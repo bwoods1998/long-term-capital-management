@@ -9,6 +9,7 @@
 import { caps, venueOrderCap } from './caps.mjs';
 import { monthCapMicro } from './frontier.mjs';
 import * as equity from './equity.mjs';
+import * as account from './account.mjs';
 import { dayCap as pullDayCap } from './github.mjs';
 import { formatUsd, formatUsdMicro } from './money.mjs';
 import { iso } from './http.mjs';
@@ -56,18 +57,99 @@ export function tradingDay(at, timezone) {
 export function createGate({ store, env = {}, now = Date.now }) {
   const limits = caps(env);
 
+  // The caps by maximum loss on the real Alpaca venue (Sept 26, 2026 (the options-swarm run, Wave 5); lib/account.mjs).
+  const maxLoss = account.maxLossCaps(env);
+
   const counters = at => {
     const day = tradingDay(at, limits.timezone);
     const row = read(store, DAY_KEY, null);
     // A new trading day starts at zero; yesterday's row is simply replaced, never accumulated.
-    return row && row.day === day
-      ? { day, orders: Number(row.orders) || 0, notional: BigInt(row.notional || 0) }
-      : { day, orders: 0, notional: 0n };
+    if (!row || row.day !== day) return { day, orders: 0, notional: 0n, alpacaOpen: 0n };
+    const notional = BigInt(row.notional || 0);
+    // `alpaca_open`: today's OPENING maximum loss on the real Alpaca venue (Sept 26, 2026, Wave 5). A row written
+    // before it existed, or one that cannot be read, counts its whole notional instead, which errs high.
+    let alpacaOpen = notional;
+    try {
+      if (row.alpaca_open !== undefined && row.alpaca_open !== null) alpacaOpen = BigInt(row.alpaca_open);
+    } catch {
+      alpacaOpen = notional;
+    }
+    return { day, orders: Number(row.orders) || 0, notional, alpacaOpen };
   };
 
-  const save = row => write(store, DAY_KEY, { day: row.day, orders: row.orders, notional: String(row.notional) });
+  const save = row => {
+    if (typeof row.alpacaOpen !== 'bigint') throw new TypeError('a day row is saved with its opening maximum loss');
+    write(store, DAY_KEY, { day: row.day, orders: row.orders, notional: String(row.notional), alpaca_open: String(row.alpacaOpen) });
+  };
 
   const killed = () => read(store, KILL_KEY, { on: false }).on === true;
+
+  /** The last reading of the real account's equity (`account.readAccountEquity`), or null. */
+  const accountReading = () => read(store, account.ACCOUNT_EQUITY_KEY, null);
+
+  /** True once today's opening maximum loss on the real Alpaca venue has reached its cap (known only from a fresh reading). */
+  const realDaySpent = (row, at) => {
+    const equityMicro = account.freshEquity(accountReading(), at, maxLoss.maxAgeMs);
+    return equityMicro !== null && row.alpacaOpen >= account.dayCapMicro(maxLoss, equityMicro, limits.maxDayMicro);
+  };
+
+  /**
+   * One order on the real Alpaca venue (Sept 26, 2026, Wave 5). An OPENING order (`exit` false) is judged by the stored
+   * equity reading, which must be no older than EQUITY_CAP_MAX_AGE_MS here as well as in the router: a credit structure
+   * (`credit`) only at CREDIT_MIN_EQUITY_USD or more; its maximum loss at most the lower of MAX_ORDER_MAX_LOSS_USD and
+   * MAX_ORDER_EQUITY_SHARE of equity; the day's opening maximum loss with it at most MAX_DAY_EQUITY_SHARE of equity and
+   * never above MAX_DAY_USD. An exit reads no equity and meets no dollar cap. Both count against MAX_DAY_ORDERS.
+   * MAX_ORDER_USD and the combined day's notional are not this venue's caps any more; its orders are still added to
+   * that notional, as a record.
+   */
+  const reserveReal = ({ amount, at, exit, credit, row }) => {
+    let equityMicro = null;
+    if (!exit) {
+      equityMicro = account.freshEquity(accountReading(), at, maxLoss.maxAgeMs);
+      if (equityMicro === null) {
+        return {
+          ok: false, status: 503, cap: 'equity',
+          error: `The real account's equity has not been read in the last ${Math.round(maxLoss.maxAgeMs / 1000)} seconds, ` +
+                 'so an opening order cannot be sized against it: nothing was sent. Send it again.',
+        };
+      }
+      if (credit && equityMicro < maxLoss.creditMinMicro) {
+        return {
+          ok: false, status: 403, cap: 'credit_equity',
+          error: `A credit structure opens only while the real account's equity is at least $${formatUsd(maxLoss.creditMinMicro)}; ` +
+                 `it reads $${account.formatUsdDown(equityMicro)}.`,
+        };
+      }
+      const orderCap = account.orderCapMicro(maxLoss, equityMicro);
+      if (amount > orderCap) {
+        return {
+          ok: false, status: 403, cap: 'order',
+          error: `Order maximum loss $${formatUsd(amount)} exceeds the per-order cap of $${account.formatUsdDown(orderCap)} ` +
+                 `(the lower of $${formatUsd(maxLoss.orderLimitMicro)} and ${account.percent(maxLoss.orderShare)} of ` +
+                 `$${account.formatUsdDown(equityMicro)} equity).`,
+        };
+      }
+    }
+    if (row.orders + 1 > limits.maxDayOrders) {
+      return {
+        ok: false, status: 403, cap: 'day_orders',
+        error: `Today's order count cap of ${limits.maxDayOrders} is already reached.`,
+      };
+    }
+    if (!exit) {
+      const dayCap = account.dayCapMicro(maxLoss, equityMicro, limits.maxDayMicro);
+      if (row.alpacaOpen + amount > dayCap) {
+        return {
+          ok: false, status: 403, cap: 'day_max_loss',
+          error: `Order maximum loss $${formatUsd(amount)} would pass today's opening maximum-loss cap of ` +
+                 `$${account.formatUsdDown(dayCap)} (already $${formatUsd(row.alpacaOpen)}).`,
+        };
+      }
+    }
+    const opening = exit ? 0n : amount;
+    save({ day: row.day, orders: row.orders + 1, notional: row.notional + amount, alpacaOpen: row.alpacaOpen + opening });
+    return { ok: true, day: row.day, micro: String(amount), ...(exit ? {} : { opening: String(opening) }) };
+  };
 
   return {
     caps: limits,
@@ -83,14 +165,17 @@ export function createGate({ store, env = {}, now = Date.now }) {
 
     /**
      * Consume `micro` dollars of today's budget for one order, or refuse.
-     * Refusal is `{ ok: false, status, error }`; the caller forwards nothing.
+     * Refusal is `{ ok: false, status, error }`; the caller forwards nothing. On the real Alpaca venue `micro` is an
+     * open's maximum loss, judged by `reserveReal` (`credit` marks a credit structure's open, Sept 26, 2026, Wave 5).
      */
-    reserve({ micro, at = now(), exit = false, venue = null }) {
+    reserve({ micro, at = now(), exit = false, venue = null, credit = false }) {
       if (killed()) {
         return { ok: false, status: 423, error: 'The kill switch is engaged; no orders are being forwarded.' };
       }
       const amount = BigInt(micro);
       if (amount <= 0n) return { ok: false, status: 400, cap: 'order', error: 'An order must have a positive notional.' };
+      // The real Alpaca venue is capped by maximum loss against its own equity (Sept 26, 2026, Wave 5).
+      if (venue === 'alpaca') return reserveReal({ amount, at, exit: exit === true, credit: credit === true, row: counters(at) });
       // A venue may carry a tighter per-order cap than the floor's (`MAX_ORDER_USD_<VENUE>`):
       // the accounts are a few hundred dollars each, and one order must never be one account.
       const venueCap = venueOrderCap(env, venue);
@@ -115,7 +200,7 @@ export function createGate({ store, env = {}, now = Date.now }) {
                  `(already $${formatUsd(row.notional)}).`,
         };
       }
-      save({ day: row.day, orders: row.orders + 1, notional: row.notional + amount });
+      save({ day: row.day, orders: row.orders + 1, notional: row.notional + amount, alpacaOpen: row.alpacaOpen });
       return { ok: true, day: row.day, micro: String(amount) };
     },
 
@@ -124,14 +209,17 @@ export function createGate({ store, env = {}, now = Date.now }) {
      * order can exist: a venue that answered at all keeps its reservation, because an unconfirmed
      * write is an order until reconciliation says otherwise.
      */
-    refund({ day, micro, at = now() }) {
+    refund({ day, micro, opening = null, at = now() }) {
       const row = counters(at);
       if (row.day !== day) return { ok: false };
       const amount = BigInt(micro);
+      // An opening reservation on the real Alpaca venue gives its maximum loss back to the day's opening cap too.
+      const open = opening === null || opening === undefined ? 0n : BigInt(opening);
       save({
         day: row.day,
         orders: Math.max(0, row.orders - 1),
         notional: row.notional > amount ? row.notional - amount : 0n,
+        alpacaOpen: row.alpacaOpen > open ? row.alpacaOpen - open : 0n,
       });
       return { ok: true };
     },
@@ -176,6 +264,53 @@ export function createGate({ store, env = {}, now = Date.now }) {
 
     /** The last reading of the real accounts (`equity.readEquity`), or null. */
     equity: () => read(store, equity.EQUITY_KEY, null),
+
+    /** The last reading of the real Alpaca account's equity for the caps by maximum loss, or null (Sept 26, 2026, Wave 5). */
+    accountEquity: () => accountReading(),
+
+    recordAccountEquity(reading) {
+      const row = reading && typeof reading === 'object' ? reading : { ok: false, at: now(), error: 'no reading' };
+      const at = Number(row.at);
+      const clean = row.ok === true && Number.isFinite(at) && /^-?\d{1,18}$/.test(String(row.equity_micro))
+        ? { ok: true, at, equity_micro: String(row.equity_micro) }
+        : { ok: false, at: Number.isFinite(at) ? at : now(), error: String(row.error || 'unreadable').slice(0, 200) };
+      write(store, account.ACCOUNT_EQUITY_KEY, clean);
+      return clean;
+    },
+
+    /** What `/v1/health` reports of the caps by maximum loss in force now (Sept 26, 2026, Wave 5). */
+    maxLossStatus(at = now()) {
+      const row = counters(at);
+      const reading = accountReading();
+      const equityMicro = account.freshEquity(reading, at, maxLoss.maxAgeMs);
+      const stamp = Number(reading?.at);
+      const readable = reading?.ok === true && /^-?\d{1,18}$/.test(String(reading.equity_micro));
+      return {
+        venue: 'alpaca',
+        equity: {
+          usd: readable ? account.formatUsdDown(BigInt(reading.equity_micro)) : null,
+          read_at: Number.isFinite(stamp) ? iso(stamp) : null,
+          age_seconds: Number.isFinite(stamp) ? Math.round((at - stamp) / 1000) : null,
+          ok: reading ? reading.ok === true : null,
+          error: reading && reading.ok !== true ? String(reading.error || 'unreadable') : null,
+          fresh: equityMicro !== null,
+          max_age_seconds: Math.round(maxLoss.maxAgeMs / 1000),
+        },
+        // Null while there is no fresh reading: then no opening order is admitted at all.
+        order_cap_usd: equityMicro === null ? null : account.formatUsdDown(account.orderCapMicro(maxLoss, equityMicro)),
+        max_order_max_loss_usd: formatUsd(maxLoss.orderLimitMicro),
+        order_equity_share: account.shareText(maxLoss.orderShare),
+        day_open_max_loss_usd: formatUsd(row.alpacaOpen),
+        day_open_cap_usd: equityMicro === null ? null : account.formatUsdDown(account.dayCapMicro(maxLoss, equityMicro, limits.maxDayMicro)),
+        day_equity_share: account.shareText(maxLoss.dayShare),
+        max_day_usd: formatUsd(limits.maxDayMicro),
+        opens_admitted: equityMicro !== null && !killed(),
+        credit_opens_admitted: equityMicro !== null && equityMicro >= maxLoss.creditMinMicro && !killed(),
+        credit_min_equity_usd: formatUsd(maxLoss.creditMinMicro),
+        orders_today: row.orders,
+        max_day_orders: limits.maxDayOrders,
+      };
+    },
 
     recordEquity(reading) {
       const row = reading && typeof reading === 'object' ? reading : { ok: false, at: now(), error: 'no reading' };
@@ -387,7 +522,7 @@ export function createGate({ store, env = {}, now = Date.now }) {
     /** True once the day's own caps leave no room for another order. */
     capsExhausted(at = now()) {
       const row = counters(at);
-      return row.orders >= limits.maxDayOrders || row.notional >= limits.maxDayMicro;
+      return row.orders >= limits.maxDayOrders || row.notional >= limits.maxDayMicro || realDaySpent(row, at);
     },
 
     /** The `/v1/health` body. */
@@ -406,7 +541,9 @@ export function createGate({ store, env = {}, now = Date.now }) {
           max_day_orders: limits.maxDayOrders,
           timezone: limits.timezone,
         },
-        caps_exhausted: row.orders >= limits.maxDayOrders || row.notional >= limits.maxDayMicro,
+        caps_exhausted: row.orders >= limits.maxDayOrders || row.notional >= limits.maxDayMicro || realDaySpent(row, at),
+        // The caps by maximum loss on the real Alpaca venue, as they stand now (Sept 26, 2026, Wave 5).
+        max_loss: this.maxLossStatus(at),
         frontier: (() => {
           const month = this.frontierMonth(at);
           const { capMicro, parts } = this.frontierCap(at);

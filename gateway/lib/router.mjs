@@ -1,11 +1,13 @@
 // The gateway's routing table. Every request arrives here with a bearer token and nothing else;
 // the venue credentials are added on the way out and never come back. The whole surface is:
 //
-//   GET             /v1/health               caps, counters, kill switch, frontier month, pulls, watchdog
+//   GET             /v1/health               caps, counters, the caps by maximum loss, kill switch, frontier month, pulls, watchdog
 //   POST            /v1/kill                 engage the kill switch: the runtime token may
 //   POST            /v1/unkill               release it: GATEWAY_ADMIN_TOKEN only, the owner's
 //   GET|POST|DELETE /v1/kalshi/<path>        signed with the Kalshi key, forwarded to the venue
-//   GET|POST|DELETE /v1/alpaca/<path>        keyed with the Alpaca headers, forwarded to the venue
+//   GET|POST|DELETE /v1/alpaca/<path>        keyed with the Alpaca headers, forwarded to the venue; its orders are
+//                                            options capped by maximum loss against the account's own equity, and
+//                                            stock only to close shares it holds (`realOrder`, Sept 26, 2026)
 //   GET|POST|DELETE /v1/alpaca-paper/<path>  the practice account: same paths, simulated money, no caps;
 //                                            its option orders are held to defined-risk shapes
 //   GET             /v1/kalshi/ws-auth       handshake headers for the Kalshi WebSocket, 30 s of life
@@ -40,14 +42,15 @@
 import { json, fail, authorized, readBody } from './http.mjs';
 import { composeNotice, NOTICE_KINDS, FROM, TO } from './email.mjs';
 import {
-  createsOrder, notional, REFERENCE_HEADER, PURPOSE_HEADER, allowedVenuePath, isOptionSymbol, alpacaShapeError,
+  createsOrder, notional, PURPOSE_HEADER, allowedVenuePath, isOptionSymbol, alpacaShapeError,
   admittedStructures, isMultiLegOrder, structureNotional, practiceOrderError, closeLegsHeldError, closedLegRows,
-  shortCloseBody,
+  shortCloseBody, realStockClose, CREDIT_STRUCTURES,
 } from './caps.mjs';
 import * as kalshi from './kalshi.mjs';
 import * as alpaca from './alpaca.mjs';
 import * as frontier from './frontier.mjs';
 import * as equity from './equity.mjs';
+import * as account from './account.mjs';
 import * as typesafe from './typesafe.mjs';
 import * as web from './fetch.mjs';
 import * as github from './github.mjs';
@@ -58,9 +61,6 @@ export const VENUES = ['kalshi', 'alpaca', 'alpaca-paper'];
 export const PAPER_VENUES = ['alpaca-paper'];
 //: The venue whose path rules a venue shares.
 const rulesOf = venue => (venue === 'alpaca-paper' ? 'alpaca' : venue);
-//: A venue quote reused across orders for this long.
-const PRODUCT_CACHE_MS = 60_000;
-const productCache = new Map();
 //: The real Alpaca account's positions, read before a real structure close is admitted (Sept 25, 2026), reused this long:
 //: briefly, so a burst of closes reads them once and a leg sold a moment ago is not counted for long. A close admitted from
 //: the cached reading takes its own legs out of it (`caps.closedLegRows`), so the same legs are not closed twice from it.
@@ -71,6 +71,10 @@ let positionsCache = null;
 //: Book holds as `unknown` for a minute or more of polls, while a 4xx is a refusal it sends again at its next tick
 //: (`RejectedOrder`; the review of g/money, Sept 25, 2026). 424: the order failed on the positions read it depends on.
 const POSITIONS_UNREAD_STATUS = 424;
+//: The status of a real OPENING order refused because the account's equity could not be read in time (Sept 26, 2026 (the
+//: options-swarm run, Wave 5)): a 503 the House sends again, with nothing reserved or sent. Only opens wait on the reading.
+const EQUITY_UNREAD_STATUS = 503;
+const EQUITY_RETRY = { 'Retry-After': '30' };
 const METHODS = ['GET', 'POST', 'DELETE'];
 const ALLOW = METHODS.join(', ');
 
@@ -155,7 +159,9 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
       });
       const data = await upstream.json().catch(() => null);
       if (!upstream.ok) return fail(`The provider answered HTTP ${upstream.status}.`, 502);
-      return json({ models: (data?.data || []).map(row => row?.id).filter(id => typeof id === 'string').sort(), priced: Object.keys(frontier.priceTable(env)) });
+      const table = frontier.priceTable(env);
+      return json({ models: (data?.data || []).map(row => row?.id).filter(id => typeof id === 'string').sort(), priced: Object.keys(table),
+        flex: Object.keys(table).filter(model => table[model].flex) });
     } catch {
       return fail('The frontier provider did not answer.', 502);
     }
@@ -233,108 +239,27 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
     } catch {
       return fail('An order body must be JSON.', 400);
     }
-    let reference = request.headers.get(REFERENCE_HEADER);
-    // The structure types the real account may OPEN (`OPTION_STRUCTURES_REAL`, none by default).
-    const structures = target.venue === 'alpaca' ? admittedStructures(env) : [];
+    let order;
     if (target.venue === 'alpaca') {
-      // A bracket, stop, trailing or symbol-less order is refused before its symbol is looked up or
-      // priced. A multi-leg order is read by its own rules instead, whatever the list: an open of a type
-      // the list does not admit is refused there, and a close of any defined-risk type is admitted only
-      // when the account holds its legs (below). Until Sept 25, 2026 (the review of g/money, MAJOR) "off"
-      // refused every multi-leg order, closes included, and stranded a held structure into expiry.
-      const structure = isMultiLegOrder(parsed);
-      const shape = structure ? structureNotional(parsed, structures).error : alpacaShapeError(parsed);
-      if (shape) return fail(shape, 400);
-      // A market order is priced from the venue's quote alone. The VM's header never prices it,
-      // and neither does a stray price field: until Sept 23, 2026 any truthy `limit_price` or
-      // `stop_price` (even "0" or "x") skipped the quote, and the header then priced 100 AAPL at $1.
-      if (parsed.type === 'market') reference = null;
+      // The real Alpaca account (Sept 26, 2026 (the options-swarm run, Wave 5)): `realOrder` decides, from the order
+      // itself and never from the caller's header, whether it opens or closes, and reads what the decision needs.
+      order = await realOrder(parsed, env, { gate, fetcher, now });
+      if (order.response) return order.response;
+    } else {
+      const exit = String(request.headers.get(PURPOSE_HEADER) || '').toLowerCase() === 'exit';
+      const priced = notional(target.venue, parsed, { exit });
+      if (priced.error) return fail(priced.error, 400);
+      order = { micro: priced.micro, exit, credit: false, closeRows: null };
     }
-    if (target.venue === 'alpaca' && parsed.type === 'market' && !isOptionSymbol(parsed.symbol)
-        && (parsed.notional === undefined || parsed.notional === null)) {
-      // A market order in shares has no enforceable limit, so its reference comes from the venue's
-      // own quote, signed like every other call. An unpriceable order is refused, never passed.
-      const symbol = String(parsed?.symbol || '');
-      if (!/^[A-Za-z0-9.\/-]{1,24}$/.test(symbol)) return fail('Invalid symbol.', 400);
-      const crypto = symbol.includes('/');
-      const quotePath = crypto
-        ? `v1beta3/crypto/us/latest/quotes?symbols=${encodeURIComponent(symbol)}`
-        : `v2/stocks/${encodeURIComponent(symbol)}/quotes/latest`;
-      const cacheKey = `alpaca:${symbol}`;
-      const cacheMs = Number(env.PRODUCT_CACHE_MS ?? PRODUCT_CACHE_MS);
-      let data = cacheMs > 0 ? productCache.get(cacheKey) : null;
-      if (!data || data.expires < Date.now()) {
-        let quote = null;
-        try {
-          const [bare, query = ''] = quotePath.split('?');
-          const signed = await sign({ venue: 'alpaca', path: bare }, new Request(`https://x/${bare}${query ? '?' + query : ''}`, { method: 'GET' }), env, { now: now() });
-          quote = await fetcher(signed.url, { method: 'GET', headers: signed.headers, signal: AbortSignal.timeout(8000), redirect: 'follow' });
-        } catch (error) {
-          return fail(`Cannot independently price this order: ${error?.name || 'fetch failed'}.`, 503);
-        }
-        if (!quote.ok) return fail(`Cannot independently price this order: venue HTTP ${quote.status}.`, 503);
-        try {
-          data = { ...(await quote.json()), expires: Date.now() + cacheMs };
-        } catch { return fail('Cannot independently price this order: unreadable venue answer.', 503); }
-        if (cacheMs > 0) productCache.set(cacheKey, data);
-        if (productCache.size > 256) productCache.clear();
-      }
-      // A stock answer is `quote` beside `symbol`; a crypto answer is `quotes`, keyed by symbol.
-      const level = data.quote || data.quotes?.[symbol] || null;
-      const ask = Number(level?.ap ?? level?.AskPrice ?? 0);
-      const bid = Number(level?.bp ?? level?.BidPrice ?? 0);
-      const price = ask > 0 ? ask : bid;
-      if (!(price > 0)) return fail('Cannot independently price this order: no venue quote.', 503);
-      reference = String(price * 1.10);  // a market order may fill through the touch
+    const decision = await gate.reserve({ micro: String(order.micro), exit: order.exit, venue: target.venue, credit: order.credit });
+    if (!decision.ok) {
+      return json({ error: decision.error, ...(decision.cap ? { cap: decision.cap } : {}) }, decision.status,
+        decision.status === EQUITY_UNREAD_STATUS ? EQUITY_RETRY : {});
     }
-    let exit = String(request.headers.get(PURPOSE_HEADER) || '').toLowerCase() === 'exit';
-    const priced = notional(target.venue, parsed, { reference, exit, structures });
-    if (priced.error) return fail(priced.error, 400);
-    let micro = priced.micro;
-    if (priced.structure) {
-      // A structure's open or close is read from its legs' position_intent, never from the caller's
-      // header: an open is metered at its maximum loss against every cap, whatever the header says. A
-      // close takes risk off and is metered at zero; the gate refuses a zero reservation and counts every
-      // order, so a close holds the least amount it records, one micro-dollar, as an exit: the kill switch
-      // and the day's order count still stop it, the dollar caps do not. Since Sept 25, 2026 (the route's
-      // review, MINOR 1) a close is admitted only when the real account HOLDS every leg it closes, long
-      // legs long and short legs short (`caps.closeLegsHeldError`), read from the account's positions:
-      // no longer trusted to the venue alone. A close of ANY defined-risk type is admitted so, whatever
-      // OPTION_STRUCTURES_REAL lists (the list gates opens only). Positions that cannot be read admit no
-      // close (a 4xx, `POSITIONS_UNREAD_STATUS`): the House sends it again at its next tick.
-      exit = !priced.opening;
-      if (!priced.opening) {
-        micro = 1n;
-        const held = await realPositions(env, { fetcher, now });
-        if (held.error) return fail(`Cannot check that the real account holds this structure's legs: ${held.error}.`, POSITIONS_UNREAD_STATUS);
-        const refusal = closeLegsHeldError(parsed, held.positions);
-        if (refusal) return fail(refusal, 400);
-      }
-    }
-    // A single-leg option buy_to_close (Sept 25, 2026, the review of Deploy G, MAJOR 2): the book's buy-back of a
-    // short leg a broken structure left on the real account (`league/book.py` `_close_break_units`). Until today
-    // it was refused as "long premium only", so the naked short stayed at the venue while the House retried it
-    // every reading. It is an exit whatever the header says, metered at one micro-dollar like a structure close
-    // (the kill switch and the day's order count still stop it), and admitted ONLY when the account's signed
-    // positions show that contract held SHORT for at least its qty: read as a one-leg close (`caps.shortCloseBody`)
-    // by the same rule as a structure's legs, so a buy "to close" of a contract not held short, which would open a
-    // long position under another name, is refused before anything is reserved. Unread positions admit nothing (a
-    // 4xx the House retries). The practice account is unchanged: it never reaches this block.
-    const shortClose = priced.shortClose ? shortCloseBody(parsed) : null;
-    if (shortClose) {
-      exit = true;
-      micro = 1n;
-      const held = await realPositions(env, { fetcher, now });
-      if (held.error) return fail(`Cannot check that the real account holds this contract short: ${held.error}.`, POSITIONS_UNREAD_STATUS);
-      const refusal = closeLegsHeldError(shortClose, held.positions);
-      if (refusal) return fail(refusal, 400);
-    }
-    const decision = await gate.reserve({ micro: String(micro), exit, venue: target.venue });
-    if (!decision.ok) return json({ error: decision.error, ...(decision.cap ? { cap: decision.cap } : {}) }, decision.status);
     reservation = decision;
-    if (((priced.structure && !priced.opening) || shortClose) && positionsCache) {
+    if (order.closeRows && positionsCache) {
       // The close goes: its legs leave the cached reading, so a second close of them within the cache is refused.
-      positionsCache = { ...positionsCache, positions: [...positionsCache.positions, ...closedLegRows(shortClose ?? parsed)] };
+      positionsCache = { ...positionsCache, positions: [...positionsCache.positions, ...order.closeRows] };
     }
   }
 
@@ -368,6 +293,94 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
     // not proof of absence of an order. Only failures before dispatch may refund it.
     return fail(`The ${target.venue} API did not answer.`, 502);
   }
+}
+
+/**
+ * One order to the REAL Alpaca account, read before anything is reserved (Sept 26, 2026 (the options-swarm run, Wave 5)):
+ * `{ micro, exit, credit, closeRows }` for the gate, or `{ response }`, the refusal to answer with.
+ *
+ *  - A multi-leg OPEN of an admitted type (`OPTION_STRUCTURES_REAL`) and a single-leg `buy_to_open` are OPENING orders,
+ *    whatever `X-LTCM-Purpose` says: metered at their maximum loss (the structure's, or premium x 100 x qty) against the
+ *    caps by maximum loss, which need the account's equity read by this Worker in the last EQUITY_CAP_MAX_AGE_MS
+ *    (`account.refreshAccountEquity`). No such reading refuses the open (a 503 the House sends again); a credit type opens
+ *    only at CREDIT_MIN_EQUITY_USD or more (the gate).
+ *  - Everything else that passes is an EXIT, read no equity and meets no dollar cap: a multi-leg close and a single-leg
+ *    `buy_to_close` (admitted only when the account holds what they close, as since Sept 25, 2026), a single-leg
+ *    `sell_to_close` (the venue refuses one with nothing to close), and a stock order that closes shares the account holds
+ *    (`caps.realStockClose`): the one stock order the real account may send. Every other stock or crypto order is refused.
+ *
+ * Until today the exit header decided what a real order was; for the real account it decides nothing now. The House sets
+ * it on its sells and its buy-backs, which are exits here by their own shape.
+ */
+async function realOrder(parsed, env, { gate, fetcher, now }) {
+  // The structure types the real account may OPEN (`OPTION_STRUCTURES_REAL`).
+  const structures = admittedStructures(env);
+  // A bracket, stop, trailing or symbol-less order is refused before anything is read. A multi-leg order is read by its
+  // own rules instead, whatever the list: an open of a type the list does not admit is refused there, and a close of any
+  // defined-risk type is admitted only when the account holds its legs (below). Until Sept 25, 2026 (the review of
+  // g/money, MAJOR) "off" refused every multi-leg order, closes included, and stranded a held structure into expiry.
+  const multi = isMultiLegOrder(parsed);
+  const shape = multi ? structureNotional(parsed, structures).error : alpacaShapeError(parsed);
+  if (shape) return { response: fail(shape, 400) };
+
+  if (!multi && !isOptionSymbol(parsed.symbol)) {
+    // A stock (or crypto) order: only the close of shares the account holds, read from its signed positions. No quote is
+    // read: it is an exit, reserved at one micro-dollar like any real close, and a quote could only delay it.
+    const close = realStockClose(parsed);
+    if (close.error) return { response: fail(close.error, 400) };
+    const held = await realPositions(env, { fetcher, now });
+    if (held.error) return { response: fail(`Cannot check that the real account holds these shares: ${held.error}.`, POSITIONS_UNREAD_STATUS) };
+    const refusal = closeLegsHeldError(close.body, held.positions);
+    if (refusal) return { response: fail(refusal, 400) };
+    return { micro: 1n, exit: true, credit: false, closeRows: closedLegRows(close.body) };
+  }
+
+  const priced = notional('alpaca', parsed, { structures });
+  if (priced.error) return { response: fail(priced.error, 400) };
+  if (priced.structure && !priced.opening) {
+    // A structure's open or close is read from its legs' position_intent, never from the caller's header. A close takes
+    // risk off and is metered at zero; the gate refuses a zero reservation and counts every order, so a close holds the
+    // least amount it records, one micro-dollar, as an exit: the kill switch and the day's order count still stop it,
+    // the dollar caps do not. Since Sept 25, 2026 (the route's review, MINOR 1) a close is admitted only when the real
+    // account HOLDS every leg it closes, long legs long and short legs short (`caps.closeLegsHeldError`), read from the
+    // account's positions. A close of ANY defined-risk type is admitted so, whatever OPTION_STRUCTURES_REAL lists (the
+    // list gates opens only). Positions that cannot be read admit no close (a 4xx, `POSITIONS_UNREAD_STATUS`): the House
+    // sends it again at its next tick.
+    const held = await realPositions(env, { fetcher, now });
+    if (held.error) return { response: fail(`Cannot check that the real account holds this structure's legs: ${held.error}.`, POSITIONS_UNREAD_STATUS) };
+    const refusal = closeLegsHeldError(parsed, held.positions);
+    if (refusal) return { response: fail(refusal, 400) };
+    return { micro: 1n, exit: true, credit: false, closeRows: closedLegRows(parsed) };
+  }
+  if (priced.shortClose) {
+    // A single-leg option buy_to_close (Sept 25, 2026, the review of Deploy G, MAJOR 2): the book's buy-back of a short
+    // leg a broken structure left on the real account (`league/book.py` `_close_break_units`). It is an exit whatever the
+    // header says, metered at one micro-dollar like a structure close (the kill switch and the day's order count still
+    // stop it), and admitted ONLY when the account's signed positions show that contract held SHORT for at least its qty:
+    // read as a one-leg close (`caps.shortCloseBody`) by the same rule as a structure's legs, so a buy "to close" of a
+    // contract not held short, which would open a long position under another name, is refused before anything is
+    // reserved. Unread positions admit nothing (a 4xx the House retries).
+    const shortClose = shortCloseBody(parsed);
+    const held = await realPositions(env, { fetcher, now });
+    if (held.error) return { response: fail(`Cannot check that the real account holds this contract short: ${held.error}.`, POSITIONS_UNREAD_STATUS) };
+    const refusal = closeLegsHeldError(shortClose, held.positions);
+    if (refusal) return { response: fail(refusal, 400) };
+    return { micro: 1n, exit: true, credit: false, closeRows: closedLegRows(shortClose) };
+  }
+  // What is left is a structure OPEN, or a single-leg option buy_to_open or sell_to_close (`caps.optionNotional` admits
+  // no other single-leg intent on the real account).
+  const opening = priced.structure ? true : parsed.position_intent === 'buy_to_open';
+  if (!opening) return { micro: priced.micro, exit: true, credit: false, closeRows: null };
+  const maxAgeMs = account.maxLossCaps(env).maxAgeMs;
+  const reading = await account.refreshAccountEquity(env, gate, { fetcher, now });
+  if (account.freshEquity(reading, now(), maxAgeMs) === null) {
+    const why = reading && reading.ok !== true ? String(reading.error || 'unreadable') : 'no reading';
+    return {
+      response: fail(`Cannot read the real account's equity (${why}): an opening order is sized against a reading no older ` +
+        `than ${Math.round(maxAgeMs / 1000)} seconds, so nothing was sent. Send it again.`, EQUITY_UNREAD_STATUS, EQUITY_RETRY),
+    };
+  }
+  return { micro: priced.micro, exit: false, credit: CREDIT_STRUCTURES.includes(priced.structure), closeRows: null };
 }
 
 /**
@@ -480,7 +493,8 @@ async function frontierCall(request, env, { gate, fetcher, now }) {
   } catch {
     return fail('The request must be JSON.', 400);
   }
-  const admitted = frontier.admit(parsed, env);
+  // The role names its output ceiling (`FRONTIER_ROLE_MAX_OUTPUT`, Sept 26, 2026 (the options-swarm run, Wave 5)).
+  const admitted = frontier.admit(parsed, env, { role: request.headers.get(frontier.ROLE_HEADER) });
   if (admitted.error) return fail(admitted.error, admitted.status);
   const bytes = new TextEncoder().encode(body.text).length;
   await equity.refresh(env, gate, { fetcher, now });  // profit-indexed cap: the accounts read at most every ten minutes
@@ -509,10 +523,19 @@ async function frontierCall(request, env, { gate, fetcher, now }) {
     return fail('The frontier model did not answer.', 502);
   }
   let actual = null;
+  let tier = null;
   if (upstream.ok) {
-    try { actual = frontier.actualCost(admitted.price, JSON.parse(text).usage); } catch { actual = null; }
+    try {
+      const answer = JSON.parse(text);
+      // Flex (Sept 26, 2026, Wave 5) is settled at its own rates only when the call asked for it AND the answer says it
+      // was served on it; OpenAI may serve a flex request on another tier, and then it is billed at the standard rates.
+      tier = admitted.flex && answer?.service_tier === 'flex' ? 'flex' : 'default';
+      actual = frontier.actualCost(tier === 'flex' ? admitted.flex : admitted.price, answer?.usage);
+    } catch { actual = null; }
   } else if (upstream.status >= 400 && upstream.status < 500) {
-    actual = 0n;  // refused by the provider before any generation: nothing was billed
+    // Refused by the provider before any generation: nothing was billed. A 429 is flex's own capacity refusal
+    // ("resource unavailable", no charge), settled here at zero like every other 4xx.
+    actual = 0n;
   } else if (frontier.unprocessed(upstream.status, text)) {
     actual = 0n;  // the provider's own capacity refusal, turned away before any work (frontier.unprocessed)
   }
@@ -523,6 +546,7 @@ async function frontierCall(request, env, { gate, fetcher, now }) {
       'Content-Type': upstream.headers.get('Content-Type') || 'application/json; charset=utf-8',
       'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store',
       ...(settled?.cost_usd ? { 'X-LTCM-Cost-USD': settled.cost_usd } : {}),
+      ...(tier ? { 'X-LTCM-Billed-Tier': tier } : {}),
     },
   });
 }

@@ -130,3 +130,38 @@ export function fakeGitHub({ script = () => undefined, checks = { total_count: 0
   return state;
 }
 
+
+/**
+ * The real Alpaca account as the gateway reads it (Sept 26, 2026 (the options-swarm run, Wave 5)). `GET v2/account`
+ * answers `account` (a body, an HTTP status, or an Error to throw), `GET v2/positions` answers `positions` (the same),
+ * and any other call is an accepted order. `orders()`, `accountReads()` and `positionReads()` split `calls`.
+ */
+export function alpacaVenue({ equity = '5000.00', account = { equity, status: 'ACTIVE' }, positions = [], order = { id: 'o-1', status: 'accepted' } } = {}) {
+  const calls = [];
+  const answer = value => {
+    if (value instanceof Error) return Promise.reject(value);
+    if (typeof value === 'number') return new Response('{}', { status: value, headers: { 'Content-Type': 'application/json' } });
+    return new Response(typeof value === 'string' ? value : JSON.stringify(value), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  const isAccount = url => url.endsWith('/v2/account');
+  const isPositions = url => url.endsWith('/v2/positions');
+  const fetcher = async (url, init = {}) => {
+    calls.push({ url: String(url), ...init });
+    if (isAccount(String(url))) return answer(account);
+    if (isPositions(String(url))) return answer(positions);
+    return answer(order);
+  };
+  return {
+    fetcher, calls,
+    orders: () => calls.filter(c => !isAccount(c.url) && !isPositions(c.url)),
+    accountReads: () => calls.filter(c => isAccount(c.url)),
+    positionReads: () => calls.filter(c => isPositions(c.url)),
+  };
+}
+
+/** A gate holding a fresh reading of the real account's equity (`usd` dollars, read `ageMs` before `at`). */
+export function withEquity(gate, usd = '5000.00', at = Date.now(), ageMs = 0) {
+  const [whole, fraction = ''] = String(usd).split('.');
+  gate.recordAccountEquity({ ok: true, at: at - ageMs, equity_micro: String(BigInt(whole) * 1000000n + BigInt(fraction.padEnd(6, '0').slice(0, 6))) });
+  return gate;
+}

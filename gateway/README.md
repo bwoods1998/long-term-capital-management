@@ -30,7 +30,7 @@ is `401`, including a deployment whose token is missing or shorter than 32 chara
 
 | Method | Path | What it does |
 | --- | --- | --- |
-| `GET` | `/v1/health` | Kill switch, caps, today's order counters, the frontier month (spent, what of it is settled and what is still in flight, the month that ended, the cap in force and its profit-indexed parts from the stored equity reading, calls, cost by agent), today's pull requests, the watchdog's record, Sail balance, runway and box state, and when each alert last went out. It never reads a venue itself (Sept 23, 2026). |
+| `GET` | `/v1/health` | Kill switch, caps, today's order counters, the caps by maximum loss on the real Alpaca account (`max_loss`: the equity reading and its age, the per-order cap now, today's opening maximum loss and its cap, whether opens and credit opens are admitted, orders today of 300), the frontier month (spent, what of it is settled and what is still in flight, the month that ended, the cap in force and its profit-indexed parts from the stored equity reading, calls, cost by agent), today's pull requests, the watchdog's record, Sail balance, runway and box state, and when each alert last went out. It never reads a venue itself (Sept 23, 2026). |
 | `POST` | `/v1/kill` | Engages the kill switch. The runtime token may: stopping is never gated. |
 | `POST` | `/v1/unkill` | Releases it. **Owner token only**; the runtime token is a `401` here. |
 | `GET`/`POST`/`DELETE` | `/v1/kalshi/<path>` | Signs `timestamp + METHOD + /trade-api/v2/<path>` with RSA-PSS SHA-256 (salt 32) and forwards to `https://api.elections.kalshi.com/trade-api/v2/<path>` with the query string. Status and body come back verbatim. |
@@ -43,7 +43,7 @@ is `401`, including a deployment whose token is missing or shorter than 32 chara
 | `POST` | `/v1/github/pr` | Opens one pull request from a proposal `{role, slug, title, body, files}`. See [Pull requests](#pull-requests). Not stopped by the kill switch: it moves no money. |
 | `GET` | `/v1/github/pr/<number>` | That pull request's `state`, `merged`, `mergeable_state`, `head` and its check runs counted into `success`, `failure` or `pending`, so the VM watches CI with no GitHub credential. Free. |
 | `POST` | `/v1/web/fetch` | Reads one public page for research, `{"url", "agent"}`, and answers its readable text. No credential is sent; private, local and own-domain addresses are refused on the request and every redirect; 3,000 pages a UTC day across the floor. See [Research reads the web](#research-reads-the-web). Not stopped by the kill switch: it moves no money. |
-| `POST` | `/v1/notify` | Mails the owner one trade notice composed here from the facts posted (`kind` of `trade`, `settled` or `test`; 32 KiB at most). A `notice_id` makes a repeat a no-op for 48 hours; `NOTIFY_MAX_PER_DAY` (300) a trading day, then `429`. The first run's desks used it; the league does not call it. |
+| `POST` | `/v1/notify` | Mails the owner one trade notice composed here from the facts posted (`kind` of `trade`, `settled`, `test`, `disk_low`, or `live_stop` since Sept 26, 2026: `{stop: drawdown|daily|reconciliation|assignment, text, equity, at}` when a real-money stop trips; 32 KiB at most). A `notice_id` makes a repeat a no-op for 48 hours; `NOTIFY_MAX_PER_DAY` (300) a trading day, then `429`. The first run's desks used it; the league does not call it. |
 
 The gateway serves exactly three venue names: `kalshi`, `alpaca` and `alpaca-paper`. Any other is
 a `404`. The Coinbase route was removed on Sept 19, 2026, when the owner closed that account.
@@ -85,19 +85,46 @@ redeploying, which is a change the owner makes, not one the VM can.
 
 | Var | Deployed | Default in code | Meaning |
 | --- | --- | --- | --- |
-| `MAX_ORDER_USD` | `75` | `50` | Per-order notional. Kalshi: `count x price` in dollars (legacy cent prices and `buy_max_cost` are understood; an unpriced contract is charged its $1.00 settlement ceiling). Alpaca: `notional`, else `qty x` a price. A limit order uses the dearer of its own positive `limit_price` and the `X-LTCM-Reference-Price` header, which can therefore raise what it is worth and never lower it; a market order is priced from the venue's own quote plus 10%, never from the caller's header or a price field. Only `market` and `limit` orders are priced. |
-| `MAX_ORDER_USD_KALSHI`, `MAX_ORDER_USD_ALPACA` | `75`, `75` | unset | A venue's own per-order cap. The tighter of it and `MAX_ORDER_USD` applies. |
-| `MAX_DAY_USD` | `4000` | `400` | Notional for the whole trading day, both real venues together. |
-| `MAX_DAY_ORDERS` | `2000` | `60` | Order count for the whole trading day, both real venues together. |
+| `MAX_ORDER_USD` | `75` | `50` | Per-order notional, **Kalshi only** since Sept 26, 2026 (the real Alpaca account is capped by maximum loss, below). Kalshi: `count x price` in dollars (legacy cent prices and `buy_max_cost` are understood; an unpriced contract is charged its $1.00 settlement ceiling). Alpaca: `notional`, else `qty x` a price. A limit order uses the dearer of its own positive `limit_price` and the `X-LTCM-Reference-Price` header, which can therefore raise what it is worth and never lower it; a market order is priced from the venue's own quote plus 10%, never from the caller's header or a price field. Only `market` and `limit` orders are priced. |
+| `MAX_ORDER_USD_KALSHI` | `75` | unset | Kalshi's own per-order cap. The tighter of it and `MAX_ORDER_USD` applies. `MAX_ORDER_USD_ALPACA` is gone (Sept 26, 2026): not deployed, and not read for the real Alpaca account if set. |
+| `MAX_DAY_USD` | `10000` | `400` | Kalshi's notional for the trading day; and the absolute ceiling on the real Alpaca account's opening maximum loss a day (the owner's whole envelope). |
+| `MAX_DAY_ORDERS` | `300` | `60` | Order count for the whole trading day, both real venues together, exits included (under the venue's 390 a day). |
+| `MAX_ORDER_MAX_LOSS_USD`, `MAX_ORDER_EQUITY_SHARE` | `1000`, `0.15` | the same | The real Alpaca account: one OPENING order's maximum loss is at most the lower of the two, the share taken of the account's equity. |
+| `MAX_DAY_EQUITY_SHARE` | `1.0` | the same | The real Alpaca account: today's opening maximum loss, this order included, is at most this share of equity, and never above `MAX_DAY_USD`. |
+| `CREDIT_MIN_EQUITY_USD` | `2000` | the same | A credit structure (`credit_vertical`, `iron_condor`, `iron_butterfly`) opens on the real account only at this equity or more. |
+| `EQUITY_CAP_MAX_AGE_MS` | `120000` | the same | The oldest equity reading an opening order is sized against; older, the order path reads the account again. |
 | `CAP_TIMEZONE` | `America/New_York` | the same | The calendar the day rolls on: the floor's own. |
-| `OPTION_STRUCTURES_REAL` | `off` | `off` | The multi-leg structure types the real Alpaca account admits, comma-separated (`debit_vertical`, ...). `off`, or any name that is not a type, admits none. See [Multi-leg structures](#multi-leg-structures-sept-25-2026). |
+| `OPTION_STRUCTURES_REAL` | `debit_vertical,credit_vertical,iron_condor,iron_butterfly,long_butterfly` | `off` | The multi-leg structure types the real Alpaca account admits, comma-separated: since Sept 26, 2026 the five Alpaca closes in one order. `off`, or any name that is not a type, admits none. See [Multi-leg structures](#multi-leg-structures-sept-25-2026). |
 
 Sized for two accounts of about $800 each: one order is never more than a tenth of an account,
 and a day's submitted notional is a few times the floor's capital because resting quotes are
 replaced as prices move. `league/constitution.py` repeats the three numbers so the House refuses
 first and can say why; this is where they are enforced.
 
-A refusal is `403` with `{ error, cap }` (`order`, `day_orders` or `day_notional`); the kill switch
+### Caps by maximum loss (Sept 26, 2026)
+
+The options-swarm plan (`docs/goals/LTCM_OPTIONS_SWARM.md`, "Money") sizes by **maximum loss**, never by
+premium, and the real Alpaca account's caps follow its equity (`lib/account.mjs`):
+
+- **The reading.** The gateway reads the equity itself, `GET v2/account` (`equity`) with the real keys, no redirect
+  followed, rounded down, and keeps it in the gate (`alpaca-equity`, apart from the profit index's reading). An
+  opening order uses a reading at most `EQUITY_CAP_MAX_AGE_MS` old and reads the account again otherwise; with no
+  such reading it is a `503` (`Retry-After: 30`) that reserves and sends nothing, and the gate checks the age again
+  itself (`cap: equity`). Health reports the reading and never takes one.
+- **Opens and exits are read from the order, never from `X-LTCM-Purpose`.** Opens: a multi-leg open of an admitted
+  type (its maximum loss) and a single-leg `buy_to_open` (premium x 100 x qty). Exits: a multi-leg close, a single-leg
+  `buy_to_close` (both only when the account holds what they close), a single-leg `sell_to_close`, and a stock close.
+  An exit never waits on the equity read and meets no dollar cap.
+- **The caps.** An open's maximum loss is at most the lower of `MAX_ORDER_MAX_LOSS_USD` and `MAX_ORDER_EQUITY_SHARE`
+  of equity (`cap: order`); today's opening maximum loss with it at most `MAX_DAY_EQUITY_SHARE` of equity and never
+  above `MAX_DAY_USD` (`cap: day_max_loss`); a credit type opens only at `CREDIT_MIN_EQUITY_USD` or more
+  (`cap: credit_equity`). Every order, exits included, counts against `MAX_DAY_ORDERS`; the kill switch is unchanged.
+- **Stock closes assigned shares only.** The one stock order the real account takes is a sale of a stock it holds
+  long, or a buy covering a stock it holds short, for at most what it holds available (`qty_available`), in shares,
+  market or limit: read from its signed positions (a `424` when they cannot be read) and reserved as an exit at one
+  micro-dollar. Every other stock order, and every crypto order, is a `400`. `alpaca-paper` is unchanged.
+
+A refusal is `403` with `{ error, cap }` (`order`, `day_orders`, `day_notional`, `day_max_loss` or `credit_equity`); the kill switch
 is `423` with `{ error }` and stops **every** order-creating call on a real venue, exits included;
 an order whose notional cannot be established is `400` rather than a pass, and a market order the
 venue cannot quote is `503`. Money is exact BigInt arithmetic throughout and every partial cent
@@ -188,10 +215,10 @@ decides on (`symbol`, `legs`, `order_class`, `position_intent`, `side`) spelled 
 that is not JSON is a `400`. Stock and crypto orders pass exactly as before.
 
 **The real account** refuses every multi-leg OPEN while `OPTION_STRUCTURES_REAL` is `off` (as
-deployed), and an open of any type the variable does not name. A type it names is metered at its **maximum loss**: a debit type at
+deployed until Sept 26, 2026; it now names the five types Alpaca closes in one order), and an open of any type the variable does not name. A type it names is metered at its **maximum loss**: a debit type at
 `limit_price x 100 x qty`, a credit type at `(collateral - credit) x 100 x qty` (the collateral is the
-width, or a condor's wider wing), against `MAX_ORDER_USD_ALPACA` and the day's caps like any order; a
-$0.70 debit vertical is $70 and passes the $75 cap, a $0.80 one is refused. The open or close is read
+width, or a condor's wider wing), against the caps by maximum loss like any open (above; until Sept 26, 2026
+`MAX_ORDER_USD_ALPACA`'s $75): at $500 of equity a $0.70 debit vertical is $70 and passes 15% of it, a $0.80 one is refused. The open or close is read
 from the legs' `position_intent`, never from `X-LTCM-Purpose`: an open labelled an exit is still
 metered. A close takes risk off and is metered at zero; the gate counts every order and refuses a
 zero reservation, so a close reserves one micro-dollar as an exit (health rounds it up to a cent):
@@ -345,13 +372,24 @@ Prompt-cache hints are admitted because they change the bill only through that u
 `prewarm`) and, on system, developer and user messages, `input_text` blocks carrying
 `prompt_cache_breakpoint: {"mode": "explicit"}`, at most four per request. Anything else is a `400`.
 These are conservative estimates, not provider invoices. Also refused: a streaming or background call (`400`: the usage that settles the bill arrives
-only with a complete response), `max_output_tokens` missing or outside 1 to 16,000 (`400`), a body
+only with a complete response), `max_output_tokens` missing or outside 1 to 16,000, or to the ceiling its role names (`400`), a body
 over 512 KiB (`413`), no `OPENAI_SECRET_KEY` (`503`). A provider `4xx` is settled at zero; a
 provider error, a timeout (570 seconds since Sept 21, 2026; it was 280) or a reply with no readable
 usage keeps its whole reservation, because unknown is not free. Since Sept 23, 2026 the House settles
 its own campaign commitment for a verified call at this meter's `X-LTCM-Cost-USD`, and releases the
 hold of a refused (4xx) call; a call with no answer keeps its worst case on both lines, until the
 House absorbs its own hold into this month six hours later (below).
+
+### Flex and role ceilings (Sept 26, 2026)
+
+- **Flex.** `service_tier: "flex"` is admitted for a model whose `FRONTIER_MODELS` row carries a `flex` object (its
+  rates, each at most the standard one; deployed at exactly half for `gpt-6-astra`, `gpt-6-sol` and `gpt-6-luna`); for
+  any other model it is a `403`. A flex call is reserved at the standard worst case, and settled at the flex rates
+  only when the answer reports `"service_tier": "flex"` (`X-LTCM-Billed-Tier` says which). A `429`, flex's capacity
+  refusal, settles at zero like every provider `4xx`. Other tiers stay refused.
+- **Role ceilings.** `X-LTCM-Role` (a slug) names the call's role, and `FRONTIER_ROLE_MAX_OUTPUT` (deployed
+  `{"postmortem": 64000}`) that role's output ceiling; any other role, or none, keeps 16,000. The reservation is sized
+  from the `max_output_tokens` admitted under it.
 
 ### What the month counts (Sept 24, 2026)
 
@@ -540,13 +578,16 @@ Mail goes out through the `EMAIL` binding, at most once per six hours per kind
 
 - `sail_balance_low`: credit under `LOW_BALANCE_USD` (60) or under `LOW_RUNWAY_DAYS` (7) of runway;
   `sail_balance_critical`: under `CRITICAL_BALANCE_USD` (20) or `CRITICAL_RUNWAY_DAYS` (2);
-  `floor_stopped`: credit at or under the reserve, or a checkpoint whose `budget.mode` is
-  `stopped`. Runway is credit above the reserve over the trailing day's Sail spend.
+  `floor_stopped`: credit at or under the reserve (since Sept 26, 2026 the schema-2 checkpoint has
+  no `budget.mode`, and a stale checkpoint is `box_not_running`'s, not this). Runway is credit above
+  the reserve over the trailing day's Sail spend.
 - `box_not_running`: a recovery failed, the box is stopped and this pass did not bring it back,
   or a restart went out earlier and the floor is still quiet. A parked box is therefore mailed
   about every six hours even before go-live.
 - `kill_switch_engaged`, for as long as it is engaged; `caps_exhausted`.
-- `daily_digest` in the 21:00 UTC hour: equity, day P&L, orders, Sail spend, runway, box state.
+- `daily_digest` in the 21:00 UTC hour: equity (the schema-2 checkpoint's `account.equity`),
+  profit since the reset (equity less `performance.start_equity` less `net_flows`, unknown when any
+  is missing), orders, Sail spend, runway, box state.
 
 A mail failure never takes the pass down, and an alert that did not send is not recorded as sent.
 

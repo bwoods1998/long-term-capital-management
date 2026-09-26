@@ -45,6 +45,9 @@ export class Gate extends DurableObject {
   status() { return this.gate.status(); }
   equity() { return this.gate.equity(); }
   recordEquity(reading) { return this.ctx.storage.transactionSync(() => this.gate.recordEquity(reading)); }
+  // The real Alpaca account's equity for the caps by maximum loss (Sept 26, 2026 (the options-swarm run, Wave 5)).
+  accountEquity() { return this.gate.accountEquity(); }
+  recordAccountEquity(reading) { return this.ctx.storage.transactionSync(() => this.gate.recordAccountEquity(reading)); }
   setKill(on) { return this.gate.setKill(on === true); }
   noticesToday(at) { return this.gate.noticesToday(at); }
   noticeDelivered(id, at) { return this.gate.noticeDelivered(id, at); }

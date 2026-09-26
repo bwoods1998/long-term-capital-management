@@ -4,7 +4,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { runWatchdog } from '../lib/watchdog.mjs';
+import { readFileSync } from 'node:fs';
+
+import { runWatchdog, readCheckpoint, profitSinceReset } from '../lib/watchdog.mjs';
 import { createGate } from '../lib/gate.mjs';
 import { compose, mime, encodeHeader, ALERT_KINDS } from '../lib/email.mjs';
 import { memoryStore } from './helpers.mjs';
@@ -25,9 +27,15 @@ const reply = (body, status = 200) =>
     status, headers: { 'Content-Type': 'application/json' },
   });
 
+//: The site checkpoint, schema 2 since Sept 26, 2026 (`league/publish.py` `build_checkpoint`): equity is the Brokerage
+//: Account's, and profit is read since the reset (equity less the start equity less the owner's net deposits).
 const checkpointBody = (at, agoSeconds) => ({
+  schema_version: 2,
   published_at: new Date(at - agoSeconds * 1000).toISOString(),
-  floor: { equity: '4999.97', daily_pnl: '-12.50', cash: '4999.97' },
+  run: { started_at: '2026-09-15T06:00:00.000Z' },
+  account: { equity: '4999.97', cash: '4999.97', as_of: new Date(at - agoSeconds * 1000).toISOString(), stale: false },
+  performance: { start_at: '2026-09-15T06:00:00.000Z', start_equity: '481.65', net_flows: '4530.82', verified_at: '2026-09-15T07:00:00.000Z' },
+  compute: null, gym: null, agents: [], structures: [],
 });
 
 /** A `fetch` for the whole control plane: checkpoint, usage, box, resume and exec. */
@@ -174,16 +182,74 @@ test('a paused box with credit above the reserve is resumed even when the credit
   assert.equal(calls.some(call => call.url.endsWith('/resume')), true);
 });
 
-test('a floor that reports itself stopped is mailed as stopped, whatever the balance', async () => {
-  const gate = gateWith();
-  const { mailer, sent } = recorder();
-  const { fetcher } = cloud();
-  const stoppedFloor = async (url, options) => {
-    if (String(url).startsWith(CHECKPOINT)) return reply({ ...checkpointBody(NOW, 60), budget: { spent_today_usd: '0', cap_usd: '0', mode: 'stopped' } });
-    return fetcher(url, options);
-  };
-  await runWatchdog({ gate, env: ENV, fetcher: stoppedFloor, mailer, now: NOW });
-  assert.deepEqual(sent.map(message => message.subject), ['LTCM: the desks have stopped — Sail credit is at the reserve']);
+test('the credit-stop mail keys on Sail: a leftover budget.mode is not read, a balance at the reserve is mailed, a stale checkpoint is not', async () => {
+  // Sept 26, 2026 (the options-swarm run, Wave 5): the schema-2 checkpoint has no `budget.mode`. Until today a floor
+  // reporting itself "stopped" was mailed as stopped whatever Sail said.
+  const leftover = cloud();
+  const oldShape = async (url, options) => (String(url).startsWith(CHECKPOINT)
+    ? reply({ ...checkpointBody(NOW, 60), budget: { spent_today_usd: '0', cap_usd: '0', mode: 'stopped' } }) : leftover.fetcher(url, options));
+  const quiet = recorder();
+  assert.equal((await runWatchdog({ gate: gateWith(), env: ENV, fetcher: oldShape, mailer: quiet.mailer, now: NOW })).action, 'ok');
+  assert.deepEqual(quiet.sent, [], '$120 of credit: nothing has stopped');
+
+  // A balance at the reserve is the stop, fresh checkpoint and running box or not; nothing is restarted for it.
+  const atReserve = cloud({ balanceCents: 1000 });
+  const told = recorder();
+  const result = await runWatchdog({ gate: gateWith(), env: ENV, fetcher: atReserve.fetcher, mailer: told.mailer, now: NOW });
+  assert.equal(result.action, 'ok');
+  assert.deepEqual(told.sent.map(message => message.subject), ['LTCM: the desks have stopped — Sail credit is at the reserve']);
+  assert.equal(atReserve.calls.some(call => call.url.endsWith('/exec') || call.url.endsWith('/resume')), false);
+
+  // A stale checkpoint with credit behind it is a restart, never a credit stop.
+  const stale = cloud({ ago: 1200 });
+  const restarted = recorder();
+  assert.equal((await runWatchdog({ gate: gateWith(), env: ENV, fetcher: stale.fetcher, mailer: restarted.mailer, now: NOW })).action, 'restarted');
+  assert.deepEqual(restarted.sent, []);
+
+  // The production tape empty (404): nothing is resumed or restarted, even a paused box (which is still told, as before);
+  // a balance at the reserve is told as the credit stop too.
+  const notRunning = 'LTCM: the desks are not running';
+  for (const [balanceCents, subjects] of [[12000, [notRunning]], [900, ['LTCM: the desks have stopped — Sail credit is at the reserve', notRunning]]]) {
+    const empty = cloud({ status: 'paused', balanceCents });
+    const missing = async (url, options) => (String(url).startsWith(CHECKPOINT) ? reply({ error: 'not found' }, 404) : empty.fetcher(url, options));
+    const mail = recorder();
+    const pass = await runWatchdog({ gate: gateWith(), env: ENV, fetcher: missing, mailer: mail.mailer, now: NOW });
+    assert.equal(pass.action, 'checkpoint_unreachable');
+    assert.equal(empty.calls.some(call => call.url.endsWith('/exec') || call.url.endsWith('/resume')), false, 'a 404 restarts nothing');
+    assert.deepEqual(mail.sent.map(message => message.subject), subjects, String(balanceCents));
+  }
+});
+
+test('the schema-2 checkpoint is read for equity and for profit since the reset, exactly as the publisher writes it', async () => {
+  // The publisher's own fixture (`league/tests/fixtures/site_checkpoint.json`): $5,694.37 of equity from a $481.65 start
+  // with $5,000 deposited since, so $212.72 of profit.
+  const fixture = JSON.parse(readFileSync(new URL('../../league/tests/fixtures/site_checkpoint.json', import.meta.url), 'utf8'));
+  const read = await readCheckpoint({ url: CHECKPOINT, fetcher: async () => reply(fixture) });
+  assert.equal(read.schema_version, 2);
+  assert.equal(read.published_at, '2026-09-28T14:58:00.000Z');
+  assert.equal(read.equity_usd, 5694.37);
+  assert.equal(read.equity_stale, false);
+  assert.equal(read.profit_usd.toFixed(2), '212.72');
+  assert.equal(profitSinceReset(fixture), read.profit_usd);
+  // A part missing is no profit: the flows until they are verified, the performance block, the account, a figure that is not one.
+  for (const change of [
+    { performance: { ...fixture.performance, net_flows: null, verified_at: null } },
+    { performance: null }, { account: null }, { account: { ...fixture.account, equity: 'n/a' } },
+    { performance: { ...fixture.performance, start_equity: undefined } },
+  ]) {
+    const body = { ...fixture, ...change };
+    assert.equal(profitSinceReset(body), null, JSON.stringify(change));
+    assert.equal((await readCheckpoint({ url: CHECKPOINT, fetcher: async () => reply(body) })).profit_usd, null);
+  }
+  assert.equal((await readCheckpoint({ url: CHECKPOINT, fetcher: async () => reply({ ...fixture, account: null }) })).equity_usd, null);
+  // A loss reads negative, to the cent; a stale broker reading is flagged.
+  const lost = { ...fixture, account: { ...fixture.account, equity: '5400.00', stale: true } };
+  const down = await readCheckpoint({ url: CHECKPOINT, fetcher: async () => reply(lost) });
+  assert.equal(down.profit_usd.toFixed(2), '-81.65');
+  assert.equal(down.equity_stale, true);
+  // The schema-1 fields are not read any more.
+  const old = await readCheckpoint({ url: CHECKPOINT, fetcher: async () => reply({ published_at: fixture.published_at, floor: { equity: '4999.97', daily_pnl: '-12.50' } }) });
+  assert.deepEqual([old.equity_usd, old.profit_usd, old.schema_version], [null, null, null]);
 });
 
 test('a terminated box is never resumed', async () => {
@@ -279,7 +345,9 @@ test('the digest goes out in the 21:00 UTC hour and carries the floor s own numb
   at(evening);
   await runWatchdog({ gate, env: ENV, fetcher, mailer, now: evening });
   assert.equal(sent.length, 1);
-  assert.equal(sent[0].subject, 'LTCM daily: equity $4999.97, day P&L -$12.50');
+  // Profit since the reset (Sept 26, 2026, Wave 5): $4,999.97 less the $481.65 start and $4,530.82 deposited since.
+  assert.equal(sent[0].subject, 'LTCM daily: equity $4999.97, profit since the reset -$12.50');
+  assert.match(sent[0].text, /^Equity: \$4999\.97\.\nProfit since the reset: -\$12\.50 \(equity less the start equity and the owner's net deposits\)\./);
   assert.match(sent[0].text, /Sail balance: \$120\.00; spend over 24h: \$4\.13; runway 26 days\./);
   assert.match(sent[0].text, /Box: running\. Kill switch: open\./);
   // The next tick five minutes later is inside the window, so it stays quiet.
@@ -310,7 +378,7 @@ test('with no mail binding the pass still runs and still records what it did', a
 
 test('every alert composes a subject and a body, and nothing else does', () => {
   for (const kind of ALERT_KINDS) {
-    const message = compose(kind, { balance_usd: 12, equity_usd: 100, daily_pnl_usd: 1, orders: 1, notional_usd: 2 });
+    const message = compose(kind, { balance_usd: 12, equity_usd: 100, profit_usd: 1, orders: 1, notional_usd: 2 });
     assert.ok(message.subject.startsWith('LTCM'), kind);
     assert.ok(message.text.includes('https://blakewoods.us/capital/'), kind);
   }

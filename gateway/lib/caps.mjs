@@ -83,7 +83,11 @@ export function createsOrder(venue, method, path) {
   return (ORDER_PATHS[venue] || []).includes(normalizePath(path));
 }
 
-/** A venue's own per-order cap (`MAX_ORDER_USD_ALPACA`), in micro-dollars, or null when unset. */
+/**
+ * A venue's own per-order cap (`MAX_ORDER_USD_KALSHI`), in micro-dollars, or null when unset. Since Sept 26, 2026 (the
+ * options-swarm run, Wave 5) the real Alpaca venue is capped by maximum loss (`account.mjs`), never by this or by
+ * MAX_ORDER_USD: the gate does not read `MAX_ORDER_USD_ALPACA`, which wrangler.jsonc no longer sets.
+ */
 export function venueOrderCap(env = {}, venue) {
   if (typeof venue !== 'string' || !/^[a-z]{2,16}$/.test(venue)) return null;
   const raw = env[`MAX_ORDER_USD_${venue.toUpperCase()}`];
@@ -584,6 +588,7 @@ export function structureNotional(body, admitted = []) {
  */
 export function closeLegsHeldError(body, positions) {
   if (!Array.isArray(positions)) return 'The account\'s positions could not be read as a list: a real close is not admitted unread.';
+  const units = value => picoUnits(value < 0n ? -value : value);
   const qty = parsePico(body.qty);
   const held = new Map();
   for (const row of positions) {
@@ -609,13 +614,23 @@ export function closeLegsHeldError(body, positions) {
     const have = held.get(raw.symbol) ?? 0n;
     const enough = intent.sign > 0 ? have >= need : -have >= need;
     if (!enough) {
-      const count = value => (value < 0n ? -value : value) / PICO;
-      short.push(`${raw.symbol} ${intent.sign > 0 ? 'long' : 'short'} (${count(need)} needed, ${have === 0n ? 'none' : `${count(have)} ${have > 0n ? 'long' : 'short'}`} held)`);
+      short.push(`${raw.symbol} ${intent.sign > 0 ? 'long' : 'short'} (${units(need)} needed, ${have === 0n ? 'none' : `${units(have)} ${have > 0n ? 'long' : 'short'}`} held)`);
     }
   }
   if (short.length === 0) return null;
+  if (body.kind === 'stock') {
+    return `A stock order on the real account must close shares it holds: ${short.join('; ')}. A sale of shares not held long would be a short sale, and a buy that covers no short would open a position: refused.`;
+  }
   const what = body.order_class === 'mleg' ? 'A structure close must close legs' : 'A single-leg buy_to_close must buy back a short leg';
   return `${what} the real account holds: ${short.join('; ')}. A close of a leg not held would open a position: refused.`;
+}
+
+/** Picounits as a plain decimal (`5`, `-0.5`), exact: a count of contracts or shares for a sentence or a position row. */
+export function picoUnits(value) {
+  const sign = value < 0n ? '-' : '';
+  const magnitude = value < 0n ? -value : value;
+  const rest = magnitude % PICO;
+  return `${sign}${magnitude / PICO}${rest === 0n ? '' : `.${String(rest).padStart(12, '0').replace(/0+$/, '')}`}`;
 }
 
 /**
@@ -626,10 +641,45 @@ export function closeLegsHeldError(body, positions) {
 export function closedLegRows(body) {
   const qty = parsePico(body.qty);
   return body.legs.map(raw => {
+    // Exact (Sept 26, 2026, Wave 5): a stock close may be for fractional shares, which a whole count would round away.
     const need = qty * (parsePico(raw.ratio_qty) / PICO);
-    const units = need / PICO;
-    return { symbol: raw.symbol, qty: String(LEG_INTENTS[raw.position_intent].sign > 0 ? -units : units) };
+    return { symbol: raw.symbol, qty: picoUnits(LEG_INTENTS[raw.position_intent].sign > 0 ? -need : need) };
   });
+}
+
+// --- stock on the real account: assignment closes only (Sept 26, 2026 (the options-swarm run, Wave 5)) ---------------
+// The plan's prune ("stock orders except the sale of assigned shares"), the cheap version: the real account trades
+// options only, and the one stock order it may send is the close of shares an assignment left on it -- an American short
+// leg assigned (SPY, QQQ, IWM and single names settle physically) becomes shares, long for a short put and short for a
+// short call. So the only stock order admitted on `alpaca` is a SELL of a stock the account holds LONG (qty at most what
+// it holds available) or a BUY that covers a stock it holds SHORT (qty at most the short), read from the account's
+// signed positions like any real close (`closeLegsHeldError`), failing closed when they cannot be read. Such an order
+// takes risk off: it is an exit (no dollar cap; counted in the day's orders; stopped by the kill switch). Every other
+// stock order, and every crypto order, is refused. `alpaca-paper` is unchanged.
+
+/**
+ * A stock order on the real account read as the close it must be: `{ body }` (a one-leg close in the shape
+ * `closeLegsHeldError` and `closedLegRows` read, `kind: "stock"`), or `{ error }`. `body` has passed `alpacaShapeError`.
+ */
+export function realStockClose(body) {
+  const symbol = String(body.symbol || '');
+  if (CRYPTO_PAIR.test(symbol)) {
+    return { error: 'Crypto is not traded on the real account: its only stock orders close shares an assignment left on it.' };
+  }
+  if (!STOCK_SYMBOL.test(symbol)) return { error: alpacaSymbolError(symbol) || 'An Alpaca order needs a top-level symbol.' };
+  if (present(body, 'position_intent')) return { error: 'A stock order carries no position_intent: that field is an option order\'s.' };
+  if (present(body, 'notional')) {
+    return { error: 'A stock order on the real account is sized in shares (qty), never in dollars: it closes shares the account holds, at most what it holds.' };
+  }
+  const qty = parsePico(body.qty);
+  if (qty === null || qty <= 0n) return { error: 'Order qty is missing or not positive.' };
+  if (body.type === 'limit') {
+    const limit = parsePico(body.limit_price);
+    if (limit === null || limit <= 0n) return { error: 'A limit order needs a positive limit price.' };
+  }
+  if (body.side !== 'sell' && body.side !== 'buy') return { error: 'A stock order is a buy or a sell.' };
+  const intent = body.side === 'sell' ? 'sell_to_close' : 'buy_to_close';
+  return { body: { kind: 'stock', qty: body.qty, legs: [{ symbol, ratio_qty: '1', side: body.side, position_intent: intent }] } };
 }
 
 // --- the practice account ------------------------------------------------------------------------

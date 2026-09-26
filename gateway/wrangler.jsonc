@@ -44,15 +44,32 @@
     // which is a change the owner makes, not a change the VM can make.
     // History: the first run sized these so a desk's own limits bound first, and on Sept 18,
     // 2026 (the arena) raised them to bound a runaway loop rather than a position.
-    // Sept 19, 2026 (the rebuild, in force): two accounts of about $800 each. One order is never
-    // more than a tenth of an account, and a day's submitted notional is a few times the floor's
-    // capital because resting quotes are replaced as prices move. An order sent with
-    // `X-LTCM-Purpose: exit` skips the dollar caps; the paper venue is never metered at all.
+    // Sept 19, 2026 (the rebuild): two accounts of about $800 each. One order is never more than a
+    // tenth of an account, and a day's submitted notional is a few times the floor's capital
+    // because resting quotes are replaced as prices move. An order sent with `X-LTCM-Purpose: exit`
+    // skips the dollar caps; the paper venue is never metered at all.
+    // Sept 26, 2026 (the options-swarm run, Wave 5; docs/goals/LTCM_OPTIONS_SWARM.md, "Money"): the
+    // REAL Alpaca venue is capped by MAXIMUM LOSS and follows the account (lib/account.mjs). The
+    // gateway reads the account's equity itself (GET v2/account with the real keys, no older than
+    // EQUITY_CAP_MAX_AGE_MS for an opening order; an opening order with no such reading is a 503 the
+    // House sends again, and exits never wait on it). One opening order may lose at most the lower of
+    // MAX_ORDER_MAX_LOSS_USD and MAX_ORDER_EQUITY_SHARE of equity; the day's opening maximum loss at
+    // most MAX_DAY_EQUITY_SHARE of equity and never above MAX_DAY_USD, the owner's whole $10,000
+    // envelope; a credit structure opens only at CREDIT_MIN_EQUITY_USD of equity or more. Exits
+    // (closes, buy-backs, the sale of assigned shares) meet no dollar cap and are not counted in the
+    // day's opening maximum loss. MAX_DAY_ORDERS counts every order, exits included (under the
+    // venue's 390 a day). The real venue's stock orders close assigned shares only, and its crypto
+    // orders are refused. MAX_ORDER_USD_ALPACA ($75 of premium) is gone: MAX_ORDER_USD and
+    // MAX_ORDER_USD_KALSHI now bound Kalshi alone, and MAX_DAY_USD is also Kalshi's day notional.
     "MAX_ORDER_USD": "75",
     "MAX_ORDER_USD_KALSHI": "75",
-    "MAX_ORDER_USD_ALPACA": "75",
-    "MAX_DAY_USD": "4000",
-    "MAX_DAY_ORDERS": "2000",
+    "MAX_DAY_USD": "10000",
+    "MAX_DAY_ORDERS": "300",
+    "MAX_ORDER_MAX_LOSS_USD": "1000",
+    "MAX_ORDER_EQUITY_SHARE": "0.15",
+    "MAX_DAY_EQUITY_SHARE": "1.0",
+    "CREDIT_MIN_EQUITY_USD": "2000",
+    "EQUITY_CAP_MAX_AGE_MS": "120000",
     // Sept 21: $104.14 already metered plus $75 owner-reported remaining credit, less ~$5
     // operating reserve. This is an aggregate ceiling, not a fresh $174 allowance.
     // Sept 21 22:15 UTC: the owner added $200 of OpenAI credit -> $374.
@@ -89,7 +106,17 @@
     // Luna $0.10 / $0.01 / $0.50; writes 1.25x plain; above 272K input tokens input and cache
     // rates double and output is 1.5x. Both ids were reachable with the key on Sept 22, 2026
     // (GET /v1/frontier/models).
-    "FRONTIER_MODELS": "{\"gpt-6-astra\":{\"input\":12.5,\"cached\":1,\"output\":50,\"long_input\":25.0,\"long_cached\":2,\"long_output\":75.0,\"uncached\":10,\"long_uncached\":20},\"gpt-5.6-sol\":{\"input\":5,\"cached\":0.4,\"output\":20,\"long_input\":10,\"long_cached\":0.8,\"long_output\":30.0,\"uncached\":4,\"long_uncached\":8},\"gpt-5.6-terra\":{\"input\":2.5,\"cached\":0.2,\"output\":12,\"long_input\":5.0,\"long_cached\":0.4,\"long_output\":18.0,\"uncached\":2,\"long_uncached\":4},\"gpt-5.6-luna\":{\"input\":0.25,\"cached\":0.02,\"output\":1.2,\"long_input\":0.5,\"long_cached\":0.04,\"long_output\":1.7999999999999998,\"uncached\":0.2,\"long_uncached\":0.4},\"gpt-6-sol\":{\"input\":2.5,\"cached\":0.2,\"output\":10,\"long_input\":5.0,\"long_cached\":0.4,\"long_output\":15.0,\"uncached\":2,\"long_uncached\":4},\"gpt-6-luna\":{\"input\":0.125,\"cached\":0.01,\"output\":0.5,\"long_input\":0.25,\"long_cached\":0.02,\"long_output\":0.75,\"uncached\":0.1,\"long_uncached\":0.2}}",
+    // Sept 26, 2026 (the options-swarm run, Wave 5): `flex` is a model's rates on the flex tier
+    // (`service_tier: "flex"`), exactly half of each standard rate, long-context ones included. A
+    // flex call is reserved at the standard worst case (OpenAI may serve it on another tier) and
+    // settled at these rates only when the answer reports `"service_tier": "flex"`; a 429 (no flex
+    // capacity) settles at zero. A model without `flex` cannot be sent on the flex tier.
+    "FRONTIER_MODELS": "{\"gpt-6-astra\":{\"input\":12.5,\"cached\":1,\"output\":50,\"long_input\":25.0,\"long_cached\":2,\"long_output\":75.0,\"uncached\":10,\"long_uncached\":20,\"flex\":{\"input\":6.25,\"cached\":0.5,\"output\":25,\"long_input\":12.5,\"long_cached\":1,\"long_output\":37.5,\"uncached\":5,\"long_uncached\":10}},\"gpt-5.6-sol\":{\"input\":5,\"cached\":0.4,\"output\":20,\"long_input\":10,\"long_cached\":0.8,\"long_output\":30.0,\"uncached\":4,\"long_uncached\":8},\"gpt-5.6-terra\":{\"input\":2.5,\"cached\":0.2,\"output\":12,\"long_input\":5.0,\"long_cached\":0.4,\"long_output\":18.0,\"uncached\":2,\"long_uncached\":4},\"gpt-5.6-luna\":{\"input\":0.25,\"cached\":0.02,\"output\":1.2,\"long_input\":0.5,\"long_cached\":0.04,\"long_output\":1.7999999999999998,\"uncached\":0.2,\"long_uncached\":0.4},\"gpt-6-sol\":{\"input\":2.5,\"cached\":0.2,\"output\":10,\"long_input\":5.0,\"long_cached\":0.4,\"long_output\":15.0,\"uncached\":2,\"long_uncached\":4,\"flex\":{\"input\":1.25,\"cached\":0.1,\"output\":5,\"long_input\":2.5,\"long_cached\":0.2,\"long_output\":7.5,\"uncached\":1,\"long_uncached\":2}},\"gpt-6-luna\":{\"input\":0.125,\"cached\":0.01,\"output\":0.5,\"long_input\":0.25,\"long_cached\":0.02,\"long_output\":0.75,\"uncached\":0.1,\"long_uncached\":0.2,\"flex\":{\"input\":0.0625,\"cached\":0.005,\"output\":0.25,\"long_input\":0.125,\"long_cached\":0.01,\"long_output\":0.375,\"uncached\":0.05,\"long_uncached\":0.1}}}",
+    // Sept 26, 2026 (the options-swarm run, Wave 5): a role's own output ceiling, by the
+    // `X-LTCM-Role` header (a slug). The weekly post-mortem writes more than the 16,000 tokens every
+    // other call is held to; the reservation is sized from the max_output_tokens admitted under the
+    // ceiling. A role not named here, or a call with no role, keeps 16,000.
+    "FRONTIER_ROLE_MAX_OUTPUT": "{\"postmortem\":64000}",
     // Where the frontier model's proposals become pull requests, and how many may open in one
     // UTC day. The token that opens them is the secret GITHUB_TOKEN; without it the route is a
     // 503. Nothing here merges: CI judges a pull request and a repository workflow merges it.
@@ -111,7 +138,11 @@
     // money-digest change the owner ratifies, not one the VM can make: it lists exactly the
     // constitution's `allocator.option_spread_real_types` while `allocator.option_spreads_real` (O1)
     // is true, and is "off" while O1 is false (`league.ci` check_structures refuses anything else).
-    "OPTION_STRUCTURES_REAL": "off",
+    // Sept 26, 2026 (the options-swarm run, Wave 5): the five types Alpaca closes in one order. The
+    // credit types (credit_vertical, iron_condor, iron_butterfly) open only while the gateway's own
+    // reading of the account's equity is at least CREDIT_MIN_EQUITY_USD; debit types need no
+    // threshold. Every open still meets the caps by maximum loss above.
+    "OPTION_STRUCTURES_REAL": "debit_vertical,credit_vertical,iron_condor,iron_butterfly,long_butterfly",
 
     // Watchdog.
     "CHECKPOINT_URL": "https://blakewoods.us/api/capital/checkpoint",

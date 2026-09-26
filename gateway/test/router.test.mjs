@@ -6,7 +6,8 @@ import test from 'node:test';
 
 import { route, parseRoute } from '../lib/router.mjs';
 import { createGate } from '../lib/gate.mjs';
-import { rsaKey, memoryStore, recorder, bearer, fakeGitHub, TOKEN, GITHUB_REPO, GITHUB_TOKEN } from './helpers.mjs';
+import { composeNotice, RELEASE_DRAWDOWN } from '../lib/email.mjs';
+import { rsaKey, memoryStore, recorder, bearer, fakeGitHub, alpacaVenue, withEquity, TOKEN, GITHUB_REPO, GITHUB_TOKEN } from './helpers.mjs';
 
 const NOW = Date.parse('2026-09-15T16:00:00Z');
 const GATEWAY = 'https://ltcm-gateway.workers.dev';
@@ -20,7 +21,7 @@ const env = (extra = {}) => ({
   KALSHI_PRIVATE_KEY: keys.kalshi.pkcs8,
   ALPACA_KEY_ID: 'AK-TEST-KEY',
   ALPACA_SECRET_KEY: 'alpaca-secret-that-never-leaves-the-worker',
-  MAX_ORDER_USD: '50', MAX_DAY_USD: '400', MAX_DAY_ORDERS: '60', CAP_TIMEZONE: 'America/New_York', PRODUCT_CACHE_MS: '0',
+  MAX_ORDER_USD: '50', MAX_DAY_USD: '400', MAX_DAY_ORDERS: '60', CAP_TIMEZONE: 'America/New_York', POSITIONS_CACHE_MS: '0',
   ...extra,
 });
 
@@ -42,41 +43,46 @@ const call = async (request, { settings, gate = gateFor(settings), reply, fetche
 const KALSHI_ORDER = { ticker: 'KXTEST-26', side: 'bid', count: '3.00', price: '0.6500', client_order_id: 'oi-1' };
 const ALPACA_ORDER = { symbol: 'AAPL', qty: '1', side: 'buy', type: 'limit', time_in_force: 'day', limit_price: '6.00', client_order_id: 'oi-2' };
 const ALPACA_MARKET = { symbol: 'AAPL', qty: '2', side: 'buy', type: 'market', time_in_force: 'day' };
+//: A single-leg option buy on the real account: $0.06 x 100 x 1 = $6.00 of maximum loss.
+const OPTION_BUY = { symbol: 'SPY261016C00740000', qty: '1', side: 'buy', type: 'limit', time_in_force: 'day', limit_price: '0.06', position_intent: 'buy_to_open', client_order_id: 'oi-4' };
 
-test('a caller cannot underprice a limit order with its reference header', async () => {
+test('a stock order on the real account that closes nothing is refused, whatever its headers say: nothing is reserved or forwarded', async () => {
+  // Sept 26, 2026 (the options-swarm run, Wave 5): the real account's only stock orders close assigned shares. Until
+  // today this buy was priced at its limit (a reference header could raise it, never lower it) against a $50 cap.
+  const tape = alpacaVenue({ positions: [] });
   const order = { ...ALPACA_ORDER, limit_price: '60.00' };
-  const { response, body, calls } = await call(ask('POST', '/v1/alpaca/v2/orders', { body: order, headers: { 'X-LTCM-Reference-Price': '0.01' } }));
-  assert.equal(response.status, 403);
-  assert.equal(body.cap, 'order');
-  assert.equal(calls.length, 0);
+  const { response, body, gate } = await call(ask('POST', '/v1/alpaca/v2/orders',
+    { body: order, headers: { 'X-LTCM-Reference-Price': '0.01', 'X-LTCM-Purpose': 'exit' } }), { fetcher: tape.fetcher });
+  assert.equal(response.status, 400);
+  assert.match(body.error, /^A stock order on the real account must close shares it holds: AAPL short \(1 needed, none held\)\./);
+  assert.equal(tape.orders().length, 0);
+  assert.equal(tape.accountReads().length, 0);
+  assert.equal(gate.status(NOW).today.orders, 0);
 });
 
-test('market orders use an independent buffered venue price', async () => {
-  const calls = [];
-  const fetcher = async (url, options) => {
-    calls.push({ url, options });
-    return new Response(JSON.stringify(options.method === 'GET' ? { symbol: 'AAPL', quote: { ap: 3, bp: 2.9 } } : { id: 'o1' }));
-  };
-  const { response, gate } = await call(ask('POST', '/v1/alpaca/v2/orders', { body: ALPACA_MARKET, headers: { 'X-LTCM-Reference-Price': '0.01' } }), { fetcher });
+test('a stock close on the real account reads no quote: a market sale of shares held long goes as an exit after one positions read', async () => {
+  const tape = alpacaVenue({ positions: [{ symbol: 'AAPL', qty: '100', qty_available: '100', side: 'long', asset_class: 'us_equity' }] });
+  const sale = { symbol: 'AAPL', qty: '100', side: 'sell', type: 'market', time_in_force: 'day' };
+  const { response, gate } = await call(ask('POST', '/v1/alpaca/v2/orders', { body: sale, headers: { 'X-LTCM-Reference-Price': '0.01' } }),
+    { fetcher: tape.fetcher });
   assert.equal(response.status, 200);
-  assert.equal(calls.length, 2);
-  assert.match(calls[0].url, /data\.alpaca\.markets\/v2\/stocks\/AAPL\/quotes\/latest$/);
-  assert.equal(calls[0].options.headers['APCA-API-KEY-ID'], 'AK-TEST-KEY', 'the quote is fetched with the venue credential');
-  assert.equal((await gate.status()).today.notional_usd, '6.60');
+  assert.deepEqual(tape.calls.map(made => made.url), ['https://api.alpaca.markets/v2/positions', 'https://api.alpaca.markets/v2/orders']);
+  assert.equal(tape.calls[0].headers['APCA-API-KEY-ID'], 'AK-TEST-KEY', 'the positions are read with the venue credential');
+  assert.deepEqual(JSON.parse(tape.calls[1].body), sale);
+  assert.deepEqual((await gate.status()).today, { day: '2026-09-15', orders: 1, notional_usd: '0.01' }, 'an exit at one micro-dollar');
 });
 
-test('market quote failure refuses the order before dispatch or reservation', async () => {
-  const { response, calls, gate } = await call(ask('POST', '/v1/alpaca/v2/orders', { body: ALPACA_MARKET }), { reply: { status: 503, body: '{}' } });
-  assert.equal(response.status, 503);
-  assert.equal(calls.length, 1);
+test('positions that cannot be read admit no stock close (a 424 that reserves nothing), and a symbol that is not one is refused unread', async () => {
+  const sale = { symbol: 'AAPL', qty: '2', side: 'sell', type: 'market', time_in_force: 'day' };
+  const unread = alpacaVenue({ positions: 503 });
+  const { response, body, gate } = await call(ask('POST', '/v1/alpaca/v2/orders', { body: sale }), { fetcher: unread.fetcher });
+  assert.equal(response.status, 424);
+  assert.match(body.error, /Cannot check that the real account holds these shares: venue HTTP 503/);
+  assert.equal(unread.orders().length, 0);
   assert.equal((await gate.status()).today.orders, 0);
-
-  // A quote with no price in it is no quote, and a symbol that is not one is never looked up.
-  const empty = await call(ask('POST', '/v1/alpaca/v2/orders', { body: ALPACA_MARKET }), { reply: { status: 200, body: '{"quote":{}}' } });
-  assert.equal(empty.response.status, 503);
-  assert.equal((await empty.gate.status()).today.orders, 0);
-  const odd = await call(ask('POST', '/v1/alpaca/v2/orders', { body: { ...ALPACA_MARKET, symbol: 'AAPL?x=1' } }));
-  assert.equal(odd.response.status, 400);
+  const odd = alpacaVenue();
+  const refused = await call(ask('POST', '/v1/alpaca/v2/orders', { body: { ...sale, symbol: 'AAPL?x=1' } }), { fetcher: odd.fetcher });
+  assert.equal(refused.response.status, 400);
   assert.equal(odd.calls.length, 0);
 });
 
@@ -104,6 +110,10 @@ test('health reports the caps, the counters, the kill switch and the watchdog', 
   assert.deepEqual(body.caps, {
     max_order_usd: '50.00', max_day_usd: '400.00', max_day_orders: 60, timezone: 'America/New_York',
   });
+  // The caps by maximum loss (Sept 26, 2026, Wave 5): with no reading of the account yet, no open is admitted.
+  assert.equal(body.max_loss.equity.fresh, false);
+  assert.equal(body.max_loss.order_cap_usd, null);
+  assert.equal(body.max_loss.opens_admitted, false);
   assert.deepEqual(Object.keys(body.watchdog).sort(),
     ['age_seconds', 'last_action', 'last_action_at', 'last_check_at', 'last_restart_at', 'published_at']);
   assert.ok('sail' in body && 'alerts' in body);
@@ -176,42 +186,44 @@ test('an exit order passes the per-order cap when the header says so', async () 
   assert.equal(calls.length, 1, 'the exit reached the venue');
 });
 
-test('a reference header can raise what a limit order is worth, never lower it', async () => {
+test('a single-leg option buy on the real account is metered at its own limit x 100 x qty: the reference header changes nothing', async () => {
   const gate = gateFor();
-  const priced = await call(
-    ask('POST', '/v1/alpaca/v2/orders', { body: ALPACA_ORDER, headers: { 'X-LTCM-Reference-Price': '6.41' } }),
-    { gate },
-  );
-  assert.equal(priced.response.status, 200);
-  assert.equal(gate.status(NOW).today.notional_usd, '6.41');
-
-  // The same order at a size that puts it over the cap is refused.
-  const refused = await call(
-    ask('POST', '/v1/alpaca/v2/orders', { body: { ...ALPACA_ORDER, qty: '10' }, headers: { 'X-LTCM-Reference-Price': '6.41' } }),
-    { gate },
-  );
-  assert.equal(refused.response.status, 403);
-
-  // A limit supplies its own enforceable ceiling without trusting a header.
-  const unpriced = await call(ask('POST', '/v1/alpaca/v2/orders', { body: ALPACA_ORDER }), { gate });
-  assert.equal(unpriced.response.status, 200);
-  assert.equal(unpriced.calls.length, 1);
-  assert.equal(gate.status(NOW).today.notional_usd, '12.41');
+  const tape = alpacaVenue();
+  const buy = { ...OPTION_BUY, symbol: 'RIVN261002P00014000', qty: '2', limit_price: '0.14' };
+  for (const reference of ['0.01', '500']) {
+    const priced = await call(ask('POST', '/v1/alpaca/v2/orders', { body: buy, headers: { 'X-LTCM-Reference-Price': reference } }),
+      { gate, fetcher: tape.fetcher });
+    assert.equal(priced.response.status, 200, reference);
+  }
+  assert.equal(gate.status(NOW).today.notional_usd, '56.00', '2 x $0.14 x 100, twice');
+  assert.equal(gate.status(NOW).max_loss.day_open_max_loss_usd, '56.00');
+  assert.equal(tape.accountReads().length, 1, 'the second open is sized from the first one\'s reading');
 });
 
-test('the caps, the exit purpose and the kill switch are the same on every venue', async () => {
-  const big = { ...ALPACA_ORDER, qty: '100', limit_price: '0.99' };
-  const refused = await call(ask('POST', '/v1/alpaca/v2/orders', { body: big }));
+test('the exit purpose skips Kalshi\'s dollar caps; on the real Alpaca account an open is an open whatever it says; the kill switch stops both', async () => {
+  const big = { ...KALSHI_ORDER, count: '100', price: '0.9900' };
+  const refused = await call(ask('POST', '/v1/kalshi/portfolio/events/orders', { body: big }));
   assert.equal(refused.response.status, 403);
   assert.match(refused.body.error, /\$99\.00 exceeds the per-order cap of \$50\.00/);
-  const exit = await call(ask('POST', '/v1/alpaca/v2/orders', { body: big, headers: { 'X-LTCM-Purpose': 'exit' } }));
+  const exit = await call(ask('POST', '/v1/kalshi/portfolio/events/orders', { body: big, headers: { 'X-LTCM-Purpose': 'exit' } }));
   assert.equal(exit.response.status, 200);
   assert.equal(exit.calls.length, 1, 'the exit reached the venue');
   assert.equal((await exit.gate.status()).today.orders, 1, 'and still counts as an order');
 
-  const gate = gateFor();
+  // Sept 26, 2026, Wave 5: 15% of $5,000 is $750, and a $760 option buy is over it, labelled an exit or not.
+  const tape = alpacaVenue();
+  const open = { ...OPTION_BUY, qty: '2', limit_price: '3.80' };
+  for (const headers of [{}, { 'X-LTCM-Purpose': 'exit' }]) {
+    const over = await call(ask('POST', '/v1/alpaca/v2/orders', { body: open, headers }), { fetcher: tape.fetcher });
+    assert.equal(over.response.status, 403, JSON.stringify(headers));
+    assert.equal(over.body.cap, 'order');
+    assert.match(over.body.error, /^Order maximum loss \$760\.00 exceeds the per-order cap of \$750\.00 \(the lower of \$1000\.00 and 15% of \$5000\.00 equity\)\.$/);
+  }
+  assert.equal(tape.orders().length, 0);
+
+  const gate = withEquity(gateFor(), '5000.00', NOW);
   await call(ask('POST', '/v1/kill'), { gate });
-  const killed = await call(ask('POST', '/v1/alpaca/v2/orders', { body: ALPACA_ORDER }), { gate });
+  const killed = await call(ask('POST', '/v1/alpaca/v2/orders', { body: OPTION_BUY }), { gate });
   assert.equal(killed.response.status, 423);
   assert.equal(killed.calls.length, 0);
   assert.equal((await call(ask('DELETE', '/v1/alpaca/v2/orders/abc-123'), { gate })).response.status, 200, 'a cancel still passes');
@@ -219,22 +231,26 @@ test('the caps, the exit purpose and the kill switch are the same on every venue
 
 test('a reservation is refunded when signing fails, and kept when the venue does not answer', async () => {
   for (const [path, body, settings] of [
-    ['/v1/alpaca/v2/orders', ALPACA_ORDER, { ALPACA_SECRET_KEY: '' }],
+    ['/v1/alpaca/v2/orders', OPTION_BUY, { ALPACA_SECRET_KEY: '' }],
     ['/v1/kalshi/portfolio/events/orders', KALSHI_ORDER, { KALSHI_PRIVATE_KEY: 'not a key' }],
   ]) {
-    const unsigned = await call(ask('POST', path, { body }), { settings });
+    // The account's equity is already read (a fresh reading in the gate): signing the order is what fails.
+    const gate = withEquity(gateFor(settings), '5000.00', NOW);
+    const unsigned = await call(ask('POST', path, { body }), { settings, gate });
     assert.equal(unsigned.response.status, 503, path);
     assert.match(unsigned.body.error, /credentials for (alpaca|kalshi) are unusable/);
     assert.equal(unsigned.calls.length, 0);
     assert.deepEqual((await unsigned.gate.status()).today, { day: '2026-09-15', orders: 0, notional_usd: '0.00' }, 'nothing was dispatched, so nothing is spent');
+    assert.equal((await unsigned.gate.status()).max_loss.day_open_max_loss_usd, '0.00', 'the opening maximum loss is given back too');
   }
 
-  const gate = gateFor();
-  const silent = await call(ask('POST', '/v1/alpaca/v2/orders', { body: ALPACA_ORDER }),
+  const gate = withEquity(gateFor(), '5000.00', NOW);
+  const silent = await call(ask('POST', '/v1/alpaca/v2/orders', { body: OPTION_BUY }),
     { gate, fetcher: async () => { throw Object.assign(new Error('nope'), { name: 'TimeoutError' }); } });
   assert.equal(silent.response.status, 502);
   assert.match(silent.body.error, /alpaca API did not answer/);
   assert.deepEqual(gate.status(NOW).today, { day: '2026-09-15', orders: 1, notional_usd: '6.00' });
+  assert.equal(gate.status(NOW).max_loss.day_open_max_loss_usd, '6.00');
 });
 
 test('reads and cancels always pass, whatever the counters say', async () => {
@@ -354,35 +370,30 @@ test('alpaca is keyed inside the worker, hosted by path, and priced before it is
   const quotes = await call(ask('GET', '/v1/alpaca/v2/stocks/AAPL/quotes/latest?feed=iex'));
   assert.equal(quotes.calls[0].url, 'https://data.alpaca.markets/v2/stocks/AAPL/quotes/latest?feed=iex');
 
-  // A limit order is priced from its own limit: 4 x $10 is inside the $50 per-order cap.
-  const limit = await call(ask('POST', '/v1/alpaca/v2/orders', {
-    body: { symbol: 'AAPL', qty: '4', side: 'buy', type: 'limit', time_in_force: 'day', limit_price: '10.00' },
-  }));
+  // An option buy is priced from its own limit, x 100: 4 contracts at $0.10 is $40 of maximum loss, sized against the
+  // account's equity, which the gateway read itself with the real key (Sept 26, 2026, Wave 5).
+  const tape = alpacaVenue();
+  const limit = await call(ask('POST', '/v1/alpaca/v2/orders', { body: { ...OPTION_BUY, qty: '4', limit_price: '0.10' } }), { fetcher: tape.fetcher });
   assert.equal(limit.response.status, 200);
-  assert.equal(JSON.parse(limit.calls[0].body).symbol, 'AAPL');
+  assert.equal(JSON.parse(tape.orders()[0].body).symbol, 'SPY261016C00740000');
   assert.equal((await limit.gate.status()).today.notional_usd, '40.00');
+  const [reading] = tape.accountReads();
+  assert.deepEqual([reading.url, reading.method, reading.redirect, reading.headers['APCA-API-KEY-ID']], ['https://api.alpaca.markets/v2/account', 'GET', 'manual', 'AK-TEST-KEY']);
 
-  // The same order for 400 shares is over the per-order cap and never reaches the venue.
-  const big = await call(ask('POST', '/v1/alpaca/v2/orders', {
-    body: { symbol: 'AAPL', qty: '400', side: 'buy', type: 'limit', time_in_force: 'day', limit_price: '10.00' },
-  }));
+  // The same order for 400 contracts ($4,000) is over the per-order cap and never reaches the venue.
+  const big = await call(ask('POST', '/v1/alpaca/v2/orders', { body: { ...OPTION_BUY, qty: '400', limit_price: '0.10' } }), { fetcher: tape.fetcher });
   assert.equal(big.response.status, 403);
   assert.equal(big.body.cap, "order");
-  assert.equal(big.calls.length, 0);
+  assert.equal(tape.orders().length, 1);
 
-  // A market order carries no price, so the gateway reads the venue's own quote and prices
-  // the order 10% through the ask; the VM's claim about the price is never used.
+  // A stock market buy covers no short the account holds: refused, and no quote is read for it.
   const market = await call(ask('POST', '/v1/alpaca/v2/orders', {
     body: { symbol: 'AAPL', qty: '2', side: 'buy', type: 'market', time_in_force: 'day' },
     headers: { 'X-LTCM-Reference-Price': '0.01' },
-  }), {
-    fetcher: async (url, init) => {
-      if (String(url).includes('/quotes/latest')) return new Response(JSON.stringify({ symbol: 'AAPL', quote: { ap: 12, bp: 11.9 } }), { status: 200 });
-      return new Response(JSON.stringify({ id: 'o1' }), { status: 200 });
-    },
-  });
-  assert.equal(market.response.status, 200);
-  assert.equal((await market.gate.status()).today.notional_usd, '26.40', '2 x 12 x 1.10, the venue price, not the caller s');
+  }), { fetcher: tape.fetcher });
+  assert.equal(market.response.status, 400);
+  assert.ok(tape.calls.every(made => !made.url.includes('/quotes/')), 'no quote is read');
+  assert.equal(tape.orders().length, 1);
 
   // A path this gateway does not sign, and a venue write that is not an order path.
   assert.equal((await call(ask('POST', '/v1/alpaca/v2/account/configurations'))).response.status, 403);
@@ -474,6 +485,44 @@ test('a trade notice is composed from the floor\'s facts, mailed once, and count
   assert.equal(over.status, 429);
   assert.equal(over.headers.get('Retry-After'), '3600');
   assert.equal(sent.length, 4);
+});
+
+test('a live_stop notice tells the owner which stop tripped, with the House\'s sentence, the equity and the time, and counts against the day', async () => {
+  // Sept 26, 2026 (the options-swarm run, Wave 5): the House posts one when a stop trips on real money.
+  const facts = stop => ({ kind: 'live_stop', stop, text: `The ${stop} stop tripped.`, equity: '4210.55', at: '2026-09-28T15:02:11.000Z' });
+  for (const [stop, subject] of [
+    ['drawdown', 'LTCM: real money paused (drawdown)'],
+    ['daily', 'LTCM: no new real entries today (daily stop)'],
+    ['reconciliation', 'LTCM: real entries frozen (reconciliation)'],
+    ['assignment', 'LTCM: real entries frozen (assignment)'],
+  ]) {
+    const message = composeNotice(facts(stop));
+    assert.equal(message.subject, subject);
+    assert.match(message.text, new RegExp(`^The ${stop} stop tripped\\.\\n\\nEquity: \\$4210\\.55\\.\\nAt: 2026-09-28T15:02:11\\.000Z\\.\\n`));
+    assert.equal(message.text.includes(RELEASE_DRAWDOWN), stop === 'drawdown', `${stop}: the release line is the drawdown's alone`);
+    assert.ok(message.text.includes('https://blakewoods.us/capital/'));
+  }
+  assert.equal(RELEASE_DRAWDOWN, 'Exits go on; the Gym keeps running. Release the drawdown pause on the box with python3 -m league.live --root /workspace/state --release-drawdown.');
+  // The House's sentence is clipped at 1,500 characters; an equity that is not a decimal is not echoed; a stop not named is refused.
+  const long = composeNotice({ ...facts('daily'), text: 'x'.repeat(2000), equity: '1e9<script>' });
+  assert.ok(long.text.startsWith(`${'x'.repeat(1500)}\n`));
+  assert.match(long.text, /Equity: unknown\./);
+  for (const stop of ['kill', 'DRAWDOWN', '', undefined, 'drawdown)\nBcc: x']) assert.equal(composeNotice({ ...facts('daily'), stop }), null, String(stop));
+
+  // Through /v1/notify: mailed, and counted against NOTIFY_MAX_PER_DAY like any notice.
+  const gate = gateFor();
+  const sent = [];
+  const options = { gate, now: () => NOW, mailer: async message => void sent.push(message) };
+  const capped = env({ NOTIFY_MAX_PER_DAY: '2' });
+  for (const stop of ['drawdown', 'assignment']) {
+    const response = await route(ask('POST', '/v1/notify', { body: facts(stop) }), capped, options);
+    assert.equal(response.status, 200, stop);
+  }
+  assert.deepEqual(sent.map(message => message.subject), ['LTCM: real money paused (drawdown)', 'LTCM: real entries frozen (assignment)']);
+  assert.equal((await route(ask('POST', '/v1/notify', { body: facts('daily') }), capped, options)).status, 429);
+  const unknown = await route(ask('POST', '/v1/notify', { body: facts('panic') }), env(), options);
+  assert.equal(unknown.status, 400);
+  assert.equal(sent.length, 2);
 });
 
 test('the gateway signs only the venue paths the floor uses; everything else is refused before signing', async () => {
@@ -661,15 +710,21 @@ test('cache hints reach OpenAI byte for byte and a cache read settles cheaper th
   assert.equal(seen.length, 2, 'a malformed hint never reaches the provider');
 });
 
-test('a venue may carry a tighter per-order cap than the floor', async () => {
-  const settings = { MAX_ORDER_USD: '50', MAX_ORDER_USD_ALPACA: '20' };
-  const order = qty => ({ symbol: 'AAPL', qty, side: 'buy', type: 'limit', time_in_force: 'day', limit_price: '10.00' });
-  assert.equal((await call(ask('POST', '/v1/alpaca/v2/orders', { body: order('2') }), { settings })).response.status, 200);
-  const refused = await call(ask('POST', '/v1/alpaca/v2/orders', { body: order('3') }), { settings });
+test('a venue may carry a tighter per-order cap than the floor (Kalshi); the real Alpaca venue is capped by maximum loss instead', async () => {
+  const settings = { MAX_ORDER_USD: '50', MAX_ORDER_USD_KALSHI: '20' };
+  const order = count => ({ ...KALSHI_ORDER, count, price: '0.5000' });
+  assert.equal((await call(ask('POST', '/v1/kalshi/portfolio/events/orders', { body: order('40') }), { settings })).response.status, 200);
+  const refused = await call(ask('POST', '/v1/kalshi/portfolio/events/orders', { body: order('41') }), { settings });
   assert.equal(refused.response.status, 403);
   assert.match(refused.body.error, /per-order cap of \$20\.00/);
   // An exit is never trapped by a dollar cap.
-  assert.equal((await call(ask('POST', '/v1/alpaca/v2/orders', { body: order('3'), headers: { 'X-LTCM-Purpose': 'exit' } }), { settings })).response.status, 200);
+  assert.equal((await call(ask('POST', '/v1/kalshi/portfolio/events/orders', { body: order('41'), headers: { 'X-LTCM-Purpose': 'exit' } }), { settings })).response.status, 200);
+  // Sept 26, 2026, Wave 5: MAX_ORDER_USD and MAX_ORDER_USD_ALPACA are not the real Alpaca venue's caps any more.
+  const tape = alpacaVenue();
+  const tight = { MAX_ORDER_USD: '1', MAX_ORDER_USD_ALPACA: '1' };
+  const open = await call(ask('POST', '/v1/alpaca/v2/orders', { body: { ...OPTION_BUY, limit_price: '0.70' } }), { settings: tight, fetcher: tape.fetcher });
+  assert.equal(open.response.status, 200);
+  assert.equal(tape.orders().length, 1);
 });
 
 test('a multi-leg order is refused before its symbol is quoted, priced or reserved, exits included', async () => {
@@ -692,7 +747,8 @@ test('a multi-leg order is refused before its symbol is quoted, priced or reserv
   assert.match(bare.body.error, /top-level symbol/);
   assert.equal(bare.calls.length, 0);
   // The House's own orders pass as before.
-  const ok = await call(ask('POST', '/v1/alpaca/v2/orders', { body: { ...ALPACA_ORDER, symbol: 'RIVN261002P00014000', limit_price: '0.14', position_intent: 'buy_to_open' } }));
+  const ok = await call(ask('POST', '/v1/alpaca/v2/orders', { body: { ...ALPACA_ORDER, symbol: 'RIVN261002P00014000', limit_price: '0.14', position_intent: 'buy_to_open' } }),
+    { fetcher: alpacaVenue().fetcher });
   assert.equal(ok.response.status, 200);
   assert.equal((await ok.gate.status()).today.notional_usd, '14.00');
 });
@@ -732,16 +788,16 @@ test('a market order is priced by the venue quote, never by a price field or the
     assert.equal(refused.calls.length, 0, `${JSON.stringify(body)}: no quote read and nothing forwarded`);
     assert.equal((await refused.gate.status()).today.orders, 0);
   }
-  // The House's market order is still quoted by the venue and priced 10% through the ask; the header is ignored.
-  const ok = await call(ask('POST', '/v1/alpaca/v2/orders', { body: { ...aapl, qty: '0.1', type: 'market' }, headers }), { reply: quote });
+  // Sept 26, 2026, Wave 5: a stock market order on the real account is the sale of shares it holds, read from its
+  // positions, never priced from a quote; one sized in dollars is refused (a close is sized in shares).
+  const tape = alpacaVenue({ positions: [{ symbol: 'AAPL', qty: '0.1', side: 'long' }] });
+  const ok = await call(ask('POST', '/v1/alpaca/v2/orders', { body: { ...aapl, qty: '0.1', side: 'sell', type: 'market' }, headers }), { fetcher: tape.fetcher });
   assert.equal(ok.response.status, 200);
-  assert.equal(ok.calls.length, 2);
-  assert.equal((await ok.gate.status()).today.notional_usd, '25.30', '0.1 x 230 x 1.10');
-  // A market order in dollars needs no quote: its notional is what it spends.
-  const dollars = await call(ask('POST', '/v1/alpaca/v2/orders', { body: { symbol: 'AAPL', notional: '25', side: 'buy', type: 'market', time_in_force: 'day' }, headers }), { reply: quote });
-  assert.equal(dollars.response.status, 200);
-  assert.equal(dollars.calls.length, 1, 'forwarded without a quote');
-  assert.equal((await dollars.gate.status()).today.notional_usd, '25.00');
+  assert.deepEqual(tape.calls.map(made => new URL(made.url).pathname), ['/v2/positions', '/v2/orders']);
+  const dollars = await call(ask('POST', '/v1/alpaca/v2/orders', { body: { symbol: 'AAPL', notional: '25', side: 'sell', type: 'market', time_in_force: 'day' }, headers }), { fetcher: tape.fetcher });
+  assert.equal(dollars.response.status, 400);
+  assert.match(dollars.body.error, /sized in shares \(qty\), never in dollars/);
+  assert.equal(tape.orders().length, 1);
 });
 
 test('a trailing_stop, stop or stop_limit order is refused before any quote is read', async () => {
@@ -782,7 +838,8 @@ test('the paper account is its own venue: paper keys, paper host, no caps, no ki
   assert.equal(placed.calls[0].url, 'https://paper-api.alpaca.markets/v2/orders');
   assert.equal((await gate.status()).today.orders, 0);
   // The live venue is still stopped by the same switch, and the path rules are shared.
-  assert.equal((await call(ask('POST', '/v1/alpaca/v2/orders', { body: { ...order, qty: '1' } }), { settings, gate })).response.status, 423);
+  withEquity(gate, '5000.00', NOW);
+  assert.equal((await call(ask('POST', '/v1/alpaca/v2/orders', { body: OPTION_BUY }), { settings, gate })).response.status, 423);
   assert.equal((await call(ask('POST', '/v1/alpaca-paper/v2/account/configurations'), { settings })).response.status, 403);
   assert.equal((await call(ask('GET', '/v1/alpaca-paper/v2/account'), { settings: { ALPACA_PAPER_SECRET_KEY: '' } })).response.status, 503);
 });

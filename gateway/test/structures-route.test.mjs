@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 
 import { route } from '../lib/router.mjs';
 import { createGate } from '../lib/gate.mjs';
-import { NAKED_SHORT, UNCOVERED_RATIO } from '../lib/caps.mjs';
+import { NAKED_SHORT, UNCOVERED_RATIO, admittedStructures } from '../lib/caps.mjs';
 import { memoryStore, recorder, TOKEN } from './helpers.mjs';
 import { occ, leg, mleg, closing, OPENS, BTO, STO, STC, BTC } from './structures-fixtures.mjs';
 
@@ -24,9 +24,10 @@ const env = (extra = {}) => ({
   ALPACA_SECRET_KEY: 'alpaca-secret-that-never-leaves-the-worker',
   ALPACA_PAPER_KEY_ID: 'PK-PAPER',
   ALPACA_PAPER_SECRET_KEY: 'paper-secret-held-by-the-worker',
-  // As deployed (wrangler.jsonc, Sept 25, 2026).
-  MAX_ORDER_USD: '75', MAX_ORDER_USD_ALPACA: '75', MAX_DAY_USD: '4000', MAX_DAY_ORDERS: '2000',
-  CAP_TIMEZONE: 'America/New_York', PRODUCT_CACHE_MS: '0', POSITIONS_CACHE_MS: '0',
+  // As deployed (wrangler.jsonc, Sept 26, 2026): the real account capped by maximum loss against its equity.
+  MAX_ORDER_USD: '75', MAX_DAY_USD: '10000', MAX_DAY_ORDERS: '300',
+  MAX_ORDER_MAX_LOSS_USD: '1000', MAX_ORDER_EQUITY_SHARE: '0.15', MAX_DAY_EQUITY_SHARE: '1.0', CREDIT_MIN_EQUITY_USD: '2000',
+  CAP_TIMEZONE: 'America/New_York', POSITIONS_CACHE_MS: '0',
   ...extra,
 });
 
@@ -43,17 +44,23 @@ const post = (venue, body, headers = {}) => new Request(`${GATEWAY}/v1/${venue}/
 const HOLDING = [{ symbol: occ(580), qty: '5', side: 'long', asset_class: 'us_option' },
   { symbol: occ(581), qty: '-5', side: 'short', asset_class: 'us_option' }];
 const isPositions = url => url.endsWith('/v2/positions');
+//: The real account's equity as `GET v2/account` reports it unless a test says otherwise (Sept 26, 2026, Wave 5): about
+//: the account at the reset, so 15% of it is the $75 the per-order cap was in dollars until today.
+const EQUITY = '500.00';
+const isAccount = url => url.endsWith('/v2/account');
 
-// `calls` are the orders forwarded; `reads` the positions read (a real structure close reads them first, Sept 25, 2026).
-const call = async (request, { settings, gate = gateFor(settings), positions = HOLDING } = {}) => {
+// `calls` are the orders forwarded; `reads` the positions read (a real structure close reads them first, Sept 25, 2026);
+// `accountReads` the equity reads (a real open reads the account's equity first, Sept 26, 2026, Wave 5).
+const call = async (request, { settings, gate = gateFor(settings), positions = HOLDING, equity = EQUITY } = {}) => {
   const tape = recorder(url => (isPositions(url)
     ? (positions instanceof Error ? Promise.reject(positions)
       : new Response(typeof positions === 'string' ? positions : JSON.stringify(positions),
         { status: positions?.status ?? 200, headers: { 'Content-Type': 'application/json' } }))
-    : new Response('{"id":"o-1","status":"accepted"}', { status: 200, headers: { 'Content-Type': 'application/json' } })));
+    : isAccount(url) ? new Response(JSON.stringify({ equity, status: 'ACTIVE' }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      : new Response('{"id":"o-1","status":"accepted"}', { status: 200, headers: { 'Content-Type': 'application/json' } })));
   const response = await route(request, env(settings), { gate, fetcher: tape.fetcher, now: () => NOW });
-  return { response, calls: tape.calls.filter(c => !isPositions(c.url)), reads: tape.calls.filter(c => isPositions(c.url)), gate,
-    body: await response.clone().json().catch(() => null) };
+  return { response, calls: tape.calls.filter(c => !isPositions(c.url) && !isAccount(c.url)), reads: tape.calls.filter(c => isPositions(c.url)),
+    accountReads: tape.calls.filter(c => isAccount(c.url)), gate, body: await response.clone().json().catch(() => null) };
 };
 
 const VERTICAL = [leg(occ(580), BTO), leg(occ(581), STO)];
@@ -182,7 +189,7 @@ test('REVIEW: with OPTION_STRUCTURES_REAL off, a held real structure is still cl
   assert.match(legging.body.error, /legging/);
 });
 
-test('with OPTION_STRUCTURES_REAL="debit_vertical": a $0.70 vertical is metered at $70 and passes, $0.80 is refused over the cap, a credit vertical is not admitted, a close is metered at zero', async () => {
+test('with OPTION_STRUCTURES_REAL="debit_vertical" and $500 of equity: a $0.70 vertical is metered at $70 and passes, $0.80 is refused over 15% of equity, a credit vertical is not admitted, a close is metered at zero', async () => {
   const settings = { OPTION_STRUCTURES_REAL: 'debit_vertical' };
   const gate = gateFor(settings);
 
@@ -194,12 +201,12 @@ test('with OPTION_STRUCTURES_REAL="debit_vertical": a $0.70 vertical is metered 
   assert.deepEqual(JSON.parse(open.calls[0].body), mleg(VERTICAL, '0.70'));
   assert.deepEqual((await gate.status()).today, { day: '2026-09-25', orders: 1, notional_usd: '70.00' });
 
-  // $80 of maximum loss is over the $75 order cap, and a header calling the open an exit changes nothing.
+  // $80 of maximum loss is over the $75 order cap (15% of $500), and a header calling the open an exit changes nothing.
   for (const headers of [{}, { 'X-LTCM-Purpose': 'exit' }]) {
     const over = await call(post('alpaca', mleg(VERTICAL, '0.80'), headers), { settings, gate });
     assert.equal(over.response.status, 403);
     assert.equal(over.body.cap, 'order');
-    assert.equal(over.body.error, 'Order notional $80.00 exceeds the per-order cap of $75.00.');
+    assert.equal(over.body.error, 'Order maximum loss $80.00 exceeds the per-order cap of $75.00 (the lower of $1000.00 and 15% of $500.00 equity).');
     assert.equal(over.calls.length, 0);
   }
 
@@ -242,7 +249,7 @@ test('a structure close passes a spent day and a spent order cap, but not the ki
   assert.equal((await call(post('alpaca', mleg(VERTICAL, '0.70')), { settings, gate })).response.status, 200);
   const second = await call(post('alpaca', mleg(VERTICAL, '0.70')), { settings, gate });
   assert.equal(second.response.status, 403);
-  assert.equal(second.body.cap, 'day_notional');
+  assert.equal(second.body.cap, 'day_max_loss');  // the day's opening maximum loss, held to MAX_DAY_USD (Sept 26, 2026)
   assert.equal((await call(post('alpaca', mleg(closing(VERTICAL), '-0.60')), { settings, gate })).response.status, 200);
   await gate.setKill(true);
   const halted = await call(post('alpaca', mleg(closing(VERTICAL), '-0.60')), { settings, gate });
@@ -250,27 +257,40 @@ test('a structure close passes a spent day and a spent order cap, but not the ki
   assert.equal(halted.calls.length, 0);
 });
 
-test('an admitted credit type is metered at its collateral less the credit', async () => {
+test('an admitted credit type is metered at its collateral less the credit, and opens only at $2,000 of equity', async () => {
+  // Sept 26, 2026 (the options-swarm run, Wave 5): at $2,000 the per-order cap is 15% of it, $300.
   const settings = { OPTION_STRUCTURES_REAL: 'iron_condor,credit_vertical' };
   const condor = [leg(occ(579, 'P'), BTO), leg(occ(580, 'P'), STO), leg(occ(590), STO), leg(occ(591), BTO)];
-  const one = await call(post('alpaca', mleg(condor, '-0.38')), { settings });
+  const one = await call(post('alpaca', mleg(condor, '-0.38')), { settings, equity: '2000.00' });
   assert.equal(one.response.status, 200);
   assert.equal((await one.gate.status()).today.notional_usd, '62.00');
-  const two = await call(post('alpaca', mleg(condor, '-0.38', { qty: '2' })), { settings });
-  assert.equal(two.response.status, 403);
-  assert.equal(two.body.error, 'Order notional $124.00 exceeds the per-order cap of $75.00.');
-  const vertical = await call(post('alpaca', mleg(CREDIT_VERTICAL, '-0.30')), { settings });
+  const five = await call(post('alpaca', mleg(condor, '-0.38', { qty: '5' })), { settings, equity: '2000.00' });
+  assert.equal(five.response.status, 403);
+  assert.equal(five.body.error, 'Order maximum loss $310.00 exceeds the per-order cap of $300.00 (the lower of $1000.00 and 15% of $2000.00 equity).');
+  const vertical = await call(post('alpaca', mleg(CREDIT_VERTICAL, '-0.30')), { settings, equity: '2000.00' });
   assert.equal((await vertical.gate.status()).today.notional_usd, '70.00');
+  // Under $2,000 no credit type opens, however small; a debit type is not held back (its own list aside).
+  for (const equity of ['1999.99', '500.00']) {
+    const under = await call(post('alpaca', mleg(condor, '-0.38')), { settings, equity });
+    assert.equal(under.response.status, 403, equity);
+    assert.equal(under.body.cap, 'credit_equity');
+    assert.equal(under.body.error, `A credit structure opens only while the real account's equity is at least $2000.00; it reads $${equity}.`);
+    assert.equal(under.calls.length, 0);
+  }
   // The debit vertical is not among these.
   assert.match((await call(post('alpaca', mleg(VERTICAL, '0.70')), { settings })).body.error, /debit_vertical is not admitted/);
 });
 
-test('the deployed configuration admits no structure on the real account', () => {
-  // wrangler.jsonc is JSON with comments: the line itself is the check.
+test('the deployed configuration admits exactly the five types Alpaca closes in one order on the real account', () => {
+  // Sept 26, 2026 (the options-swarm run, Wave 5): until today "off". wrangler.jsonc is JSON with comments: the line
+  // itself is the check.
   const config = readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
   const lines = config.split('\n').filter(line => /"OPTION_STRUCTURES_REAL"/.test(line));
   assert.equal(lines.length, 1);
-  assert.match(lines[0], /^\s*"OPTION_STRUCTURES_REAL": "off",?\s*$/);
+  assert.match(lines[0], /^\s*"OPTION_STRUCTURES_REAL": "debit_vertical,credit_vertical,iron_condor,iron_butterfly,long_butterfly",?\s*$/);
+  const listed = /"OPTION_STRUCTURES_REAL": "([^"]*)"/.exec(lines[0])[1];
+  assert.deepEqual(admittedStructures({ OPTION_STRUCTURES_REAL: listed }),
+    ['debit_vertical', 'credit_vertical', 'iron_condor', 'iron_butterfly', 'long_butterfly'], 'every name is a type: none is silently dropped');
 });
 
 // --- a real close must close legs the account holds (Sept 25, 2026; the route's review, MINOR 1) ---------------------------
@@ -507,7 +527,7 @@ test('REVIEW: positions that cannot be read admit no real buy-back, reserve noth
 });
 
 test('REVIEW: a real buy-back passes a spent day and a spent order cap, not the kill switch, and is not sent twice from the cache', async () => {
-  const settings = { OPTION_STRUCTURES_REAL: 'debit_vertical', MAX_DAY_USD: '100', MAX_ORDER_USD: '1', MAX_ORDER_USD_ALPACA: '1' };
+  const settings = { OPTION_STRUCTURES_REAL: 'debit_vertical', MAX_DAY_USD: '100', MAX_ORDER_USD: '1', MAX_ORDER_MAX_LOSS_USD: '1' };
   const gate = gateFor(settings);
   // A $0.30 buy-back is $30 of premium, over the $1 order cap: an exit is never trapped by a dollar cap.
   assert.equal((await call(post('alpaca', BUY_BACK), { settings, gate, positions: SHORT_HELD })).response.status, 200);
