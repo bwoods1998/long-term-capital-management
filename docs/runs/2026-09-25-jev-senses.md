@@ -100,7 +100,9 @@ its session.
   watch ends. D-J2 carries J3 (#322), its `researcher.py` hook (#328) and J1's serving hook switched off (#327),
   both retargeted to main after K1, and Jev's exposure groups and hypothesis links switched off. **J5's gateway
   deploy** (#304) follows D-J2's watch in the same slot, rebased on the options run's and the Kalshi run's
-  gateway changes, with every gateway test re-run.
+  gateway changes, with every gateway test re-run. (22:25Z: forward-first moves B up to the moment the real
+  family's last two games settle, about 04:30-05:30Z; the order is unchanged, so D-J2 starts 30 minutes after
+  forward-first's C's watch ends, whatever the clock.)
   **10:31Z: today's slot is closed** (the options run: the usage-limit outage delayed Deploy V past 11:45Z).
   D-J1 goes in Saturday Sept 26's quiet window after forward-first's Deploy B and the options run's Deploy G,
   before the Kalshi run's K2.
