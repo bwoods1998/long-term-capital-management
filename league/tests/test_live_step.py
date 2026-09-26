@@ -417,6 +417,89 @@ class Isolation(LiveCase):
         self.assertTrue(live.shadow.accounts["bad@1:s"].counts["rejected"] > 0)
 
 
+MID_CLOSE = VERTICAL.replace('out.append({"close": p["id"], "limit": "natural", "note": "held long enough"})',
+                             'out.append({"close": p["id"], "limit": "mid", "note": "held long enough"})')
+RESTER = VERTICAL.replace('"limit": "natural", "tag": "t"', '"limit": {"price": 0.01}, "tag": "t"').replace(
+    '"rel": 0, "offset": 1.0', '"rel": 0, "offset": 2.0')
+
+
+class ExitsFirst(LiveCase):
+    def test_a_programs_resting_close_never_blocks_the_forced_expiry_close(self):
+        self.clock.set(at(MONDAY, 14, 50))
+        live = self.make([family("vert", MID_CLOSE, band="probe", params={"hold": 10, "dte": 0})])
+        self.run_to(14, 50)
+        [pos] = live.book.positions.values()
+        self.run_to(15, 14)
+        # The program's own mid close rests from 15:00 (the fake fills only at the natural).
+        mid = [b for b in self.venue.sent if b["legs"][0]["position_intent"] == "sell_to_close"]
+        self.assertEqual(len(mid), 1)
+        self.run_to(15, 17)
+        self.assertIn(self.venue.book[1]["id"], self.venue.cancels)         # the House cancelled it
+        self.assertEqual(live.book.positions, {}, "the forced close at the natural took it before 15:25")
+        self.assertEqual(live.state.rows("SELECT reason FROM positions WHERE pid=?", (pos.pid,))[0]["reason"], "forced")
+
+    def test_a_program_close_inside_the_forced_window_is_the_houses(self):
+        self.clock.set(at(MONDAY, 14, 50))
+        live = self.make([family("vert", MID_CLOSE, band="probe", params={"hold": 26, "dte": 0})])
+        self.run_to(15, 13)
+        self.killed = True                                                  # the House's own close cannot go yet
+        self.run_to(15, 16)
+        self.assertTrue(any("the House is closing" in p["why"] for p, a in self.ledger.of("live.refusal")))
+        self.killed = False
+        self.run_to(15, 18)
+        self.assertEqual(live.book.positions, {})
+        pos = live.book.state.rows("SELECT reason FROM positions")[0]
+        self.assertEqual(pos["reason"], "forced")
+
+    def test_an_exit_cancels_another_familys_resting_open_on_its_contract(self):
+        live = self.make([family("holder", VERTICAL, band="probe", params={"hold": 10}),
+                          family("rester", RESTER, band="probe", params={"hold": 600})])
+        self.run_to(9, 31)
+        self.assertEqual(len(live.book.positions), 1)                       # the holder's vertical filled
+        resting = [o for o in live.book.orders.values() if o.family == "rester"]
+        self.assertEqual(len(resting), 1)
+        self.run_to(9, 45)
+        self.assertEqual([p.family for p in live.book.positions.values()], [])
+        self.assertIn(resting[0].venue_id, self.venue.cancels)
+        rejects = [p["why"] for p, a in self.ledger.of("live.refusal") if a == "rester"]
+        self.assertTrue(any("an exit needs" in w for w in rejects) or live.book.state.rows(
+            "SELECT answer FROM orders WHERE oid=?", (resting[0].oid,))[0]["answer"].find("an exit needs") >= 0)
+
+
+CHURN = VERTICAL.replace('out.append({"close": p["id"], "limit": "natural", "note": "held long enough"})',
+                         'out.append({"close": p["id"], "limit": {"price": 9.99}, "tif": 1, "note": "work it"})')
+
+
+class OrderBudget(LiveCase):
+    def test_a_real_instance_has_the_gyms_orders_a_day(self):
+        self.venue.fill = "natural"
+        live = self.make([family("vert", CHURN, band="probe", params={"hold": 1})], config={"instance_orders_day": 6})
+        self.run_to(10, 30)
+        sent = len(self.venue.sent)
+        self.assertLessEqual(sent, 6)
+        self.assertTrue(any("order budget" in p["why"] for p, a in self.ledger.of("live.refusal")))
+
+    def test_program_closes_leave_the_room_forced_exits_need(self):
+        live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 3})])
+        self.run_to(9, 31)
+        live.book._count("2026-09-28", 247)                                  # 249 with the open: no room for a program close
+        self.run_to(9, 36)
+        self.assertEqual(len(live.book.positions), 1)
+        self.assertTrue(any("the day's order count" in p["why"] for p, a in self.ledger.of("live.refusal")))
+
+
+class ShadowHeldLegs(LiveCase):
+    def test_a_shadow_positions_legs_are_read_after_they_leave_the_programs_band(self):
+        live = self.make([family("vert", VERTICAL, band="candidate", params={"hold": 12})], real_money=False)
+        self.run_to(9, 34)
+        shadow = live.shadow.accounts["vert@1:s"]
+        [pos] = shadow.positions.values()
+        self.market.spot = 640.0                                              # +6.7%: the legs leave band 3% + 1%
+        self.run_to(9, 50)
+        self.assertEqual(shadow.positions, {}, "its close filled on the held legs' own quotes")
+        self.assertEqual(shadow.trades[-1]["exit_reason"], "program")
+
+
 class Restart(LiveCase):
     def test_a_restart_resumes_the_books(self):
         live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 600})])

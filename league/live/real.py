@@ -425,8 +425,24 @@ class RealBook:
         return sum(2 * len(p.legs) for p in self.positions.values() if p.qty > 0)
 
     # ------------------------------------------------------------------ the order path's refusals
-    def path_refusal(self, legs: Sequence[RLeg], *, opening: bool, day: str, extra_legs: int = 0) -> str | None:
-        """Why this order may not go now (the contract rules and the day's count), or None."""
+    def forced_reserve(self, day: str) -> int:
+        """Order-count room only the House's own exits may use: every structure expiring today or broken, its legs
+        twice (a close and a re-price), and room for an assignment's share sales."""
+        legs = sum(2 * len(p.legs) for p in self.positions.values()
+                   if p.qty > 0 and (p.expiry <= day or p.info.get("broken")))
+        return legs + 4
+
+    def blockers(self, legs: Sequence[RLeg], *, pid: int | None = None) -> list[ROrder]:
+        """The working orders (any family's) on these contracts, but a position's own close."""
+        symbols = {leg.symbol for leg in legs}
+        return [o for o in self.orders.values() if o.working and not (pid is not None and o.pid == pid and o.action != "open")
+                and any(leg.symbol in symbols for leg in o.legs)]
+
+    def path_refusal(self, legs: Sequence[RLeg], *, opening: bool, day: str, extra_legs: int = 0,
+                     house: bool = False) -> str | None:
+        """Why this order may not go now (the contract rules and the day's count), or None. An open must leave room
+        for every open structure's close; a program's close (or cancel) must leave the room only the House's forced
+        exits may use (`forced_reserve`); the House's own exits (`house`) meet only the gateway's count."""
         busy = self.busy()
         clash = [leg.symbol for leg in legs if leg.symbol in busy]
         if clash:
@@ -443,6 +459,16 @@ class RealBook:
             if count > room:
                 return (f"the day's order count: {self.count_today(day)} legs sent of {self.table.max_orders_day}, and "
                         f"{self.exit_reserve()} kept for closing what is open")
+        elif not house:
+            return self.count_refusal(len(legs) + extra_legs, day=day)
+        return None
+
+    def count_refusal(self, legs: int, *, day: str) -> str | None:
+        """A program's close or cancel of `legs` legs: refused when it would eat the House's forced-exit room."""
+        room = self.table.max_orders_day - self.count_today(day) - self.forced_reserve(day)
+        if legs > room:
+            return (f"the day's order count: {self.count_today(day)} legs sent of {self.table.max_orders_day}, and "
+                    f"{self.forced_reserve(day)} kept for the House's own exits (expiring and broken structures)")
         return None
 
     # ------------------------------------------------------------------ sending

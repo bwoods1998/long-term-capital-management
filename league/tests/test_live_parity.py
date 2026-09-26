@@ -116,7 +116,7 @@ class ContractIdentity(unittest.TestCase):
         chain.record(30, rows, open_epoch=at(MONDAY, 9, 30, 0))
         self.assertTrue((np.diff(chain.key) > 0).all())
         before = dict(zip(chain.symbol, chain.bid[30]))
-        market.spot = 605.0
+        market.spot = market.center = 605.0                                   # new strikes listed around the new spot
         more = market.chain("SPY", expiry_from="2026-09-28", expiry_to="2026-09-29")
         self.assertTrue(chain.record(31, more, open_epoch=at(MONDAY, 9, 30, 0)))
         self.assertTrue((np.diff(chain.key) > 0).all())

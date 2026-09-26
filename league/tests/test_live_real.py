@@ -223,7 +223,10 @@ class OrderPath(unittest.TestCase):
         self.assertEqual(self.book.exit_reserve(), 4)
         self.book._count("2026-09-28", 3)             # 245 + 4 kept = 249: a two-leg open does not fit
         self.assertIn("the day's order count", self.book.path_refusal(legs(620.0), opening=True, day="2026-09-28"))
-        self.assertIsNone(self.book.path_refusal(order.legs[:0] or legs(630.0), opening=False, day="2026-09-28"))
+        # A program's close keeps the room the House's own exits need (4 at least); the House's exit meets only the gateway.
+        self.assertIn("kept for the House's own exits", self.book.path_refusal(legs(630.0), opening=False, day="2026-09-28"))
+        self.assertIsNone(self.book.path_refusal(legs(630.0), opening=False, day="2026-09-28", house=True))
+        self.assertIn("kept for the House's own exits", self.book.count_refusal(2, day="2026-09-28"))
 
 
 @unittest.skipUnless(HAVE, "numpy not installed")

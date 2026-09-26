@@ -47,6 +47,7 @@ class Market:
     def __init__(self, clock: Clock, *, spot: float = 600.0, vol: float = 0.18, day: dt.date = MONDAY,
                  expiries: Iterable[int] = (0, 1, 2, 3, 4, 7), width: int = 30):
         self.clock, self.spot, self.vol, self.day = clock, float(spot), vol, day
+        self.center = float(spot)        # the listed strikes stay where they were listed as the spot moves
         self.expiries, self.width = tuple(expiries), width
         self.calls = 0
         self.minute_calls = Rate(100000)
@@ -62,7 +63,8 @@ class Market:
         minute = local.hour * 60 + local.minute
         level = self.level(root)
         step = 5.0 if root in ("SPXW", "SPX") else 1.0
-        base = round(level / step) * step
+        listed = self.center * (10.0 if root in ("SPXW", "SPX") else 1.0) * (1.001 if root == "XSP" else 1.0)
+        base = round(listed / step) * step
         out = {}
         for d in self.expiries:
             expiry = self.day + dt.timedelta(days=d)

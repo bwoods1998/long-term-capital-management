@@ -56,7 +56,7 @@ from .paper import PaperProof
 from .real import RealBook, RLeg, RPosition, real_legs
 from .shadow import SHADOW_FILE, ShadowAccount, ShadowBook, needs_of
 from .state import STATE_FILE, LiveState
-from .venue import OPTION_EVENTS, Account, MarketData, VenueError, occ_parts, stock_price
+from .venue import OPTION_EVENTS, Account, MarketData, VenueError, occ_parts, occ_symbol, stock_price
 
 NEW_YORK = ZoneInfo("America/New_York")
 FAMILIES_EVERY = 300.0
@@ -73,6 +73,7 @@ DEFAULTS = {
     "decide_timeout": 1.0,
     "max_errors": 25,
     "decider_memory_mb": 2048,
+    "instance_orders_day": 60,   # a real instance's orders a day, opens and closes (the Gym's `max_orders_day`)
 }
 
 
@@ -152,6 +153,8 @@ class OptionsLive:
         self._stop = threading.Event()
         self._lock = threading.RLock()
         self._rows: list[dict] = []
+        #: pid -> {forced, why, intent}: exits waiting for their contracts (another order works on them).
+        self.pending_exits: dict[int, dict] = {}
         self._restore_real_instances()
 
     # ------------------------------------------------------------------ plumbing
@@ -570,7 +573,19 @@ class OptionsLive:
         return spy * (10.0 if root in ("SPXW", "SPX") else 1.0)
 
     def _held_symbols(self) -> dict[str, set[str]]:
+        """Every contract a book holds or works, real AND shadow: read each minute whatever the programs' windows (in
+        the Gym NEEDS limits only what a program sees; fills, marks and closes use the whole chain)."""
         out: dict[str, set[str]] = {}
+        for acc in self.shadow.accounts.values():
+            for pos in acc.positions.values():
+                for leg, exp in zip(pos.legs, pos.expirations):
+                    out.setdefault(pos.root, set()).add(occ_symbol(pos.root, from_ordinal(int(exp)).isoformat(), leg.is_call, leg.strike))
+            for work in acc.orders.values():
+                for leg in work.order.legs:
+                    exp = self.day.ordinal + leg.dte if self.day is not None else None
+                    if exp is not None:
+                        out.setdefault(work.order.root, set()).add(
+                            occ_symbol(work.order.root, from_ordinal(exp).isoformat(), leg.is_call, leg.strike))
         if self.book is not None:
             for pos in self.book.positions.values():
                 out.setdefault(pos.root, set()).update(leg.symbol for leg in pos.legs)
@@ -923,6 +938,7 @@ class OptionsLive:
         if killed:
             out["kill_switch"] = True
             return
+        self._pending_exits(day, mi, out)
         for pos in list(book.positions.values()):
             if pos.qty > 0 and pos.info.get("broken"):
                 self._close_broken(pos, day, mi, out)
@@ -952,10 +968,39 @@ class OptionsLive:
                 continue
             working = book.closing_order(pos.pid)
             if working is not None:
-                if working.forced and mi - working.placed_minute >= 1:
+                if not working.forced:
+                    # A program's own close (a mid or better limit, a day order) never stands in the House's way.
+                    book.cancel(working, f"the House closes it: {force_why}")
+                elif mi - working.placed_minute >= 1:
                     book.cancel(working, "re-priced at the natural")
                 continue
             self._send_close(pos, day, mi, forced=True, why=force_why, out=out)
+
+    def _in_forced_window(self, pos: RPosition, day: LiveDay, minute: int) -> bool:
+        """Whether an expiring equity structure is the House's to close now (the forced window of `_venue_rules`)."""
+        rules = day.rules.get(pos.root) or V.rules_for(pos.root, open_minute=day.open_min, close_minute=day.close_min)
+        return (pos.expiry == day.day.isoformat() and rules.kind == "equity"
+                and minute >= rules.close_cutoff - self.table.expiry_close_lead_minutes)
+
+    def _pending_exits(self, day: LiveDay, mi: int, out: dict) -> None:
+        """Exits waiting for their contracts (another family's open being cancelled for them, or another close): sent as
+        soon as the stream is free, before any new open."""
+        book = self.book
+        assert book is not None
+        for pid, want in list(self.pending_exits.items()):
+            pos = book.positions.get(pid)
+            if pos is None or pos.qty <= 0 or book.closing_order(pid) is not None:
+                self.pending_exits.pop(pid, None)
+                continue
+            why = self._send_close(pos, day, mi, forced=want["forced"], why=want["why"], out=out, intent=want.get("intent"),
+                                   pending=True)
+            if why is None:
+                self.pending_exits.pop(pid, None)
+
+    def _pending_symbols(self) -> set[str]:
+        if self.book is None:
+            return set()
+        return {leg.symbol for pid in self.pending_exits for leg in (self.book.positions[pid].legs if pid in self.book.positions else [])}
 
     def _close_broken(self, pos: RPosition, day: LiveDay, mi: int, out: dict) -> None:
         """A structure an assignment, exercise or expiry broke: each leg it still holds closed alone at the touch (a
@@ -987,9 +1032,19 @@ class OptionsLive:
                 return                                                 # a short leg first, alone
 
     def _send_close(self, pos: RPosition, day: LiveDay, mi: int, *, forced: bool, why: str, out: dict,
-                    intent: Mapping[str, Any] | None = None) -> str | None:
+                    intent: Mapping[str, Any] | None = None, pending: bool = False) -> str | None:
         book = self.book
         assert book is not None
+        blockers = book.blockers(pos.legs, pid=pos.pid)
+        if blockers:
+            # Exits first: another family's working OPEN on one of these contracts is cancelled for this exit, and the
+            # exit waits (`pending_exits`) until the stream is free; a working CLOSE of another position is let finish.
+            for other in blockers:
+                if other.action == "open":
+                    if book.cancel(other, "an exit needs this contract"):
+                        book._reject(other.instance, f"your open was cancelled: another position's exit needs {', '.join(sorted({l.symbol for l in other.legs} & {l.symbol for l in pos.legs}))}")
+            self.pending_exits[pos.pid] = {"forced": forced, "why": why, "intent": dict(intent) if intent else None}
+            return None if pending else "the close waits for its contracts (another order works on them); the House sends it"
         chain = day.chains.get(pos.root)
         if chain is None:
             return "no chain for this root now"
@@ -1026,18 +1081,35 @@ class OptionsLive:
             value = max(value, round(-(pos.collateral - 0.01), 2))
         else:
             value = max(0.0, value)
-        refusal = book.path_refusal(pos.legs, opening=False, day=day.day.isoformat())
+        refusal = book.path_refusal(pos.legs, opening=False, day=day.day.isoformat(), house=forced)
         if refusal:
             return refusal
         if self._killed():
             return "the gateway's kill switch is engaged"
+        if not forced and not self._instance_budget(pos.instance, day):
+            return f"order budget: {int(self.settings['instance_orders_day'])} orders a day (the Gym's)"
         tif = order.tif if not forced else None
         sent = book.new_order(instance=pos.instance, family=pos.family, action="close", type_=pos.type, root=pos.root,
                               legs=list(pos.legs), qty=order.qty, limit_value=value, tif=tif, day=day.day.isoformat(),
                               minute=mi, pid=pos.pid, forced=forced, fees_est=order.fees, why=why)
         book.send(sent)
+        if not forced:
+            self._instance_spent(pos.instance, day)
         out.setdefault("orders", []).append({"oid": sent.oid, "family": pos.family, "action": "close", "status": sent.status})
         return None if sent.status in ("working", "filled", "unknown") else f"{sent.status}: {sent.answer.get('error')}"
+
+    def _instance_budget(self, instance: str, day: LiveDay) -> bool:
+        """A real instance's orders a day, as the Gym allows a program (`instance_orders_day`, the engine's 60)."""
+        row = self.state.get("instance_orders", {}) or {}
+        used = int((row.get("counts") or {}).get(instance, 0)) if row.get("day") == day.day.isoformat() else 0
+        return used < int(self.settings["instance_orders_day"])
+
+    def _instance_spent(self, instance: str, day: LiveDay) -> None:
+        row = self.state.get("instance_orders", {}) or {}
+        if row.get("day") != day.day.isoformat():
+            row = {"day": day.day.isoformat(), "counts": {}}
+        row["counts"][instance] = int(row["counts"].get(instance, 0)) + 1
+        self.state.put("instance_orders", row)
 
     # ------------------------------------------------------------------ the real instances
     def _real_job(self, inst: Instance, day: LiveDay, mi: int) -> dict | None:
@@ -1136,6 +1208,9 @@ class OptionsLive:
             order = book.orders.get(intent["cancel"]) if isinstance(intent["cancel"], int) else None
             if order is None or order.instance != inst.key or order.forced:
                 return "cancel: no such working order"
+            refusal = book.count_refusal(len(order.legs), day=today)
+            if refusal:
+                return refusal
             book.cancel(order, "the program cancelled it")
             return None
         if "close" in intent:
@@ -1146,6 +1221,8 @@ class OptionsLive:
                 return "close: this position already has a working close (cancel it first)"
             if pos.info.get("broken"):
                 return f"close: this structure is broken ({pos.info['broken']}): the House closes its legs"
+            if self._in_forced_window(pos, day, minute):
+                return "close: the House is closing this expiring structure (a leg in or near the money) at the natural"
             rules = day.rules.get(pos.root)
             if rules is not None and pos.expiry == today and minute >= rules.close_cutoff:
                 return f"expiry cutoff: closing orders on expiring contracts end at {rules.close_cutoff // 60}:{rules.close_cutoff % 60:02d} ET"
@@ -1198,15 +1275,21 @@ class OptionsLive:
         free = float(M.D(self.account_row.get("options_buying_power") or 0)) - book.reserved()
         if reserve > free + 1e-9:
             return f"buying power: it reserves {reserve:.2f} (maximum loss, fees and {self.table.bp_buffer:.0%}); {max(0.0, free):.2f} is free"
+        waiting = sorted({leg.symbol for leg in legs} & self._pending_symbols())
+        if waiting:
+            return f"an exit is waiting for {', '.join(waiting)}: no new open on it"
         refusal = book.path_refusal(legs, opening=True, day=today)
         if refusal:
             return refusal
+        if not self._instance_budget(inst.key, day):
+            return f"order budget: {int(self.settings['instance_orders_day'])} orders a day (the Gym's)"
         tif = order.tif
         sent = book.new_order(instance=inst.key, family=inst.family, action="open", type_=order.type, root=root, legs=legs,
                               qty=qty, limit_value=order.limit, tif=tif, day=today, minute=mi, reserve=reserve,
                               max_loss=max_loss, fees_est=fees, tuition=inst.tuition,
                               why=str(intent.get("note") or intent.get("tag") or "")[:200])
         book.send(sent)
+        self._instance_spent(inst.key, day)
         if sent.status in ("working", "filled") and order.type in self.table.credit_types:
             self.state.put("credit_accepted", True)
         out.setdefault("orders", []).append({"oid": sent.oid, "family": inst.family, "action": "open", "qty": qty,
