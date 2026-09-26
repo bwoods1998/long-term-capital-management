@@ -816,6 +816,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     run.add_argument("--forward-days", default="", help="stage 7: these forward days for the whole universe")
     run.add_argument("--threads", type=int, default=8, help="task threads; more than the slots, so decoding overlaps fetching")
     run.add_argument("--decoders", type=int, default=6, help="processes that decode and write the big frames")
+    run.add_argument("--passes", type=int, default=12, help="passes over the queue before giving up on failing tasks")
+    run.add_argument("--pause", type=int, default=600, help="seconds between passes")
     run.add_argument("--slots", type=int, default=None, help="write this to the slots file first")
     sub.add_parser("status")
     sub.add_parser("compile")
@@ -892,7 +894,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                     groups.setdefault((task.day, task.stage), set()).add(task.root)
             LISTINGS = Listings(lambda t: sorted(groups.get((t.day, t.stage), {t.root})))
             try:
-                return Runner(tasks, theta, store, calendar, threads=args.threads).run()
+                # Passes until the queue is empty: a task that failed three times in a pass (a vendor
+                # outage, a bad hour) is tried again in the next pass, ten minutes later.
+                for passes in range(1, args.passes + 1):
+                    Runner(tasks, theta, store, calendar, threads=args.threads).run()
+                    left = sl.pending(tasks, store.journal)
+                    if not left:
+                        break
+                    log.warning("pass %d ended with %d tasks not done; next pass in %ds", passes, len(left), args.pause)
+                    time.sleep(args.pause)
+                return 0
             finally:
                 POOL.shutdown(wait=False, cancel_futures=True)
         finally:
