@@ -13,6 +13,7 @@ from ltcm.broker import Instrument
 from league import shards
 from league.ledger import Ledger, now_iso
 from league.tests.fakes import Clock
+from league.tests.fakes import OpenGrant
 
 D = Decimal
 
@@ -73,8 +74,9 @@ class FakeHouse:
         self.books = {"kalshi": FakeBook(broker)}
         self.killed = False
         self.kill_switch = lambda: self.killed
-        self.grant = {"active": True, "revoked": None}
-        self.campaigns = SimpleNamespace(live_authorization=lambda: self.grant)
+        self.grant_row = {"active": True, "revoked": None}
+        # The owner's grant (`House.grant`, league/live_trading.py since the options overhaul of Sept 26, 2026).
+        self.grant = SimpleNamespace(live_authorization=lambda: self.grant_row)
         self.pause = None
         self.agents = []
         self.registry = SimpleNamespace(living=lambda: list(self.agents), get=lambda i: next((a for a in self.agents if a.id == i), None))
@@ -272,7 +274,7 @@ class Guards(FunderCase):
     def test_nothing_moves_without_an_active_grant(self):
         self.house.desk("sports-1", "KXMLBTOTAL")
         for grant in (None, {"active": False}, {"active": True, "revoked": 1.0}):
-            self.house.grant = grant
+            self.house.grant_row = grant
             self.assertEqual(self.funder.run()["blocked"], "no live grant is active")
         self.assertEqual(self.broker.transfers, [])
 
@@ -616,7 +618,7 @@ class TheHouseHook(unittest.TestCase):
         clock = Clock()
         broker = KalshiWithShards()
         house = House(Path(self.dir.name) / "house", brokers={"kalshi": broker}, sandbox=InProcessSandbox(), clock=clock,
-                      settings=Settings(mark_every_seconds=0, research=False, real_money=True), game=game)
+                      grant=OpenGrant(), settings=Settings(mark_every_seconds=0, research=False, real_money=True), game=game)
         self.addCleanup(lambda: house.close(wait=None))
         self.assertIsNotNone(house.shards)
         house.tick()
@@ -653,7 +655,7 @@ class TheHouseHook(unittest.TestCase):
         game["economy"]["min_population"] = 0
         game["economy"]["newcomer_seconds"] = 10 ** 9
         house = House(Path(self.dir.name) / "house", brokers={"kalshi": KalshiWithShards()}, sandbox=InProcessSandbox(), clock=Clock(),
-                      settings=Settings(mark_every_seconds=0, research=False, real_money=True), game=game)
+                      grant=OpenGrant(), settings=Settings(mark_every_seconds=0, research=False, real_money=True), game=game)
         self.addCleanup(lambda: house.close(wait=None))
         ops = house._lanes["ops"] = threading.Semaphore(0)  # Merton, the backup and a repair hold every ops slot
         self.addCleanup(lambda: [ops.release() for _ in range(50)])  # runs before close: let the queued ops jobs end

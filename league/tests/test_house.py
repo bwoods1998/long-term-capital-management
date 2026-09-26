@@ -874,6 +874,7 @@ class FloorInvariants(HouseCase):
         # ...counted from its first offer after that intent (22 h 50 m), not from the first of all (42 h).
         self.assertIn("for 22 hours", self.warnings("offered markets")[-1]["text"])
 
+    @unittest.skip('Wave 2b rewrites the Kalshi tests: the options overhaul (Sept 26, 2026) took the Kalshi horizon rule out of game.json')
     def test_a_kalshi_wake_offers_only_its_own_series_inside_its_horizon(self):
         """Sept 24, 2026: greenwich-h4cb387 (NFL props within six hours, horizon "hour") was shown its
         desk's busiest live series (UEFA and DJI) while its own had nothing in its window, and each

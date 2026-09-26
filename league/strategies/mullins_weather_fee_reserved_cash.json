@@ -1,8 +1,0 @@
-{
-  "family": "weather-lab-b8b1fe",
-  "name": "mullins_weather_fee_reserved_cash",
-  "repair": {
-    "key": "order_refusal:kalshi-shadow:insufficient desk cash: need #, have #"
-  },
-  "why": "Corrected child of mullins-l925c21, proposed for rung 0 with no inherited record. The parent omits fees from working-buy reservations and new-entry sizing. Preserve its effective weather series, daily horizon, parameters and post-only NO selection while reserving a conservative, upward-rounded fee allowance and reducing whole-contract quantities to fit. The reported shortfalls require CI and forward confirmation; this proposal does not edit the parent or its sibling."
-}

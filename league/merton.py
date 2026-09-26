@@ -891,7 +891,8 @@ def evidence_from(house: Any) -> Callable[[str], dict[str, Any]]:
                         'Do not force turnover, assume profitability, or mistake repeated historical tests for new evidence.'}
             if burst and 'ends' in burst else None)
         base['live_pilot'] = guard.live_pilot() if guard else None
-        base['live_trading'] = guard.live_trading() if guard else None
+        grant = getattr(house, 'grant', None)  # the owner's grant of real money (`league/live_trading.py`)
+        base['live_trading'] = grant.live_trading() if grant is not None else None
         states = getattr(house, '_state', {}).get('promotion_status', {})
         base['promotion_holds'] = [states[a.id] for a in living if a.id in states
                                    and states[a.id].get('stage') not in ('evidence', 'promoted')][-12:]

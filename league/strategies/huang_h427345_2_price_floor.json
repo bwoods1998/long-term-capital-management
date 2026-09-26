@@ -1,8 +1,0 @@
-{
-  "family": "crypto-15m-prior-window-reset",
-  "name": "huang_h427345_2_price_floor",
-  "repair": {
-    "key": "order_refusal:kalshi:buying a longshot at #: the floor buys no event contract under # (longshot buyers lose on Kalshi; se"
-  },
-  "why": "Corrected child of huang-h427345-2. Its BTC probability strategy requested contracts at 0.0030 and 0.0120 below the practice floor. Exclude each candidate leg below 0.15 on rungs 0/1 or 0.30 on rungs 2/3 before ranking edges; retain the parent's specialty and remaining logic. Born on rung 0 to qualify independently."
-}

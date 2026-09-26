@@ -28,6 +28,10 @@ from league.tests.test_merton import FakeForge, FakeFrontier
 from league.tests.test_researcher import ResearchCase
 from league.yield_ledger import YieldLedger, engineer_lift, fold, teacher_lift
 
+def setUpModule():
+    raise unittest.SkipTest("the research gate and Merton's lift left game.json with the options overhaul (Sept 26, 2026); Wave 2b deletes league/research_gate.py, league/yield_ledger.py and these tests")
+
+
 ROOT = Path(__file__).resolve().parents[2]
 
 

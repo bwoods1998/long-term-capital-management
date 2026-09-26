@@ -35,6 +35,13 @@ def rules_text(game: Mapping[str, Any], constitution: Mapping[str, Any] | None =
     steepness = 2 ** exponent
     w1, w2, w3 = (e["rung_weights"].get(r, "0") for r in ("1", "2", "3"))
     epoch_hours = float(e["epoch_seconds"]) / 3600.0
+    # The Kalshi and crypto horizon rule left game.json with the options overhaul (Sept 26, 2026): an options House says
+    # nothing of it; a game that still carries the block (an older release, a test) is told it as before.
+    horizon = game.get("horizon") or {}
+    horizon_rule = (f"""THE HORIZON RULE. A Kalshi entry must be expected to pay within {horizon['kalshi_hour_max_hours']} hours (hourly
+strategies) or {horizon['kalshi_day_max_hours']} (daily); a crypto position is closed by the House after {horizon['crypto_max_hold_hours']} hours. Equities are
+not bounded. Fast results are how a record is built: a stake parked for a month proves nothing.
+""" if horizon else "")
     idle_barren = int((game.get("research") or {}).get("idle", {}).get("barren_wakes", 10))
     episodes = ladder.get('completed_exposures')
     deflation = (f"a deflated Sharpe ratio of {ladder['replay']['min_deflated_sharpe']} or more. Every replay in YOUR OWN LINE (yours and\n"
@@ -360,10 +367,7 @@ Each venue also has an OPEN desk (kalshi-open, alpaca-open; 8 seats each) whose 
 market of the venue (any Kalshi series; any US stock, ETF or coin against the dollar, never an
 option). A program is born there only when no one desk holds most of what its NEEDS name; it is
 shown what it names (12 at most), staked and judged exactly like any other.
-THE HORIZON RULE. A Kalshi entry must be expected to pay within {game['horizon']['kalshi_hour_max_hours']} hours (hourly
-strategies) or {game['horizon']['kalshi_day_max_hours']} (daily); a crypto position is closed by the House after {game['horizon']['crypto_max_hold_hours']} hours. Equities are
-not bounded. Fast results are how a record is built: a stake parked for a month proves nothing.
-
+{horizon_rule}
 THE ECONOMY. Compute is the currency, and it is the ONLY thing performance buys. Every model token,
 sandbox second and web search is charged to your credits at cost ({payer}). Each day the House pays out a pool drawn from
 both of the owner's budgets, because you buy research with one and Merton's time with the other.

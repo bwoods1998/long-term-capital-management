@@ -162,84 +162,7 @@
       "unproven_multiple": 6,
       "_about_sept23": "Sept 23, 2026: 84% of research sessions since 21:10Z Sept 22 ended by abstaining, most of them by agents with no record. With the burst's base interval at 15 minutes (turbo research_minutes), an agent with no earned record researches every 45 minutes (unproven_multiple), a winner every 1.5 minutes (winner_share), a loser every 2 hours (loser_multiple); the money moves to the foundry.",
       "_about_sept23_pacing": "Sept 23, 2026, 16:41 UTC (C3 pacing): an agent with no earned record researches every 6 intervals (90 minutes at the 15-minute burst interval; was 45 minutes): 82-84% of such sessions abstained on Sept 22, and the paced OpenAI line goes first to agents with a record and to audits."
-    },
-    "gate": {
-      "_about": "Sept 22, 2026 overnight v0: after `after` empty passes in a row (no candidate, no replay, no Merton strategy) and nothing new on the agent's record, the interval doubles per further empty pass up to max_factor; sample_percent of skipped windows still run so misses stay measurable.",
-      "_about_sept23_evidence": "Sept 23, 2026 (the learn-and-unblock run, S3/C3; league/research_gate.py rules 6 and 7). Measured 00:00Z Sept 22 to 16:28Z Sept 23: 90.3% of 7,532 research sessions abstained (rung 0: 95.5%), abstentions cost $112.80 of the $147.44 research spend (about $82 a day), 41% of the gate's runs were `clock` or `backoff_elapsed`, and half the hand-read abstentions said nothing had changed since the last pass. clock_runs `winners_and_idle`: a session is due only on a trigger (a fill, settlement, refusal, active block, audit or repair verdict, code or rung change, a lesson or note for its desk, a fulfilled request, a lifted blocker); a winner (positive earned record, already at winner_share of the interval) and an idle agent (at the idle cadence) still run on the clock; the max_skip_hours heartbeat and the sample stay. abstain_lock_after 3: after three abstaining sessions in a row an agent researches only on a settlement, a fill or a refusal until a session produces a candidate. `all` / 0 restore the Sept 22 rule. Every research.gate row carries `trigger` and `record`, and `python -m league.research_gate LEDGER` prices each trigger (by_trigger).",
-      "enabled": true,
-      "after": 2,
-      "max_factor": 8,
-      "sample_percent": 10,
-      "clock_runs": "real_positions",
-      "abstain_lock_after": 3,
-      "_about_sept24_lock_profile": "Sept 24, 2026 (the close-the-gaps run, L2): an agent under the abstention lock researches on abstain_lock_profile, the cheapest profile the code base names (league/routing.py TaskRouter.research_settings, from research_gate.ResearchGate.lock_profile). Measured Sept 22 on the same frozen packets (league/routing_evidence.json): flash_asap $0.0027 a call against Luna's $0.0080 and pro_asap's $0.0299, and it spends Sail, not the gateway month kept for audits. A cheaper Sail profile the session already runs on is kept. Bounds: any Sail profile ltcm/provider.py prices.",
-      "abstain_lock_profile": "flash_asap",
-      "_about_sept25_forward_first": "Sept 25, 2026 (the forward-first run, F2 and X2; league/research_gate.py rules 9-12). Replayed on the T0 snapshot (the 24 hours to 04:23Z Sept 25, scripts/gate_replay.py): 2,566 sessions, $87.65, 547 candidates. The clock was the costliest trigger: 387 clock runs ($27.72), 350 of them idle agents re-running every 12 minutes at the winners' pace; the clock's 201 retained candidates had 9 adoptions or forks; 121 of the 122 heartbeats were a newborn's first session at age 0; 275 samples of locked winners retained 4 candidates; 670 refusals from 86 distinct (agent, day, reason) triples bought 437 prompt sessions and 107 gate runs. With these rules the replay runs 794 of the 2,566 sessions plus about 44 samples ($35.34; 90 of the 108 adoptions or forks; 259 of the 547 candidates, the idle treadmill's lost: the acceptance's candidates a day unchanged or up is NOT met). clock_runs real_positions: the clock (and its backoff) runs only an agent on real money that holds a position or a working order there or met a refusal since its last session (and rung 0, replay only); everyone else waits for evidence, including an idle program's outcome (idle_runs barren: 10 more barren wakes since its last session). The heartbeat is max_skip_hours (24) for a real agent and practice_max_skip_hours (72) for a practice agent, counted from the gate's first sight of one that never researched. practice_pause_after 3: a practice agent (not on rung 0) whose last three sessions abstained researches only on news of its own program (a code or rung change, a repair verdict, a lesson naming it, its barren outcome) and on its own trading (a fill or an active block) once a UTC day (review of #311: the fill-only pause ran 1,038 sessions, 253 candidates, 85 adoptions or forks). A rung-0 agent keeps its clock and its backoff. sample_hours 6: a skip is drawn for the sample at most once per six hours per agent (a winner's interval is 12 minutes). refusal_dedupe: a refusal triggers research once per agent, reason and day, on the House's fast path too. lesson_sources teacher: a post-mortem is not a lesson (134 of 204 lesson-triggered rows had only one). lesson_arm parity: a lesson wakes only the agents whose id hashes even; the odd half is the control the hourly yield row compares (lift.teacher), and a lesson naming a control agent is neither put to Jev for it nor shown by its playbook_read for merton.lift.teacher_days. Bounds: research_bounds.gate. winners_and_idle restores the Sept 23 rule.",
-      "practice_max_skip_hours": 72,
-      "practice_pause_after": 3,
-      "idle_runs": "barren",
-      "sample_hours": 6,
-      "refusal_dedupe": true,
-      "lesson_sources": [
-        "teacher"
-      ],
-      "lesson_arm": "parity"
     }
-  },
-  "research_bounds": {
-    "_about": "Checked by economy.check_bounds (and so by league.ci; Sept 25, 2026, the forward-first run, F2): each research.gate dial named here stays inside its range, or among the values listed.",
-    "gate": {
-      "clock_runs": [
-        "all",
-        "winners_and_idle",
-        "real_positions"
-      ],
-      "idle_runs": [
-        "barren",
-        "off",
-        "clock"
-      ],
-      "lesson_arm": [
-        "all",
-        "parity"
-      ],
-      "practice_max_skip_hours": [
-        24,
-        168
-      ],
-      "practice_pause_after": [
-        0,
-        10
-      ],
-      "sample_hours": [
-        1,
-        24
-      ],
-      "max_skip_hours": [
-        6,
-        72
-      ]
-    }
-  },
-  "horizon": {
-    "_about": "Fast feedback: no Kalshi entry expected to resolve later than this, and no crypto position held longer. Equities and options are not bounded.",
-    "kalshi_hour_max_hours": 12,
-    "kalshi_day_max_hours": 48,
-    "crypto_max_hold_hours": 48
-  },
-  "horizon_bounds": {
-    "kalshi_hour_max_hours": [
-      1,
-      24
-    ],
-    "kalshi_day_max_hours": [
-      12,
-      96
-    ],
-    "crypto_max_hold_hours": [
-      6,
-      168
-    ]
   },
   "merton_bounds": {
     "_about": "Checked by economy.check_bounds (and so by league.ci): the teacher's schedule within these hours, and paused_until_profit any subset of these roles (Sept 24, 2026); lift's dials within these ranges, and the consultant may be paused too (Sept 25, 2026, F4).",
@@ -256,56 +179,6 @@
       "designer",
       "teacher",
       "consultant"
-    ],
-    "lift": {
-      "days": [
-        3,
-        14
-      ],
-      "teacher_days": [
-        1,
-        7
-      ],
-      "consult_sessions": [
-        1,
-        4
-      ],
-      "consult_blocks": [
-        3,
-        12
-      ],
-      "consult_max_multiple": [
-        1,
-        16
-      ]
-    }
-  },
-  "lab_bounds": {
-    "_about": "Checked by economy.check_bounds (and so by league.ci), Sept 24, 2026: the Alpha Lab's dials the close-the-gaps plan bounds (its risk-free dials table). The lab holds reserved_share to these bounds where it reads it too.",
-    "reserved_share": [
-      0.33,
-      0.75
-    ],
-    "batch_size": [
-      16,
-      64
-    ],
-    "max_births_per_hour": [
-      1,
-      12
-    ],
-    "_about_sept25": "Sept 25, 2026 (the forward-first run, F1): the forward windows' own dials, bounded like the rest. reserved_share keeps its bounds and is now the parameter children's share (the mechanism children take the rest first).",
-    "forward_box_seconds": [
-      60,
-      600
-    ],
-    "forward_candidates_per_run": [
-      16,
-      200
-    ],
-    "lineage_block_active_blocks": [
-      3,
-      24
     ]
   },
   "merton": {
@@ -341,72 +214,12 @@
       "operator": "medium",
       "teacher": "medium"
     },
-    "_about_sept25_lift": "Sept 25, 2026 (the forward-first run, F4; league/yield_ledger.py lifts, league/merton.py consult_price_multiple). The hourly yield row gains `lift`: the teacher's (forward growth per active block over teacher_days after a lesson, lesson arm against control arm by research_gate.lesson_arm), the consultant's (a consult.outcome row per paid consult: productive if a candidate or strategy change followed within consult_sessions sessions, then its next consult_blocks active blocks against its previous ones) and the engineer's (repairs verified per dollar: 22 lifetime for $27.54 at T0), each over the last `days`. A consult that produced nothing within two sessions doubles that agent's next consult price, again for each in a row, up to consult_max_multiple, counting only the consults of the last `days`; the surcharge is capped at what the balance can bear (the consult's own cost is always charged, and the multiple never takes the balance under the 1x consult price: review of #311, at T0 prices 8 of the 83 consults since Sept 23 that cleared the 8x floor would have left the balance at or below zero, a dead agent). At T0 the consultant had cost $35.44 for 62 answers in a day; replayed on the T0 snapshot, 50 of 110 judged consults bought no candidate or strategy change within two sessions and the 31 with six forward blocks after them lost 0.0091 a block against the six before (80% lower bound -0.0129), $0.45 a positive block after against research's $0.29. A lane whose verdict is no_lift at the end of the run goes into paused_until_profit (the consultant is allowed there since this date).",
-    "lift": {
-      "days": 7,
-      "teacher_days": 3,
-      "consult_sessions": 2,
-      "consult_blocks": 6,
-      "consult_max_multiple": 8
-    }
+    "_about_sept25_lift": "Sept 25, 2026 (the forward-first run, F4; league/yield_ledger.py lifts, league/merton.py consult_price_multiple). The hourly yield row gains `lift`: the teacher's (forward growth per active block over teacher_days after a lesson, lesson arm against control arm by research_gate.lesson_arm), the consultant's (a consult.outcome row per paid consult: productive if a candidate or strategy change followed within consult_sessions sessions, then its next consult_blocks active blocks against its previous ones) and the engineer's (repairs verified per dollar: 22 lifetime for $27.54 at T0), each over the last `days`. A consult that produced nothing within two sessions doubles that agent's next consult price, again for each in a row, up to consult_max_multiple, counting only the consults of the last `days`; the surcharge is capped at what the balance can bear (the consult's own cost is always charged, and the multiple never takes the balance under the 1x consult price: review of #311, at T0 prices 8 of the 83 consults since Sept 23 that cleared the 8x floor would have left the balance at or below zero, a dead agent). At T0 the consultant had cost $35.44 for 62 answers in a day; replayed on the T0 snapshot, 50 of 110 judged consults bought no candidate or strategy change within two sessions and the 31 with six forward blocks after them lost 0.0091 a block against the six before (80% lower bound -0.0129), $0.45 a positive block after against research's $0.29. A lane whose verdict is no_lift at the end of the run goes into paused_until_profit (the consultant is allowed there since this date)."
   },
   "frontier_reserve": {
     "_about": "Dollars left in the gateway's monthly frontier budget (GET /v1/health) below which frontier work narrows. Under earned_usd, cheap-model research moves to Sail and the unearned roles (operator, teacher, designer) pause; under code_roles_usd the architect and toolsmith pause too, and only audits and consultations by profitable agents remain. Promotion to real money needs an audit, so the month's last dollars are kept for it.",
     "earned_usd": "20",
     "code_roles_usd": "8"
-  },
-  "hypotheses": {
-    "_about": "The hypothesis foundry (league/hypotheses.py): Merton writes 3-4 falsifiable strategy cards for the desk the evidence favours (exploration_share of calls go to the least-explored desk), replay admits them before any paper seat, and routine refill stops breeding random mutations. Calls are at most one per call_minutes, only while a seat is open, the frontier tier pays for code work and the day's OpenAI allowance has room, and never past budget_usd within budget_window_hours. It writes on `model` (GPT-6 Sol from Sept 22, 2026, at high effort and a quarter-hour cadence: about a fifth of Astra's price, so the same budget buys four to five times the cards); the auditor and the engineer keep Astra. A family with retire_after_failures counted replay failures and no pass is retired from House breeding. mutation_share (at least mutation_min_per_day) bounds House mutations, and only of parents earning forward.",
-    "enabled": true,
-    "replace_mutation_refill": true,
-    "call_minutes": 10,
-    "candidates": 4,
-    "max_output_tokens": 16000,
-    "effort": "high",
-    "model": "gpt-6-sol",
-    "budget_usd": "40",
-    "budget_window_hours": 24,
-    "exploration_share": 0.2,
-    "exploration_window": 10,
-    "retire_after_failures": 15,
-    "blocked_share": 0.5,
-    "repair_after_blocked": 3,
-    "blocked_hours": 24,
-    "mutation_share": 0.2,
-    "mutation_min_per_day": 2,
-    "card_ttl_hours": 24,
-    "_about_sept23": "Sept 23, 2026 (the owner: a 24/7 swarm; 'do 1-5 right now fully'): the first GPT-6 Sol call wrote 4 cards for $0.128 and one was on paper 43 s later, while agent research cost about $1 per replay-passing candidate. So the foundry gets more of the budget ($40 a window, a call every 10 minutes), half of its calls go to the fast-evidence desks (hourly, around the clock) whose low pass rates never win the evidence route, cards may queue for replay (max_pending_cards) instead of holding the next call, and Merton is told to prefer hourly programs where a desk allows them.",
-    "fast_desks": [
-      "alpaca-crypto-majors",
-      "alpaca-index-etfs",
-      "alpaca-megacaps",
-      "alpaca-open",
-      "kalshi-open"
-    ],
-    "fast_share": 0.5,
-    "prefer_horizon": "hour",
-    "max_pending_cards": 8,
-    "_about_sept23c": "Sept 23, 2026 (the learn-and-unblock run, S3/C3: the foundry follows yield). Measured since Sept 22 13:30Z: the foundry was the only paid source to reach real money (108 cards for $8.48, 33 replay passes, 27 born, 2 on rung 2; $0.26 a replay pass) and the practice loss engine: foundry-born agents were -$272.96 of the -$361 kalshi-shadow loss, two BTC-strike cards -$113.68 in ten settlements, kalshi-crypto-strikes -10.3% an active block (40 born, 2 replay passes ever), kalshi-crypto-15m -1.9% a block with taker entries at 182 bps. So kalshi-crypto-strikes leaves fast_desks; a desk whose foundry-born agents are negative over fast_lane_min_blocks (6) active blocks (league/hypotheses.py desk_forward, from eval.block rows) gets no fast-lane call until one family there is positive over fast_lane_reopen_blocks (3), and the open fast desks are ranked by that yield before the rotation; the exploration share is unchanged; the brief tells Merton that kalshi-crypto-15m needs maker entries and that a binary position above 15% of the stake is a one-loss trial. The foundry runs at the `earned` frontier tier (it is the best yield per dollar) and stops only at `audits`, as before.",
-    "fast_lane_min_blocks": 6,
-    "fast_lane_reopen_blocks": 3,
-    "_about_sept23b": "Sept 23, 2026 (the owner's north star: a swarm that trades 24/7 and compounds). Measured 01:39-02:10Z: 4 of 8 GPT-6 Sol cards passed replay at about $0.03 a card, the best yield in the league, but the foundry never exploited what already works. The only mechanism with real-money profit (Kalshi daily favourites bought as a maker: mullins-2 and mullins-6 on weather, hawkins-19 on commodities, all live) was never offered to a desk where it had not been tried, and 12 of the 16 merged repairs failed replay, so self-improvement was fixing bugs, not finding edges. The fast route sent every fast call to the best-scored fast desk, the index-ETF desk, so the 24/7 crypto desks got no cards. Now up to transfer_share of calls take a family with an earned forward record (real money first) to the best-scored desk of its venue where it was never tried, and Merton adapts its mechanism there; the fast route rotates to the fast desk with the fewest recent cards; every packet carries the league's edge map (winning_mechanisms). Precedence: transfer, fast, exploration, else evidence; with 0.3, 0.5 and 0.2 that is about 27%, 45%, 18% and 9% of calls (the evidence route had about 36% before transfers).",
-    "transfer_share": 0.3,
-    "closed_desks": [
-      "kalshi-crypto-strikes",
-      "kalshi-crypto-15m"
-    ],
-    "closed_reopen_blocks": 3,
-    "first_transfer": {
-      "family": "weather-favorites",
-      "desk": "kalshi-weather",
-      "mechanism": "Scale the weather favourites on the ensemble's fair value: price every Kalshi weather series the desk can reach (daily highs, lows and rain) from the GFS and ECMWF ensemble members' forecasts for its settlement station (the weather feed; the NWS forecast beside it; the forecast feed's point-in-time history for a replay), and bid post-only where the model's probability clears the ask plus the fee, sized by how far it clears it.",
-      "feeds": [
-        "weather",
-        "nws",
-        "forecast"
-      ]
-    },
-    "_about_sept24": "Sept 24, 2026 (the close-the-gaps run, E2 and E3: the foundry brief foundry-2026-09-24.1). Cards are model-versus-market mechanisms that name the feeds the House records for their desk (league/hypotheses.py DESK_FEEDS: weather ensembles and NWS forecasts for kalshi-weather, EDGAR 8-K earnings times for the megacaps and options, SOFR and par yields for the rates series, ESPN odds for sports, DVOL and funding for crypto) and state the fee each trade pays and the edge it needs to clear it (a card that does not is refused before its replay). fast_desks is now the deep-market desks (the megacaps, index ETFs, crypto majors and both open desks: options has no replay, so no card can be admitted there); kalshi-crypto-strikes and kalshi-crypto-15m (closed_desks) get no card on any route until a family there is positive over closed_reopen_blocks (3) active forward blocks (at T0 every crypto-15m family was negative on its pooled record, crypto-15m-favorites n 106, bound -0.0064; the strike desk ran -10.3% a block). The first transfer to try (first_transfer) scales the weather favourites, the one family with real profit ($1.41 a day on its real seats at T0, about $7.81 a day at its measured capacity), on the ensemble's fair value across every weather series. A family at its measured capacity (the family ledger's estimate) gets no House mutation, and the packet marks it."
   },
   "consult": {
     "_about": "What it costs an agent to hire Merton, the frontier model, out of its own credits, and what it must have DONE to be allowed to. Frontier intelligence is the scarcest thing on the floor: it is the prize for trading well, never a rebate for existing. An agent that has not traded is served by Merton's own roles -- the architect who writes strategies, the toolsmith who builds what the queue asks for, the teacher who writes the lessons -- which cost it nothing and reach the whole firm.",
@@ -423,38 +236,5 @@
       "2": 1,
       "3": 0.5
     }
-  },
-  "lab": {
-    "_about": "The Alpha Lab (league/lab.py), Sept 23, 2026, the north-star build: a MAP-Elites archive of strategy programs searched in batches on the lab box (league/labbox.py). Seeds are the living agents' programs, the foundry's cards and the founders; children are parameter mutants of the archive's elites and Luna's mutations and crossovers, with a Sol leap every leap_every Luna calls. Fitness is out-of-sample growth after fees on the first search_fraction of the House's own replay tape; the fittest gate-passing program of a cell is replayed by the House on the whole tape (and by the sealed holdout on the history store) and born on paper, at most max_births_per_hour. OpenAI spend is its own line (budget_usd_per_hour, plus royalties: royalty_share of a graduate's performance fee), inside the campaign allowance and only while the frontier tier is 'all'. It runs only where league/config.json names a lab box.",
-    "enabled": true,
-    "budget_usd_per_hour": "0.75",
-    "box_usd_per_hour": "0.20",
-    "batch_size": 32,
-    "reserved_share": 0.33,
-    "param_children": 48,
-    "llm_children": 6,
-    "leap_every": 10,
-    "leap_candidates": 4,
-    "search_fraction": 0.66,
-    "step_seconds": 240,
-    "max_births_per_hour": 6,
-    "max_graduations_per_step": 1,
-    "submit_max": 8,
-    "royalty_share": "0.10",
-    "luna_model": "gpt-6-luna",
-    "sol_model": "gpt-6-sol",
-    "_about_sept23_pacing": "Sept 23, 2026, 16:41 UTC (C3 pacing, the learn-and-unblock run): the lab's Luna seeds and Sol leaps share the paced September OpenAI line, so the lab's own LLM line is $0.75 an hour until the month resets on Oct 1; parameter children, batch replay on the lab box and graduation spend no OpenAI and are unchanged.",
-    "idle_desk_hours": 48,
-    "deep_desks": [
-      "alpaca-megacaps",
-      "alpaca-index-etfs",
-      "alpaca-crypto-majors",
-      "alpaca-open"
-    ],
-    "_about_sept24": "Sept 24, 2026 (the close-the-gaps run, E1: the lab as a search). Measured at T0: 2,137 of the lab's 3,641 candidates were parameter mutants and 16 of its 18 born graduates were nudges (an impulse floor 0.0006 -> 0.000686); after Deploy A the lab ran 63 batches of 84 candidates in an hour (1.3 a batch: 65 of the 69 Luna children queued at T4 asked for NEEDS of their own, a tape each, and a step builds four). reserved_share (0.5, lab_bounds 0.33-0.75; was a third): the share of each batch reserved for the programs someone wrote (agent submissions, Luna, Sol) where they wait, and the share of turns whose tape is theirs, the one with the most rows first; the other turns alternate between the queue's oldest row and the largest group of any origin, so a step's builds fill batches (league/lab.py batch_turn). A graduate needs a code change beyond PARAMS relative to every living program of its desk or a forward score above the desk's living median (zero while no resident has one), never graduates on a losing forward window, and is never born onto a desk that was offered markets for idle_desk_hours (48) with no intent unless a feed it asked for arrived since (Lab._hold). Breeding weighs a parent's own forward window and its family's record in the mechanism ledger; a lineage whose family is at its measured capacity is not searched; Sol's leaps go to deep_desks first.",
-    "forward_box_seconds": 180,
-    "forward_candidates_per_run": 96,
-    "lineage_block_active_blocks": 6,
-    "_about_sept25": "Sept 25, 2026 (the forward-first run, F1: forward growth is the fitness). Measured at T0 (04:21Z): the archive placed every cell by search fitness; 273 candidates went to the House's replay in 24 h (446 lab.graduate rows, 17% written by Luna, Sol or an agent), and only 2 of them had a winning forward window of their own when they went. Now a lineage whose candidates' latest windows pool forward_min_active_blocks (3) active blocks is placed and ordered by its forward growth per block (league/lab.py forward_rank; search fitness places only lineages without a record, and only a program that passed the gate is placed by its lineage's record); the archive is re-placed after every forward run (replace_archive: 44 of the 83 cells move on the T0 snapshot, and the elites of winning lineages go from 15 to 46). A lineage whose latest window loses over lineage_block_active_blocks (6, bounds 3-24) active blocks is neither bred nor graduated until a later window wins (11 lineages at T0). A candidate graduates only on a winning forward window of its own where the lab can build one (held \"pending\" until then, and the forward runs score the pending ones first, mechanism children first), or with a code change beyond PARAMS where it cannot. reserved_share (0.33, lab_bounds 0.33-0.75; E1 read it as the written programs' share, 0.5) is kept for the parameter children: the mechanism children take two thirds of the turns and of each batch first. The forward runs get forward_box_seconds 180 (was 90: at T0 most runs spent their 90 s after 5-20 of 48 due) and forward_candidates_per_run 96 (was 48; a due candidate with no forward data yet costs no box time)."
   }
 }

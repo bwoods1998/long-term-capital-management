@@ -857,8 +857,9 @@ class Allocator:
 
     # ------------------------------------------------------------ envelope
     def grant(self) -> dict[str, Any] | None:
-        guard = getattr(self.house, "campaigns", None)
-        return guard.live_authorization() if guard else None
+        """The owner's grant (`House.grant`, `league/live_trading.py`), revoked or not: its capital stays the envelope."""
+        guard = getattr(self.house, "grant", None)
+        return guard.live_authorization() if guard is not None else None
 
     def grant_capital(self, venue: str | None = None) -> Decimal:
         grant = self.grant()
@@ -1347,9 +1348,9 @@ class Allocator:
         released = getattr(self, "_released", None)
         if released is not None:
             return released
-        guard = getattr(self.house, "campaigns", None)
+        guard = getattr(self.house, "grant", None)
         if guard is None:
-            return True
+            return False  # real money turns on only through the grant (`league/live_trading.py`)
         try:
             return bool(guard.allows_live(3))
         except Exception:  # noqa: BLE001 - an unreadable grant releases nothing above the bunt
@@ -1466,8 +1467,8 @@ class Allocator:
         house = self.house
         if getattr(house, "auditor", None) is None or not hasattr(house, "_background"):
             return
-        guard = getattr(house, "campaigns", None)
-        if guard and not guard.allows_live(3):
+        guard = getattr(house, "grant", None)
+        if guard is None or not guard.allows_live(3):
             return  # the live grant has not released stakes above the bunt: nothing to audit for
         with self._lock:
             audit = dict((self.state.setdefault("family_audits", {})).get(key) or {})
@@ -2754,8 +2755,8 @@ class Allocator:
             return False
         if house.paused():
             return False
-        guard = getattr(house, "campaigns", None)
-        return not guard or guard.allows_live(2)
+        guard = getattr(house, "grant", None)
+        return guard is not None and guard.allows_live(2)
 
     def _numbers(self, ev: Evidence, band_from: str, band_to: str, stake: Decimal | None, why: str,
                  agent: Any = None) -> dict[str, Any]:
@@ -2923,8 +2924,8 @@ class Allocator:
         with an approved audit on record goes straight up."""
         house = self.house
         verdict = _verdict(agent.id, 2, why, ev, self)
-        guard = getattr(house, "campaigns", None)
-        if guard and not guard.allows_live(3):
+        guard = getattr(house, "grant", None)
+        if guard is None or not guard.allows_live(3):
             house._promotion_status(agent, verdict, "campaign", "the live grant has not released the swing band")
             return
         approved = audit_standing(house, agent) == "approved"

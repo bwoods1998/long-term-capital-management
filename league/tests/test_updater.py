@@ -853,3 +853,22 @@ class TheReleaseTrain(unittest.TestCase):
         out = self.updater().check()
         self.assertEqual((out["action"], out["holds"]), ("held", ["recent_start"]))
         self.assertIn("the ledger could not be read", out["reasons"][0])
+
+
+class TheUpdaterIsOffUnlessTheConfigSaysOn(unittest.TestCase):
+    """The options overhaul (Sept 26, 2026, trap 3): the in-box updater cannot carry the prune, so it
+    stays off, and a config that does not name the key never switches it on."""
+
+    def test_the_shipped_config_turns_it_off(self):
+        from league import service
+
+        self.assertIs(service.load_config()["auto_update"], False)
+        self.assertFalse(service.auto_update(service.load_config()))
+
+    def test_a_missing_key_means_off_and_only_true_means_on(self):
+        from league.service import auto_update
+
+        self.assertFalse(auto_update({}))
+        for value in (False, None, 0, 1, "true", "yes"):
+            self.assertFalse(auto_update({"auto_update": value}), value)
+        self.assertTrue(auto_update({"auto_update": True}))

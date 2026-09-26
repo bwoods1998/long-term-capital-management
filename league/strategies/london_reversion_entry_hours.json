@@ -1,8 +1,0 @@
-{
-  "family": "open-lab-e206cc",
-  "name": "london_reversion_entry_hours",
-  "repair": {
-    "key": "order_refusal:alpaca-paper:outside the regular session no stock or option entry is sent: it could not trade before the open. Th"
-  },
-  "why": "Corrected child of london-l8cee49: its mixed crypto/equity program requested XLE before the regular open on 2026-09-25. Preserve its specialty, parameters and decision logic except to suppress stock buys outside 09:30-16:00 New York weekdays, or when ctx.now cannot establish that window. Crypto entries and all exits remain unchanged. The House retains holiday, early-close and risk enforcement. New rung-0 child requiring its own evidence."
-}

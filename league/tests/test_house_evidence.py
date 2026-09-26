@@ -13,6 +13,7 @@ from league.economy import load_game
 from league.house import House, Settings
 from league.ledger import now_iso
 from league.tests.fakes import Clock, FakeBroker
+from league.tests.fakes import OpenGrant
 from league.tests.test_book import event
 from league.tests.test_house import HouseCase
 from league.tests.test_ladder import InProcessSandbox
@@ -68,7 +69,7 @@ class WindingDownEvidence(unittest.TestCase):
         game["economy"]["newcomer_seconds"] = 10 ** 9
         self.house = House(
             Path(self.directory.name), brokers={"kalshi": self.real, "kalshi-shadow": self.paper},
-            sandbox=InProcessSandbox(), settings=Settings(real_money=True, research=False, mark_every_seconds=0),
+            sandbox=InProcessSandbox(), grant=OpenGrant(), settings=Settings(real_money=True, research=False, mark_every_seconds=0),
             game=game, clock=self.clock,
         )
         self.agent = self.house.spawn("terminal", "test", CODE)
@@ -208,7 +209,7 @@ class StartupReconcile(unittest.TestCase):
 
         def house():
             return House(Path(directory.name), brokers={"kalshi": real, "kalshi-shadow": paper}, sandbox=InProcessSandbox(),
-                         settings=Settings(real_money=True, research=False, mark_every_seconds=0), game=game, clock=clock)
+                         grant=OpenGrant(), settings=Settings(real_money=True, research=False, mark_every_seconds=0), game=game, clock=clock)
 
         first = house()
         agent = first.spawn("favorite", "test", CODE)

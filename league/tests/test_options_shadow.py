@@ -1026,7 +1026,8 @@ class ReviewHoldsAsClaimed(ShadowCase):
 
 
 class Service(unittest.TestCase):
-    """`service.build` makes the account and its book beside the Kalshi shadow, on a canary too."""
+    """`service.build` makes the account and its book, on a canary too; since the options overhaul (Sept 26, 2026) no
+    Kalshi shadow beside it."""
 
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
@@ -1061,7 +1062,8 @@ class Service(unittest.TestCase):
             self.assertFalse(book.real_money)
             self.assertEqual((book.fees.family, book.fees.option_clearing), ("alpaca", True))
             self.assertEqual(book.baseline_cash, D(service.load_config()["options_structures"]["shadow"]["starting_cash"]))
-            self.assertIn("kalshi-shadow", house.books)
+            self.assertNotIn("kalshi-shadow", house.books)
+            self.assertEqual(set(house.books), {"alpaca-paper", V})
             self.assertEqual(list(house.books)[-1], V)  # after every other book: the House walks them in this order
         self.assertIn(service.load_config()["options_structures"]["book"], (V, "alpaca-paper"))
         self.assertIsNone(service.options_shadow_broker(Path("/nonexistent"), {"options_structures": {"shadow": {"enabled": False}}}, None, None))
