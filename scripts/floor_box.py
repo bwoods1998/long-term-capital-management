@@ -229,10 +229,24 @@ def live(ask):
                      for pid, instance, qty, status in db.execute("select pid,instance,qty,status from positions where status != 'closed' or qty != 0")]
         orders = [{"order_id": "live:" + str(oid), "status": status, "agents": [instance]}
                   for oid, instance, status in db.execute("select oid,instance,status from orders where status not in ('filled','cancelled','canceled','rejected','expired')")]
-        kv = {key: json.loads(value) for key, value in db.execute("select key,value from kv where key in ('recon','paper_proof')")}
-        recon = kv.get("recon") or {}
+        kv = {key: json.loads(value) for key, value in db.execute("select key,value from kv where key in ('recon','assignment_latch','shares','paper_proof')")}
+        recon = kv.get("recon", {})
         if not isinstance(recon, dict) or recon.get("frozen"):
             raise RuntimeError("live reconciliation is frozen or unreadable")
+        # The first mismatch has not frozen the book yet. Assigned shares can also outlive
+        # all option positions/orders, so neither an empty book nor frozen='' proves flat.
+        if recon.get("problems") or recon.get("bad"):
+            raise RuntimeError("live reconciliation has an unresolved mismatch")
+        latch = kv.get("assignment_latch", {})
+        if not isinstance(latch, dict) or latch:
+            raise RuntimeError("live assignment is unresolved or unreadable")
+        shares = kv.get("shares", {})
+        if not isinstance(shares, dict):
+            raise RuntimeError("live share inventory is unreadable")
+        for value in shares.values():
+            quantity = Decimal(str(value))
+            if not quantity.is_finite() or quantity != 0:
+                raise RuntimeError("live share inventory remains held or unreadable")
         proof = kv.get("paper_proof") or {}
         if not isinstance(proof, dict):
             raise RuntimeError("paper inventory is unreadable")
@@ -725,8 +739,8 @@ def read_structure_guard(api: SailboxClient, box: str, python: str, *, release: 
 
 def hold_structures(answer: Mapping[str, Any], missing: Sequence[str], *, target: str, force: bool) -> None:
     """Refuse (SystemExit) to put `target` on the box when it lacks the structure-aware code (`missing`) while the
-    ledger shows a structure held or a structure order open on `alpaca-paper`, or cannot be read; say why it may go
-    otherwise. `force` (`--force-structures-risk`) sends it anyway, with a loud warning."""
+    legacy ledger or live state shows inventory, orders, or unresolved reconciliation/assignment, or cannot be read.
+    `force` (`--force-structures-risk`) sends it anyway, with a loud warning."""
     if not missing:
         return
     lacks = "; ".join(missing)

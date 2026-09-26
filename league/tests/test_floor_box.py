@@ -1487,6 +1487,63 @@ class StructureGuardSnippetTests(unittest.TestCase):
         (self.state / "live.sqlite").write_bytes(b"corrupt")
         self.assertIn("error", self.run_guard())
 
+    def test_assignment_shares_keep_the_exit_path_when_the_first_close_is_rate_limited(self):
+        from league.tests.test_live_step import HAVE, LiveCase
+        if not HAVE:
+            self.skipTest("numpy not installed")
+        case = LiveCase()
+        case.setUp()
+        self.addCleanup(case.tearDown)
+        live = case.make([])
+        case.venue.fill = "none"
+        case.venue.submit_mode = "ratelimited"
+        case.venue.held["SPY"] = 100
+        case.venue.activity_rows.append({"id": "synthetic-assignment", "activity_type": "OPASN",
+                                        "symbol": "SPY260928P00600000", "qty": "1",
+                                        "transaction_time": "2026-09-28T13:30:00Z"})
+        live.minute()
+        self.assertEqual(case.venue.held["SPY"], 100)
+        self.assertEqual(case.venue.orders(status="open"), [])
+        self.assertTrue(live.state.get("assignment_latch"))
+        self.assertEqual(live.state.get("recon")["bad"], 1)
+        self.assertFalse(live.state.get("recon")["frozen"])
+        self.state = case.root
+        answer = self.run_guard()
+        self.assertIn("unresolved mismatch", answer["error"])
+        with self.assertRaisesRegex(SystemExit, "REFUSED"):
+            floor_box.hold_structures(answer, LACKS, target="old-release", force=False)
+
+    def test_assignment_and_each_reconciliation_or_share_hold_must_resolve_before_rollback(self):
+        from league.live.state import LiveState
+        state = LiveState(self.state / "live.sqlite")
+        self.addCleanup(state.close)
+        cases = (
+            ("recon", {"frozen": "", "bad": 1, "problems": []}),
+            ("recon", {"frozen": "", "bad": 0, "problems": ["foreign working order"]}),
+            ("recon", []),
+            ("assignment_latch", {"why": "assigned", "at": self.NOW}),
+            ("assignment_latch", []),
+            ("shares", {"SPY": "100"}),
+            ("shares", {"SPY": "-100"}),
+            ("shares", {"SPY": "NaN"}),
+            ("shares", []),
+        )
+        for key, value in cases:
+            with self.subTest(key=key, value=value):
+                state.put(key, value)
+                answer = self.run_guard()
+                self.assertIn("error", answer)
+                with self.assertRaisesRegex(SystemExit, "REFUSED"):
+                    floor_box.hold_structures(answer, LACKS, target="old-release", force=False)
+                state.execute("DELETE FROM kv WHERE key=?", (key,))
+        state.put("recon", {"frozen": "", "bad": 0, "good": 2, "problems": []})
+        state.put("shares", {"SPY": "0"})
+        answer = self.run_guard()
+        self.assertEqual(answer["structures"], [])
+        self.assertEqual(answer["orders"], [])
+        with contextlib.redirect_stdout(io.StringIO()):
+            floor_box.hold_structures(answer, LACKS, target="old-release", force=False)
+
     def test_its_constants_are_the_houses_own(self):
         from league import ledger
         self.assertEqual(floor_box.NEVER_ARRIVED, "the venue has no such order")
