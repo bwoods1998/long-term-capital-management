@@ -419,6 +419,57 @@ class ReportInputs(unittest.TestCase):
             self.assertEqual(result["orders"][0]["fees_usd"], .65)
             self.assertEqual(result["orders"][0]["net_cashflow_usd"], -100.65)
 
+    def test_future_working_order_and_proof_status_do_not_change_earlier_day_census(self):
+        before = self.read()
+        tuesday = MONDAY + dt.timedelta(days=1)
+        row = self.state.rows("SELECT * FROM orders WHERE oid=1")[0]
+        row.update(oid=2, client_id="future", day=tuesday.isoformat(), status="working",
+                   placed_at=at(tuesday, 10, 0), updated_at=at(tuesday, 10, 1))
+        self.state.upsert("orders", row, "oid")
+        self.state.put("paper_proof", {"day": tuesday.isoformat(), "status": "passed", "open_witness": True,
+                                      "close_witness": True, "passed_at": at(tuesday, 10, 5),
+                                      "orders": [{"cid": "future-paper", "at": at(tuesday, 10, 1)}]})
+        after = self.read()
+        self.assertTrue(before["complete"])
+        self.assertTrue(after["complete"])
+        self.assertEqual(before["orders"], after["orders"])
+        self.assertNotIn("paper_proof", after)
+
+    def test_carry_in_closed_after_report_day_still_requires_that_days_receipts(self):
+        friday, tuesday = MONDAY - dt.timedelta(days=3), MONDAY + dt.timedelta(days=1)
+        row = self.state.rows("SELECT * FROM orders WHERE oid=1")[0]
+        row.update(oid=2, client_id="carry-in", day=friday.isoformat(), status="filled",
+                   placed_at=at(friday, 15, 0), updated_at=at(tuesday, 10, 1))
+        self.state.upsert("orders", row, "oid")
+        self.assertIn("authoritative_order_receipt_missing", self.read()["gaps"])
+        self.state.execute("UPDATE orders SET updated_at=? WHERE oid=2", (at(friday, 15, 1),))
+        self.assertTrue(self.read()["complete"])  # known terminal before the report day
+        self.state.execute("UPDATE orders SET status='working' WHERE oid=2")
+        self.assertIn("authoritative_order_receipt_missing", self.read()["gaps"])
+
+    def test_future_proof_completion_cannot_rewrite_captured_report_day_status(self):
+        self.evidence.call("insert", "paper", "open_witness", "proof",
+                           {"proof": {"day": MONDAY.isoformat(), "status": "open_filled", "open_witness": True,
+                                      "close_witness": False, "filled_at": self.clock(), "passed_at": None}})
+        captured = self.read()["paper_proof"]
+        tuesday = MONDAY + dt.timedelta(days=1)
+        self.state.put("paper_proof", {"day": MONDAY.isoformat(), "status": "passed", "open_witness": True,
+                                      "close_witness": True, "passed_at": at(tuesday, 10, 5), "orders": []})
+        after = self.read()
+        self.assertEqual(after["paper_proof"], captured)
+        self.assertEqual(after["paper_proof"]["status"], "open_filled")
+
+    def test_paper_carry_in_needs_receipts_unless_known_terminal_before_session(self):
+        friday = MONDAY - dt.timedelta(days=3)
+        work = {"cid": "carry-paper", "at": at(friday, 15, 0), "terminal": True,
+                "answer": {"updated_at": "2026-09-29T14:01:00Z"}}
+        proof = {"day": friday.isoformat(), "status": "passed", "orders": [work]}
+        self.state.put("paper_proof", proof)
+        self.assertIn("authoritative_order_receipt_missing", self.read()["gaps"])
+        work["answer"]["updated_at"] = "2026-09-25T19:01:00Z"
+        self.state.put("paper_proof", proof)
+        self.assertTrue(self.read()["complete"])
+
     def test_input_manifest_binds_fees_proof_health_models_and_coverage(self):
         previous = self.read()
         mutations = [lambda: self.state.execute("UPDATE fills SET fees=.70"),

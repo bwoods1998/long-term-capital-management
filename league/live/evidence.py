@@ -292,7 +292,8 @@ class Evidence:
         work = work or (row.get("orders") or [{}])[-1]
         body = work.get("body") or {}
         data = {"attempt": row.get("attempt"), "action": work.get("action"), "model": self.model,
-                "work": dict(work), "detail": detail, "synthetic": True, "fee_provenance": "unknown"}
+                "work": dict(work), "detail": detail, "synthetic": True, "fee_provenance": "unknown",
+                "proof": {k: row.get(k) for k in ("day", "status", "open_witness", "close_witness", "filled_at", "passed_at")}}
         if kind in ("submit", "opportunity") and body:
             data["quote"] = self._snapshot("SPY", body_legs(body), mi=mi)
         self._insert("paper", kind, str(work.get("cid") or row.get("attempt") or "proof"), data,

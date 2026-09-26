@@ -331,6 +331,10 @@ def report(root: Path, day: str) -> dict:
     checkpoints = {}
     for event in events:
         data = event["data"]
+        if event["source"] == "paper" and isinstance(data.get("proof"), dict):
+            # Current proof KV can contain a later session's completion of this attempt. Only an immutable
+            # requested-day observation establishes proof status as of this report.
+            out["paper_proof"] = dict(data["proof"], observed_at=event["at"])
         if event["kind"] == "checkpoint" and event["source"] == "shadow":
             checkpoints[data["recorder_run"]] = event["seq"]
         if data.get("model"):
@@ -371,9 +375,12 @@ def report(root: Path, day: str) -> dict:
         with closing(readonly(state)) as db:
             begin = dt.datetime.combine(date, dt.time(), NY).timestamp()
             end = dt.datetime.combine(date + dt.timedelta(days=1), dt.time(), NY).timestamp()
-            real = [dict(r) for r in db.execute("SELECT * FROM orders WHERE day=? OR oid IN "
-                "(SELECT oid FROM fills WHERE at>=? AND at<?) OR status IN ('pending','working','unknown') ORDER BY oid",
-                (day, begin, end))]
+            # A later terminal status does not establish that a carry-in was terminal before this session.
+            # Its last update must also predate the session to exclude it from the conservative census.
+            real = [dict(r) for r in db.execute("SELECT * FROM orders WHERE placed_at<? AND "
+                "(day=? OR placed_at>=? OR oid IN (SELECT oid FROM fills WHERE at>=? AND at<?) "
+                "OR status IN ('pending','working','unknown') OR updated_at>=?) ORDER BY oid",
+                (end, day, begin, begin, end, begin))]
             oids = [r["oid"] for r in real]
             fills = ([dict(r) for r in db.execute("SELECT * FROM fills WHERE oid IN (" + ",".join("?" for _ in oids)
                                                 + ") ORDER BY id", oids)] if oids else [])
@@ -390,9 +397,10 @@ def report(root: Path, day: str) -> dict:
             proof = json.loads(paper[0])
             for work in proof.get("orders") or []:
                 stamp = number(work.get("at"))
-                if stamp is not None and dt.datetime.fromtimestamp(stamp, NY).date() == date:
+                terminal_at = parse_time((work.get("answer") or {}).get("updated_at"))
+                if (stamp is not None and stamp < end and (stamp >= begin or not work.get("terminal")
+                        or terminal_at is None or terminal_at >= begin)):
                     census.append(["paper", work["cid"]])
-            out["paper_proof"] = {k: proof.get(k) for k in ("day", "status", "open_witness", "close_witness")}
     else:
         gaps.append("authoritative_live_state_missing")
     recorded = {(o["source"], o["id"]) for o in out["orders"]}
