@@ -9,7 +9,9 @@ owner's decision. Everything here is throughput and money: how many, how often, 
 from __future__ import annotations
 
 import copy
+import datetime as dt
 import json
+import re
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -91,6 +93,8 @@ DEFAULTS: dict[str, Any] = {
     },
     "architect": {
         "every_seconds": 14400,
+        "refill_seconds": 3600,         # while fewer than population.start live: hourly, up to the gap (max_refill a pass)
+        "max_refill": 12,
         "min_new": 3,
         "max_new": 6,
         "openai_model": "gpt-6-astra",
@@ -159,6 +163,20 @@ def load(root: str | Path | None = None, *, config: Mapping[str, Any] | None = N
             local = {}
         if isinstance(local, Mapping):
             out = _merge(out, local)
+        try:
+            ready = json.loads((Path(root) / "gym-forward.json").read_text())
+            day = dt.date.fromisoformat(ready["day"])
+            at = dt.datetime.fromisoformat(ready["ready_at"].replace("Z", "+00:00"))
+            checkpoint = ready["gate_checkpoint"]
+            valid = (ready.get("schema") == 1 and str(day) == ready["day"] and at.tzinfo is not None
+                     and day < at.date() and re.fullmatch(r"sbcp_[A-Za-z0-9-]+", checkpoint)
+                     and isinstance(ready.get("roots"), list) and bool(ready["roots"])
+                     and all(isinstance(r, str) and re.fullmatch(r"[A-Z][A-Z0-9.]{0,9}", r) for r in ready["roots"]))
+            if valid and out["gym"].get("gate_checkpoint"):
+                out["gym"]["gate_checkpoint"] = checkpoint
+                out["forward"]["ready"] = ready
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            pass
     return out
 
 

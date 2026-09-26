@@ -34,6 +34,8 @@ from typing import Any, Callable, Mapping
 
 from . import HEARTBEAT, LOCK_FILE, LOG_FILE, bands as bands_mod, public, settings as settings_mod, sitefeed
 from .store import SwarmStore
+from .cleanup import StoppedPoolCleanup
+from ..data_job import NightlySupervisor, read_json
 
 CODE_DIR = Path(__file__).resolve().parents[2]
 PUBLIC_KINDS = ("swarm.born", "swarm.retired", "swarm.band", "swarm.note")
@@ -66,12 +68,20 @@ class SwarmStep:
         self.child_locked = False
         self.child_accounted = True
         self.alerts: list[str] = []
+        self.nightly = NightlySupervisor(self.root, code_dir=self.code_dir, python=self.python)
+        self.pool_cleanup = StoppedPoolCleanup(self.root)
 
     # ------------------------------------------------------------------ the House calls this
     def tick(self, house: Any = None, open_for_business: bool = True) -> dict[str, Any]:
         # A House paused for maintenance (or with its meter stopped) starts no new paid work: it starts no swarm. One
         # already running goes on (the Gym trains through a pause); `<state>/swarm.stop` is how to stop it.
         out: dict[str, Any] = {"process": self.supervise(may_start=open_for_business)}
+        out["pool_cleanup"] = self.pool_cleanup.tick(stopped=(
+            (not out["process"].get("enabled") or bool(self.stopped())) and not out["process"].get("running")))
+        try:
+            out["nightly"] = self.nightly.tick(may_start=open_for_business)
+        except Exception as exc:  # the collector never blocks the House's trading/marking path
+            out["nightly"] = {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
         ledger = getattr(house, "ledger", None)
         if ledger is not None:
             try:
@@ -326,7 +336,8 @@ def attach(house: Any, root: str | Path, config: Mapping[str, Any]) -> SwarmStep
     merges `house.swarm.site_inputs()` with its own; a House without one gets the swarm's feed as its `site_inputs`
     (the publisher's hook), so the page shows the swarm's agents, Gym and compute until then. Its compute is the
     swarm's own spend only: in swarm mode the House's Sail meter (`Budget`) is off."""
-    if not settings_mod.load(root, config=config).get("enabled"):  # config.json "swarm" < <root>/swarm.json
+    if (not settings_mod.load(root, config=config).get("enabled")
+            and read_json(Path(root) / "data-nightly.json").get("enabled") is not True):
         return None
     step = SwarmStep(root, config=config)
     house.swarm = step

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from decimal import Decimal
 from typing import Any, Callable, Mapping, Sequence
 
@@ -81,27 +82,78 @@ class ModelRouter:
                 attempt += 1
                 self.sleep(float(getattr(exc, "retry_after", None) or 5 * 3 ** attempt))
         cost = float(response.cost_usd or 0)
-        if cost:
-            self.store.add_spend(kind, cost, family=family.split(":", 1)[0], detail={"profile": profile, "key": key[:120], "desk": family})
+        self._account_sail(key, cost, kind=kind, family=family.split(":", 1)[0], settled=True,
+                           detail={"profile": profile, "key": key[:120], "desk": family})
         return response
+
+    #: Errors after which Sail may have run (and billed) a call whose answer never came back.
+    UNCONFIRMED = ("provider_poll_timeout", "provider_transport_timeout", "provider_transport_unconfirmed")
+
+    def _row(self, key: str) -> Any:
+        try:
+            with self.provider._lock:
+                return self.provider._db.execute("SELECT status, reserved_usd, cost_usd, response_id FROM requests WHERE request_key=?",
+                                                 (key[:200],)).fetchone()
+        except Exception:  # noqa: BLE001 - a fake Provider: nothing known
+            return None
+
+    def _account_sail(self, key: str, usd: float, *, kind: str, family: str | None,
+                      settled: bool, detail: Mapping[str, Any], released: bool = False) -> bool:
+        """Replace a request's booked cost atomically. A reaper or cached retry cannot book it a second time."""
+        key = key[:200]
+        with self.store.atomic():
+            holds = dict(self.store.get("unsettled") or {})
+            row = self.store._one("SELECT booked_usd, settled FROM model_costs WHERE request_key=?", (key,))
+            if row and row["settled"]:
+                return False
+            # Upgrade an existing pre-stage-3 hold without booking it again.
+            booked = float(row["booked_usd"] if row else (holds.get(key) or {}).get("usd") or 0)
+            if settled:
+                holds.pop(key, None)
+            else:
+                holds[key] = {"usd": usd, "kind": kind, "family": family, "at": time.time()}
+            self.store.put("unsettled", holds)
+            self.store._exec("INSERT INTO model_costs(request_key, booked_usd, settled) VALUES(?,?,?) "
+                             "ON CONFLICT(request_key) DO UPDATE SET booked_usd=excluded.booked_usd, settled=excluded.settled",
+                             (key, usd, int(settled and not released)))
+            if usd != booked:
+                self.store.add_spend(kind, usd - booked, family=family,
+                                     detail={**detail, **({"replaces_hold": round(booked, 6)} if booked else {})})
+            return True
 
     def _book_unsettled(self, kind: str, profile: str, family: str, key: str, exc: BaseException) -> None:
         """A call that failed after it was sent (a poll or transport timeout: Sail may have run it and billed it) is
-        booked at the Provider's hold for it, so the swarm's own meter never undercounts; a call the Provider released
-        (refused outright, never accepted) costs nothing. Best effort: never raises."""
-        try:
-            request = self.provider.request_id_for(family, key[:200])
-            with self.provider._lock:
-                row = self.provider._db.execute("SELECT status, reserved_usd, cost_usd FROM requests WHERE id=?", (request,)).fetchone()
-        except Exception:  # noqa: BLE001 - a fake Provider, or no row: nothing known to book
-            return
-        if row is None or row["status"] == "abandoned":
+        booked ONCE at the Provider's hold for it, and remembered (kv `unsettled`), so the swarm's own meter never
+        undercounts: its settled cost later replaces the hold (`sail`, `settle_holds`), and a hold the Provider
+        releases is reversed. A call the venue refused, or an HTTP error with nothing accepted, costs nothing."""
+        row = self._row(key)
+        code = str(getattr(exc, "code", "") or "")
+        if row is None or row["status"] == "abandoned" or (not row["response_id"] and code not in self.UNCONFIRMED):
             return
         usd = float(row["cost_usd"] if row["cost_usd"] is not None else row["reserved_usd"] or 0)
-        if usd > 0:
-            self.store.add_spend(kind, usd, family=family.split(":", 1)[0],
-                                 detail={"profile": profile, "key": key[:120], "desk": family, "unsettled": str(getattr(exc, "code", "")
-                                                                                                               or type(exc).__name__)[:80]})
+        if usd <= 0:
+            return
+        self._account_sail(key, usd, kind=kind, family=family.split(":", 1)[0], settled=False,
+                           detail={"profile": profile, "key": key[:120], "desk": family, "unsettled": code or type(exc).__name__})
+
+    def settle_holds(self) -> int:
+        """True up the holds booked for unanswered calls once the Provider knows: its settled cost replaces the hold,
+        a released (abandoned) request reverses it. Returns how many were settled."""
+        n = 0
+        for key, hold in list((self.store.get("unsettled") or {}).items()):
+            row = self._row(key)
+            if row is None:
+                continue
+            if row["status"] == "abandoned" and row["cost_usd"] is None:
+                cost = 0.0
+            elif row["cost_usd"] is not None and row["status"] not in ("prepared", "dispatched"):
+                cost = float(row["cost_usd"])
+            else:
+                continue  # still unknown: the hold stands
+            n += int(self._account_sail(key, cost, kind=hold.get("kind") or "sail_model", family=hold.get("family"),
+                                        settled=True, released=row["status"] == "abandoned" and row["cost_usd"] is None,
+                                        detail={"key": key[:120], "settles_hold": round(float(hold["usd"]), 6)}))
+        return n
 
     def compact(self, *, older_than_seconds: float = 3600.0) -> int:
         """Blank the request bodies and responses of settled calls older than an hour in the swarm's Provider file. Each

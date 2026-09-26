@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Verify the swarm ON THE HOUSE BOX after a deploy (read-only; standard library only).
 
-    python3 scripts/verify_swarm.py --root /workspace/state [--since-minutes 60] [--families 48]
+    python3 scripts/verify_swarm.py --root /workspace/state [--since-minutes 60] [--floor 16]
 
 Checks, each PASS / FAIL / WAIT with its numbers, as one JSON document (exit 0 when nothing FAILs):
 
 - process     the swarm's heartbeat is fresh (< 60 s), its pid is alive, it runs the House's release;
-- population  at least --families families alive;
+- population  at least the population floor alive (`population.floor` in <root>/swarm.json, else 16; the plan:
+              48 at the start, a ceiling of 96, a floor of 16) and at most the ceiling; below the start the
+              architect refills hourly (WAIT when it is refilling);
 - cycles      every living family has completed at least one model cycle (a cycle with a model call and no
               error), and the median cycle is under 180 s; the slowest and the error count are reported;
 - gym         Gym boxes ready or busy, batches run, program-years, trials in total;
@@ -51,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default="/workspace/state")
     parser.add_argument("--since-minutes", type=float, default=60.0)
-    parser.add_argument("--families", type=int, default=48)
+    parser.add_argument("--floor", type=int, default=None, help="the population floor (default: swarm.json's, else 16)")
     args = parser.parse_args(argv)
     root = Path(args.root)
     now = time.time()
@@ -81,7 +83,14 @@ def main(argv: list[str] | None = None) -> int:
     db = ro(db_path)
     fams = [dict(r) for r in db.execute("SELECT id, band, retired_at FROM families")]
     living = [f["id"] for f in fams if not f["retired_at"]]
-    checks["population"] = {"result": "PASS" if len(living) >= args.families else "FAIL", "alive": len(living),
+    try:
+        pop = dict(json.loads((root / "swarm.json").read_text()).get("population") or {})
+    except (OSError, ValueError, AttributeError):
+        pop = {}
+    start, ceiling = int(pop.get("start", 48)), int(pop.get("ceiling", 96))
+    floor = args.floor if args.floor is not None else int(pop.get("floor", 16))
+    verdict = "FAIL" if not floor <= len(living) <= ceiling else ("WAIT" if len(living) < start else "PASS")
+    checks["population"] = {"result": verdict, "alive": len(living), "floor": floor, "start": start, "ceiling": ceiling,
                             "retired": len(fams) - len(living),
                             "bands": {b: sum(1 for f in fams if f["band"] == b) for b in ("gym", "candidate", "probe", "sized", "retired")}}
 
