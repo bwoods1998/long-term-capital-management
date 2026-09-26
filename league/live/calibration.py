@@ -7,7 +7,8 @@ sends 1-lot SPY and QQQ debit verticals, opens and closes them, capped at the co
 samples per cell. These are the only orders no agent's intent produced besides the paper route proof. They are never
 evidence for any family.
 
-WHAT IT SENDS (`Calibration.step`, once a session minute, from `OptionsLive._session_minute` after the account's reads):
+WHAT IT SENDS (`Calibration.step`, once a session minute, from `OptionsLive._session_minute` after the families' real
+orders of the minute, so it takes only what they left):
 
 - At each slot (10:00, 12:30 and 14:30 ET: 14:00Z, 16:30Z and 18:30Z in daylight time), at most one round trip, never
   two at once: the symbol with the fewest open-at-mid samples still under the target whose vertical fits every cap. The
@@ -18,20 +19,25 @@ WHAT IT SENDS (`Calibration.step`, once a session minute, from `OptionsLive._ses
 - The open: a limit at the mid (the Gym's `limit_value("mid")`: the $0.01 net tick, rounded passively). It works
   `WAIT_MINUTES` (its time in force, cancelled by the order path), then goes ONCE more at the mid plus one tick, then
   nothing.
-- The close, once filled: at the mid, then at the mid less one tick, then at the natural (again each minute until it
-  fills), each for `WAIT_MINUTES`; at the natural at once from `LAST_RESORT_MINUTES` before the session's close. The
-  House's own expiry-day rules apply to these positions as to any (they open a day or more before their expiry).
+- The close, once filled: at the mid, then at the mid less one tick, then at the natural, each for `WAIT_MINUTES`; at
+  the natural at once from `LAST_RESORT_MINUTES` before the session's close. Charged to the day's order budget like a
+  program's close (only that last resort may use the room kept for the House's own exits); at most `CLOSE_ATTEMPTS_DAY`
+  attempts a position a day, backing off `REJECT_BACKOFF_MINUTES` (doubling) after a refused one; a natural of a tick
+  or less (nothing bids for it) is never sent. The House's own expiry-day rules apply to these positions as to any,
+  and from `CALIBRATION_BACKSTOP` minutes before the close the House itself closes one still open.
+- It yields: a root on which any family works a real order is left to the families that minute.
 - Every order goes through the real book (`league/live/real.py` `RealBook`): written before it is sent, one order stream
   per contract, never the opposite side of a contract the account holds (the wash-trade guard), the day's order count
   (250, every leg counted), buying power reserved, and the gateway's own caps and kill switch behind them.
 - New round trips only while: `config.json` real_money, the grant active and every real-entry rule open
   (`OptionsLive.real_block`: the kill switch, the stops, reconciliation, the House), the paper proof PASSED,
-  `live.calibration` true in `<state>/swarm.json`, the day's cap with room, the book's, the gateway's order and day caps
-  and buying power with room, and the recorder readable. Closes need only the kill switch off.
+  `live.calibration` true in `<state>/swarm.json` (off by default), the day's cap with room, the book's, the gateway's
+  order and day caps and buying power with room, and the recorder readable. Closes need only the kill switch off.
 
-NEVER EVIDENCE: the orders and positions belong to `FAMILY` ("house:calibration", never a swarm family's slug), whose
-closed trades never reach a forward record (`OptionsLive._export_real`), whose structures the site never shows, and whose
-positions the House never takes for an orphan's.
+NEVER EVIDENCE, NEVER PROFIT: the orders and positions belong to `FAMILY` ("house:calibration", never a swarm family's
+slug), whose closed trades never reach a forward record (`OptionsLive._export_real`), whose structures the site never
+shows, which Profit leaves out (`league/trading_profit.py`; their realized net is published as a cost,
+`compute.other_usd`), and whose positions the House takes for an orphan's only in the session's last minutes.
 
 RECORDS (`Recorder`, `<state>/calibration.sqlite`, mode 0600): one row per attempt (per order), written in one transaction
 when it is sent and completed in one when it ends: the order and client order ids; the symbol, legs, cell (symbol x

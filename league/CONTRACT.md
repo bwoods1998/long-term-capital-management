@@ -158,6 +158,10 @@ position is liquidated at the natural. Equity options are physically settled: a 
 money becomes shares, marked to the next session's first price. XSP and SPXW are cash-settled at the
 close (hold them to expiry if you like; no calendars or diagonals there). At the end of a run everything
 open is closed at the natural. Stop sending closes on an expiring contract after its `close_cutoff`.
+On real money the House is stricter than the Gym here: from ten minutes before that cutoff (15:00 ET; 15:15
+SPY/QQQ) it closes an expiring equity position itself at the natural when a leg is in or within 1% of the
+money, and an expiring long call or put whatever its moneyness while it has a bid, and your own close of it
+is refused from then. Close expiring equity positions before 15:00 (15:15 SPY/QQQ) if you want your price.
 
 ## The game you are in
 

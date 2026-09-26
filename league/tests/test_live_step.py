@@ -216,7 +216,8 @@ class Gates(LiveCase):
         self.assertIn("paper account has not yet proved", " ".join(self.refusals()))
         self.run_to(9, 45)
         self.assertEqual(live.proof.status()["status"], "passed")
-        self.assertEqual([b["legs"][0]["position_intent"] for b in self.paper.sent], ["buy_to_open", "sell_to_close"])
+        self.assertEqual([b["legs"][0]["position_intent"] for b in self.paper.sent if b.get("legs")],
+                         ["buy_to_open", "sell_to_close"])
         opened = self.paper.sent[0]
         self.assertEqual((opened["qty"], opened["order_class"], len(opened["legs"])), ("1", "mleg", 2))
 

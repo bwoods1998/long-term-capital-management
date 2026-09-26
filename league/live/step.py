@@ -176,6 +176,10 @@ class OptionsLive:
         self.shadow = ShadowBook(self.root / SHADOW_FILE, fill_model=fill_model or F.FillModel.load())
         self.book = RealBook(self.state, real, self.table, clock=clock, record=self.record) if real is not None else None
         self.proof = PaperProof(self.state, paper, record=self.record, clock=clock) if paper is not None else None
+        # The single-leg route's own proof (a long call), once the vertical's has passed: real long calls and puts wait
+        # for it (`_real_intent`).
+        self.proof_single = (PaperProof(self.state, paper, record=self.record, clock=clock, kind="single")
+                             if paper is not None else None)
         self.calibration = Calibration(self) if self.book is not None else None
         perf = dict(performance or {})
         self.start_at = str(perf.get("start_at") or "")
@@ -857,6 +861,9 @@ class OptionsLive:
         if self.proof is not None and not self.proof.passed():
             w = out.setdefault("SPY", [1, 7, 0.01])
             w[1] = max(w[1], 7)
+        elif self.proof_single is not None and not self.proof_single.passed():
+            w = out.setdefault("SPY", [1, 7, 0.025])                      # its call is 1-2% out of the money
+            w[1], w[2] = max(w[1], 7), max(w[2], 0.025)
         if self.calibration is not None:
             for root, (lo, hi, band) in self.calibration.roots(self.clock()).items():
                 w = out.setdefault(root, [lo, hi, band])
@@ -968,8 +975,10 @@ class OptionsLive:
                 out.setdefault(pos.root, set()).update(leg.symbol for leg in pos.legs)
             for order in self.book.orders.values():
                 out.setdefault(order.root, set()).update(leg.symbol for leg in order.legs)
-        if self.proof is not None:
-            out.setdefault("SPY", set()).update(self.proof.held_symbols())
+        if not observe:
+            for proof in (self.proof, self.proof_single):
+                if proof is not None:
+                    out.setdefault("SPY", set()).update(proof.held_symbols())
         return out
 
     # ------------------------------------------------------------------ the session minute
@@ -1291,12 +1300,18 @@ class OptionsLive:
                                             "trace": traceback.format_exc()[-2000:]})
 
     def _paper_proof(self, day: LiveDay, mi: int, out: dict) -> None:
-        """The paper venue proves its route while real execution remains disabled, including recovery."""
-        if self.proof is not None and not self.proof.passed() and "SPY" in day.chains:
-            try:
-                out["paper_proof"] = self.proof.step(day=day.day.isoformat(), mi=mi, snap=day.snapshot("SPY", mi), chain=day.chains["SPY"]).get("status")
-            except Exception as exc:  # noqa: BLE001
-                out["paper_proof"] = f"error: {type(exc).__name__}"
+        """The paper venue proves its route while real execution remains disabled, including recovery: the multi-leg
+        vertical first, then the single-leg long call."""
+        if self.proof is None or "SPY" not in day.chains:
+            return
+        proof, label = ((self.proof, "paper_proof") if not self.proof.passed()
+                        else (self.proof_single, "paper_proof_single"))
+        if proof is None or proof.passed():
+            return
+        try:
+            out[label] = proof.step(day=day.day.isoformat(), mi=mi, snap=day.snapshot("SPY", mi), chain=day.chains["SPY"]).get("status")
+        except Exception as exc:  # noqa: BLE001
+            out[label] = f"error: {type(exc).__name__}"
 
     def _read_account(self, out: dict) -> None:
         try:
@@ -1906,6 +1921,9 @@ class OptionsLive:
         why = self.table.type_allowed(order.type, equity_now)
         if why:
             return why
+        if (order.type in SINGLE_TYPES and self.settings.get("require_paper_proof", True)
+                and (self.proof_single is None or not self.proof_single.passed())):
+            return "the paper account has not yet proved the single-leg route (a long call's open and close) this run"
         if any(leg.dte == 0 for leg in order.legs) and minute >= rules.open_cutoff:
             return f"expiry cutoff: no new opening order on an expiring contract from {rules.open_cutoff // 60}:{rules.open_cutoff % 60:02d} ET"
         legs = real_legs(order, chain)
@@ -2162,6 +2180,7 @@ class OptionsLive:
                                "cells": len(getattr(model, "hazard", {}) or {})},
                 "frozen": self.book.frozen if self.book is not None else None,
                 "paper_proof": self.proof.status() if self.proof is not None else None,
+                "paper_proof_single": self.proof_single.status() if self.proof_single is not None else None,
                 "instances": {k: {"family": i.family, "kind": i.kind, "band": i.band, "mode": i.mode, "error": i.error or None,
                                   "tuition": i.tuition, "observe": i.observe} for k, i in self.instances.items()},
                 # Read from the House's thread: the live state (its own lock) and the last minute's switches only; the
