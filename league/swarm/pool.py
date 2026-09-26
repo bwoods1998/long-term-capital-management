@@ -116,6 +116,9 @@ class GymPool:
         self.fork_after: dict[str, float] = {}
         self.fork_times: list[float] = []
         self.reconciled_at = float("-inf")
+        #: Forks whose POST is in flight, by name (persisted as `forking` for the operator; a new process starts with none:
+        #: a fork a dead process left in flight is a stray, ended by `reconcile`).
+        self.forking: dict[str, float] = {}
 
     # ------------------------------------------------------------------ settings
     @property
@@ -217,12 +220,16 @@ class GymPool:
         began = self.clock()
         with self._lock:
             self.boxes[placeholder] = Box(placeholder, kind, str(image), "starting")
+            self.forking[name] = began  # a fork in flight: `reconcile` never takes it for a stray
+            self.store.put("forking", dict(self.forking))
         try:
             row = self.client.from_checkpoint(image, name=name)
             box_id = str(row.get("sailbox_id"))
         except Exception as exc:  # noqa: BLE001
             with self._lock:
                 self.boxes.pop(placeholder, None)
+                self.forking.pop(name, None)
+                self.store.put("forking", dict(self.forking))
             self._failed_fork(kind, f"the fork failed: {str(exc)[:200]}")
             self.store.event("swarm.pool", None, {"action": "fork_failed", "kind": kind, "image": image, "error": str(exc)[:300]})
             return
@@ -230,7 +237,9 @@ class GymPool:
         with self._lock:
             self.boxes.pop(placeholder, None)
             self.boxes[box_id] = box
-        self.store.upsert_box(box_id, kind=kind, version=str(image), state="starting", detail={"name": name})
+            self.store.upsert_box(box_id, kind=kind, version=str(image), state="starting", detail={"name": name})
+            self.forking.pop(name, None)
+            self.store.put("forking", dict(self.forking))
         try:
             if not self.sealed(box_id):
                 self.store.event("swarm.pool", None, {"action": "unsealed", "box": box_id, "kind": kind, "image": image})
@@ -314,9 +323,12 @@ class GymPool:
             return 0
         with self._lock:
             known = set(self.boxes) | {r["id"] for r in self.store.boxes(live=True)}
+            in_flight = set(self.forking)
         n = 0
         for row in rows:
             box_id, name = str(row.get("sailbox_id") or row.get("id") or ""), str(row.get("name") or "")
+            if name in in_flight:
+                continue  # its POST has not returned: ours, not a stray
             if not name.startswith(NAME_PREFIX) or box_id in known or str(row.get("status")) in ("terminated", "terminating",
                                                                                                     "failed", "create_failed"):
                 continue

@@ -5,9 +5,11 @@ and the page and the repository are public. Researchers write their notebooks fo
 helps them; only a filtered sentence ever leaves (`swarm.note`), and the House's publisher masks it again
 (`league/publish.py` `words`).
 
-- `note_text` (a researcher's note): keeps only sentences with NO digit, no code mark (`= _ { } [ ] < > \` # |`,
-  `->`, `ctx.`, `np.`, `PARAMS`, `NEEDS`, `def `, `return `, `import `, `lambda`) and no parameter name of the
-  family's program (written with underscores or spaces). Nothing left: nothing is published.
+- `note_text` (a researcher's note): keeps only sentences with NO digit, NO number written as a word (zero to ninety,
+  hundred, thousand, half, third, quarter, point, percent, the ordinals and fraction words), no colon, nothing in
+  brackets, no code mark (`= _ { } [ ] < > backtick # |`, `->`, `ctx.`, `np.`, `PARAMS`, `NEEDS`, `def `, `return `,
+  `import `, `lambda`) and no parameter name of the family's program (written with underscores or spaces). Nothing
+  left: nothing is published. The researcher is told its notes are public (the role prompt, the note tools).
 - `news_text` (a mechanism, a band's reason, a retirement's cause): drops a sentence with a code mark or a parameter
   name, and removes every decimal number and anything in brackets; plain integers stay ("in 30 revisions").
 
@@ -22,6 +24,13 @@ from typing import Any, Iterable
 
 CODE = re.compile(r"[=_{}\[\]<>`#|\\]|->|::|\bctx\.|\bnp\.|\bPARAMS\b|\bNEEDS\b|\bdef\s|\breturn\s|\bimport\s|\blambda\b")
 SENTENCE = re.compile(r"(?<=[.!?])\s+")
+#: A number written as a word: a fitted value can hide in words ("a twenty five delta", "point one eight", "two thirds").
+NUMBER_WORDS = re.compile(
+    r"\b(zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|"
+    r"eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|hundreds|thousand|thousands|million|"
+    r"half|halves|halve|third|thirds|quarter|quarters|fourth|fourths|fifth|fifths|sixth|sixths|seventh|eighth|ninth|tenth|tenths|"
+    r"hundredth|hundredths|first|second|twice|thrice|double|triple|dozen|point|percent|percentage|percentages|fraction|"
+    r"fractions|basis|bps|pct)\b", re.I)
 DECIMAL = re.compile(r"[-+]?\$?\d*\.\d+%?|\d+(?:\.\d+)?\s*%|\$\s*\d[\d,]*(?:\.\d+)?")
 BRACKETED = re.compile(r"\s*\([^)]*\)")
 
@@ -56,7 +65,8 @@ def note_text(text: Any, *, param_names: Iterable[str] = (), limit: int = 400) -
     keep = []
     for sentence in SENTENCE.split(" ".join(str(text or "").split())):
         low = sentence.lower()
-        if not sentence or any(ch.isdigit() for ch in sentence) or CODE.search(sentence) or any(n in low for n in names):
+        if not sentence or any(ch.isdigit() for ch in sentence) or CODE.search(sentence) or any(n in low for n in names) \
+                or NUMBER_WORDS.search(sentence) or ":" in sentence or "(" in sentence or ")" in sentence:
             continue
         keep.append(sentence)
     out = " ".join(keep).strip()

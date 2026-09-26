@@ -242,6 +242,22 @@ class Boxes(PoolCase):
         pool.adopt()
         self.assertEqual(self.sail.terminated, ["sb_stray"])
 
+    def test_a_fork_in_flight_is_never_taken_for_a_stray(self):
+        sail = self.sail
+        pool = self.pool(start_boxes=1)
+        real = sail.from_checkpoint
+
+        def slow_post(checkpoint, *, name, timeout=900.0):
+            row = real(checkpoint, name=name)  # Sail has made the box; the POST has not returned yet
+            pool.reconcile()  # the main thread's sweep, meanwhile
+            return row
+
+        sail.from_checkpoint = slow_post
+        pool.submit(job("a"))
+        pool.manage()
+        self.assertEqual(sail.terminated, [], "a fork whose POST is in flight is ours")
+        self.assertEqual(sum(1 for b in pool.boxes.values() if b.state == "ready"), 1)
+
     def test_an_unsealed_fork_is_terminated_and_never_used(self):
         self.sail.sealed = False
         pool = self.pool(start_boxes=1)

@@ -35,7 +35,30 @@ def tape(kind, agent, payload):
     return publish.to_events(entry)
 
 
+WORDS = [
+    "Moving the short leg to a twenty five delta and taking profit at half the credit lifted the score.",
+    "I now enter only when implied vol rank is above sixty and exit at two thirds of max profit.",
+    "Selling the put at point one eight delta beats point three.",
+    "The rule: enter late.",
+    "Wider wings (as the graveyard said) cost less.",
+]
+
+
 class NoteText(unittest.TestCase):
+    def test_fitted_values_in_words_never_pass(self):
+        for text in WORDS:
+            self.assertIsNone(public.note_text(text), text)
+
+    def test_the_model_is_told_its_notes_are_public(self):
+        from league.swarm.researcher import ROLE, TOOLS
+
+        self.assertIn("PUBLIC", ROLE)
+        for tool in TOOLS:
+            if tool["name"] == "gym_run":
+                self.assertIn("PUBLIC", tool["parameters"]["properties"]["note"]["description"])
+            if tool["name"] == "notebook":
+                self.assertIn("PUBLIC", tool["description"])
+
     def test_code_params_and_numbers_never_pass(self):
         for text in LEAKY:
             out = public.note_text(text, param_names=("short_delta", "vrp_min", "wing_width", "cadence"))

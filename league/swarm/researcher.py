@@ -48,14 +48,19 @@ TOOLS: list[dict[str, Any]] = [
          "params": {"type": "object", "description": "PARAMS overrides for this run (keys must exist in PARAMS)"},
          "stress": {"type": "number", "description": "half-spread multiplier, 1.0 (default) or 1.5 (the gate's stress)"},
          "why": {"type": "string", "description": "one sentence: what this version changes and why it should help"},
-         "note": {"type": "string", "description": "optional: what you learned from your last run, appended to your notebook"}}}},
+         "note": {"type": "string", "description": "optional: what you learned from your last run, appended to your notebook. "
+                                                   "PUBLIC: it may appear on the public site, so describe the mechanism and "
+                                                   "your reasoning only, never a threshold, level, delta, ratio or any other "
+                                                   "fitted value (in digits or in words)"}}}},
     {"name": "read_run", "description": "Read one section of a past Train run of your family.",
      "parameters": {"type": "object", "properties": {
          "run_id": {"type": "string"},
          "section": {"type": "string", "description": "summary, fills, runtime, worst, trades, daily, or breakdown.<weekday|"
                                                       "time_of_day|dte|rv_tercile|iv_tercile|quarter|type|root|exit_reason>"},
          "page": {"type": "integer"}}, "required": ["run_id", "section"]}},
-    {"name": "notebook", "description": "Your memory across cycles: append what you learned, or read your recent entries.",
+    {"name": "notebook", "description": "Your memory across cycles: append what you learned, or read your recent entries. "
+                                        "PUBLIC: an entry may appear on the public site, so write the mechanism and your "
+                                        "reasoning only, never a threshold, level, delta, ratio or other fitted value.",
      "parameters": {"type": "object", "properties": {
          "action": {"type": "string", "enum": ["append", "read"]},
          "text": {"type": "string", "description": "for append: a few plain sentences in your own words"}}, "required": ["action"]}},
@@ -76,6 +81,9 @@ change parameters) and put what you learned from the last run in its `note`. REA
 submit the run if it is your best; queue your next gym_run (it opens your next cycle); use read_run, graveyard or the
 notebook only when the diagnostic leaves you unsure. Keep every program inside the contract below; the Gym refuses
 anything else. Reply with tool calls; keep prose short.
+Your notes (the notebook and gym_run's note) are PUBLIC: they may appear on the public site. Write the mechanism and your
+reasoning there, never a threshold, level, delta, ratio, date or any other fitted value, in digits or in words; the
+numbers belong in your program and in the diagnostics, which stay private.
 
 THE CONTRACT (league/CONTRACT.md)
 
