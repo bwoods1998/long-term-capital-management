@@ -11,7 +11,8 @@ Nothing here is ever committed: the repository is public and programs are fitted
 TRIALS. Every Gym evaluation is a trial (`add_run` counts the result's own `trials`), per family and in
 total. A family's LINEAGE trial count is the sum over every family of its lineage (ancestors, siblings,
 descendants, alive or retired) and over any lineage its root was born on the slice of (`prior_lineage`: an
-architect's new idea on a dead family's slice): `lineage_trials`, the same set `lineage_trial_sharpes` reads.
+architect's new idea on a dead family's slice): `lineage_trials`, the same set `lineage_trial_sharpes` reads. Since the
+owner's decision D2 (Sept 26) the deflated Sharpe's N is that set's VALIDATED versions (`lineage_validated`), not its trials.
 Holdout LOOKS are a ration, counted live across the whole connected lineage (`lineage_looks`), including
 ancestors, siblings and descendants on every root, before or after a fork. Reusing identical program code
 on the same structure and roots connects lineages permanently; changing a label or parameters cannot buy
@@ -36,6 +37,7 @@ import re
 import sqlite3
 import threading
 import time
+import zlib
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -462,6 +464,7 @@ class SwarmStore:
             return {"status": "refused", "reason": "retirement needs a nonempty reason string"}
         reason = reason.strip()[:2000]
         from . import public
+        from .diagnostics import validation_words
 
         with self.atomic():
             fam = self.family(fid)
@@ -477,9 +480,11 @@ class SwarmStore:
                         "reason": "the population is at its minimum; retirement was not applied"}
             state = fam.get("state") or {}
             notes = self.notebook(fid, limit=4)
+            # Validation as a verdict and a count only (D2a): the graveyard is read by researchers and the architect.
+            validation = validation_words(state.get("validation_line")) if state.get("validation_line") else "never validated"
             lesson = (f"{fam['structure']} on {', '.join(fam['roots'])}: {reason}. Tried {fam.get('revisions')} versions over "
-                      f"{self.lineage_trials(fid)} lineage trials; best Train score {fam.get('best_train')}; best validation "
-                      f"{dumps(state.get('validation_view'))}. Last notes: " + " | ".join(n["text"][:240] for n in notes))
+                      f"{self.lineage_trials(fid)} lineage trials; best Train score {fam.get('best_train')}; best validation: "
+                      f"{validation}. Last notes: " + " | ".join(n["text"][:240] for n in notes))
             self.note(fid, f"Retired by {source}: {reason}")
             self.bury(fid, lesson, {"validation": state.get("validation_view"), "best_train": fam.get("best_train"),
                                    "best_version": fam.get("best_version")})
@@ -567,6 +572,31 @@ class SwarmStore:
                 if marker.get("sha"):
                     seen.add(marker["sha"])
         return len(seen)
+
+    def lineage_validated(self, fid: str) -> tuple[int, list[float]]:
+        """(N, Sharpes) for the deflated Sharpe (the owner's decision D2b, Sept 26): N = the distinct program versions
+        validated across the family's lineage set (`lineages`: ancestors, siblings, descendants and prior slices, so
+        inherited ones count), and each one's traded-day Sharpe (`t_daily / sqrt(days_traded)`) from its latest
+        validation at the normal spread."""
+        from .evidence import traded_sharpe
+
+        lines = self.lineages(fid)
+        if not lines:
+            return 0, []
+        rows = self._all(f"SELECT r.family, r.version, r.summary FROM runs r JOIN families f ON f.id=r.family "
+                         f"WHERE f.lineage IN ({','.join('?' * len(lines))}) AND r.window='validation' AND r.stress=1.0 "
+                         "AND r.trials>0 AND r.version IS NOT NULL ORDER BY r.at DESC, r.rowid DESC", tuple(lines))
+        seen: set[tuple[str, int]] = set()
+        sharpes = []
+        for r in rows:
+            key = (r["family"], int(r["version"]))
+            if key in seen:
+                continue
+            seen.add(key)
+            value = traded_sharpe(loads(r["summary"], {}) or {})
+            if value is not None:
+                sharpes.append(value)
+        return len(seen), sharpes
 
     def lineage_trial_sharpes(self, fid: str, *, window: str = "train", limit: int = 5000) -> list[float]:
         """Daily Sharpe of every recorded trial in the family's lineage (for the deflated Sharpe)."""
@@ -674,14 +704,20 @@ class SwarmStore:
     #: compressed and a researcher makes one a minute, which would fill the House box's disk in days. The summary row stays.
     KEEP_FULL_TRAIN_RUNS = 6
 
+    #: Full robustness results kept per family (their compact figures live in the family's state).
+    KEEP_FULL_ROBUSTNESS_RUNS = 2
+
     def prune_runs(self, fid: str) -> int:
         fam = self.family(fid) or {}
         state = fam.get("state") or {}
         keep = {state.get("best_train_run"), state.get("submitted_run")}
-        rows = self._all("SELECT run_id, path FROM runs WHERE family=? AND window='train' AND path IS NOT NULL ORDER BY at DESC, rowid DESC",
-                         (fid,))
+        rows = self._all("SELECT run_id, path, purpose FROM runs WHERE family=? AND window='train' AND path IS NOT NULL "
+                         "ORDER BY at DESC, rowid DESC", (fid,))
+        # The researcher's own runs and the robustness runs are kept apart, so robustness never pushes out a run it reads.
+        research = [r for r in rows if r["purpose"] != "robustness"][self.KEEP_FULL_TRAIN_RUNS:]
+        robustness = [r for r in rows if r["purpose"] == "robustness"][self.KEEP_FULL_ROBUSTNESS_RUNS:]
         n = 0
-        for row in rows[self.KEEP_FULL_TRAIN_RUNS:]:
+        for row in research + robustness:
             if row["run_id"] in keep:
                 continue
             try:
@@ -704,7 +740,7 @@ class SwarmStore:
             return None
         try:
             return json.loads(gzip.decompress((self.root / row["path"]).read_bytes()))
-        except (OSError, ValueError):
+        except (OSError, ValueError, EOFError, zlib.error):  # a missing, truncated or corrupt file is unreadable, never a crash
             return None
 
     def runs(self, fid: str, *, window: str | None = None, limit: int = 50) -> list[dict[str, Any]]:

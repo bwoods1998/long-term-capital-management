@@ -245,10 +245,12 @@ the weekly post-mortem, on OpenAI's half-price flex tier wherever latency does n
 
 - **Every Gym evaluation is a trial**, counted per lineage (forks inherit their parent's count and
   holdout looks) and in total on the ledger.
-- **The validation line** (a family's best program): at least 100 trades on at least 60 distinct
+- **The validation line** (a family's best program): at least 50 trades on at least 25 distinct
   days in Validation; mean P&L per dollar of maximum loss above zero after fees with a one-sided t of
-  at least 2; a deflated Sharpe probability of at least 0.95 given the lineage's trial count;
-  positive in at least 3 of Validation's 4 quarters; positive at 1.5x the half-spread.
+  at least 2; a deflated Sharpe probability of at least 0.95 on the traded-day Sharpe, against the
+  lineage's validated versions (inherited ones included); positive in at least 3 of Validation's 4
+  quarters; positive at 1.5x the half-spread. The owner's decision D2 (Sept 26, 2026) set these; it
+  also limits what a researcher sees of Validation to pass or fail and a count of checks passed.
 - **The holdout line**, one look per program version and at most three per lineage: P&L after fees
   positive; a day-block bootstrap one-sided 95% lower bound on mean daily P&L above zero, with a
   Holm-Bonferroni correction across every holdout look the swarm has made; holdout Sharpe at least

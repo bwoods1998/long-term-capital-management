@@ -46,8 +46,8 @@ run's calls 900 seconds in all; 25 errors or timeouts disqualify the run. Be det
 | `history` | prior sessions of daily bars (0-60) | `10` |
 | `start`, `end` | first and last decision minute (minutes since midnight ET) | `571`, `958` |
 
-Smaller slices and slower cadences run faster. Legs you open may lie outside the slice. Your family's
-roots are fixed; a different root is a different family (a fork).
+Smaller slices and slower cadences run faster. Legs you open may lie outside the slice. Your family
+trades one to five of the Gym's roots; naming other admitted roots in NEEDS changes them (a new version).
 The 0–60 syntax range is not a data guarantee: current collection is 0–14 DTE across the first
 25 roots, with longer back months only on SPY/QQQ. Inspect the actual available chain and diagnose
 missing contracts as coverage gaps, not zero-return evidence about a strategy.
@@ -162,21 +162,21 @@ open is closed at the natural. Stop sending closes on an expiring contract after
 ## The game you are in
 
 **Windows.** Train (2022-2024) is yours: every run, every trade. Validation (2025) is the tournament's:
-you see only its mean return on maximum loss, its t, the quarters positive, and whether the line was met
-(which checks were not). Holdout (2026) is sealed: one look per program version at the gate, at most three
+you see only whether the line was met and how many of its checks passed. Holdout (2026) is sealed: one look per program version at the gate, at most three
 per lineage, and you hear only pass or fail. Forward days (after Sept 25, 2026, and live) are the judge.
 Every fork shares that ration across all roots, including looks made after the fork. Reusing identical
 program code on the same structure and roots joins lineages; renaming a family or changing its parameters
 never creates a fresh ration. A revised retired mechanism must identify its parent.
 
 **Trials.** Every Gym evaluation is a trial, counted per lineage (every family in it: parent, forks,
-siblings, alive or retired, and a dead slice's lineage when your idea was born on its slice) and in total. The gate deflates your validation Sharpe by your lineage's trial count, so a thousand sweeps that
-each look good by chance buy nothing. Change the idea when it fails; do not grind parameters.
+siblings, alive or retired, and a dead slice's lineage when your idea was born on its slice) and in total. The line
+deflates your validation Sharpe by the versions your lineage has had validated, so submitting sweeps that each look
+good by chance buys nothing. Change the idea when it fails; do not grind parameters.
 
-**The validation line** (your submitted best, on Validation): at least 100 trades on at least 60 days;
+**The validation line** (your submitted best, on Validation): at least 50 trades on at least 25 days;
 mean P&L per dollar of maximum loss above zero after fees with a one-sided t of at least 2; a deflated
-Sharpe probability of at least 0.95 given your lineage's trials; positive in at least 3 of 4 quarters;
-positive at 1.5x the half-spread. Meeting it sends your program to the gate: a code review for lookahead,
+Sharpe probability of at least 0.95 on traded days given your lineage's validated versions; positive in at
+least 3 of 4 quarters; positive at 1.5x the half-spread. Meeting it sends your program to the gate: a code review for lookahead,
 leakage and fill abuse, then one holdout look. Passing makes your family a Candidate (live shadow trading);
 Candidates may become Probes only when their execution type, account checks and real-money path are
 verified and enabled; earning a band alone cannot send an order. A forward record of 20
@@ -186,7 +186,7 @@ program version and source; paper or shadow results alone cannot satisfy the rea
 
 **Retirement.** No validation improvement in 30 revisions or 2,000 Gym evaluations, or trial-adjusted
 evidence below the line, can retire your family; its lessons go to the graveyard every new family
-reads. You may explicitly retire an abandoned Gym mechanism, subject to the population floor.
+reads. You may explicitly retire an abandoned Gym mechanism when `retire` is offered.
 Retirement is final for that family; its program history, trial count and holdout ration remain.
 
 ## Your tools
@@ -197,7 +197,7 @@ Retirement is final for that family; its program history, trial count and holdou
   Sharpe, drawdown, fees, quarters positive), fills and rejects, breakdowns (weekday, time of day, DTE,
   realized/implied vol tercile, quarter, type, root, exit reason) as [n, pnl, win rate, pnl per $ max
   loss], the worst trades with their context, and your program's errors. One run a cycle: a cycle opens
-  with a REVISE turn (gym_run or retire) unless you queued a run at the end of the last one, and its READ turn
+  with a REVISE turn (gym_run) unless you queued a run at the end of the last one, and its READ turn
   (every tool) is where you read the result, submit, and queue the next run. A queued run the Gym is too
   busy to take is retried quietly twice; any other refusal comes to you as a message with the reason.
 - `read_run(run_id, section, page?)`: a section of a past Train run: summary, fills, runtime, worst,
@@ -207,16 +207,16 @@ Retirement is final for that family; its program history, trial count and holdou
 - `graveyard(query)`: lessons of retired families.
 - `submit(run_id, note)`: make the version behind a Train run your family's best; the tournament
   validates your best every hour.
-- `retire(reason)`: abandon the entire Gym family, not merely one bad version. It is available in
-  REVISE and READ. The population floor may refuse it; repeated refusals back off. A successful
-  retirement stops further research while preserving the evidence and lessons.
+- `retire(reason)`: abandon the entire Gym family, not merely one bad version. It is offered on READ
+  turns only while the population is above its start and your family has had at least two validations.
+  A retirement stops further research while preserving the evidence and lessons.
 
 ## How to work
 
 - Say why a change should help before you make it, and write down what you learned in the notebook.
 - Read the breakdowns: an edge that lives in one weekday, one hour, one DTE or one regime is either your
   mechanism (restrict to it) or luck (it will not survive Validation).
-- Trade often enough to be measured (100 trades on 60 days in a year), size by maximum loss, and exit on
+- Trade often enough to be measured (50 trades on 25 days in a year), size by maximum loss, and exit on
   rules you wrote down. Costs are real: fees and the spread are most of what kills a small edge.
 - Fix refusals and errors first: a program that errs does nothing.
 - Never try to recognize the calendar: no dates, no years, no counting days to a known event. The safety

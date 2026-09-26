@@ -110,30 +110,61 @@ class StoreRetirement(StoreCase):
 
 
 class ResearcherRetirement(ResearcherCase):
+    """`retire` is offered on a READ turn only above `population.start` with two validations (the sprint, Sept 26); these
+    cases put the family there (start 0, two validations) unless they test the guard itself."""
+
     def setUp(self):
         super().setUp()
         self.settings["population"]["floor"] = 0
+        self.settings["population"]["start"] = 0
+        self.store.update_family(self.fam["id"], validations=2)
         self.cancelled = []
         self.pool.cancel_family = self.cancelled.append
 
     def final_call(self):
         return ("retire", {"reason": "Costs defeated the mechanism."})
 
-    def test_retire_before_any_version_is_terminal_and_restart_skips_it(self):
-        self.steps = [{"calls": [self.final_call(), ("gym_run", {"code": self.code}),
-                                 ("notebook", {"action": "append", "text": "Should never run"})]}]
-        researcher = Researcher(self.store, self.router, self.pool, self.settings, clock=self.clock, background=False)
-        out = researcher.cycle(self.fam["id"])
+    def tools_of(self, body):
+        return [t["name"] for t in body["tools"]]
+
+    def test_a_retire_on_the_revise_turn_is_refused_and_the_revision_runs(self):
+        self.researcher().cycle(self.fam["id"])
+        self.steps = [{"calls": [self.final_call(), ("gym_run", {"params": {"vrp_min": 1.3}})]}, {"text": "read it"}]
+        out = self.researcher().cycle(self.fam["id"])
+        self.assertNotIn("retired", out)
+        self.assertNotIn("error", out, "a refused retire is never a cycle error")
+        self.assertEqual(self.tools_of(self.sail.bodies[0]), ["gym_run"], "REVISE never offers retire")
+        self.assertEqual(len(self.pool.jobs), 2, "the revision ran")
+        outputs = [json.loads(i["output"]) for i in self.store.convo(self.fam["id"])[0][-1]["items"]
+                   if i.get("type") == "function_call_output"]
+        self.assertEqual(outputs[0]["status"], "refused")
+        self.assertEqual(self.store.family(self.fam["id"])["band"], "gym")
+
+    def test_retire_is_offered_on_read_only_above_the_start_with_two_validations(self):
+        self.researcher().cycle(self.fam["id"])
+        for start, validations, offered in ((0, 2, True), (1, 2, False), (0, 1, False)):
+            self.settings["population"]["start"] = start
+            self.store.update_family(self.fam["id"], validations=validations)
+            self.steps = [{"calls": [("gym_run", {"params": {"vrp_min": 1.3 + validations / 10 + start}})]}, {"text": "read it"}]
+            self.researcher().cycle(self.fam["id"])
+            self.assertEqual("retire" in self.tools_of(self.sail.bodies[-1]), offered, (start, validations))
+            status = next(i["content"] for i in reversed(self.sail.bodies[-1]["input"])
+                          if i.get("role") == "user" and "Now: if a run just came back" in str(i.get("content")))
+            self.assertEqual("call retire" in status, offered)
+
+    def test_a_retire_on_read_is_terminal_and_restart_skips_it(self):
+        self.researcher().cycle(self.fam["id"])
+        self.steps = [{"calls": [("gym_run", {"params": {"vrp_min": 1.3}})]},
+                      {"calls": [self.final_call(), ("notebook", {"action": "append", "text": "Should never run"})]}]
+        out = self.researcher().cycle(self.fam["id"])
         self.assertTrue(out["retired"])
-        self.assertEqual((out["model_calls"], len(self.pool.jobs), self.store.versions(self.fam["id"])), (1, 0, []))
         self.assertEqual(self.cancelled, [self.fam["id"]])
         items = self.store.convo(self.fam["id"])[0][-1]["items"]
         calls = [i["call_id"] for i in items if i.get("type") == "function_call"]
         outputs = [i for i in items if i.get("type") == "function_call_output"]
         self.assertEqual([i["call_id"] for i in outputs], calls)
-        self.assertEqual([json.loads(i["output"])["status"] for i in outputs], ["retired", "refused", "refused"])
+        self.assertEqual([json.loads(i["output"]).get("status") for i in outputs][-2:], ["retired", "refused"])
         self.assertEqual(self.researcher().cycle(self.fam["id"])["skipped"], "retired")
-        self.assertEqual(len(self.sail.bodies), 1)
         self.assertEqual(len(self.store.notebook(self.fam["id"])), 1)
 
     def test_read_retirement_cancels_an_earlier_queued_run_and_keeps_the_completed_run(self):
@@ -151,37 +182,32 @@ class ResearcherRetirement(ResearcherCase):
         self.assertEqual(len([e for e in self.store.events_after(0) if e["kind"] == "swarm.retired"]), 1)
         self.assertEqual([e for e in self.store.events_after(0) if e["kind"] == "swarm.note"], [])
 
-    def test_floor_refusal_defers_the_cycle_and_uses_increasing_scheduler_backoff(self):
+    def test_a_floor_refusal_is_no_cycle_error_and_no_backoff(self):
         from league.swarm.loop import Scheduler
 
-        self.settings["population"]["floor"] = 1
+        self.settings["population"]["floor"] = 1  # offered (start 0), then refused by the store's floor
         self.researcher().cycle(self.fam["id"])
         scheduler = Scheduler(self.store, clock=self.clock)
-        for delay in (60, 120):
-            self.assertEqual(scheduler.take(), self.fam["id"])
-            self.steps = [{"calls": [self.final_call(), ("gym_run", {"params": {"vrp_min": 1.3}})]}]
-            out = self.researcher().cycle(self.fam["id"])
-            self.assertTrue(out["retirement_deferred"])
-            self.assertNotIn("retired", out)
-            self.assertEqual((out["model_calls"], len(self.pool.jobs)), (1, 1))
-            self.assertEqual(self.store.family(self.fam["id"])["band"], "gym")
-            self.assertIn("minimum", out["error"])
-            scheduler.release(self.fam["id"], out)
-            self.clock.advance(delay - 1)
-            self.assertIsNone(scheduler.take())
-            self.clock.advance(1)
-        self.assertEqual(self.store.family(self.fam["id"])["trials"], 1)
+        self.assertEqual(scheduler.take(), self.fam["id"])
+        self.steps = [{"calls": [("gym_run", {"params": {"vrp_min": 1.3}})]}, {"calls": [self.final_call()]}, {"text": "ok"}]
+        out = self.researcher().cycle(self.fam["id"])
+        self.assertNotIn("retired", out)
+        self.assertNotIn("error", out)
+        self.assertTrue(out["retire_refused"])
+        self.assertEqual(self.store.family(self.fam["id"])["band"], "gym")
+        scheduler.release(self.fam["id"], out)
+        self.clock.advance(5)
+        self.assertEqual(scheduler.take(), self.fam["id"], "no cooldown: the family's next cycle comes at once")
         self.assertEqual(self.store.graveyard(), [])
 
-    def test_floor_deferral_cancels_an_earlier_queued_run_in_the_same_response(self):
+    def test_a_floor_refusal_keeps_an_earlier_queued_run(self):
         self.settings["population"]["floor"] = 1
         self.researcher().cycle(self.fam["id"])
         self.steps = [{"calls": [("gym_run", {"params": {"vrp_min": 1.3}})]},
                       {"calls": [("gym_run", {"params": {"vrp_min": 1.5}}), self.final_call()]}]
         out = self.researcher().cycle(self.fam["id"])
-        self.assertTrue(out["retirement_deferred"])
-        self.assertFalse(out["pending_run"])
-        self.assertIsNone(self.store.convo(self.fam["id"])[1])
+        self.assertTrue(out["pending_run"], "the refusal changes nothing: the queued run opens the next cycle")
+        self.assertIsNotNone(self.store.convo(self.fam["id"])[1])
         self.assertEqual(out["trials"], 1)
 
     def test_retirement_during_a_model_request_refuses_all_returned_tools(self):
