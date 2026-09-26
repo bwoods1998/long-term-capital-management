@@ -287,6 +287,33 @@ clock never restarts.
   The swarm process (pid 5336, niced) started 10:22:27Z: 48 families founded, 0 boxes adopted; the gate
   "waiting" (no gate image). 10:23Z six sealed Gym boxes `ltcm-swarm-gym-*` running. The site's first new-era
   checkpoint at 10:22:27Z: schema 2, run.started_at 10:22:21.321Z, account equity $481.63.
+- 10:47:10Z Stage 1 of the backfill (core five 2023-2025) complete: 0 empty, 0 failed tasks. 10:58:44Z **Gym image v1**:
+  sbcp_4f1f0577-9b32-4e8d-b610-480bb88d617d (+ copy sbcp_204a6762), 365-day TTL, image box sb_a9eca175 asleep;
+  verified inside (no_network, no key, no GATE, nothing after 2025-12-31). Store: 3,760 root-days of 1-minute
+  NBBO (1.63 billion rows, 6.95 GiB); Train 2023-2024 502 days per root, Validation 2025 250 per root, for
+  IWM, QQQ, SPXW, SPY, XSP; underlying for all, OI 3,759. Holdout (stage 2, 920 root-days) next; the gate
+  image builds itself when it completes (~11:50Z); then 2022, trade_quote, the 20 names.
+- ~10:52Z W5's round-2 fixes pushed (#362 769243f4, CI green): C2 (Sized only after 5 real Probe trades and a whole
+  session at Probe; money digest -> 8dba0b1f), C5/R4 (waiting exits persisted), C7 (legs refuse bad types;
+  pending and forced closes isolated), m2, m6 (credit latch gone), m9/R8, R1-R7, and two more it found (a
+  waiting exit after the cutoff; the live path not following swarm.json). Under a third verification.
+- 10:55Z #363 (the swarm's fixes through 4026a42c) merged; deploying with the gate off. W4's stage 3 is PR #365.
+- 10:55:51Z #363 (through 4026a42c) PROMOTED as `20260926T105515Z-b25acc7981e2` (the House restarted at 11:05:52Z
+  after the watch; the swarm took the new release; 0 failed jobs since).
+- 11:57:47Z **Gate image v1** (W1's waiter, before it stopped): sbcp_61d027f4-ba8c-4e9e-8f0a-c9be4f9be28c (+ copy
+  sbcp_74aaa06a), 365-day TTL, box sb_fdd0b97d, gate mark present, windows holdout+train+validation, 14,109 files,
+  2022-01-03 .. 2026-09-25. gate_checkpoint stays null until the swarm's stage 3 (#365) lands.
+- **~11:06-14:14Z the session was stopped by the account's weekly usage limit** (W1, W4 and two verification agents
+  died with it; the owner bought credits and said "continue" at ~14:14Z). The House, the swarm and the backfill ran
+  on their own throughout. W1's laptop-side waiters died (the gate image had been built at 11:57Z).
+- 14:14Z Swarm after 3 h 52 min (verify_swarm on the box): 9,549 trials, 9,449 program-years; 3,000 cycles in the
+  last hour, median 29.2 s, 2 errors; first tournament 13:23Z: 44 on the board, 18 validated, 0 gate-ready, 7
+  retired ("no validation improvement in 31-52 revisions"), 1 born (a fork); 44 alive, 11 retired; pool 6 boxes,
+  1,214 batches, 8,245 jobs, 0 failed, 30,973 program-years in 25,002 box-seconds (~8,000 program-years/h);
+  spend $4.63/h (models $3.46, boxes $1.17); guard: balance $99.17, line $32, burst spent $19.40, not braked.
+  The verify script's population check FAILs only because 44 < 48.
+- 14:15Z swarm.json -> Gym v1 (sbcp_4f1f0577); gate still null. W4 and W1 resumed; the #362 round-2 verification's
+  two lost agents re-run.
 
 ## Scoreboard
 
@@ -324,5 +351,19 @@ clock never restarts.
 | 7 | Execution | no option order; the live path (PR #362) in its second fix round |
 | 8 | Compute | Sail balance $116.08 (owner top-up pending); OpenAI month $596.29 of $607 (cap not raised: unfunded); ThetaData Standard |
 | 9 | Harness | House restarts: 1 (the new House start); CI ~10-11 min; main 310225ae: 988 files (from 1,103), 353,272 lines (from 360,821); docs .md 3 (from 119); README 10 KB (from 105 KB); league/CONTRACT.md 12,048 bytes (from 75,558; rewritten for options by the swarm PR) |
+
+### T0 + 8 h (14:23Z Sept 26)
+
+| # | Metric | T0 + 8 h |
+|---|---|---|
+| 1 | Net since the reset | options P&L $0 (no option order); compute since T0: Sail $118.79 -> $99.17 (-$19.62: the swarm ~$17.4, trials and boxes the rest), OpenAI $0.18; ThetaData and market data accrue (~$0.9 so far) |
+| 2 | Data | core five 2023-2025 3,760/3,760 (done 10:47Z); holdout 920/920 (in the gate image); 2022 1,254/1,255 (XSP 2022-06-29 fails: ThetaData INVALID_ARGUMENT "expecting 11 fields, got 8"); trade_quote 755/755; the 20 names 1,660/23,740; back months 0/2,374; 1,644 underlying-days/h; names ETA ~03:40Z Sunday. Gym v1 (Train 2023-24, Validation 2025) and the gate image built |
+| 3 | Gym throughput | ~8,000 program-years/h on 6 l boxes (30,973 in 6.9 box-hours) (target 2,000 by Saturday evening: met); inner loop median 29 s (target < 3 min: met) |
+| 4 | The search | 44 alive, 11 retired, 1 forked; 9,549 trials; 3,000 cycles/h; architect passes due every 4 h |
+| 5 | Evidence | 18 validated, 0 over the validation line, 0 holdout looks (gate off pending #365), leakage alarm silent |
+| 6 | Forward | none yet (first forward day Monday) |
+| 7 | Execution | no option order; the live path (#362) in its third verification |
+| 8 | Compute | Sail $99.17 (owner top-up pending; the guard brakes at $32: ~14 h at $4.6/h); OpenAI month $596.29 of $607 (unfunded: roles on Sail); ThetaData Standard |
+| 9 | Harness | House restarts: 3 (start, #363 deploy, watch); CI ~10-11 min; the session lost ~3 h to the usage limit |
 
 ## Report
