@@ -392,4 +392,18 @@ consumer, no effect); the gate's relevance question is dropped by the gate's own
   restart: the move sensor resumes from its cursor (snapshots older than two intervals give quotes, not rows).
   This run checks the sensor after it.
 
+- **Pre-ship review for the wrap-up (01:27-01:45Z Sept 26; a workflow of 5 reviewer lenses and 3 skeptics per
+  finding, 20 agents, read-only).** No blocker in #349 or #304. Confirmed (at least 2 of 3 skeptics):
+  (1) **#349, teacher lessons could reach control agents through J3** (the gate's `lesson_arm` control for the
+  teacher's lift): on the T0 snapshot no lesson ranked in any of 128 agents' top 16, but the path is closed:
+  J3 no longer indexes teacher lessons (`j3/memory`, merged into #349 as `dc335348`). (2) **#349, a Jev relevance
+  answer slower than the retrieval's 1.5 s is booked at the $0.01 hold and opens `memory_rank`'s breaker**: shipped
+  as a known limit. J3's own $0.20 a day ceiling (labels and relevance together) bounds the booked cost, so the
+  $1.50 pool cannot starve the move sensor or triage; the Jev arm then falls back to the free order and each
+  retrieval records it, so the report reads the Jev arm on the retrievals Jev actually ranked. (3) **#304, a
+  question named `__proto__` could lose its rejection**: admission now refuses `__proto__`, `constructor` and
+  `prototype` (`05db8c96`, 205 gateway tests pass). Refuted: "#304 lacks the options run's G gateway changes"
+  (the PR rebases on G before it deploys, as written). Notes kept: the score tolerance has not met a real Jev
+  score answer (no caller asks one yet; it fails closed); `too_slow` is judged by the retrieval's own clock.
+
 ## Report
