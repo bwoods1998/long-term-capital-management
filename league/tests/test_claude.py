@@ -1,0 +1,188 @@
+"""`league.claude`: the one request shape that reaches the gateway's Claude route, how the answer is read (the stop reason
+before the content, text blocks only), how every failure becomes a typed `ClaudeError`, and the funded meter's reading.
+The fake opener stands in for `urllib.request.urlopen` (league/tests/test_frontier.py)."""
+
+from __future__ import annotations
+
+import io
+import json
+import socket
+import unittest
+import urllib.error
+from decimal import Decimal
+
+from league.claude import (AGENT_HEADER, COST_HEADER, MAX_TOKENS, MODEL, ROLE_HEADER, Claude, ClaudeError, ClaudeMeter,
+                           ClaudeRefusal, ClaudeTruncated, extract_json, request_body, reservation_ceiling)
+from league.tests.test_frontier import FakeOpener, FakeResponse
+
+GATEWAY = "https://gateway.example.test"
+SECRET = "gw-token-5f1c-DO-NOT-LEAK"
+USAGE = {"input_tokens": 2000, "cache_creation_input_tokens": 3000, "cache_read_input_tokens": 0, "output_tokens": 900}
+
+
+def message(text='{"decision": "retire"}', *, stop="end_turn", model=MODEL, usage=USAGE, cost="0.047000", **more):
+    payload = {"id": "msg_1", "type": "message", "role": "assistant", "model": model, "stop_reason": stop, "usage": usage,
+               "content": [{"type": "thinking", "thinking": "", "signature": "sig"}, {"type": "text", "text": text}], **more}
+    return FakeResponse(payload, headers={} if cost is None else {COST_HEADER: cost})
+
+
+ERRORS: list[urllib.error.HTTPError] = []
+
+
+def http_error(code, detail="refused", headers=None):
+    error = urllib.error.HTTPError(GATEWAY, code, "error", headers or {}, io.BytesIO(detail.encode("utf-8")))
+    ERRORS.append(error)
+    return error
+
+
+def tearDownModule():
+    for error in ERRORS:
+        error.close()
+
+
+def client(opener, **kw):
+    return Claude(GATEWAY, lambda: SECRET, opener=opener, **kw)
+
+
+class RequestShape(unittest.TestCase):
+    def test_the_request_the_gateway_receives(self):
+        opener = FakeOpener(message())
+        schema = {"type": "object", "additionalProperties": False, "required": ["decision"],
+                  "properties": {"decision": {"type": "string"}}}
+        client(opener).ask("THE RULES", "the family", agent="swarm-diagnostician", role="diagnostician", schema=schema)
+        request, timeout = opener.calls[0]
+        self.assertEqual(request.full_url, GATEWAY + "/v1/claude/messages")
+        self.assertEqual(request.get_method(), "POST")
+        self.assertEqual(timeout, 600.0)
+        headers = opener.headers()
+        self.assertEqual(headers["authorization"], "Bearer " + SECRET)
+        self.assertEqual(headers[AGENT_HEADER.lower()], "swarm-diagnostician")
+        self.assertEqual(headers[ROLE_HEADER.lower()], "diagnostician")
+        self.assertEqual(opener.body(), {
+            "model": "claude-opus-5-5", "max_tokens": 16000,
+            "system": [{"type": "text", "text": "THE RULES", "cache_control": {"type": "ephemeral"}}],
+            "messages": [{"role": "user", "content": "the family"}],
+            "thinking": {"type": "adaptive"},
+            "output_config": {"effort": "high", "format": {"type": "json_schema", "schema": schema}},
+        })
+
+    def test_no_sampling_no_prefill_no_forced_tool_and_effort_always_explicit(self):
+        body = request_body(MODEL, "s", [{"role": "user", "content": "q"}], effort="medium", cache=False)
+        self.assertEqual(body["output_config"], {"effort": "medium"}, "Opus 5.5 defaults to medium: always say it")
+        self.assertNotIn("cache_control", body["system"][0])
+        for key in ("temperature", "top_p", "top_k", "tool_choice", "tools", "stream"):
+            self.assertNotIn(key, body)
+        self.assertNotIn("system", request_body(MODEL, "", [{"role": "user", "content": "q"}]), "no empty system block")
+        self.assertEqual(request_body(MODEL, "s", [{"role": "user", "content": "q"}], max_tokens=10 ** 6)["max_tokens"], MAX_TOKENS)
+        for bad in ([{"role": "user", "content": "q"}, {"role": "assistant", "content": "{"}], [],
+                    [{"role": "system", "content": "x"}], [{"role": "user", "content": ""}]):
+            with self.assertRaises(ClaudeError):
+                request_body(MODEL, "s", bad)
+        with self.assertRaises(ClaudeError):
+            request_body(MODEL, "s", [{"role": "user", "content": "q"}], effort="minimal")
+        opener = FakeOpener()
+        with self.assertRaises(ClaudeError):
+            client(opener).ask("s", "q", agent="a", role="Bad Role")
+        self.assertEqual(opener.calls, [], "refused before any request")
+
+    def test_converse_carries_earlier_turns(self):
+        opener = FakeOpener(message("ok"))
+        client(opener).converse("s", [{"role": "user", "content": "a"}, {"role": "assistant", "content": "b"},
+                                      {"role": "user", "content": "c"}], agent="a")
+        self.assertEqual([t["role"] for t in opener.body()["messages"]], ["user", "assistant", "user"])
+
+    def test_the_ceiling_is_never_below_the_gateways_worst_case(self):
+        body = request_body(MODEL, "rules " * 3000, [{"role": "user", "content": "packet " * 5000}])
+        size = len(json.dumps(body).encode("utf-8"))
+        gateway = (Decimal(size + 4096) * 5 + Decimal(16000) * 20) / 1000000  # gateway/lib/claude.mjs worstCase
+        self.assertGreaterEqual(reservation_ceiling(body), gateway)
+        self.assertLess(reservation_ceiling(body) - gateway, Decimal("0.00001"))
+        sonnet = request_body("claude-sonnet-5", "s", [{"role": "user", "content": "q"}], max_tokens=1000)
+        self.assertGreaterEqual(reservation_ceiling(sonnet), (Decimal(len(json.dumps(sonnet)) + 4096) * Decimal("2.5") + 1000 * 10) / 10 ** 6)
+        with self.assertRaises(ClaudeError):
+            reservation_ceiling({**body, "model": "claude-opus-5"})
+
+
+class Answers(unittest.TestCase):
+    def test_only_text_blocks_are_the_answer_and_the_gateway_cost_is_verified(self):
+        answer = client(FakeOpener(message("hello"))).ask("s", "q", agent="a")
+        self.assertEqual(answer.text, "hello")
+        self.assertEqual(answer.cost_usd, Decimal("0.047000"))
+        self.assertTrue(answer.cost_verified)
+        self.assertEqual(answer.stop_reason, "end_turn")
+        self.assertEqual(answer.usage["cache_creation_input_tokens"], 3000)
+        self.assertIsNone(answer.data, "no schema, no parse")
+        unverified = client(FakeOpener(message("hello", cost=None))).ask("s", "q", agent="a")
+        self.assertFalse(unverified.cost_verified)
+        self.assertIsNone(unverified.cost_usd)
+        other = client(FakeOpener(message("hello", model="claude-sonnet-5"))).ask("s", "q", agent="a")
+        self.assertFalse(other.cost_verified, "an answer from another model is not this call's verified cost")
+
+    def test_a_schema_answer_is_parsed_and_one_without_json_is_an_error_that_carries_its_bill(self):
+        schema = {"type": "object"}
+        self.assertEqual(client(FakeOpener(message('{"decision": "rewrite"}'))).ask("s", "q", agent="a", schema=schema).data,
+                         {"decision": "rewrite"})
+        self.assertEqual(client(FakeOpener(message('Here: {"decision": "retire"} done'))).ask("s", "q", agent="a", schema=schema).data,
+                         {"decision": "retire"})
+        with self.assertRaises(ClaudeError) as caught:
+            client(FakeOpener(message("no json here"))).ask("s", "q", agent="a", schema=schema)
+        self.assertEqual(caught.exception.cost_usd, Decimal("0.047000"))
+
+    def test_the_stop_reason_is_read_before_the_content(self):
+        with self.assertRaises(ClaudeRefusal) as refused:
+            client(FakeOpener(message("", stop="refusal", stop_details={"type": "refusal", "category": "cyber"}))).ask("s", "q", agent="a")
+        self.assertEqual(refused.exception.cost_usd, Decimal("0.047000"), "a refusal is billed at its usage")
+        self.assertEqual(refused.exception.answer.stop_reason, "refusal")
+        with self.assertRaises(ClaudeTruncated) as cut:
+            client(FakeOpener(message('{"decision": "rew', stop="max_tokens"))).ask("s", "q", agent="a", schema={"type": "object"})
+        self.assertEqual(cut.exception.cost_usd, Decimal("0.047000"))
+        with self.assertRaises(ClaudeError):
+            client(FakeOpener(message("x", stop="pause_turn"))).ask("s", "q", agent="a")
+
+    def test_every_failure_is_a_claude_error_with_its_status_and_the_gateways_settled_cost(self):
+        with self.assertRaises(ClaudeError) as capped:
+            client(FakeOpener(http_error(402, '{"error": "left of the $100.00 funded", "cap": "claude_funded"}'))).ask("s", "q", agent="a")
+        self.assertEqual((capped.exception.status, capped.exception.cost_usd), (402, None))
+        with self.assertRaises(ClaudeError) as lost:
+            client(FakeOpener(http_error(502, "no answer", {COST_HEADER: "0.000000"}))).ask("s", "q", agent="a")
+        self.assertEqual((lost.exception.status, lost.exception.cost_usd), (502, Decimal("0")))
+        for failure in (urllib.error.URLError("down"), socket.timeout("slow"), ConnectionResetError("reset")):
+            with self.assertRaises(ClaudeError) as caught:
+                client(FakeOpener(failure)).ask("s", "q", agent="a")
+            self.assertIsNone(caught.exception.status)
+            self.assertIsNone(caught.exception.cost_usd, "unknown: the caller keeps its hold")
+            self.assertNotIn(SECRET, str(caught.exception))
+        with self.assertRaises(ClaudeError):
+            client(FakeOpener(FakeResponse(raw=b"<html>"))).ask("s", "q", agent="a")
+
+    def test_extract_json(self):
+        self.assertEqual(extract_json('{"a": 1}'), {"a": 1})
+        self.assertEqual(extract_json('```json\n{"a": {"b": 2}}\n```'), {"a": {"b": 2}})
+        self.assertIsNone(extract_json("nothing"))
+
+
+class Meter(unittest.TestCase):
+    def health(self, claude):
+        return FakeResponse({"ok": True, "claude": claude})
+
+    def test_the_funded_total_less_what_is_spent_is_read_and_kept_for_its_ttl(self):
+        now = [1000.0]
+        opener = FakeOpener(self.health({"cap_usd": "100.00", "spent_usd": "12.345678", "inflight_usd": "0.3", "calls": 4}),
+                            self.health({"cap_usd": "100.00", "spent_usd": "20.000000"}))
+        meter = ClaudeMeter(GATEWAY, lambda: SECRET, opener=opener, ttl=60, clock=lambda: now[0])
+        self.assertEqual(meter.remaining(), Decimal("87.654322"))
+        self.assertEqual(meter.remaining(), Decimal("87.654322"))
+        self.assertEqual(len(opener.calls), 1)
+        self.assertEqual(opener.request.full_url, GATEWAY + "/v1/health")
+        now[0] += 61
+        self.assertEqual(meter.remaining(), Decimal("80.000000"))
+
+    def test_an_unreadable_gateway_is_unknown_never_a_number(self):
+        for reply in (urllib.error.URLError("down"), self.health(None), self.health({"cap_usd": "x", "spent_usd": "1"}),
+                      FakeResponse(raw=b"not json")):
+            meter = ClaudeMeter(GATEWAY, lambda: SECRET, opener=FakeOpener(reply), ttl=0)
+            self.assertIsNone(meter.remaining())
+
+
+if __name__ == "__main__":
+    unittest.main()

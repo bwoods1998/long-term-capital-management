@@ -4,7 +4,7 @@
 `provision` generates an owner credential once and installs it as a Worker secret.
 `unkill` explicitly releases the external switch; provisioning does not change its state.
 `kill` engages it (any holder of the ordinary gateway token may: stopping is never gated).
-`status` prints the switch, today's counters, the frontier month and the Sail balance.
+`status` prints the switch, today's counters, the frontier month, Claude's funded meter and the Sail balance.
 No credential value is printed, passed in argv, or included in deployment archives.
 """
 import argparse
@@ -55,7 +55,7 @@ def main():
         with urllib.request.urlopen(request, timeout=30) as response:
             data = json.load(response)
         sail = data.get('sail') or {}
-        print(json.dumps({'kill_switch': data.get('kill_switch'), 'today': data.get('today'), 'frontier': data.get('frontier'), 'typesafe': data.get('typesafe'), 'github': data.get('github'),
+        print(json.dumps({'kill_switch': data.get('kill_switch'), 'today': data.get('today'), 'frontier': data.get('frontier'), 'claude': data.get('claude'), 'typesafe': data.get('typesafe'), 'github': data.get('github'),
                           'sail_balance_usd': sail.get('balance_usd'), 'box_status': sail.get('box_status')}, indent=1))
         return
     token = KEY.read_text().strip()

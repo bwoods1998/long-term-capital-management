@@ -131,6 +131,17 @@ DEFAULTS: dict[str, Any] = {
         # $10.89 left (effectively none until the owner funds it), so the swarm spends OpenAI only after a raise.
         "openai_reserve_usd": 25.0,
     },
+    # Claude through the gateway (Sept 26, 2026, the swarm sprint; league/claude.py). The gateway's CLAUDE_USD ($100, the
+    # owner's funded total) is the hard line; `usd_cap` is the swarm's own Claude line inside it and `reserve_usd` is never
+    # spent (the House's post-mortem). `roles` are the calls Claude answers first; removing one routes it as before.
+    "claude": {
+        "model": "claude-opus-5-5",
+        "effort": "high",
+        "usd_cap": 100.0,
+        "reserve_usd": 5.0,
+        "max_tokens": 16000,            # thinking and the answer together (the gateway's non-streaming ceiling)
+        "roles": ["architect", "audit", "diagnostician"],
+    },
     "heartbeat_seconds": 20,
     "stale_heartbeat_seconds": 240,     # the House restarts a swarm whose heartbeat is older than this
     "nice": 10,
