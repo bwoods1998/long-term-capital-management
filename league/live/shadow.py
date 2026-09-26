@@ -9,8 +9,6 @@ Gym's `league.gym.engine.Account` (subclassed only where a replay and a live ses
 - its program runs in the decider's child process (`league.live.decider`), so `_decide` is split in two: `job` builds
   exactly what the engine hands `build_ctx` (the positions and orders rows, cash, equity, buying power, the rules of
   the roots with a chain now) and `apply` turns the answer's intents into orders with the engine's own `_intent`;
-- `_trade_row` is the engine's with the date helper taken from here (the engine's imports pyarrow, which the House has
-  not).
 
 Everything else is the engine's code, unchanged: a decision at minute m meets the NBBO of minute m + 1 at the natural
 price (better only by the calibrated fill model's draw, keyed by contract and minute), size capped by the quoted size,
@@ -125,24 +123,6 @@ class ShadowAccount(E.Account):
         out = self.trades[self.exported:]
         self.exported = len(self.trades)
         return out
-
-    def _trade_row(self, pos: E.Position) -> dict:
-        max_loss = pos.max_loss_share * V.MULTIPLIER * pos.opened_qty
-        exit_value = pos.exit_value_qty / pos.opened_qty if pos.opened_qty else math.nan
-        return {
-            "id": pos.pid, "root": pos.root, "type": pos.type, "tag": pos.tag, "qty": pos.opened_qty,
-            "legs": [{"dte": leg.dte, "strike": leg.strike, "right": "C" if leg.is_call else "P",
-                      "side": "long" if leg.side > 0 else "short", "ratio": leg.ratio} for leg in pos.legs],
-            "day": from_ordinal(pos.opened_day).isoformat(), "entry_minute": pos.info.get("minute"),
-            "filled_minute": pos.info.get("filled_minute"),
-            "exit_day": from_ordinal(pos.exit_day).isoformat() if pos.exit_day else None,
-            "exit_minute": pos.exit_mi + pos.info.get("open_min", 570) if pos.exit_mi else None,
-            "sessions_held": self.session - pos.opened_session,
-            "entry": round(pos.entry, 4), "exit": None if not math.isfinite(exit_value) else round(exit_value, 4),
-            "max_loss": round(max_loss, 2), "fees": round(pos.fees, 2), "pnl": round(pos.cash, 2),
-            "return_on_max_loss": round(pos.cash / max_loss, 4) if max_loss > 0 else None,
-            "exit_reason": pos.reason, "note": pos.note,
-        }
 
     # ------------------------------------------------------------------ state
     def to_state(self) -> dict:

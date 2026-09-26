@@ -256,6 +256,10 @@ class OptionsLive:
         day = self._ensure_day(today, open_min, close_min)
         mi = m - open_min
         if mi >= day.minutes - 1:
+            if mi == day.minutes - 1 and self._last_minute != (today.isoformat(), mi):
+                # The close's own row: read it, and step the shadow book through its last minute (one behind).
+                self._last_minute = (today.isoformat(), mi)
+                self._closing_minute(day, mi, now, out)
             out["state"] = "after the close"
             self._end_of_day(day, out)
             self._quiet(now, out)
@@ -546,25 +550,7 @@ class OptionsLive:
         roots = self._roots()
         self._read(day, mi, roots, out)
         jobs: list[dict] = []
-        shadow_due: dict[str, ShadowAccount] = {}
-        for key, acc in list(self.shadow.accounts.items()):
-            inst = self.instances.get(key)
-            if acc.began_day != day.ordinal:
-                acc.begin_day(day)
-                acc.began_day = day.ordinal
-                acc.last_mi = -1
-            acc.pre(day, mi)
-            if inst is None or inst.mode == "wind_down" or acc.winding_down:
-                if not acc.winding_down or any(not p.closing for p in acc.positions.values()):
-                    acc.wind_down(day, mi)
-                continue
-            if inst.error or mi not in acc.decision_minutes(day):
-                continue
-            job = acc.job(day, mi)
-            if job is not None:
-                job["key"] = key
-                jobs.append(job)
-                shadow_due[key] = acc
+        shadow_due = self._shadow_jobs(day, mi - 1, jobs)
         real_due: dict[str, Instance] = {}
         if self.book is not None:
             self._real_pre(day, mi, now, out)
@@ -575,23 +561,14 @@ class OptionsLive:
                     continue
                 job = self._real_job(inst, day, mi)
                 if job is not None:
+                    job["mi"] = mi
                     jobs.append(job)
                     real_due[key] = inst
-        snaps = {r: day.snapshot(r, mi) for r in day.chains}
-        snaps = {r: s for r, s in snaps.items() if s is not None}
-        histories = {inst.needs.history for inst in self.instances.values() if inst.needs is not None}
-        unders = {(r, h): day.under(r, mi, h) for r in snaps for h in histories}
-        results: dict[str, dict] = {}
-        if jobs:
-            try:
-                results = self.decider.decide(snaps, unders, jobs)
-            except DeciderError as exc:
-                out["decider"] = str(exc)[:200]
-                self.alert("warning", f"live: {exc}")
+        results = self._decide(day, jobs, out)
         for key, acc in shadow_due.items():
             answer = results.get(key) or {}
             self._stats(key, answer)
-            acc.apply(day, mi, answer.get("intents") or [])
+            acc.apply(day, mi - 1, answer.get("intents") or [])
         for key, inst in real_due.items():
             answer = results.get(key) or {}
             self._stats(key, answer)
@@ -607,6 +584,65 @@ class OptionsLive:
                            "open": len(self.book.positions), "working": len(self.book.orders), "frozen": self.book.frozen or None,
                            "orders_today": self.book.count_today(day.day.isoformat())}
         out["blocked"] = self.real_block() or None
+
+    def _shadow_jobs(self, day: LiveDay, smi: int, jobs: list[dict]) -> dict[str, ShadowAccount]:
+        """The shadow book steps ONE MINUTE BEHIND the wall clock: at wall minute m it steps minute m - 1, so the Gym's
+        engine, which reads the minute after a decision to judge a passive fill (adverse selection), finds that row
+        recorded, exactly as it does in a replay of a stored day. Returns the accounts deciding at `smi`."""
+        due: dict[str, ShadowAccount] = {}
+        if smi < 0:
+            return due
+        for key, acc in list(self.shadow.accounts.items()):
+            inst = self.instances.get(key)
+            if acc.began_day != day.ordinal:
+                acc.begin_day(day)
+                acc.began_day = day.ordinal
+                acc.last_mi = -1
+            if smi <= acc.last_mi:
+                continue
+            acc.pre(day, smi)
+            if inst is None or inst.mode == "wind_down" or acc.winding_down:
+                if not acc.winding_down or any(not p.closing for p in acc.positions.values()):
+                    acc.wind_down(day, smi)
+                continue
+            if inst.error or smi not in acc.decision_minutes(day):
+                continue
+            job = acc.job(day, smi)
+            if job is not None:
+                job["key"], job["mi"] = key, smi
+                jobs.append(job)
+                due[key] = acc
+        return due
+
+    def _decide(self, day: LiveDay, jobs: list[dict], out: dict) -> dict[str, dict]:
+        if not jobs:
+            return {}
+        minutes = {job["mi"] for job in jobs}
+        snaps = {(r, m): day.snapshot(r, m) for r in day.chains for m in minutes}
+        snaps = {k: v for k, v in snaps.items() if v is not None}
+        histories = {inst.needs.history for inst in self.instances.values() if inst.needs is not None}
+        unders = {(r, h, m): day.under(r, m, h) for (r, m) in snaps for h in histories}
+        try:
+            return self.decider.decide(snaps, unders, jobs)
+        except DeciderError as exc:
+            out["decider"] = str(exc)[:200]
+            self.alert("warning", f"live: {exc}")
+            return {}
+
+    def _closing_minute(self, day: LiveDay, mi: int, now: float, out: dict) -> None:
+        """16:00 (13:00 on a half day): the close's row read, the shadow book's last minute stepped (and asked, as
+        the engine asks a program at its last decision minute); no real decision."""
+        day.advance(mi)
+        self._read(day, mi, self._roots(), out)
+        jobs: list[dict] = []
+        due = self._shadow_jobs(day, mi - 1, jobs)
+        results = self._decide(day, jobs, out)
+        for key, acc in due.items():
+            answer = results.get(key) or {}
+            self._stats(key, answer)
+            acc.apply(day, mi - 1, answer.get("intents") or [])
+        self._export_shadow()
+        self.shadow.save()
 
     def _stats(self, key: str, answer: Mapping[str, Any]) -> None:
         inst = self.instances.get(key)

@@ -16,8 +16,8 @@ Gym and the House can never disagree about what a program saw or how its order f
 - XSP and SPXW have no index feed at the venue: their level is put-call parity on the nearest expiry's at-the-money
   options (`league.gym.ctx.parity_spot`), the way the Gym's store checks its recorded level.
 
-numpy only (the House has no pyarrow). `contract_key` repeats the store's formula exactly (a test pins them together
-where pyarrow is installed).
+numpy only (the House has no pyarrow): the contract identity, the dates and the underlying's shape are the Gym's own
+(`league/gym/day.py`, the store's pyarrow-free half).
 """
 
 from __future__ import annotations
@@ -31,39 +31,15 @@ import numpy as np
 
 from ..gym import venue as V
 from ..gym.ctx import Snapshot, parity_spot, underlying_view
+from ..gym.day import Underlying, contract_key, from_ordinal, ordinal
 from ..gym.events import EventCalendar, rate_on
 from .venue import occ_parts, quote_of
 
 EPOCH = dt.date(1970, 1, 1)
-INDEX_UNDERLYING = {"XSP": "XSP", "SPXW": "SPXW", "SPX": "SPX"}
-
-
-def ordinal(day: dt.date) -> int:
-    return (day - EPOCH).days
-
-
-def from_ordinal(value: int) -> dt.date:
-    return EPOCH + dt.timedelta(days=int(value))
-
-
-def contract_key(expiration: Any, strike: Any, is_call: Any) -> np.ndarray:
-    """The store's contract identity (`league.gym.store.contract_key`): (expiration ordinal, strike to the tenth of a
-    cent, right), sortable in the store's order (expiry, strike, calls first)."""
-    e = np.asarray(expiration, dtype=np.int64)
-    k = np.rint(np.asarray(strike, dtype=np.float64) * 1000.0).astype(np.int64)
-    c = np.where(np.asarray(is_call, dtype=bool), 0, 1).astype(np.int64)
-    return (e * 100_000_000 + k) * 2 + c
 
 
 def uses_parity(root: str) -> bool:
     return V.is_index(root)
-
-
-@dataclass
-class Underlying:
-    """The session's underlying price row by row (NaN before a price is known)."""
-
-    price: np.ndarray
 
 
 class LiveChain:
@@ -86,7 +62,7 @@ class LiveChain:
         self.bid_size = np.zeros((self.m, 0), dtype=np.int32)
         self.ask_size = np.zeros((self.m, 0), dtype=np.int32)
         self.oi = np.zeros(0, dtype=np.int64)
-        self.underlying = Underlying(np.full(self.m, np.nan))
+        self.underlying = Underlying(price=np.full(self.m, np.nan))
         self._col: dict[str, int] = {}
         self.generation = 0          # bumped at every rebuild (indices change)
 
@@ -227,6 +203,7 @@ class LiveDay:
         self.day = day
         self.ordinal = ordinal(day)
         self.weekday = day.weekday()
+        self.store = None            # the engine settles a missed expiry from its store; live has none (today's price)
         self.open_min, self.close_min = int(open_min), int(close_min)
         self.minutes = self.close_min - self.open_min + 1
         self.rate = rate_on(day)

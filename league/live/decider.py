@@ -14,8 +14,8 @@ decisions a minute. What that buys:
   reads its answers as JSON, never pickle, so a program that escaped the Gym's sandbox still could not hand the House an
   object to run.
 
-The parent sends each minute's `Snapshot`s once (pickled; the House is the trusted side) and each instance's account
-rows; the child slices each instance's chain with the Gym's own `Snapshot.view(slice_index(...))`, builds the ctx with
+The parent sends each minute's `Snapshot`s once (pickled; the House is the trusted side), keyed by (root, minute
+index), and each instance's account rows with the minute index it decides on; the child slices each instance's chain with the Gym's own `Snapshot.view(slice_index(...))`, builds the ctx with
 the Gym's own `build_ctx` and calls `Runner.decide`, exactly as `league.gym.engine.Account._decide` does, so a program
 sees the same ctx live as in the replay. `InlineDecider` is the same API in one process, for tests.
 """
@@ -73,9 +73,10 @@ def _handle(message: Any, runners: dict, reply: Any) -> bool:
                     out[job["key"]] = {"intents": [], "stats": None, "missing": True}
                     continue
                 needs = runner.program.needs
+                mi = job.get("mi")
                 chains = {}
                 for root in job["roots"]:
-                    snap = snaps.get(root)
+                    snap = snaps.get((root, mi))
                     if snap is not None:
                         chains[root] = snap.view(snap.slice_index(needs.dte_min, needs.dte_max, needs.band),
                                                  key=(needs.dte_min, needs.dte_max, needs.band))
@@ -84,7 +85,7 @@ def _handle(message: Any, runners: dict, reply: Any) -> bool:
                     continue
                 ctx = build_ctx(minute=job["minute"], open_minute=job["open_minute"], close_minute=job["close_minute"],
                                 weekday=job["weekday"], chains=chains,
-                                underlyings={r: unders[(r, needs.history)] for r in chains},
+                                underlyings={r: unders[(r, needs.history, mi)] for r in chains},
                                 positions=job["positions"], orders=job["orders"], cash=job["cash"], equity=job["equity"],
                                 budget=job["budget"], buying_power=job["buying_power"], params=runner.program.params,
                                 rules={r: job["rules"][r] for r in chains}, events=job["events"],

@@ -95,11 +95,13 @@ class RoundTrip(LiveCase):
         [(buy, agent)] = self.ledger.of("book.fill")
         self.assertEqual((agent, buy["side"], buy["real_money"], buy["source"]), ("vert", "buy", True, "venue"))
         self.assertTrue(buy["instrument"]["market_id"].startswith("debit_vertical|+1SPY"))
-        # The shadow order meets the NEXT minute's quotes.
+        # The shadow book steps one minute behind the wall clock (the engine judges a passive fill by the minute after
+        # it): at 09:32 it decides on 09:31's row, and its order meets the NEXT minute's quotes, 09:32's, at 09:33.
         shadow = live.shadow.accounts["vert@1:s"]
-        self.assertEqual(len(shadow.positions), 0)
-        self.assertEqual(len(shadow.orders), 1)
+        self.assertEqual((len(shadow.positions), len(shadow.orders)), (0, 0))
         self.run_to(9, 32)
+        self.assertEqual((len(shadow.positions), len(shadow.orders)), (0, 1))
+        self.run_to(9, 33)
         self.assertEqual(len(shadow.positions), 1)
         self.run_to(9, 40)
         # Both closed after the program's hold: one shadow trade and one real trade on the forward record.
@@ -240,6 +242,40 @@ class Assignment(LiveCase):
         live._activities_at = float("-inf")
         self.run_to(9, 36)
         self.assertIsNone(live.state.get("assignment_latch"), "resolved: the latch lifts itself")
+
+
+class TheClose(LiveCase):
+    def test_index_structures_settle_in_cash_at_the_close_and_the_shadow_book_ends_its_day(self):
+        self.clock.set(at(MONDAY, 14, 50))
+        xsp = VERTICAL.replace('"SPY"', '"XSP"')
+        live = self.make([family("xsp", xsp, band="probe", params={"hold": 600, "dte": 0})])
+        self.run_to(14, 52)
+        [pos] = live.book.positions.values()
+        self.assertEqual((pos.root, pos.expiry), ("XSP", "2026-09-28"))
+        self.run_to(15, 59)
+        self.assertEqual(len(self.venue.sent), 1, "an index structure is held into its cash settlement")
+        self.clock.set(at(MONDAY, 16, 0))
+        out = live.minute()
+        self.assertEqual(out["state"], "after the close")
+        self.assertEqual(live.book.positions, {})
+        [closed] = live.book.closed_trades()
+        self.assertEqual(closed["family"], "xsp")
+        level = live.day.chains["XSP"].underlying.price
+        self.assertTrue(np.isfinite(level[389]))
+        settled = live.state.rows("SELECT reason FROM positions")[0]["reason"]
+        self.assertEqual(settled, "settled")
+        shadow = live.shadow.accounts["xsp@1:s"]
+        self.assertEqual(shadow.ended_day, live.day.ordinal)
+        self.assertEqual({t["exit_reason"] for t in shadow.trades}, {"settled"})
+        self.assertEqual(sorted(r["source"] for r in self.families.forward_rows("xsp")), ["real", "shadow"])
+        # After the close the account's expiring contracts are the venue's to settle: no freeze for them.
+        live.state.put("quiet_at", 0)
+        self.clock.set(at(MONDAY, 16, 20))
+        live.minute()
+        live.state.put("quiet_at", 0)
+        self.clock.set(at(MONDAY, 16, 40))
+        live.minute()
+        self.assertEqual(live.book.frozen, "")
 
 
 class Restart(LiveCase):

@@ -52,12 +52,7 @@ class GymAndLiveAgree(unittest.TestCase):
         day.history["SPY"] = [(590.0, 595.0, 588.0, 592.0), (591.0, 596.0, 589.0, 593.0), (592.0, 597.0, 590.0, 594.0)]
         program = R.load_program(PROGRAM, name="probe")
 
-        class Gym(E.Account):
-            # The engine's trade row reads its date helper from the store, which needs pyarrow; the shadow book's is the
-            # same row with the helper taken from league/live/chains.py.
-            _trade_row = ShadowAccount._trade_row
-
-        gym = Gym(program, E.RunConfig(window="forward", roots=("SPY",), capital=10000.0), ("SPY",))
+        gym = E.Account(program, E.RunConfig(window="forward", roots=("SPY",), capital=10000.0), ("SPY",))
         seen_gym = []
         runner = gym.runner
         original = runner.decide
@@ -89,9 +84,9 @@ class GymAndLiveAgree(unittest.TestCase):
             live.pre(day, mi)
             if wants:
                 job = live.job(day, mi)
-                job["key"] = "k"
-                snaps = {"SPY": day.snapshot("SPY", mi)}
-                unders = {("SPY", 3): day.under("SPY", mi, 3)}
+                job["key"], job["mi"] = "k", mi
+                snaps = {("SPY", mi): day.snapshot("SPY", mi)}
+                unders = {("SPY", 3, mi): day.under("SPY", mi, 3)}
                 answer = decider.decide(snaps, unders, [job])["k"]
                 seen_live.append(answer["intents"])
                 live.apply(day, mi, answer["intents"])
@@ -106,10 +101,7 @@ class GymAndLiveAgree(unittest.TestCase):
 @unittest.skipUnless(HAVE, "numpy not installed")
 class ContractIdentity(unittest.TestCase):
     def test_the_live_key_is_the_stores(self):
-        try:
-            from league.gym.store import contract_key as store_key
-        except ImportError:
-            self.skipTest("pyarrow not installed (the Gym's store)")
+        from league.gym.day import contract_key as store_key
         exp = np.array([20724, 20725, 20730])
         strike = np.array([600.0, 7650.0, 2.5])
         call = np.array([True, False, True])

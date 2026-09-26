@@ -39,7 +39,7 @@ def snapshot():
 
 
 def job(key):
-    return {"key": key, "minute": 600, "open_minute": 570, "close_minute": 960, "weekday": 0, "roots": ["SPY"],
+    return {"key": key, "mi": 30, "minute": 600, "open_minute": 570, "close_minute": 960, "weekday": 0, "roots": ["SPY"],
             "positions": [], "orders": [], "cash": 10000.0, "equity": 10000.0, "budget": 10000.0, "buying_power": 10000.0,
             "rules": {"SPY": V.rules_for("SPY").as_dict()}, "events": {}, "events_next": {}, "closed": [], "rejects": []}
 
@@ -64,12 +64,12 @@ class TheChild(unittest.TestCase):
         inline = InlineDecider()
         for d in (self.decider, inline):
             d.load("v", VERTICAL, {}, "vert")
-        snaps, unders = {"SPY": snapshot()}, {("SPY", 2): underlying_view("SPY", [600.0, 600.1])}
+        snaps, unders = {("SPY", 30): snapshot()}, {("SPY", 2, 30): underlying_view("SPY", [600.0, 600.1])}
         self.assertEqual(self.decider.decide(snaps, unders, [job("v")]), inline.decide(snaps, unders, [job("v")]))
 
     def test_a_program_that_never_returns_is_cut_off_and_counted(self):
         self.decider.load("loop", LOOP, {}, "loop")
-        answer = self.decider.decide({"SPY": snapshot()}, {("SPY", 0): underlying_view("SPY", [600.0])}, [job("loop")])["loop"]
+        answer = self.decider.decide({("SPY", 30): snapshot()}, {("SPY", 0, 30): underlying_view("SPY", [600.0])}, [job("loop")])["loop"]
         self.assertEqual(answer["intents"], [])
         self.assertEqual(answer["stats"]["timeouts"], 1)
         self.assertEqual(self.decider.restarts, 0)
@@ -99,10 +99,10 @@ class AHungChild(unittest.TestCase):
             decider._kill()
             Stuck.hang = True
             with self.assertRaises(DeciderError):
-                decider.decide({"SPY": snapshot()}, {("SPY", 2): underlying_view("SPY", [600.0])}, [job("v")])
+                decider.decide({("SPY", 30): snapshot()}, {("SPY", 2, 30): underlying_view("SPY", [600.0])}, [job("v")])
             self.assertEqual(decider.restarts, 1)
             # The next child has every program again (fresh memory).
-            answer = decider.decide({"SPY": snapshot()}, {("SPY", 2): underlying_view("SPY", [600.0])}, [job("v")])
+            answer = decider.decide({("SPY", 30): snapshot()}, {("SPY", 2, 30): underlying_view("SPY", [600.0])}, [job("v")])
             self.assertIn("v", answer)
             self.assertTrue(answer["v"]["intents"])
         finally:
