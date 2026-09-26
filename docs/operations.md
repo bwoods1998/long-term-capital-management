@@ -305,13 +305,16 @@ resolve the accounting; estimated intrinsic values never become forward evidence
 The checked-in deployment remains in paper readiness: `real_money: false`, no enabled grant, and
 the gateway's `OPTION_STRUCTURES_REAL: off`. The gateway still admits paper structures and verified
 closes of held real positions. A disabled gateway is a permitted stricter setting in `league.ci`.
+The paper route proof runs from 09:35 ET during this readiness stage, even with no real-account
+client, grant or eligible family. It keeps an unfinished attempt's identity and owned contracts
+through restarts. Passing records paper execution evidence; the real-money flags remain off.
 
 **Turning real money on** (M4b): the gateway deployed with the caps by maximum loss and
 `OPTION_STRUCTURES_REAL` set to the five types; a second owner deploy with `real_money` true (the
 release carries the options money table: a new money digest); `python3 scripts/live_trading.py
 --ratify` within a minute of it (`--enable` the first time). Then the House promotes Candidates that
-qualify to Probe within five minutes (`live.band` rows), and the paper proof runs at the next session's
-09:35 ET before any real order.
+qualify to Probe within five minutes (`live.band` rows). Real entries still require the paper route
+proof's witnessed round trip, whether it passed during readiness or in the current session.
 
 ### Monday's pre-open (12:00-13:25Z Sept 28)
 
@@ -393,3 +396,10 @@ qualify to Probe within five minutes (`live.band` rows), and the paper proof run
 | `OPTION_STRUCTURES_REAL` | `gateway/wrangler.jsonc` | off | structure types real money may open; must equal the constitution's list | gateway deploy with the matching House deploy and a ratify |
 | `FRONTIER_MONTH_USD`, `FRONTIER_MONTH_MAX_USD`, `FRONTIER_FUNDED_MONTH` | `gateway/wrangler.jsonc` | $707, September 2026 only | the OpenAI month; expires before an unfunded month can renew it | gateway deploy |
 | The money rules | `league/constitution.py` | Deploy G's (money `be1e3ce9`); the options table arrives with the live path | what real money may do | owner deploy, then `--ratify` |
+
+In `swarm.json`, `researcher.usd_per_hour` keeps the combined Sail-model and OpenAI trailing-hour pace.
+Set the optional `researcher.sail_usd_per_hour` to the funded Sail rate to pace Sail models separately;
+absent or null keeps the combined behavior. OpenAI holds still count against its own burst cap and funded
+gateway month. Invalid, nonfinite or negative limits pause research. The heartbeat's
+`status.researcher_pace` reports the scope, limit, spend and pause reason, so a quiet research loop can be
+distinguished from a publication delay.
