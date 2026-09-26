@@ -51,6 +51,12 @@ def read(root: str | Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
     image = settings.load(root)["gym"]["image_checkpoint"]
+    from ..gym.driver import build_bundle
+
+    try:
+        bundle = build_bundle()[1]
+    except OSError:
+        bundle = None
     try:
         db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1.0)
         db.row_factory = sqlite3.Row
@@ -88,7 +94,7 @@ def read(root: str | Path) -> list[dict[str, Any]]:
 
         sha = run_sha({"sha": v["sha"], "params": params})
         if fam["band"] == "gym":
-            if not image or state.get("validation_image") != image:
+            if not image or state.get("validation_image") != image or not bundle or state.get("validation_bundle") != bundle:
                 continue
             # Tuition only for a validated version the review (and the audit) passed and the gate has not failed, refused
             # or demoted: a program the reviewer called dangerous, or one whose holdout or forward record failed, never

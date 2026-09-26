@@ -261,6 +261,9 @@ class Mirror(HookCase):
 class Reads(HookCase):
     def setUp(self):
         super().setUp()
+        from league.gym.driver import build_bundle
+
+        self.bundle = build_bundle()[1]
         (self.root / "swarm.json").write_text(json.dumps({"gym": {"image_checkpoint": "synthetic-image"}}))
 
     def test_bands_read_rows_for_the_live_path(self):
@@ -274,7 +277,8 @@ class Reads(HookCase):
         store.set_band(a["id"], "candidate", reason="passed")
         from league.swarm.gate import run_sha
 
-        store.set_state(b["id"], validation_version=1, validation_image="synthetic-image", validation_line={"passed": True}, typical_max_loss_usd=45.0,
+        store.set_state(b["id"], validation_version=1, validation_image="synthetic-image", validation_bundle=self.bundle,
+                        validation_line={"passed": True}, typical_max_loss_usd=45.0,
                         review={"sha": run_sha(store.version(b["id"], 1)), "verdict": "pass", "audit": {"verdict": "pass"}})
         store.close()
         rows = {r["family"]: r for r in bands.read(self.root)}
@@ -286,6 +290,9 @@ class Reads(HookCase):
                                                 "code", "params", "run_sha", "typical_max_loss_usd", "seed_era", "forward"})
         self.assertIn("# tuition", rows["tuition"]["code"])
         self.assertEqual((rows["tuition"]["typical_max_loss_usd"], rows["tuition"]["seed_era"]), (45.0, True))
+        with patch("league.gym.driver.build_bundle", return_value=(b"", "changed-code")):
+            self.assertEqual([r["family"] for r in bands.read(self.root)], ["condor-vrp"],
+                             "new Gym code requires tuition validation again; existing forward bands remain")
         (self.root / "swarm.json").write_text(json.dumps({"gym": {"image_checkpoint": "expanded-image"}}))
         self.assertEqual([r["family"] for r in bands.read(self.root)], ["condor-vrp"],
                          "new data requires tuition validation again; existing forward bands remain")
@@ -298,12 +305,14 @@ class Reads(HookCase):
         for fid in ("unreviewed", "reviewed", "refused", "looked-failed", "demoted"):
             fam = store.add_family({**SPEC, "id": fid}, origin="seed")
             v = store.add_version(fam["id"], f"# {fid}\nNEEDS = {{}}\n", {}, author="seed")
-            store.set_state(fid, validation_version=v["n"], validation_image="synthetic-image", validation_line={"passed": True})
+            store.set_state(fid, validation_version=v["n"], validation_image="synthetic-image", validation_bundle=self.bundle,
+                            validation_line={"passed": True})
             cases[fid] = run_sha(v)
         store.set_state("reviewed", review={"sha": cases["reviewed"], "verdict": "pass", "audit": {"verdict": "pass"}})
         fam = store.add_family({**SPEC, "id": "unaudited"}, origin="seed")
         v = store.add_version("unaudited", "# unaudited\nNEEDS = {}\n", {}, author="seed")
-        store.set_state("unaudited", validation_version=v["n"], validation_image="synthetic-image", validation_line={"passed": True},
+        store.set_state("unaudited", validation_version=v["n"], validation_image="synthetic-image", validation_bundle=self.bundle,
+                        validation_line={"passed": True},
                         review={"sha": run_sha(v), "verdict": "pass"})
         store.set_state("refused", review={"sha": cases["refused"], "verdict": "fail"}, gate_outcome={"sha": cases["refused"], "result": "refused"})
         store.set_state("looked-failed", review={"sha": cases["looked-failed"], "verdict": "pass", "audit": {"verdict": "pass"}},
