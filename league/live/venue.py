@@ -238,6 +238,9 @@ class Account:
             return Submitted(False, None, f"no answer: {str(exc)[:200]}", unknown=True)
         if 200 <= status < 300 and isinstance(payload, dict) and payload.get("id"):
             return Submitted(True, payload, "", status=status)
+        if 200 <= status < 300:
+            # Accepted, but no order id to track it by: the order may exist. Unknown, looked up by its client id.
+            return Submitted(False, None, f"HTTP {status} without an order id", unknown=True, status=status)
         message = str((payload.get("message") or payload.get("error") if isinstance(payload, dict) else payload) or "")[:300]
         # A refusal the gateway made before forwarding names the cap it hit (`cap`: "equity", "order", "day_orders", ...):
         # nothing reached the venue. Its own 502 ("did not answer") and any other 5xx or timeout after dispatch may still

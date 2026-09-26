@@ -75,6 +75,8 @@ class Orders(unittest.TestCase):
         self.assertTrue(self.a.submit(self.body, exit=False).unknown)
         self.t.route("POST", "/v2/orders", 0, TransportError("timed out"))
         self.assertTrue(self.a.submit(self.body, exit=False).unknown)
+        self.t.route("POST", "/v2/orders", 200, {"status": "accepted"})       # accepted with no id to track: unknown
+        self.assertTrue(self.a.submit(self.body, exit=False).unknown)
 
     def test_a_missing_order_is_none_and_a_found_one_is_its_row(self):
         self.assertIsNone(self.a.order_by_client_id("lv-0000009-f"))
