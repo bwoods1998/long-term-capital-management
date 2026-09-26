@@ -37,7 +37,6 @@ def main(argv: list[str] | None = None) -> dict:
         out = {
             "stops": state.get("stops"), "reconciliation": state.get("recon"), "paper_proof": state.get("paper_proof"),
             "assignment_latch": state.get("assignment_latch"), "orders_today": state.get("count"),
-            "credit_accepted": state.get("credit_accepted", False),
             "pending_owner_actions": {k: state.get(k) for k in ("owner_release_drawdown", "owner_clear_assignment") if state.get(k)},
             "open_positions": state.rows("SELECT pid, family, type, root, qty, status, opened_day FROM positions "
                                          "WHERE status IN ('open', 'awaiting_expiry') ORDER BY pid"),

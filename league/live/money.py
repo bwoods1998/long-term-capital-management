@@ -102,6 +102,8 @@ class Table:
     kelly_fraction: float
     sized_share: Decimal
     sized_family_share: Decimal
+    min_probe_real_trades: int
+    min_probe_sessions: int
     book_share: Decimal
     daily_stop_share: Decimal
     drawdown_stop_share: Decimal
@@ -135,7 +137,8 @@ class Table:
             probe_family_share=D(probe["family_share"]), probe_floor=D(probe["floor_usd"]),
             sized_min_trades=int(sized["min_trades"]), sized_confidence=float(D(sized["confidence"])),
             kelly_fraction=float(D(sized["kelly_fraction"])), sized_share=D(sized["max_loss_share"]),
-            sized_family_share=D(sized["family_share"]),
+            sized_family_share=D(sized["family_share"]), min_probe_real_trades=int(sized["min_probe_real_trades"]),
+            min_probe_sessions=int(sized["min_probe_sessions"]),
             book_share=D(t["book_share"]), daily_stop_share=D(t["daily_stop_share"]),
             drawdown_stop_share=D(t["drawdown_stop_share"]),
             tuition_day=D(t["tuition"]["day_usd"]), tuition_week=D(t["tuition"]["week_usd"]),
@@ -146,16 +149,18 @@ class Table:
             gateway_day_share=D(gate["day_equity_share"]), gateway_max_orders=int(gate["max_day_orders"]),
         )
 
-    def credit_allowed(self, equity: Decimal, *, credit_accepted: bool = False) -> bool:
-        """Credit structures on real money: once the account reads `credit_min_equity` or a real credit order was accepted."""
-        return credit_accepted or equity >= self.credit_min_equity
+    def credit_allowed(self, equity: Decimal) -> bool:
+        """Credit structures on real money: while the account reads `credit_min_equity`. Equity alone, as the gateway
+        judges it (the plan's "or a real credit order is accepted" can only happen at that equity, since the gateway
+        refuses a credit open under it; a latch kept past a fall under it would only send refused orders)."""
+        return equity >= self.credit_min_equity
 
-    def type_allowed(self, type_: str, equity: Decimal, *, credit_accepted: bool = False) -> str | None:
+    def type_allowed(self, type_: str, equity: Decimal) -> str | None:
         """Why real money may not open `type_` now, or None."""
         if type_ not in self.real_types:
             return (f"a {type_} is not one of the types real money opens ({', '.join(self.real_types)}): "
                     "it closes in more than one order at the venue; shadow only until a paper round trip proves it")
-        if type_ in self.credit_types and not self.credit_allowed(equity, credit_accepted=credit_accepted):
+        if type_ in self.credit_types and not self.credit_allowed(equity):
             return (f"a {type_} is a credit structure: real credit opens wait until the account reads "
                     f"${self.credit_min_equity} of equity (it reads ${cents(equity)}; debit structures only until then)")
         return None
@@ -264,9 +269,9 @@ def fits_probe(table: Table, equity: Decimal, unit: Decimal) -> bool:
     return unit > 0 and (unit <= probe_cap(table, equity) or unit <= table.probe_floor)
 
 
-def band_for(table: Table, row: Mapping[str, Any], equity: Decimal, fwd: Forward, *, credit_accepted: bool = False) -> tuple[str, str]:
+def band_for(table: Table, row: Mapping[str, Any], equity: Decimal, fwd: Forward, *, probe_sessions: int = 0) -> tuple[str, str]:
     """The money band a live family should be in now, and why: "candidate" (shadow only), "probe" or "sized". Only for
-    a family the swarm has at candidate, probe or sized."""
+    a family the swarm has at candidate, probe or sized. `probe_sessions`: whole sessions it has spent at Probe."""
     band = str(row.get("band") or "")
     if band not in ("candidate", "probe", "sized"):
         return band, "not a Candidate"
@@ -274,7 +279,7 @@ def band_for(table: Table, row: Mapping[str, Any], equity: Decimal, fwd: Forward
         return "candidate", "has not passed the holdout"
     if fwd.negative:
         return "candidate", f"its forward record turned negative ({fwd.n} trades, ${fwd.pnl:.2f})"
-    why = table.type_allowed(str(row.get("structure") or ""), equity, credit_accepted=credit_accepted)
+    why = table.type_allowed(str(row.get("structure") or ""), equity)
     if why:
         return "candidate", why
     typical = row.get("typical_max_loss_usd")
@@ -292,9 +297,10 @@ def band_for(table: Table, row: Mapping[str, Any], equity: Decimal, fwd: Forward
     if band in ("probe", "sized") and fwd.real_bad:
         return "probe", (f"its {fwd.real_n} real trades lose (mean {fwd.real_mean:.4f} a dollar of maximum loss): held at "
                          "Probe")
-    if band in ("probe", "sized") and sized_ok(table, fwd):
+    probe_done = band == "sized" or (fwd.real_n >= table.min_probe_real_trades and probe_sessions >= table.min_probe_sessions)
+    if band in ("probe", "sized") and sized_ok(table, fwd) and probe_done:
         return "sized", (f"a forward record of {fwd.n} trades, mean {fwd.mean:.4f} a dollar of maximum loss, "
-                         f"{table.sized_confidence:.0%} lower bound {fwd.lcb:.4f}")
+                         f"{table.sized_confidence:.0%} lower bound {fwd.lcb:.4f}, after {fwd.real_n} real Probe trades")
     if band == "candidate":
         return "probe", "passed the holdout and trades a real type that fits the Probe's cap (Sized only from Probe)"
     return "probe", "passed the holdout and trades a real type that fits the Probe's cap"
@@ -430,6 +436,7 @@ class Stops:
     provisional: str = ""                # a breach seen on an unsettled observation (blocks entries; latches nothing)
     last_profit: Decimal | None = None   # the profit at the latest settled reading (where a release restarts the peak)
     last_reading: list | None = None     # [time, equity, day] of the latest reading (the next session's base)
+    tainted: bool = False                # a funding read showed a pending flow: readings before the next clean read drop
     pending: list = field(default_factory=list)  # [(time, equity, last_equity, day)]: flows not read after them yet
 
     def as_state(self) -> dict[str, Any]:
@@ -440,7 +447,7 @@ class Stops:
                 "daily_why": self.daily_why, "drawdown": None if self.drawdown is None else str(self.drawdown),
                 "drawdown_tripped": self.drawdown_tripped, "drawdown_why": self.drawdown_why,
                 "drawdown_at": self.drawdown_at, "provisional": self.provisional,
-                "last_profit": None if self.last_profit is None else str(self.last_profit),
+                "last_profit": None if self.last_profit is None else str(self.last_profit), "tainted": self.tainted,
                 "last_reading": None if self.last_reading is None else [self.last_reading[0], str(self.last_reading[1]), self.last_reading[2]],
                 "pending": [[t, str(e), str(last), d] for t, e, last, d in self.pending[-50:]]}
 
@@ -463,6 +470,7 @@ class Stops:
         out.drawdown_at = row.get("drawdown_at")
         out.provisional = str(row.get("provisional") or "")
         out.last_profit = None if row.get("last_profit") is None else D(row["last_profit"])
+        out.tainted = bool(row.get("tainted"))
         last = row.get("last_reading")
         out.last_reading = None if not last else [float(last[0]), D(last[1]), str(last[2])]
         out.pending = [(float(t), D(e), D(last), str(d)) for t, e, last, d in row.get("pending") or []]
@@ -499,9 +507,16 @@ class Stops:
             self.provisional = "the account's funding history has not been read"
             return
         if flows.unsettled:
-            # A deposit or withdrawal still pending moves equity when it settles, not now: nothing is settled on it.
+            # A deposit or withdrawal still pending moves equity when it executes, not now, and its row may be timed at
+            # its request: no reading taken while it is pending is ever settled against it (they are dropped, and the
+            # readings up to the first funding read that shows it executed with them).
             self.provisional = f"a deposit or withdrawal is pending ({'; '.join(flows.unsettled)[:200]})"
+            self.pending = []
+            self.tainted = True
             return
+        if self.tainted:
+            self.pending = [row for row in self.pending if row[0] > flows.read_at]
+            self.tainted = False
         # Settled observations: their flows were read after them, so every deposit that was in their equity is known.
         settled = [row for row in self.pending if row[0] <= flows.read_at]
         self.pending = [row for row in self.pending if row[0] > flows.read_at]

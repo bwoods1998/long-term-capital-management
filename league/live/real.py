@@ -673,8 +673,6 @@ class RealBook:
             self._save_position(pos)
             self.state.execute("INSERT INTO fills(oid, pid, qty, value, fees, at) VALUES(?,?,?,?,?,?)",
                                (order.oid, pos.pid, dq, value, fees, now))
-            if pos.type in self.table.credit_types:
-                self.state.put("credit_accepted", True)   # a real credit order FILLED: the venue takes credit structures
             code = _code(pos)
             self.record("book.fill", {"source": "venue", "side": "buy", "real_money": True, "quantity": dq,
                                       "instrument": {"market_id": code, "asset_class": "option", "multiplier": 100},

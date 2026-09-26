@@ -200,15 +200,13 @@ class Gates(LiveCase):
         self.assertEqual(self.families.rows["condor"]["band"], "candidate")
         self.assertEqual(self.venue.sent, [])
 
-    def test_only_a_filled_credit_order_marks_credit_as_accepted(self):
-        self.venue.fill = "none"
-        live = self.make([family("condor", CONDOR, band="probe", structure="iron_condor")])
-        self.run_to(9, 32)
-        self.assertEqual(len(self.venue.sent), 1)                          # sent and working, not filled
-        self.assertFalse(live.state.get("credit_accepted", False))
-        self.venue.fill = "natural"
-        self.run_to(9, 33)
-        self.assertTrue(live.state.get("credit_accepted", False))
+    def test_credit_opens_follow_equity_alone_even_after_a_credit_fill(self):
+        live = self.make([family("condor", CONDOR, band="probe", structure="iron_condor", params={"hold": 600})])
+        self.run_to(9, 31)
+        self.assertEqual(len(self.venue.sent), 1)                          # a credit structure filled at $5,481.65
+        self.venue.equity = D("1999.99")
+        refusal = live.table.type_allowed("iron_condor", D(live.real.account()["equity"]) if hasattr(live.real, "account") else D("0"))
+        self.assertIn("credit structure", refusal)
 
     def test_reconciliation_freezes_entries_on_the_second_reading_and_exits_still_go(self):
         live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 2, "opens": 3})])
@@ -264,20 +262,34 @@ class OrderPathInTheLoop(LiveCase):
 
 
 class Sized(LiveCase):
-    def test_a_forward_record_that_earns_it_sizes_by_quarter_kelly_on_its_lower_bound(self):
+    def test_a_probe_that_earns_it_is_sized_by_quarter_kelly_on_its_lower_bound(self):
         live = self.make([family("vert", VERTICAL, band="probe")])
         returns = [0.30, 0.10, 0.20, -0.10, 0.25] * 5
         self.families.add_forward("vert", "shadow", [{"id": f"s{i}", "day": f"2026-09-{i % 25 + 1:02d}", "pnl": r * 100.0,
                                                        "max_loss": 100.0} for i, r in enumerate(returns)])
+        self.families.add_forward("vert", "real", [{"id": f"r{i}", "day": f"2026-08-{i + 1:02d}", "pnl": 6.0, "max_loss": 50.0}
+                                                   for i in range(5)])
+        live.state.put("band_moves", {"vert": {"band": "probe", "at": at(MONDAY, 9, 0) - 7 * 86400}})
         self.run_to(9, 31)
         self.assertEqual(self.families.rows["vert"]["band"], "sized")
         [pos] = live.book.positions.values()
-        fwd = M.forward_stats(self.families.forward_rows("vert"), 0.8)
+        fwd = M.forward_stats(self.families.forward_rows("vert"), 0.8, version=1)
         cap = M.structure_cap(live.table, "sized", min(D("5481.65"), D("5500")), fwd)
         self.assertGreater(cap, D("164.4495"))                            # more than a Probe's 3%
         self.assertLessEqual(pos.max_loss, float(cap))
         unit = pos.max_loss_share * 100 + 2 * pos.fees / pos.qty
         self.assertEqual(pos.qty, min(int(cap // D(str(round(unit, 2)))), int(D("822.2475") // D(str(round(unit, 2))))))
+
+
+class ProbeStage(LiveCase):
+    def test_a_probe_without_real_trades_is_never_sized(self):
+        live = self.make([family("vert", VERTICAL, band="probe")])
+        returns = [0.30, 0.10, 0.20, -0.10, 0.25] * 5
+        self.families.add_forward("vert", "shadow", [{"id": f"s{i}", "day": f"2026-09-{i % 25 + 1:02d}", "pnl": r * 100.0,
+                                                       "max_loss": 100.0} for i, r in enumerate(returns)])
+        live.state.put("band_moves", {"vert": {"band": "probe", "at": at(MONDAY, 9, 0) - 7 * 86400}})
+        self.run_to(9, 31)
+        self.assertEqual(self.families.rows["vert"]["band"], "probe")
 
 
 class ExpiryDay(LiveCase):

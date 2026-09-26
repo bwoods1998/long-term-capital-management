@@ -693,7 +693,8 @@ CONSTITUTION: dict[str, Any] = {
     #   percentages, so a small account can still trade (and the family's own total may reach it).
     # - `sized`: a forward record (nightly + shadow + real) of at least `min_trades` trades with a mean return on maximum
     #   loss above zero and its `confidence` one-sided lower bound above zero: `kelly_fraction` of Kelly on the LOWER
-    #   bound, a structure at most `max_loss_share`, the family at most `family_share`.
+    #   bound, a structure at most `max_loss_share`, the family at most `family_share`. Only a Probe with at least
+    #   `min_probe_real_trades` real trades and `min_probe_sessions` whole sessions at Probe (the review of #362).
     # - `book_share`: every real structure's open maximum loss together. `daily_stop_share`: the day's realized plus
     #   marked loss against start-of-day equity: no new real entry that day. `drawdown_stop_share`: from the peak since
     #   the reset: real money paused (exits go on, the owner told, the Gym keeps running) until the owner releases it.
@@ -708,7 +709,7 @@ CONSTITUTION: dict[str, Any] = {
         "credit_min_equity_usd": "2000",
         "probe": {"max_loss_share": "0.03", "open_per_family": 3, "family_share": "0.12", "floor_usd": "60"},
         "sized": {"min_trades": 20, "confidence": "0.80", "kelly_fraction": "0.25", "max_loss_share": "0.10",
-                  "family_share": "0.30"},
+                  "family_share": "0.30", "min_probe_real_trades": 5, "min_probe_sessions": 1},
         "book_share": "0.70",
         "daily_stop_share": "0.25",
         "drawdown_stop_share": "0.50",
@@ -762,6 +763,10 @@ OPTIONS_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     "sized.kelly_fraction": ("0.125", "0.5"),
     "sized.max_loss_share": ("0.05", "0.15"),
     "sized.family_share": ("0.20", "0.40"),
+    # The Probe is a real stage (the review of #362, C2): Sized only after this many real Probe trades on the current
+    # program version and this many whole sessions at Probe. A tightening of the plan's row; loosening is the owner's.
+    "sized.min_probe_real_trades": ("5", "50"),
+    "sized.min_probe_sessions": ("1", "20"),
     "book_share": ("0.50", "0.90"),
     "daily_stop_share": ("0.15", "0.35"),
     "drawdown_stop_share": ("0.40", "0.60"),
@@ -783,7 +788,7 @@ OPTIONS_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
 OPTIONS_REAL_TYPES = ("debit_vertical", "credit_vertical", "iron_condor", "iron_butterfly", "long_butterfly")
 OPTIONS_CREDIT_TYPES = ("credit_vertical", "iron_condor", "iron_butterfly")
 #: Rows read as whole counts.
-_OPTIONS_COUNTS = ("probe.open_per_family", "sized.min_trades", "order_path.max_orders_day", "order_path.max_requests_minute",
+_OPTIONS_COUNTS = ("probe.open_per_family", "sized.min_trades", "sized.min_probe_real_trades", "sized.min_probe_sessions", "order_path.max_orders_day", "order_path.max_requests_minute",
                    "order_path.expiry_close_lead_minutes", "gateway.max_day_orders", "gateway.max_day_open_orders")
 
 

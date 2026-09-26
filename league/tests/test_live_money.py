@@ -70,11 +70,12 @@ class TheTable(unittest.TestCase):
         c["options_money"]["probe"]["max_loss_share"] = "0.04"
         self.assertNotEqual(money_digest(c), money_digest())
 
-    def test_credit_waits_for_two_thousand_dollars(self):
+    def test_credit_waits_for_two_thousand_dollars_on_equity_alone(self):
         t = M.Table.from_constitution()
         self.assertIn("credit structure", t.type_allowed("iron_condor", D("1999.99")))
         self.assertIsNone(t.type_allowed("iron_condor", D("2000")))
-        self.assertIsNone(t.type_allowed("iron_condor", D("500"), credit_accepted=True))
+        # The gateway refuses a credit open under $2,000 on equity alone: no latch from an earlier fill opens it here.
+        self.assertIn("credit structure", t.type_allowed("iron_condor", D("1999.99")))
         self.assertIsNone(t.type_allowed("debit_vertical", D("100")))
         self.assertIn("closes in more than one order", t.type_allowed("calendar", D("9000")))
         self.assertIn("closes in more than one order", t.type_allowed("long_call", D("9000")))
@@ -110,18 +111,33 @@ class Bands(unittest.TestCase):
 
     def test_a_candidate_becomes_a_probe_first_never_sized_at_once(self):
         good = [0.2, 0.1, 0.3, -0.1, 0.25] * 5
-        self.assertEqual(M.band_for(self.t, row(band="candidate"), D("5000"), fwd(good))[0], "probe")
-        self.assertEqual(M.band_for(self.t, row(band="probe"), D("5000"), fwd(good))[0], "sized")
+        self.assertEqual(M.band_for(self.t, row(band="candidate"), D("5000"), fwd(good), probe_sessions=5)[0], "probe")
+        self.assertEqual(M.band_for(self.t, row(band="probe"), D("5000"), fwd(good), probe_sessions=5)[0], "probe",
+                         "no real Probe trade yet: the Probe stage is real, never a formality")
+
+    def test_sized_needs_real_probe_trades_and_a_full_session_at_probe(self):
+        t = self.t
+        self.assertEqual((t.min_probe_real_trades, t.min_probe_sessions), (5, 1))
+        rows = [{"day": f"2026-09-{d:02d}", "source": "shadow", "pnl": 20.0, "max_loss": 100.0} for d in range(1, 21)]
+        rows += [{"day": f"2026-10-{d:02d}", "source": "real", "pnl": 3.0, "max_loss": 20.0} for d in range(1, 5)]
+        four = M.forward_stats(rows, 0.8)
+        self.assertEqual(M.band_for(t, row(band="probe"), D("5000"), four, probe_sessions=3)[0], "probe")
+        five = M.forward_stats(rows + [{"day": "2026-10-05", "source": "real", "pnl": 3.0, "max_loss": 20.0}], 0.8)
+        self.assertEqual(M.band_for(t, row(band="probe"), D("5000"), five, probe_sessions=0)[0], "probe")
+        self.assertEqual(M.band_for(t, row(band="probe"), D("5000"), five, probe_sessions=1)[0], "sized")
 
     def test_sized_needs_twenty_trades_a_positive_mean_and_a_positive_lower_bound(self):
+        def real(returns):
+            return M.forward_stats([{"day": f"2026-10-{i + 1:02d}", "source": "real", "pnl": r * 100.0, "max_loss": 100.0}
+                                    for i, r in enumerate(returns)], 0.8)
         good = [0.2, 0.1, 0.3, -0.1, 0.25] * 4
-        self.assertEqual(M.band_for(self.t, row(band="probe"), D("5000"), fwd(good))[0], "sized")
-        self.assertEqual(M.band_for(self.t, row(band="probe"), D("5000"), fwd(good[:19]))[0], "probe")
+        self.assertEqual(M.band_for(self.t, row(band="probe"), D("5000"), real(good), probe_sessions=1)[0], "sized")
+        self.assertEqual(M.band_for(self.t, row(band="probe"), D("5000"), real(good[:19]), probe_sessions=1)[0], "probe")
         noisy = [1.0, -0.95] * 10 + [0.01]
         f = fwd(noisy)
         self.assertGreater(f.mean, 0)
         self.assertLess(f.lcb, 0)
-        self.assertEqual(M.band_for(self.t, row(band="sized"), D("5000"), f)[0], "probe")
+        self.assertEqual(M.band_for(self.t, row(band="sized"), D("5000"), f, probe_sessions=1)[0], "probe")
 
     def test_one_decision_counts_once_preferring_real_then_shadow_then_nightly(self):
         shadow = [{"day": f"2026-10-{d:02d}", "source": "shadow", "pnl": 10.0, "max_loss": 100.0} for d in range(1, 13)]
@@ -152,8 +168,8 @@ class Bands(unittest.TestCase):
         f = M.forward_stats(rows, 0.8)
         self.assertTrue(M.sized_ok(t, f))                   # the whole record would size it
         self.assertTrue(f.real_bad)                         # but its 10 real trades lose
-        self.assertEqual(M.band_for(t, row(band="probe"), D("5000"), f)[0], "probe")
-        band, why = M.band_for(t, row(band="sized"), D("5000"), f)
+        self.assertEqual(M.band_for(t, row(band="probe"), D("5000"), f, probe_sessions=5)[0], "probe")
+        band, why = M.band_for(t, row(band="sized"), D("5000"), f, probe_sessions=5)
         self.assertEqual(band, "probe")
         self.assertIn("real", why)
 
@@ -348,6 +364,18 @@ class Stops(unittest.TestCase):
         s.observe(self.t, at=500, day="d2", equity=D("700"), last_equity=D("1000"), flows=self.flows(600))
         self.assertTrue(s.daily_tripped)
         self.assertEqual(s.day_base, D("1000"))
+
+    def test_readings_taken_while_a_flow_was_pending_are_never_settled(self):
+        s = self.stops
+        s.observe(self.t, at=50, day="d1", equity=D("3000"), last_equity=D("3000"), flows=self.flows(100))
+        pending = M.FlowBook(read_at=250, rows=(), closes=(0.0,), unsettled=("CSD 3000 queued",))
+        for t in (200, 260, 300):
+            s.observe(self.t, at=t, day="d1", equity=D("3000"), last_equity=D("3000"), flows=pending)
+        # It executes overnight: the flow is timed at its request (200), equity moved only at execution (after 300).
+        done = self.flows(400, [(200, "3000")])
+        s.observe(self.t, at=350, day="d2", equity=D("6000"), last_equity=D("6000"), flows=done)
+        self.assertFalse(s.drawdown_tripped, "the readings taken while it was pending were never settled against it")
+        self.assertEqual(s.peak_profit, D("3000") - D("481.65"))
 
     def test_no_flows_read_blocks_entries(self):
         s = self.stops

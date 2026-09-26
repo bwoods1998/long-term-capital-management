@@ -398,7 +398,6 @@ class OptionsLive:
             self.alert("warning", f"live: the swarm's bands could not be read ({type(exc).__name__}: {str(exc)[:160]})")
             return
         equity = self.sizing_equity()
-        credit_ok = bool(self.state.get("credit_accepted", False))
         wanted: dict[str, tuple[dict, str, bool]] = {}
         for row in rows:
             fid, band = str(row.get("family") or ""), str(row.get("band") or "")
@@ -406,7 +405,7 @@ class OptionsLive:
                 continue
             version = int(row.get("version") or 0)
             if band in ("candidate", "probe", "sized"):
-                band = self._move_band(row, equity, credit_ok)
+                band = self._move_band(row, equity)
                 wanted[f"{fid}@{version}:s"] = (row, "shadow", False)
                 if band in ("probe", "sized") and self._real_on() and (
                         f"{fid}@{version}:r" in self.instances or self._real_eligible(fid)):
@@ -450,7 +449,7 @@ class OptionsLive:
                 self._persist_instance(inst)
             self.record("live.instance", {"instance": key, "family": inst.family, "state": inst.mode}, agent=inst.family)
 
-    def _move_band(self, row: dict, equity: Decimal | None, credit_ok: bool) -> str:
+    def _move_band(self, row: dict, equity: Decimal | None) -> str:
         """The live path's band move for a Candidate, Probe or Sized family (the money table)."""
         fid, band = row["family"], row["band"]
         forward_meta = row.get("forward") or {}
@@ -465,7 +464,7 @@ class OptionsLive:
             # No band moves while real money cannot trade (off, no active grant) or the account is unread: a move now
             # would only be undone, and a Probe trades from the session after its move (`_real_eligible`).
             return band
-        new, why = M.band_for(self.table, row, equity, fwd, credit_accepted=credit_ok)
+        new, why = M.band_for(self.table, row, equity, fwd, probe_sessions=self._probe_sessions(fid, band))
         if new != band:
             try:
                 self.families.set_band(fid, new, why)
@@ -486,6 +485,31 @@ class OptionsLive:
                 self.state.put("held_told", told)
                 self.record("live.band", {"family": fid, "from": band, "to": band, "held": True, "why": why}, agent=fid)
         return new
+
+    def _probe_sessions(self, fid: str, band: str) -> int:
+        """Whole sessions a Probe family has spent at Probe (opened after its move there and closed since): the Probe
+        is a real stage before Sized (`sized.min_probe_sessions`). A Probe with no recorded move counts from now."""
+        if band != "probe":
+            return 0
+        now = self.clock()
+        rec = (self.state.get("band_moves", {}) or {}).get(fid)
+        if rec and rec.get("band") in ("probe", "sized"):
+            since = float(rec["at"])
+        else:
+            # A Probe the live path did not move there itself (no record): its time at Probe counts from when it is first
+            # seen at Probe (kept apart from `band_moves`, which decides when real money may start).
+            seen = dict(self.state.get("probe_since", {}) or {})
+            if fid not in seen:
+                seen[fid] = now
+                self.state.put("probe_since", seen)
+            since = float(seen[fid])
+        day, end, count = ny(since).date(), ny(now).date(), 0
+        while day <= end:
+            session = session_minutes(day)
+            if session is not None and epoch_of(day, session[0]) >= since and epoch_of(day, session[1]) <= now:
+                count += 1
+            day += dt.timedelta(days=1)
+        return count
 
     def _real_eligible(self, fid: str) -> bool:
         """A family moved to Probe (or Sized) trades real money from the session AFTER its move (the plan's Probe row:
@@ -1304,7 +1328,7 @@ class OptionsLive:
         sizing = self.sizing_equity()
         if sizing is None:
             return "no sizing equity (the grant or the account)"
-        why = self.table.type_allowed(order.type, equity_now, credit_accepted=bool(self.state.get("credit_accepted", False)))
+        why = self.table.type_allowed(order.type, equity_now)
         if why:
             return why
         if any(leg.dte == 0 for leg in order.legs) and minute >= rules.open_cutoff:
