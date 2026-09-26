@@ -172,10 +172,30 @@ class Forward:
         return None if self.sd is None else self.sd * self.sd
 
 
+def one_record(rows: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    """The forward record with each trading day counted ONCE: the live shadow book's trades that day where it has any,
+    else the nightly replay's, else the real book's. The three sources trade the SAME program's decisions on the same
+    day (the nightly replay re-runs the day the shadow book traded live; a real trade mirrors a shadow one), so counting
+    them all would count one decision two or three times and narrow the lower bound that sizes money. A tightening of
+    the plan's count (the plan: "nightly + shadow + real"), on the same evidence."""
+    by_day: dict[str, dict[str, list]] = {}
+    for row in rows:
+        by_day.setdefault(str(row.get("day") or ""), {}).setdefault(str(row.get("source") or ""), []).append(row)
+    out: list[Mapping[str, Any]] = []
+    for day in sorted(by_day):
+        sources = by_day[day]
+        for source in ("shadow", "nightly", "real", ""):
+            if sources.get(source):
+                out.extend(sources[source])
+                break
+    return out
+
+
 def forward_stats(rows: Sequence[Mapping[str, Any]], confidence: float, *, negative: bool | None = None) -> Forward:
-    """The forward record's statistics from its trades ({pnl, max_loss}); a trade without a positive maximum loss is
-    not a return and is left out of the returns (it still counts in the P&L). `negative`: the swarm's own verdict when
-    it gives one (else: at least 20 trades and a loss in all)."""
+    """The forward record's statistics from its trades ({pnl, max_loss}, one record a day: `one_record`); a trade
+    without a positive maximum loss is not a return and is left out of the returns (it still counts in the P&L).
+    `negative`: the swarm's own verdict when it gives one (else: at least 20 trades and a loss in all)."""
+    rows = one_record(rows)
     returns = []
     pnl = 0.0
     for row in rows:
@@ -476,5 +496,5 @@ class FlowBook:
         return before[-1] if before else None
 
 
-__all__ = ["Table", "Forward", "forward_stats", "band_for", "fits_probe", "probe_cap", "structure_cap", "family_cap",
+__all__ = ["Table", "Forward", "forward_stats", "one_record", "band_for", "fits_probe", "probe_cap", "structure_cap", "family_cap",
            "Exposure", "Plan", "plan_open", "Stops", "FlowBook", "D", "cents", "sized_ok"]

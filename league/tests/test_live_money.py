@@ -113,6 +113,15 @@ class Bands(unittest.TestCase):
         self.assertLess(f.lcb, 0)
         self.assertEqual(M.band_for(self.t, row(band="sized"), D("5000"), f)[0], "probe")
 
+    def test_one_decision_counts_once_whatever_the_sources(self):
+        shadow = [{"day": f"2026-10-{d:02d}", "source": "shadow", "pnl": 10.0, "max_loss": 100.0} for d in range(1, 13)]
+        nightly = [{"day": f"2026-10-{d:02d}", "source": "nightly", "pnl": 12.0, "max_loss": 100.0} for d in range(1, 16)]
+        real = [{"day": f"2026-10-{d:02d}", "source": "real", "pnl": 2.0, "max_loss": 20.0} for d in range(1, 13)]
+        f = M.forward_stats(shadow + nightly + real, 0.8)
+        self.assertEqual(f.n, 15)                          # 12 shadow days, then 3 nightly-only days; the real ones mirror
+        self.assertAlmostEqual(f.pnl, 12 * 10.0 + 3 * 12.0)
+        self.assertEqual(M.forward_stats(real, 0.8).n, 12)  # a day with only real trades counts them
+
     def test_a_negative_forward_record_loses_the_band(self):
         band, why = M.band_for(self.t, row(band="sized"), D("5000"), fwd([0.5] * 25, negative=True))
         self.assertEqual(band, "candidate")
