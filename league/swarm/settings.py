@@ -154,6 +154,7 @@ DEFAULTS: dict[str, Any] = {
         "usd_day": 15.0,
         "min_validations": 2,
         "near_miss_checks": 6,
+        "structured": True,             # a JSON-schema answer (structured outputs); false reads the JSON from the text
     },
     "heartbeat_seconds": 20,
     "stale_heartbeat_seconds": 240,     # the House restarts a swarm whose heartbeat is older than this

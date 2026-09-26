@@ -154,6 +154,12 @@ class Diagnostician:
     def cfg(self) -> Mapping[str, Any]:
         return self.settings.get("diagnostician", {})
 
+    @property
+    def schema(self) -> dict[str, Any] | None:
+        """The structured-output schema, or None (`diagnostician.structured` false): the answer's JSON is then read from
+        its text, as the system prompt asks for one object either way."""
+        return SCHEMA if self.cfg.get("structured", True) else None
+
     def due(self) -> bool:
         if not self.cfg.get("enabled"):
             return False
@@ -302,7 +308,7 @@ class Diagnostician:
         try:
             answer = self.router.ask(role=ROLE, system=self.system, user=user, family=fid,
                                      key=f"swarm:{fid}:diagnose:{seen['validations']}:{int(began)}", openai_model=None,
-                                     sail_profile=None, max_output=16000, effort="high", need_usd=0.0, claude=True, schema=SCHEMA)
+                                     sail_profile=None, max_output=16000, effort="high", need_usd=0.0, claude=True, schema=self.schema)
         except Exception as exc:  # noqa: BLE001 - no answer: tried again after half an hour
             self.store.set_state(fid, diagnosis_error_at=self.clock())
             out.update(outcome="error", error=str(exc)[:300])
@@ -369,7 +375,7 @@ class Diagnostician:
         done = []
         for fam, seen in rows[: max(0, int(self.cfg.get("per_round", 2)))]:
             try:
-                _, ceiling = self.router.claude_request(self.system, self.packet(fam, seen), schema=SCHEMA)
+                _, ceiling = self.router.claude_request(self.system, self.packet(fam, seen), schema=self.schema)
             except Exception as exc:  # noqa: BLE001
                 return {"eligible": len(rows), "diagnosed": done, "skipped": f"the request could not be priced: {exc}"[:300]}
             spent = self.router.claude_spent(role=ROLE, since=self.clock() - 86400)

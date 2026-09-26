@@ -160,6 +160,13 @@ class Rewrites(DiagnosticianCase):
         self.assertEqual(self.pool.jobs[-1].window, "train")
         self.assertIsNone(self.store.family(self.fid)["state"]["rewrite_ready"])
 
+    def test_without_structured_outputs_the_json_is_read_from_the_text(self):
+        self.settings["diagnostician"]["structured"] = False
+        self.claude.script = [message("My diagnosis follows.\n" + json.dumps({"decision": "rewrite", "diagnosis": "d", "note": "n",
+                                                                               "program": self.rewritten(), "lesson": ""}))]
+        self.assertEqual(self.diagnostician().run()["diagnosed"][0]["outcome"], "rewrite")
+        self.assertNotIn("format", self.claude.body()["output_config"])
+
     def test_a_parameter_only_rewrite_another_root_or_no_program_is_not_run(self):
         params_only = self.code.replace("'vrp_min': 1.2", "'vrp_min': 1.6")  # the starter's NEEDS in another key order, too
         self.assertNotEqual(params_only, self.best_code())
