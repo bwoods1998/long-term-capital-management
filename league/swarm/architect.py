@@ -49,8 +49,9 @@ lineage's trials, 3 of 4 quarters positive, positive at 1.5x the half-spread). P
 (a risk premium, a flow, a behavioral bias, a venue rule), short horizons (0-5 days to expiry), and slices the swarm does
 not cover. Learn from the graveyard: do not re-propose what failed unless you say what is different.
 
-Roots: SPY, QQQ, IWM (ETF options, physically settled, daily expiries), XSP and SPXW (index, cash-settled, no calendars or
-diagonals). Structure types: long_call, long_put, debit_vertical, credit_vertical, iron_condor, iron_butterfly,
+Use only the available roots listed in the current request; that configured list is the Gym's data universe.
+XSP and SPXW are cash-settled index options with no calendars or diagonals. The other available roots are physically
+settled equity or ETF options. Structure types: long_call, long_put, debit_vertical, credit_vertical, iron_condor, iron_butterfly,
 long_butterfly, long_straddle, long_strangle, calendar, diagonal. Only the first five multi-leg types (verticals, iron
 condors, iron butterflies, long butterflies) can reach real money soon.
 
@@ -89,17 +90,21 @@ class Architect:
         n = min(int(self.cfg.get("max_refill", 12)), start - alive) if alive < start else int(self.cfg.get("max_new", 6))
         return max(0, min(n, ceiling - alive))
 
-    def gaps(self) -> list[str]:
+    def _gaps_by_root(self) -> dict[str, list[str]]:
         roots = list(self.settings.get("gym", {}).get("roots", ["SPY", "QQQ", "IWM", "XSP", "SPXW"]))
         covered = {(r, f["structure"]) for f in self.store.families(alive=True) for r in f["roots"]}
-        out = []
+        out = {}
         for root in roots:
+            out[root] = []
             for structure in STRUCTURES:
                 if root in ("XSP", "SPXW") and structure in ("calendar", "diagonal"):
                     continue
                 if (root, structure) not in covered:
-                    out.append(f"{structure} on {root}")
+                    out[root].append(structure)
         return out
+
+    def gaps(self) -> list[str]:
+        return [f"{structure} on {root}" for root, structures in self._gaps_by_root().items() for structure in structures]
 
     def prompt(self) -> str:
         alive = self.store.families(alive=True)
@@ -114,10 +119,11 @@ class Architect:
                   for g in self.store.graveyard(limit=20)]
         want = self.want()
         roots = ", ".join(self.settings.get("gym", {}).get("roots", ["SPY", "QQQ", "IWM", "XSP", "SPXW"]))
+        gaps = json.dumps(self._gaps_by_root(), separators=(",", ":"))
         return (f"Propose {min(max(int(self.cfg.get('min_new', 3)), 1), max(want, 1))} to {max(want, 1)} new families, on these roots only (the Gym "
                 f"holds their data): {roots}.\n\nLIVING FAMILIES "
-                f"(leaderboard):\n{json.dumps(living)}\n\nTHE GRAVEYARD:\n{json.dumps(graves)}\n\nGAPS (no living family):\n"
-                f"{', '.join(self.gaps()[:60])}")
+                f"(leaderboard):\n{json.dumps(living)}\n\nTHE GRAVEYARD:\n{json.dumps(graves)}\n\n"
+                f"GAPS (uncovered structure types by root; [] means all covered):\n{gaps}")
 
     def admit(self, rows: Any) -> list[str]:
         cap = self.want()

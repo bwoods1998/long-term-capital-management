@@ -15,6 +15,7 @@ from league.swarm.architect import Architect
 from league.swarm.gate import Gate
 from league.swarm.models import ModelRouter
 from league.swarm.pool import GymJob, PoolError
+from league.swarm.seeds import SEEDS, family_spec
 from league.swarm.store import SwarmStore
 from league.swarm.tournament import Tournament
 from league.tests.swarm_fakes import Clock, FakeFrontier, FakeMonth, provider, result
@@ -634,6 +635,9 @@ class GateTests(RoundCase):
 
 
 class ArchitectTests(RoundCase):
+    FINAL_ROOTS = ["SPY", "QQQ", "IWM", "XSP", "SPXW", "TSLA", "NVDA", "TLT", "AMD", "SLV", "AMZN", "META",
+                   "AAPL", "PLTR", "TQQQ", "SMCI", "MARA", "GLD", "TSM", "MSFT", "MU", "BABA", "SMH", "GOOGL", "SOXL"]
+
     PROPOSAL = {"families": [
         {"slug": "gamma-scalp-spy", "mechanism": "Dealers short gamma amplify afternoon moves; buy a straddle when they are.",
          "structure": "long_straddle", "roots": ["SPY"], "dte": [0, 1], "rejection": "straddles lose", "sketch": "buy at 13:00"},
@@ -777,6 +781,36 @@ class ArchitectTests(RoundCase):
         self.assertNotIn("iron_condor on SPY", gaps)
         self.assertIn("iron_condor on QQQ", gaps)
         self.assertNotIn("calendar on XSP", gaps)
+
+    def expanded_prompt(self, *, seeded):
+        self.settings["gym"]["roots"] = list(self.FINAL_ROOTS)
+        if seeded:
+            for spec in SEEDS[:48]:
+                self.store.add_family(family_spec(spec), origin="seed")
+        self.replies = [{"text": json.dumps({"families": []})}]
+        Architect(self.store, self.router, self.settings, clock=self.clock).run()
+        body = self.sail.bodies[-1]
+        system, user = body["input"][0]["content"], body["input"][-1]["content"]
+        self.assertIn("available roots listed in the current request", system)
+        self.assertNotIn("Roots: SPY, QQQ, IWM", system)
+        self.assertIn(", ".join(self.FINAL_ROOTS), user.split("\n\n", 1)[0])
+        gaps = json.loads(user.split("GAPS (uncovered structure types by root; [] means all covered):\n", 1)[1])
+        self.assertEqual(set(gaps), set(self.FINAL_ROOTS))
+        for root in ("XSP", "SPXW"):
+            self.assertFalse({"calendar", "diagonal"} & set(gaps[root]))
+        for root in self.FINAL_ROOTS[5:]:
+            self.assertEqual(len(gaps[root]), 11, root)
+            self.assertTrue({"calendar", "diagonal", "debit_vertical"} <= set(gaps[root]), root)
+        return gaps
+
+    def test_empty_expanded_universe_prompt_exposes_every_gap_including_the_last_root(self):
+        gaps = self.expanded_prompt(seeded=False)
+        self.assertEqual(sum(map(len, gaps.values())), 271)
+
+    def test_seeded_expanded_universe_prompt_preserves_all_new_roots_and_existing_coverage(self):
+        gaps = self.expanded_prompt(seeded=True)
+        self.assertEqual(sum(map(len, gaps.values())), 241)
+        self.assertNotIn("iron_condor", gaps["SPY"])
 
 
 if __name__ == "__main__":
