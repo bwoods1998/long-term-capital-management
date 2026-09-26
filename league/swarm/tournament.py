@@ -186,7 +186,6 @@ class Tournament:
         allowed there), with the parent's best program as its first version."""
         roots = [r for r in self.settings.get("gym", {}).get("roots", UNIVERSE_ROTATION)]
         taken = {tuple(f["roots"]) for f in self.store.families(alive=True) if f["mechanism"] == fam["mechanism"]}
-        parent_line = fam.get("lineage") or fam["id"]
         for root in roots:
             if (root,) in taken or root in fam["roots"]:
                 continue
@@ -196,10 +195,9 @@ class Tournament:
             spec.update({"id": f"{fam['id'].split('-on-')[0]}-on-{root.lower()}", "mechanism": fam["mechanism"],
                          "structure": fam["structure"], "roots": [root]})
             spec.pop("signal", None)  # its first version is the parent's program on the new root, not a starter
-            # Its trials count through the lineage. A slice the lineage looked at before (a retired sibling's) costs
-            # its looks too; the parent's ancestors' looks already come through the parent.
-            _, extra_looks = self.store.slice_spent(parent_line, [root], exclude=self.store.ancestors(fam["id"]))
-            child = self.store.add_family(spec, origin="fork", parent=fam["id"], extra_looks=extra_looks)
+            # Its trials and its looks count through the lineage (`SwarmStore.lineage_looks`: every look this lineage
+            # made on the child's slice, before or after the fork, and what reached the parent through its forks).
+            child = self.store.add_family(spec, origin="fork", parent=fam["id"])
             best = self.store.version(fam["id"], self.candidate_version(fam))
             if best and best.get("code"):
                 code = best["code"]

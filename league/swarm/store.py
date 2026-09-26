@@ -12,8 +12,10 @@ TRIALS. Every Gym evaluation is a trial (`add_run` counts the result's own `tria
 total. A family's LINEAGE trial count is the sum over every family of its lineage (ancestors, siblings,
 descendants, alive or retired) and over any lineage its root was born on the slice of (`prior_lineage`: an
 architect's new idea on a dead family's slice): `lineage_trials`, the same set `lineage_trial_sharpes` reads.
-Holdout LOOKS are a ration: what the family inherited at its fork (its ancestors' looks, and the looks other
-members spent on the same slice) plus its own (`lineage_looks`). Nothing ever lowers a count.
+Holdout LOOKS are a ration, counted live from the looks table (`lineage_looks`): every look any member of the
+lineage made on the family's own slice (its roots), and, up each fork of its chain, every look on that
+ancestor's slice made before the fork (what reached it through the fork). Each look once. Nothing ever
+lowers a count.
 
 EVENTS. `event(kind, family, payload)` appends a row the House mirrors into its ledger (`hook.py`),
 all of kind `swarm.*`: the public ones the site's tape reads (`swarm.born`, `swarm.retired`, `swarm.band`,
@@ -299,13 +301,12 @@ class SwarmStore:
             candidate = f"{stem[:36 - len(str(n)) - 1]}-{n}"
         return candidate
 
-    def add_family(self, spec: Mapping[str, Any], *, origin: str, parent: str | None = None, extra_looks: int = 0,
+    def add_family(self, spec: Mapping[str, Any], *, origin: str, parent: str | None = None,
                    prior_lineage: str | None = None) -> dict[str, Any]:
         """A new family from `spec` (id or slug, mechanism, structure, roots, dte, rejection, ...). A fork
-        (`parent`) joins its parent's lineage (whose trials it counts, `lineage_trials`) and starts with the parent's
-        holdout looks plus `extra_looks` (what other members of the lineage spent on the same slice). A new lineage
-        born on a dead one's slice names it as `prior_lineage`: its trials count, its looks do not.
-        `inherited_trials` is a record of the count at birth; the live count is `lineage_trials`."""
+        (`parent`) joins its parent's lineage: its trials (`lineage_trials`) and its looks (`lineage_looks`). A new
+        lineage born on a dead one's slice names it as `prior_lineage`: its trials count, its looks do not.
+        `inherited_trials` and `inherited_looks` record the counts at birth; the live counts are the methods'."""
         if spec.get("structure") not in STRUCTURES:
             raise ValueError(f"unknown structure {spec.get('structure')!r}")
         roots = [str(r).upper() for r in (spec.get("roots") or []) if str(r).strip()]
@@ -323,7 +324,6 @@ class SwarmStore:
                     raise ValueError(f"no parent family {parent}")
                 lineage = mother["lineage"]
                 inherited_trials = self.lineage_trials(parent)
-                inherited_looks = self.lineage_looks(parent) + int(extra_looks)
             body = {k: v for k, v in dict(spec).items() if k not in ("id", "slug", "prior_lineage")}
             body["roots"] = roots
             if prior_lineage and not parent and self._one("SELECT 1 FROM families WHERE lineage=?", (prior_lineage,)):
@@ -335,6 +335,8 @@ class SwarmStore:
                 " inherited_trials, inherited_looks) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (fid, lineage, parent, origin, mechanism, spec["structure"], dumps(roots), dumps(body), now, "gym", now,
                  inherited_trials, inherited_looks))
+            if parent:
+                self._exec("UPDATE families SET inherited_looks=? WHERE id=?", (self.lineage_looks(fid), fid))
         return self.family(fid)  # type: ignore[return-value]
 
     def family(self, fid: str) -> dict[str, Any] | None:
@@ -446,21 +448,33 @@ class SwarmStore:
         return out
 
     def lineage_looks(self, fid: str) -> int:
-        fam = self._one("SELECT inherited_looks FROM families WHERE id=?", (fid,))
-        own = self._one("SELECT COUNT(*) AS n FROM looks WHERE family=?", (fid,))
-        return int((fam["inherited_looks"] if fam else 0) + (own["n"] if own else 0))
-
-    def slice_spent(self, lineage: str, roots: Sequence[str], *, exclude: Sequence[str] = ()) -> tuple[int, int]:
-        """(trials, holdout looks) the members of a lineage spent on exactly these roots (their own, not inherited).
-        A fork passes its parent's `ancestors` as `exclude`: their looks already come through the parent."""
-        want = sorted(str(r).upper() for r in roots)
-        trials = looks = 0
-        for row in self._all("SELECT id, roots, trials FROM families WHERE lineage=?", (lineage,)):
-            if row["id"] in exclude or sorted(loads(row["roots"], [])) != want:
-                continue
-            trials += int(row["trials"])
-            looks += int((self._one("SELECT COUNT(*) AS n FROM looks WHERE family=?", (row["id"],)) or {}).get("n") or 0)
-        return trials, looks
+        """The holdout looks that count against the family (the module docstring): each look once."""
+        fam = self._one("SELECT lineage, roots, parent, born_at FROM families WHERE id=?", (fid,))
+        if fam is None:
+            return 0
+        members: dict[str, list[str]] = {}
+        for m in self._all("SELECT id, roots FROM families WHERE lineage=?", (fam["lineage"],)):
+            members.setdefault(dumps(sorted(loads(m["roots"], []))), []).append(m["id"])
+        seen: set[int] = set()
+        node: dict[str, Any] | None = fam
+        cutoff: str | None = None  # the family itself: every look; an ancestor: those before its chain child was born
+        visited: set[str] = set()
+        while node is not None:
+            ids = members.get(dumps(sorted(loads(node["roots"], []))), [])
+            if ids:
+                sql = f"SELECT seq FROM looks WHERE family IN ({','.join('?' * len(ids))})"
+                params: list[Any] = list(ids)
+                if cutoff is not None:
+                    sql += " AND at<=?"
+                    params.append(cutoff)
+                seen.update(int(r["seq"]) for r in self._all(sql, params))
+            parent = node["parent"]
+            if not parent or parent in visited:
+                break
+            visited.add(parent)
+            cutoff = node["born_at"]
+            node = self._one("SELECT lineage, roots, parent, born_at FROM families WHERE id=?", (parent,))
+        return len(seen)
 
     def lineage_trial_sharpes(self, fid: str, *, window: str = "train", limit: int = 5000) -> list[float]:
         """Daily Sharpe of every recorded trial in the family's lineage (for the deflated Sharpe)."""

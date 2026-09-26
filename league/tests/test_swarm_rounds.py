@@ -192,6 +192,23 @@ class TournamentTests(RoundCase):
         self.assertEqual(self.store.lineage_looks(c), 1, "a's one look, once")
         del a, b
 
+    def test_a_fork_back_onto_an_ancestors_slice_counts_the_looks_it_spent_there_after_the_fork(self):
+        self.family("a")  # SPY
+        self.store.set_state("a", validation_numbers={"mean": 0.05, "t": 2.5, "sharpe_daily": 0.2, "quarters": "4/4"})
+        t = Tournament(self.store, self.pool, self.settings)
+        [b] = t.forks(self.store.families(alive=True))
+        self.assertEqual(self.store.family(b)["roots"], ["QQQ"])
+        self.clock.advance(3600)
+        for i in range(2):  # a spends two SPY looks after b was born, then retires
+            self.store.add_look("a", 1, f"sha-a{i}", passed=False, p_value=0.5, detail={})
+        self.store.retire("a", "done")
+        self.clock.advance(3600)
+        self.store.set_state(b, validation_numbers={"mean": 0.05, "t": 2.5, "sharpe_daily": 0.2, "quarters": "4/4"})
+        [c] = t.forks(self.store.families(alive=True))
+        self.assertEqual(self.store.family(c)["roots"], ["SPY"])
+        self.assertEqual(self.store.lineage_looks(c), 2, "SPY's holdout was looked at twice by this lineage")
+        self.assertEqual(self.store.lineage_looks(b), 0, "b's own slice was never looked at")
+
     def test_a_late_validation_of_an_older_version_never_overwrites_a_newer_one(self):
         self.family("a")
         t = Tournament(self.store, self.pool, self.settings)
@@ -493,9 +510,11 @@ class GateTests(RoundCase):
 
     def test_three_looks_a_lineage(self):
         self.ready()
-        self.store.update_family("a", inherited_looks=3)
+        for i in range(3):  # three looks this lineage already made on the slice (the ration is counted from the looks)
+            self.store.add_look("a", 1, f"earlier-{i}", passed=False, p_value=0.5, detail={})
         Gate(self.store, self.pool, self.router, self.settings).run()
-        self.assertEqual(self.store.looks(), [])
+        self.assertEqual(len(self.store.looks()), 3, "no fourth look")
+        self.assertEqual([j for j in self.pool.jobs if j.window == "holdout"], [])
         self.assertEqual(self.store.refusals("a")[0]["stage"], "rations")
 
     def test_the_leakage_alarm_stops_the_gate(self):
