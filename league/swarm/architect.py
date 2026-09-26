@@ -75,7 +75,9 @@ class Architect:
                   for g in self.store.graveyard(limit=20)]
         room = int(self.settings.get("population", {}).get("ceiling", 96)) - len(self.store.families(alive=True))
         want = max(0, min(int(self.cfg.get("max_new", 6)), room))
-        return (f"Propose {max(int(self.cfg.get('min_new', 3)), 1)} to {max(want, 1)} new families.\n\nLIVING FAMILIES "
+        roots = ", ".join(self.settings.get("gym", {}).get("roots", ["SPY", "QQQ", "IWM", "XSP", "SPXW"]))
+        return (f"Propose {max(int(self.cfg.get('min_new', 3)), 1)} to {max(want, 1)} new families, on these roots only (the Gym "
+                f"holds their data): {roots}.\n\nLIVING FAMILIES "
                 f"(leaderboard):\n{json.dumps(living)}\n\nTHE GRAVEYARD:\n{json.dumps(graves)}\n\nGAPS (no living family):\n"
                 f"{', '.join(self.gaps()[:60])}")
 
