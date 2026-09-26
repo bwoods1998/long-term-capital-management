@@ -8,6 +8,7 @@ The Sail key is read the floor's way (`SAIL_API_KEY`, else an owner-only `.env`)
 from __future__ import annotations
 
 import datetime as dt
+from contextlib import contextmanager
 import json
 import os
 import sys
@@ -33,6 +34,24 @@ DATA_BOX = STATE_DIR / "data_box.json"
 IMAGES = STATE_DIR / "images.json"
 UNIVERSE = STATE_DIR / "universe.json"
 THETA_ENV = Path.home() / ".config" / "thetadata" / "env"
+
+
+def configure_state(path: Path) -> None:
+    global STATE_DIR, DATA_BOX, IMAGES, UNIVERSE
+
+    STATE_DIR = Path(path)
+    os.environ["LTCM_GYM_STATE"] = str(STATE_DIR)
+    DATA_BOX, IMAGES, UNIVERSE = (STATE_DIR / name for name in ("data_box.json", "images.json", "universe.json"))
+
+
+@contextmanager
+def using_state(path: Path):
+    previous = STATE_DIR
+    configure_state(path)
+    try:
+        yield
+    finally:
+        configure_state(previous)
 
 #: The data box's egress while it runs, and the extra hosts only while it is being set up.
 THETA_HOSTS = ("nexus-api.thetadata.us", "mdds-01.thetadata.us")
@@ -170,6 +189,16 @@ class RemoteLease:
                 self.failed = True
                 return
 
+    def check(self) -> None:
+        """Reconfirm ownership before mutating or publishing an image."""
+        try:
+            owned = not self.failed and self.command("renew")
+        except Exception:
+            owned = False
+        if not owned:
+            self.failed = True
+            raise RuntimeError("the data operation lease was lost; refusing image publication")
+
     def __exit__(self, kind, value, traceback):
         self.stop.set()
         if self.worker:
@@ -179,6 +208,7 @@ class RemoteLease:
         except Exception:
             released = False
         if kind is None and (self.failed or not released):
+            self.failed = True
             raise RuntimeError("the data operation lease was lost; retry before publishing a checkpoint")
 
 
