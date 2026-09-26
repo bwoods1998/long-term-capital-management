@@ -491,6 +491,33 @@ clock never restarts.
   floor, lineage, live exit ownership and existing thresholds; prose alone will never retire a
   family.
 
+### Final data/image adoption (prepared Saturday; waits for completion)
+
+The provisional calibrated pair is not the final pair. Do not select it or spend a holdout look
+while the full ThetaData/SIP completion is pending.
+
+1. Read the actual `data/completion.json` and `data/images-ready.json` from the House. Require
+   completed ThetaData stages 1–6 with no failures, completed SIP relay, all universe roots,
+   distinct sealed Gym/gate templates, two one-year checkpoints per template, and matching
+   calibration SHA/model identity in `next-images/images.json` and `next-images/calibration.json`.
+   Verify inside each sealed template and privately compare its model hash with the receipt.
+2. Quiesce research with `swarm.stop` and collection with `data/nightly.stop`; verify process
+   identity and released locks. A House maintenance pause alone does not stop existing research.
+   Back up current metadata, `swarm.json`, any model file and forward manifest before changes.
+3. Transfer the verified model privately from the sealed Gym to the House's
+   `/data/calibration/fill_model.json` (0600), comparing SHA before and after. Adopt the staged
+   image, calibration, universe and calendar records together; preserve the completion receipts.
+   Select the final Gym checkpoint while keeping the gate pointer disabled. Verify that no stale
+   `gym-forward.json` can override the intended gate pointer; Sunday should have no forward day.
+4. Restart the House so the shadow book loads the new model, then resume supervised research and
+   collection. Verify the deployed release, model identity, pool checkpoint identities and fresh
+   heartbeats. Prior-image workers must not execute new jobs. Require fresh validation on the
+   selected Gym and current engine bundle before enabling the matching final gate checkpoint.
+   Preserve all previous trial counts, lineage links, look results and look reservations.
+5. Confirm the active data records point to the final gate template for Tuesday's forward copy;
+   verify next wake September 29 06:00Z. Record exact identities and evidence in this run before
+   declaring final data readiness. No real execution or grant setting changes in this procedure.
+
 ### Monday pre-open and forward-run checklist (prepared Saturday; results still pending)
 
 This continuation prepares paper/shadow operation and leaves `real_money=false`, the grant
