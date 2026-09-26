@@ -6,7 +6,9 @@ decision, which is why they are constants here and not settings.
 
 THE VALIDATION LINE (a family's best program, on Validation 2025):
   - at least 100 trades on at least 60 distinct trading days;
-  - mean P&L per dollar of maximum loss above zero after fees, with a one-sided t of at least 2;
+  - mean P&L per dollar of maximum loss above zero after fees, with a one-sided t of at least 2 (the t on
+    DAILY-aggregated P&L per dollar of maximum loss, `t_daily`: correlated intraday entries make a per-trade t
+    overstate the evidence, the Gym's review of Sept 26);
   - a deflated Sharpe probability of at least 0.95 given the LINEAGE's trial count (`league/stats.py`);
   - positive in at least 3 of Validation's 4 quarters;
   - positive at 1.5x the half-spread (the stress run's P&L after fees).
@@ -71,20 +73,48 @@ def daily_pnl(result: Mapping[str, Any]) -> list[float]:
             and _num(d[1]) is not None]
 
 
+#: When a summary does not carry the daily series' moments, the deflated Sharpe assumes these: a fat, left tail
+#: (short-premium programs have one), never the normal's flattering 0 and 3.
+CONSERVATIVE_SKEW = -1.0
+CONSERVATIVE_KURT = 6.0
+
+
+def daily_t(summary: Mapping[str, Any]) -> float | None:
+    """The t statistic of the mean on DAILY-aggregated P&L per dollar of maximum loss (`t_daily`, the Gym's review
+    of Sept 26: a per-trade t with correlated intraday entries overstates the evidence). None when absent."""
+    return _num(summary.get("t_daily"))
+
+
+def deflated(summary: Mapping[str, Any], daily: Sequence[float], *, lineage_trials: int, trial_sharpes: Sequence[float]) -> float | None:
+    """The deflated Sharpe probability given the lineage's trials: from the daily series when the result carries
+    it, else from the summary's daily Sharpe, days and moments (conservative moments when they are absent)."""
+    sharpes = [float(x) for x in trial_sharpes if _num(x) is not None]
+    trials = max(1, int(lineage_trials))
+    if len(daily) >= 2:
+        row = stats.deflated_sharpe(list(daily), sharpes, trials)
+        return row["dsr"] if row else None
+    sr = _num(summary.get("sharpe_daily"))
+    n = int(summary.get("days") or 0)
+    if sr is None or n < 2:
+        return None
+    skew = _num(summary.get("skew_daily"))
+    kurt = _num(summary.get("kurt_daily"))
+    benchmark = stats.expected_max_sharpe(sharpes, trials, fallback_variance=1.0 / n)
+    return stats.probabilistic_sharpe(sr, n, CONSERVATIVE_SKEW if skew is None else skew, CONSERVATIVE_KURT if kurt is None else kurt,
+                                      benchmark)
+
+
 def validation_line(result: Mapping[str, Any], stressed: Mapping[str, Any] | None, *, lineage_trials: int,
                     trial_sharpes: Sequence[float]) -> dict[str, Any]:
-    """Does a validation result (in full, with its daily series) meet the line? `stressed` is the same
-    program's validation result at 1.5x the half-spread (its summary is enough)."""
+    """Does a validation result meet the line? It may be the Gym's validation VIEW (summaries only: no trades,
+    no dates, no daily series); `stressed` is the same program's validation result at 1.5x the half-spread."""
     s = dict(result.get("summary") or {})
     trades = int(s.get("trades") or 0)
     days = int(s.get("days_traded") or 0)
     mean = _num(s.get("mean_return_on_max_loss"))
-    t = _num(s.get("t_stat"))
+    t = daily_t(s)
     k, n = quarters_positive(s)
-    daily = daily_pnl(result)
-    dsr_row = stats.deflated_sharpe(daily, [x for x in trial_sharpes if _num(x) is not None], max(1, int(lineage_trials))) \
-        if len(daily) >= 2 else None
-    dsr = dsr_row["dsr"] if dsr_row else None
+    dsr = deflated(s, daily_pnl(result), lineage_trials=lineage_trials, trial_sharpes=trial_sharpes)
     stress_pnl = _num((stressed or {}).get("summary", {}).get("pnl")) if stressed else None
     checks = {
         "status_ok": result.get("status") == "ok",
@@ -103,13 +133,15 @@ def validation_line(result: Mapping[str, Any], stressed: Mapping[str, Any] | Non
 
 
 def score(summary: Mapping[str, Any] | None, *, min_trades: int = 30) -> float | None:
-    """One number for "is this version better" on a window: the t statistic of the mean return on
-    maximum loss, None below `min_trades` trades (too few to say)."""
+    """One number for "is this version better" on a window: the daily t of the mean return on maximum loss
+    (`t_daily`; the per-trade `t_stat` only from a Gym that does not report it yet), None below `min_trades`
+    trades (too few to say)."""
     if not summary:
         return None
     if int(summary.get("trades") or 0) < min_trades:
         return None
-    return _num(summary.get("t_stat"))
+    t = daily_t(summary)
+    return t if t is not None else _num(summary.get("t_stat"))
 
 
 # ---------------------------------------------------------------------------- the holdout line

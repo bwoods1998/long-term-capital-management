@@ -56,6 +56,23 @@ class ValidationLine(unittest.TestCase):
         self.assertGreater(few["numbers"]["dsr"], many["numbers"]["dsr"])
         self.assertFalse(many["checks"]["dsr"])
 
+    def test_the_t_is_the_daily_one_never_the_per_trade_one(self):
+        r = good(t=1.2)
+        r["summary"]["t_stat"] = 9.0  # correlated intraday entries inflate a per-trade t
+        self.assertFalse(self.line(r)["checks"]["t"])
+        del r["summary"]["t_daily"]
+        self.assertFalse(self.line(r)["checks"]["t"], "no daily t, no pass")
+
+    def test_a_summary_only_view_is_judged_with_conservative_moments(self):
+        r = good()
+        view = {k: r[k] for k in ("status", "summary")}  # the Gym's validation view: no daily series, no trades
+        view["summary"] = {**r["summary"], "sharpe_daily": 0.35, "days": 250}
+        out = self.line(view)
+        self.assertTrue(out["checks"]["dsr"], out)
+        normal = self.line({**view, "summary": {**view["summary"], "skew_daily": 0.0, "kurt_daily": 3.0}})
+        self.assertGreaterEqual(normal["numbers"]["dsr"], out["numbers"]["dsr"], "missing moments never flatter")
+        self.assertFalse(self.line({**view, "summary": {**view["summary"], "sharpe_daily": 0.02}})["checks"]["dsr"])
+
     def test_a_disqualified_run_never_passes(self):
         self.assertFalse(self.line(good(status="disqualified"))["passed"])
 

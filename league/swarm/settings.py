@@ -31,7 +31,8 @@ DEFAULTS: dict[str, Any] = {
         "stall_revisions": 5,
         "reasoning_effort": "low",
         "max_output_tokens": 8000,
-        "max_model_calls": 4,          # a cycle's model calls (revise, read, ...)
+        "max_model_calls": 3,          # a cycle's model calls (revise, read, ...)
+        "min_call_seconds": 75,         # a later model call starts only with this much of the cycle left
         "max_tool_calls": 8,            # a cycle's tool calls
         "cycle_seconds": 170,           # a cycle's wall-time budget (target under 3 minutes)
         "history_cycles": 4,            # cycles of conversation kept; older ones live in the notebook

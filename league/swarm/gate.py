@@ -40,8 +40,10 @@ decide(ctx)) that runs in a replay of recorded one-minute option quotes and then
 money. Refuse it (verdict "fail") for any of:
 - LOOKAHEAD: anything that could know the future inside the replay (it only sees ctx; flag code that tries to reach
   outside ctx, reads module state written by another run, or infers future data).
-- LEAKAGE: recognizing the calendar or a specific period (counting sessions to known events, hard-coded price levels,
-  regime switches keyed to values that identify particular years, tables of dates or levels).
+- LEAKAGE: recognizing the calendar or a specific period. Refuse ABSOLUTE PRICE-LEVEL CONSTANTS (an underlying or
+  strike level, e.g. "SPY above 550", identifies the years), CALENDAR RECONSTRUCTION (counting sessions, weekdays or
+  event flags across a run to work out the date or the year), regime switches keyed to values that identify periods,
+  and any table of dates, levels or events. Relative measures (returns, ratios, vol, moneyness, z-scores) are fine.
 - FILL ABUSE: relying on fills the live market will not give (limits far through the mid expected to fill, sizes beyond
   the quoted size, orders sent after the venue's cutoffs, churning cancels).
 - DANGER on real money: naked short exposure, structures that cannot be closed in one order, unbounded order loops.

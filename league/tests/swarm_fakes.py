@@ -28,7 +28,7 @@ class Clock:
 def summary(trades: int = 150, days: int = 120, pnl: float = 500.0, mean: float = 0.05, t: float = 2.5, sharpe_daily: float = 0.2,
             quarters: str = "4/4") -> dict[str, Any]:
     return {"trades": trades, "days": 250, "days_traded": days, "pnl": pnl, "pnl_per_max_loss": mean, "mean_return_on_max_loss": mean,
-            "t_stat": t, "win_rate": 0.6, "profit_factor": 1.4, "sharpe": sharpe_daily * 15.87, "sharpe_daily": sharpe_daily,
+            "t_stat": t + 1.0, "t_daily": t, "win_rate": 0.6, "profit_factor": 1.4, "sharpe": sharpe_daily * 15.87, "sharpe_daily": sharpe_daily,
             "max_drawdown": 200.0, "fees": 30.0, "quarters_positive": quarters, "avg_trade": pnl / max(trades, 1)}
 
 

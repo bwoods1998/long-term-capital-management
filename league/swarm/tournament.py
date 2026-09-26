@@ -103,10 +103,8 @@ class Tournament:
                 fields.update(best_validation=float(mean), since_val_revisions=0, since_val_trials=0)
             self.store.update_family(fid, **fields)
             self.store.bump(fid, validations=1)
-            losses = sorted(float(t["max_loss"]) / max(1, int(t.get("qty") or 1)) for t in (result.get("trades") or [])
-                            if isinstance(t.get("max_loss"), (int, float)))
             self.store.set_state(fid, validation_view=view, validation_line=line, validation_version=n,
-                                 typical_max_loss_usd=round(losses[len(losses) // 2], 2) if losses else None,
+                                 typical_max_loss_usd=typical_max_loss(result),
                                  validation_numbers={"mean": mean, "t": summary.get("t_stat"),
                                                      "sharpe_daily": summary.get("sharpe_daily"),
                                                      "quarters": summary.get("quarters_positive")},
@@ -247,6 +245,24 @@ class Tournament:
         self.store.event("swarm.tournament", None, row)
         self.store.put("leaderboard", {"at": began, "board": board, "totals": totals})
         return row
+
+
+def typical_max_loss(result: Mapping[str, Any]) -> float | None:
+    """The median maximum loss of ONE structure in a validation run, for the live path's sizing: the Gym's own
+    `median_max_loss_per_structure` when the (validation-view) summary carries it, else the trades' median when
+    the result has them, else the mean maximum loss a trade opened."""
+    s = result.get("summary") or {}
+    value = s.get("median_max_loss_per_structure")
+    if isinstance(value, (int, float)) and value > 0:
+        return round(float(value), 2)
+    losses = sorted(float(t["max_loss"]) / max(1, int(t.get("qty") or 1)) for t in (result.get("trades") or [])
+                    if isinstance(t.get("max_loss"), (int, float)))
+    if losses:
+        return round(losses[len(losses) // 2], 2)
+    opened, trades = s.get("max_loss_opened"), s.get("trades")
+    if isinstance(opened, (int, float)) and isinstance(trades, int) and trades > 0:
+        return round(float(opened) / trades, 2)
+    return None
 
 
 def json_safe(value: Any) -> str:

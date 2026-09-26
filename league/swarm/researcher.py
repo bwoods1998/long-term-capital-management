@@ -334,9 +334,12 @@ class Researcher:
                 gym_done = True
                 fam = self.store.family(fid) or fam
         current.append({"role": "user", "content": self.status(fam)})
-        max_calls = int(self.cfg.get("max_model_calls", 4))
+        max_calls = int(self.cfg.get("max_model_calls", 3))
         max_tools = int(self.cfg.get("max_tool_calls", 8))
-        while out["model_calls"] < max_calls and self.clock() < deadline:
+        # A model call that writes a program took 60-80 s on Sept 26 (DeepSeek-V4-Flash asap): after the first, a call
+        # starts only with `min_call_seconds` of the cycle's budget left, so a cycle stays under three minutes.
+        min_call = float(self.cfg.get("min_call_seconds", 75))
+        while out["model_calls"] < max_calls and (out["model_calls"] == 0 or deadline - self.clock() >= min_call):
             history = [i for c in cycles for i in c.get("items", [])]
             items = [{"role": "system", "content": self.system}, {"role": "user", "content": self.brief(fam)}]
             items += sanitize(history + current)
