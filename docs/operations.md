@@ -305,13 +305,16 @@ resolve the accounting; estimated intrinsic values never become forward evidence
 The checked-in deployment remains in paper readiness: `real_money: false`, no enabled grant, and
 the gateway's `OPTION_STRUCTURES_REAL: off`. The gateway still admits paper structures and verified
 closes of held real positions. A disabled gateway is a permitted stricter setting in `league.ci`.
+The paper route proof runs from 09:35 ET during this readiness stage, even with no real-account
+client, grant or eligible family. It keeps an unfinished attempt's identity and owned contracts
+through restarts. Passing records paper execution evidence; the real-money flags remain off.
 
 **Turning real money on** (M4b): the gateway deployed with the caps by maximum loss and
 `OPTION_STRUCTURES_REAL` set to the five types; a second owner deploy with `real_money` true (the
 release carries the options money table: a new money digest); `python3 scripts/live_trading.py
 --ratify` within a minute of it (`--enable` the first time). Then the House promotes Candidates that
-qualify to Probe within five minutes (`live.band` rows), and the paper proof runs at the next session's
-09:35 ET before any real order.
+qualify to Probe within five minutes (`live.band` rows). Real entries still require the paper route
+proof's witnessed round trip, whether it passed during readiness or in the current session.
 
 ### Monday's pre-open (12:00-13:25Z Sept 28)
 
