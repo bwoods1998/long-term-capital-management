@@ -176,6 +176,78 @@ cd /workspace/previous && /workspace/.venv/bin/python -m league.watchdog rollbac
   `scripts/floor_watch.py` is being rewritten for the options scoreboard; until then use `status`,
   `health.json` and the ledger.
 
+## Private execution evidence and post-close comparison
+
+The House records selected and working option contracts in `live-execution.sqlite` under its state root. This is
+an observational sidecar, not an order book or promotion input. It does not query a venue, send or cancel an order,
+change a grant, fit a model, or publish to the site. The existing paper, shadow and real books remain authoritative.
+
+Each source stays separate. Paper is the independent route proof, with broker requests, changed answers and owned
+inventory witnesses. Shadow is the Gym engine on live sampled quotes, with decisions, observed working opportunities,
+fills, cancellations, rejections and completed trades. Real observations link existing client/order IDs and raw
+answers to the real book's fills and estimated fees. A disabled real path remains disabled.
+
+Quote samples contain only selected/working legs: bid, ask, sizes, the original provider timestamp text, its parsed
+time/status, local receipt time and sample minute. Missing size differs from an explicitly quoted zero. Rejected
+reads retain their rejection status; quotes older than 60 seconds at receipt or reference time are explicitly stale
+for comparison purposes. This diagnostic threshold does not alter admission or execution. These are
+minute samples, not proof of the exchange NBBO at an unobserved fill instant. The recorder runs on the live minute
+writer after the underlying update; it also refuses a concurrent quote/geometry update. It does not change which
+quotes the trading engine admits.
+
+Shadow timing is deliberately explicit: at wall minute `m+1` the House decides on simulated minute `m`; its order
+meets simulated `m+1` at wall `m+2`, when the next row needed for adverse selection is available. Missing or skipped
+rows are not observed nonfills. A working order restored with unknown legacy fill-classification flags remains
+marked unknown. Artifacts snapshot the actual in-memory fill model, not whatever a mutable source file contains
+later; each event names its model hash and engine bundle. Fitted values remain private in the sidecar. A checkpoint
+receipt follows the existing atomic shadow-book save. Fills or completed trades lacking a later checkpoint from
+their own recorder process remain uncertain after restart; a replay never silently doubles their cashflows.
+
+The recorder commits a pending marker before constructing/writing each observation. A failed write or interrupted
+observation remains visible after restart; missing session-minute coverage supplies a second completeness check.
+Failure also attempts a sticky `live-execution-health.json` marker and emits one generic warning. The recorder stops
+for that process's session after a failure. Its errors never stop closes, cancels, fills or reconciliation, and no
+missing receipt is inferred from the success of an order. This means trading can continue with an explicitly
+incomplete execution report.
+
+Storage is bounded: 256 MiB combined SQLite database/WAL/SHM, 224 MiB accumulated payload, 100,000 events per session,
+64 KiB per event and 1 MiB per distinct model artifact. WAL permits consistent report reads without blocking the
+minute writer; short automatic checkpoints and a retained-journal limit keep normal usage small. A combined-file
+guard reserves 4 MiB before each observation, so even a reader pinning a snapshot cannot grow the journal without
+bound. Existing evidence is not overwritten. Synthetic two- and four-leg
+opportunities measured about 3.3 and 5.2 KiB respectively; 48 continuously working orders for a 390-minute session
+would contribute about 60 and 95 MiB of opportunity payload, before other events and SQLite overhead. More orders,
+larger replies or prior sessions can reach the cap sooner. Cap exhaustion produces incomplete evidence, not a
+trading halt. Archive the closed sidecar and health file privately during an operator-controlled stopped interval;
+never remove a live database or discard unreported evidence. Reports can read an archived state root containing
+the matching accounting state.
+
+After the close, on the House, write a private report with a new output prefix:
+
+```sh
+python3 -m league.live.execution_report --root /workspace/state --day 2026-09-28 --out /workspace/private-report-20260928
+```
+
+This command opens its inputs read-only, makes no network or model calls, and creates mode-0600 JSON and Markdown
+files without overwriting existing output. Keep these files outside git and public/site paths: they contain licensed
+execution observations. It reports route status, quantities, cumulative gross order cashflows, fee provenance,
+broker versus observation latency, sampled-natural/mid slippage, retained shadow trades and evidence gaps. Order
+cashflows can cross sessions; they are explicitly not session P&L. Missing broker times, fees or reference samples
+stay unknown. Real fees match the witnessed cumulative fill quantity and observation cutoff; later fills cannot
+lend their fees to earlier gross cashflow. They are existing venue-table estimates, not a claim about brokerage
+charges. Regressing cumulative broker snapshots or a model/engine continuity change makes the comparison incomplete.
+The private input manifest hashes all used receipts, accounting rows, proof state, coverage, health and model
+metadata plus report source identity, so changed inputs produce a different report hash.
+
+This is a captured quote/receipt comparison, not completed independent Gym-versus-venue calibration. It does not
+replay fitted fill probabilities or schedule automatic post-close/weekly work; those remain separate pending work.
+
+No report automatically recalibrates or installs anything. Paper fills are synthetic route diagnostics and shadow
+fills are simulated; neither enters fitting. Future real-fill work needs complete working-order exposure, including
+unfilled and cancelled opportunities, sufficient samples and separate review. The goal's detailed fill contract
+excludes paper from calibration, while its Done sentence mentions real and paper fills. The report records that
+contradiction rather than claiming that synthetic paper outcomes fulfill real-fill calibration.
+
 ## The data box, the images and the Gym boxes
 
 The data box holds the ThetaData key in `/data/secrets/thetadata.env` (0600) and nothing else

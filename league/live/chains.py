@@ -61,6 +61,15 @@ class LiveChain:
         self.ask = np.full((self.m, 0), np.nan)
         self.bid_size = np.zeros((self.m, 0), dtype=np.int32)
         self.ask_size = np.zeros((self.m, 0), dtype=np.int32)
+        # Observation metadata only: neither timestamp changes quote admission, pricing or decisions.
+        self.quote_at = np.full((self.m, 0), np.nan)
+        self.received_at = np.full((self.m, 0), np.nan)
+        self.quote_time_raw = np.full((self.m, 0), None, dtype=object)
+        self.bid_size_status = np.zeros((self.m, 0), dtype=np.uint8)
+        self.ask_size_status = np.zeros((self.m, 0), dtype=np.uint8)
+        self.observation_status = np.zeros((self.m, 0), dtype=np.uint8)
+        self.last_read_at = np.full((self.m, 0), np.nan)
+        self._observation_received_at: float | None = None
         self.oi = np.zeros(0, dtype=np.int64)
         self.underlying = Underlying(price=np.full(self.m, np.nan))
         self._col: dict[str, int] = {}
@@ -118,12 +127,26 @@ class LiveChain:
         ask = np.full((self.m, c), np.nan)
         bsz = np.zeros((self.m, c), dtype=np.int32)
         asz = np.zeros((self.m, c), dtype=np.int32)
+        quote_at = np.full((self.m, c), np.nan)
+        received_at = np.full((self.m, c), np.nan)
+        quote_time_raw = np.full((self.m, c), None, dtype=object)
+        bid_size_status = np.zeros((self.m, c), dtype=np.uint8)
+        ask_size_status = np.zeros((self.m, c), dtype=np.uint8)
+        observation_status = np.zeros((self.m, c), dtype=np.uint8)
+        last_read_at = np.full((self.m, c), np.nan)
         oi = np.zeros(c, dtype=np.int64)
         if n_old:
             bid[:, new_of_old] = self.bid
             ask[:, new_of_old] = self.ask
             bsz[:, new_of_old] = self.bid_size
             asz[:, new_of_old] = self.ask_size
+            quote_at[:, new_of_old] = self.quote_at
+            received_at[:, new_of_old] = self.received_at
+            quote_time_raw[:, new_of_old] = self.quote_time_raw
+            bid_size_status[:, new_of_old] = self.bid_size_status
+            ask_size_status[:, new_of_old] = self.ask_size_status
+            observation_status[:, new_of_old] = self.observation_status
+            last_read_at[:, new_of_old] = self.last_read_at
             oi[new_of_old] = self.oi
         self.key = key[order]
         self.expiration = exp[order].astype(np.int32)
@@ -132,16 +155,23 @@ class LiveChain:
         self.is_call = call[order]
         self.symbol = [symbols_all[i] for i in order]
         self.bid, self.ask, self.bid_size, self.ask_size, self.oi = bid, ask, bsz, asz, oi
+        self.quote_at, self.received_at = quote_at, received_at
+        self.quote_time_raw = quote_time_raw
+        self.bid_size_status, self.ask_size_status = bid_size_status, ask_size_status
+        self.observation_status, self.last_read_at = observation_status, last_read_at
         self._col = {s: i for i, s in enumerate(self.symbol)}
         self.generation += 1
         return True
 
-    def record(self, mi: int, rows: Mapping[str, Mapping[str, Any]], *, open_epoch: float) -> bool:
+    def record(self, mi: int, rows: Mapping[str, Mapping[str, Any]], *, open_epoch: float,
+               received_at: float | None = None) -> bool:
         """Publish an odd/even revision around the complete chain update for concurrent readers."""
         self.quote_revision += 1
+        self._observation_received_at = received_at
         try:
             return self._record(mi, rows, open_epoch=open_epoch)
         finally:
+            self._observation_received_at = None
             self.quote_revision += 1
 
     def _record(self, mi: int, rows: Mapping[str, Mapping[str, Any]], *, open_epoch: float) -> bool:
@@ -155,14 +185,34 @@ class LiveChain:
             if col is None:
                 continue
             bid, ask, bs, as_, stamp = quote_of(row)
+            raw_quote = row.get("latestQuote") if isinstance(row, Mapping) else None
+            self.last_read_at[mi, col] = self._observation_received_at if self._observation_received_at is not None else np.nan
             if stamp is not None and stamp < open_epoch:
+                self.observation_status[mi, col] = 4  # rejected pre-open timestamp
                 continue
             if not (math.isfinite(bid) and math.isfinite(ask) and ask > 0 and 0 <= bid <= ask):
+                self.observation_status[mi, col] = (5 if math.isfinite(bid) and math.isfinite(ask) and bid > ask else
+                                                    2 if not isinstance(raw_quote, Mapping) else 3)
                 continue
+            self.observation_status[mi, col] = 1
             self.bid[mi, col] = round(bid, 4)
             self.ask[mi, col] = round(ask, 4)
             self.bid_size[mi, col] = bs
             self.ask_size[mi, col] = as_
+            self.quote_at[mi, col] = stamp if stamp is not None else np.nan
+            self.received_at[mi, col] = self._observation_received_at if self._observation_received_at is not None else np.nan
+            raw_stamp = raw_quote.get("t")
+            self.quote_time_raw[mi, col] = raw_stamp if isinstance(raw_stamp, (str, int, float)) else None
+            for name, target in (("bs", self.bid_size_status), ("as", self.ask_size_status)):
+                raw_size = raw_quote.get(name)
+                target[mi, col] = 0
+                if raw_size is None:
+                    continue
+                try:
+                    value = float(raw_size)
+                    target[mi, col] = 1 if math.isfinite(value) and value >= 0 and value == int(value) else 2
+                except (TypeError, ValueError, OverflowError):
+                    target[mi, col] = 2
         return changed
 
     def set_price(self, mi: int, price: float) -> None:

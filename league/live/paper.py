@@ -40,10 +40,11 @@ ROOT = "SPY"
 
 class PaperProof:
     def __init__(self, state: LiveState, account: Account, *, record: Callable[..., Any] | None = None,
-                 clock: Callable[[], float] | None = None):
+                 clock: Callable[[], float] | None = None, evidence: Any = None):
         self.state, self.account = state, account
         self.record = record or (lambda *a, **k: None)
         self.clock = clock or time.time
+        self.evidence = evidence
 
     def status(self) -> dict:
         return dict(self.state.get("paper_proof", {}) or {})
@@ -116,6 +117,8 @@ class PaperProof:
         row.update(status="open_sent" if action == "open" else "close_sent", why="awaiting the dispatched order")
         # FULL synchronous SQLite commit before POST. A crash at any later instruction looks up this same id.
         self._put(row)
+        if self.evidence is not None:
+            self.evidence.call("paper", "submit", row, work=work, mi=mi)
         answer = self.account.submit(body, exit=action != "open")
         self._event(action + "_sent", {"body": body, "ok": answer.ok, "error": answer.error, "answer": answer.order})
         if answer.ok and answer.order:
@@ -132,6 +135,8 @@ class PaperProof:
         if work.get("rejected"):
             return
         answer = self.account.order_by_client_id(work["cid"])
+        if self.evidence is not None:
+            self.evidence.call("paper", "lookup", row, detail={"answer": answer})
         if answer is None:
             row["why"] = "the dispatched order is not yet found; its outcome remains unresolved"
             self._put(row)
@@ -158,6 +163,8 @@ class PaperProof:
             if self.clock() - float(work.get("cancel_at") or 0) >= 60:
                 work["cancel_at"] = self.clock()
                 self._put(row)  # a lost cancel answer is also recovered by this order's id
+                if self.evidence is not None:
+                    self.evidence.call("paper", "cancel_requested", row)
                 ok, why = self.account.cancel(work["id"])
                 self._event("cancel", {"cid": work["cid"], "ok": ok, "why": why})
             row["why"] = "waiting for the venue to confirm the order is terminal after cancellation"
@@ -233,6 +240,8 @@ class PaperProof:
             return row
         try:
             if row.get("orders"):
+                if self.evidence is not None:
+                    self.evidence.call("paper", "opportunity", row, mi=mi)
                 self._refresh(row)
             positions = self._positions()
         except Exception as exc:  # noqa: BLE001 - no new dispatch or pass without readable evidence
@@ -327,6 +336,8 @@ class PaperProof:
 
     def _event(self, what: str, detail: Mapping[str, Any]) -> None:
         self.state.event("paper_proof." + what, dict(detail))
+        if self.evidence is not None:
+            self.evidence.call("paper_event", what, self.status, detail)
 
 
 __all__ = ["PaperProof"]

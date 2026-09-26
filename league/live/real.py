@@ -290,9 +290,10 @@ class RealBook:
     """The real book and its order path (the module docstring)."""
 
     def __init__(self, state: LiveState, account: Account, table: M.Table, *, clock: Callable[[], float] = time.time,
-                 record: Callable[..., Any] | None = None):
+                 record: Callable[..., Any] | None = None, evidence: Any = None):
         self.state, self.account, self.table, self.clock = state, account, table, clock
         self.record = record or (lambda *a, **k: None)
+        self.evidence = evidence
         self.positions: dict[int, RPosition] = {}
         self.orders: dict[int, ROrder] = {}
         self.frozen = ""                 # why new real entries are frozen by reconciliation ("" none)
@@ -518,7 +519,13 @@ class RealBook:
         """POST the order written as `pending`. Never retried (the module docstring)."""
         body = single_leg_body(order) if order.action == "close_leg" else mleg_body(order)
         self._count_dispatch(order)
+        if self.evidence is not None:
+            self.evidence.call("real", "submit", order)
         result: Submitted = self.account.submit(body, exit=order.action != "open")
+        if self.evidence is not None:
+            self.evidence.call("real", "submit_reply", order,
+                               detail={"ok": result.ok, "unknown": result.unknown, "sent": result.sent,
+                                       "status": result.status, "error": result.error, "answer": result.order})
         order.attempts += 1
         if result.ok:
             order.dispatched = True
@@ -568,7 +575,11 @@ class RealBook:
             today = dt.datetime.fromtimestamp(order.cancel_sent, ZoneInfo("America/New_York")).date().isoformat()
             self._count(today, len(order.legs))
             self._save_order(order)
+        if self.evidence is not None:
+            self.evidence.call("real", "cancel_requested", order)
         done, error = self.account.cancel(order.venue_id)
+        if self.evidence is not None:
+            self.evidence.call("real", "cancel", order, detail={"ok": done, "error": error})
         order.answer = {**order.answer, "cancel": why[:200], "cancel_error": error or None}
         self._save_order(order)
         self.record("live.cancel", {"oid": order.oid, "family": order.family, "why": why[:200], "ok": done,
@@ -638,6 +649,8 @@ class RealBook:
 
     def _absorb(self, order: ROrder, row: Mapping[str, Any]) -> None:
         """Bring one order up to the venue's row: new whole-structure fills booked, the status carried."""
+        if self.evidence is not None:
+            self.evidence.call("real", "reply", order, detail=row)
         self._count_dispatch(order)
         order.dispatched = True
         order.venue_id = str(row.get("id") or order.venue_id or "") or order.venue_id

@@ -51,6 +51,7 @@ from ..gym.ctx import order_row, position_row
 from . import money as M
 from .chains import LiveDay, from_ordinal, ordinal, session_minutes, trading_days_around, uses_parity
 from .decider import DeciderError, ProgramRefused, MAX_BATCH_SECONDS
+from .evidence import Evidence
 from .families import MemoryFamilies
 from .paper import PaperProof
 from .real import RealBook, RLeg, RPosition, real_legs
@@ -136,9 +137,14 @@ class OptionsLive:
                               memory_mb=int(self.settings["decider_memory_mb"]), log=self.root / "live-decider.log")
         self.decider = decider
         self.state = LiveState(self.root / STATE_FILE, clock=clock)
-        self.shadow = ShadowBook(self.root / SHADOW_FILE, fill_model=fill_model or F.FillModel.load())
-        self.book = RealBook(self.state, real, self.table, clock=clock, record=self.record) if real is not None else None
-        self.proof = PaperProof(self.state, paper, record=self.record, clock=clock) if paper is not None else None
+        self.evidence = Evidence(self.root, clock=clock, alert=self.alert, context=lambda: self.day)
+        effective_model = fill_model or F.FillModel.load()
+        self.evidence.call("model", effective_model)
+        self.shadow = ShadowBook(self.root / SHADOW_FILE, fill_model=effective_model, evidence=self.evidence)
+        self.book = RealBook(self.state, real, self.table, clock=clock, record=self.record,
+                             evidence=self.evidence) if real is not None else None
+        self.proof = PaperProof(self.state, paper, record=self.record, clock=clock,
+                                evidence=self.evidence) if paper is not None else None
         perf = dict(performance or {})
         self.start_at = str(perf.get("start_at") or "")
         start_equity = M.D(perf.get("start_equity") or 0)
@@ -215,6 +221,7 @@ class OptionsLive:
             self.decider.close()
         except Exception:  # noqa: BLE001
             pass
+        self.evidence.close()
 
     def _loop(self) -> None:
         while not self._stop.is_set():
@@ -250,6 +257,16 @@ class OptionsLive:
             self.state.execute("DELETE FROM kv WHERE key IN ('assignment_latch', 'owner_clear_assignment')")
 
     def minute(self) -> dict:
+        token = self.evidence.call("begin", self.clock())
+        completed = False
+        try:
+            result = self._minute()
+            completed = True
+            return result
+        finally:
+            self.evidence.call("end", token, completed)
+
+    def _minute(self) -> dict:
         """One pass: the session's minute, the close's bookkeeping, or the quiet hours' reconciliation."""
         now = self.clock()
         # Loads, recovery, decisions and drops share one budget; leave five seconds before the next wall minute for
@@ -384,6 +401,7 @@ class OptionsLive:
             if inst.error_since is None:
                 inst.error_since = self.clock()
         self.instances[inst.key] = inst
+        self.evidence.call("instance", inst)
         return not inst.error
 
     def _decision_budget(self) -> float:
@@ -468,7 +486,7 @@ class OptionsLive:
                 if kind == "shadow" and key not in self.shadow.accounts:
                     self.shadow.accounts[key] = ShadowAccount(instance=key, family=inst.family, needs=inst.needs,
                                                               params=inst.params, capital=float(self.settings["shadow_capital"]),
-                                                              fill_model=self.shadow.fill_model)
+                                                              fill_model=self.shadow.fill_model, evidence=self.evidence)
                 if kind == "real":
                     self._persist_instance(inst)
                 self.record("live.instance", {"instance": key, "family": inst.family, "kind": kind, "band": inst.band,
@@ -686,7 +704,7 @@ class OptionsLive:
             except Exception as exc:  # noqa: BLE001 - this root has no snapshot this minute
                 out.setdefault("data_errors", []).append(f"{root}: {type(exc).__name__}: {str(exc)[:120]}")
                 continue
-            changed |= chain.record(mi, rows, open_epoch=open_epoch)
+            changed |= chain.record(mi, rows, open_epoch=open_epoch, received_at=self.clock())
             level = chain.parity(mi, spot) if uses_parity(root) else spot
             chain.set_price(mi, level)
             if math.isfinite(level):
@@ -735,6 +753,9 @@ class OptionsLive:
         self.sync_families(now)
         roots = self._roots()
         self._read(day, mi, roots, out)
+        if self.book is not None:
+            for order in list(self.book.orders.values()):
+                self.evidence.call("real", "opportunity", order, mi=mi)
         jobs: list[dict] = []
         shadow_due = self._shadow_jobs(day, mi - 1, jobs)
         real_due: dict[str, Instance] = {}
@@ -1307,6 +1328,7 @@ class OptionsLive:
                                   legs=[RLeg(leg.symbol, leg.side, 1, leg.is_call, leg.strike, leg.expiry, leg.key)], qty=left,
                                   limit_value=price, tif=1, day=day.day.isoformat(), minute=mi, pid=pos.pid, forced=True,
                                   why=f"broken structure: {pos.info.get('broken')}")
+            self.evidence.call("real", "decision", sent, mi=mi)
             book.send(sent)
             sent_at[leg.symbol] = now
             out.setdefault("orders", []).append({"oid": sent.oid, "family": pos.family, "action": "close_leg", "status": sent.status})
@@ -1389,6 +1411,7 @@ class OptionsLive:
         sent = book.new_order(instance=pos.instance, family=pos.family, action="close", type_=pos.type, root=pos.root,
                               legs=list(pos.legs), qty=order.qty, limit_value=value, tif=tif, day=day.day.isoformat(),
                               minute=mi, pid=pos.pid, forced=forced, fees_est=order.fees, why=why)
+        self.evidence.call("real", "decision", sent, mi=snap.minute - day.open_min)
         book.send(sent)
         if not forced and sent.dispatched:
             self._instance_spent(pos.instance, day)
@@ -1496,6 +1519,8 @@ class OptionsLive:
                 why = f"a malformed intent: {type(exc).__name__}: {str(exc)[:160]}"
             if why:
                 book._reject(inst.key, why)
+                self.evidence.call("refusal", "real", inst.key,
+                                   {"why": why, "intent": intent, "decision_minute": day.open_min + mi})
                 self.record("live.refusal", {"instance": inst.key, "family": inst.family, "why": why[:300],
                                              "_intent": {k: v for k, v in intent.items() if k != "note"}}, agent=inst.family)
 
@@ -1601,6 +1626,7 @@ class OptionsLive:
             self._persist_instance(inst)
             self._cancel_inactive_opens()
             return "its family or version is no longer eligible to open"
+        self.evidence.call("real", "decision", sent, mi=mi)
         book.send(sent)
         if sent.dispatched:
             self._instance_spent(inst.key, day)
@@ -1613,6 +1639,8 @@ class OptionsLive:
         trades = acc.new_trades()
         if not trades:
             return
+        for trade in trades:
+            self.evidence.call("shadow", "trade", acc, detail=trade)
         version = _version_of(acc.instance)
         rows = [{"id": f"{acc.instance}:{t['id']}", "day": t["day"], "pnl": t["pnl"], "max_loss": t["max_loss"], "version": version}
                 for t in trades]

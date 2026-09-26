@@ -58,17 +58,57 @@ class ShadowAccount(E.Account):
     """One family instance's shadow book (the module docstring)."""
 
     def __init__(self, *, instance: str, family: str, needs: Needs, params: Mapping[str, Any], capital: float,
-                 fill_model: F.FillModel | None = None, max_orders_day: int = 60):
+                 fill_model: F.FillModel | None = None, max_orders_day: int = 60, evidence: Any = None):
         stub = SimpleNamespace(needs=needs, params=dict(params), start=lambda **_: _Inert())
         cfg = E.RunConfig(window="forward", roots=tuple(needs.roots), capital=float(capital),
                           fill_model=fill_model or F.FillModel(), max_orders_day=int(max_orders_day))
         super().__init__(stub, cfg, tuple(needs.roots))
         self.instance, self.family = instance, family
+        self.evidence = evidence
         self.exported = 0          # trades already handed to the forward record
         self.winding_down = False  # a superseded instance: no decisions, its positions closed at the natural
         self.began_day: int | None = None
         self.ended_day: int | None = None
         self.last_mi = -1          # the last minute of today this account was stepped through
+
+    # These observations wrap the unchanged engine methods. They never become inputs to their result.
+    def _observe(self, kind: str, **kwargs: Any) -> None:
+        if self.evidence is not None:
+            self.evidence.call("shadow", kind, self, **kwargs)
+
+    def _intent(self, day: LiveDay, mi: int, intent: dict) -> None:
+        previous = set(self.orders)
+        super()._intent(day, mi, intent)
+        for oid in set(self.orders) - previous:
+            self._observe("decision", day=day, mi=mi, work=self.orders[oid])
+
+    def _try_fill(self, day: LiveDay, mi: int, work: E.Working) -> None:
+        self._observe("opportunity", day=day, mi=mi, work=work)
+        super()._try_fill(day, mi, work)
+
+    def _open_fill(self, day: LiveDay, mi: int, work: E.Working, price: float, qty: int, fees: float) -> None:
+        super()._open_fill(day, mi, work, price, qty, fees)
+        self._observe("fill", day=day, mi=mi, work=work,
+                      detail={"qty": qty, "value": price, "fees": fees, "cashflow": -price * 100 * qty,
+                              "simulated_minute": day.open_min + mi})
+
+    def _close_fill(self, day: LiveDay, mi: int, work: E.Working, price: float, qty: int, fees: float, reason: str) -> None:
+        super()._close_fill(day, mi, work, price, qty, fees, reason)
+        self._observe("fill", day=day, mi=mi, work=work,
+                      detail={"qty": qty, "value": price, "fees": fees, "cashflow": price * 100 * qty,
+                              "simulated_minute": day.open_min + mi})
+
+    def _finish(self, pos: E.Position, day: LiveDay) -> None:
+        super()._finish(pos, day)
+        self._observe("trade", detail=self.trades[-1])
+
+    def _drop(self, work: E.Working, why: str | None) -> None:
+        self._observe("terminal", work=work, detail={"reason": why})
+        super()._drop(work, why)
+
+    def _reject(self, why: str) -> None:
+        super()._reject(why)
+        self._observe("rejection", detail={"reason": why})
 
     # ------------------------------------------------------------------ the minute, in two halves
     def pre(self, day: LiveDay, mi: int) -> None:
@@ -145,9 +185,9 @@ class ShadowAccount(E.Account):
         }
 
     @classmethod
-    def from_state(cls, row: Mapping[str, Any], fill_model: F.FillModel | None = None) -> "ShadowAccount":
+    def from_state(cls, row: Mapping[str, Any], fill_model: F.FillModel | None = None, evidence: Any = None) -> "ShadowAccount":
         acc = cls(instance=row["instance"], family=row["family"], needs=needs_of(row["needs"]), params=row["params"],
-                  capital=row["capital"], fill_model=fill_model, max_orders_day=row.get("max_orders_day", 60))
+                  capital=row["capital"], fill_model=fill_model, max_orders_day=row.get("max_orders_day", 60), evidence=evidence)
         acc.cash, acc.equity_prev = float(row["cash"]), float(row["equity_prev"])
         acc.next_id, acc.orders_today, acc.session = int(row["next_id"]), int(row["orders_today"]), int(row["session"])
         acc.counts.update(row.get("counts") or {})
@@ -236,8 +276,9 @@ def _working_from(x: Mapping[str, Any]) -> E.Working:
 class ShadowBook:
     """Every shadow account, by instance id, persisted as one JSON file."""
 
-    def __init__(self, path: Any, *, fill_model: F.FillModel | None = None):
+    def __init__(self, path: Any, *, fill_model: F.FillModel | None = None, evidence: Any = None):
         self.path = path
+        self.evidence = evidence
         self.fill_model = fill_model or F.FillModel()
         self.accounts: dict[str, ShadowAccount] = {}
         self.day_ordinal: int | None = None
@@ -246,14 +287,17 @@ class ShadowBook:
             self.day_ordinal = raw.get("day")
             for row in raw.get("accounts") or []:
                 try:
-                    acc = ShadowAccount.from_state(row, self.fill_model)
+                    acc = ShadowAccount.from_state(row, self.fill_model, evidence=evidence)
                     self.accounts[acc.instance] = acc
                 except (KeyError, TypeError, ValueError):
                     continue
 
     def save(self) -> None:
-        write_json_atomic(self.path, {"version": VERSION, "day": self.day_ordinal,
-                                      "accounts": [a.to_state() for a in self.accounts.values()]})
+        payload = {"version": VERSION, "day": self.day_ordinal,
+                   "accounts": [a.to_state() for a in self.accounts.values()]}
+        write_json_atomic(self.path, payload)
+        if self.evidence is not None:
+            self.evidence.call("checkpoint", payload)
 
 
 __all__ = ["ShadowAccount", "ShadowBook", "needs_of", "SHADOW_FILE"]
