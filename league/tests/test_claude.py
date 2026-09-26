@@ -4,6 +4,7 @@ The fake opener stands in for `urllib.request.urlopen` (league/tests/test_fronti
 
 from __future__ import annotations
 
+import http.client
 import io
 import json
 import socket
@@ -281,6 +282,14 @@ class Streaming(unittest.TestCase):
     def test_a_complete_answer_whose_cost_the_gateway_could_not_read_is_not_verified(self):
         answer = client(FakeOpener(FakeStream(events(cost="0.662015", known=False)))).ask("s", "q", agent="a", stream=True)
         self.assertEqual((answer.cost_usd, answer.cost_verified), (Decimal("0.662015"), False))
+
+    def test_a_stream_closed_mid_read_is_a_claude_error(self):
+        for failure in (http.client.IncompleteRead(b"par", 10), http.client.RemoteDisconnected("gone")):
+            with self.assertRaises(ClaudeError) as cut:
+                client(FakeOpener(FakeStream(events(), fail=failure, fail_after=4))).ask("s", "q", agent="a", stream=True)
+            self.assertIsNone(cut.exception.cost_usd, type(failure).__name__)
+        with self.assertRaises(ClaudeError):
+            client(FakeOpener(http.client.IncompleteRead(b"", 5))).ask("s", "q", agent="a")
 
     def test_a_quiet_stream_and_one_past_the_overall_limit_are_errors_with_an_unknown_cost(self):
         with self.assertRaises(ClaudeError) as quiet:

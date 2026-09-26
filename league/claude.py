@@ -27,6 +27,7 @@ Standard library only.
 
 from __future__ import annotations
 
+import http.client
 import json
 import re
 import time
@@ -235,7 +236,7 @@ class Claude:
                 cap = None
             raise ClaudeError(f"Claude call refused: HTTP {exc.code} {detail}", status=exc.code, cost_usd=_cost(exc.headers),
                               cap=cap if isinstance(cap, str) else None) from None
-        except (urllib.error.URLError, OSError, ValueError) as exc:
+        except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as exc:
             raise ClaudeError(f"Claude call failed: {type(exc).__name__}") from None
         if raw is not None:
             try:
@@ -333,7 +334,7 @@ class Claude:
             dispatch()
         except ClaudeError:
             raise
-        except (OSError, ValueError) as exc:  # socket.timeout: no byte for `read_timeout` seconds
+        except (http.client.HTTPException, OSError, ValueError) as exc:  # a quiet or cut stream (IncompleteRead)
             raise ClaudeError(f"the Claude stream stalled or broke: {type(exc).__name__}", cost_usd=state["cost"]) from None
         if state["error"]:
             raise ClaudeError(f"Anthropic's stream failed: {state['error']}", cost_usd=state["cost"])

@@ -706,11 +706,20 @@ function claudeStream(upstream, { admitted, settle, waitUntil }) {
   const meter = new claude.StreamMeter();
   const { readable, writable } = new TransformStream();
   const writer = writable.getWriter();
+  let gone = false, reader = null;
+  // The House closing its end is noticed at once, not at the next write: a quiet Anthropic (the model thinking) could
+  // otherwise hold the pump past Cloudflare's grace for waitUntil, and the call would never settle. Cancelling
+  // Anthropic's stream ends the read below, and the call settles as `house_gone` at its whole hold.
+  writer.closed.catch(() => {
+    gone = true;
+    reader?.cancel().catch(() => {});
+  });
   const pump = (async () => {
     const parser = claude.sseParser();
-    let broken = false, gone = false, reader = null;
+    let broken = false;
     try {
       reader = upstream.body.getReader();
+      if (gone) await reader.cancel().catch(() => {});
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;

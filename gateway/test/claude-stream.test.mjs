@@ -135,17 +135,35 @@ test('a stream that breaks after its headers, or ends without message_stop, keep
   }
 });
 
-test('an error event settles at the usage seen so far, or unknown before any', async () => {
+test('an error event before any output settles at message_start\'s usage; before it, or once output began, unknown', async () => {
   const overloaded = { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } };
-  const late = await call(body(), upstream(sse([...EVENTS.slice(0, 7), overloaded])).response);
-  assert.deepEqual(tail(await late.response.text()), { type: 'ltcm.cost', cost_usd: '0.064020', known: true, stop: 'stream_error' });
-  await Promise.all(late.pending);
-  assert.equal(late.gate.claudeStatus().spent_usd, '0.064020', 'input, cache and the one output token message_start reported');
-  const early = await call(body(), upstream(sse([overloaded])).response);
-  const text = await early.response.text();
-  await Promise.all(early.pending);
-  assert.equal(tail(text).known, false);
-  assert.equal(early.gate.claudeStatus().spent_usd, formatUsdMicro(worstCase(OPUS, early.bytes, 32000)));
+  const input = await call(body(), upstream(sse([START, { type: 'ping' }, overloaded])).response);
+  assert.deepEqual(tail(await input.response.text()), { type: 'ltcm.cost', cost_usd: '0.064020', known: true, stop: 'stream_error' });
+  await Promise.all(input.pending);
+  assert.equal(input.gate.claudeStatus().spent_usd, '0.064020', 'input, cache and the one output token message_start reported');
+  for (const events of [[overloaded], [...EVENTS.slice(0, 7), overloaded]]) {
+    const out = await call(body(), upstream(sse(events)).response);
+    const text = await out.response.text();
+    await Promise.all(out.pending);
+    const worst = formatUsdMicro(worstCase(OPUS, out.bytes, 32000));
+    assert.deepEqual(tail(text), { type: 'ltcm.cost', cost_usd: worst, known: false, stop: 'stream_error' }, `${events.length} events`);
+    assert.equal(out.gate.claudeStatus().spent_usd, worst, 'unknown is not free: the whole hold stays');
+  }
+});
+
+test('a House that goes away while Anthropic is quiet is noticed at once and settles at its whole hold', async () => {
+  let release;
+  const quiet = new Promise(resolve => { release = resolve; });
+  const anthropic = upstream(sse(EVENTS), { hold: quiet });  // after its first piece, Anthropic says nothing
+  const out = await call(body(), anthropic.response);
+  const reader = out.response.body.getReader();
+  await reader.read();
+  await reader.cancel();
+  await Promise.all(out.pending);  // settled without Anthropic sending another byte
+  assert.equal(anthropic.state.cancelled, true);
+  assert.deepEqual([out.gate.claudeStatus().spent_usd, out.gate.claudeStatus().stops],
+    [formatUsdMicro(worstCase(OPUS, out.bytes, 32000)), { house_gone: 1 }]);
+  release();
 });
 
 test('a House that goes away stops the stream, and the call settles unknown', async () => {

@@ -40,7 +40,8 @@ const MODEL_ID = /^claude-[a-z0-9-]{1,60}$/;
 export const REQUEST_HEADER = 'X-LTCM-Request';
 const REQUEST_ID = /^[A-Za-z0-9:._-]{1,160}$/;
 //: A hold with no settlement this long after it was made is released to zero: every call answers or is cut off within
-//: ten minutes (570 s here, 600 s at the House), so only a Worker that died between reserve and settle leaves one.
+//: eleven minutes (570 s unstreamed and 660 s streamed here, 600 s at the House), so only a Worker that died between
+//: reserve and settle leaves one.
 export const STALE_HOLD_MS = 30 * 60 * 1000;
 //: How many of the House's requests the meter remembers the outcome of.
 export const RECENT_REQUESTS = 256;
@@ -265,6 +266,7 @@ export function sseParser() {
 export class StreamMeter {
   constructor() {
     this.started = false;
+    this.output = false;
     this.stopped = false;
     this.usage = {};
     this.stop = null;
@@ -284,6 +286,8 @@ export class StreamMeter {
     } else if (event.type === 'message_delta') {
       merge(event.usage);
       if (typeof event.delta?.stop_reason === 'string') this.stop = event.delta.stop_reason;
+    } else if (event.type === 'content_block_start' || event.type === 'content_block_delta') {
+      this.output = true;
     } else if (event.type === 'message_stop') {
       this.stopped = true;
     } else if (event.type === 'error') {
@@ -297,13 +301,15 @@ export class StreamMeter {
 
   /**
    * `{ cost, stop }`: the cost in micro-dollars, or null when it is unknown (the whole hold stays spent). A complete
-   * answer settles at its usage. An `error` event settles at the usage seen so far, or unknown before `message_start`.
-   * A stream that broke, or ended without `message_stop`, is unknown: the call ran and may be billed.
+   * answer settles at its usage. An `error` event before any output settles at the usage `message_start` reported (the
+   * input), and unknown before `message_start` or once output has begun: its tokens were made and are not counted
+   * until the final `message_delta`, and unknown is not free. A stream that broke, or ended without `message_stop`, is
+   * unknown: the call ran and may be billed.
    */
   settlement(price, { broken = false } = {}) {
     const cost = () => (this.started ? actualCost(price, this.usage) : null);
     if (this.stopped && !this.error) return { cost: cost(), stop: this.stop || 'end_turn' };
-    if (this.error) return { cost: cost(), stop: 'stream_error' };
+    if (this.error) return { cost: this.output ? null : cost(), stop: 'stream_error' };
     return { cost: null, stop: broken ? 'stream_broken' : 'stream_cut' };
   }
 }
