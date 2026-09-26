@@ -1,308 +1,335 @@
-"""Persistent owner authorization tested only against disposable state and fake venues."""
+"""The owner's grant of real money, `options-swarm-20260928` (`league/live_trading.py`), tested only
+against disposable state and fake venues.
+
+The options overhaul (Sept 26, 2026, trap 1) built it fresh in its own store, for the Brokerage
+Account alone, and moved every call site of the campaign store's grant to it, so real money turns
+on and off only through it:
+
+- no grant -> no real entry, and no promotion onto real money;
+- an active grant -> entries allowed, inside its capital (the lower of equity and the ceiling);
+- revoked -> exits only, for good;
+- a money rule changed (the digest moved) -> no entry until the owner ratifies;
+- a deposit -> ratifying raises capital, up to the ceiling;
+- an empty state root works (no campaign database).
+"""
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 import io
 import json
 from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 
-from league.campaigns import CampaignBudget, CampaignClosed, CampaignPacer
-from league.constitution import CONSTITUTION
+from league.constitution import CONSTITUTION, money_digest
 from league.evaluator import Verdict
-from league.live_trading import main, policy, read_venue_capital, report
-from league.overnight import active, load_policy
-from league.tests.test_phase1 import PhaseCase, policy as campaign_policy
-from league.tests import test_ladder, test_tuition
+from league.live_trading import (GRANT_ID, STORE, GrantClosed, LiveGrant, ceiling, holds, main, policy, read_equity,
+                                 smallest_stake)
+from league.tests import test_tuition
+from league.tests.fakes import Clock
+
+D = Decimal
+EQUITY = "481.62"   # the Brokerage Account's cash at T0 of the options run
+CEILING = "5500"    # $481.62 plus the owner's planned $5,000 deposit
 
 
-CAPITAL = {'alpaca': '500', 'kalshi': '500'}
+class GrantCase(TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.root = Path(self.dir.name) / "state"
+        self.clock = Clock()
+
+    def grant(self):
+        grant = LiveGrant(self.root / STORE, clock=self.clock)
+        self.addCleanup(grant.close)
+        return grant
 
 
-def research_policy():
-    value = load_policy()
-    value['caps_usd'] = {'openai': '3', 'sail': '2'}
-    return value
+class ThePolicy(TestCase):
+    def test_capital_is_the_lower_of_equity_and_the_ceiling_on_the_brokerage_account_only(self):
+        low = policy(EQUITY, CEILING)
+        self.assertEqual((low["capital_usd"], low["max_loss_usd"], low["venue_capital_usd"]), ("481.62", "481.62", {"alpaca": "481.62"}))
+        self.assertEqual((low["venues"], low["max_rung"], low["expires"]), (["alpaca"], 3, None))
+        self.assertEqual(low["constitution_digest"], money_digest())
+        self.assertEqual(low["max_agents"], int(D("481.62") // smallest_stake()))
+        high = policy("7000", CEILING)
+        self.assertEqual((high["capital_usd"], high["equity_usd"], high["ceiling_usd"]), ("5500.00", "7000.00", "5500.00"))
+
+    def test_nonsense_and_oversized_or_unfunded_capital_is_refused(self):
+        for equity, top in (("NaN", CEILING), ("-1", CEILING), (EQUITY, "10000.01"), ("1", CEILING), (EQUITY, "1"), ("x", CEILING)):
+            with self.subTest(equity=equity, ceiling=top), self.assertRaises(ValueError):
+                policy(equity, top)
+        self.assertEqual(policy("10000", "10000")["capital_usd"], "10000.00")
+
+    def test_a_policy_naming_another_venue_or_digest_never_holds(self):
+        good = policy(EQUITY, CEILING)
+        self.assertTrue(holds(good))
+        self.assertFalse(holds({**good, "venues": ["alpaca", "kalshi"]}))
+        self.assertFalse(holds({**good, "venue_capital_usd": {"alpaca": "400", "kalshi": "81.62"}}))
+        self.assertFalse(holds({**good, "constitution_digest": "0" * 64}))
+        self.assertFalse(holds({**good, "version": 1}))
+
+    def test_the_ceiling_is_the_config_and_the_shipped_one_is_5500(self):
+        from league.service import load_config
+
+        self.assertEqual(ceiling(load_config()), D("5500"))
+        self.assertEqual(ceiling({"live_trading": {"ceiling_usd": "123.456"}}), D("123.45"))
+        with self.assertRaises(ValueError):
+            ceiling({})
+
+    def test_equity_is_read_through_the_gateway_as_a_balance_only(self):
+        balance = SimpleNamespace(currency="USD", cash=D("457.05"), equity=D("481.789"), buying_power=D("2000"))
+        with patch("league.service.load_env"), patch("league.service.secret", return_value="t" * 40), \
+                patch("league.venues.gateway_broker") as broker:
+            broker.return_value.balance.return_value = balance
+            self.assertEqual(read_equity({"gateway_url": "https://gateway.invalid"}), D("481.78"))
+        self.assertEqual(broker.call_args.args[0], "alpaca")
+        self.assertFalse(broker.return_value.submit.called)
 
 
+class TheStore(GrantCase):
+    def test_an_empty_root_has_no_grant_and_allows_nothing(self):
+        grant = self.grant()
+        self.assertIsNone(grant.current())
+        self.assertIsNone(grant.live_authorization())
+        self.assertFalse(grant.allows_live(2))
+        self.assertFalse(grant.allows_live(3))
+        self.assertFalse((self.root / "campaigns.sqlite").exists(), "no campaign database is made or needed")
 
-from league.tests.fakes import old_ladder as _old_ladder  # noqa: E402
-_OLD_LADDER = _old_ladder()
+    def test_enable_activates_only_the_live_rungs(self):
+        grant = self.grant()
+        live = grant.enable(GRANT_ID, EQUITY, CEILING)
+        self.assertTrue(live["active"])
+        self.assertEqual((live["id"], live["revoked"], live["ends"]), (GRANT_ID, None, None))
+        self.assertEqual([grant.allows_live(r) for r in (0, 1, 2, 3, 4)], [False, False, True, True, False])
+        self.assertEqual(self.grant().current(), live, "a second connection reads the same grant")
 
+    def test_a_deposit_is_answered_by_ratifying_up_to_the_ceiling(self):
+        grant = self.grant()
+        self.assertEqual(grant.enable(GRANT_ID, EQUITY, CEILING)["policy"]["capital_usd"], "481.62")
+        self.clock.advance(3600)
+        landed = grant.ratify(GRANT_ID, "5481.62", CEILING)
+        self.assertTrue(landed["active"])
+        self.assertEqual(landed["policy"]["capital_usd"], "5481.62")
+        above = grant.ratify(GRANT_ID, "7200", CEILING)
+        self.assertEqual(above["policy"]["capital_usd"], "5500.00", "never above the owner's ceiling")
+        self.assertEqual(len(grant.ratifications()), 2)
+        self.assertEqual(json.loads(grant.ratifications()[0]["old_policy"])["capital_usd"], "481.62")
+        lower = grant.ratify(GRANT_ID, "300", CEILING)
+        self.assertEqual(lower["policy"]["capital_usd"], "300.00", "a loss lowers it at the next ratification")
 
-def setUpModule():
-    # These tests pin the grant, the micro stake and the tuition of the ladder before the allocator.
-    _OLD_LADDER.start()
+    def test_enabling_again_reads_capital_afresh_and_never_forks_a_second_grant(self):
+        grant = self.grant()
+        grant.enable(GRANT_ID, EQUITY, CEILING)
+        again = grant.enable(GRANT_ID, "900", CEILING)
+        self.assertEqual(again["policy"]["capital_usd"], "900.00")
+        with self.assertRaises(GrantClosed):
+            grant.enable("someone-else", EQUITY, CEILING)
+        self.assertEqual(grant.current()["id"], GRANT_ID)
 
+    def test_two_connections_cannot_create_two_grants(self):
+        guards = [self.grant(), self.grant()]
 
-def tearDownModule():
-    _OLD_LADDER.stop()
-
-class PersistentAuthorization(PhaseCase):
-    def expired(self):
-        guard = self.budget()
-        burst = guard.activate_burst('original-night', research_policy())
-        guard.reserve('pending-call', 'foundation-review', '1')
-        self.now[0] = burst['ends'] + 3600
-        return guard, burst
-
-    def test_reporting_and_deployment_never_authorize_trading(self):
-        guard, _ = self.expired()
-        before = guard.report()
-        shown = report(guard, prepared_capital=CAPITAL)
-        self.assertEqual(guard.report(), before)
-        self.assertFalse(shown['micro_entries_allowed'])
-        self.assertFalse(shown['scaled_entries_allowed'])
-        self.assertEqual(shown['unused_burst_allowance_usd'], {'openai': '2', 'sail': '2'})
-        self.assertIsNone(self.budget().live_trading())
-
-    def test_activation_survives_phase_expiry_without_resetting_any_dollar(self):
-        guard, original = self.expired()
-        phase = guard.started, guard.ends, guard.policy
-        live = guard.activate_live_trading('earned', CAPITAL)
-        self.assertTrue(live['active'])
-        self.assertIsNone(live['ends'])
-        self.assertTrue(guard.allows_live(2))
-        self.assertTrue(guard.allows_live(3))
-        self.assertEqual(guard.remaining('openai'), 2)
-        self.assertEqual(guard.burst(), original)
-        self.now[0] = guard.ends + 90 * 86400
-        reopened = self.budget()
-        self.assertTrue(reopened.running())
-        self.assertTrue(reopened.allows_live(3))
-        self.assertEqual((reopened.started, reopened.ends, reopened.policy), phase)
-        self.assertEqual(reopened.activate_live_trading('earned', CAPITAL), live)
-        self.assertEqual(reopened.report()['pending_calls'], 1)
-        reopened.reserve('last-two', 'foundation-review', '2')
-        self.assertEqual(reopened.remaining('openai'), 0)
-        with self.assertRaises(CampaignClosed):
-            reopened.reserve('one-more', 'foundation-review', '.01')
-        self.assertTrue(reopened.allows_live(3))  # Funding and financial permission are separate.
-        self.assertEqual(reopened.burst(), original)
-
-    def test_identity_and_capital_cannot_be_refilled_by_repeating_activation(self):
-        guard, _ = self.expired()
-        original = guard.activate_live_trading('earned', CAPITAL)
-        for ident, capital in [('new', CAPITAL), ('earned', {'alpaca': '501', 'kalshi': '500'})]:
-            with self.subTest(ident=ident, capital=capital), self.assertRaises(CampaignClosed):
-                guard.activate_live_trading(ident, capital)
-        self.assertEqual(guard.live_trading(), original)
-
-    def test_two_connections_cannot_authorize_different_capital(self):
-        a, _ = self.expired()
-        guards = [a, self.budget()]
         def enable(i):
             try:
-                guards[i].activate_live_trading('owner-' + str(i), CAPITAL)
+                guards[i].enable(f"owner-{i}", EQUITY, CEILING)
                 return True
-            except CampaignClosed:
+            except GrantClosed:
                 return False
+
         with ThreadPoolExecutor(max_workers=2) as pool:
             self.assertEqual(sum(pool.map(enable, range(2))), 1)
 
-    def test_revocation_keeps_risk_and_cannot_be_undone_by_a_retry(self):
-        guard, _ = self.expired()
-        guard.activate_live_trading('earned', CAPITAL)
-        guard.revoke_live_trading()
-        self.assertFalse(guard.allows_live(2))
-        self.assertFalse(guard.allows_live(3))
-        self.assertFalse(guard.activate_live_trading('earned', CAPITAL)['active'])
-        self.assertEqual(guard.live_authorization()['policy']['max_loss_usd'], '1000.00')
-        self.assertEqual(guard.report()['pending_calls'], 1)
+    def test_revocation_is_for_good_and_keeps_the_capital_accounting(self):
+        grant = self.grant()
+        grant.enable(GRANT_ID, EQUITY, CEILING)
+        self.clock.advance(60)
+        revoked = grant.revoke()
+        self.assertFalse(revoked["active"])
+        self.assertFalse(grant.allows_live(2))
+        self.assertFalse(grant.allows_live(3))
+        self.assertEqual(grant.live_authorization()["policy"]["venue_capital_usd"], {"alpaca": "481.62"})
+        for action in (grant.enable, grant.ratify):
+            with self.subTest(action=action.__name__), self.assertRaises(GrantClosed):
+                action(GRANT_ID, EQUITY, CEILING)
+        self.assertFalse(grant.current()["active"])
+        # A new identity may follow once the first is revoked.
+        self.clock.advance(60)
+        self.assertTrue(grant.enable("options-swarm-next", EQUITY, CEILING)["active"])
 
-    def test_changed_constitution_cannot_inherit_owner_authorization(self):
-        guard, _ = self.expired()
-        guard.activate_live_trading('earned', CAPITAL)
-        with patch.dict(CONSTITUTION['rungs']['3'], max_share_of_venue=.5):
-            self.assertFalse(guard.allows_live(3))
-            with self.assertRaises(CampaignClosed):
-                guard.activate_live_trading('earned', CAPITAL)
+    def test_a_money_rule_change_holds_entries_until_the_owner_ratifies(self):
+        grant = self.grant()
+        grant.enable(GRANT_ID, EQUITY, CEILING)
+        with patch.dict(CONSTITUTION["tuition"], max_agents=CONSTITUTION["tuition"]["max_agents"] + 1):
+            self.assertFalse(grant.current()["active"])
+            self.assertFalse(grant.allows_live(2))
+            ratified = grant.ratify(GRANT_ID, EQUITY, CEILING)
+            self.assertTrue(ratified["active"])
+            self.assertEqual(ratified["policy"]["constitution_digest"], money_digest())
+        self.assertFalse(grant.allows_live(2), "back on the old rules, the grant pinned on the new ones holds nothing")
 
-    def test_risk_free_rules_can_change_without_revoking_the_money_grant(self):
-        """The grant pins the rules that govern real money; the replay gate and paper death do not."""
-        guard, _ = self.expired()
-        guard.activate_live_trading('earned', CAPITAL)
-        with patch.dict(CONSTITUTION['ladder']['replay'], min_deflated_sharpe=.3), \
-                patch.dict(CONSTITUTION['ladder']['paper_death'], max_loss=.05):
-            self.assertTrue(guard.allows_live(3))
-        with patch.dict(CONSTITUTION['ladder']['paper'], min_active_blocks=CONSTITUTION['ladder']['paper']['min_active_blocks'] + 1):
-            self.assertFalse(guard.allows_live(2))  # the screen that promotes to money is a money rule
+    def test_risk_free_rules_can_change_without_revoking_the_grant(self):
+        grant = self.grant()
+        grant.enable(GRANT_ID, EQUITY, CEILING)
+        with patch.dict(CONSTITUTION["ladder"]["replay"], min_deflated_sharpe=.3), \
+                patch.dict(CONSTITUTION["ladder"]["paper_death"], max_loss=.05):
+            self.assertTrue(grant.allows_live(3))
 
-    def test_a_legacy_whole_constitution_grant_holds_only_while_money_rules_are_unchanged(self):
-        from league.constitution import LEGACY_GRANT_DIGESTS, money_digest
-        guard, _ = self.expired()
-        guard.activate_live_trading('earned', CAPITAL)
-        legacy = next(iter(LEGACY_GRANT_DIGESTS))
-        stored = {**policy(CAPITAL), 'constitution_digest': legacy}
-        guard.db.execute('UPDATE live_trading SET policy=?', (json.dumps(stored, sort_keys=True, separators=(',', ':')),))
-        with patch.dict(LEGACY_GRANT_DIGESTS, {legacy: money_digest()}):
-            self.assertTrue(guard.live_trading()['active'])
-            with patch.dict(CONSTITUTION['tuition'], max_agents=9):
-                self.assertFalse(guard.live_trading()['active'])
-        with patch.dict(LEGACY_GRANT_DIGESTS, {legacy: '0' * 64}):
-            self.assertFalse(guard.live_trading()['active'])
-
-    def test_the_pre_revision_grant_needs_the_owner_after_the_fast_lane(self):
-        """The fast lane (Sept 21 ~22:30 UTC) changed money rules, so the grant recorded before it is
-        not carried over silently: the owner ratifies it (`ratify_live_trading`)."""
-        from league.constitution import LEGACY_GRANT_DIGESTS, money_digest
-        self.assertNotEqual(LEGACY_GRANT_DIGESTS['bfdbbf8567205153a18eed023819e9bf52e5d989dae5d113d60fd5c1a1e5fad1'], money_digest())
-
-    def test_the_owner_ratifies_a_grant_under_revised_money_rules_without_new_capital(self):
-        guard, _ = self.expired()
-        live = guard.activate_live_trading('earned', CAPITAL)
-        with patch.dict(CONSTITUTION['ladder']['paper'], min_active_blocks=CONSTITUTION['ladder']['paper']['min_active_blocks'] + 1):
-            self.assertFalse(guard.live_trading()['active'])
-            with self.assertRaises(CampaignClosed):
-                guard.ratify_live_trading('someone-else')
-            ratified = guard.ratify_live_trading('earned')
-            self.assertTrue(ratified['active'])
-            self.assertEqual(ratified['policy']['venue_capital_usd'], live['policy']['venue_capital_usd'])
-            self.assertEqual(guard.db.execute('SELECT COUNT(*) FROM live_ratifications').fetchone()[0], 1)
-        guard.revoke_live_trading()
-        with self.assertRaises(CampaignClosed):
-            guard.ratify_live_trading('earned')
-
-    def test_exhausted_or_unhealthy_research_cannot_be_reopened(self):
-        guard, _ = self.expired()
-        with patch.object(guard, 'ready', return_value=False), self.assertRaises(CampaignClosed):
-            guard.activate_live_trading('earned', CAPITAL)
-        self.assertIsNone(guard.live_trading())
-        guard.db.execute("UPDATE commitments SET reserved=3000000 WHERE id='pending-call'")
-        with self.assertRaises(CampaignClosed):
-            guard.activate_live_trading('earned', CAPITAL)
-        self.assertIsNone(guard.live_trading())
-
-    def test_fast_game_is_restored_without_changing_the_research_cohort(self):
-        guard, original = self.expired()
-        self.assertIsNone(active(guard, self.clock))
-        guard.activate_live_trading('earned', CAPITAL)
-        effective = active(guard, self.clock)
-        self.assertEqual(effective['id'], original['id'])
-        self.assertIsNone(effective['ends'])
-        self.assertEqual(effective['policy'], original['policy'])
-        pacer = CampaignPacer(None, guard, clock=self.clock)
-        self.assertEqual(pacer.credit_pool(per_seconds=3600), Decimal('.31'))
-
-    def test_owner_cli_report_is_inert_and_retry_does_not_read_new_deposits(self):
-        guard, _ = self.expired()
-        with patch('league.live_trading.read_venue_capital', return_value=CAPITAL), \
-                patch('league.campaigns.load_policy', return_value=campaign_policy()), \
-                patch('sys.stdout', new_callable=io.StringIO):
-            main(['--root', str(self.root)])
-        self.assertIsNone(guard.live_trading())
-        guard.activate_live_trading('earned', CAPITAL)
-        with patch('league.live_trading.read_venue_capital', side_effect=AssertionError('no new capital read')), \
-                patch('league.campaigns.load_policy', return_value=campaign_policy()), \
-                patch('sys.stdout', new_callable=io.StringIO):
-            main(['--root', str(self.root), '--enable', 'earned'])
+    def test_a_grant_not_yet_started_allows_nothing(self):
+        grant = self.grant()
+        grant.enable(GRANT_ID, EQUITY, CEILING)
+        grant.db.execute("UPDATE grants SET started=?", (self.clock() + 60,))
+        self.assertFalse(grant.allows_live(2))
 
 
-class CapitalSnapshot(TestCase):
-    def test_only_cash_not_margin_or_unrealized_assets_is_authorized(self):
-        balances = [SimpleNamespace(currency='USD', cash=Decimal('501.999'), equity=Decimal('520'), buying_power=Decimal('2000')),
-                    SimpleNamespace(currency='USD', cash=Decimal('490'), equity=Decimal('480'), buying_power=Decimal('500'))]
-        with patch('league.service.load_env'), patch('league.service.secret', return_value='test'), \
-                patch('league.venues.gateway_broker') as broker:
-            broker.return_value.balance.side_effect = balances
-            self.assertEqual(read_venue_capital(), {'alpaca': '501.99', 'kalshi': '480.00'})
+class OwnerCommand(GrantCase):
+    def run_main(self, *args, equity=EQUITY):
+        with patch("league.live_trading.read_equity", return_value=D(equity)) as read, \
+                patch("league.live_trading.ceiling", return_value=D(CEILING)), patch("sys.stdout", new_callable=io.StringIO):
+            out = main(["--root", str(self.root), *args])
+        return out, read
 
-    def test_invalid_or_unfunded_allocations_are_rejected(self):
-        for value in ({'alpaca': 'NaN', 'kalshi': '500'}, {'alpaca': '-1', 'kalshi': '500'},
-                      {'alpaca': '10', 'kalshi': '10'}, {'alpaca': '24', 'kalshi': '24'},
-                      {'alpaca': '10000', 'kalshi': '1'}):
-            with self.subTest(value=value), self.assertRaises(ValueError):
-                policy(value)
+    def test_the_report_on_an_empty_root_is_inert(self):
+        out, read = self.run_main()
+        self.assertIsNone(out["live_trading"])
+        self.assertFalse(out["micro_entries_allowed"])
+        self.assertEqual(out["prepared_policy"]["capital_usd"], EQUITY)
+        self.assertIsNone(self.grant().current())
 
+    def test_enable_ratify_and_disable(self):
+        out, _ = self.run_main("--enable")
+        self.assertEqual((out["live_trading"]["id"], out["live_trading"]["active"]), (GRANT_ID, True))
+        out, read = self.run_main("--ratify", equity="5481.62")
+        self.assertTrue(read.called)
+        self.assertEqual(out["live_trading"]["policy"]["capital_usd"], "5481.62")
+        out, read = self.run_main("--disable")
+        self.assertFalse(read.called, "revoking reads no balance")
+        self.assertFalse(out["live_trading"]["active"])
+        with self.assertRaises(GrantClosed):
+            self.run_main("--enable")
 
-class PersistentLadder(TestCase):
-    def fixture(self, kind=test_tuition.TuitionTest, capital=None):
-        f = kind(); f.setUp(); self.addCleanup(f.tearDown)
-        guard = CampaignBudget(Path(f.dir.name) / 'campaigns.sqlite', campaign_policy(), clock=f.clock)
-        guard.activate_burst('original-night', research_policy())
-        f.clock.advance(9 * 3600)
-        guard.activate_live_trading('earned', capital or CAPITAL)
-        f.house.campaigns = guard
-        f.house.pacer = CampaignPacer(f.house.ledger, guard, clock=f.clock)
-        f.house.provider = SimpleNamespace(transport=SimpleNamespace(refresh=lambda: True))
-        if hasattr(f, 'quote'):
-            f.quote(80000)
-        return f, guard
+    def test_the_box_wrapper_runs_the_grant_on_the_state_root_and_restarts_nothing(self):
+        from scripts.live_trading import GRANT_ID as SCRIPT_GRANT, main as owner_command
 
-    def test_a_qualified_agent_can_audit_and_trade_after_both_old_deadlines(self):
-        f, guard = self.fixture(test_ladder.LadderTest)
-        h = f.house
-        f.clock.advance(3 * 86400)
-        agent = h.spawn('climber', 'test', test_ladder.LADDER, reason='test', endowment='2.5')
-        h.evaluator.seat(agent.id, 1, 'paper')
-        h._state['tried'][agent.id] = agent.code_sha256
-        for _ in range(60 * 12):
-            f.run_hours(1 / 12, edge=.78)
-            if h.evaluator.rung(agent.id) >= 3:
-                break
-        self.assertEqual(h.evaluator.rung(agent.id), 3)
-        self.assertIn(agent.id, f.auditor.seen)
-        self.assertTrue(f.real.submitted)
-        self.assertTrue(h.books['alpaca'].reconcile().ok)
-        self.assertTrue(guard.allows_live(3))
-        from league.capital import resize
-        resize(h, agent)
-        self.assertGreater(h.books['alpaca'].account(agent.id).staked, 50)
-        self.assertGreater(h.standing_of(agent.id)['earned_observations'], 0)
-        f.run_hours(30, edge=.3)
-        decisions = [e.payload['decision'] for e in h.ledger.iter(kinds='eval.verdict', agent=agent.id)]
-        self.assertTrue('demote' in decisions or 'die' in decisions)
-        self.assertTrue(h.books['alpaca'].reconcile().ok)
-        self.assertEqual(h.ledger.verify(), h.ledger.head()[0])
-
-    def test_scaled_agent_can_pass_fifty_dollars_but_cannot_spend_the_other_venue(self):
-        from league.capital import resize
-        f, guard = self.fixture(capital={'alpaca': '125', 'kalshi': '500'})
-        h = f.house
-        agent = f.on_micro('winner')
-        h.evaluator.promote(agent.id, 3, 'earned test bound')
-        with patch('league.capital.kelly_stake', return_value=(Decimal('1000'), {'reason': 'test'})):
-            resize(h, agent)
-        self.assertEqual(h.books['alpaca'].account(agent.id).staked, Decimal('125'))
-        self.assertEqual(h.tuition('alpaca')['headroom_usd'], 0)
-        self.assertEqual(h.tuition()['headroom_usd'], 500)
-        waiting = f.on_micro('waiting', rung=1)
-        h._promote(waiting, Verdict(waiting.id, 1, 'eligible', 'screen', {}))
-        self.assertEqual(h.evaluator.rung(waiting.id), 1)
-        self.assertEqual(h._state['promotion_status'][waiting.id]['stage'], 'tuition')
-
-    def test_revocation_blocks_queued_buys_but_keeps_exits_and_historical_losses(self):
-        f, guard = self.fixture()
-        h = f.house
-        agent = f.on_micro('trader')
-        f.lose_about_five_dollars(agent)
-        book = h.books['alpaca']
-        # $12, not $1: a crypto buy asked under Alpaca's $10 minimum is refused by the House before it can queue.
-        intents, _ = h._intents(agent, book, [{'symbol': 'BTC/USD', 'side': 'buy', 'notional_usd': '12'}])
-        self.assertTrue(intents)
-        before = len(f.real.submitted)
-        guard.revoke_live_trading()
-        self.assertEqual(h._submit_wakes('alpaca', [{'agent': agent.id, '_generation': h._generation(agent.id), 'intents': intents}]), [])
-        self.assertEqual(len(f.real.submitted), before)
-        sell, dropped = h._intents(agent, book, [{'symbol': 'BTC/USD', 'side': 'sell', 'quantity': '.00001'}])
-        self.assertTrue(sell)
-        self.assertFalse(dropped)
-        self.assertGreater(h.tuition('alpaca')['spent_usd'], 4)
-        self.assertEqual(h.tuition()['limit_usd'], 1000)
-
-
-class OwnerWrapper(TestCase):
-    def test_only_successful_owner_enable_restarts_the_house(self):
-        from scripts.live_trading import main as owner_command
-        for args, live, calls in [([], None, 1), (['--enable', 'earned'], {'active': True}, 2),
-                                  (['--enable', 'earned'], {'active': False}, 1), (['--disable'], {'active': False}, 1)]:
-            result = SimpleNamespace(stdout=json.dumps({'live_trading': live}), check=lambda: None)
-            with self.subTest(args=args, live=live), patch('scripts.live_trading.client') as api, \
-                    patch('scripts.live_trading.read_state', return_value={'box_id': 'fake'}), \
-                    patch('sys.stdout', new_callable=io.StringIO):
+        self.assertEqual(SCRIPT_GRANT, GRANT_ID)
+        for args, tail in [([], []), (["--enable"], ["--enable", GRANT_ID]), (["--ratify"], ["--ratify", GRANT_ID]),
+                           (["--disable"], ["--disable"])]:
+            result = SimpleNamespace(stdout=json.dumps({"live_trading": {"active": True}}), check=lambda: None)
+            with self.subTest(args=args), patch("scripts.live_trading.client") as api, \
+                    patch("scripts.live_trading.read_state", return_value={"box_id": "fake"}), \
+                    patch("scripts.live_trading.require_box", return_value="fake"), \
+                    patch("sys.stdout", new_callable=io.StringIO):
                 api.return_value.exec.return_value = result
                 owner_command(args)
-                self.assertEqual(api.return_value.exec.call_count, calls)
-                if calls == 2:
-                    self.assertEqual(api.return_value.exec.call_args.args[1], ['sh', '/workspace/restart.sh'])
+                self.assertEqual(api.return_value.exec.call_count, 1, "one command, no restart")
+                command = api.return_value.exec.call_args.args[1]
+                self.assertIn("from league.live_trading import main", command[2])
+                self.assertEqual(command[3:], ["--root", "/workspace/state", *tail])
+
+
+class TheHouseAsksOnlyTheGrant(TestCase):
+    """A real-money House with the real store in its state root (the fixture of `test_tuition`)."""
+
+    def setUp(self):
+        self.f = test_tuition.TuitionTest()
+        self.f.setUp()
+        self.addCleanup(self.f.tearDown)
+        self.house = self.f.house
+        self.house.grant = LiveGrant(self.house.root / STORE, clock=self.f.clock)
+        self.addCleanup(self.house.grant.close)
+        self.book = self.house.books["alpaca"]
+        self.agent = self.f.on_micro("trader")
+
+    def buy(self):
+        return self.house._intents(self.agent, self.book, [{"symbol": "BTC/USD", "side": "buy", "notional_usd": "12"}])
+
+    def sell(self):
+        return self.house._intents(self.agent, self.book, [{"symbol": "BTC/USD", "side": "sell", "quantity": ".00001"}])
+
+    def submitted(self, intents):
+        before = len(self.f.real.submitted)
+        self.house._submit_wakes("alpaca", [{"agent": self.agent.id, "_generation": self.house._generation(self.agent.id),
+                                             "intents": intents}])
+        return len(self.f.real.submitted) - before
+
+    def enable(self, equity=EQUITY):
+        return self.house.grant.enable(GRANT_ID, equity, CEILING)
+
+    def test_a_house_on_an_empty_root_builds_its_own_empty_grant(self):
+        from league.house import House, Settings
+        from league.tests.fakes import FakeBroker
+        from league.tests.test_ladder import InProcessSandbox
+
+        with tempfile.TemporaryDirectory() as tmp:
+            house = House(Path(tmp) / "state", brokers={"alpaca": FakeBroker("alpaca")}, sandbox=InProcessSandbox(),
+                          settings=Settings(real_money=True, research=False), clock=Clock())
+            try:
+                self.assertIsInstance(house.grant, LiveGrant)
+                self.assertEqual(house.grant.path, Path(tmp) / "state" / STORE)
+                self.assertFalse(house.grant.allows_live(2))
+                self.assertFalse(house.allocator._live_open("alpaca"))
+            finally:
+                house.close(wait=None)
+
+    def test_no_grant_means_no_real_entry_and_no_promotion_onto_real_money(self):
+        _, dropped = self.buy()
+        self.assertTrue(dropped, "the buy is refused where it is asked")
+        self.assertIn("no new real-money entries", " ".join(dropped))
+        waiting = self.f.on_micro("waiting", rung=1)
+        self.house._promote(waiting, Verdict(waiting.id, 1, "eligible", "screen", {}))
+        self.assertEqual(self.house.evaluator.rung(waiting.id), 1)
+        self.assertEqual(self.house._state["promotion_status"][waiting.id]["stage"], "campaign")
+        self.assertFalse(self.house.allocator._live_open("alpaca"))
+        self.assertFalse(self.house.allocator._swing_released())
+
+    def test_an_active_grant_allows_entries_inside_its_capital(self):
+        self.enable()
+        intents, dropped = self.buy()
+        self.assertTrue(intents)
+        self.assertFalse(dropped)
+        self.assertEqual(self.submitted(intents), 1)
+        self.assertEqual(self.house.allocator.grant_capital("alpaca"), D(EQUITY))
+        self.assertEqual(self.house.tuition("alpaca")["limit_usd"], D(EQUITY))
+        self.assertTrue(self.house.allocator._live_open("alpaca"))
+
+    def test_revoked_means_exits_only(self):
+        self.enable()
+        intents, _ = self.buy()
+        self.assertTrue(intents)
+        self.house.grant.revoke()
+        self.assertEqual(self.submitted(intents), 0, "a buy queued before the revocation does not leave")
+        _, dropped = self.buy()
+        self.assertTrue(dropped)
+        sells, dropped = self.sell()
+        self.assertTrue(sells)
+        self.assertFalse(dropped)
+        self.assertEqual(self.house.tuition("alpaca")["limit_usd"], D(EQUITY), "the revoked grant's capital still bounds the book")
+
+    def test_a_moved_digest_holds_entries_until_ratified(self):
+        self.enable()
+        with patch.dict(CONSTITUTION["tuition"], max_agents=CONSTITUTION["tuition"]["max_agents"] + 1):
+            _, dropped = self.buy()
+            self.assertTrue(dropped)
+            self.house.grant.ratify(GRANT_ID, EQUITY, CEILING)
+            intents, dropped = self.buy()
+            self.assertTrue(intents)
+            self.assertFalse(dropped)
+
+    def test_a_deposit_ratified_raises_the_envelope_up_to_the_ceiling(self):
+        self.enable()
+        self.assertEqual(self.house.allocator.grant_capital("alpaca"), D(EQUITY))
+        self.house.grant.ratify(GRANT_ID, "5481.62", CEILING)
+        self.assertEqual(self.house.allocator.grant_capital("alpaca"), D("5481.62"))
+        self.house.grant.ratify(GRANT_ID, "9000", CEILING)
+        self.assertEqual(self.house.allocator.grant_capital("alpaca"), D(CEILING))
+
+    def test_no_call_site_asks_the_campaign_store_for_real_money(self):
+        import re
+
+        root = Path(__file__).resolve().parents[1]
+        for name in ("house.py", "allocator.py", "capital.py", "shards.py", "merton.py"):
+            text = (root / name).read_text()
+            self.assertIsNone(re.search(r"campaigns\S*\.(allows_live|live_authorization|live_trading)\(", text), name)
+            self.assertIsNone(re.search(r"getattr\((self\.)?house, ['\"]campaigns['\"], None\)\s*\n\s*.*(allows_live|live_authorization)", text), name)

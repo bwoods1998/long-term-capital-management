@@ -36,7 +36,7 @@ def report(root: str | Path, *, now=None):
         if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='live_trading'").fetchone():
             row = db.execute('SELECT * FROM live_trading').fetchone()
             if row:
-                from .live_trading import policy as live_policy
+                from .campaigns import legacy_live_policy as live_policy
                 live_trading = {**dict(row), 'policy': json.loads(row['policy'])}
                 live_trading['active'] = (row['revoked'] is None and row['started'] <= now
                     and live_trading['policy'] == live_policy(live_trading['policy']['venue_capital_usd']))

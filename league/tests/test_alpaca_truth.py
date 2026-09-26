@@ -36,6 +36,7 @@ from league.house import OPEN_WAKE_SECONDS, House, Settings
 from league.ledger import now_iso
 from league.sandbox import LocalSandbox
 from league.tests.fakes import Clock, FakeBroker
+from league.tests.fakes import OpenGrant
 from league.tests.test_house import BUYER
 from league.tests.test_ladder import InProcessSandbox
 from league.venues import instrument_for
@@ -158,7 +159,7 @@ class RealAlpaca(unittest.TestCase):
         game["economy"]["newcomer_seconds"] = 10 ** 9
         self.house = House(
             Path(self.dir.name) / "house", brokers={"alpaca-paper": self.paper, "alpaca": self.real}, sandbox=InProcessSandbox(),
-            alpaca_data=self.data, clock=self.clock, settings=Settings(mark_every_seconds=0, research=False, real_money=True), game=game)
+            alpaca_data=self.data, clock=self.clock, grant=OpenGrant(), settings=Settings(mark_every_seconds=0, research=False, real_money=True), game=game)
         self.book = self.house.books["alpaca"]
 
     def tearDown(self):

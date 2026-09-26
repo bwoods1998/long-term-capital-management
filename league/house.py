@@ -617,6 +617,7 @@ class House:
         publisher: Any = None,
         budget: Any = None,
         campaigns: Any = None,
+        grant: Any = None,
         game: Mapping[str, Any] | None = None,
         settings: Settings | None = None,
         clock: Callable[[], float] = time.time,
@@ -657,6 +658,15 @@ class House:
 
         self.campaigns = campaigns
         self.pacer = CampaignPacer(self.ledger, campaigns, clock=clock) if campaigns else Pacer(self.ledger, clock=clock)
+        #: The owner's grant of real money (`league/live_trading.py`, `options-swarm-20260928`, the options overhaul of
+        #: Sept 26, 2026): real money turns on and off ONLY through it. Every real entry, promotion, envelope and swing
+        #: asks it; with none active, no real opening order leaves (exits go on). Its own store in the state root, so a
+        #: House on an empty root has one, empty (no grant: no real entry). Tests may hand in a stand-in.
+        if grant is None:
+            from .live_trading import STORE as _GRANT_STORE, LiveGrant
+
+            grant = LiveGrant(self.root / _GRANT_STORE, clock=clock)
+        self.grant = grant
         self.commons = commons or Commons(self.ledger)
         self.sandbox = sandbox
         self.alpaca_data = alpaca_data
@@ -2627,7 +2637,7 @@ class House:
     # ------------------------------------------------------------------ books
     def _event_capital_budget(self, venue: str) -> Decimal | None:
         """Read an existing explicit venue envelope; never activate or enlarge one."""
-        authorization = self.campaigns.live_authorization() if self.campaigns else None
+        authorization = self.grant.live_authorization()
         limits = (authorization or {}).get('policy', {}).get('venue_capital_usd') or {}
         return Decimal(limits[venue]) if venue in limits else None
 
@@ -3333,8 +3343,8 @@ class House:
                     self.ledger.append('book.refused', {'book': book_name,
                         'reasons': ['the House is paused for maintenance: exits and cancels only']}, agent=agent.id)
                     rows = [intent for intent in rows if intent.side != 'buy']
-                if (self.books[book_name].real_money and self.campaigns
-                        and not self.campaigns.allows_live(self.evaluator.rung(agent.id))):
+                if (self.books[book_name].real_money
+                        and not self.grant.allows_live(self.evaluator.rung(agent.id))):
                     if any(intent.side == 'buy' for intent in rows):
                         self.ledger.append('book.refused', {'book': book_name,
                             'reasons': ['the live allocation window closed before submission']}, agent=agent.id)
@@ -3651,8 +3661,8 @@ class House:
                     continue
                 instrument = instrument_for(book.broker.venue, dict(row))
                 side = str(row.get("side") or "").lower()
-                if (book.real_money and side == "buy" and self.campaigns
-                        and not self.campaigns.allows_live(self.evaluator.rung(agent.id))):
+                if (book.real_money and side == "buy"
+                        and not self.grant.allows_live(self.evaluator.rung(agent.id))):
                     raise ValueError("this phase permits exits but no new real-money entries")
                 if book.real_money and side == "buy" and instrument.asset_class == "option":
                     # A single contract bought on a real structure's short leg would net it away at the venue (the review
@@ -4941,16 +4951,16 @@ class House:
                     'the source record contains an unresolved position attribution defect',
                     accounting=source_book.evidence_integrity(agent.id))
                 return
-            if rung >= 1 and self.campaigns and not self.campaigns.allows_live(rung + 1):
+            if rung >= 1 and not self.grant.allows_live(rung + 1):
                 self._promotion_status(agent, verdict, 'campaign',
-                    'the campaign has not released this live rung; a screen pass alone cannot allocate money')
+                    'the live grant has not released this rung; a screen pass alone cannot allocate money')
                 return
             if rung == 1:
                 if not self.settings.real_money or REAL_BOOK[agent.venue] not in self.books:
                     self._promotion_status(agent, verdict, 'live_book', 'the live venue is not enabled')
                     return  # it stays eligible on paper until the owner turns real money on
                 state = self.tuition()
-                pilot = self.campaigns.live_authorization() if self.campaigns else None
+                pilot = self.grant.live_authorization()
                 verdict = Verdict(verdict.agent, verdict.rung, verdict.decision, verdict.reason,
                     {**verdict.numbers, 'allocation_context': {
                         'tuition': {'max_loss_usd': str(state['limit_usd']), 'max_agents': state['max_agents']},
@@ -5209,8 +5219,8 @@ class House:
                     'position attribution changed during the audit; the source record requires repair',
                     accounting=source_book.evidence_integrity(agent.id))
                 return
-            if rung >= 1 and self.campaigns and not self.campaigns.allows_live(rung + 1):
-                self._promotion_status(agent, verdict, 'campaign', 'the live allocation window closed during the audit')
+            if rung >= 1 and not self.grant.allows_live(rung + 1):
+                self._promotion_status(agent, verdict, 'campaign', 'the live grant closed during the audit')
                 return
             if rung == 2 and allocator_module.enabled() and not self.allocator.swing_allowed(agent):
                 # Only a proven family's agent swings (Sept 24, 2026; the constitution's
@@ -5219,7 +5229,7 @@ class House:
                 self._promotion_status(agent, verdict, 'family', "its family's pooled record is not proven: "
                                                                   "only a proven family's agent swings")
                 return
-            authorization = self.campaigns.live_authorization() if self.campaigns else None
+            authorization = self.grant.live_authorization()
             if rung == 1 and allocator_module.enabled():
                 # A known defect's bunt, committed after its audit: the allocator's envelope decides.
                 if self.allocator.refuses_probe(agent, verdict): return  # R5 (Sept 24, 2026): the probe gate again after the audit
@@ -5590,7 +5600,7 @@ class House:
         accounts, and its own stake fit under the loss line. A drawdown stop is not a guaranteed
         exit price: an option or a contract held to settlement can lose its entire purchase."""
         rules = dict(CONSTITUTION["tuition"])
-        pilot = self.campaigns.live_authorization() if self.campaigns else None
+        pilot = self.grant.live_authorization()
         if pilot:
             # The owner explicitly funds this envelope. Reaching rung 3 or expiry must never
             # erase its losses, reserved stakes or abandoned positions from the experiment.
@@ -5644,7 +5654,7 @@ class House:
             self._enforce_tuition_locked()
 
     def _enforce_tuition_locked(self) -> None:
-        authorization = self.campaigns.live_authorization() if self.campaigns else None
+        authorization = self.grant.live_authorization()
         # Venue allocations are separate purses: profit at Alpaca cannot refill Kalshi's risk.
         if authorization and authorization['policy'].get('venue_capital_usd'):
             for venue in authorization['policy']['venue_capital_usd']:
@@ -5662,7 +5672,7 @@ class House:
         if not state["closed"]:
             self._state["tuition_closed"] = False
             return
-        pilot = self.campaigns.live_authorization() if self.campaigns else None
+        pilot = self.grant.live_authorization()
         for agent in self.registry.living():
             if self.evaluator.rung(agent.id) == 2 or pilot and self.evaluator.rung(agent.id) >= 3:
                 old = self.book_of(agent)
@@ -8729,10 +8739,10 @@ class House:
                     'fresh_active_blocks': ladder['look_every_active_blocks'],
                     'note': 'A new evidence batch can earn another audit during the accelerated game. The screen and fresh audit must still pass; repeated reads and partial exits do not count.'},
                 'live_pilot': self.campaigns.live_pilot() if self.campaigns else None,
-                'live_trading': self.campaigns.live_trading() if self.campaigns else None,
+                'live_trading': self.grant.live_trading(),
                 'live_tuition': {k: str(v) if isinstance(v, Decimal) else v for k, v in self.tuition().items()},
                 'promotion_status': self._state.get('promotion_status', {}).get(agent.id),
-                'new_live_capital_allowed_by_campaign': self.campaigns.allows_live(2) if self.campaigns else self.settings.real_money,
+                'new_live_capital_allowed_by_campaign': bool(self.settings.real_money and self.grant.allows_live(2)),
                 # Capital is the ladder (Sept 23, 2026): the rules, and this agent's own evidence and band now.
                 'allocator': ({**{k: v for k, v in (CONSTITUTION.get('allocator') or {}).items()},
                                'your_band': (self.allocator.board().get('agents') or {}).get(agent.id, {}).get('band'),
@@ -10777,6 +10787,9 @@ class House:
         self.ledger.close()
         if self.campaigns:
             self.campaigns.close()
+        close = getattr(self.grant, "close", None)
+        if close is not None:
+            close()
 
 
 def _code_venue(code: str) -> str | None:
