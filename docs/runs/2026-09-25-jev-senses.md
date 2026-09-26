@@ -32,6 +32,22 @@ Execution record for the owner's goal of Sept 25, 2026: execute
   line read $16.230245 spent at 06:22Z, so funded lifetime is about $41.23 against the gateway's
   `TYPESAFE_PILOT_USD` cap of $42: $0.77 above funded money. The next gateway deploy lowers it to $41.
 
+## The owner's wrap-up (Sept 26, 2026, about 01:26Z)
+
+Across all four runs: finish soon, start nothing new. Build nothing further; ship only what is already built,
+reviewed and CI-green, in the order B (forward-first, once tonight's last two real MLB games settle), G
+(options), C (forward-first), **D-J2 with its J5 gateway deploy (this run)**, K2 (Kalshi, the scale rule
+switched off); each 30 minutes after the previous watch, never while a real family's game is in play, never
+13:25-20:05Z on a trading day; a run not ready passes its slot. Then: verify on the box, a final scoreboard,
+anything needing a later market window recorded as a named window after the run with its numbers,
+README/operations/memory, merged worktrees and branches removed (unmerged work pushed, never deleted), the final
+PR of this record, the report with the owner's decisions; then stop.
+
+**Read as:** D-J2 ships #349 (J3, its hook, the move feed switched off, two idle jobs off: built, reviewed on
+its PRs; CI on the fixed head) and J5's gateway ships #304 (built; reviewed before it ships, since it had no
+independent review yet); J4's event features are not built (blocked, with the numbers); the move feed's serve
+switch, J3's arm report and the Jev shadow's cut become windows after the run.
+
 ## The first hour's decisions
 
 1. **The plan to main.** PR #303 (docs only: a release tree holds `league/`, `ltcm/`, `scripts/`,
