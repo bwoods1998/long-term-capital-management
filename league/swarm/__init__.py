@@ -22,8 +22,8 @@ THE PIECES.
 - `seeds`       the 48 founding families (mechanisms re-expressed for the Gym) and their starter programs;
 - `evidence`    the plan's validation and holdout lines, the leakage alarm, and the bandit's draws;
 - `diagnostics` what a researcher sees of a run (train: a compact table; validation: mean, t, quarters);
-- `models`      the model router (Sail's Responses API through `ltcm.provider.Provider`; OpenAI through
-                the gateway only when its month has room, else the Sail fallback);
+- `models`      the model router (Sail's Responses API through `ltcm.provider.Provider`; Claude and OpenAI
+                through the gateway only when their budgets have room, else the Sail fallback);
 - `pool`        the Gym box pool (forks of the Gym image, sealed; batches day-major via the Gym's
                 driver) and the gate's boxes;
 - `guard`       the Sail guard (scale to zero before the House is at risk; the burst caps);
@@ -31,6 +31,7 @@ THE PIECES.
 - `tournament`  the hourly tournament: validation runs, the bandit, forks, retirements, the leaderboard;
 - `gate`        the program review, the holdout look, the Candidate band or a recorded refusal;
 - `architect`   every four hours, 3-6 new families from the leaderboard, the graveyard and the gaps;
+- `diagnostician` Claude on a stuck or nearly-there family: a rewritten mechanism, or its lesson;
 - `bands`       what the House reads (`bands.read(root)`): each family's band and program;
 - `sitefeed`    the site's inputs (schema 2: agents, the Gym's pace) and the tape's words;
 - `hook`        the House's side: `SwarmStep` (supervise, mirror, read);
