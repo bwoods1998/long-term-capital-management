@@ -59,7 +59,9 @@ def main():
                           'sail_balance_usd': sail.get('balance_usd'), 'box_status': sail.get('box_status')}, indent=1))
         return
     token = KEY.read_text().strip()
-    config = json.loads((ROOT/'ltcm/config.json').read_text())
+    # The league's config names the gateway (the options overhaul, Sept 26, 2026: no tool reads the
+    # legacy `ltcm/` package; the admin token stays where it always was, under .data/ltcm/keys).
+    config = json.loads((ROOT/'league/config.json').read_text())
     url = str(config.get('gateway_url') or '').rstrip('/')
     if not url.startswith('https://'):
         raise SystemExit('No HTTPS gateway configured; no changes made.')

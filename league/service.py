@@ -171,7 +171,7 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
     from ltcm.data.news import News
     from ltcm.history import History
     from ltcm.provider import Provider
-    from ltcm.sailbox import SailboxClient
+    from .sailbox import SailboxClient
 
     from .auditor import Auditor
     from .budget import Budget
