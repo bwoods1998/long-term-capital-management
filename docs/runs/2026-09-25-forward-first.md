@@ -565,6 +565,18 @@ today meriwether-h2d625d stays a proven-family bunt at $16.62 on a proof of 3 da
   model-route test, which pinned the sports founders to two where K1 (merged via main) added four more: fixed on
   `c/integration` (the test sets exactly its own founders).
 
+- **Deploy B verified on the box (02:53Z Sept 26).** Grant active on `acff5c64`; tick 6.7 s; C8's one-time re-key at
+  02:26:24Z (871 `agent.family` rows, 479 agents); the site accepts checkpoints again from 02:24:20Z (0 refusals since the
+  start; the page updated 02:53:06Z); `seats.deaths` reads the displacement share 0.762 with `desk_closed` 2 apart; the
+  lab's forward state: 15 lineages blocked, 24 winning, 15,445 candidates pending a window, 4,744 held by lineage; the
+  research gate runs real agents on refusals and pauses practice agents (`practice_pause`). The real `kalshi` book stays
+  frozen on the owner's sales (inherited). **A second effect of the owner's sale:** at about 02:37Z the AZ-SD market
+  settled and the book settled meriwether-h2d625d's 11 NO units the venue no longer held; the phantom loss moved
+  sports-central-run-under from n 30 / bound +0.0218 PROVEN (02:32Z) to n 31 / bound -0.027 UNPROVEN (02:37:55Z). LAD-SF
+  (about 05:15Z) and NYM-WSH (Saturday) would do the same. The owner-sale fix (`fix/owner-sale`, into Deploy C) books the
+  owner's sales on the House row at cost, reverses settlements booked on units he had sold, and never settles more
+  units than the venue holds.
+
 ## Progress notes
 
 ### T+18.2 h (22:36Z Sept 25; Deploy A live since 20:11Z, the Kalshi run's K1 since 20:54Z)
