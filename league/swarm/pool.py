@@ -15,7 +15,8 @@
   priority (`ROBUSTNESS_PRIORITY`): a box takes them only when nothing else waits AND another Gym box is free (ready or
   asleep), so they fill idle boxes and never delay a researcher's run or a validation. They never start, grow or keep
   awake a box (`manage` counts only other work), and a family's queued runs of a version that is no longer its best
-  are superseded.
+  are superseded. So a busy queue cannot starve them (validation waits on the 1.5x run), one waiting past
+  `pool.robust_age_seconds` (600; the mid run twice that) takes a Train job's priority and any free box.
 - FAILURES. A root the box's store lacks fails its job at once with the Gym's own words; a batch that
   errs or times out is retried once on another box, then its jobs fail. A failure never kills the pool.
 - COST. Every awake second of a box (starting, ready and idle, busy, resuming) is booked at `box_usd_hour`
@@ -267,10 +268,19 @@ class GymPool:
         mine = [j for j in self.queue if bool(j.gate) == gate]
         if not mine:
             return []
-        mine.sort(key=lambda j: (-j.priority, j.created, j.id))
+        # AGING: a robustness run waiting past `pool.robust_age_seconds` (the 1.5x run, which validation waits on; the mid
+        # run at twice that) takes a Train job's priority, the top one waiting, so it has its turn by age on any free box.
+        now = self.clock()
+        age = float(self.settings.get("pool", {}).get("robust_age_seconds", 600))
+        train = max([j.priority for j in mine if j.purpose == "train"] + [0.0])
+
+        def aged(j: GymJob) -> bool:
+            return j.purpose == "robustness" and now - j.created >= age * (1.0 if float(j.stress) == 1.5 else 2.0)
+
+        mine.sort(key=lambda j: (-(train if aged(j) else j.priority), j.created, j.id))
         head = mine[0]
-        if head.purpose == "robustness" and not any(b is not box and b.kind == box.kind and b.state in ("ready", "asleep")
-                                                    for b in self.boxes.values()):
+        if head.purpose == "robustness" and not aged(head) and not any(
+                b is not box and b.kind == box.kind and b.state in ("ready", "asleep") for b in self.boxes.values()):
             return []  # the last free box stays free for the inner loop
         # A robustness run never rides in a researcher's batch (a longer batch would delay the researcher's result).
         same = [j for j in mine if j.key() == head.key() and (j.purpose == "robustness") == (head.purpose == "robustness")]

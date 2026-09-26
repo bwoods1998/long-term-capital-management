@@ -305,6 +305,28 @@ class Robustness(PoolCase):
         pool.submit(sibling)
         self.assertEqual(len(pool.queue), 2, "a version's two runs keep each other")
 
+    def test_an_aged_robustness_run_takes_its_turn_by_age_on_any_free_box_the_1_5x_first(self):
+        pool = self.pool(batch_programs=1)
+        box = self.ready_box(pool)
+        self.ready_box(pool).state = "busy"  # no spare box: a young robustness run would wait
+        mid = self.robustness("m")
+        mid.stress = 0.0
+        pool.submit(self.robustness("r"))
+        pool.submit(mid)
+        self.clock.advance(601)
+        for i in range(3):
+            pool.submit(GymJob(family=f"t{i}", version=1, code="NEEDS = {}", params={}, window="train", roots=("SPY",),
+                               priority=0.7 - i / 10))
+        self.clock.advance(9)
+        self.assertEqual([j.family for j in pool._take(box)], ["r"], "the 1.5x run aged: its turn comes by age")
+        self.assertEqual([j.family for j in pool._take(box)], ["t0"], "the mid run ages at twice the time")
+        self.clock.advance(600)
+        self.assertEqual([j.family for j in pool._take(box)], ["m"])
+        pool.settings["pool"] = {"robust_age_seconds": 10 ** 6}
+        pool.submit(self.robustness("late"))
+        self.clock.advance(3600)
+        self.assertEqual([j.family for j in pool._take(box)], ["t1"], "a setting can hold aging off")
+
     def test_robustness_never_starts_or_keeps_awake_a_box(self):
         pool = self.pool()
         pool.submit(self.robustness())

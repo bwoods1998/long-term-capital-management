@@ -91,6 +91,8 @@ DEFAULTS: dict[str, Any] = {
         "capital": 10000.0,
         "roots": ["SPY", "QQQ", "IWM", "XSP", "SPXW"],
     },
+    # A robustness run waiting this long (its 1.5x run; the mid run twice as long) takes a Train job's priority (aging).
+    "pool": {"robust_age_seconds": 600},
     "tournament": {
         "every_seconds": 3600,
         "explore_share": 0.25,
