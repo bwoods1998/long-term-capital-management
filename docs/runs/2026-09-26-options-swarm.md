@@ -314,6 +314,32 @@ clock never restarts.
   The verify script's population check FAILs only because 44 < 48.
 - 14:15Z swarm.json -> Gym v1 (sbcp_4f1f0577); gate still null. W4 and W1 resumed; the #362 round-2 verification's
   two lost agents re-run.
+- 15:04:30Z **Codex continuation started; T0 is unchanged.** Read the handoff, this record and the full goal;
+  reconciled local worktrees, GitHub and the running House. Persistent goal created for the engineering,
+  testing, data, paper/shadow deployment and operational-readiness work. This continuation does not execute
+  real-money orders or activate autonomous brokerage trading; real-money activation remains an owner action.
+  No live grant is enabled or ratified, and `real_money` remains false. The original goal's market-session
+  and post-close milestones remain open; no future result is claimed.
+- 15:01Z takeover readings: House release `20260926T105515Z-b25acc7981e2`, supervisor 5318 / loop 5684,
+  healthy ticks; swarm pid 5708, matching release, 46 active families and 14 retired, 11,408 trials,
+  13,019.71 recorded program-years, 2,781 recent cycles, median 40.2 s and 99.6% under 180 s. Zero
+  validation-ready families at the latest tournament (14:23:56Z), zero holdout looks/passes. Population
+  reports FAIL on the old verifier's fixed 48 threshold; the running population is inside the configured
+  floor/ceiling. Gateway OpenAI $596.29/$607; Sail $96.43, swarm booked pace about $3.96/h, $32 guard.
+  Brokerage read: equity $481.63, cash $481.60, no open orders, only the previously recorded LTC dust.
+- 15:02:16Z W1 resumed and verified later progress omitted from the handoff: PR **#366** already exists,
+  CI green at `f8ce1b3d`. Core 2022 is **1,255/1,255** (the failed XSP day was recovered); stage 1
+  3,760/3,760, holdout 920/920, calibration samples 755/755; names 2,868/23,740 (68 vendor-empty,
+  zero failures), back months 0/2,374. Verified Gym v2b from 14:46:50Z adds core-five Train 2022:
+  `sbcp_c9820e03-418a-46b4-b9a3-01dbe7ae3688`, backup `sbcp_69a14100-a70f-43aa-be7d-306734b783f5`.
+  The House has not been switched to it yet.
+- 15:04Z Three builders resumed in the existing W1/W4/W5 worktrees; the main session owns merges,
+  deployment and independent verification. One laptop test process is enforced with
+  `/tmp/ltcm-options-tests.lock`. W4 found a further image-binding gap in the current-best validation
+  shortcut. W1 found missing nightly supervision/checkpoint handoff, a download-failure exit-status
+  defect and a fixed-UTC winter scheduling defect. These are being fixed with behavioral regression
+  tests before deployment. The nightly target is Tuesday Sept 29 06:00Z, then 02:00 New York time.
+  Owner funding confirmation requested; existing funded caps remain in force.
 
 ## Scoreboard
 
