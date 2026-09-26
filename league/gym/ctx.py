@@ -53,8 +53,10 @@ class Snapshot:
         self.strike = np.asarray(strike, dtype=np.float64)
         self.is_call = np.asarray(is_call, dtype=bool)
         n = self.strike.shape[0]
-        bid = np.asarray(bid, dtype=np.float64)
-        ask = np.asarray(ask, dtype=np.float64)
+        # Quotes come in whole cents (sub-penny at most); a float32 grid carries ~1e-7 of noise, so
+        # prices are rounded to 1e-4 as they leave it.
+        bid = np.round(np.asarray(bid, dtype=np.float64), 4)
+        ask = np.round(np.asarray(ask, dtype=np.float64), 4)
         with np.errstate(invalid="ignore"):
             self.valid = np.isfinite(bid) & np.isfinite(ask) & (ask > 0) & (bid >= 0) & (ask >= bid)
         self.bid = np.where(self.valid, bid, _NAN)

@@ -391,7 +391,7 @@ class Account:
                 expirations=np.array([day.ordinal + leg.dte for leg in snap_legs], dtype=np.int64), qty=0, opened_qty=0,
                 entry=price, max_loss_share=L.max_loss_share(order.type, price, order.collateral) if self._defined(order, price) else order.max_loss_share,
                 collateral=order.collateral, opened_day=day.ordinal, opened_mi=mi, opened_session=self.session,
-                info=dict(order.extra), tag=order.tag, note=order.note,
+                info={**order.extra, "filled_minute": day.open_min + mi}, tag=order.tag, note=order.note,
                 idx=np.array([leg.idx for leg in snap_legs], dtype=np.int64))
             self.positions[pid] = pos
             self.traded_days.add(day.ordinal)
@@ -445,6 +445,7 @@ class Account:
             "legs": [{"dte": leg.dte, "strike": leg.strike, "right": "C" if leg.is_call else "P",
                       "side": "long" if leg.side > 0 else "short", "ratio": leg.ratio} for leg in pos.legs],
             "day": from_ordinal(pos.opened_day).isoformat(), "entry_minute": pos.info.get("minute"),
+            "filled_minute": pos.info.get("filled_minute"),
             "exit_day": from_ordinal(pos.exit_day).isoformat() if pos.exit_day else None,
             "exit_minute": pos.exit_mi + pos.info.get("open_min", 570) if pos.exit_mi else None,
             "sessions_held": self.session - pos.opened_session,
@@ -573,7 +574,8 @@ class Account:
             snap = day.snapshot(pos.root, mi)
             if snap is None:
                 raise L.Refused("close: no chain for this root now")
-            order = L.resolve_close(intent, pos.type, pos.legs_today(), pos.qty, snap, rules, position=pos.pid)
+            order = L.resolve_close(intent, pos.type, pos.legs_today(), pos.qty, snap, rules, position=pos.pid,
+                                    stress=self.cfg.stress)
             work = Working(self._id(), order, order.qty, mi, arrival, self._expiry(order, arrival), 0.0, pid=pos.pid)
             self.orders[work.oid] = work
             pos.closing = work.oid
@@ -590,7 +592,7 @@ class Account:
         if snap is None:
             raise L.Refused(f"open: no {root} chain today")
         rules = day.rules[root]
-        order = L.resolve_open(intent, snap, rules, buying_power=self.buying_power())
+        order = L.resolve_open(intent, snap, rules, buying_power=self.buying_power(), stress=self.cfg.stress)
         if any(leg.dte == 0 for leg in order.legs) and minute >= rules.open_cutoff:
             raise L.Refused(f"expiry cutoff: no new opening order on an expiring contract from {rules.open_cutoff // 60}:{rules.open_cutoff % 60:02d} ET")
         order.extra = {"minute": day.open_min + mi, "open_min": day.open_min, "context": self._context(day, snap, order)}
@@ -693,7 +695,7 @@ class Account:
         if chain is None or i < 0:
             return math.nan
         for m in range(day.minutes - 1, max(-1, day.minutes - 1 - back), -1):
-            bid, ask = float(chain.bid[m, i]), float(chain.ask[m, i])
+            bid, ask = round(float(chain.bid[m, i]), 4), round(float(chain.ask[m, i]), 4)
             if math.isfinite(bid) and math.isfinite(ask):
                 return 0.5 * (bid + ask)
         return math.nan
@@ -703,8 +705,8 @@ class Account:
         if chain is None or (pos.idx < 0).any():
             return
         for m in range(mi, max(0, mi - 30), -1):
-            bid = chain.bid[m, pos.idx].astype(np.float64)
-            ask = chain.ask[m, pos.idx].astype(np.float64)
+            bid = np.round(chain.bid[m, pos.idx].astype(np.float64), 4)
+            ask = np.round(chain.ask[m, pos.idx].astype(np.float64), 4)
             if np.isfinite(bid).all() and np.isfinite(ask).all():
                 sides = np.array([leg.side * leg.ratio for leg in pos.legs], dtype=np.float64)
                 pos.last_mark = float(np.sum(sides * 0.5 * (bid + ask)))
@@ -736,9 +738,9 @@ class Account:
 
 # --------------------------------------------------------------------------- the run
 def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Sequence[dt.date] | None = None,
-        progress: Any = None) -> list[dict]:
+        progress: Any = None, keep: list | None = None) -> list[dict]:
     """Run a batch of programs over the window, day-major; return one result dict per program
-    (`results.build`), in the order given."""
+    (`results.build`), in the order given. `keep`, a list, receives the accounts (for inspection)."""
     from . import results as R
 
     began = time.perf_counter()
@@ -747,6 +749,8 @@ def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Se
     for program in programs:
         roots = tuple(r for r in program.needs.roots if not universe or r in universe)
         accounts.append(Account(program, cfg, roots))
+    if keep is not None:
+        keep.extend(accounts)
     all_roots = tuple(sorted({r for a in accounts for r in a.roots}))
     if days is None:
         days = [d for d in store.days(cfg.window, [], start=cfg.start, end=cfg.end)
@@ -786,6 +790,8 @@ def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Se
                     account.step(data, mi, wants)
         for account in live:
             account.end_day(data, last=n == len(days) - 1)
+        for root, chain in data.chains.items():
+            history.add(root, chain.underlying.price)
         if progress is not None:
             progress(n + 1, len(days), day)
     elapsed = time.perf_counter() - began

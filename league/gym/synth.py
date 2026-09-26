@@ -123,11 +123,12 @@ def weekdays(start: dt.date, count: int, skip: Iterable[dt.date] = ()) -> list[d
 
 def flat_day(writer: Writer, root: str, day: dt.date, contracts: Sequence[Mapping[str, Any]], *, prices: Any,
              open_min: int = 570, close_min: int = 960, size: int = 100) -> None:
-    """A hand-set day: each contract {"expiration", "strike", "right", "quotes"} where quotes maps a
-    minute to (bid, ask) and holds until the next listed minute (the 09:30 row stays empty unless
-    listed); `prices` is one price for the whole day, or a {minute: price} step function."""
+    """A hand-set day: each contract {"expiration", "strike", "right", "quotes"[, "size"]} where quotes
+    maps a minute to (bid, ask[, size]) and holds until the next listed minute (a minute before the
+    first listed one has no row; a (None, None) entry ends the rows); `prices` is one price for the
+    whole day, or a {minute: price} step function."""
     minutes = np.arange(open_min, close_min + 1)
-    exp, strike, right, minute, bid, ask = [], [], [], [], [], []
+    exp, strike, right, minute, bid, ask, sizes = [], [], [], [], [], [], []
     for c in contracts:
         steps = sorted((int(m), q) for m, q in c["quotes"].items())
         for m in minutes:
@@ -135,7 +136,7 @@ def flat_day(writer: Writer, root: str, day: dt.date, contracts: Sequence[Mappin
             for start, q in steps:
                 if start <= m:
                     current = q
-            if current is None:
+            if current is None or current[0] is None:
                 continue
             exp.append(c["expiration"])
             strike.append(float(c["strike"]))
@@ -143,7 +144,7 @@ def flat_day(writer: Writer, root: str, day: dt.date, contracts: Sequence[Mappin
             minute.append(int(m))
             bid.append(float(current[0]))
             ask.append(float(current[1]))
-    sizes = [size] * len(bid)
+            sizes.append(int(current[2]) if len(current) > 2 else int(c.get("size", size)))
     writer.nbbo(root, day, expiration=exp, strike=strike, right=right, minute=minute, bid=bid, ask=ask, bid_size=sizes, ask_size=sizes)
     if isinstance(prices, Mapping):
         steps = sorted((int(m), float(p)) for m, p in prices.items())

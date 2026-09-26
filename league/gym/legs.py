@@ -335,15 +335,21 @@ def _leg_prices(snap: Snapshot, legs: Sequence[LegFill], action: str) -> list[fl
 
 
 # --------------------------------------------------------------------------- orders
-def resolve_open(intent: Mapping[str, Any], snap: Snapshot, rules: venue.Rules, *, buying_power: float) -> Order:
-    """An "open" intent as an order (Refused says why not). `snap` is the intent's root at the decision minute."""
+def resolve_open(intent: Mapping[str, Any], snap: Snapshot, rules: venue.Rules, *, buying_power: float,
+                 stress: float = 1.0) -> Order:
+    """An "open" intent as an order (Refused says why not). `snap` is the intent's root at the decision
+    minute; `stress` widens the half-spreads the natural is taken from (the gate's stress run)."""
     type_ = str(intent.get("open") or "")
     root = snap.root
     if str(intent.get("root", root)).upper() != root:
         raise Refused(f"the intent's root {intent.get('root')!r} is not {root}")
+    if type_ not in venue.STRUCTURE_TYPES:
+        raise Refused(f"'open' is one of {', '.join(venue.STRUCTURE_TYPES)}")
+    if type_ in ("calendar", "diagonal") and not rules.calendars:
+        raise Refused(f"{root} options are index options: every leg has one expiry (no calendars or diagonals)")
     legs = resolve_legs(snap, intent.get("legs"), rules)
     collateral = classify(type_, root, legs, rules)
-    natural, _ = natural_value(snap, legs, "open")
+    natural, _ = natural_value(snap, legs, "open", stress=stress)
     mid = mid_value(snap, legs)
     if not (math.isfinite(natural) and math.isfinite(mid)):
         raise Refused("a leg has no quote now")
@@ -376,14 +382,14 @@ def resolve_open(intent: Mapping[str, Any], snap: Snapshot, rules: venue.Rules, 
 
 
 def resolve_close(intent: Mapping[str, Any], type_: str, legs: Sequence[LegFill], held_qty: int, snap: Snapshot,
-                  rules: venue.Rules, *, position: int) -> Order:
+                  rules: venue.Rules, *, position: int, stress: float = 1.0) -> Order:
     """A "close" intent for a held position whose `legs` carry today's snapshot indices."""
     if any(leg.idx < 0 for leg in legs):
         raise Refused("a leg of this position is not in today's chain (no quote to close against)")
     qty = intent.get("qty", held_qty)
     if isinstance(qty, bool) or not isinstance(qty, (int, float)) or int(qty) != qty or not 1 <= qty <= held_qty:
         raise Refused(f"'qty' closes 1 to {held_qty} of this position")
-    natural, _ = natural_value(snap, legs, "close")
+    natural, _ = natural_value(snap, legs, "close", stress=stress)
     mid = mid_value(snap, legs)
     if not (math.isfinite(natural) and math.isfinite(mid)):
         raise Refused("a leg has no quote now")
