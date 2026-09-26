@@ -546,9 +546,12 @@ class GateTests(RoundCase):
 
     def test_no_gate_image_no_look_but_the_review_runs_and_is_kept(self):
         from league.swarm import bands
+        from league.gym.driver import build_bundle
 
         self.pool.image = lambda kind: "sbcp_synthetic_gym"
-        self.answer = lambda job: {**strong(job), "gym_image": "sbcp_synthetic_gym"}
+        bundle = build_bundle()[1]
+        self.pool.bundle = lambda: bundle
+        self.answer = lambda job: {**strong(job), "gym_image": "sbcp_synthetic_gym", "gym_bundle": bundle}
         (self.root / "swarm.json").write_text(json.dumps({"gym": {"image_checkpoint": "sbcp_synthetic_gym"}}))
         self.ready()
         self.settings["gym"]["gate_checkpoint"] = None

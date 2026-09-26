@@ -158,7 +158,8 @@ class Gate:
             if fam["band"] != "gym" or not state.get("gate_ready"):
                 continue
             image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
-            if state.get("validation_image") != image:
+            bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
+            if state.get("validation_image") != image or state.get("validation_bundle") != bundle:
                 continue  # the tournament owes validation on the current data before any holdout is opened
             n = state.get("validation_version")
             version = self.store.version(fam["id"], n)
@@ -241,6 +242,7 @@ class Gate:
         state = fam.get("state") or {}
         vsharpe = (state.get("validation_numbers") or {}).get("sharpe_daily")
         image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
+        bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
         marker = {"sha": sha, "n": n, "at": self.clock(), "token": secrets.token_hex(8)}
         # Compare-and-set under the store's lock: only the version still validated is looked at; the marker says a look
         # is in flight (not `gated_sha`: a look cut off by a restart must be owed, not forgotten).
@@ -249,7 +251,7 @@ class Gate:
             if current.get("retired_at") or self.store.looked(sha) or \
                     self.store.lineage_looks(fam["id"], include_inflight=True) >= evidence.LOOKS_PER_LINEAGE:
                 return None
-            if not self.store.compare_and_set_state(fam["id"], {"validation_version": n, "validation_image": image,
+            if not self.store.compare_and_set_state(fam["id"], {"validation_version": n, "validation_image": image, "validation_bundle": bundle,
                                                                "look_inflight": None}, gate_ready=False, look_inflight=marker):
                 return None
         job = GymJob(family=fam["id"], version=n, code=version["code"], params=version.get("params") or {}, window="holdout",
@@ -257,14 +259,15 @@ class Gate:
         try:
             result = self.pool.run(job, timeout=float(self.settings.get("gym", {}).get("run_timeout_seconds", 900)) + 600,
                                    late=lambda r: self.finish(fam["id"], version, sha, r, validation_sharpe=vsharpe,
-                                                              validation_image=image, marker=marker),
+                                                              validation_image=image, validation_bundle=bundle, marker=marker),
                                    late_fail=lambda why: self.owe(fam["id"], n, sha, marker=marker))
         except PoolError as exc:
             self.store.event("swarm.gate", fam["id"], {"action": "look_failed", "version": n, "error": str(exc)[:300]})
             if job.result is None and job.late is None:  # it never ran (or the Gym failed it): the look is still owed
                 self.owe(fam["id"], n, sha, marker=marker)
             return None
-        return self.finish(fam["id"], version, sha, result, validation_sharpe=vsharpe, validation_image=image, marker=marker)
+        return self.finish(fam["id"], version, sha, result, validation_sharpe=vsharpe, validation_image=image,
+                           validation_bundle=bundle, marker=marker)
 
     def clear_marker(self, fid: str, sha: str) -> bool:
         """Drop the in-flight marker only if it is this look's (a newer version's look may be out meanwhile)."""
@@ -299,16 +302,17 @@ class Gate:
                                                    "text": "the gate box could not make a holdout look three times"})
 
     def finish(self, fid: str, version: Mapping[str, Any], sha: str, result: Mapping[str, Any], *,
-               validation_sharpe: Any = None, validation_image: Any = None, marker: Mapping[str, Any] | None = None) -> bool | None:
+               validation_sharpe: Any = None, validation_image: Any = None, validation_bundle: Any = None,
+               marker: Mapping[str, Any] | None = None) -> bool | None:
         """Record a holdout result as the look it is (once: a second result for the same version is ignored) and answer.
         A result the Gym could not produce (an engine error, no data) is no look: it stays owed. Nothing here undoes a
         newer validation the tournament wrote while the look ran."""
         with self.store.atomic():
             return self._finish(fid, version, sha, result, validation_sharpe=validation_sharpe, validation_image=validation_image,
-                                marker=marker)
+                                validation_bundle=validation_bundle, marker=marker)
 
     def _finish(self, fid: str, version: Mapping[str, Any], sha: str, result: Mapping[str, Any], *,
-                validation_sharpe: Any, validation_image: Any, marker: Mapping[str, Any] | None) -> bool | None:
+                validation_sharpe: Any, validation_image: Any, validation_bundle: Any, marker: Mapping[str, Any] | None) -> bool | None:
         fam = self.store.family(fid)
         if fam is None or self.store.looked(sha):
             return None
@@ -331,7 +335,8 @@ class Gate:
         self.tell(fid, "pass" if line["passed"] else "fail")
         self.outcome(fid, sha, "passed" if line["passed"] else "failed")
         image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
-        if line["passed"] and fam["band"] == "gym" and not fam.get("retired_at") and validation_image == image:
+        bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
+        if line["passed"] and fam["band"] == "gym" and not fam.get("retired_at") and validation_image == image and validation_bundle == bundle:
             self.store.set_state(fid, banded_version=n, banded_sha=version["sha"], banded_at=self.clock())
             self.store.set_band(fid, "candidate", reason="passed its holdout look")
         return bool(line["passed"])
@@ -340,7 +345,11 @@ class Gate:
     def forward_target(self) -> dict[str, str] | None:
         ready = self.settings.get("forward", {}).get("ready") or {}
         if ready.get("day") and ready.get("gate_checkpoint") == self.settings.get("gym", {}).get("gate_checkpoint"):
-            return {"day": ready["day"], "checkpoint": ready["gate_checkpoint"]}
+            target = {"day": ready["day"], "checkpoint": ready["gate_checkpoint"]}
+            bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
+            if bundle is not None:
+                target["bundle"] = bundle
+            return target
         return None
 
     def forward_pending(self, target: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -444,7 +453,8 @@ class Gate:
                              judge: bool = True) -> int | None:
         self.store.add_run(fid, n, result, window="forward", stress=1.0, purpose="forward")
         days = {str(row[0]) for row in result.get("daily") or [] if row}
-        if target != self.forward_target() or result.get("gym_image") != target["checkpoint"] or target["day"] not in days:
+        if target != self.forward_target() or result.get("gym_image") != target["checkpoint"] or \
+                result.get("gym_bundle") != target.get("bundle") or target["day"] not in days:
             self.store.event("swarm.gate", fid, {"action": "forward_failed", "version": n,
                                                  "why": "the replay does not cover the ready checkpoint and day"})
             return None

@@ -65,15 +65,17 @@ class Tournament:
         errors = {}
         judged = {}
         image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
+        bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
         for fam in fams:
             n = self.candidate_version(fam)
             if n is None:
                 continue
             state = fam.get("state") or {}
-            if n == fam.get("validated_version") and state.get("validation_image") == image:
+            if n == fam.get("validated_version") and state.get("validation_image") == image and state.get("validation_bundle") == bundle:
                 continue
-            if state.get("validation_image") != image:
-                self.store.compare_and_set_state(fam["id"], {"validation_image": state.get("validation_image")}, gate_ready=False)
+            if state.get("validation_image") != image or state.get("validation_bundle") != bundle:
+                self.store.compare_and_set_state(fam["id"], {"validation_image": state.get("validation_image"),
+                                                           "validation_bundle": state.get("validation_bundle")}, gate_ready=False)
             version = self.store.version(fam["id"], n)
             if version is None or not version.get("code"):
                 continue
@@ -103,10 +105,11 @@ class Tournament:
         """The full result of a validation this version already had on the Gym image in use now (the same program on the
         same code and data answers the same; another image may hold other days, so its result is not reused)."""
         image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
+        bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
         for row in self.store.runs(fid, window="validation", limit=500):
             if row.get("version") == n and float(row.get("stress") or 1.0) == 1.0 and row.get("path"):
                 result = self.store.run_result(row["run_id"])
-                if result is not None and result.get("gym_image") == image:
+                if result is not None and result.get("gym_image") == image and result.get("gym_bundle") == bundle:
                     return result
         return None
 
@@ -129,7 +132,8 @@ class Tournament:
         with self.store.lock:  # the candidate check and the verdict's writes, never interleaved with another judge
             fam = self.store.family(fid) or fam
             image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
-            if self.candidate_version(fam) != int(n) or result.get("gym_image") != image:
+            bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
+            if self.candidate_version(fam) != int(n) or result.get("gym_image") != image or result.get("gym_bundle") != bundle:
                 return None  # stale: its trials count, its verdict does not
             return self._verdict(fid, fam, n, result, counted=record)
 
@@ -157,6 +161,7 @@ class Tournament:
             typical[str(n)] = loss
         self.store.set_state(fid, validation_view=view, validation_line=line, validation_version=n,
                              validation_image=result.get("gym_image"),
+                             validation_bundle=result.get("gym_bundle"),
                              typical_max_loss_usd=loss, typical_by_version=typical,
                              validation_numbers={"mean": mean, "t": t, "sharpe_daily": summary.get("sharpe_daily"),
                                                  "quarters": summary.get("quarters_positive")},

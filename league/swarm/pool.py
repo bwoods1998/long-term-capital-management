@@ -167,6 +167,15 @@ class GymPool:
     def image(self, kind: str) -> str | None:
         return self.gym.get("image_checkpoint") if kind == "gym" else self.gym.get("gate_checkpoint")
 
+    def bundle(self) -> str | None:
+        """The engine code shipped by this process; a checkpoint alone identifies only its saved data."""
+        if self.driver_factory is not None:
+            return next((getattr(b.driver, "version", None) for b in self.boxes.values() if b.driver is not None), None)
+        if not hasattr(self, "_bundle_version"):
+            from ..gym.driver import build_bundle
+            self._bundle_version = build_bundle()[1]
+        return self._bundle_version
+
     # ------------------------------------------------------------------ jobs
     def submit(self, job: GymJob) -> GymJob:
         """Queue a job. A family has at most one Train job waiting: a newer one supersedes it (its waiter, if any, is
@@ -491,7 +500,7 @@ class GymPool:
             if result is None:
                 self._fail(job, "the batch returned no result for this program")
                 continue
-            result = {**result, "gym_image": box.version}  # which Gym (image: code and data) made it
+            result = {**result, "gym_image": box.version, "gym_bundle": getattr(box.driver, "version", None)}
             job.result = result
             job.batch = {**info, "box": box.id, "programs_in_batch": len(batch), "wall_seconds": round(elapsed, 2)}
             days = (result.get("summary") or {}).get("days") or len(result.get("daily") or [])

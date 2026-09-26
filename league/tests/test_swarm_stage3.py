@@ -26,7 +26,7 @@ class ValidationImageTests(R.RoundCase):
     def setup_image(self):
         self.image = "sbcp_gym_v0"
         self.pool.image = lambda kind: self.image
-        self.answer = lambda job: {**R.strong(job), "gym_image": self.image}
+        self.answer = lambda job: {**R.strong(job), "gym_image": self.image, "gym_bundle": getattr(self, "bundle", None)}
         self.family("a")
         self.tournament = Tournament(self.store, self.pool, self.settings, clock=self.clock)
         self.tournament.validate(self.store.families(alive=True))
@@ -38,6 +38,20 @@ class ValidationImageTests(R.RoundCase):
         self.assertEqual(out["queued"], 1)
         self.assertEqual(self.store.family("a")["state"]["validation_image"], self.image)
         self.assertEqual(self.store.family("a")["trials"], 4)
+
+    def test_an_engine_bundle_change_requires_validation_again_on_the_same_checkpoint(self):
+        self.bundle = "engine-v1"
+        self.pool.bundle = lambda: self.bundle
+        self.setup_image()
+        self.assertEqual(self.store.family("a")["state"]["validation_bundle"], "engine-v1")
+        previous = self.answer(self.pool.jobs[-1])
+        self.bundle = "engine-v2"
+        self.replies = [{"text": '{"verdict":"pass"}'}] * 2
+        Gate(self.store, self.pool, self.router, self.settings, clock=self.clock).run()
+        self.assertFalse([j for j in self.pool.jobs if j.window == "holdout"])
+        self.assertEqual(self.tournament.validate(self.store.families(alive=True))["queued"], 1)
+        self.assertEqual(self.store.family("a")["state"]["validation_bundle"], "engine-v2")
+        self.assertIsNone(self.tournament.judge("a", 1, previous))
 
     def test_a_late_old_image_verdict_cannot_restore_gate_eligibility(self):
         self.setup_image()
@@ -65,6 +79,20 @@ class ValidationImageTests(R.RoundCase):
         gate = Gate(self.store, self.pool, self.router, self.settings, clock=self.clock)
         gate.run()
         self.image = "sbcp_gym_v1"
+        job, late = self.pool.landing[0]
+        late(R.strong(job))
+        self.assertEqual(len(self.store.looks()), 1, "the opened holdout remains counted")
+        self.assertEqual(self.store.family("a")["band"], "gym")
+
+    def test_a_holdout_result_from_an_old_engine_bundle_cannot_promote(self):
+        self.bundle = "engine-v1"
+        self.pool.bundle = lambda: self.bundle
+        self.setup_image()
+        self.pool.slow.add("a")
+        self.replies = [{"text": '{"verdict":"pass"}'}] * 2
+        gate = Gate(self.store, self.pool, self.router, self.settings, clock=self.clock)
+        gate.run()
+        self.bundle = "engine-v2"
         job, late = self.pool.landing[0]
         late(R.strong(job))
         self.assertEqual(len(self.store.looks()), 1, "the opened holdout remains counted")
@@ -403,7 +431,22 @@ class ReadyForwardTests(R.RoundCase):
 
     def good(self, job):
         target = self.gate.forward_target()
-        return {**R.strong(job), "gym_image": target["checkpoint"], "daily": [[target["day"], 0, 10000]], "trades": []}
+        return {**R.strong(job), "gym_image": target["checkpoint"], "gym_bundle": target.get("bundle"),
+                "daily": [[target["day"], 0, 10000]], "trades": []}
+
+    def test_an_engine_bundle_change_requires_a_fresh_forward_replay(self):
+        self.banded()
+        self.target()
+        self.bundle = "engine-v1"
+        self.pool.bundle = lambda: self.bundle
+        self.gate = Gate(self.store, self.pool, self.router, self.settings, clock=self.clock)
+        self.answer = self.good
+        self.gate.forward()
+        self.assertFalse(self.gate.forward_due())
+        self.bundle = "engine-v2"
+        self.assertTrue(self.gate.forward_due())
+        self.gate.forward()
+        self.assertEqual(self.store.family("a")["state"]["forward_replay"]["target"]["bundle"], self.bundle)
 
     def test_ready_checkpoint_after_a_clock_only_run_replays_immediately_and_retries_failure(self):
         self.banded()
