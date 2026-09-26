@@ -1110,6 +1110,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     known, _ = parser.parse_known_args(argv)
     if known.command in ("run", "probe", "one"):
         with process_lock(Path(known.work) / "session.lock"):
+            if known.command == "run" and os.getpgrp() != os.getpid():
+                os.setsid()  # the runner and its decoders are one safely identifiable stop group
             return _main(argv)
     return _main(argv)
 

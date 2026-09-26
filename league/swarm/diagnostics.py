@@ -20,10 +20,11 @@ import json
 import math
 from typing import Any, Mapping
 
-SUMMARY_KEYS = ("trades", "days", "days_traded", "pnl", "pnl_per_max_loss", "mean_return_on_max_loss", "t_stat", "win_rate",
+SUMMARY_KEYS = ("trades", "days", "days_traded", "pnl", "pnl_per_max_loss", "mean_return_on_max_loss_daily", "t_daily",
+                "sharpe_daily", "mean_return_on_max_loss", "t_stat", "win_rate",
                 "profit_factor", "sharpe", "max_drawdown", "max_drawdown_frac", "fees", "quarters_positive", "avg_trade",
                 "turnover", "max_loss_opened")
-FILL_KEYS = ("orders", "opens", "closes", "filled", "partial", "cancelled", "expired", "rejected", "liquidated", "settled",
+FILL_KEYS = ("orders", "opens", "closes", "filled", "partial_fills", "partial", "cancelled", "expired", "rejected", "liquidated", "settled",
              "exercised", "fill_rate", "at_natural", "open_slip_half_spreads", "close_slip_half_spreads")
 BREAKDOWNS = ("weekday", "time_of_day", "dte", "rv_tercile", "iv_tercile", "quarter", "type", "root", "exit_reason")
 TRADE_KEYS = ("day", "root", "type", "legs", "entry_minute", "filled_minute", "exit_minute", "sessions_held", "exit_reason", "qty",
