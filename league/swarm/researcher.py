@@ -230,7 +230,12 @@ class Researcher:
                      stress=stress, purpose="train", priority=float(fam.get("weight") or 0.0))
         began = self.clock()
         try:
-            result = self.pool.run(job, timeout=float(self.settings.get("gym", {}).get("run_timeout_seconds", 900)) + 120)
+            def late(result: Mapping[str, Any], fid: str = fam["id"], n: int = version["n"], stress: float = stress) -> None:
+                days = float((result.get("summary") or {}).get("days") or 0)
+                self.store.add_run(fid, n, result, window="train", stress=stress, purpose="train",
+                                   program_years=days / 252.0 * max(1, len(fam["roots"])))
+
+            result = self.pool.run(job, timeout=float(self.settings.get("gym", {}).get("run_timeout_seconds", 900)) + 120, late=late)
         except PoolError as exc:
             out["gym_error"] = str(exc)[:300]
             return {"status": "gym_error", "version": version["n"], "error": str(exc)[:500],

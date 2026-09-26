@@ -150,30 +150,43 @@ class Gate:
         return out
 
     def look(self, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str) -> bool | None:
-        """The one holdout look. None when the gate box could not run it (no look is spent)."""
+        """The one holdout look. None when the gate box did not run it (no look is spent). The version is marked as
+        looked at BEFORE the box runs it, so a slow look is never started twice; one that lands after the gate stopped
+        waiting is recorded and judged when it lands (`finish`)."""
         n = int(version["n"])
+        self.store.set_state(fam["id"], gated_sha=sha, gate_ready=False)
         job = GymJob(family=fam["id"], version=n, code=version["code"], params=version.get("params") or {}, window="holdout",
                      roots=tuple(fam["roots"]), gate=f"holdout look {fam['id']} v{n}", purpose="holdout", priority=10.0)
         try:
-            result = self.pool.run(job, timeout=float(self.settings.get("gym", {}).get("run_timeout_seconds", 900)) + 600)
+            result = self.pool.run(job, timeout=float(self.settings.get("gym", {}).get("run_timeout_seconds", 900)) + 600,
+                                   late=lambda r: self.finish(fam["id"], version, sha, r))
         except PoolError as exc:
             self.store.event("swarm.gate", fam["id"], {"action": "look_failed", "version": n, "error": str(exc)[:300]})
+            if job.result is None and job.late is None:  # it never ran (or the Gym failed it): the look is still owed
+                self.store.set_state(fam["id"], gated_sha=None, gate_ready=True)
             return None
+        return self.finish(fam["id"], version, sha, result)
+
+    def finish(self, fid: str, version: Mapping[str, Any], sha: str, result: Mapping[str, Any]) -> bool | None:
+        """Record a holdout result as the look it is (once: a second result for the same version is ignored) and answer."""
+        fam = self.store.family(fid)
+        if fam is None or self.store.looked(sha):
+            return None
+        n = int(version["n"])
         years = float((result.get("summary") or {}).get("days") or 0) / 252.0 * max(1, len(fam["roots"]))
-        self.store.add_run(fam["id"], n, result, window="holdout", stress=1.0, purpose="holdout", program_years=years)
+        self.store.add_run(fid, n, result, window="holdout", stress=1.0, purpose="holdout", program_years=years)
         state = fam.get("state") or {}
         previous = [x["p_value"] for x in self.store.looks() if x["p_value"] is not None]
         line = evidence.holdout_line(result, validation_sharpe=(state.get("validation_numbers") or {}).get("sharpe_daily"),
                                      previous_ps=previous, seed=sha)
-        self.store.add_look(fam["id"], n, sha, passed=line["passed"], p_value=line["p"], detail=line)
-        self.store.set_state(fam["id"], gated_sha=sha, gate_ready=False)
-        self.store.event("swarm.gate", fam["id"], {"action": "look", "version": n, "passed": line["passed"],
-                                                   "_line": line})  # the numbers stay private (underscore)
-        self.tell(fam["id"], "pass" if line["passed"] else "fail")
+        self.store.add_look(fid, n, sha, passed=line["passed"], p_value=line["p"], detail=line)
+        self.store.event("swarm.gate", fid, {"action": "look", "version": n, "passed": line["passed"],
+                                             "_line": line})  # the numbers stay private (underscore)
+        self.tell(fid, "pass" if line["passed"] else "fail")
         if line["passed"]:
-            self.store.update_family(fam["id"], best_version=n)
-            self.store.set_state(fam["id"], banded_version=n, banded_sha=version["sha"], banded_at=self.clock())
-            self.store.set_band(fam["id"], "candidate", reason="passed its holdout look")
+            self.store.update_family(fid, best_version=n)
+            self.store.set_state(fid, banded_version=n, banded_sha=version["sha"], banded_at=self.clock())
+            self.store.set_band(fid, "candidate", reason="passed its holdout look")
         return bool(line["passed"])
 
     # ------------------------------------------------------------------ the nightly forward
@@ -201,26 +214,32 @@ class Gate:
             jobs.append((fam, int(n), self.pool.submit(job)))
         for fam, n, job in jobs:
             try:
-                result = self.pool.wait(job, float(self.settings.get("gym", {}).get("run_timeout_seconds", 900)) + 600)
+                result = self.pool.wait(job, float(self.settings.get("gym", {}).get("run_timeout_seconds", 900)) + 600,
+                                        late=lambda r, fid=fam["id"], n=n: self.record_forward(fid, n, r))
             except PoolError as exc:
                 out.setdefault("errors", {})[fam["id"]] = str(exc)[:200]
                 continue
-            self.store.add_run(fam["id"], n, result, window="forward", stress=1.0, purpose="forward")
-            # The forward view carries each trade's day, P&L and maximum loss (no ids): a trade is (version, day, its place
-            # that day). Every forward day is rerun each night, so the latest run replaces the nightly record whole.
-            trades, seen = [], {}
-            for t in result.get("trades") or []:
-                if t.get("pnl") is None:
-                    continue
-                k = seen[t.get("day")] = seen.get(t.get("day"), -1) + 1
-                trades.append({"id": f"v{n}:{t.get('day')}:{k}", "day": t.get("day"), "pnl": t.get("pnl"), "max_loss": t.get("max_loss")})
-            out["trades"] += self.store.replace_forward(fam["id"], "nightly", trades)
+            out["trades"] += self.record_forward(fam["id"], n, result)
         for fam in banded:
             move = self.judge_forward(fam["id"])
             if move:
                 out["moves"].append(move)
         self.store.event("swarm.gate", None, {"action": "forward", **out})
         return out
+
+    def record_forward(self, fid: str, n: int, result: Mapping[str, Any]) -> int:
+        """A nightly replay's run (a trial) and its trades as the family's nightly forward record (the latest run replaces
+        the record whole: every forward day is rerun each night)."""
+        self.store.add_run(fid, n, result, window="forward", stress=1.0, purpose="forward")
+        # The forward view carries each trade's day, P&L and maximum loss (no ids): a trade is (version, day, its place
+        # that day).
+        trades, seen = [], {}
+        for t in result.get("trades") or []:
+            if t.get("pnl") is None:
+                continue
+            k = seen[t.get("day")] = seen.get(t.get("day"), -1) + 1
+            trades.append({"id": f"v{n}:{t.get('day')}:{k}", "day": t.get("day"), "pnl": t.get("pnl"), "max_loss": t.get("max_loss")})
+        return self.store.replace_forward(fid, "nightly", trades)
 
     def judge_forward(self, fid: str) -> dict[str, Any] | None:
         fam = self.store.family(fid)

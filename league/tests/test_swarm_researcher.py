@@ -26,8 +26,11 @@ class FakePool:
         self.answer = answer or (lambda job: result(job.name, roots=job.roots))
         self.fail = fail
 
-    def run(self, job, timeout=None):
+    def run(self, job, timeout=None, late=None):
         self.jobs.append(job)
+        if self.fail == "late":  # the researcher stops waiting; the Gym's result lands after
+            self.late = (late, self.answer(job))
+            raise PoolError("the Gym did not answer in time")
         if self.fail:
             raise PoolError(self.fail)
         return self.answer(job)
@@ -169,6 +172,16 @@ class ModelCycles(ResearcherCase):
         self.assertEqual(out["note"], "entries were too rare")
         self.assertEqual(self.store.notebook(self.fam["id"])[-1]["text"], "entries were too rare")
         self.assertEqual(self.pool.jobs[-1].params, {"vrp_min": 1.3}, "no code: the latest version with new params")
+
+    def test_a_run_that_lands_after_the_researcher_gave_up_is_still_a_trial(self):
+        self.run_first()
+        self.pool.fail = "late"
+        self.steps = [{"calls": [("gym_run", {"params": {"vrp_min": 1.3}})]}, {"text": "ok"}]
+        self.researcher().cycle(self.fam["id"])
+        self.assertEqual(self.store.family(self.fam["id"])["trials"], 1)
+        late, landed = self.pool.late
+        late(landed)
+        self.assertEqual(self.store.family(self.fam["id"])["trials"], 2)
 
     def test_notes_reach_the_tape_at_most_every_few_cycles(self):
         self.run_first()

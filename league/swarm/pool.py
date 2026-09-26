@@ -64,6 +64,9 @@ class GymJob:
     batch: dict[str, Any] | None = None
     error: str | None = None
     done: threading.Event = field(default_factory=threading.Event)
+    #: Called with the result when it arrives after its waiter gave up (`GymPool.wait` timed out): an evaluation the Gym
+    #: made is a trial whether or not anyone was still waiting for it.
+    late: Any = None
 
     @property
     def name(self) -> str:
@@ -126,15 +129,26 @@ class GymPool:
             self._wake.notify_all()
         return job
 
-    def wait(self, job: GymJob, timeout: float | None = None) -> dict[str, Any]:
+    def wait(self, job: GymJob, timeout: float | None = None, *, late: Any = None) -> dict[str, Any]:
+        """The job's result. On a timeout the job leaves the queue if it has not started (nothing ran); if it is
+        running, `late(result)` records it when it lands (it is still a trial)."""
         if not job.done.wait(timeout):
+            with self._lock:
+                if job in self.queue:
+                    self.queue.remove(job)
+                    job.error = "abandoned before it ran"
+                else:
+                    job.late = late
+            if job.done.is_set() and job.result is not None and late is not None and job.late is not None:
+                job.late = None
+                late(job.result)
             raise PoolError(f"the Gym did not answer within {timeout:.0f} s (queue {self.queued()})")
         if job.error:
             raise PoolError(job.error)
         return job.result  # type: ignore[return-value]
 
-    def run(self, job: GymJob, timeout: float | None = None) -> dict[str, Any]:
-        return self.wait(self.submit(job), timeout)
+    def run(self, job: GymJob, timeout: float | None = None, *, late: Any = None) -> dict[str, Any]:
+        return self.wait(self.submit(job), timeout, late=late)
 
     def queued(self, kind: str | None = None) -> int:
         with self._lock:
@@ -327,7 +341,14 @@ class GymPool:
             job.batch = {**info, "box": box.id, "programs_in_batch": len(batch), "wall_seconds": round(elapsed, 2)}
             days = (result.get("summary") or {}).get("days") or len(result.get("daily") or [])
             years += float(days) / 252.0 * max(1, len(result.get("roots") or job.roots))
-            job.done.set()
+            with self._lock:
+                late, job.late = job.late, None
+                job.done.set()
+            if late is not None:
+                try:
+                    late(result)
+                except Exception:  # noqa: BLE001 - recording a late result never breaks the dispatcher
+                    pass
         with self._lock:
             self.stats["batches"] += 1
             self.stats["jobs"] += len(batch)

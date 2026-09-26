@@ -128,6 +128,22 @@ class Batches(PoolCase):
             pool.wait(j, 0)
         self.assertIn("missing data", str(caught.exception))
 
+    def test_a_wait_that_times_out_withdraws_a_queued_job_and_records_a_running_one_when_it_lands(self):
+        pool = self.pool()
+        box = self.ready_box(pool)
+        queued = pool.submit(job("q"))
+        with self.assertRaises(PoolError):
+            pool.wait(queued, 0.01, late=lambda r: self.fail("never ran"))
+        self.assertEqual(pool.queued(), 0, "withdrawn: nothing ran")
+        running = pool.submit(job("r"))
+        self.clock.advance(9)
+        batch = pool._take(box)
+        landed = []
+        with self.assertRaises(PoolError):
+            pool.wait(running, 0.01, late=landed.append)
+        pool.run_batch(box, batch)
+        self.assertEqual([r["status"] for r in landed], ["ok"], "the evaluation happened: it is recorded")
+
     def test_gate_jobs_go_only_to_gate_boxes_and_never_wait_for_company(self):
         pool = self.pool()
         gym = self.ready_box(pool, "gym")

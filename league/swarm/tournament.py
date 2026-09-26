@@ -77,41 +77,49 @@ class Tournament:
         deadline = self.clock() + timeout
         for fam, n, job in jobs:
             try:
-                result = self.pool.wait(job, max(1.0, deadline - self.clock()))
+                result = self.pool.wait(job, max(1.0, deadline - self.clock()),
+                                        late=lambda r, fid=fam["id"], n=n: self.judge(fid, n, r))
             except PoolError as exc:
                 errors[fam["id"]] = str(exc)[:300]
                 continue
-            fid = fam["id"]
-            years = float((result.get("summary") or {}).get("days") or 0) / 252.0 * max(1, len(fam["roots"]))
-            row = self.store.add_run(fid, n, result, window="validation", stress=1.0, purpose="validation", program_years=years)
-            stressed = evidence.stressed_of(result)
-            if isinstance(result.get("stress_1.5"), dict):
-                twin = result["stress_1.5"]
-                self.store.add_run(fid, n, {"run_id": f"{row['run_id']}-s15", "status": twin.get("status") or "ok", "trials": 1,
-                                            "summary": dict(twin)}, window="validation", stress=evidence.STRESS, purpose="validation",
-                                   program_years=years)
-            fam = self.store.family(fid)
-            if fam is None:
-                continue
-            line = evidence.validation_line(result, stressed, lineage_trials=self.store.lineage_trials(fid),
-                                            trial_sharpes=self.store.lineage_trial_sharpes(fid))
-            view = diagnostics.validation_view(result, line)
-            summary = result.get("summary") or {}
-            mean = evidence.daily_mean(summary)
-            t = evidence.daily_t(summary)
-            improved = mean is not None and (fam.get("best_validation") is None or float(mean) > float(fam["best_validation"]))
-            fields: dict[str, Any] = {"validated_version": n}
-            if improved:
-                fields.update(best_validation=float(mean), since_val_revisions=0, since_val_trials=0)
-            self.store.update_family(fid, **fields)
-            self.store.bump(fid, validations=1)
-            self.store.set_state(fid, validation_view=view, validation_line=line, validation_version=n,
-                                 typical_max_loss_usd=typical_max_loss(result),
-                                 validation_numbers={"mean": mean, "t": t, "sharpe_daily": summary.get("sharpe_daily"),
-                                                     "quarters": summary.get("quarters_positive")},
-                                 gate_ready=bool(line["passed"]))
-            judged[fid] = {"version": n, "passed": line["passed"], "mean": mean, "t": t}
+            row = self.judge(fam["id"], n, result)
+            if row is not None:
+                judged[fam["id"]] = row
         return {"queued": len(jobs), "judged": judged, "errors": errors}
+
+    def judge(self, fid: str, n: int, result: Mapping[str, Any]) -> dict[str, Any] | None:
+        """Record a validation result (and its stress twin: two trials) and judge it by the line. Also called for a
+        result that lands after the round stopped waiting: every evaluation counts, and its verdict is the same."""
+        fam = self.store.family(fid)
+        if fam is None:
+            return None
+        years = float((result.get("summary") or {}).get("days") or 0) / 252.0 * max(1, len(fam["roots"]))
+        row = self.store.add_run(fid, n, result, window="validation", stress=1.0, purpose="validation", program_years=years)
+        stressed = evidence.stressed_of(result)
+        if isinstance(result.get("stress_1.5"), dict):
+            twin = result["stress_1.5"]
+            self.store.add_run(fid, n, {"run_id": f"{row['run_id']}-s15", "status": twin.get("status") or "ok", "trials": 1,
+                                        "summary": dict(twin)}, window="validation", stress=evidence.STRESS, purpose="validation",
+                               program_years=years)
+        fam = self.store.family(fid) or fam
+        line = evidence.validation_line(result, stressed, lineage_trials=self.store.lineage_trials(fid),
+                                        trial_sharpes=self.store.lineage_trial_sharpes(fid))
+        view = diagnostics.validation_view(result, line)
+        summary = result.get("summary") or {}
+        mean = evidence.daily_mean(summary)
+        t = evidence.daily_t(summary)
+        improved = mean is not None and (fam.get("best_validation") is None or float(mean) > float(fam["best_validation"]))
+        fields: dict[str, Any] = {"validated_version": n}
+        if improved:
+            fields.update(best_validation=float(mean), since_val_revisions=0, since_val_trials=0)
+        self.store.update_family(fid, **fields)
+        self.store.bump(fid, validations=1)
+        self.store.set_state(fid, validation_view=view, validation_line=line, validation_version=n,
+                             typical_max_loss_usd=typical_max_loss(result),
+                             validation_numbers={"mean": mean, "t": t, "sharpe_daily": summary.get("sharpe_daily"),
+                                                 "quarters": summary.get("quarters_positive")},
+                             gate_ready=bool(line["passed"]))
+        return {"version": n, "passed": line["passed"], "mean": mean, "t": t}
 
     # ------------------------------------------------------------------ 3. the bandit
     def allocate(self, fams: list[dict[str, Any]]) -> dict[str, float]:

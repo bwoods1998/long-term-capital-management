@@ -30,19 +30,25 @@ class FakeGymPool:
         self.answer = answer
         self.jobs = []
         self.fail: set[str] = set()
+        self.slow: set[str] = set()
+        self.landing: list = []
         self.cancelled: list[str] = []
 
     def submit(self, job):
         self.jobs.append(job)
         return job
 
-    def wait(self, job, timeout=None):
+    def wait(self, job, timeout=None, late=None):
         if job.family in self.fail:
             raise PoolError("the Gym failed")
+        if job.family in self.slow:  # the round stops waiting; the result lands later
+            job.late = late
+            self.landing.append((job, late))
+            raise PoolError("the Gym did not answer in time")
         return self.answer(job)
 
-    def run(self, job, timeout=None):
-        return self.wait(self.submit(job), timeout)
+    def run(self, job, timeout=None, late=None):
+        return self.wait(self.submit(job), timeout, late)
 
     def cancel_family(self, family):
         self.cancelled.append(family)
@@ -185,6 +191,30 @@ class GateTests(RoundCase):
         self.assertEqual(len([j for j in self.pool.jobs if j.window == "holdout"]), 1)
         gate_rows = [e for e in self.store.events_after(0) if e["kind"] == "swarm.gate" and e["payload"].get("action") == "look"]
         self.assertIn("_line", gate_rows[0]["payload"], "the numbers stay private")
+
+    def test_a_slow_look_is_never_started_twice_and_is_recorded_when_it_lands(self):
+        self.ready()
+        self.pool.slow.add("a")
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}] * 3
+        Gate(self.store, self.pool, self.router, self.settings).run()
+        Gate(self.store, self.pool, self.router, self.settings).run()
+        self.assertEqual(len([j for j in self.pool.jobs if j.window == "holdout"]), 1, "in flight: not started again")
+        self.assertEqual(self.store.looks(), [])
+        job, late = self.pool.landing[0]
+        late(strong(job))
+        late(strong(job))
+        self.assertEqual(len(self.store.looks()), 1, "recorded once, when it landed")
+        self.assertEqual(self.store.family("a")["band"], "candidate")
+
+    def test_a_look_the_gym_failed_is_still_owed(self):
+        self.ready()
+        self.pool.fail.add("a")
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}] * 2
+        Gate(self.store, self.pool, self.router, self.settings).run()
+        self.assertTrue(self.store.family("a")["state"]["gate_ready"])
+        self.pool.fail.clear()
+        Gate(self.store, self.pool, self.router, self.settings).run()
+        self.assertEqual(len(self.store.looks()), 1)
 
     def test_a_failed_review_is_a_refusal_and_costs_no_look(self):
         self.ready()
