@@ -334,9 +334,17 @@ class Gate:
             self.store.event("swarm.status", None, {"action": "holm_unreachable", "looks": len(previous) + 1})
         self.tell(fid, "pass" if line["passed"] else "fail")
         self.outcome(fid, sha, "passed" if line["passed"] else "failed")
-        image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
-        bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
-        if line["passed"] and fam["band"] == "gym" and not fam.get("retired_at") and validation_image == image and validation_bundle == bundle:
+        has_image = callable(getattr(self.pool, "image", None))
+        has_bundle = callable(getattr(self.pool, "bundle", None))
+        image = self.pool.image("gym") if has_image else None
+        gate_image = self.pool.image("gate") if has_image else None
+        bundle = self.pool.bundle() if has_bundle else None
+        # Opening sealed data consumes the look even when its image was replaced while the job ran. Only a result
+        # actually produced by the current gate data and engine can promote. Identity-less pools exist in tests only.
+        current_holdout = ((not has_image or (gate_image is not None and result.get("gym_image") == gate_image))
+                           and (not has_bundle or (bundle is not None and result.get("gym_bundle") == bundle)))
+        if line["passed"] and fam["band"] == "gym" and not fam.get("retired_at") and validation_image == image \
+                and validation_bundle == bundle and current_holdout:
             self.store.set_state(fid, banded_version=n, banded_sha=version["sha"], banded_at=self.clock())
             self.store.set_band(fid, "candidate", reason="passed its holdout look")
         return bool(line["passed"])

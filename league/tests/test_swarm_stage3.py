@@ -111,6 +111,56 @@ class ValidationImageTests(R.RoundCase):
         self.assertEqual(self.store.family("a")["state"]["typical_by_version"], {"1": 60.0, "2": 125.0})
 
 
+class HoldoutIdentityTests(R.RoundCase):
+    def setUp(self):
+        super().setUp()
+        self.images = {"gym": "sbcp_gym_v1", "gate": "sbcp_gate_v1"}
+        self.pool.image = lambda kind: self.images[kind]
+        self.pool.bundle = lambda: "engine-v1"
+        self.answer = lambda job: {**R.strong(job), "gym_image": self.images["gym"], "gym_bundle": "engine-v1"}
+        self.family("a")
+        Tournament(self.store, self.pool, self.settings, clock=self.clock).validate(self.store.families(alive=True))
+        self.pool.slow.add("a")
+        self.replies = [{"text": '{"verdict":"pass"}'}] * 2
+        self.gate = Gate(self.store, self.pool, self.router, self.settings, clock=self.clock)
+        self.gate.run()
+        self.job, self.late = self.pool.landing[0]
+        self.result = {**R.strong(self.job), "gym_image": "sbcp_gate_v1", "gym_bundle": "engine-v1"}
+
+    def cannot_promote(self):
+        trials = self.store.family("a")["trials"]
+        self.late(self.result)
+        self.assertEqual(self.store.family("a")["band"], "gym")
+        self.assertEqual(len(self.store.looks()), 1, "opening old or unidentified sealed data still uses a look")
+        self.assertGreater(self.store.family("a")["trials"], trials, "its actual computation still counts")
+        self.assertIsNone(self.store.family("a")["state"].get("look_inflight"))
+
+    def test_a_gate_checkpoint_switch_cannot_promote_the_old_result(self):
+        self.images["gate"] = "sbcp_gate_v2"
+        self.cannot_promote()
+
+    def test_a_disabled_gate_cannot_promote_a_late_result(self):
+        self.images["gate"] = None
+        self.cannot_promote()
+
+    def test_missing_holdout_checkpoint_identity_cannot_promote(self):
+        self.result.pop("gym_image")
+        self.cannot_promote()
+
+    def test_a_holdout_result_from_another_engine_cannot_promote(self):
+        self.result["gym_bundle"] = "engine-v0"
+        self.cannot_promote()
+
+    def test_missing_holdout_engine_identity_cannot_promote(self):
+        self.result.pop("gym_bundle")
+        self.cannot_promote()
+
+    def test_the_current_holdout_image_and_engine_do_promote(self):
+        self.late(self.result)
+        self.assertEqual(self.store.family("a")["band"], "candidate")
+        self.assertEqual(len(self.store.looks()), 1)
+
+
 class GateOwnershipTests(R.RoundCase):
     def ready(self):
         self.family("a")
