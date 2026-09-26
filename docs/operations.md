@@ -1433,27 +1433,39 @@ ORDER BY seq DESC LIMIT 20`.
     closed trade, no settlement and no observation from it -- W and the day's loss take the move's
     `equity_flow` out as a stake's); each of your fills is booked on the House row (`owner-fill`, id
     `owner-fill:kalshi:<the venue's fill id>`, `realized` the House's result against that cost); the
-    fee rounding left over is House dust. The House row holds none of the units afterwards.
+    fee rounding left over is House dust. The House row sells in the same group every unit it took
+    over, so it holds none of them afterwards and a later settlement of the market (Kalshi lists one even
+    at zero count held) pays no one.
   - *Units the House had already settled keep their settlement.* It stands as the agent's
     hold-to-settlement result (the market's verdict on its mechanism), and your proceeds, less what
     the settlement credited on the sold units, go to the House row as one row
-    `owner-sale:kalshi:<ticker>` (`source: owner`, no instrument, `receipts` the fill ids).
+    `owner-sale:kalshi:<ticker>` (`source: owner`, `form: settled`, no instrument).
+  - *One row per market, in either form.* A transfer's group carries the same id,
+    `owner-sale:kalshi:<ticker>` (`form: transfer`, no cash), so a market's sale is booked once and
+    never in both forms. Your receipts, Kalshi's order ids and the words about your trades are under
+    `_` keys (`_receipts`, `_venue_fill_id`, `_venue_order_id`, `_reported`, `_fills`, `_detail`):
+    `book.fill` rows are public and `public_view` strips those.
+  - *Nothing is booked while an order rests on an affected market*, the House's or one at the venue
+    (`GET /portfolio/orders?status=resting`): it could fill between the reading and the booking, and a
+    resting sell of NO is a YES bid that buys YES once hit. Cancel it and the next reading books.
   - *The House no longer settles units the venue did not hold.* A real Kalshi settlement is booked
     only when the venue's settlement row (its `yes_count` and `no_count`, which count both legs
     traded, gross: AZ-SD read 11 and 11) shows the account held at least the book's units; otherwise
     nothing of that market is settled, an error alert says so, and the reading books your sale as
     above. Of the 152 real settlements since Sept 18 this refuses one: AZ-SD.
-  - One ERROR alert names your trades, the agents, the units, the prices and the House's result; it
-    begins with the book's name and carries `began_at` (your first fill), so a deploy's watch inherits
-    it. Every id derives from the venue's fill ids: a second reading or a restart books nothing twice.
+  - One ERROR alert: its public text begins with the book's name, lists the markets and the House's
+    result; its private `_detail` names your trades, the agents, the units and the prices. It carries
+    `began_at` (your first fill), so a deploy's watch inherits it. Every id derives from the venue's fill ids: a second reading or a restart books nothing twice.
   - *What still freezes*, for you to read: a buy (units the book does not know, or more of a leg it
     holds), a sale of units the book does not hold, fills that explain only some of the missing units,
     cash the fills do not explain, any baseline units of the market, an order in doubt, both legs of
-    a market held, a fills read that fails or returns 1,000 rows. A practice book never reads fills
+    a market held, an order resting on an affected market, a market already booked in either form, a
+    fills read that fails or returns 1,000 rows. A practice book never reads fills
     for this; it adopts the venue as before.
   - To verify after a deploy (across two readings, not the first: right after a restart a sold
     position passes as "awaiting settlement"): `book.fill` rows with `source` `owner-transfer`,
-    `owner-fill` and `owner`, the ops.alert beginning "kalshi: the owner's own trades", `book.reconciled`
+    `owner-fill` and `owner` (one `owner-sale:kalshi:<ticker>` a market), the error alert beginning
+    "kalshi: 4 venue fill(s) no House order sent", `book.reconciled`
     `ok: true` with `cash_diff` 0, `health.json` `books.kalshi.frozen` null, and the agent's family
     record unchanged by the move.
 - **File a repair.** Drop a JSON file into `/workspace/state/repairs-inbox/`:

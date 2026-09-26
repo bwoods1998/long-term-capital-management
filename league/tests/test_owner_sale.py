@@ -6,6 +6,7 @@ positions differ: ... -11, ... -13, ... -16". At 02:34:14Z the House settled AZ-
 venue no longer held. These tests replay that night with the venue's own fill rows as Kalshi reported them: each sale of
 NO as a YES bought at the complement (`outcome_side: yes`, `book_side: bid`), by an order the House never sent.
 """
+import json
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -156,11 +157,11 @@ class OwnerSale(unittest.TestCase):
             self.assertEqual(D(e.payload["position_delta"]), -UNITS[ticker])
             self.assertTrue(e.payload["closes_position"])
         owner = self.rows(OWNER_FILL)
-        self.assertEqual({e.payload["venue_fill_id"] for e in owner}, {f[0] for f in OWNER_FILLS})
+        self.assertEqual({e.payload["_venue_fill_id"] for e in owner}, {f[0] for f in OWNER_FILLS})
         self.assertTrue(all(e.agent == HOUSE and e.payload["side"] == "sell" for e in owner))
         ladsf = next(e.payload for e in owner if e.payload["instrument"]["market_id"] == LADSF)
         self.assertEqual((ladsf["instrument"]["right"], D(ladsf["price"]), D(ladsf["cash_delta"])), ("no", D("0.47"), D("5.9966")))
-        self.assertEqual(ladsf["reported"], {"leg": "yes", "side": "buy", "price": "0.53"})
+        self.assertEqual(ladsf["_reported"], {"leg": "yes", "side": "buy", "price": "0.53"})
         # The agent: its cost back, no result, only the position the owner left it.
         account = book.account(AGENT)
         self.assertEqual(account.realized, D(0))
@@ -172,11 +173,21 @@ class OwnerSale(unittest.TestCase):
         self.assertEqual(book.account(HOUSE).holdings, {})
         # The CIN-TOR fee's rounding, beside them, as dust.
         self.assertEqual(result.cash_diff, D(0))
-        alerts = [a for a in self.alerts() if "owner" in a["text"]]
+        alerts = [a for a in self.alerts() if "_owner_fills" in a]
         self.assertEqual(len(alerts), 1)
         self.assertTrue(alerts[0]["text"].startswith("kalshi: "))
-        for word in (AZSD, LADSF, NYMWSH, AGENT, "0.47", f"{house_pnl:+.4f}"):
+        for word in (AZSD, LADSF, NYMWSH, f"{house_pnl:+.4f}"):
             self.assertIn(word, alerts[0]["text"])
+        for word in (AGENT, "13 @ 0.47", f"{house_pnl:+.4f}"):
+            self.assertIn(word, alerts[0]["_detail"])
+        # One row per market in either form, and nothing of the owner's receipts or words on the public rows.
+        for ticker in (AZSD, LADSF, NYMWSH):
+            self.assertEqual(self.ledger.get(f"owner-sale:kalshi:{ticker}").payload["form"], "transfer")
+        from league.ledger import public_view
+        for e in self.rows(OWNER_TRANSFER) + self.rows(OWNER_FILL) + self.rows(OWNER_SALE):
+            shown = json.dumps(public_view(e.payload))
+            for secret in [f[0] for f in OWNER_FILLS] + [f[1] for f in OWNER_FILLS] + ["owner"]:
+                self.assertNotIn(secret, shown.replace('"source": "owner', '"source": "'))
         self.assertEqual(alerts[0]["began_at"], "2026-09-26T02:07:08Z")
         # Evidence: no closed trade, no settlement, nothing at risk closed: the family record is as it was.
         self.assertEqual(self.closed(), before)
@@ -220,7 +231,8 @@ class OwnerSale(unittest.TestCase):
         self.assertIsNotNone(sale)
         self.assertEqual((sale.agent, sale.payload["source"], sale.payload["instrument"]), (HOUSE, OWNER_SALE, None))
         self.assertEqual(D(sale.payload["cash_delta"]), D("2.7409"))  # 4 @ 0.25 + 7 @ 0.27 less 0.1491 of fees; the payout was 0
-        self.assertEqual(sorted(sale.payload["receipts"]), sorted(f[0] for f in OWNER_FILLS if f[2] == AZSD))
+        self.assertEqual(sale.payload["form"], "settled")
+        self.assertEqual(sorted(sale.payload["_receipts"]), sorted(f[0] for f in OWNER_FILLS if f[2] == AZSD))
         # The settlement stands, unchanged: the agent's record is exactly what it was.
         self.assertEqual(self.closed(), before)
         self.assertEqual(book.account(AGENT).realized, D("-5.9257"))
@@ -240,7 +252,7 @@ class OwnerSale(unittest.TestCase):
         _, result = self.through_the_grace(book)
         self.assertTrue(result.ok, result.detail)
         self.assertEqual(self.closed()[0], [])  # no phantom settlement in the agent's record
-        self.assertIsNone(self.ledger.get(f"owner-sale:kalshi:{AZSD}"))
+        self.assertEqual(self.ledger.get(f"owner-sale:kalshi:{AZSD}").payload["form"], "transfer")  # never settled: moved
         self.assertEqual(book.account(AGENT).realized, D(0))
 
     def test_a_settlement_the_venue_held_is_booked_as_before(self):
@@ -281,6 +293,43 @@ class OwnerSale(unittest.TestCase):
         _, result = self.through_the_grace(self.book(self.venue(extra_cash=D("2.00"))))
         self.assertFalse(result.ok)
         self.assertIn("cash differs", result.detail)
+        self.assertEqual(self.rows(OWNER_TRANSFER) + self.rows(OWNER_FILL), [])
+
+    def test_an_order_resting_on_an_affected_market_leaves_the_book_frozen(self):
+        from ltcm.broker import Order
+
+        broker = self.venue()
+        yes = Instrument("event", NYMWSH, "kalshi", market_id=NYMWSH, right="yes")
+        broker.orders["owner-resting"] = Order("owner-resting", "owner-resting", "", yes, "buy", D(5), "limit", D("0.40"), "gtc",
+                                               "accepted", "kalshi", broker_order_id="01a0-owner-resting")
+        _, result = self.through_the_grace(self.book(broker))
+        self.assertFalse(result.ok)
+        self.assertEqual(self.rows(OWNER_TRANSFER) + self.rows(OWNER_FILL) + self.rows(OWNER_SALE), [])
+        del broker.orders["owner-resting"]  # gone: the next reading books the sale
+        self.clock.advance(300)
+        self.assertTrue(self.book(broker).reconcile().ok)
+
+    def test_a_later_settlement_of_a_transferred_market_pays_no_one(self):
+        broker = self.venue()
+        book = self.book(broker)
+        self.through_the_grace(book)
+        house_cash, agent_cash = book.account(HOUSE).cash, book.account(AGENT).cash
+        # Kalshi lists the market at settlement even at zero count held (AZ-SD: yes 11, no 11).
+        for ticker, count in ((NYMWSH, "16.00"), (LADSF, "13.00")):
+            self.assertEqual(book.settle(ticker, "no", venue_row={"yes_count": D(count), "no_count": D(count)}), 0)
+            self.assertEqual(book.settle(ticker, "no", venue_row={}), 0)
+        self.assertEqual((book.account(HOUSE).cash, book.account(AGENT).cash), (house_cash, agent_cash))
+        self.assertEqual(list(self.ledger.iter(kinds="book.settle")), [])
+        self.clock.advance(300)
+        self.assertTrue(book.reconcile().ok)
+
+    def test_a_market_booked_once_is_never_booked_again_in_the_other_form(self):
+        # Another path booked LAD-SF's sale first (its per-market row): this pass cannot book it again, in any form.
+        self.ledger.append("book.fill", {"book": "kalshi", "source": OWNER_SALE, "instrument": None, "market": LADSF, "form": "settled",
+                                         "quantity": "0", "price": "0", "cash_delta": "0", "position_delta": "0", "realized": None,
+                                         "_receipts": []}, agent=HOUSE, id=f"owner-sale:kalshi:{LADSF}")
+        _, result = self.through_the_grace(self.book(self.venue()))
+        self.assertFalse(result.ok)
         self.assertEqual(self.rows(OWNER_TRANSFER) + self.rows(OWNER_FILL), [])
 
     def test_a_practice_book_is_unchanged(self):

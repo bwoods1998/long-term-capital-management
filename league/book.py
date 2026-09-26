@@ -156,6 +156,8 @@ OWNER_SOURCES = (OWNER_TRANSFER, OWNER_FILL, OWNER_SALE)
 #: fill explains nothing, and the freeze stays.
 OWNER_SINCE_MARGIN_SECONDS = 60
 OWNER_FILLS_LIMIT = 1000
+#: The adapter reads at most 200 resting orders (`KalshiBroker.orders`): a read that full may have left one out.
+OWNER_RESTING_LIMIT = 200
 #: Level-3 structures on a venue that holds their LEGS (`structure_legs`: the Alpaca accounts; Sept
 #: 25, 2026, the options-desk run). How many readings in a row must show a structure's contract apart
 #: from what the book explains before the House breaks the structure and closes what is left of it
@@ -747,8 +749,8 @@ class Book:
         #: for the cancelled row a later poll writes (`_attribute`): the agent reads its orders' latest rows. In memory
         #: only: after a restart that row carries no reason, as before (review of #226, Sept 24, 2026).
         self._cancel_why: dict[str, str] = {}
-        #: The owner's own trades (Sept 26, 2026; `_owner_trades`): the venue fill ids already booked (`venue_fill_id` on
-        #: an owner fill, `receipts` on an owner sale), when the book last read the venue clean (a reconciled reading with
+        #: The owner's own trades (Sept 26, 2026; `_owner_trades`): the venue fill ids already booked (`_venue_fill_id` on
+        #: an owner fill, `_receipts` on an owner sale), when the book last read the venue clean (a reconciled reading with
         #: no settlement awaited), and the event settlements booked since then by position key, `(agent, payload, at)`:
         #: the units an owner may have sold before the House settled them. All folded, so a restart knows them.
         self._owner_booked: set[str] = set()
@@ -838,10 +840,10 @@ class Book:
             if p.get("cross_plan_id"):
                 self._cross_applied.add(f"{p['source']}:{p['intent_id']}")
             source = p.get("source")
-            if source == OWNER_FILL and p.get("venue_fill_id"):
-                self._owner_booked.add(str(p["venue_fill_id"]))
+            if source == OWNER_FILL and p.get("_venue_fill_id"):
+                self._owner_booked.add(str(p["_venue_fill_id"]))
             elif source == OWNER_SALE:
-                self._owner_booked.update(str(fill_id) for fill_id in p.get("receipts") or ())
+                self._owner_booked.update(str(fill_id) for fill_id in p.get("_receipts") or ())
             elif source == OWNER_TRANSFER and agent != HOUSE and p.get("equity_flow"):
                 # The position left at its cost, not at its mark: the difference is no day's profit or loss of the
                 # agent's (a transfer is never its trade), so its opening moves with it, as a stake's does.
@@ -4655,11 +4657,17 @@ class Book:
         - units the House had already settled: that settlement STANDS as the agent's hold-to-settlement result (the
           market's verdict on the mechanism), and the owner's proceeds, less what the settlement credited on the sold
           units, go to the House row as one `owner-sale:<book>:<ticker>` row (`source: owner`, no instrument);
-        - what is left of the cash difference (the venue's fee rounding) to the House row as dust.
+        - what is left of the cash difference (the venue's fee rounding) to the House row as dust;
+        - in either form, one row per market with the id `owner-sale:<book>:<ticker>` (`form` "transfer" or "settled"),
+          so a market's owner sale can be booked once, in one form, and never in both.
 
-        The House row holds none of the units after the group: every unit moved to it is sold by an owner fill in the same
-        group. One error alert names the owner's trades, the agents, the units, the prices and the House's result; its text
-        begins with the book's name and its `began_at` is the owner's first fill, before any promotion that meets it."""
+        Nothing is booked while any order rests on an affected market, the House's or one at the venue: it could fill
+        between the reading and the booking, and a resting sell of NO buys YES once hit. The House row holds none of the
+        units after the group: every unit moved to it is sold by an owner fill in the same group, so a later settlement
+        of the market pays no one. The owner's receipts, Kalshi's order ids and the words about his trades are under `_`
+        keys (a `book.fill` row is public; `public_view` strips them). One error alert names the owner's trades, the
+        agents, the units, the prices and the House's result (its `_detail`); its text begins with the book's name and its
+        `began_at` is the owner's first fill, before any promotion that meets it."""
         read = getattr(self.broker, "fills", None)
         if read is None:
             return False
@@ -4726,7 +4734,25 @@ class Book:
             owner.setdefault(key, []).append((fill, price))
         if not owner or set(missing) - set(owner):
             return False
-        # Each position the fills explain, unit for unit.
+        # No order may rest on an affected market, the House's own or one at the venue (the owner's): it can fill between
+        # this reading and the booking, and a resting sell of NO is a YES bid there (`order_body`, no reduce-only) that
+        # BUYS YES once hit, units the book would not know. `open_baseline` looks for the venue's foreign orders only when
+        # the book first opens, never after a restart. Any resting: no booking, the freeze stays (the review of this
+        # fix, Sept 26, 2026).
+        affected = {key.split(":", 3)[1] for key in owner}
+        if any(w.open and str(w.instrument.market_id or w.instrument.symbol).upper() in affected for w in self.orders.values()):
+            return False
+        try:
+            resting = list(self.broker.open_orders())
+        except Exception:  # noqa: BLE001 - an unread venue explains nothing
+            return False
+        if len(resting) >= OWNER_RESTING_LIMIT or any(
+                str(o.instrument.market_id or o.instrument.symbol).upper() in affected for o in resting):
+            return False
+        # Each position the fills explain, unit for unit. One row per market carries the id `owner-sale:<book>:<ticker>`
+        # whichever form the booking takes (the units' transfer, or the proceeds beside a settlement that stands), so the
+        # ledger refuses a second booking of the market in either form. The owner's receipts, Kalshi's order ids and the
+        # words about the owner's trades are private (`_` keys: `public_view` strips them; `book.fill` rows are public).
         rows: list[dict[str, Any]] = []
         told: list[str] = []
         proceeds_all = credited_all = house_pnl = ZERO
@@ -4734,10 +4760,19 @@ class Book:
         for key, group in sorted(owner.items()):
             group.sort(key=lambda item: (self._row_seconds(item[0].at), str(item[0].id)))
             units = sum((fill.quantity for fill, _ in group), ZERO)
-            market = key.split(":", 3)[1]
+            market, leg = key.split(":", 3)[1], key.rsplit(":", 1)[1]
             receipts = [str(fill.id) for fill, _ in group]
             said = ", ".join(f"{format(f.quantity.normalize(), 'f')} @ {format(p.normalize(), 'f')} (fee {format(f.fee.normalize(), 'f')})"
                              for f, p in group)
+            fills_said = [{"fill_id": str(f.id), "order_id": str(f.order_id), "at": f.at, "quantity": text(f.quantity), "price": text(p),
+                           "fee": text(f.fee), "reported": {"leg": f.instrument.right or "yes", "side": f.side, "price": text(f.price)}}
+                          for f, p in group]
+            row_id = f"owner-sale:{self.name}:{market}"
+            if self.ledger.get(row_id) is not None:
+                return False  # this market's owner sale is booked already, in one form or the other
+            marker = {"book": self.name, "source": OWNER_SALE, "instrument": None, "market": market, "leg": leg, "side": "sell",
+                      "quantity": "0", "price": "0", "position_delta": "0", "units": text(units), "flat": None,
+                      "_receipts": receipts, "_fills": fills_said, "real_money": self.real_money}
             if key in missing:
                 if units != missing[key]:
                     return False
@@ -4758,18 +4793,20 @@ class Book:
                     moved.append(f"{format(part.normalize(), 'f')} from {name} at its cost ${q_cash(basis):.4f}")
                     common = {"book": self.name, "source": OWNER_TRANSFER, "instrument": holding.instrument.to_dict(), "side": "transfer",
                               "quantity": text(part), "price": text(basis / (part * holding.instrument.multiplier)), "fee_usd": "0",
-                              "fee_quantity": "0", "venue_fee": "0", "realized": None, "flat": None, "receipts": receipts,
+                              "fee_quantity": "0", "venue_fee": "0", "realized": None, "flat": None, "_receipts": receipts,
                               "opened_at": holding.opened_at, "entry_reason": holding.reason, "real_money": self.real_money}
                     tag = hashlib.sha256("|".join([name, key, *receipts]).encode()).hexdigest()[:16]
                     rows.append({"kind": "book.fill", "agent": name, "id": f"owner-transfer:{self.name}:{name}:{tag}", "payload": {
                         **common, "cash_delta": text(basis), "position_delta": text(-part), "to": HOUSE,
                         "closes_position": part == holding.quantity, "equity_flow": text(q_cash(basis - value)),
-                        "detail": ("the owner sold these units at the venue by hand: moved to the House row at the agent's cost, "
-                                   "no result of the agent's")}})
+                        "_detail": ("the owner sold these units at the venue by hand: moved to the House row at the agent's cost, "
+                                    "no result of the agent's")}})
                     rows.append({"kind": "book.fill", "agent": HOUSE, "id": f"owner-transfer:{self.name}:{HOUSE}:{tag}", "payload": {
                         **common, "instrument": instrument.to_dict(), "cash_delta": text(-basis), "position_delta": text(part), "from": name,
-                        "detail": f"the owner's sale of {name}'s units, taken over at its cost"}})
-                # Each owner fill on the House row, its result against the cost taken over (the last takes the rounding).
+                        "_detail": f"the owner's sale of {name}'s units, taken over at its cost"}})
+                # Each owner fill on the House row, its result against the cost taken over (the last takes the rounding): the
+                # House row sells in this same group every unit it took over, so it holds none of them afterwards, and a later
+                # settlement of the market (Kalshi lists one even at zero count) finds no holder to pay.
                 left = basis_total
                 for index, (fill, price) in enumerate(group):
                     mult = instrument.multiplier
@@ -4777,16 +4814,19 @@ class Book:
                     cost = left if index == len(group) - 1 else basis_total * fill.quantity / units
                     left -= cost
                     rows.append({"kind": "book.fill", "agent": HOUSE, "id": f"owner-fill:{self.name}:{fill.id}", "payload": {
-                        "book": self.name, "source": OWNER_FILL, "venue_fill_id": str(fill.id), "venue_order_id": str(fill.order_id),
+                        "book": self.name, "source": OWNER_FILL, "_venue_fill_id": str(fill.id), "_venue_order_id": str(fill.order_id),
                         "order_id": None, "intent_id": None, "instrument": instrument.to_dict(), "side": "sell",
                         "quantity": text(fill.quantity), "price": text(price), "fee_usd": text(fill.fee), "fee_quantity": "0",
                         "venue_fee": text(fill.fee), "cash_delta": text(q_cash(cash)), "position_delta": text(-fill.quantity),
-                        "realized": text(q_cash(cash - cost)), "flat": None, "filled_at": fill.at,
-                        "reported": {"leg": fill.instrument.right or "yes", "side": fill.side, "price": text(fill.price)},
-                        "reason": "the owner's own sale at the venue, by hand: no order of the House's", "real_money": self.real_money}})
+                        "realized": text(q_cash(cash - cost)), "flat": None, "filled_at": fill.at, "reason": "",
+                        "_reported": {"leg": fill.instrument.right or "yes", "side": fill.side, "price": text(fill.price)},
+                        "_detail": "the owner's own sale at the venue, by hand: no order of the House's", "real_money": self.real_money}})
                     proceeds_all += cash
                     house_pnl += cash - cost
-                told.append(f"{market} {key.rsplit(':', 1)[1].upper()} {said}: {'; '.join(moved)}")
+                rows.append({"kind": "book.fill", "agent": HOUSE, "id": row_id, "payload": {
+                    **marker, "form": "transfer", "cash_delta": "0", "fee_usd": "0", "realized": None,
+                    "_detail": "the owner's sale of units the House still held: see this market's owner-transfer and owner-fill rows"}})
+                told.append(f"{market} {leg.upper()} {said}: {'; '.join(moved)}")
             else:
                 # Sold by the owner, then settled by the House for its holders: the settlement stands.
                 stands = [(agent, p, at) for k, agent, p, at in settled if k == key]
@@ -4803,28 +4843,19 @@ class Book:
                 mult = Instrument.from_dict(stands[0][1]["instrument"]).multiplier
                 cash = sum((fill.quantity * price * mult - fill.fee for fill, price in group), ZERO)
                 fees = sum((fill.fee for fill, _ in group), ZERO)
-                row_id = f"owner-sale:{self.name}:{market}"
-                if self.ledger.get(row_id) is not None:
-                    return False  # booked once already, with other receipts: not this pass's to book again
                 rows.append({"kind": "book.fill", "agent": HOUSE, "id": row_id, "payload": {
-                    "book": self.name, "source": OWNER_SALE, "instrument": None, "market": market, "leg": key.rsplit(":", 1)[1],
-                    "side": "sell", "quantity": "0", "price": "0", "position_delta": "0", "units": text(units),
-                    "proceeds": text(q_cash(cash)), "fee_usd": text(fees), "payout_credited": text(q_cash(credited)),
-                    "cash_delta": text(q_cash(cash - credited)), "realized": text(q_cash(cash - credited)), "flat": None,
-                    "receipts": receipts,
-                    "fills": [{"fill_id": str(f.id), "order_id": str(f.order_id), "at": f.at, "quantity": text(f.quantity),
-                               "price": text(p), "fee": text(f.fee), "reported": {"leg": f.instrument.right or "yes", "side": f.side,
-                                                                                  "price": text(f.price)}} for f, p in group],
-                    "settlements": [{"agent": agent, "quantity": p.get("quantity"), "payout": p.get("payout"), "at": at}
-                                    for agent, p, at in stands],
-                    "detail": ("the owner sold these units at the venue by hand before the market settled; the House had settled "
-                               "them for their holders, and that settlement stands as the agent's result: the House row takes "
-                               "the owner's proceeds less the payout the settlement credited"),
-                    "real_money": self.real_money}})
+                    **marker, "form": "settled", "proceeds": text(q_cash(cash)), "fee_usd": text(fees),
+                    "payout_credited": text(q_cash(credited)), "cash_delta": text(q_cash(cash - credited)),
+                    "realized": text(q_cash(cash - credited)),
+                    "_settlements": [{"agent": agent, "quantity": p.get("quantity"), "payout": p.get("payout"), "at": at}
+                                     for agent, p, at in stands],
+                    "_detail": ("the owner sold these units at the venue by hand before the market settled; the House had settled "
+                                "them for their holders, and that settlement stands as the agent's result: the House row takes "
+                                "the owner's proceeds less the payout the settlement credited")}})
                 proceeds_all += cash
                 credited_all += credited
                 house_pnl += cash - credited
-                told.append(f"{market} {key.rsplit(':', 1)[1].upper()} {said}, after the House had settled them for "
+                told.append(f"{market} {leg.upper()} {said}, after the House had settled them for "
                             f"{', '.join(sorted({a for a, _, _ in stands}))} (that settlement stands; it credited ${credited:.4f})")
         residual = cash_diff - (proceeds_all - credited_all)
         key_usd = real_book_dust_usd() or ZERO
@@ -4834,15 +4865,17 @@ class Book:
             rows.append({"kind": "book.fill", "agent": HOUSE, "id": f"owner-dust:{self.name}:{hashlib.sha256('|'.join(sorted(self._fill_ids(owner))).encode()).hexdigest()[:24]}",
                          "payload": {"book": self.name, "source": "dust", "instrument": None, "quantity": "0", "price": "0", "fee_usd": "0",
                                      "cash_delta": text(q_cash(residual)), "position_delta": "0", "real_money": self.real_money,
-                                     "detail": (f"the rest of the cash difference beside the owner's own trades ({n_fills} fill(s)): the "
-                                                "venue's fee rounding, within a cent a fill and allocator.real_book_dust_usd")}})
+                                     "detail": (f"the rest of the cash difference beside {n_fills} venue fill(s) the book did not send: "
+                                                "the venue's fee rounding, within a cent a fill and allocator.real_book_dust_usd")}})
         began = min((fill.at for group in owner.values() for fill, _ in group), key=self._row_seconds)
         rows.append({"kind": "ops.alert", "agent": HOUSE, "id": None, "payload": {
             "level": "error", "book": self.name, "began_at": began, "house_pnl_usd": text(q_cash(house_pnl)),
-            "owner_fills": sorted(self._fill_ids(owner)),
-            "text": (f"{self.name}: the owner's own trades at the venue (no House order) booked, not a freeze: "
-                     + " | ".join(told) + f". The House's result: {q_cash(house_pnl):+.4f}"
-                     + (f"; {q_cash(residual):+.4f} of fee rounding as dust" if q_cash(residual) != 0 else ""))[:1000]}})
+            "markets": sorted(affected), "_owner_fills": sorted(self._fill_ids(owner)),
+            "_detail": (" | ".join(told) + f". The House's result: {q_cash(house_pnl):+.4f}"
+                        + (f"; {q_cash(residual):+.4f} of fee rounding as dust" if q_cash(residual) != 0 else ""))[:2000],
+            "text": (f"{self.name}: {n_fills} venue fill(s) no House order sent (the account holder's own) booked to the House row, "
+                     f"not a freeze: {', '.join(sorted(affected))}; the House's result {q_cash(house_pnl):+.4f} "
+                     "(the trades, agents, units and prices: this alert's private detail)")[:1000]}})
         for entry in self.ledger.append_many(rows):
             if entry.kind == "book.fill":
                 self._apply(entry.kind, entry.agent, entry.payload, entry.at)
