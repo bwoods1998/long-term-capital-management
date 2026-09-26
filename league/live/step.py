@@ -723,6 +723,8 @@ class OptionsLive:
                 out.setdefault(pos.root, set()).update(leg.symbol for leg in pos.legs)
             for order in self.book.orders.values():
                 out.setdefault(order.root, set()).update(leg.symbol for leg in order.legs)
+        if self.proof is not None:
+            out.setdefault("SPY", set()).update(self.proof.held_symbols())
         return out
 
     # ------------------------------------------------------------------ the session minute
@@ -1431,7 +1433,7 @@ class OptionsLive:
         latch = self.state.get("assignment_latch")
         if latch:
             return f"{latch.get('why')}: the owner clears it (python3 -m league.live --root <state> --clear-assignment)"
-        if self.settings.get("require_paper_proof", True) and self.proof is not None and not self.proof.passed():
+        if self.settings.get("require_paper_proof", True) and (self.proof is None or not self.proof.passed()):
             return "the paper account has not yet proved the multi-leg route this run"
         if not self.house_open:
             return "the House is paused"

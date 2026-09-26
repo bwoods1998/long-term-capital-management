@@ -296,7 +296,9 @@ class Venue:
             if self.fill == "uneven" and leg is not order["legs"][0]:
                 continue
             before = Decimal(leg["filled_qty"])
-            add = Decimal(units * int(leg["ratio_qty"]))
+            add = min(Decimal(units * int(leg["ratio_qty"])), Decimal(leg["qty"]) - before)
+            if add <= 0:
+                continue  # a later read of an uneven order cannot fill its already-complete leg again
             old = Decimal(str(leg["filled_avg_price"] or 0))
             leg["filled_avg_price"] = str(round((old * before + Decimal(str(price)) * add) / (before + add), 4))
             leg["filled_qty"] = str(before + add)
