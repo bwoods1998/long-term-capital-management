@@ -3,9 +3,45 @@
 How to pause, deploy, roll back, inspect and recover the House, the gateway, the data box and the
 Gym, and the switches that govern them. The design is in [design.md](design.md). Commands run from
 the repository root on the owner's machine unless they say "on the box". Sections that depend on
-the swarm (Wave 4) or the live path (Wave 5) are marked **(to be completed when the swarm/live path
-lands)**. Written Sept 26, 2026 for main after PR #359 (the House options-only); the old operator's
-page is [archive/docs/operations.md](../archive/docs/operations.md).
+the swarm or live path describe their implementation, not evidence that production trading is
+enabled. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
+is [archive/docs/operations.md](../archive/docs/operations.md).
+
+## Current operation and next work — September 26, 20:10Z
+
+The House is healthy on release `20260926T181814Z-b4bc25619f84` (`60b34dd9`), with real money off,
+no enabled live grant and no production options orders/positions. Training is running on five
+roots. At 20:01Z there were 16 active families, 17,631 trials, no validation passes and no holdout
+looks. The gate is disabled pending final data/image adoption. These are observations, not a
+readiness promise for Monday.
+
+The owner's new priority is broad, rapid options research: simple and complex strategies, all
+Alpaca-supported securities discoverable, data readiness recorded by root and expiry, and a real
+agent paper-testing environment. Current limits are five actively trained roots, 11 simulator
+types, no covered-call/cash-secured-put inventory, and a single SPY paper connectivity proof.
+Changing a prompt, symbol list or allowlist does not implement the missing mechanics.
+
+In order: finish and verify the 25-root data batch; adopt only the final sealed/restored images;
+broaden strategy exploration and the paper order/accounting path; finish execution receipts and
+reports plus the funded post-burst budget; verify the Monday paper/shadow session. Keep paper,
+shadow and real outcomes separate. No new real-money activation occurs in this engineering
+continuation. Existing instructions below for grants describe the mechanism, not current state.
+
+At this checkpoint #378 (complete universe context), #379 (shadow restart flags) and #380
+(role/Flex routing and durable spend reservations) are merged, not deployed. Main is `e73e7740`;
+#380 merged at 20:05Z after full CI, independent review and 221 actual-House tests. Execution
+reporting (#381) and lifecycle changes are still under review. Re-read main,
+open PRs and the running release before acting; a document timestamp is not a fresh health check.
+
+The existing ThetaData collector owns the only account session; preserve it while it downloads.
+Do not log in again or launch a duplicate collector to widen the universe. New discovery belongs
+in a data backlog until coverage and capacity are verified. Retain funded caps: Sail reserve $32,
+Sail researcher-model pace $2.25/hour, OpenAI September cap $707, no October allowance. The planned
+larger deposits are not confirmed funding.
+
+No trading-day deploy 13:25–20:05Z except rollback. The full prune remains after Monday September
+28 at 20:05Z, with fresh integration/review of these additions. First actual nightly forward job:
+Tuesday September 29 at 06:00Z; the Saturday rehearsal does not satisfy it.
 
 ## What runs where
 

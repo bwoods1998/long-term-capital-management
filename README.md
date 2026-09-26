@@ -1,6 +1,6 @@
 # Long-Term Capital Management
 
-**A swarm of AI agents trading level-3 options on one brokerage account, trained around the clock in
+**Building a swarm of AI agents that researches and trades options, trained around the clock in
 a Gym of real recorded quotes, judged by the live market.** Public page:
 [blakewoods.us/capital](https://blakewoods.us/capital/).
 
@@ -13,6 +13,37 @@ A swarm of AI agents trading anything available with level-3 options on the owne
 (the "Brokerage Account" on the public page), profitably: **options returns greater than every
 input cost** (Sail, OpenAI, ThetaData and the market-data subscription). The money in the account
 may all be lost; the evidence must stay honest.
+
+The owner's September 26 update makes breadth explicit: simple calls and puts, covered calls,
+cash-secured puts and supported multi-leg strategies should all have a path through research and
+testing. Discover the optionable securities Alpaca supports; the initial five roots and next 20
+names are data batches, not a permanent universe limit. Complexity earns no preference. Each new
+strategy, security and expiry range needs suitable historical data, accurate account/settlement
+handling and paper execution support before it is called ready.
+
+The engineering job is the game and its feedback loop: parallel hypotheses, short replay/review/
+revision cycles, persistent lessons, and compute following credible evidence. Monday September 28
+at 13:30Z is the target first market session. Profitable production trading is the goal, not an
+outcome established by more agents, more trials, or a successful backtest.
+
+## Current state — September 26, 20:04Z
+
+- The House and research swarm are running. Real money is off, no live grant is enabled, and no
+  new options trades have been placed on the production account.
+- At 20:01Z: 16 active families, 57 retired, 17,631 recorded trials, **zero validation passes and
+  zero holdout looks**. Fifteen active families use multi-leg strategies; one uses a single put.
+- The active Gym covers SPY, QQQ, IWM, XSP and SPXW. The 25-root data expansion is still downloading;
+  its final images are not adopted and the gate is disabled. Alpaca's asset lookup returned 6,177
+  tradable optionable equity/ETF assets: discovery is much broader than training readiness.
+- The simulator supports 11 types, including single long calls and puts. Covered calls and
+  cash-secured puts still need inventory/collateral support. The current Alpaca paper path proves
+  one SPY vertical round trip; a general agent paper book remains to be built.
+- The live site has genuine agent thoughts and clickable dots whose progress follows each
+  agent's promotion evidence. Trading Profit is $0; project Net is negative because inputs cost
+  money. Exact all-input costs are still being reconciled.
+
+The [goal](docs/goals/LTCM_OPTIONS_SWARM.md) records the updated direction and remaining work;
+[operations](docs/operations.md) distinguishes merged code from deployed behavior.
 
 ## The one number
 
@@ -28,7 +59,7 @@ The full design is [docs/design.md](docs/design.md); the run that is building it
 [docs/goals/LTCM_OPTIONS_SWARM.md](docs/goals/LTCM_OPTIONS_SWARM.md).
 
 - **The Gym.** One-minute NBBO for the option contracts near the money, 0-14 days to expiry, across
-  the universe (SPY, QQQ, IWM, XSP and SPXW, then about 20 liquid single names and ETFs), from
+  the first data batches (five core roots, then 20 liquid single names and ETFs), from
   ThetaData, stored as Parquet on sealed Sailboxes. A vectorized engine replays agent programs over
   it at roughly 100,000 times real time per core, fills each leg against the recorded quote on the
   minute after the decision (the natural price by default), and applies the venue's rules: expiry
@@ -38,8 +69,9 @@ The full design is [docs/design.md](docs/design.md); the run that is building it
   Every clock is set by what an agent can learn from it: seconds for a revision, hours for
   selection, a night for a new forward day.
 - **The agents.** An agent is one family: a mechanism (why the trade should make money), a
-  defined-risk structure type (verticals, condors, butterflies, straddles, calendars, single long
-  options) and a slice of the universe. A researcher model owns it, keeps a notebook, and revises
+  supported options strategy type and a slice of the data-ready universe. Simple long options
+  compete alongside spreads; covered strategies are an explicit implementation gap. A researcher
+  model owns each family, keeps a notebook, and revises
   one Python program (`NEEDS`, `PARAMS`, `decide(ctx)`). A program never sees the calendar date, so
   the sealed holdout cannot be recognized. Programs live in the House's state, never in git.
 - **The loops.** Inner (a researcher revises and reruns on Train, in minutes); tournament (hourly:
@@ -47,7 +79,9 @@ The full design is [docs/design.md](docs/design.md); the run that is building it
   architect (every four hours, new families from the leaderboard and the graveyard); gate (review,
   audit and one holdout look when a family meets the validation line); nightly forward (each new
   trading day, for Candidates only); live (market hours: every Candidate in shadow, Probes and Sized
-  families on real money); post-mortem (after each close).
+  families on real money when execution is separately enabled); post-mortem (after each close).
+  General agent paper trading and automatic post-close reporting are unfinished; the current
+  SPY paper proof checks the route only.
 - **Evidence.** Train 2022-2024, Validation 2025, a sealed holdout from Jan 2 to Sept 25, 2026, and
   every day after that forward. Every Gym evaluation counts as a trial. A family passes validation
   with at least 100 trades on 60 days, a t of 2 on P&L per dollar of maximum loss, a deflated Sharpe
@@ -60,8 +94,10 @@ The full design is [docs/design.md](docs/design.md); the run that is building it
   risks 3% of equity a structure (one contract when its maximum loss is at most $60), three open
   structures and 12% per family; a Sized family risks by quarter-Kelly on its forward record's lower
   bound, up to 10% a structure and 30% a family; the whole book at most 70% of equity. No new entries
-  after a 25% day; real money pauses at a 50% drawdown from the peak. Real money trades only the
-  five structure types the venue closes in one order, and credit types only from $2,000 of equity.
+  after a 25% day; real money pauses at a 50% drawdown from the peak. The current real adapter is
+  restricted to five spread types, and credit types require $2,000 of equity. Those implementation
+  limits are not a description of everything Alpaca level 3 supports; broadening the research and
+  paper harness does not silently change the money rules.
   The House nets every agent's intents into one order stream, never crosses itself, stays under 250
   orders a day and closes expiring structures before the venue's cutoffs. Real money flows only
   under the owner's grant `options-swarm-20260928`, pinned to the money rules, behind the gateway's

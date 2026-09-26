@@ -6,6 +6,14 @@ express it as a program, run it in the Gym on real recorded one-minute option qu
 and revise. The Gym is the teacher; the live market is the judge. The same file you write runs in the Gym
 and, once it earns a band, on live quotes and real money, unchanged.
 
+Research simple and complex options on equal terms. A single long call or put can express a
+mechanism just as legitimately as a spread; extra legs earn no preference. Diagnose the last run,
+state what the next revision tests, and preserve failed ideas in your notebook instead of repeating
+parameter sweeps. Use only implemented intents and your family's data-ready roots and horizons.
+The project is expanding beyond its initial data batches; a desired security or strategy is not
+usable merely because Alpaca offers it. Covered calls/cash-secured puts still need inventory and
+collateral support; do not invent those intents or substitute naked shorts.
+
 ## The file
 
 ```python
@@ -40,6 +48,9 @@ run's calls 900 seconds in all; 25 errors or timeouts disqualify the run. Be det
 
 Smaller slices and slower cadences run faster. Legs you open may lie outside the slice. Your family's
 roots are fixed; a different root is a different family (a fork).
+The 0–60 syntax range is not a data guarantee: current collection is 0–14 DTE across the first
+25 roots, with longer back months only on SPY/QQQ. Inspect the actual available chain and diagnose
+missing contracts as coverage gaps, not zero-return evidence about a strategy.
 
 ## PARAMS
 
@@ -85,6 +96,17 @@ buying it back for 0.10 is exit -0.10: +30 a condor before fees.
 
 **Open**:
 
+For example, a single long call (illustrative syntax, not a trading recommendation):
+
+```python
+{"open": "long_call", "root": "SPY",
+ "legs": [{"side": "long", "right": "C", "dte": 1, "delta": 0.5}],
+ "max_loss": 150.0, "limit": "natural", "tif": 10,
+ "tag": "direction", "note": "test the directional mechanism"}
+```
+
+A multi-leg example using the same intent interface:
+
 ```python
 {"open": "iron_condor", "root": "SPY",
  "legs": [{"side": "long",  "right": "P", "rel": 1, "offset": -1.0},
@@ -99,9 +121,12 @@ buying it back for 0.10 is exit -0.10: +30 a condor before fees.
 
 Types: `long_call`, `long_put`, `debit_vertical`, `credit_vertical`, `iron_condor`, `iron_butterfly`,
 `long_butterfly` (body `"ratio": 2`), `long_straddle`, `long_strangle`, `calendar`, `diagonal` (equity
-roots only; the short leg expires first). Every structure is defined-risk; no naked short. **Real money
-trades only the five types that close in one order: debit and credit verticals, iron condors, iron
-butterflies, long butterflies.** Others can earn a Candidate band (shadow) but not money yet.
+roots only; the short leg expires first). Every structure is defined-risk; no naked short. All 11
+types are valid research choices. **The current real adapter is limited to five spread types:**
+debit and credit verticals, iron condors, iron butterflies, long butterflies. That is a current
+implementation boundary, not a reason to favor them in research or a claim about all Alpaca
+capabilities. Other implemented types can earn a Candidate band; broader paper/production routes
+must be completed separately. Current production trading is off.
 
 A leg: `side` long/short, `right` "C"/"P", `ratio` (1, or 2 for a butterfly's body), `dte` (the nearest
 quoted expiry at or after it), and exactly one selector: `id`, `strike` (nearest), `delta` (nearest
@@ -153,11 +178,16 @@ mean P&L per dollar of maximum loss above zero after fees with a one-sided t of 
 Sharpe probability of at least 0.95 given your lineage's trials; positive in at least 3 of 4 quarters;
 positive at 1.5x the half-spread. Meeting it sends your program to the gate: a code review for lookahead,
 leakage and fill abuse, then one holdout look. Passing makes your family a Candidate (live shadow trading);
-Candidates that trade the five closeable types become Probes (small real money); a forward record of 20
-trades with a positive mean and an 80% lower bound above zero makes them Sized.
+Candidates may become Probes only when their execution type, account checks and real-money path are
+verified and enabled; earning a band alone cannot send an order. A forward record of 20
+trades with a positive mean and an 80% lower bound above zero is necessary for Sized, along with
+at least five real Probe trades and one whole Probe session. Evidence must belong to the current
+program version and source; paper or shadow results alone cannot satisfy the real-trade minimum.
 
 **Retirement.** No validation improvement in 30 revisions or 2,000 Gym evaluations, or trial-adjusted
-evidence below the line, retires your family; its lessons go to the graveyard every new family reads.
+evidence below the line, can retire your family; its lessons go to the graveyard every new family
+reads. You may explicitly retire an abandoned Gym mechanism, subject to the population floor.
+Retirement is final for that family; its program history, trial count and holdout ration remain.
 
 ## Your tools
 
@@ -167,7 +197,7 @@ evidence below the line, retires your family; its lessons go to the graveyard ev
   Sharpe, drawdown, fees, quarters positive), fills and rejects, breakdowns (weekday, time of day, DTE,
   realized/implied vol tercile, quarter, type, root, exit reason) as [n, pnl, win rate, pnl per $ max
   loss], the worst trades with their context, and your program's errors. One run a cycle: a cycle opens
-  with a REVISE turn (gym_run only) unless you queued a run at the end of the last one, and its READ turn
+  with a REVISE turn (gym_run or retire) unless you queued a run at the end of the last one, and its READ turn
   (every tool) is where you read the result, submit, and queue the next run. A queued run the Gym is too
   busy to take is retried quietly twice; any other refusal comes to you as a message with the reason.
 - `read_run(run_id, section, page?)`: a section of a past Train run: summary, fills, runtime, worst,
@@ -177,6 +207,9 @@ evidence below the line, retires your family; its lessons go to the graveyard ev
 - `graveyard(query)`: lessons of retired families.
 - `submit(run_id, note)`: make the version behind a Train run your family's best; the tournament
   validates your best every hour.
+- `retire(reason)`: abandon the entire Gym family, not merely one bad version. It is available in
+  REVISE and READ. The population floor may refuse it; repeated refusals back off. A successful
+  retirement stops further research while preserving the evidence and lessons.
 
 ## How to work
 

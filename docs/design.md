@@ -6,22 +6,33 @@ order of work and the authority; this page holds the design alone. Where this pa
 disagree, the code is right and this page is fixed. How to operate it is in
 [operations.md](operations.md).
 
-## Where each part stands (Sept 26, 2026, 08:00Z)
+## Where each part stands (Sept 26, 2026, 20:04Z)
 
 | Part | Code | State |
 |---|---|---|
-| The House, options only | `league/` | PR #359 merged 07:49Z (main `6c715d83`): updater off, the new grant, options-only service and tick; not yet deployed (the old House is stopped) |
-| The data store and images | `scripts/data/` | the data box downloading since 06:49:43Z; images and the nightly job rehearsed 07:08-07:19Z; code on branch `data/gym-store` |
-| The Gym | `league/gym/` | PR #358 open, under adversarial review before it merges |
-| The swarm | `league/swarm/`, `league/CONTRACT.md` | being built (Wave 4) |
-| The live path | the House's live tick, `gateway/` | being built (Wave 5); real money stays off until it is deployed |
-| The public page | blakewoods.us/capital | reset and deployed at 07:21Z (schema 2); no checkpoint until the new House publishes |
+| The House, options only | `league/` | running release `20260926T181814Z-b4bc25619f84`, based on `60b34dd9`; full deployment watch passed; real money off and no grant |
+| The data store and images | `scripts/data/` | core/history/calibration stages complete; the 20 added names were 10,699/23,740 tasks at 19:59Z; back months 0/2,374; final images/adoption pending |
+| The Gym | `league/gym/` | running on five core roots; 11 types including long calls/puts; natural-price fills on the active v1 image |
+| The swarm | `league/swarm/`, `league/CONTRACT.md` | 16 active families and 17,631 trials at 20:01Z; no validation passes or holdout looks; gate off |
+| Paper and production paths | `league/live/`, `gateway/` | reviewed original live-path fixes deployed; paper is a single SPY route proof, not a general agent paper book; covered strategies absent |
+| The public page | blakewoods.us/capital | deployed: genuine thoughts first, Profit/Running, clickable agent dots with evidence-based progress; no production options profit yet |
+
+This is observed state, not completion of the design below. Later merged prompt, restart and model
+routing fixes still need deployment. Execution receipts/reporting, funded post-burst operation,
+broad universe discovery and the general paper environment are active engineering work.
 
 ## The goal and the one number
 
 One goal: a swarm of AI agents trading level-3 options on one brokerage account (the "Brokerage
 Account"), profitably, where profitably means options returns greater than everything the project
 spends.
+
+The September 26 owner feedback sets the scope: **all Alpaca-supported options opportunities with
+the data and mechanics needed to test them**, with no preference for complicated structures. The
+first five and next 20 roots are collection batches. Neither is the eventual universe boundary.
+Simple calls/puts, covered calls/cash-secured puts and supported spreads must compete on evidence.
+The target is profitable production trading beginning Monday; the current record does not yet
+demonstrate an edge or establish that this target will be met.
 
 **Net = the options book's realized P&L on the Brokerage Account, after every fee, minus every input
 cost** (Sail, OpenAI, ThetaData, the market-data subscription, and anything added). Deposits and
@@ -50,9 +61,14 @@ One account at Alpaca, approved for level 3. The facts the design is built on (v
 - **Under $2,000 of equity the account is 1x with no shorting.** A spread needs options buying power
   equal to its maximum loss (a debit spread its debit; a credit spread width x 100 minus the credit).
   Options settle T+1.
-- **Structures:** at most 4 legs, every short leg covered inside the same order, whole-order replace
-  only. **Only five types close in one order:** debit and credit verticals, iron condors, iron
-  butterflies, long butterflies. Legging out risks a naked short (refused) or a buying-power refusal.
+- **Capabilities:** level 3 includes lower-level permissions: long calls and puts, covered calls
+  backed by owned shares, and cash-secured puts backed by cash, as well as supported multi-leg
+  orders. Multi-leg orders have at most four option legs, with short legs covered within the order;
+  stock-plus-option combination orders are not supported. The current House's five-type real
+  allowlist is an implementation restriction, not the venue's entire options capability. Exit
+  behavior and inventory reservations need verification for each added type. See Alpaca's
+  [options levels](https://docs.alpaca.markets/us/docs/options-trading) and
+  [multi-leg restrictions](https://docs.alpaca.markets/us/docs/options-level-3-trading).
 - **Positions net per contract across the whole account**, so one agent's sale can close another
   agent's leg, and opposing orders that could cross on one contract are rejected as wash trades.
 - **Index options** (SPX, SPXW, XSP, VIX, VIXW, DJX) are cash-settled and European; every leg of an
@@ -97,17 +113,36 @@ judges what it learned.
 The danger at this speed is a search that finds luck. Every program evaluation is counted as a
 trial, and the evidence rules below are as much a part of the game as its speed.
 
+Improve the loop recursively: a hypothesis, runnable program, recorded replay, actionable failure
+diagnostic, revision, then independent evaluation. Compare mechanisms and simple baselines before
+spending on repeated parameter sweeps. Preserve notebooks and failed ideas, allocate exploration
+across strategy types and securities, and use stronger models where diagnoses or rewrites need
+them. Measure useful revisions, completed evaluations, refusals, coverage and cost per result.
+Agent count and simulated years measure activity; passing unseen evidence measures progress.
+
 ## The world
 
-- **Universe.** The core five: SPY, QQQ and IWM (ETF options, daily expiries) and XSP and SPXW
-  (cash-settled, so 0DTE can be held to expiry with no assignment). Then about 20 single names and
-  ETFs ranked by 2024 option volume and quoted spread (never from holdout days). Any optionable
-  underlying is admissible once its data is in the Gym.
-- **Structures:** everything level 3 allows, all defined-risk: debit and credit verticals, iron
-  condors, iron butterflies, long butterflies, long straddles and strangles, calendars and diagonals
-  (equity options only), single long calls and puts. No naked short anywhere.
-- **Horizons:** 0-5 days to expiry at the center, so each agent closes one or more independent
-  trades a day; calendars and diagonals may hold a back leg to 45 days.
+- **Universe.** Discover Alpaca's optionable assets and supported index products. Keep distinct
+  states for discovered, data pending, historically testable, paper-supported and production-ready.
+  Rank collection work by liquidity, coverage gaps and research demand using Train-era data; keep
+  all other eligible securities in the backlog. Initial batches are SPY/QQQ/IWM/XSP/SPXW and 20
+  liquid names/ETFs. The 20:04Z asset receipt contains 6,177 tradable optionable equity/ETF assets;
+  this is a discovery count, not a claim that their contracts/data are all supported today.
+- **Strategies.** Give single long calls and puts the same research opportunity as debit/credit
+  verticals, condors, butterflies, straddles, strangles, calendars and diagonals. Add covered calls
+  and cash-secured puts with explicit stock/cash reservations, assignment, dividends/corporate
+  actions and exit accounting; they are not implemented by pretending a short option is naked.
+  Stock inventory held to support an options strategy belongs in the options harness. Independent
+  stock/crypto trading remains outside the project. Complexity is not a promotion criterion.
+- **Horizons and rules.** Admit only the expiry ranges, listing history, multipliers and settlement
+  rules supported by each root's data and implementation. Current collection is 0–14 DTE across
+  25 roots and a 15–45 DTE extension on SPY/QQQ only; runtime syntax permitting 60 DTE does not supply
+  that data. Short-dated options are the initial batch, not a permanent research objective. New
+  AM-settled index products require their own settlement/spot treatment, not XSP/SPXW defaults.
+- **Paper environment.** Every supported candidate needs a general Alpaca-paper order, inventory,
+  cancel, fill, restart and reconciliation path. The current one-lot SPY proof establishes only
+  route connectivity. Paper is for execution diagnostics and rehearsal; synthetic fills never
+  establish a real fill model or live profitability.
 - **Time splits**, for every family and program:
 
   | Window | Dates | Use |
@@ -196,8 +231,8 @@ trial, and the evidence rules below are as much a part of the game as its speed.
 | Architect | every 4 hours | GPT-6 Astra | reads the leaderboard, the graveyard and the gaps; writes families with a mechanism, a structure and a rejection test | 3-6 new families |
 | Gate | when a family meets the validation line | GPT-6 Sol, Astra, the gate box | review for lookahead, leakage and fill abuse; the audit; one holdout look | a Candidate, or a recorded refusal |
 | Nightly forward | after 01:45 ET each trading night | the data box, the gate box | the new day goes to the gate image only; every Candidate is re-run on it | one unseen day a night for every Candidate |
-| Live | 09:30-16:00 ET | the House | Candidates trade the shadow book on live quotes; Probe and Sized families trade real money; the paper account measures multi-leg execution | forward records, real P&L, real fills |
-| Post-mortem | after each close; weekly | the House, Astra | live P&L against what the Gym expected; the fill model recalibrated | calibration, lessons, repairs |
+| Live | 09:30-16:00 ET | the House | Candidates in live shadow; general agent paper execution is being built; production requires its own verified/enabled path | separate paper, shadow and actual real records |
+| Post-mortem | after each close; weekly | the House, Astra | compare captured executions with the Gym; diagnose gaps and propose repairs; scheduler unfinished | private reports; calibration only from eligible actual observations |
 
 **Models.** The inner loop runs on Sail's DeepSeek-V4-Flash (V4.1-Flash where long cached histories
 make it cheaper), with a cache key per agent and the shared contract cached once a day. A researcher
@@ -233,13 +268,13 @@ the weekly post-mortem, on OpenAI's half-price flex tier wherever latency does n
 
 | Rule | Default | Allowed range |
 |---|---|---|
-| Probe: a Candidate that passed the holdout, trades one of the five one-order-closeable types, and whose typical maximum loss fits the cap at current equity | real from its next session | - |
+| Probe: a Candidate that passed the holdout, has a verified/enabled execution type, and whose typical maximum loss fits the cap at current equity | real from its next session when enabled; current adapter allows five spread types | - |
 | Credit structures on real money | only from $2,000 of equity (or once a real credit order is accepted); debit types until then | - |
 | Probe max loss per structure | 3% of equity | 2-5% |
 | Probe open structures per family | 3 | 1-5 |
 | Probe family total max loss | 12% of equity | 8-15% |
 | Probe floor for a small account | one contract when its max loss is at most $60 | $0-100 |
-| Sized: forward record of at least 20 trades, mean > 0 and 80% lower bound > 0 | quarter-Kelly on the lower bound | eighth- to half-Kelly |
+| Sized: current-version forward record of at least 20 trades, mean > 0 and 80% lower bound > 0, plus at least 5 real Probe trades and 1 whole Probe session | quarter-Kelly on the lower bound; paper/shadow alone cannot satisfy the real minimum | eighth- to half-Kelly |
 | Sized max loss per structure | 10% of equity | 5-15% |
 | Sized family total max loss | 30% of equity | 20-40% |
 | Book: open max loss, all families | 70% of equity | 50-90% |
@@ -255,7 +290,9 @@ the weekly post-mortem, on OpenAI's half-price flex tier wherever latency does n
   verified) and 150 requests a minute; sends no new opening order on an expiring contract after
   15:00 ET; closes expiring equity-option structures with a short leg near the money by 15:10 ET
   (15:25 for SPY and QQQ) with one multi-leg order; and polls account activities for assignments.
-  Real money trades only the five one-order-closeable types until a paper round trip proves another.
+  The current real adapter permits five spread types. Broader research or a paper round trip alone
+  does not implement another production type: its accounting, exits, gateway rules and tests must
+  also agree before that type is enabled.
 - **The gateway's caps follow the account:** per order, maximum loss at most the lower of $1,000 and
   15% of equity; opening maximum loss a day at most 100% of equity; 300 orders a day; the kill
   switch. `OPTION_STRUCTURES_REAL` names the types real money may open.
