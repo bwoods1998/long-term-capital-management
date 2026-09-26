@@ -11,7 +11,7 @@ commitments, not claimed invoice costs.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from decimal import Decimal, ROUND_UP
+from decimal import ROUND_DOWN, ROUND_UP, Decimal
 import json
 import math
 from pathlib import Path
@@ -201,7 +201,7 @@ class CampaignBudget:
             if row is None:
                 return None
             value = {**dict(row), 'policy': json.loads(row['policy']), 'mode': 'persistent', 'ends': None}
-            from .live_trading import policy
+            policy = legacy_live_policy
             value['active'] = (value['revoked'] is None and value['started'] <= self.clock()
                                and _grant_matches(value['policy'], policy(value['policy']['venue_capital_usd'])))
             return value
@@ -214,7 +214,7 @@ class CampaignBudget:
         """Account-owner action: keep an existing grant under revised MONEY rules. The same identity,
         the same capital allocation (never more), re-pinned to the current `money_digest`; the old
         policy is kept in `live_ratifications`. A revoked grant stays revoked."""
-        from .live_trading import policy
+        policy = legacy_live_policy
         with self.lock:
             self.db.execute('BEGIN IMMEDIATE')
             try:
@@ -236,7 +236,7 @@ class CampaignBudget:
 
     def activate_live_trading(self, ident: str, venue_capital: Mapping[str, Any]) -> dict[str, Any]:
         """Account-owner action. Persistent ladder access; no provider or capital replenishment."""
-        from .live_trading import policy
+        policy = legacy_live_policy
         if not isinstance(ident, str) or not ident.strip() or len(ident) > 100:
             raise ValueError('live trading requires a bounded identity')
         encoded = canonical(policy(venue_capital))
@@ -1136,3 +1136,43 @@ def _grant_matches(stored: Mapping[str, Any], expected: Mapping[str, Any]) -> bo
     legacy = LEGACY_GRANT_DIGESTS.get(stored.get('constitution_digest'))
     return (legacy is not None and legacy == expected.get('constitution_digest')
             and {**stored, 'constitution_digest': legacy} == dict(expected))
+
+
+def legacy_live_policy(venue_capital):
+    """The campaign store's own grant policy (Alpaca and Kalshi, `earned-live-20260921`), kept here
+    for this store's own reads until Wave 2b cuts it. Real money no longer asks this grant: the
+    options overhaul (Sept 26, 2026) moved every call site to `league/live_trading.py`."""
+    from .constitution import CONSTITUTION, money_digest
+    if set(venue_capital) != {'alpaca', 'kalshi'}:
+        raise ValueError('capital must name Alpaca and Kalshi')
+    amounts = {k: Decimal(str(v)) for k, v in venue_capital.items()}
+    if any(not v.is_finite() or v < 0 for v in amounts.values()):
+        raise ValueError('venue capital must be finite and nonnegative')
+    amounts = {k: v.quantize(Decimal('.01'), rounding=ROUND_DOWN) for k, v in amounts.items()}
+    total = sum(amounts.values())
+    stake = Decimal(CONSTITUTION['rungs']['2']['stake_usd'])
+    allocator = CONSTITUTION.get('allocator') or {}
+    probes = allocator.get('probe_bunt_usd') or {}
+    if allocator.get('enabled'):
+        # Capital is the ladder (Sept 23, 2026): the smallest real stake is a bunt, and the envelope
+        # in dollars -- not a head count sized for $60 stakes -- is what bounds the real money. Since
+        # Sept 24, 2026 (P1, the close-the-gaps run) it is a PROBE, an unproven family's first stake:
+        # $10 at Kalshi seats more agents than a $30 bunt, floor($1,017.75 / $10) = 101 (40 at $25).
+        stake = min(Decimal(str(v)) for v in (*allocator['bunt_usd'].values(), *probes.values()))
+    if max(amounts.values()) < stake or not stake <= total <= Decimal('10000'):
+        raise ValueError('live allocation must cover a micro stake and remain within the $10,000 project envelope')
+    return {'version': 1, 'max_rung': 3, 'max_agents': int(total // stake),
+            'max_loss_usd': str(total), 'stake_usd': str(stake),
+            'venue_capital_usd': {k: str(v) for k, v in amounts.items()},
+            'constitution_digest': money_digest(), 'expires': None,
+            'research_funding': 'Only unused original burst allowance within campaign caps; no calendar expiry or replenishment.',
+            'scaling': ((f"Capital is the ladder: "
+                         + (f"probes of {', '.join(f'${v} at {k}' for k, v in sorted(probes.items()))} for an unproven family, " if probes else '')
+                         + f"bunts of {', '.join(f'${v} at {k}' for k, v in sorted(allocator['bunt_usd'].items()))}"
+                         + (" for a proven one" if probes else '') + ", "
+                         f"swings sized by evidence up to {allocator['max_share_of_venue']:g} of a venue; "
+                         'venue and aggregate capital limits include historical losses; realized profit enlarges a venue.')
+                        if allocator.get('enabled') else
+                        (f"Existing performance gates and {CONSTITUTION['rungs']['3']['kelly_fraction']:g} of Kelly on the lower bound; "
+                         'venue and aggregate capital limits include historical losses.')),
+            'capital_source': 'Existing cash only; later deposits do not enlarge this allocation.'}

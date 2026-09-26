@@ -21,6 +21,7 @@ from league.house import House, Settings
 from league.tests import test_tuition
 from league.tests.test_house import FakeAlpacaData
 from league.tests.test_ladder import FakeAuditor, InProcessSandbox
+from league.tests.fakes import OpenGrant
 
 
 def setUpModule():
@@ -157,7 +158,7 @@ class RestartDuringAnAudit(unittest.TestCase):
         f.house.close(wait=0)
         f.house = House(
             Path(f.dir.name) / "house", brokers={"alpaca-paper": f.paper, "alpaca": f.real}, sandbox=InProcessSandbox(),
-            alpaca_data=FakeAlpacaData(), clock=f.clock, settings=Settings(mark_every_seconds=0, research=False, real_money=True),
+            alpaca_data=FakeAlpacaData(), clock=f.clock, grant=OpenGrant(), settings=Settings(mark_every_seconds=0, research=False, real_money=True),
             game=f.house.game, auditor=auditor)
         auditor.ledger = f.house.ledger
         return f.house

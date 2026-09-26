@@ -1,8 +1,0 @@
-{
-  "family": "crypto-alts-reversion",
-  "name": "haghani_reserved_cash_child",
-  "repair": {
-    "key": "order_refusal:alpaca:insufficient desk cash: need #, have #"
-  },
-  "why": "Corrected child of haghani-56 for repeated insufficient-desk-cash entry refusals. Preserve its Alpaca hourly altcoin deep-dip maker specialty and exits, but reserve outstanding buys and fees and share remaining snapshot cash across new entries without spending expected cancellation releases or sale proceeds. Submitted under a new name because the prior path already exists. Born on rung 0 with no inherited qualification; CI and forward records must judge the repair."
-}

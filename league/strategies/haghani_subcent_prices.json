@@ -1,9 +1,0 @@
-{
-  "family": "crypto-alts-reversion",
-  "name": "haghani_subcent_prices",
-  "repair": {
-    "key": "strategy_defect:haghani:8d50f78b06f1",
-    "parent": "haghani"
-  },
-  "why": "Corrected child of haghani, proposed at rung 0 with no inherited record. Removes cent rounding from dip-entry and mean-exit limit prices, preserving sub-cent prices for the same six alternative coins. Keeps the parent's inputs, parameters, sizing and risk behavior unchanged; must qualify on its own evidence."
-}

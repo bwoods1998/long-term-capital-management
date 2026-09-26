@@ -1,8 +1,0 @@
-{
-  "family": "sports-runline-leverage-tax",
-  "name": "sports_runline_three_market_cap",
-  "repair": {
-    "key": "bug_report:kalshi-sports:ab941883da"
-  },
-  "why": "Corrected child of meriwether-hadd32b: retain the KXMLBSPREAD daily NO-entry specialty while enforcing a fixed three-held-market entry cap. Preserve cancel-before-entry behavior so working orders cannot accompany fresh entry requests. Born at rung 0, with no inherited qualification or performance record."
-}

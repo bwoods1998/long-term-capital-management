@@ -1,9 +1,0 @@
-{
-  "family": "crypto-alts-reversion",
-  "name": "haghani-40-directional-grid",
-  "repair": {
-    "key": "strategy_defect:haghani-40:8d50f78b06f1",
-    "parent": "haghani-40"
-  },
-  "why": "Corrected child of haghani-40, starting at rung 0 with no performance record. Preserves its specialty and effective parameters while replacing cent-rounded dip entries and mean exits with directional snapping to a stated venue price increment, retaining calculated precision when no grid is supplied. Resting-order comparisons use those same submission prices."
-}
