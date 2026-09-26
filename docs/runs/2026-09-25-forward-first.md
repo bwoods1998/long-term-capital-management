@@ -86,7 +86,7 @@ the docs and memory, clean up, open the record's final PR, report, and stop. For
 | S | The search looks for capacity (foundry brief `foundry-2026-09-25.1`; alpaca-open 12 seats) | built, PR #331 (CI green; on #324); Deploy C |
 | Y | Compute follows yield (lane throttle, trigger skip, unit economics, the contract by section) | built, PR #330 (CI green; built on #311); Deploy C |
 | F3/C7 | Seat market by forward record; members on disjoint events | built, PR #329 (CI green); Deploy B; money review with C-money |
-| B | Deploy B integration (`b/integration`, draft PR #334) | Deploy A + C8/C6 + M1-M6 + F1 + F2/F4/X2 + F3/C7, all reviewed; money digest `acff5c64` (constitution `32db7547`); Deploy B Saturday Sept 26 in a quiet window |
+| B | **Deploy B: LIVE** (release `20260926T022308Z-1931abd19d1f`, promoted 02:24:53Z Sept 26, ratified 02:25:10Z on `acff5c64`, watch passed 02:35:19Z) | was: `b/integration`, PR #334 merged 22:18:39Z | Deploy A + C8/C6 + M1-M6 + F1 + F2/F4/X2 + F3/C7, all reviewed; money digest `acff5c64` (constitution `32db7547`); Deploy B Saturday Sept 26 in a quiet window |
 | C8/C6 | Family = mechanism; capacity at the real size | built, PR #324 (CI green); money digest (on H4) `d7d910fe` -> `555b7aac`; Deploy B; three-lens review with C-money |
 | W | The site's flywheel strip | site #8 merged and DEPLOYED 12:35:10Z (version `2b780c2c`; the next checkpoint, 12:35:58Z, accepted); publisher #325 (CI green) merges in Deploy C |
 | F1 | The lab places, breeds and graduates on forward growth | built, PR #306 (CI green); Deploy B (`lab.py` protected) |
@@ -175,10 +175,14 @@ positive stretch) is being verified before C-money's brief fixes M1 and M3 for t
 `earned-live-20260921` ratified 20:11:48Z on `d7d910fe` (active), `ops.started` 20:13:21Z, watch verdict promoted, **watch
 ended 20:21:56Z** (the Kalshi run's K1 may start from 20:52Z).
 
-**Deploy B STARTS at 02:22:58Z Sept 26** (main `206e7952`; pre-flight 02:22Z: CI green, only M1-M5 and C8 rows change against the
+**Deploy B started at 02:22:58Z Sept 26** (main `206e7952`; pre-flight 02:22Z: CI green, only M1-M5 and C8 rows change against the
 running release, nothing in flight). The owner sold the proven family's AZ-SD and LAD-SF positions (and NYM-WSH) by hand
 at about 02:15Z, so no real family game is in play; the real Kalshi book froze on those sales at 02:16Z (cash +$15.48,
-positions AZ-SD -11, LAD-SF -13, NYM-WSH -16), which B's watch reads as inherited.
+positions AZ-SD -11, LAD-SF -13, NYM-WSH -16), which B's watch reads as inherited. **Done:** release `20260926T022308Z-1931abd19d1f` staged
+02:23:15Z, promoted 02:24:53.7Z, grant `earned-live-20260921` ratified 02:25:10Z on `acff5c64` (active), watch passed,
+**watch ended 02:35:19Z** (the options run's G may start from 03:05Z). The owner chose (02:26Z) to fix the Kalshi
+freeze: a builder books an owner's own sale on a real book (moved to the House row at cost, the sale booked there),
+reviewed, shipping with Deploy C.
 
 **Deploy B moves up (01:22Z Sept 26, the owner asked why wait):** it starts as soon as the proven family's last two
 real games of the night settle (KXMLBTOTAL AZ-SD, first pitch 01:40Z; LAD-SF, 02:15Z; the other four settled 00:19-01:16Z:
