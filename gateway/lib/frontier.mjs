@@ -15,34 +15,87 @@ import { parseUsdMicro } from './money.mjs';
 export const HOST = 'https://api.openai.com';
 export const PATH = '/v1/responses';
 export const AGENT_HEADER = 'X-LTCM-Agent';
-//: The most output one call may ask for. The reservation is sized from it.
+//: The role a call is made for (a slug). It names the call's output ceiling in `FRONTIER_ROLE_MAX_OUTPUT`.
+export const ROLE_HEADER = 'X-LTCM-Role';
+//: The most output one call may ask for, unless its role names another ceiling. The reservation is sized from it.
 export const MAX_OUTPUT_TOKENS = 16000;
+//: The most any role's ceiling may name: a larger number in `FRONTIER_ROLE_MAX_OUTPUT` is not read.
+export const ROLE_MAX_OUTPUT_LIMIT = 128000;
+const SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const RATE_FIELDS = ['input', 'cached', 'output', 'long_input', 'long_cached', 'long_output', 'uncached', 'long_uncached'];
 
-/** `{ model: { input, cached, output } }` in dollars per million tokens, from `FRONTIER_MODELS`. */
+/**
+ * One row of rates, checked, or null. `base` is the standard row a flex row discounts (Sept 26, 2026 (the options-swarm
+ * run, Wave 5)): a long-context rate the flex row leaves out is the standard one (the meter errs high), and no flex rate
+ * may exceed its standard rate, so a flex call settled at flex rates never settles above the standard worst case it
+ * reserved.
+ */
+function rates(row, base = null) {
+  if (!row || typeof row !== 'object' || Array.isArray(row)) return null;
+  const input = Number(row.input), cached = Number(row.cached ?? row.input), output = Number(row.output);
+  const longInput = Number(row.long_input ?? base?.long_input ?? input), longCached = Number(row.long_cached ?? base?.long_cached ?? cached);
+  const longOutput = Number(row.long_output ?? base?.long_output ?? output);
+  // `input` is the cache-write rate, the dearest an input token can be. `uncached` is the
+  // plain rate for a token neither read from nor written to the cache; absent, it is `input`,
+  // so a table without it prices exactly as before.
+  const uncached = Number(row.uncached ?? input), longUncached = Number(row.long_uncached ?? base?.long_uncached ?? longInput);
+  if (![input, cached, output, longInput, longCached, longOutput, uncached, longUncached].every(Number.isFinite)
+      || !(input > 0 && cached >= 0 && cached <= input && output > 0
+        && longInput >= input && longCached >= cached && longCached <= longInput && longOutput >= output
+        && uncached >= cached && uncached <= input && longUncached >= longCached && longUncached <= longInput && longUncached >= uncached)) {
+    return null;
+  }
+  const out = { input, cached, output, long_input: longInput, long_cached: longCached, long_output: longOutput, uncached, long_uncached: longUncached };
+  if (base && RATE_FIELDS.some(field => out[field] > base[field])) return null;
+  return out;
+}
+
+/**
+ * `{ model: { input, cached, output, ..., flex? } }` in dollars per million tokens, from `FRONTIER_MODELS`. A model whose
+ * standard rates do not read is absent (refused). `flex` (Sept 26, 2026, Wave 5) is the model's flex-tier rates,
+ * `{input, cached, output}` and optionally the long-context and uncached rates; a model without it, or whose flex rates
+ * do not read, is priced as before and cannot be sent on the flex tier.
+ */
 export function priceTable(env = {}) {
   try {
     const table = JSON.parse(env.FRONTIER_MODELS || '{}');
     const out = {};
     for (const [model, row] of Object.entries(table)) {
-      const input = Number(row?.input), cached = Number(row?.cached ?? row?.input), output = Number(row?.output);
-      const longInput = Number(row?.long_input ?? input), longCached = Number(row?.long_cached ?? cached);
-      const longOutput = Number(row?.long_output ?? output);
-      // `input` is the cache-write rate, the dearest an input token can be. `uncached` is the
-      // plain rate for a token neither read from nor written to the cache; absent, it is `input`,
-      // so a table without it prices exactly as before.
-      const uncached = Number(row?.uncached ?? input), longUncached = Number(row?.long_uncached ?? longInput);
-      if (/^[A-Za-z0-9._:-]{1,80}$/.test(model) && [input, cached, output, longInput, longCached, longOutput, uncached, longUncached].every(Number.isFinite)
-          && input > 0 && cached >= 0 && cached <= input && output > 0
-          && longInput >= input && longCached >= cached && longCached <= longInput && longOutput >= output
-          && uncached >= cached && uncached <= input && longUncached >= longCached && longUncached <= longInput && longUncached >= uncached) {
-        out[model] = { input, cached, output, long_input: longInput, long_cached: longCached, long_output: longOutput,
-          uncached, long_uncached: longUncached };
-      }
+      if (!/^[A-Za-z0-9._:-]{1,80}$/.test(model)) continue;
+      const standard = rates(row);
+      if (!standard) continue;
+      const flex = row?.flex === undefined ? null : rates(row.flex, standard);
+      out[model] = flex ? { ...standard, flex } : standard;
     }
     return out;
   } catch {
     return {};
   }
+}
+
+/** `FRONTIER_ROLE_MAX_OUTPUT` read: `{ role: ceiling }` for each slug with a whole number from 1 to the limit. */
+export function roleCeilings(env = {}) {
+  let table;
+  try {
+    table = JSON.parse(env.FRONTIER_ROLE_MAX_OUTPUT || '{}');
+  } catch {
+    return {};
+  }
+  if (!table || typeof table !== 'object' || Array.isArray(table)) return {};
+  const out = {};
+  for (const [role, value] of Object.entries(table)) {
+    if (SLUG.test(role) && Number.isSafeInteger(value) && value >= 1 && value <= ROLE_MAX_OUTPUT_LIMIT) out[role] = value;
+  }
+  return out;
+}
+
+/**
+ * The output ceiling of a call made for `role` (the `X-LTCM-Role` header): what `FRONTIER_ROLE_MAX_OUTPUT` names for it,
+ * else MAX_OUTPUT_TOKENS. A role it does not name, a header that is not a slug, or none at all gets the default.
+ */
+export function outputCeiling(env = {}, role = null) {
+  const table = roleCeilings(env);
+  return typeof role === 'string' && SLUG.test(role) && Object.hasOwn(table, role) ? table[role] : MAX_OUTPUT_TOKENS;
 }
 
 /** A funded month expires instead of creating another allowance at the next UTC month boundary. */
@@ -145,11 +198,13 @@ function textContent(content) {
 }
 
 /**
- * Check a request body before it is sent. `{ model, price, maxOutput }` or `{ error, status }`.
+ * Check a request body before it is sent. `{ model, price, flex, maxOutput, ceiling }` or `{ error, status }`.
  * Streaming and background calls are refused: the usage block that settles the bill arrives
  * with a complete response, and a call that outlives the request cannot be settled at all.
+ * `flex` is the model's flex rates when the call asks for the flex tier, else null; the call is
+ * still reserved at `price`, the standard rates, because OpenAI may serve it on another tier.
  */
-export function admit(body, env) {
+export function admit(body, env, { role = null } = {}) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return { error: 'The request must be a JSON object.', status: 400 };
   const model = String(body.model || '');
   const price = priceTable(env)[model];
@@ -171,17 +226,26 @@ export function admit(body, env) {
     breakpoints += marks;
     return true;
   }));
+  // Flex (Sept 26, 2026 (the options-swarm run, Wave 5)): half price, slower, and refused with a 429 when OpenAI lacks
+  // the capacity. Priority and every other tier stay refused: they bill above the standard rates this meter reserves.
   if (!textInput || Object.keys(body).some(key => !allowed.has(key))
-      || (body.service_tier !== undefined && body.service_tier !== 'default')) {
-    return { error: 'Only inline text on the standard service tier is priced by this gateway.', status: 400 };
+      || (body.service_tier !== undefined && body.service_tier !== 'default' && body.service_tier !== 'flex')) {
+    return { error: 'Only inline text on the standard or flex service tier is priced by this gateway.', status: 400 };
+  }
+  const flex = body.service_tier === 'flex' ? price.flex ?? null : null;
+  if (body.service_tier === 'flex' && !flex) {
+    return { error: `No flex price is configured for model "${model}"; a flex call is refused.`, status: 403 };
   }
   // OpenAI takes at most four cache writes a request.
   if (!cacheHintsValid(body) || breakpoints > 4) {
     return { error: 'Prompt-cache hints must be a bounded key, a documented retention, a 30m ttl without prewarm and at most four explicit breakpoints.', status: 400 };
   }
+  // The ceiling is the role's (Sept 26, 2026, Wave 5: the weekly post-mortem writes more than 16,000 tokens), else
+  // 16,000; the reservation is sized from the max_output_tokens admitted under it.
+  const ceiling = outputCeiling(env, role);
   const maxOutput = Number(body.max_output_tokens);
-  if (!Number.isInteger(maxOutput) || maxOutput < 1 || maxOutput > MAX_OUTPUT_TOKENS) {
-    return { error: `max_output_tokens is required, between 1 and ${MAX_OUTPUT_TOKENS}.`, status: 400 };
+  if (!Number.isInteger(maxOutput) || maxOutput < 1 || maxOutput > ceiling) {
+    return { error: `max_output_tokens is required, between 1 and ${ceiling}.`, status: 400 };
   }
-  return { model, price, maxOutput };
+  return { model, price, flex, maxOutput, ceiling };
 }

@@ -115,8 +115,13 @@ class Rows(unittest.TestCase):
 
 
 class OneSourceOfTruth(unittest.TestCase):
-    """`league.ci` (`check_structures`): the gateway's OPTION_STRUCTURES_REAL admits exactly the types the constitution opens
-    on real money -- `option_spread_real_types` while O1 is on, none while it is off."""
+    """`league.ci` (`check_structures`): the gateway's OPTION_STRUCTURES_REAL admits exactly the types the constitution's
+    options money table opens on real money (`options_money.real_types`, the options swarm, Sept 26, 2026), and the
+    table's rows stay inside their bounds."""
+
+    FIVE = ["credit_vertical", "debit_vertical", "iron_butterfly", "iron_condor", "long_butterfly"]
+    TYPES_LINE = '"real_types": ["debit_vertical", "credit_vertical", "iron_condor", "iron_butterfly", "long_butterfly"],'
+    GATEWAY_LINE = '"OPTION_STRUCTURES_REAL": "off",'
 
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
@@ -125,37 +130,57 @@ class OneSourceOfTruth(unittest.TestCase):
         (self.root / "gateway").mkdir()
         self.constitution = (ci.REPO / "league" / "constitution.py").read_text(encoding="utf-8")
         self.wrangler = (ci.REPO / "gateway" / "wrangler.jsonc").read_text(encoding="utf-8")
+        self.assertIn(self.TYPES_LINE, self.constitution)
+        self.assertIn(self.GATEWAY_LINE, self.wrangler)
 
     def tearDown(self):
         self.dir.cleanup()
 
-    def tree(self, *, on=False, gateway="off", types=None):
-        text = self.constitution.replace('"option_spreads_real": False,', f'"option_spreads_real": {on},')
+    def tree(self, *, gateway=None, types=None, replace=None):
+        text = self.constitution
         if types is not None:
-            text = text.replace('"option_spread_real_types": ["debit_vertical"],', f'"option_spread_real_types": {types!r},')
+            text = text.replace(self.TYPES_LINE, f'"real_types": {types!r},'.replace("'", '"'))
+        for old, new in (replace or {}).items():
+            text = text.replace(old, new)
         (self.root / "league" / "constitution.py").write_text(text, encoding="utf-8")
-        (self.root / "gateway" / "wrangler.jsonc").write_text(
-            self.wrangler.replace('"OPTION_STRUCTURES_REAL": "off",', f'"OPTION_STRUCTURES_REAL": "{gateway}",'), encoding="utf-8")
+        wrangler = self.wrangler if gateway is None else self.wrangler.replace(self.GATEWAY_LINE, f'"OPTION_STRUCTURES_REAL": "{gateway}",')
+        (self.root / "gateway" / "wrangler.jsonc").write_text(wrangler, encoding="utf-8")
         return ci.check_structures(self.root)
 
     def test_the_repository_as_it_stands_agrees(self):
         self.assertEqual(ci.check_structures(), [])
         self.assertEqual(ci.gateway_structures(), ([], []))
 
-    def test_the_switch_and_the_gateway_change_together(self):
-        self.assertEqual(self.tree(on=False, gateway="off"), [])
-        self.assertEqual(self.tree(on=True, gateway="debit_vertical"), [])
-        self.assertEqual(self.tree(on=True, gateway=" debit_vertical, "), [])
-        refused = self.tree(on=True, gateway="off")
-        self.assertEqual(len(refused), 1)
-        self.assertIn("admits none on the real account, but the constitution opens ['debit_vertical']", refused[0])
-        self.assertIn("admits ['debit_vertical'] on the real account, but the constitution opens none",
-                      self.tree(on=False, gateway="debit_vertical")[0])
-        self.assertIn("iron_condor", self.tree(on=True, gateway="debit_vertical,iron_condor")[0])
-        # A typo would admit none at the gateway, silently: refused whatever the switch says.
-        self.assertIn("debit_verticle, not a structure type", self.tree(on=False, gateway="debit_verticle")[0])
-        # A credit type in the constitution is refused by the bounds before any comparison.
-        self.assertIn("owner's explicit confirmation", " ".join(self.tree(on=True, gateway="credit_vertical", types=["credit_vertical"])))
+    def test_the_table_and_the_gateway_change_together(self):
+        self.assertEqual(self.tree(), [])
+        self.assertEqual(self.tree(types=["debit_vertical"], gateway="debit_vertical"), [])
+        self.assertEqual(self.tree(types=["debit_vertical"], gateway=" debit_vertical, "), [])
+        self.assertEqual(self.tree(gateway="off"), [], "the external boundary may always disable real opens")
+        self.assertEqual(self.tree(gateway=",".join(self.FIVE)), [])
+        self.assertIn("admits ['debit_vertical'] on the real account", self.tree(gateway="debit_vertical")[0])
+        self.assertIn("admits", self.tree(types=["debit_vertical"], gateway=",".join(self.FIVE))[0])
+        # A typo would admit none at the gateway, silently: refused whatever the table says.
+        self.assertIn("debit_verticle, not a structure type", self.tree(gateway="debit_verticle")[0])
+        # A type the venue cannot close in one order is refused by the table's bounds before any comparison.
+        self.assertIn("real_types", " ".join(self.tree(types=["calendar"], gateway="calendar")))
+
+    def test_the_gateways_caps_are_the_money_tables(self):
+        self.assertEqual(self.tree(), [])
+        for var, value in (("MAX_ORDER_MAX_LOSS_USD", "1500"), ("MAX_ORDER_EQUITY_SHARE", "0.2"), ("MAX_DAY_EQUITY_SHARE", "1.5"),
+                           ("MAX_DAY_ORDERS", "400"), ("MAX_DAY_OPEN_ORDERS", "280"), ("CREDIT_MIN_EQUITY_USD", "1000")):
+            import re as _re
+
+            text = _re.sub(rf'"{var}": "[^"]*"', f'"{var}": "{value}"', self.wrangler, count=1)
+            (self.root / "league" / "constitution.py").write_text(self.constitution, encoding="utf-8")
+            (self.root / "gateway" / "wrangler.jsonc").write_text(text, encoding="utf-8")
+            refused = ci.check_structures(self.root)
+            self.assertTrue(any(var in p for p in refused), (var, refused))
+
+    def test_a_money_row_outside_its_range_is_refused(self):
+        refused = self.tree(replace={'"daily_stop_share": "0.25",': '"daily_stop_share": "0.50",'})
+        self.assertIn("options_money.daily_stop_share = '0.50' is outside [0.15, 0.35]", " ".join(refused))
+        refused = self.tree(replace={'"max_orders_day": 250,': '"max_orders_day": 400,'})
+        self.assertIn("order_path.max_orders_day", " ".join(refused))
 
     def test_the_check_runs_in_league_ci(self):
         with patch.object(ci, "check_structures", return_value=["the structures disagree"]) as check, \

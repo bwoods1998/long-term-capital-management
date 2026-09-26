@@ -31,6 +31,7 @@ numpy only (plus the standard-library `structure_core`); Python 3.11+.
 from __future__ import annotations
 
 import datetime as dt
+import functools
 import math
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
@@ -50,6 +51,22 @@ MAX_QTY = 500
 
 class Refused(ValueError):
     """An intent cannot become an order (the message says why, in a program's terms)."""
+
+
+def _refusing(fn: Any) -> Any:
+    """A program's malformed value (a wrong type, NaN or infinity where a number goes) is refused like any other bad
+    intent: the error it raises in a conversion never escapes to the engine or the House as an exception."""
+
+    @functools.wraps(fn)
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return fn(*args, **kwargs)
+        except Refused:
+            raise
+        except (TypeError, ValueError, OverflowError, KeyError, IndexError, AttributeError) as exc:
+            raise Refused(f"a malformed value in the intent ({type(exc).__name__}: {str(exc)[:120]})") from None
+
+    return wrapped
 
 
 @dataclass(frozen=True)
@@ -139,6 +156,7 @@ def tick_of(root: str, legs: Sequence[LegFill], value: float) -> float:
     return venue.leg_tick(root, abs(value)) if len(legs) == 1 else venue.NET_TICK
 
 
+@_refusing
 def limit_value(rule: Any, action: str, natural: float, mid: float, tick: float) -> float:
     """The limit a share for a limit rule (the module docstring), on the tick, rounded passively."""
     opening = action == "open"
@@ -162,6 +180,7 @@ def limit_value(rule: Any, action: str, natural: float, mid: float, tick: float)
     return rounded
 
 
+@_refusing
 def _tif(raw: Any) -> int | None:
     if raw is None or raw == "day":
         return None
@@ -269,6 +288,7 @@ def _is_call(right: Any) -> bool:
     raise Refused("a leg's 'right' is 'C' or 'P'")
 
 
+@_refusing
 def resolve_legs(snap: Snapshot, specs: Any, rules: venue.Rules) -> list[LegFill]:
     """The contracts an intent's `legs` name, absolute selectors first, then the `rel` ones."""
     if not isinstance(specs, (list, tuple)) or not 1 <= len(specs) <= rules.max_legs:
@@ -340,6 +360,7 @@ def _leg_prices(snap: Snapshot, legs: Sequence[LegFill], action: str) -> list[fl
 
 
 # --------------------------------------------------------------------------- orders
+@_refusing
 def resolve_open(intent: Mapping[str, Any], snap: Snapshot, rules: venue.Rules, *, buying_power: float,
                  stress: float = 1.0) -> Order:
     """An "open" intent as an order (Refused says why not). `snap` is the intent's root at the decision
@@ -389,6 +410,7 @@ def resolve_open(intent: Mapping[str, Any], snap: Snapshot, rules: venue.Rules, 
                  _tif(intent.get("tif")), str(intent.get("tag") or "")[:80], str(intent.get("note") or "")[:300])
 
 
+@_refusing
 def resolve_close(intent: Mapping[str, Any], type_: str, legs: Sequence[LegFill], held_qty: int, snap: Snapshot,
                   rules: venue.Rules, *, position: int, stress: float = 1.0) -> Order:
     """A "close" intent for a held position whose `legs` carry today's snapshot indices."""

@@ -35,6 +35,12 @@
     "start_at": "2026-09-26T06:25:30.000Z",
     "start_equity": "481.65"
   },
+  "live": {
+    "_about": "The live options path (league/live/, the options swarm's Wave 5, Sept 26, 2026): Candidates trade the shadow book on live quotes (the Gym's own fill rules), Probe and Sized families trade real money under the constitution's options_money table and the grant, the practice account proves the multi-leg route first. enabled: it runs, and it owns both Alpaca accounts (no old Book is built for them). require_paper_proof: real opens wait for the practice account's multi-leg round trip. shadow_capital: each shadow instance's notional capital (the Gym's). The House box needs numpy.",
+    "enabled": true,
+    "require_paper_proof": true,
+    "shadow_capital": 10000.0
+  },
   "gym": {
     "_about": "The Gym (Wave 3, league/gym/): sealed Sailboxes forked from the Gym image that replay agent programs over recorded one-minute NBBO. A placeholder until the Gym's builder fills it; nothing reads it yet.",
     "enabled": false

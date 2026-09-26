@@ -166,6 +166,58 @@ def options_shadow_broker(root: Path, config: dict[str, Any], data_client: Any, 
                                starting_cash=str(shadow.get("starting_cash", "100000")), feed=feed)
 
 
+def live_enabled(config: dict[str, Any], *, canary: bool = False) -> bool:
+    """Whether the live options path (`league/live/`, Wave 5) runs: `config.json` `live.enabled`, never on a canary."""
+    return not canary and (config.get("live") or {}).get("enabled") is True
+
+
+def options_live(house: House, root: Path, config: dict[str, Any], *, real_money: bool, token: Callable[[], str],
+                 swarm_on: bool = False) -> Any:
+    """`House.options_live` (`league/live/step.py`): live chains, the shadow book, the paper proof and the real route,
+    through the gateway. It owns both Alpaca accounts: no old `Book` is built for them beside it (`build`). None, with an
+    error alert, when numpy is missing on the box (the main session installs it at deploy). `swarm_on`: `build`'s own
+    reading of the swarm's settings (config.json < <state>/swarm.json): the families are then the swarm's store."""
+    try:
+        import numpy  # noqa: F401 - the live path needs it; the rest of the House does not
+
+        from .live import money as live_money
+        from .live.families import MemoryFamilies, SwarmFamilies
+        from .live.step import OptionsLive
+        from .live.venue import Account as LiveAccount, MarketData
+    except ImportError as exc:
+        house.alert("error", f"the live options path is not running: {exc} (pip install numpy in the House's venv)")
+        return None
+    from ltcm.adapters import GatewaySigner, VenueClient
+    from ltcm.notify import post_json
+
+    from .ledger import HOUSE
+
+    gateway_url = config["gateway_url"]
+    signer = GatewaySigner(token())
+    table = live_money.Table.from_constitution()
+
+    def client(venue: str) -> Any:
+        return VenueClient(None, gateway_url=gateway_url, gateway=signer, venue=venue)
+
+    # OPRA/SIP entitlement belongs to the real account even while all execution is shadow/paper.
+    market = MarketData(client("alpaca"), option_feed=str(config.get("alpaca_option_feed", "opra")),
+                        stock_feed=str(config.get("alpaca_feed", "sip")))
+    real = LiveAccount(client("alpaca"), venue="alpaca", max_requests_minute=table.max_requests_minute) if real_money else None
+    paper = LiveAccount(client("alpaca-paper"), venue="alpaca-paper", max_requests_minute=table.max_requests_minute)
+    families = SwarmFamilies(root) if swarm_on else MemoryFamilies()
+
+    def record(kind: str, payload: dict[str, Any], agent: str | None = None) -> None:
+        house.ledger.append(kind, payload, agent=agent or HOUSE)
+
+    def notify(facts: dict[str, Any]) -> Any:
+        return post_json(f"{gateway_url.rstrip('/')}/v1/notify", token(), facts)
+
+    return OptionsLive(root, market=market, real=real, paper=paper, families=families, grant=house.grant,
+                       kill_switch=gateway_kill_switch(gateway_url, token), table=table, config=dict(config.get("live") or {}),
+                       real_money=real_money, performance=performance_of(config), clock=house.clock, record=record,
+                       alert=house.alert, notify=notify)
+
+
 def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandbox: bool = False, research: bool = True,
           publish: bool = True, tape: str | None = None, game: dict[str, Any] | None = None, name_prefix: str = "league",
           merton: bool = True, canary: bool = False) -> House:
@@ -226,25 +278,32 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
     real_money = bool(config.get("real_money"))
     feed, option_feed = config.get("alpaca_feed", "iex"), config.get("alpaca_option_feed", "indicative")
 
-    # Market data reads through the real account's credentials when real money is on (the gateway's kill switch stops
-    # orders, never reads), and through the practice account's otherwise (a canary, a House with real money off).
-    data_venue = "alpaca" if real_money else "alpaca-paper"
-    data_client = VenueClient(None, gateway_url=gateway_url, gateway=GatewaySigner(token()), venue=data_venue)
+    # Market data uses the entitled real account independently of execution (including a canary).
+    # This client is passed to readers only; real execution accounts still require real_money below.
+    data_client = VenueClient(None, gateway_url=gateway_url, gateway=GatewaySigner(token()), venue="alpaca")
     alpaca_data = AlpacaData(data_client, feed=feed)
-    if canary:
-        from .sim import SimBroker, touch_from
-
-        paper: Any = SimBroker(root / "alpaca-sim.json", touch_from(alpaca_data))
+    live_on = live_enabled(config, canary=canary)
+    brokers: dict[str, Any] = {}
+    if live_on:
+        # The live options path owns both Alpaca accounts (Wave 5, Sept 26, 2026): an old `Book` reconciling or
+        # repairing the same account beside it would fight it (its short-leg buy-back, its freezes). No old book is
+        # built, the old options shadow account neither (the live path's shadow book is the Gym's engine).
+        pass
     else:
-        paper = gateway_broker("alpaca-paper", gateway_url=gateway_url, token=token(), feed=feed, option_feed=option_feed)
-    brokers: dict[str, Any] = {"alpaca-paper": paper}
-    if real_money:
-        brokers["alpaca"] = gateway_broker("alpaca", gateway_url=gateway_url, token=token(), feed=feed, option_feed=option_feed)
-    # Last: the House's passes walk the books in this order (the horizon rule's has no guard of its own for one
-    # book), and practice must never stand in front of real money.
-    shadow_options = options_shadow_broker(root, config, data_client, alpaca_data)
-    if shadow_options is not None:
-        brokers[shadow_options.venue] = shadow_options
+        if canary:
+            from .sim import SimBroker, touch_from
+
+            paper: Any = SimBroker(root / "alpaca-sim.json", touch_from(alpaca_data))
+        else:
+            paper = gateway_broker("alpaca-paper", gateway_url=gateway_url, token=token(), feed=feed, option_feed=option_feed)
+        brokers["alpaca-paper"] = paper
+        if real_money:
+            brokers["alpaca"] = gateway_broker("alpaca", gateway_url=gateway_url, token=token(), feed=feed, option_feed=option_feed)
+        # Last: the House's passes walk the books in this order (the horizon rule's has no guard of its own for one
+        # book), and practice must never stand in front of real money.
+        shadow_options = options_shadow_broker(root, config, data_client, alpaca_data)
+        if shadow_options is not None:
+            brokers[shadow_options.venue] = shadow_options
 
     if local_sandbox:
         sandbox: Any = LocalSandbox(root / "boxes")
@@ -268,6 +327,8 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         root, brokers=brokers, sandbox=sandbox, alpaca_data=alpaca_data, kalshi_data=None, provider=provider,
         game=game, settings=house_settings, kill_switch=gateway_kill_switch(gateway_url, token) if real_money else None,
     )
+    if live_on:
+        house.options_live = options_live(house, root, config, real_money=real_money, token=token, swarm_on=swarm_on)
     # The same clock as the House: `open_requests` drops a request nothing has closed after three
     # days, and a Commons reading a different clock would measure that window against the wrong now.
     # `fetch`: research's `web_fetch` reads one public page through the gateway (I1, Sept 25, 2026).
@@ -277,12 +338,12 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         house.researcher.commons = house.commons
     frontier = Frontier(gateway_url, token)
     house.frontier = frontier
-    if config.get("options_history", True) and not canary:
+    if config.get("options_history", True) and not canary and not live_on:
         # Listed-option history (market-data GETs only): the options desk's replay. Empty until ingested; then
         # refreshed daily. Superseded by the Gym (league/gym/) and deleted with it in Wave 2b.
         from .options_history import OptionsHistory, gateway_get
-        reader = brokers["alpaca"] if real_money else paper
-        house.options_history = OptionsHistory(root / "options_history.sqlite", gateway_get(reader), ledger=house.ledger, clock=house.clock)
+        house.options_history = OptionsHistory(root / "options_history.sqlite", gateway_get(client=data_client),
+                                               ledger=house.ledger, clock=house.clock)
     if not canary:
         from .frontier import FrontierMonth
 

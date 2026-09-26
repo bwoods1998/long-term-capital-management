@@ -146,6 +146,19 @@ KINDS: dict[str, bool] = {
     # ("unproven", "proven", "swing") and since, its stake and capacity, at most every five minutes and
     # only for a family whose record changed. Private: the site reads the families from the board.
     "family.record": False,
+    # The live options path (league/live/, the options swarm's Wave 5, Sept 26, 2026). Private: prices, legs and the
+    # venue's answers stay on the box; a real fill reaches the site as a `book.fill` row (quote-free by the publisher).
+    "live.order": False,        # a real order written, sent, and what the venue or the gateway answered
+    "live.cancel": False,       # a real order cancelled, and why
+    "live.refusal": False,      # an intent the money table or the order path turned away, and why
+    "live.freeze": False,       # reconciliation froze (or released) new real entries, and why
+    "live.stop": False,         # the daily or the drawdown stop tripped
+    "live.band": False,         # the live path moved a family between candidate, probe and sized
+    "live.instance": False,     # a live program instance started, wound down, went to exits only, or failed to load
+    "live.option_event": False,  # an assignment, exercise or expiry the account reported
+    "live.shares": False,       # the stock order that closes an assignment's shares
+    "live.paper_proof": False,  # the practice account's multi-leg round trip passed or failed
+    "live.alert": False,        # something the live path could not explain
     # The options swarm (Sept 26, 2026; league/swarm/): its own append-only events, mirrored here by the House's swarm
     # step (`league/swarm/hook.py`), idempotent by id `swarm:<seq>`. Never the House's own agent.* or eval.* kinds: its
     # roster and evaluator read those. Public: the site's tape reads a family's birth, retirement, band move and notes

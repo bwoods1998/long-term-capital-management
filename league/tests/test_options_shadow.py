@@ -1042,7 +1042,10 @@ class Service(unittest.TestCase):
         def no_network(*args, **kwargs):
             raise OSError("no network in tests")
 
-        config = {**service.load_config(), "feeds": False, "options_history": False, "jev": {"enabled": False}, "real_money": False}
+        # The old options shadow account is built only without the live path (Wave 5, Sept 26, 2026: the live path's shadow
+        # book is the Gym's engine, and it owns the Alpaca accounts); until the prune removes it, it is tested so.
+        config = {**service.load_config(), "feeds": False, "options_history": False, "jev": {"enabled": False}, "real_money": False,
+                  "live": {"enabled": False}}
         with patch.object(service, "load_env"), patch.object(service, "secret", return_value="t" * 40), \
                 patch("league.venues.gateway_broker", side_effect=lambda venue, **_: FakeBroker(venue)), \
                 patch("urllib.request.urlopen", side_effect=no_network):
