@@ -153,10 +153,16 @@ An order meets the quotes of the minute AFTER your decision, and every chance in
   its `tif` minutes (`"day"` by default). Each minute it has not filled, it fills AT ITS LIMIT if
   the natural has come through it, and otherwise with the fill model's probability for that minute:
   how often Train's recorded trades printed at or through that distance from the mid on a quoted
-  contract-minute like yours (days to expiry, moneyness, time of day; packages use complex-order
-  prints), a point estimate pooled toward coarser cells where data is thin. It never fills on a
-  minute after which the mid holds still or moves your way (a passive fill is someone else's good
-  trade). So a limit a tick or two inside the natural, or at the mid, with a `tif` of 10-30 minutes
+  contract-minute like yours (the same root, days to expiry, moneyness, time of day), a point
+  estimate pooled toward coarser cells where data is thin. A multi-leg package gets the LOWEST of
+  its legs' rates, each leg at its own strike and expiry, from complex-order prints and never above
+  that leg's single-leg rate. A passive fill takes at most the contracts Train's fills at that
+  distance typically found (one structure where unknown), and in one minute all your orders on a
+  contract share that liquidity: the rest keeps working. It never fills on a minute after which the
+  mid holds still or moves your way (a passive fill is someone else's good trade). **Not modelled,
+  so natural only:** a structure with any leg 8 or more days to expiry (the trade sample stops at 7
+  days; back months fill at or through the natural until they are sampled), and a root the sample
+  never covered. So a limit a tick or two inside the natural, or at the mid, with a `tif` of 10-30 minutes
   can save much of the half-spread on entries and exits; what it costs is the fills you miss (the
   market leaves without you) and the adverse selection of the ones you get. Your results' `fills`
   show what your prices got: fill rate, the share filled at the natural, slippage from the mid in
@@ -169,7 +175,8 @@ An order meets the quotes of the minute AFTER your decision, and every chance in
 Fees: OCC, ORF, CAT on every contract, TAF and the SEC fee ($20.60 a million of premium) on sells,
 $0.50 plus exchange fees a contract on index options. Buying power: an open reserves (maximum loss +
 fees) x 1.1; a credit position holds its collateral. **The gate also runs you at 1.5x the half-spread
-(passive fills pay the extra too): an edge that lives inside the spread fails.**
+(passive fills pay the extra too, and a limit that is passive at the real quotes stays passive): an
+edge that lives inside the spread fails.**
 
 ## The venue's clock
 
@@ -182,9 +189,10 @@ further out of the money is left to expire, worth its intrinsic value at the clo
 with no fee). Equity options are physically settled: a short leg left in the money becomes shares,
 marked to the next session's first price. XSP and SPXW are cash-settled at the close at intrinsic value
 and never liquidated (hold them to expiry if you like; no calendars or diagonals there). At the end of a
-run everything open is closed at the natural; where the Gym splits a run into segments to answer
-faster, a position open at an inner boundary is valued at the mid with no fee (exit reason
-`split_mark`), and your STATE restarts there after replaying the prior week without trading. Stop
+run everything open is closed at the natural; where the Gym splits a Train run into segments to
+answer faster, a position open at an inner boundary is valued at the mid with no fee (exit reason
+`split_mark`), and your STATE restarts there after replaying the prior week without trading.
+Validation, holdout and forward runs are never split. Stop
 sending closes on an expiring contract after its `close_cutoff`.
 
 ## The game you are in

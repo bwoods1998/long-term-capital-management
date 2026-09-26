@@ -19,7 +19,7 @@ the prints at or through the touch in that minute add up to MORE contracts than 
 at the minute's start (the queue ahead of an order arriving then). Prints the queue absorbed fill
 nothing.
 
-THE ESTIMATOR: a point estimate, not a bound.
+THE ESTIMATOR: a point estimate, not a bound, per root.
 - Exposure: every contract-minute (09:31 to the minute before the close) at 0-7 days to expiry on
   which the contract was QUOTED two-sided with size (the same population as the hits), within the
   trade sample's strike band: per expiry, `sample_strikes` listed strikes each side of the money at
@@ -28,18 +28,24 @@ THE ESTIMATOR: a point estimate, not a bound.
   misses; contracts inside it with no print count, as they should (zero-print contracts are real zeros).
   Each contract-minute is two exposures: a resting buy and a resting sell.
 - Hits: contract-minutes with a print at or past the level, buys and sells separately.
-- Single-leg cells take the single-leg prints; MULTI-LEG cells take the complex prints directly
-  (conditions 130-134, 136, 137, 144 and the legacy 35 SPREAD, 36 STRADDLE, 38 COMBO; stock-option
-  packages 135 and 138-143 are excluded from both), no haircut and no cap by the single-leg rate.
+- Single-leg cells take the single-leg prints; MULTI-LEG cells take the complex prints (conditions
+  130-134, 136, 137, 144 and the legacy 35 SPREAD, 36 STRADDLE, 38 COMBO; stock-option packages 135
+  and 138-143 are excluded from both), measured leg by leg: the rate at which a complex order traded
+  on that contract at that level. The engine prices a package at the LOWEST of its legs' rates, each
+  at the leg's own days to expiry and moneyness and capped by the leg's single-leg rate (`fills.py`):
+  a package needs a counterparty for every leg, which leg-by-leg prints cannot show, so this is an
+  upper bound on a package's rate that real fills will correct.
 - The rate is the MLE hits / exposure, shrunk toward the next coarser cell where data is thin:
-  (dte, moneyness, time) -> (dte, moneyness) -> (dte) -> the level's pooled rate, each level
-  estimated as (hits + prior x parent rate) / (exposure + prior), `prior` pseudo side-minutes. A cell
-  with no exposure takes its parent's rate: nothing falls to zero merely for lack of data. Weights do
-  not depend on the level, so the table stays monotone in it (a nearer-the-natural limit never fills
-  less often). A days-to-expiry bucket the sample never saw (8+ days: the sample stops at 7) takes
-  the nearest sampled bucket's cells (3-7 days); back months print less often per minute than that,
-  so their passive fills are the one place the table may flatter (named in `meta.borrowed_dte`).
-- A level with no exposure at all is left out (the engine reads zero: natural fills only).
+  (root, dte, moneyness, time) -> (root, dte, moneyness) -> (root, dte) -> (root) -> every root
+  pooled, each level estimated as (hits + prior x parent rate) / (exposure + prior), `prior` pseudo
+  side-minutes. A cell with no exposure takes its parent's rate. Weights do not depend on the level,
+  so the table stays monotone in it (a nearer-the-natural limit never fills less often).
+- A root, or a root's days-to-expiry bucket, the sample never saw has NO cells: the engine reads zero
+  there (natural fills only). So 8 or more days to expiry (the sample stops at 7) is never modelled,
+  and no root borrows another's liquidity except through the shrinkage of cells it did sample.
+- Size: for each (root, level, single or multi-leg, days to expiry), the LOWER median over Train's
+  hits of the contracts that traded at or through the level in that contract-minute beyond the queue
+  ahead (at the touch, the volume less the displayed size; inside the spread, the volume), at least 1. The engine caps a passive fill at it (one structure where the table has no size).
 
 Paper fills prove the route only and never calibrate the model; real fills will. The table goes to a
 gitignored path: fitted parameters of licensed data never enter git or anything published.
@@ -76,7 +82,9 @@ Q_BUCKETS = (TOUCH_BUCKET, *LEVELS)
 PRIOR = 600.0
 #: The trade sample's strikes each side of the money (scripts/data/storelib.py TQ_STRIKE_RANGE), and its reach.
 SAMPLE_STRIKES = 10
-SAMPLE_MAX_DTE = 7
+SAMPLE_MAX_DTE = F.MODELLED_DTE
+#: The size histogram's bins: 0 .. SIZE_BINS - 1 contracts beyond the queue (larger fills count in the last).
+SIZE_BINS = 5001
 D_BUCKETS = tuple(range(len(F.DTE_EDGES)))
 K_BUCKETS = tuple(range(len(F.MONEY_EDGES) + 1))
 T_BUCKETS = tuple(range(len(F.TOD_EDGES) + 1))
@@ -117,48 +125,57 @@ def sampled_band(chain, eligible: np.ndarray, printed: np.ndarray, strikes_each_
     return band
 
 
-def shrink(exposure: dict[int, float], hits: dict[int, float], prior: float) -> tuple[dict[tuple[int, int, int], float], list[int]]:
-    """{(d, k, t): rate} for every cell, from exposures (side-minutes) and hits per cell code: the MLE
-    shrunk toward (d, k), then (d), then the pooled rate (the module docstring). Also the DTE buckets
-    that borrowed a sampled neighbour's cells. Empty when there is no exposure at all."""
+def lower_median(counts: np.ndarray) -> int:
+    """The lower median of a histogram of whole contracts (bin i holds the hits that found i), at least 1."""
+    total = int(counts.sum())
+    if total <= 0:
+        return 1
+    return max(1, int(np.searchsorted(np.cumsum(counts), (total + 1) // 2)))
+
+
+def shrink(exposure: dict[tuple[str, int], float], hits: dict[tuple[str, int], float],
+           prior: float) -> dict[tuple[str, int, int, int], float]:
+    """{(root, d, k, t): rate} for every cell of every (root, days-to-expiry bucket) with exposure, from
+    exposures (side-minutes) and hits keyed by (root, cell code): the MLE shrunk toward (root, d, k),
+    (root, d), (root), then every root pooled (the module docstring). Nothing for what was never seen."""
     total_n = sum(exposure.values())
     if total_n <= 0:
-        return {}, []
+        return {}
     pooled = sum(hits.values()) / total_n
-    n1: dict[int, float] = {}
-    k1: dict[int, float] = {}
-    n2: dict[tuple[int, int], float] = {}
-    k2: dict[tuple[int, int], float] = {}
-    for code, n in exposure.items():
+    n0: dict[str, float] = {}
+    k0: dict[str, float] = {}
+    n1: dict[tuple[str, int], float] = {}
+    k1: dict[tuple[str, int], float] = {}
+    n2: dict[tuple[str, int, int], float] = {}
+    k2: dict[tuple[str, int, int], float] = {}
+    for (root, code), n in exposure.items():
         d, k, _ = _decode(code)
-        h = hits.get(code, 0.0)
-        n1[d] = n1.get(d, 0.0) + n
-        k1[d] = k1.get(d, 0.0) + h
-        n2[d, k] = n2.get((d, k), 0.0) + n
-        k2[d, k] = k2.get((d, k), 0.0) + h
-    out: dict[tuple[int, int, int], float] = {}
-    seen = sorted(d for d in D_BUCKETS if n1.get(d, 0.0) > 0)
-    for d in seen:
-        r1 = (k1[d] + prior * pooled) / (n1[d] + prior)
-        for k in K_BUCKETS:
-            r2 = (k2.get((d, k), 0.0) + prior * r1) / (n2.get((d, k), 0.0) + prior)
-            for t in T_BUCKETS:
-                code = (d * 10 + k) * 10 + t
-                out[d, k, t] = (hits.get(code, 0.0) + prior * r2) / (exposure.get(code, 0.0) + prior)
-    borrowed = [d for d in D_BUCKETS if d not in seen]
-    for d in borrowed:  # never sampled: the nearest sampled horizon's cells (the shorter one on a tie)
-        near = min(seen, key=lambda s: (abs(s - d), s))
-        for k in K_BUCKETS:
-            for t in T_BUCKETS:
-                out[d, k, t] = out[near, k, t]
-    return out, borrowed
+        h = hits.get((root, code), 0.0)
+        for nd, kd, key in ((n0, k0, root), (n1, k1, (root, d)), (n2, k2, (root, d, k))):
+            nd[key] = nd.get(key, 0.0) + n
+            kd[key] = kd.get(key, 0.0) + h
+    out: dict[tuple[str, int, int, int], float] = {}
+    for root in sorted(n0):
+        r0 = (k0[root] + prior * pooled) / (n0[root] + prior)
+        for d in D_BUCKETS:
+            if n1.get((root, d), 0.0) <= 0:
+                continue  # never sampled: no cells (natural fills only)
+            r1 = (k1[root, d] + prior * r0) / (n1[root, d] + prior)
+            for k in K_BUCKETS:
+                r2 = (k2.get((root, d, k), 0.0) + prior * r1) / (n2.get((root, d, k), 0.0) + prior)
+                for t in T_BUCKETS:
+                    code = (d * 10 + k) * 10 + t
+                    out[root, d, k, t] = (hits.get((root, code), 0.0) + prior * r2) / (exposure.get((root, code), 0.0) + prior)
+    return out
 
 
 def fit(store: Store, roots: Sequence[str], *, days: Sequence[dt.date] | None = None, prior: float = PRIOR,
         sample_strikes: int = SAMPLE_STRIKES) -> dict:
     """The fitted table and what it was fitted on (see the module docstring)."""
-    exposure: dict[int, float] = {}
-    hits = {cls: {q: {} for q in Q_BUCKETS} for cls in ("s", "m")}
+    exposure: dict[tuple[str, int], float] = {}
+    hits: dict[str, dict[int, dict[tuple[str, int], float]]] = {cls: {q: {} for q in Q_BUCKETS} for cls in ("s", "m")}
+    # (root, q, class, dte bucket) -> a histogram of the contracts beyond the queue at each hit (capped at SIZE_BINS - 1)
+    excess: dict[tuple[str, int, str, int], np.ndarray] = {}
     seen = {"days": 0, "prints": 0, "single": 0, "multi": 0, "stock_option": 0, "dropped": 0, "contract_minutes": 0}
     codes: dict[int, int] = {}
     for root in roots:
@@ -211,50 +228,61 @@ def fit(store: Store, roots: Sequence[str], *, days: Sequence[dt.date] | None = 
             money = chain.strike[contract] / spot[mm] - 1.0
             cell = _cells(chain.dte[contract], money, chain.open_min + mm)
             for code, n in zip(*np.unique(cell, return_counts=True)):
-                exposure[int(code)] = exposure.get(int(code), 0.0) + 2.0 * float(n)   # a resting buy and a resting sell
+                exposure[root, int(code)] = exposure.get((root, int(code)), 0.0) + 2.0 * float(n)   # a resting buy and a resting sell
             # Hits: contract-minutes with a print at or past each level, buys and sells separately.
             pmoney = chain.strike[idx] / spot[minute] - 1.0
             pcell = _cells(chain.dte[idx], pmoney, chain.open_min + minute)
             key = idx * 10_000 + minute
+            pdte = np.searchsorted(np.array(F.DTE_EDGES[1:]), chain.dte[idx], side="right")
+
+            def count(cls: str, q: int, sel: np.ndarray, queue: np.ndarray | None) -> None:
+                """The contract-minutes of `sel`'s prints that fill a resting order at level q: per contract-minute,
+                the contracts traded at or through it beyond `queue` (the displayed size ahead; None inside the spread)."""
+                if not sel.any():
+                    return
+                uniq, inverse = np.unique(key[sel], return_inverse=True)
+                volume = np.bincount(inverse, weights=size[sel].astype(np.float64), minlength=uniq.size)
+                ahead = np.zeros(uniq.size, dtype=np.float64)
+                if queue is not None:
+                    ahead[inverse] = queue[minute[sel], idx[sel]]
+                cells = np.zeros(uniq.size, dtype=np.int64)
+                cells[inverse] = pcell[sel]
+                dbucket = np.zeros(uniq.size, dtype=np.int64)
+                dbucket[inverse] = pdte[sel]
+                filled = volume > ahead
+                for code, n in zip(*np.unique(cells[filled], return_counts=True)):
+                    hits[cls][q][root, int(code)] = hits[cls][q].get((root, int(code)), 0.0) + float(n)
+                beyond = np.minimum(np.rint(volume - ahead)[filled], SIZE_BINS - 1).astype(np.int64)
+                for d in np.unique(dbucket[filled]):
+                    counts = np.bincount(beyond[dbucket[filled] == d], minlength=SIZE_BINS)
+                    group = (root, q, cls, int(d))
+                    excess[group] = counts if group not in excess else excess[group] + counts
+
             for cls, mask in (("s", ~multi), ("m", multi)):
                 for q, level in LEVELS.items():
                     for side in (pos <= level, pos >= -level):     # a resting buy; a resting sell
-                        sel = mask & side
-                        uniq, first = np.unique(key[sel], return_index=True)
-                        cells = pcell[sel][first]
-                        for code, n in zip(*np.unique(cells, return_counts=True)):
-                            hits[cls][q][int(code)] = hits[cls][q].get(int(code), 0.0) + float(n)
+                        count(cls, q, mask & side, None)
                 # The touch: a buy at the bid (a sell at the ask) behind the queue the NBBO showed at the minute.
                 for side, queue in ((pos <= F.TOUCH, chain.bid_size), (pos >= -F.TOUCH, chain.ask_size)):
-                    sel = mask & side
-                    if not sel.any():
-                        continue
-                    uniq, inverse = np.unique(key[sel], return_inverse=True)
-                    volume = np.bincount(inverse, weights=size[sel].astype(np.float64), minlength=uniq.size)
-                    ahead = np.zeros(uniq.size, dtype=np.float64)
-                    ahead[inverse] = queue[minute[sel], idx[sel]]
-                    cells = np.zeros(uniq.size, dtype=np.int64)
-                    cells[inverse] = pcell[sel]
-                    for code, n in zip(*np.unique(cells[volume > ahead], return_counts=True)):
-                        hits[cls][TOUCH_BUCKET][int(code)] = hits[cls][TOUCH_BUCKET].get(int(code), 0.0) + float(n)
+                    count(cls, TOUCH_BUCKET, mask & side, queue)
     hazard: dict[str, float] = {}
-    borrowed: list[int] = []
     for cls in ("s", "m"):
         for q in Q_BUCKETS:
-            rates, borrowed = shrink(exposure, hits[cls][q], float(prior))
-            for (d, k, t), p in rates.items():
+            for (root, d, k, t), p in shrink(exposure, hits[cls][q], float(prior)).items():
                 rounded = round(min(1.0, max(0.0, p)), 6)
                 if rounded > 0:
-                    hazard[f"q{q}|{cls}|d{d}|k{k}|t{t}"] = rounded
-    return {"source": "league.gym.calibrate", "hazard": dict(sorted(hazard.items())),
+                    hazard[f"{root}|q{q}|{cls}|d{d}|k{k}|t{t}"] = rounded
+    sizes = {f"{root}|q{q}|{cls}|d{d}": lower_median(counts) for (root, q, cls, d), counts in excess.items()}
+    return {"source": "league.gym.calibrate", "hazard": dict(sorted(hazard.items())), "size": dict(sorted(sizes.items())),
             "meta": {"fitted_on": seen, "roots": list(roots), "cells_with_exposure": len(exposure),
-                     "prior": float(prior), "sample_strikes": int(sample_strikes), "borrowed_dte": borrowed,
+                     "prior": float(prior), "sample_strikes": int(sample_strikes), "modelled_dte": F.MODELLED_DTE,
                      "conditions": dict(sorted(codes.items())),
                      "fitted_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
-                     "rule": "per-minute MLE over quoted contract-minutes in the sample's strike band, shrunk toward coarser "
-                             "cells (time -> moneyness -> dte -> pooled) with `prior` pseudo side-minutes; each level at its "
-                             "least aggressive edge; the touch (q0) only where the minute's volume there exceeded the "
-                             "displayed queue; multi-leg from complex prints directly"}}
+                     "rule": "per-root per-minute MLE over quoted contract-minutes in the sample's strike band, shrunk toward "
+                             "coarser cells (time -> moneyness -> dte -> root -> every root) with `prior` pseudo side-minutes; "
+                             "unsampled roots and dte buckets have no cells; each level at its least aggressive edge; the touch "
+                             "(q0) only where the minute's volume there exceeded the displayed queue; multi-leg from complex "
+                             "prints leg by leg; size the median contracts beyond the queue"}}
 
 
 def main(argv: Sequence[str] | None = None) -> int:

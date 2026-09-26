@@ -43,8 +43,7 @@ class Determinism(unittest.TestCase):
         cls.days = synth.weekdays(dt.date(2023, 5, 1), 8)
         synth.generate(cls.dir, roots=("SPY",), days=cls.days, strikes_each_side=10, max_dte=4, seed=11)
         cls.store = S.Store(cls.dir)
-        cls.model = F.FillModel(hazard={F.cell(q, 2, d, m, t): 0.08 for q in (0.1, 0.3) for d in (0, 1, 2)
-                                        for m in (0.0, 0.01) for t in (600, 700, 950)}, source="test")
+        cls.model = synth.uniform_model(0.08, ("SPY",), levels=(2, 3), size=5)
 
     @classmethod
     def tearDownClass(cls):
@@ -134,15 +133,17 @@ class SplitBoundaries(unittest.TestCase):
     STATE warmed on the prior days without trading. Hand-computed; XSP (cash-settled) keeps the arithmetic short."""
 
     D = [dt.date(2023, 3, 6), dt.date(2023, 3, 7), dt.date(2023, 3, 8), dt.date(2023, 3, 9)]
+    V = [dt.date(2025, 3, 3), dt.date(2025, 3, 4), dt.date(2025, 3, 5), dt.date(2025, 3, 6)]
 
     @classmethod
     def setUpClass(cls):
         cls.dir = tempfile.mkdtemp(prefix="gym-split-")
         w = synth.Writer(cls.dir)
-        w.calendar(cls.D)
-        for day, (bid, ask) in zip(cls.D, ((2.00, 2.10), (1.80, 1.90), (1.20, 1.30), (0.60, 0.70))):
-            synth.flat_day(w, "XSP", day, [{"expiration": cls.D[3], "strike": 450, "right": "C", "quotes": {571: (bid, ask)}}],
-                           prices=450.5)
+        w.calendar(cls.D + cls.V)
+        for days in (cls.D, cls.V):
+            for day, (bid, ask) in zip(days, ((2.00, 2.10), (1.80, 1.90), (1.20, 1.30), (0.60, 0.70))):
+                synth.flat_day(w, "XSP", day, [{"expiration": days[3], "strike": 450, "right": "C", "quotes": {571: (bid, ask)}}],
+                               prices=450.5)
         w.finish()
         cls.store = S.Store(cls.dir)
 
@@ -150,10 +151,13 @@ class SplitBoundaries(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls.dir, ignore_errors=True)
 
-    def batch(self, split):
+    def batch(self, split, window="train", doc=None):
         from league.gym import batch as B
-        doc = B.run_batch([("holder", HOLDER, {})], store_root=self.dir, window="train", roots=["XSP"], split=split)
-        [result] = doc["results"]
+        out = B.run_batch([("holder", HOLDER, {})], store_root=self.dir, window=window, roots=["XSP"], split=split,
+                          stress_twin=False, _raw=True)
+        if doc is not None:
+            doc.update(out["batch"])
+        [result] = out["results"]
         self.assertEqual(result["status"], "ok", result.get("runtime"))
         return result
 
@@ -184,6 +188,20 @@ class SplitBoundaries(unittest.TestCase):
         # Deterministic: the same split gives the same hash.
         self.assertEqual(self.batch(2)["result_sha"], split["result_sha"])
         self.assertNotEqual(whole["run_id"], split["run_id"])
+
+    def test_validation_is_never_split(self):
+        # The pool once asked for Validation in 4 segments: a mid mark would then count as selection evidence. The Gym
+        # runs every window but Train whole, whatever the split asked, and says so.
+        asked, whole = {}, {}
+        split = self.batch(4, "validation", asked)
+        one = self.batch(1, "validation", whole)
+        self.assertEqual((asked["split"], whole["split"]), (1, 1))
+        self.assertEqual(split["result_sha"], one["result_sha"])
+        self.assertEqual([(t["exit_reason"], t["pnl"]) for t in split["trades"]], [("settled", -160.55)])
+        self.assertEqual(self.batch(2, "train", asked)["trades"][0]["exit_reason"], "split_mark")   # Train still splits
+        self.assertEqual(asked["split"], 2)
+        from league.swarm import settings
+        self.assertEqual(settings.DEFAULTS["gym"]["validation_split"], 1)
 
     def test_warm_up_decides_but_never_trades(self):
         cfg = E.RunConfig(window="train", roots=("XSP",), start=self.D[2], end=self.D[3], warmup=5)

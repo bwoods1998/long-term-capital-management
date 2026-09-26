@@ -21,7 +21,10 @@ years on eight cores). A segment boundary is an accounting split, not a trade:
 
 So a split run differs from an unsplit one only by what the positions open at a boundary would have
 done after it (their later P&L and exit costs are not counted) and by STATE older than the warm-up;
-each is deterministic (the segments and warm-up days are fixed by the window and N).
+each is deterministic (the segments and warm-up days are fixed by the window and N). Only Train is
+ever split: a Validation, holdout or forward run is the whole window in one piece whatever `--split`
+says (the batch reports `split` 1), so no mid mark or warm-up can touch the evidence that selects,
+gates or sizes a family.
 
 The output (FILE, JSON): {"batch": {...the run's settings, trials, program-years, seconds...},
 "results": [one result per (program, parameters), in DIR's order; a program the safety check
@@ -214,6 +217,8 @@ def run_batch(jobs: Sequence[tuple[str, str, dict]], *, store_root: str, window:
 
     if window == "validation" and (start or end):
         raise ValueError("a validation run is the whole window: no start or end cut")
+    if window != "train":
+        split = 1  # only Train is split (the module docstring): no mid mark ever counts as evidence
     began = time.time()
     gate = mint_gate_capability(store_root, gate_reason) if gate_reason else None
     store = Store(store_root, gate=gate)

@@ -73,24 +73,28 @@ class Calibration(unittest.TestCase):
         # meets 10:00 and 10:10 (at or above the mid): 3 hits, all before 10:30. Every hit and minute is at 0 DTE and
         # at the money, so the pooled, DTE and moneyness levels all estimate 3/778; the time cells shrink toward it.
         pooled = 3 / 778
-        self.assertEqual(h["q2|s|d0|k0|t0"], shrunk(3, 118, pooled))
-        self.assertEqual(h["q2|s|d0|k0|t1"], shrunk(0, 540, pooled))    # no print after 10:30: small, never zero
-        self.assertEqual(h["q2|s|d0|k2|t0"], round(pooled, 6))          # no exposure at all there: its parent's rate
-        # 1-2, 3-7 and 8+ days were never sampled here: they take the nearest sampled horizon's cells, and say so.
-        self.assertEqual(h["q2|s|d3|k0|t0"], h["q2|s|d0|k0|t0"])
-        self.assertEqual(table["meta"]["borrowed_dte"], [1, 2, 3])
+        self.assertEqual(h["SPY|q2|s|d0|k0|t0"], shrunk(3, 118, pooled))
+        self.assertEqual(h["SPY|q2|s|d0|k0|t1"], shrunk(0, 540, pooled))    # no print after 10:30: small, never zero
+        self.assertEqual(h["SPY|q2|s|d0|k2|t0"], round(pooled, 6))          # no exposure at all there: its parent's rate
+        # 1-2, 3-7 and 8+ days were never sampled here: no cells at all (natural fills only), never a neighbour's.
+        self.assertEqual([k for k in h if "|d0|" not in k], [])
+        self.assertEqual(F.FillModel.from_json(table).p("SPY", 0.0, [(10, 0.0)], 600), 0.0)
+        # Every cell is SPY's: another root reads zero.
+        self.assertEqual(F.FillModel.from_json(table).p("QQQ", 0.0, [(0, 0.0)], 600), 0.0)
         # Level 0.75 (q5): a buy at mid + 0.75 half-spreads meets the 10:00 print; a sell at mid - 0.75 meets both.
-        self.assertEqual(h["q5|s|d0|k0|t0"], shrunk(3, 118, pooled))
+        self.assertEqual(h["SPY|q5|s|d0|k0|t0"], shrunk(3, 118, pooled))
         # Level -0.25 (q1): a buy below the mid meets nothing; a sell above it (mid + 0.25) meets the 10:10 print.
-        self.assertEqual(h["q1|s|d0|k0|t0"], shrunk(1, 118, 1 / 778))
+        self.assertEqual(h["SPY|q1|s|d0|k0|t0"], shrunk(1, 118, 1 / 778))
         # The touch (q0): the 10:10 print at the ask is 1 contract against 100 displayed: no fill, so no touch cells.
-        self.assertFalse([k for k in h if k.startswith("q0|")])
+        self.assertFalse([k for k in h if k.startswith("SPY|q0|")])
         # Multi-leg: the 10:20 complex print at the mid (buy and sell side: 2 hits), from complex prints directly.
-        self.assertEqual(h["q2|m|d0|k0|t0"], shrunk(2, 118, 2 / 778))
+        self.assertEqual(h["SPY|q2|m|d0|k0|t0"], shrunk(2, 118, 2 / 778))
         # Monotone in the level: a limit nearer the natural never fills less often.
-        for cell in ("d0|k0|t0", "d0|k0|t1", "d1|k3|t2"):
-            rates = [h.get(f"q{q}|s|{cell}", 0.0) for q in range(6)]
+        for cell in ("d0|k0|t0", "d0|k0|t1", "d0|k3|t2"):
+            rates = [h.get(f"SPY|q{q}|s|{cell}", 0.0) for q in range(6)]
             self.assertEqual(rates, sorted(rates), cell)
+        # Size: every hit here traded one contract beyond the (empty, inside the spread) queue.
+        self.assertEqual(table["size"]["SPY|q2|s|d0"], 1)
         meta = table["meta"]["fitted_on"]
         self.assertEqual((meta["prints"], meta["multi"], meta["stock_option"]), (3, 1, 1))  # the 138 print is a stock-option package
         self.assertEqual(table["meta"]["conditions"], {18: 2, 130: 1, 138: 1})
@@ -105,14 +109,21 @@ class Calibration(unittest.TestCase):
                                          (610, 1.10, 18, 150), (620, 1.00, 130, 101)]))
         table = CAL.fit(self.store, ["SPY"], days=[D1], prior=P)
         # Single-leg touch hits: 10:05 (a resting buy) and 10:10 (a resting sell); 10:00 is absorbed by the queue.
-        self.assertEqual(table["hazard"]["q0|s|d0|k0|t0"], shrunk(2, 118, 2 / 778))
+        self.assertEqual(table["hazard"]["SPY|q0|s|d0|k0|t0"], shrunk(2, 118, 2 / 778))
         # Multi-leg: one complex contract-minute through the queue.
-        self.assertEqual(table["hazard"]["q0|m|d0|k0|t0"], shrunk(1, 118, 1 / 778))
+        self.assertEqual(table["hazard"]["SPY|q0|m|d0|k0|t0"], shrunk(1, 118, 1 / 778))
+        # Size beyond the queue: the single-leg touch fills found 1 (10:05) and 50 (10:10) contracts: the lower median, 1.
+        self.assertEqual((table["size"]["SPY|q0|s|d0"], table["size"]["SPY|q0|m|d0"]), (1, 1))
+        # A quarter-spread short of the mid (q1) there is no queue ahead: the buys found 100 (10:00) and 101 (10:05)
+        # contracts, the sell 150 (10:10): the lower median, 101.
+        self.assertEqual(table["size"]["SPY|q1|s|d0"], 101)
+        self.assertEqual((CAL.lower_median(numpy.bincount([1, 50, 70])), CAL.lower_median(numpy.zeros(3, int))), (50, 1))
         # The touch is never credited more than a level inside the spread (q1, a quarter-spread short of the mid).
-        self.assertLessEqual(table["hazard"]["q0|s|d0|k0|t0"], table["hazard"]["q1|s|d0|k0|t0"])
+        self.assertLessEqual(table["hazard"]["SPY|q0|s|d0|k0|t0"], table["hazard"]["SPY|q1|s|d0|k0|t0"])
         # And the engine reads the fitted cell for a one-tick "mid" limit (q = -1).
         model = F.FillModel.from_json(table)
-        self.assertEqual(model.p(-1.0, 1, 0, 0.0, 600), table["hazard"]["q0|s|d0|k0|t0"])
+        self.assertEqual(model.p("SPY", -1.0, [(0, 0.0)], 600), table["hazard"]["SPY|q0|s|d0|k0|t0"])
+        self.assertEqual(model.sizes("SPY", -1.0, [(0, 0.0)], [1]), [1])
 
     def test_train_only(self):
         with self.assertRaises(S.StoreRefused):
@@ -129,7 +140,7 @@ class Calibration(unittest.TestCase):
         table = CAL.fit(self.store, ["SPY"], days=[D1], prior=P)
         # Same three single-leg side hits, twice the population (the put at the same strike is in the sample's
         # band and was quoted all day). No put print is needed.
-        self.assertEqual(table["hazard"]["q2|s|d0|k0|t0"], shrunk(3, 236, 3 / 1556))
+        self.assertEqual(table["hazard"]["SPY|q2|s|d0|k0|t0"], shrunk(3, 236, 3 / 1556))
 
     def test_exposure_is_the_trade_samples_band_only(self):
         # Calls from 398 to 402 and 410 around 400.00, and a sample of one strike each side of the money: the
@@ -150,19 +161,30 @@ class Calibration(unittest.TestCase):
         # All four are within 0.5% of the money (402/400 is just under 1.005 in floating point). The 10:00 and 10:10
         # prints are 3 q2 hits before 10:30 and the 11:40 one 2 more: 5 of 4 x 778 side-minutes in all.
         pooled = 5 / (4 * 778)
-        self.assertEqual(table["hazard"]["q2|s|d0|k0|t0"], shrunk(3, 4 * 118, pooled))
-        self.assertEqual(table["hazard"]["q2|s|d0|k0|t1"], shrunk(2, 4 * 540, pooled))
+        self.assertEqual(table["hazard"]["SPY|q2|s|d0|k0|t0"], shrunk(3, 4 * 118, pooled))
+        self.assertEqual(table["hazard"]["SPY|q2|s|d0|k0|t1"], shrunk(2, 4 * 540, pooled))
 
     def test_shrinkage_by_hand(self):
-        # Two cells of DTE bucket 0 at the money: 100 side-minutes with 10 hits before 10:30, 900 with none later.
-        exposure = {CAL._cells(numpy.array([0]), numpy.array([0.0]), numpy.array([m]))[0]: n for m, n in ((600, 100.0), (700, 900.0))}
-        hits = {CAL._cells(numpy.array([0]), numpy.array([0.0]), numpy.array([600]))[0]: 10.0}
-        rates, borrowed = CAL.shrink(exposure, hits, 100.0)
-        self.assertAlmostEqual(rates[0, 0, 0], (10 + 100 * 0.01) / 200)     # pooled 10/1000; own 10/100
-        self.assertAlmostEqual(rates[0, 0, 1], (0 + 100 * 0.01) / 1000)
-        self.assertAlmostEqual(rates[0, 0, 2], 0.01)                          # no data: the parent, not zero
-        self.assertEqual((borrowed, rates[3, 0, 0]), ([1, 2, 3], rates[0, 0, 0]))
-        self.assertEqual(CAL.shrink({}, {}, 100.0), ({}, []))                 # no exposure at all: nothing to say
+        # SPY: two cells of DTE bucket 0 at the money, 100 side-minutes with 10 hits before 10:30 and 900 with none
+        # later. QQQ: 1000 side-minutes before 10:30 with no hit. Every root pooled: 10 of 2000.
+        code = lambda m: int(CAL._cells(numpy.array([0]), numpy.array([0.0]), numpy.array([m]))[0])  # noqa: E731
+        exposure = {("SPY", code(600)): 100.0, ("SPY", code(700)): 900.0, ("QQQ", code(600)): 1000.0}
+        hits = {("SPY", code(600)): 10.0}
+        rates = CAL.shrink(exposure, hits, 100.0)
+        spy = (10 + 100 * 0.005) / 1100                                        # SPY's 10/1000, toward the pool's 0.005
+        spy_d = (10 + 100 * spy) / 1100                                        # (SPY, d0): the same data, toward SPY's
+        spy_dk = (10 + 100 * spy_d) / 1100                                     # (SPY, d0, k0): again
+        self.assertAlmostEqual(rates["SPY", 0, 0, 0], (10 + 100 * spy_dk) / 200)
+        self.assertAlmostEqual(rates["SPY", 0, 0, 1], (0 + 100 * spy_dk) / 1000)
+        self.assertAlmostEqual(rates["SPY", 0, 0, 2], spy_dk)                  # no data there: the parent, not zero
+        self.assertAlmostEqual(rates["SPY", 0, 1, 0], spy_d)                   # nor at another moneyness
+        qqq = (0 + 100 * 0.005) / 1100                                         # QQQ never filled: pulled up by the pool only
+        qqq_dk = (0 + 100 * ((0 + 100 * qqq) / 1100)) / 1100
+        self.assertAlmostEqual(rates["QQQ", 0, 0, 0], (0 + 100 * qqq_dk) / 1100)
+        self.assertLess(rates["QQQ", 0, 0, 0], 0.0005)
+        self.assertNotIn(("SPY", 1, 0, 0), rates)                              # a DTE bucket never sampled: no cells
+        self.assertNotIn(("IWM", 0, 0, 0), rates)                              # a root never sampled: no cells
+        self.assertEqual(CAL.shrink({}, {}, 100.0), {})                        # no exposure at all: nothing to say
 
     def test_hits_need_the_corresponding_quote_and_a_known_spot(self):
         chain = self.store.chain("SPY", D1)
@@ -172,7 +194,7 @@ class Calibration(unittest.TestCase):
             table = CAL.fit(self.store, ["SPY"], days=[D1], prior=P)
         self.assertEqual(table["meta"]["fitted_on"]["single"], 0)
         self.assertEqual([k for k in table["hazard"] if "|s|" in k], [])   # no single-leg print survived
-        self.assertIn("q2|m|d0|k0|t0", table["hazard"])                     # the 10:20 complex print did
+        self.assertIn("SPY|q2|m|d0|k0|t0", table["hazard"])                     # the 10:20 complex print did
 
     def test_the_cli_writes_where_it_is_told_and_the_engine_uses_it(self):
         out = self.dir / "cal" / "fill_model.json"

@@ -72,7 +72,7 @@ DEFAULTS: dict[str, Any] = {
         "workers": 8,
         "split": 8,                      # the inner loop's segments (latency: one program, 3 years, 8 cores)
         "train_split": 8,
-        "validation_split": 4,
+        "validation_split": 1,          # Validation, holdout and forward run whole (the Gym refuses to split them)
         "run_timeout_seconds": 900,
         "idle_sleep_seconds": 600,      # a box idle this long sleeps (sleeping boxes cost nothing)
         "box_usd_hour": 0.20,           # a busy l box (Sail bills measured use; $0.12-0.20/h measured Sept 26)

@@ -106,8 +106,7 @@ class HonestFills(unittest.TestCase):
             contracts.append({"expiration": D1, "strike": k, "right": "C",
                               "quotes": {571: (2.00 - 0.6 * (k - 400), 2.10 - 0.6 * (k - 400))}})
         store = self.make(contracts)
-        model = F.FillModel(hazard={F.cell(q, 2, 0, m, t): 0.05 for q in (0.1,) for m in (0.0, 0.01, 0.02, 0.04)
-                                    for t in (600, 700, 950)}, source="test")
+        model = synth.uniform_model(0.05, ("SPY",), levels=(2,), size=10)
         a = self.run_one(store, prog(limit="mid1"), fill_model=model)
         edited = OPENER.replace("STATE = {", "# a comment the researcher added\nSTATE = {").replace(
             '"close_at": 0}', '"close_at": 0, "unused": 3}')
@@ -125,7 +124,7 @@ class HonestFills(unittest.TestCase):
         # SPY 400C quoted 1.00 x 1.01: the mid 1.005 is off the penny, so "mid" is the bid (q = -1, the touch).
         store = self.make([{"expiration": D1, "strike": 400, "right": "C", "quotes": {571: (1.00, 1.01)}}])
         mid = prog(name="touch", code=SINGLE, limit="mid", tif=60)
-        cells = lambda q: {F.cell(q, 1, 0, 0.0, t): 0.2 for t in (600, 700, 950)}  # noqa: E731
+        cells = lambda q: {F.cell("SPY", q, 1, 0, 0.0, t): 0.2 for t in (600, 700, 950)}  # noqa: E731
         # A table without the touch bucket (fitted before it existed) never fills it: no neighbour's rate.
         old = self.run_one(store, mid, fill_model=F.FillModel(hazard={**cells(-0.1), **cells(0.1)}, source="old"))
         self.assertEqual((old["summary"]["trades"], old["fills"]["expired"]), (0, 1))
@@ -138,13 +137,15 @@ class HonestFills(unittest.TestCase):
         self.assertEqual(again["trades"][0]["filled_minute"], t["filled_minute"])
 
     def test_the_touch_cell_and_behind_it(self):
-        model = F.FillModel(hazard={F.cell(-1.0, 1, 0, 0.0, 700): 0.3}, source="t")
+        model = F.FillModel(hazard={F.cell("SPY", -1.0, 1, 0, 0.0, 700): 0.3}, source="t")
         self.assertEqual(F.q_bucket(-1.0), 0)
         self.assertEqual(F.q_bucket(-0.3), 0)
-        self.assertEqual(model.p(-1.0 - 1e-9, 1, 0, 0.0, 700), 0.3)   # float noise at the touch is the touch
-        self.assertEqual(model.p(-0.5, 1, 0, 0.0, 700), 0.3)          # inside the spread: the touch's (lower) rate
-        self.assertEqual(model.p(-1.2, 1, 0, 0.0, 700), 0.0)          # behind the touch: only the market fills it
-        self.assertEqual(model.p(-1.0, 2, 0, 0.0, 700), 0.0)          # a package's touch cell is its own
+        atm = [(0, 0.0)]
+        self.assertEqual(model.p("SPY", -1.0 - 1e-9, atm, 700), 0.3)   # float noise at the touch is the touch
+        self.assertEqual(model.p("SPY", -0.5, atm, 700), 0.3)          # inside the spread: the touch's (lower) rate
+        self.assertEqual(model.p("SPY", -1.2, atm, 700), 0.0)          # behind the touch: only the market fills it
+        self.assertEqual(model.p("SPY", -1.0, atm * 2, 700), 0.0)      # a package needs its own (complex) cells
+        self.assertEqual(model.p("QQQ", -1.0, atm, 700), 0.0)          # another root's cells are not this root's
 
     def test_a_passive_fill_still_waits_for_an_unfavourable_next_minute(self):
         # 1.00 x 1.01 on even minutes, 1.01 x 1.02 on odd ones. A buy resting at 1.00 is at the touch only on an
@@ -153,12 +154,68 @@ class HonestFills(unittest.TestCase):
         quotes = {m: (1.00, 1.01) if m % 2 == 0 else (1.01, 1.02) for m in range(571, 700)}
         store = self.make([{"expiration": D1, "strike": 400, "right": "C", "quotes": quotes}])
         self.addCleanup(shutil.rmtree, self.dir, True)
-        model = F.FillModel(hazard={F.cell(-1.0, 1, 0, 0.0, t): 1.0 for t in (600, 700)}, source="certain")
+        model = F.FillModel(hazard={F.cell("SPY", -1.0, 1, 0, 0.0, t): 1.0 for t in (600, 700)}, source="certain")
         r = self.run_one(store, prog(name="rising", code=SINGLE, limit="mid", tif=60), fill_model=model)
         self.assertEqual((r["summary"]["trades"], r["fills"]["expired"]), (0, 1))
         flat = self.make([{"expiration": D1, "strike": 400, "right": "C", "quotes": {571: (1.00, 1.01)}}])
         [t] = self.run_one(flat, prog(name="flat", code=SINGLE, limit="mid", tif=60), fill_model=model)["trades"]
         self.assertEqual((t["entry"], t["filled_minute"]), (1.00, 601))   # the same cell, a flat next minute: filled
+
+    def test_a_package_takes_its_lowest_leg_each_at_its_own_cell_capped_by_the_single_leg_rate(self):
+        near, far = (0, 0.001), (0, 0.02)                     # k0 and k2 (1.5-3% from the money)
+        hazard = {F.cell("SPY", 0.1, 2, 0, 0.001, 700): 0.30, F.cell("SPY", 0.1, 1, 0, 0.001, 700): 0.20,
+                  F.cell("SPY", 0.1, 2, 0, 0.02, 700): 0.05, F.cell("SPY", 0.1, 1, 0, 0.02, 700): 0.40}
+        model = F.FillModel(hazard=hazard, source="t")
+        self.assertEqual(model.p("SPY", 0.1, [near, far], 700), 0.05)   # the far leg's complex rate is the lowest
+        self.assertEqual(model.p("SPY", 0.1, [near, near], 700), 0.20)  # 0.30 complex capped by the leg's 0.20 single
+        self.assertEqual(model.p("SPY", 0.1, [near], 700), 0.20)        # one leg: its single-leg cell
+        # A leg 8 or more days out is never modelled, whatever the table holds: natural fills only.
+        hazard[F.cell("SPY", 0.1, 2, 9, 0.001, 700)] = hazard[F.cell("SPY", 0.1, 1, 9, 0.001, 700)] = 0.5
+        self.assertEqual(F.FillModel(hazard=hazard).p("SPY", 0.1, [near, (9, 0.001)], 700), 0.0)
+        self.assertEqual(model.p("SPY", 0.1, [near, (0, float("nan"))], 700), 0.0)  # moneyness unknown: none
+
+    def test_a_calendar_with_a_back_leg_past_seven_days_fills_only_at_the_natural(self):
+        store = self.make([
+            {"expiration": D1, "strike": 400, "right": "C", "quotes": {571: (1.00, 1.10)}},
+            {"expiration": D1 + dt.timedelta(days=9), "strike": 400, "right": "C", "quotes": {571: (3.00, 3.10)}}])
+        code = SINGLE.replace('"open": "long_call", "legs": [{"side": "long", "right": "C", "dte": 0, "strike": p["low"]}]',
+                              '"open": "calendar", "legs": [{"side": "short", "right": "C", "dte": 0, "strike": p["low"]}, '
+                              '{"side": "long", "right": "C", "dte": 9, "strike": p["low"]}]').replace('"dte": [0, 3]', '"dte": [0, 9]')
+        r = self.run_one(store, prog(name="cal", code=code, limit="mid", tif=60), fill_model=synth.uniform_model(1.0, ("SPY",)))
+        self.assertEqual((r["fills"]["opens"], r["summary"]["trades"], r["fills"]["expired"]), (1, 0, 1))
+
+    def test_a_passive_fill_takes_the_modelled_size_and_orders_share_a_minutes_liquidity(self):
+        store = self.make([{"expiration": D1, "strike": 400, "right": "C", "quotes": {571: (1.00, 1.01)}}])
+        # Two contracts beyond the queue at the touch a minute: 5 lots fill 2, 2, 1 at 601, 602, 603.
+        model = synth.uniform_model(1.0, ("SPY",), levels=(0,), classes=("s",), size=2)
+        r = self.run_one(store, prog(name="big", code=SINGLE, limit="mid", tif=60, qty=5), fill_model=model)
+        [t] = r["trades"]
+        self.assertEqual((t["qty"], t["entry"], t["filled_minute"]), (5, 1.00, 601))
+        self.assertEqual((r["fills"]["fills"], r["fills"]["partial_fills"]), (3 + 1, 1))   # and the window-end close
+        # Unknown size: one structure a minute.
+        bare = F.FillModel(hazard=model.hazard, source="no sizes")
+        r = self.run_one(store, prog(name="bare", code=SINGLE, limit="mid", tif=60, qty=3), fill_model=bare)
+        self.assertEqual(r["fills"]["fills"], 3 + 1)
+        # Two orders on the same contract in the same minute share its 3 contracts: 2 + 1 at 601, the last at 602.
+        both = SINGLE.replace('return [{"open": "long_call"', 'return [{"open": "long_call", "tag": "b"').replace(
+            '"tif": p["tif"] or "day"}]', '"tif": p["tif"] or "day"}] * 2')
+        model3 = synth.uniform_model(1.0, ("SPY",), levels=(0,), classes=("s",), size=3)
+        r = self.run_one(store, prog(name="two", code=both, limit="mid", tif=60, qty=2), fill_model=model3)
+        self.assertEqual(sorted(t["filled_minute"] for t in r["trades"]), [601, 601])
+        self.assertEqual(r["fills"]["fills"], 3 + 2)
+
+    def test_stress_widens_what_a_fill_costs_never_which_limits_can_fill(self):
+        store = self.make([{"expiration": D1, "strike": 400, "right": "C", "quotes": {571: (1.00, 1.10)}}])
+        model = synth.uniform_model(1.0, ("SPY",), levels=(0,), classes=("s",), size=10)
+        behind = SINGLE.replace('limit = p["limit"] if p["limit"] in ("natural", "mid") else {"mid": 1}',
+                                'limit = {"price": 0.99} if p["limit"] == "behind" else {"price": 1.00}')
+        # 0.99 is behind the 1.00 bid (q = -1.2 on the real quotes; it would be -0.8 against the 1.5x-stressed spread).
+        for stress in (1.0, 1.5):
+            r = self.run_one(store, prog(name="behind", code=behind, limit="behind", tif=60), fill_model=model, stress=stress)
+            self.assertEqual(r["summary"]["trades"], 0, stress)
+        # At the touch it fills, and under stress pays the extra half-spread: 1.00 + 0.5 x 0.05.
+        r = self.run_one(store, prog(name="touch", code=behind, limit="touch", tif=60), fill_model=model, stress=1.5)
+        self.assertEqual(r["trades"][0]["entry"], 1.025)
 
     def test_draws_are_keyed_and_uniform(self):
         u = F.draw([11, 22], 19422, 601, "buy")
@@ -168,8 +225,8 @@ class HonestFills(unittest.TestCase):
         xs = [F.draw([1], 1, m, "buy") for m in range(2000)]
         self.assertTrue(all(0.0 <= x < 1.0 for x in xs))
         self.assertAlmostEqual(sum(xs) / len(xs), 0.5, delta=0.03)
-        self.assertEqual(F.FillModel().p(0.2, 2, 0, 0.0, 700), 0.0)  # the default: natural only
-        self.assertEqual(F.FillModel().p(1.0, 2, 0, 0.0, 700), 1.0)
+        self.assertEqual(F.FillModel().p("SPY", 0.2, [(0, 0.0)] * 2, 700), 0.0)  # the default: natural only
+        self.assertEqual(F.FillModel().p("SPY", 1.0, [(0, 0.0)] * 2, 700), 1.0)
 
     def test_stress_widens_every_half_spread(self):
         store = self.make([

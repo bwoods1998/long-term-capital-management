@@ -353,6 +353,8 @@ class Account:
         self.orders_today = 0
         self.session = 0
         self.warming = False          # replaying warm-up days: decide runs, its intents are dropped
+        self.liquidity_at: tuple[int, int] | None = None   # the minute `liquidity_used` counts
+        self.liquidity_used: dict[int, int] = {}           # contract key -> contracts passive fills took this minute
 
     # ------------------------------------------------------------------ helpers
     def _id(self) -> int:
@@ -444,31 +446,43 @@ class Account:
             marketable = natural <= order.limit + 1e-9 if opening else natural >= order.limit - 1e-9
             if not work.seen:
                 work.seen, work.aggressive = True, marketable
+            room = None
             if marketable:
                 # A taking order (and its remainder after a size-capped fill) takes the natural, the
                 # better of it and the limit; a resting order the market later comes through fills at
                 # its own limit.
                 price = natural if work.aggressive else order.limit
             else:
-                span = natural - mid
+                # q is measured against the UNSTRESSED quotes: stress changes what a fill costs, never
+                # which limits can fill (a limit behind the touch stays behind it).
+                plain = natural if stress == 1.0 else L.natural_value(snap, legs, order.action)[0]
+                span = plain - mid
                 q = (order.limit - mid) / span if abs(span) > 1e-12 else 1.0
-                strikes = [leg.strike for leg in legs]
-                money = (sum(strikes) / len(strikes)) / snap.spot - 1.0 if np.isfinite(snap.spot) else 0.0
-                dte = min(int(snap.dte[leg.idx]) for leg in legs)
-                p = self.cfg.fill_model.p(q, len(legs), dte, money, snap.minute)
+                shape = [(int(snap.dte[leg.idx]), leg.strike / snap.spot - 1.0 if np.isfinite(snap.spot) else math.nan)
+                         for leg in legs]
+                model = self.cfg.fill_model
+                p = model.p(order.root, q, shape, snap.minute)
                 if p <= 0.0 or not self._adverse(day, mi, order.root, legs, mid, opening):
                     return
                 if F.draw([leg.key for leg in legs], day.ordinal, snap.minute, "buy" if opening else "sell") >= p:
                     return
+                # The passive liquidity of this minute: what Train's fills at this level found beyond the
+                # queue, per contract, shared by every order of this program on that contract.
+                if self.liquidity_at != (day.ordinal, mi):
+                    self.liquidity_at, self.liquidity_used = (day.ordinal, mi), {}
+                sizes = model.sizes(order.root, q, shape, [leg.ratio for leg in legs])
+                room = min((size - self.liquidity_used.get(leg.key, 0)) // leg.ratio for leg, size in zip(legs, sizes))
                 price = order.limit
                 if stress != 1.0:
                     # Stress charges a passive fill too: (stress - 1) x the structure's half-spread.
-                    plain, _ = L.natural_value(snap, legs, order.action)
                     extra = (stress - 1.0) * abs(plain - mid)
                     price = price + extra if opening else price - extra
-            qty = min(work.remaining, cap)
+            qty = min(work.remaining, cap) if room is None else min(work.remaining, cap, room)
             if qty <= 0:
                 return
+            if room is not None:
+                for leg in legs:
+                    self.liquidity_used[leg.key] = self.liquidity_used.get(leg.key, 0) + qty * leg.ratio
         leg_prices = []
         for leg in legs:
             buying = (leg.side > 0) == opening

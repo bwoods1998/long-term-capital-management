@@ -92,7 +92,7 @@ def decide(ctx):
         store = self.store("s2", [D1], lambda w: synth.flat_day(w, "SPY", D1, [
             {"expiration": D2, "strike": 400, "right": "C", "quotes": {571: (2.00, 2.20)}},
             {"expiration": D2, "strike": 401, "right": "C", "quotes": {571: (1.40, 1.60)}}], prices=400.5))
-        model = F.FillModel(hazard={f"q{q}|m|d{d}|k{k}|t{t}": 0.3 for q in range(6) for d in range(4) for k in range(4) for t in range(3)})
+        model = synth.uniform_model(0.3, ("SPY",))
         pnl = [self.run_one(store, self.PASSIVE, fill_model=model, stress=s)["summary"]["pnl"] for s in (1.0, 1.5, 3.0)]
         self.assertGreater(pnl[0], pnl[1])
         self.assertGreater(pnl[1], pnl[2])
@@ -100,7 +100,7 @@ def decide(ctx):
     def test_2_no_passive_fill_into_a_favourable_move(self):
         rising = {m: (2.00 + 0.01 * (m - 571), 2.20 + 0.01 * (m - 571)) for m in range(571, 961)}
         falling = {m: (2.00 - 0.001 * (m - 571), 2.20 - 0.001 * (m - 571)) for m in range(571, 961)}
-        model = F.FillModel(hazard={f"q{q}|m|d{d}|k{k}|t{t}": 1.0 for q in range(6) for d in range(4) for k in range(4) for t in range(3)})
+        model = synth.uniform_model(1.0, ("SPY",))
         opener = self.PASSIVE.replace("ctx.minute >= 700", "ctx.minute >= 10000")
         for name, quotes, fills in (("up", rising, 0), ("down", falling, 1)):
             store = self.store(name, [D1], lambda w, q=quotes: synth.flat_day(w, "SPY", D1, [

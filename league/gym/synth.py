@@ -114,6 +114,18 @@ class Writer:
         _write(table, self.root / "manifest.parquet")
 
 
+def uniform_model(rate: float, roots: Sequence[str] = ("SPY",), *, levels: Iterable[int] = range(6),
+                  classes: Sequence[str] = ("s", "m"), size: int | None = None):
+    """A fill model with the same hazard in every modelled cell of `roots` (tests only; `size` contracts
+    a level where given, else the engine's one-structure default)."""
+    from .fills import F_CELLS, FillModel
+
+    hazard = {f"{root}|q{q}|{cls}|{rest}": float(rate) for root in roots for q in levels for cls in classes for rest in F_CELLS}
+    sizes = {} if size is None else {f"{root}|q{q}|{cls}|d{d}": int(size) for root in roots for q in levels for cls in classes
+                                     for d in range(3)}
+    return FillModel(hazard=hazard, source=f"uniform {rate}", size=sizes)
+
+
 def weekdays(start: dt.date, count: int, skip: Iterable[dt.date] = ()) -> list[dt.date]:
     """`count` weekdays from `start` (skipping `skip`)."""
     out, day, skip = [], start, set(skip)
