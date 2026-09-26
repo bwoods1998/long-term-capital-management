@@ -53,6 +53,9 @@ DEFAULTS: dict[str, Any] = {
         # The swarm's model spend an hour (Sail models + OpenAI over the last hour): a researcher starts no cycle above it.
         # Measured Sept 26: 22 researchers at ~44 s cycles spent ~$5/h before the cache fixes; the plan's figure is $1-2/h.
         "usd_per_hour": 4.0,
+        # Optional independently funded Sail pace. When set, this replaces the combined hourly check above;
+        # OpenAI remains governed by its funded gateway month and the swarm's own OpenAI burst cap/holds.
+        "sail_usd_per_hour": None,
         "family_usd_day": 3.0,          # each family's daily model budget (the Provider's desk cap): a fuse
         "floor_usd_day": 150.0,         # every model call of the swarm together, a day (the Provider's floor cap): a fuse
         "idle_seconds": 5,              # between a family's cycles

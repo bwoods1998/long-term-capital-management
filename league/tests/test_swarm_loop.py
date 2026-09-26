@@ -175,6 +175,63 @@ class Process(LoopCase):
         worker.join(10)
         self.assertEqual([e for e in self.store.events_after(0) if e["kind"] == "swarm.cycle"], [])
 
+    def test_a_retained_openai_hold_does_not_stall_the_separately_funded_sail_pace(self):
+        self.settings["researcher"].update(usd_per_hour=2.25, sail_usd_per_hour=2.25)
+        self.store.add_spend("openai", 2.0, detail={"role": "architect", "hold": "synthetic-unresolved-request"})
+        self.store.add_spend("sail_model", 1.02)
+        sw = self.swarm()
+        clock = [time.time()]
+        sw.clock = lambda: clock[0]
+        self.assertFalse(sw.over_pace())
+        pace = sw.status()["researcher_pace"]
+        self.assertEqual((pace["scope"], pace["limit_usd_per_hour"], pace["spent_last_hour_usd"]),
+                         ("sail_model", 2.25, 1.02))
+        self.assertIsNone(pace["reason"])
+        self.assertEqual(self.store.spent(["openai"]), 2.0, "the unresolved hold still counts against OpenAI's own cap")
+        self.store.add_spend("sail_model", 1.23)
+        clock[0] += 11
+        self.assertTrue(sw.over_pace(), "Sail still stops at its funded rate")
+        self.assertIn("Sail models spent", sw.status()["researcher_pace"]["reason"])
+
+    def test_absent_and_null_sail_limit_keep_the_legacy_combined_pace(self):
+        self.settings["researcher"]["usd_per_hour"] = 2.25
+        self.store.add_spend("sail_model", 1.02)
+        self.store.add_spend("openai", 2.0, detail={"hold": "synthetic-unresolved-request"})
+        sw = self.swarm()
+        for explicit_null in (False, True):
+            with self.subTest(explicit_null=explicit_null):
+                if explicit_null:
+                    self.settings["researcher"]["sail_usd_per_hour"] = None
+                else:
+                    self.settings["researcher"].pop("sail_usd_per_hour", None)
+                self.assertTrue(sw.over_pace())
+                pace = sw.status()["researcher_pace"]
+                self.assertEqual((pace["scope"], pace["spent_last_hour_usd"]), ("all_models", 3.02))
+                self.assertIn("Sail and OpenAI", pace["reason"])
+
+    def test_changing_pace_scope_takes_effect_even_during_the_spend_cache(self):
+        self.settings["researcher"]["usd_per_hour"] = 1.0
+        self.store.add_spend("sail_model", 0.4)
+        self.store.add_spend("openai", 1.0)
+        sw = self.swarm()
+        self.assertTrue(sw.over_pace())
+        self.settings["researcher"]["sail_usd_per_hour"] = 1.0
+        self.assertFalse(sw.over_pace())
+        self.settings["researcher"]["sail_usd_per_hour"] = None
+        self.assertTrue(sw.over_pace())
+
+    def test_invalid_nonfinite_and_negative_pace_limits_pause_research_and_explain_why(self):
+        sw = self.swarm()
+        for key in ("sail_usd_per_hour", "usd_per_hour"):
+            for limit in ("bad", float("nan"), float("inf"), -1, True):
+                with self.subTest(key=key, limit=limit):
+                    self.settings["researcher"]["sail_usd_per_hour"] = None
+                    self.settings["researcher"][key] = limit
+                    self.assertTrue(sw.over_pace())
+                    pace = sw.status()["researcher_pace"]
+                    self.assertIsNone(pace["limit_usd_per_hour"])
+                    self.assertIn(f"invalid researcher.{key}", pace["reason"])
+
     def test_the_architect_grows_the_population_only_under_the_pace_but_always_refills_it(self):
         sw = self.swarm()
         sw.seed()

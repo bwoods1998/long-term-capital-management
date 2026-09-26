@@ -73,3 +73,7 @@ The daemon holds `nightly.lock` for its lifetime and refreshes `nightly.heartbea
 Before admission opens, inspect cash/equity and funded caps, grant digest/capital, live/market data freshness, model identity, empty or fully reconciled inventory, order reservations and the current session's paper proof. A Candidate without complete proof stays in shadow. A deadline never replaces a failed gate or routing check.
 
 After close, reconcile every fill and remaining position, preserve unknowns, report whole-book real P&L after fees and all known input costs separately, and record promotions, demotions, holds and failures. Monday's result decides what actually happened; the draft cleanup can be reviewed for merge afterward.
+
+## Research pacing
+
+In `swarm.json`, `researcher.usd_per_hour` keeps the combined Sail-model and OpenAI trailing-hour pace. The optional `researcher.sail_usd_per_hour` sets an independently funded Sail pace; absent or null keeps the combined behavior. OpenAI holds still count against the separate burst cap and funded gateway month. Invalid, nonfinite or negative limits pause research. `swarm.heartbeat` reports `status.researcher_pace` with scope, limit, spend and reason, so a paced loop can be distinguished from a publication delay.
