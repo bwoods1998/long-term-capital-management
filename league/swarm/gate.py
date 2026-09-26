@@ -99,8 +99,9 @@ class Gate:
 
     # ------------------------------------------------------------------ the audit
     def audit(self, fam: Mapping[str, Any], version: Mapping[str, Any], *, attempt: int = 0) -> dict[str, Any]:
-        """The gate's audit (plan: GPT-6 Astra, high, standard) through the gateway when the OpenAI month has room; else a
-        SECOND, DIFFERENT model on Sail (`audit_sail_profile`, Kimi-K3 balanced: the reviewer is DeepSeek-V4-Pro), never a
+        """The gate's audit: Claude Opus 5.5 at high effort through the gateway while its funded total has room (the
+        swarm sprint, Sept 26, 2026); else GPT-6 Astra (high, standard) when the OpenAI month has room; else a SECOND,
+        DIFFERENT model on Sail (`audit_sail_profile`, Kimi-K3 balanced: the reviewer is DeepSeek-V4-Pro), never a
         pass-through."""
         model = self.cfg.get("audit_openai_model", "gpt-6-astra")
         need = float(self.cfg.get("audit_need_usd", 1.0))
@@ -111,7 +112,7 @@ class Gate:
                                  key=f"swarm:{fam['id']}:audit:{version['n']}:{attempt}", openai_model=model if use_openai else None,
                                  sail_profile=str(self.cfg.get("audit_sail_profile", "k3_balanced")),
                                  max_output=int(self.cfg.get("review_max_output_tokens", 6000)), effort="high", need_usd=need,
-                                 desk=f"{fam['id']}:review", cap_usd_day=float(self.cfg.get("review_usd_day", 1.0)))
+                                 desk=f"{fam['id']}:review", cap_usd_day=float(self.cfg.get("review_usd_day", 1.0)), claude=True)
         verdict = (answer.get("json") or {}).get("verdict")
         return {"verdict": verdict if verdict in ("pass", "fail") else "unclear",
                 "reasons": [str(r)[:300] for r in ((answer.get("json") or {}).get("reasons") or [])][:6],
@@ -216,12 +217,12 @@ class Gate:
                 if audit["verdict"] != "pass":
                     review = {**review, "verdict": "fail", "stage": "audit",
                               "reasons": audit.get("reasons") or ["the audit could not reach a verdict"]}
-                if review.get("route") != "openai" or audit.get("route") != "openai":
+                if review.get("route") != "openai" or audit.get("route") not in ("claude", "openai"):
                     self.store.event("swarm.status", fam["id"], {
                         "action": "not_the_plans_reviewer", "alert": True, "version": n,
                         "review": review.get("model"), "audit": audit.get("model"),
-                        "text": "a holdout look was reviewed without the plan's OpenAI models (GPT-6 Sol and Astra): "
-                                "the OpenAI month has no room, so Sail models stood in"})
+                        "text": "a holdout look was reviewed without the plan's models (GPT-6 Sol reviews; Claude Opus 5.5 or "
+                                "GPT-6 Astra audits): their budgets had no room, so Sail models stood in"})
                 if not self.store.compare_and_set_state(fam["id"], {"validation_version": n}, review=review):
                     continue
             if not self._review_current(fam["id"], n, image, bundle):

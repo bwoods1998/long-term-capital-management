@@ -226,7 +226,8 @@ class Architect:
             answer = self.router.ask(role="architect", system=SYSTEM, user=self.prompt(), family=None,
                                      key=f"swarm:architect:{int(began)}", openai_model=self.cfg.get("openai_model"),
                                      sail_profile=str(self.cfg.get("sail_profile", "k3_balanced")),
-                                     max_output=int(self.cfg.get("max_output_tokens", 12000)), effort="high", need_usd=2.0)
+                                     max_output=int(self.cfg.get("max_output_tokens", 12000)), effort="high", need_usd=2.0,
+                                     claude=True, rotate=True)  # Claude Opus 5.5 first; every other pass Astra first
         except Exception as exc:  # noqa: BLE001
             out = {"born": [], "error": str(exc)[:300]}
             self.store.event("swarm.architect", None, out)

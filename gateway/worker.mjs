@@ -58,13 +58,24 @@ export class Gate extends DurableObject {
   refund(request) { return this.ctx.storage.transactionSync(() => this.gate.refund(request)); }
   frontierReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.frontierReserve(request)); }
   frontierSettle(request) { return this.ctx.storage.transactionSync(() => this.gate.frontierSettle(request)); }
+  claudeReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.claudeReserve(request)); }
+  claudeSettle(request) { return this.ctx.storage.transactionSync(() => this.gate.claudeSettle(request)); }
+  claudeRequest(id) { return this.gate.claudeRequest(id); }
   typesafeReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.typesafeReserve(request)); }
   typesafeSettle(request) { return this.ctx.storage.transactionSync(() => this.gate.typesafeSettle(request)); }
   pullReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.pullReserve(request)); }
   pullRefund(request) { return this.ctx.storage.transactionSync(() => this.gate.pullRefund(request)); }
   webFetchReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.webFetchReserve(request)); }
 
-  watchdog() { return runWatchdog({ gate: this.gate, env: this.env, mailer: mailerFor(this.env) }); }
+  watchdog() {
+    // Claude holds no settlement replaced within half an hour are released on the cron too, not only at the next call.
+    try {
+      this.ctx.storage.transactionSync(() => this.gate.claudeSweep());
+    } catch {
+      // A sweep that fails is tried again at the next reserve and the next cron; the watchdog runs regardless.
+    }
+    return runWatchdog({ gate: this.gate, env: this.env, mailer: mailerFor(this.env) });
+  }
 }
 
 const gateOf = env => env.GATE.get(env.GATE.idFromName(GATE_OBJECT));
