@@ -293,5 +293,5 @@ agent's intent, never from a test.
 | Kill switch | the gateway | off | every real order-creating call refused | `gateway_admin.py kill` / `unkill` |
 | `MAX_ORDER_USD*`, `MAX_DAY_USD`, `MAX_DAY_ORDERS` | `gateway/wrangler.jsonc` | $75, $4,000, 2,000 | caps by notional; to become caps by maximum loss (live path) | gateway deploy |
 | `OPTION_STRUCTURES_REAL` | `gateway/wrangler.jsonc` | off | structure types real money may open; must equal the constitution's list | gateway deploy with the matching House deploy and a ratify |
-| `FRONTIER_MONTH_USD`, `FRONTIER_MONTH_MAX_USD` | `gateway/wrangler.jsonc` | $607 | the OpenAI month; never above funded money | gateway deploy |
+| `FRONTIER_MONTH_USD`, `FRONTIER_MONTH_MAX_USD`, `FRONTIER_FUNDED_MONTH` | `gateway/wrangler.jsonc` | $707, September 2026 only | the OpenAI month; expires before an unfunded month can renew it | gateway deploy |
 | The money rules | `league/constitution.py` | Deploy G's (money `be1e3ce9`); the options table arrives with the live path | what real money may do | owner deploy, then `--ratify` |

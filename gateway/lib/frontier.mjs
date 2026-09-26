@@ -45,7 +45,16 @@ export function priceTable(env = {}) {
   }
 }
 
-export const monthCapMicro = env => parseUsdMicro(env.FRONTIER_MONTH_USD, 0n);
+/** A funded month expires instead of creating another allowance at the next UTC month boundary. */
+export function monthCapMicro(env = {}, at = Date.now()) {
+  if (Object.hasOwn(env, 'FRONTIER_FUNDED_MONTH')) {
+    const funded = String(env.FRONTIER_FUNDED_MONTH);
+    const time = new Date(at);
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(funded) || !Number.isFinite(time.getTime())
+        || time.toISOString().slice(0, 7) !== funded) return 0n;
+  }
+  return parseUsdMicro(env.FRONTIER_MONTH_USD, 0n);
+}
 
 const micro = dollars => BigInt(Math.ceil(dollars * 1e6));
 

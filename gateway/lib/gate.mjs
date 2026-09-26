@@ -419,7 +419,7 @@ export function createGate({ store, env = {}, now = Date.now }) {
             settled_usd: formatUsdMicro(month.spent > month.inflight ? month.spent - month.inflight : 0n),
             inflight_usd: formatUsdMicro(month.inflight),
             previous: previous ? { month: previous.month, spent_usd: formatUsd(previous.spent), settled_usd: formatUsdMicro(previous.settled) } : null,
-            base_cap_usd: formatUsd(monthCapMicro(env)), profit_index: parts,
+            base_cap_usd: formatUsd(monthCapMicro(env, at)), profit_index: parts,
             by_agent: Object.fromEntries(Object.entries(month.agents).map(([name, value]) => [name, formatUsd(BigInt(value))])),
           };
         })(),
