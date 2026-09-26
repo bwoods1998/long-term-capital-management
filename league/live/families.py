@@ -6,7 +6,8 @@ The options-swarm run, Wave 5 (Sept 26, 2026), the interface agreed with Wave 4 
   "probe" | "sized"), structure, roots, holdout_passed, validation_passed, version, code, params, run_sha,
   typical_max_loss_usd (one structure's median maximum loss in its validation run, or None), seed_era, forward
   (the nightly + shadow + real record, with `negative`)}.
-- `SwarmStore(root).add_forward(family, "shadow" | "real", trades)`: the live path's forward trades, each once by id.
+- `SwarmStore(root).add_forward(family, "shadow" | "real", trades)`: the live path's forward trades, each once by id, each
+  carrying its program `version` (a new version starts its own record).
 - `SwarmStore(root).forward(family)`: the whole forward record, one row a trade ({pnl, max_loss, source, ...}).
 - `SwarmStore(root).set_band(family, band, reason=...)`: the live path alone moves candidate <-> probe <-> sized (the
   money table is its; the swarm moves gym <-> candidate and retires families).

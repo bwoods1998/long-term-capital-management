@@ -171,10 +171,12 @@ def live_enabled(config: dict[str, Any], *, canary: bool = False) -> bool:
     return not canary and (config.get("live") or {}).get("enabled") is True
 
 
-def options_live(house: House, root: Path, config: dict[str, Any], *, real_money: bool, token: Callable[[], str]) -> Any:
+def options_live(house: House, root: Path, config: dict[str, Any], *, real_money: bool, token: Callable[[], str],
+                 swarm_on: bool = False) -> Any:
     """`House.options_live` (`league/live/step.py`): live chains, the shadow book, the paper proof and the real route,
     through the gateway. It owns both Alpaca accounts: no old `Book` is built for them beside it (`build`). None, with an
-    error alert, when numpy is missing on the box (the main session installs it at deploy)."""
+    error alert, when numpy is missing on the box (the main session installs it at deploy). `swarm_on`: `build`'s own
+    reading of the swarm's settings (config.json < <state>/swarm.json): the families are then the swarm's store."""
     try:
         import numpy  # noqa: F401 - the live path needs it; the rest of the House does not
 
@@ -201,7 +203,6 @@ def options_live(house: House, root: Path, config: dict[str, Any], *, real_money
                         stock_feed=str(config.get("alpaca_feed", "sip")))
     real = LiveAccount(client("alpaca"), venue="alpaca", max_requests_minute=table.max_requests_minute) if real_money else None
     paper = LiveAccount(client("alpaca-paper"), venue="alpaca-paper", max_requests_minute=table.max_requests_minute)
-    swarm_on = (config.get("swarm") or {}).get("enabled") is True
     families = SwarmFamilies(root) if swarm_on else MemoryFamilies()
 
     def record(kind: str, payload: dict[str, Any], agent: str | None = None) -> None:
@@ -262,6 +263,15 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
     load_env()
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
+    # The options swarm (Sept 26, 2026, Wave 4; league/swarm/) owns the population, the research and the Gym when it is
+    # enabled: the House then seats no agent of its own (`Settings.births`), builds no old researcher, provider or
+    # Merton, and runs the swarm's step (`league/swarm/hook.py`: it keeps `python -m league.swarm run` alive beside the
+    # loop, mirrors the swarm's events into the ledger and reads its bands). Never in a canary.
+    from .swarm import settings as swarm_settings
+
+    swarm_on = bool(swarm_settings.load(root, config=config).get("enabled")) and not canary  # config < <root>/swarm.json
+    if swarm_on:
+        research = merton = False
     gateway_url = config["gateway_url"]
     token = lambda: secret("GATEWAY_TOKEN")  # noqa: E731
     real_money = bool(config.get("real_money"))
@@ -311,14 +321,14 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         # Lab, Kalshi's founders and survey, and the credit economy's wake gate, culling and payouts. The options
         # swarm's Gym (league/gym/) and its evidence lines replace them; nothing here turns one back on.
         deep_replay=False, holdout_gate=False, history_coverage=False, lab_box="", kalshi_founders=False,
-        niche_survey_hours=0.0, credit_economy=False,
+        niche_survey_hours=0.0, credit_economy=False, births=not swarm_on,
     )
     house = House(
         root, brokers=brokers, sandbox=sandbox, alpaca_data=alpaca_data, kalshi_data=None, provider=provider,
         game=game, settings=house_settings, kill_switch=gateway_kill_switch(gateway_url, token) if real_money else None,
     )
     if live_on:
-        house.options_live = options_live(house, root, config, real_money=real_money, token=token)
+        house.options_live = options_live(house, root, config, real_money=real_money, token=token, swarm_on=swarm_on)
     # The same clock as the House: `open_requests` drops a request nothing has closed after three
     # days, and a Commons reading a different clock would measure that window against the wrong now.
     # `fetch`: research's `web_fetch` reads one public page through the gateway (I1, Sept 25, 2026).
@@ -377,6 +387,10 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         from .updater import Updater
 
         house.updater = Updater(REPO.parent.parent)
+    if swarm_on:
+        from .swarm.hook import attach
+
+        attach(house, root, config)
     if publish:
         # The balance chart is the REAL account whatever the agents are doing, so the publisher
         # reads it (balances only) even while every book is practice.

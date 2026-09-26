@@ -129,7 +129,7 @@ def main(argv=None) -> int:
                 house.begin_close()
 
             signal.signal(signal.SIGTERM, terminate)
-            if not house.registry.living():
+            if not house.registry.living() and house.settings.births:  # the swarm's House seats no agent of its own
                 house.found()
             while not stopping["now"] and not stop_file.exists():
                 started = time.time()

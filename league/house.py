@@ -546,6 +546,10 @@ class Settings:
     # swarm's per-family budgets (Wave 4) replace credits. Credits are still charged and read by what remains of the
     # old research path until Wave 2b deletes it. On by default, so every older House and test keeps its game.
     credit_economy: bool = True
+    # The options swarm (Sept 26, 2026, Wave 4; league/swarm/) owns the population when it is enabled: `service.build`
+    # sets this False, and the births pass (founders, the options desk's seats, merged strategies, forks, the refill)
+    # never runs, so the House seats no agent of its own and builds no agent box. Culling still runs. On by default.
+    births: bool = True
     holdout_lineage_budget: int = 3
     # The tick never waits on a box that background work holds (`House.tick`). A wake whose box is
     # busy (its research replaying a candidate there) is skipped and retried on the next tick; the
@@ -9826,8 +9830,8 @@ class House:
             self._population_rule()  # apart: a search that cannot be read must not skip Sail's runway (review of #276)
         except Exception as exc:  # noqa: BLE001 - the ceiling stands until the next tick
             self.alert("warning", f"the population rule could not be applied ({type(exc).__name__}: {str(exc)[:160]})")
-        if not refill or self._closing.is_set():
-            return  # births buy sandbox work; culling above remains available after spending stops
+        if not refill or not self.settings.births or self._closing.is_set():
+            return  # births buy sandbox work; culling above remains available after spending stops (and the swarm's House has none)
         roster = self._roster()
         if not self._births_due(roster):
             return  # H5: nothing was born and nothing died since a pass that is under five minutes old

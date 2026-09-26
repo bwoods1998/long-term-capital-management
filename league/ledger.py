@@ -159,6 +159,21 @@ KINDS: dict[str, bool] = {
     "live.shares": False,       # the stock order that closes an assignment's shares
     "live.paper_proof": False,  # the practice account's multi-leg round trip passed or failed
     "live.alert": False,        # something the live path could not explain
+    # The options swarm (Sept 26, 2026; league/swarm/): its own append-only events, mirrored here by the House's swarm
+    # step (`league/swarm/hook.py`), idempotent by id `swarm:<seq>`. Never the House's own agent.* or eval.* kinds: its
+    # roster and evaluator read those. Public: the site's tape reads a family's birth, retirement, band move and notes
+    # (masked there for quotes). Private: what can carry program content or evidence numbers.
+    "swarm.born": True,  # a family born: a seed, a fork (its parent) or the architect's
+    "swarm.retired": True,  # a family retired, and why
+    "swarm.band": True,  # a band move (gym, candidate, probe, sized) and why
+    "swarm.note": True,  # a researcher's notebook entry in its own words
+    "swarm.cycle": False,  # one researcher cycle: its run, trials, score, cost and time
+    "swarm.tournament": False,  # the hourly leaderboard: validation, the bandit's shares, forks, retirements, totals
+    "swarm.gate": False,  # the review, the holdout look (numbers private), the leakage alarm, the nightly forward
+    "swarm.architect": False,  # an architect pass and the families it proposed
+    "swarm.guard": False,  # the Sail guard's brake and release
+    "swarm.pool": False,  # Gym and gate boxes: forks, failures, sleeps, terminations
+    "swarm.status": False,  # the swarm process started, stopped, or a round failed
 }
 
 

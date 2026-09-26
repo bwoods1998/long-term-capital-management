@@ -63,10 +63,18 @@ PROFILES: dict[str, tuple[str, str, str, str, str]] = {
     "flash_asap": ("deepseek-ai/DeepSeek-V4-Flash-0731", "asap", "0.09", "0.02", "0.18"),
     "flash_balanced": ("deepseek-ai/DeepSeek-V4-Flash-0731", "balanced", "0.07", "0.02", "0.14"),
     "flash_flex": ("deepseek-ai/DeepSeek-V4-Flash-0731", "flex", "0.05", "0.01", "0.09"),
+    # The options swarm's researchers (Sept 26, 2026; plan "The facts", Sail inference table): V4.1-Flash for
+    # long cached histories (its cached input is a third of V4-Flash's), Kimi-K3 balanced for the top
+    # families' rewrites and the architect's Sail fallback. Slugs from the published rate card that day.
+    "flash41_asap": ("deepseek-ai/DeepSeek-V4.1-Flash", "asap", "0.15", "0.006", "0.60"),
+    "flash41_balanced": ("deepseek-ai/DeepSeek-V4.1-Flash", "balanced", "0.12", "0.005", "0.48"),
+    "flash41_flex": ("deepseek-ai/DeepSeek-V4.1-Flash", "flex", "0.08", "0.004", "0.30"),
     "kimi_asap": ("moonshotai/Kimi-K2.6", "asap", "1.00", "0.20", "4.00"),
     "kimi_balanced": ("moonshotai/Kimi-K2.6", "balanced", "0.45", "0.20", "3.00"),
     "kimi_flex": ("moonshotai/Kimi-K2.6", "flex", "0.35", "0.10", "2.00"),
     "k3": ("moonshotai/Kimi-K3", "asap", "2.50", "0.25", "12.50"),
+    "k3_balanced": ("moonshotai/Kimi-K3", "balanced", "2.00", "0.20", "10.00"),
+    "k3_flex": ("moonshotai/Kimi-K3", "flex", "1.25", "0.15", "6.25"),
     "glm_asap": ("zai-org/GLM-5.3", "asap", "0.98", "0.18", "3.08"),
     "glm_balanced": ("zai-org/GLM-5.3", "balanced", "0.50", "0.12", "2.50"),
     "glm_flex": ("zai-org/GLM-5.3", "flex", "0.40", "0.08", "1.80"),
@@ -86,6 +94,7 @@ PROFILES: dict[str, tuple[str, str, str, str, str]] = {
 DISPLAY_NAMES: dict[str, str] = {
     "deepseek-ai/DeepSeek-V4-Pro-0813": "DeepSeek V4 Pro",
     "deepseek-ai/DeepSeek-V4-Flash-0731": "DeepSeek V4 Flash",
+    "deepseek-ai/DeepSeek-V4.1-Flash": "DeepSeek V4.1 Flash",
     "moonshotai/Kimi-K2.6": "Kimi K2.6",
     "moonshotai/Kimi-K3": "Kimi K3",
     "zai-org/GLM-5.3": "GLM-5.3",

@@ -2,8 +2,10 @@
 applies it. Standard library only."""
 
 import copy
+import tempfile
 import unittest
 from decimal import Decimal as D
+from pathlib import Path
 
 from league.constitution import CONSTITUTION, OPTIONS_MONEY_BOUNDS, options_money_problems
 from league.live import money as M
@@ -387,6 +389,40 @@ class Stops(unittest.TestCase):
         s.observe(self.t, at=50, day="d1", equity=D("1000"), last_equity=D("1000"), flows=self.flows(40))
         again = M.Stops.from_state(s.as_state(), D("481.65"))
         self.assertEqual(again.as_state(), s.as_state())
+
+
+class TheSwarmsStore(unittest.TestCase):
+    """The interface agreed with Wave 4, against the swarm's real store (`league/swarm/store.py`, `bands.read`)."""
+
+    def test_the_live_path_reads_the_bands_writes_versioned_forward_trades_and_moves_bands(self):
+        from league.live.families import SwarmFamilies
+        from league.swarm.store import SwarmStore
+        from league.tests.swarm_fakes import Clock as SwarmClock
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            store = SwarmStore(root, clock=SwarmClock())
+            store.add_family({"id": "vert", "mechanism": "Calls after a quiet open.", "structure": "debit_vertical",
+                              "roots": ["SPY"], "dte": [0, 2]}, origin="seed")
+            store.add_version("vert", "# vert\nNEEDS = {}\n", {"k": 1}, author="seed")
+            store.set_state("vert", banded_version=1, validation_version=1, validation_line={"passed": True},
+                            typical_max_loss_usd=60.0)
+            store.set_band("vert", "candidate", reason="passed the holdout")
+            store.close()
+            families = SwarmFamilies(root)
+            [row] = families.read()
+            self.assertEqual((row["family"], row["band"], row["version"], row["holdout_passed"]), ("vert", "candidate", 1, True))
+            trades = [{"id": f"t{i}", "day": "2026-09-28", "pnl": 3.0, "max_loss": 50.0, "version": 1} for i in range(2)]
+            self.assertEqual(families.add_forward("vert", "shadow", trades), 2)
+            self.assertEqual(families.add_forward("vert", "shadow", trades), 0, "each trade once by id")
+            families.add_forward("vert", "real", [{"id": "r1", "day": "2026-09-28", "pnl": -2.0, "max_loss": 40.0, "version": 1}])
+            families.add_forward("vert", "shadow", [{"id": "old", "day": "2026-09-25", "pnl": 9.0, "max_loss": 50.0, "version": 0}])
+            rows = families.forward_rows("vert")
+            self.assertEqual({(r["source"], r["version"]) for r in rows}, {("shadow", 1), ("real", 1), ("shadow", 0)})
+            fwd = M.forward_stats(rows, D("0.80"), version=1)
+            self.assertEqual((fwd.n, fwd.real_n), (1, 1), "the version's own record, one source a day, real first")
+            families.set_band("vert", "probe", "passed the holdout and fits the Probe's cap")
+            self.assertEqual(families.read()[0]["band"], "probe")
 
 
 if __name__ == "__main__":

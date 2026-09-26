@@ -152,6 +152,18 @@ class TheLivePath(BuildCase):
         self.assertEqual({kw["venue"] for _, kw in client.call_args_list}, {"alpaca", "alpaca-paper"})
         self.assertEqual(house.options_live.real_block(), "the grant options-swarm-20260928 is not active on the money rules in force")
 
+    def test_the_live_path_reads_the_swarms_families_when_the_swarm_is_on_in_the_state(self):
+        from league.live.families import SwarmFamilies
+
+        state = Path(self.dir.name) / "state"
+        state.mkdir(parents=True, exist_ok=True)
+        (state / "swarm.json").write_text('{"enabled": true}')              # config.json says off; the state turns it on
+        with patch("ltcm.adapters.VenueClient"):
+            house = self.build(real_money=False, config=LIVE)
+        self.assertIsNotNone(house.swarm)
+        self.assertIsInstance(house.options_live.families, SwarmFamilies)
+        self.assertEqual(house.options_live.families.root, state)
+
     def test_the_repositorys_config_runs_the_live_path(self):
         config = service.load_config()
         self.assertIs(config["live"]["enabled"], True)
