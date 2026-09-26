@@ -119,11 +119,12 @@ class CompletionReadiness(unittest.TestCase):
             running[0] = True
         data = SimpleNamespace(box_id="sb_data", wake=lambda: None,
                                download=lambda _: b'{"stages": {}}',
-                               backfill_running=lambda: running[0], start_backfill=start)
+                               backfill_running=lambda: running[0], start_backfill=start,
+                               backfill_receipt=lambda: {"pid": 123, "pgid": 123, "start": "456", "args": ["--stages", "1,2,3,4,5,6"]})
         with tempfile.TemporaryDirectory() as tmp, bl.using_state(Path(tmp)):
             bl.write_json(bl.DATA_BOX, {"box_id": "sb_data", "runs": [{"args": "--stages 1,2,3,4,5,6"}]})
             ops = object.__new__(complete.Operations)
-            ops.data, ops.api = data, object()
+            ops.data, ops.api, ops.state = data, object(), bl.STATE_DIR
             with patch.object(bl, "RemoteLease", return_value=lease):
                 status = ops.theta_status()
                 again = ops.theta_status()
@@ -131,6 +132,9 @@ class CompletionReadiness(unittest.TestCase):
             self.assertFalse(status["ready"])
             self.assertFalse(again["resumed"])
             self.assertEqual(starts, ["--stages 1,2,3,4,5,6"])
+            receipt = bl.read_json(bl.STATE_DIR / "completion-process.json")
+            self.assertEqual(receipt["process"]["start"], "456")
+            self.assertEqual(receipt["resume_args"], "--stages 1,2,3,4,5,6")
 
     def test_every_theta_stage_must_finish_before_sip(self):
         progress = {"stages": {str(s): {"planned": 10, "done": 10, "failing": 0} for s in complete.STAGES}}

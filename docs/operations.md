@@ -417,6 +417,10 @@ UTC midnight and has a $5.25 total Sail allowance; subsequent UTC days have at m
 editing the configured burst end cannot replenish it. Unresolved paid commitments carry into the new
 period, and the entire meter fall across a boundary is charged conservatively to the new period.
 The original $150 local OpenAI fuse, funded gateway month, and reserve are unchanged.
+Monday protects only maintenance due in its shortened period: no Tuesday nightly or forward allowance
+is borrowed from Monday. At Tuesday midnight those due jobs are protected before research can spend.
+Elapsed House use already present in the account meter is not added twice; the admission bound takes
+the larger of whole-period work plus House capacity, or the account meter plus remaining House capacity.
 
 After the burst, at most 16 families receive research. The roster is persistent, filled from living
 families using the bandit's weights with places for new mechanisms, and reconsidered daily. Dormant
@@ -427,7 +431,9 @@ changes a validation, holdout, promotion, or money-band condition.
 
 The allocation signal uses 20 completed sessions from the canonical data calendar, at least 20 closed
 returns across five sessions, and current version/checkpoint/bundle replay receipts for every banded
-family owed a replay. Each family/version uses real, else shadow, else nightly rows per day. Retired
+family owed a replay. Each family/version uses real, else shadow, else nightly rows per day. Unknown
+sources or missing version identity mean insufficient evidence. Positive history cannot lift a floor
+without a latest-session observation from a currently banded version. Retired
 versions' losses remain in the record. Missing receipts and successful zero-trade replays are different
 from observed zero returns. The private heartbeat reports mode, evidence status, cohort, period,
 committed dollars, and protected maintenance allowance.
@@ -441,10 +447,26 @@ deadline; forward replay reserves $1.25/day; architect Sail fallback reserves $1
 $0.50/day. These are resource/runtime bounds, not measured nightly cost. Finite configured bounds and
 their provenance are required; bad or missing values defer paid work. Actual box dimensions must fit
 the bound, and a new fork requires a saved capacity verification for its exact checkpoint.
+With no carried commitments, the default full-day research allowance before any maintenance release
+is $1.60; Monday's is $2.28125.
+The nightly job validates both current boxes, holds the data-operation lease, and records exact
+checkpoint capacity before/after its checkpoint POST. Each restored child is checked again before work.
+A manual `nightly schedule` no longer schedules an unreserved post-burst wake; the House controller
+admits the actual job against that day's allowance. Paused bulk-backfill arguments remain in the private
+forward-day record with an explicit deferred status, rather than silently restarting paid bulk work.
+An independent cutoff observer records the Completion backfill's box, PID, start ticks, process group
+and exact resume arguments before Monday's boundary. It then stops only that process under the data
+lease and confirms sleep. It never wakes a box or adopts a new owner after the boundary. Unknown
+ownership or cleanup keeps a rolling 40-minute capacity liability in the shared ledger; this records
+already running exposure and grants no new work. A missing pre-boundary receipt is reported as unowned.
 
 Unused commitments are released only after known settlement or confirmed cleanup. A network timeout
 does not establish that a remote command or box stopped. OS command timeouts and RPC deadlines bound
-work; unreachable cleanup retains its commitment and prevents further admission. External billing
+work, including SIP pagination; unreachable cleanup retains its commitment and prevents further admission.
+Cleanup stops the lease-renewal thread before sleeping only its owned boxes, confirms their status,
+and keeps the lease token until its normal 40-minute expiry. Restart honors that retry boundary and
+resolves any old cleanup before dispatching again. Exact pending fork names survive unknown outcomes;
+an absent inventory row alone never releases a reservation. External billing
 during a Sail outage, changed vendor prices, or checkpoint/storage fees outside the active-usage meter
 cannot be guaranteed by a local reservation ledger. The account meter remains an independent brake;
 record and investigate such charges rather than increasing a cap. House exits and shadow bookkeeping

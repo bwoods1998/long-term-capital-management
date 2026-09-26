@@ -50,7 +50,7 @@ class Periods(LifeCase):
         self.budget.refresh()
         self.assertFalse(guard.check()["braked"])
         self.assertEqual(self.budget.period()["cap"], 5.25)
-        self.budget.reserve("monday", 2, kind="data_box", bucket="nightly")
+        self.budget.reserve("monday", 2, kind="sail_model")
         self.budget.charge("monday", 2, final=True)
         other = SwarmStore(self.root, clock=self.clock)
         self.addCleanup(other.close)
@@ -59,7 +59,7 @@ class Periods(LifeCase):
         self.cfg["guard"]["burst_until"] = "2026-10-28T13:30:00Z"
         self.assertFalse(restarted.burst())
         with self.assertRaises(BudgetDeferred):
-            restarted.reserve("cannot-borrow-tuesday", 2, kind="data_box", bucket="nightly")
+            restarted.reserve("cannot-borrow-tuesday", 2, kind="sail_model")
 
     def test_full_meter_fall_across_boundary_is_conservatively_charged_to_new_period(self):
         self.clock.t = epoch("2026-09-28T13:29:00Z")
@@ -88,8 +88,43 @@ class Periods(LifeCase):
         self.budget.reserve("tracked-but-existing-guard-still-owns-burst", 400, kind="gym_box")
         self.assertEqual(self.budget.status()["held_usd"], 400)
 
+    def test_monday_protects_only_jobs_due_before_midnight_and_tuesday_starts_protected(self):
+        self.clock.t = epoch("2026-09-28T13:30:00Z")
+        self.good()
+        self.budget.refresh()
+        status = self.budget.status()
+        self.assertEqual(status["protected"], {"nightly": 0, "forward": 0, "architect": 1})
+        self.assertAlmostEqual(status["research_room_usd"], 2.28125)
+        self.budget.reserve("monday-research", status["research_room_usd"], kind="sail_model")
+        self.budget.charge("monday-research", status["research_room_usd"], final=True)
+        self.clock.t = epoch("2026-09-29T00:00:00Z")
+        self.good()
+        self.budget.refresh()
+        self.assertEqual(self.budget.status()["protected"], {"nightly": 3.65, "forward": 1.25, "architect": 1})
+
 
 class Admissions(LifeCase):
+    def test_elapsed_metered_house_use_does_not_consume_its_future_reservation_twice(self):
+        self.budget.meter(100)
+        room = self.budget.status()["research_room_usd"]
+        self.budget.reserve("research", room, kind="sail_model")
+        self.budget.charge("research", room, final=True)
+        self.clock.advance(6*3600)
+        self.good()
+        self.budget.meter(100 - room - 1)  # Six hours of the already protected $4 House day.
+        self.budget.reserve("night", 3.65, kind="data_box", bucket="nightly")
+        self.budget.reserve("forward", 1.25, kind="gym_box", bucket="forward")
+        self.budget.reserve("architect", 1, kind="sail_model", bucket="architect")
+        self.assertAlmostEqual(self.budget.status()["used_usd"], 12)
+
+    def test_a_later_confirmed_charge_cannot_disappear_after_settlement(self):
+        self.budget.reserve("late-adjustment", .5, kind="gym_box")
+        self.budget.charge("late-adjustment", .1, final=True)
+        self.budget.charge("late-adjustment", .2)
+        self.budget.charge("late-adjustment", .15)
+        self.assertAlmostEqual(self.budget.status()["actual_usd"], .2)
+        self.assertEqual(self.budget.status()["held_usd"], 0)
+
     def test_two_connections_cannot_each_take_the_last_research_dollar(self):
         other = SwarmStore(self.root, clock=self.clock)
         self.addCleanup(other.close)
@@ -182,6 +217,38 @@ class Evidence(LifeCase):
         self.assertEqual((out["mode"], out["evidence"]["observations"]), ("floor", 20))
         self.store.retire("family", "test")
         self.assertEqual(self.budget.refresh()["evidence"]["observations"], 20)
+
+    def test_legacy_empty_source_is_not_compute_evidence(self):
+        self.prepare(1)
+        self.store._exec("UPDATE forward SET source=''")
+        self.assertEqual(self.budget.refresh()["evidence"]["status"], "insufficient")
+
+    def test_missing_version_is_not_silently_dropped_from_compute_evidence(self):
+        self.prepare(1)
+        self.store.add_forward("family", "real", [{"id": "unknown-loss", "day": "2026-09-28", "pnl": -1000, "max_loss": 100}])
+        self.assertEqual(self.budget.refresh()["evidence"]["status"], "insufficient")
+
+    def test_retired_positive_rows_cannot_lift_floor_through_a_new_zero_trade_family(self):
+        self.prepare(1)
+        prior = self.store.family("family")["state"]
+        self.store.retire("family", "test")
+        self.family("new")
+        n = self.store.add_version("new", "def decide(state, quotes):\n    return []\n", {}, author="test")["n"]
+        self.store.set_band("new", "candidate", reason="test")
+        self.store.set_state("new", banded_version=n, forward_replay={**prior["forward_replay"], "version": n})
+        self.store.put("lifecycle", {"mode": "floor"})
+        result = self.budget.refresh()
+        self.assertEqual((result["mode"], result["evidence"]["status"]), ("floor", "insufficient"))
+
+    def test_retired_positive_history_without_delivery_cannot_lift_floor(self):
+        self.prepare(1)
+        self.store.put("lifecycle", {"mode": "floor"})
+        self.store.retire("family", "test")
+        self.cfg["forward"].pop("ready")
+        self.cfg["forward"].pop("current_bundle")
+        result = self.budget.refresh()
+        self.assertEqual(result["mode"], "floor")
+        self.assertEqual(result["evidence"]["status"], "insufficient")
 
     def test_successful_zero_trade_replay_does_not_invent_flat_observations(self):
         self.prepare()

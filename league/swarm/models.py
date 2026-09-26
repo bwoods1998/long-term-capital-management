@@ -84,10 +84,12 @@ class ModelRouter:
             raise BudgetDeferred("Provider cannot price a post-burst request")
         while True:
             cached = self._row(key)
+            if cached is not None and cached["status"] == "abandoned" and cached["cost_usd"] is None:
+                self.budget.charge(commitment, 0, final=True, released=True)
             already_settled = cached is not None and cached["cost_usd"] is not None and cached["status"] not in ("prepared", "dispatched")
             if not already_settled:
                 if (bucket == "research" and not self.budget.burst() and not self.budget.research_allowed(family.split(":", 1)[0])
-                        and self.store._one("SELECT 1 FROM sail_commitments WHERE key=?", (commitment,)) is None):
+                        and self.store._one("SELECT 1 FROM sail_commitments WHERE key=? AND state!='released'", (commitment,)) is None):
                     raise BudgetDeferred("family is outside the active research cohort")
                 self.budget.reserve(commitment, hold, kind=kind, bucket=bucket, detail={"request_key": key[:200]})
             try:

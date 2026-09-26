@@ -167,6 +167,7 @@ class RemoteLease:
         self.stop = threading.Event()
         self.failed = False
         self.worker = None
+        self.preserve_for_sleep = False
 
     def command(self, action: str) -> bool:
         return run_py(self.api, self.box, f"locking.py {action} --token {self.token}", timeout=60).ok
@@ -203,6 +204,11 @@ class RemoteLease:
         self.stop.set()
         if self.worker:
             self.worker.join(timeout=65)
+        if self.preserve_for_sleep:
+            # A bounded nightly owner sleeps the lease holder before relinquishing ownership.
+            # Do not wake it to release, or permit another controller to race the sleep RPC.
+            # The existing lease expires normally; the controller persists the retry-not-before time.
+            return
         try:
             released = self.command("release")
         except Exception:

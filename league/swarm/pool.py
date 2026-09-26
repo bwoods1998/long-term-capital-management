@@ -41,7 +41,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from .store import SwarmStore
+from .store import SwarmStore, loads
 from .lifecycle import BoundedClient, BudgetDeferred, SailBudget, capacity
 
 _IDS = itertools.count(1)
@@ -108,8 +108,27 @@ class Box:
 
 
 AWAKE = ("starting", "ready", "busy")
+TERMINAL = ("terminated", "failed", "create_failed")
 #: A box name from before the per-store token (the stage-1 release): ours, whichever store made it.
 LEGACY_NAME = re.compile(r"^ltcm-swarm-(gym|gate)-\d+-\d+$")
+
+
+def settle_ended(store: SwarmStore, budget: SailBudget, row: Mapping[str, Any]) -> None:
+    """An inventory-confirmed end settles only exact persisted commitments, charging an unknown interval in full."""
+    if row.get("status") not in TERMINAL:
+        return
+    box_id, name = str(row.get("sailbox_id") or row.get("id") or ""), str(row.get("name") or "")
+    recorded = next((b for b in store.boxes(live=False) if b["id"] == box_id), {})
+    recorded_key = (recorded.get("detail") or {}).get("budget_key")
+    with store.atomic():
+        for hold in store._all("SELECT * FROM sail_commitments WHERE kind='gym_box' AND state='open'"):
+            detail = loads(hold["detail"], {})
+            if not (hold["key"] == recorded_key or (box_id and detail.get("box") == box_id)
+                    or (name and detail.get("name") == name)):
+                continue
+            unknown = (max(0., budget.clock() - float(hold["created"])) * float(detail.get("rate_usd_hour", .6)) / 3600
+                       + float(detail.get("creation_usd", 0)))
+            budget.charge(hold["key"], max(float(hold["reserved"]), float(hold["accounted"]), unknown), final=True)
 
 
 def forked_at(row: Mapping[str, Any]) -> float | None:
@@ -289,8 +308,8 @@ class GymPool:
         if self.budget.burst():
             return None
         key = getattr(self.boxes.get(box_id), "budget_key", None)
-        row = self.store._one("SELECT created FROM sail_commitments WHERE key=? AND state='open'", (key,)) if key else None
-        return float(row["created"]) + float(self.settings.get("lifecycle", {}).get("box_lease_seconds", 2400)) if row else self.clock()
+        row = self.store._one("SELECT created,detail FROM sail_commitments WHERE key=? AND state='open'", (key,)) if key else None
+        return float(row["created"]) + float(loads(row["detail"], {}).get("lease_seconds", 2400)) if row else self.clock()
 
     def _start_box(self, kind: str) -> None:
         """Fork one box from its image, check its seal, make it ready (runs on its own thread). Its start-up time is booked;
@@ -298,7 +317,7 @@ class GymPool:
         lost is found by name and ended (`reconcile`)."""
         image = self.image(kind)
         n = next(self._counter)
-        name = f"{self.name_prefix(kind)}{int(self.clock())}-{n}"
+        name = f"{self.name_prefix(kind)}{int(self.clock())}-{n}{secrets.token_hex(6)}"
         placeholder = f"pending-{kind}-{n}"
         began = self.clock()
         with self._lock:
@@ -326,7 +345,9 @@ class GymPool:
             self.forking[name] = began  # a fork in flight: `reconcile` never takes it for a stray
             self.store.put("forking", dict(self.forking))
         try:
-            row = self.client.from_checkpoint(image, name=name)
+            api = self.client if self.budget.burst() else BoundedClient(
+                self.client, lambda: began + float(self.budget.cfg.get("box_lease_seconds", 2400)), clock=self.clock)
+            row = api.from_checkpoint(image, name=name)
             box_id = str(row.get("sailbox_id"))
         except Exception as exc:  # noqa: BLE001
             with self._lock:
@@ -388,7 +409,9 @@ class GymPool:
             self.store.event("swarm.pool", None, {"action": "box_failed", "box": box_id, "kind": kind, "error": str(exc)[:400]})
             try:
                 self.client.terminate(box_id)
-                self._settle_box(box)
+                if self.budget.burst() or self.client.get(box_id).get("status") in TERMINAL:
+                    self._accrue(box, awake=True)
+                    self._settle_box(box)
             except Exception:  # noqa: BLE001
                 pass
             with self._lock:
@@ -454,6 +477,9 @@ class GymPool:
         n = 0
         for row in rows:
             box_id, name = str(row.get("sailbox_id") or row.get("id") or ""), str(row.get("name") or "")
+            if str(row.get("status")) in TERMINAL:
+                settle_ended(self.store, self.budget, row)
+                continue
             if name in in_flight:
                 continue  # its POST has not returned: ours, not a stray
             if not (name.startswith(mine) or LEGACY_NAME.match(name)) or box_id in known or str(row.get("status")) in ("terminated", "terminating",
@@ -464,6 +490,9 @@ class GymPool:
                 continue  # made minutes ago (or cannot say when): a fork whose answer may still be on its way
             try:
                 self.client.terminate(box_id)
+                if not self.budget.burst():
+                    confirmed = self.client.get(box_id)
+                    settle_ended(self.store, self.budget, {**row, **confirmed})
                 n += 1
                 self.store.event("swarm.pool", None, {"action": "stray_terminated", "box": box_id, "name": name})
             except Exception:  # noqa: BLE001
@@ -498,13 +527,18 @@ class GymPool:
         fee = float(self.settings.get("lifecycle", {}).get("box_creation_usd", .012)) if creation else 0.0
         if creation and fee < .012:
             raise BudgetDeferred("Gym creation fee bound is below the observed l-box rate")
-        self.budget.reserve(key, rate * seconds / 3600 + fee, kind="gym_box", bucket=bucket, detail=detail)
+        self.budget.reserve(key, rate * seconds / 3600 + fee, kind="gym_box", bucket=bucket,
+                            detail={**(detail or {}), "rate_usd_hour": rate, "lease_seconds": seconds, "creation_usd": fee})
 
     def _settle_box(self, box: Box, *, uncertain=False) -> None:
         key = getattr(box, "budget_key", None)
         row = self.store._one("SELECT * FROM sail_commitments WHERE key=?", (key,)) if key else None
         if row:
-            self.budget.charge(key, max(float(row["reserved"]), float(row["accounted"])) if uncertain else float(row["accounted"]), final=True)
+            detail = loads(row["detail"], {})
+            unknown = ((self.clock() - float(row["created"])) * float(detail.get("rate_usd_hour", .6)) / 3600
+                       + float(detail.get("creation_usd", 0)))
+            self.budget.charge(key, max(float(row["reserved"]), float(row["accounted"]), unknown)
+                               if uncertain else float(row["accounted"]), final=True)
 
     def run_batch(self, box: Box, batch: list[GymJob]) -> None:
         """A post-burst batch owns a finite reservation before resume, and sleeps promptly afterward."""
@@ -523,7 +557,7 @@ class GymPool:
                 for job in batch:
                     self._fail(job, "cannot verify the previous Gym lease ended")
                 return
-            key = f"box:{box.id}:{self.clock()}:{next(self._counter)}"
+            key = f"box:{box.id}:{self.clock()}:{secrets.token_hex(8)}"
             try:
                 capacity(self.client.get(box.id), float(self.settings.get("lifecycle", {}).get("box_rate_usd_hour", .6)))
                 self._lease(key, bucket="forward" if batch[0].purpose == "forward" else "research", detail={"box": box.id})
@@ -556,7 +590,8 @@ class GymPool:
         if box.state == "asleep":
             resuming = self.clock()
             try:
-                self.client.resume(box.id)
+                api = self.client if self.budget.burst() else BoundedClient(self.client, lambda: self._deadline(box.id), clock=self.clock)
+                api.resume(box.id)
             except Exception as exc:  # noqa: BLE001
                 self._requeue(batch, f"resuming {box.id} failed: {exc}")
                 box.booked_at = resuming
@@ -566,6 +601,9 @@ class GymPool:
                 self.store.event("swarm.pool", None, {"action": "resume_failed", "box": box.id, "error": str(exc)[:300]})
                 try:
                     self.client.terminate(box.id)
+                    if self.budget.burst() or self.client.get(box.id).get("status") in TERMINAL:
+                        self._accrue(box, awake=True)
+                        self._settle_box(box)
                 except Exception:  # noqa: BLE001
                     pass
                 return
@@ -673,6 +711,9 @@ class GymPool:
         box.state = "terminated"
         try:
             self.client.terminate(box.id)
+            if self.budget.burst() or self.client.get(box.id).get("status") in TERMINAL:
+                self._accrue(box, awake=True)
+                self._settle_box(box, uncertain=bool(getattr(box, "adopted_awake", False)))
         except Exception:  # noqa: BLE001
             pass
         self.store.set_box_state(box.id, "terminated")
@@ -734,6 +775,8 @@ class GymPool:
             if kind == "gym":
                 cap = int(g.get("max_boxes", 8))
                 target = min(cap, max(int(g.get("start_boxes", 4)), math.ceil(demand / per)))
+                if not self.budget.burst():
+                    cap, target = min(1, cap), min(1, target)
             else:
                 cap = target = 1
             with self._lock:  # every live box of the kind counts against the cap: the pool's and the store's
@@ -781,6 +824,7 @@ class GymPool:
             self.client.sleep(box.id)
             if not self.budget.burst() and self.client.get(box.id).get("status") not in ("sleeping", "paused", "terminated"):
                 raise BudgetDeferred("Sail has not confirmed that the box is asleep")
+            self._accrue(box, awake=True)
             box.state = "asleep"
             self.store.set_box_state(box.id, "asleep")
             self._settle_box(box, uncertain=bool(getattr(box, "adopted_awake", False)))
@@ -882,6 +926,8 @@ def cleanup_stopped(root: str | Path, client: Any, *, limit: int = 100) -> dict[
             return out
         store = SwarmStore(root)
         try:
+            from .settings import load
+            budget = SailBudget(store, load(root))
             token = str(store.get("pool_token") or "")
             pending = dict(store.get("forking") or {})
             known = {r["id"] for r in store.boxes(live=False)}
@@ -914,6 +960,7 @@ def cleanup_stopped(root: str | Path, client: Any, *, limit: int = 100) -> dict[
                 if owned(row) and str(row.get("status")) in terminal:
                     box_id = str(row.get("sailbox_id") or row.get("id") or "")
                     store.set_box_state(box_id, "terminated")
+                    settle_ended(store, budget, row)
                     pending.pop(str(row.get("name") or ""), None)
                     out["confirmed"] += 1
             store.put("forking", pending)

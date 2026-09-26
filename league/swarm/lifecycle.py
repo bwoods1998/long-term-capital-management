@@ -144,6 +144,10 @@ class Lifecycle:
         except (OSError, ValueError, TypeError, KeyError):
             return {"status": "insufficient", "reason": "canonical calendar unavailable"}
         ready = self.settings.get("forward", {}).get("ready") or {}
+        if (ready.get("day") != days[0] or not ready.get("gate_checkpoint")
+                or ready.get("gate_checkpoint") != self.settings.get("gym", {}).get("gate_checkpoint")
+                or not self.settings.get("forward", {}).get("current_bundle")):
+            return {"status": "insufficient", "reason": "fresh forward delivery is unavailable", "day": days[0]}
         families = self.store.families()
         current = [f for f in families if not f.get("retired_at") and f["band"] in ("candidate", "probe", "sized")]
         for fam in current:
@@ -157,9 +161,13 @@ class Lifecycle:
                     or target.get("bundle") != self.settings.get("forward", {}).get("current_bundle")
                     or target.get("checkpoint") != self.settings.get("gym", {}).get("gate_checkpoint")):
                 return {"status": "insufficient", "reason": "latest version-bound forward replay incomplete", "day": days[0]}
-        returns, observed = [], set()
+        returns, observed, fresh_banded_observation = [], set(), False
+        current_versions = {f["id"]: (f.get("state") or {}).get("banded_version") for f in current}
         for fam in families:  # losses of retired/demoted versions stay in the compute record
             rows = self.store.forward(fam["id"])
+            if any(r.get("day") in days and (r.get("source") not in ("real", "shadow", "nightly")
+                                             or r.get("version") is None) for r in rows):
+                return {"status": "insufficient", "reason": "unsupported forward source or missing version"}
             versions = {r.get("version") for r in rows if r.get("version") is not None}
             for version in versions:
                 if self.store.version(fam["id"], version) is None:
@@ -175,10 +183,14 @@ class Lifecycle:
                         return {"status": "insufficient", "reason": "invalid forward return"}
                     returns.append(pnl / maximum)
                     observed.add(row["day"])
+                    if row["day"] == days[0] and current_versions.get(fam["id"]) == version:
+                        fresh_banded_observation = True
         result = {"observations": len(returns), "sessions": len(observed), "day": days[0], "window_sessions": 20}
         if len(returns) < 20 or len(observed) < 5:
             return {**result, "status": "insufficient", "reason": "need 20 closed returns across 5 sessions"}
         mean = sum(returns) / len(returns)
+        if mean > 0 and not fresh_banded_observation:
+            return {**result, "status": "insufficient", "reason": "positive history lacks a fresh banded observation"}
         return {**result, "status": "positive" if mean > 0 else "flat" if mean == 0 else "negative", "mean_rom": mean}
 
     def refresh(self) -> dict[str, Any]:
@@ -228,9 +240,44 @@ class SailBudget(Lifecycle):
         if not str(self.cfg.get("maintenance_basis") or "").strip():
             raise BudgetDeferred("maintenance cost bounds have not been verified")
         try:
-            return {k: number(raw[k]) for k in MAINTENANCE}
+            amounts = {k: number(raw[k]) for k in MAINTENANCE}
         except (TypeError, ValueError, KeyError):
             raise BudgetDeferred("maintenance cost bounds are missing or invalid") from None
+        period = self.period()
+        # A future Tuesday job is protected in Tuesday's period, never charged against Monday's $5.25.
+        if period["end"] <= dt.datetime(2026, 9, 29, 6, tzinfo=dt.timezone.utc).timestamp():
+            amounts.update(nightly=0.0, forward=0.0)
+            return amounts
+        try:
+            calendar = json.loads((self.store.root / "data/calendar.json").read_text())["exceptions"]
+            completed = set((self.store.get("nightly_results") or {}).keys())
+            try:
+                completed.update(json.loads((self.store.root / "data/nightly.json").read_text()).get("completed", {}).keys())
+            except FileNotFoundError:
+                pass
+            owed = False
+            day = dt.date(2026, 9, 28)
+            until = dt.datetime.fromtimestamp(period["end"], ET).date()
+            while day <= until:
+                due = dt.datetime.combine(day + dt.timedelta(days=1), dt.time(2), ET).timestamp()
+                if (day.weekday() < 5 and calendar.get(day.isoformat(), [570, 960]) is not None
+                        and due < period["end"] and day.isoformat() not in completed):
+                    owed = True
+                    break
+                day += dt.timedelta(days=1)
+            if not owed:
+                amounts["nightly"] = 0.0
+                ready = self.settings.get("forward", {}).get("ready") or {}
+                target = {"day": ready.get("day"), "checkpoint": ready.get("gate_checkpoint"),
+                          "bundle": self.settings.get("forward", {}).get("current_bundle")}
+                pending = any((f.get("state") or {}).get("forward_replay") !=
+                              {"target": target, "version": (f.get("state") or {}).get("banded_version")}
+                              for f in self.store.families(alive=True) if f["band"] in ("candidate", "probe", "sized"))
+                if not pending:
+                    amounts["forward"] = 0.0
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            pass  # unknown schedule preserves the allocation; missing evidence is never a free budget
+        return amounts
 
     def status(self) -> dict[str, Any]:
         with self.store.atomic():
@@ -249,7 +296,12 @@ class SailBudget(Lifecycle):
             house = max(4.0, number(self.cfg.get("house_usd_day", 4)), number(
                 self.settings.get("guard", {}).get("house_burn_usd_day", 1))) * p["fraction"]
             buffer = number(self.cfg.get("uncertainty_usd", .5)) * p["fraction"]
-            used = max(actual, metered) + pending + (0 if self.burst() else house + buffer)
+            remaining = max(0., p["end"] - self.clock()) / max(1., p["end"] - p["start"])
+            # The account meter already includes elapsed House use. Compare whole-period
+            # work+House bounds with metered-to-date+future-House; do not reserve elapsed
+            # House capacity twice and silently consume Tuesday's maintenance protection.
+            used = (max(actual, metered) + pending if self.burst() else
+                    max(actual + house, metered + house * min(1., remaining)) + pending + buffer)
             error, maintenance = None, {}
             if not self.burst():
                 try:
@@ -305,14 +357,14 @@ class SailBudget(Lifecycle):
             row = self.store._one("SELECT * FROM sail_commitments WHERE key=?", (key,))
             if row is None:
                 return  # pre-upgrade work is still covered by the untagged ledger/meter
-            if row["state"] in ("settled", "released"):
-                return
             delta = max(0.0, amount - float(row["accounted"]))
             p = self.period()
             self.store._exec("INSERT INTO sail_charges(period,key,bucket,usd) VALUES(?,?,?,?) ON CONFLICT(period,key) "
                              "DO UPDATE SET usd=usd+excluded.usd", (p["id"], key, row["bucket"], delta))
+            state = row["state"] if row["state"] in ("settled", "released") else (
+                "released" if released else "settled" if final else "open")
             self.store._exec("UPDATE sail_commitments SET accounted=?,state=?,updated=? WHERE key=?",
-                             (max(amount, float(row["accounted"])), "released" if released else "settled" if final else "open",
+                             (max(amount, float(row["accounted"])), state,
                               self.clock(), key))
 
     def finish_maintenance(self, bucket: str) -> None:

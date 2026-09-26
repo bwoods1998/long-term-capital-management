@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import shlex
 from pathlib import Path
 import sys
 import time
@@ -71,6 +72,15 @@ class Operations:
                     self.data.start_backfill(args)
                     running, resumed = self.data.backfill_running(), True
         ready = theta_ready(progress, running)
+        if running:
+            # The cutoff worker may only stop a process the Completion controller actually observed.
+            # PID reuse, manual replacement and unreadable identities never become implicit ownership.
+            receipt = self.data.backfill_receipt()
+            args = (bl.read_json(bl.DATA_BOX).get("runs") or [{}])[-1].get("args")
+            if receipt is None or not args or receipt["args"] != shlex.split(args):
+                raise RuntimeError("Completion cannot bind the backfill process to its recorded resume arguments")
+            bl.write_json(self.state / "completion-process.json", {"box": self.data.box_id, "process": receipt,
+                          "resume_args": args, "observed_at": time.time()})
         if ready:
             universe = json.loads(self.data.download("/data/work/universe.json"))
             # Rank/spread measurements stay on the data box. Only root identities are needed here.

@@ -236,9 +236,11 @@ class Swarm:
             limit = min(limit, daily["research_room_usd"] / remaining_hours)
             valid = valid and self.lifecycle.research_allowed() and not daily["reason"]
         cached = self._pace
-        if now - cached[0] >= 10.0 or now < cached[0] or cached[1] != scope:
-            spent = self.store.spent(["sail_model"] if scope == "sail_model" else ["sail_model", "openai"], since=now - 3600)
-            cached = self._pace = (now, scope, spent)
+        cache_key = f"{scope}:{daily['period']['id']}" if daily else scope
+        if now - cached[0] >= 10.0 or now < cached[0] or cached[1] != cache_key:
+            since = max(now - 3600, daily["period"]["start"]) if daily else now - 3600
+            spent = self.store.spent(["sail_model"] if scope == "sail_model" else ["sail_model", "openai"], since=since)
+            cached = self._pace = (now, cache_key, spent)
         paused = not valid or cached[2] >= limit
         label = "Sail models" if scope == "sail_model" else "Sail and OpenAI models"
         reason = ((daily["reason"] or f"research lifecycle is {(self.store.get('lifecycle') or {}).get('mode', 'unavailable')}")
@@ -321,21 +323,31 @@ class Swarm:
                     log(f"guard: brake ({getattr(self.guard, 'reason', '')})")
                 self.pool.scale_to_zero(getattr(self.guard, "reason", "the guard"))
         self.pool.manage()
-        if self.guard.allows() and self.gym_ready():
-            if self.lifecycle.research_allowed() and self.tournament.due():
+        if self.guard.allows():
+            ready = self.gym_ready()
+            if ready and self.lifecycle.research_allowed() and self.tournament.due():
                 self._round("tournament", self.tournament.run)
-            if self.lifecycle.research_allowed() and self.gate.due():
+            if ready and self.lifecycle.research_allowed() and self.gate.due():
                 self._round("gate", self.gate.run)
-            if self.gate.forward_due():
-                self._round("forward", self.gate.forward)
+            if (ready or life["mode"] != "burst") and self.gate.forward_due():
+                self._round("forward", self._forward)
             # Refilling to the start population always (a birth spends nothing by itself: the pace caps all cycles);
             # growing past it toward the ceiling only while the hourly spend is under the pace.
-            if self.architect.due() and self.store.get("tournament_at") and (life["mode"] != "burst" or self.architect.refilling() or not self.over_pace()):
+            if self.architect.due() and ((life["mode"] != "burst") or (
+                    ready and self.store.get("tournament_at") and (self.architect.refilling() or not self.over_pace()))):
                 self._round("architect", self.architect.run)
         if self.clock() - self._beat >= float(self.settings.get("heartbeat_seconds", 20)):
             self._beat = self.clock()
             self.heartbeat()
             self.bound_log()
+
+    def _forward(self):
+        result = self.gate.forward()
+        target = self.gate.forward_target()
+        if (target is not None and not result.get("failed") and not result.get("errors")
+                and not self.gate.forward_pending(target)):
+            self.lifecycle.finish_maintenance("forward")
+        return result
 
     def run(self, *, once: bool = False) -> int:
         """The process: seed, start the workers, loop until asked to stop."""

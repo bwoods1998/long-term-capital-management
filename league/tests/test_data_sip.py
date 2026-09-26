@@ -48,6 +48,22 @@ class Opener:
 
 
 class Client(unittest.TestCase):
+    def test_paid_nightly_deadline_stops_pagination_before_another_request(self):
+        now = [100]
+        class Slow(Opener):
+            def open(inner, request, timeout):
+                self.assertEqual(timeout, 30)
+                now[0] += 30
+                return super().open(request, timeout)
+        opener = Slow([{'bars': {}, 'next_page_token': 'next'}])
+        checked = []
+        client = GatewayBars('https://gateway.invalid', 'test', opener=opener, deadline=250,
+                             clock=lambda: now[0], check=lambda: checked.append(now[0]))
+        with self.assertRaisesRegex(SIPError, 'deadline'):
+            client.fetch(['SPY'], DAY, HOURS)
+        self.assertEqual(len(opener.requests), 1)
+        self.assertEqual(checked, [100, 130])
+
     def test_read_only_gateway_pagination_uses_raw_sip_and_historical_symbol_date(self):
         opener = Opener([{'bars': {'SPY': [bar()]}, 'next_page_token': 'next'},
                          {'bars': {'SPY': [bar(571)]}, 'next_page_token': None}])

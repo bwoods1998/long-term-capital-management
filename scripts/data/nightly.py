@@ -2,7 +2,7 @@
 """The nightly forward job: yesterday's market into the data box's store and the gate image only.
 
     python3 scripts/data/nightly.py run [--day YYYY-MM-DD] [--dry-run]
-    python3 scripts/data/nightly.py schedule        sleep the data box until the next 02:00 ET wake
+    python3 scripts/data/nightly.py schedule        legacy burst sleep; post-burst uses the House controller
     python3 scripts/data/nightly.py status
     python3 scripts/data/nightly.py daemon --state /workspace/state/data \
         --ready-file /workspace/state/gym-forward.json
@@ -15,13 +15,13 @@ the night and a second run of a finished night does nothing):
   2. the data box: woken; the backfill stopped if it is running (ThetaData allows one session per
      account); `backfill.py run --stages 7 --forward-days DAY` pulls the day for the whole universe,
      then `--stages 8` its SPY/QQQ back months (resumable: a root already in the journal is not
-     fetched again); the backfill restarted with its last arguments;
+     fetched again); burst backfill is restarted with its last arguments; post-burst resume intent is retained;
   3. the gate image: its box woken (or, when it is gone, forked from its current checkpoint and sealed
      again), each of the day's files downloaded from the data box and uploaded to the same path,
      `backfill.py adopt` there checks every sha256 and journals them, and the gate is re-checkpointed
      with a one-year TTL; the new checkpoint becomes `gate.current_checkpoint` in images.json;
-  4. both boxes back to sleep (the data box only when no backfill runs), the data box with a wake
-     at the next trading night's 02:00 ET (06:00Z in summer, 07:00Z in winter).
+  4. both boxes back to sleep. During the burst a next-night wake may be scheduled; afterward
+     the House admits each due 02:00 ET job (06:00Z in summer, 07:00Z in winter) against its current budget.
 
 Forward days go to the gate image and never to a Gym box: the Gym image's box id is refused as a
 target. The House supervises `daemon` after the operator installs the private data records and
@@ -46,6 +46,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import storelib as sl  # noqa: E402
 
@@ -122,7 +123,7 @@ class Nightly:
                  gym_box_ids: Sequence[str] = (), log: Callable[[str], None] = print,
                  clock: Callable[[], dt.datetime] = lambda: dt.datetime.now(dt.timezone.utc), rehearsal: bool = False,
                  relay: Callable[[dt.date, Any], None] | None = None,
-                 check_lease: Callable[[], None] = lambda: None):
+                 check_lease: Callable[[], None] = lambda: None, resume_backfill: bool = True):
         self.data, self.gate, self.images, self.save = data, gate, images, save
         self.checkpoint = checkpoint
         self.calendar = calendar
@@ -135,6 +136,7 @@ class Nightly:
         self.rehearsal = rehearsal
         self.relay = relay
         self.check_lease = check_lease
+        self.resume_backfill = resume_backfill
 
     def persist(self) -> None:
         self.check_lease()
@@ -169,7 +171,7 @@ class Nightly:
         # 1. the pull, on the data box, with the backfill paused (one ThetaData session per account)
         self.data.wake()
         need_pull = not state.get("pulled") and not self.rehearsal
-        was_running = need_pull and self.data.backfill_running()
+        was_running = (need_pull or not self.resume_backfill) and self.data.backfill_running()
         if was_running:
             if not self.last_backfill_args:
                 raise RuntimeError("cannot pause a running backfill without its restart arguments")
@@ -195,7 +197,10 @@ class Nightly:
                 raise RuntimeError(f"no records for {day}: {out[-400:]}")
             records = [json.loads(line) for line in out.splitlines() if line.strip().startswith("{")]
         finally:
-            if state.get("resume_backfill") and not self.data.backfill_running():
+            if state.get("resume_backfill") and not self.resume_backfill:
+                state["resume_backfill_deferred"] = "post-burst bulk backfill paused; arguments retained for an authorized funded run"
+                self.persist()
+            elif state.get("resume_backfill") and not self.data.backfill_running():
                 self.check_lease()
                 self.data.start_backfill(state["resume_backfill"])
                 state.pop("resume_backfill")
@@ -310,14 +315,41 @@ except (OSError, ValueError):
             raise RuntimeError("could not read the backfill process state")
         return out.stdout.strip() == "yes"
 
-    def stop_backfill(self) -> None:
+    def backfill_receipt(self) -> dict[str, Any] | None:
         code = BACKFILL_IDENTITY + """
-import signal, time
+import json
+try:
+    pid = int(pathlib.Path('/data/work/backfill.pid').read_text())
+except FileNotFoundError:
+    print('null'); raise SystemExit(0)
+found = identity(pid)
+if found is None:
+    if pathlib.Path('/proc', str(pid)).exists():
+        raise SystemExit('backfill process identity is unreadable or changed')
+    print('null'); raise SystemExit(0)
+argv = pathlib.Path('/proc', str(pid), 'cmdline').read_bytes().decode().split('\\0')
+index = next(i for i, arg in enumerate(argv[:-1]) if pathlib.Path(arg).name == 'backfill.py' and argv[i+1] == 'run')
+print(json.dumps({'pid': pid, 'start': found[0], 'pgid': found[1], 'args': [x for x in argv[index+2:] if x]}))
+"""
+        result = self.api.exec(self.box_id, ["/opt/data-venv/bin/python", "-c", code], timeout=60).check()
+        row = json.loads(result.stdout)
+        if row is not None and (not isinstance(row, dict) or type(row.get("pid")) is not int
+                                or type(row.get("pgid")) is not int or not str(row.get("start", "")).isdigit()
+                                or not isinstance(row.get("args"), list)):
+            raise RuntimeError("invalid backfill process receipt")
+        return row
+
+    def stop_backfill(self, expected: Mapping[str, Any] | None = None) -> None:
+        code = BACKFILL_IDENTITY + """
+import json, signal, time
+expected = json.loads(EXPECTED_JSON)
 try:
     pid = int(pathlib.Path('/data/work/backfill.pid').read_text())
 except (OSError, ValueError):
     raise SystemExit(0)
 initial = identity(pid)
+if expected is not None and (pid != expected['pid'] or initial != (expected['start'], expected['pgid'])):
+    raise SystemExit('backfill ownership changed before stop')
 def alive():
     return initial is not None and identity(pid) == initial
 if initial is not None:
@@ -341,6 +373,7 @@ if initial is not None:
 if identity(pid) is not None:
     raise SystemExit('backfill identity changed during stop; retry under the operation lease')
 """
+        code = code.replace("EXPECTED_JSON", repr(json.dumps(expected)))
         self.api.exec(self.box_id, ["/opt/data-venv/bin/python", "-c", code], timeout=90).check()
 
     def start_backfill(self, args: str) -> None:
@@ -367,7 +400,7 @@ if identity(pid) is not None:
 
 
 def real_job(*, rehearsal_gate: str | None = None, api: Any = None,
-             check_lease: Callable[[], None] = lambda: None) -> Nightly:
+             check_lease: Callable[[], None] = lambda: None, resume_backfill: bool = True) -> Nightly:
     import boxlib as bl
 
     api = api or bl.client()
@@ -416,44 +449,276 @@ def real_job(*, rehearsal_gate: str | None = None, api: Any = None,
         return row["checkpoint_id"]
 
     def relay(day, handle):
-        from sip import relay_day
-
-        return relay_day(day, handle)
+        from sip import GatewayBars, relay_day
+        gateway = None
+        if isinstance(api, PaidNight):
+            config = json.loads((Path(__file__).resolve().parents[2] / "league/config.json").read_text())
+            gateway = GatewayBars(config["gateway_url"], os.environ.get("GATEWAY_TOKEN", ""),
+                                  deadline=api.deadline, clock=api.budget.clock, check=check_lease)
+        return relay_day(day, handle, gateway=gateway)
 
     return Nightly(data=data, gate=gate_handle, images=images, save=lambda d: bl.write_json(bl.IMAGES, d),
                    checkpoint=checkpoint, calendar=calendar, last_backfill_args=last_args, gym_box_ids=gym_ids,
-                   rehearsal=bool(rehearsal_gate), relay=relay, check_lease=check_lease)
+                   rehearsal=bool(rehearsal_gate), relay=relay, check_lease=check_lease, resume_backfill=resume_backfill)
 
 
-def run_real(day: dt.date | None = None, *, rehearsal_gate: str | None = None,
-             dry_run: bool = False) -> dict[str, Any]:
+def _run_real(day: dt.date | None = None, *, rehearsal_gate: str | None = None,
+              dry_run: bool = False, operation: Any = None) -> dict[str, Any]:
     import boxlib as bl
 
-    api = bl.client()
+    api = operation if operation is not None else bl.client()
     data_box = bl.data_box_id()
     bl.ensure_running(api, data_box)
     job = None
-    with bl.RemoteLease(api, data_box) as lease:
+    with bl.RemoteLease(operation.client if operation is not None else api, data_box) as lease:
+        def check():
+            lease.check()
+            if operation is not None:
+                operation.check()
         try:
             # Gate recovery/verification and code changes are covered by the same cross-host lease.
-            job = real_job(rehearsal_gate=rehearsal_gate, api=api, check_lease=lease.check)
-            lease.check()
+            job = real_job(rehearsal_gate=rehearsal_gate, api=api, check_lease=check, resume_backfill=operation is None)
+            check()
             bl.push_code(api, data_box)
             result = job.run(day, dry_run=dry_run)
-            job.gate.sleep(None)
-            if not job.data.backfill_running():
+            if operation is None:
+                job.gate.sleep(None)
+            if operation is None and not job.data.backfill_running():
                 job.data.sleep(next_wake(job.clock(), job.calendar).strftime("%Y-%m-%dT%H:%M:%SZ"))
         except BaseException:
             # Sleep only while we still own the gate. A lost lease may have a new controller.
             try:
-                if job is not None:
+                if job is not None and operation is None:
                     lease.check()
                     job.gate.sleep(None)
             except Exception:
                 pass
             raise
-    job.data.flush_sleep()  # release the data-box lease before putting its holder to sleep
+        finally:
+            if operation is not None:
+                operation.cleanup(lease)
+    if operation is None:
+        job.data.flush_sleep()  # legacy burst behavior
     return result
+
+
+class PaidNight:
+    """One exclusive data/Gate operation; holds survive a lost response or unconfirmed cleanup."""
+    def __init__(self, api, budget, key, day, amount, deadline, record=None):
+        from league.swarm.lifecycle import BoundedClient
+        self.client, self.budget, self.key = api, budget, key
+        self.deadline = deadline
+        self.record = record or {"key": key, "day": day.isoformat(), "amount": amount, "started": budget.clock(),
+                                 "deadline": deadline, "boxes": [], "pending_forks": [], "status": "running"}
+        self.bounded = BoundedClient(api, lambda: deadline, clock=budget.clock)
+        self.cleaned = False
+        self.save()
+
+    def save(self):
+        self.budget.store.put("nightly_operation", self.record)
+
+    def check(self):
+        from league.swarm.lifecycle import BudgetDeferred
+        if self.budget.clock() >= self.deadline - 120:
+            raise BudgetDeferred("nightly runtime bound reached")
+
+    def own(self, box):
+        from league.swarm.lifecycle import capacity
+        dims = capacity(self.client.get(box), float(self.budget.cfg.get("box_rate_usd_hour", .6)))
+        if box not in self.record["boxes"]:
+            self.record["boxes"].append(box)
+            self.save()
+        return dims
+
+    def __getattr__(self, name):
+        return getattr(self.bounded, name)
+
+    def resume(self, box, **kwargs):
+        self.own(box)
+        return self.bounded.resume(box, **kwargs)
+
+    def from_checkpoint(self, checkpoint, *, name, **kwargs):
+        from league.swarm.lifecycle import capacity
+        bound = (self.budget.store.get("checkpoint_capacities") or {}).get(checkpoint)
+        capacity(bound or {}, float(self.budget.cfg.get("box_rate_usd_hour", .6)))
+        # Exact persisted ownership before POST; a lost POST is found by this name alone.
+        name = "ltcm-nightly-" + hashlib.sha256(self.key.encode()).hexdigest()[:20]
+        self.record["pending_forks"].append(name)
+        self.save()
+        row = self.bounded.from_checkpoint(checkpoint, name=name, **kwargs)
+        box = row["sailbox_id"]
+        self.record["boxes"].append(box)  # own even an oversized bad fork, so cleanup can end it
+        self.record["pending_forks"].remove(name)
+        self.record["forks"] = int(self.record.get("forks", 0)) + 1
+        self.save()
+        self.own(box)
+        return row
+
+    def checkpoint(self, box, **kwargs):
+        before = self.own(box)
+        row = self.bounded.checkpoint(box, **kwargs)
+        after = self.own(box)
+        if before != after:
+            raise RuntimeError("gate capacity changed across its checkpoint")
+        with self.budget.store.atomic():
+            known = self.budget.store.get("checkpoint_capacities") or {}
+            known[row["checkpoint_id"]] = {**after, "source": "exclusive nightly lease: same GET dimensions before/after checkpoint POST",
+                                          "checkpoint": row["checkpoint_id"], "verified_at": self.budget.clock()}
+            self.budget.store.put("checkpoint_capacities", known)
+        return row
+
+    def sleep(self, box, **kwargs):
+        # Nightly.run requests sleeps before it returns. Cleanup performs them together under ownership.
+        return {"deferred_to_owned_cleanup": True}
+
+    def cleanup(self, lease):
+        """Only under the data lease. Confirm sleeps; keep the lease until expiry to prevent a release/sleep race."""
+        import boxlib as bl
+        from league.swarm.lifecycle import BudgetDeferred
+        if self.record.get("status") == "cleaned":
+            return
+        data = bl.data_box_id()
+        lease.check()
+        self.record["lease_token"] = lease.token
+        self.record["owner_pid"] = os.getpid()
+        self.record["owner_start"] = Path("/proc/self/stat").read_text().rsplit(")", 1)[1].split()[19]
+        self.save()
+        lease.stop.set()
+        if lease.worker is not None:
+            lease.worker.join(timeout=65)
+            if lease.worker.is_alive():
+                raise BudgetDeferred("lease renewer did not stop; cannot sleep its data box")
+        lease.preserve_for_sleep = True
+        self.record["retry_not_before"] = self.budget.clock() + 2400
+        self.save()
+        if self.record["pending_forks"]:
+            rows = self.client.list_boxes(limit=1000)
+            for name in list(self.record["pending_forks"]):
+                found = [r for r in rows if r.get("name") == name]
+                if not found:
+                    continue  # it may still materialize; absence is not confirmed cancellation
+                for row in found:
+                    box = str(row.get("sailbox_id") or row.get("id"))
+                    if box not in self.record["boxes"]:
+                        self.record["boxes"].append(box)
+                self.record["forks"] = int(self.record.get("forks", 0)) + len(found)
+                self.record["pending_forks"].remove(name)
+            self.save()
+        errors = []
+        for box in sorted(set(self.record["boxes"]), key=lambda b: b == data):
+            try:
+                lease.check()
+                if box == data:
+                    lease.preserve_for_sleep = True
+                    self.record["retry_not_before"] = self.budget.clock() + 2400
+                    self.save()
+                self.client.sleep(box)
+                if self.client.get(box).get("status") not in ("sleeping", "paused", "terminated"):
+                    raise RuntimeError("sleep not confirmed")
+            except Exception as exc:
+                errors.append(f"{box}: {type(exc).__name__}")
+        if errors or self.record["pending_forks"]:
+            self.record.update(status="cleanup_pending", errors=errors, retry_not_before=self.budget.clock() + 2400)
+            self.save()
+            raise BudgetDeferred("nightly cleanup is unresolved; its commitment remains held")
+        elapsed = max(0, self.budget.clock() - float(self.record["started"]))
+        charge = (max(2, len(set(self.record["boxes"]))) * float(self.budget.cfg.get("box_rate_usd_hour", .6)) * elapsed / 3600
+                  + int(self.record.get("forks", 0)) * float(self.budget.cfg.get("box_creation_usd", .012)))
+        with self.budget.store.atomic():
+            self.budget.store.add_spend("data_box", charge, detail={"budget_key": self.key, "seconds": elapsed,
+                                       "basis": "capacity bound; both owned boxes; confirmed sleeping"})
+            self.budget.charge(self.key, charge, final=True)
+            self.record.update(status="cleaned", charge_usd=charge)
+            self.save()
+        self.cleaned = True
+
+
+def run_real(day: dt.date | None = None, *, rehearsal_gate: str | None = None, dry_run: bool = False,
+             budget_root: Path | None = None) -> dict[str, Any]:
+    """The automatic and manual paid paths share the House's budget after the burst."""
+    import boxlib as bl
+    from league.swarm import settings as swarm_settings
+    from league.swarm.lifecycle import BudgetDeferred, SailBudget, capacity, number
+    from league.swarm.store import SwarmStore
+
+    root = Path(budget_root) if budget_root is not None else bl.STATE_DIR.parent
+    cfg = swarm_settings.load(root)
+    end = dt.datetime.fromisoformat(cfg["guard"]["burst_until"].replace("Z", "+00:00")).timestamp()
+    if not (root / "swarm.sqlite").exists():
+        if time.time() < end:
+            return _run_real(day, rehearsal_gate=rehearsal_gate, dry_run=dry_run)
+        raise BudgetDeferred("post-burst nightly work requires the House budget ledger")
+    store = SwarmStore(root, clock=time.time)
+    try:
+        budget = SailBudget(store, cfg)
+        if budget.burst():
+            return _run_real(day, rehearsal_gate=rehearsal_gate, dry_run=dry_run)
+        if day is None:
+            calendar = sl.Calendar.from_json(bl.read_json(bl.STATE_DIR / "calendar.json")["exceptions"])
+            day = target_day(dt.datetime.now(dt.timezone.utc), calendar)
+        cached = (store.get("nightly_results") or {}).get(day.isoformat())
+        if cached is not None and not rehearsal_gate:
+            return cached
+        old = store.get("nightly_operation") or {}
+        if time.time() < float(old.get("retry_not_before") or 0):
+            raise BudgetDeferred("prior nightly owner retained the sleeping lease until its expiry")
+        if old.get("status") in ("running", "cleanup_pending"):
+            if old.get("status") == "running" and time.time() < float(old.get("deadline") or 0):
+                raise BudgetDeferred("prior nightly operation still owns a commitment or sleeping lease")
+            api = bl.client()
+            op = PaidNight(api, budget, old["key"], dt.date.fromisoformat(old["day"]), old["amount"], old["deadline"], record=old)
+            # No fresh paid job until the previous exact ownership is resolved under the operation lease.
+            bl.ensure_running(api, bl.data_box_id())
+            with bl.RemoteLease(api, bl.data_box_id()) as lease:
+                op.cleanup(lease)
+            raise BudgetDeferred("prior nightly operation cleaned; retry from its durable stage record")
+        api = bl.client()
+        data = bl.data_box_id()
+        capacity(api.get(data), float(budget.cfg.get("box_rate_usd_hour", .6)))
+        images = bl.read_json(bl.IMAGES)
+        gate = rehearsal_gate or ((images.get("gate") or {}).get("current") or {}).get("box_id")
+        if not gate:
+            raise BudgetDeferred("no owned gate image is configured")
+        try:
+            gate_row = api.get(gate)
+        except Exception as exc:
+            if getattr(exc, "status", None) != 404:
+                raise
+            gate_row = {"status": "terminated"}
+        if gate_row.get("status") not in ("terminated", "terminating", "failed", "create_failed"):
+            capacity(gate_row, float(budget.cfg.get("box_rate_usd_hour", .6)))
+        else:
+            checkpoint = images["gate"].get("current_checkpoint") or images["gate"]["current"]["checkpoints"][0]
+            capacity((store.get("checkpoint_capacities") or {}).get(checkpoint) or {}, float(budget.cfg.get("box_rate_usd_hour", .6)))
+        status = budget.status()
+        amount = min(float(budget.cfg.get("maintenance_usd", {}).get("nightly", 0)), status["room_usd"],
+                     max(0., status["maintenance"].get("nightly", 0) - status["buckets"]["nightly"]))
+        rate = float(budget.cfg.get("box_rate_usd_hour", .6))
+        fee = number(budget.cfg.get("box_creation_usd", .012))
+        if fee < .012:
+            raise BudgetDeferred("nightly creation fee bound is below the observed l-box rate")
+        duration = min(10800, number(budget.cfg.get("nightly_max_seconds", 10800)), (amount - fee) / (2 * rate) * 3600)
+        if duration < 300:
+            raise BudgetDeferred("nightly budget cannot fund a bounded work interval")
+        key = f"nightly:{day}:{uuid.uuid4().hex}"
+        with store.atomic():
+            if (store.get("nightly_operation") or {}) != old:
+                raise BudgetDeferred("nightly controller state changed during admission; retry")
+            budget.reserve(key, amount, kind="data_box", bucket="nightly", detail={"day": day.isoformat()})
+            op = PaidNight(api, budget, key, day, amount, time.time() + duration)
+        op.own(data)
+        if gate_row.get("status") not in ("terminated", "terminating", "failed", "create_failed"):
+            op.own(gate)
+        result = _run_real(day, rehearsal_gate=rehearsal_gate, dry_run=dry_run, operation=op)
+        result["resources"] = (store.get("checkpoint_capacities") or {}).get(result.get("checkpoint"))
+        if not rehearsal_gate and not dry_run:
+            with store.atomic():
+                results = store.get("nightly_results") or {}
+                results[day.isoformat()] = result
+                store.put("nightly_results", results)
+        return result
+    finally:
+        store.close()
 
 
 def publish_ready(path: Path, result: Mapping[str, Any], now: dt.datetime) -> dict[str, Any]:
@@ -467,6 +732,8 @@ def publish_ready(path: Path, result: Mapping[str, Any], now: dt.datetime) -> di
         raise ValueError("only forward days can be published")
     document = {"schema": 1, "gate_checkpoint": result["checkpoint"], "day": day.isoformat(),
                 "ready_at": now.isoformat(), "roots": list(result.get("roots") or ())}
+    if result.get("resources"):
+        document["resources"] = result["resources"]
     previous = bl.read_json(path)
     if str(previous.get("day", "")) <= day.isoformat():
         bl.write_json(path, document)
@@ -519,6 +786,7 @@ def daemon(state: Path, ready_file: Path, *, poll: float = 30.0) -> int:
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: stop.set())
     status: dict[str, Any] = {"phase": "starting"}
+    cutoff_status: dict[str, Any] = {"status": "starting"}
     release = str(Path(__file__).resolve().parents[2])
     start = Path("/proc/self/stat").read_text().rsplit(")", 1)[1].split()[19]
     identity = {"pid": os.getpid(), "start": start, "release": release}
@@ -526,14 +794,35 @@ def daemon(state: Path, ready_file: Path, *, poll: float = 30.0) -> int:
     def heartbeat():
         while not finished.is_set():
             bl.write_json(state / "nightly.heartbeat", {**identity, "at": time.time(), **status,
+                                                       "completion_cutoff": dict(cutoff_status),
                                                        "state": status.get("phase"),
                                                        "busy": status.get("phase") == "running"})
             finished.wait(30)
 
+    def watch_cutoff():
+        # A Completion call can be waiting on remote work while the burst ends. This independent,
+        # bounded cleanup observer keeps the already running backfill from escaping the transition.
+        from burst_cutoff import Cutoff
+        from league.swarm import settings as swarm_settings
+        from league.swarm.store import SwarmStore
+        store = SwarmStore(ready_file.parent)
+        try:
+            cutoff = Cutoff(state, store, swarm_settings.load(ready_file.parent))
+            while not finished.is_set():
+                try:
+                    result = cutoff.tick()
+                except Exception as exc:
+                    result = {"status": "unavailable", "error": f"{type(exc).__name__}: {str(exc)[:300]}"}
+                cutoff_status.clear()
+                cutoff_status.update(result)
+                finished.wait(30)
+        finally:
+            store.close()
+
     def run(day):
         status.clear()
         status.update({"phase": "running", "day": day.isoformat()})
-        return run_real(day)
+        return run_real(day, budget_root=ready_file.parent)
 
     with process_lock(state / "nightly.lock") as lock:
         lock.seek(0)
@@ -544,6 +833,8 @@ def daemon(state: Path, ready_file: Path, *, poll: float = 30.0) -> int:
         (state / "nightly.pid").write_text(str(os.getpid()))
         worker = threading.Thread(target=heartbeat, daemon=True)
         worker.start()
+        cutoff_worker = threading.Thread(target=watch_cutoff, daemon=True, name="completion-cutoff")
+        cutoff_worker.start()
         controller = Controller(state, ready_file, calendar, run=run)
         try:
             while not stop.is_set() and not (state / "nightly.stop").exists():
@@ -553,6 +844,19 @@ def daemon(state: Path, ready_file: Path, *, poll: float = 30.0) -> int:
                 if (not stop.is_set() and not (state / "nightly.stop").exists()
                         and bl.read_json(state / "completion-config.json").get("enabled") is True):
                     from complete import Completion
+                    from league.swarm import settings as swarm_settings
+                    from league.swarm.lifecycle import Lifecycle
+                    from league.swarm.store import SwarmStore
+
+                    budget_store = SwarmStore(ready_file.parent)
+                    try:
+                        burst = Lifecycle(budget_store, swarm_settings.load(ready_file.parent)).burst()
+                    finally:
+                        budget_store.close()
+                    if not burst:
+                        status.update(completion="deferred", completion_error="bulk store completion is outside the post-burst maintenance allocation")
+                        stop.wait(poll)
+                        continue
 
                     status.clear()
                     status.update({"phase": "running", "job": "store-completion"})
@@ -606,6 +910,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(run_real(dt.date.fromisoformat(args.day), rehearsal_gate=args.gate_box), indent=1, default=str))
         return 0
     if args.cmd == "schedule":
+        # A scheduled wake cannot reserve tomorrow's dollars. After the burst the House daemon
+        # owns wake/sleep under that day's ledger and exclusive operation lease.
+        import boxlib as bl
+        from league.swarm import settings as swarm_settings
+        from league.swarm.lifecycle import Lifecycle
+        from league.swarm.store import SwarmStore
+        root = bl.STATE_DIR.parent
+        cfg = swarm_settings.load(root)
+        burst = time.time() < dt.datetime.fromisoformat(cfg["guard"]["burst_until"].replace("Z", "+00:00")).timestamp()
+        if (root / "swarm.sqlite").exists():
+            store = SwarmStore(root, clock=time.time)
+            try:
+                burst = Lifecycle(store, cfg).burst()
+            finally:
+                store.close()
+        if not burst:
+            print("the House nightly controller will wake the data box after reserving the current period's budget")
+            return 0
         job = real_job()
         if job.data.backfill_running():
             print("the backfill is running; the data box stays awake")

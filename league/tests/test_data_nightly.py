@@ -7,7 +7,13 @@ import datetime as dt
 import hashlib
 import json
 import sys
+import subprocess
 import tempfile
+import threading
+import copy
+from contextlib import ExitStack
+from types import SimpleNamespace
+from unittest import mock
 import unittest
 from pathlib import Path
 
@@ -367,6 +373,7 @@ class Schedule(unittest.TestCase):
             controller = nt.Controller(root, root / "ready.json", calendar(), run=run, clock=lambda: now[0])
             self.assertEqual(controller.tick()["phase"], "retry")
             self.assertFalse((root / "ready.json").exists())
+
             self.assertEqual(controller.tick()["phase"], "retry")
             self.assertEqual(len(calls), 1)
             now[0] += dt.timedelta(minutes=5)
@@ -390,3 +397,194 @@ class Schedule(unittest.TestCase):
             with self.assertRaises(ValueError):
                 nt.publish_ready(root / "ready.json", {"day": "2026-09-28"}, controller.clock())
             self.assertFalse((root / "ready.json").exists())
+
+
+
+class PaidNights(unittest.TestCase):
+    def setUp(self):
+        import boxlib as bl
+        from league.swarm import settings
+        from league.swarm.lifecycle import SailBudget
+        from league.swarm.store import SwarmStore
+        from league.tests.swarm_fakes import Clock
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.clock = Clock(dt.datetime(2026, 9, 29, 6, tzinfo=UTC).timestamp())
+        self.store = SwarmStore(self.root, clock=self.clock)
+        self.addCleanup(self.store.close)
+        self.cfg = copy.deepcopy(settings.DEFAULTS)
+        self.budget = SailBudget(self.store, self.cfg, clock=self.clock)
+        self.store.put("guard", {"braked": False, "last_ok": self.clock()})
+        self.budget.refresh()
+        self.stack = ExitStack()
+        self.addCleanup(self.stack.close)
+        self.stack.enter_context(bl.using_state(self.root / "data"))
+        bl.write_json(bl.DATA_BOX, {"box_id": "sb_data"})
+        bl.write_json(bl.IMAGES, {"gate": {"current": {"box_id": "sb_gate"}, "current_checkpoint": "sbcp_old"}})
+        self.api = self.API()
+        self.stack.enter_context(mock.patch("boxlib.client", return_value=self.api))
+        self.stack.enter_context(mock.patch("boxlib.RemoteLease", self.Lease))
+        self.stack.enter_context(mock.patch("nightly.time.time", side_effect=self.clock))
+        self.day = dt.date(2026, 9, 28)
+
+    class API:
+        def __init__(self):
+            self.status = {"sb_data": "running", "sb_gate": "running"}
+            self.sleeps = []
+            self.fail_sleep = set()
+            self.dimensions = {"vcpu_count": 8, "memory_mib": 32768, "state_disk_size_gib": 256}
+        def get(self, box):
+            return {"sailbox_id": box, "status": self.status[box], **self.dimensions}
+        def sleep(self, box, **kwargs):
+            self.sleeps.append(box)
+            if box in self.fail_sleep:
+                raise OSError("lost sleep response")
+            self.status[box] = "sleeping"
+            return {"status": "sleeping"}
+        def resume(self, box, **kwargs):
+            self.status[box] = "running"
+        def checkpoint(self, box, **kwargs):
+            return {"checkpoint_id": "sbcp_new", "sailbox_id": box}
+        def list_boxes(self, **kwargs):
+            return []
+
+    class Lease:
+        def __init__(self, *args):
+            self.token = "synthetic-owner-token"
+            self.stop = threading.Event()
+            self.worker = None
+            self.preserve_for_sleep = False
+            self.failed = False
+        def check(self):
+            if self.failed:
+                raise RuntimeError("lease lost")
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            self.stop.set()
+
+    def execute(self, day, *, operation, **kwargs):
+        operation.checkpoint("sb_gate")
+        self.clock.advance(30)
+        lease = self.Lease()
+        operation.cleanup(lease)
+        self.assertTrue(lease.stop.is_set(), "renewer stops before the data sleep")
+        self.assertTrue(lease.preserve_for_sleep)
+        return {"day": str(day), "checkpoint": "sbcp_new", "roots": ["SPY"]}
+
+    def test_confirmed_cleanup_settles_and_restart_reuses_completed_result_without_dispatch(self):
+        with mock.patch("nightly._run_real", side_effect=self.execute) as run:
+            first = nt.run_real(self.day, budget_root=self.root)
+            second = nt.run_real(self.day, budget_root=self.root)
+        self.assertEqual(first, second)
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(self.api.sleeps, ["sb_gate", "sb_data"])
+        self.assertEqual(self.budget.status()["held_usd"], 0)
+        self.assertAlmostEqual(self.budget.status()["actual_usd"], .01)
+        self.assertEqual(first["resources"]["checkpoint"], "sbcp_new")
+        self.assertIn("exclusive nightly lease", first["resources"]["source"])
+
+    def test_failed_sleep_retains_hold_and_restart_waits_for_owner_expiry(self):
+        from league.swarm.lifecycle import BudgetDeferred
+        self.api.fail_sleep.add("sb_data")
+        with mock.patch("nightly._run_real", side_effect=self.execute) as run:
+            with self.assertRaises(BudgetDeferred):
+                nt.run_real(self.day, budget_root=self.root)
+            self.assertEqual(self.budget.status()["held_usd"], 3.65)
+            old = self.store.get("nightly_operation")
+            self.assertEqual(old["status"], "cleanup_pending")
+            self.assertEqual(old["lease_token"], "synthetic-owner-token")
+            with self.assertRaises(BudgetDeferred):
+                nt.run_real(self.day, budget_root=self.root)
+            self.assertEqual(run.call_count, 1)
+            self.assertEqual(len(self.api.sleeps), 2)
+            self.clock.t = old["retry_not_before"] + 1
+            self.api.fail_sleep.clear()
+            with self.assertRaisesRegex(BudgetDeferred, "cleaned"):
+                nt.run_real(self.day, budget_root=self.root)
+            self.assertEqual(run.call_count, 1, "takeover cleans first; it never repeats the paid dispatch")
+        self.assertEqual(self.budget.status()["held_usd"], 0)
+        self.assertEqual(self.store.get("nightly_operation")["status"], "cleaned")
+
+    def test_unavailable_allowance_never_dispatches_nightly_and_does_not_mark_complete(self):
+        from league.swarm.lifecycle import BudgetDeferred
+        self.store.add_spend("sail_model", 8)
+        with mock.patch("nightly._run_real") as run:
+            with self.assertRaises(BudgetDeferred):
+                nt.run_real(self.day, budget_root=self.root)
+            run.assert_not_called()
+        self.assertIsNone(self.store.get("nightly_results"))
+        self.assertEqual(self.api.sleeps, [])
+
+    def test_actual_oversized_box_is_refused_before_reservation_or_dispatch(self):
+        from league.swarm.lifecycle import BudgetDeferred
+        self.api.dimensions["vcpu_count"] = 16
+        with mock.patch("nightly._run_real") as run:
+            with self.assertRaises(BudgetDeferred):
+                nt.run_real(self.day, budget_root=self.root)
+            run.assert_not_called()
+        self.assertEqual(self.budget.status()["held_usd"], 0)
+
+    def test_interrupted_cleanup_does_not_sleep_without_ownership_or_release_hold(self):
+        self.budget.reserve("night", 3.65, kind="data_box", bucket="nightly")
+        op = nt.PaidNight(self.api, self.budget, "night", self.day, 3.65, self.clock() + 10800)
+        op.own("sb_data")
+        op.own("sb_gate")
+        lease = self.Lease()
+        lease.failed = True
+        with self.assertRaises(RuntimeError):
+            op.cleanup(lease)
+        self.assertEqual(self.api.sleeps, [])
+        self.assertEqual(self.budget.status()["held_usd"], 3.65)
+
+    def test_post_burst_paused_backfill_keeps_its_resume_arguments(self):
+        data = FakeData(self.day, running=True)
+        images = {}
+        instance, _, _ = job(data, FakeGate(), images, now=dt.datetime(2026, 9, 29, 6, 5, tzinfo=UTC))
+        instance.resume_backfill = False
+        instance.run(self.day)
+        saved = images["gate"]["forward_days"][str(self.day)]
+        self.assertEqual(saved["resume_backfill"], "--stages 1,2")
+        self.assertIn("post-burst", saved["resume_backfill_deferred"])
+        self.assertFalse(data.running)
+        self.assertFalse(any(isinstance(c, tuple) and c[0] == "start" for c in data.calls))
+
+    def test_schedule_cannot_prebook_an_unfunded_future_wake(self):
+        with mock.patch("nightly.real_job") as factory, mock.patch("builtins.print"):
+            self.assertEqual(nt.main(["schedule"]), 0)
+            factory.assert_not_called()
+
+    def test_absolute_cli_works_outside_the_release_without_installed_league(self):
+        root = self.root / "standalone"
+        root.mkdir()
+        (root / "swarm.json").write_text(json.dumps({"guard": {"burst_until": "2020-01-01T00:00:00Z"}}))
+        result = subprocess.run([sys.executable, "-I", str(DATA / "nightly.py"), "--state", str(root / "data"), "schedule"],
+                                cwd=root, capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("after reserving", result.stdout)
+
+    def test_real_remote_lease_exit_does_not_wake_or_release_a_sleeping_lease(self):
+        # Restore the class saved before setUp's fake, and call its actual exit logic.
+        from scripts.data.boxlib import RemoteLease
+        lease = RemoteLease(self.api, "sb_data")
+        lease.preserve_for_sleep = True
+        with mock.patch.object(lease, "command") as command:
+            lease.__exit__(None, None, None)
+            command.assert_not_called()
+        self.assertTrue(lease.stop.is_set())
+
+    def test_stop_checks_the_expected_identity_again_inside_the_signal_command(self):
+        expected = {"pid": 123, "start": "old", "pgid": 123, "args": []}
+        signals = []
+        class API:
+            def exec(self, box, command, **kwargs):
+                code = command[-1]
+                scope = {"identity": lambda pid: ("replacement", 123),
+                         "pathlib": SimpleNamespace(Path=lambda _: SimpleNamespace(read_text=lambda: "123")),
+                         "os": SimpleNamespace(kill=lambda *a: signals.append(a), killpg=lambda *a: signals.append(a))}
+                exec(code.removeprefix(nt.BACKFILL_IDENTITY), scope)
+                raise AssertionError("the replacement identity must stop the command before signaling")
+        with self.assertRaisesRegex(SystemExit, "ownership changed"):
+            nt.BoxHandle(API(), "sb_owned").stop_backfill(expected=expected)
+        self.assertEqual(signals, [])

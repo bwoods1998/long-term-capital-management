@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import re
 import sys
+import time
 from typing import Any, Callable
 import urllib.error
 import urllib.parse
@@ -40,7 +41,9 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 class GatewayBars:
     """Only the gateway's allowlisted, read-only stock-bars endpoint."""
 
-    def __init__(self, base: str, token: str, *, opener: Any = None):
+    def __init__(self, base: str, token: str, *, opener: Any = None,
+                 deadline: float | None = None, clock: Callable[[], float] = time.time,
+                 check: Callable[[], None] = lambda: None):
         parsed = urllib.parse.urlsplit(base)
         if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
             raise SIPError('invalid gateway base URL')
@@ -49,6 +52,7 @@ class GatewayBars:
         self.url = base.rstrip('/') + '/v1/alpaca/v2/stocks/bars'
         self.token = token
         self.opener = opener or urllib.request.build_opener(NoRedirect())
+        self.deadline, self.clock, self.check = deadline, clock, check
 
     def fetch(self, symbols: list[str], day: dt.date, hours: tuple[int, int]) -> dict[str, list[dict]]:
         start = dt.datetime.combine(day, dt.time(), NY) + dt.timedelta(minutes=hours[0])
@@ -59,11 +63,15 @@ class GatewayBars:
         rows: dict[str, list[dict]] = {symbol: [] for symbol in symbols}
         seen_tokens = set()
         for _ in range(100):
+            self.check()
+            timeout = 60 if self.deadline is None else min(60, self.deadline - self.clock() - 120)
+            if timeout <= 0:
+                raise SIPError('nightly SIP relay deadline reached')
             request = urllib.request.Request(self.url + '?' + urllib.parse.urlencode(params), method='GET',
                                              headers={'Authorization': 'Bearer ' + self.token,
                                                       'User-Agent': 'ltcm-sip-relay/1'})
             try:
-                with self.opener.open(request, timeout=60) as response:
+                with self.opener.open(request, timeout=timeout) as response:
                     page = json.load(response)
             except urllib.error.HTTPError as error:
                 raise SIPError(f'gateway stock bars returned HTTP {error.code}') from None
