@@ -270,9 +270,12 @@ Expiring equity structures with a leg in or within 1% of the money are the House
 minutes before the close cutoff (15:00 ET for most roots, 15:15 for SPY and QQQ): a program's own
 close is cancelled for the forced one; index structures settle in cash. A family moved onto real money
 trades it from the next session; a Candidate whose typical maximum loss is unknown stays shadow-only
-(`live.band` rows with `held` say why, once a day). Each real instance has 60 orders a day (the Gym's);
-a program's closes and cancels keep room for the House's own exits under 250 legs, and the gateway
-stops opens at 250 orders while exits go on to 300.
+(`live.band` rows with `held` say why, once a day). A Probe becomes Sized only after five real Probe
+trades and a whole session at Probe. Each real instance has 60 orders a day (the Gym's), charged for
+orders that reached the venue and checked for opens only: an exit is never refused on it. A program's
+closes (and cancels of its closes) keep room for the House's own exits under 250 legs, and the gateway
+stops opens at 250 orders while exits go on to 300. An exit waiting for its contracts is kept across a
+restart and dropped at the day's end (its program is told).
 
 **Turning real money on** (M4b): the gateway deployed with the caps by maximum loss and
 `OPTION_STRUCTURES_REAL` set to the five types; a second owner deploy with `real_money` true (the
