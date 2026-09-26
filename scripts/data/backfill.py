@@ -383,8 +383,30 @@ def run_task(task: sl.Task, theta: Theta, store: Store, calendar: sl.Calendar) -
         if not expiries:
             return {"status": "empty", "why": "no contracts quoted"}
         store.save_expiries(task.root, task.day, expiries)
-        chunks = theta.call_raw("option_history_quote", task.root, "*", interval="1m", date=task.day,
-                                strike_range=rng, max_dte=sl.MAX_DTE, **window)
+        source = f"thetadata option_history_quote 1m exp=* max_dte={sl.MAX_DTE} strike_range={rng}"
+        try:
+            chunks = theta.call_raw("option_history_quote", task.root, "*", interval="1m", date=task.day,
+                                    strike_range=rng, max_dte=sl.MAX_DTE, **window)
+        except Exception as error:  # noqa: BLE001 - one server-side defect has been seen (XSP 2022-06-29)
+            if _grpc_code(error) != "INVALID_ARGUMENT":
+                raise
+            # ThetaData answered the bulk request with "Wrong number of data fields": ask expiry by
+            # expiry, and keep what each answers; an expiry that still fails is recorded, not faked.
+            log.warning("%s: bulk quote refused (%s); fetching by expiry", task.id, str(error)[:120])
+            chunks, refused = [], []
+            for expiry in [e for e in expiries if (e - task.day).days <= sl.MAX_DTE]:
+                try:
+                    part = theta.call_raw("option_history_quote", task.root, expiry, interval="1m", date=task.day,
+                                          strike_range=rng, **window)
+                except Exception as inner:  # noqa: BLE001
+                    if _grpc_code(inner) != "INVALID_ARGUMENT":
+                        raise
+                    refused.append(expiry.isoformat())
+                    continue
+                if part:
+                    chunks.append(part)
+            source = (f"thetadata option_history_quote 1m by expiry (bulk refused) max_dte={sl.MAX_DTE} strike_range={rng}"
+                      + (f"; refused expiries {','.join(refused)}" if refused else ""))
         stats: dict[str, int] = {}
         if chunks:
             built = _offload(build_nbbo, chunks, task.day, str(store.path("nbbo", task.root, task.day)),
@@ -393,8 +415,7 @@ def run_task(task: sl.Task, theta: Theta, store: Store, calendar: sl.Calendar) -
             stats = built["stats"]
             if built["rows"]:
                 written.append(sl.file_record("nbbo", task.root, task.day, rows=built["rows"], sha256=built["sha256"],
-                                              size=built["bytes"], fetched_at=fetched,
-                                              source=f"thetadata option_history_quote 1m exp=* max_dte={sl.MAX_DTE} strike_range={rng}"))
+                                              size=built["bytes"], fetched_at=fetched, source=source))
         under = None
         for expiry in [e for e in expiries if e >= task.day][:3]:
             # Calls only: the same underlying series at half the request time (measured Sept 26).

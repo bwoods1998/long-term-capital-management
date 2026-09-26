@@ -63,7 +63,10 @@ chmod 700 /data/secrets
 
 
 def _key_source() -> str:
-    from ltcm.provider import _key_from_env_file  # the floor's parser: owner-only files, one key
+    try:  # the floor's parser: owner-only regular files, exactly one key
+        from league.sailbox import _key_from_env_file  # type: ignore
+    except ImportError:  # pragma: no cover - before the prune
+        from ltcm.provider import _key_from_env_file
 
     key = os.environ.get("SAIL_API_KEY", "").strip()
     if key:

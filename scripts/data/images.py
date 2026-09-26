@@ -195,15 +195,16 @@ def checkpoint_with_retry(api: Any, box: str, *, name: str, ttl_seconds: int, at
 
 
 def wait_until_complete(kind: str, *, poll: float = 120.0, api: Any = None, sleep: Callable[[float], None] = time.sleep,
-                        log: Callable[[str], None] = say) -> dict[str, Any]:
+                        log: Callable[[str], None] = say, needs: tuple[int, ...] | None = None) -> dict[str, Any]:
     """Block until the data box's progress shows every stage this image needs as complete."""
     api = api or bl.client()
     box = bl.data_box_id()
     last = None
+    needs = tuple(needs or KINDS[kind]["needs_stages"])
     while True:
         try:
             progress = json.loads(api.download(box, "/data/work/progress.json"))
-            rows = {str(s): (progress.get("stages") or {}).get(str(s)) or {} for s in KINDS[kind]["needs_stages"]}
+            rows = {str(s): (progress.get("stages") or {}).get(str(s)) or {} for s in needs}
             if all(r.get("planned") and r.get("done", 0) >= r["planned"] for r in rows.values()):
                 log(f"{kind}: stages {sorted(rows)} complete at {bl.now()}")
                 return rows
@@ -217,7 +218,8 @@ def wait_until_complete(kind: str, *, poll: float = 120.0, api: Any = None, slee
 
 
 def build(kind: str, *, version: str, force: bool, api: Any = None, sleep: Callable[[float], None] = time.sleep,
-          ttl_days: int = 365, rehearsal: bool = False, keep: bool = False) -> dict[str, Any]:
+          ttl_days: int = 365, rehearsal: bool = False, keep: bool = False,
+          needs: tuple[int, ...] | None = None) -> dict[str, Any]:
     """Build one image. `rehearsal` runs every step on whatever the store holds now, then
     terminates the fork and records the result under `rehearsals` (never as the current image).
     One build at a time: each stops and restarts the data box's backfill around its checkpoint."""
@@ -227,13 +229,15 @@ def build(kind: str, *, version: str, force: bool, api: Any = None, sleep: Calla
     with open(bl.STATE_DIR / "images.lock", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         return _build(kind, version=version, force=force, api=api, sleep=sleep, ttl_days=ttl_days,
-                      rehearsal=rehearsal, keep=keep)
+                      rehearsal=rehearsal, keep=keep, needs=needs)
 
 
 def _build(kind: str, *, version: str, force: bool, api: Any, sleep: Callable[[float], None],
-           ttl_days: int, rehearsal: bool, keep: bool) -> dict[str, Any]:
+           ttl_days: int, rehearsal: bool, keep: bool, needs: tuple[int, ...] | None = None) -> dict[str, Any]:
     api = api or bl.client()
-    spec = KINDS[kind]
+    spec = dict(KINDS[kind])
+    if needs:
+        spec["needs_stages"] = tuple(needs)
     errors: list[dict[str, Any]] = []
     data_box = bl.data_box_id()
     bl.ensure_running(api, data_box)
@@ -350,16 +354,19 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--rehearsal", action="store_true", help="every step on the store as it is; the fork is terminated")
     b.add_argument("--keep", action="store_true", help="with --rehearsal: leave the fork asleep (for a nightly rehearsal)")
     b.add_argument("--when-complete", action="store_true", help="wait until the data box holds what the image needs")
+    b.add_argument("--needs", default="", help="the stages that must be complete (default gym 1, gate 1,2); "
+                                                "Gym v2: 1,3,5 (2022 and the trade_quote samples)")
     v = sub.add_parser("verify")
     v.add_argument("kind", choices=sorted(KINDS))
     v.add_argument("--checkpoint", default=None)
     sub.add_parser("status")
     args = parser.parse_args(argv)
     if args.cmd == "build":
+        needs = tuple(int(x) for x in args.needs.split(",") if x.strip()) or None
         if args.when_complete:
-            wait_until_complete(args.kind)
+            wait_until_complete(args.kind, needs=needs)
         print(json.dumps(build(args.kind, version=args.version, force=args.force or args.rehearsal,
-                               ttl_days=args.ttl_days, rehearsal=args.rehearsal, keep=args.keep), indent=1))
+                               ttl_days=args.ttl_days, rehearsal=args.rehearsal, keep=args.keep, needs=needs), indent=1))
     elif args.cmd == "verify":
         print(json.dumps(verify(args.kind, args.checkpoint), indent=1))
     else:
