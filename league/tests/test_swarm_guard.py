@@ -63,6 +63,14 @@ class Guard(GuardCase):
         self.assertEqual(out["line"], 34.0)
         self.assertTrue(g.allows())
 
+    def test_the_operator_may_trust_the_configured_house_burn(self):
+        self.reading = (80.0, 34.0)
+        self.settings["guard"].update(measured_burn=False, house_burn_usd_day=3.0)
+        g = self.guard()
+        out = g.check()
+        self.assertEqual((out["house_day"], out["line"]), (3.0, 36.0))
+        self.assertTrue(g.allows())
+
     def test_release_needs_the_line_plus_a_margin(self):
         self.reading = (90.0, 34.0)
         g = self.guard()

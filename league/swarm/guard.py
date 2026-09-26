@@ -71,7 +71,11 @@ class SailGuard:
         balance = float(balance) if balance is not None else None
         burn = float(burn) if burn is not None else None
         swarm_day = self.store.spent(SWARM_SAIL_KINDS, since=now - 86400)
-        house = max(float(cfg.get("house_burn_usd_day", 2.0)), (burn - swarm_day) if burn is not None else 0.0)
+        # `measured_burn` (default): Sail's own 24-hour spend less the swarm's, never below the floor. It counts every
+        # other box on the account (the data box) and, for a day after a restart, whatever ran before it; false trusts the
+        # configured `house_burn_usd_day` alone (the operator's choice once the new House's burn is known).
+        measured = (burn - swarm_day) if burn is not None and cfg.get("measured_burn", True) else 0.0
+        house = max(float(cfg.get("house_burn_usd_day", 2.0)), measured)
         line = 2.0 * house + float(cfg.get("margin_usd", 30.0))
         burst_start = float(self.store.get("burst_started_at", now))
         burst_until = _epoch(cfg.get("burst_until", "2026-09-28T13:30:00Z"))
