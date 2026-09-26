@@ -111,6 +111,94 @@ class Determinism(unittest.TestCase):
         self.assertEqual(RS.merge(parts)["result_sha"], merged["result_sha"])
 
 
+# Buys the XSP 450 call (expiring D4) at 10:00 whenever it holds nothing; tags the trade with the sessions it
+# has seen (a STATE counter), so a warm-up's replayed days show in the tag.
+HOLDER = '''
+NEEDS = {"roots": ["XSP"], "dte": [0, 10], "band": 0.2, "cadence": 5, "start": 600}
+PARAMS = {}
+STATE = {"sessions": 0, "last": 10000}
+def decide(ctx):
+    if ctx.minute < STATE["last"]:
+        STATE["sessions"] += 1
+    STATE["last"] = ctx.minute
+    if not ctx.positions and not ctx.orders and ctx.minute == 600:
+        return [{"open": "long_call", "legs": [{"side": "long", "right": "C", "dte": 0, "strike": 450}], "qty": 1,
+                 "tag": str(STATE["sessions"])}]
+    return []
+'''
+
+
+@unittest.skipUnless(HAVE, "numpy/pyarrow not installed (requirements-gym.txt)")
+class SplitBoundaries(unittest.TestCase):
+    """A split run's inner boundaries are an accounting split: open positions valued at the mid with no fee, and
+    STATE warmed on the prior days without trading. Hand-computed; XSP (cash-settled) keeps the arithmetic short."""
+
+    D = [dt.date(2023, 3, 6), dt.date(2023, 3, 7), dt.date(2023, 3, 8), dt.date(2023, 3, 9)]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = tempfile.mkdtemp(prefix="gym-split-")
+        w = synth.Writer(cls.dir)
+        w.calendar(cls.D)
+        for day, (bid, ask) in zip(cls.D, ((2.00, 2.10), (1.80, 1.90), (1.20, 1.30), (0.60, 0.70))):
+            synth.flat_day(w, "XSP", day, [{"expiration": cls.D[3], "strike": 450, "right": "C", "quotes": {571: (bid, ask)}}],
+                           prices=450.5)
+        w.finish()
+        cls.store = S.Store(cls.dir)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.dir, ignore_errors=True)
+
+    def batch(self, split):
+        from league.gym import batch as B
+        doc = B.run_batch([("holder", HOLDER, {})], store_root=self.dir, window="train", roots=["XSP"], split=split)
+        [result] = doc["results"]
+        self.assertEqual(result["status"], "ok", result.get("runtime"))
+        return result
+
+    def test_a_segment_end_values_open_positions_at_the_mid_with_no_fee(self):
+        # A segment another continues (split_mark): bought D1 at 2.10 (fee 0.55: 0.0403 + 0.50, rounded up),
+        # valued at D1's closing mid 2.05 with no fee: (2.05 - 2.10) x 100 - 0.55 = -5.55.
+        [t] = E.run([R.load_program(HOLDER, name="h")], self.store, E.RunConfig(window="train", roots=("XSP",), split_mark=True),
+                    days=self.D[:1])[0]["trades"]
+        self.assertEqual((t["exit_reason"], t["entry"], t["exit"], t["fees"], t["pnl"]), ("split_mark", 2.10, 2.05, 0.55, -5.55))
+        # The window's end closes at the natural as before: sold at the 2.00 bid, fee 0.55: -10.00 - 1.10 = -11.10.
+        [t] = E.run([R.load_program(HOLDER, name="h")], self.store, E.RunConfig(window="train", roots=("XSP",)),
+                    days=self.D[:1])[0]["trades"]
+        self.assertEqual((t["exit_reason"], t["exit"], t["fees"], t["pnl"]), ("window_end", 2.00, 1.10, -11.10))
+
+    def test_split_two_by_hand(self):
+        whole, split = self.batch(1), self.batch(2)
+        # Unsplit: bought D1 at 2.10, settled D4 at intrinsic 0.50 (450.5 - 450): -160.00 - 0.55.
+        self.assertEqual([(t["exit_reason"], t["pnl"], t["tag"]) for t in whole["trades"]], [("settled", -160.55, "1")])
+        # Split in two (D1-D2, D3-D4): the first segment's position is valued at D2's closing mid 1.85 with no fee;
+        # the second segment's program replays D1 and D2 without trading (its STATE has seen 3 sessions on D3),
+        # buys D3 at 1.30 and is settled D4 at 0.50.
+        self.assertEqual([(t["exit_reason"], t["entry"], t["exit"], t["pnl"], t["tag"]) for t in split["trades"]],
+                         [("split_mark", 2.10, 1.85, -25.55, "1"), ("settled", 1.30, 0.50, -80.55, "3")])
+        # The daily P&L up to the boundary is the unsplit run's (the mid is where the day's equity marked it).
+        self.assertEqual([round(d[1], 2) for d in whole["daily"]], [-5.55, -20.0, -60.0, -75.0])
+        self.assertEqual([round(d[1], 2) for d in split["daily"]], [-5.55, -20.0, -5.55, -75.0])
+        self.assertAlmostEqual(sum(d[1] for d in split["daily"]), split["summary"]["pnl"], places=6)
+        # Deterministic: the same split gives the same hash.
+        self.assertEqual(self.batch(2)["result_sha"], split["result_sha"])
+        self.assertNotEqual(whole["run_id"], split["run_id"])
+
+    def test_warm_up_decides_but_never_trades(self):
+        cfg = E.RunConfig(window="train", roots=("XSP",), start=self.D[2], end=self.D[3], warmup=5)
+        [r] = E.run([R.load_program(HOLDER, name="h")], self.store, cfg)
+        # Only D1 and D2 precede D3 in the window: two warm-up days, then D3's first decision is its third session.
+        self.assertEqual([t["tag"] for t in r["trades"]], ["3"])
+        self.assertEqual(len(r["daily"]), 2)                          # no daily rows for warm-up days
+        self.assertEqual(r["fills"]["orders"], 1)                      # the warm-up's intents never became orders
+        self.assertEqual(r["data_version"], self.store.data_version(["XSP"], self.D))   # warm-up files are part of the data
+        [cold] = E.run([R.load_program(HOLDER, name="h")], self.store,
+                       E.RunConfig(window="train", roots=("XSP",), start=self.D[2], end=self.D[3]))
+        self.assertEqual([t["tag"] for t in cold["trades"]], ["1"])
+        self.assertNotEqual(cold["run_id"], r["run_id"])
+
+
 if __name__ == "__main__":
     unittest.main()
 

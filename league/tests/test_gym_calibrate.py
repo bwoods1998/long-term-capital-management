@@ -31,9 +31,11 @@ DV = dt.date(2025, 3, 3)
 def prints(rows):
     cols = {k: [] for k in ("expiration", "strike", "right", "ms_of_day", "price", "size", "condition", "exchange", "bid", "ask",
                             "bid_size", "ask_size")}
-    for minute, price, condition in rows:
+    for row in rows:
+        minute, price, condition = row[:3]
+        size = row[3] if len(row) > 3 else 1
         for k, v in (("expiration", D1), ("strike", 400.0), ("right", "C"), ("ms_of_day", minute * 60000 + 5000), ("price", price),
-                     ("size", 1), ("condition", condition), ("exchange", 1), ("bid", 1.00), ("ask", 1.10), ("bid_size", 10),
+                     ("size", size), ("condition", condition), ("exchange", 1), ("bid", 1.00), ("ask", 1.10), ("bid_size", 10),
                      ("ask_size", 10)):
             cols[k].append(v)
     return cols
@@ -71,6 +73,25 @@ class Calibration(unittest.TestCase):
         meta = table["meta"]["fitted_on"]
         self.assertEqual((meta["prints"], meta["multi"], meta["stock_option"]), (3, 1, 1))  # the 138 print is a stock-option package
         self.assertEqual(table["meta"]["conditions"], {18: 2, 130: 1, 138: 1})
+
+    def test_the_touch_counts_only_volume_through_the_displayed_queue(self):
+        # The NBBO file shows 100 contracts on each side (flat_day's default size). At the bid, 10:00 prints 60 and
+        # 40 (100 in all: the queue ahead, nothing left for a new order) and 10:05 prints 70 then 31 (101: one
+        # contract reaches the order). At the ask, 10:10 prints 150 in one trade. Multi-leg: a complex print of
+        # 101 at the bid at 10:20.
+        w = synth.Writer(self.dir)
+        w.trade_quote("SPY", D1, prints([(600, 1.00, 18, 60), (600, 1.00, 18, 40), (605, 1.00, 18, 70), (605, 0.99, 18, 31),
+                                         (610, 1.10, 18, 150), (620, 1.00, 130, 101)]))
+        table = CAL.fit(self.store, ["SPY"], days=[D1], min_exposure=10)
+        # Single-leg touch hits: 10:05 (a resting buy) and 10:10 (a resting sell); 10:00 is absorbed by the queue.
+        self.assertAlmostEqual(table["hazard"]["q0|s|d0|k0|t0"], round(CAL.wilson_lower(2, 118), 6))
+        # Multi-leg: one complex contract-minute through the queue, halved and capped by the single-leg rate.
+        self.assertAlmostEqual(table["hazard"]["q0|m|d0|k0|t0"], round(min(CAL.wilson_lower(2, 118), 0.5 * CAL.wilson_lower(1, 118)), 6))
+        # The touch is never credited more than a level inside the spread (q1, a quarter-spread short of the mid).
+        self.assertLessEqual(table["hazard"]["q0|s|d0|k0|t0"], table["hazard"]["q1|s|d0|k0|t0"])
+        # And the engine reads the fitted cell for a one-tick "mid" limit (q = -1).
+        model = F.FillModel.from_json(table)
+        self.assertEqual(model.p(-1.0, 1, 0, 0.0, 600), table["hazard"]["q0|s|d0|k0|t0"])
 
     def test_train_only(self):
         with self.assertRaises(S.StoreRefused):

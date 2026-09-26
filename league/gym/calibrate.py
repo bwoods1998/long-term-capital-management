@@ -14,6 +14,12 @@ its own NBBO. Cells are (level bucket, single or multi-leg, days to expiry, mone
 the same as `fills.cell`; each bucket is measured at its LEAST aggressive level (a quarter-spread
 bucket counts prints at or past its lower edge), so a fill is never credited to a price it did not reach.
 
+The touch (bucket 0: a buy resting at the bid, a sell at the ask, up to a quarter-spread short of the
+mid) is measured at the touch itself, where an order joins a queue: a contract-minute counts only when
+the prints at or through the touch in that minute add up to MORE contracts than the NBBO showed there
+at the minute's start (the queue ahead of an order arriving then), so the whole displayed queue traded
+before it. Prints at the touch that the queue absorbed fill nothing.
+
 Multi-leg: prints whose condition is a multi-leg execution (ThetaData's codes 130-134, 136, 137, 144,
 and the legacy 35 SPREAD, 36 STRADDLE, 38 COMBO; stock-option packages 135 and 138-143 are excluded)
 say how often complex orders trade on a contract, and where against its NBBO. A structure's package
@@ -46,6 +52,7 @@ from .store import Store, StoreRefused, contract_key, window_of
 MULTI_LEG = frozenset({35, 36, 38, 130, 131, 132, 133, 134, 136, 137, 144})
 STOCK_OPTION = frozenset({135, 138, 139, 140, 141, 142, 143})
 LEVELS = {1: -0.25, 2: 0.0, 3: 0.25, 4: 0.5, 5: 0.75}   # q bucket -> its least aggressive level
+TOUCH_BUCKET = 0                                         # measured at F.TOUCH, behind the displayed queue
 MULTI_HAIRCUT = 0.5
 LAPTOP_OUT = Path(__file__).resolve().parents[2] / ".data" / "gym" / "fill_model.json"
 
@@ -75,7 +82,7 @@ def _decode(code: int) -> tuple[int, int, int]:
 def fit(store: Store, roots: Sequence[str], *, days: Sequence[dt.date] | None = None, min_exposure: int = 300) -> dict:
     """The fitted table and what it was fitted on (see the module docstring)."""
     exposure: dict[int, float] = {}
-    hits = {cls: {q: {} for q in LEVELS} for cls in ("s", "m")}
+    hits = {cls: {q: {} for q in (TOUCH_BUCKET, *LEVELS)} for cls in ("s", "m")}
     seen = {"days": 0, "prints": 0, "single": 0, "multi": 0, "stock_option": 0, "dropped": 0}
     codes: dict[int, int] = {}
     for root in roots:
@@ -102,6 +109,7 @@ def fit(store: Store, roots: Sequence[str], *, days: Sequence[dt.date] | None = 
             bid = np.round(tq.column("bid").to_numpy().astype(np.float64), 4)
             ask = np.round(tq.column("ask").to_numpy().astype(np.float64), 4)
             cond = tq.column("condition").to_numpy().astype(np.int64)
+            size = tq.column("size").to_numpy().astype(np.int64)
             for c, n in zip(*np.unique(cond, return_counts=True)):
                 codes[int(c)] = codes.get(int(c), 0) + int(n)
             ok = ((idx >= 0) & (minute >= 1) & (minute < chain.minutes - 1) & (ask > bid) & (bid >= 0)
@@ -112,7 +120,7 @@ def fit(store: Store, roots: Sequence[str], *, days: Sequence[dt.date] | None = 
             ok &= ~np.isin(cond, list(STOCK_OPTION))
             seen["stock_option"] += int(np.isin(cond, list(STOCK_OPTION)).sum())
             seen["dropped"] += int((~ok).sum())
-            idx, minute, price, bid, ask, cond = idx[ok], minute[ok], price[ok], bid[ok], ask[ok], cond[ok]
+            idx, minute, price, bid, ask, cond, size = idx[ok], minute[ok], price[ok], bid[ok], ask[ok], cond[ok], size[ok]
             half = 0.5 * (ask - bid)
             pos = np.round((price - 0.5 * (ask + bid)) / half, 6)   # -1 at the bid, +1 at the ask
             multi = np.isin(cond, list(MULTI_LEG))
@@ -138,12 +146,25 @@ def fit(store: Store, roots: Sequence[str], *, days: Sequence[dt.date] | None = 
                         cells = pcell[sel][first]
                         for code, n in zip(*np.unique(cells, return_counts=True)):
                             hits[cls][q][int(code)] = hits[cls][q].get(int(code), 0.0) + float(n)
+                # The touch: a buy at the bid (a sell at the ask) behind the queue the NBBO showed at the minute.
+                for side, queue in ((pos <= F.TOUCH, chain.bid_size), (pos >= -F.TOUCH, chain.ask_size)):
+                    sel = mask & side
+                    if not sel.any():
+                        continue
+                    uniq, inverse = np.unique(key[sel], return_inverse=True)
+                    volume = np.bincount(inverse, weights=size[sel].astype(np.float64), minlength=uniq.size)
+                    ahead = np.zeros(uniq.size, dtype=np.float64)
+                    ahead[inverse] = queue[minute[sel], idx[sel]]
+                    cells = np.zeros(uniq.size, dtype=np.int64)
+                    cells[inverse] = pcell[sel]
+                    for code, n in zip(*np.unique(cells[volume > ahead], return_counts=True)):
+                        hits[cls][TOUCH_BUCKET][int(code)] = hits[cls][TOUCH_BUCKET].get(int(code), 0.0) + float(n)
     hazard: dict[str, float] = {}
     for code, n in exposure.items():
         if n < min_exposure:
             continue
         d, k, t = _decode(code)
-        for q in LEVELS:
+        for q in (TOUCH_BUCKET, *LEVELS):
             single = wilson_lower(hits["s"][q].get(code, 0.0), 2.0 * n)   # buys and sells: two exposures
             multi = min(single, MULTI_HAIRCUT * wilson_lower(hits["m"][q].get(code, 0.0), 2.0 * n))
             for cls, p in (("s", single), ("m", multi)):
@@ -154,7 +175,8 @@ def fit(store: Store, roots: Sequence[str], *, days: Sequence[dt.date] | None = 
             "meta": {"fitted_on": seen, "roots": list(roots), "cells_with_exposure": len(exposure),
                      "min_exposure": min_exposure, "conditions": dict(sorted(codes.items())),
                      "fitted_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
-                     "rule": "Wilson 95% lower bound; each level bucket at its least aggressive edge; multi-leg halved and capped by single"}}
+                     "rule": "Wilson 95% lower bound; each level bucket at its least aggressive edge; the touch (q0) only where "
+                             "the minute's volume there exceeded the displayed queue; multi-leg halved and capped by single"}}
 
 
 def main(argv: Sequence[str] | None = None) -> int:

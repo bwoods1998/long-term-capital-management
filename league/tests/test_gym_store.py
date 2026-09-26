@@ -74,6 +74,21 @@ class TheStore(unittest.TestCase):
         self.assertEqual(self.store.days("train", ["SPY"]), [D1])
         self.assertEqual(S.describe(self.store, "train", ["SPY", "QQQ"])["roots"]["QQQ"]["nbbo"], 0)
 
+    def test_how_far_the_chains_reach(self):
+        self.assertEqual(self.store.max_dte("SPY", D1), 1)
+        self.assertIsNone(self.store.max_dte("QQQ", D1))
+        report = S.describe(self.store, "train", ["SPY", "QQQ"])["roots"]
+        self.assertEqual((report["SPY"]["dte"], report["SPY"]["back_months"]), ([1, 1], 0.0))
+        self.assertEqual((report["QQQ"]["dte"], report["QQQ"]["back_months"]), (None, None))
+        # A back month merged into the day's file (the backfill's stage 6) is served and counted.
+        w = synth.Writer(self.dir)
+        far = D1 + dt.timedelta(days=42)
+        w.nbbo("SPY", D1, expiration=[D1, far], strike=[400.0, 400.0], right=["C", "C"], minute=[571, 571], bid=[2.0, 9.0],
+               ask=[2.1, 9.2], bid_size=[1, 1], ask_size=[1, 1])
+        self.assertEqual(self.store.max_dte("SPY", D1), 42)
+        self.assertEqual(list(self.store.chain("SPY", D1).dte), [0, 42])
+        self.assertEqual(S.describe(self.store, "train", ["SPY"])["roots"]["SPY"]["back_months"], 1.0)
+
     def test_trade_quote_is_train_only(self):
         with self.assertRaises(S.StoreRefused):
             self.store.trade_quote("SPY", dt.date(2025, 3, 3))

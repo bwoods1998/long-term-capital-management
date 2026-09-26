@@ -32,6 +32,13 @@ class CalibrationReceipt(unittest.TestCase):
             table["hazard"]["q2|s|d0|k0|t0"] = bad
             with self.assertRaises(ValueError):
                 calibration.model_receipt(json.dumps(table).encode())
+        # The touch cell (q0) is a valid key; a bucket the fill model does not have is not.
+        table["hazard"] = {"q0|s|d0|k0|t0": 0.01, "q0|m|d1|k2|t1": 0.002}
+        self.assertEqual(calibration.model_receipt(json.dumps(table).encode())["cells"], 2)
+        for key in ("q6|s|d0|k0|t0", "q-1|s|d0|k0|t0"):
+            table["hazard"] = {key: 0.01}
+            with self.assertRaises(ValueError):
+                calibration.model_receipt(json.dumps(table).encode())
 
     def test_both_images_receive_the_same_private_model_before_any_checkpoint(self):
         blob = json.dumps({"source": "league.gym.calibrate", "hazard": {"q2|s|d0|k0|t0": 0.1},

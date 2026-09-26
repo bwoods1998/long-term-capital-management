@@ -37,7 +37,8 @@ def model_receipt(blob: bytes) -> dict[str, Any]:
     if not isinstance(hazard, dict):
         raise ValueError("calibration has no hazard table")
     for key, value in hazard.items():
-        if (not re.fullmatch(r"q[1-5]\|[sm]\|d[0-9]+\|k[0-9]+\|t[0-9]+", key)
+        # q0 is the touch (league/gym/fills.py, Sept 27, 2026); q1-q5 the levels from a quarter-spread short of the mid.
+        if (not re.fullmatch(r"q[0-5]\|[sm]\|d[0-9]+\|k[0-9]+\|t[0-9]+", key)
                 or isinstance(value, bool) or not isinstance(value, (float, int))
                 or not math.isfinite(value) or not 0 <= value <= 1):
             raise ValueError("invalid calibrated hazard")

@@ -301,8 +301,9 @@ def decide(ctx):
             prices={570: 450.0, 960: 452.30}, extra={"settle": 452.80}))
         [t] = self.run_one(store, self.CARRY.replace('"dte": 1', '"dte": 0'), roots=("XSP",))["trades"]
         self.assertEqual((t["exit"], t["exit_reason"]), (-0.80, "settled"))
+        # The front leg's quotes end at 15:00, so neither the House's expiry close (15:15) nor the liquidation can fill.
         cal = self.store("s12b", [D1, D2], lambda w: synth.flat_day(w, "SPY", D1, [
-            {"expiration": D1, "strike": 400, "right": "C", "quotes": {571: (1.00, 1.05), 929: (None, None)}},
+            {"expiration": D1, "strike": 400, "right": "C", "quotes": {571: (1.00, 1.05), 900: (None, None)}},
             {"expiration": D2, "strike": 400, "right": "C", "quotes": {571: (3.00, 3.20)}}], prices={570: 400.0, 940: 399.0}))
         code = '''
 NEEDS = {"roots": ["SPY"], "dte": [0, 5], "band": 0.2, "cadence": 5, "start": 600}
@@ -318,7 +319,8 @@ def decide(ctx):
         [t] = self.run_one(cal, code, days=[D1])["trades"]
         self.assertEqual(t["exit_reason"], "forced_mark")
         self.assertEqual(t["exit"], 3.00)                    # the long back leg at its bid, not its 3.10 mid
-        self.assertEqual(t["fees"], 0.05 + 0.05 + 0.06)      # open (buy 3.20, sell 1.00) and the back leg's sale at 3.00
+        # Open (buy 3.20; sell 1.00: 0.04359 + 0.00206) and the back leg's sale at 3.00 (0.04359 + 0.00618): 0.05 each.
+        self.assertEqual(t["fees"], 0.15)
 
 
 if __name__ == "__main__":

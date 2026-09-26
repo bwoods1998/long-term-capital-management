@@ -40,6 +40,9 @@ def decide(ctx):
     return []
 '''
 
+SINGLE = OPENER.replace('"open": "debit_vertical"', '"open": "long_call"').replace(
+    ',\n                 {"side": "short", "right": "C", "dte": 0, "strike": p["low"] + 1}]', "]")
+
 
 def prog(name="opener", code=OPENER, **params):
     return R.load_program(code, name=name, params=params)
@@ -117,6 +120,45 @@ class HonestFills(unittest.TestCase):
         other = self.run_one(store, prog(limit="mid1", low=399), fill_model=model)
         [to] = other["trades"]
         self.assertNotEqual(to["filled_minute"], ta["filled_minute"])  # other contracts, other draws
+
+    def test_a_mid_limit_on_a_one_tick_spread_is_the_touch_and_fills_by_the_touch_cell(self):
+        # SPY 400C quoted 1.00 x 1.01: the mid 1.005 is off the penny, so "mid" is the bid (q = -1, the touch).
+        store = self.make([{"expiration": D1, "strike": 400, "right": "C", "quotes": {571: (1.00, 1.01)}}])
+        mid = prog(name="touch", code=SINGLE, limit="mid", tif=60)
+        cells = lambda q: {F.cell(q, 1, 0, 0.0, t): 0.2 for t in (600, 700, 950)}  # noqa: E731
+        # A table without the touch bucket (fitted before it existed) never fills it: no neighbour's rate.
+        old = self.run_one(store, mid, fill_model=F.FillModel(hazard={**cells(-0.1), **cells(0.1)}, source="old"))
+        self.assertEqual((old["summary"]["trades"], old["fills"]["expired"]), (0, 1))
+        touch = self.run_one(store, mid, fill_model=F.FillModel(hazard=cells(-1.0), source="touch"))
+        [t] = touch["trades"]
+        self.assertEqual(t["entry"], 1.00)                  # filled at its limit, the bid
+        self.assertGreater(t["filled_minute"], 601)         # after waiting for its keyed draw
+        # The same draws again: a second run fills on the same minute.
+        again = self.run_one(store, mid, fill_model=F.FillModel(hazard=cells(-1.0), source="touch"))
+        self.assertEqual(again["trades"][0]["filled_minute"], t["filled_minute"])
+
+    def test_the_touch_cell_and_behind_it(self):
+        model = F.FillModel(hazard={F.cell(-1.0, 1, 0, 0.0, 700): 0.3}, source="t")
+        self.assertEqual(F.q_bucket(-1.0), 0)
+        self.assertEqual(F.q_bucket(-0.3), 0)
+        self.assertEqual(model.p(-1.0 - 1e-9, 1, 0, 0.0, 700), 0.3)   # float noise at the touch is the touch
+        self.assertEqual(model.p(-0.5, 1, 0, 0.0, 700), 0.3)          # inside the spread: the touch's (lower) rate
+        self.assertEqual(model.p(-1.2, 1, 0, 0.0, 700), 0.0)          # behind the touch: only the market fills it
+        self.assertEqual(model.p(-1.0, 2, 0, 0.0, 700), 0.0)          # a package's touch cell is its own
+
+    def test_a_passive_fill_still_waits_for_an_unfavourable_next_minute(self):
+        # 1.00 x 1.01 on even minutes, 1.01 x 1.02 on odd ones. A buy resting at 1.00 is at the touch only on an
+        # even minute, and the next minute's mid is always higher then: a fill there would be just before the
+        # market moves its way, so even a certain touch cell never fills it (on odd minutes it is behind the touch).
+        quotes = {m: (1.00, 1.01) if m % 2 == 0 else (1.01, 1.02) for m in range(571, 700)}
+        store = self.make([{"expiration": D1, "strike": 400, "right": "C", "quotes": quotes}])
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        model = F.FillModel(hazard={F.cell(-1.0, 1, 0, 0.0, t): 1.0 for t in (600, 700)}, source="certain")
+        r = self.run_one(store, prog(name="rising", code=SINGLE, limit="mid", tif=60), fill_model=model)
+        self.assertEqual((r["summary"]["trades"], r["fills"]["expired"]), (0, 1))
+        flat = self.make([{"expiration": D1, "strike": 400, "right": "C", "quotes": {571: (1.00, 1.01)}}])
+        [t] = self.run_one(flat, prog(name="flat", code=SINGLE, limit="mid", tif=60), fill_model=model)["trades"]
+        self.assertEqual((t["entry"], t["filled_minute"]), (1.00, 601))   # the same cell, a flat next minute: filled
 
     def test_draws_are_keyed_and_uniform(self):
         u = F.draw([11, 22], 19422, 601, "buy")

@@ -7,7 +7,11 @@ it fills AT ITS LIMIT if the natural has come through it, and otherwise only wit
 the fill model gives, a per-minute hazard looked up by
 
 - q: where the limit sits between the mid (0) and the natural (1), in quarter-spread buckets
-  (negative is better than the mid);
+  (negative is better than the mid). Bucket 0 is the TOUCH, from the order's own side of the book
+  (-1: a buy at the bid, a sell at the ask) to a quarter-spread through the mid; it is measured at
+  the touch itself and only where the minute's volume there cleared the queue ahead (`calibrate.py`).
+  A limit behind the touch fills only when the market comes through it. A "mid" limit on a
+  one-tick spread IS the touch (the mid is off the tick and rounds to the order's own side);
 - legs: one leg or a multi-leg package;
 - days to expiry (0, 1-2, 3-7, 8+), moneyness of the structure's centre (|K/S - 1|: under 0.5%,
   0.5-1.5%, 1.5-3%, over 3%) and the time of day (to 10:30, to 15:00, after).
@@ -17,7 +21,9 @@ program: a trivial edit to a program cannot re-roll its luck, and two programs t
 order at the same minute fill or miss together. The table is fitted from Train's `trade_quote`
 samples by `calibrate.py` and read from a gitignored file (`/data/calibration/fill_model.json` on a
 box, `.data/gym/fill_model.json` on the laptop, or GYM_FILL_MODEL); absent, every hazard is zero:
-natural fills only, the conservative default.
+natural fills only, the conservative default. A cell the table lacks is zero too: a table fitted
+before the touch bucket existed (Sept 27, 2026) has no bucket-0 cells, so the touch never fills on it
+until the table is refitted.
 
 Size is capped by the quoted size at the natural. Stress mode widens every leg's half-spread
 (1.5x for the gate's stress test) before the natural is taken.
@@ -37,6 +43,8 @@ from typing import Any, Mapping, Sequence
 #: Part of every fill's key: changing it re-rolls every draw, so it changes only with the engine version.
 SEED = "ltcm-gym-fills-v1"
 Q_EDGES = (-0.25, 0.0, 0.25, 0.5, 0.75, 1.0)
+#: The order's own side of the book (q of a buy at the bid, a sell at the ask): bucket 0's far edge.
+TOUCH = -1.0
 DTE_EDGES = (0, 1, 3, 8)
 MONEY_EDGES = (0.005, 0.015, 0.03)
 TOD_EDGES = (630, 900)
@@ -52,7 +60,7 @@ def _bucket(value: float, edges: Sequence[float]) -> int:
 
 
 def q_bucket(q: float) -> int:
-    """0: better than a quarter-spread through the mid ... 5: at or past the natural."""
+    """0: the touch up to a quarter-spread short of the mid ... 5: at or past the natural."""
     return _bucket(q, Q_EDGES)
 
 
@@ -89,6 +97,8 @@ class FillModel:
     def p(self, q: float, legs: int, dte: int, moneyness: float, minute: int) -> float:
         if q >= 1.0 - 1e-12 or not self.hazard:
             return 0.0 if q < 1.0 - 1e-12 else 1.0
+        if q < TOUCH - 1e-6:
+            return 0.0  # behind the touch: only the market coming through it fills it
         return float(self.hazard.get(cell(q, legs, dte, moneyness, minute), 0.0))
 
     @classmethod
@@ -116,4 +126,4 @@ def draw(keys: Sequence[int], day: int, minute: int, side: str) -> float:
     return int.from_bytes(hashlib.blake2b(text.encode(), digest_size=8).digest(), "big") / 18446744073709551616.0
 
 
-__all__ = ["FillModel", "draw", "cell", "q_bucket", "dte_bucket", "money_bucket", "tod_bucket", "SEED"]
+__all__ = ["FillModel", "draw", "cell", "q_bucket", "dte_bucket", "money_bucket", "tod_bucket", "SEED", "TOUCH"]

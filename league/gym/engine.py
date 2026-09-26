@@ -12,15 +12,20 @@ program sees at minute m is computed from anything after m: the engine owns the 
 The day of a program, minute index i from 1 (09:31) to the last minute before the close:
 1. its working orders meet row i (arrivals first sent at i - 1);
 2. the venue acts at row i: opening orders on an expiring contract are cancelled at the open
-   cutoff (15:00), closing ones at the close cutoff (15:10; 15:25 SPY/QQQ), and from the
-   liquidation minute (15:30) every equity position with a leg expiring today is closed at the
-   natural price;
+   cutoff (15:00), closing ones at the close cutoff (15:10; 15:25 SPY/QQQ); an equity position with
+   a leg expiring today that is in the money or within 1% of it (`venue.near_money`) is closed at
+   the natural price by the House from 10 minutes before the close cutoff until the cutoff, and by
+   the venue's liquidation from 15:30 (the live path's rule, `league/live/step.py` `_expiry_close`);
+   one whose every expiring leg is further out of the money is left to expire;
 3. on a decision minute, decide(ctx) runs and its intents become orders arriving at i + 1.
 At the close: working orders expire; positions expiring today settle (index: cash at the closing
-level; equity legs that could not be liquidated: exercised at $0.01 in the money, and a net share
-position is marked to the next session's first price); every position is marked at the mid; the
-day's P&L is the change in cash plus marks. At the window's end every open position is closed at
-the natural price of the last minute (or marked, where a leg has no quote).
+level, never liquidated; equity legs that were not closed: exercised at $0.01 in the money, and a
+net share position is marked to the next session's first price; nothing in the money: expired, with
+no fee); every position is marked at the mid; the day's P&L is the change in cash plus marks. At the
+window's end every open position is closed at the natural price of the last minute (or marked, where
+a leg has no quote). A segment of a split run (`RunConfig.split_mark`) ends differently: what is
+still open is valued at the mid with no fee (an accounting split, not a trade), and a later segment's
+programs first replay `RunConfig.warmup` prior days without trading (`batch.py`).
 
 Deterministic: the same programs, parameters, store files, fill model and window give the same
 result (`results.py` hashes it). numpy only here; the store reader brings pyarrow.
@@ -75,12 +80,21 @@ class RunConfig:
     start: dt.date | None = None     # cut the window (the inner loop's segments)
     end: dt.date | None = None
     fill_model: F.FillModel = field(default_factory=F.FillModel)
+    #: A segment another segment continues (a split run): at its end, open positions are valued at the
+    #: mid with no fee (exit reason `split_mark`), never closed at the natural.
+    split_mark: bool = False
+    #: Trading days of the window before `start` that each program replays first, deciding but never
+    #: trading, so its STATE is warm when the segment begins (0: none).
+    warmup: int = 0
 
     def identity(self) -> dict[str, Any]:
-        return {"window": self.window, "roots": sorted(self.roots), "capital": self.capital, "stress": self.stress,
-                "max_orders_day": self.max_orders_day, "start": self.start.isoformat() if self.start else None,
-                "end": self.end.isoformat() if self.end else None, "fill_model": self.fill_model.version,
-                "engine": ENGINE_VERSION}
+        out = {"window": self.window, "roots": sorted(self.roots), "capital": self.capital, "stress": self.stress,
+               "max_orders_day": self.max_orders_day, "start": self.start.isoformat() if self.start else None,
+               "end": self.end.isoformat() if self.end else None, "fill_model": self.fill_model.version,
+               "engine": ENGINE_VERSION}
+        if self.split_mark or self.warmup:
+            out.update(split_mark=bool(self.split_mark), warmup=int(self.warmup))
+        return out
 
 
 # --------------------------------------------------------------------------- one day of data
@@ -307,6 +321,10 @@ class Working:
     aggressive: bool = False      # marketable when it first met one: its remainder keeps taking the natural
 
 
+#: A forced close's order note -> the trade's exit reason (the note survives the shadow book's saved state).
+FORCED_REASONS = {"expiry close": "expiry_close", "liquidation": "liquidated"}
+
+
 class Account:
     """One program in one run: its runner, cash, positions, orders and the record."""
 
@@ -334,6 +352,7 @@ class Account:
         self.rejects_since: list[str] = []
         self.orders_today = 0
         self.session = 0
+        self.warming = False          # replaying warm-up days: decide runs, its intents are dropped
 
     # ------------------------------------------------------------------ helpers
     def _id(self) -> int:
@@ -462,7 +481,8 @@ class Account:
         if opening:
             self._open_fill(day, mi, work, price, qty, fees)
         else:
-            self._close_fill(day, mi, work, price, qty, fees, "liquidated" if work.forced else "program")
+            self._close_fill(day, mi, work, price, qty, fees,
+                             FORCED_REASONS.get(work.order.note, "liquidated") if work.forced else "program")
         work.remaining -= qty
         work.filled += qty
         if work.order.action == "open":
@@ -537,7 +557,7 @@ class Account:
         pos.qty -= qty
         if pos.qty <= 0:
             pos.exit_day, pos.exit_mi, pos.reason = day.ordinal, mi, reason
-            if reason == "liquidated":
+            if reason in FORCED_REASONS.values():
                 self.counts["liquidated"] += 1
             self._finish(pos, day)
 
@@ -597,20 +617,34 @@ class Account:
                     if work.order.action == "close" and not work.forced and pos is not None and pos.root == root and \
                             int(pos.expirations.min()) == day.ordinal:
                         self._drop(work, "cancelled")
-            if rules.liquidation is not None and minute >= rules.liquidation:
-                for pos in list(self.positions.values()):
-                    if pos.root != root or int(pos.expirations.min()) != day.ordinal or pos.pid not in self.positions:
-                        continue
-                    if pos.closing and self.orders.get(pos.closing) is not None and self.orders[pos.closing].forced:
-                        continue
-                    if pos.closing:
-                        self._drop(self.orders[pos.closing], "cancelled")
-                    order = L.Order("close", pos.type, root, pos.legs_today(), pos.qty, math.nan, math.nan, math.nan, 0.0,
-                                    0.0, 0.0, 0.0, None, pos.tag, "liquidation", position=pos.pid)
-                    work = Working(self._id(), order, pos.qty, mi, mi, None, 0.0, pid=pos.pid, forced=True)
-                    self.orders[work.oid] = work
-                    pos.closing = work.oid
-                    self._try_fill(day, mi, work)
+            house = rules.expiry_close is not None and rules.expiry_close <= minute < rules.close_cutoff
+            liquidating = rules.liquidation is not None and minute >= rules.liquidation
+            if not (house or liquidating):
+                continue
+            for pos in list(self.positions.values()):
+                if pos.root != root or int(pos.expirations.min()) != day.ordinal or pos.pid not in self.positions:
+                    continue
+                if pos.closing and self.orders.get(pos.closing) is not None and self.orders[pos.closing].forced:
+                    continue
+                if not self._near_money(day, mi, pos, rules):
+                    continue  # every expiring leg is further out of the money: it is left to expire
+                if pos.closing and self.orders.get(pos.closing) is not None:
+                    self._drop(self.orders[pos.closing], "cancelled")
+                order = L.Order("close", pos.type, root, pos.legs_today(), pos.qty, math.nan, math.nan, math.nan, 0.0,
+                                0.0, 0.0, 0.0, None, pos.tag, "expiry close" if house else "liquidation", position=pos.pid)
+                work = Working(self._id(), order, pos.qty, mi, mi, None, 0.0, pid=pos.pid, forced=True)
+                self.orders[work.oid] = work
+                pos.closing = work.oid
+                self._try_fill(day, mi, work)
+
+    @staticmethod
+    def _near_money(day: DayData, mi: int, pos: Position, rules: venue.Rules) -> bool:
+        """A leg expiring today is in the money or within `rules.near_money_share` of it at minute mi (or
+        there is no price to tell): the live path's `_expiry_close` predicate."""
+        snap = day.snapshot(pos.root, mi)
+        spot = snap.spot if snap is not None else math.nan
+        return any(venue.near_money(leg.strike, leg.is_call, spot, rules.near_money_share)
+                   for leg, exp in zip(pos.legs, pos.expirations) if int(exp) == day.ordinal)
 
     # ------------------------------------------------------------------ decisions
     def _position_rows(self, day: DayData, mi: int) -> list[dict]:
@@ -659,7 +693,10 @@ class Account:
                         roots=tuple(chains))
         self.closed_since = []
         self.rejects_since = []
-        for intent in self.runner.decide(ctx):
+        intents = self.runner.decide(ctx)
+        if self.warming:
+            return  # a warm-up day: the program decides (its STATE moves on) but nothing trades
+        for intent in intents:
             try:
                 self._intent(day, mi, intent)
             except L.Refused as exc:
@@ -750,7 +787,10 @@ class Account:
             self._mark(day, pos, close_mi)
         if last:
             for pos in list(self.positions.values()):
-                self._window_end(day, pos)
+                if self.cfg.split_mark:
+                    self._split_mark(day, pos)
+                else:
+                    self._window_end(day, pos)
             for pos, root, shares, ref in self.pending_shares:
                 pos.info["share_gap"] = 0.0
                 self._finish(pos, day)
@@ -810,7 +850,7 @@ class Account:
         price; `shares_now` when that session is today). Legs expiring later (a calendar's back month)
         leave at their NATURAL price with their fees, never at a mid."""
         near = int(pos.expirations.min())
-        value, shares, fees, later = 0.0, 0.0, 0.0, False
+        value, shares, fees, later, itm = 0.0, 0.0, 0.0, False, False
         for leg, exp, i in zip(pos.legs, pos.expirations, pos.idx):
             if int(exp) != near:
                 later = True
@@ -821,6 +861,7 @@ class Account:
             intrinsic = max(0.0, level - leg.strike) if leg.is_call else max(0.0, leg.strike - level)
             if not math.isfinite(intrinsic) or intrinsic < 0.01:
                 continue
+            itm = True
             value += leg.side * leg.ratio * intrinsic
             if not venue.is_index(pos.root):
                 shares += (1.0 if leg.is_call else -1.0) * leg.side * leg.ratio * venue.MULTIPLIER * pos.qty
@@ -835,6 +876,8 @@ class Account:
         elif venue.is_index(pos.root):
             pos.reason = "settled_data_hole" if hole else "settled"
             self.counts["settled"] += 1
+        elif not itm:
+            pos.reason = "expired_data_hole" if hole else "expired"   # nothing in the money: no exercise, no fee
         else:
             pos.reason = "exercised_data_hole" if hole else "exercised"
             self.counts["exercised"] += 1
@@ -881,6 +924,19 @@ class Account:
                 sides = np.array([leg.side * leg.ratio for leg in pos.legs], dtype=np.float64)
                 pos.last_mark = float(np.sum(sides * 0.5 * (bid + ask)))
                 return
+
+    def _split_mark(self, day: DayData, pos: Position) -> None:
+        """The end of a segment another segment continues: the position is valued at its mid (the close's
+        mark, as the day's equity already counts it) with no fee. An accounting split, not a trade: the
+        segment's daily P&L is the unsplit run's, and the next segment starts without it."""
+        value = pos.last_mark if math.isfinite(pos.last_mark) else pos.entry
+        cash = value * venue.MULTIPLIER * pos.qty
+        self.cash += cash
+        pos.cash += cash
+        pos.exit_value_qty += value * pos.qty
+        pos.qty = 0
+        pos.exit_day, pos.exit_mi, pos.reason = day.ordinal, day.minutes - 1, "split_mark"
+        self._finish(pos, day)
 
     def _window_end(self, day: DayData, pos: Position) -> None:
         snap = day.snapshot(pos.root, day.minutes - 2) if pos.root in day.chains else None
@@ -963,18 +1019,42 @@ def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Se
         days = [d for d in store.days(cfg.window, [], start=cfg.start, end=cfg.end)
                 if any(store.has("nbbo", r, d) for r in all_roots)] if all_roots else []
     days = list(days)
-    for day in days:
+    warm: list[dt.date] = []
+    if days and cfg.warmup > 0:
+        # The window's trading days just before the first (never another window's: no leak across the line).
+        warm = [d for d in store.days(cfg.window, [], end=days[0] - dt.timedelta(days=1))
+                if any(store.has("nbbo", r, d) for r in all_roots)][-int(cfg.warmup):]
+    for day in warm + days:
         store.check(day)
     depth = max([a.needs.history for a in accounts] + [11])
     history = History(depth)
     if days:
-        for prior in store.history_days(days[0], depth):
+        for prior in store.history_days((warm or days)[0], depth):
             for root in all_roots:
                 if store.has("underlying", root, prior):
                     history.add(root, store.underlying(root, prior).price)
     events = EventCalendar(store.trading_days(), store.session)
     regimes: dict[str, dict[str, dict[str, float]]] = {}
     from .day import ordinal as to_ordinal
+
+    for day in warm:
+        data = DayData(store, day, all_roots, events, history, to_ordinal(day))
+        live = [a for a in accounts if a.roots and not a.runner.disqualified]
+        schedules = [account.decision_minutes(data) for account in live]
+        for account, schedule in zip(live, schedules):
+            account.warming = True
+            for root in account.roots:
+                data.want(root, schedule)
+        for mi in range(1, data.minutes - 1):
+            data.advance(mi)
+            for account, schedule in zip(live, schedules):
+                if mi in schedule and not account.runner.disqualified:
+                    account._decide(data, mi)
+        for account in live:
+            account.warming = False
+            account.closed_since, account.rejects_since = [], []
+        for root, chain in data.chains.items():
+            history.add(root, chain.underlying.price)
 
     for n, day in enumerate(days):
         data = DayData(store, day, all_roots, events, history, to_ordinal(day))
@@ -992,6 +1072,8 @@ def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Se
                 if minute is not None and data.open_min < minute < data.close_min:
                     events_minutes.update(range(minute - data.open_min, data.minutes - 1) if minute == rules.liquidation
                                           else [minute - data.open_min])
+            if rules.expiry_close is not None:  # the House's expiry close: every minute up to the close cutoff
+                events_minutes.update(range(max(1, rules.expiry_close - data.open_min), rules.close_cutoff - data.open_min))
         for mi in range(1, data.minutes - 1):
             data.advance(mi)
             for account, schedule in zip(live, schedules):
@@ -1005,7 +1087,7 @@ def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Se
         if progress is not None:
             progress(n + 1, len(days), day)
     elapsed = time.perf_counter() - began
-    data_version = store.data_version(all_roots, days) if days else "no-days"
+    data_version = store.data_version(all_roots, warm + days) if days else "no-days"
     code, tables = code_digest(), tables_digest()
     return [R.build(a, cfg, days, data_version, regimes, elapsed / max(1, len(accounts)), code=code, tables=tables)
             for a in accounts]
