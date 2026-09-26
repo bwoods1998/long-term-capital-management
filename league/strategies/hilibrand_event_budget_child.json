@@ -1,8 +1,0 @@
-{
-  "family": "crypto-strikes-lab-955dae",
-  "name": "hilibrand-event-budget-child",
-  "repair": {
-    "key": "order_refusal:kalshi:one event may hold at most #% of the stake: KXBTCD-#SEP# would hold $# of this account's $# (holding"
-  },
-  "why": "Corrected child of hilibrand-lc04657. Preserve its hourly KXBTCD/KXETHD post-only NO-favourite strategy, but aggregate both legs' holdings at cost, unfilled working buys and proposed entries across every strike of each event under 25% of equity. Cancellation requests remain reserved until confirmed absent. Born on rung 0 with no inherited performance record."
-}

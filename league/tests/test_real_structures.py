@@ -26,6 +26,7 @@ from league.book import Holding
 from league.house import House, Settings
 from league.ledger import Ledger, now_iso
 from league.tests.fakes import Clock, FakeBroker
+from league.tests.fakes import OpenGrant
 from league.tests.test_house import FakeAlpacaData
 from league.tests.test_ladder import FakeAuditor, InProcessSandbox
 from league.tests.test_options import STRUCTURE_AGENT, THURSDAY_11_NY, condor_row, fake_chain, occ
@@ -250,7 +251,7 @@ class RealStructuresHouse(unittest.TestCase):
         self.house = House(Path(self.dir.name) / "house",
                            brokers={"alpaca-paper": self.paper, "alpaca": self.real, "options-shadow": self.shadow},
                            sandbox=InProcessSandbox(), alpaca_data=self.data, clock=self.clock,
-                           settings=Settings(mark_every_seconds=0, research=False, real_money=True), game=game, auditor=self.auditor)
+                           grant=OpenGrant(), settings=Settings(mark_every_seconds=0, research=False, real_money=True), game=game, auditor=self.auditor)
         self.addCleanup(self.house.close, wait=None)
         self.house.structure_book_name = "options-shadow"
         self.auditor.ledger = self.house.ledger
@@ -729,7 +730,9 @@ class TheReviewOfGMoney(RealStructuresHouse):
         # A single contract bought on the structure's short leg is dropped for the same reason; on its long leg it is not.
         self.assertIn(occ("2026-09-11", "call", 581), house._real_netting_refusal(real, [(occ("2026-09-11", "call", 581), 1)]))
         self.assertEqual(house._real_netting_refusal(real, [(occ("2026-09-11", "call", 580), 1)]), "")
-        single = house.spawn("options-breakout", "options-breakout", seeds.load("options-breakout"), reason="test", specialty="alpaca-options")
+        # On real money (rung 2): below it the owner's grant releases no real entry at all (`House.grant`, Sept 26, 2026).
+        single = self.on_real_money(house.spawn("options-breakout", "options-breakout", seeds.load("options-breakout"), reason="test",
+                                                specialty="alpaca-options"))
         intents, dropped = house._intents(single, real, [{"occ": occ("2026-09-11", "call", 581), "side": "buy", "quantity": 1,
                                                           "type": "limit", "limit_price": 0.5}])
         self.assertEqual(intents, [])

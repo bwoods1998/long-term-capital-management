@@ -1,8 +1,0 @@
-{
-  "family": "weather-lab-b8b1fe",
-  "name": "mullins_le122fc_fee_cash_child",
-  "repair": {
-    "key": "order_refusal:kalshi-shadow:needs $# with fees; free cash is $#"
-  },
-  "why": "Corrected child of mullins-le122fc, born on rung 0 with no inherited record. Seq 702786 reports a fee-inclusive cash refusal; this parent was not covered by PR #288 and still reserves principal alone. Preserve its effective weather series, daily horizon, parameters and passive NO selection. Reserve rounded fees for remaining working buys and new entries using a conservative taker-rate cash budget, without anticipating cancellation proceeds. CI, independent qualification and the child's subsequent refusal record must judge the repair."
-}

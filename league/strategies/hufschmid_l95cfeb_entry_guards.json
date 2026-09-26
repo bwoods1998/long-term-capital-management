@@ -1,9 +1,0 @@
-{
-  "family": "sports-props-late-pregame-strikeo-f73d2b",
-  "name": "hufschmid_l95cfeb_entry_guards",
-  "repair": {
-    "key": "strategy_defect:hufschmid-l95cfeb:95cfeb6c6744",
-    "parent": "hufschmid-l95cfeb"
-  },
-  "why": "Corrected child of hufschmid-l95cfeb: check the complementary NO maker price against the practice and real-money longshot floors, using decimal subtraction, and reject malformed market identifiers before emitting intents. Retains KXMLBKS, the daily horizon and the parent's entry mechanism. The reported invalid-symbol drop lacks its ticker, so its exact cause remains unconfirmed. Born on rung 0 with no inherited record; qualification remains independent."
-}

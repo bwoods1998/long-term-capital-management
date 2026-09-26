@@ -1,8 +1,0 @@
-{
-  "family": "crypto-15m-prior-window-reset",
-  "name": "huang_btc_momentum_maker_child",
-  "repair": {
-    "key": "order_refusal:kalshi:a real entry on crypto-#m-prior-window-reset must be a post-only limit until the family's pooled tak"
-  },
-  "why": "Corrected child of huang-h427345-4. The parent's market entries repeatedly violate the real-entry liquidity rule while its family's pooled taker bound is negative. Preserve its KXBTC15M hourly momentum specialty, but enter only through non-crossing post-only bids that respect the entry price floor. Born on rung 0 with no inherited record; must qualify independently."
-}

@@ -122,6 +122,7 @@ class FullBatches(LabCase):
 
 
 class Bounds(unittest.TestCase):
+    @unittest.skip('Wave 2b deletes the Alpha Lab: the options overhaul (Sept 26, 2026) took its game.json block out')
     def test_the_game_file_holds_the_labs_bounded_dials(self):
         game = load_game()
         check_bounds(game)

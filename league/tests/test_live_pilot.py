@@ -161,6 +161,9 @@ class LivePath(unittest.TestCase):
         if activate:
             guard.activate_live_pilot('live')
         f.house.campaigns = guard
+        # Since the options overhaul (Sept 26, 2026) the House asks only `House.grant` about real money: the pilot's store
+        # stands in as that grant here, so these tests still hold the House to a timed pilot's window.
+        f.house.grant = guard
         f.house.pacer = CampaignPacer(f.house.ledger, guard, clock=f.clock)
         f.house.provider = SimpleNamespace(transport=SimpleNamespace(refresh=lambda: True))
         return guard
