@@ -10,12 +10,12 @@ disagree, the code is right and this page is fixed. How to operate it is in
 
 | Part | Code | State |
 |---|---|---|
-| The House, options only | `league/` | PR #359 (Wave 2a) open: updater off, the new grant, options-only service and tick |
-| The data store and images | `scripts/data/` | the data box downloading since 06:49:43Z; code on branch `data/gym-store` |
-| The Gym | `league/gym/` | PR #358 (Wave 3) open |
+| The House, options only | `league/` | PR #359 merged 07:49Z (main `6c715d83`): updater off, the new grant, options-only service and tick; not yet deployed (the old House is stopped) |
+| The data store and images | `scripts/data/` | the data box downloading since 06:49:43Z; images and the nightly job rehearsed 07:08-07:19Z; code on branch `data/gym-store` |
+| The Gym | `league/gym/` | PR #358 open, under adversarial review before it merges |
 | The swarm | `league/swarm/`, `league/CONTRACT.md` | being built (Wave 4) |
-| The live path | `league/` House tick, `gateway/` | to be built (Wave 5, on top of Wave 2a); real money stays off until it is deployed |
-| The public page | blakewoods.us/capital | reset and serving schema 2 since about 07:21Z |
+| The live path | the House's live tick, `gateway/` | being built (Wave 5); real money stays off until it is deployed |
+| The public page | blakewoods.us/capital | reset and deployed at 07:21Z (schema 2); no checkpoint until the new House publishes |
 
 ## The goal and the one number
 
