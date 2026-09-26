@@ -224,7 +224,9 @@ class TheConfigAfterThePrune(unittest.TestCase):
                          {"start_at": "2026-09-26T12:00:00Z", "start_equity": "5481.62"})
         self.assertIn("gym", config)
         self.assertIn("swarm", config)
-        self.assertIs(config["real_money"], False, "the new House's first owner deploy runs without real money (plan Wave 7)")
+        # The first owner deploy ran without real money (plan Wave 7); the sprint's R2 turns it on (the owner's D1,
+        # Sept 26, 2026). Real entries still wait on the grant, the kill switch, the stops and the paper proofs.
+        self.assertIs(config["real_money"], True, "real money is on from the sprint's R2 (owner decision D1)")
         game = json.loads((root / "game.json").read_text())
         for key in ("lab", "lab_bounds", "hypotheses", "horizon", "horizon_bounds", "research_bounds"):
             self.assertNotIn(key, game)
