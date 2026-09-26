@@ -13,7 +13,7 @@ from unittest.mock import patch
 from league import publish
 from league.ledger import KINDS, Ledger
 from league.swarm import bands, sitefeed
-from league.swarm.hook import SwarmStep
+from league.swarm.hook import SwarmStep, attach
 from league.swarm.store import SwarmStore
 from league.tests.swarm_fakes import Clock, result
 from league.tests.test_options_house import BuildCase
@@ -370,7 +370,23 @@ class SwarmHouse(BuildCase):
         self.assertIsNone(house.merton)
         self.assertIsNone(getattr(house, "budget", None))
         self.assertFalse(house.settings.births)
-        self.assertNotIn("site_inputs", vars(house), "the House's own site_inputs reads house.swarm")
+
+    def test_the_site_reads_the_swarm_until_the_house_has_its_own_site_inputs(self):
+        house, _ = self.build_on()
+        if hasattr(type(house), "site_inputs"):  # the live path's House (#362) merges house.swarm itself
+            self.assertNotIn("site_inputs", vars(house))
+        else:
+            self.assertEqual(house.site_inputs, house.swarm.site_inputs, "the swarm's feed stands in")
+            self.assertIsInstance(house.site_inputs(), dict)
+
+        class OwnHouse:
+            def site_inputs(self):
+                return {"agents": ["the House's own"]}
+
+        own = OwnHouse()
+        step = attach(own, Path(self.dir.name), ON)
+        self.assertIs(own.swarm, step)
+        self.assertEqual(own.site_inputs(), {"agents": ["the House's own"]}, "a House with its own is never overridden")
 
     def test_an_empty_root_tick_seats_no_agent_and_spends_no_research(self):
         house, _ = self.build_on()

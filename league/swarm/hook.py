@@ -322,11 +322,16 @@ def public_payload(kind: str, payload: dict[str, Any], names: list[str]) -> dict
 
 
 def attach(house: Any, root: str | Path, config: Mapping[str, Any]) -> SwarmStep | None:
-    """Set `house.swarm` when the swarm is enabled (the House's `site_inputs()` reads `house.swarm.site_inputs()`)."""
+    """Set `house.swarm` when the swarm is enabled. The live path's House (#362) has its own `site_inputs()`, which
+    merges `house.swarm.site_inputs()` with its own; a House without one gets the swarm's feed as its `site_inputs`
+    (the publisher's hook), so the page shows the swarm's agents, Gym and compute until then. Its compute is the
+    swarm's own spend only: in swarm mode the House's Sail meter (`Budget`) is off."""
     if not settings_mod.load(root, config=config).get("enabled"):  # config.json "swarm" < <root>/swarm.json
         return None
     step = SwarmStep(root, config=config)
     house.swarm = step
+    if not hasattr(house, "site_inputs"):
+        house.site_inputs = step.site_inputs
     return step
 
 
