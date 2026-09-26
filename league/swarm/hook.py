@@ -205,7 +205,7 @@ class SwarmStep:
 
 def attach(house: Any, root: str | Path, config: Mapping[str, Any]) -> SwarmStep | None:
     """Set `house.swarm` when the swarm is enabled (the House's `site_inputs()` reads `house.swarm.site_inputs()`)."""
-    if not (config.get("swarm") or {}).get("enabled"):
+    if not settings_mod.load(root, config=config).get("enabled"):  # config.json "swarm" < <root>/swarm.json
         return None
     step = SwarmStep(root, config=config)
     house.swarm = step

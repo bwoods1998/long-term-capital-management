@@ -195,10 +195,16 @@ class Swarm:
         return ""
 
     # ------------------------------------------------------------------ the threads
+    def gym_ready(self) -> bool:
+        """The Gym is configured (enabled, with an image): until then nothing that needs it starts (no model is paid to
+        wait for a box that cannot come)."""
+        gym = self.settings.get("gym", {})
+        return bool(gym.get("enabled")) and bool(gym.get("image_checkpoint"))
+
     def _worker(self, index: int) -> None:
         idle = float(self.settings.get("researcher", {}).get("idle_seconds", 5))
         while not self.stop.is_set():
-            if not self.guard.allows() or index >= int(self.settings.get("researcher", {}).get("concurrency", 48)):
+            if not self.guard.allows() or not self.gym_ready() or index >= int(self.settings.get("researcher", {}).get("concurrency", 48)):
                 self.sleep(5.0)
                 continue
             fid = self.scheduler.take(idle_seconds=idle)
@@ -234,8 +240,7 @@ class Swarm:
     def step(self) -> None:
         """One pass of the main loop (tests call it directly)."""
         fresh = settings_mod.load(self.root, config=self.config)
-        self.settings.clear()
-        self.settings.update(fresh)
+        self.settings.update(fresh)  # in place (every piece holds this dict), and no key ever disappears mid-read
         if getattr(self.guard, "due", lambda: True)():
             was = not self.guard.allows()
             self.guard.check()
@@ -244,7 +249,7 @@ class Swarm:
                     log(f"guard: brake ({getattr(self.guard, 'reason', '')})")
                 self.pool.scale_to_zero(getattr(self.guard, "reason", "the guard"))
         self.pool.manage()
-        if self.guard.allows():
+        if self.guard.allows() and self.gym_ready():
             if self.tournament.due():
                 self._round("tournament", self.tournament.run)
             if self.gate.due():

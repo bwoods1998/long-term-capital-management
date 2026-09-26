@@ -245,6 +245,14 @@ class SwarmHouse(BuildCase):
         self.assertEqual(summary["swarm"]["process"]["action"], "started")
         self.assertEqual(calls, [1])
 
+    def test_the_state_roots_swarm_json_switches_it_on_without_a_deploy(self):
+        root = Path(self.dir.name) / "state"
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "swarm.json").write_text(json.dumps({"enabled": True}))
+        house = self.build(config={"swarm": {"enabled": False}})
+        self.assertIsInstance(house.swarm, SwarmStep)
+        self.assertFalse(house.settings.births)
+
     def test_a_canary_never_runs_the_swarm(self):
         with patch("league.swarm.hook.SwarmStep._popen", side_effect=AssertionError("no swarm in a canary")):
             house = self.build(config=ON, canary=True)
