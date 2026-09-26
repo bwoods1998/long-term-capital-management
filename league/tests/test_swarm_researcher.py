@@ -186,10 +186,10 @@ class ModelCycles(ResearcherCase):
     def test_notes_reach_the_tape_at_most_every_few_cycles(self):
         self.run_first()
         for i in range(3):
-            self.steps = [{"calls": [("notebook", {"action": "append", "text": f"lesson {i}"})]}, {"text": "ok"}]
+            self.steps = [{"calls": [("notebook", {"action": "append", "text": f"lesson {'abc'[i]} learned"})]}, {"text": "ok"}]
             self.researcher().cycle(self.fam["id"])
         notes = [e for e in self.store.events_after(0) if e["kind"] == "swarm.note"]
-        self.assertEqual([n["payload"]["text"] for n in notes], ["lesson 0"])
+        self.assertEqual([n["payload"]["text"] for n in notes], ["lesson a learned"])
 
     def test_the_status_shows_validation_only_as_mean_t_quarters_and_the_line(self):
         self.run_first()

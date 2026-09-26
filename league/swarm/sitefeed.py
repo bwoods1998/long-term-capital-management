@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import DB_NAME
+from . import DB_NAME, public
 from .store import loads
 
 
@@ -59,7 +59,7 @@ def site_inputs(root: str | Path, *, retired_shown: int = 24) -> dict[str, Any]:
         if rec:
             fwd = {"trades": sum(v["trades"] for v in rec.values()), "wins": sum(v["wins"] for v in rec.values()),
                    "pnl_usd": round(sum(v["pnl_usd"] for v in rec.values()), 2)}
-        agents.append({"id": f["id"], "family": f["lineage"], "mechanism": f["mechanism"], "structure": f["structure"],
+        agents.append({"id": f["id"], "family": f["lineage"], "mechanism": public.news_text(f["mechanism"]), "structure": f["structure"],
                        "band": "retired" if f["retired_at"] else f["band"], "born_at": f["born_at"], "retired_at": f["retired_at"],
                        "record": {"trials": int(f["trials"]) + int(f["inherited_trials"]), "revisions": int(f["revisions"]),
                                   "forward": fwd, "real": rec.get("real")}})

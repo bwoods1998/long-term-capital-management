@@ -32,7 +32,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from . import HEARTBEAT, LOG_FILE, bands as bands_mod, settings as settings_mod, sitefeed
+from . import HEARTBEAT, LOG_FILE, bands as bands_mod, public, settings as settings_mod, sitefeed
 from .store import SwarmStore
 
 CODE_DIR = Path(__file__).resolve().parents[2]
@@ -191,10 +191,19 @@ class SwarmStep:
         if not rows:
             return 0
         batch = []
+        names: dict[str, list[str]] = {}
         for r in rows:
             if r["kind"] in SKIPPED_KINDS:
                 continue
             payload = dict(r["payload"]) if isinstance(r["payload"], dict) else {"value": r["payload"]}
+            if r["kind"] in PUBLIC_KINDS:
+                # The second wall (the researcher filtered the note first): a public row carries words only.
+                fid = r["family"] or ""
+                if fid not in names:
+                    names[fid] = self._param_names(fid)
+                payload = public_payload(r["kind"], payload, names[fid])
+                if payload is None:
+                    continue
             payload["swarm_seq"] = r["seq"]
             payload["swarm_at"] = r["at"]
             batch.append({"kind": r["kind"], "payload": payload, "agent": r["family"] or "house", "id": f"swarm:{r['seq']}",
@@ -206,12 +215,38 @@ class SwarmStep:
         tmp.replace(self.root / MIRROR_CURSOR)
         return len(rows)
 
+    def _param_names(self, fid: str) -> list[str]:
+        if not fid:
+            return []
+        store = SwarmStore(self.root, readonly=True)
+        try:
+            latest = store.latest_version(fid) or {}
+        finally:
+            store.close()
+        return public.param_names_of(latest.get("code")) + list((latest.get("params") or {}).keys())
+
     # ------------------------------------------------------------------ read
     def bands(self) -> list[dict[str, Any]]:
         return bands_mod.read(self.root)
 
     def site_inputs(self) -> dict[str, Any]:
         return sitefeed.site_inputs(self.root)
+
+
+def public_payload(kind: str, payload: dict[str, Any], names: list[str]) -> dict[str, Any] | None:
+    """A public row's payload with its words filtered (`public.py`); None drops the row (a note with nothing left).
+    Its other fields are kept only when they are names, bands, structures or roots."""
+    keep = {k: payload[k] for k in ("parent", "structure", "roots", "origin", "founder", "band_from", "band_to", "swarm_seq", "swarm_at")
+            if k in payload}
+    if kind == "swarm.note":
+        text = public.note_text(payload.get("text"), param_names=names)
+        return {**keep, "text": text} if text else None
+    for field in ("mechanism", "reason", "cause"):
+        if field in payload:
+            text = public.news_text(payload.get(field), param_names=names)
+            if text:
+                keep[field] = text
+    return keep
 
 
 def attach(house: Any, root: str | Path, config: Mapping[str, Any]) -> SwarmStep | None:

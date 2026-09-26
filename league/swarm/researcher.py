@@ -33,7 +33,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from . import diagnostics, evidence
+from . import diagnostics, evidence, public
 from .pool import GymJob, PoolError
 from .store import SwarmStore
 
@@ -504,16 +504,20 @@ class Researcher:
         return True
 
     def _public_note(self, fid: str, out: Mapping[str, Any]) -> None:
-        """A notebook entry to the site's tape (as `swarm.note`), at most every `note_every_cycles` cycles."""
-        text = str(out.get("note") or "").strip()
+        """A notebook entry to the site's tape (as `swarm.note`), at most every `note_every_cycles` cycles, and only its
+        plain-word sentences: no digit, no code, no parameter name of the program (`public.note_text`; the notebook
+        keeps everything, privately)."""
+        latest = self.store.latest_version(fid) or {}
+        names = public.param_names_of(latest.get("code")) + list((latest.get("params") or {}).keys())
+        text = public.note_text(out.get("note"), param_names=names)
         if not text:
             return
         state = (self.store.family(fid) or {}).get("state") or {}
         last = int(state.get("public_note_cycle") or -10**6)
-        if int(out.get("cycle") or 0) - last < int(self.cfg.get("note_every_cycles", 6)) and not out.get("improved"):
+        if int(out.get("cycle") or 0) - last < int(self.cfg.get("note_every_cycles", 6)):
             return
         self.store.set_state(fid, public_note_cycle=int(out.get("cycle") or 0))
-        self.store.event("swarm.note", fid, {"text": text[:1000]})
+        self.store.event("swarm.note", fid, {"text": text})
 
 
 __all__ = ["Researcher", "TOOLS", "needs_of", "check_code", "sanitize"]
