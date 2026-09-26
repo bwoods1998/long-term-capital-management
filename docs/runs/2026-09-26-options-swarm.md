@@ -264,6 +264,29 @@ clock never restarts.
   refused/failed programs offered to live as tuition; forward records not tied to a version; no Astra audit at
   the gate. Refuted: the three-looks limit bypass by forks; boxes left awake on stop. All sent to W4 to fix with
   tests before the deploy.
+- ~09:25Z W5 pushed its review fixes (#362 head 0735ef77, CI green, gateway 252 tests): all 10 confirmed + 16 of 17
+  minors, m13 kept with a reason. Money digest moved again (options_money.gateway.max_day_open_orders 250);
+  gateway MAX_DAY_OPEN_ORDERS 250, MAX_DAY_USD back to 4000, MAX_DAY_USD_ALPACA 10000; a family moved onto
+  real money trades from the NEXT session. W4 pushed its fixes (#363 head 9508c032, CI green): all 22.
+- ~09:55Z **Fix verification** (10 agents, both PRs): #363 16 fixed, 6 partly (C1 lineage trial count, C7 audit
+  without OpenAI room, C11 fitted values as words still public, C13 reconcile can kill a box mid-fork, C16
+  daily cap on estimates, M4 stale gate snapshot) + 1 major regression (a holdout look cut off by a restart is
+  never recorded or retried) + 6 minor. #362 19 fixed, m13 kept (accepted), C2 NOT fixed (probe -> sized five
+  minutes later with no real Probe trade), 6 partly (C5, C7, m2, m6, m9, m16) + 8 regressions (3 major:
+  broken-leg resend stamp without a day; forced window refusing closes of any expiring structure; the
+  instance order budget refusing a program's own exits). Both back to their builders; the swarm deploys for
+  training after the public-notes fix (C11), the gate-side fixes land before the gate image.
+- 10:21:31Z The swarm's training stage merged as PR #364 (the reviewed swarm up to W4's d2b365a1: C11 public notes
+  refuse number words, ':' and parentheses, and the role prompt says notes are public; C13a forks recorded before
+  their POST); main 310225ae. #363 continues with the gate-side fixes.
+- 10:22:17Z Release `20260926T102142Z-e71ed057c625` canaried and PROMOTED (loop stopped); previous =
+  20260926T084913Z-8158a11cfe3f (the rollback floor holds). 10:22Z `/workspace/state/swarm.json` =
+  {"enabled": true, "gym": {"enabled": true, "image_checkpoint": sbcp_2cde3f22 (Gym v0), "gate_checkpoint": null}}.
+- 10:22:29Z **The new House started** (`floor_box.py start`: supervisor 5318, loop 5322). First tick 10:22:26Z:
+  budget open, books alpaca-paper + options-shadow reconciled, living 0 (no old-style agents), real_money false.
+  The swarm process (pid 5336, niced) started 10:22:27Z: 48 families founded, 0 boxes adopted; the gate
+  "waiting" (no gate image). 10:23Z six sealed Gym boxes `ltcm-swarm-gym-*` running. The site's first new-era
+  checkpoint at 10:22:27Z: schema 2, run.started_at 10:22:21.321Z, account equity $481.63.
 
 ## Scoreboard
 
@@ -280,5 +303,19 @@ clock never restarts.
 | 7 | Execution | no option order; 0 orders today |
 | 8 | Compute | Sail balance $118.79 (was $34/day before the pause); OpenAI month $596.11 of $607; ThetaData Standard $80/mo |
 | 9 | Harness | CI 14m12s (3.14) / 10m44s (3.11); 1,103 files, 360,821 lines (league 90,343 + tests 80,279; ltcm 50,460 + tests 42,762); 119 docs .md; README 104.6 KB; CONTRACT 75.6 KB |
+
+### T0 + 4 h (10:23Z Sept 26)
+
+| # | Metric | T0 + 4 h |
+|---|---|---|
+| 1 | Net since the reset | options P&L $0 (no option order yet); compute since T0: Sail $118.79 -> $116.08 (-$2.71, mostly the swarm's laptop trials), OpenAI $0.18 (one architect call in a trial); ThetaData $80/mo, market data $83/mo accrue |
+| 2 | Data: underlying-days in the store | at 10:11Z: core five 2023-2025 3,136 of 3,760 (Gym v0 cut at 08:58Z: Train 2024 252 days per root, Validation Jan-Jun 2025 ~104); holdout 3 of 920; 2022 0 of 1,255; the 20 names 0 of 23,740; trade_quote 0 of 755; back months 0 of 2,374; ~1,000-1,300 underlying-days/h (ThetaData-bound); target core five 2023-2025 by 12:00Z: on track (~10:40Z) |
+| 3 | Gym throughput | laptop: ~425 program-years/hour/core (typical programs 16-20 s a program-year; worst 66 s); on Sail: not yet measured on the box (6 Gym boxes starting at 10:23Z); laptop trial of the swarm: 213 inner-loop cycles, median 71 s, p90 114 s |
+| 4 | The search | 48 families founded at 10:22:27Z on the House box; trials: 0 on the box (laptop trials excluded) |
+| 5 | Evidence | 0 validation passes; 0 holdout looks (the gate waits for its image); leakage alarm silent |
+| 6 | Forward | none (first forward day Monday) |
+| 7 | Execution | no option order; the live path (PR #362) in its second fix round |
+| 8 | Compute | Sail balance $116.08 (owner top-up pending); OpenAI month $596.29 of $607 (cap not raised: unfunded); ThetaData Standard |
+| 9 | Harness | House restarts: 1 (the new House start); CI ~10-11 min; main 310225ae: 988 files (from 1,103), 353,272 lines (from 360,821); docs .md 3 (from 119); README 10 KB (from 105 KB); league/CONTRACT.md 12,048 bytes (from 75,558; rewritten for options by the swarm PR) |
 
 ## Report
