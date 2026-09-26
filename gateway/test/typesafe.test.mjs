@@ -228,3 +228,12 @@ test('a bad answer is named per question, and a caller may opt in to the answers
   assert.match(answerProblems(two, extra).top, /not asked/);
   assert.match(answerProblems(two, { ...mixed, model: 'jev-0' }).top, /pinned model/);
 });
+
+test('reserved object names are refused as question and option names', () => {
+  for (const name of ['__proto__', 'constructor', 'prototype']) {
+    const questions = JSON.parse(`{"${name}": {"type": "noul", "instructions": "Is it?"}}`);
+    assert.match(admit({ model: MODEL, state: 'x', questions }), /simple identifier/);
+    const options = JSON.parse(`{"${name}": "an option", "other": "another"}`);
+    assert.match(admit({ model: MODEL, state: 'x', questions: { q: { type: 'choice', instructions: 'Which?', criteria: options } } }), /2 to 32 named options/);
+  }
+});

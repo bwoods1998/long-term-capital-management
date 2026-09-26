@@ -15,7 +15,10 @@ export const money = formatUsdMicro;
 const object = x => x !== null && typeof x === 'object' && !Array.isArray(x);
 const text = x => typeof x === 'string' && x.trim().length > 0;
 const keysOnly = (x, keys) => Object.keys(x).every(k => keys.includes(k));
-const ident = x => typeof x === 'string' && /^[a-zA-Z0-9_-]{1,64}$/.test(x);
+// `__proto__` and the other Object.prototype names are not question or option names: as keys of a
+// plain object they would slip past per-name checks (pre-ship review of #304, Sept 26, 2026).
+const RESERVED = new Set(['__proto__', 'constructor', 'prototype']);
+const ident = x => typeof x === 'string' && /^[a-zA-Z0-9_-]{1,64}$/.test(x) && !RESERVED.has(x);
 
 export function admit(body) {
   if (!object(body) || !keysOnly(body, ['model', 'state', 'questions']) || body.model !== MODEL
