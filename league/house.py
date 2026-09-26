@@ -312,14 +312,10 @@ class House:
 
 
     def paused(self) -> dict[str, Any] | None:
-        """The operator's maintenance pause: `PAUSE` in the House root, with the reason as its text.
-
-        STOP ends the loop, and with it reconciliation and every exit. PAUSE keeps the loop and
-        closes everything that spends or enters: no research, Merton, semantic lab, survey, replay,
-        births or payouts; no promotion; only agents already holding a position are woken, and
-        only their exits and cancels reach a book. Research in flight defers at its next paid turn
-        and resumes from its checkpoint when the file is removed. The clock-based culls wait too,
-        because an agent cannot replay or trade its way out of a pause."""
+        """Read the maintenance reason. PAUSE blocks admissions and starting paid workers;
+        live reconciliation and exits continue. An existing swarm keeps training until its own
+        `swarm.stop` is set. STOP ends the House loop and therefore its active exit supervision.
+        """
         path = self.root / "PAUSE"
         try:
             text = path.read_text(encoding="utf-8")[:500].strip()

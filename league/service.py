@@ -151,7 +151,8 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
     from .swarm import settings as swarm_settings
 
     config = dict(config or load_config())
-    load_env()
+    if not canary:
+        load_env()
     root = Path(root)
     real_money = config.get("real_money") is True and not canary
     if real_money and local_sandbox:

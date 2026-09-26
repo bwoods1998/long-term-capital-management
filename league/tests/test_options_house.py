@@ -89,7 +89,7 @@ class Build(BuildCase):
         from league.ledger import Ledger
         root = Path(self.dir.name) / 'isolated-canary'
         with patch.object(service, 'secret', side_effect=AssertionError('secret requested')), \
-             patch.object(service, 'load_env'), \
+             patch.object(service, 'load_env', side_effect=AssertionError('environment requested')), \
              patch('urllib.request.urlopen', side_effect=AssertionError('network requested')), \
              contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(main(['tick', '--canary', '--root', str(root)]), 0)
