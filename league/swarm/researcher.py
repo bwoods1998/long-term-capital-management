@@ -72,7 +72,7 @@ TOOLS: list[dict[str, Any]] = [
                     "required": ["run_id"]}},
 ]
 
-#: The REVISE turn of a cycle offers gym_run alone, and a tool call is required: every cycle runs something.
+#: A REVISE turn offers gym_run alone. A missing required tool call fails the cycle and uses the normal backoff.
 TOOLS_REVISE: list[dict[str, Any]] = [TOOLS[0]]
 
 ROLE = """You are a researcher in the LTCM options swarm. You own one family and improve its program in the Gym.
@@ -172,6 +172,11 @@ TRANSIENT = ("did not answer", "abandoned before it ran", "superseded")
 
 def transient(error: str) -> bool:
     return any(t in error for t in TRANSIENT)
+
+
+def completed_run(result: Mapping[str, Any]) -> bool:
+    """A diagnostic worth a READ turn: the Gym completed and the store recorded its run."""
+    return result.get("status") == "ok" and bool(result.get("run_id"))
 
 
 class Researcher:
@@ -398,7 +403,8 @@ class Researcher:
                                                        f"rewrote your program:\n```python\n{ready['code']}\n```\nIts Train diagnostic:\n"
                                                        f"{json.dumps(view, default=str)[:9000]}"})
             out["rewrite"] = ready.get("profile")
-            gym_done = True
+            gym_done = completed_run(view)
+            pending = None  # the rewrite supersedes the queued input, including when the rewrite needs repair
             fam = self.store.family(fid) or fam
         if pending and not gym_done:  # the run asked for at the end of the last cycle (its call was answered "queued" then)
             result = self._execute(fam, "gym_run", pending.get("arguments") or {}, out, author=pending.get("author") or "model")
@@ -416,9 +422,12 @@ class Researcher:
                 # The Gym will not run it (or failed it three times): the model hears why and revises.
                 current.append({"role": "user", "content": "The gym_run you queued last cycle could not run: "
                                                            f"{str(result.get('error') or '')[:600]}. {result.get('hint') or ''}"})
-            else:
+            elif completed_run(result):
                 current.append({"role": "user", "content": f"The gym_run you queued last cycle ran:\n{json.dumps(result, default=str)[:12000]}"})
                 gym_done = True
+            else:
+                current.append({"role": "user", "content": "The gym_run you queued last cycle did not complete a Gym run:\n"
+                                                           f"{json.dumps(result, default=str)[:12000]}"})
             fam = self.store.family(fid) or fam
         pending = None  # run, or superseded by the rewrite (its call was answered "queued" last cycle)
         if int(fam.get("stall") or 0) >= int(self.cfg.get("stall_revisions", 5)):
@@ -436,7 +445,7 @@ class Researcher:
             chars = sum(len(json.dumps(i, default=str)) for i in items)
             profile = self._profile(chars)
             key = f"swarm:{fid}:c{n}:m{out['model_calls']}:{int(fam.get('revisions') or 0)}"
-            # REVISE (nothing has run this cycle): gym_run alone, and a call is required. READ (a run came back): every tool.
+            # REVISE (no successful run this cycle): gym_run alone, required. READ (a completed run came back): every tool.
             revise = not gym_done
             response = self.router.sail(profile, items, family=fid, key=key, tools=TOOLS_REVISE if revise else TOOLS,
                                         effort=str(self.cfg.get("reasoning_effort", "minimal")),
@@ -452,10 +461,14 @@ class Researcher:
             if not calls:
                 if response.output_text:
                     out["text"] = response.output_text[:600]
+                if revise:
+                    out["protocol_error"] = "required gym_run returned no tool call"
+                    out.setdefault("error", f"model protocol: {out['protocol_error']}")
                 break
             stop = False
             for call in calls:
-                if call.name == "gym_run" and (gym_done or self.clock() > deadline - 30 or out["tool_calls"] >= max_tools) \
+                if call.name == "gym_run" and (out.get("run_id") or "gym_error" in out or
+                                              self.clock() > deadline - 30 or out["tool_calls"] >= max_tools) \
                         and pending is None and not call.error:
                     # One run a cycle: this one opens the next cycle. Its call is answered now (every call keeps its output
                     # beside it in the history); its result arrives as a message when it has run.
@@ -477,7 +490,7 @@ class Researcher:
                     result = self._execute(fam, call.name, call.arguments, out, author=profile)
                     out["tool_calls"] += 1
                     if call.name == "gym_run":
-                        gym_done = True
+                        gym_done = completed_run(result)
                         if isinstance(result, dict) and result.get("status") == "gym_error":
                             out["error"] = f"gym: {str(result.get('error') or '')[:200]}"  # no further model call this cycle
                             stop = True
