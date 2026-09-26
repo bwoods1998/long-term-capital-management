@@ -168,6 +168,12 @@ Read-only on the box at 06:03-06:15Z Sept 25 (`allocator-board.json` at 06:03:51
    p50; each founder's replay recorded as the wait it is ("unsupported input: feeds recorded live since"), never a
    failed trial, so the forward-first run's F1/F3 ranking reads it as no replay record (asked 06:58Z). Then the gateway fetch from a research pass (the `web_fetch` ledger row).
 
+## Wrap-up (the owner's message to all four runs, received about 22:45Z Sept 25)
+
+- Finish soon, start nothing new: build nothing further; ship only what is built, reviewed and CI-green.
+- Deploy order, each after the previous one's watch ends + 30 min, never while a real Kalshi family's game is in play, never 13:25-20:05Z on a trading day: (1) forward-first Deploy B as soon as tonight's last two real MLB games (AZ-SD, LAD-SF) settle; (2) options Deploy G; (3) forward-first Deploy C; (4) Jev D-J2 (+ its J5 gateway deploy); (5) **this run's K2 (#348: the scale rule K5 and the allocator's tranche line K5b, switched off)**. A run not ready passes its slot to the next.
+- After K2: verify it on the box; the final scoreboard reading; everything that needs a later market window (Monday's US session, the next real fill, the next settlement) recorded as a named window after the run with its numbers; README, operations and memory updated; merged worktrees and branches removed (unmerged work pushed, never deleted); the run record's final PR; the report with the owner's decisions. Then stop. **Read as:** the plan's weekend watch every 30 minutes and its Saturday/Sunday/Monday scoreboard readings are replaced by the final reading after K2 and named windows after the run.
+
 ## Interruptions
 
 - **07:30-10:30Z Sept 25: the account's usage limit** (HTTP 429, "session limit, resets 3:30am America/Los_Angeles") stopped five of this run's agents mid-work (the K1 wake fix, I2, and the seat-hook, weather-seed and scale-rule reviews); the other runs stalled too (Deploy A did not happen in its 08:00-09:30Z window; main moved only by Merton's #314-316). Nothing was lost: each worktree kept its uncommitted work. Resumed at 10:32Z in priority order, Deploy K1's path first (the wake fix, the seat-hook review, the weather review), then I2 and the K5 review; the limit is shared by four runs, so this run keeps at most three agents at once from here. Two waiter loops of the K5 builder (`pgrep -f` matching its own command line, 3 h 20 min) were stopped; its `test_live_trading` run had finished (19 OK).
