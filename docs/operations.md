@@ -295,3 +295,10 @@ agent's intent, never from a test.
 | `OPTION_STRUCTURES_REAL` | `gateway/wrangler.jsonc` | off | structure types real money may open; must equal the constitution's list | gateway deploy with the matching House deploy and a ratify |
 | `FRONTIER_MONTH_USD`, `FRONTIER_MONTH_MAX_USD`, `FRONTIER_FUNDED_MONTH` | `gateway/wrangler.jsonc` | $707, September 2026 only | the OpenAI month; expires before an unfunded month can renew it | gateway deploy |
 | The money rules | `league/constitution.py` | Deploy G's (money `be1e3ce9`); the options table arrives with the live path | what real money may do | owner deploy, then `--ratify` |
+
+In `swarm.json`, `researcher.usd_per_hour` keeps the combined Sail-model and OpenAI trailing-hour pace.
+Set the optional `researcher.sail_usd_per_hour` to the funded Sail rate to pace Sail models separately;
+absent or null keeps the combined behavior. OpenAI holds still count against its own burst cap and funded
+gateway month. Invalid, nonfinite or negative limits pause research. The heartbeat's
+`status.researcher_pace` reports the scope, limit, spend and pause reason, so a quiet research loop can be
+distinguished from a publication delay.
