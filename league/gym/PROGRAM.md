@@ -101,8 +101,12 @@ every exit are values, and a trade's P&L is (exit - entry) x 100 x qty - fees. S
 Types: `long_call`, `long_put`, `debit_vertical`, `credit_vertical`, `iron_condor`, `iron_butterfly`,
 `long_butterfly` (body `"ratio": 2`), `long_straddle`, `long_strangle`, `calendar`, `diagonal`
 (equity roots only; the short leg expires first). Every structure is defined-risk; no naked short.
-Real money trades only the first five multi-leg types that close in one order (verticals, condors,
-iron butterflies, long butterflies) until others are proven.
+All listed types are valid Gym research choices; single long calls and puts have no lesser status
+than spreads. The current production adapter allows five spread types (verticals, condors, iron
+butterflies, long butterflies); that implementation limit does not define Alpaca's full capability.
+Covered calls and cash-secured puts require inventory/collateral support that this interface does
+not yet implement. Paper and production adapters must be verified separately; research support
+alone does not enable either route.
 
 A leg: `side` long/short, `right` "C"/"P", `ratio` (1, or 2 for a butterfly's body), `dte` (the nearest
 quoted expiry at or after it), and exactly one selector: `id` (a contract from `ctx.chain.id`),
