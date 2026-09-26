@@ -403,3 +403,9 @@ absent or null keeps the combined behavior. OpenAI holds still count against its
 gateway month. Invalid, nonfinite or negative limits pause research. The heartbeat's
 `status.researcher_pace` reports the scope, limit, spend and pause reason, so a quiet research loop can be
 distinguished from a publication delay.
+
+A Gym researcher can call `retire(reason)` to abandon its whole family. Retirement stops queued research,
+keeps the best programs and every trial/look, and leaves existing positions under their exit owner.
+Researchers and the tournament share the same atomic population-floor check. A floor refusal ends the
+cycle and uses the existing increasing error cooldown (up to thirty minutes); it does not retire the family.
+The raw reason stays private in its notebook and graveyard; the public event carries only filtered prose.

@@ -335,6 +335,34 @@ class BandRace(LiveCase):
         live.account_row = self.venue.account()
         return live, store, other
 
+    def tuition_live(self, *, hold=2):
+        import json
+        from league.gym.driver import build_bundle
+        from league.swarm.gate import run_sha
+
+        live, store, other = self.swarm_live("gym")
+        (self.root / "swarm.json").write_text(json.dumps({"gym": {"image_checkpoint": "synthetic-image"}}))
+        version = store.add_version("vert", VERTICAL, {"hold": hold}, author="synthetic")
+        sha = run_sha(version)
+        store.set_state("vert", validation_version=version["n"], validation_line={"passed": True},
+                        validation_image="synthetic-image", validation_bundle=build_bundle()[1],
+                        review={"sha": sha, "verdict": "pass", "audit": {"verdict": "pass"}})
+        return live, store, other, f"vert@{version['n']}:t"
+
+    def on_decision(self, live, key, change):
+        decide = live._decide
+        changed = []
+
+        def interrupted(day, jobs, out):
+            answers = decide(day, jobs, out)
+            if not changed and any(j["key"] == key for j in jobs):
+                change()
+                changed.append(True)
+            return answers
+
+        live._decide = interrupted
+        return changed
+
     def intervene(self, live, change):
         read = live.families.forward_rows
 
@@ -387,19 +415,8 @@ class BandRace(LiveCase):
         self.assertTrue(live.book.positions)
 
     def test_self_retired_gym_tuition_keeps_its_position_exit_owner(self):
-        import json
-        from league.gym.driver import build_bundle
-        from league.swarm.gate import run_sha
-
-        live, store, _ = self.swarm_live("gym")
-        (self.root / "swarm.json").write_text(json.dumps({"gym": {"image_checkpoint": "synthetic-image"}}))
-        version = store.add_version("vert", VERTICAL, {"hold": 2}, author="synthetic")
-        sha = run_sha(version)
-        store.set_state("vert", validation_version=version["n"], validation_line={"passed": True},
-                        validation_image="synthetic-image", validation_bundle=build_bundle()[1],
-                        review={"sha": sha, "verdict": "pass", "audit": {"verdict": "pass"}})
+        live, store, _, key = self.tuition_live()
         self.run_to(9, 31)
-        key = f"vert@{version['n']}:t"
         self.assertTrue(live.book.positions)
         self.assertTrue(live.instances[key].tuition)
         retired = store.retire_gym("vert", "The research mechanism failed.", floor=0, source="researcher")
@@ -412,6 +429,140 @@ class BandRace(LiveCase):
         opens = [body for body in self.venue.sent if body["legs"][0]["position_intent"] == "buy_to_open"]
         self.assertEqual(len(opens), 1, "the retired tuition program cannot reopen")
         self.assertEqual(store.forward("vert"), [], "tuition remains outside qualifying forward evidence")
+
+    def test_retirement_during_a_tuition_decision_refuses_its_returned_open(self):
+        live, store, other, key = self.tuition_live()
+        changed = self.on_decision(live, key, lambda: other.retire_gym(
+            "vert", "The mechanism failed.", floor=0, source="researcher"))
+        self.run_to(9, 31)
+        self.assertTrue(changed)
+        self.assertEqual(store.family("vert")["band"], "retired")
+        self.assertEqual((self.venue.sent, live.book.positions, live.book.orders), ([], {}, {}))
+        self.assertIn("no longer eligible", self.ledger.of("live.refusal")[-1][0]["why"])
+
+    def test_retirement_during_a_tuition_decision_keeps_its_returned_close(self):
+        live, store, other, key = self.tuition_live(hold=1)
+        self.run_to(9, 31)
+        self.assertTrue(live.book.positions)
+        self.on_decision(live, key, lambda: other.retire_gym(
+            "vert", "The mechanism failed.", floor=0, source="researcher"))
+        self.run_to(9, 32)
+        self.assertEqual(store.family("vert")["band"], "retired")
+        self.assertEqual(live.book.positions, {})
+        self.assertEqual([b["legs"][0]["position_intent"] for b in self.venue.sent], ["buy_to_open", "sell_to_close"])
+
+    def test_demotion_during_a_real_decision_refuses_its_returned_open(self):
+        live, store, other = self.swarm_live("probe")
+        self.on_decision(live, "vert@1:r", lambda: other.set_band("vert", "gym", reason="synthetic demotion"))
+        self.run_to(9, 31)
+        self.assertEqual(store.family("vert")["band"], "gym")
+        self.assertEqual((self.venue.sent, live.book.positions), ([], {}))
+
+    def test_new_negative_evidence_during_a_real_decision_refuses_its_returned_open(self):
+        live, store, other = self.swarm_live("probe")
+        self.on_decision(live, "vert@1:r", lambda: other.set_state("vert", forward={"negative": True}))
+        self.run_to(9, 31)
+        self.assertEqual(store.family("vert")["band"], "probe")
+        self.assertEqual((self.venue.sent, live.book.positions), ([], {}))
+
+    def test_new_negative_raw_trades_during_a_decision_refuse_entry_before_summary_refresh(self):
+        live, store, other = self.swarm_live("probe")
+        self.on_decision(live, "vert@1:r", lambda: other.add_forward("vert", "nightly", [
+            {"id": str(i), "day": "2026-09-28", "pnl": -10, "max_loss": 50, "version": 1} for i in range(20)]))
+        self.run_to(9, 31)
+        self.assertFalse(store.family("vert")["state"]["forward"]["negative"], "the cached summary is still stale")
+        self.assertEqual((self.venue.sent, live.book.positions), ([], {}))
+
+    def test_forward_rows_changing_between_sizing_and_admission_refuse_the_stale_order(self):
+        live, store, other = self.swarm_live("probe")
+
+        def after_decision():
+            self.intervene(live, lambda: other.add_forward("vert", "nightly", [
+                {"id": str(i), "day": "2026-09-28", "pnl": -10, "max_loss": 50, "version": 1} for i in range(20)]))
+
+        self.on_decision(live, "vert@1:r", after_decision)
+        self.run_to(9, 31)
+        self.assertEqual(len(store.forward("vert")), 20)
+        self.assertEqual((self.venue.sent, live.book.positions), ([], {}))
+
+    def test_replaced_version_during_a_real_decision_refuses_its_returned_open(self):
+        live, store, other = self.swarm_live("probe")
+
+        def replace():
+            version = other.add_version("vert", VERTICAL, {"hold": 601}, author="synthetic")
+            other.set_state("vert", banded_version=version["n"], banded_sha=version["sha"])
+
+        self.on_decision(live, "vert@1:r", replace)
+        self.run_to(9, 31)
+        self.assertEqual((self.venue.sent, live.book.positions), ([], {}))
+
+    def test_demotion_during_a_shadow_decision_refuses_its_returned_open(self):
+        live, store, other = self.swarm_live("candidate")
+        live.real_money = False
+        self.run_to(9, 31)
+        account = live.shadow.accounts["vert@1:s"]
+        self.on_decision(live, "vert@1:s", lambda: other.set_band("vert", "gym", reason="synthetic demotion"))
+        self.run_to(9, 33)
+        self.assertEqual((account.orders, account.positions, account.counts["opens"]), ({}, {}, 0))
+        self.assertEqual(self.venue.sent, [])
+
+    def test_retirement_with_a_waiting_shadow_open_withdraws_it_before_the_next_fill(self):
+        live, store, other = self.swarm_live("candidate")
+        live.real_money = False
+        self.run_to(9, 32)
+        account = live.shadow.accounts["vert@1:s"]
+        self.assertEqual((len(account.orders), len(account.positions)), (1, 0))
+        other.set_band("vert", "gym", reason="synthetic demotion")
+        other.retire_gym("vert", "The mechanism failed.", floor=0, source="researcher")
+        self.run_to(9, 34)
+        self.assertEqual((account.orders, account.positions, account.trades), ({}, {}, []))
+
+    def test_unreadable_shadow_entry_permission_does_not_drop_an_owned_close(self):
+        live = self.make([family("vert", VERTICAL, band="candidate", params={"hold": 600})], real_money=False)
+        self.run_to(9, 33)
+        account = live.shadow.accounts["vert@1:s"]
+        [pos] = account.positions.values()
+        with patch.object(live.families, "admit_open", side_effect=RuntimeError("store unavailable")):
+            live._shadow_intents("vert@1:s", account, live.day, 2,
+                                 [{"open": "debit_vertical"}, {"close": pos.pid, "limit": "natural"}])
+        self.assertTrue(pos.closing)
+        self.run_to(9, 36)
+        self.assertEqual(account.positions, {})
+        self.assertEqual(len(account.trades), 1)
+
+    def test_entry_admission_releases_the_swarm_transaction_before_venue_io(self):
+        live, store, other = self.swarm_live("probe")
+        submit = self.venue.submit
+        checked = []
+
+        def outside_transaction(body, *, exit):
+            other.set_state("vert", venue_io_observed=True)
+            checked.append(True)
+            return submit(body, exit=exit)
+
+        self.venue.submit = outside_transaction
+        self.run_to(9, 31)
+        self.assertEqual(checked, [True])
+        self.assertTrue(store.family("vert")["state"]["venue_io_observed"])
+        self.assertTrue(live.book.positions)
+
+    def test_retirement_after_local_admission_keeps_the_inflight_fill_and_its_exit_owner(self):
+        live, store, other, key = self.tuition_live()
+        submit = self.venue.submit
+
+        def retire_after_admission(body, *, exit):
+            if not exit:
+                self.assertEqual(len(live.book.orders), 1, "the order was durably admitted before venue I/O")
+                other.retire_gym("vert", "The mechanism failed.", floor=0, source="researcher")
+            return submit(body, exit=exit)
+
+        self.venue.submit = retire_after_admission
+        self.run_to(9, 31)
+        self.assertEqual(store.family("vert")["band"], "retired")
+        self.assertTrue(live.book.positions, "the in-flight fill remains owned after retirement")
+        self.run_to(9, 35)
+        self.assertEqual(live.book.positions, {})
+        self.assertEqual([b["legs"][0]["position_intent"] for b in self.venue.sent], ["buy_to_open", "sell_to_close"])
 
     def test_missing_forward_evidence_does_not_start_a_real_instance(self):
         live = self.make([family("vert", VERTICAL)])

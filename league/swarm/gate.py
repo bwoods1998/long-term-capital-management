@@ -142,7 +142,7 @@ class Gate:
             out["alarm"] = True
             return out
         limit = float(self.settings.get("gym", {}).get("run_timeout_seconds", 900)) + 1200
-        for fam in self.store.families(alive=True):
+        for fam in self.store.families():
             state = fam.get("state") or {}
             inflight = state.get("look_inflight") or {}
             if inflight.get("sha"):
@@ -155,7 +155,7 @@ class Gate:
                     state = fam.get("state") or {}
             if state.get("look_inflight"):
                 continue  # one look per family in flight; its reservation must survive until it resolves
-            if fam["band"] != "gym" or not state.get("gate_ready"):
+            if fam.get("retired_at") or fam["band"] != "gym" or not state.get("gate_ready"):
                 continue
             image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
             bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
@@ -178,6 +178,8 @@ class Gate:
                 continue
             review = state.get("review") if (state.get("review") or {}).get("sha") == sha else None
             if review is None:  # the review, once a version (kept, so an audit asked again does not redo it)
+                if not self._review_current(fam["id"], n, image, bundle):
+                    continue
                 try:
                     review = self.review(fam, version)
                 except Exception as exc:  # noqa: BLE001 - no reviewer, no look
@@ -195,6 +197,8 @@ class Gate:
                 if not self.store.compare_and_set_state(fam["id"], {"validation_version": n}, review=review):
                     continue  # the tournament validated a newer version meanwhile: this one is not the gate's
             if review["verdict"] == "pass" and "audit" not in review:  # the audit: a second reader, before any look
+                if not self._review_current(fam["id"], n, image, bundle):
+                    continue  # the paid review remains evidence; a terminal family starts no new paid stage
                 attempts = int(self.store.get("audit_attempt:" + sha, 0))
                 try:
                     audit = self.audit(fam, version, attempt=attempts)
@@ -219,6 +223,8 @@ class Gate:
                                 "the OpenAI month has no room, so Sail models stood in"})
                 if not self.store.compare_and_set_state(fam["id"], {"validation_version": n}, review=review):
                     continue
+            if not self._review_current(fam["id"], n, image, bundle):
+                continue
             if review["verdict"] != "pass":
                 self.refuse(fam, n, sha, review.get("stage") or "review", review.get("reasons") or [], out)
                 continue
@@ -233,6 +239,13 @@ class Gate:
             if self.alarm():
                 break
         return out
+
+    def _review_current(self, fid: str, n: int, image: Any, bundle: Any) -> bool:
+        fam = self.store.family(fid) or {}
+        state = fam.get("state") or {}
+        return bool(not fam.get("retired_at") and fam.get("band") == "gym" and state.get("gate_ready")
+                    and state.get("validation_version") == n and state.get("validation_image") == image
+                    and state.get("validation_bundle") == bundle)
 
     def look(self, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str) -> bool | None:
         """The one holdout look. None when the gate box did not run it (no look is spent). The version is marked as

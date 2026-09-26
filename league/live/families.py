@@ -18,9 +18,26 @@ The options-swarm run, Wave 5 (Sept 26, 2026), the interface agreed with Wave 4 
 from __future__ import annotations
 
 import copy
+from contextlib import contextmanager
 import threading
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
+
+
+def _entry_matches(row: Mapping[str, Any] | None, expected: Mapping[str, Any], real: bool) -> bool:
+    # The decider's run hash includes merged program defaults; the swarm's hash covers stored overrides. Compare
+    # the exact immutable source and overrides actually loaded, so those distinct hash conventions cannot disagree.
+    if (not row or row.get("version") != expected.get("version") or row.get("code") != expected.get("code")
+            or (row.get("params") or {}) != (expected.get("params") or {})):
+        return False
+    band = row.get("band")
+    if not real:
+        return band in ("candidate", "probe", "sized")
+    if band != expected.get("band"):
+        return False
+    if expected.get("tuition"):
+        return band == "gym" and bool(row.get("validation_passed")) and not row.get("holdout_passed")
+    return band in ("probe", "sized") and bool(row.get("holdout_passed")) and not (row.get("forward") or {}).get("negative")
 
 
 class SwarmFamilies:
@@ -46,6 +63,15 @@ class SwarmFamilies:
     def forward_rows(self, family: str) -> list[dict]:
         with self.lock:
             return [dict(r) for r in self._db().forward(family)]
+
+    @contextmanager
+    def admit_open(self, expected: Mapping[str, Any], *, real: bool):
+        """Serialize current eligibility with durable local order admission, never with venue/network work."""
+        with self.lock, self._db().atomic():
+            row = next((r for r in self.read() if r["family"] == expected["family"]), None)
+            evidence_current = (not real or expected.get("tuition") or
+                                self._db().forward(str(expected["family"])) == expected.get("forward_rows"))
+            yield _entry_matches(row, expected, real) and evidence_current
 
     def add_forward(self, family: str, source: str, trades: Iterable[Mapping[str, Any]]) -> int:
         with self.lock:
@@ -115,6 +141,14 @@ class MemoryFamilies:
     def forward_rows(self, family: str) -> list[dict]:
         with self.lock:
             return [dict(v, source=k[0]) for k, v in sorted(self.forward.get(family, {}).items())]
+
+    @contextmanager
+    def admit_open(self, expected: Mapping[str, Any], *, real: bool):
+        with self.lock:
+            family = str(expected["family"])
+            rows = [dict(v, source=k[0]) for k, v in sorted(self.forward.get(family, {}).items())]
+            evidence_current = not real or expected.get("tuition") or rows == expected.get("forward_rows")
+            yield _entry_matches(self.rows.get(family), expected, real) and evidence_current
 
     def add_forward(self, family: str, source: str, trades: Iterable[Mapping[str, Any]]) -> int:
         if source not in ("nightly", "shadow", "real"):

@@ -236,6 +236,56 @@ class ResearcherRetirement(ResearcherCase):
 
 
 class RoundRetirement(RoundCase):
+    def test_retirement_during_review_keeps_the_paid_answer_but_starts_no_new_audit(self):
+        self.family("a")
+        Tournament(self.store, self.pool, self.settings).validate(self.store.families(alive=True))
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}] * 2
+        gate = Gate(self.store, self.pool, self.router, self.settings, clock=self.clock)
+        other = SwarmStore(self.root, clock=self.clock)
+        self.addCleanup(other.close)
+        review = gate.review
+
+        def retired_while_reviewing(fam, version):
+            answer = review(fam, version)
+            other.retire_gym(fam["id"], "The mechanism failed.", floor=0, source="researcher")
+            return answer
+
+        gate.review = retired_while_reviewing
+        gate.run()
+        current = self.store.family("a")
+        self.assertEqual(current["state"]["review"]["verdict"], "pass")
+        self.assertNotIn("audit", current["state"]["review"])
+        self.assertEqual(len(self.sail.bodies), 1)
+        self.assertEqual([j for j in self.pool.jobs if j.window == "holdout"], [])
+        self.assertEqual(len([e for e in self.store.events_after(0)
+                              if e["kind"] == "swarm.gate" and e["payload"].get("action") == "review"]), 1)
+
+    def test_restart_releases_a_retired_ancestors_dead_process_look_without_rearming_it(self):
+        self.family("ancestor")
+        self.store.add_family({**SPEC, "id": "descendant"}, origin="fork", parent="ancestor")
+        marker = {"sha": "unfinished-look", "n": 1, "at": self.clock() - 1, "token": "old-process"}
+        self.store.set_state("ancestor", validation_version=1, look_inflight=marker)
+        self.store.retire_gym("ancestor", "The mechanism failed.", floor=0, source="researcher")
+        self.assertEqual(self.store.lineage_looks("descendant", include_inflight=True), 1)
+        Gate(self.store, self.pool, self.router, self.settings, clock=self.clock).run()
+        state = self.store.family("ancestor")["state"]
+        self.assertIsNone(state["look_inflight"])
+        self.assertFalse(state["gate_ready"])
+        self.assertEqual(self.store.lineage_looks("descendant", include_inflight=True), 0)
+        self.assertEqual((self.pool.jobs, self.store.looks()), ([], []))
+
+    def test_current_process_retired_look_reservation_survives_gate_cleanup(self):
+        self.family("ancestor")
+        gate = Gate(self.store, self.pool, self.router, self.settings, clock=self.clock)
+        self.clock.advance(1)
+        marker = {"sha": "running-look", "n": 1, "at": self.clock(), "token": "current-process"}
+        self.store.set_state("ancestor", validation_version=1, look_inflight=marker)
+        self.store.retire_gym("ancestor", "The mechanism failed.", floor=0, source="researcher")
+        gate.run()
+        self.assertEqual(self.store.family("ancestor")["state"]["look_inflight"], marker)
+        self.assertEqual(self.store.lineage_looks("ancestor", include_inflight=True), 1)
+        self.assertEqual((self.pool.jobs, self.sail.bodies), ([], []))
+
     def test_stale_tournament_snapshot_shares_the_atomic_population_floor(self):
         for i in range(3):
             self.family(f"f{i}")
