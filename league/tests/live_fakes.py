@@ -362,5 +362,5 @@ def family(name: str, code: str, *, band: str = "probe", structure: str = "debit
     return {"family": name, "band": band, "structure": structure, "roots": ["SPY"], "holdout_passed": holdout,
             "validation_passed": validation, "version": version, "code": code, "params": dict(params or {}),
             "run_sha": f"sha-{name}-{version}", "typical_max_loss_usd": typical, "seed_era": True,
-            "real_promoted_at": at(MONDAY - dt.timedelta(days=3), 16, 1) if band in ("probe", "sized") else None,
+            "real_promoted_at": at(MONDAY - dt.timedelta(days=7), 9, 0) if band in ("probe", "sized") else None,
             "forward": {"trades": 0, "negative": False}}

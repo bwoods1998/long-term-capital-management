@@ -554,15 +554,14 @@ class OptionsLive:
             return 0
         now = self.clock()
         rec = (self.state.get("band_moves", {}) or {}).get(fid)
-        if not rec:
-            try:
-                promoted = self.families.promoted_at(fid)
-            except Exception:  # no verified history means zero proven Probe sessions
-                return 0
-            if promoted is not None:
-                rec = {"band": "probe", "at": promoted}
-        if rec and rec.get("band") in ("probe", "sized"):
-            since = float(rec["at"])
+        try:
+            promoted = self.families.promoted_at(fid)
+        except Exception:  # no verified history means zero proven Probe sessions
+            return 0
+        stamps = ([float(rec["at"])] if rec and rec.get("band") in ("probe", "sized") else [])
+        stamps += [promoted] if promoted is not None else []
+        if stamps:
+            since = max(stamps)
         else:
             # A Probe the live path did not move there itself (no record): its time at Probe counts from when it is first
             # seen at Probe (kept apart from `band_moves`, which decides when real money may start).

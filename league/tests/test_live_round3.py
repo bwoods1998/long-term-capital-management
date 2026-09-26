@@ -420,6 +420,15 @@ class BandRace(LiveCase):
         self.clock.set(at(MONDAY + dt.timedelta(days=1), 9, 31))
         self.assertTrue(live._real_eligible("vert"))
 
+    def test_a_repromotion_uses_the_latest_durable_time_for_whole_probe_sessions(self):
+        live, store, other = self.swarm_live("probe")
+        live.state.put("band_moves", {"vert": {"band": "probe", "at": at(MONDAY - dt.timedelta(days=7), 9, 0)}})
+        other.set_state("vert", live_promoted_at=self.clock())  # new promotion committed before the local write crashed
+        self.assertFalse(live._real_eligible("vert"))
+        self.assertEqual(live._probe_sessions("vert", "probe"), 0)
+        self.clock.set(at(MONDAY + dt.timedelta(days=1), 16, 0))
+        self.assertEqual(live._probe_sessions("vert", "probe"), 1)
+
 
 class Deadline(unittest.TestCase):
     def test_production_child_refuses_to_start_without_its_network_namespace(self):
