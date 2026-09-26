@@ -728,13 +728,55 @@ class OptionsLive:
             seen.add(str(r.get("id")))
             kind, symbol = str(r.get("activity_type")), str(r.get("symbol") or "").upper()
             self.record("live.option_event", {"kind": kind, "symbol": symbol, "qty": str(r.get("qty")), "_row": dict(r)})
+            contracts = abs(int(M.D(r.get("qty") or 0)))
+            if self.book is not None and contracts:
+                value = 0.0
+                if kind in ("OPASN", "OPEXC"):
+                    value = self._intrinsic_now(symbol)
+                found = self.book.remove_contracts(symbol, contracts, value_share=value,
+                                                   why={"OPEXP": "expired", "OPASN": "assigned", "OPEXC": "exercised"}.get(kind, kind))
+                if found < contracts and kind != "OPEXP":
+                    self.record("live.alert", {"what": f"{kind} of {contracts} {symbol}: the book held {found}"})
             if kind in ("OPASN", "OPEXC"):
                 why = f"{'an assignment' if kind == 'OPASN' else 'an exercise'} on {symbol} ({r.get('qty')} contracts)"
                 self.state.put("assignment_latch", {"why": why, "at": now})
-                self.alert("error", f"live: {why}: real entries frozen until the owner clears it; its shares are closed")
+                self.alert("error", f"live: {why}: real entries frozen until it is resolved; its shares are closed and the "
+                                    "structure's other legs closed alone")
                 self._tell_owner("assignment", why)
         self.state.put("activities_seen", sorted(seen)[-2000:])
         self._close_shares()
+        self._resolve_latch()
+
+    def _intrinsic_now(self, symbol: str) -> float:
+        """An option's intrinsic value a share at the underlying's price now (0 when it cannot be read)."""
+        parts = occ_parts(symbol)
+        if parts is None:
+            return 0.0
+        root, _, is_call, strike = parts
+        try:
+            if uses_parity(root):
+                chain = self.day.chains.get(root) if self.day is not None else None
+                prices = chain.underlying.price[np.isfinite(chain.underlying.price)] if chain is not None else np.zeros(0)
+                level = float(prices[-1]) if prices.size else float("nan")
+            else:
+                level = stock_price(self.market.stocks([root]).get(root) or {})
+        except Exception:  # noqa: BLE001
+            level = float("nan")
+        if not math.isfinite(level):
+            return 0.0
+        return max(0.0, level - strike) if is_call else max(0.0, strike - level)
+
+    def _resolve_latch(self) -> None:
+        """An assignment's latch lifts by itself once it is resolved: no broken structure left, no shares held, and a
+        clean reconciliation (the owner has been told either way; `--clear-assignment` lifts it by hand)."""
+        latch = self.state.get("assignment_latch")
+        if not latch or self.book is None:
+            return
+        broken = [p for p in self.book.positions.values() if p.info.get("broken")]
+        shares = self.state.get("shares", {}) or {}
+        if not broken and not any(shares.values()) and not self.book.frozen and not self.book.mismatch:
+            self.state.execute("DELETE FROM kv WHERE key='assignment_latch'")
+            self.record("live.stop", {"stop": "assignment", "released": True, "why": f"resolved: {latch.get('why')}"})
 
     def _close_shares(self) -> None:
         """Any stock position on the account (an assignment's or an exercise's) closed at once with a market order."""
@@ -742,10 +784,11 @@ class OptionsLive:
             return
         try:
             positions = self.real.positions()
+            working = {str(o.get("symbol") or "").upper() for o in self.real.orders(status="open")}
         except Exception:  # noqa: BLE001
             return
         for row in positions:
-            if str(row.get("asset_class")) != "us_equity":
+            if str(row.get("asset_class")) != "us_equity" or str(row.get("symbol") or "").upper() in working:
                 continue
             qty = M.D(row.get("qty") or 0)
             if qty == 0:
@@ -772,7 +815,7 @@ class OptionsLive:
             age = mi - order.placed_minute if order.day == today else 10_000
             if order.action == "open" and expiring and minute >= rules.open_cutoff:
                 book.cancel(order, "the open cutoff for expiring contracts")
-            elif order.tif is not None and age >= max(1, order.tif) and not order.forced:
+            elif order.tif is not None and age >= max(1, order.tif) and (not order.forced or order.action == "close_leg"):
                 book.cancel(order, f"its time in force ({order.tif} minutes) ran out")
             elif order.action == "open" and self.real_block(opening=True):
                 book.cancel(order, f"real entries are shut: {self.real_block(opening=True)}")
@@ -780,6 +823,9 @@ class OptionsLive:
             out["kill_switch"] = True
             return
         for pos in list(book.positions.values()):
+            if pos.qty > 0 and pos.info.get("broken"):
+                self._close_broken(pos, day, mi, out)
+                continue
             if pos.qty <= 0 or pos.status != "open":
                 continue
             rules = day.rules.get(pos.root) or V.rules_for(pos.root, open_minute=day.open_min, close_minute=day.close_min)
@@ -809,6 +855,35 @@ class OptionsLive:
                     book.cancel(working, "re-priced at the natural")
                 continue
             self._send_close(pos, day, mi, forced=True, why=force_why, out=out)
+
+    def _close_broken(self, pos: RPosition, day: LiveDay, mi: int, out: dict) -> None:
+        """A structure an assignment, exercise or expiry broke: each leg it still holds closed alone at the touch (a
+        short leg bought back at its ask first, a long leg sold at its bid; a long leg bid at nothing is left to expire,
+        worthless and riskless). One order a leg at a time, re-sent each minute until it fills."""
+        book = self.book
+        assert book is not None
+        chain, snap = day.chains.get(pos.root), day.snapshot(pos.root, mi)
+        if chain is None or snap is None:
+            return
+        busy = book.busy()
+        for leg in sorted(pos.legs, key=lambda x: x.side):             # shorts first
+            left = book.leg_remaining(pos, leg)
+            if left <= 0 or leg.symbol in busy:
+                continue
+            i = chain.column(leg.symbol)
+            if i < 0:
+                continue
+            price = float(snap.bid[i] if leg.side > 0 else snap.ask[i])
+            if not math.isfinite(price) or price <= 0:
+                continue
+            sent = book.new_order(instance=pos.instance, family=pos.family, action="close_leg", type_=pos.type, root=pos.root,
+                                  legs=[RLeg(leg.symbol, leg.side, 1, leg.is_call, leg.strike, leg.expiry, leg.key)], qty=left,
+                                  limit_value=price, tif=1, day=day.day.isoformat(), minute=mi, pid=pos.pid, forced=True,
+                                  why=f"broken structure: {pos.info.get('broken')}")
+            book.send(sent)
+            out.setdefault("orders", []).append({"oid": sent.oid, "family": pos.family, "action": "close_leg", "status": sent.status})
+            if leg.side < 0:
+                return                                                 # a short leg first, alone
 
     def _send_close(self, pos: RPosition, day: LiveDay, mi: int, *, forced: bool, why: str, out: dict,
                     intent: Mapping[str, Any] | None = None) -> str | None:
@@ -956,6 +1031,8 @@ class OptionsLive:
                 return "close: no such open position"
             if book.closing_order(pos.pid) is not None:
                 return "close: this position already has a working close (cancel it first)"
+            if pos.info.get("broken"):
+                return f"close: this structure is broken ({pos.info['broken']}): the House closes its legs"
             rules = day.rules.get(pos.root)
             if rules is not None and pos.expiry == today and minute >= rules.close_cutoff:
                 return f"expiry cutoff: closing orders on expiring contracts end at {rules.close_cutoff // 60}:{rules.close_cutoff % 60:02d} ET"
@@ -1066,7 +1143,7 @@ class OptionsLive:
         if self.book is not None:
             today = day.day.isoformat()
             for pos in list(self.book.positions.values()):
-                if pos.qty <= 0 or pos.expiry != today:
+                if pos.qty <= 0 or pos.expiry != today or pos.info.get("broken"):
                     continue
                 chain = day.chains.get(pos.root)
                 prices = chain.underlying.price[np.isfinite(chain.underlying.price)] if chain is not None else np.zeros(0)

@@ -237,6 +237,16 @@ def mleg_body(order: ROrder) -> dict[str, Any]:
             "time_in_force": "day", "legs": legs, "client_order_id": order.client_id}
 
 
+def single_leg_body(order: ROrder) -> dict[str, Any]:
+    """One leg of a broken structure closed alone (the gateway admits a sell_to_close of a contract held long and a
+    buy_to_close of one held short): `qty` contracts at a positive premium limit."""
+    leg = order.legs[0]
+    selling = leg.side > 0
+    return {"symbol": leg.symbol, "qty": str(order.qty), "side": "sell" if selling else "buy", "type": "limit",
+            "limit_price": order.limit_price, "time_in_force": "day",
+            "position_intent": "sell_to_close" if selling else "buy_to_close", "client_order_id": order.client_id}
+
+
 def leg_fees(root: str, legs: Sequence[RLeg], prices: Sequence[float], qty: int, action: str) -> float:
     total = 0.0
     for leg, price in zip(legs, prices):
@@ -365,21 +375,29 @@ class RealBook:
         out: dict[str, int] = {}
         for p in self.positions.values():
             for leg in p.legs:
-                out[leg.symbol] = out.get(leg.symbol, 0) + leg.side * leg.ratio * p.qty
+                out[leg.symbol] = out.get(leg.symbol, 0) + leg.side * self.leg_remaining(p, leg)
         for o in self.orders.values():
             if o.working and o.action == "open":
                 for leg in o.legs:
                     out[leg.symbol] = out.get(leg.symbol, 0) + leg.side * leg.ratio * o.remaining
         return out
 
+    @staticmethod
+    def leg_remaining(pos: RPosition, leg: RLeg) -> int:
+        """Contracts of one leg the account still holds for this position: its units x ratio, less what an expiry, an
+        assignment or an exercise took out (`gone`) and what single-leg closes sold or bought back (`leg_closed`)."""
+        gone = int((pos.info.get("gone") or {}).get(leg.symbol, 0))
+        closed = int((pos.info.get("leg_closed") or {}).get(leg.symbol, 0))
+        return max(0, leg.ratio * pos.qty - gone - closed)
+
     def expected_positions(self) -> dict[str, int]:
-        """What the venue should hold per contract: open positions (their filled units) only."""
+        """What the venue should hold per contract: open positions (their filled units, less legs gone) only."""
         out: dict[str, int] = {}
         for p in self.positions.values():
             if p.qty <= 0:
                 continue
             for leg in p.legs:
-                out[leg.symbol] = out.get(leg.symbol, 0) + leg.side * leg.ratio * p.qty
+                out[leg.symbol] = out.get(leg.symbol, 0) + leg.side * self.leg_remaining(p, leg)
         return {k: v for k, v in out.items() if v != 0}
 
     def closing_order(self, pid: int) -> ROrder | None:
@@ -433,8 +451,9 @@ class RealBook:
                   reserve: float = 0.0, max_loss: float = 0.0, fees_est: float = 0.0, tuition: bool = False, why: str = "") -> ROrder:
         with self.state.transaction():
             oid = self._next("orders", "oid")
+            price = f"{round(abs(limit_value), 2):.2f}" if action == "close_leg" else limit_price(limit_value, action)
             order = ROrder(oid, client_id(oid, family), instance, family, action, type_, root, list(legs), int(qty),
-                           float(limit_value), limit_price(limit_value, action), tif, self.clock(), day, int(minute),
+                           float(limit_value), price, tif, self.clock(), day, int(minute),
                            pid=pid, forced=forced, reserve=float(reserve), max_loss=float(max_loss), fees_est=float(fees_est),
                            tuition=tuition, why=str(why)[:300])
             order.updated_at = self.clock()
@@ -444,8 +463,8 @@ class RealBook:
 
     def send(self, order: ROrder) -> ROrder:
         """POST the order written as `pending`. Never retried (the module docstring)."""
-        body = mleg_body(order)
-        result: Submitted = self.account.submit(body, exit=order.action == "close")
+        body = single_leg_body(order) if order.action == "close_leg" else mleg_body(order)
+        result: Submitted = self.account.submit(body, exit=order.action != "open")
         order.attempts += 1
         if result.ok:
             order.dispatched = True
@@ -560,14 +579,20 @@ class RealBook:
         """Bring one order up to the venue's row: new whole-structure fills booked, the status carried."""
         order.venue_id = str(row.get("id") or order.venue_id or "") or order.venue_id
         status = str(row.get("status") or "")
-        fill = structure_fill(order, row)
+        if order.action == "close_leg":
+            fill = _single_fill(order, row)
+        else:
+            fill = structure_fill(order, row)
         if fill is not None:
             units, value, prices, uneven = fill
             order.uneven = uneven
             if units > order.filled_qty and value is not None:
                 dq = units - order.filled_qty
                 increment = (value * units - order.fill_value * order.filled_qty) / dq
-                self._book(order, dq, increment, prices)
+                if order.action == "close_leg":
+                    self._book_leg(order, dq, increment)
+                else:
+                    self._book(order, dq, increment, prices)
                 order.fill_value = value
                 order.filled_qty = units
         if status in TERMINAL:
@@ -635,6 +660,55 @@ class RealBook:
                 self._close(pos, "forced" if order.forced else "program", now)
             else:
                 self._save_position(pos)
+
+    def _book_leg(self, order: ROrder, dq: int, price: float) -> None:
+        """A single-leg close of a broken structure's leg: `dq` contracts at `price` a share."""
+        pos = self.positions.get(order.pid or -1)
+        if pos is None:
+            return
+        leg = order.legs[0]
+        fee = leg_fees(order.root, [RLeg(leg.symbol, leg.side, 1, leg.is_call, leg.strike, leg.expiry, leg.key)], [price], dq, "close")
+        closed = dict(pos.info.get("leg_closed") or {})
+        closed[leg.symbol] = int(closed.get(leg.symbol, 0)) + dq
+        pos.info["leg_closed"] = closed
+        pos.cash += leg.side * price * V.MULTIPLIER * dq - fee
+        pos.fees += fee
+        pos.exit_value_qty += leg.side * price * dq / max(1, leg.ratio)
+        self.state.execute("INSERT INTO fills(oid, pid, qty, value, fees, at) VALUES(?,?,?,?,?,?)",
+                           (order.oid, pos.pid, dq, leg.side * price, fee, self.clock()))
+        self._finish_broken(pos, "broken: legs closed alone")
+
+    def remove_contracts(self, symbol: str, contracts: int, *, value_share: float, why: str) -> int:
+        """An expiry, an assignment or an exercise took `contracts` of `symbol` out of the account: the positions
+        holding it lose them (oldest first), each contract worth `value_share` a share at that moment (its intrinsic;
+        zero at an expiry out of the money), and the position is broken (its other legs close alone). Returns how many
+        contracts the book found."""
+        left = int(contracts)
+        for pos in sorted(self.positions.values(), key=lambda p: p.pid):
+            if left <= 0:
+                break
+            for leg in pos.legs:
+                if leg.symbol != symbol or left <= 0:
+                    continue
+                take = min(self.leg_remaining(pos, leg), left)
+                if take <= 0:
+                    continue
+                gone = dict(pos.info.get("gone") or {})
+                gone[symbol] = int(gone.get(symbol, 0)) + take
+                pos.info["gone"] = gone
+                pos.info["broken"] = why[:200]
+                pos.cash += leg.side * value_share * V.MULTIPLIER * take
+                pos.exit_value_qty += leg.side * value_share * take / max(1, leg.ratio)
+                left -= take
+                self._finish_broken(pos, why)
+        return int(contracts) - left
+
+    def _finish_broken(self, pos: RPosition, why: str) -> None:
+        if all(self.leg_remaining(pos, leg) == 0 for leg in pos.legs):
+            pos.qty = 0
+            self._close(pos, why[:120], self.clock())
+        else:
+            self._save_position(pos)
 
     def _close(self, pos: RPosition, reason: str, now: float) -> None:
         pos.status, pos.closed_at, pos.reason = "closed", now, reason
@@ -728,6 +802,18 @@ class RealBook:
         return problems
 
 
+def _single_fill(order: ROrder, row: Mapping[str, Any]) -> tuple[int, float | None, list[float], bool] | None:
+    """A single-leg order's fill: its own `filled_qty` contracts at `filled_avg_price` (a premium, positive)."""
+    filled = dec(row.get("filled_qty"))
+    if filled is None:
+        return None
+    units = int(filled)
+    price = dec(row.get("filled_avg_price"))
+    if units > 0 and price is None:
+        return None
+    return units, (float(price) if price is not None else None), [float(price) if price is not None else math.nan], False
+
+
 def _collateral(type_: str, legs: Sequence[RLeg]) -> Decimal:
     spec = core.classify(type_, [core.leg(leg.symbol, leg.side, leg.ratio) for leg in legs])
     return spec.collateral
@@ -758,5 +844,5 @@ def real_legs(order: L.Order, chain: Any) -> list[RLeg]:
     return out
 
 
-__all__ = ["RealBook", "RLeg", "RPosition", "ROrder", "mleg_body", "limit_price", "client_id", "structure_fill", "real_legs",
+__all__ = ["RealBook", "RLeg", "RPosition", "ROrder", "mleg_body", "single_leg_body", "limit_price", "client_id", "structure_fill", "real_legs",
            "leg_fees", "PREFIX", "KNOWN_DUST"]

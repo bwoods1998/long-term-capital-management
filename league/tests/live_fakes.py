@@ -255,9 +255,20 @@ class Venue:
             if not order["legs"] and order["type"] == "market":
                 order["status"] = "filled"
                 order["filled_qty"] = order["qty"]
+                order["filled_avg_price"] = str(self.market.spot)
                 sym = order["symbol"]
                 sign = Decimal(1) if order["side"] == "buy" else Decimal(-1)
                 self.held[sym] = self.held.get(sym, Decimal(0)) + sign * Decimal(order["qty"])
+            elif not order["legs"] and occ_parts(order["symbol"]) and self.fill != "none":
+                bid, ask = self.market.quote(order["symbol"])
+                limit = float(order["limit_price"])
+                buying = order["side"] == "buy"
+                if (buying and ask <= limit + 1e-9) or (not buying and bid >= limit - 1e-9):
+                    order["status"] = "filled"
+                    order["filled_qty"] = order["qty"]
+                    order["filled_avg_price"] = str(ask if buying else bid)
+                    sign = Decimal(1) if buying else Decimal(-1)
+                    self.held[order["symbol"]] = self.held.get(order["symbol"], Decimal(0)) + sign * Decimal(order["qty"])
             return
         value, prices = self._natural(order)
         opening = order["legs"][0]["position_intent"].endswith("open")

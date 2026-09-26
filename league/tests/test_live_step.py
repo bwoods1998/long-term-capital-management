@@ -212,6 +212,36 @@ class ExpiryDay(LiveCase):
         self.assertTrue(any("expiry cutoff" in w for w in refused))
 
 
+class Assignment(LiveCase):
+    def test_an_assignment_freezes_entries_closes_the_shares_and_the_other_leg_and_books_the_trade(self):
+        live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 600})])
+        self.run_to(9, 31)
+        [pos] = live.book.positions.values()
+        long_leg, short_leg = pos.legs
+        # The short call is assigned early: the account holds its shares short instead of the contracts.
+        contracts = self.venue.held[short_leg.symbol]
+        self.assertLess(contracts, 0)
+        self.venue.held[short_leg.symbol] = D(0)
+        self.venue.held["SPY"] = contracts * 100
+        self.venue.activity_rows.append({"id": "asn1", "activity_type": "OPASN", "symbol": short_leg.symbol,
+                                         "qty": str(-contracts), "date": "2026-09-28"})
+        live._activities_at = float("-inf")
+        self.run_to(9, 33)
+        stock = [b for b in self.venue.sent if b.get("symbol") == "SPY"]
+        self.assertEqual([(b["side"], b["type"], b["qty"]) for b in stock], [("buy", "market", str(-contracts * 100))])
+        self.assertTrue(any(n["stop"] == "assignment" for n in self.notices))
+        legs_alone = [b for b in self.venue.sent if b.get("symbol") == long_leg.symbol]
+        self.assertEqual([(b["side"], b["position_intent"]) for b in legs_alone], [("sell", "sell_to_close")])
+        self.assertEqual(live.book.positions, {})
+        sells = [p for p, a in self.ledger.of("book.fill") if p["side"] == "sell"]
+        self.assertEqual(len(sells), 1)
+        self.assertEqual(sells[0]["reason"], "broken: legs closed alone")
+        self.assertIn("assign", " ".join(p["why"] for p, a in self.ledger.of("live.refusal")) or "assign")
+        live._activities_at = float("-inf")
+        self.run_to(9, 36)
+        self.assertIsNone(live.state.get("assignment_latch"), "resolved: the latch lifts itself")
+
+
 class Restart(LiveCase):
     def test_a_restart_resumes_the_books(self):
         live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 600})])
