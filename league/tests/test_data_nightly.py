@@ -313,11 +313,24 @@ class Rehearsal(unittest.TestCase):
         result = nightly.run(day)
         self.assertNotIn(("run", "backfill.py", "run"), data.calls)
         self.assertEqual(images["gate"]["current_checkpoint"], "sbcp_real")
-        self.assertEqual(images["nightly_rehearsals"]["2026-09-23"]["checkpoint"], checkpoints[-1])
+        self.assertEqual(images["nightly_rehearsals"]["2026-09-23:sb_gate"]["checkpoint"], checkpoints[-1])
         self.assertTrue(result["checkpoint"])
         nightly.rehearsal = False
         with self.assertRaises(ValueError):
             nightly.run(day)
+
+    def test_a_new_rehearsal_target_does_not_reuse_another_boxs_checkpoint(self):
+        day = dt.date(2026, 9, 23)
+        images = {}
+        first, _, _ = job(FakeData(day), FakeGate(), images, now=dt.datetime(2026, 9, 26, 7, 0, tzinfo=UTC))
+        first.rehearsal = True
+        first.run(day)
+        second_gate = FakeGate()
+        second_gate.box_id = "sb_second_gate"
+        second, _, _ = job(FakeData(day), second_gate, images, now=dt.datetime(2026, 9, 26, 7, 0, tzinfo=UTC))
+        second.rehearsal = True
+        self.assertNotIn("already", second.run(day))
+        self.assertTrue(second_gate.uploads)
 
 
 class Schedule(unittest.TestCase):

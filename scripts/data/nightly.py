@@ -36,10 +36,12 @@ import datetime as dt
 import hashlib
 import json
 import os
+import shlex
 import signal
 import sys
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
@@ -49,6 +51,24 @@ import storelib as sl  # noqa: E402
 
 FIRST_FORWARD_DAY = dt.date(2026, 9, 28)
 READY_ET_MINUTES = 105  # 01:45 ET
+
+BACKFILL_IDENTITY = r'''
+import os, pathlib
+def identity(pid, proc_root='/proc'):
+    try:
+        base = pathlib.Path(proc_root) / str(pid)
+        stat = (base / 'stat').read_text().rsplit(')', 1)[1].split()
+        if stat[0] == 'Z':
+            return None
+        argv = (base / 'cmdline').read_bytes().decode().split('\0')
+        cwd = (base / 'cwd').resolve()
+        exact = any(pathlib.Path(arg).name == 'backfill.py' and argv[i+1] == 'run'
+                    and (cwd / arg).resolve() == pathlib.Path('/data/code/backfill.py')
+                    for i, arg in enumerate(argv[:-1]))
+        return (stat[19], int(stat[2])) if exact else None
+    except (OSError, ValueError, IndexError, UnicodeError):
+        return None
+'''
 
 
 def eastern(now: dt.datetime) -> dt.datetime:
@@ -116,7 +136,8 @@ class Nightly:
 
     def state(self, day: dt.date) -> dict[str, Any]:
         if self.rehearsal:
-            return self.images.setdefault("nightly_rehearsals", {}).setdefault(day.isoformat(), {})
+            key = f"{day.isoformat()}:{self.gate.box_id}"
+            return self.images.setdefault("nightly_rehearsals", {}).setdefault(key, {})
         nights = self.images.setdefault("gate", {}).setdefault("forward_days", {})
         return nights.setdefault(day.isoformat(), {})
 
@@ -261,12 +282,11 @@ class BoxHandle:
         self.api.upload(self.box_id, path, blob, mode=mode, timeout=900)
 
     def backfill_running(self) -> bool:
-        code = """import pathlib
+        code = BACKFILL_IDENTITY + """
 p = pathlib.Path('/data/work/backfill.pid')
 try:
     pid = int(p.read_text())
-    cmd = pathlib.Path(f'/proc/{pid}/cmdline').read_bytes()
-    print('yes' if b'backfill.py' in cmd and b'run' in cmd.split(b'\\0') else 'no')
+    print('yes' if identity(pid) is not None else 'no')
 except (OSError, ValueError):
     print('no')
 """
@@ -276,22 +296,22 @@ except (OSError, ValueError):
         return out.stdout.strip() == "yes"
 
     def stop_backfill(self) -> None:
-        code = """import os, pathlib, signal, time
+        code = BACKFILL_IDENTITY + """
+import signal, time
 try:
     pid = int(pathlib.Path('/data/work/backfill.pid').read_text())
 except (OSError, ValueError):
     raise SystemExit(0)
+initial = identity(pid)
 def alive():
-    try:
-        cmd = pathlib.Path(f'/proc/{pid}/cmdline').read_bytes()
-        return b'backfill.py' in cmd and b'run' in cmd.split(b'\\0')
-    except OSError:
-        return False
-if alive():
-    grouped = os.getpgid(pid) == pid
+    return initial is not None and identity(pid) == initial
+if initial is not None:
     def send(sig):
+        # Re-check start ticks, exact script path/argv and group ownership before EVERY signal.
+        if not alive():
+            return
         try:
-            os.killpg(pid, sig) if grouped else os.kill(pid, sig)
+            os.killpg(pid, sig) if initial[1] == pid else os.kill(pid, sig)
         except ProcessLookupError:
             pass
     send(signal.SIGTERM)
@@ -303,15 +323,32 @@ if alive():
         if not alive(): break
         time.sleep(1)
     if alive(): raise SystemExit('backfill did not stop')
+if identity(pid) is not None:
+    raise SystemExit('backfill identity changed during stop; retry under the operation lease')
 """
         self.api.exec(self.box_id, ["/opt/data-venv/bin/python", "-c", code], timeout=90).check()
 
     def start_backfill(self, args: str) -> None:
         import boxlib as bl
 
-        command = (f"mkdir -p /data/work && cd {bl.CODE_DIR} && setsid nohup {bl.VENV_PY} backfill.py run {args} "
-                   f">> /data/work/backfill.out 2>&1 < /dev/null &")
+        if self.backfill_running():
+            raise RuntimeError("refusing to start a second backfill session")
+        receipt = f"/data/work/restart-{uuid.uuid4().hex}.exit"
+        run = shlex.join([bl.VENV_PY, "backfill.py", "run", *shlex.split(args)])
+        inner = f"{run}; status=$?; echo $status > {shlex.quote(receipt)}; exit $status"
+        command = (f"mkdir -p /data/work && cd {shlex.quote(bl.CODE_DIR)} && setsid nohup sh -c {shlex.quote(inner)} "
+                   ">> /data/work/backfill.out 2>&1 < /dev/null &")
         self.api.exec(self.box_id, command, timeout=60, background=True).check()
+        for _ in range(20):
+            if self.backfill_running():
+                return
+            result = self.api.exec(self.box_id, ["bash", "-c", f"cat {shlex.quote(receipt)} 2>/dev/null || true"], timeout=60)
+            if result.stdout.strip():
+                if result.stdout.strip() == "0":
+                    return  # the resumable queue was already empty and finished cleanly
+                raise RuntimeError(f"the backfill restart exited with {result.stdout.strip()}")
+            time.sleep(0.5)
+        raise RuntimeError("the restarted backfill never confirmed its running identity or a clean completion")
 
 
 def real_job(*, rehearsal_gate: str | None = None, api: Any = None) -> Nightly:
@@ -359,11 +396,14 @@ def real_job(*, rehearsal_gate: str | None = None, api: Any = None) -> Nightly:
                                     ttl_seconds=(2 if rehearsal_gate else 365) * 86400)
         return row["checkpoint_id"]
 
-    from sip import relay_day
+    def relay(day, handle):
+        from sip import relay_day
+
+        return relay_day(day, handle)
 
     return Nightly(data=data, gate=gate_handle, images=images, save=lambda d: bl.write_json(bl.IMAGES, d),
                    checkpoint=checkpoint, calendar=calendar, last_backfill_args=last_args, gym_box_ids=gym_ids,
-                   rehearsal=bool(rehearsal_gate), relay=relay_day)
+                   rehearsal=bool(rehearsal_gate), relay=relay)
 
 
 def run_real(day: dt.date | None = None, *, rehearsal_gate: str | None = None,
@@ -489,6 +529,15 @@ def daemon(state: Path, ready_file: Path, *, poll: float = 30.0) -> int:
                 result = controller.tick()
                 status.clear()
                 status.update(result)
+                if bl.read_json(state / "completion-config.json").get("enabled") is True:
+                    from complete import Completion
+
+                    status.clear()
+                    status.update({"phase": "running", "job": "store-completion"})
+                    completion = Completion(state).tick()
+                    status.clear()
+                    status.update({**result, "completion": completion.get("phase"),
+                                   "completion_error": completion.get("error")})
                 stop.wait(poll)
         finally:
             stop.set()
@@ -519,8 +568,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         os.environ["LTCM_GYM_STATE"] = state
         import boxlib as bl
 
-        bl.STATE_DIR = Path(state)
-        bl.DATA_BOX, bl.IMAGES, bl.UNIVERSE = (bl.STATE_DIR / name for name in ("data_box.json", "images.json", "universe.json"))
+        bl.configure_state(Path(state))
     if args.cmd == "daemon":
         import boxlib as bl
 
