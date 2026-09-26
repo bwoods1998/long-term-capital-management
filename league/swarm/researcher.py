@@ -225,6 +225,10 @@ class Researcher:
             parts.append("No best submitted yet: submit your best Train run.")
         if val:
             parts.append(f"Your best on Validation: {json.dumps(val)}.")
+        parts.append("The unchanged validation line requires at least 100 trades on at least 60 days, daily t >= 2, "
+                     "deflated Sharpe probability >= 0.95, 3 of 4 quarters positive, and positive P&L at 1.5x spread. "
+                     "Seek mechanisms that produce enough independent opportunities to measure; never force trades "
+                     "or weaken the evidence requirements.")
         if gate:
             parts.append(f"The gate's last answer: {gate}.")
         if notes:

@@ -86,6 +86,17 @@ class Batches(PoolCase):
         self.assertEqual(pool.stats["jobs"], 3)
         self.assertGreater(self.store.spent(["gym_box"]), -1)  # booked (zero seconds on a frozen clock)
 
+    def test_each_result_names_the_gym_image_and_engine_bundle_it_ran_on(self):
+        pool = self.pool()
+        box = self.ready_box(pool)
+        box.driver.version = "engine-synthetic-v1"
+        [j] = [pool.submit(job("a"))]
+        self.clock.advance(9)
+        pool.run_batch(box, pool._take(box))
+        self.assertEqual(j.result["gym_image"], box.version)
+        self.assertEqual(j.result["gym_bundle"], box.driver.version)
+        self.assertEqual(pool.bundle(), box.driver.version)
+
     def test_a_root_the_box_lacks_fails_its_job_at_once(self):
         pool = self.pool()
         box = self.ready_box(pool)

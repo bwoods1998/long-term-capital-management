@@ -22,7 +22,7 @@
   trial's) boxes, and never one forked in the last `reconcile_grace_seconds`. Stage 1 (Sept 26, 10:22Z) named
   its boxes `ltcm-swarm-<kind>-<epoch>-<n>` without a token: `adopt` takes back every box the store knows
   whatever its name, and `reconcile` also ends an untokened one it does not know (`LEGACY_NAME`).
-- CAP. `max_boxes` counts every live box of the kind the pool holds or the store records.
+- CAP. `max_boxes` counts every live box of the kind the pool holds, the store records, or Sail lists.
 
 The Gym's driver (`league.gym.driver.GymDriver`) is imported when a box starts; tests hand in fakes.
 Standard library only.
@@ -38,6 +38,7 @@ import secrets
 import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from .store import SwarmStore
@@ -166,6 +167,15 @@ class GymPool:
     def image(self, kind: str) -> str | None:
         return self.gym.get("image_checkpoint") if kind == "gym" else self.gym.get("gate_checkpoint")
 
+    def bundle(self) -> str | None:
+        """The engine code shipped by this process; a checkpoint alone identifies only its saved data."""
+        if self.driver_factory is not None:
+            return next((getattr(b.driver, "version", None) for b in self.boxes.values() if b.driver is not None), None)
+        if not hasattr(self, "_bundle_version"):
+            from ..gym.driver import build_bundle
+            self._bundle_version = build_bundle()[1]
+        return self._bundle_version
+
     # ------------------------------------------------------------------ jobs
     def submit(self, job: GymJob) -> GymJob:
         """Queue a job. A family has at most one Train job waiting: a newer one supersedes it (its waiter, if any, is
@@ -265,6 +275,8 @@ class GymPool:
         placeholder = f"pending-{kind}-{n}"
         began = self.clock()
         with self._lock:
+            if self._stopping:
+                return
             self.boxes[placeholder] = Box(placeholder, kind, str(image), "starting")
             self.forking[name] = began  # a fork in flight: `reconcile` never takes it for a stray
             self.store.put("forking", dict(self.forking))
@@ -278,6 +290,7 @@ class GymPool:
                 self.store.put("forking", dict(self.forking))
             self._failed_fork(kind, f"the fork failed: {str(exc)[:200]}")
             self.store.event("swarm.pool", None, {"action": "fork_failed", "kind": kind, "image": image, "error": str(exc)[:300]})
+            self.reconciled_at = float("-inf")  # the POST may have created a box: reconcile before another fork
             return
         box = Box(box_id, kind, str(image), "starting", last_used=self.clock(), booked_at=began)
         with self._lock:
@@ -487,6 +500,7 @@ class GymPool:
             if result is None:
                 self._fail(job, "the batch returned no result for this program")
                 continue
+            result = {**result, "gym_image": box.version, "gym_bundle": getattr(box.driver, "version", None)}
             job.result = result
             job.batch = {**info, "box": box.id, "programs_in_batch": len(batch), "wall_seconds": round(elapsed, 2)}
             days = (result.get("summary") or {}).get("days") or len(result.get("daily") or [])
@@ -599,6 +613,21 @@ class GymPool:
             with self._lock:  # every live box of the kind counts against the cap: the pool's and the store's
                 live = {b.id for b in self.boxes.values() if b.kind == kind and b.state not in ("terminated", "failed")}
             live |= {r["id"] for r in self.store.boxes(kind=kind, live=True)}
+            if target > len(available) and cap > len(live):
+                # A lost POST's young stray is protected by reconciliation's grace period, but still occupies a slot.
+                # Read the venue before creating capacity; an unreadable inventory never permits extra boxes.
+                lister = getattr(self.client, "list_boxes", None)
+                if lister is not None:
+                    try:
+                        listed = lister(limit=1000)
+                    except Exception:  # noqa: BLE001
+                        out["inventory_unreadable"] = True
+                        continue
+                    for row in listed:
+                        name = str(row.get("name") or "")
+                        if (name.startswith(self.name_prefix(kind)) or name.startswith(f"{NAME_PREFIX}{kind}-")) and \
+                                str(row.get("status")) not in ("terminated", "terminating", "failed", "create_failed"):
+                            live.add(str(row.get("sailbox_id") or row.get("id")))
             if now < self.fork_after.get(kind, 0.0):
                 out["fork_backoff"] = round(self.fork_after[kind] - now)
                 continue  # the last fork failed: wait (a bad image must not become a storm of paid boxes)
@@ -698,4 +727,68 @@ class GymPool:
                                                                  for k, v in self.stats.items()}}
 
 
-__all__ = ["GymPool", "GymJob", "PoolError", "Box"]
+def cleanup_stopped(root: str | Path, client: Any, *, limit: int = 100) -> dict[str, Any]:
+    """Bounded House-side cleanup after a stopped process, including forks whose POST returned after it died.
+
+    Only this store's recorded IDs, pending names and exact pool token are owned. Keep unresolved names until a
+    later inventory confirms termination; a submitted fork may not appear in Sail's list yet. The process lock
+    prevents a replacement swarm from adopting a box while this function terminates it.
+    """
+    import fcntl
+
+    from . import DB_NAME, LOCK_FILE
+
+    root = Path(root)
+    out: dict[str, Any] = {"active": False, "inspected": 0, "requested": 0, "confirmed": 0, "pending": 0, "errors": []}
+    if not (root / DB_NAME).exists():
+        return out
+    with (root / LOCK_FILE).open("a+") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            out["active"] = True
+            return out
+        store = SwarmStore(root)
+        try:
+            token = str(store.get("pool_token") or "")
+            pending = dict(store.get("forking") or {})
+            known = {r["id"] for r in store.boxes(live=False)}
+            def owned(row):
+                return (str(row.get("sailbox_id") or row.get("id") or "") in known or row.get("name") in pending or
+                        bool(token and str(row.get("name") or "").startswith(f"{NAME_PREFIX}{token}-")))
+            try:
+                rows = client.list_boxes(limit=1000)
+            except Exception as exc:  # noqa: BLE001
+                out["errors"].append(f"inventory: {type(exc).__name__}: {str(exc)[:160]}")
+                out["pending"] = len(pending)
+                return out
+            terminal = ("terminated", "failed", "create_failed")
+            for row in [r for r in rows if owned(r)][:max(0, int(limit))]:
+                out["inspected"] += 1
+                box_id = str(row.get("sailbox_id") or row.get("id") or "")
+                if str(row.get("status")) in terminal or str(row.get("status")) == "terminating":
+                    continue
+                try:
+                    client.terminate(box_id)
+                    out["requested"] += 1
+                except Exception as exc:  # noqa: BLE001
+                    out["errors"].append(f"{box_id}: {type(exc).__name__}: {str(exc)[:160]}")
+            try:
+                confirmed = client.list_boxes(limit=1000) if out["requested"] else rows
+            except Exception as exc:  # noqa: BLE001
+                out["errors"].append(f"confirmation: {type(exc).__name__}: {str(exc)[:160]}")
+                confirmed = []
+            for row in confirmed:
+                if owned(row) and str(row.get("status")) in terminal:
+                    box_id = str(row.get("sailbox_id") or row.get("id") or "")
+                    store.set_box_state(box_id, "terminated")
+                    pending.pop(str(row.get("name") or ""), None)
+                    out["confirmed"] += 1
+            store.put("forking", pending)
+            out["pending"] = len(pending)
+            return out
+        finally:
+            store.close()
+
+
+__all__ = ["GymPool", "GymJob", "PoolError", "Box", "cleanup_stopped"]

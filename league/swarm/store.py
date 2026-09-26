@@ -12,8 +12,10 @@ TRIALS. Every Gym evaluation is a trial (`add_run` counts the result's own `tria
 total. A family's LINEAGE trial count is the sum over every family of its lineage (ancestors, siblings,
 descendants, alive or retired) and over any lineage its root was born on the slice of (`prior_lineage`: an
 architect's new idea on a dead family's slice): `lineage_trials`, the same set `lineage_trial_sharpes` reads.
-Holdout LOOKS are a ration: what the family inherited at its fork (its ancestors' looks, and the looks other
-members spent on the same slice) plus its own (`lineage_looks`). Nothing ever lowers a count.
+Holdout LOOKS are a ration, counted live across the whole connected lineage (`lineage_looks`), including
+ancestors, siblings and descendants on every root, before or after a fork. Reusing identical program code
+on the same structure and roots connects lineages permanently; changing a label or parameters cannot buy
+new looks. Each look once. Nothing ever lowers a count.
 
 EVENTS. `event(kind, family, payload)` appends a row the House mirrors into its ledger (`hook.py`),
 all of kind `swarm.*`: the public ones the site's tape reads (`swarm.born`, `swarm.retired`, `swarm.band`,
@@ -27,6 +29,7 @@ real trades, `add_forward`) from its own process. Standard library only.
 from __future__ import annotations
 
 import gzip
+from contextlib import contextmanager
 import hashlib
 import json
 import re
@@ -81,6 +84,12 @@ CREATE TABLE IF NOT EXISTS versions (
     author TEXT NOT NULL,
     note TEXT,
     PRIMARY KEY (family, n)
+);
+CREATE INDEX IF NOT EXISTS versions_sha ON versions(sha);
+CREATE TABLE IF NOT EXISTS lineage_links (
+    a TEXT NOT NULL,
+    b TEXT NOT NULL,
+    PRIMARY KEY (a, b)
 );
 CREATE TABLE IF NOT EXISTS runs (
     run_id TEXT PRIMARY KEY,
@@ -165,6 +174,11 @@ CREATE TABLE IF NOT EXISTS spend (
     detail TEXT
 );
 CREATE INDEX IF NOT EXISTS spend_kind ON spend(kind, epoch);
+CREATE TABLE IF NOT EXISTS model_costs (
+    request_key TEXT PRIMARY KEY,
+    booked_usd REAL NOT NULL,
+    settled INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS boxes (
     id TEXT PRIMARY KEY,
     kind TEXT NOT NULL,
@@ -250,6 +264,13 @@ class SwarmStore:
             if "version" not in columns:  # a store made before forward rows carried their program version
                 self._db.execute("ALTER TABLE forward ADD COLUMN version INTEGER")
         self._db.row_factory = sqlite3.Row
+        if not readonly and not self.get("program_lineages_indexed"):
+            with self.atomic():
+                self._exec("INSERT OR IGNORE INTO lineage_links(a,b) SELECT DISTINCT f.lineage,g.lineage "
+                           "FROM versions v JOIN versions w ON v.sha=w.sha "
+                           "JOIN families f ON f.id=v.family JOIN families g ON g.id=w.family "
+                           "WHERE f.lineage<g.lineage AND f.structure=g.structure AND f.roots=g.roots")
+                self.put("program_lineages_indexed", True)
 
     # ------------------------------------------------------------------ plumbing
     def now(self) -> str:
@@ -271,6 +292,23 @@ class SwarmStore:
     def close(self) -> None:
         with self._lock:
             self._db.close()
+
+    @contextmanager
+    def atomic(self):
+        """One durable read/write operation, also excluding the House's other SQLite connection."""
+        with self._lock:
+            outer = not self._db.in_transaction
+            if outer:
+                self._db.execute("BEGIN IMMEDIATE")
+            try:
+                yield
+            except BaseException:
+                if outer:
+                    self._db.rollback()
+                raise
+            else:
+                if outer:
+                    self._db.commit()
 
     # ------------------------------------------------------------------ key-values
     def get(self, key: str, default: Any = None) -> Any:
@@ -299,13 +337,12 @@ class SwarmStore:
             candidate = f"{stem[:36 - len(str(n)) - 1]}-{n}"
         return candidate
 
-    def add_family(self, spec: Mapping[str, Any], *, origin: str, parent: str | None = None, extra_looks: int = 0,
+    def add_family(self, spec: Mapping[str, Any], *, origin: str, parent: str | None = None,
                    prior_lineage: str | None = None) -> dict[str, Any]:
         """A new family from `spec` (id or slug, mechanism, structure, roots, dte, rejection, ...). A fork
-        (`parent`) joins its parent's lineage (whose trials it counts, `lineage_trials`) and starts with the parent's
-        holdout looks plus `extra_looks` (what other members of the lineage spent on the same slice). A new lineage
-        born on a dead one's slice names it as `prior_lineage`: its trials count, its looks do not.
-        `inherited_trials` is a record of the count at birth; the live count is `lineage_trials`."""
+        (`parent`) joins its parent's lineage: its trials (`lineage_trials`) and its looks (`lineage_looks`). A new
+        lineage born on a dead one's slice names it as `prior_lineage`: its trials count, its looks do not.
+        `inherited_trials` and `inherited_looks` record the counts at birth; the live counts are the methods'."""
         if spec.get("structure") not in STRUCTURES:
             raise ValueError(f"unknown structure {spec.get('structure')!r}")
         roots = [str(r).upper() for r in (spec.get("roots") or []) if str(r).strip()]
@@ -323,18 +360,19 @@ class SwarmStore:
                     raise ValueError(f"no parent family {parent}")
                 lineage = mother["lineage"]
                 inherited_trials = self.lineage_trials(parent)
-                inherited_looks = self.lineage_looks(parent) + int(extra_looks)
             body = {k: v for k, v in dict(spec).items() if k not in ("id", "slug", "prior_lineage")}
             body["roots"] = roots
             if prior_lineage and not parent and self._one("SELECT 1 FROM families WHERE lineage=?", (prior_lineage,)):
                 body["prior_lineage"] = prior_lineage
-                inherited_trials = self._trials_of(self._lineages_from(prior_lineage))
+                inherited_trials = self.lineage_trials(prior_lineage)
             now = self.now()
             self._exec(
                 "INSERT INTO families(id, lineage, parent, origin, mechanism, structure, roots, spec, born_at, band, band_since,"
                 " inherited_trials, inherited_looks) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (fid, lineage, parent, origin, mechanism, spec["structure"], dumps(roots), dumps(body), now, "gym", now,
                  inherited_trials, inherited_looks))
+            if parent:
+                self._exec("UPDATE families SET inherited_looks=? WHERE id=?", (self.lineage_looks(fid), fid))
         return self.family(fid)  # type: ignore[return-value]
 
     def family(self, fid: str) -> dict[str, Any] | None:
@@ -368,22 +406,27 @@ class SwarmStore:
 
     def set_state(self, fid: str, **values: Any) -> dict[str, Any]:
         with self._lock:
-            fam = self.family(fid) or {}
-            state = dict(fam.get("state") or {})
-            state.update(values)
-            self.update_family(fid, state=state)
-            return state
+            while True:
+                row = self._one("SELECT state FROM families WHERE id=?", (fid,))
+                state = dict(loads(row["state"], {}) or {}) if row else {}
+                state.update(values)
+                if row is None or self._exec("UPDATE families SET state=? WHERE id=? AND state=?",
+                                              (dumps(state), fid, row["state"])).rowcount:
+                    return state
 
     def compare_and_set_state(self, fid: str, expect: Mapping[str, Any], **values: Any) -> bool:
-        """Under the store's lock: set `values` in a family's state only if every `expect` key still holds its value
-        (a round's snapshot can be minutes old: the tournament may have validated a newer version meanwhile)."""
+        """Set only while `expect` holds, retrying unrelated writes from the House's separate connection."""
         with self._lock:
-            state = (self.family(fid) or {}).get("state") or {}
-            if any(state.get(k) != v for k, v in expect.items()):
-                return False
-            state.update(values)
-            self.update_family(fid, state=state)
-            return True
+            while True:
+                row = self._one("SELECT state FROM families WHERE id=?", (fid,))
+                if row is None:
+                    return False
+                state = dict(loads(row["state"], {}) or {})
+                if any(state.get(k) != v for k, v in expect.items()):
+                    return False
+                state.update(values)
+                if self._exec("UPDATE families SET state=? WHERE id=? AND state=?", (dumps(state), fid, row["state"])).rowcount:
+                    return True
 
     def set_band(self, fid: str, band: str, *, reason: str) -> str | None:
         """Move a family's band; the move is a `swarm.band` event (the site's news). Returns the old band."""
@@ -393,7 +436,9 @@ class SwarmStore:
             fam = self.family(fid)
             if fam is None or fam["band"] == band:
                 return None
-            self.update_family(fid, band=band, band_since=self.now())
+            if not self._exec("UPDATE families SET band=?, band_since=? WHERE id=? AND band=?",
+                               (band, self.now(), fid, fam["band"])).rowcount:
+                return None
             self.event("swarm.band", fid, {"band_from": fam["band"], "band_to": band, "reason": reason})
             return fam["band"]
 
@@ -417,7 +462,32 @@ class SwarmStore:
     def lineages(self, fid: str) -> list[str]:
         """The family's lineage and every lineage its root was born on the slice of: the set its trials count over."""
         fam = self._one("SELECT lineage FROM families WHERE id=?", (fid,))
-        return self._lineages_from(fam["lineage"]) if fam else []
+        if fam is None:
+            return []
+        out, pending = set(), [fam["lineage"]]
+        while pending:
+            line = pending.pop()
+            if line in out:
+                continue
+            connected = self._connected_lineages(line)
+            out.update(connected)
+            for linked in connected:
+                pending.extend(prior for prior in self._lineages_from(linked)[1:] if prior not in out)
+        return sorted(out)
+
+    def _connected_lineages(self, line: str) -> list[str]:
+        graph: dict[str, set[str]] = {}
+        for row in self._all("SELECT a,b FROM lineage_links"):
+            graph.setdefault(row["a"], set()).add(row["b"])
+            graph.setdefault(row["b"], set()).add(row["a"])
+        seen, pending = set(), [line]
+        while pending:
+            node = pending.pop()
+            if node in seen:
+                continue
+            seen.add(node)
+            pending.extend(graph.get(node, set()) - seen)
+        return sorted(seen)
 
     def _trials_of(self, lines: Sequence[str]) -> int:
         if not lines:
@@ -425,6 +495,11 @@ class SwarmStore:
         row = self._one(f"SELECT COALESCE(SUM(trials), 0) AS n FROM families WHERE lineage IN ({','.join('?' * len(lines))})",
                         tuple(lines))
         return int(row["n"]) if row else 0
+
+    @property
+    def lock(self) -> Any:
+        """The store's own (re-entrant) lock, for a read-then-write that must not interleave with another thread's."""
+        return self._lock
 
     def lineage_trials(self, fid: str) -> int:
         """Every trial of every family in the lineage set (`lineages`): the N the deflated Sharpe divides by."""
@@ -440,22 +515,20 @@ class SwarmStore:
             cur = row["parent"] if row else None
         return out
 
-    def lineage_looks(self, fid: str) -> int:
-        fam = self._one("SELECT inherited_looks FROM families WHERE id=?", (fid,))
-        own = self._one("SELECT COUNT(*) AS n FROM looks WHERE family=?", (fid,))
-        return int((fam["inherited_looks"] if fam else 0) + (own["n"] if own else 0))
-
-    def slice_spent(self, lineage: str, roots: Sequence[str], *, exclude: Sequence[str] = ()) -> tuple[int, int]:
-        """(trials, holdout looks) the members of a lineage spent on exactly these roots (their own, not inherited).
-        A fork passes its parent's `ancestors` as `exclude`: their looks already come through the parent."""
-        want = sorted(str(r).upper() for r in roots)
-        trials = looks = 0
-        for row in self._all("SELECT id, roots, trials FROM families WHERE lineage=?", (lineage,)):
-            if row["id"] in exclude or sorted(loads(row["roots"], [])) != want:
-                continue
-            trials += int(row["trials"])
-            looks += int((self._one("SELECT COUNT(*) AS n FROM looks WHERE family=?", (row["id"],)) or {}).get("n") or 0)
-        return trials, looks
+    def lineage_looks(self, fid: str, *, include_inflight: bool = False) -> int:
+        """Every connected lineage's look, across all roots and all fork dates; optionally reserve pending looks."""
+        fam = self._one("SELECT lineage FROM families WHERE id=?", (fid,))
+        if fam is None:
+            return 0
+        lines = self._connected_lineages(fam["lineage"])
+        slots = ",".join("?" * len(lines))
+        seen = {row["run_sha"] for row in self._all(f"SELECT run_sha FROM looks WHERE lineage IN ({slots})", lines)}
+        if include_inflight:
+            for row in self._all(f"SELECT state FROM families WHERE lineage IN ({slots})", lines):
+                marker = (loads(row["state"], {}) or {}).get("look_inflight") or {}
+                if marker.get("sha"):
+                    seen.add(marker["sha"])
+        return len(seen)
 
     def lineage_trial_sharpes(self, fid: str, *, window: str = "train", limit: int = 5000) -> list[float]:
         """Daily Sharpe of every recorded trial in the family's lineage (for the deflated Sharpe)."""
@@ -479,6 +552,13 @@ class SwarmStore:
         sha = code_sha(code)
         params = dict(params or {})
         with self._lock:
+            fam = self.family(fid)
+            if fam is not None:
+                for other in self._all("SELECT DISTINCT f.lineage,f.structure,f.roots FROM versions v JOIN families f "
+                                       "ON f.id=v.family WHERE v.sha=? AND f.lineage!=?", (sha, fam["lineage"])):
+                    if other["structure"] == fam["structure"] and sorted(loads(other["roots"], [])) == sorted(fam["roots"]):
+                        a, b = sorted((fam["lineage"], other["lineage"]))
+                        self._exec("INSERT OR IGNORE INTO lineage_links(a,b) VALUES(?,?)", (a, b))
             for v in self._all("SELECT * FROM versions WHERE family=? AND sha=?", (fid, sha)):
                 if loads(v["params"], {}) == params:
                     return self.version(fid, v["n"])  # type: ignore[return-value]
@@ -686,7 +766,7 @@ class SwarmStore:
     def replace_forward(self, fid: str, source: str, trades: Iterable[Mapping[str, Any]], *, version: int) -> int:
         """One version's record from one source anew (the nightly replay reruns every forward day: its latest good run
         is the record). Other versions' and sources' rows are untouched."""
-        with self._lock:
+        with self.atomic():
             self._exec("DELETE FROM forward WHERE family=? AND source=? AND version=?", (fid, source, int(version)))
             return self.add_forward(fid, source, trades, version=version)
 
