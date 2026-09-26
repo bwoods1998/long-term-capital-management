@@ -39,11 +39,18 @@ def result(name: str, *, status: str = "ok", daily: list[float] | None = None, t
     trade_rows = [{"id": i, "day": rows[i % len(rows)][0], "root": roots[0], "type": "iron_condor", "qty": 1, "entry": -0.4, "exit": -0.1,
                    "entry_minute": 600, "max_loss": 60.0, "fees": 1.0, "pnl": 5.0 if i % 3 else -4.0, "exit_reason": "target",
                    "context": {"dte": 0}} for i in range(min(trades, 40))]
-    return {"run_id": f"run-{name}-{next(_N)}", "program": name, "status": status, "trials": 0 if status == "refused" else 1,
+    out = {"run_id": f"run-{name}-{next(_N)}", "program": name, "status": status, "trials": 0 if status == "refused" else 1,
             "window": window, "roots": list(roots), "stress": 1.0, "params": {}, "summary": summary(trades=trades, **kw),
             "fills": {"orders": 300, "filled": 290, "fill_rate": 0.97, "reject_reasons": {}}, "breakdown": {"weekday": {"Mon": {"n": 30, "pnl": 100.0, "win_rate": 0.6, "pnl_per_max_loss": 0.05}}},
             "daily": rows, "trades": trade_rows, "worst": trade_rows[:5], "runtime": {"calls": 1000, "errors": 0, "timeouts": 0, "messages": [],
                                                                                    "disqualified": None}}
+    if window == "validation":  # the Gym's validation view: no trades, dates or daily series; the stress twin's figures
+        s = out["summary"]
+        s["median_max_loss_per_structure"] = 60.0
+        out = {k: v for k, v in out.items() if k not in ("daily", "trades", "worst")}
+        out["stress_1.5"] = {"stress": 1.5, "status": status, "trades": s["trades"], "pnl": round(s["pnl"] * 0.7, 2),
+                             "t_daily": s["t_daily"] * 0.7, "sharpe_daily": s["sharpe_daily"] * 0.7}
+    return out
 
 
 class FakeDriver:

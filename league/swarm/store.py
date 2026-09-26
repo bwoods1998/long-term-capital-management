@@ -588,6 +588,12 @@ class SwarmStore:
                 n += cur.rowcount or 0
         return n
 
+    def replace_forward(self, fid: str, source: str, trades: Iterable[Mapping[str, Any]]) -> int:
+        """A source's whole record anew (the nightly replay reruns every forward day: its latest run is the record)."""
+        with self._lock:
+            self._exec("DELETE FROM forward WHERE family=? AND source=?", (fid, source))
+            return self.add_forward(fid, source, trades)
+
     def forward(self, fid: str) -> list[dict[str, Any]]:
         return self._all("SELECT * FROM forward WHERE family=? ORDER BY day, trade_id", (fid,))
 

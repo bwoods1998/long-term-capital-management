@@ -95,7 +95,7 @@ class TournamentTests(RoundCase):
         self.answer = lambda job: strong(job) if job.family == "a" else weak(job)
         row = Tournament(self.store, self.pool, self.settings, rng=random.Random(1)).run()
         self.assertEqual(sorted((j.family, j.window, j.stress) for j in self.pool.jobs),
-                         [("a", "validation", 1.0), ("a", "validation", 1.5), ("b", "validation", 1.0), ("b", "validation", 1.5)])
+                         [("a", "validation", 1.0), ("b", "validation", 1.0)], "one job a family: the Gym runs the stress twin")
         self.assertTrue(row["validation"]["judged"]["a"]["passed"])
         self.assertFalse(row["validation"]["judged"]["b"]["passed"])
         a = self.store.family("a")
@@ -108,7 +108,14 @@ class TournamentTests(RoundCase):
         self.assertEqual(event["payload"]["totals"]["trials"], 4)
         # The same version is not validated twice.
         Tournament(self.store, self.pool, self.settings).validate(self.store.families(alive=True))
-        self.assertEqual(len(self.pool.jobs), 4)
+        self.assertEqual(len(self.pool.jobs), 2)
+
+    def test_a_validation_view_without_its_stress_twin_does_not_pass(self):
+        self.family("a")
+        self.answer = lambda job: {k: v for k, v in strong(job).items() if k != "stress_1.5"}
+        out = Tournament(self.store, self.pool, self.settings).validate(self.store.families(alive=True))
+        self.assertFalse(out["judged"]["a"]["passed"])
+        self.assertIn("stress", self.store.family("a")["state"]["validation_view"]["checks_not_met"])
 
     def test_retirement_after_thirty_revisions_without_validation_improvement_respects_the_floor(self):
         for i in range(18):
@@ -248,7 +255,11 @@ class GateTests(RoundCase):
         self.assertEqual(out["trades"], 25)
         self.assertEqual(out["moves"], [{"family": "a", "to": "gym"}])
         self.assertFalse(gate.forward_due(), "once a day")
-        self.assertEqual([j.gate for j in self.pool.jobs if j.window == "forward"], ["nightly forward replay"])
+        self.store.set_band("a", "candidate", reason="test")
+        self.clock.advance(86400)
+        gate.forward()
+        self.assertEqual(len([t for t in self.store.forward("a") if t["source"] == "nightly"]), 25, "a rerun replaces, never doubles")
+        self.assertEqual([j.gate for j in self.pool.jobs if j.window == "forward"], ["nightly forward replay"] * 2)
 
     def test_the_swarm_never_makes_a_probe_or_a_sized(self):
         self.ready()

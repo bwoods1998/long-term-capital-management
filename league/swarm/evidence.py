@@ -85,6 +85,18 @@ def daily_t(summary: Mapping[str, Any]) -> float | None:
     return _num(summary.get("t_daily"))
 
 
+def daily_mean(summary: Mapping[str, Any]) -> float | None:
+    """The mean the daily t is about (`mean_return_on_max_loss_daily`); the per-trade mean only from an older Gym."""
+    value = _num(summary.get("mean_return_on_max_loss_daily"))
+    return value if value is not None else _num(summary.get("mean_return_on_max_loss"))
+
+
+def stressed_of(result: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The 1.5x-stress figures a validation view carries (`stress_1.5`, the batch's twin run) as a result-shaped dict."""
+    twin = result.get("stress_1.5")
+    return {"status": twin.get("status"), "summary": dict(twin)} if isinstance(twin, Mapping) else None
+
+
 def deflated(summary: Mapping[str, Any], daily: Sequence[float], *, lineage_trials: int, trial_sharpes: Sequence[float]) -> float | None:
     """The deflated Sharpe probability given the lineage's trials: from the daily series when the result carries
     it, else from the summary's daily Sharpe, days and moments (conservative moments when they are absent)."""
@@ -111,7 +123,7 @@ def validation_line(result: Mapping[str, Any], stressed: Mapping[str, Any] | Non
     s = dict(result.get("summary") or {})
     trades = int(s.get("trades") or 0)
     days = int(s.get("days_traded") or 0)
-    mean = _num(s.get("mean_return_on_max_loss"))
+    mean = daily_mean(s)
     t = daily_t(s)
     k, n = quarters_positive(s)
     dsr = deflated(s, daily_pnl(result), lineage_trials=lineage_trials, trial_sharpes=trial_sharpes)

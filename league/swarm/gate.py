@@ -206,10 +206,15 @@ class Gate:
                 out.setdefault("errors", {})[fam["id"]] = str(exc)[:200]
                 continue
             self.store.add_run(fam["id"], n, result, window="forward", stress=1.0, purpose="forward")
-            trades = [{"id": f"v{n}:{t.get('day')}:{t.get('entry_minute')}:{t.get('root')}:{t.get('type')}:{t.get('id')}",
-                       "day": t.get("day"), "pnl": t.get("pnl"), "max_loss": t.get("max_loss")}
-                      for t in (result.get("trades") or []) if t.get("pnl") is not None]
-            out["trades"] += self.store.add_forward(fam["id"], "nightly", trades)
+            # The forward view carries each trade's day, P&L and maximum loss (no ids): a trade is (version, day, its place
+            # that day). Every forward day is rerun each night, so the latest run replaces the nightly record whole.
+            trades, seen = [], {}
+            for t in result.get("trades") or []:
+                if t.get("pnl") is None:
+                    continue
+                k = seen[t.get("day")] = seen.get(t.get("day"), -1) + 1
+                trades.append({"id": f"v{n}:{t.get('day')}:{k}", "day": t.get("day"), "pnl": t.get("pnl"), "max_loss": t.get("max_loss")})
+            out["trades"] += self.store.replace_forward(fam["id"], "nightly", trades)
         for fam in banded:
             move = self.judge_forward(fam["id"])
             if move:

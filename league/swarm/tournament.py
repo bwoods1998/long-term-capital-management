@@ -1,9 +1,9 @@
 """The hourly tournament: validation, the bandit, forks, retirements, lessons, the leaderboard.
 
 1. VALIDATION. Every living family whose best version (submitted, else its best Train score) has not been
-   validated yet runs on Validation twice: at 1.0x and at 1.5x the half-spread (two trials, counted). The
-   full results stay with the swarm; the researcher is told the mean, t, quarters positive and whether the
-   line was met (`diagnostics.validation_view`).
+   validated yet runs on Validation once; the Gym runs its 1.5x-half-spread twin in the same batch (two
+   trials, counted) and returns only the validation VIEW (no trades, dates or daily series). The
+   researcher is told the mean, t, quarters positive and whether the line was met.
 2. THE LINE (`evidence.validation_line`, the plan's): a family that meets it goes to the gate's queue.
 3. THE BANDIT (`evidence.thompson`): each family's share of researcher cycles and Gym priority from its
    validation evidence, with 25% for new families.
@@ -59,7 +59,8 @@ class Tournament:
         return int(state["best_train_version"]) if state.get("best_train_version") else None
 
     def validate(self, fams: list[dict[str, Any]], *, timeout: float = 3000.0) -> dict[str, Any]:
-        """Queue validation (1.0x and 1.5x) for every family with an unvalidated best; wait; judge."""
+        """Queue validation for every family with an unvalidated best; wait; judge. One job a family: the Gym runs
+        the 1.5x-stress twin itself and carries its figures as `stress_1.5` (a second trial, counted here)."""
         jobs = []
         for fam in fams:
             n = self.candidate_version(fam)
@@ -68,35 +69,36 @@ class Tournament:
             version = self.store.version(fam["id"], n)
             if version is None or not version.get("code"):
                 continue
-            for stress in (1.0, evidence.STRESS):
-                job = GymJob(family=fam["id"], version=n, code=version["code"], params=version["params"], window="validation",
-                             roots=tuple(fam["roots"]), stress=stress, purpose="validation", priority=1.0)
-                jobs.append((fam, n, stress, self.pool.submit(job)))
-        done: dict[tuple[str, int], dict[float, dict]] = {}
+            job = GymJob(family=fam["id"], version=n, code=version["code"], params=version["params"], window="validation",
+                         roots=tuple(fam["roots"]), stress=1.0, purpose="validation", priority=1.0)
+            jobs.append((fam, n, self.pool.submit(job)))
         errors = {}
+        judged = {}
         deadline = self.clock() + timeout
-        for fam, n, stress, job in jobs:
+        for fam, n, job in jobs:
             try:
                 result = self.pool.wait(job, max(1.0, deadline - self.clock()))
             except PoolError as exc:
                 errors[fam["id"]] = str(exc)[:300]
                 continue
+            fid = fam["id"]
             years = float((result.get("summary") or {}).get("days") or 0) / 252.0 * max(1, len(fam["roots"]))
-            self.store.add_run(fam["id"], n, result, window="validation", stress=stress, purpose="validation", program_years=years)
-            done.setdefault((fam["id"], n), {})[stress] = result
-        judged = {}
-        for (fid, n), pair in done.items():
-            if 1.0 not in pair:
-                continue
+            row = self.store.add_run(fid, n, result, window="validation", stress=1.0, purpose="validation", program_years=years)
+            stressed = evidence.stressed_of(result)
+            if isinstance(result.get("stress_1.5"), dict):
+                twin = result["stress_1.5"]
+                self.store.add_run(fid, n, {"run_id": f"{row['run_id']}-s15", "status": twin.get("status") or "ok", "trials": 1,
+                                            "summary": dict(twin)}, window="validation", stress=evidence.STRESS, purpose="validation",
+                                   program_years=years)
             fam = self.store.family(fid)
             if fam is None:
                 continue
-            result, stressed = pair[1.0], pair.get(evidence.STRESS)
             line = evidence.validation_line(result, stressed, lineage_trials=self.store.lineage_trials(fid),
                                             trial_sharpes=self.store.lineage_trial_sharpes(fid))
             view = diagnostics.validation_view(result, line)
             summary = result.get("summary") or {}
-            mean = summary.get("mean_return_on_max_loss")
+            mean = evidence.daily_mean(summary)
+            t = evidence.daily_t(summary)
             improved = mean is not None and (fam.get("best_validation") is None or float(mean) > float(fam["best_validation"]))
             fields: dict[str, Any] = {"validated_version": n}
             if improved:
@@ -105,11 +107,10 @@ class Tournament:
             self.store.bump(fid, validations=1)
             self.store.set_state(fid, validation_view=view, validation_line=line, validation_version=n,
                                  typical_max_loss_usd=typical_max_loss(result),
-                                 validation_numbers={"mean": mean, "t": summary.get("t_stat"),
-                                                     "sharpe_daily": summary.get("sharpe_daily"),
+                                 validation_numbers={"mean": mean, "t": t, "sharpe_daily": summary.get("sharpe_daily"),
                                                      "quarters": summary.get("quarters_positive")},
                                  gate_ready=bool(line["passed"]))
-            judged[fid] = {"version": n, "passed": line["passed"], "mean": mean, "t": summary.get("t_stat")}
+            judged[fid] = {"version": n, "passed": line["passed"], "mean": mean, "t": t}
         return {"queued": len(jobs), "judged": judged, "errors": errors}
 
     # ------------------------------------------------------------------ 3. the bandit

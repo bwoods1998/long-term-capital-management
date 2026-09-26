@@ -116,8 +116,8 @@ def section(result: Mapping[str, Any], name: str, *, page: int = 0, per_page: in
 def validation_view(result: Mapping[str, Any], line: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """What a researcher may know of a validation run: mean, t, quarters positive, the line met or not."""
     s = result.get("summary") or {}
-    out = {"mean_return_on_max_loss": _r(s.get("mean_return_on_max_loss")), "t": _r(s.get("t_stat"), 3),
-           "quarters_positive": s.get("quarters_positive")}
+    mean = s.get("mean_return_on_max_loss_daily", s.get("mean_return_on_max_loss"))
+    out = {"mean_return_on_max_loss": _r(mean), "t": _r(s.get("t_daily"), 3), "quarters_positive": s.get("quarters_positive")}
     if line is not None:
         out["line_met"] = bool(line.get("passed"))
         out["checks_not_met"] = sorted(k for k, ok in (line.get("checks") or {}).items() if not ok)
