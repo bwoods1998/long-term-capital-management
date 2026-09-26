@@ -14,7 +14,7 @@ from league.swarm import settings as S
 from league.swarm.architect import Architect
 from league.swarm.gate import Gate
 from league.swarm.models import ModelRouter
-from league.swarm.pool import PoolError
+from league.swarm.pool import GymJob, PoolError
 from league.swarm.store import SwarmStore
 from league.swarm.tournament import Tournament
 from league.tests.swarm_fakes import Clock, FakeFrontier, FakeMonth, provider, result
@@ -178,6 +178,31 @@ class TournamentTests(RoundCase):
         self.assertEqual(self.store.family(second)["roots"], self.store.family(first)["roots"])
         self.assertEqual(self.store.lineage_trials(second), 1 + 50)
         self.assertEqual(self.store.lineage_looks(second), 1)
+
+    def test_a_fork_chain_never_counts_an_ancestors_looks_twice(self):
+        a = self.family("a")
+        self.store.add_look("a", 1, "sha-a", passed=False, p_value=0.5, detail={})
+        b = self.store.add_family({**SPEC, "id": "b", "roots": ["QQQ"]}, origin="fork", parent="a")
+        self.store.retire("a", "done")
+        self.store.set_state("b", validation_numbers={"mean": 0.05, "t": 2.5, "sharpe_daily": 0.2, "quarters": "4/4"})
+        self.store.add_version("b", "# b\nNEEDS = {'roots': ['QQQ']}\nPARAMS = {}\ndef decide(ctx):\n    return []\n", {}, author="x")
+        self.store.update_family("b", best_version=1)
+        [c] = Tournament(self.store, self.pool, self.settings).forks(self.store.families(alive=True))
+        self.assertEqual(self.store.family(c)["roots"], ["SPY"])
+        self.assertEqual(self.store.lineage_looks(c), 1, "a's one look, once")
+        del a, b
+
+    def test_a_late_validation_of_an_older_version_never_overwrites_a_newer_one(self):
+        self.family("a")
+        t = Tournament(self.store, self.pool, self.settings)
+        v2 = self.store.add_version("a", "# a2\nNEEDS = {'roots': ['SPY']}\nPARAMS = {}\ndef decide(ctx):\n    return None\n", {}, author="x")
+        job = lambda n: GymJob(family="a", version=n, code="", params={}, window="validation", roots=("SPY",))
+        self.assertTrue(t.judge("a", v2["n"], strong(job(v2["n"])))["passed"])
+        trials = self.store.family("a")["trials"]
+        self.assertIsNone(t.judge("a", 1, weak(job(1))), "version 1's result landed late")
+        fam = self.store.family("a")
+        self.assertEqual((fam["validated_version"], fam["state"]["validation_version"], fam["state"]["gate_ready"]), (2, 2, True))
+        self.assertEqual(fam["trials"], trials + 2, "its trials still count")
 
     def test_a_validation_failure_is_recorded_not_raised(self):
         self.family("a")
@@ -491,7 +516,8 @@ class ArchitectTests(RoundCase):
         self.assertEqual(out["route"], "sail")
 
     def test_a_proposal_on_a_retired_familys_slice_continues_its_lineage(self):
-        old = self.family("fly", structure="iron_butterfly", roots=["SPY"])
+        old = self.family("fly", structure="iron_butterfly", roots=["SPY"],
+                          mechanism="Sell the afternoon's at-the-money decay with an iron butterfly on calm days.")
         for i in range(30):
             self.store.add_run("fly", 1, result(f"f{i}"), window="train", stress=1.0, purpose="train")
         self.store.add_look("fly", 1, "sha-fly", passed=False, p_value=0.4, detail={})
@@ -504,6 +530,23 @@ class ArchitectTests(RoundCase):
         self.assertEqual(self.store.lineage_trials(born), 30)
         self.assertEqual(self.store.lineage_looks(born), 1)
         del old
+
+    def test_a_new_idea_on_a_dead_familys_slice_is_a_new_lineage_that_still_counts_its_trials(self):
+        self.family("fly", structure="iron_butterfly", roots=["SPY"])
+        for i in range(30):
+            self.store.add_run("fly", 1, result(f"f{i}"), window="train", stress=1.0, purpose="train")
+        self.store.add_look("fly", 1, "sha-fly", passed=False, p_value=0.4, detail={})
+        self.store.retire("fly", "no improvement in 30 revisions")
+        rows = [{"slug": "news-fly", "mechanism": "After a scheduled macro release the realized move undershoots what options priced.",
+                 "structure": "iron_butterfly", "roots": ["SPY"], "dte": [0, 1]}]
+        [born] = Architect(self.store, self.router, self.settings).admit(rows)
+        fam = self.store.family(born)
+        self.assertEqual((fam["parent"], fam["lineage"]), (None, born), "another mechanism: its own lineage")
+        self.assertEqual(self.store.lineage_looks(born), 0, "no inherited look ration")
+        self.assertEqual(self.store.lineage_trials(born), 30, "the slice's searching still deflates it")
+        self.assertEqual(len(self.store.lineage_trial_sharpes(born)), 30, "the same set")
+        self.store.add_run("fly", 1, result("late"), window="train", stress=1.0, purpose="train")
+        self.assertEqual(self.store.lineage_trials(born), 31)
 
     def test_every_four_hours(self):
         a = Architect(self.store, self.router, self.settings, clock=self.clock)

@@ -19,6 +19,21 @@ from typing import Any, Callable, Mapping
 
 from .store import STRUCTURES, SwarmStore
 
+#: Two mechanisms are the same idea when their content words overlap this much (Jaccard).
+SAME_IDEA = 0.5
+_STOP = frozenset("a an and are as at be by for from in into is it its of on or than that the their then this to when with "
+                  "options option sell buy".split())
+
+
+def words(text: str) -> frozenset[str]:
+    return frozenset(w for w in "".join(c if c.isalnum() else " " for c in str(text).lower()).split()
+                     if len(w) > 2 and w not in _STOP)
+
+
+def same_idea(a: str, b: str) -> bool:
+    x, y = words(a), words(b)
+    return bool(x and y) and len(x & y) / len(x | y) >= SAME_IDEA
+
 SYSTEM = """You are the architect of a swarm of AI researchers that trade level-3 options (defined-risk structures only) on one
 brokerage account. Each researcher owns one family: a mechanism, a structure type and a universe slice, and improves a
 program for it in a Gym of real recorded one-minute option quotes (Train 2022-2024; Validation 2025 by summary only; a
@@ -108,11 +123,14 @@ class Architect:
             spec = {"id": row.get("slug") or mechanism, "mechanism": mechanism, "structure": structure, "roots": roots, "dte": [lo, hi],
                     "rejection": str(row.get("rejection") or "")[:400], "sketch": str(row.get("sketch") or "")[:800],
                     "lessons": lessons}
-            # A slice a retired family searched (same structure and roots) continues that lineage: it inherits its
-            # trials and holdout looks, so re-proposing an idea never resets the count its evidence is deflated by.
+            # A slice a retired family searched (same structure and roots): the same idea again continues its lineage
+            # (its trials and holdout looks, so re-proposing never resets the count its evidence is deflated by); another
+            # idea is a new lineage that still counts the slice's trials (`prior_lineage`) but not its look ration.
             dead = [f for f in self.store.families(alive=False) if f["structure"] == structure and sorted(f["roots"]) == sorted(roots)]
-            parent = dead[-1]["id"] if dead else None
-            fam = self.store.add_family(spec, origin="architect", parent=parent)
+            same = [f for f in dead if same_idea(f["mechanism"], mechanism)]
+            parent = same[-1]["id"] if same else None
+            prior = dead[-1]["lineage"] if dead and not parent else None
+            fam = self.store.add_family(spec, origin="architect", parent=parent, prior_lineage=prior)
             if spec["sketch"]:
                 self.store.note(fam["id"], f"The architect's sketch: {spec['sketch']}")
             self.store.event("swarm.born", fam["id"], {"parent": parent, "mechanism": mechanism, "structure": structure,

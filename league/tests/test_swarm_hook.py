@@ -333,6 +333,23 @@ class Reads(HookCase):
         self.assertEqual({a["id"] for a in checkpoint["agents"]}, {"condor-vrp", "gone"})
         self.assertEqual(checkpoint["gym"]["trials"], 1)
 
+    def test_the_sites_real_record_is_every_real_trade_and_its_trials_the_lineages(self):
+        store = SwarmStore(self.root, clock=self.clock)
+        fam = store.add_family(SPEC, origin="seed")
+        for i in range(3):
+            store.add_run(fam["id"], 1, result(f"p{i}"), window="train", stress=1.0, purpose="train")
+        store.add_forward(fam["id"], "real", [{"id": "r1", "day": "d1", "pnl": 5.0, "max_loss": 50.0}], version=1)
+        store.set_state(fam["id"], banded_version=2)
+        store.add_forward(fam["id"], "shadow", [{"id": "s1", "day": "d2", "pnl": -2.0, "max_loss": 50.0}], version=2)
+        child = store.add_family({**SPEC, "id": "condor-on-qqq", "roots": ["QQQ"]}, origin="fork", parent=fam["id"])
+        store.add_run(child["id"], 1, result("c"), window="train", stress=1.0, purpose="train")
+        store.close()
+        agents = {a["id"]: a for a in sitefeed.site_inputs(self.root)["agents"]}
+        record = agents[fam["id"]]["record"]
+        self.assertEqual(record["real"], {"trades": 1, "wins": 1, "pnl_usd": 5.0}, "real money is real whatever the version")
+        self.assertEqual(record["forward"], {"trades": 1, "wins": 0, "pnl_usd": -2.0}, "the banded version's record")
+        self.assertEqual((record["trials"], agents["condor-on-qqq"]["record"]["trials"]), (4, 4))
+
 
 class SwarmHouse(BuildCase):
     def build_on(self, **kw):
