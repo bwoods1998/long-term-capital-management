@@ -303,6 +303,7 @@ class SipIngest(unittest.TestCase):
                          lambda p: p.update(root="XSP"),
                          lambda p: p.update(root="../bad")):
                 packet = self.packet()
+                packet["root"] = "QQQ"  # distinct from the valid first packet
                 edit(packet)
                 with self.assertRaises(ValueError):
                     bf.ingest_underlying(store, [self.packet(), packet], sl.Calendar({}))

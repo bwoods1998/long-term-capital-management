@@ -185,6 +185,26 @@ class Night(unittest.TestCase):
         result = nightly.run()
         self.assertTrue(result["checkpoint"])
 
+    def test_lease_lost_during_checkpoint_never_publishes_or_reuses_success(self):
+        data, gate, records = FakeData(self.DAY), FakeGate(), {}
+        nightly, saved, checkpoints = job(data, gate, records, now=self.NOW)
+        held = [True]
+        def check():
+            if not held[0]:
+                raise RuntimeError("lease expired")
+        def checkpoint():
+            held[0] = False
+            return "sbcp_unowned"
+        nightly.check_lease, nightly.checkpoint = check, checkpoint
+        with self.assertRaisesRegex(RuntimeError, "lease expired"):
+            nightly.run()
+        self.assertNotIn("checkpoint", nightly.state(self.DAY))
+        self.assertNotIn("current_checkpoint", records["gate"])
+        self.assertTrue(all("sbcp_unowned" not in value for value in saved))
+        held[0] = True
+        nightly.checkpoint = lambda: "sbcp_owned"
+        self.assertEqual(nightly.run()["checkpoint"], "sbcp_owned")
+
     def test_sip_relay_runs_before_restart_and_failure_keeps_day_pending(self):
         data, gate, images = FakeData(self.DAY), FakeGate(), {}
         nightly, _, checkpoints = job(data, gate, images, now=self.NOW)
@@ -313,11 +333,24 @@ class Rehearsal(unittest.TestCase):
         result = nightly.run(day)
         self.assertNotIn(("run", "backfill.py", "run"), data.calls)
         self.assertEqual(images["gate"]["current_checkpoint"], "sbcp_real")
-        self.assertEqual(images["nightly_rehearsals"]["2026-09-23"]["checkpoint"], checkpoints[-1])
+        self.assertEqual(images["nightly_rehearsals"]["2026-09-23:sb_gate"]["checkpoint"], checkpoints[-1])
         self.assertTrue(result["checkpoint"])
         nightly.rehearsal = False
         with self.assertRaises(ValueError):
             nightly.run(day)
+
+    def test_a_new_rehearsal_target_does_not_reuse_another_boxs_checkpoint(self):
+        day = dt.date(2026, 9, 23)
+        images = {}
+        first, _, _ = job(FakeData(day), FakeGate(), images, now=dt.datetime(2026, 9, 26, 7, 0, tzinfo=UTC))
+        first.rehearsal = True
+        first.run(day)
+        second_gate = FakeGate()
+        second_gate.box_id = "sb_second_gate"
+        second, _, _ = job(FakeData(day), second_gate, images, now=dt.datetime(2026, 9, 26, 7, 0, tzinfo=UTC))
+        second.rehearsal = True
+        self.assertNotIn("already", second.run(day))
+        self.assertTrue(second_gate.uploads)
 
 
 class Schedule(unittest.TestCase):
