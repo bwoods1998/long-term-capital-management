@@ -276,6 +276,12 @@ class Reconciliation(unittest.TestCase):
         del self.venue.held["SPY"]
         self.assertIn("not the live path's", " ".join(self.recon(foreign=[{"client_order_id": "manual-1", "status": "new"}])))
 
+    def test_the_close_of_an_assignments_shares_is_the_houses_own_order(self):
+        rows = self.venue.orders_rows() + [{"id": "s1", "client_order_id": "lv-shares-spy-1790000000", "status": "new",
+                                            "symbol": "SPY", "side": "sell", "legs": None}]
+        self.assertEqual(self.book.ingest(rows), [])
+        self.assertEqual(self.book.ingest(rows + [{"id": "m1", "client_order_id": "manual", "status": "new"}])[0]["id"], "m1")
+
     def test_after_the_close_contracts_expiring_that_day_are_the_venues_to_settle(self):
         day_legs = legs(expiry="2026-09-28")
         order = self.book.new_order(instance="f@1:r", family="f", action="open", type_="debit_vertical", root="SPY", legs=day_legs,

@@ -523,6 +523,8 @@ class RealBook:
         foreign = []
         for row in rows:
             cid = str(row.get("client_order_id") or "")
+            if cid.startswith(PREFIX + "shares-"):
+                continue  # the close of an assignment's shares (`OptionsLive._close_shares`): not a structure's order
             if cid.startswith(PREFIX):
                 by_client[cid] = row
             elif str(row.get("status") or "") in WORKING:
