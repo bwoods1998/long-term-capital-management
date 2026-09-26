@@ -198,8 +198,11 @@ def alpaca(quotes_path: Path, store_root: Path, extra_roots: Sequence[Path] = ()
             continue
         store = pl.read_parquet(path).with_columns(pl.col("bid").cast(pl.Float64).alias("t_bid"),
                                                    pl.col("ask").cast(pl.Float64).alias("t_ask"))
-        joined = group.join(store.select(["expiration", "strike", "right", "minute", "t_bid", "t_ask"]),
-                            on=["expiration", "strike", "right", "minute"], how="inner")
+        cols = store.select(["expiration", "strike", "right", "minute", "t_bid", "t_ask"])
+        following = cols.with_columns((pl.col("minute") - 1).cast(pl.Int16).alias("minute")).rename(
+            {"t_bid": "n_bid", "t_ask": "n_ask"})
+        joined = group.join(cols, on=["expiration", "strike", "right", "minute"], how="inner").join(
+            following, on=["expiration", "strike", "right", "minute"], how="left")
         results.append({"root": root, "day": str(day), "recorded": group.height, "store": True, "matched": joined.height})
         if joined.height:
             compared.append(joined)
@@ -210,18 +213,26 @@ def alpaca(quotes_path: Path, store_root: Path, extra_roots: Sequence[Path] = ()
     both = both.with_columns(tick_expr.alias("tick"))
     within = ((pl.col("bid") - pl.col("t_bid")).abs() <= pl.col("tick") + 1e-6) & ((pl.col("ask") - pl.col("t_ask")).abs() <= pl.col("tick") + 1e-6)
     exact = ((pl.col("bid") - pl.col("t_bid")).abs() < 0.005) & ((pl.col("ask") - pl.col("t_ask")).abs() < 0.005)
-    both = both.with_columns(within.alias("within"), exact.alias("exact"))
+    either = within | (((pl.col("bid") - pl.col("n_bid")).abs() <= pl.col("tick") + 1e-6)
+                       & ((pl.col("ask") - pl.col("n_ask")).abs() <= pl.col("tick") + 1e-6)).fill_null(False)
+    both = both.with_columns(within.alias("within"), exact.alias("exact"), either.alias("bracketed"))
     early = both.filter(pl.col("second") <= 2)
 
     def rate(frame: Any, col: str) -> float | None:
         return round(float(frame[col].mean()), 4) if frame.height else None
 
-    per_root = (both.group_by("root").agg(pl.len().alias("n"), pl.col("within").mean().alias("within"))
-                .sort("root").to_dicts())
+    per_root = (both.group_by("root").agg(
+        pl.len().alias("n"), pl.col("within").mean().alias("within"), pl.col("bracketed").mean().alias("bracketed"),
+        pl.col("within").filter(pl.col("second") <= 2).mean().alias("early_within"),
+        (pl.col("second") <= 2).sum().alias("early_n")).sort("root").to_dicts())
     return {
-        "at": sl.utc_now(), "compared": both.height, "within_a_tick": rate(both, "within"), "exact": rate(both, "exact"),
+        "at": sl.utc_now(), "recorded": quotes.height, "compared": both.height, "within_a_tick": rate(both, "within"),
+        "exact": rate(both, "exact"), "within_a_tick_of_this_or_next_minute": rate(both, "bracketed"),
         "first_seconds": {"compared": early.height, "within_a_tick": rate(early, "within"), "exact": rate(early, "exact")},
-        "per_root": [{"root": r["root"], "n": r["n"], "within": round(r["within"], 4)} for r in per_root],
+        "per_root": [{"root": r["root"], "n": r["n"], "within": round(r["within"], 4), "bracketed": round(r["bracketed"], 4),
+                      "first_seconds_n": r["early_n"],
+                      "first_seconds_within": None if r["early_within"] is None else round(r["early_within"], 4)}
+                     for r in per_root],
         "by_root_day": sorted(results, key=lambda r: (r["root"], r["day"])),
         "note": ("a recorded quote at hh:mm:ss is compared with the store's row for hh:mm (the NBBO in force at "
                  "hh:mm:00); quotes that changed inside the minute disagree by construction, so the rate for quotes "
