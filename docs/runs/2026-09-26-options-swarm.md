@@ -601,6 +601,11 @@ clock never restarts.
   with no writes. The plan now compares canonical calendars to the final source, preserves and
   rejects unexpected active/staged forward receipts, and checks the effective loaded model in
   each restored Gym/gate environment. No production adoption or checkpoint restoration occurred.
+- 18:37Z Recorded a new 30-day House recovery checkpoint,
+  `sbcp_939a5990-309b-4aa1-b643-add639dafb0a`, generation 1595, expiring October 26 18:37:41Z.
+  Creation succeeded; no restore was exercised and no clone was started. The current handoff
+  now precedes the historical Claude handoff and includes deployed identities, funding, evidence,
+  the staged prune and the remaining Sunday/Monday/Tuesday actions. The overall goal stays active.
 
 ### Final data/image adoption (prepared Saturday; waits for completion)
 

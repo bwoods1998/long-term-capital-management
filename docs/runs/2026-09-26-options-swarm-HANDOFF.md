@@ -1,6 +1,6 @@
 # Handoff: the options-swarm run
 
-## Current continuation, September 26 18:35Z
+## Current continuation, September 26 18:38Z
 
 Read this update before the historical Claude handoff below. The run record remains the source
 of truth and now includes the **T0 + 12 h scoreboard**. T0 is still **2026-09-26T06:23:14Z**;
@@ -79,8 +79,10 @@ No strategy has passed validation, no holdout look has occurred, and profitabili
 
 Root scratch remains `~/Work/.ltcm-main`; one laptop test process at a time under
 `flock /tmp/ltcm-options-tests.lock`. Builder worktrees have their own private `.data` receipts.
-The verified recovery checkpoint is `sbcp_797f731a-e823-4f04-b68b-42cc4ce057be` from 17:19Z;
-it includes credentials and must never become an independently trading clone. No rollback
+The recorded House recovery checkpoint is `sbcp_939a5990-309b-4aa1-b643-add639dafb0a` from
+18:37Z (generation 1595, expires October 26 18:37:41Z); it has not been restored in a test.
+The earlier 17:19Z checkpoint remains recorded. These include credentials and must never
+become independently trading clones. No rollback
 before `20260926T084913Z-8158a11cfe3f`. No extra ThetaData login: the credentialed data box owns
 the account's only session. Keep quotes, source programs, fitted model tables and secrets private.
 
