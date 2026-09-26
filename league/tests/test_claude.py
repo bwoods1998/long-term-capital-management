@@ -4,6 +4,7 @@ The fake opener stands in for `urllib.request.urlopen` (league/tests/test_fronti
 
 from __future__ import annotations
 
+import http.client
 import io
 import json
 import socket
@@ -11,8 +12,9 @@ import unittest
 import urllib.error
 from decimal import Decimal
 
-from league.claude import (AGENT_HEADER, COST_HEADER, MAX_TOKENS, MODEL, REQUEST_HEADER, ROLE_HEADER, Claude, ClaudeError,
-                           ClaudeMeter, ClaudeRefusal, ClaudeTruncated, extract_json, request_body, reservation_ceiling)
+from league.claude import (AGENT_HEADER, COST_HEADER, MAX_TOKENS, MAX_TOKENS_STREAM, MODEL, REQUEST_HEADER, ROLE_HEADER, Claude,
+                           ClaudeError, ClaudeMeter, ClaudeRefusal, ClaudeTruncated, extract_json, request_body,
+                           reservation_ceiling)
 from league.tests.test_frontier import FakeOpener, FakeResponse
 
 GATEWAY = "https://gateway.example.test"
@@ -183,6 +185,129 @@ class Answers(unittest.TestCase):
         self.assertEqual(extract_json('{"a": 1}'), {"a": 1})
         self.assertEqual(extract_json('```json\n{"a": {"b": 2}}\n```'), {"a": {"b": 2}})
         self.assertIsNone(extract_json("nothing"))
+
+
+START = {"type": "message_start", "message": {"id": "msg_9", "type": "message", "role": "assistant", "model": MODEL, "content": [],
+                                               "stop_reason": None, "usage": {"input_tokens": 2000, "cache_read_input_tokens": 30000,
+                                                                              "cache_creation_input_tokens": 0, "output_tokens": 1}}}
+
+
+def events(text='{"decision": "retire"}', *, stop="end_turn", cost="0.184000", known=True, extra=(), cut=False):
+    """A relayed stream: Anthropic's events (thinking, then the text in two deltas), then the gateway's ltcm.cost."""
+    out = [START, {"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": ""}},
+           {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "Weighing it."}},
+           {"type": "content_block_stop", "index": 0}, {"type": "ping"},
+           {"type": "content_block_start", "index": 1, "content_block": {"type": "text", "text": ""}},
+           {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": text[: len(text) // 2]}},
+           {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": text[len(text) // 2:]}},
+           {"type": "content_block_stop", "index": 1}, *extra]
+    if not cut:
+        out += [{"type": "message_delta", "delta": {"stop_reason": stop, "stop_sequence": None}, "usage": {"output_tokens": 6000}},
+                {"type": "message_stop"}]
+    if cost is not None:
+        out.append({"type": "ltcm.cost", "cost_usd": cost, "known": known, "stop": stop})
+    return "".join(f"event: {e['type']}\ndata: {json.dumps(e)}\n\n" for e in out)
+
+
+class FakeStream:
+    """A relayed event stream read line by line; `fail` (an exception) is raised after `fail_after` lines; `tick` moves
+    the clock on every line."""
+
+    def __init__(self, text, *, fail=None, fail_after=None, clock=None, tick=0.0, content_type="text/event-stream; charset=utf-8"):
+        self.lines = text.encode("utf-8").splitlines(keepends=True)
+        self.headers = {"Content-Type": content_type}
+        self.fail, self.fail_after, self.clock, self.tick, self.read_lines = fail, fail_after, clock, tick, 0
+
+    def readline(self):
+        if self.fail is not None and self.read_lines >= self.fail_after:
+            raise self.fail
+        if self.clock is not None:
+            self.clock[0] += self.tick
+        self.read_lines += 1
+        return self.lines.pop(0) if self.lines else b""
+
+    def read(self):
+        return b"".join(self.lines)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+
+class Streaming(unittest.TestCase):
+    def test_a_streamed_request_asks_for_events_summarized_thinking_and_up_to_32000_tokens(self):
+        body = request_body(MODEL, "s", [{"role": "user", "content": "q"}], max_tokens=10 ** 6, stream=True)
+        self.assertEqual((body["stream"], body["thinking"], body["max_tokens"]),
+                         (True, {"type": "adaptive", "display": "summarized"}, MAX_TOKENS_STREAM))
+        self.assertNotIn("stream", request_body(MODEL, "s", [{"role": "user", "content": "q"}]))
+        opener = FakeOpener(FakeStream(events()))
+        client(opener, read_timeout=120.0).ask("s", "q", agent="a", stream=True, max_tokens=32000)
+        self.assertEqual(opener.calls[0][1], 120.0, "the socket timeout is the gap allowed between events")
+        self.assertEqual((opener.body()["stream"], opener.body()["max_tokens"]), (True, 32000))
+
+    def test_the_final_message_is_rebuilt_from_the_events_and_the_gateways_cost(self):
+        answer = client(FakeOpener(FakeStream(events()))).ask("s", "q", agent="a", stream=True, schema={"type": "object"})
+        self.assertEqual((answer.text, answer.data, answer.stop_reason, answer.id), ('{"decision": "retire"}', {"decision": "retire"},
+                                                                                       "end_turn", "msg_9"))
+        self.assertEqual(answer.usage, {"input_tokens": 2000, "cache_read_input_tokens": 30000, "cache_creation_input_tokens": 0,
+                                        "output_tokens": 6000}, "input and cache from message_start, output from message_delta")
+        self.assertEqual((answer.cost_usd, answer.cost_verified), (Decimal("0.184000"), True))
+        self.assertEqual([b["type"] for b in answer.raw["content"]], ["thinking", "text"])
+
+    def test_refusal_and_truncation_are_the_same_typed_errors_with_their_bill(self):
+        with self.assertRaises(ClaudeRefusal) as refused:
+            client(FakeOpener(FakeStream(events("", stop="refusal", cost="0.012000")))).ask("s", "q", agent="a", stream=True)
+        self.assertEqual(refused.exception.cost_usd, Decimal("0.012000"))
+        with self.assertRaises(ClaudeTruncated) as cut:
+            client(FakeOpener(FakeStream(events('{"deci', stop="max_tokens")))).ask("s", "q", agent="a", stream=True)
+        self.assertEqual(cut.exception.cost_usd, Decimal("0.184000"))
+
+    def test_a_stream_that_errs_stops_early_or_loses_its_tail_is_an_error_with_what_the_gateway_booked(self):
+        overloaded = {"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}}
+        with self.assertRaises(ClaudeError) as failed:
+            client(FakeOpener(FakeStream(events(extra=[overloaded], cut=True, cost="0.064020")))).ask("s", "q", agent="a", stream=True)
+        self.assertIn("overloaded_error", str(failed.exception))
+        self.assertEqual(failed.exception.cost_usd, Decimal("0.064020"))
+        with self.assertRaises(ClaudeError) as early:
+            client(FakeOpener(FakeStream(events(cut=True, cost="0.662015", known=False)))).ask("s", "q", agent="a", stream=True)
+        self.assertIn("ended before the answer", str(early.exception))
+        self.assertEqual(early.exception.cost_usd, Decimal("0.662015"), "the worst case the gateway kept")
+        # A complete answer whose ltcm.cost never came is still an answer: its cost is unknown (the caller's hold stands
+        # and is trued up from the gateway's record of the call).
+        lost = client(FakeOpener(FakeStream(events(cost=None)))).ask("s", "q", agent="a", stream=True)
+        self.assertEqual((lost.text, lost.cost_usd, lost.cost_verified), ('{"decision": "retire"}', None, False))
+
+    def test_a_complete_answer_whose_cost_the_gateway_could_not_read_is_not_verified(self):
+        answer = client(FakeOpener(FakeStream(events(cost="0.662015", known=False)))).ask("s", "q", agent="a", stream=True)
+        self.assertEqual((answer.cost_usd, answer.cost_verified), (Decimal("0.662015"), False))
+
+    def test_a_stream_closed_mid_read_is_a_claude_error(self):
+        for failure in (http.client.IncompleteRead(b"par", 10), http.client.RemoteDisconnected("gone")):
+            with self.assertRaises(ClaudeError) as cut:
+                client(FakeOpener(FakeStream(events(), fail=failure, fail_after=4))).ask("s", "q", agent="a", stream=True)
+            self.assertIsNone(cut.exception.cost_usd, type(failure).__name__)
+        with self.assertRaises(ClaudeError):
+            client(FakeOpener(http.client.IncompleteRead(b"", 5))).ask("s", "q", agent="a")
+
+    def test_a_quiet_stream_and_one_past_the_overall_limit_are_errors_with_an_unknown_cost(self):
+        with self.assertRaises(ClaudeError) as quiet:
+            client(FakeOpener(FakeStream(events(), fail=socket.timeout("timed out"), fail_after=6))).ask("s", "q", agent="a", stream=True)
+        self.assertIn("stalled", str(quiet.exception))
+        self.assertIsNone(quiet.exception.cost_usd)
+        now = [0.0]
+        with self.assertRaises(ClaudeError) as slow:
+            client(FakeOpener(FakeStream(events(), clock=now, tick=50.0)), timeout=600.0, clock=lambda: now[0]).ask(
+                "s", "q", agent="a", stream=True)
+        self.assertIn("600-second limit", str(slow.exception))
+
+    def test_a_gateway_that_answers_json_to_a_streamed_call_is_read_as_json(self):
+        answer = client(FakeOpener(message("hello"))).ask("s", "q", agent="a", stream=True)
+        self.assertEqual((answer.text, answer.cost_verified), ("hello", True))
+        with self.assertRaises(ClaudeError) as capped:
+            client(FakeOpener(http_error(402, '{"error": "funded", "cap": "claude_funded"}'))).ask("s", "q", agent="a", stream=True)
+        self.assertEqual(capped.exception.cap, "claude_funded")
 
 
 class Meter(unittest.TestCase):

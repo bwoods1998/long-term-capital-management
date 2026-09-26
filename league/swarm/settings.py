@@ -165,7 +165,8 @@ DEFAULTS: dict[str, Any] = {
         "effort": "high",
         "usd_cap": 100.0,
         "reserve_usd": 5.0,
-        "max_tokens": 16000,            # thinking and the answer together (the gateway's non-streaming ceiling)
+        "max_tokens": 16000,            # thinking and the answer together (up to 32,000 streamed; 16,000 not)
+        "stream": True,                 # server-sent events through the gateway: no hop waits 100 s in silence (HTTP 524)
         "roles": ["architect", "audit", "diagnostician"],
     },
     # The diagnostician (league/swarm/diagnostician.py): Claude reads a family that is stuck or nearly there and rewrites

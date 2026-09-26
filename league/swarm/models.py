@@ -275,9 +275,11 @@ class ModelRouter:
 
         cfg = self._claude_cfg()
         effort = str(effort or cfg.get("effort") or "high")
+        # Streamed (`claude.stream`, the default since Sept 27, 2026): a high-effort answer outlasts Cloudflare's
+        # 100-second wait for a silent origin (HTTP 524) unless its events flow as they are made.
         body = request_body(str(cfg.get("model")), system, [{"role": "user", "content": user}],
                             max_tokens=int(cfg.get("max_tokens", MAX_TOKENS)), effort=effort if effort in EFFORTS else "high",
-                            schema=schema, cache=True)
+                            schema=schema, cache=True, stream=cfg.get("stream", True) is True)
         return body, float(reservation_ceiling(body))
 
     def claude_spent(self, *, role: str | None = None, since: float | None = None) -> float:
@@ -371,7 +373,8 @@ class ModelRouter:
         try:
             client = self.claude_factory(model)  # type: ignore[misc]
             answer = client.ask(system, user, agent=f"swarm-{role}", role=role, max_tokens=body["max_tokens"],
-                                effort=body["output_config"]["effort"], schema=schema, cache=True, request_id=request_id)
+                                effort=body["output_config"]["effort"], schema=schema, cache=True, request_id=request_id,
+                                stream=body.get("stream") is True)
         except ClaudeError as exc:
             status = exc.status
             stop = getattr(exc.answer, "stop_reason", None) or type(exc).__name__

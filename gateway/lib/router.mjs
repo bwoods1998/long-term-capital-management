@@ -101,7 +101,7 @@ export function parseRoute(pathname) {
   return { venue: match[1], path };
 }
 
-export async function route(request, env, { gate, fetcher = fetch, now = Date.now, mailer = null } = {}) {
+export async function route(request, env, { gate, fetcher = fetch, now = Date.now, mailer = null, waitUntil = null } = {}) {
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, '') || '/';
 
@@ -202,7 +202,7 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
   }
   if (path === '/v1/claude/messages') {
     if (request.method !== 'POST') return fail('Method not allowed.', 405, { Allow: 'POST' });
-    return claudeCall(request, env, { gate, fetcher, now });
+    return claudeCall(request, env, { gate, fetcher, now, waitUntil });
   }
   const claudeRequest = /^\/v1\/claude\/request\/([A-Za-z0-9:._-]{1,160})$/.exec(path);
   if (claudeRequest) {
@@ -611,8 +611,8 @@ async function frontierCall(request, env, { gate, fetcher, now }) {
 }
 
 /** The headers every Anthropic call carries: the key is added here, on the way out, and never comes back. */
-function claudeHeaders(env) {
-  return { 'Content-Type': 'application/json', Accept: 'application/json', 'x-api-key': env.CLAUDE_API_KEY,
+function claudeHeaders(env, { stream = false } = {}) {
+  return { 'Content-Type': 'application/json', Accept: stream ? 'text/event-stream' : 'application/json', 'x-api-key': env.CLAUDE_API_KEY,
     'anthropic-version': claude.API_VERSION, 'User-Agent': 'ltcm-gateway/1.0' };
 }
 
@@ -626,7 +626,7 @@ function claudeHeaders(env) {
  * usage does not read, keeps its whole hold as spent (unknown is not free), as the frontier's does. The House's
  * X-LTCM-Request id files the outcome (`gate.claudeRequest`).
  */
-async function claudeCall(request, env, { gate, fetcher, now }) {
+async function claudeCall(request, env, { gate, fetcher, now, waitUntil = null }) {
   if (!env.CLAUDE_API_KEY) return json({ error: 'Claude is not configured.', cap: 'setup' }, 503);
   const body = await readBody(request, claude.MAX_REQUEST_BYTES);
   if (body.error) return fail(body.error, 413);
@@ -649,14 +649,15 @@ async function claudeCall(request, env, { gate, fetcher, now }) {
   let upstream, text;
   try {
     upstream = await fetcher(claude.HOST + claude.PATH, {
-      method: 'POST', headers: claudeHeaders(env), body: body.text, redirect: 'manual',
-      // Just under the House's own 600-second read, as the frontier's.
-      signal: AbortSignal.timeout(570000),
+      method: 'POST', headers: claudeHeaders(env, { stream: admitted.stream }), body: body.text, redirect: 'manual',
+      // Just under the House's own 600-second read, as the frontier's; a stream just over it (the House gives up first).
+      signal: AbortSignal.timeout(admitted.stream ? claude.STREAM_TIMEOUT_MS : 570000),
     });
   } catch {
     const settled = await settle('0', 'no_answer');
     return json({ error: 'Anthropic did not answer.' }, 502, { 'X-LTCM-Cost-USD': settled.cost_usd });
   }
+  if (admitted.stream && upstream.ok) return claudeStream(upstream, { admitted, settle, waitUntil });
   try {
     text = await upstream.text();
   } catch {
@@ -688,6 +689,71 @@ async function claudeCall(request, env, { gate, fetcher, now }) {
       ...(settled?.cost_usd ? { 'X-LTCM-Cost-USD': settled.cost_usd } : {}),
       ...(actual === null ? { 'X-LTCM-Cost-Known': 'false' } : {}),
     },
+  });
+}
+
+/**
+ * A streamed Claude call's answer (Sept 27, 2026): Anthropic's events go to the House as they arrive, so no hop waits in
+ * silence (Cloudflare gives up on a silent origin after 100 seconds: HTTP 524), and are metered on the way
+ * (`claude.StreamMeter`). When the stream ends the call is settled, and one last event, `ltcm.cost`
+ * (`{ cost_usd, known, stop }`), tells the House what the meter booked. A stream that broke after its headers, or ended
+ * without `message_stop`, keeps its whole hold (unknown is not free: the 30-minute sweep and `/v1/claude/request/<id>`
+ * reconcile it); an `error` event settles at the usage seen so far, or unknown before any. A House that went away
+ * stops the stream (Anthropic's generation with it) and the call settles unknown unless its usage was complete. The
+ * settling runs under `waitUntil`, so it outlives the response.
+ */
+function claudeStream(upstream, { admitted, settle, waitUntil }) {
+  const meter = new claude.StreamMeter();
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  let gone = false, reader = null;
+  // The House closing its end is noticed at once, not at the next write: a quiet Anthropic (the model thinking) could
+  // otherwise hold the pump past Cloudflare's grace for waitUntil, and the call would never settle. Cancelling
+  // Anthropic's stream ends the read below, and the call settles as `house_gone` at its whole hold.
+  writer.closed.catch(() => {
+    gone = true;
+    reader?.cancel().catch(() => {});
+  });
+  const pump = (async () => {
+    const parser = claude.sseParser();
+    let broken = false;
+    try {
+      reader = upstream.body.getReader();
+      if (gone) await reader.cancel().catch(() => {});
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        for (const event of parser.push(value)) meter.observe(event);
+        try {
+          await writer.write(value);
+        } catch {
+          gone = true;  // the House closed its end
+          try { await reader.cancel(); } catch { /* already closed */ }
+          break;
+        }
+      }
+      for (const event of parser.end()) meter.observe(event);
+    } catch {
+      broken = true;
+    }
+    const outcome = meter.settlement(admitted.price, { broken: broken || gone });
+    const stop = gone && !meter.stopped ? 'house_gone' : outcome.stop;
+    let settled = null;
+    try {
+      settled = await settle(outcome.cost === null ? null : String(outcome.cost), stop, meter.geo);
+    } catch { /* the hold stays; the sweep and the House's true-up reconcile it */ }
+    if (gone) return;
+    try {
+      const tail = { type: 'ltcm.cost', cost_usd: settled?.cost_usd ?? null, known: outcome.cost !== null && settled !== null, stop };
+      // The blank line first ends any event a broken stream left half-sent, so the tail always reads as its own event.
+      await writer.write(new TextEncoder().encode(`\n\nevent: ltcm.cost\ndata: ${JSON.stringify(tail)}\n\n`));
+      await writer.close();
+    } catch { /* the House went away at the end */ }
+  })();
+  if (typeof waitUntil === 'function') waitUntil(pump);
+  return new Response(readable, {
+    status: upstream.status,
+    headers: { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' },
   });
 }
 
