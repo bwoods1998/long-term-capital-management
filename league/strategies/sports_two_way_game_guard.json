@@ -1,8 +1,0 @@
-{
-  "family": "sports-favorites",
-  "name": "sports_two_way_game_guard",
-  "repair": {
-    "key": "bug_report:kalshi-sports:0367baac0c"
-  },
-  "why": "Corrected child of meriwether-20. Reserve CFB/NFL exposure by the shared game ticker prefix across holdings, open orders and same-decision intents, preventing favourite YES and opposing underdog NO from duplicating a two-way game bet. Preserve the parent's specialty and supplied effective parameters; qualify independently from rung 0."
-}

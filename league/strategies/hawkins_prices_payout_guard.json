@@ -1,9 +1,0 @@
-{
-  "family": "prices-favorites",
-  "name": "hawkins_prices_payout_guard",
-  "repair": {
-    "key": "strategy_defect:hawkins-9:ca63354ca603",
-    "parent": "hawkins-9"
-  },
-  "why": "Corrected child of hawkins-9 retaining its Kalshi day WTI/diesel specialty and effective parameters. Requires explicit finite hours_to_resolve between 0 and 48 for new entries and cancels outstanding buys failing that guard, rather than treating trading-close time as payout time. Starts at rung 0 with no inherited qualification."
-}

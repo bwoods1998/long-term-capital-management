@@ -1,8 +1,0 @@
-{
-  "family": "weather-favorites",
-  "name": "mullins_two_event_reservations",
-  "repair": {
-    "key": "order_refusal:kalshi:one event may hold at most #% of the stake: KXHIGHNY-#SEP# would hold $# of this account's $# (holdi"
-  },
-  "why": "Corrected child of mullins-2. Repeated KXHIGHNY refusals show that per-market sizing ignored the 25% aggregate event limit. Preserve the parent's weather favourite-NO maker strategy while reserving event headroom for both-leg holdings at cost, unfilled working buys including pending cancels, and all new intents in the decision. Born on rung 0; must qualify on its own evidence."
-}

@@ -1,8 +1,0 @@
-{
-  "family": "crypto-alts-reversion",
-  "name": "haghani-reference-distance-guard",
-  "repair": {
-    "key": "order_refusal:alpaca-paper:limit price deviates #% from reference"
-  },
-  "why": "New corrected child of haghani-37, starting at rung 0 without inherited evidence. LTC limits were still refused at 10.35% reference deviation after cent rounding was removed. Preserve the parent's specialty, parameters and mean-reversion signals, but submit or retain discretionary limits only within 9% of fresh bid/ask references and the latest close after known-grid rounding. Cancel and defer inadmissible limits instead of moving the signal or substituting market orders; preserve existing stop and time exits. CI and the child's independent floor record must judge the repair."
-}

@@ -1,8 +1,0 @@
-{
-  "family": "crypto-alts-reversion",
-  "name": "haghani_equity_order_cap",
-  "repair": {
-    "key": "order_refusal:alpaca:order notional # exceeds #% of desk equity"
-  },
-  "why": "New corrected child of haghani-37, retaining its Alpaca hourly alternative-coin maker-reversion specialty. Caps entry budgets by 50% of current equity in addition to cash and supplied limits, cancels oversized resting buys, and skips budgets below the crypto venue minimum. Must qualify independently from rung 0; parent signals and exits are unchanged."
-}

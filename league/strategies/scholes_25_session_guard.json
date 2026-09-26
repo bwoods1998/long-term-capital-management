@@ -1,9 +1,0 @@
-{
-  "family": "equity-trend",
-  "name": "scholes_25_session_guard",
-  "repair": {
-    "key": "strategy_defect:scholes-25:654b8a6a5518",
-    "parent": "scholes-25"
-  },
-  "why": "Corrected child of scholes-25: restrict market-order decisions to weekdays from 09:30 inclusive to 16:00 exclusive in America/New_York, preventing the reported post-close exit retries while retaining the ETF pullback signal and next-session carry exit. New rung-0 candidate with no inherited record."
-}

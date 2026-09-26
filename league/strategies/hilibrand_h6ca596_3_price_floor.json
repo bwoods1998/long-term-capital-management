@@ -1,8 +1,0 @@
-{
-  "family": "crypto-strikes-vol-shock-upside",
-  "name": "hilibrand_h6ca596_3_price_floor",
-  "repair": {
-    "key": "order_refusal:kalshi:buying a longshot at #: the floor buys no event contract under # (longshot buyers lose on Kalshi; se"
-  },
-  "why": "Corrected child of hilibrand-h6ca596-3. The floor recorded a 0.19 real-money longshot refusal; the supplied strategy has a 0.20 lower bound, which also permits entries below the real-money 0.30 floor. Intersect its original 0.20-to-0.65 range with the rung's floor after rounding each leg's bid and before ranking edges. Keep the parent's BTC/ETH strike specialty, parameters, probability model, sizing and post-only execution. Born on rung 0 with no inherited record; must qualify independently."
-}

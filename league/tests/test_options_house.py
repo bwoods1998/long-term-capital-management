@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 from league import service
 from league.live_trading import LiveGrant
+from league.tests import REAL_NICHES_PATH
 from league.tests.fakes import FakeBroker
 
 #: What the options House never builds (plan "The prune": Kalshi, Jev, the lab, the foundry, the semantic lab, the
@@ -37,7 +38,9 @@ class BuildCase(unittest.TestCase):
 
     def build(self, *, real_money=False, config=None, sail=None, **kw):
         config = {**service.load_config(), "options_history": False, **(config or {}), "real_money": real_money}
-        patches = [patch.object(service, "load_env"), patch.object(service, "secret", return_value="t" * 40),
+        # The House's real desks (league/niches.json: the options desk alone), not the old tests' legacy fixture.
+        patches = [patch("league.niches.NICHES_PATH", REAL_NICHES_PATH),
+                   patch.object(service, "load_env"), patch.object(service, "secret", return_value="t" * 40),
                    patch("league.venues.gateway_broker", side_effect=self.broker),
                    patch("urllib.request.urlopen", side_effect=no_network)]
         if sail is not None:
@@ -105,6 +108,77 @@ class Build(BuildCase):
     def test_a_canary_is_practice_only_and_builds_nothing_cut(self):
         house = self.build(real_money=True, canary=True)
         self.assertEqual(list(house.books), ["alpaca-paper", "options-shadow"])
+        for name in CUT_PIECES:
+            self.assertIsNone(getattr(house, name, None), name)
+
+
+class TheConfigAfterThePrune(unittest.TestCase):
+    def test_config_game_and_niches_carry_only_what_the_options_house_reads(self):
+        import json
+
+        root = Path(service.__file__).resolve().parent
+        config = service.load_config()
+        for key in ("jev", "lab", "semantic_lab"):
+            self.assertNotIn(key, config)
+        self.assertEqual({k: v for k, v in config["performance"].items() if not k.startswith("_")},
+                         {"start_at": None, "start_equity": None}, "the main session fills them at the reset")
+        self.assertIsNone(service.performance_of(config), "no half-filled record reaches the publisher")
+        self.assertEqual(service.performance_of({"performance": {"start_at": "2026-09-26T12:00:00Z", "start_equity": "5481.62"}}),
+                         {"start_at": "2026-09-26T12:00:00Z", "start_equity": "5481.62"})
+        self.assertIn("gym", config)
+        self.assertIn("swarm", config)
+        self.assertIs(config["real_money"], False, "the new House's first owner deploy runs without real money (plan Wave 7)")
+        game = json.loads((root / "game.json").read_text())
+        for key in ("lab", "lab_bounds", "hypotheses", "horizon", "horizon_bounds", "research_bounds"):
+            self.assertNotIn(key, game)
+        self.assertNotIn("gate", game["research"])
+        self.assertNotIn("lift", game["merton"])
+        desks = json.loads(REAL_NICHES_PATH.read_text())["niches"]
+        self.assertEqual([d["id"] for d in desks], ["alpaca-options"])
+        for name in ("turbo.json", "repairs.json", "research_routes.json", "routing_evidence.json", "jev_move_model.json",
+                     "jev_move_model_jev_shadow.json"):
+            self.assertFalse((root / name).exists(), name)
+        from league import strategies
+
+        self.assertTrue(all(row["file"].startswith(("krasker_", "options_")) for row in strategies.registry(root / "strategies")))
+
+
+class AnEmptyRootTicksOptionsOnly(BuildCase):
+    """The Done line of Wave 2a: a local tick of the floor's House on an EMPTY state root (fake brokers, no network)
+    runs only options code. What was built, what the tick ran (its steps) and what it wrote (the ledger's kinds)."""
+
+    #: Every ledger kind a first options tick may write: the start, the books' baselines and reconciliation, the
+    #: allocator's board, the House's own jobs and budget rows, the teacher's lessons, the audit's score, and the births
+    #: of the options desk's founders (their endowment and first charge, their seats and stakes, any displacement).
+    FIRST_TICK_KINDS = {"ops.started", "book.baseline", "book.reconciled", "alloc.board", "ops.job", "ops.budget",
+                        "playbook.entry", "audit.counterfactual", "agent.born", "credit.grant", "credit.charge",
+                        "route.decision", "eval.verdict", "book.stake", "agent.postmortem", "agent.died", "ops.alert"}
+    #: Steps of the tick whose piece the options House never builds: each is a lap of nothing.
+    NOTHING = ("feeds", "jev", "hypotheses", "lab", "shards", "history_coverage")
+
+    def test_one_tick_on_an_empty_root(self):
+        import collections
+
+        root = Path(self.dir.name) / "state"
+        self.assertFalse(root.exists())
+        house = self.build(research=True, merton=True)
+        summary = house.tick()
+        house.wait(60)
+        self.assertEqual(sorted(p.name for p in root.iterdir() if p.name.startswith(("campaigns", "kalshi", "feeds", "jev", "lab"))), [])
+        kinds = collections.Counter(e.kind for e in house.ledger.iter())
+        self.assertLessEqual(set(kinds), self.FIRST_TICK_KINDS, kinds)
+        born = [e.payload for e in house.ledger.iter(kinds="agent.born")]
+        self.assertTrue(born, "the options desk's founders are seated")
+        self.assertEqual({(b.get("niche") or b.get("specialty"), b.get("venue")) for b in born}, {("alpaca-options", "alpaca")})
+        self.assertTrue(all(a.venue == "alpaca" and a.niche == "alpaca-options" for a in house.registry.agents.values()))
+        self.assertEqual(set(summary["reconciled"]), {"alpaca-paper", "options-shadow"})
+        steps = house._tick_last["steps"]
+        for step in self.NOTHING:
+            self.assertLess(steps.get(step, 0.0), 0.05, step)
+        self.assertNotIn("meter", steps, "no campaign meter")
+        self.assertNotIn("swarm", steps)
+        self.assertEqual([e for e in house.ledger.iter(kinds="ops.budget") if e.payload.get("what") in ("expedition", "payout", "burst-ended")], [],
+                         "no credit payout and no burst")
         for name in CUT_PIECES:
             self.assertIsNone(getattr(house, name, None), name)
 

@@ -140,6 +140,13 @@ def lab_box_key(config: dict[str, Any], *, canary: bool = False) -> str:
     return str(lab.get("box_key") or "lab")
 
 
+def performance_of(config: dict[str, Any]) -> dict[str, Any] | None:
+    """`config.json` `performance` once the reset has filled both `start_at` and `start_equity`; None before (the
+    publisher then shows the account's balance with no since-reset figure, rather than failing every minute)."""
+    performance = dict(config.get("performance") or {})
+    return performance if performance.get("start_at") and performance.get("start_equity") is not None else None
+
+
 def options_shadow_broker(root: Path, config: dict[str, Any], data_client: Any, alpaca_data: Any) -> Any:
     """The options shadow account (`league/options_shadow.py`, Sept 25, 2026, the options-desk run's
     Track S): every level-3 structure on practice, filled on the live option
@@ -316,7 +323,7 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         readers = {"alpaca": brokers.get("alpaca") or gateway_broker("alpaca", gateway_url=gateway_url, token=token(), feed=feed)}
         house.publisher = Publisher(
             config["site_url"], lambda: secret("CAPITAL_PUBLISH_TOKEN"), root / "publish.json", tape=tape or config.get("site_tape"),
-            performance=config.get("performance"), real_brokers=readers,
+            performance=performance_of(config), real_brokers=readers,
             gateway_url=gateway_url, gateway_token=token,
         )
     return house
