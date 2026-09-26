@@ -103,11 +103,28 @@ def _handle(message: Any, runners: dict, reply: Any) -> bool:
             reply({"ok": True, "results": out})
         elif kind == "ping":
             try:  # the child's own network namespace's interfaces (/proc/self/net is per namespace; /sys is not remounted)
-                lines = open("/proc/self/net/dev", encoding="utf-8").read().splitlines()[2:]
+                lines = Path("/proc/self/net/dev").read_text().splitlines()[2:]
                 interfaces = sorted(line.split(":", 1)[0].strip() for line in lines if ":" in line)
+                routes = {line.split()[0] for line in Path("/proc/self/net/route").read_text().splitlines()[1:] if line.strip()}
+                ipv6_routes, ipv6_addresses = Path("/proc/self/net/ipv6_route"), Path("/proc/self/net/if_inet6")
+                routes.update(line.split()[-1] for line in (ipv6_routes.read_text().splitlines() if ipv6_routes.exists() else []) if line.strip())
+                import fcntl
+                import ipaddress
+                import socket
+
+                addresses = [str(ipaddress.IPv6Address(int(line.split()[0], 16)))
+                             for line in (ipv6_addresses.read_text().splitlines() if ipv6_addresses.exists() else []) if line.strip()]
+                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                    for interface in interfaces:
+                        try:
+                            response = fcntl.ioctl(sock.fileno(), 0x8915, struct.pack("256s", interface.encode()[:15]))
+                            addresses.append(socket.inet_ntoa(response[20:24]))
+                        except OSError:  # a dormant tunnel such as sit0 has no IPv4 address
+                            pass
             except OSError:
-                interfaces = None
-            reply({"ok": True, "pid": os.getpid(), "env": sorted(os.environ), "interfaces": interfaces})
+                interfaces, routes, addresses = None, None, None
+            reply({"ok": True, "pid": os.getpid(), "env": sorted(os.environ), "interfaces": interfaces,
+                   "routed_interfaces": None if routes is None else sorted(routes), "addresses": addresses})
         elif kind == "quit":
             reply({"ok": True})
             return False

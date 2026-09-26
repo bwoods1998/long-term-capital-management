@@ -71,6 +71,7 @@ class TheChild(unittest.TestCase):
         self.assertEqual(remote, local)
 
     def test_the_child_has_no_network_where_the_box_allows_a_namespace(self):
+        import ipaddress
         import shutil
 
         if not (shutil.which("unshare") and subprocess.run(["unshare", "--net", "--map-root-user", "true"],
@@ -78,7 +79,14 @@ class TheChild(unittest.TestCase):
             self.skipTest("no unprivileged network namespace here")
         ping = self.decider.ping()
         self.assertTrue(self.decider.netns)
-        self.assertEqual(ping.get("interfaces"), ["lo"])                    # only loopback: no route to the gateway
+        # Some kernels include the dormant sit0 tunnel in a fresh namespace. An interface name alone does not mean
+        # external connectivity: there must be no external address or route through any interface.
+        self.assertIsNotNone(ping["routed_interfaces"])
+        self.assertLessEqual(set(ping["routed_interfaces"]), {"lo"})
+        self.assertIsNotNone(ping["addresses"])
+        for address in ping["addresses"]:
+            parsed = ipaddress.ip_address(address)
+            self.assertTrue(parsed.is_loopback or parsed.is_unspecified, address)
 
     def test_a_program_that_never_returns_is_cut_off_and_counted(self):
         self.decider.load("loop", LOOP, {}, "loop")
