@@ -10315,6 +10315,38 @@ class House:
     #:   researchers' inner loop, the hourly tournament and bandit, forks and retirements, the architect and the gate.
     PLUGGABLE_STEPS = ("options_live", "swarm")
 
+    def site_inputs(self) -> dict[str, Any]:
+        """The site's inputs from the two pluggable steps (the publisher's `site_inputs` hook, `league/publish.py`): the
+        swarm's (`gym`, `agents`, and `compute`: the swarm's own spend) and the live path's (`structures`: the open real
+        and shadow structures). A block both give is merged: lists are joined, and `compute`'s numbers are added part by
+        part (each gives its own spend). A step that fails costs its own blocks only, never the checkpoint."""
+        out: dict[str, Any] = {}
+        for name in ("swarm", "options_live"):
+            hook = getattr(getattr(self, name, None), "site_inputs", None)
+            if not callable(hook):
+                continue
+            try:
+                given = hook() or {}
+            except Exception as exc:  # noqa: BLE001
+                self.alert("warning", f"the {name} step's site inputs failed ({type(exc).__name__}: {str(exc)[:160]})")
+                continue
+            for key, value in dict(given).items():
+                if key not in out or out[key] is None:
+                    out[key] = value
+                elif isinstance(out[key], list) and isinstance(value, list):
+                    out[key] = out[key] + value
+                elif key == "compute" and isinstance(out[key], Mapping) and isinstance(value, Mapping):
+                    merged = dict(out[key])
+                    for part, amount in value.items():
+                        if part == "as_of":
+                            merged[part] = max(str(merged.get(part) or ""), str(amount or "")) or None
+                        elif merged.get(part) is None:
+                            merged[part] = amount
+                        elif amount is not None:
+                            merged[part] = Decimal(str(merged[part])) + Decimal(str(amount))
+                    out[key] = merged
+        return out
+
     def _pluggable_step(self, name: str, summary: dict[str, Any], open_for_business: bool) -> None:
         """Run one of `PLUGGABLE_STEPS` when it is set; see there."""
         step = getattr(self, name, None)
@@ -10832,6 +10864,13 @@ class House:
 
     def close(self, *, wait: float | None = SHUTDOWN_WAIT_SECONDS) -> None:
         self._closing.set()
+        for name in self.PLUGGABLE_STEPS:
+            closer = getattr(getattr(self, name, None), "close", None)
+            if callable(closer):
+                try:
+                    closer()
+                except Exception:  # noqa: BLE001 - a step that cannot close still lets the House close
+                    pass
         self.wait(wait)
         self._save_state()
         self.recorder.close()

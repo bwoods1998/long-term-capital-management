@@ -20,6 +20,10 @@ from league.tests.fakes import FakeBroker
 #: What the options House never builds (plan "The prune": Kalshi, Jev, the lab, the foundry, the semantic lab, the
 #: feeds and recorders, the campaign store and its burst).
 CUT_PIECES = ("campaigns", "feeds", "jev_floor", "lab", "hypotheses", "semantic_lab", "shards", "kalshi_data")
+#: The House as Wave 2a left it, before the live options path (Wave 5) owns the Alpaca accounts.
+NO_LIVE = {"live": {"enabled": False}}
+#: The live options path built but its minute thread never started (a test's House must not read a venue).
+LIVE = {"live": {"enabled": True, "thread": False, "require_paper_proof": True}}
 
 
 def no_network(*args, **kwargs):
@@ -60,7 +64,7 @@ class BuildCase(unittest.TestCase):
 
 class Build(BuildCase):
     def test_practice_books_only_without_real_money_and_no_cut_piece(self):
-        house = self.build(research=True, merton=True, publish=True)
+        house = self.build(research=True, merton=True, publish=True, config=NO_LIVE)
         self.assertEqual(list(house.books), ["alpaca-paper", "options-shadow"])
         for name in CUT_PIECES:
             self.assertIsNone(getattr(house, name, None), name)
@@ -81,7 +85,7 @@ class Build(BuildCase):
         from league.tests.test_sandbox import FakeSail
 
         with patch("ltcm.adapters.VenueClient") as client:
-            house = self.build(real_money=True, sail=FakeSail())
+            house = self.build(real_money=True, sail=FakeSail(), config=NO_LIVE)
         self.assertEqual(list(house.books), ["alpaca-paper", "alpaca", "options-shadow"])
         self.assertTrue(house.books["alpaca"].real_money)
         self.assertIsNotNone(house.kill_switch)
@@ -90,7 +94,7 @@ class Build(BuildCase):
 
     def test_without_real_money_market_data_reads_through_the_practice_account(self):
         with patch("ltcm.adapters.VenueClient") as client:
-            self.build(real_money=False)
+            self.build(real_money=False, config=NO_LIVE)
         self.assertEqual({kw["venue"] for _, kw in client.call_args_list}, {"alpaca-paper"})
 
     def test_no_absent_key_switches_a_cut_feature_on(self):
@@ -106,10 +110,54 @@ class Build(BuildCase):
             self.assertNotIn(f'config.get("{key}"', source, key)
 
     def test_a_canary_is_practice_only_and_builds_nothing_cut(self):
-        house = self.build(real_money=True, canary=True)
+        house = self.build(real_money=True, canary=True, config=LIVE)
         self.assertEqual(list(house.books), ["alpaca-paper", "options-shadow"])
+        self.assertIsNone(house.options_live, "a canary never runs the live path")
         for name in CUT_PIECES:
             self.assertIsNone(getattr(house, name, None), name)
+
+
+class TheLivePath(BuildCase):
+    """Wave 5 (Sept 26, 2026): with `live.enabled` the live options path owns both Alpaca accounts: no old Book is
+    built for them, and `House.options_live` is the live step, reading and trading through the gateway only."""
+
+    def setUp(self):
+        super().setUp()
+        try:
+            import numpy  # noqa: F401
+        except ImportError:
+            self.skipTest("numpy not installed (the live path needs it)")
+
+    def test_the_live_path_owns_the_alpaca_accounts(self):
+        from league.live.step import OptionsLive
+
+        with patch("ltcm.adapters.VenueClient") as client:
+            house = self.build(real_money=False, config=LIVE)
+        self.assertEqual(house.books, {})
+        self.assertIsInstance(house.options_live, OptionsLive)
+        self.assertIsNone(house.options_live.real, "no real account without real money")
+        self.assertEqual(house.options_live.paper.venue, "alpaca-paper")
+        self.assertIs(house.options_live.grant, house.grant)
+        self.assertEqual({kw["venue"] for _, kw in client.call_args_list}, {"alpaca-paper"})
+        self.assertTrue(all(isinstance(kw.get("gateway").headers(), dict) for _, kw in client.call_args_list if kw.get("gateway")))
+
+    def test_with_real_money_it_trades_the_brokerage_account_and_reads_through_it(self):
+        from league.tests.test_sandbox import FakeSail
+
+        with patch("ltcm.adapters.VenueClient") as client:
+            house = self.build(real_money=True, sail=FakeSail(), config=LIVE)
+        self.assertEqual(house.books, {})
+        self.assertEqual(house.options_live.real.venue, "alpaca")
+        self.assertTrue(house.options_live.real_money)
+        self.assertEqual({kw["venue"] for _, kw in client.call_args_list}, {"alpaca", "alpaca-paper"})
+        self.assertEqual(house.options_live.real_block(), "the grant options-swarm-20260928 is not active on the money rules in force")
+
+    def test_the_repositorys_config_runs_the_live_path(self):
+        config = service.load_config()
+        self.assertIs(config["live"]["enabled"], True)
+        self.assertIs(config["live"]["require_paper_proof"], True)
+        self.assertTrue(service.live_enabled(config))
+        self.assertFalse(service.live_enabled(config, canary=True))
 
 
 class TheConfigAfterThePrune(unittest.TestCase):
@@ -163,7 +211,7 @@ class AnEmptyRootTicksOptionsOnly(BuildCase):
 
         root = Path(self.dir.name) / "state"
         self.assertFalse(root.exists())
-        house = self.build(research=True, merton=True)
+        house = self.build(research=True, merton=True, config=NO_LIVE)
         summary = house.tick()
         house.wait(60)
         self.assertEqual(sorted(p.name for p in root.iterdir() if p.name.startswith(("campaigns", "kalshi", "feeds", "jev", "lab"))), [])
@@ -198,7 +246,7 @@ class Step:
 
 class PluggableSteps(BuildCase):
     def test_each_step_runs_once_a_tick_with_its_lap_and_its_summary(self):
-        house = self.build()
+        house = self.build(config=NO_LIVE)
         house.swarm, house.options_live = Step(), Step()
         summary = house.tick()
         self.assertEqual((house.swarm.calls, house.options_live.calls), ([True], [True]))
@@ -211,7 +259,7 @@ class PluggableSteps(BuildCase):
         self.assertLess(order.index("research"), order.index("swarm"))
 
     def test_a_failing_step_is_a_warning_and_the_tick_goes_on(self):
-        house = self.build()
+        house = self.build(config=NO_LIVE)
         house.swarm = Step(fail=True)
         summary = house.tick()
         self.assertNotIn("swarm", summary)
@@ -220,7 +268,7 @@ class PluggableSteps(BuildCase):
         self.assertTrue(any("the swarm step failed" in t for t in texts), texts)
 
     def test_a_paused_house_tells_the_steps_it_is_not_open_for_business(self):
-        house = self.build()
+        house = self.build(config=NO_LIVE)
         house.swarm = Step()
         with patch.object(type(house), "paused", return_value={"reason": "maintenance"}):
             house.tick()
@@ -229,12 +277,35 @@ class PluggableSteps(BuildCase):
     def test_unfilled_steps_run_nothing_and_health_says_which_are_filled(self):
         import json
 
-        house = self.build()
+        house = self.build(config=NO_LIVE)
         house.tick()
         self.assertNotIn("swarm", house._tick_last["steps"])
         health = json.loads((Path(self.dir.name) / "state" / "health.json").read_text())
         self.assertEqual(health["pluggable_steps"], {"options_live": False, "swarm": False})
         self.assertIs(health["credit_economy"], False)
+
+    def test_the_house_merges_the_steps_site_inputs(self):
+        from decimal import Decimal
+
+        class Swarm(Step):
+            def site_inputs(self):
+                return {"gym": {"trials": 9}, "agents": [{"id": "a"}], "compute": {"as_of": "2026-09-28T14:00:00Z", "sail_usd": "1.50", "openai_usd": "2.00"}}
+
+        class Live(Step):
+            def site_inputs(self):
+                return {"structures": [{"id": "real:1"}], "compute": {"sail_usd": "0.25"}}
+
+        house = self.build(config=NO_LIVE)
+        self.assertEqual(house.site_inputs(), {})
+        house.swarm, house.options_live = Swarm(), Live()
+        merged = house.site_inputs()
+        self.assertEqual(merged["gym"], {"trials": 9})
+        self.assertEqual(merged["agents"], [{"id": "a"}])
+        self.assertEqual(merged["structures"], [{"id": "real:1"}])
+        self.assertEqual(merged["compute"]["sail_usd"], Decimal("1.75"))
+        self.assertEqual(merged["compute"]["openai_usd"], "2.00")
+        house.options_live.site_inputs = lambda: 1 / 0
+        self.assertEqual(house.site_inputs()["agents"], [{"id": "a"}], "a failing step costs its own blocks only")
 
 
 if __name__ == "__main__":

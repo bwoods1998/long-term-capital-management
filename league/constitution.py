@@ -830,4 +830,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '63b65b348aab76633bdd98cca7e873481f97e628d75b7635454419314d0acc4d'
+PINNED_DIGEST = '502be7357db767366479e5c0c668ee5f17e01f725fa309f1c533cf7dbcea9781'

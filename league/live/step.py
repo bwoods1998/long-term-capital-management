@@ -65,6 +65,7 @@ FLOWS_EVERY = 300.0
 MINUTE_OFFSET = 3.0          # seconds into each minute the live step runs
 DEFAULTS = {
     "enabled": True,
+    "thread": True,              # the minute thread (tests drive `minute()` themselves)
     "shadow_capital": 10000.0,
     "require_paper_proof": True,
     "read_band_margin": 0.01,
@@ -181,7 +182,8 @@ class OptionsLive:
     def tick(self, house: Any, *, open_for_business: bool = True) -> dict:
         """Called once a House tick: keeps the minute thread alive; returns the last minute's summary."""
         self.house_open = bool(open_for_business)
-        if self.settings.get("enabled", True) and (self._thread is None or not self._thread.is_alive()):
+        if (self.settings.get("enabled", True) and self.settings.get("thread", True)
+                and (self._thread is None or not self._thread.is_alive())):
             self.start()
         with self._lock:
             return dict(self.summary)
@@ -215,8 +217,27 @@ class OptionsLive:
                 self.state.event("live.error", {"error": f"{type(exc).__name__}: {exc}", "trace": traceback.format_exc()[-2000:]})
 
     # ------------------------------------------------------------------ one minute
+    def owner_actions(self) -> None:
+        """What the owner asked for with `python -m league.live` (the live state's key-values, read every minute): the
+        drawdown pause released, an assignment's latch cleared. Only the owner's command writes them."""
+        ask = self.state.get("owner_release_drawdown")
+        if ask and self.stops.drawdown_tripped:
+            self.record("live.stop", {"stop": "drawdown", "released": True, "why": self.stops.drawdown_why,
+                                      "by": str(ask.get("by") or "the owner")})
+            self.stops.release_drawdown()
+            self.state.put("stops", self.stops.as_state())
+        if ask:
+            self.state.execute("DELETE FROM kv WHERE key='owner_release_drawdown'")
+        ask = self.state.get("owner_clear_assignment")
+        if ask:
+            latch = self.state.get("assignment_latch")
+            if latch:
+                self.record("live.stop", {"stop": "assignment", "released": True, "why": latch.get("why")})
+            self.state.execute("DELETE FROM kv WHERE key IN ('assignment_latch', 'owner_clear_assignment')")
+
     def minute(self) -> dict:
         """One pass: the session's minute, the close's bookkeeping, or the quiet hours' reconciliation."""
+        self.owner_actions()
         now = self.clock()
         local = ny(now)
         today = local.date()
