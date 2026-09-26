@@ -85,9 +85,10 @@ export default {
     await gateOf(env).watchdog();
   },
 
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     // A refusal before any route names its cap, so the House never reads it as a lost order (Sept 26, 2026, Wave 5).
     if (!env.GATE) return json({ error: 'Gateway setup is incomplete.', cap: 'setup' }, 503);
-    return route(request, env, { gate: gateOf(env), mailer: mailerFor(env) });
+    // `waitUntil`: a streamed Claude call settles when its stream ends, after the response has begun (lib/router.mjs).
+    return route(request, env, { gate: gateOf(env), mailer: mailerFor(env), waitUntil: promise => ctx?.waitUntil?.(promise) });
   },
 };
