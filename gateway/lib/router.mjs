@@ -44,7 +44,7 @@ import { composeNotice, NOTICE_KINDS, FROM, TO } from './email.mjs';
 import {
   createsOrder, notional, PURPOSE_HEADER, allowedVenuePath, isOptionSymbol, alpacaShapeError,
   admittedStructures, isMultiLegOrder, structureNotional, practiceOrderError, closeLegsHeldError, closedLegRows,
-  shortCloseBody, realStockClose, CREDIT_STRUCTURES,
+  shortCloseBody, longCloseBody, singleLegOpenError, realStockClose, CREDIT_STRUCTURES,
 } from './caps.mjs';
 import * as kalshi from './kalshi.mjs';
 import * as alpaca from './alpaca.mjs';
@@ -75,6 +75,14 @@ const POSITIONS_UNREAD_STATUS = 424;
 //: options-swarm run, Wave 5)): a 503 the House sends again, with nothing reserved or sent. Only opens wait on the reading.
 const EQUITY_UNREAD_STATUS = 503;
 const EQUITY_RETRY = { 'Retry-After': '30' };
+
+/**
+ * A refusal made before anything is forwarded, naming why in `cap` (Sept 26, 2026 (the options-swarm run, Wave 5), the
+ * review's m8/m12). Every such refusal on a venue route carries one, a 5xx above all: the House reads a 5xx without a
+ * `cap` as a venue that may hold the order, and one with a `cap` as a refusal that sent nothing. The one 5xx that names
+ * no cap is the answer that never came after dispatch (a 502): that one may be an order.
+ */
+const refuse = (message, status, cap, headers = {}) => json({ error: message, cap }, status, headers);
 const METHODS = ['GET', 'POST', 'DELETE'];
 const ALLOW = METHODS.join(', ');
 
@@ -269,7 +277,7 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
     outbound = await sign(target, request, env, { now: now() });
   } catch (error) {
     if (reservation) await gate.refund(reservation);
-    return fail(`Gateway credentials for ${target.venue} are unusable: ${error.message}`, 503);
+    return refuse(`Gateway credentials for ${target.venue} are unusable: ${error.message}`, 503, 'credentials');
   }
 
   try {
@@ -299,15 +307,16 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
  * One order to the REAL Alpaca account, read before anything is reserved (Sept 26, 2026 (the options-swarm run, Wave 5)):
  * `{ micro, exit, credit, closeRows }` for the gate, or `{ response }`, the refusal to answer with.
  *
- *  - A multi-leg OPEN of an admitted type (`OPTION_STRUCTURES_REAL`) and a single-leg `buy_to_open` are OPENING orders,
- *    whatever `X-LTCM-Purpose` says: metered at their maximum loss (the structure's, or premium x 100 x qty) against the
+ *  - A multi-leg OPEN of an admitted type (`OPTION_STRUCTURES_REAL`) and a single-leg `buy_to_open` of an admitted right
+ *    (`long_call`, `long_put`: none as deployed, the review's m7/m15) are OPENING orders, whatever `X-LTCM-Purpose` says: metered at their maximum loss (the structure's, or premium x 100 x qty) against the
  *    caps by maximum loss, which need the account's equity read by this Worker in the last EQUITY_CAP_MAX_AGE_MS
  *    (`account.refreshAccountEquity`). No such reading refuses the open (a 503 the House sends again); a credit type opens
  *    only at CREDIT_MIN_EQUITY_USD or more (the gate).
- *  - Everything else that passes is an EXIT, read no equity and meets no dollar cap: a multi-leg close and a single-leg
- *    `buy_to_close` (admitted only when the account holds what they close, as since Sept 25, 2026), a single-leg
- *    `sell_to_close` (the venue refuses one with nothing to close), and a stock order that closes shares the account holds
+ *  - Everything else that passes is an EXIT, read no equity and meets no dollar cap: a multi-leg close, a single-leg
+ *    `buy_to_close` and a single-leg `sell_to_close` (each admitted only when the account holds what it closes; the
+ *    sell_to_close since the review's m14), and a stock order that closes shares the account holds
  *    (`caps.realStockClose`): the one stock order the real account may send. Every other stock or crypto order is refused.
+ *  - Every refusal names its `cap` when it is a 424 or a 5xx (`refuse`): nothing was sent.
  *
  * Until today the exit header decided what a real order was; for the real account it decides nothing now. The House sets
  * it on its sells and its buy-backs, which are exits here by their own shape.
@@ -322,6 +331,11 @@ async function realOrder(parsed, env, { gate, fetcher, now }) {
   const multi = isMultiLegOrder(parsed);
   const shape = multi ? structureNotional(parsed, structures).error : alpacaShapeError(parsed);
   if (shape) return { response: fail(shape, 400) };
+  // A single contract bought to open is a long_call or a long_put, admitted only when OPTION_STRUCTURES_REAL names it
+  // (Sept 26, 2026, Wave 5, the review's m7/m15): until today every single-leg buy_to_open went, though the real account
+  // trades only the types the list names. Refused before anything is read.
+  const single = multi ? null : singleLegOpenError(parsed, structures);
+  if (single) return { response: fail(single, 400) };
 
   if (!multi && !isOptionSymbol(parsed.symbol)) {
     // A stock (or crypto) order: only the close of shares the account holds, read from its signed positions. No quote is
@@ -329,7 +343,7 @@ async function realOrder(parsed, env, { gate, fetcher, now }) {
     const close = realStockClose(parsed);
     if (close.error) return { response: fail(close.error, 400) };
     const held = await realPositions(env, { fetcher, now });
-    if (held.error) return { response: fail(`Cannot check that the real account holds these shares: ${held.error}.`, POSITIONS_UNREAD_STATUS) };
+    if (held.error) return { response: refuse(`Cannot check that the real account holds these shares: ${held.error}.`, POSITIONS_UNREAD_STATUS, 'positions') };
     const refusal = closeLegsHeldError(close.body, held.positions);
     if (refusal) return { response: fail(refusal, 400) };
     return { micro: 1n, exit: true, credit: false, closeRows: closedLegRows(close.body) };
@@ -347,7 +361,7 @@ async function realOrder(parsed, env, { gate, fetcher, now }) {
     // list gates opens only). Positions that cannot be read admit no close (a 4xx, `POSITIONS_UNREAD_STATUS`): the House
     // sends it again at its next tick.
     const held = await realPositions(env, { fetcher, now });
-    if (held.error) return { response: fail(`Cannot check that the real account holds this structure's legs: ${held.error}.`, POSITIONS_UNREAD_STATUS) };
+    if (held.error) return { response: refuse(`Cannot check that the real account holds this structure's legs: ${held.error}.`, POSITIONS_UNREAD_STATUS, 'positions') };
     const refusal = closeLegsHeldError(parsed, held.positions);
     if (refusal) return { response: fail(refusal, 400) };
     return { micro: 1n, exit: true, credit: false, closeRows: closedLegRows(parsed) };
@@ -362,22 +376,35 @@ async function realOrder(parsed, env, { gate, fetcher, now }) {
     // reserved. Unread positions admit nothing (a 4xx the House retries).
     const shortClose = shortCloseBody(parsed);
     const held = await realPositions(env, { fetcher, now });
-    if (held.error) return { response: fail(`Cannot check that the real account holds this contract short: ${held.error}.`, POSITIONS_UNREAD_STATUS) };
+    if (held.error) return { response: refuse(`Cannot check that the real account holds this contract short: ${held.error}.`, POSITIONS_UNREAD_STATUS, 'positions') };
     const refusal = closeLegsHeldError(shortClose, held.positions);
     if (refusal) return { response: fail(refusal, 400) };
     return { micro: 1n, exit: true, credit: false, closeRows: closedLegRows(shortClose) };
   }
-  // What is left is a structure OPEN, or a single-leg option buy_to_open or sell_to_close (`caps.optionNotional` admits
-  // no other single-leg intent on the real account).
-  const opening = priced.structure ? true : parsed.position_intent === 'buy_to_open';
-  if (!opening) return { micro: priced.micro, exit: true, credit: false, closeRows: null };
+  if (!priced.structure && parsed.position_intent === 'sell_to_close') {
+    // A single-leg option sell_to_close (Sept 26, 2026, Wave 5, the review's m14): an exit, metered at its premium as
+    // before, and admitted only when the account's signed positions show that contract held LONG for at least its qty
+    // (available), by the same rule as every real close. Until today it was trusted to the venue, and a margin account
+    // may take a sale of what it does not hold long as a sale to open: a naked short.
+    const longClose = longCloseBody(parsed);
+    const held = await realPositions(env, { fetcher, now });
+    if (held.error) return { response: refuse(`Cannot check that the real account holds this contract long: ${held.error}.`, POSITIONS_UNREAD_STATUS, 'positions') };
+    const refusal = closeLegsHeldError(longClose, held.positions);
+    if (refusal) return { response: fail(refusal, 400) };
+    return { micro: priced.micro, exit: true, credit: false, closeRows: closedLegRows(longClose) };
+  }
+  // What is left is an OPEN: a structure of an admitted type, or a single-leg buy_to_open of an admitted right
+  // (`caps.optionNotional` admits no other single-leg intent on the real account; anything else is refused here).
+  if (!priced.structure && parsed.position_intent !== 'buy_to_open') {
+    return { response: fail('A single-leg option order on the real account is a buy_to_open, a sell_to_close or a buy_to_close.', 400) };
+  }
   const maxAgeMs = account.maxLossCaps(env).maxAgeMs;
   const reading = await account.refreshAccountEquity(env, gate, { fetcher, now });
   if (account.freshEquity(reading, now(), maxAgeMs) === null) {
     const why = reading && reading.ok !== true ? String(reading.error || 'unreadable') : 'no reading';
     return {
-      response: fail(`Cannot read the real account's equity (${why}): an opening order is sized against a reading no older ` +
-        `than ${Math.round(maxAgeMs / 1000)} seconds, so nothing was sent. Send it again.`, EQUITY_UNREAD_STATUS, EQUITY_RETRY),
+      response: refuse(`Cannot read the real account's equity (${why}): an opening order is sized against a reading no older ` +
+        `than ${Math.round(maxAgeMs / 1000)} seconds, so nothing was sent. Send it again.`, EQUITY_UNREAD_STATUS, 'equity', EQUITY_RETRY),
     };
   }
   return { micro: priced.micro, exit: false, credit: CREDIT_STRUCTURES.includes(priced.structure), closeRows: null };

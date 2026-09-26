@@ -14,7 +14,7 @@ import { createGate, GATE_OBJECT } from './lib/gate.mjs';
 import { runWatchdog } from './lib/watchdog.mjs';
 import { route } from './lib/router.mjs';
 import { mime } from './lib/email.mjs';
-import { fail } from './lib/http.mjs';
+import { json } from './lib/http.mjs';
 
 // Mail is the only way this system asks for a human. Without the binding it simply does not ask,
 // and the watchdog keeps working: the alert is recorded as unsent rather than lost.
@@ -75,7 +75,8 @@ export default {
   },
 
   async fetch(request, env) {
-    if (!env.GATE) return fail('Gateway setup is incomplete.', 503);
+    // A refusal before any route names its cap, so the House never reads it as a lost order (Sept 26, 2026, Wave 5).
+    if (!env.GATE) return json({ error: 'Gateway setup is incomplete.', cap: 'setup' }, 503);
     return route(request, env, { gate: gateOf(env), mailer: mailerFor(env) });
   },
 };

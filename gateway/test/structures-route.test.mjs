@@ -25,7 +25,7 @@ const env = (extra = {}) => ({
   ALPACA_PAPER_KEY_ID: 'PK-PAPER',
   ALPACA_PAPER_SECRET_KEY: 'paper-secret-held-by-the-worker',
   // As deployed (wrangler.jsonc, Sept 26, 2026): the real account capped by maximum loss against its equity.
-  MAX_ORDER_USD: '75', MAX_DAY_USD: '10000', MAX_DAY_ORDERS: '300',
+  MAX_ORDER_USD: '75', MAX_DAY_USD: '4000', MAX_DAY_USD_ALPACA: '10000', MAX_DAY_ORDERS: '300', MAX_DAY_OPEN_ORDERS: '250',
   MAX_ORDER_MAX_LOSS_USD: '1000', MAX_ORDER_EQUITY_SHARE: '0.15', MAX_DAY_EQUITY_SHARE: '1.0', CREDIT_MIN_EQUITY_USD: '2000',
   CAP_TIMEZONE: 'America/New_York', POSITIONS_CACHE_MS: '0',
   ...extra,
@@ -244,7 +244,8 @@ test('with OPTION_STRUCTURES_REAL="debit_vertical" and $500 of equity: a $0.70 v
 });
 
 test('a structure close passes a spent day and a spent order cap, but not the kill switch', async () => {
-  const settings = { OPTION_STRUCTURES_REAL: 'debit_vertical', MAX_DAY_USD: '100' };
+  // The real account's own day envelope (MAX_DAY_USD_ALPACA since the review of Wave 5, m17; MAX_DAY_USD is Kalshi's).
+  const settings = { OPTION_STRUCTURES_REAL: 'debit_vertical', MAX_DAY_USD_ALPACA: '100' };
   const gate = gateFor(settings);
   assert.equal((await call(post('alpaca', mleg(VERTICAL, '0.70')), { settings, gate })).response.status, 200);
   const second = await call(post('alpaca', mleg(VERTICAL, '0.70')), { settings, gate });
@@ -393,7 +394,7 @@ test('a leg committed to a resting order is not available to close again (qty_av
   assert.equal((await call(post('alpaca', close), { settings, positions: unreadable })).response.status, 400);
 });
 
-test('an open, the practice account and every single-leg order but a buy-back read no positions', async () => {
+test('an open and the practice account read no positions; every real single-leg close does, a sell_to_close included', async () => {
   const settings = { OPTION_STRUCTURES_REAL: 'debit_vertical' };
   const open = await call(post('alpaca', mleg(VERTICAL, '0.70')), { settings, positions: [] });
   assert.equal(open.response.status, 200);
@@ -403,9 +404,12 @@ test('an open, the practice account and every single-leg order but a buy-back re
     assert.equal(practice.response.status, 200, 'practice is unchanged: the venue judges what it holds');
     assert.equal(practice.reads.length, 0);
   }
-  const single = await call(post('alpaca', { symbol: 'RIVN261002P00014000', qty: '1', side: 'sell', type: 'limit', limit_price: '0.20',
-    time_in_force: 'day', position_intent: STC }), { settings, positions: [] });
-  assert.equal(single.reads.length, 0, 'a single contract\'s close is unchanged');
+  // Since the review of Wave 5 (m14) a real sell_to_close is admitted only when the account holds the contract long.
+  const sale = { symbol: 'RIVN261002P00014000', qty: '1', side: 'sell', type: 'limit', limit_price: '0.20', time_in_force: 'day', position_intent: STC };
+  const unheld = await call(post('alpaca', sale), { settings, positions: [] });
+  assert.deepEqual([unheld.response.status, unheld.reads.length, unheld.calls.length], [400, 1, 0]);
+  const held = await call(post('alpaca', sale), { settings, positions: [{ symbol: sale.symbol, qty: '1', side: 'long' }] });
+  assert.deepEqual([held.response.status, held.reads.length, held.calls.length], [200, 1, 1]);
 });
 
 test('the positions are read at most once in a few seconds (POSITIONS_CACHE_MS), less what was closed from them', async () => {
@@ -527,7 +531,7 @@ test('REVIEW: positions that cannot be read admit no real buy-back, reserve noth
 });
 
 test('REVIEW: a real buy-back passes a spent day and a spent order cap, not the kill switch, and is not sent twice from the cache', async () => {
-  const settings = { OPTION_STRUCTURES_REAL: 'debit_vertical', MAX_DAY_USD: '100', MAX_ORDER_USD: '1', MAX_ORDER_MAX_LOSS_USD: '1' };
+  const settings = { OPTION_STRUCTURES_REAL: 'debit_vertical', MAX_DAY_USD_ALPACA: '100', MAX_ORDER_USD: '1', MAX_ORDER_MAX_LOSS_USD: '1' };
   const gate = gateFor(settings);
   // A $0.30 buy-back is $30 of premium, over the $1 order cap: an exit is never trapped by a dollar cap.
   assert.equal((await call(post('alpaca', BUY_BACK), { settings, gate, positions: SHORT_HELD })).response.status, 200);

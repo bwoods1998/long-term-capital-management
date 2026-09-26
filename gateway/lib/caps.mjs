@@ -212,6 +212,29 @@ export function shortCloseBody(body) {
   return { qty: body.qty, legs: [{ symbol: body.symbol, ratio_qty: '1', side: 'buy', position_intent: 'buy_to_close' }] };
 }
 
+/**
+ * A single-leg sell_to_close read as a one-leg close (Sept 26, 2026 (the options-swarm run, Wave 5), the review's m14): the
+ * contract it sells must be held LONG for at least its `qty`, available. Until today it was trusted to the venue, which a
+ * margin account may take as a sale that opens a short.
+ */
+export function longCloseBody(body) {
+  return { kind: 'sell_to_close', qty: body.qty, legs: [{ symbol: body.symbol, ratio_qty: '1', side: 'sell', position_intent: 'sell_to_close' }] };
+}
+
+/**
+ * Why a single-leg option order may not OPEN on the real account, or null (Sept 26, 2026, Wave 5, the review's m7/m15). A
+ * `buy_to_open` is a `long_call` or a `long_put` by the contract's right, and is admitted only when OPTION_STRUCTURES_REAL
+ * (`admitted`) names that type; every other single-leg order is not an open and passes to the rules that read it.
+ */
+export function singleLegOpenError(body, admitted = []) {
+  if (!body || typeof body !== 'object' || body.position_intent !== 'buy_to_open') return null;
+  const parts = OCC_PARTS.exec(typeof body.symbol === 'string' ? body.symbol : '');
+  if (!parts) return null;  // not a standard option symbol: the shape rules refuse it
+  const type = parts[3] === 'C' ? 'long_call' : 'long_put';
+  if (admitted.includes(type)) return null;
+  return `${named(type).replace(/^a/, 'A')} is not admitted on the real account: OPTION_STRUCTURES_REAL admits ${admitted.length ? admitted.join(', ') : 'none'}.`;
+}
+
 // The only Alpaca order this gateway prices is one instrument named by a top-level `symbol`.
 // Found Sept 23, 2026: the option rules above applied only when the TOP-LEVEL symbol was an option
 // symbol, so a multi-leg order (`order_class: "mleg"` with a `legs` array and no top-level symbol)
@@ -346,6 +369,11 @@ function alpacaNotional(body, reference) {
 export const DEBIT_STRUCTURES = ['debit_vertical', 'long_butterfly', 'calendar', 'diagonal', 'long_straddle', 'long_strangle'];
 export const CREDIT_STRUCTURES = ['credit_vertical', 'iron_condor', 'iron_butterfly'];
 export const STRUCTURE_TYPES = [...DEBIT_STRUCTURES, ...CREDIT_STRUCTURES];
+//: A single contract bought to open, named by its right (Sept 26, 2026 (the options-swarm run, Wave 5), the review's
+//: m7/m15): not one of the structure spec's types, so the real account opens one only when OPTION_STRUCTURES_REAL names it.
+export const SINGLE_LEG_TYPES = ['long_call', 'long_put'];
+//: Every name OPTION_STRUCTURES_REAL may carry.
+export const REAL_TYPES = [...STRUCTURE_TYPES, ...SINGLE_LEG_TYPES];
 //: The fields of a multi-leg order and of one leg, spelled exactly so (see ALPACA_ORDER_FIELDS on why).
 export const STRUCTURE_ORDER_FIELDS = new Set(['order_class', 'qty', 'type', 'limit_price', 'time_in_force', 'legs', 'client_order_id']);
 export const STRUCTURE_LEG_FIELDS = new Set(['symbol', 'ratio_qty', 'side', 'position_intent']);
@@ -374,14 +402,15 @@ export function isMultiLegOrder(body) {
 
 /**
  * The structure types the real account admits, from `OPTION_STRUCTURES_REAL` ("off" by default in
- * `wrangler.jsonc`): a comma- or space-separated list of the spec's type names. A name that is not
- * a type admits nothing at all, so a typo can only ever close the route, never open more of it.
+ * the code): a comma- or space-separated list of the spec's type names, and since Sept 26, 2026
+ * `long_call` and `long_put` for a single contract bought to open. A name that is not a type admits
+ * nothing at all, so a typo can only ever close the route, never open more of it.
  */
 export function admittedStructures(env = {}) {
   const raw = String(env.OPTION_STRUCTURES_REAL ?? '').trim();
   if (!raw || raw.toLowerCase() === 'off') return [];
   const names = raw.split(/[\s,]+/).filter(Boolean);
-  if (names.some(name => !STRUCTURE_TYPES.includes(name))) return [];
+  if (names.some(name => !REAL_TYPES.includes(name))) return [];
   return [...new Set(names)];
 }
 
@@ -621,7 +650,9 @@ export function closeLegsHeldError(body, positions) {
   if (body.kind === 'stock') {
     return `A stock order on the real account must close shares it holds: ${short.join('; ')}. A sale of shares not held long would be a short sale, and a buy that covers no short would open a position: refused.`;
   }
-  const what = body.order_class === 'mleg' ? 'A structure close must close legs' : 'A single-leg buy_to_close must buy back a short leg';
+  const what = body.order_class === 'mleg' ? 'A structure close must close legs'
+    : body.kind === 'sell_to_close' ? 'A single-leg sell_to_close must sell a long leg'
+      : 'A single-leg buy_to_close must buy back a short leg';
   return `${what} the real account holds: ${short.join('; ')}. A close of a leg not held would open a position: refused.`;
 }
 

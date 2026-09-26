@@ -22,6 +22,9 @@ const env = (extra = {}) => ({
   ALPACA_KEY_ID: 'AK-TEST-KEY',
   ALPACA_SECRET_KEY: 'alpaca-secret-that-never-leaves-the-worker',
   MAX_ORDER_USD: '50', MAX_DAY_USD: '400', MAX_DAY_ORDERS: '60', CAP_TIMEZONE: 'America/New_York', POSITIONS_CACHE_MS: '0',
+  // These tests' real account admits a single contract bought to open (not deployed: the review of Wave 5, m7/m15, pins
+  // its refusal in maxloss.test.mjs), so the caps can be exercised on one contract.
+  OPTION_STRUCTURES_REAL: 'long_call,long_put',
   ...extra,
 });
 

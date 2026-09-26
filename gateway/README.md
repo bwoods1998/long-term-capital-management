@@ -47,13 +47,14 @@ path, Wave 5):
 | Var | Deployed | Meaning |
 |---|---|---|
 | `MAX_ORDER_MAX_LOSS_USD`, `MAX_ORDER_EQUITY_SHARE` | 1000, 0.15 | one OPENING order's maximum loss is at most the lower of $1,000 and 15% of the account's equity |
-| `MAX_DAY_EQUITY_SHARE`, `MAX_DAY_USD` | 1.0, 10000 | today's opening maximum loss, this order included, at most 100% of equity and never above $10,000 |
+| `MAX_DAY_EQUITY_SHARE`, `MAX_DAY_USD_ALPACA` | 1.0, 10000 | today's opening maximum loss, this order included, at most 100% of equity and never above $10,000 |
 | `MAX_DAY_ORDERS` | 300 | the trading day's order count, exits included (under the venue's 390 a day) |
+| `MAX_DAY_OPEN_ORDERS` | 250 | no order OPENS once the day's orders (exits included) reach it: the last 50 are kept for exits (`403 {cap: "day_open_orders"}`) |
 | `CREDIT_MIN_EQUITY_USD` | 2000 | a credit structure (credit vertical, iron condor, iron butterfly) opens only at this equity or more |
 | `EQUITY_CAP_MAX_AGE_MS` | 120000 | the oldest equity reading an opening order is sized against |
-| `OPTION_STRUCTURES_REAL` | the five types | `debit_vertical,credit_vertical,iron_condor,iron_butterfly,long_butterfly`: what the real account may OPEN |
+| `OPTION_STRUCTURES_REAL` | the five types | `debit_vertical,credit_vertical,iron_condor,iron_butterfly,long_butterfly`: what the real account may OPEN; a single contract bought to open goes only if `long_call` or `long_put` (by its right) is named, and neither is |
 | `CAP_TIMEZONE` | America/New_York | the calendar the day rolls on |
-| `MAX_ORDER_USD`, `MAX_ORDER_USD_KALSHI` | 75, 75 | Kalshi only (dead until the prune removes it) |
+| `MAX_ORDER_USD`, `MAX_ORDER_USD_KALSHI`, `MAX_DAY_USD` | 75, 75, 4000 | Kalshi only (dead until the prune removes it); the real account's orders never spend Kalshi's day |
 
 - **The equity is the gateway's own reading** (`lib/account.mjs`): `GET v2/account` with the real keys,
   rounded down, kept in the Durable Object and read again on the order path when older than
@@ -62,11 +63,15 @@ path, Wave 5):
   caps by reporting a larger account.
 - **Open or exit is read from the order**, not from `X-LTCM-Purpose`: a structure's legs'
   `position_intent` says whether it opens (metered at its maximum loss against every cap) or closes
-  (one micro-dollar, admitted only when the account's positions hold every leg it closes).
+  (one micro-dollar, admitted only when the account's positions hold every leg it closes). A single-leg
+  `sell_to_close` or `buy_to_close` is admitted only when the account holds that contract long or short
+  for its size (`qty_available`); positions that cannot be read are `424 {cap: "positions"}`.
 - **Stock orders** only close an assignment: a sale of shares held long or a buy covering shares held
   short, at most the size held; every other stock or crypto order on the real account is refused.
 - A refusal is `403 {error, cap}`; the kill switch is `423` and stops every order-creating call on the
-  real account, exits included; an order that cannot be priced is `400`. Money is exact integer
+  real account, exits included; an order that cannot be priced is `400`. Every refusal made before
+  anything is forwarded that is a `424` or a `5xx` names its `cap` (`equity`, `positions`,
+  `credentials`, `setup`): the one 5xx with no `cap` is a `502` after dispatch, which may be an order. Money is exact integer
   arithmetic and partial cents round against the order.
 - **Structures** (`order_class: "mleg"`, `lib/caps.mjs`) are read from their legs as one of the
   defined-risk types. Any naked short, uncovered ratio, legging in or out, mixed roots or a
@@ -74,7 +79,8 @@ path, Wave 5):
   `OPTION_STRUCTURES_REAL` must equal the constitution's `options_money.real_types`; `league.ci`
   refuses a tree where they disagree.
 - `/v1/health` reports `max_loss`: the equity reading and its age, the per-order cap now, today's
-  opening maximum loss and its cap, whether opens and credit opens are admitted, orders today.
+  opening maximum loss and its cap, `max_day_usd_alpaca`, whether opens and credit opens are admitted,
+  orders today of `max_day_open_orders` and `max_day_orders`.
 
 ## The OpenAI month
 

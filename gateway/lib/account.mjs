@@ -3,8 +3,9 @@
 // The plan (`docs/goals/LTCM_OPTIONS_SWARM.md`, "Money"): sizing is by MAXIMUM LOSS, never by premium, and the
 // gateway's caps follow the account. On the real Alpaca venue (`alpaca`) an OPENING order may lose at most the lower
 // of MAX_ORDER_MAX_LOSS_USD ($1,000) and MAX_ORDER_EQUITY_SHARE (15%) of the account's equity; the day's opening
-// maximum loss, this order included, at most MAX_DAY_EQUITY_SHARE (100%) of equity and never above MAX_DAY_USD (the
-// owner's whole $10,000 envelope). A credit structure opens only while equity is at least CREDIT_MIN_EQUITY_USD
+// maximum loss, this order included, at most MAX_DAY_EQUITY_SHARE (100%) of equity and never above MAX_DAY_USD_ALPACA (the
+// owner's whole $10,000 envelope; MAX_DAY_USD is Kalshi's own day again, the review's m17). No order opens once the
+// day's orders reach MAX_DAY_OPEN_ORDERS (250): the rest of MAX_DAY_ORDERS (300) is kept for exits (the review's C6/C10). A credit structure opens only while equity is at least CREDIT_MIN_EQUITY_USD
 // ($2,000): under it Alpaca's account is "limited margin". The $75 premium cap (`MAX_ORDER_USD_ALPACA`) is gone.
 //
 // The equity is read HERE, through the real account's own keys (`GET v2/account`, field `equity`), never taken from
@@ -35,15 +36,24 @@ export function shareMillionths(raw, fallback) {
   return pico / MILLION;
 }
 
+//: The orders a day that may open (MAX_DAY_OPEN_ORDERS unset): the rest of MAX_DAY_ORDERS is kept for exits.
+export const DAY_OPEN_ORDERS = 250;
+
 /** The caps by maximum loss in force, from `vars`. A malformed value falls back to its documented default. */
 export function maxLossCaps(env = {}) {
   const age = parseCount(env.EQUITY_CAP_MAX_AGE_MS, MAX_AGE_MS);
+  const openOrders = env.MAX_DAY_OPEN_ORDERS;
   return {
     orderLimitMicro: parseUsdMicro(env.MAX_ORDER_MAX_LOSS_USD, 1000n * MILLION),
     orderShare: shareMillionths(env.MAX_ORDER_EQUITY_SHARE, 150000n),
     dayShare: shareMillionths(env.MAX_DAY_EQUITY_SHARE, MILLION),
+    // The real account's own absolute day envelope (the review's m17): MAX_DAY_USD is Kalshi's day notional.
+    dayLimitMicro: parseUsdMicro(env.MAX_DAY_USD_ALPACA, 10000n * MILLION),
     creditMinMicro: parseUsdMicro(env.CREDIT_MIN_EQUITY_USD, 2000n * MILLION),
     maxAgeMs: age > 0 ? age : MAX_AGE_MS,
+    // Unset is the default; "0" is a choice (no order opens).
+    maxDayOpenOrders: openOrders === undefined || openOrders === null || String(openOrders).trim() === ''
+      ? DAY_OPEN_ORDERS : parseCount(openOrders, DAY_OPEN_ORDERS),
   };
 }
 
@@ -56,10 +66,10 @@ export function orderCapMicro(limits, equityMicro) {
   return byEquity < limits.orderLimitMicro ? byEquity : limits.orderLimitMicro;
 }
 
-/** The day's opening maximum loss cap: MAX_DAY_EQUITY_SHARE of equity, never above MAX_DAY_USD (`maxDayMicro`). */
-export function dayCapMicro(limits, equityMicro, maxDayMicro) {
+/** The day's opening maximum loss cap: MAX_DAY_EQUITY_SHARE of equity, never above MAX_DAY_USD_ALPACA. */
+export function dayCapMicro(limits, equityMicro) {
   const byEquity = ofEquity(equityMicro, limits.dayShare);
-  return byEquity < maxDayMicro ? byEquity : maxDayMicro;
+  return byEquity < limits.dayLimitMicro ? byEquity : limits.dayLimitMicro;
 }
 
 /**

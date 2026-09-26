@@ -54,17 +54,22 @@
     // EQUITY_CAP_MAX_AGE_MS for an opening order; an opening order with no such reading is a 503 the
     // House sends again, and exits never wait on it). One opening order may lose at most the lower of
     // MAX_ORDER_MAX_LOSS_USD and MAX_ORDER_EQUITY_SHARE of equity; the day's opening maximum loss at
-    // most MAX_DAY_EQUITY_SHARE of equity and never above MAX_DAY_USD, the owner's whole $10,000
-    // envelope; a credit structure opens only at CREDIT_MIN_EQUITY_USD of equity or more. Exits
-    // (closes, buy-backs, the sale of assigned shares) meet no dollar cap and are not counted in the
-    // day's opening maximum loss. MAX_DAY_ORDERS counts every order, exits included (under the
-    // venue's 390 a day). The real venue's stock orders close assigned shares only, and its crypto
-    // orders are refused. MAX_ORDER_USD_ALPACA ($75 of premium) is gone: MAX_ORDER_USD and
-    // MAX_ORDER_USD_KALSHI now bound Kalshi alone, and MAX_DAY_USD is also Kalshi's day notional.
+    // most MAX_DAY_EQUITY_SHARE of equity and never above MAX_DAY_USD_ALPACA, the owner's whole
+    // $10,000 envelope; a credit structure opens only at CREDIT_MIN_EQUITY_USD of equity or more.
+    // Exits (closes, buy-backs, the sale of assigned shares) meet no dollar cap and are not counted
+    // in the day's opening maximum loss. MAX_DAY_ORDERS counts every order, exits included (under the
+    // venue's 390 a day), and no order opens once the day's orders reach MAX_DAY_OPEN_ORDERS: the
+    // last 50 are kept for exits. A single contract bought to open goes only when
+    // OPTION_STRUCTURES_REAL names long_call or long_put (it names neither). The real venue's stock
+    // orders close assigned shares only, and its crypto orders are refused. MAX_ORDER_USD_ALPACA ($75
+    // of premium) is gone: MAX_ORDER_USD, MAX_ORDER_USD_KALSHI and MAX_DAY_USD ($4,000 of notional a
+    // day, as before) bound Kalshi alone (the review of Wave 5, m17).
     "MAX_ORDER_USD": "75",
     "MAX_ORDER_USD_KALSHI": "75",
-    "MAX_DAY_USD": "10000",
+    "MAX_DAY_USD": "4000",
+    "MAX_DAY_USD_ALPACA": "10000",
     "MAX_DAY_ORDERS": "300",
+    "MAX_DAY_OPEN_ORDERS": "250",
     "MAX_ORDER_MAX_LOSS_USD": "1000",
     "MAX_ORDER_EQUITY_SHARE": "0.15",
     "MAX_DAY_EQUITY_SHARE": "1.0",
