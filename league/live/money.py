@@ -424,6 +424,8 @@ class Stops:
     drawdown_why: str = ""
     drawdown_at: float | None = None
     provisional: str = ""                # a breach seen on an unsettled observation (blocks entries; latches nothing)
+    last_profit: Decimal | None = None   # the profit at the latest settled reading (where a release restarts the peak)
+    last_reading: list | None = None     # [time, equity, day] of the latest reading (the next session's base)
     pending: list = field(default_factory=list)  # [(time, equity, last_equity, day)]: flows not read after them yet
 
     def as_state(self) -> dict[str, Any]:
@@ -434,6 +436,8 @@ class Stops:
                 "daily_why": self.daily_why, "drawdown": None if self.drawdown is None else str(self.drawdown),
                 "drawdown_tripped": self.drawdown_tripped, "drawdown_why": self.drawdown_why,
                 "drawdown_at": self.drawdown_at, "provisional": self.provisional,
+                "last_profit": None if self.last_profit is None else str(self.last_profit),
+                "last_reading": None if self.last_reading is None else [self.last_reading[0], str(self.last_reading[1]), self.last_reading[2]],
                 "pending": [[t, str(e), str(last), d] for t, e, last, d in self.pending[-50:]]}
 
     @classmethod
@@ -454,6 +458,9 @@ class Stops:
         out.drawdown_why = str(row.get("drawdown_why") or "")
         out.drawdown_at = row.get("drawdown_at")
         out.provisional = str(row.get("provisional") or "")
+        out.last_profit = None if row.get("last_profit") is None else D(row["last_profit"])
+        last = row.get("last_reading")
+        out.last_reading = None if not last else [float(last[0]), D(last[1]), str(last[2])]
         out.pending = [(float(t), D(e), D(last), str(d)) for t, e, last, d in row.get("pending") or []]
         return out
 
@@ -474,12 +481,22 @@ class Stops:
         (None: never read)."""
         if day != self.day:
             self.day, self.daily_tripped, self.daily_why, self.day_base, self.day_pnl = day, False, "", None, None
-            self.sod_equity, self.sod_at = equity, at
+            # The day's base is the previous session's last reading (flows since then are netted), so losses before a
+            # House that started late in the session are still the day's; with no previous reading, this one.
+            if self.last_reading is not None and self.last_reading[2] != day:
+                self.sod_at, self.sod_equity = float(self.last_reading[0]), D(self.last_reading[1])
+            else:
+                self.sod_equity, self.sod_at = equity, at
+        self.last_reading = [at, equity, day]
         self.pending.append((at, equity, last_equity, day))
         del self.pending[:-50]
         self.provisional = ""
         if flows is None:
             self.provisional = "the account's funding history has not been read"
+            return
+        if flows.unsettled:
+            # A deposit or withdrawal still pending moves equity when it settles, not now: nothing is settled on it.
+            self.provisional = f"a deposit or withdrawal is pending ({'; '.join(flows.unsettled)[:200]})"
             return
         # Settled observations: their flows were read after them, so every deposit that was in their equity is known.
         settled = [row for row in self.pending if row[0] <= flows.read_at]
@@ -494,8 +511,10 @@ class Stops:
                settled: bool) -> None:
         since_reset = flows.net_until(t)
         profit = equity - since_reset - self.start_equity
-        if settled and profit > self.peak_profit:
-            self.peak_profit = profit
+        if settled:
+            self.last_profit = profit
+            if profit > self.peak_profit:
+                self.peak_profit = profit
         peak_equity = self.start_equity + since_reset + self.peak_profit
         drawdown = (self.peak_profit - profit) / peak_equity if peak_equity > 0 else Decimal(1)
         self.drawdown = drawdown
@@ -525,8 +544,10 @@ class Stops:
             self.provisional = "; ".join(breaches)
 
     def release_drawdown(self) -> None:
-        """The owner's release of the drawdown pause (after which the peak starts again from here)."""
+        """The owner's release of the drawdown pause: the peak starts again from the latest settled reading."""
         self.drawdown_tripped, self.drawdown_why, self.drawdown_at = False, "", None
+        if self.last_profit is not None:
+            self.peak_profit = self.last_profit
 
 
 @dataclass(frozen=True)
@@ -537,6 +558,7 @@ class FlowBook:
     read_at: float
     rows: tuple[tuple[float, Decimal], ...]
     closes: tuple[float, ...] = ()   # epoch seconds of recent session closes, ascending
+    unsettled: tuple[str, ...] = ()  # funding activities not executed yet (queued, pending): nothing settles on them
 
     def net_until(self, t: float) -> Decimal:
         return sum((amount for when, amount in self.rows if when <= t), ZERO)

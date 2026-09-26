@@ -316,6 +316,34 @@ class Stops(unittest.TestCase):
         self.assertFalse(s.daily_tripped)
         self.assertIsNone(s.blocked())
 
+    def test_the_owners_release_restarts_the_peak_from_now(self):
+        s = self.stops
+        s.observe(self.t, at=50, day="d1", equity=D("1000"), last_equity=D("1000"), flows=self.flows(100))
+        s.observe(self.t, at=150, day="d2", equity=D("500"), last_equity=D("500"), flows=self.flows(200))
+        self.assertTrue(s.drawdown_tripped)
+        s.release_drawdown()
+        s.observe(self.t, at=250, day="d3", equity=D("500"), last_equity=D("500"), flows=self.flows(300))
+        self.assertFalse(s.drawdown_tripped, "the peak restarted at the release: no new drawdown")
+        s.observe(self.t, at=350, day="d4", equity=D("240"), last_equity=D("240"), flows=self.flows(400))
+        self.assertTrue(s.drawdown_tripped, "a new 50% fall from the restarted peak trips it again")
+
+    def test_a_pending_deposit_or_withdrawal_settles_nothing(self):
+        s = self.stops
+        s.observe(self.t, at=50, day="d1", equity=D("1000"), last_equity=D("1000"), flows=self.flows(100))
+        pending = M.FlowBook(read_at=300, rows=(), closes=(0.0,), unsettled=("a CSW of -600 queued",))
+        s.observe(self.t, at=250, day="d1", equity=D("400"), last_equity=D("1000"), flows=pending)
+        self.assertFalse(s.drawdown_tripped)
+        self.assertFalse(s.daily_tripped)
+        self.assertIn("pending", s.blocked())
+
+    def test_the_days_base_is_the_last_reading_of_the_previous_session(self):
+        s = self.stops
+        s.observe(self.t, at=100, day="d1", equity=D("1000"), last_equity=D("1000"), flows=self.flows(150))
+        # The House was down at the open of d2 and first reads the account mid-session, $300 lower.
+        s.observe(self.t, at=500, day="d2", equity=D("700"), last_equity=D("1000"), flows=self.flows(600))
+        self.assertTrue(s.daily_tripped)
+        self.assertEqual(s.day_base, D("1000"))
+
     def test_no_flows_read_blocks_entries(self):
         s = self.stops
         s.observe(self.t, at=10, day="d1", equity=D("481.65"), last_equity=D("481.65"), flows=None)

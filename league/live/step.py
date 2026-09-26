@@ -805,13 +805,17 @@ class OptionsLive:
         try:
             rows = self.real.activities(sorted(ALPACA_FUNDING), after=self.start_at)
             read_at = now
-            flows = []
+            flows, unsettled = [], []
             start = parse_time(self.start_at) or 0.0
             for r in rows:
                 when = parse_time(r.get("transaction_time") or r.get("created_at") or (str(r.get("date")) + "T00:00:00Z"))
                 amount = M.D(r.get("net_amount") or 0)
-                status = str(r.get("status") or "executed")
+                status = str(r.get("status") or "executed").lower()
                 if when is None or when <= start or status in ("canceled", "cancelled", "failed", "rejected"):
+                    continue
+                if status not in ("executed", "complete", "completed"):
+                    # As `ltcm.performance` reads funding: only a settled flow is netted; a pending one settles nothing.
+                    unsettled.append(f"{r.get('activity_type')} {amount} {status}")
                     continue
                 flows.append((when, amount))
             closes = []
@@ -821,7 +825,8 @@ class OptionsLive:
                 session = session_minutes(day)
                 if session is not None:
                     closes.append(epoch_of(day, session[1]))
-            self.flows = M.FlowBook(read_at=read_at, rows=tuple(sorted(flows)), closes=tuple(sorted(closes)))
+            self.flows = M.FlowBook(read_at=read_at, rows=tuple(sorted(flows)), closes=tuple(sorted(closes)),
+                                    unsettled=tuple(unsettled))
         except Exception as exc:  # noqa: BLE001 - the stops wait on a reading (provisional only)
             self.alert("warning", f"live: the account's funding could not be read ({type(exc).__name__}: {str(exc)[:120]})")
 
