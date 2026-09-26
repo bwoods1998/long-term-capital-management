@@ -193,6 +193,7 @@ class Theta:
         self.lock = threading.Lock()
         self.requests = 0
         self.seconds = 0.0
+        self.by_method: dict[str, list[float]] = {}
 
     def call_raw(self, method: str, *args: Any, **kwargs: Any) -> Any:
         """The response's raw chunks (decode later with `decode`), or None for no data."""
@@ -217,8 +218,12 @@ class Theta:
                         return getattr(target, method)(*args, **kwargs)
                     finally:
                         with self.lock:
+                            took = time.monotonic() - started
                             self.requests += 1
-                            self.seconds += time.monotonic() - started
+                            self.seconds += took
+                            cell = self.by_method.setdefault(method, [0, 0.0])
+                            cell[0] += 1
+                            cell[1] += took
             except Exception as error:  # noqa: BLE001 - classified below
                 name = type(error).__name__
                 if name == "NoDataFoundError":
@@ -486,7 +491,9 @@ class Runner:
             "at": sl.utc_now(), "pid": os.getpid(), "started_at": dt.datetime.fromtimestamp(self.started, dt.timezone.utc).isoformat(),
             "finished_this_run": len(finished), "tasks_per_hour": round(rate, 1), "underlying_days_per_hour": round(day_rate, 1),
             "slots": self.theta.limiter.limit, "requests": self.theta.requests,
-            "request_seconds": round(self.theta.seconds, 1), "in_flight": in_flight, "last_error": self.last_error,
+            "request_seconds": round(self.theta.seconds, 1),
+            "by_method": {m: {"n": int(v[0]), "mean_s": round(v[1] / max(1, v[0]), 2)} for m, v in self.theta.by_method.items()},
+            "in_flight": in_flight, "last_error": self.last_error,
             "stages": summary["stages"], "eta": etas, "underlying_days": summary["underlying_days"],
         }
 
