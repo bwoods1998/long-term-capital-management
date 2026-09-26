@@ -344,6 +344,11 @@ consumer, no effect); the gate's relevance question is dropped by the gate's own
   retargeted, and the three integrated as **#349** (`dj2/integration`, one docstring conflict in
   `sensors.py` resolved; every touched test module passes locally; CI on the PR). One local test depended on
   the Mac's free /tmp (the recorder's own 2 GB disk guard tripped during the test's set-up); made independent.
+  **CI on #349 failed (22:33-22:35Z; seen 01:23Z):** two tests outside the touched set (`test_fast_research`'s
+  cache layout, `test_pacer`'s idle brief) call `Researcher._state` on a stand-in `self` with no `_prior_block`.
+  Fixed on #328 (`7def9f49`: the block is called through the class), re-merged (`9f07dd80`), and every module
+  that calls `_state` re-run locally (researcher, fast_research, pacer; hypotheses' `_state` is another
+  class). Lesson: a signature change's test set is every caller's module, found by grep, not the touched ones.
 
 ## Deploy log
 
