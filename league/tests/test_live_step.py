@@ -236,6 +236,23 @@ class OrderPathInTheLoop(LiveCase):
         self.assertTrue(live.book.state.rows("SELECT tuition FROM orders WHERE action='open'")[0]["tuition"])
 
 
+class Sized(LiveCase):
+    def test_a_forward_record_that_earns_it_sizes_by_quarter_kelly_on_its_lower_bound(self):
+        live = self.make([family("vert", VERTICAL, band="probe")])
+        returns = [0.30, 0.10, 0.20, -0.10, 0.25] * 5
+        self.families.add_forward("vert", "shadow", [{"id": f"s{i}", "day": f"2026-09-{i % 25 + 1:02d}", "pnl": r * 100.0,
+                                                       "max_loss": 100.0} for i, r in enumerate(returns)])
+        self.run_to(9, 31)
+        self.assertEqual(self.families.rows["vert"]["band"], "sized")
+        [pos] = live.book.positions.values()
+        fwd = M.forward_stats(self.families.forward_rows("vert"), 0.8)
+        cap = M.structure_cap(live.table, "sized", min(D("5481.65"), D("5500")), fwd)
+        self.assertGreater(cap, D("164.4495"))                            # more than a Probe's 3%
+        self.assertLessEqual(pos.max_loss, float(cap))
+        unit = pos.max_loss_share * 100 + 2 * pos.fees / pos.qty
+        self.assertEqual(pos.qty, min(int(cap // D(str(round(unit, 2)))), int(D("822.2475") // D(str(round(unit, 2))))))
+
+
 class ExpiryDay(LiveCase):
     def test_no_new_open_on_an_expiring_contract_from_three_and_the_near_money_close(self):
         self.clock.set(at(MONDAY, 14, 58))
