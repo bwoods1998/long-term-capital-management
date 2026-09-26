@@ -65,9 +65,10 @@ INSIDE_CHECK = r"""
 import json, os, pathlib, subprocess
 out = {}
 out["key_file"] = os.path.exists("/data/secrets/thetadata.env") or os.path.exists("/data/secrets")
-hits = subprocess.run(["grep", "-rIl", "THETADATA_API_KEY", "/data", "/root", "/tmp", "/home"],
-                      capture_output=True, text=True).stdout.split()
-out["key_mentions"] = [h for h in hits if not h.startswith("/data/code/")]
+# A key LINE (the name assigned a value), not source code that merely names the variable.
+hits = subprocess.run(["grep", "-rIlE", r"THETADATA_API_KEY[[:space:]]*=[[:space:]]*[A-Za-z0-9_-]{8,}",
+                       "/data", "/root", "/tmp", "/home", "/etc", "/var/tmp"], capture_output=True, text=True).stdout.split()
+out["key_mentions"] = hits
 store = pathlib.Path("/data/store")
 dates = sorted(p.stem for p in store.glob("*/*/*.parquet"))
 out["files"] = len(dates)
@@ -86,8 +87,32 @@ out["expiries_last_date"] = str(e["date"].max()) if e.height else None
 out["version"] = (store / "VERSION").read_text().strip()
 out["gate_mark"] = (store / "GATE").is_file()
 out["work_exists"] = os.path.exists("/data/work")
-out["processes"] = subprocess.run(["pgrep", "-fa", "backfill.py|universe.py"], capture_output=True, text=True).stdout.strip()
+out["processes"] = subprocess.run(["pgrep", "-fa", "[b]ackfill.py (run|one)|[u]niverse.py|[m]ultiprocessing.spawn"],
+                                  capture_output=True, text=True).stdout.strip()
 print(json.dumps(out))
+"""
+
+
+#: After the prune: the page cache dropped and the free memory overwritten, so neither the deleted
+#: key file's cached pages nor a stopped process's freed pages go into the image's checkpoint.
+SCRUB = r"""
+sync; echo 3 > /proc/sys/vm/drop_caches
+/opt/data-venv/bin/python - <<'PY'
+import os
+free = 0
+for line in open('/proc/meminfo'):
+    if line.startswith('MemAvailable:'):
+        free = int(line.split()[1]) * 1024
+chunk, held = 256 * 2**20, []
+target = int(free * 0.85)
+while sum(len(b) for b in held) + chunk <= target:
+    b = bytearray(chunk)
+    for i in range(0, chunk, 4096):
+        b[i] = 0
+    held.append(b)
+print('scrubbed', sum(len(b) for b in held) // 2**20, 'MiB')
+PY
+sync; echo 3 > /proc/sys/vm/drop_caches
 """
 
 
@@ -223,6 +248,8 @@ def build(kind: str, *, version: str, force: bool, api: Any = None, sleep: Calla
         api.upload(box, "/data/store/GATE", f"gate image {version} built {bl.now()}\n".encode(), mode=0o444)
     else:
         api.exec(box, ["rm", "-f", "/data/store/GATE"], timeout=60)
+    scrub = api.exec(box, ["bash", "-c", SCRUB], timeout=900)
+    say(f"  memory: {scrub.stdout.strip() or scrub.output[-300:]}")
     # 5. verify
     facts = verify_inside(api, box, kind)
     say(f"  inside: {json.dumps({k: facts[k] for k in ('passed', 'problems', 'files', 'first_date', 'last_date', 'manifest_windows', 'network')})}")
