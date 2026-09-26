@@ -142,6 +142,19 @@ DEFAULTS: dict[str, Any] = {
         "max_tokens": 16000,            # thinking and the answer together (the gateway's non-streaming ceiling)
         "roles": ["architect", "audit", "diagnostician"],
     },
+    # The diagnostician (league/swarm/diagnostician.py): Claude reads a family that is stuck or nearly there and rewrites
+    # its mechanism or writes its lesson. Eligible: `min_validations` validations without passing, or the latest
+    # validation passing at least `near_miss_checks` of the line's checks; at most once a family every `family_hours`,
+    # within `usd_day` of Claude spend a day.
+    "diagnostician": {
+        "enabled": True,
+        "every_seconds": 300,
+        "per_round": 2,
+        "family_hours": 6.0,
+        "usd_day": 15.0,
+        "min_validations": 2,
+        "near_miss_checks": 6,
+    },
     "heartbeat_seconds": 20,
     "stale_heartbeat_seconds": 240,     # the House restarts a swarm whose heartbeat is older than this
     "nice": 10,
