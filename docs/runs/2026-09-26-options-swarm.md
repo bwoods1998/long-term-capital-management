@@ -582,6 +582,25 @@ clock never restarts.
   remain. Fix `669befe8` includes a synthetic actual assignment with a rate-limited share close;
   126 affected tests passed, exact-head re-review and CI are pending. The draft also incorporates
   #377 and its folded calendar import. It remains unmerged and undeployed.
+- 18:29Z Publisher rollout `20260926T181814Z-b4bc25619f84` completed its ten-minute watch
+  without a failure and received the promoted verdict at 18:28:53Z. House, swarm and nightly
+  worker identities match the release; next forward wake remains Tuesday 06:00Z. The original
+  pre-progress website validator also accepted the actual production default checkpoint after
+  the new publisher started. The progress display is live and verified; this does not change the
+  strategy-evidence or real-money readiness state.
+- 18:31Z Draft #375 final head `cadba222` passed independent re-review and full CI (Python
+  3.11 98s, 3.14 81s, gateway 7s). Review also caught malformed falsey paper-proof state being
+  treated as empty; all five malformed cases now refuse the unsupported target. An exact archive
+  on the actual House ran 175 tests: 173 passed and two optional site-schema environment checks
+  skipped. The draft remains unmerged and undeployed for Monday after 20:05Z.
+- 18:35Z Independent final-data preparation found and corrected three private audit gaps:
+  Train/Validation identity omitted session/expiry control metadata; active forward-day receipts
+  could bypass a new nightly copy; and an inherited model-path override could differ from the
+  file being hashed. Fifteen synthetic tests passed after correction. Root separately ran the
+  effective-model audit in the actual isolated 25-file Gym bundle and verified matching identity
+  with no writes. The plan now compares canonical calendars to the final source, preserves and
+  rejects unexpected active/staged forward receipts, and checks the effective loaded model in
+  each restored Gym/gate environment. No production adoption or checkpoint restoration occurred.
 
 ### Final data/image adoption (prepared Saturday; waits for completion)
 

@@ -1,4 +1,90 @@
-# Handoff: the options-swarm run, as of Sat Sept 26, 2026 ~14:40Z
+# Handoff: the options-swarm run
+
+## Current continuation, September 26 18:35Z
+
+Read this update before the historical Claude handoff below. The run record remains the source
+of truth and now includes the **T0 + 12 h scoreboard**. T0 is still **2026-09-26T06:23:14Z**;
+the next four-hour scoreboard is 22:23Z. The overall goal is active and is **not complete**.
+
+This continuation completes engineering, data, paper/shadow operation and readiness. It has not
+enabled autonomous real-money execution: `real_money=false`, no live grant, real openings off.
+No strategy has passed validation, no holdout look has occurred, and profitability is unproven.
+
+### Deployed and verified
+
+- Main is `60b34dd97639cf1c3ec94c41dc7665e90d068965`. House release
+  `20260926T181814Z-b4bc25619f84` passed its complete watch at **18:28:53Z**. House, swarm
+  (PID 9188) and nightly (PID 9184, start ticks 57687395) match the release. Verify identities
+  afresh before acting; do not signal a process from these historical numbers alone.
+- The former #362 live-path defects and #365 gate fixes are merged, reviewed and tested.
+  Subsequent releases fixed full-book options P&L, independent paper-route readiness, researcher
+  READ/REVISE protocol, funded Sail pacing, explicit retirement and fresh order-admission checks.
+  Real positions/orders remain empty, with only legacy crypto dust outside the options book.
+- [The site](https://blakewoods.us/capital/) is complete for the owner's latest requests:
+  Profit and Running, genuine agent thoughts, bare account chart caption, stable LTCM partner
+  names and three stages of clickable dots. Each agent's ring follows its own current promotion
+  evidence; selected detail shows remaining checks and blockers. No invented progress or odds.
+  Site main `5abc570`, Worker `e473bcbc-0200-480a-92e0-de2001d55b20`. All 63 site tests passed;
+  independent reviews and actual production checks passed at desktop and narrow phone widths.
+  New pages request `checkpoint?progress=1`; default reads preserve old tabs' strict schema.
+  Local dynamic tests verified improvement, regression and confirmed stage changes. Earlier
+  production observation proved incoming WebSocket thoughts reach the main card automatically.
+- Full publisher CI, independent policy comparisons and actual-House archive tests passed.
+  The 18:20 public checkpoint had 16 active dots, 13 with verified progress. Missing or stale
+  evidence leaves an empty track. Nothing in this feature changes promotion or money rules.
+
+### Funding and search
+
+- Owner confirmed Sail $200 and OpenAI API $124 after top-ups. Observed Sail about **$189.90**
+  at 18:23Z; reserve remains $32, researcher Sail-model allowance $2.25/hour. OpenAI September
+  gateway spending **$598.17 / $707**, with no October allowance added. Do not raise caps based
+  on the older unfunded plan. The conservative unresolved $2 architect hold remains accounted
+  for separately from settled costs.
+- Brokerage equity **$481.63**, cash $481.60, no open orders or option position. No new deposit
+  has been verified. Profit on the site is **$0.00**, unrelated to compute or deposits.
+- At 18:23Z: 16,358 trials and 22,684.43 durable program-years; 17 alive in the database after
+  a birth, 53 retired. The population is refilling from its floor of 16. Median model cycle
+  47 seconds. No validation/holdout pass. Do not relax evidence requirements to manufacture one.
+
+### What remains, in order
+
+1. **Final data completion/adoption.** Core, holdout, 2022 and trade-quote calibration stages are
+   complete. Names were 8,626/23,740 at 18:22Z, with 150 vendor-empty tasks and no failures;
+   back months were 0/2,374. The completion supervisor is healthy in the ThetaData phase.
+   Active Gym is still v1, `sbcp_4f1f0577-9b32-4e8d-b610-480bb88d617d`; the gate is disabled.
+   Do not select the provisional calibrated pair. Await full ThetaData/SIP, final calibration,
+   sealed final pair and actual primary/backup restores. Follow the expanded adoption procedure
+   in the run record and private `.data/w2b/FINAL-DATA-ADOPTION.md` in the main checkout.
+   Independent preparation caught three more gaps: calendar/expiry control metadata, inherited
+   active forward checkpoints and model-path environment overrides. Helpers now check these;
+   15 synthetic tests and an isolated real-bundle probe passed. Actual final-image checks and
+   adoption are still pending. Preserve all evidence/lineage/looks and leave a failed adoption
+   stopped rather than partially resuming it.
+2. **Monday paper/shadow session.** Use the run record's pre-open checklist. Reconcile the nine
+   inherited paper positions separately; observe the independent one-lot SPY paper route proof
+   at minute five, expected 13:35Z. Candidate live shadow depends on actual evidence. No deploy
+   **13:25–20:05Z** except rollback. Record that no strategy qualifies if that is the outcome.
+3. **Prune after Monday close only.** Draft [#375](https://github.com/bwoods1998/long-term-capital-management/pull/375)
+   is ready at `cadba222fcac73fc5f12887a0032ac6af594334c`, including current main. Independent
+   review found and verified fixes for assignment/reconciliation rollback protection and
+   malformed paper-proof state. Full CI passed (3.11 98s, 3.14 81s, gateway 7s); isolated
+   actual-House archive verification ran 175 tests, 173 passed and two optional schema checks
+   skipped. It remains **DRAFT, unmerged, undeployed until Monday September 28 after 20:05Z**.
+   Recheck later-main changes, deployment/rollback state, money digest and Gym bundle then.
+4. **Tuesday September 29 06:00Z.** Verify the first actual nightly forward collection, SIP
+   ingestion and sealed gate copy/checkpoint. Current nightly heartbeat waits for that time.
+   Saturday rehearsal is not completion of this milestone.
+5. Write the final report and update memory from actual outcomes. The future session, final
+   data adoption, prune deployment and first nightly job cannot be claimed complete today.
+
+Root scratch remains `~/Work/.ltcm-main`; one laptop test process at a time under
+`flock /tmp/ltcm-options-tests.lock`. Builder worktrees have their own private `.data` receipts.
+The verified recovery checkpoint is `sbcp_797f731a-e823-4f04-b68b-42cc4ce057be` from 17:19Z;
+it includes credentials and must never become an independently trading clone. No rollback
+before `20260926T084913Z-8158a11cfe3f`. No extra ThetaData login: the credentialed data box owns
+the account's only session. Keep quotes, source programs, fitted model tables and secrets private.
+
+## Historical Claude handoff, September 26 ~14:40Z
 
 **The goal file this run executes:** `docs/goals/LTCM_OPTIONS_SWARM.md` (on `main`, merged in #356). Read it first:
 its "Done" list is the finish line, its "Authority" section is the permission boundary, and its "Order of work"
