@@ -511,6 +511,32 @@ clock never restarts.
   an isolated snapshot on the actual House. Root's bounded read found no confirmed regression,
   but full independent review and integration of newer main fixes remain. The draft has not
   been deployed and must not merge before Monday's close.
+- 17:26Z Merged paper-route readiness #373 at `7645e202` after the unchanged failed CI job
+  passed. Its 114 local and 114 House tests plus independent service-factory probes cover the
+  paper proof without a real client, real book or grant. Monday's actual venue round trip is
+  still pending. Deployed main `7645e202` as `20260926T172613Z-f62e2af878bb`; the canary and
+  full ten-minute watch passed, with final promotion at **17:36:52Z** and no health failures.
+  The new swarm and nightly collector run from that release; the latter still wakes Tuesday
+  September 29 at 06:00Z. Read-only post-deploy checks confirm `real_money=false`, no live grant,
+  and no real options positions or orders in the book.
+- 17:28Z Selected the separately funded Sail researcher allowance of **$2.25/hour** using
+  #372's optional `sail_usd_per_hour`; the prior combined allowance remains a fallback. The
+  state update has a private backup and receipt. The $32 Sail reserve and OpenAI month cap of
+  $707 are unchanged; an unresolved $2 architect reservation was not discarded. At 17:29Z the
+  swarm reports 49 alive, 19 retired, 46 running, 14,764 trials and 19,515 program-years; its
+  Sail pace is unpaused. Last-hour model and Gym spend total $1.11 and Sail balance is $191.93.
+  No validation pass or holdout look has occurred; these are throughput figures, not evidence
+  of profitability.
+- 17:34Z Draft #375 integrated current main at `b13c968f`. Full CI is green (Python 3.11/3.14
+  92s/109s, gateway 7s), and its updated paper/House/swarm modules passed 88 tests on an isolated
+  snapshot on the actual House. It remains unmerged and undeployed until after Monday's close.
+- 17:39Z Explicit researcher retirement is under review. Independent probes confirmed three
+  defects in the first implementation: an already-running decision could open after retirement;
+  a gate review completing after retirement could start another paid audit; and a retired
+  family's stale in-flight gate marker could survive restart. Corrections and regression tests
+  are in progress, with a second independent review of order admission and transaction boundaries.
+  The data completion worker remains healthy: names 7,695/23,740, no failing stage; final images
+  and calibration have not been adopted.
 
 ### Final data/image adoption (prepared Saturday; waits for completion)
 
