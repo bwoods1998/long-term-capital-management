@@ -778,8 +778,10 @@ class RealBook:
             held[symbol] = int(signed)
         for symbol in set(expected) | set(held):
             parts = occ_parts(symbol)
-            if after_close and parts is not None and dt.date.fromisoformat(parts[1]) <= day:
-                continue  # expiring today: the venue settles it after the close
+            if parts is not None:
+                expiry = dt.date.fromisoformat(parts[1])
+                if expiry < day or (after_close and expiry <= day):
+                    continue  # expired: the venue settles it (after the close); its events adjust the book
             if expected.get(symbol, 0) != held.get(symbol, 0):
                 problems.append(f"{symbol}: the account holds {held.get(symbol, 0)}, the book {expected.get(symbol, 0)}")
         for row in foreign_orders:

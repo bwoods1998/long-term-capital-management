@@ -45,6 +45,7 @@ import numpy as np
 
 from ..gym import fills as F
 from ..gym import legs as L
+from ..gym.engine import settlement_level
 from ..gym import venue as V
 from ..gym.ctx import order_row, position_row
 from . import money as M
@@ -90,6 +91,7 @@ class Instance:
     mode: str = "live"           # live | exit_only | wind_down
     needs: Any = None
     error: str = ""
+    fatal: bool = False          # the program will not run again (refused, or disqualified): the House closes what it holds
     stats: dict = field(default_factory=dict)
 
 
@@ -144,6 +146,7 @@ class OptionsLive:
         self.flows: M.FlowBook | None = None
         self._families_at = float("-inf")
         self._activities_at = float("-inf")
+        self._activities_changed = False
         self._flows_at = float("-inf")
         self._last_minute: tuple[str, int] | None = None
         self._thread: threading.Thread | None = None
@@ -294,24 +297,51 @@ class OptionsLive:
         days = trading_days_around(today)
         self.day = LiveDay(today, open_min, close_min, trading_days=days, session=lambda d: session_minutes(d) or (570, 960))
         self.shadow.day_ordinal = ordinal(today)
-        self._history(self.day)
+        self._missed_close(today)
         self.shadow.save()
         return self.day
 
-    def _history(self, day: LiveDay) -> None:
-        """Prior sessions' daily bars for every root the live programs may read (XSP and SPXW from SPY's, scaled at the
-        first parity reading: the venue has no index history)."""
-        roots = {r for inst in self.instances.values() if inst.needs is not None for r in inst.needs.roots} | {"SPY"}
-        stocks = sorted({r for r in roots if not uses_parity(r)} | {"SPY"})
-        try:
-            start = (day.day - dt.timedelta(days=100)).isoformat()
-            bars = self.market.bars(stocks, timeframe="1Day", start=start, end=(day.day - dt.timedelta(days=1)).isoformat())
-        except Exception as exc:  # noqa: BLE001 - programs then see no history today
-            self.alert("warning", f"live: the underlyings' daily history could not be read ({type(exc).__name__})")
+    def _missed_close(self, today: dt.date) -> None:
+        """Real positions whose expiry passed while the House was not there to see the close: an index structure is
+        settled at its intrinsic value on the last level the House recorded for it (an approximation of the official
+        settlement, said so); an equity one waits for the venue's expiry, exercise or assignment events."""
+        if self.book is None:
             return
-        for symbol, rows in bars.items():
-            day.history[symbol] = [(float(r["o"]), float(r["h"]), float(r["l"]), float(r["c"])) for r in rows
-                                   if all(k in r for k in ("o", "h", "l", "c"))][-60:]
+        levels = self.state.get("levels", {}) or {}
+        for pos in list(self.book.positions.values()):
+            if pos.qty <= 0 or pos.expiry >= today.isoformat() or pos.info.get("broken"):
+                continue
+            level = float((levels.get(pos.root) or [float("nan")])[0])
+            if V.is_index(pos.root) and math.isfinite(level):
+                value = sum(leg.side * leg.ratio * _intrinsic(leg, level) for leg in pos.legs)
+                self.book.settle(pos, value, "settled at the last recorded level (the House missed the close)")
+            elif pos.status != "awaiting_expiry":
+                pos.status = "awaiting_expiry"
+                self.book._save_position(pos)
+            self.alert("warning", f"live: {pos.family}'s {pos.type} expired while the House was away: {pos.status}")
+        self._export_real()
+
+    def _history(self, day: LiveDay, root: str, level: float, spy: float) -> None:
+        """The prior sessions' daily bars of `root`, read once a day when the root is first read. XSP and SPXW from
+        SPY's, scaled by the index level over SPY's price at that reading: the venue has no index history."""
+        if root in day.history:
+            return
+        source = "SPY" if uses_parity(root) else root
+        if source not in day.history:
+            day.history[source] = []
+            try:
+                start = (day.day - dt.timedelta(days=100)).isoformat()
+                bars = self.market.bars([source], timeframe="1Day", start=start,
+                                        end=(day.day - dt.timedelta(days=1)).isoformat())
+                day.history[source] = [(float(r["o"]), float(r["h"]), float(r["l"]), float(r["c"])) for r in bars.get(source) or []
+                                       if all(k in r for k in ("o", "h", "l", "c"))][-60:]
+            except Exception as exc:  # noqa: BLE001 - programs then see no history for it today
+                self.alert("warning", f"live: {source}'s daily history could not be read ({type(exc).__name__})")
+        if uses_parity(root):
+            if not (math.isfinite(level) and math.isfinite(spy) and spy > 0):
+                return
+            ratio = level / spy
+            day.history[root] = [tuple(x * ratio for x in row) for row in day.history.get("SPY", [])]
 
     # ------------------------------------------------------------------ families and instances
     def _restore_real_instances(self) -> None:
@@ -328,6 +358,7 @@ class OptionsLive:
             inst.error = ""
         except ProgramRefused as exc:
             inst.error = f"the program does not load: {str(exc)[:200]}"
+            inst.fatal = True
         except DeciderError as exc:
             inst.error = f"the decider failed: {str(exc)[:200]}"
         self.instances[inst.key] = inst
@@ -380,6 +411,9 @@ class OptionsLive:
                 wanted[f"{fid}@{version}:t"] = (row, "real", True)
         for key, (row, kind, tuition) in wanted.items():
             inst = self.instances.get(key)
+            if inst is not None and inst.error.startswith("the decider failed"):
+                self.instances.pop(key, None)          # a transient failure: load it again
+                inst = None
             if inst is None:
                 inst = Instance(key, str(row["family"]), int(row.get("version") or 0), kind, str(row.get("code") or ""),
                                 dict(row.get("params") or {}), str(row.get("run_sha") or ""), str(row.get("band") or ""), tuition)
@@ -484,7 +518,7 @@ class OptionsLive:
 
     def _read(self, day: LiveDay, mi: int, roots: Mapping[str, tuple[int, int, float]], out: dict) -> None:
         open_epoch = epoch_of(day.day, day.open_min)
-        stocks = [r for r in roots if not uses_parity(r)]
+        stocks = [r for r in roots if not uses_parity(r)] + (["SPY"] if any(uses_parity(r) for r in roots) and "SPY" not in roots else [])
         prices: dict[str, float] = {}
         if stocks:
             try:
@@ -494,6 +528,7 @@ class OptionsLive:
                 out.setdefault("data_errors", []).append(f"stocks: {type(exc).__name__}: {str(exc)[:120]}")
         held = self._held_symbols()
         changed = False
+        levels = dict(self.state.get("levels", {}) or {})
         for root, (lo, hi, band) in roots.items():
             chain = day.chain(root)
             if not uses_parity(root):
@@ -517,11 +552,13 @@ class OptionsLive:
                 out.setdefault("data_errors", []).append(f"{root}: {type(exc).__name__}: {str(exc)[:120]}")
                 continue
             changed |= chain.record(mi, rows, open_epoch=open_epoch)
-            if uses_parity(root):
-                level = chain.parity(mi, spot)
-                chain.set_price(mi, level)
-            else:
-                chain.set_price(mi, spot)
+            level = chain.parity(mi, spot) if uses_parity(root) else spot
+            chain.set_price(mi, level)
+            if math.isfinite(level):
+                levels[root] = [level, self.clock()]
+            self._history(day, root, level, prices.get("SPY", float("nan")))
+        if levels:
+            self.state.put("levels", levels)
         if changed:
             day.remap(self.shadow.accounts.values())
         out["data_calls"] = self.market.minute_calls.used()
@@ -646,10 +683,16 @@ class OptionsLive:
 
     def _stats(self, key: str, answer: Mapping[str, Any]) -> None:
         inst = self.instances.get(key)
-        if inst is not None and isinstance(answer.get("stats"), Mapping):
+        if inst is None:
+            return
+        if answer.get("missing") and not inst.error:
+            # The decider lost the program (a restart whose reload failed): loaded again at the next families pass.
+            inst.error = "the decider failed: the program was not loaded in the decider"
+            self._families_at = float("-inf")
+        if isinstance(answer.get("stats"), Mapping):
             inst.stats = dict(answer["stats"])
-            if inst.stats.get("disqualified") and not inst.error:
-                inst.error = f"disqualified: {inst.stats['disqualified']}"
+            if inst.stats.get("disqualified") and not inst.fatal:
+                inst.error, inst.fatal = f"disqualified: {inst.stats['disqualified']}", True
                 self.record("live.instance", {"instance": key, "family": inst.family, "error": inst.error}, agent=inst.family)
 
     def _schedule(self, inst: Instance, day: LiveDay) -> set[int]:
@@ -675,6 +718,9 @@ class OptionsLive:
         except Exception as exc:  # noqa: BLE001
             positions = None
             out.setdefault("venue_errors", []).append(f"positions: {type(exc).__name__}: {str(exc)[:120]}")
+        self._activities(now)
+        if self._activities_changed:
+            positions = self._positions_again(out)
         if positions is not None and foreign is not None:
             before = book.frozen
             book.reconcile(positions, foreign, day=day.day, after_close=False, shares=self.state.get("shares", {}) or {})
@@ -682,7 +728,6 @@ class OptionsLive:
                 self.alert("error", f"live: real entries frozen: {book.frozen}")
                 self._tell_owner("reconciliation", book.frozen)
         self._flows(now)
-        self._activities(now)
         if self.account_row is not None:
             try:
                 before = (self.stops.daily_tripped, self.stops.drawdown_tripped)
@@ -715,6 +760,13 @@ class OptionsLive:
         except Exception as exc:  # noqa: BLE001
             self.account_row = None
             out.setdefault("venue_errors", []).append(f"account: {type(exc).__name__}: {str(exc)[:120]}")
+
+    def _positions_again(self, out: dict) -> list[dict] | None:
+        try:
+            return self.real.positions()
+        except Exception as exc:  # noqa: BLE001
+            out.setdefault("venue_errors", []).append(f"positions: {type(exc).__name__}: {str(exc)[:120]}")
+            return None
 
     def _flows(self, now: float) -> None:
         if self.real is None or not self.start_at or now - self._flows_at < FLOWS_EVERY:
@@ -750,6 +802,7 @@ class OptionsLive:
         """Assignments and exercises (OPASN, OPEXC): the account now holds shares it cannot carry, and a structure is
         broken. Real entries freeze, the owner is told, and the shares are closed at once (the only stock order the
         live path sends)."""
+        self._activities_changed = False
         if self.real is None or now - self._activities_at < ACTIVITIES_EVERY:
             return
         self._activities_at = now
@@ -780,6 +833,7 @@ class OptionsLive:
                                     "structure's other legs closed alone")
                 self._tell_owner("assignment", why)
         self.state.put("activities_seen", sorted(seen)[-2000:])
+        self._activities_changed = bool(fresh)
         self._close_shares()
         self._resolve_latch()
 
@@ -853,8 +907,8 @@ class OptionsLive:
                 book.cancel(order, "the open cutoff for expiring contracts")
             elif order.tif is not None and age >= max(1, order.tif) and (not order.forced or order.action == "close_leg"):
                 book.cancel(order, f"its time in force ({order.tif} minutes) ran out")
-            elif order.action == "open" and self.real_block(opening=True):
-                book.cancel(order, f"real entries are shut: {self.real_block(opening=True)}")
+            elif order.action == "open" and (shut := self.real_block(opening=True)) and not shut.startswith("the account could not be read"):
+                book.cancel(order, f"real entries are shut: {shut}")
         if killed:
             out["kill_switch"] = True
             return
@@ -866,7 +920,7 @@ class OptionsLive:
                 continue
             rules = day.rules.get(pos.root) or V.rules_for(pos.root, open_minute=day.open_min, close_minute=day.close_min)
             inst = self.instances.get(pos.instance)
-            orphan = inst is None or bool(inst.error)
+            orphan = inst is None or inst.fatal
             expiring = pos.expiry == today
             force_why = ""
             if expiring and rules.kind == "equity" and rules.close_cutoff - self.table.expiry_close_lead_minutes <= minute:
@@ -1182,8 +1236,7 @@ class OptionsLive:
                 if pos.qty <= 0 or pos.expiry != today or pos.info.get("broken"):
                     continue
                 chain = day.chains.get(pos.root)
-                prices = chain.underlying.price[np.isfinite(chain.underlying.price)] if chain is not None else np.zeros(0)
-                level = float(prices[-1]) if prices.size else float("nan")
+                level = settlement_level(chain.underlying) if chain is not None else float("nan")
                 if not math.isfinite(level):
                     pos.status = "awaiting_expiry"
                     self.book._save_position(pos)
