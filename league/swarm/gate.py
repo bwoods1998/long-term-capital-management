@@ -34,6 +34,7 @@ from typing import Any, Callable, Mapping
 
 from . import evidence
 from .pool import GymJob, PoolError
+from .researcher import needs_roots
 from .store import SwarmStore, dumps
 
 REVIEW = """You review option-trading programs before they meet sealed data. A program is one Python file (NEEDS, PARAMS,
@@ -269,7 +270,8 @@ class Gate:
                                                                "look_inflight": None}, gate_ready=False, look_inflight=marker):
                 return None
         job = GymJob(family=fam["id"], version=n, code=version["code"], params=version.get("params") or {}, window="holdout",
-                     roots=tuple(fam["roots"]), gate=f"holdout look {fam['id']} v{n}", purpose="holdout", priority=10.0)
+                     roots=needs_roots(version["code"], fam["roots"]), gate=f"holdout look {fam['id']} v{n}", purpose="holdout",
+                     priority=10.0)  # the version's own NEEDS roots, as its validation ran (a family's roots may move)
         try:
             result = self.pool.run(job, timeout=float(self.settings.get("gym", {}).get("run_timeout_seconds", 900)) + 600,
                                    late=lambda r: self.finish(fam["id"], version, sha, r, validation_sharpe=vsharpe,

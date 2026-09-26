@@ -487,8 +487,21 @@ gateway month. Invalid, nonfinite or negative limits pause research. The heartbe
 `status.researcher_pace` reports the scope, limit, spend and pause reason, so a quiet research loop can be
 distinguished from a publication delay.
 
-A Gym researcher can call `retire(reason)` to abandon its whole family. Retirement stops queued research,
-keeps the best programs and every trial/look, and leaves existing positions under their exit owner.
-Researchers and the tournament share the same atomic population-floor check. A floor refusal ends the
-cycle and uses the existing increasing error cooldown (up to thirty minutes); it does not retire the family.
-The raw reason stays private in its notebook and graveyard; the public event carries only filtered prose.
+A Gym researcher can call `retire(reason)` to abandon its whole family, but only on a READ turn while more
+families live than `population.start` and the family has had at least two validations (Sept 26: an unguarded
+retire on the REVISE turn took the population from 49 to 16). Retirement stops queued research, keeps the best
+programs and every trial/look, and leaves existing positions under their exit owner. Researchers and the
+tournament share the same atomic population-floor check. A refused retire (not offered, or the floor) is a plain
+tool answer: no cycle error and no cooldown; it does not retire the family. The raw reason stays private in its
+notebook and graveyard; the public event carries only filtered prose.
+
+The sprint's search settings (Sept 26), all in `swarm.json` without a deploy: `researcher.top_profile` (default
+`pro_asap`, null turns it off), `researcher.top_reasoning_effort` (`low`), `researcher.top_families` (10) and
+`researcher.top_max_output_tokens` (12000) put the bandit's top ten on the stronger Sail profile inside the same
+hourly pace; `architect.agenda` (default empty) closes every architect request as the operator's research agenda
+(at most 4,000 characters); `population.reseed_max` (default 0, off) founds the seeds' mechanisms again on roots they
+never tried while the population is below its start and the architect is not due; `tournament.require_robustness`
+(default true) validates a version only after its 1.5x Train robustness run came back with a profit. The robust Train
+objective, its robustness runs (1.5x and mid, at the pool's lowest priority, never starting or keeping a box awake) and
+the D2 validation line are code, not settings. The objective's one-time migration beats the heartbeat while it runs,
+skips a family it already moved and empties (never keeps) the best of a family it cannot rescore.

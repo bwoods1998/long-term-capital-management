@@ -1,15 +1,20 @@
 """The hourly tournament: validation, the bandit, forks, retirements, lessons, the leaderboard.
 
 1. VALIDATION. Every living family whose best version (submitted, else its best Train score) has not been
-   validated yet runs on Validation once; the Gym runs its 1.5x-half-spread twin in the same batch (two
+   validated yet runs on Validation once, but only after that version's 1.5x-stress Train robustness run came back
+   with a profit (`tournament.require_robustness`, Sept 26: a version that loses at 1.5x never reaches the gate); the Gym runs its 1.5x-half-spread twin in the same batch (two
    trials, counted) and returns only the validation VIEW (no trades, dates or daily series). The
-   researcher is told the mean, t, quarters positive and whether the line was met.
-2. THE LINE (`evidence.validation_line`, the plan's): a family that meets it goes to the gate's queue.
+   researcher is told only whether the line was met and how many of its checks passed (D2a). A version runs on
+   its own NEEDS roots (a family's roots may have moved since).
+2. THE LINE (`evidence.validation_line`, as the owner's decision D2 amended it): its deflated Sharpe is on traded
+   days with N = the lineage's validated versions (`SwarmStore.lineage_validated`). A family that meets it goes to
+   the gate's queue.
 3. THE BANDIT (`evidence.thompson`): each family's share of researcher cycles and Gym priority from its
    validation evidence, with 25% for new families.
-4. FORKS: the top families with a positive validation t fork (a new family on another root of the
-   universe, same mechanism and structure; it inherits the lineage's trial count and holdout looks), while
-   the population is under its ceiling.
+4. FORKS: the top families with a positive validation t fork (a new family on the parent's roots plus one more
+   root of the rotation, same mechanism and structure; it inherits the lineage's trial count and holdout looks),
+   while the population is under its ceiling. XSP is out of the rotation: its $0.50 a contract makes a narrow
+   structure uneconomic.
 5. RETIREMENTS: no validation improvement in 30 revisions or 2,000 Gym evaluations, or trial-adjusted
    evidence below the line (the deflated Sharpe probability under `retire_dsr_below` after
    `retire_min_validations` validations); never below the population floor. Each retiree's lesson goes to
@@ -28,10 +33,13 @@ from typing import Any, Callable, Mapping
 
 from . import diagnostics, evidence
 from .pool import GymJob, PoolError
+from .researcher import MAX_ROOTS, needs_roots, robust_at_stress, with_roots
 from .store import CLOSEABLE, SwarmStore
 
-UNIVERSE_ROTATION = ("SPY", "QQQ", "IWM", "XSP", "SPXW")
+UNIVERSE_ROTATION = ("SPY", "QQQ", "IWM", "SPXW")
 INDEX = ("XSP", "SPXW")
+#: Never added by a fork (the sprint, Sept 26): XSP's $0.50 a contract makes narrow XSP structures uneconomic.
+NOT_ROTATED = ("XSP",)
 
 
 class Tournament:
@@ -64,6 +72,7 @@ class Tournament:
         jobs = []
         errors = {}
         judged = {}
+        waiting: list[str] = []
         image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
         bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
         for fam in fams:
@@ -75,6 +84,9 @@ class Tournament:
             if n is None:
                 continue
             state = fam.get("state") or {}
+            if self.cfg.get("require_robustness", True) and not robust_at_stress(state, n):
+                waiting.append(fam["id"])  # its robustness run at 1.5x has not landed (or lost): not validated yet
+                continue
             if n == fam.get("validated_version") and state.get("validation_image") == image and state.get("validation_bundle") == bundle:
                 continue
             if state.get("validation_image") != image or state.get("validation_bundle") != bundle:
@@ -90,7 +102,7 @@ class Tournament:
                     judged[fam["id"]] = row
                 continue
             job = GymJob(family=fam["id"], version=n, code=version["code"], params=version["params"], window="validation",
-                         roots=tuple(fam["roots"]), stress=1.0, purpose="validation", priority=1.0)
+                         roots=needs_roots(version["code"], fam["roots"]), stress=1.0, purpose="validation", priority=1.0)
             if (self.store.family(fam["id"]) or {}).get("retired_at"):
                 continue
             jobs.append((fam, n, self.pool.submit(job)))
@@ -105,7 +117,7 @@ class Tournament:
             row = self.judge(fam["id"], n, result)
             if row is not None:
                 judged[fam["id"]] = row
-        return {"queued": len(jobs), "judged": judged, "errors": errors}
+        return {"queued": len(jobs), "judged": judged, "errors": errors, "waiting_robustness": waiting}
 
     def recorded_validation(self, fid: str, n: int) -> dict[str, Any] | None:
         """The full result of a validation this version already had on the Gym image in use now (the same program on the
@@ -145,8 +157,9 @@ class Tournament:
 
     def _verdict(self, fid: str, fam: Mapping[str, Any], n: int, result: Mapping[str, Any], *, counted: bool) -> dict[str, Any]:
         stressed = evidence.stressed_of(result)
-        line = evidence.validation_line(result, stressed, lineage_trials=self.store.lineage_trials(fid),
-                                        trial_sharpes=self.store.lineage_trial_sharpes(fid))
+        validated, sharpes = self.store.lineage_validated(fid)
+        line = evidence.validation_line(result, stressed, validated_versions=validated, version_sharpes=sharpes,
+                                        lineage_trials=self.store.lineage_trials(fid))
         view = diagnostics.validation_view(result, line)
         summary = result.get("summary") or {}
         mean = evidence.daily_mean(summary)
@@ -215,37 +228,36 @@ class Tournament:
         return born
 
     def fork(self, fam: Mapping[str, Any]) -> str | None:
-        """A child on the next root of the universe the parent does not trade (index roots only for types
-        allowed there), with the parent's best program as its first version."""
+        """A child on the parent's roots plus the next root of the rotation the parent does not trade (never XSP; index
+        roots only for types allowed there; at most five roots), with the parent's best program, its NEEDS widened to
+        the child's roots, as its first version."""
         fam = self.store.family(fam["id"]) or fam
-        if fam.get("retired_at"):
+        if fam.get("retired_at") or len(fam["roots"]) >= MAX_ROOTS:
             return None
-        roots = [r for r in self.settings.get("gym", {}).get("roots", UNIVERSE_ROTATION)]
-        taken = {tuple(f["roots"]) for f in self.store.families(alive=True) if f["mechanism"] == fam["mechanism"]}
+        roots = [str(r).upper() for r in self.settings.get("gym", {}).get("roots", UNIVERSE_ROTATION) if str(r).upper() not in NOT_ROTATED]
+        taken = {tuple(sorted(f["roots"])) for f in self.store.families(alive=True) if f["mechanism"] == fam["mechanism"]}
         for root in roots:
-            if (root,) in taken or root in fam["roots"]:
+            pooled = list(fam["roots"]) + [root]
+            if tuple(sorted(pooled)) in taken or root in fam["roots"]:
                 continue
             if root in INDEX and fam["structure"] in ("calendar", "diagonal"):
                 continue
+            best = self.store.version(fam["id"], self.candidate_version(fam))
+            code = with_roots(best["code"], pooled) if best and best.get("code") else None
             spec = dict(fam.get("spec") or {})
             spec.update({"id": f"{fam['id'].split('-on-')[0]}-on-{root.lower()}", "mechanism": fam["mechanism"],
-                         "structure": fam["structure"], "roots": [root]})
-            spec.pop("signal", None)  # its first version is the parent's program on the new root, not a starter
+                         "structure": fam["structure"], "roots": pooled})
+            spec.pop("signal", None)  # its first version is the parent's program on the pooled roots, not a starter
             # The entire connected lineage shares its trials and three holdout looks, including later looks on other roots.
             child = self.store.add_family(spec, origin="fork", parent=fam["id"])
-            best = self.store.version(fam["id"], self.candidate_version(fam))
-            if best and best.get("code"):
-                code = best["code"]
-                for old in fam["roots"]:
-                    code = code.replace(f'"{old}"', f'"{root}"').replace(f"'{old}'", f"'{root}'")
+            if best and code:
                 self.store.add_version(child["id"], code, best.get("params") or {}, author=f"fork of {fam['id']}",
-                                       note=f"the parent's version {best['n']} moved to {root}")
-                self.store.note(child["id"], f"Forked from {fam['id']} (validation t {((fam.get('state') or {}).get('validation_numbers') or {}).get('t')}) "
-                                             f"onto {root}. Version 1 is the parent's best with its roots renamed; check NEEDS, widths "
-                                             f"and risk_usd for this root.")
+                                       note=f"the parent's version {best['n']} on {', '.join(pooled)}")
+                self.store.note(child["id"], f"Forked from {fam['id']} onto {', '.join(pooled)}: its roots and {root}. Version 1 is "
+                                             f"the parent's best with {root} added to NEEDS; check widths and risk_usd for {root}.")
             self.store.set_state(fam["id"], forked_at=self.clock())
             self.store.event("swarm.born", child["id"], {"parent": fam["id"], "mechanism": fam["mechanism"],
-                                                          "structure": fam["structure"], "roots": [root], "origin": "fork"})
+                                                          "structure": fam["structure"], "roots": pooled, "origin": "fork"})
             return child["id"]
         return None
 
@@ -266,7 +278,8 @@ class Tournament:
                 dsr = (line.get("numbers") or {}).get("dsr")
                 if int(fam.get("validations") or 0) >= int(self.cfg.get("retire_min_validations", 6)) and dsr is not None \
                         and dsr < float(self.cfg.get("retire_dsr_below", 0.05)):
-                    why = f"its trial-adjusted evidence fell below the line (deflated Sharpe probability {dsr:.3f})"
+                    # No figure in the reason: it becomes a graveyard lesson researchers read (D2a).
+                    why = "its trial-adjusted evidence fell below the line (the deflated Sharpe probability)"
             if why:
                 if self.retire(fam, why):
                     out.append({"family": fam["id"], "why": why})

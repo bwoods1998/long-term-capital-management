@@ -3,7 +3,9 @@
 The publisher calls this after its existing account read. A single read transaction binds family, version,
 lineage, completed looks and forward rows; no SwarmStore is opened, migrated or written. Existing live bands
 keep their recorded holdout authority across a Gym image change. Gym validation must match the current image
-and engine, and an old lineage-adjusted verdict cannot claim a current deflated-Sharpe pass.
+and engine, and an old lineage-adjusted verdict cannot claim a current deflated-Sharpe pass: since the owner's
+decision D2 (Sept 26) the deflated Sharpe counts the lineage's validated versions, so a verdict is current while
+that count is the one it was judged with. The counts' targets are the line's own (`evidence.MIN_TRADES`, `MIN_DAYS`).
 """
 
 from __future__ import annotations
@@ -30,7 +32,8 @@ TARGET_KEYS = {
     "maintain": ("execution_ready", "holdout", "real_structure", "credit_equity", "risk_fit", "forward_nonnegative",
                  "forward_trades", "forward_mean", "forward_confidence", "real_record"),
 }
-COUNT_BOUNDS = {"validation_trades": (100, 100), "validation_days": (60, 60), "validation_quarters": (3, 3),
+COUNT_BOUNDS = {"validation_trades": (evidence.MIN_TRADES, evidence.MIN_TRADES), "validation_days": (evidence.MIN_DAYS, evidence.MIN_DAYS),
+                "validation_quarters": (3, 3),
                 "forward_trades": (20, 1000), "real_trades": (5, 50), "probe_sessions": (1, 20)}
 BLOCKERS = frozenset(("validation_pending", "evidence_stale", "validation_failed", "review_pending", "review_failed",
                      "audit_pending", "audit_failed", "holdout_pending", "holdout_failed", "look_limit", "gate_paused",
@@ -125,7 +128,7 @@ def _probe_sessions(fam: Mapping, local: Mapping, now: float) -> int:
 
 
 def _gym(fam: Mapping, version: Mapping, families: Mapping, looks: Sequence, links: Sequence,
-         cfg: Mapping, bundle: str) -> dict | None:
+         cfg: Mapping, bundle: str, validated: Sequence = ()) -> dict | None:
     state, n = fam["state"], version["n"]
     image = cfg["gym"].get("image_checkpoint")
     if (not image or not bundle or state.get("validation_version") != n or fam.get("validated_version") != n
@@ -136,8 +139,8 @@ def _gym(fam: Mapping, version: Mapping, families: Mapping, looks: Sequence, lin
     if not checks or not numbers:
         return None
     trial_lines = _lines(fam, families, links, prior=True)
-    trials = sum(int(f["trials"] or 0) for f in families.values() if f["lineage"] in trial_lines)
-    fresh_dsr = numbers.get("lineage_trials") == trials
+    members = {fid for fid, f in families.items() if f["lineage"] in trial_lines}
+    fresh_dsr = numbers.get("validated_versions") == len({(f, v) for f, v in validated if f in members})
     sha = run_sha(version)
     review = state.get("review") or {}
     review_current = review.get("sha") == sha and review.get("version") == n
@@ -289,6 +292,8 @@ def attach(agents: Sequence[Mapping], root: str | Path, *, live: Any = None, acc
                         for r in db.execute("SELECT family,n,sha,params FROM versions")}
             looks = [dict(r) for r in db.execute("SELECT family,lineage,version,run_sha,passed FROM looks")]
             links = [(r["a"], r["b"]) for r in db.execute("SELECT a,b FROM lineage_links")]
+            validated = [(r["family"], r["version"]) for r in db.execute(
+                "SELECT DISTINCT family, version FROM runs WHERE window='validation' AND stress=1.0 AND trials>0 AND version IS NOT NULL")]
             forward: dict[str, list] = {}
             for r in db.execute("SELECT family,source,day,pnl,max_loss,version FROM forward"):
                 forward.setdefault(r["family"], []).append(dict(r))
@@ -304,7 +309,7 @@ def attach(agents: Sequence[Mapping], root: str | Path, *, live: Any = None, acc
                 if version is None:
                     continue
                 if fam["band"] == "gym":
-                    value = _gym(fam, version, families, looks, links, cfg, bundle)
+                    value = _gym(fam, version, families, looks, links, cfg, bundle, validated)
                 elif fam["band"] in ("candidate", "probe", "sized"):
                     value = _live(fam, version, looks, forward.get(fam["id"], []), table, context, now)
                 else:
