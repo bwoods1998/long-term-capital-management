@@ -403,11 +403,14 @@ class IndexTest(Floor):
                 self.ledger.append("agent.postmortem", {"text": "huang-2 died of displaced after 3 trials with no edge.",
                                                         "cause": "displaced"}, agent="huang-2"),
                 self.ledger.append("playbook.entry", {"title": "Lesson: makers", "text": "Resting makers need a fill model before a replay.",
-                                                      "source": "teacher"}),
+                                                      "source": "desk"}),
                 self.ledger.append("library.note", {"title": "Weather feed", "text": "The NWS hourly feed lags the station by an hour.",
                                                     "tags": [], "niche": "kalshi-weather-hourly"}, agent="huang-2")]
         self.ledger.append("playbook.entry", {"title": "Post-mortem: huang-2", "text": "huang-2 died of displaced after 3 trials.",
                                               "source": "graveyard"}, agent="huang-2")
+        # The teacher's lessons reach agents only through the gate's lesson_arm split: never indexed.
+        self.ledger.append("playbook.entry", {"title": "Lesson: huang-2", "text": "huang-2 should stop quoting weather brackets overnight.",
+                                              "source": "teacher"})
         self.index().run()
         rows = self.rows("SELECT ref, kind, agent, niche, family, venue, outcome FROM docs ORDER BY ref")
         self.assertEqual([r[0] for r in rows], [e.seq for e in kept])
@@ -909,7 +912,8 @@ class WiringTest(HouseCase):
             self.clock.advance(60)
         self.assertIn("jev:memory", self.jobs())
         health = json.loads((self.house.root / "health.json").read_text())
-        lessons = self.house.ledger.count(kinds="playbook.entry")  # the teacher's lessons, loaded at start
+        # The teacher's lessons (loaded at start) are never indexed: only the gate's lesson_arm hands them out.
+        lessons = sum(1 for e in self.house.ledger.iter(kinds="playbook.entry") if e.payload.get("source") not in ("teacher", "graveyard"))
         self.assertEqual(health["jev"]["memory"]["docs"], lessons + 1)
         self.assertEqual(health["jev"]["memory"]["taxonomy"], TAXONOMY_VERSION)
         self.assertIn("memory", health["jev"]["sensor"]["today"], "the label was bought under its own purpose")
@@ -933,6 +937,10 @@ class WiringTest(HouseCase):
         import threading
 
         floor = self.floor({"memory": {"enabled": True}})
+        peer = self.house.spawn("peer", "test-family", self.seated("scout").code, reason="a test agent with a conclusion")
+        self.house.ledger.append("agent.research", {"tool": "summary", "session": "s-9", "turns": 3, "profile": "flash_flex",
+                                                    "cost_usd": "0.01", "trials": 0, "summary": WEATHER, "reason": "finished",
+                                                    "candidate": False}, agent=peer.id)
         release = threading.Event()
         move = threading.Thread(target=release.wait, daemon=True)
         move.start()
