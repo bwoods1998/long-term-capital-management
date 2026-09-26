@@ -201,15 +201,20 @@ test('refusals and truncations are billed at their usage; a 4xx, a 5xx without u
   assert.equal(lost.response.status, 502);
   assert.equal(lost.response.headers.get('X-LTCM-Cost-USD'), '0.000000');
   assert.deepEqual([lost.meter.spent_usd, lost.meter.inflight_usd, lost.meter.stops], ['0.000000', '0.000000', { no_answer: 1 }]);
+  // Anthropic's headers came and then the body was cut off: the call ran, so its worst case stays spent (item 1 of the review).
   const cut = await call(body(), () => ({ ok: true, status: 200, headers: new Headers(), text: async () => { throw new Error('cut off'); } }));
   assert.equal(cut.response.status, 502);
-  assert.equal(cut.meter.inflight_usd, '0.000000');
+  assert.equal(cut.response.headers.get('X-LTCM-Cost-Known'), 'false');
+  assert.equal(cut.response.headers.get('X-LTCM-Cost-USD'), formatUsdMicro(worstCase(OPUS, cut.bytes, 16000)));
+  assert.deepEqual([cut.meter.spent_usd, cut.meter.inflight_usd, cut.meter.stops],
+    [formatUsdMicro(worstCase(OPUS, cut.bytes, 16000)), '0.000000', { body_cut: 1 }]);
 
   // A 2xx whose usage cannot be read keeps its whole hold: unknown is not free.
   const unknown = await call(body(), message({ usage: undefined }));
   assert.equal(unknown.response.status, 200);
   assert.equal(unknown.meter.spent_usd, formatUsdMicro(worstCase(OPUS, unknown.bytes, 16000)));
   assert.equal(unknown.meter.inflight_usd, '0.000000');
+  assert.equal(unknown.response.headers.get('X-LTCM-Cost-Known'), 'false');
 });
 
 test('the kill switch stops Claude calls before any hold, and releasing it lets them through', async () => {
@@ -231,8 +236,8 @@ test('/v1/health reports Claude\'s funded meter, and /v1/claude/models what the 
   const health = await (await route(ask(null, {}, '/v1/health', 'GET'), env, { gate, now: () => NOW })).json();
   assert.deepEqual(health.claude, {
     funded: true, cap_usd: '100.00', spent_usd: '0.184000', settled_usd: '0.184000', inflight_usd: '0.000000', remaining_usd: '99.816000',
-    calls: 1, models: ['claude-opus-5-5', 'claude-sonnet-5'], configured: true, by_role: { diagnostician: '0.184000' },
-    by_agent: { unattributed: '0.184000' }, stops: { end_turn: 1 },
+    calls: 1, holds: 0, stale_holds: 0, swept: 0, swept_usd: '0.000000', models: ['claude-opus-5-5', 'claude-sonnet-5'], configured: true,
+    by_role: { diagnostician: '0.184000' }, by_agent: { unattributed: '0.184000' }, stops: { end_turn: 1 }, geos: {},
   });
   assert.ok(!JSON.stringify(health).includes(KEY));
 
@@ -247,4 +252,61 @@ test('/v1/health reports Claude\'s funded meter, and /v1/claude/models what the 
   assert.equal(seen[0].init.headers['x-api-key'], KEY);
   const down = await route(ask(null, {}, '/v1/claude/models', 'GET'), env, { gate, fetcher: async () => new Response('{}', { status: 401 }) });
   assert.equal(down.status, 502);
+});
+
+test('a hold no settlement replaced is swept to zero after half an hour, and a late settlement still books its cost', () => {
+  const env = settings();
+  let at = NOW;
+  const gate = createGate({ store: memoryStore(), env, now: () => at });
+  const lost = gate.claudeReserve({ micro: '400000', request: 'swarm:architect:1', at });
+  assert.equal(lost.ok, true);
+  assert.deepEqual(gate.claudeRequest('swarm:architect:1'), { request: 'swarm:architect:1', state: 'held', cost_usd: null });
+  at += 29 * 60 * 1000;
+  assert.equal(gate.claudeSweep({ at }), 0, 'not yet stale');
+  assert.equal(gate.claudeStatus(at).inflight_usd, '0.400000');
+  at += 2 * 60 * 1000;
+  assert.equal(gate.claudeStatus(at).stale_holds, 1);
+  // The next call sweeps first: the lost hold no longer shrinks the funded total.
+  const next = gate.claudeReserve({ micro: '100000', request: 'swarm:audit:2', at });
+  assert.equal(next.ok, true);
+  let meter = gate.claudeStatus(at);
+  assert.deepEqual([meter.spent_usd, meter.inflight_usd, meter.holds, meter.swept, meter.swept_usd], ['0.100000', '0.100000', 1, 1, '0.400000']);
+  assert.deepEqual(gate.claudeRequest('swarm:architect:1'), { request: 'swarm:architect:1', state: 'released', cost_usd: '0.000000' });
+  // The lost call's settlement arrives after all: its cost is booked, and nothing is released twice.
+  gate.claudeSettle({ id: lost.id, reserved: '400000', actual: '150000', at });
+  gate.claudeSettle({ id: next.id, reserved: '100000', actual: '20000', at });
+  meter = gate.claudeStatus(at);
+  assert.deepEqual([meter.spent_usd, meter.inflight_usd, meter.holds], ['0.170000', '0.000000', 0]);
+  assert.deepEqual(gate.claudeRequest('swarm:audit:2'), { request: 'swarm:audit:2', state: 'settled', cost_usd: '0.020000' });
+  assert.deepEqual(gate.claudeRequest('never-sent'), { request: 'never-sent', state: 'absent' });
+  assert.deepEqual(gate.claudeRequest('bad id!'), { request: null, state: 'absent' });
+});
+
+test('/v1/claude/request/<id> tells the House what became of its call: settled, unknown or absent', async () => {
+  const env = settings();
+  const gate = createGate({ store: memoryStore(), env, now: () => NOW });
+  await call(body(), message(), { env, gate, headers: { 'X-LTCM-Request': 'swarm:condor:diagnose:2:1790:ab12' } });
+  await call(body(), message({ usage: undefined }), { env, gate, headers: { 'X-LTCM-Request': 'swarm:condor:audit:3:0:cd34' } });
+  const read = async id => (await route(ask(null, {}, `/v1/claude/request/${id}`, 'GET'), env, { gate, now: () => NOW })).json();
+  assert.deepEqual(await read('swarm:condor:diagnose:2:1790:ab12'), { request: 'swarm:condor:diagnose:2:1790:ab12', state: 'settled', cost_usd: '0.184000' });
+  const unknown = await read('swarm:condor:audit:3:0:cd34');
+  assert.equal(unknown.state, 'unknown');
+  assert.ok(Number(unknown.cost_usd) > 0.32, 'an unknown bill is booked at its worst case');
+  assert.deepEqual(await read('swarm:elsewhere'), { request: 'swarm:elsewhere', state: 'absent' });
+  assert.equal((await route(ask(null, {}, '/v1/claude/request/x', 'POST'), env, { gate })).status, 405);
+  assert.equal((await route(new Request('https://gw/v1/claude/request/x'), env, { gate })).status, 401);
+});
+
+test('the inference geography is recorded, and priced only by a multiplier CLAUDE_MODELS names', async () => {
+  const usage = { ...USAGE, inference_geo: 'us' };
+  assert.equal(actualCost(OPUS, usage), 184000n, 'no multiplier configured: the rates stand');
+  const geo = priceTable({ CLAUDE_MODELS: JSON.stringify({ 'claude-opus-5-5': { ...OPUS, geo: { us: 1.1, cheap: 0.5, 'Bad Geo': 2 } } }) })['claude-opus-5-5'];
+  assert.deepEqual(geo.geo, { us: 1.1 });
+  const priced = actualCost(geo, usage);
+  assert.ok(priced >= 202400n && priced <= 202401n, `1.1 x $0.184, rounded up at most a micro-dollar: ${priced}`);
+  assert.equal(actualCost(geo, { ...usage, inference_geo: 'global' }), 184000n);
+  assert.ok(worstCase(geo, 1000, 1000) > worstCase(OPUS, 1000, 1000), 'the worst case assumes the dearest geography');
+  const out = await call(body(), message({ usage }));
+  assert.deepEqual(out.meter.geos, { us: 1 });
+  assert.equal(out.meter.spent_usd, '0.184000');
 });

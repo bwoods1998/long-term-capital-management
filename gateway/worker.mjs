@@ -60,13 +60,18 @@ export class Gate extends DurableObject {
   frontierSettle(request) { return this.ctx.storage.transactionSync(() => this.gate.frontierSettle(request)); }
   claudeReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.claudeReserve(request)); }
   claudeSettle(request) { return this.ctx.storage.transactionSync(() => this.gate.claudeSettle(request)); }
+  claudeRequest(id) { return this.gate.claudeRequest(id); }
   typesafeReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.typesafeReserve(request)); }
   typesafeSettle(request) { return this.ctx.storage.transactionSync(() => this.gate.typesafeSettle(request)); }
   pullReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.pullReserve(request)); }
   pullRefund(request) { return this.ctx.storage.transactionSync(() => this.gate.pullRefund(request)); }
   webFetchReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.webFetchReserve(request)); }
 
-  watchdog() { return runWatchdog({ gate: this.gate, env: this.env, mailer: mailerFor(this.env) }); }
+  watchdog() {
+    // Claude holds no settlement replaced within half an hour are released on the cron too, not only at the next call.
+    this.ctx.storage.transactionSync(() => this.gate.claudeSweep());
+    return runWatchdog({ gate: this.gate, env: this.env, mailer: mailerFor(this.env) });
+  }
 }
 
 const gateOf = env => env.GATE.get(env.GATE.idFromName(GATE_OBJECT));

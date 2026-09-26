@@ -155,6 +155,7 @@ DEFAULTS: dict[str, Any] = {
         "min_validations": 2,
         "near_miss_checks": 6,
         "structured": True,             # a JSON-schema answer (structured outputs); false reads the JSON from the text
+        "retry_truncated": True,        # one retry at medium effort after an answer cut off at max_tokens
     },
     "heartbeat_seconds": 20,
     "stale_heartbeat_seconds": 240,     # the House restarts a swarm whose heartbeat is older than this

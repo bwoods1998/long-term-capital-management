@@ -23,7 +23,7 @@ from league.swarm.settings import DEFAULTS
 from league.swarm.store import SwarmStore
 from league.tests.swarm_fakes import Clock, FakeMonth
 from league.tests.test_claude import message
-from league.tests.test_frontier import GATEWAY, FakeOpener, ok
+from league.tests.test_frontier import GATEWAY, FakeOpener, FakeResponse, ok
 
 
 class FakeClaudeMeter:
@@ -131,6 +131,43 @@ class ClaudeRouting(unittest.TestCase):
                 result = self.ask(self.router(FakeOpener(error)), key=f"k{error.code}")
                 self.assertEqual(result["route"], "openai")
                 self.assertEqual(self.claude_spent(), Decimal("0"))
+
+    def test_a_refusal_naming_its_cap_releases_the_hold_and_an_empty_answer_falls_through(self):
+        result = self.ask(self.router(FakeOpener(refused(503, '{"error": "Claude is not configured.", "cap": "setup"}'))), key="setup")
+        self.assertEqual(result["route"], "openai")
+        self.assertEqual(self.claude_spent(), Decimal("0"), "the gateway refused before reserving: no phantom hold")
+        self.assertEqual(self.store.get("claude_unsettled"), None)
+        empty = self.ask(self.router(FakeOpener(message("", cost="0.030000"))), key="empty", role="audit")
+        self.assertEqual(empty["route"], "openai", "an empty answer is not an audit: Astra reads it instead")
+        self.assertEqual(self.claude_spent(), Decimal("0.030000"), "billed at its usage")
+
+    def test_an_unknown_bill_is_trued_up_from_the_gateways_record_of_the_call(self):
+        opener = FakeOpener(refused(502, "bad gateway"), refused(504, "timeout"), refused(500, "worker"), socket.timeout("slow"))
+        router = self.router(opener)
+        for key in ("a", "b", "c", "d"):
+            self.assertEqual(self.ask(router, key=key)["route"], "openai")
+        holds = self.store.get("claude_unsettled")
+        self.assertEqual(len(holds), 4)
+        sent = [dict(r.header_items()).get("X-ltcm-request") for r, _ in opener.calls]
+        self.assertEqual(sorted(sent), sorted(holds), "each call carried the id its hold is filed under")
+        self.assertEqual(len(set(sent)), 4)
+        held = Decimal(str(self.store.spent(["claude"])))
+        self.assertGreater(held, Decimal("1.2"), "four worst cases are held")
+        self.assertEqual(router.settle_claude_holds(), 0, "not before a minute has passed")
+        self.clock.advance(61)
+        ids = sorted(holds)  # the order the holds are read in
+        records = {sent[0]: {"state": "settled", "cost_usd": "0.120000"}, sent[1]: {"state": "released", "cost_usd": "0.000000"},
+                   sent[2]: {"state": "absent"}, sent[3]: {"state": "held"}}
+        opener.script = [FakeResponse(records[rid]) for rid in ids]
+        self.assertEqual(router.settle_claude_holds(), 2, "the settled and the released; the absent and the held wait")
+        left = self.store.get("claude_unsettled")
+        self.assertEqual(sorted(left), sorted([sent[2], sent[3]]))
+        self.clock.advance(1800)
+        opener.script = [FakeResponse(records[rid]) for rid in sorted(left)]
+        self.assertEqual(router.settle_holds(), 1, "a call the gateway never recorded is released after half an hour")
+        self.assertEqual(list(self.store.get("claude_unsettled")), [sent[3]])
+        still = Decimal(str(left[sent[3]]["usd"]))
+        self.assertAlmostEqual(float(self.claude_spent()), float(Decimal("0.12") + still), places=5)
 
     def test_capped_unconfigured_or_unreadable_claude_leaves_the_existing_routes_exactly_as_they_were(self):
         cases = {

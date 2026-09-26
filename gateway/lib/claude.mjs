@@ -31,13 +31,28 @@ export const MAX_TOKENS = 16000;
 export const MAX_REQUEST_BYTES = 1024 * 1024;
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const MODEL_ID = /^claude-[a-z0-9-]{1,60}$/;
+//: The House's id for one call (`X-LTCM-Request`), under which the gateway records what became of it.
+export const REQUEST_HEADER = 'X-LTCM-Request';
+const REQUEST_ID = /^[A-Za-z0-9:._-]{1,160}$/;
+//: A hold with no settlement this long after it was made is released to zero: every call answers or is cut off within
+//: ten minutes (570 s here, 600 s at the House), so only a Worker that died between reserve and settle leaves one.
+export const STALE_HOLD_MS = 30 * 60 * 1000;
+//: How many of the House's requests the meter remembers the outcome of.
+export const RECENT_REQUESTS = 256;
 //: Anthropic accepts at most four cache breakpoints a request.
 const MAX_BREAKPOINTS = 4;
 
+/** A House request id as the meter keeps it, or null. */
+export function requestId(value) {
+  return typeof value === 'string' && REQUEST_ID.test(value) ? value : null;
+}
+
 /**
- * `{ model: { input, cache_write, cache_read, output } }` in dollars per million tokens, from `CLAUDE_MODELS`. A row
- * that does not read (a rate missing, not finite, a cache write below the input rate, a cache read above it) is
- * absent, and its model is refused. `cache_write` is the 5-minute write rate, the only one admitted.
+ * `{ model: { input, cache_write, cache_read, output, geo? } }` in dollars per million tokens, from `CLAUDE_MODELS`. A
+ * row that does not read (a rate missing, not finite, a cache write below the input rate, a cache read above it) is
+ * absent, and its model is refused. `cache_write` is the 5-minute write rate, the only one admitted. `geo`, optional,
+ * multiplies every rate of a call Anthropic says ran in that inference geography (`usage.inference_geo`, e.g.
+ * `{"us": 1.1}`); a multiplier below 1 or that does not read is left out, and without one the rates stand.
  */
 export function priceTable(env = {}) {
   let table;
@@ -53,7 +68,13 @@ export function priceTable(env = {}) {
     const input = Number(row.input), write = Number(row.cache_write), read = Number(row.cache_read), output = Number(row.output);
     if (![input, write, read, output].every(Number.isFinite)) continue;
     if (!(input > 0 && output > 0 && write >= input && read >= 0 && read <= input)) continue;
-    out[model] = { input, cache_write: write, cache_read: read, output };
+    const geo = {};
+    if (row.geo && typeof row.geo === 'object' && !Array.isArray(row.geo)) {
+      for (const [name, factor] of Object.entries(row.geo)) {
+        if (/^[a-z0-9_-]{1,16}$/.test(name) && Number.isFinite(Number(factor)) && Number(factor) >= 1) geo[name] = Number(factor);
+      }
+    }
+    out[model] = { input, cache_write: write, cache_read: read, output, ...(Object.keys(geo).length ? { geo } : {}) };
   }
   return out;
 }
@@ -65,10 +86,13 @@ export function capMicro(env = {}) {
 
 const micro = dollars => BigInt(Math.ceil(dollars * 1e6));
 
+/** The dearest geography multiplier a row names (1 without one): the worst case assumes it. */
+const dearestGeo = price => Math.max(1, ...Object.values(price.geo || {}));
+
 /** The most this call can cost, in micro-dollars: a byte per possible input token plus framing, all written to the cache. */
 export function worstCase(price, bodyBytes, maxTokens) {
   const inputTokens = bodyBytes + 4096;
-  return micro((inputTokens * price.cache_write + maxTokens * price.output) / 1e6);
+  return micro(dearestGeo(price) * (inputTokens * price.cache_write + maxTokens * price.output) / 1e6);
 }
 
 const count = value => {
@@ -89,7 +113,8 @@ export function actualCost(price, usage) {
   if (input === null || output === null || written === null || read === null
       || usage.input_tokens === undefined || usage.output_tokens === undefined) return null;
   const hour = Math.min(written, count(usage.cache_creation?.ephemeral_1h_input_tokens) ?? 0);
-  return micro((input * price.input + (written - hour) * price.cache_write + hour * Math.max(price.cache_write, 2 * price.input)
+  const geo = typeof usage.inference_geo === 'string' && Object.hasOwn(price.geo || {}, usage.inference_geo) ? price.geo[usage.inference_geo] : 1;
+  return micro(geo * (input * price.input + (written - hour) * price.cache_write + hour * Math.max(price.cache_write, 2 * price.input)
     + read * price.cache_read + output * price.output) / 1e6);
 }
 

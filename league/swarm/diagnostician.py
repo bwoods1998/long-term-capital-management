@@ -10,7 +10,8 @@ go first (most checks met), then the most validated; `per_round` families a roun
 WHAT IT SEES. The family's mechanism, structure, roots, days to expiry, rejection test and sketch; its best program
 and parameters; the full Train diagnostic of that program (every breakdown, the P&L by Train year from the daily
 series, and every robustness result that exists: other Train runs of the same version and any `robustness` block);
-the graveyard's relevant lessons, with any validation figure cut and every number masked. Of VALIDATION only: passed
+the graveyard's relevant lessons; every free text (the mechanism, the sketch, the rejection test, the lessons and
+their notes) with any validation figure cut, every number masked and the line's check names withheld. Of VALIDATION only: passed
 or not, and "N of 8 checks passed" (decision D2a). Never a validation number, never a check's name, never the
 family's notebook (researchers once saw validation numbers and may have written them down).
 
@@ -20,8 +21,11 @@ WHAT IT ANSWERS (one JSON object, a structured output): `decision` "rewrite" or 
   the best version's. It must pass the Gym's safety check and name only the family's roots. It is then queued as the
   family's next Train run (`rewrite_ready`, profile "diagnostician"), so the researcher's next cycle runs it through
   the same safety check and Gym run as any revision, as a new version authored "diagnostician".
-- A RETIRE is honored only while more families live than `population.start` (through `retire_gym`, which also keeps
-  the population floor); otherwise it is written to the family's notebook as a recommendation.
+- A RETIRE is honored only while more families live than `population.start` (`retire_gym` with that as its floor, checked
+  in its own transaction); otherwise it is written to the family's notebook as a recommendation.
+- A call BILLED WITHOUT AN ANSWER (a refusal, a truncation) counts as a diagnosis: the family waits for new evidence. A
+  truncation is asked once more at medium effort with a tighter brief when the day's budget holds it. A call that cost
+  nothing is asked again after half an hour.
 
 Every call is a `swarm.diagnostician` event (outcome, cost, route, stop reason) and its money is `spend` rows of kind
 `claude` with role "diagnostician" (the router's durable hold, then its settlement). Standard library only.
@@ -83,6 +87,11 @@ THE CONTRACT (league/CONTRACT.md)
 
 _NUMBER = re.compile(r"(?<![A-Za-z_])[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?")
 _MARKER = "best validation "
+#: The validation line's distinctive check and field names (evidence.validation_line, diagnostics.validation_view).
+_CHECK_NAMES = re.compile(r"\b(?:status_ok|mean_positive|dsr|checks_not_met|line_met|validation_(?:line|view|numbers))\b", re.I)
+#: The tighter brief of the one retry after a truncation (at medium effort).
+RETRY_BRIEF = ("\n\nYOUR LAST ANSWER RAN OUT OF ROOM BEFORE IT FINISHED. Think briefly. Keep the diagnosis to three sentences "
+               "and the program compact (about 250 lines at most), and answer with the JSON object only.")
 
 
 def withheld(text: Any) -> str:
@@ -99,7 +108,7 @@ def withheld(text: Any) -> str:
             end = len(re.match(r"\S*", out[begin:]).group(0))
         out = out[:begin] + "[withheld]" + out[begin + end:]
         at = out.find(_MARKER, begin)
-    return _NUMBER.sub("#", out)
+    return _CHECK_NAMES.sub("[withheld]", _NUMBER.sub("#", out))
 
 
 def _shape(code: Any) -> str | None:
@@ -238,12 +247,12 @@ class Diagnostician:
                    if g["family"] != fid]
         dte = spec.get("dte") or ["?", "?"]
         parts = [
-            f"FAMILY {fid} ({fam.get('origin')}). Mechanism: {fam['mechanism']}",
+            f"FAMILY {fid} ({fam.get('origin')}). Mechanism: {withheld(fam['mechanism'])}",
             f"Structure {fam['structure']}; roots {', '.join(fam['roots'])}; days to expiry {dte[0]}-{dte[-1]}.",
-            f"Rejection test: {spec.get('rejection') or '(none stated)'}",
+            f"Rejection test: {withheld(spec.get('rejection')) or '(none stated)'}",
         ]
         if spec.get("sketch"):
-            parts.append(f"The architect's sketch: {spec['sketch']}")
+            parts.append(f"The architect's sketch: {withheld(spec['sketch'])}")
         parts += [
             f"Versions so far: {fam.get('revisions')}; lineage trials {self.store.lineage_trials(fid)}; best Train score "
             f"{fam.get('best_train')}.",
@@ -305,13 +314,24 @@ class Diagnostician:
         user = self.packet(fam, seen)
         out: dict[str, Any] = {"family": fid, "validations": seen["validations"], "checks_met": f"{seen['met']}/{seen['total']}",
                                "version": best.get("n")}
-        try:
-            answer = self.router.ask(role=ROLE, system=self.system, user=user, family=fid,
-                                     key=f"swarm:{fid}:diagnose:{seen['validations']}:{int(began)}", openai_model=None,
-                                     sail_profile=None, max_output=16000, effort="high", need_usd=0.0, claude=True, schema=self.schema)
-        except Exception as exc:  # noqa: BLE001 - no answer: tried again after half an hour
-            self.store.set_state(fid, diagnosis_error_at=self.clock())
-            out.update(outcome="error", error=str(exc)[:300])
+        answer, billed, error = self._ask(fid, user, seen, began)
+        if answer is None and any(b.get("stop_reason") == "max_tokens" for b in billed) and self.cfg.get("retry_truncated", True):
+            # Cut off at max_tokens: once more at medium effort with a tighter brief, if the day's budget holds it.
+            tighter = user + RETRY_BRIEF
+            if self.affordable(tighter, effort="medium") is None:
+                answer, more, error = self._ask(fid, tighter, seen, began, effort="medium")
+                billed += more
+                out["retried"] = "medium"
+        if answer is None:
+            if billed:
+                # Billed without an answer (a refusal, a truncation): no new call until new evidence, like a diagnosis.
+                with self.store.atomic():
+                    self.store.set_state(fid, diagnosed_at=self.clock(), diagnosed_validations=seen["validations"])
+                out.update(outcome="billed_failure", cost_usd=round(sum(float(b.get("cost_usd") or 0) for b in billed), 6),
+                           stop_reason=",".join(str(b.get("stop_reason")) for b in billed), error=error)
+            else:
+                self.store.set_state(fid, diagnosis_error_at=self.clock())  # nothing billed: asked again after half an hour
+                out.update(outcome="error", error=error)
             return self._record(out, began)
         out.update(route=answer.get("route"), model=answer.get("model"), cost_usd=answer.get("cost_usd"),
                    held_usd=answer.get("held_usd"), stop_reason=answer.get("stop_reason"))
@@ -339,25 +359,51 @@ class Diagnostician:
         if decision == "retire":
             lesson = " ".join(str(reply.get("lesson") or diagnosis or "the diagnostician found no capturable edge").split())[:1500]
             population = self.settings.get("population", {})
-            alive = len(self.store.families(alive=True))
-            if alive > int(population.get("start", 48)):
-                result = self.store.retire_gym(fid, f"the diagnostician: {lesson}", floor=int(population.get("floor", 16)),
-                                               source=ROLE)
-                if result.get("status") == "retired" and not result.get("already_retired"):
-                    try:
-                        if self.pool is not None:
-                            self.pool.cancel_family(fid)
-                    except Exception:  # noqa: BLE001 - queued work is refused by the retired state anyway
-                        pass
-                    out.update(outcome="retired", lesson=lesson[:300])
-                    return self._record(out, began)
-                out.update(outcome="retire_refused", reason=str(result.get("reason") or result.get("status"))[:200])
+            # The start population is the floor `retire_gym` checks inside its own transaction, so a tournament retiring
+            # at the same moment cannot take the swarm below it.
+            floor = max(int(population.get("floor", 16)), int(population.get("start", 48)))
+            result = self.store.retire_gym(fid, f"the diagnostician: {lesson}", floor=floor, source=ROLE)
+            if result.get("status") == "retired" and not result.get("already_retired"):
+                try:
+                    if self.pool is not None:
+                        self.pool.cancel_family(fid)
+                except Exception:  # noqa: BLE001 - queued work is refused by the retired state anyway
+                    pass
+                out.update(outcome="retired", lesson=lesson[:300])
+                return self._record(out, began)
+            if result.get("deferred") == "population_floor":
+                out.update(outcome="retire_noted", reason="not above the start population")
             else:
-                out.update(outcome="retire_noted", reason=f"{alive} families live, not above the start population")
+                out.update(outcome="retire_refused", reason=str(result.get("reason") or result.get("status"))[:200])
             self.store.note(fid, f"The diagnostician recommends retiring this family: {lesson}")
             return self._record(out, began)
         out.update(outcome="unclear")
         return self._record(out, began)
+
+    def _ask(self, fid: str, user: str, seen: Mapping[str, Any], began: float,
+             effort: str | None = None) -> tuple[dict[str, Any] | None, list[dict[str, Any]], str | None]:
+        """(the answer or None, the paid attempts billed without one, the error)."""
+        try:
+            answer = self.router.ask(role=ROLE, system=self.system, user=user, family=fid,
+                                     key=f"swarm:{fid}:diagnose:{seen['validations']}:{int(began)}{':' + effort if effort else ''}",
+                                     openai_model=None, sail_profile=None, max_output=16000, effort="high", need_usd=0.0,
+                                     claude=True, schema=self.schema, claude_effort=effort)
+            return answer, [], None
+        except Exception as exc:  # noqa: BLE001 - the caller decides when to ask again
+            return None, list(getattr(exc, "billed", []) or []), str(exc)[:300]
+
+    def affordable(self, user: str, *, effort: str | None = None) -> str | None:
+        """Why a call with this packet cannot be made now (the day's budget, Claude's room), or None."""
+        try:
+            _, ceiling = self.router.claude_request(self.system, user, schema=self.schema, effort=effort)
+        except Exception as exc:  # noqa: BLE001
+            return f"the request could not be priced: {exc}"[:300]
+        spent = self.router.claude_spent(role=ROLE, since=self.clock() - 86400)
+        if spent + ceiling > float(self.cfg.get("usd_day", 15.0)):
+            return f"the day's diagnostician budget: ${spent:.2f} spent, the next call may cost ${ceiling:.2f}"
+        if self.router.claude_room() < ceiling:
+            return "Claude has no room above its reserve"
+        return None
 
     def _record(self, out: dict[str, Any], began: float) -> dict[str, Any]:
         out["seconds"] = round(self.clock() - began, 1)
@@ -374,16 +420,10 @@ class Diagnostician:
             return {"eligible": 0}
         done = []
         for fam, seen in rows[: max(0, int(self.cfg.get("per_round", 2)))]:
-            try:
-                _, ceiling = self.router.claude_request(self.system, self.packet(fam, seen), schema=self.schema)
-            except Exception as exc:  # noqa: BLE001
-                return {"eligible": len(rows), "diagnosed": done, "skipped": f"the request could not be priced: {exc}"[:300]}
-            spent = self.router.claude_spent(role=ROLE, since=self.clock() - 86400)
-            if spent + ceiling > float(self.cfg.get("usd_day", 15.0)):
-                return {"eligible": len(rows), "diagnosed": done,
-                        "skipped": f"the day's diagnostician budget: ${spent:.2f} spent, the next call may cost ${ceiling:.2f}"}
-            if self.router.claude_room() < ceiling:
-                return {"eligible": len(rows), "diagnosed": done, "skipped": "Claude has no room above its reserve"}
+            why = self.affordable(self.packet(fam, seen))
+            if why:
+                return {"eligible": len(rows), "diagnosed": [{k: d.get(k) for k in ("family", "outcome", "cost_usd")} for d in done],
+                        "skipped": why}
             done.append(self.diagnose(fam, seen))
         return {"eligible": len(rows), "diagnosed": [{k: d.get(k) for k in ("family", "outcome", "cost_usd")} for d in done]}
 

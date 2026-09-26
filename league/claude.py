@@ -32,6 +32,8 @@ PATH = "/v1/claude/messages"
 COST_HEADER = "X-LTCM-Cost-USD"
 AGENT_HEADER = "X-LTCM-Agent"
 ROLE_HEADER = "X-LTCM-Role"
+#: The House's id for one call: the gateway files what became of it under this id (`GET /v1/claude/request/<id>`).
+REQUEST_HEADER = "X-LTCM-Request"
 #: The gateway's ceiling (gateway/lib/claude.mjs MAX_TOKENS): thinking and the answer together.
 MAX_TOKENS = 16000
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
@@ -43,19 +45,22 @@ MODEL_CEILINGS = {
     "claude-sonnet-5": (Decimal("2.50"), Decimal("10")),
 }
 _SLUG = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
+_REQUEST_ID = re.compile(r"[A-Za-z0-9:._-]{1,160}")
 
 
 class ClaudeError(RuntimeError):
     """A Claude call that produced no usable answer. `status` is the HTTP status when there was one; `answer` is the
     billed answer when one came back (a refusal, a truncation, an answer without the asked-for JSON); `cost_usd` is the
-    gateway's settled cost when it said (None when it is unknown)."""
+    gateway's settled cost when it said (None when it is unknown); `cap` names the gateway's own refusal (`setup`,
+    `claude_funded`, `kill_switch`: refused before anything was reserved or sent)."""
 
     def __init__(self, message: str, *, status: int | None = None, answer: "Answer | None" = None,
-                 cost_usd: Decimal | None = None):
+                 cost_usd: Decimal | None = None, cap: str | None = None):
         super().__init__(message)
         self.status = status
         self.answer = answer
         self.cost_usd = answer.cost_usd if answer is not None and cost_usd is None else cost_usd
+        self.cap = cap
 
 
 class ClaudeRefusal(ClaudeError):
@@ -166,28 +171,41 @@ class Claude:
         self.timeout = timeout
 
     def ask(self, system: str, user: str, *, agent: str, role: str | None = None, max_tokens: int = MAX_TOKENS,
-            effort: str = "high", schema: Mapping[str, Any] | None = None, cache: bool = True) -> Answer:
+            effort: str = "high", schema: Mapping[str, Any] | None = None, cache: bool = True,
+            request_id: str | None = None) -> Answer:
         return self.converse(system, [{"role": "user", "content": user}], agent=agent, role=role, max_tokens=max_tokens,
-                             effort=effort, schema=schema, cache=cache)
+                             effort=effort, schema=schema, cache=cache, request_id=request_id)
 
     def converse(self, system: str, messages: Sequence[Mapping[str, Any]], *, agent: str, role: str | None = None,
                  max_tokens: int = MAX_TOKENS, effort: str = "high", schema: Mapping[str, Any] | None = None,
-                 cache: bool = True) -> Answer:
+                 cache: bool = True, request_id: str | None = None) -> Answer:
+        """One call. `request_id` (`[A-Za-z0-9:._-]{1,160}`) is the id the gateway files the call's outcome under, so a
+        caller that never saw the answer can ask what it cost (`settlement`)."""
         if role is not None and (not isinstance(role, str) or not _SLUG.fullmatch(role)):
             raise ClaudeError("invalid Claude role")
+        if request_id is not None and (not isinstance(request_id, str) or not _REQUEST_ID.fullmatch(request_id)):
+            raise ClaudeError("invalid Claude request id")
         body = request_body(self.model, system, messages, max_tokens=max_tokens, effort=effort, schema=schema, cache=cache)
         headers = {"Authorization": "Bearer " + self.token_source(), "Content-Type": "application/json",
                    AGENT_HEADER: attribution(agent), "User-Agent": "ltcm-floor/1.0"}
         if role is not None:
             headers[ROLE_HEADER] = role
+        if request_id is not None:
+            headers[REQUEST_HEADER] = request_id
         request = urllib.request.Request(self.url, data=json.dumps(body).encode("utf-8"), method="POST", headers=headers)
         try:
             with self.opener(request, timeout=self.timeout) as response:
                 raw = response.read()
                 cost = _cost(response.headers)
         except urllib.error.HTTPError as exc:
-            detail = exc.read()[:300].decode("utf-8", "replace")
-            raise ClaudeError(f"Claude call refused: HTTP {exc.code} {detail}", status=exc.code, cost_usd=_cost(exc.headers)) from None
+            raw_error = exc.read()[:4000]
+            detail = raw_error[:300].decode("utf-8", "replace")
+            try:
+                cap = json.loads(raw_error).get("cap")
+            except (ValueError, AttributeError):
+                cap = None
+            raise ClaudeError(f"Claude call refused: HTTP {exc.code} {detail}", status=exc.code, cost_usd=_cost(exc.headers),
+                              cap=cap if isinstance(cap, str) else None) from None
         except (urllib.error.URLError, OSError, ValueError) as exc:
             raise ClaudeError(f"Claude call failed: {type(exc).__name__}") from None
         try:
@@ -220,11 +238,30 @@ class Claude:
                             cost_verified=verified, id=answer.id, raw=payload)
         return answer
 
+    def settlement(self, request_id: str) -> dict[str, Any] | None:
+        """What the gateway booked for call `request_id`: `{"state": "held"|"settled"|"unknown"|"released"|"absent",
+        "cost_usd": Decimal | None}`, or None when the gateway cannot be read."""
+        if not isinstance(request_id, str) or not _REQUEST_ID.fullmatch(request_id):
+            return None
+        url = self.url.rsplit("/messages", 1)[0] + "/request/" + request_id
+        request = urllib.request.Request(url, headers={"Authorization": "Bearer " + self.token_source(), "User-Agent": "ltcm-floor/1.0"})
+        try:
+            with self.opener(request, timeout=20) as response:
+                data = json.loads(response.read())
+            state = str(data.get("state") or "")
+            cost = data.get("cost_usd")
+            amount = Decimal(str(cost)) if cost is not None else None
+        except Exception:  # noqa: BLE001 - unreadable is unknown
+            return None
+        if state not in ("held", "settled", "unknown", "released", "absent") or (amount is not None and (not amount.is_finite() or amount < 0)):
+            return None
+        return {"state": state, "cost_usd": amount}
+
 
 class ClaudeMeter:
     """What is left of the owner's funded Claude total, read from the gateway's `GET /v1/health` (`claude` block).
-    `remaining()` is None when the gateway cannot be read or has no Claude block; callers then spend nothing on Claude,
-    and the gateway's own 402 is still the backstop."""
+    `remaining()` is None when the gateway cannot be read, has no Claude block, or reports Claude not configured (no key:
+    every call would be a 503); callers then spend nothing on Claude, and the gateway's own 402 is still the backstop."""
 
     def __init__(self, gateway_url: str, token_source: Callable[[], str], *, opener: Any = None, ttl: float = 60.0,
                  clock: Any = None):
@@ -253,12 +290,12 @@ class ClaudeMeter:
                 with self.opener(request, timeout=20) as response:
                     block = json.load(response).get("claude") or {}
                 value = Decimal(str(block["cap_usd"])) - Decimal(str(block["spent_usd"]))
-                self._value = value if value.is_finite() else None
+                self._value = value if value.is_finite() and block.get("configured") is not False else None
                 self.last = {k: block.get(k) for k in ("cap_usd", "spent_usd", "inflight_usd", "calls", "configured")}
             except Exception:  # noqa: BLE001 - unreadable is unknown, never a number
                 self._value = None
             return self._value
 
 
-__all__ = ["Claude", "ClaudeMeter", "ClaudeError", "ClaudeRefusal", "ClaudeTruncated", "Answer", "MODEL", "MAX_TOKENS",
+__all__ = ["Claude", "ClaudeMeter", "ClaudeError", "ClaudeRefusal", "ClaudeTruncated", "Answer", "MODEL", "MAX_TOKENS", "REQUEST_HEADER",
            "request_body", "reservation_ceiling", "extract_json", "attribution"]

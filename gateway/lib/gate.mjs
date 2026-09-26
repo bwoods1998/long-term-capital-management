@@ -400,24 +400,57 @@ export function createGate({ store, env = {}, now = Date.now }) {
     /**
      * Claude's funded meter (Sept 26, 2026, the swarm sprint; lib/claude.mjs). Unlike the frontier's month it never
      * starts again: CLAUDE_USD is what the owner funded, and `spent` is every call's cost or hold against it. `inflight`
-     * is the part of `spent` still held (reserved, not yet settled). `roles` and `agents` file each settled cost by
-     * the call's X-LTCM-Role and X-LTCM-Agent; `stops` counts the answers by their stop reason.
+     * is the part of `spent` still held. Each hold is kept by id (`holds`: its micro-dollars, when, and the House's
+     * X-LTCM-Request id): a hold with no settlement after `claude.STALE_HOLD_MS` (the Worker died between reserve and
+     * settle) is released to zero by the sweep, so a lost settlement never shrinks the funded total for good; a
+     * settlement that arrives after its sweep still books its cost. `recent` is what became of the House's last requests
+     * (held, settled, unknown, released), which the House reads to true up its own holds (`GET /v1/claude/request/<id>`).
+     * `roles` and `agents` file each settled cost; `stops` and `geos` count the answers by stop reason and inference geo.
      */
     claudeMeter() {
       const row = read(store, CLAUDE_KEY, null) || {};
       const big = value => { try { return BigInt(value || 0); } catch { return 0n; } };
       const table = value => (value && typeof value === 'object' && !Array.isArray(value) ? value : {});
-      return { spent: big(row.spent), inflight: big(row.inflight), calls: Number(row.calls) || 0,
-        agents: table(row.agents), roles: table(row.roles), stops: table(row.stops) };
+      return { spent: big(row.spent), inflight: big(row.inflight), calls: Number(row.calls) || 0, seq: Number(row.seq) || 0,
+        agents: table(row.agents), roles: table(row.roles), stops: table(row.stops), geos: table(row.geos), holds: table(row.holds),
+        recent: table(row.recent), swept: Number(row.swept) || 0, swept_micro: big(row.swept_micro) };
+    },
+
+    _claudeWrite(row) {
+      const recent = Object.entries(row.recent).sort((a, b) => (Number(b[1]?.at) || 0) - (Number(a[1]?.at) || 0)).slice(0, claude.RECENT_REQUESTS);
+      write(store, CLAUDE_KEY, { spent: String(row.spent > 0n ? row.spent : 0n), inflight: String(row.inflight > 0n ? row.inflight : 0n),
+        calls: row.calls, seq: row.seq, agents: row.agents, roles: row.roles, stops: row.stops, geos: row.geos, holds: row.holds,
+        recent: Object.fromEntries(recent), swept: row.swept, swept_micro: String(row.swept_micro) });
+    },
+
+    /** Release every hold older than `claude.STALE_HOLD_MS` that no settlement replaced. Returns how many. */
+    claudeSweep({ at = now() } = {}) {
+      const row = this.claudeMeter();
+      let n = 0;
+      for (const [id, hold] of Object.entries(row.holds)) {
+        if (!(at - Number(hold?.at) > claude.STALE_HOLD_MS)) continue;
+        let micro = 0n;
+        try { micro = BigInt(hold.micro); } catch { micro = 0n; }
+        row.spent -= micro;
+        row.inflight -= micro;
+        row.swept += 1;
+        row.swept_micro += micro;
+        delete row.holds[id];
+        if (hold.request) row.recent[hold.request] = { state: 'released', cost: '0', at };
+        n += 1;
+      }
+      if (n) this._claudeWrite(row);
+      return n;
     },
 
     /** Hold a Claude call's worst case against the funded total, or refuse. The kill switch stops Claude calls too. */
-    claudeReserve({ micro }) {
+    claudeReserve({ micro, request = null, at = now() }) {
       if (killed()) return { ok: false, status: 423, cap: 'kill_switch', error: 'The kill switch is engaged; no Claude calls are being made.' };
       const cap = claude.capMicro(env);
       if (cap <= 0n) return { ok: false, status: 403, cap: 'claude_funded', error: 'No Claude budget is configured.' };
       const amount = BigInt(micro);
       if (amount <= 0n) return { ok: false, status: 400, error: 'A call must have a positive worst-case cost.' };
+      this.claudeSweep({ at });
       const row = this.claudeMeter();
       if (row.spent + amount > cap) {
         return {
@@ -425,45 +458,71 @@ export function createGate({ store, env = {}, now = Date.now }) {
           error: `This call could cost $${formatUsdMicro(amount)}; $${formatUsdMicro(cap > row.spent ? cap - row.spent : 0n)} is left of the $${formatUsd(cap)} funded.`,
         };
       }
-      write(store, CLAUDE_KEY, { ...this._claudeRow(row), spent: String(row.spent + amount), inflight: String(row.inflight + amount) });
-      return { ok: true, micro: String(amount) };
+      row.seq += 1;
+      const id = `c${row.seq}`;
+      const tag = claude.requestId(request);
+      row.holds[id] = { micro: String(amount), at, ...(tag ? { request: tag } : {}) };
+      if (tag) row.recent[tag] = { state: 'held', at };
+      row.spent += amount;
+      row.inflight += amount;
+      this._claudeWrite(row);
+      return { ok: true, micro: String(amount), id };
     },
 
-    /** Replace a hold with what the call cost (`actual`, micro-dollars); null keeps the whole hold: unknown is not free. */
-    claudeSettle({ reserved, actual, agent = null, role = null, stop = null }) {
+    /**
+     * Replace hold `id` with what the call cost (`actual`, micro-dollars); null keeps the whole hold as spent: unknown is
+     * not free. A hold the sweep already released books only the settlement's cost (its worst case when unknown).
+     */
+    claudeSettle({ id = null, reserved, actual, agent = null, role = null, stop = null, geo = null, at = now() }) {
       const row = this.claudeMeter();
-      const held = BigInt(reserved);
-      const cost = actual === null || actual === undefined ? held : BigInt(actual);
-      const spent = row.spent - held + cost;
+      const hold = id !== null && Object.hasOwn(row.holds, id) ? row.holds[id] : null;
+      const held = hold ? BigInt(hold.micro) : 0n;
+      const cost = actual === null || actual === undefined ? BigInt(reserved) : BigInt(actual);
+      if (hold) delete row.holds[id];
+      row.spent = row.spent - held + cost;
+      row.inflight -= held;
+      row.calls += 1;
       const slug = value => (typeof value === 'string' && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(value) ? value : 'unattributed');
       const add = (tableRow, name) => ({ ...tableRow, [name]: String(BigInt(tableRow[name] || 0) + cost) });
+      row.agents = add(row.agents, slug(agent));
+      row.roles = add(row.roles, slug(role));
       const stopName = typeof stop === 'string' && /^[a-z0-9_]{1,32}$/.test(stop) ? stop : 'none';
-      write(store, CLAUDE_KEY, {
-        ...this._claudeRow(row), spent: String(spent > 0n ? spent : 0n), inflight: String(row.inflight > held ? row.inflight - held : 0n),
-        calls: row.calls + 1, agents: add(row.agents, slug(agent)), roles: add(row.roles, slug(role)),
-        stops: { ...row.stops, [stopName]: (Number(row.stops[stopName]) || 0) + 1 },
-      });
+      row.stops = { ...row.stops, [stopName]: (Number(row.stops[stopName]) || 0) + 1 };
+      if (typeof geo === 'string' && /^[a-z0-9_-]{1,16}$/.test(geo)) row.geos = { ...row.geos, [geo]: (Number(row.geos[geo]) || 0) + 1 };
+      if (hold?.request) {
+        row.recent[hold.request] = { state: actual === null || actual === undefined ? 'unknown' : 'settled', cost: String(cost), at };
+      }
+      this._claudeWrite(row);
       return { ok: true, cost_usd: formatUsdMicro(cost) };
     },
 
-    _claudeRow(row) {
-      return { spent: String(row.spent), inflight: String(row.inflight), calls: row.calls, agents: row.agents, roles: row.roles, stops: row.stops };
+    /** What became of the House's request `request` (its X-LTCM-Request id): held, settled, unknown, released or absent. */
+    claudeRequest(request) {
+      const tag = claude.requestId(request);
+      const entry = tag ? this.claudeMeter().recent[tag] : null;
+      if (!entry) return { request: tag, state: 'absent' };
+      let cost = null;
+      try { cost = entry.cost === undefined ? null : formatUsdMicro(BigInt(entry.cost)); } catch { cost = null; }
+      return { request: tag, state: entry.state, cost_usd: cost };
     },
 
     /** What `/v1/health` reports of Claude: the funded total, what is spent and held, and by whom. */
-    claudeStatus() {
+    claudeStatus(at = now()) {
       const row = this.claudeMeter();
       const cap = claude.capMicro(env);
       const usd = table => Object.fromEntries(Object.entries(table).map(([name, value]) => {
         try { return [name, formatUsdMicro(BigInt(value))]; } catch { return [name, null]; }
       }));
+      const holds = Object.values(row.holds);
       return {
         // `cap_usd` is the owner's funded total, not a monthly allowance; `spent_usd` includes the holds in flight.
         funded: true, cap_usd: formatUsd(cap), spent_usd: formatUsdMicro(row.spent),
         settled_usd: formatUsdMicro(row.spent > row.inflight ? row.spent - row.inflight : 0n), inflight_usd: formatUsdMicro(row.inflight),
         remaining_usd: formatUsdMicro(cap > row.spent ? cap - row.spent : 0n), calls: row.calls,
+        holds: holds.length, stale_holds: holds.filter(hold => at - Number(hold?.at) > claude.STALE_HOLD_MS).length,
+        swept: row.swept, swept_usd: formatUsdMicro(row.swept_micro),
         models: Object.keys(claude.priceTable(env)), configured: typeof env.CLAUDE_API_KEY === 'string' && env.CLAUDE_API_KEY.length > 0,
-        by_role: usd(row.roles), by_agent: usd(row.agents), stops: row.stops,
+        by_role: usd(row.roles), by_agent: usd(row.agents), stops: row.stops, geos: row.geos,
       };
     },
 
@@ -661,7 +720,7 @@ export function createGate({ store, env = {}, now = Date.now }) {
           };
         })(),
         typesafe: this.typesafeStatus(),
-        claude: this.claudeStatus(),
+        claude: this.claudeStatus(at),
         github: { day: iso(at).slice(0, 10), pull_requests: this.pullsToday(at), cap: pullDayCap(env) },
         web_fetch: (() => {
           const row = this.webFetchDay(at);

@@ -17,6 +17,7 @@
 //   GET             /v1/claude/models        the Claude model ids the Anthropic key can reach, and which are priced
 //   POST            /v1/claude/messages      one Claude call, reserved and settled against the funded total (the
 //                                            kill switch stops it; lib/claude.mjs)
+//   GET             /v1/claude/request/<id>  what became of the House's Claude call <id> (its X-LTCM-Request)
 //   POST            /v1/typesafe/systemone  funded Jev judgments, with durable request identities
 //   POST            /v1/web/fetch            one public page's text for research, capped per day (lib/fetch.mjs)
 //   POST            /v1/github/pr            a proposal becomes a branch and a pull request, never a push
@@ -202,6 +203,12 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
   if (path === '/v1/claude/messages') {
     if (request.method !== 'POST') return fail('Method not allowed.', 405, { Allow: 'POST' });
     return claudeCall(request, env, { gate, fetcher, now });
+  }
+  const claudeRequest = /^\/v1\/claude\/request\/([A-Za-z0-9:._-]{1,160})$/.exec(path);
+  if (claudeRequest) {
+    // Free and read-only: the House trues up a hold it could not settle from its own answer.
+    if (request.method !== 'GET') return fail('Method not allowed.', 405, { Allow: 'GET' });
+    return json(await gate.claudeRequest(decodeURIComponent(claudeRequest[1])));
   }
 
   if (path === '/v1/typesafe/systemone') {
@@ -613,9 +620,11 @@ function claudeHeaders(env) {
  * One Claude call (Sept 26, 2026, the swarm sprint): refused while the kill switch is engaged, reserved at its worst
  * case against the funded total, forwarded, and settled from Anthropic's usage block. A refusal (`stop_reason`
  * "refusal", an HTTP 200) and a truncated answer ("max_tokens") are billed and settle at their usage; a 4xx settles at
- * zero (refused before any generation); so does a 5xx without a usage block, and so does a call that never answered
- * (the owner's rule for this meter: Anthropic bills completed work, and the account's own prepaid balance is the
- * backstop). A 2xx whose usage does not read keeps its whole hold: unknown is not free.
+ * zero (refused before any generation); so does a 5xx without a usage block, and so does a call whose request never
+ * got an answer (the owner's rule for this meter: Anthropic bills completed work, and the account's own prepaid balance
+ * is the backstop). Once Anthropic's headers arrived, though, the call ran: a body cut off mid-read, or a 2xx whose
+ * usage does not read, keeps its whole hold as spent (unknown is not free), as the frontier's does. The House's
+ * X-LTCM-Request id files the outcome (`gate.claudeRequest`).
  */
 async function claudeCall(request, env, { gate, fetcher, now }) {
   if (!env.CLAUDE_API_KEY) return json({ error: 'Claude is not configured.', cap: 'setup' }, 503);
@@ -630,11 +639,13 @@ async function claudeCall(request, env, { gate, fetcher, now }) {
   const admitted = claude.admit(parsed, env);
   if (admitted.error) return fail(admitted.error, admitted.status);
   const bytes = new TextEncoder().encode(body.text).length;
-  const hold = await gate.claudeReserve({ micro: String(claude.worstCase(admitted.price, bytes, admitted.maxTokens)), at: now() });
+  const tag = claude.requestId(request.headers.get(claude.REQUEST_HEADER));
+  const hold = await gate.claudeReserve({ micro: String(claude.worstCase(admitted.price, bytes, admitted.maxTokens)), request: tag, at: now() });
   if (!hold.ok) return json({ error: hold.error, ...(hold.cap ? { cap: hold.cap } : {}) }, hold.status);
   const agent = request.headers.get(frontier.AGENT_HEADER);
   const role = request.headers.get(frontier.ROLE_HEADER);
-  const settle = (actual, stop = null) => gate.claudeSettle({ reserved: hold.micro, actual, agent, role, stop, at: now() });
+  const settle = (actual, stop = null, geo = null) =>
+    gate.claudeSettle({ id: hold.id, reserved: hold.micro, actual, agent, role, stop, geo, at: now() });
   let upstream, text;
   try {
     upstream = await fetcher(claude.HOST + claude.PATH, {
@@ -642,10 +653,17 @@ async function claudeCall(request, env, { gate, fetcher, now }) {
       // Just under the House's own 600-second read, as the frontier's.
       signal: AbortSignal.timeout(570000),
     });
-    text = await upstream.text();  // inside the guard: a body cut off mid-read still settles
   } catch {
     const settled = await settle('0', 'no_answer');
     return json({ error: 'Anthropic did not answer.' }, 502, { 'X-LTCM-Cost-USD': settled.cost_usd });
+  }
+  try {
+    text = await upstream.text();
+  } catch {
+    // Anthropic answered and then the body was cut off: the call ran and may be billed. Its whole hold stays spent.
+    const settled = await settle(null, 'body_cut');
+    return json({ error: 'Anthropic\'s answer was cut off; its worst case stays on the meter.' }, 502,
+      { 'X-LTCM-Cost-USD': settled.cost_usd, 'X-LTCM-Cost-Known': 'false' });
   }
   let answer = null;
   try { answer = JSON.parse(text); } catch { answer = null; }
@@ -660,13 +678,15 @@ async function claudeCall(request, env, { gate, fetcher, now }) {
     actual = claude.actualCost(admitted.price, answer?.usage) ?? 0n;  // a 5xx is billed only for the usage it reports
     stop = `http_${upstream.status}`;
   }
-  const settled = await settle(actual === null ? null : String(actual), stop);
+  const geo = typeof answer?.usage?.inference_geo === 'string' ? answer.usage.inference_geo : null;
+  const settled = await settle(actual === null ? null : String(actual), stop, geo);
   return new Response(text, {
     status: upstream.status,
     headers: {
       'Content-Type': upstream.headers.get('Content-Type') || 'application/json; charset=utf-8',
       'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store',
       ...(settled?.cost_usd ? { 'X-LTCM-Cost-USD': settled.cost_usd } : {}),
+      ...(actual === null ? { 'X-LTCM-Cost-Known': 'false' } : {}),
     },
   });
 }

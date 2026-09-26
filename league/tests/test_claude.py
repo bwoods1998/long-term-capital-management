@@ -11,8 +11,8 @@ import unittest
 import urllib.error
 from decimal import Decimal
 
-from league.claude import (AGENT_HEADER, COST_HEADER, MAX_TOKENS, MODEL, ROLE_HEADER, Claude, ClaudeError, ClaudeMeter,
-                           ClaudeRefusal, ClaudeTruncated, extract_json, request_body, reservation_ceiling)
+from league.claude import (AGENT_HEADER, COST_HEADER, MAX_TOKENS, MODEL, REQUEST_HEADER, ROLE_HEADER, Claude, ClaudeError,
+                           ClaudeMeter, ClaudeRefusal, ClaudeTruncated, extract_json, request_body, reservation_ceiling)
 from league.tests.test_frontier import FakeOpener, FakeResponse
 
 GATEWAY = "https://gateway.example.test"
@@ -155,6 +155,30 @@ class Answers(unittest.TestCase):
         with self.assertRaises(ClaudeError):
             client(FakeOpener(FakeResponse(raw=b"<html>"))).ask("s", "q", agent="a")
 
+    def test_the_request_id_rides_along_and_the_gateways_record_of_it_can_be_read(self):
+        opener = FakeOpener(message(), FakeResponse({"request": "swarm:a:1:ab", "state": "settled", "cost_usd": "0.047000"}),
+                            FakeResponse({"request": "x", "state": "released", "cost_usd": "0.000000"}), FakeResponse({"state": "bogus"}),
+                            urllib.error.URLError("down"))
+        c = client(opener)
+        c.ask("s", "q", agent="a", request_id="swarm:a:1:ab")
+        self.assertEqual(opener.headers()[REQUEST_HEADER.lower()], "swarm:a:1:ab")
+        self.assertEqual(c.settlement("swarm:a:1:ab"), {"state": "settled", "cost_usd": Decimal("0.047000")})
+        self.assertEqual(opener.request.full_url, GATEWAY + "/v1/claude/request/swarm:a:1:ab")
+        self.assertEqual(opener.request.get_method(), "GET")
+        self.assertEqual(c.settlement("x"), {"state": "released", "cost_usd": Decimal("0")})
+        self.assertIsNone(c.settlement("x"), "an unknown state is no record")
+        self.assertIsNone(c.settlement("x"), "an unreadable gateway is no record")
+        self.assertIsNone(c.settlement("bad id!"))
+        with self.assertRaises(ClaudeError):
+            client(FakeOpener()).ask("s", "q", agent="a", request_id="has space")
+
+    def test_a_gateway_refusal_names_its_cap(self):
+        for code, body, cap in ((503, '{"error": "Claude is not configured.", "cap": "setup"}', "setup"),
+                                (423, '{"error": "kill", "cap": "kill_switch"}', "kill_switch"), (502, "<html>", None)):
+            with self.assertRaises(ClaudeError) as caught:
+                client(FakeOpener(http_error(code, body))).ask("s", "q", agent="a")
+            self.assertEqual((caught.exception.status, caught.exception.cap), (code, cap))
+
     def test_extract_json(self):
         self.assertEqual(extract_json('{"a": 1}'), {"a": 1})
         self.assertEqual(extract_json('```json\n{"a": {"b": 2}}\n```'), {"a": {"b": 2}})
@@ -178,7 +202,7 @@ class Meter(unittest.TestCase):
         self.assertEqual(meter.remaining(), Decimal("80.000000"))
 
     def test_an_unreadable_gateway_is_unknown_never_a_number(self):
-        for reply in (urllib.error.URLError("down"), self.health(None), self.health({"cap_usd": "x", "spent_usd": "1"}),
+        for reply in (self.health({"cap_usd": "100.00", "spent_usd": "0.000000", "configured": False}),urllib.error.URLError("down"), self.health(None), self.health({"cap_usd": "x", "spent_usd": "1"}),
                       FakeResponse(raw=b"not json")):
             meter = ClaudeMeter(GATEWAY, lambda: SECRET, opener=FakeOpener(reply), ttl=0)
             self.assertIsNone(meter.remaining())

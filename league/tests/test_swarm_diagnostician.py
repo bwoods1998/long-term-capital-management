@@ -111,6 +111,10 @@ class WhatItSees(DiagnosticianCase):
         # A robustness run of the same version, a lesson carrying another family's validation figures, and a notebook.
         self.store.add_run(self.fid, 1, result("stress", daily=[1.0] * 250, pnl=250.0), window="train", stress=1.5, purpose="train")
         self.store.note(self.fid, f"My validation t was {SECRET_T}; dsr failed.")
+        fam_row = self.store.family(self.fid)
+        spec = {**fam_row["spec"], "sketch": "Enter when the validation t of 2.2 holds; dsr and mean_positive failed at 0.61.",
+                "rejection": "It fails if checks_not_met still names days after 7 validations."}
+        self.store.update_family(self.fid, spec=spec)
         dead = self.store.add_family({**self.fam["spec"], "id": "condor-dead"}, origin="seed")
         self.store.set_state(dead["id"], validation_view={"t": 2.71828, "checks_not_met": ["mean_positive"]})
         self.store.retire_gym(dead["id"], "its trial-adjusted evidence fell below the line (deflated Sharpe probability 0.0314)",
@@ -120,11 +124,12 @@ class WhatItSees(DiagnosticianCase):
         packet = d.packet(fam, d.eligible(fam))
         self.assertIn("VALIDATION: not passed; 6 of 8 checks passed on the latest; 2 validations so far.", packet)
         for secret in (str(SECRET_T), str(SECRET_MEAN), str(SECRET_DSR), "2.71828", "0.0314", "checks_not_met", "mean_positive",
-                       "status_ok", "line_met", "dsr", "My validation"):
+                       "status_ok", "line_met", "dsr", "My validation", "2.2", "0.61", "after 7"):
             self.assertNotIn(secret, packet, secret)
         self.assertIn("def pick_dte(chain, lo, hi):", packet, "the best program in full")
         for section in ('"by_train_year"', '"weekday"', '"fills"', "ROBUSTNESS", '"stress": 1.5', "LESSONS OF RETIRED FAMILIES",
-                        "[withheld]", "condor"):
+                        "[withheld]", "condor", "The architect's sketch: Enter when the validation t of # holds",
+                        "Rejection test: It fails if [withheld] still names days after # validations."):
             self.assertIn(section, packet, section)
         self.assertIn('"by_train_year": {"2024": {"days": 250', packet, "P&L by Train year, from Train's own daily series")
 
@@ -210,6 +215,44 @@ class Rewrites(DiagnosticianCase):
         [event] = self.events()
         self.assertEqual(event["outcome"], "rejected")
         self.assertIn("safety check", event["reason"])
+
+
+class BilledFailures(DiagnosticianCase):
+    def test_a_truncation_is_asked_once_more_at_medium_with_a_tighter_brief(self):
+        self.claude.script = [message('{"decision": "rew', stop="max_tokens", cost="0.330000"), reply(program=self.rewritten())]
+        out = self.diagnostician().run()
+        self.assertEqual(out["diagnosed"][0]["outcome"], "rewrite")
+        first, second = (json.loads(r.data) for r, _ in self.claude.calls)
+        self.assertEqual((first["output_config"]["effort"], second["output_config"]["effort"]), ("high", "medium"))
+        self.assertIn("RAN OUT OF ROOM", second["messages"][0]["content"])
+        self.assertEqual(self.events()[-1]["retried"], "medium")
+        self.assertAlmostEqual(self.router.claude_spent(role="diagnostician"), 0.33 + 0.412)
+
+    def test_a_billed_failure_waits_for_new_evidence_instead_of_asking_every_half_hour(self):
+        for script in ([message("", stop="refusal", cost="0.020000")],
+                       [message("{", stop="max_tokens", cost="0.330000"), message("{", stop="max_tokens", cost="0.200000")]):
+            with self.subTest(stops=[json.loads(m.body)["stop_reason"] for m in script]):
+                self.setUp()
+                self.claude.script = list(script)
+                out = self.diagnostician().run()
+                [event] = self.events()
+                self.assertEqual(event["outcome"], "billed_failure")
+                self.assertAlmostEqual(event["cost_usd"], sum(float(m.headers["X-LTCM-Cost-USD"]) for m in script))
+                self.assertEqual(len(self.claude.calls), len(script), "a refusal is not retried; a truncation once")
+                d = self.diagnostician()
+                self.clock.advance(1801)
+                self.assertIsNone(d.eligible(self.store.family(self.fid)), "no new evidence: no new call")
+                self.clock.advance(6 * 3600)
+                self.assertIsNone(d.eligible(self.store.family(self.fid)))
+                self.store.update_family(self.fid, validations=3)
+                self.assertIsNotNone(d.eligible(self.store.family(self.fid)))
+
+    def test_no_retry_when_the_days_budget_cannot_hold_it(self):
+        self.settings["diagnostician"]["usd_day"] = 1.0
+        self.claude.script = [message("{", stop="max_tokens", cost="0.600000")]
+        self.diagnostician().run()
+        self.assertEqual(self.events()[-1]["outcome"], "billed_failure")
+        self.assertEqual(len(self.claude.calls), 1)
 
 
 class Retirement(DiagnosticianCase):
