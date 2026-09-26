@@ -789,6 +789,60 @@ that data limitation ([Alpaca release](https://alpaca.markets/blog/alpaca-launch
 Parity is an estimate, not an official cash-settlement value; unresolved settlement evidence must
 be reported as such. Venue cutoffs and refusals must be observed, not inferred from a passing test.
 
+## The sprint (docs/goals/LTCM_SWARM_SPRINT.md, from 21:24Z Sept 26)
+
+The owner started the sprint with `/goal` on Saturday afternoon Pacific. It amends the plan, keeps T0
+and this record, and lifts the Saturday continuation's no-real-money scope.
+
+**Owner's decisions** (as given):
+- D1 real money on for Monday: yes.
+- D2 evidence reform as written: yes.
+- D3 real-fill calibration round trips at $50 a day: yes.
+- D4 money table at the bold end: yes.
+- D5 deposit: none now; deposits across all accounts later this week, so size by what is there.
+- D6 Sail: no top-up now; pace the burst so the Sail balance stays above the guard through Tuesday.
+- D7 Claude API: $100 funded, key in the gateway as `CLAUDE_API_KEY` (listed in the Worker's secrets
+  at 21:10Z).
+
+### Sprint log
+
+- **20:51Z Review.** Three read-only reviews: Gym realism, swarm dynamics, Monday's live path. Main
+  findings, counts only:
+  - 76 families, 18,226 trials, 0 over the validation line;
+  - 16 alive at the floor of 16; 7 of 8 Gym boxes idle.
+  - The seven causes are in the sprint file.
+- **21:24Z** Sprint goal merged as #386 (`28395fd7`).
+- **21:24Z Wave 0 settings** in `/workspace/state/swarm.json` on the House. Backup is
+  `swarm.json.before-sprint-20260926T212416Z`; mode 600 kept. Changes:
+  - `population.floor` 16 to 44 (start 48, ceiling 96);
+  - `architect.refill_seconds` 1200, `every_seconds` 7200, `max_refill` 12;
+  - `tournament.retire_revisions` 200, `retire_evaluations` 4000;
+  - `gym.validation_split` 1: no forced segment closes on Validation;
+  - `researcher.sail_usd_per_hour` 2.25 to 1.5 (D6 pacing);
+  - **Gym image v1 to `core-calibrated-v1`**: `sbcp_fb07667a-…`, Train 2022-2024 plus the provisional
+    fitted fill model, sealed, holdout-free;
+  - **the gate on**: `gate_checkpoint` `sbcp_87f6a5ae-…`, the paired gate image with the 2026 holdout.
+
+  The Saturday plan's "final pair only" adoption is superseded by the sprint: image adoption costs
+  one re-validation and no holdout looks, and the 25-root pair follows when the names land.
+  - At 21:25:51Z, verified: process PASS, heartbeat 15 s, pace 1.5 read. The pool ended the v1 boxes
+    and forked on the new image. Gate WAIT, since nothing is over the line.
+- **21:25Z Wave 0.3** mid-fill diagnostic started on its own sealed fork
+  (`sb_2ff60e71`, `ltcm-diag-mid-*`) with the deployed engine: 72 validated families × stress 1.0 /
+  0.5 / 0.0 on Validation. Results are private (`~/Work/.ltcm-main/middiag/`) and never shown to
+  researchers; the runs count as diagnostic trials.
+- **21:25Z Wave 0.5 data order.** `backfill.py run` supports `--order`, but no reorder. The back
+  months only become usable with B2's horizon admission in R2, by which time both stages will have
+  finished (names about 09:30Z Sunday). Restarting the supervised collector would risk a duplicate
+  session for no gain.
+- **21:22Z Wave 1** builders started, each in its own worktree:
+  - B1 search: `sprint/b1-search`, ~/Work/ltcm-sprint-b1;
+  - B2 Gym: `sprint/b2-gym`;
+  - B3 Claude: `sprint/b3-claude`;
+  - B4 live: `sprint/b4-live`.
+
+  An independent review of #381 is also running.
+
 ## Scoreboard
 
 ### T0 (2026-09-26T06:23Z; repo figures at 06:40Z)
