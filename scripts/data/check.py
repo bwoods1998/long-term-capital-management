@@ -280,6 +280,26 @@ def alpaca_seconds(quotes_path: Path, seconds_root: Path) -> dict[str, Any]:
             "by_root_day": out}
 
 
+def zero_dte(work: Path) -> dict[str, Any]:
+    """Per root and year: trading days in the store, and the share of them with a same-day expiry
+    listed (SPY/QQQ daily from mid-Nov 2022, IWM's Tue/Thu from 2024: the store keeps what existed)."""
+    out: dict[str, dict[str, Any]] = {}
+    base = work / "expiries"
+    for root_dir in sorted(p for p in base.iterdir() if p.is_dir()) if base.exists() else []:
+        for path in sorted(root_dir.glob("*.json")):
+            day = dt.date.fromisoformat(path.stem)
+            listed = json.loads(path.read_text())
+            cell = out.setdefault(root_dir.name, {}).setdefault(str(day.year), {"days": 0, "zero_dte": 0, "by_weekday": [0] * 5})
+            cell["days"] += 1
+            if day.isoformat() in listed:
+                cell["zero_dte"] += 1
+                cell["by_weekday"][day.weekday()] += 1
+    for cells in out.values():
+        for cell in cells.values():
+            cell["share"] = round(cell["zero_dte"] / cell["days"], 3) if cell["days"] else None
+    return out
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--store", default=sl.STORE_ROOT)
@@ -295,6 +315,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     a.add_argument("--quotes", required=True)
     a.add_argument("--extra", action="append", default=[], help="another store-layout root to look in")
     a.add_argument("--seconds", default=None, help="a check-store-1s directory: compare at one-second resolution too")
+    sub.add_parser("zero-dte", help="per root and year: the share of days with a same-day expiry listed")
     e = sub.add_parser("export-alpaca")
     e.add_argument("--sqlite", default=str(Path.home() / "Work" / ".options-history" / "options_history.sqlite"))
     e.add_argument("--out", default=str(HERE.parents[1] / ".data" / "gym" / "alpaca_quotes_2026-09-22_24.csv.gz"))
@@ -316,6 +337,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             result["one_second"] = alpaca_seconds(Path(args.quotes), Path(args.seconds))
         (work / "checks-alpaca.json").write_text(json.dumps(result, indent=1, default=str))
         print(json.dumps(result, indent=1, default=str))
+    elif args.cmd == "zero-dte":
+        print(json.dumps(zero_dte(work), indent=1))
     elif args.cmd == "export-alpaca":
         print(json.dumps(export_alpaca(Path(args.sqlite), Path(args.out))))
     return 0
