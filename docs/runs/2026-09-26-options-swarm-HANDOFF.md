@@ -94,6 +94,15 @@ swarm (after an adversarial review and two fix rounds). The gateway is deployed 
    re-launched** (workflow run `wf_3048d1aa-607`); read their results (`~/.claude/projects/-home-bwoods1998-Work/
    551089ee-bad4-4d48-a821-22438d30a90b/subagents/workflows/wf_3048d1aa-607/journal.jsonl`) or re-run them. Review
    material: `~/Work/ltcm-w5-live/.data/w5/review362.md` and `fixverify362.md`; JSONs in `~/Work/.ltcm-main/`.
+   **Round-3 verification finished ~14:35Z** (`~/Work/ltcm-w5-live/.data/w5/fixverify362-round3.md`, JSON in
+   `~/Work/.ltcm-main/fixverify362-round3.json`): **1 CRITICAL** (pre-existing): with the committed config,
+   `service.build` crashes before the House starts (the options_history block reads `brokers["alpaca"]` / `paper`,
+   which the live path no longer builds) -> **do not deploy #362 until fixed and a build test on the unmodified
+   config passes**; **6 major** from a fresh full pass (an exit waiting forever behind another position's resting
+   close; a lost exit-only program never reloaded; a real instance taken off real money; `_export_real`'s cursor
+   dropping real trades; Probe/Sized demoted to Candidate too eagerly; a venue-liquidated expiring position left
+   'awaiting'); m2, m16 (the decider docstring's false claim that the child cannot read the token), R7 partly.
+   All sent to W5 at ~14:37Z. Re-verify after its fixes.
    W5's open question: cap how often a program may re-send a close (recommended: cap re-sends of the same close,
    never the first send). After fixes and a clean verification: merge (after merging main), deploy the gateway
    first (`npx wrangler deploy` in `gateway/`: new vars MAX_DAY_OPEN_ORDERS 250, MAX_DAY_USD 4000,
