@@ -265,6 +265,7 @@ class Swarm:
             self.guard.check()
             try:  # requests a stopped process left in flight: settled or released (their holds would count forever)
                 self.router.provider.reconcile_stale()
+                self.router.settle_holds()  # what the swarm booked for unanswered calls, trued up
             except Exception:  # noqa: BLE001
                 pass
             try:  # old conversations out of the Provider's file (the disk)
@@ -283,7 +284,9 @@ class Swarm:
                 self._round("gate", self.gate.run)
             if self.gate.forward_due():
                 self._round("forward", self.gate.forward)
-            if self.architect.due() and self.store.get("tournament_at"):
+            # Refilling to the start population always (a birth spends nothing by itself: the pace caps all cycles);
+            # growing past it toward the ceiling only while the hourly spend is under the pace.
+            if self.architect.due() and self.store.get("tournament_at") and (self.architect.refilling() or not self.over_pace()):
                 self._round("architect", self.architect.run)
         if self.clock() - self._beat >= float(self.settings.get("heartbeat_seconds", 20)):
             self._beat = self.clock()

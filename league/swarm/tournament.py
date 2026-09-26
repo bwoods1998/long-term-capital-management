@@ -62,18 +62,32 @@ class Tournament:
         """Queue validation for every family with an unvalidated best; wait; judge. One job a family: the Gym runs
         the 1.5x-stress twin itself and carries its figures as `stress_1.5` (a second trial, counted here)."""
         jobs = []
+        errors = {}
+        judged = {}
+        image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
+        bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
         for fam in fams:
             n = self.candidate_version(fam)
-            if n is None or n == fam.get("validated_version"):
+            if n is None:
                 continue
+            state = fam.get("state") or {}
+            if n == fam.get("validated_version") and state.get("validation_image") == image and state.get("validation_bundle") == bundle:
+                continue
+            if state.get("validation_image") != image or state.get("validation_bundle") != bundle:
+                self.store.compare_and_set_state(fam["id"], {"validation_image": state.get("validation_image"),
+                                                           "validation_bundle": state.get("validation_bundle")}, gate_ready=False)
             version = self.store.version(fam["id"], n)
             if version is None or not version.get("code"):
+                continue
+            recorded = self.recorded_validation(fam["id"], n)
+            if recorded is not None:  # validated before (a best submitted again): judged from its result, no new trial
+                row = self.judge(fam["id"], n, recorded, record=False)
+                if row is not None:
+                    judged[fam["id"]] = row
                 continue
             job = GymJob(family=fam["id"], version=n, code=version["code"], params=version["params"], window="validation",
                          roots=tuple(fam["roots"]), stress=1.0, purpose="validation", priority=1.0)
             jobs.append((fam, n, self.pool.submit(job)))
-        errors = {}
-        judged = {}
         deadline = self.clock() + timeout
         for fam, n, job in jobs:
             try:
@@ -87,24 +101,44 @@ class Tournament:
                 judged[fam["id"]] = row
         return {"queued": len(jobs), "judged": judged, "errors": errors}
 
-    def judge(self, fid: str, n: int, result: Mapping[str, Any]) -> dict[str, Any] | None:
+    def recorded_validation(self, fid: str, n: int) -> dict[str, Any] | None:
+        """The full result of a validation this version already had on the Gym image in use now (the same program on the
+        same code and data answers the same; another image may hold other days, so its result is not reused)."""
+        image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
+        bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
+        for row in self.store.runs(fid, window="validation", limit=500):
+            if row.get("version") == n and float(row.get("stress") or 1.0) == 1.0 and row.get("path"):
+                result = self.store.run_result(row["run_id"])
+                if result is not None and result.get("gym_image") == image and result.get("gym_bundle") == bundle:
+                    return result
+        return None
+
+    def judge(self, fid: str, n: int, result: Mapping[str, Any], *, record: bool = True) -> dict[str, Any] | None:
         """Record a validation result (and its stress twin: two trials) and judge it by the line. Also called for a
-        result that lands after the round stopped waiting: every evaluation counts, and its verdict is the same."""
+        result that lands after the round stopped waiting: every evaluation counts. Its verdict is written only while
+        `n` is still the family's candidate (the researcher's current best): a result for a version the family has
+        moved on from is stale, whatever its number. `record=False` re-judges a result already recorded."""
         fam = self.store.family(fid)
         if fam is None:
             return None
-        years = float((result.get("summary") or {}).get("days") or 0) / 252.0 * max(1, len(fam["roots"]))
-        stale = fam.get("validated_version") is not None and int(fam["validated_version"]) > int(n)
-        row = self.store.add_run(fid, n, result, window="validation", stress=1.0, purpose="validation", program_years=years)
+        if record:
+            years = float((result.get("summary") or {}).get("days") or 0) / 252.0 * max(1, len(fam["roots"]))
+            row = self.store.add_run(fid, n, result, window="validation", stress=1.0, purpose="validation", program_years=years)
+            if isinstance(result.get("stress_1.5"), dict):
+                twin = result["stress_1.5"]
+                self.store.add_run(fid, n, {"run_id": f"{row['run_id']}-s15", "status": twin.get("status") or "ok", "trials": 1,
+                                            "summary": dict(twin)}, window="validation", stress=evidence.STRESS, purpose="validation",
+                                   program_years=years)
+        with self.store.lock:  # the candidate check and the verdict's writes, never interleaved with another judge
+            fam = self.store.family(fid) or fam
+            image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
+            bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
+            if self.candidate_version(fam) != int(n) or result.get("gym_image") != image or result.get("gym_bundle") != bundle:
+                return None  # stale: its trials count, its verdict does not
+            return self._verdict(fid, fam, n, result, counted=record)
+
+    def _verdict(self, fid: str, fam: Mapping[str, Any], n: int, result: Mapping[str, Any], *, counted: bool) -> dict[str, Any]:
         stressed = evidence.stressed_of(result)
-        if isinstance(result.get("stress_1.5"), dict):
-            twin = result["stress_1.5"]
-            self.store.add_run(fid, n, {"run_id": f"{row['run_id']}-s15", "status": twin.get("status") or "ok", "trials": 1,
-                                        "summary": dict(twin)}, window="validation", stress=evidence.STRESS, purpose="validation",
-                               program_years=years)
-        if stale:  # an older version's result landed after a newer one was judged: its trials count, its verdict does not
-            return None
-        fam = self.store.family(fid) or fam
         line = evidence.validation_line(result, stressed, lineage_trials=self.store.lineage_trials(fid),
                                         trial_sharpes=self.store.lineage_trial_sharpes(fid))
         view = diagnostics.validation_view(result, line)
@@ -116,9 +150,19 @@ class Tournament:
         if improved:
             fields.update(best_validation=float(mean), since_val_revisions=0, since_val_trials=0)
         self.store.update_family(fid, **fields)
-        self.store.bump(fid, validations=1)
+        if counted:  # a re-judged recorded result is no new validation for the bandit
+            self.store.bump(fid, validations=1)
+        state = fam.get("state") or {}
+        typical = dict(state.get("typical_by_version") or {})
+        if state.get("validation_version") is not None and state.get("typical_max_loss_usd") is not None:
+            typical.setdefault(str(state["validation_version"]), state["typical_max_loss_usd"])
+        loss = typical_max_loss(result)
+        if loss is not None:
+            typical[str(n)] = loss
         self.store.set_state(fid, validation_view=view, validation_line=line, validation_version=n,
-                             typical_max_loss_usd=typical_max_loss(result),
+                             validation_image=result.get("gym_image"),
+                             validation_bundle=result.get("gym_bundle"),
+                             typical_max_loss_usd=loss, typical_by_version=typical,
                              validation_numbers={"mean": mean, "t": t, "sharpe_daily": summary.get("sharpe_daily"),
                                                  "quarters": summary.get("quarters_positive")},
                              gate_ready=bool(line["passed"]))
@@ -156,7 +200,10 @@ class Tournament:
         for _, fam in scored[: int(self.cfg.get("fork_top", 3))]:
             if alive + len(born) >= ceiling:
                 break
-            child = self.fork(fam)
+            with self.store.lock:
+                if len(self.store.families(alive=True)) >= ceiling:
+                    break
+                child = self.fork(fam)
             if child:
                 born.append(child)
         return born
@@ -166,7 +213,6 @@ class Tournament:
         allowed there), with the parent's best program as its first version."""
         roots = [r for r in self.settings.get("gym", {}).get("roots", UNIVERSE_ROTATION)]
         taken = {tuple(f["roots"]) for f in self.store.families(alive=True) if f["mechanism"] == fam["mechanism"]}
-        parent_line = fam.get("lineage") or fam["id"]
         for root in roots:
             if (root,) in taken or root in fam["roots"]:
                 continue
@@ -176,10 +222,8 @@ class Tournament:
             spec.update({"id": f"{fam['id'].split('-on-')[0]}-on-{root.lower()}", "mechanism": fam["mechanism"],
                          "structure": fam["structure"], "roots": [root]})
             spec.pop("signal", None)  # its first version is the parent's program on the new root, not a starter
-            # Its trials count through the lineage. A slice the lineage looked at before (a retired sibling's) costs
-            # its looks too; the parent's ancestors' looks already come through the parent.
-            _, extra_looks = self.store.slice_spent(parent_line, [root], exclude=self.store.ancestors(fam["id"]))
-            child = self.store.add_family(spec, origin="fork", parent=fam["id"], extra_looks=extra_looks)
+            # The entire connected lineage shares its trials and three holdout looks, including later looks on other roots.
+            child = self.store.add_family(spec, origin="fork", parent=fam["id"])
             best = self.store.version(fam["id"], self.candidate_version(fam))
             if best and best.get("code"):
                 code = best["code"]

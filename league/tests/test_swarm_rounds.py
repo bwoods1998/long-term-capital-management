@@ -192,10 +192,28 @@ class TournamentTests(RoundCase):
         self.assertEqual(self.store.lineage_looks(c), 1, "a's one look, once")
         del a, b
 
+    def test_a_fork_back_onto_an_ancestors_slice_counts_the_looks_it_spent_there_after_the_fork(self):
+        self.family("a")  # SPY
+        self.store.set_state("a", validation_numbers={"mean": 0.05, "t": 2.5, "sharpe_daily": 0.2, "quarters": "4/4"})
+        t = Tournament(self.store, self.pool, self.settings)
+        [b] = t.forks(self.store.families(alive=True))
+        self.assertEqual(self.store.family(b)["roots"], ["QQQ"])
+        self.clock.advance(3600)
+        for i in range(2):  # a spends two SPY looks after b was born, then retires
+            self.store.add_look("a", 1, f"sha-a{i}", passed=False, p_value=0.5, detail={})
+        self.store.retire("a", "done")
+        self.clock.advance(3600)
+        self.store.set_state(b, validation_numbers={"mean": 0.05, "t": 2.5, "sharpe_daily": 0.2, "quarters": "4/4"})
+        [c] = t.forks(self.store.families(alive=True))
+        self.assertEqual(self.store.family(c)["roots"], ["SPY"])
+        self.assertEqual(self.store.lineage_looks(c), 2, "SPY's holdout was looked at twice by this lineage")
+        self.assertEqual(self.store.lineage_looks(b), 2, "the whole lineage shares the ration across roots and fork dates")
+
     def test_a_late_validation_of_an_older_version_never_overwrites_a_newer_one(self):
         self.family("a")
         t = Tournament(self.store, self.pool, self.settings)
         v2 = self.store.add_version("a", "# a2\nNEEDS = {'roots': ['SPY']}\nPARAMS = {}\ndef decide(ctx):\n    return None\n", {}, author="x")
+        self.store.update_family("a", best_version=v2["n"])  # the researcher's best moved on to v2
         job = lambda n: GymJob(family="a", version=n, code="", params={}, window="validation", roots=("SPY",))
         self.assertTrue(t.judge("a", v2["n"], strong(job(v2["n"])))["passed"])
         trials = self.store.family("a")["trials"]
@@ -203,6 +221,58 @@ class TournamentTests(RoundCase):
         fam = self.store.family("a")
         self.assertEqual((fam["validated_version"], fam["state"]["validation_version"], fam["state"]["gate_ready"]), (2, 2, True))
         self.assertEqual(fam["trials"], trials + 2, "its trials still count")
+
+    def validation_jobs(self):
+        return [j for j in self.pool.jobs if j.window == "validation"]
+
+    def test_an_older_version_submitted_again_is_judged_once_not_revalidated_every_hour(self):
+        self.family("a")
+        t = Tournament(self.store, self.pool, self.settings)
+        v2 = self.store.add_version("a", "# a2\nNEEDS = {'roots': ['SPY']}\nPARAMS = {}\ndef decide(ctx):\n    return None\n", {}, author="x")
+        self.store.update_family("a", best_version=v2["n"])
+        self.answer = weak
+        t.validate(self.store.families(alive=True))
+        self.store.update_family("a", best_version=1)  # the researcher submits its older (never validated) version
+        self.answer = strong
+        t.validate(self.store.families(alive=True))
+        fam = self.store.family("a")
+        self.assertEqual((fam["validated_version"], fam["state"]["validation_version"], fam["state"]["gate_ready"]), (1, 1, True))
+        jobs, trials = len(self.validation_jobs()), fam["trials"]
+        for _ in range(3):
+            t.validate(self.store.families(alive=True))
+        self.assertEqual((len(self.validation_jobs()), self.store.family("a")["trials"]), (jobs, trials), "judged once")
+
+    def test_a_version_validated_before_is_judged_again_from_its_recorded_result(self):
+        self.family("a")
+        t = Tournament(self.store, self.pool, self.settings)
+        self.answer = strong
+        t.validate(self.store.families(alive=True))
+        v2 = self.store.add_version("a", "# a2\nNEEDS = {'roots': ['SPY']}\nPARAMS = {}\ndef decide(ctx):\n    return None\n", {}, author="x")
+        self.store.update_family("a", best_version=v2["n"])
+        self.answer = weak
+        t.validate(self.store.families(alive=True))
+        self.assertFalse(self.store.family("a")["state"]["gate_ready"])
+        jobs, trials = len(self.validation_jobs()), self.store.family("a")["trials"]
+        self.store.update_family("a", best_version=1)  # back to v1
+        t.validate(self.store.families(alive=True))
+        fam = self.store.family("a")
+        self.assertEqual((len(self.validation_jobs()), fam["trials"]), (jobs, trials), "no new Gym run, no new trial")
+        self.assertEqual((fam["state"]["validation_version"], fam["state"]["gate_ready"]), (1, True))
+
+    def test_a_recorded_validation_from_another_gym_image_is_not_reused(self):
+        self.family("a")
+        self.pool.image = lambda kind: "sbcp_gym_v0"
+        self.answer = lambda job: {**strong(job), "gym_image": "sbcp_gym_v0"}
+        t = Tournament(self.store, self.pool, self.settings)
+        t.validate(self.store.families(alive=True))
+        v2 = self.store.add_version("a", "# a2\nNEEDS = {'roots': ['SPY']}\nPARAMS = {}\ndef decide(ctx):\n    return None\n", {}, author="x")
+        self.store.update_family("a", best_version=v2["n"])
+        t.validate(self.store.families(alive=True))
+        jobs = len(self.validation_jobs())
+        self.pool.image = lambda kind: "sbcp_gym_v1"  # the Gym moved to other data
+        self.store.update_family("a", best_version=1)
+        t.validate(self.store.families(alive=True))
+        self.assertEqual(len(self.validation_jobs()), jobs + 1, "v1 runs again on the new Gym's data")
 
     def test_a_validation_failure_is_recorded_not_raised(self):
         self.family("a")
@@ -284,6 +354,81 @@ class GateTests(RoundCase):
         self.pool.slow.clear()
         gate.run()
         self.assertEqual(len(self.store.looks()), 1)
+
+    def newer(self, fid, answer, tag="v2"):
+        """The researcher's newer best, validated by the tournament (`answer` makes it pass or fail the line)."""
+        v = self.store.add_version(fid, f"# {tag}\nNEEDS = {{'roots': ['SPY']}}\nPARAMS = {{}}\ndef decide(ctx):\n    return None\n", {},
+                                   author="x")
+        self.store.update_family(fid, best_version=v["n"])
+        self.answer = answer
+        Tournament(self.store, self.pool, self.settings).validate(self.store.families(alive=True))
+        self.assertEqual(self.store.family(fid)["state"]["validation_version"], v["n"])
+        return v
+
+    def alerts(self):
+        return [e for e in self.store.events_after(0) if e["kind"] == "swarm.status" and e["payload"].get("alert")
+                and e["payload"].get("action") == "look_failed_three_times"]
+
+    def test_a_superseded_versions_look_marker_is_dropped_without_a_refusal_or_an_alert(self):
+        self.ready()
+        self.pool.slow.add("a")
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}] * 2
+        Gate(self.store, self.pool, self.router, self.settings, clock=self.clock).run()
+        self.pool.slow.clear()
+        self.newer("a", weak)  # v2 fails the line while v1's look is in flight
+        self.clock.advance(60)
+        gate = Gate(self.store, self.pool, self.router, self.settings, clock=self.clock)  # a restart
+        for _ in range(6):
+            gate.run()
+            self.clock.advance(300)
+        state = self.store.family("a")["state"]
+        self.assertIsNone(state.get("look_inflight"), "nothing is owed for a version no longer validated")
+        self.assertEqual((self.store.refusals("a"), self.alerts()), ([], []))
+        self.assertEqual(len([j for j in self.pool.jobs if j.window == "holdout"]), 1)
+
+    def test_a_late_failure_of_a_superseded_look_clears_its_marker(self):
+        self.ready()
+        self.pool.slow.add("a")
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}] * 2
+        gate = Gate(self.store, self.pool, self.router, self.settings, clock=self.clock)
+        gate.run()
+        job, _ = self.pool.landing[0]
+        self.pool.slow.clear()
+        self.newer("a", weak)
+        job.late_fail("the Gym failed twice")
+        state = self.store.family("a")["state"]
+        self.assertIsNone(state.get("look_inflight"))
+        self.assertFalse(state["gate_ready"], "v2 failed its line: not re-armed")
+        self.assertEqual(self.store.refusals("a"), [])
+
+    def test_a_look_the_gym_cannot_make_is_refused_and_alerted_once(self):
+        self.ready()
+        gate = Gate(self.store, self.pool, self.router, self.settings, clock=self.clock)
+        for _ in range(5):
+            gate.owe("a", 1, "sha-a1")
+        self.assertEqual(len(self.store.refusals("a")), 1)
+        self.assertEqual(len(self.alerts()), 1)
+
+    def test_a_late_result_of_an_older_look_never_clears_the_newer_looks_marker(self):
+        self.ready()
+        self.pool.slow.add("a")
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}] * 4
+        Gate(self.store, self.pool, self.router, self.settings, clock=self.clock).run()
+        self.pool.slow.clear()
+        self.newer("a", strong)  # v2 passes its line while v1's look is out
+        self.pool.slow.add("a")
+        Gate(self.store, self.pool, self.router, self.settings, clock=self.clock).run()  # v2's look goes out too
+        self.assertEqual(len(self.pool.landing), 1, "the older look still reserves the family's place")
+        self.clock.advance(2200)
+        Gate(self.store, self.pool, self.router, self.settings, clock=self.clock).run()  # the old attempt expired
+        (job1, late1), (job2, _) = self.pool.landing
+        self.assertEqual((job1.version, job2.version), (1, 2))
+        late1(weak(job1))  # v1's result lands: a look, and a fail
+        self.assertEqual(self.store.family("a")["state"]["look_inflight"]["n"], 2, "v2's marker stands")
+        self.pool.slow.clear()
+        self.clock.advance(60)
+        Gate(self.store, self.pool, self.router, self.settings, clock=self.clock).run()  # a restart: v2's look is owed
+        self.assertEqual([x["version"] for x in self.store.looks()], [1, 2])
 
     def test_the_gate_looks_only_at_the_version_still_validated(self):
         self.ready("a")
@@ -383,9 +528,11 @@ class GateTests(RoundCase):
 
     def test_three_looks_a_lineage(self):
         self.ready()
-        self.store.update_family("a", inherited_looks=3)
+        for i in range(3):  # three looks this lineage already made on the slice (the ration is counted from the looks)
+            self.store.add_look("a", 1, f"earlier-{i}", passed=False, p_value=0.5, detail={})
         Gate(self.store, self.pool, self.router, self.settings).run()
-        self.assertEqual(self.store.looks(), [])
+        self.assertEqual(len(self.store.looks()), 3, "no fourth look")
+        self.assertEqual([j for j in self.pool.jobs if j.window == "holdout"], [])
         self.assertEqual(self.store.refusals("a")[0]["stage"], "rations")
 
     def test_the_leakage_alarm_stops_the_gate(self):
@@ -399,7 +546,13 @@ class GateTests(RoundCase):
 
     def test_no_gate_image_no_look_but_the_review_runs_and_is_kept(self):
         from league.swarm import bands
+        from league.gym.driver import build_bundle
 
+        self.pool.image = lambda kind: "sbcp_synthetic_gym"
+        bundle = build_bundle()[1]
+        self.pool.bundle = lambda: bundle
+        self.answer = lambda job: {**strong(job), "gym_image": "sbcp_synthetic_gym", "gym_bundle": bundle}
+        (self.root / "swarm.json").write_text(json.dumps({"gym": {"image_checkpoint": "sbcp_synthetic_gym"}}))
         self.ready()
         self.settings["gym"]["gate_checkpoint"] = None
         self.replies = [{"text": json.dumps({"verdict": "pass"})}] * 2
@@ -492,6 +645,38 @@ class ArchitectTests(RoundCase):
         {"slug": "tsla", "mechanism": "Single-name momentum after earnings with debit verticals on the move.", "structure": "debit_vertical",
          "roots": ["TSLA"]}]}
 
+    def populate(self, n):
+        for i in range(n):
+            self.store.add_family({**SPEC, "id": f"pop-{i}", "mechanism": f"Idea number {'abcdefghijklmnopqrstuvwxyz'[i % 26]} "
+                                   f"{i // 26} of the founding population, a condor on the index."}, origin="seed")
+
+    def many(self, n):
+        return {"families": [{"slug": f"new-{i}", "mechanism": f"A distinct mechanism {'abcdefghijklmnop'[i]} for why a spread pays "
+                                                                f"on this index after a {'abcdefghijklmnop'[i]} event.",
+                              "structure": "iron_condor", "roots": ["QQQ"], "dte": [0, 2]} for i in range(n)]}
+
+    def test_below_the_start_population_the_architect_refills_hourly_up_to_the_gap(self):
+        self.populate(40)
+        arch = Architect(self.store, self.router, self.settings, clock=self.clock)
+        self.store.put("architect_at", self.clock())
+        self.clock.advance(3600)
+        self.assertTrue(arch.refilling() and arch.due(), "40 alive of the 48 the swarm starts with: hourly")
+        self.replies = [{"text": json.dumps(self.many(12))}]
+        out = arch.run()
+        self.assertEqual(len(out["born"]), 8, "up to the start population")
+        self.assertIn("Propose 3 to 8 new families", self.sail.bodies[-1]["input"][-1]["content"])
+
+    def test_at_the_start_population_it_grows_every_four_hours_three_to_six_at_a_time(self):
+        self.populate(50)
+        arch = Architect(self.store, self.router, self.settings, clock=self.clock)
+        self.store.put("architect_at", self.clock())
+        self.clock.advance(3600)
+        self.assertFalse(arch.refilling() or arch.due())
+        self.clock.advance(4 * 3600)
+        self.assertTrue(arch.due())
+        self.replies = [{"text": json.dumps(self.many(12))}]
+        self.assertEqual(len(arch.run()["born"]), 6)
+
     def test_it_admits_only_well_formed_families_and_they_read_the_graveyard(self):
         self.family("old")
         self.store.bury("old", "straddles on SPY bled theta on quiet days")
@@ -549,6 +734,7 @@ class ArchitectTests(RoundCase):
         self.assertEqual(self.store.lineage_trials(born), 31)
 
     def test_every_four_hours(self):
+        self.populate(48)  # the start population: the plan's cadence (below it the architect refills hourly)
         a = Architect(self.store, self.router, self.settings, clock=self.clock)
         self.assertTrue(a.due())
         self.replies = [{"text": json.dumps({"families": []})}]
