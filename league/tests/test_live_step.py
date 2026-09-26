@@ -195,6 +195,47 @@ class Gates(LiveCase):
         self.assertTrue(any(n["stop"] == "reconciliation" for n in self.notices))
 
 
+class OrderPathInTheLoop(LiveCase):
+    def refusals(self):
+        return [p["why"] for p, a in self.ledger.of("live.refusal")]
+
+    def test_buying_power_is_reserved_before_sending(self):
+        self.venue.bp = D("50")                                           # far less than the Probe's structures need
+        live = self.make([family("vert", VERTICAL, band="probe")])
+        self.run_to(9, 32)
+        self.assertEqual(self.venue.sent, [])
+        self.assertTrue(any(w.startswith("buying power: it reserves") for w in self.refusals()), self.refusals())
+
+    def test_a_working_order_is_cancelled_when_its_time_in_force_runs_out(self):
+        timed = VERTICAL.replace('"limit": "natural", "tag": "t"', '"limit": {"price": 0.01}, "tif": 3, "tag": "t"')
+        self.venue.fill = "none"
+        live = self.make([family("vert", timed, band="probe", params={"hold": 600})])
+        self.run_to(9, 33)
+        self.assertEqual(self.venue.cancels, [])
+        self.run_to(9, 34)
+        self.assertEqual(len(self.venue.cancels), 1)
+        self.assertEqual(self.venue.book[0]["status"], "canceled")
+
+    def test_a_working_open_on_an_expiring_contract_is_cancelled_at_three(self):
+        self.clock.set(at(MONDAY, 14, 57))
+        resting = VERTICAL.replace('"limit": "natural", "tag": "t"', '"limit": {"price": 0.01}, "tag": "t"')
+        self.venue.fill = "none"
+        live = self.make([family("vert", resting, band="probe", params={"hold": 600, "dte": 0})])
+        self.run_to(14, 59)
+        self.assertEqual(self.venue.cancels, [])
+        self.run_to(15, 0)
+        self.assertEqual(len(self.venue.cancels), 1)
+
+    def test_tuition_is_one_structure_and_never_evidence(self):
+        live = self.make([family("pre", VERTICAL, band="gym", holdout=False, validation=True, params={"hold": 2})])
+        self.run_to(9, 36)
+        self.assertEqual(sorted(live.instances), ["pre@1:t"])
+        opens = [b for b in self.venue.sent if b["legs"][0]["position_intent"] == "buy_to_open"]
+        self.assertEqual([b["qty"] for b in opens], ["1"])
+        self.assertEqual(self.families.forward_rows("pre"), [])              # never evidence
+        self.assertTrue(live.book.state.rows("SELECT tuition FROM orders WHERE action='open'")[0]["tuition"])
+
+
 class ExpiryDay(LiveCase):
     def test_no_new_open_on_an_expiring_contract_from_three_and_the_near_money_close(self):
         self.clock.set(at(MONDAY, 14, 58))
