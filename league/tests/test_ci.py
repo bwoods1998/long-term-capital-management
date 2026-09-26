@@ -145,3 +145,21 @@ class TheDeployedGatewaysPrefix(unittest.TestCase):
         text = (Path(__file__).resolve().parents[2] / ".github" / "workflows" / "merton.yml").read_text()
         self.assertIn("startsWith(github.head_ref, 'merton/')", text)
         self.assertIn("startsWith(github.head_ref, 'astra/')", text)
+
+    def test_nothing_merges_a_proposal_by_itself(self):
+        """The options overhaul (Sept 26, 2026, trap 3): Merton's merge job is off; the guard and the judge still report."""
+        from pathlib import Path
+
+        text = (Path(__file__).resolve().parents[2] / ".github" / "workflows" / "merton.yml").read_text()
+        merge = text.split("\n  merge:\n", 1)[1]
+        self.assertIn("\n    if: false\n", merge.split("\n    steps:\n", 1)[0])
+        self.assertIn("\n  guard:\n", text)
+        self.assertIn("\n  judge:\n", text)
+
+    def test_the_checks_install_the_gym_only_when_the_tree_pins_it_and_run_both_suites(self):
+        from pathlib import Path
+
+        text = (Path(__file__).resolve().parents[2] / ".github" / "workflows" / "checks.yml").read_text()
+        self.assertIn("if [ -f requirements-gym.txt ]; then python3 -m pip install", text)
+        self.assertIn("discover -s ltcm/tests -t .", text)
+        self.assertIn("discover -s league/tests -t .", text)
