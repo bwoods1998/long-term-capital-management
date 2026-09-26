@@ -355,11 +355,14 @@ def gateway_structures(root: Path = REPO) -> tuple[list[str], list[str]]:
 
 
 def check_structures(root: Path = REPO) -> list[str]:
-    """The options-desk run's money rows (O1-O5, G of Sept 25, 2026) inside their bounds (`allocator.spread_problems`),
-    and ONE source of truth for the structure types real money may open: the gateway's `OPTION_STRUCTURES_REAL` admits
-    exactly `allocator.spread_types_real()` of the tree's own constitution -- `option_spread_real_types` while
-    `option_spreads_real` (O1) is on, none while it is off (the plan's G1: the gateway variable is set in the same deploy
-    that flips O1, never before). The constitution is read from `root` without importing the tree's package."""
+    """ONE source of truth for the structure types real money may open, and the money rows inside their bounds.
+
+    Since the options swarm (Sept 26, 2026, Wave 5) the constitution's `options_money` table governs real money: its rows
+    inside `constitution.OPTIONS_MONEY_BOUNDS` (`options_money_problems`), and the gateway's `OPTION_STRUCTURES_REAL`
+    admitting exactly its `real_types` (the gateway itself holds the credit types back under $2,000 of equity). A tree
+    whose constitution has no such table is judged by the options-desk run's rows (O1-O5, G of Sept 25, 2026): the gateway
+    admits exactly `allocator.spread_types_real()` (`option_spread_real_types` while O1 is on, none while it is off). The
+    constitution is read from `root` without importing the tree's package."""
     from . import allocator
 
     path = root / "league" / "constitution.py"
@@ -371,17 +374,21 @@ def check_structures(root: Path = REPO) -> list[str]:
         constitution = namespace["CONSTITUTION"]
     except Exception as exc:  # noqa: BLE001 - a constitution that cannot be read is a refusal
         return [f"league/constitution.py could not be read: {type(exc).__name__}: {exc}"]
-    problems = [f"league/constitution.py: {p}" for p in allocator.spread_problems(constitution)]
+    table = constitution.get("options_money")
+    if table is not None:
+        problems = [f"league/constitution.py: {p}" for p in namespace["options_money_problems"](constitution)]
+        wanted = sorted(set(table.get("real_types") or [])) if isinstance(table, dict) else []
+        source = f"options_money.real_types {wanted}"
+    else:
+        problems = [f"league/constitution.py: {p}" for p in allocator.spread_problems(constitution)]
+        wanted = sorted(allocator.spread_types_real(constitution))
+        source = (f"allocator.option_spreads_real {bool(constitution.get('allocator', {}).get('option_spreads_real'))}, "
+                  f"option_spread_real_types {constitution.get('allocator', {}).get('option_spread_real_types')}")
     gateway, unreadable = gateway_structures(root)
     problems += unreadable
-    if not problems:
-        wanted = sorted(allocator.spread_types_real(constitution))
-        if gateway != wanted:
-            problems.append(f"gateway/wrangler.jsonc: OPTION_STRUCTURES_REAL admits {gateway or 'none'} on the real account, "
-                            f"but the constitution opens {wanted or 'none'} (allocator.option_spreads_real "
-                            f"{bool(constitution.get('allocator', {}).get('option_spreads_real'))}, "
-                            f"option_spread_real_types {constitution.get('allocator', {}).get('option_spread_real_types')}): "
-                            "the two change together, in one deploy")
+    if not problems and gateway != wanted:
+        problems.append(f"gateway/wrangler.jsonc: OPTION_STRUCTURES_REAL admits {gateway or 'none'} on the real account, "
+                        f"but the constitution opens {wanted or 'none'} ({source}): the two change together, in one deploy")
     return problems
 
 

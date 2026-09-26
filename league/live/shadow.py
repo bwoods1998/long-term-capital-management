@@ -70,13 +70,20 @@ class ShadowAccount(E.Account):
         self.winding_down = False  # a superseded instance: no decisions, its positions closed at the natural
         self.began_day: int | None = None
         self.ended_day: int | None = None
+        self.last_mi = -1          # the last minute of today this account was stepped through
 
     # ------------------------------------------------------------------ the minute, in two halves
     def pre(self, day: LiveDay, mi: int) -> None:
-        """The engine's step before the decision: working orders meet this minute's quotes, then the venue acts."""
+        """The engine's step before the decision: working orders meet this minute's quotes, then the venue acts. The
+        engine steps every minute; a live minute the House missed (a slow minute) still gets the venue's rules (the
+        cutoffs act at their exact minute), with no quotes to fill against."""
+        last = getattr(self, "last_mi", -1)
+        for skipped in range(max(0, last + 1), mi):
+            self._venue(day, skipped)
         if self.orders:
             self._work(day, mi)
         self._venue(day, mi)
+        self.last_mi = mi
 
     def job(self, day: LiveDay, mi: int) -> dict | None:
         """What `engine.Account._decide` hands `build_ctx`, for the decider; None when no root has a chain now."""
@@ -149,7 +156,7 @@ class ShadowAccount(E.Account):
             "pending_shares": [[_position_state(p), root, shares, ref] for p, root, shares, ref in self.pending_shares],
             "trades": self.trades[self.exported:], "daily": self.daily[-30:], "fill_rows": self.fill_rows[-200:],
             "closed_since": self.closed_since, "rejects_since": self.rejects_since, "winding_down": self.winding_down,
-            "began_day": self.began_day, "ended_day": self.ended_day,
+            "began_day": self.began_day, "ended_day": self.ended_day, "last_mi": self.last_mi,
         }
 
     @classmethod
@@ -171,6 +178,7 @@ class ShadowAccount(E.Account):
         acc.rejects_since = list(row.get("rejects_since") or [])
         acc.winding_down = bool(row.get("winding_down"))
         acc.began_day, acc.ended_day = row.get("began_day"), row.get("ended_day")
+        acc.last_mi = int(row.get("last_mi", -1))
         return acc
 
 

@@ -524,10 +524,9 @@ class OptionsLive:
         for key, acc in list(self.shadow.accounts.items()):
             inst = self.instances.get(key)
             if acc.began_day != day.ordinal:
-                if not all(r in day.chains and day.chains[r].contracts for r in {p.root for p in acc.positions.values()}):
-                    pass
                 acc.begin_day(day)
                 acc.began_day = day.ordinal
+                acc.last_mi = -1
             acc.pre(day, mi)
             if inst is None or inst.mode == "wind_down" or acc.winding_down:
                 if not acc.winding_down or any(not p.closing for p in acc.positions.values()):
@@ -747,7 +746,7 @@ class OptionsLive:
                 book.cancel(order, "the open cutoff for expiring contracts")
             elif order.tif is not None and age >= max(1, order.tif) and not order.forced:
                 book.cancel(order, f"its time in force ({order.tif} minutes) ran out")
-            elif order.action == "open" and (self.real_block(opening=True) and not order.tuition):
+            elif order.action == "open" and self.real_block(opening=True):
                 book.cancel(order, f"real entries are shut: {self.real_block(opening=True)}")
         if killed:
             out["kill_switch"] = True
@@ -806,6 +805,13 @@ class OptionsLive:
             tries = int(pos.info.get("forced_tries") or 0)
             value = round(order.natural - 0.01 * min(10, tries), 2)
             pos.info["forced_tries"] = tries + 1
+            book._save_position(pos)
+        # A close's limit stays one the gateway takes: a debit structure is never paid to be given away (its close
+        # receives zero at worst), and a credit structure's buy-back stays under its collateral.
+        if pos.type in L.CREDIT:
+            value = max(value, round(-(pos.collateral - 0.01), 2))
+        else:
+            value = max(0.0, value)
         refusal = book.path_refusal(pos.legs, opening=False, day=day.day.isoformat())
         if refusal:
             return refusal
