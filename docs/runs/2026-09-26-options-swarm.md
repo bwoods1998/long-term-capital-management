@@ -373,6 +373,73 @@ clock never restarts.
   promotion when only the gate checkpoint changed; W4 is fixing it while preserving the consumed
   look. Independent W5 review reproduced a concurrent band/evidence race that could undo a
   demotion; W5 owns its fix. Evidence thresholds stay unchanged.
+- 15:52Z **#368 merged and deployed.** Main `647c8384`; gateway version
+  `e602bdb4-59ca-4c29-9977-098a97faeb58`. The post-deploy status confirms September's cumulative
+  OpenAI cap $707, metered spending $596.29, kill switch false and no change to today's order
+  counters. October cannot reuse the September funding automatically. Real option opens stay off.
+- 15:56Z **#365 merged** at reviewed head `5d03099a`, main `49df3d9b`. Its tests and CI passed.
+  The running store's private backup migrated in 0.008 seconds and reopened in 0.001 seconds:
+  60 families, 44 alive, 2,592 versions, no holdout looks, SQLite integrity `ok`. The production
+  store was not mutated by this rehearsal. Gate selection remains null pending final SIP images.
+- 16:02Z **#367 merged** at reviewed head `acee1211`, main `8d1a7354`, all CI green.
+  The committed source passed 223 integrated tests on the House. Private data/image/calendar/
+  calibration metadata is installed at `/workspace/state/data`, hashes verified, files 0600;
+  supervision remains disabled until the integrated House release is verified.
+- 16:03Z Funded-pace observation: Sail $193.68, booked swarm cost $2.9593/hour (models $2.1612,
+  Gym $0.7981); 13,546 trials and 17,268.75 recorded program-years, 44 alive/16 retired,
+  median cycle 60.15 seconds, 2,057 recent cycles and one error. No validation-ready family or
+  holdout look. The verifier's default 48-population check is a founding target, not the adaptive
+  floor (16); current population is within the planned range. Brokerage remains $481.63 equity,
+  $481.60 cash, no open orders/options, only LTC dust.
+- 16:04Z W5's five additional repairs independently reproduced: atomic band/evidence confirmation,
+  expired broken-structure recovery, funding/equity snapshot consistency, cumulative-fill value
+  accounting, and promotion time persisted with the band transition. A residual old-local/new-
+  durable timestamp mismatch was also fixed. Head `11b6f1f2` passed 163 focused tests on the House;
+  the production-kernel isolation probe passed again (uid/gid 65534, no extra groups, no network,
+  dummy secret/state access denied, read-only runtime, synthetic decision parity).
+- 16:05Z Root found and assigned a wiring mismatch: market-data authentication must use `alpaca`
+  even with real execution disabled, as the goal requires. Read-only entitlement probes actually
+  returned HTTP 200 for OPRA through both credentials, so this was a plan/credential-routing
+  defect, not evidence of an observed subscription outage. Paper inventory is **nine legacy
+  positions and zero open orders**: seven stock fractions and two SOFI Oct 2 puts. This supersedes
+  the handoff's claim that closes are still queued; Monday must inspect/clear or explicitly retain
+  them in its paper accounting, not assume they disappeared. No order was sent by this probe.
+- 16:05Z #369's committed completion/nightly/locking tests passed on the House: 52 run, 15 skipped
+  because that box deliberately has no Arrow/Polars (the data box does). Data-side scripts and the
+  sealed forward rehearsal were separately verified by W1. #370's daily-statistics feedback
+  correction passed independent review, 29 focused laptop tests and its on-box regression. Both
+  await full CI. Wave 2b is being built only as a draft and will not merge before Monday's close.
+
+### Monday pre-open and forward-run checklist (prepared Saturday; results still pending)
+
+This continuation prepares paper/shadow operation and leaves `real_money=false`, the grant
+disabled and real-option openings off. The original plan's real-money milestone is not claimed.
+
+1. Before 12:00Z Sept 28, reconcile the exact deployed release, latest backup, House and swarm
+   heartbeats, data collector lock/start identity and heartbeat, free disk, Sail reserve and funded
+   OpenAI allowance. Read the final image/calibration identities and the current engine bundle.
+   Every eligible family's validation and holdout evidence must match those identities.
+2. Read the actual session/expiry/event calendar; inspect Candidate and paper instance lists,
+   missing quotes, unresolved positions/fills, stops and alerts. Read the brokerage and paper
+   accounts separately. Do not call a pending deposit trading profit or assume funding landed.
+3. Reconcile the nine inherited paper positions against current positions/orders. Record their
+   disposition separately from the swarm. The one-lot SPY paper route proof must open and close
+   successfully on the venue; synthetic tests and historical rehearsal do not satisfy this check.
+4. At 13:30Z, run Candidates in live shadow and observe the paper proof. Record actual simulated
+   and paper fills, rejections, quote staleness, buying power, attribution and execution latency.
+   No strategy qualifying is a valid result to report. It is not permission to lower the evidence
+   requirements. No deploy from 13:25Z through 20:05Z except a rollback.
+5. Inspect every 30 minutes during the session and reconcile after 20:00Z. Report options P&L
+   separately from funding and all compute/data costs. Only then consider the reviewed Wave 2b
+   merge after 20:05Z, with its before/after repository and CI measurements.
+6. Tuesday Sept 29 06:00Z: verify the actual first forward collection, SIP ingestion, sealed gate
+   copy/checkpoint and consumed manifest for Sept 28. The Saturday rehearsal is not that run.
+
+The production index level is inferred from option parity because Alpaca does not supply an
+underlying index feed. Its September 2 launch notice confirms both live index-option support and
+that data limitation ([Alpaca release](https://alpaca.markets/blog/alpaca-launches-index-options-via-trading-api/)).
+Parity is an estimate, not an official cash-settlement value; unresolved settlement evidence must
+be reported as such. Venue cutoffs and refusals must be observed, not inferred from a passing test.
 
 ## Scoreboard
 
