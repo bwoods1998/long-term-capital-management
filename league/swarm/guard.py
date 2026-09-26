@@ -10,15 +10,20 @@ researchers to zero, when:
   other box (the data box) that eats the same credits;
 - the swarm's Sail spend since the burst began reached `burst_cap_usd` ($350 until Monday's open);
 - after the burst: the swarm's Sail spend today reached `after_burst_usd_day` less the House's burn;
-- the balance could not be read for `unknown_brake_seconds` (a guard that cannot see does not spend).
+- the balance could not be read (FAIL CLOSED: at once, and a failed read never releases a brake), or no
+  good reading is `stale_seconds` old;
+- the burst's spend reaches the cap, counted as the larger of what the swarm booked and Sail's own meter
+  (every fall of the balance since the burst began: every box and model call on the account);
+- the state disk has under `min_free_disk_gb` free (the House's ledger lives there).
 
-It releases when the balance is back above the line plus `release_margin_usd` (hysteresis), the caps
-allow, and a reading is fresh. Every change of state is a `swarm.guard` event. Standard library only.
+It releases only on a fresh good reading above the line plus `release_margin_usd` (hysteresis) with the
+caps allowing. Every change of state is a `swarm.guard` event. Standard library only.
 """
 
 from __future__ import annotations
 
 import datetime as dt
+import shutil
 import time
 from typing import Any, Callable, Mapping
 
@@ -32,17 +37,19 @@ def _epoch(text: str) -> float:
 
 
 class SailGuard:
-    """The guard (the module docstring). `reader()` returns (balance_usd or None, sail_burn_usd_per_day or None)."""
+    """The guard (the module docstring). `reader()` returns (balance_usd or None, sail_burn_usd_per_day or None);
+    `disk_free()` the state root's free bytes."""
 
     def __init__(self, store: SwarmStore, settings: Mapping[str, Any], reader: Callable[[], tuple[Any, Any]], *,
-                 clock: Callable[[], float] = time.time):
+                 clock: Callable[[], float] = time.time, disk_free: Callable[[], float] | None = None):
         self.store = store
         self.settings = settings
         self.reader = reader
         self.clock = clock
+        self.disk_free = disk_free or (lambda: float(shutil.disk_usage(store.root).free))
         state = store.get("guard", {}) or {}
-        self.braked: bool = bool(state.get("braked", False))
-        self.reason: str = str(state.get("reason") or "")
+        self.braked: bool = bool(state.get("braked", True))  # nothing is allowed before a first good reading
+        self.reason: str = str(state.get("reason") or "no reading yet")
         self.last_ok: float = float(state.get("last_ok") or 0.0)
         self.last: dict[str, Any] = dict(state.get("last") or {})
         self.checked_at: float = 0.0
@@ -54,10 +61,23 @@ class SailGuard:
         return self.settings.get("guard", {})
 
     def allows(self, kind: str = "any") -> bool:
-        return not self.braked
+        """FAIL CLOSED: braked, or no good reading for `stale_seconds`, allows no new cycle, round or box."""
+        return not self.braked and self.clock() - self.last_ok < float(self.cfg.get("stale_seconds", 600))
 
     def due(self) -> bool:
         return self.clock() - self.checked_at >= float(self.cfg.get("every_seconds", 180))
+
+    def _metered(self, balance: float | None) -> float:
+        """Sail's own meter since the burst began: every fall of the balance between two good readings (a rise is a
+        top-up, never negative spend). It counts every box and model call on the account, booked or not."""
+        spent = float(self.store.get("metered_spent", 0.0) or 0.0)
+        previous = self.store.get("metered_last_balance")
+        if balance is not None:
+            if previous is not None and balance < float(previous):
+                spent += float(previous) - balance
+            self.store.put("metered_last_balance", balance)
+            self.store.put("metered_spent", round(spent, 4))
+        return spent
 
     def check(self) -> dict[str, Any]:
         """Read the balance and decide. Returns the reading and the decision."""
@@ -71,22 +91,23 @@ class SailGuard:
         balance = float(balance) if balance is not None else None
         burn = float(burn) if burn is not None else None
         swarm_day = self.store.spent(SWARM_SAIL_KINDS, since=now - 86400)
-        # `measured_burn` (default): Sail's own 24-hour spend less the swarm's, never below the floor. It counts every
-        # other box on the account (the data box) and, for a day after a restart, whatever ran before it; false trusts the
-        # configured `house_burn_usd_day` alone (the operator's choice once the new House's burn is known).
-        measured = (burn - swarm_day) if burn is not None and cfg.get("measured_burn", True) else 0.0
-        house = max(float(cfg.get("house_burn_usd_day", 2.0)), measured)
+        # `measured_burn`: Sail's own 24-hour spend less the swarm's, never below the floor. It counts every other box on
+        # the account (the data box) and, for a day after a restart, whatever ran before it; false (the default) trusts
+        # the configured `house_burn_usd_day` alone.
+        measured = (burn - swarm_day) if burn is not None and cfg.get("measured_burn", False) else 0.0
+        house = max(float(cfg.get("house_burn_usd_day", 1.0)), measured)
         line = 2.0 * house + float(cfg.get("margin_usd", 30.0))
         burst_start = float(self.store.get("burst_started_at", now))
         burst_until = _epoch(cfg.get("burst_until", "2026-09-28T13:30:00Z"))
         in_burst = now < burst_until
-        burst_spent = self.store.spent(SWARM_SAIL_KINDS, since=burst_start)
+        metered = self._metered(balance)
+        burst_spent = max(self.store.spent(SWARM_SAIL_KINDS, since=burst_start), metered if in_burst else 0.0)
         midnight = now - (now % 86400)
         today_spent = self.store.spent(SWARM_SAIL_KINDS, since=midnight)
         reasons = []
         if balance is None:
-            if now - self.last_ok >= float(cfg.get("unknown_brake_seconds", 900)):
-                reasons.append("the Sail balance could not be read for 15 minutes")
+            # FAIL CLOSED: a failed read never releases a brake, and brakes an unbraked guard at once.
+            reasons.append("the Sail balance could not be read" + (" (braked before it)" if self.braked else ""))
         else:
             self.last_ok = now
             release = line + (float(cfg.get("release_margin_usd", 5.0)) if self.braked else 0.0)
@@ -99,11 +120,18 @@ class SailGuard:
             day_cap = max(0.0, float(cfg.get("after_burst_usd_day", 12.0)) - house)
             if today_spent >= day_cap:
                 reasons.append(f"today's Sail allowance after the burst is spent ({today_spent:.2f} of {day_cap:.2f})")
-        was = self.braked
+        try:
+            free_gb = self.disk_free() / 2 ** 30
+        except OSError:
+            free_gb = None
+        if free_gb is not None and free_gb < float(cfg.get("min_free_disk_gb", 3.0)):
+            reasons.append(f"the state disk has {free_gb:.1f} GB free (the House's ledger needs room)")
+        was = self.braked if self.store.get("guard") is not None else None  # the first check says where it starts
         self.braked = bool(reasons)
         self.reason = "; ".join(reasons)
         self.last = {"balance": balance, "burn_day": burn, "house_day": round(house, 2), "line": round(line, 2),
-                     "swarm_day": round(swarm_day, 4), "burst_spent": round(burst_spent, 4), "today_spent": round(today_spent, 4),
+                     "swarm_day": round(swarm_day, 4), "burst_spent": round(burst_spent, 4), "metered_spent": round(metered, 4),
+                     "today_spent": round(today_spent, 4), "free_disk_gb": None if free_gb is None else round(free_gb, 1),
                      "in_burst": in_burst, "braked": self.braked, "reason": self.reason, "at": now}
         self.store.put("guard", {"braked": self.braked, "reason": self.reason, "last_ok": self.last_ok, "last": self.last})
         if was != self.braked:

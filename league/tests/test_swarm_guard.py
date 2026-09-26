@@ -27,7 +27,7 @@ class GuardCase(unittest.TestCase):
         self.settings = copy.deepcopy(S.DEFAULTS)
 
     def guard(self):
-        return SailGuard(self.store, self.settings, lambda: self.reading, clock=self.clock)
+        return SailGuard(self.store, self.settings, lambda: self.reading, clock=self.clock, disk_free=lambda: 100.0 * 2 ** 30)
 
 
 class Defaults(GuardCase):
@@ -124,16 +124,64 @@ class Guard(GuardCase):
         g.check()
         self.assertFalse(g.allows(), "12 a day less the House's 2")
 
-    def test_an_unreadable_balance_brakes_after_fifteen_minutes(self):
+    def test_an_unreadable_balance_brakes_at_once_and_only_a_good_reading_releases(self):
         g = self.guard()
         g.check()
+        self.assertTrue(g.allows())
         self.reading = (None, None)
-        self.clock.advance(600)
+        self.clock.advance(180)
+        g.check()
+        self.assertFalse(g.allows(), "fail closed: no new cycle or box on a failed read")
+        self.assertIn("could not be read", g.reason)
+        self.reading = (118.79, 34.0)
+        self.clock.advance(180)
         g.check()
         self.assertTrue(g.allows())
-        self.clock.advance(301)
+
+    def test_a_failed_read_while_braked_keeps_the_brake(self):
+        self.reading = (20.0, 34.0)
+        g = self.guard()
         g.check()
         self.assertFalse(g.allows())
+        for _ in range(3):
+            self.reading = (None, None)
+            self.clock.advance(180)
+            g.check()
+            self.assertFalse(g.allows())
+        self.reading = (99.0, 34.0)  # above the line but not above line + the release margin
+        self.clock.advance(180)
+        g.check()
+        self.assertFalse(g.allows())
+        actions = [e["payload"]["action"] for e in self.store.events_after(0) if e["kind"] == "swarm.guard"]
+        self.assertEqual(actions, ["brake"], "never released by a failed read")
+
+    def test_a_stale_reading_does_not_allow(self):
+        g = self.guard()
+        g.check()
+        self.assertTrue(g.allows())
+        self.clock.advance(601)
+        self.assertFalse(g.allows(), "no reading for ten minutes: no new cycle or box")
+
+    def test_the_burst_cap_also_reads_sails_own_meter(self):
+        g = self.guard()
+        self.reading = (5000.0, 34.0)
+        g.check()
+        for balance in (4900.0, 4800.0, 4700.0, 4640.0):  # $360 metered by Sail, none of it booked by the swarm
+            self.reading = (balance, 34.0)
+            self.clock.advance(180)
+            g.check()
+        self.assertFalse(g.allows())
+        self.assertIn("burst", g.reason)
+        self.reading = (6000.0, 34.0)  # a top-up is not negative spend
+        self.clock.advance(180)
+        out = g.check()
+        self.assertEqual(out["metered_spent"], 360.0)
+
+    def test_a_filling_disk_brakes(self):
+        g = SailGuard(self.store, self.settings, lambda: self.reading, clock=self.clock, disk_free=lambda: 2.0 * 2 ** 30)
+        g.check()
+        self.assertFalse(g.allows())
+        self.assertIn("disk", g.reason)
 
     def test_a_restart_remembers_the_brake(self):
         self.reading = (10.0, 34.0)
