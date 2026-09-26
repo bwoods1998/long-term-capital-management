@@ -230,6 +230,25 @@ class Mirror(HookCase):
         self.assertEqual([e["kind"] for e in events], ["swarm.news", "swarm.news", "agent.note"])
         self.assertIn("moves from Gym to Candidate", events[1]["payload"]["text"])
 
+    def test_a_swarm_alert_reaches_the_houses_ops_alerts(self):
+        store = SwarmStore(self.root)
+        store.event("swarm.status", "fly", {"action": "not_the_plans_reviewer", "alert": True, "text": "two Sail models stood in"})
+        store.event("swarm.status", None, {"action": "started"})
+        store.close()
+        alerts = []
+
+        class House:
+            ledger = Ledger(self.root / "ledger.sqlite")
+
+            def alert(self, level, text, **payload):
+                alerts.append((level, text))
+
+        house = House()
+        self.addCleanup(house.ledger.close)
+        self.step().tick(house, open_for_business=False)
+        self.assertEqual(len(alerts), 1)
+        self.assertIn("two Sail models stood in", alerts[0][1])
+
     def test_the_swarm_never_writes_the_houses_own_kinds(self):
         for kind in ("swarm.born", "swarm.retired", "swarm.band", "swarm.note", "swarm.cycle", "swarm.tournament", "swarm.gate",
                      "swarm.architect", "swarm.guard", "swarm.pool", "swarm.status"):
@@ -252,7 +271,7 @@ class Reads(HookCase):
         from league.swarm.gate import run_sha
 
         store.set_state(b["id"], validation_version=1, validation_line={"passed": True}, typical_max_loss_usd=45.0,
-                        review={"sha": run_sha(store.version(b["id"], 1)), "verdict": "pass"})
+                        review={"sha": run_sha(store.version(b["id"], 1)), "verdict": "pass", "audit": {"verdict": "pass"}})
         store.close()
         rows = {r["family"]: r for r in bands.read(self.root)}
         self.assertEqual(set(rows), {"condor-vrp", "tuition"})
@@ -274,11 +293,15 @@ class Reads(HookCase):
             v = store.add_version(fam["id"], f"# {fid}\nNEEDS = {{}}\n", {}, author="seed")
             store.set_state(fid, validation_version=v["n"], validation_line={"passed": True})
             cases[fid] = run_sha(v)
-        store.set_state("reviewed", review={"sha": cases["reviewed"], "verdict": "pass"})
+        store.set_state("reviewed", review={"sha": cases["reviewed"], "verdict": "pass", "audit": {"verdict": "pass"}})
+        fam = store.add_family({**SPEC, "id": "unaudited"}, origin="seed")
+        v = store.add_version("unaudited", "# unaudited\nNEEDS = {}\n", {}, author="seed")
+        store.set_state("unaudited", validation_version=v["n"], validation_line={"passed": True},
+                        review={"sha": run_sha(v), "verdict": "pass"})
         store.set_state("refused", review={"sha": cases["refused"], "verdict": "fail"}, gate_outcome={"sha": cases["refused"], "result": "refused"})
-        store.set_state("looked-failed", review={"sha": cases["looked-failed"], "verdict": "pass"},
+        store.set_state("looked-failed", review={"sha": cases["looked-failed"], "verdict": "pass", "audit": {"verdict": "pass"}},
                         gate_outcome={"sha": cases["looked-failed"], "result": "failed"})
-        store.set_state("demoted", review={"sha": cases["demoted"], "verdict": "pass"},
+        store.set_state("demoted", review={"sha": cases["demoted"], "verdict": "pass", "audit": {"verdict": "pass"}},
                         gate_outcome={"sha": cases["demoted"], "result": "demoted"})
         store.close()
         self.assertEqual([r["family"] for r in bands.read(self.root)], ["reviewed"])

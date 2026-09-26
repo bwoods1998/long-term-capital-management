@@ -38,17 +38,18 @@ class FakeGymPool:
         self.jobs.append(job)
         return job
 
-    def wait(self, job, timeout=None, late=None):
+    def wait(self, job, timeout=None, late=None, late_fail=None):
         if job.family in self.fail:
             raise PoolError("the Gym failed")
         if job.family in self.slow:  # the round stops waiting; the result lands later
             job.late = late
+            job.late_fail = late_fail
             self.landing.append((job, late))
             raise PoolError("the Gym did not answer in time")
         return self.answer(job)
 
-    def run(self, job, timeout=None, late=None):
-        return self.wait(self.submit(job), timeout, late)
+    def run(self, job, timeout=None, late=None, late_fail=None):
+        return self.wait(self.submit(job), timeout, late, late_fail)
 
     def cancel_family(self, family):
         self.cancelled.append(family)
@@ -89,7 +90,8 @@ class RoundCase(unittest.TestCase):
 
     def family(self, fid="condor-vrp", **kw):
         fam = self.store.add_family({**SPEC, "id": fid, **kw}, origin="seed")
-        v = self.store.add_version(fam["id"], "NEEDS = {'roots': ['SPY']}\nPARAMS = {}\ndef decide(ctx):\n    return []\n", {}, author="seed")
+        v = self.store.add_version(fam["id"], f"# {fid}\nNEEDS = {{'roots': ['SPY']}}\nPARAMS = {{}}\ndef decide(ctx):\n    return []\n", {},
+                                   author="seed")
         self.store.update_family(fam["id"], best_version=v["n"])
         return self.store.family(fam["id"])
 
@@ -192,7 +194,7 @@ class GateTests(RoundCase):
 
     def test_review_then_one_holdout_look_then_candidate_and_the_researcher_hears_only_pass(self):
         self.ready()
-        self.replies = [{"text": json.dumps({"verdict": "pass", "reasons": []})}]
+        self.replies = [{"text": json.dumps({"verdict": "pass", "reasons": []})}] * 2
         out = Gate(self.store, self.pool, self.router, self.settings).run()
         self.assertEqual(out["looked"], [{"family": "a", "passed": True}])
         [look] = [j for j in self.pool.jobs if j.window == "holdout"]
@@ -211,9 +213,11 @@ class GateTests(RoundCase):
     def test_a_slow_look_is_never_started_twice_and_is_recorded_when_it_lands(self):
         self.ready()
         self.pool.slow.add("a")
-        self.replies = [{"text": json.dumps({"verdict": "pass"})}] * 3
-        Gate(self.store, self.pool, self.router, self.settings).run()
-        Gate(self.store, self.pool, self.router, self.settings).run()
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}] * 6
+        gate = Gate(self.store, self.pool, self.router, self.settings, clock=self.clock)  # one process
+        gate.run()
+        self.clock.advance(60)
+        gate.run()
         self.assertEqual(len([j for j in self.pool.jobs if j.window == "holdout"]), 1, "in flight: not started again")
         self.assertEqual(self.store.looks(), [])
         job, late = self.pool.landing[0]
@@ -225,11 +229,66 @@ class GateTests(RoundCase):
     def test_a_look_the_gym_failed_is_still_owed(self):
         self.ready()
         self.pool.fail.add("a")
-        self.replies = [{"text": json.dumps({"verdict": "pass"})}] * 2
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}] * 4
         Gate(self.store, self.pool, self.router, self.settings).run()
         self.assertTrue(self.store.family("a")["state"]["gate_ready"])
         self.pool.fail.clear()
         Gate(self.store, self.pool, self.router, self.settings).run()
+        self.assertEqual(len(self.store.looks()), 1)
+
+    def test_a_look_cut_off_by_a_restart_is_owed_to_the_next_process(self):
+        self.ready()
+        self.pool.slow.add("a")  # the look is in flight when the process dies
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}] * 4
+        Gate(self.store, self.pool, self.router, self.settings, clock=self.clock).run()
+        self.assertEqual(self.store.looks(), [])
+        self.clock.advance(60)
+        self.pool.slow.clear()
+        Gate(self.store, self.pool, self.router, self.settings, clock=self.clock).run()  # a new process: no job survived
+        self.assertEqual(len(self.store.looks()), 1, "owed and looked")
+
+    def test_a_look_that_fails_after_its_waiter_gave_up_is_owed(self):
+        self.ready()
+        self.pool.slow.add("a")
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}] * 2
+        gate = Gate(self.store, self.pool, self.router, self.settings)
+        gate.run()
+        job, late = self.pool.landing[0]
+        self.assertIsNotNone(job.late_fail)
+        job.late_fail("the Gym failed twice")
+        self.pool.slow.clear()
+        gate.run()
+        self.assertEqual(len(self.store.looks()), 1)
+
+    def test_the_gate_looks_only_at_the_version_still_validated(self):
+        self.ready("a")
+        self.ready("b")
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}] * 8
+        store = self.store
+        answer = self.answer
+
+        def during_as_look(job):
+            if job.family == "a" and job.window == "holdout":  # meanwhile the tournament validates b's newer version
+                v3 = store.add_version("b", "NEEDS = {'roots': ['SPY']}\nPARAMS = {'k': 1}\ndef decide(ctx):\n    return None\n", {},
+                                       author="x")
+                store.update_family("b", validated_version=v3["n"])
+                store.set_state("b", validation_version=v3["n"], gate_ready=True)
+            return answer(job)
+
+        self.answer = during_as_look
+        Gate(self.store, self.pool, self.router, self.settings).run()
+        looked_b = [x for x in self.store.looks() if x["family"] == "b"]
+        self.assertEqual([x["version"] for x in looked_b], [], "b's superseded version is never looked at")
+        self.assertTrue(self.store.family("b")["state"]["gate_ready"], "b's new version keeps its place")
+
+    def test_an_unclear_audit_is_asked_again_before_a_refusal(self):
+        self.ready()
+        self.month.value = 100
+        texts = iter([json.dumps({"verdict": "pass"}), "no verdict here", "still none", json.dumps({"verdict": "pass"})])
+        self.router.frontier_factory = lambda model: FakeFrontier(model, text=next(texts), asked=self.asked)
+        for _ in range(3):
+            Gate(self.store, self.pool, self.router, self.settings).run()
+        self.assertEqual(self.store.refusals("a"), [])
         self.assertEqual(len(self.store.looks()), 1)
 
     def test_a_failed_review_is_a_refusal_and_costs_no_look(self):
@@ -268,20 +327,30 @@ class GateTests(RoundCase):
         self.assertEqual(self.store.looks(), [])
         self.assertEqual(self.store.refusals("a")[0]["stage"], "audit")
 
-    def test_without_openai_room_the_audit_is_recorded_as_the_sail_reviewer(self):
+    def test_without_openai_room_the_audit_is_a_second_different_sail_model_and_the_owner_is_told(self):
         self.ready()
-        self.replies = [{"text": json.dumps({"verdict": "pass"})}]
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}, {"text": json.dumps({"verdict": "pass"})}]
         Gate(self.store, self.pool, self.router, self.settings).run()
-        self.assertEqual(len(self.sail.bodies), 1, "no second Sail call")
+        self.assertEqual([b["model"] for b in self.sail.bodies], ["deepseek-ai/DeepSeek-V4-Pro-0813", "moonshotai/Kimi-K3"],
+                         "the audit is another model, not a pass-through")
         review = self.store.family("a")["state"]["review"]
-        self.assertEqual(review["audit"]["route"], "sail-reviewer")
-        events = [e["payload"] for e in self.store.events_after(0) if e["kind"] == "swarm.gate" and e["payload"].get("action") == "review"]
-        self.assertTrue(events[0]["not_the_plans_reviewer"])
+        self.assertEqual((review["route"], review["audit"]["route"], review["audit"]["model"]), ("sail", "sail", "k3_balanced"))
+        alerts = [e["payload"] for e in self.store.events_after(0) if e["kind"] == "swarm.status"
+                  and e["payload"].get("action") == "not_the_plans_reviewer"]
+        self.assertEqual(len(alerts), 1)
+        self.assertTrue(alerts[0]["alert"])
         self.assertEqual(len(self.store.looks()), 1)
+
+    def test_a_sail_audit_that_refuses_costs_no_look(self):
+        self.ready()
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}, {"text": json.dumps({"verdict": "fail", "reasons": ["a level"]})}]
+        Gate(self.store, self.pool, self.router, self.settings).run()
+        self.assertEqual(self.store.looks(), [])
+        self.assertEqual(self.store.refusals("a")[0]["stage"], "audit")
 
     def test_a_failing_holdout_is_a_fail_and_the_band_stays(self):
         self.ready()
-        self.replies = [{"text": json.dumps({"verdict": "pass"})}]
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}] * 2
         self.answer = lambda job: weak(job) if job.window == "holdout" else strong(job)
         Gate(self.store, self.pool, self.router, self.settings).run()
         fam = self.store.family("a")
@@ -308,19 +377,19 @@ class GateTests(RoundCase):
 
         self.ready()
         self.settings["gym"]["gate_checkpoint"] = None
-        self.replies = [{"text": json.dumps({"verdict": "pass"})}]
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}] * 2
         out = Gate(self.store, self.pool, self.router, self.settings).run()
         self.assertEqual(out["waiting"], ["a"])
         self.assertEqual(self.store.looks(), [])
         self.assertEqual([r["family"] for r in bands.read(self.root)], ["a"], "reviewed and waiting: tuition may run it")
         self.settings["gym"]["gate_checkpoint"] = "sbcp_gate"
         Gate(self.store, self.pool, self.router, self.settings).run()
-        self.assertEqual(len(self.sail.bodies), 1, "the review is not asked twice")
+        self.assertEqual(len(self.sail.bodies), 2, "the review and the audit, neither asked twice")
         self.assertEqual(len(self.store.looks()), 1)
 
     def test_the_nightly_forward_records_trades_and_demotes_a_negative_candidate(self):
         self.ready()
-        self.replies = [{"text": json.dumps({"verdict": "pass"})}]
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}] * 2
         Gate(self.store, self.pool, self.router, self.settings).run()
         self.answer = lambda job: {**weak(job), "trades": [{"id": i, "day": "2026-09-28", "entry_minute": 600 + i, "root": "SPY",
                                                             "type": "iron_condor", "pnl": -5.0, "max_loss": 60.0} for i in range(25)]}
@@ -339,7 +408,7 @@ class GateTests(RoundCase):
 
     def test_a_failed_nightly_replay_keeps_the_record(self):
         self.ready()
-        self.replies = [{"text": json.dumps({"verdict": "pass"})}]
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}] * 2
         Gate(self.store, self.pool, self.router, self.settings).run()
         trades = [{"day": f"2026-09-{28 + i // 5}", "pnl": -5.0, "max_loss": 60.0} for i in range(19)]
         self.answer = lambda job: {**weak(job), "trades": trades}
@@ -355,7 +424,7 @@ class GateTests(RoundCase):
 
     def test_the_forward_record_is_the_banded_versions_alone(self):
         self.ready()
-        self.replies = [{"text": json.dumps({"verdict": "pass"})}]
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}] * 2
         Gate(self.store, self.pool, self.router, self.settings).run()
         self.store.add_forward("a", "shadow", [{"id": f"old{i}", "day": f"d{i}", "pnl": -4.0, "max_loss": 60.0, "version": 0}
                                                 for i in range(22)])
@@ -366,7 +435,7 @@ class GateTests(RoundCase):
     def test_a_look_never_undoes_a_newer_validation(self):
         self.ready()
         self.pool.slow.add("a")
-        self.replies = [{"text": json.dumps({"verdict": "pass"})}]
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}] * 2
         Gate(self.store, self.pool, self.router, self.settings).run()
         v2 = self.store.add_version("a", "NEEDS = {'roots': ['SPY']}\nPARAMS = {}\ndef decide(ctx):\n    return None\n", {}, author="x")
         self.store.update_family("a", best_version=v2["n"])
@@ -379,7 +448,7 @@ class GateTests(RoundCase):
 
     def test_the_swarm_never_makes_a_probe_or_a_sized(self):
         self.ready()
-        self.replies = [{"text": json.dumps({"verdict": "pass"})}]
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}] * 2
         Gate(self.store, self.pool, self.router, self.settings).run()
         self.store.add_forward("a", "shadow", [{"id": f"t{i}", "day": "d", "pnl": 10.0, "max_loss": 50.0} for i in range(30)])
         self.assertIsNone(Gate(self.store, self.pool, self.router, self.settings).judge_forward("a"))

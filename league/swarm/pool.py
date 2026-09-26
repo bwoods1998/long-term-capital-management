@@ -69,6 +69,9 @@ class GymJob:
     #: Called with the result when it arrives after its waiter gave up (`GymPool.wait` timed out): an evaluation the Gym
     #: made is a trial whether or not anyone was still waiting for it.
     late: Any = None
+    #: Called with the reason when a job whose waiter gave up then FAILS (retried out, cancelled, missing data): the
+    #: waiter's owner learns the job will never land (the gate owes a look it could not make).
+    late_fail: Any = None
 
     @property
     def name(self) -> str:
@@ -142,9 +145,9 @@ class GymPool:
             self._wake.notify_all()
         return job
 
-    def wait(self, job: GymJob, timeout: float | None = None, *, late: Any = None) -> dict[str, Any]:
+    def wait(self, job: GymJob, timeout: float | None = None, *, late: Any = None, late_fail: Any = None) -> dict[str, Any]:
         """The job's result. On a timeout the job leaves the queue if it has not started (nothing ran); if it is
-        running, `late(result)` records it when it lands (it is still a trial)."""
+        running, `late(result)` records it when it lands (it is still a trial), and `late_fail(why)` if it fails."""
         if not job.done.wait(timeout):
             with self._lock:
                 if job in self.queue:
@@ -152,6 +155,7 @@ class GymPool:
                     job.error = "abandoned before it ran"
                 else:
                     job.late = late
+                    job.late_fail = late_fail
             if job.done.is_set() and job.result is not None and late is not None and job.late is not None:
                 job.late = None
                 late(job.result)
@@ -160,8 +164,8 @@ class GymPool:
             raise PoolError(job.error)
         return job.result  # type: ignore[return-value]
 
-    def run(self, job: GymJob, timeout: float | None = None, *, late: Any = None) -> dict[str, Any]:
-        return self.wait(self.submit(job), timeout, late=late)
+    def run(self, job: GymJob, timeout: float | None = None, *, late: Any = None, late_fail: Any = None) -> dict[str, Any]:
+        return self.wait(self.submit(job), timeout, late=late, late_fail=late_fail)
 
     def queued(self, kind: str | None = None) -> int:
         with self._lock:
@@ -176,7 +180,13 @@ class GymPool:
     def _fail(self, job: GymJob, why: str) -> None:
         job.error = why
         self.stats["failed_jobs"] += 1
+        callback, job.late_fail = job.late_fail, None
         job.done.set()
+        if callback is not None:
+            try:
+                callback(why)
+            except Exception:  # noqa: BLE001 - never breaks the dispatcher
+                pass
 
     def _take(self, box: Box) -> list[GymJob]:
         """The next batch for `box` (called under the lock)."""
@@ -306,7 +316,8 @@ class GymPool:
             self.fork_after[kind] = self.clock() + min(1800.0, 60.0 * 2 ** (failures - 1))
         if failures == int(self.gym.get("unavailable_after", 3)):
             self.store.event("swarm.status", None, {"action": f"{kind}_unavailable", "failures": failures, "why": why,
-                                                    "image": self.image(kind)})
+                                                    "image": self.image(kind), "alert": True,
+                                                    "text": f"the {kind} boxes fail to start ({why[:160]}): the researchers idle"})
 
     def unavailable(self, kind: str = "gym") -> bool:
         return self.fork_failures.get(kind, 0) >= int(self.gym.get("unavailable_after", 3))

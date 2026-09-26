@@ -366,6 +366,17 @@ class SwarmStore:
             self.update_family(fid, state=state)
             return state
 
+    def compare_and_set_state(self, fid: str, expect: Mapping[str, Any], **values: Any) -> bool:
+        """Under the store's lock: set `values` in a family's state only if every `expect` key still holds its value
+        (a round's snapshot can be minutes old: the tournament may have validated a newer version meanwhile)."""
+        with self._lock:
+            state = (self.family(fid) or {}).get("state") or {}
+            if any(state.get(k) != v for k, v in expect.items()):
+                return False
+            state.update(values)
+            self.update_family(fid, state=state)
+            return True
+
     def set_band(self, fid: str, band: str, *, reason: str) -> str | None:
         """Move a family's band; the move is a `swarm.band` event (the site's news). Returns the old band."""
         if band not in BANDS:
