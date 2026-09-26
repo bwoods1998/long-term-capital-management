@@ -407,6 +407,7 @@ class FastEvidence(FoundryCase):
             self.assertEqual(picked.niche, self.DESK)
             self.assertIn("best forward yield", reason)
 
+    @unittest.skip('Wave 2b deletes the hypothesis foundry: the options overhaul (Sept 26, 2026) took its game.json block and the non-options desks out')
     def test_the_brief_demands_maker_entries_on_the_fifteen_minute_desk_and_warns_on_binary_size(self):
         self.assertIn("kalshi-crypto-15m` MAKER ENTRIES ARE REQUIRED", FOUNDRY_BRIEF)
         self.assertIn("182 bps", FOUNDRY_BRIEF)
@@ -449,6 +450,7 @@ class FastEvidence(FoundryCase):
         self.assertEqual(packet["fees"]["alpaca_crypto"]["round_trip"]["taker_taker"], 0.005)
 
 
+@unittest.skip('Wave 2b deletes the hypothesis foundry: the options overhaul (Sept 26, 2026) took its game.json block and the non-options desks out')
 class Transfer(FoundryCase):
     """Sept 23, 2026: the foundry never exploited what already works. The only mechanism with
     real-money profit (Kalshi daily favourites bought as a maker, on weather and commodities) was
