@@ -341,6 +341,39 @@ clock never restarts.
   tests before deployment. The nightly target is Tuesday Sept 29 06:00Z, then 02:00 New York time.
   Owner funding confirmation requested; existing funded caps remain in force.
 
+- 15:36Z **Funding confirmed by the owner:** Sail now $200, OpenAI credit $124 (previously stated
+  $24; a $100 addition). Brokerage stays around its current balance; no new deposit confirmed.
+  Read-only gateway snapshot: Sail $194.50 after ongoing charges, OpenAI September $596.29/$607,
+  brokerage equity $481.63/cash $481.60, no open orders/options. Swarm: 12,801 trials, 44 alive,
+  16 retired, 15,784.66 recorded program-years, 2,438 cycles/hour, median 55.37 s, two recent errors;
+  booked pace $3.4873/hour (Sail models $2.688 + Gym $0.7993), zero gate-ready/holdout passes.
+- 15:38Z **#366 merged** at reviewed head `5781ce3d`, main `ee055804`; Python 3.11/3.14 and gateway CI
+  green. W1 verified the deployed data scripts and a sealed-gate nightly rehearsal (15 historical
+  files, SHA checked, separate rehearsal checkpoint, rehearsal box terminated). Production gate
+  unchanged. Root confirmed the SIP read path from the House: September 25 SPY produced 390
+  completed-minute rows, 09:31–16:00 ET. No real order was sent.
+- 15:38Z **Production child isolation verified** on a source snapshot, not an active deployment:
+  host uid/gid 65534, no supplementary groups, no-new-privileges, private network namespace with
+  no IPv4 routes, no outbound connection, dummy secret read denied, dummy state write denied,
+  root-owned read-only runtime, and a synthetic program matching the inline decision. This kernel
+  exposes dormant `sit0` alongside loopback; the portable regression now checks routes/addresses.
+  Private evidence is under `~/Work/.ltcm-main/house-isolation-review.json`.
+- 15:41Z **#367** adds the House's nightly supervision, stopped-fork cleanup and the SIP relay.
+  Independent review reproduced and fixed two supervisor races: a job starting just before a
+  release-handover TERM, and a temporarily unreadable child start identity. 52 focused tests pass;
+  independent reruns confirm both repairs. Full CI pending at `f4d8fcb9`.
+- 15:41Z **#368** applies only the confirmed $100 OpenAI addition: September aggregate cap
+  $607 -> $707, still below metered spending plus confirmed credit. A funded-month guard prevents
+  an unfunded October renewal. Independent review and 217 gateway tests pass; CI/deploy pending.
+- 15:42:13Z **Funded research pace set:** private `swarm.json` model ceiling $4 -> $2.25/hour, with
+  other guards unchanged. At roughly $0.8/hour Gym plus data/House costs this leaves room to keep
+  training toward Monday with the $32 Sail reserve. The previous config is backed up on the House.
+  Reconcile actual burn again before changing throughput. No trading limit or grant changed.
+- 15:42Z Verification continues before #365/#362 merge. Root reproduced a stale holdout-image
+  promotion when only the gate checkpoint changed; W4 is fixing it while preserving the consumed
+  look. Independent W5 review reproduced a concurrent band/evidence race that could undo a
+  demotion; W5 owns its fix. Evidence thresholds stay unchanged.
+
 ## Scoreboard
 
 ### T0 (2026-09-26T06:23Z; repo figures at 06:40Z)
