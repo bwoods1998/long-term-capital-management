@@ -200,6 +200,7 @@ STAGES: dict[int, str] = {
     5: "trade_quote calibration samples: core five, Train days, one in five, 0-7 DTE, 10 strikes",
     6: "back months to 45 DTE, SPY and QQQ",
     7: "forward: the previous trading day for the whole universe (the nightly job)",
+    8: "forward: that day's back months to 45 DTE, SPY and QQQ (the nightly job, after stage 7)",
 }
 
 
@@ -243,6 +244,13 @@ def plan(
             if calendar.is_trading(day):
                 for root in list(core) + list(names):
                     add(Task(7, "day", root, day))
+    if 8 in stages:  # the forward day's back months (SPY, QQQ): a second run, once stage 7 is in
+        for day in forward:
+            if window_of(day) != "forward":
+                raise ValueError(f"{day} is not a forward day")
+            if calendar.is_trading(day):
+                for root in BACK_MONTH_ROOTS:
+                    add(Task(8, "back", root, day))
     for root, day in first:
         stage = stage_of(root, day, core)
         if stage in stages and calendar.is_trading(day):

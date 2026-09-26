@@ -11,9 +11,9 @@ the night and a second run of a finished night does nothing):
      holdout's 2026-09-25) and at least 01:45 ET behind us (ThetaData serves the previous day from
      then);
   2. the data box: woken; the backfill stopped if it is running (ThetaData allows one session per
-     account); `backfill.py run --stages 7 --forward-days DAY` pulls the day for the whole universe
-     (resumable: a root already in the journal is not fetched again); the backfill restarted with its
-     last arguments;
+     account); `backfill.py run --stages 7 --forward-days DAY` pulls the day for the whole universe,
+     then `--stages 8` its SPY/QQQ back months (resumable: a root already in the journal is not
+     fetched again); the backfill restarted with its last arguments;
   3. the gate image: its box woken (or, when it is gone, forked from its current checkpoint and sealed
      again), each of the day's files downloaded from the data box and uploaded to the same path,
      `backfill.py adopt` there checks every sha256 and journals them, and the gate is re-checkpointed
@@ -116,10 +116,11 @@ class Nightly:
             self.data.stop_backfill()
         try:
             if not state.get("pulled"):
-                ok, out = self.data.run(f"backfill.py run --stages 7 --forward-days {day.isoformat()} --threads 8 "
-                                        "--passes 3 --pause 120", timeout=5400)
-                if not ok:
-                    raise RuntimeError(f"the forward pull failed: {out[-800:]}")
+                for stage in (7, 8):  # the day's chains, then (needing them) the back months
+                    ok, out = self.data.run(f"backfill.py run --stages {stage} --forward-days {day.isoformat()} "
+                                            "--threads 8 --passes 3 --pause 120", timeout=5400)
+                    if not ok:
+                        raise RuntimeError(f"the forward pull (stage {stage}) failed: {out[-800:]}")
                 state["pulled"] = self.clock().isoformat()
                 self.save(self.images)
             ok, out = self.data.run(f"backfill.py records --date {day.isoformat()}", timeout=600)

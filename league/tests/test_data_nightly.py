@@ -146,7 +146,9 @@ class Night(unittest.TestCase):
         self.assertEqual(result["day"], "2026-09-28")
         self.assertEqual(data.calls[:2], ["wake", "stop"])  # the backfill yields the ThetaData session
         self.assertIn(("start", "--stages 1,2"), data.calls)  # and gets it back
-        self.assertLess(data.calls.index(("run", "backfill.py", "run")), data.calls.index(("start", "--stages 1,2")))
+        runs = [i for i, c in enumerate(data.calls) if c == ("run", "backfill.py", "run")]
+        self.assertEqual(len(runs), 2)  # stage 7, then stage 8
+        self.assertLess(runs[-1], data.calls.index(("start", "--stages 1,2")))
         self.assertEqual(len(gate.uploads), 5)  # four files and the records
         self.assertEqual(gate.uploads[f"{sl.STORE_ROOT}/nbbo/SPY/2026-09-28.parquet"], b"nbbo-SPY")
         self.assertIn(("run", "backfill.py adopt --records /data/work/nightly-2026-09-28.jsonl"), gate.calls)
@@ -216,6 +218,12 @@ class Night(unittest.TestCase):
 
 
 class ForwardStage(unittest.TestCase):
+    def test_stage_eight_is_the_back_months_after_the_day(self):
+        tasks = sl.plan(calendar(), stages=(7, 8), forward=[dt.date(2026, 9, 28)])
+        eight = [t for t in tasks if t.stage == 8]
+        self.assertEqual({(t.root, t.job) for t in eight}, {("SPY", "back"), ("QQQ", "back")})
+        self.assertGreater(tasks.index(eight[0]), max(i for i, t in enumerate(tasks) if t.stage == 7))
+
     def test_stage_seven_is_the_universe_on_forward_days_only(self):
         tasks = sl.plan(calendar(), stages=(7,), names=["TSLA"], forward=[dt.date(2026, 9, 28)])
         self.assertEqual({t.root for t in tasks}, set(sl.CORE_FIVE) | {"TSLA"})
