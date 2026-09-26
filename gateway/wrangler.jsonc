@@ -121,7 +121,9 @@
     "RESTART_COOLDOWN_SECONDS": "1800",
     "RESTART_COMMAND": "/workspace/restart.sh",
     // Set to the Sailbox id once the box exists. Empty means the watchdog only reports.
-    "SAILBOX_ID": "sb_d36bc830-0d04-4761-8898-0ff4daa199dc",
+    // Sept 26, 2026 08:41Z: the House box is sb_1d99c4a7 (ltcm-house), a fork of checkpoint sbcp_9dc7fd6b
+    // with its state cleared; the old sb_d36bc830 failed a Sail runtime upgrade (interrupted_restorable).
+    "SAILBOX_ID": "sb_1d99c4a7-bee2-4226-ba7b-c694ccd857d3",
 
     // Funding and mail. Sail's `range` understands 1h/6h/24h/7d/30d/period and silently falls
     // back to 30d for anything else, so "a day" is spelled 24h.
