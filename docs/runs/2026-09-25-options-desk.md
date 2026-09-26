@@ -243,6 +243,12 @@ run's `config.json` change is its own new `options_structures` key).
   practice-account flip, the watchdog-side rollback guard and the forward harness's switch are NOT built and do not ship in
   this run: they are named windows after it (see the report). The read-only memory diagnosis started about 01:27Z was stopped at once
   on the wrap-up; a read-only RSS sampler stays on until the report.
+  **The owner, 02:22Z Sept 26:** "i sold the mlb game, continue". The owner sold the proven family's AZ-SD, LAD-SF and
+  NYM-WSH positions on Kalshi by hand; the REAL `kalshi` book has been frozen since 02:16:19Z ("cash differs by 15.4796; positions
+  differ: AZSD no -11, LADSF no -13, NYMWSH no -16"): a real book never adopts the venue (`book.py` 3106-3122), so real Kalshi
+  entries wait until those sales are booked (the forward-first and Kalshi runs' book; told 02:23Z). The watchdog reads a
+  book frozen before a promotion as inherited, never a rollback (`watchdog.py` 237-251). **Deploy B started 02:22:58Z** (the
+  forward-first run's record); **Deploy G starts at B's watch-end plus 30 minutes**, written here first.
 
 **Requests to the forward-first run (06:05Z; also a comment on its PR #297):**
 
