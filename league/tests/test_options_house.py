@@ -73,7 +73,7 @@ class Build(BuildCase):
         self.assertIsNone(house.researcher.jev if hasattr(house.researcher, "jev") else None)
         self.assertIsNone(getattr(house.researcher, "traces", None))
         self.assertIsNone(getattr(house.researcher, "grants", None))
-        self.assertEqual(sorted(house.publisher.real_brokers), ["alpaca"], "the balance is the Brokerage Account's alone")
+        self.assertEqual(house.publisher.broker.venue, "alpaca", "the balance is the Brokerage Account's alone")
         self.assertNotIn("kalshi", [venue for venue, _ in self.made])
         self.assertFalse((Path(self.dir.name) / "state" / "campaigns.sqlite").exists())
 
@@ -120,9 +120,11 @@ class TheConfigAfterThePrune(unittest.TestCase):
         config = service.load_config()
         for key in ("jev", "lab", "semantic_lab"):
             self.assertNotIn(key, config)
-        self.assertEqual({k: v for k, v in config["performance"].items() if not k.startswith("_")},
-                         {"start_at": None, "start_equity": None}, "the main session fills them at the reset")
-        self.assertIsNone(service.performance_of(config), "no half-filled record reaches the publisher")
+        # The site's reset (Sept 26, 2026, 07:21Z): the Brokerage Account's equity once Wave 0 closed the leftovers.
+        self.assertEqual(config["performance"], {"start_at": "2026-09-26T06:25:30.000Z", "start_equity": "481.65"})
+        self.assertEqual(service.performance_of(config), config["performance"])
+        self.assertIsNone(service.performance_of({"performance": {"start_at": None, "start_equity": None}}),
+                          "no half-filled record reaches the publisher")
         self.assertEqual(service.performance_of({"performance": {"start_at": "2026-09-26T12:00:00Z", "start_equity": "5481.62"}}),
                          {"start_at": "2026-09-26T12:00:00Z", "start_equity": "5481.62"})
         self.assertIn("gym", config)

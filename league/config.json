@@ -30,10 +30,10 @@
   "mark_every_seconds": 300,
   "replay_days": 21,
   "inference_daily_cap_usd": "20.00",
+  "_about_performance": "The record's first point for the options swarm: the site's reset of Sept 26, 2026 at 07:21Z used start_at 06:25:30Z (the moment Wave 0 closed the Brokerage Account's leftovers) and start_equity 481.65 (its equity then); capital.js PERFORMANCE_START_AT is the same instant. Deposits and withdrawals are never profit: the publisher nets the account's funding flows since start_at.",
   "performance": {
-    "_about": "The record's first point for the options swarm (the options overhaul, Sept 26, 2026): start_at is the reset's instant and start_equity the Brokerage Account's equity at that moment, both filled by the main session at the site's reset (plan \"The website\"), with capital.js PERFORMANCE_START_AT equal to start_at. While either is null the publisher shows the account's balance with no since-reset figure (league/service.py).",
-    "start_at": null,
-    "start_equity": null
+    "start_at": "2026-09-26T06:25:30.000Z",
+    "start_equity": "481.65"
   },
   "gym": {
     "_about": "The Gym (Wave 3, league/gym/): sealed Sailboxes forked from the Gym image that replay agent programs over recorded one-minute NBBO. A placeholder until the Gym's builder fills it; nothing reads it yet.",
