@@ -491,6 +491,27 @@ clock never restarts.
   floor, lineage, live exit ownership and existing thresholds; prose alone will never retire a
   family.
 
+- 17:12:42Z #372's unchanged head passed its failed-job rerun and merged as `079de48b`; #374
+  passed full CI and merged at 17:16:07Z as `bc122348`. These changes are not deployed yet.
+  Research resumed under the existing rolling pace by 17:10Z as older Sail spend aged out.
+- 17:19:34Z A 30-day House recovery checkpoint was saved before the upcoming researcher-state
+  changes: `sbcp_797f731a-e823-4f04-b68b-42cc4ce057be`. It is private and must not be forked into
+  an independently running House.
+- 17:20:58Z The production browser received nine genuine `agent.note` WebSocket events and
+  displayed an incoming note in the main thought card automatically, with no refresh or script
+  error. Profit remained **$0.00** and transport was live. The screenshot also confirms the
+  underlying workflow issue: most recent notes declare failed mechanisms finished. Explicit
+  retirement, not cosmetic replacement text, is the pending correction.
+- 17:21Z The instrumented full Python 3.14 suite on main `4472c334` passed 4,649 tests in 531s
+  (25 skips), with no captured symlink failure. The intermittent CI failure has no confirmed
+  root cause; no production behavior or assertion was weakened. #373's failed job is being
+  checked again. The unchanged watchdog code also passed main and draft-prune CI.
+- 17:22Z Draft Wave 2b #375 had passed Python 3.11/3.14 CI in 101s/107s on `7c22d55a`; its
+  subsequent canary cleanup `67d0946e` passed 160 House/operator/watchdog/grant/Profit tests on
+  an isolated snapshot on the actual House. Root's bounded read found no confirmed regression,
+  but full independent review and integration of newer main fixes remain. The draft has not
+  been deployed and must not merge before Monday's close.
+
 ### Final data/image adoption (prepared Saturday; waits for completion)
 
 The provisional calibrated pair is not the final pair. Do not select it or spend a holdout look
