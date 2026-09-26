@@ -426,6 +426,11 @@ class SwarmStore:
                         tuple(lines))
         return int(row["n"]) if row else 0
 
+    @property
+    def lock(self) -> Any:
+        """The store's own (re-entrant) lock, for a read-then-write that must not interleave with another thread's."""
+        return self._lock
+
     def lineage_trials(self, fid: str) -> int:
         """Every trial of every family in the lineage set (`lineages`): the N the deflated Sharpe divides by."""
         return self._trials_of(self.lineages(fid))

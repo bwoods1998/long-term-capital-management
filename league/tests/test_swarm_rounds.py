@@ -196,6 +196,7 @@ class TournamentTests(RoundCase):
         self.family("a")
         t = Tournament(self.store, self.pool, self.settings)
         v2 = self.store.add_version("a", "# a2\nNEEDS = {'roots': ['SPY']}\nPARAMS = {}\ndef decide(ctx):\n    return None\n", {}, author="x")
+        self.store.update_family("a", best_version=v2["n"])  # the researcher's best moved on to v2
         job = lambda n: GymJob(family="a", version=n, code="", params={}, window="validation", roots=("SPY",))
         self.assertTrue(t.judge("a", v2["n"], strong(job(v2["n"])))["passed"])
         trials = self.store.family("a")["trials"]
@@ -203,6 +204,43 @@ class TournamentTests(RoundCase):
         fam = self.store.family("a")
         self.assertEqual((fam["validated_version"], fam["state"]["validation_version"], fam["state"]["gate_ready"]), (2, 2, True))
         self.assertEqual(fam["trials"], trials + 2, "its trials still count")
+
+    def validation_jobs(self):
+        return [j for j in self.pool.jobs if j.window == "validation"]
+
+    def test_an_older_version_submitted_again_is_judged_once_not_revalidated_every_hour(self):
+        self.family("a")
+        t = Tournament(self.store, self.pool, self.settings)
+        v2 = self.store.add_version("a", "# a2\nNEEDS = {'roots': ['SPY']}\nPARAMS = {}\ndef decide(ctx):\n    return None\n", {}, author="x")
+        self.store.update_family("a", best_version=v2["n"])
+        self.answer = weak
+        t.validate(self.store.families(alive=True))
+        self.store.update_family("a", best_version=1)  # the researcher submits its older (never validated) version
+        self.answer = strong
+        t.validate(self.store.families(alive=True))
+        fam = self.store.family("a")
+        self.assertEqual((fam["validated_version"], fam["state"]["validation_version"], fam["state"]["gate_ready"]), (1, 1, True))
+        jobs, trials = len(self.validation_jobs()), fam["trials"]
+        for _ in range(3):
+            t.validate(self.store.families(alive=True))
+        self.assertEqual((len(self.validation_jobs()), self.store.family("a")["trials"]), (jobs, trials), "judged once")
+
+    def test_a_version_validated_before_is_judged_again_from_its_recorded_result(self):
+        self.family("a")
+        t = Tournament(self.store, self.pool, self.settings)
+        self.answer = strong
+        t.validate(self.store.families(alive=True))
+        v2 = self.store.add_version("a", "# a2\nNEEDS = {'roots': ['SPY']}\nPARAMS = {}\ndef decide(ctx):\n    return None\n", {}, author="x")
+        self.store.update_family("a", best_version=v2["n"])
+        self.answer = weak
+        t.validate(self.store.families(alive=True))
+        self.assertFalse(self.store.family("a")["state"]["gate_ready"])
+        jobs, trials = len(self.validation_jobs()), self.store.family("a")["trials"]
+        self.store.update_family("a", best_version=1)  # back to v1
+        t.validate(self.store.families(alive=True))
+        fam = self.store.family("a")
+        self.assertEqual((len(self.validation_jobs()), fam["trials"]), (jobs, trials), "no new Gym run, no new trial")
+        self.assertEqual((fam["state"]["validation_version"], fam["state"]["gate_ready"]), (1, True))
 
     def test_a_validation_failure_is_recorded_not_raised(self):
         self.family("a")

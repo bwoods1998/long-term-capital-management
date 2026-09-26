@@ -62,6 +62,8 @@ class Tournament:
         """Queue validation for every family with an unvalidated best; wait; judge. One job a family: the Gym runs
         the 1.5x-stress twin itself and carries its figures as `stress_1.5` (a second trial, counted here)."""
         jobs = []
+        errors = {}
+        judged = {}
         for fam in fams:
             n = self.candidate_version(fam)
             if n is None or n == fam.get("validated_version"):
@@ -69,11 +71,15 @@ class Tournament:
             version = self.store.version(fam["id"], n)
             if version is None or not version.get("code"):
                 continue
+            recorded = self.recorded_validation(fam["id"], n)
+            if recorded is not None:  # validated before (a best submitted again): judged from its result, no new trial
+                row = self.judge(fam["id"], n, recorded, record=False)
+                if row is not None:
+                    judged[fam["id"]] = row
+                continue
             job = GymJob(family=fam["id"], version=n, code=version["code"], params=version["params"], window="validation",
                          roots=tuple(fam["roots"]), stress=1.0, purpose="validation", priority=1.0)
             jobs.append((fam, n, self.pool.submit(job)))
-        errors = {}
-        judged = {}
         deadline = self.clock() + timeout
         for fam, n, job in jobs:
             try:
@@ -87,24 +93,37 @@ class Tournament:
                 judged[fam["id"]] = row
         return {"queued": len(jobs), "judged": judged, "errors": errors}
 
-    def judge(self, fid: str, n: int, result: Mapping[str, Any]) -> dict[str, Any] | None:
+    def recorded_validation(self, fid: str, n: int) -> dict[str, Any] | None:
+        """The full result of a validation this version already had (the Gym's answer for the same program is the same)."""
+        for row in self.store.runs(fid, window="validation", limit=500):
+            if row.get("version") == n and float(row.get("stress") or 1.0) == 1.0 and row.get("path"):
+                return self.store.run_result(row["run_id"])
+        return None
+
+    def judge(self, fid: str, n: int, result: Mapping[str, Any], *, record: bool = True) -> dict[str, Any] | None:
         """Record a validation result (and its stress twin: two trials) and judge it by the line. Also called for a
-        result that lands after the round stopped waiting: every evaluation counts, and its verdict is the same."""
+        result that lands after the round stopped waiting: every evaluation counts. Its verdict is written only while
+        `n` is still the family's candidate (the researcher's current best): a result for a version the family has
+        moved on from is stale, whatever its number. `record=False` re-judges a result already recorded."""
         fam = self.store.family(fid)
         if fam is None:
             return None
-        years = float((result.get("summary") or {}).get("days") or 0) / 252.0 * max(1, len(fam["roots"]))
-        stale = fam.get("validated_version") is not None and int(fam["validated_version"]) > int(n)
-        row = self.store.add_run(fid, n, result, window="validation", stress=1.0, purpose="validation", program_years=years)
+        if record:
+            years = float((result.get("summary") or {}).get("days") or 0) / 252.0 * max(1, len(fam["roots"]))
+            row = self.store.add_run(fid, n, result, window="validation", stress=1.0, purpose="validation", program_years=years)
+            if isinstance(result.get("stress_1.5"), dict):
+                twin = result["stress_1.5"]
+                self.store.add_run(fid, n, {"run_id": f"{row['run_id']}-s15", "status": twin.get("status") or "ok", "trials": 1,
+                                            "summary": dict(twin)}, window="validation", stress=evidence.STRESS, purpose="validation",
+                                   program_years=years)
+        with self.store.lock:  # the candidate check and the verdict's writes, never interleaved with another judge
+            fam = self.store.family(fid) or fam
+            if self.candidate_version(fam) != int(n):
+                return None  # stale: its trials count, its verdict does not
+            return self._verdict(fid, fam, n, result, counted=record)
+
+    def _verdict(self, fid: str, fam: Mapping[str, Any], n: int, result: Mapping[str, Any], *, counted: bool) -> dict[str, Any]:
         stressed = evidence.stressed_of(result)
-        if isinstance(result.get("stress_1.5"), dict):
-            twin = result["stress_1.5"]
-            self.store.add_run(fid, n, {"run_id": f"{row['run_id']}-s15", "status": twin.get("status") or "ok", "trials": 1,
-                                        "summary": dict(twin)}, window="validation", stress=evidence.STRESS, purpose="validation",
-                               program_years=years)
-        if stale:  # an older version's result landed after a newer one was judged: its trials count, its verdict does not
-            return None
-        fam = self.store.family(fid) or fam
         line = evidence.validation_line(result, stressed, lineage_trials=self.store.lineage_trials(fid),
                                         trial_sharpes=self.store.lineage_trial_sharpes(fid))
         view = diagnostics.validation_view(result, line)
@@ -116,7 +135,8 @@ class Tournament:
         if improved:
             fields.update(best_validation=float(mean), since_val_revisions=0, since_val_trials=0)
         self.store.update_family(fid, **fields)
-        self.store.bump(fid, validations=1)
+        if counted:  # a re-judged recorded result is no new validation for the bandit
+            self.store.bump(fid, validations=1)
         self.store.set_state(fid, validation_view=view, validation_line=line, validation_version=n,
                              typical_max_loss_usd=typical_max_loss(result),
                              validation_numbers={"mean": mean, "t": t, "sharpe_daily": summary.get("sharpe_daily"),
