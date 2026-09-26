@@ -500,6 +500,36 @@ class ShadowHeldLegs(LiveCase):
         self.assertEqual(shadow.trades[-1]["exit_reason"], "program")
 
 
+class BrokenLegs(LiveCase):
+    def test_long_legs_are_never_sold_while_a_short_leg_is_still_held(self):
+        live = self.make([family("condor", CONDOR, band="probe", structure="iron_condor")])
+        self.run_to(9, 31)
+        [pos] = live.book.positions.values()
+        lp, sp, sc, lc = sorted(pos.legs, key=lambda l: (not l.is_call, l.strike))[::-1][::-1] if False else (None, None, None, None)
+        shorts = [l for l in pos.legs if l.side < 0]
+        put_short = next(l for l in shorts if not l.is_call)
+        call_short = next(l for l in shorts if l.is_call)
+        held = -self.venue.held[put_short.symbol]
+        self.venue.held[put_short.symbol] = D(0)
+        self.venue.held["SPY"] = held * 100
+        self.venue.activity_rows.append({"id": "asn2", "activity_type": "OPASN", "symbol": put_short.symbol, "qty": str(held)})
+        self.market.overrides[call_short.symbol] = (float("nan"), float("nan"), 0, 0)   # the short call cannot be priced
+        live._activities_at = float("-inf")
+        self.run_to(9, 40)
+        singles = [b for b in self.venue.sent if b.get("symbol") and b.get("position_intent")]
+        self.assertEqual(singles, [], "no long leg sold while the short call is held")
+        del self.market.overrides[call_short.symbol]
+        self.run_to(9, 50)
+        intents = [(b["symbol"], b["position_intent"]) for b in self.venue.sent if b.get("position_intent")]
+        self.assertEqual(intents[0], (call_short.symbol, "buy_to_close"), "the short leg first")
+        per_leg = {}
+        for b in self.venue.sent:
+            if b.get("position_intent"):
+                per_leg[b["symbol"]] = per_leg.get(b["symbol"], 0) + 1
+        self.assertTrue(all(n <= 4 for n in per_leg.values()), per_leg)          # a leg is re-sent at most every 3 minutes
+        self.assertEqual(live.book.positions, {})
+
+
 class Restart(LiveCase):
     def test_a_restart_resumes_the_books(self):
         live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 600})])

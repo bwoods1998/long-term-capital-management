@@ -62,6 +62,7 @@ NEW_YORK = ZoneInfo("America/New_York")
 FAMILIES_EVERY = 300.0
 ACTIVITIES_EVERY = 300.0
 FLOWS_EVERY = 300.0
+BROKEN_RESEND_MINUTES = 3    # a broken structure's leg is sent alone at most this often
 MINUTE_OFFSET = 3.0          # seconds into each minute the live step runs
 DEFAULTS = {
     "enabled": True,
@@ -1003,23 +1004,25 @@ class OptionsLive:
         return {leg.symbol for pid in self.pending_exits for leg in (self.book.positions[pid].legs if pid in self.book.positions else [])}
 
     def _close_broken(self, pos: RPosition, day: LiveDay, mi: int, out: dict) -> None:
-        """A structure an assignment, exercise or expiry broke: each leg it still holds closed alone at the touch (a
-        short leg bought back at its ask first, a long leg sold at its bid; a long leg bid at nothing is left to expire,
-        worthless and riskless). One order a leg at a time, re-sent each minute until it fills."""
+        """A structure an assignment, exercise or expiry broke: each leg it still holds closed alone at the touch. Every
+        SHORT leg first (bought back at its ask), and no long leg is sold while any short leg is still held, sent, busy
+        or unpriced: a long leg sold first would leave a naked short. Then the long legs (sold at the bid; one bid at
+        nothing is left to expire, worthless and riskless). A leg is sent at most every `BROKEN_RESEND_MINUTES`."""
         book = self.book
         assert book is not None
         chain, snap = day.chains.get(pos.root), day.snapshot(pos.root, mi)
-        if chain is None or snap is None:
-            return
         busy = book.busy()
-        for leg in sorted(pos.legs, key=lambda x: x.side):             # shorts first
+        sent_at = dict(pos.info.get("leg_sent") or {})
+        shorts = [leg for leg in pos.legs if leg.side < 0 and book.leg_remaining(pos, leg) > 0]
+        todo = shorts or [leg for leg in pos.legs if leg.side > 0 and book.leg_remaining(pos, leg) > 0]
+        for leg in todo:
             left = book.leg_remaining(pos, leg)
-            if left <= 0 or leg.symbol in busy:
+            if leg.symbol in busy or mi - int(sent_at.get(leg.symbol, -10_000)) < BROKEN_RESEND_MINUTES:
+                continue
+            if chain is None or snap is None:
                 continue
             i = chain.column(leg.symbol)
-            if i < 0:
-                continue
-            price = float(snap.bid[i] if leg.side > 0 else snap.ask[i])
+            price = float(snap.bid[i] if leg.side > 0 else snap.ask[i]) if i >= 0 else float("nan")
             if not math.isfinite(price) or price <= 0:
                 continue
             sent = book.new_order(instance=pos.instance, family=pos.family, action="close_leg", type_=pos.type, root=pos.root,
@@ -1027,9 +1030,11 @@ class OptionsLive:
                                   limit_value=price, tif=1, day=day.day.isoformat(), minute=mi, pid=pos.pid, forced=True,
                                   why=f"broken structure: {pos.info.get('broken')}")
             book.send(sent)
+            sent_at[leg.symbol] = mi
             out.setdefault("orders", []).append({"oid": sent.oid, "family": pos.family, "action": "close_leg", "status": sent.status})
-            if leg.side < 0:
-                return                                                 # a short leg first, alone
+        if sent_at != (pos.info.get("leg_sent") or {}):
+            pos.info["leg_sent"] = sent_at
+            book._save_position(pos)
 
     def _send_close(self, pos: RPosition, day: LiveDay, mi: int, *, forced: bool, why: str, out: dict,
                     intent: Mapping[str, Any] | None = None, pending: bool = False) -> str | None:
