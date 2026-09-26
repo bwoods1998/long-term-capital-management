@@ -668,7 +668,7 @@ class ArchitectTests(RoundCase):
         self.replies = [{"text": json.dumps(self.many(12))}]
         out = arch.run()
         self.assertEqual(len(out["born"]), 8, "up to the start population")
-        self.assertIn("Propose 3 to 8 new families", self.sail.bodies[-1]["input"][-1]["content"])
+        self.assertIn("Propose 8 new families", self.sail.bodies[-1]["input"][-1]["content"])
 
     def test_at_the_start_population_it_grows_every_four_hours_three_to_six_at_a_time(self):
         self.populate(50)
@@ -781,6 +781,58 @@ class ArchitectTests(RoundCase):
         self.assertNotIn("iron_condor on SPY", gaps)
         self.assertIn("iron_condor on QQQ", gaps)
         self.assertNotIn("calendar on XSP", gaps)
+
+    def test_coverage_preserves_retired_effort_without_double_counting_inheritance(self):
+        self.family("call", structure="long_call")
+        self.store.update_family("call", trials=20, validations=2)
+        child = self.store.add_family({**SPEC, "id": "child", "structure": "long_call"},
+                                      origin="fork", parent="call")
+        self.store.update_family(child["id"], trials=3)
+        self.store.retire("call", "synthetic failed mechanism")
+        self.family("put", structure="long_put")
+        self.store.update_family("put", trials=7)
+        self.family("spread", structure="debit_vertical")
+        self.store.update_family("spread", trials=10, validations=1)
+        self.family("outside", structure="long_put", roots=["SOXL"])
+        self.store.update_family("outside", trials=900, validations=9)
+        before = self.store.families()
+        arch = Architect(self.store, self.router, self.settings, clock=self.clock)
+        coverage = arch.coverage()
+        self.assertEqual(coverage["long_call"], {"active_families": 1, "retired_families": 1,
+                                               "trials": 23, "validated_families": 1})
+        self.assertEqual(coverage["long_put"]["trials"], 7, "an unloaded root is outside this image's effort")
+        self.assertEqual(coverage["debit_vertical"]["validated_families"], 1)
+        self.assertEqual(sum(row["trials"] for row in coverage.values()), 40)
+        self.assertEqual(len(coverage), 11, "unexplored types are visible as zero effort")
+        self.assertEqual(self.store.families(), before, "coverage does not mutate evidence or retirement")
+        self.settings["gym"]["roots"].append("SOXL")
+        self.assertEqual(arch.coverage()["long_put"]["trials"], 907)
+
+    def test_actual_architect_request_includes_single_option_and_retired_coverage(self):
+        self.family("call", structure="long_call")
+        self.store.update_family("call", trials=13)
+        self.store.retire("call", "synthetic failed mechanism")
+        self.replies = [{"text": json.dumps({"families": []})}]
+        Architect(self.store, self.router, self.settings, clock=self.clock).run()
+        prompt = self.sail.bodies[-1]["input"][-1]["content"]
+        label = "RESEARCH COVERAGE (effort, not profitability; validated means evaluated, not passed):\n"
+        coverage = json.loads(prompt.split(label, 1)[1].split("\n\nGAPS", 1)[0])
+        self.assertEqual(coverage["long_call"]["retired_families"], 1)
+        self.assertEqual(coverage["long_call"]["trials"], 13)
+        self.assertEqual(coverage["long_put"]["active_families"], 0)
+        self.assertIn("Propose 12 new families", prompt, "refill asks for the bounded gap, not a minimum of three")
+
+    def test_simple_call_and_put_proposals_are_admitted_without_a_promotion_shortcut(self):
+        proposals = [{"slug": kind, "structure": kind, "roots": ["SPY"], "dte": [0, 2],
+                      "mechanism": "A synthetic directional research hypothesis with a single option and capped premium."}
+                     for kind in ("long_call", "long_put")]
+        arch = Architect(self.store, self.router, self.settings, clock=self.clock)
+        born = arch.admit(proposals)
+        self.assertEqual(len(born), 2)
+        for fid in born:
+            family = self.store.family(fid)
+            self.assertEqual((family["band"], family["trials"], family["validations"]), ("gym", 0, 0))
+        self.assertEqual(self.store.looks(), [])
 
     def expanded_prompt(self, *, seeded):
         self.settings["gym"]["roots"] = list(self.FINAL_ROOTS)

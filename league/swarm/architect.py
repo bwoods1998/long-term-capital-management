@@ -46,14 +46,19 @@ program for it in a Gym of real recorded one-minute option quotes (Train 2022-20
 sealed holdout at the gate). Propose NEW families that are likely to clear the validation line (>= 100 trades on >= 60
 days a year, mean P&L per dollar of max loss > 0 with t >= 2 after fees and the spread, a deflated Sharpe that survives the
 lineage's trials, 3 of 4 quarters positive, positive at 1.5x the half-spread). Prefer mechanisms with a reason to exist
-(a risk premium, a flow, a behavioral bias, a venue rule), short horizons (0-5 days to expiry), and slices the swarm does
-not cover. Learn from the graveyard: do not re-propose what failed unless you say what is different.
+(a risk premium, a flow, a behavioral bias, a venue rule), horizons supported by the available data, and slices the
+swarm does not cover. The strategy still needs enough independent trades to be evaluated. Learn from the graveyard:
+do not re-propose what failed unless you say what is different.
 
 Use only the available roots listed in the current request; that configured list is the Gym's data universe.
 XSP and SPXW are cash-settled index options with no calendars or diagonals. The other available roots are physically
 settled equity or ETF options. Structure types: long_call, long_put, debit_vertical, credit_vertical, iron_condor, iron_butterfly,
-long_butterfly, long_straddle, long_strangle, calendar, diagonal. Only the first five multi-leg types (verticals, iron
-condors, iron butterflies, long butterflies) can reach real money soon.
+long_butterfly, long_straddle, long_strangle, calendar, diagonal. All listed types compete on the same evidence:
+complexity earns no preference. Single calls and puts are first-class research choices. Consider the simplest
+expression of each mechanism before adding legs; use additional legs when they serve the hypothesis. Use the coverage
+counts and gaps to explore neglected types and roots, while retaining the lessons and trial history of failed ideas.
+Research support does not imply brokerage execution support; the House checks that separately. Do not invent a data
+source, a supported strategy type, or evidence to fill a coverage gap.
 
 Reply with ONE JSON object: {"families": [{"slug": "short-kebab-name", "mechanism": "one or two sentences: why it should
 make money", "structure": "<type>", "roots": ["SPY"], "dte": [0, 2], "rejection": "the result that would prove it
@@ -106,6 +111,24 @@ class Architect:
     def gaps(self) -> list[str]:
         return [f"{structure} on {root}" for root, structures in self._gaps_by_root().items() for structure in structures]
 
+    def coverage(self) -> dict[str, dict[str, int]]:
+        """Research effort by supported type, including retired ideas; never a claim about returns or fills.
+
+        Count each family's own evaluations once. Inherited lineage counts remain the gate's evidence adjustment,
+        not extra work to add again to this coverage table. Families outside this image's root list are excluded.
+        """
+        roots = set(self.settings.get("gym", {}).get("roots", ["SPY", "QQQ", "IWM", "XSP", "SPXW"]))
+        rows = {kind: {"active_families": 0, "retired_families": 0, "trials": 0, "validated_families": 0}
+                for kind in STRUCTURES}
+        for family in self.store.families():
+            if not roots.intersection(family["roots"]):
+                continue
+            row = rows[family["structure"]]
+            row["retired_families" if family["retired_at"] else "active_families"] += 1
+            row["trials"] += int(family.get("trials") or 0)
+            row["validated_families"] += int(int(family.get("validations") or 0) > 0)
+        return rows
+
     def prompt(self) -> str:
         alive = self.store.families(alive=True)
         living_ids = {f["id"] for f in alive}
@@ -120,9 +143,14 @@ class Architect:
         want = self.want()
         roots = ", ".join(self.settings.get("gym", {}).get("roots", ["SPY", "QQQ", "IWM", "XSP", "SPXW"]))
         gaps = json.dumps(self._gaps_by_root(), separators=(",", ":"))
-        return (f"Propose {min(max(int(self.cfg.get('min_new', 3)), 1), max(want, 1))} to {max(want, 1)} new families, on these roots only (the Gym "
+        coverage = json.dumps(self.coverage(), separators=(",", ":"))
+        # During a burst refill, ask for the whole bounded gap. Asking for "3 to 12" repeatedly underfilled a
+        # population losing families faster than three births per hour. The admission and spending caps still bind.
+        number = str(want) if self.refilling() and want > 0 else f"{min(max(int(self.cfg.get('min_new', 3)), 1), max(want, 1))} to {max(want, 1)}"
+        return (f"Propose {number} new families, on these roots only (the Gym "
                 f"holds their data): {roots}.\n\nLIVING FAMILIES "
                 f"(leaderboard):\n{json.dumps(living)}\n\nTHE GRAVEYARD:\n{json.dumps(graves)}\n\n"
+                f"RESEARCH COVERAGE (effort, not profitability; validated means evaluated, not passed):\n{coverage}\n\n"
                 f"GAPS (uncovered structure types by root; [] means all covered):\n{gaps}")
 
     def admit(self, rows: Any) -> list[str]:
