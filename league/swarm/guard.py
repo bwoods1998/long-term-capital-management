@@ -30,8 +30,9 @@ import time
 from typing import Any, Callable, Mapping
 
 from .store import SwarmStore
+from .lifecycle import SailBudget
 
-SWARM_SAIL_KINDS = ("sail_model", "gym_box")
+SWARM_SAIL_KINDS = ("sail_model", "gym_box", "data_box")
 
 
 def _epoch(text: str) -> float:
@@ -48,6 +49,7 @@ class SailGuard:
         self.settings = settings
         self.reader = reader
         self.clock = clock
+        self.budget = SailBudget(store, settings, clock=clock)
         self.disk_free = disk_free or (lambda: float(shutil.disk_usage(store.root).free))
         state = store.get("guard", {}) or {}
         self.braked: bool = bool(state.get("braked", True))  # nothing is allowed before a first good reading
@@ -104,10 +106,13 @@ class SailGuard:
         # the configured `house_burn_usd_day` alone.
         measured = (burn - swarm_day) if burn is not None and cfg.get("measured_burn", False) else 0.0
         house = max(float(cfg.get("house_burn_usd_day", 1.0)), measured)
+        if not self.budget.burst():
+            house = max(house, float(self.settings.get("lifecycle", {}).get("house_usd_day", 4.0)))
         line = 2.0 * house + float(cfg.get("margin_usd", 30.0))
         burst_start = float(self.store.get("burst_started_at", now))
-        burst_until = _epoch(cfg.get("burst_until", "2026-09-28T13:30:00Z"))
+        burst_until = self.budget.boundary()
         in_burst = now < burst_until
+        self.budget.meter(balance)  # before the legacy meter overwrites its prior balance
         metered, metered_today = self._metered(balance, now)
         burst_spent = max(self.store.spent(SWARM_SAIL_KINDS, since=burst_start), metered if in_burst else 0.0)
         midnight = now - (now % 86400)
@@ -125,13 +130,19 @@ class SailGuard:
         if in_burst and burst_spent >= float(cfg.get("burst_cap_usd", 350.0)):
             reasons.append(f"the burst's Sail cap is spent ({burst_spent:.2f} of {float(cfg.get('burst_cap_usd', 350.0)):.0f})")
         if not in_burst:
-            account_cap = float(cfg.get("after_burst_usd_day", 12.0))
-            day_cap = max(0.0, account_cap - house)
+            budget = self.budget.status()
+            period = budget["period"]
+            account_cap = period["cap"]
+            today_spent = self.store.spent(SWARM_SAIL_KINDS, since=period["start"])
+            metered_today = budget["metered_usd"]
+            day_cap = max(0.0, account_cap - house * period["fraction"])
             if today_spent >= day_cap:
                 reasons.append(f"today's Sail allowance after the burst is spent ({today_spent:.2f} of {day_cap:.2f})")
             elif metered_today >= account_cap:
                 reasons.append(f"today's Sail allowance after the burst is spent by Sail's meter ({metered_today:.2f} of "
                                f"{account_cap:.2f} for the account)")
+            elif budget["room_usd"] <= 0:
+                reasons.append("today's Sail allowance is committed (including House and uncertainty reserve)")
         try:
             free_gb = self.disk_free() / 2 ** 30
         except OSError:

@@ -340,9 +340,11 @@ class Boxes(PoolCase):
         import threading
 
         release = threading.Event()
+        entered = threading.Event()
         real = self.sail.from_checkpoint
 
         def slow_post(checkpoint, *, name, timeout=900.0):
+            entered.set()
             release.wait(5)
             return real(checkpoint, name=name)
 
@@ -351,6 +353,7 @@ class Boxes(PoolCase):
                        driver_factory=lambda client, box: FakeDriver(client, box, calls=self.calls))
         pool.submit(job("a"))
         pool.manage()
+        self.assertTrue(entered.wait(2), "the fork POST is in flight before the stop")
         threading.Timer(0.2, release.set).start()
         pool.stop(join_seconds=5)
         self.assertFalse(any(t.is_alive() for t in pool.fork_threads), "no fork outlives the pool")

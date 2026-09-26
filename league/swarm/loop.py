@@ -35,6 +35,7 @@ from . import HEARTBEAT, LOCK_FILE, LOG_FILE, PID_FILE, settings as settings_mod
 from .architect import Architect
 from .gate import Gate
 from .guard import SailGuard, provider_reader
+from .lifecycle import SailBudget
 from .pool import GymPool
 from .researcher import Researcher
 from .seeds import SEEDS, family_spec, program_for
@@ -76,6 +77,9 @@ class Scheduler:
     def take(self, *, idle_seconds: float = 5.0) -> str | None:
         now = self.clock()
         fams = self.store.families(alive=True)
+        life = self.store.get("lifecycle") or {}
+        if life.get("mode") in ("steady", "floor"):
+            fams = [f for f in fams if life.get("mode") == "steady" and f["id"] in (life.get("cohort") or [])]
         with self._lock:
             ready = [f for f in fams if f["id"] not in self.running and self.cooldown.get(f["id"], 0) <= now
                      and now - self.last.get(f["id"], 0) >= idle_seconds]
@@ -117,6 +121,7 @@ class Swarm:
         self.clock = clock
         self.sleep = sleep
         self.store = store or SwarmStore(self.root, clock=clock)
+        self.lifecycle = SailBudget(self.store, self.settings, clock=clock)
         if router is None:
             from .models import build_router
 
@@ -176,6 +181,7 @@ class Swarm:
                 "median_cycle_seconds": seconds[len(seconds) // 2] if seconds else None, "cycles_last_hour": len(recent),
                 "cycle_errors_last_hour": sum(1 for p in recent if p.get("error")),
                 "researcher_pace": self.pace_status(),
+                "lifecycle": self.store.get("lifecycle"), "sail_budget": self.lifecycle.status(),
                 "guard": getattr(self.guard, "last", {}), "braked": not self.guard.allows(), "pool": self.pool.status(),
                 "rounds": sorted(k for k, t in self.rounds.items() if t.is_alive())}
 
@@ -223,13 +229,21 @@ class Swarm:
         except (TypeError, ValueError, OverflowError):
             limit, valid = 0.0, False
         now = self.clock()
+        daily = None
+        if not self.lifecycle.burst():
+            daily = self.lifecycle.status()
+            remaining_hours = max(1.0 / 60, (daily["period"]["end"] - now) / 3600)
+            limit = min(limit, daily["research_room_usd"] / remaining_hours)
+            valid = valid and self.lifecycle.research_allowed() and not daily["reason"]
         cached = self._pace
         if now - cached[0] >= 10.0 or now < cached[0] or cached[1] != scope:
             spent = self.store.spent(["sail_model"] if scope == "sail_model" else ["sail_model", "openai"], since=now - 3600)
             cached = self._pace = (now, scope, spent)
         paused = not valid or cached[2] >= limit
         label = "Sail models" if scope == "sail_model" else "Sail and OpenAI models"
-        reason = (f"invalid researcher.{key}; research paused" if not valid else
+        reason = ((daily["reason"] or f"research lifecycle is {(self.store.get('lifecycle') or {}).get('mode', 'unavailable')}")
+                  if daily and (daily["reason"] or not self.lifecycle.research_allowed()) else
+                  f"invalid researcher.{key}; research paused" if not valid else
                   f"{label} spent ${cached[2]:.4f} in the last hour, at the ${limit:.4f} pace" if paused else None)
         return {"scope": scope, "limit_usd_per_hour": limit if valid else None,
                 "spent_last_hour_usd": round(cached[2], 6), "paused": paused, "reason": reason}
@@ -280,7 +294,16 @@ class Swarm:
     def step(self) -> None:
         """One pass of the main loop (tests call it directly)."""
         fresh = settings_mod.load(self.root, config=self.config)
+        if callable(getattr(self.pool, "bundle", None)):
+            fresh["forward"]["current_bundle"] = self.pool.bundle()
         self.settings.update(fresh)  # in place (every piece holds this dict), and no key ever disappears mid-read
+        life = self.lifecycle.refresh()
+        if life["mode"] != "burst":
+            limit = min(16, len(life["cohort"]))
+            self.settings["population"] = {**self.settings["population"], "start": 16, "ceiling": 16}
+            self.settings["researcher"] = {**self.settings["researcher"], "concurrency": min(limit, int(
+                self.settings["researcher"].get("concurrency", 48)))}
+            self.settings["gym"] = {**self.settings["gym"], "start_boxes": 1, "max_boxes": 1}
         if getattr(self.guard, "due", lambda: True)():
             was = not self.guard.allows()
             self.guard.check()
@@ -299,15 +322,15 @@ class Swarm:
                 self.pool.scale_to_zero(getattr(self.guard, "reason", "the guard"))
         self.pool.manage()
         if self.guard.allows() and self.gym_ready():
-            if self.tournament.due():
+            if self.lifecycle.research_allowed() and self.tournament.due():
                 self._round("tournament", self.tournament.run)
-            if self.gate.due():
+            if self.lifecycle.research_allowed() and self.gate.due():
                 self._round("gate", self.gate.run)
             if self.gate.forward_due():
                 self._round("forward", self.gate.forward)
             # Refilling to the start population always (a birth spends nothing by itself: the pace caps all cycles);
             # growing past it toward the ceiling only while the hourly spend is under the pace.
-            if self.architect.due() and self.store.get("tournament_at") and (self.architect.refilling() or not self.over_pace()):
+            if self.architect.due() and self.store.get("tournament_at") and (life["mode"] != "burst" or self.architect.refilling() or not self.over_pace()):
                 self._round("architect", self.architect.run)
         if self.clock() - self._beat >= float(self.settings.get("heartbeat_seconds", 20)):
             self._beat = self.clock()

@@ -77,6 +77,10 @@ class Architect:
         return len(self.store.families(alive=True)) < int(self.settings.get("population", {}).get("start", 48))
 
     def due(self) -> bool:
+        from .lifecycle import Lifecycle
+        life = Lifecycle(self.store, self.settings, clock=self.clock)
+        if not life.burst():
+            return (self.store.get("daily_architect") or {}).get("period") != life.period()["id"]
         every = float(self.cfg.get("refill_seconds", 3600)) if self.refilling() else float(self.cfg.get("every_seconds", 14400))
         return self.clock() - float(self.store.get("architect_at", 0.0) or 0.0) >= every
 
@@ -167,23 +171,41 @@ class Architect:
 
     def run(self) -> dict[str, Any]:
         began = self.clock()
+        from .lifecycle import SailBudget
+        life = SailBudget(self.store, self.settings, clock=self.clock)
+        daily = not life.burst()
+        if daily:
+            with self.store.atomic():
+                prior = self.store.get("daily_architect") or {}
+                if prior.get("period") == life.period()["id"]:
+                    return {"born": [], "why": "daily architect already dispatched", "status": prior.get("status")}
+                life._safe()
+                # Claim before dispatch; a crash/ambiguous answer is not another paid pass after restart.
+                self.store.put("daily_architect", {"period": life.period()["id"], "status": "dispatched", "at": began})
         self.store.put("architect_at", began)
         room = int(self.settings.get("population", {}).get("ceiling", 96)) - len(self.store.families(alive=True))
-        if room <= 0:
+        if room <= 0 and not daily:
             out = {"born": [], "why": "the population is at its ceiling"}
             self.store.event("swarm.architect", None, out)
             return out
         try:
             answer = self.router.ask(role="architect", system=SYSTEM, user=self.prompt(), family=None,
-                                     key=f"swarm:architect:{int(began)}", openai_model=self.cfg.get("openai_model"),
+                                     key=f"swarm:architect:{life.period()['id'] if daily else int(began)}", openai_model=self.cfg.get("openai_model"),
                                      sail_profile=str(self.cfg.get("sail_profile", "k3_balanced")),
                                      max_output=int(self.cfg.get("max_output_tokens", 12000)), effort="high", need_usd=2.0)
         except Exception as exc:  # noqa: BLE001
             out = {"born": [], "error": str(exc)[:300]}
+            if daily:
+                self.store.put("daily_architect", {"period": life.period()["id"], "status": "deferred_or_uncertain", "at": began,
+                                                   "error": str(exc)[:300]})
             self.store.event("swarm.architect", None, out)
             return out
         rows = (answer.get("json") or {}).get("families")
-        born = self.admit(rows)
+        born = self.admit(rows) if not daily or (self.store.get("lifecycle") or {}).get("mode") != "floor" else []
+        if daily:
+            self.store.put("daily_architect", {"period": life.period()["id"], "status": "complete", "at": began,
+                                               "proposals": rows, "answer": answer.get("text")})
+            life.finish_maintenance("architect")
         out = {"born": born, "proposed": len(rows) if isinstance(rows, list) else 0, "route": answer.get("route"),
                "model": answer.get("model"), "cost_usd": answer.get("cost_usd"), "seconds": round(self.clock() - began, 1)}
         self.store.event("swarm.architect", None, out)

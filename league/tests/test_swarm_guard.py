@@ -134,12 +134,12 @@ class Guard(GuardCase):
         self.clock.advance(BURST_END + 86400 * 3 + 3600 - self.clock())
         self.reading = (5000.0, 5.0)
         g = self.guard()
-        self.store.add_spend("sail_model", 9.0)
+        self.store.add_spend("sail_model", 7.0)
         g.check()
         self.assertTrue(g.allows())
-        self.store.add_spend("sail_model", 1.5)
+        self.store.add_spend("sail_model", 1.0)
         g.check()
-        self.assertFalse(g.allows(), "12 a day less the House's 2")
+        self.assertFalse(g.allows(), "12 a day less the House capacity bound and uncertainty reserve")
 
     def test_an_unreadable_balance_brakes_at_once_and_only_a_good_reading_releases(self):
         g = self.guard()

@@ -22,6 +22,7 @@ from decimal import Decimal
 from typing import Any, Callable, Mapping, Sequence
 
 from .store import SwarmStore
+from .lifecycle import BudgetDeferred, SailBudget
 
 
 class ModelError(RuntimeError):
@@ -55,6 +56,7 @@ class ModelRouter:
         self.store = store
         self.provider = provider
         self.settings = settings
+        self.budget = SailBudget(store, settings)
         self.frontier_factory = frontier_factory
         self.month = month
         self._lock = threading.Lock()
@@ -62,12 +64,32 @@ class ModelRouter:
     # ------------------------------------------------------------------ Sail
     def sail(self, profile: str, items: Sequence[Any], *, family: str, key: str, tools: Sequence[Mapping[str, Any]] | None = None,
              effort: str = "low", max_output: int = 8000, cache_key: str | None = None, tool_choice: str = "auto",
-             cap_usd_day: float | None = None, kind: str = "sail_model") -> Any:
+             cap_usd_day: float | None = None, kind: str = "sail_model", bucket: str = "research") -> Any:
         """One Sail call, deduped on `key` (a crash-retry re-reads the stored response). Raises the
         Provider's errors (`BudgetExceeded` when a cap would be breached)."""
         cap = cap_usd_day if cap_usd_day is not None else float(self.settings.get("researcher", {}).get("family_usd_day", 2.0))
         attempt = 0
+        commitment = "model:" + key[:200]
+        # Exactly the Provider's encoded readable request, including tools; no token-count guess here.
+        if callable(getattr(self.provider, "build_body", None)) and callable(getattr(self.provider, "estimate", None)):
+            body = self.provider.build_body(profile, items, tools=tools, reasoning_effort=effort,
+                                            max_output_tokens=int(max_output), cache_key=(cache_key or family)[:128],
+                                            tool_choice=tool_choice)
+            from ltcm.events import canonical
+            size = len(canonical({"input": body.get("input", []), "tools": body.get("tools", [])}).encode("utf-8"))
+            hold = float(self.provider.estimate(profile, size, int(max_output)))
+        elif self.budget.burst():
+            hold = 0.0  # legacy test transports have no price estimator; production Provider always does
+        else:
+            raise BudgetDeferred("Provider cannot price a post-burst request")
         while True:
+            cached = self._row(key)
+            already_settled = cached is not None and cached["cost_usd"] is not None and cached["status"] not in ("prepared", "dispatched")
+            if not already_settled:
+                if (bucket == "research" and not self.budget.burst() and not self.budget.research_allowed(family.split(":", 1)[0])
+                        and self.store._one("SELECT 1 FROM sail_commitments WHERE key=?", (commitment,)) is None):
+                    raise BudgetDeferred("family is outside the active research cohort")
+                self.budget.reserve(commitment, hold, kind=kind, bucket=bucket, detail={"request_key": key[:200]})
             try:
                 response = self.provider.respond(profile, list(items), tools=list(tools) if tools else None, desk_id=family,
                                                  session_id=family, request_key=key[:200], reasoning_effort=effort,
@@ -76,6 +98,12 @@ class ModelRouter:
                 break
             except Exception as exc:  # noqa: BLE001 - a rate limit or a 5xx is waited out twice (a 502 was seen on Sept 26)
                 code = str(getattr(exc, "code", "") or "")
+                row = self._row(key)
+                if row is not None and row["status"] == "abandoned" and row["cost_usd"] is None:
+                    self.budget.charge(commitment, 0, final=True, released=True)
+                elif row is None and (type(exc).__name__ == "BudgetExceeded" or code.startswith("provider_bad_")
+                                      or code in ("provider_unknown_profile", "provider_empty_input")):
+                    self.budget.charge(commitment, 0, final=True, released=True)
                 if attempt >= 2 or not any(code.startswith(f"provider_http_{s}") for s in (429, 500, 502, 503, 504, 529)):
                     self._book_unsettled(kind, profile, family, key, exc)
                     raise
@@ -105,6 +133,7 @@ class ModelRouter:
             holds = dict(self.store.get("unsettled") or {})
             row = self.store._one("SELECT booked_usd, settled FROM model_costs WHERE request_key=?", (key,))
             if row and row["settled"]:
+                self.budget.charge("model:" + key, float(row["booked_usd"]), final=True)
                 return False
             # Upgrade an existing pre-stage-3 hold without booking it again.
             booked = float(row["booked_usd"] if row else (holds.get(key) or {}).get("usd") or 0)
@@ -118,7 +147,11 @@ class ModelRouter:
                              (key, usd, int(settled and not released)))
             if usd != booked:
                 self.store.add_spend(kind, usd - booked, family=family,
-                                     detail={**detail, **({"replaces_hold": round(booked, 6)} if booked else {})})
+                                     detail={**detail, **({"budget_key": "model:" + key} if self.store._one(
+                                         "SELECT 1 FROM sail_commitments WHERE key=?", ("model:" + key,)) else {}),
+                                         **({"replaces_hold": round(booked, 6)} if booked else {})})
+            if settled:
+                self.budget.charge("model:" + key, usd, final=True, released=released)
             return True
 
     def _book_unsettled(self, kind: str, profile: str, family: str, key: str, exc: BaseException) -> None:
@@ -202,6 +235,8 @@ class ModelRouter:
         `need_usd` BEFORE it is sent and settles it after (a refusal to $0; a call lost in flight keeps the hold), so the
         swarm's OpenAI cap never undercounts. Returns {text, json, route, model, cost_usd}."""
         errors = []
+        if role != "architect" and not self.budget.research_allowed(family):
+            raise ModelError("research lifecycle defers this model role")
         if openai_model and self.openai_room() >= need_usd:
             hold = float(need_usd)
             self.store.add_spend("openai", hold, family=family, detail={"role": role, "hold": key[:120]})
@@ -226,7 +261,7 @@ class ModelRouter:
                                  cache_key=f"swarm-{role}", tool_choice="auto",
                                  cap_usd_day=float(cap_usd_day if cap_usd_day is not None else
                                                    self.settings.get("researcher", {}).get("floor_usd_day", 60.0)),
-                                 kind="sail_model")
+                                 kind="sail_model", bucket="architect" if role == "architect" else "research")
         except Exception as exc:  # noqa: BLE001
             raise ModelError("; ".join(errors + [f"sail: {type(exc).__name__}: {getattr(exc, 'code', '') or str(exc)[:160]}"])) from None
         text = response.output_text or ""

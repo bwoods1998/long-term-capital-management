@@ -67,6 +67,9 @@ class Tournament:
         image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
         bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
         for fam in fams:
+            from .lifecycle import Lifecycle
+            if not Lifecycle(self.store, self.settings, clock=self.clock).research_allowed(fam["id"]):
+                continue
             current = self.store.family(fam["id"])
             if current is None or current.get("retired_at"):
                 continue

@@ -132,6 +132,19 @@ DEFAULTS: dict[str, Any] = {
         "openai_reserve_usd": 25.0,
     },
     "heartbeat_seconds": 20,
+    "lifecycle": {
+        "research_families": 16,
+        # Capacity bounds from Sail's 2026-09-26 API rates, not a claim of measured nightly cost.
+        # House 1cpu/16GiB/32GiB <=$3.9681/day; data and image forks 8cpu/32GiB/256GiB <=$.5548/hour.
+        "maintenance_usd": {"nightly": 3.65, "forward": 1.25, "architect": 1.00},
+        "maintenance_basis": "Sail API 2026-09-26: cpu4167/memory2222/disk194 USD nanos/s; two 8cpu/32GiB/256GiB boxes, 3h deadline",
+        "house_usd_day": 4.0,
+        "uncertainty_usd": 0.50,
+        "box_lease_seconds": 2400,
+        "box_rate_usd_hour": 0.60,
+        "box_creation_usd": 0.012,
+        "nightly_max_seconds": 10800,
+    },
     "stale_heartbeat_seconds": 240,     # the House restarts a swarm whose heartbeat is older than this
     "nice": 10,
 }

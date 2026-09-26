@@ -179,6 +179,15 @@ CREATE TABLE IF NOT EXISTS model_costs (
     booked_usd REAL NOT NULL,
     settled INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS sail_commitments (
+    key TEXT PRIMARY KEY, kind TEXT NOT NULL, bucket TEXT NOT NULL,
+    reserved REAL NOT NULL, accounted REAL NOT NULL DEFAULT 0,
+    state TEXT NOT NULL, created REAL NOT NULL, updated REAL NOT NULL, detail TEXT NOT NULL DEFAULT '{}'
+);
+CREATE TABLE IF NOT EXISTS sail_charges (
+    period TEXT NOT NULL, key TEXT NOT NULL, bucket TEXT NOT NULL, usd REAL NOT NULL,
+    PRIMARY KEY(period, key)
+);
 CREATE TABLE IF NOT EXISTS boxes (
     id TEXT PRIMARY KEY,
     kind TEXT NOT NULL,

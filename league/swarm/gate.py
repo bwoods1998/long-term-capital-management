@@ -157,6 +157,9 @@ class Gate:
                 continue  # one look per family in flight; its reservation must survive until it resolves
             if fam.get("retired_at") or fam["band"] != "gym" or not state.get("gate_ready"):
                 continue
+            from .lifecycle import Lifecycle
+            if not Lifecycle(self.store, self.settings, clock=self.clock).research_allowed(fam["id"]):
+                continue
             image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
             bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
             if state.get("validation_image") != image or state.get("validation_bundle") != bundle:

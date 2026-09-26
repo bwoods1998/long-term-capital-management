@@ -299,7 +299,7 @@ class Process(LoopCase):
         self.assertEqual(sw.run(once=True), 0)
         self.assertEqual(len(self.store.families(alive=True)), 48)
         kinds = [e["payload"].get("action") for e in self.store.events_after(0) if e["kind"] == "swarm.status"]
-        self.assertEqual(kinds, ["started", "stopped"])
+        self.assertEqual(kinds, ["started", "lifecycle", "stopped"])
 
 
 class Scheduling(LoopCase):

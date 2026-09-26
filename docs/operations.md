@@ -409,3 +409,43 @@ keeps the best programs and every trial/look, and leaves existing positions unde
 Researchers and the tournament share the same atomic population-floor check. A floor refusal ends the
 cycle and uses the existing increasing error cooldown (up to thirty minutes); it does not retire the family.
 The raw reason stays private in its notebook and graveyard; the public event carries only filtered prose.
+
+### After the research burst
+
+The lifecycle records its boundary once: Monday 2026-09-28 13:30Z. The first post-burst period ends at
+UTC midnight and has a $5.25 total Sail allowance; subsequent UTC days have at most $12. Restarting or
+editing the configured burst end cannot replenish it. Unresolved paid commitments carry into the new
+period, and the entire meter fall across a boundary is charged conservatively to the new period.
+The original $150 local OpenAI fuse, funded gateway month, and reserve are unchanged.
+
+After the burst, at most 16 families receive research. The roster is persistent, filled from living
+families using the bandit's weights with places for new mechanisms, and reconsidered daily. Dormant
+families keep every ID, program, trial, look, lineage, and position owner. The researcher pace is capped
+by the research allowance remaining until midnight. A flat or negative complete forward record reduces
+compute to maintenance; incomplete or stale evidence cannot lift that floor. This allocation rule never
+changes a validation, holdout, promotion, or money-band condition.
+
+The allocation signal uses 20 completed sessions from the canonical data calendar, at least 20 closed
+returns across five sessions, and current version/checkpoint/bundle replay receipts for every banded
+family owed a replay. Each family/version uses real, else shadow, else nightly rows per day. Retired
+versions' losses remain in the record. Missing receipts and successful zero-trade replays are different
+from observed zero returns. The private heartbeat reports mode, evidence status, cohort, period,
+committed dollars, and protected maintenance allowance.
+
+Model, Gym and nightly admissions share SQLite commitments. Maintenance reservations are inside the
+daily cap, ahead of research, and the safety guard can defer any paid job. Defaults use conservative
+capacity bounds from Sail's 2026-09-26 API rates (USD nanos/second: CPU 4167, memory GiB 2222, disk GiB
+194): the 1 CPU/16 GiB/32 GiB House is reserved at $4/day; a box up to 8 CPU/32 GiB/256 GiB at $0.60/hour.
+The observed l-box creation fee is $0.012. Nightly reserves $3.65 for two boxes with a three-hour
+deadline; forward replay reserves $1.25/day; architect Sail fallback reserves $1/day; uncertainty is
+$0.50/day. These are resource/runtime bounds, not measured nightly cost. Finite configured bounds and
+their provenance are required; bad or missing values defer paid work. Actual box dimensions must fit
+the bound, and a new fork requires a saved capacity verification for its exact checkpoint.
+
+Unused commitments are released only after known settlement or confirmed cleanup. A network timeout
+does not establish that a remote command or box stopped. OS command timeouts and RPC deadlines bound
+work; unreachable cleanup retains its commitment and prevents further admission. External billing
+during a Sail outage, changed vendor prices, or checkpoint/storage fees outside the active-usage meter
+cannot be guaranteed by a local reservation ledger. The account meter remains an independent brake;
+record and investigate such charges rather than increasing a cap. House exits and shadow bookkeeping
+continue while paid research is paused.
