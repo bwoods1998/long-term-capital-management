@@ -366,6 +366,35 @@ class RateLimits(unittest.TestCase):
             prov.close()
             store.close()
 
+    def test_a_call_that_timed_out_is_booked_at_its_hold(self):
+        from ltcm.provider import Provider, ProviderError
+
+        with tempfile.TemporaryDirectory() as d:
+            store = SwarmStore(Path(d))
+
+            def transport(method, route, body=None, idempotency_key=None):
+                raise ProviderError("provider_transport_timeout")  # sent; Sail may have run it and billed it
+
+            prov = Provider(Path(d) / "p.sqlite", transport=transport, floor_cap_usd_per_day="100")
+            router = ModelRouter(store, prov, settings=copy.deepcopy(S.DEFAULTS), sleep=lambda s: None)
+            items = [{"role": "user", "content": "hi"}]
+            with self.assertRaises(ProviderError):
+                router.sail("flash_asap", items, family="f:rewrite", key="k1", max_output=8000)
+            booked = store.spent(["sail_model"])
+            self.assertGreater(booked, 0)
+            self.assertEqual(booked, float(prov._db.execute("SELECT reserved_usd FROM requests").fetchone()[0]), "the Provider's hold")
+            self.assertEqual(store._one("SELECT family FROM spend")["family"], "f", "booked to the family, not its role's desk")
+
+            def refuse(method, route, body=None, idempotency_key=None):
+                raise ProviderError("provider_http_400", detail="bad request")  # refused outright: never billed
+
+            prov.transport = refuse
+            with self.assertRaises(ProviderError):
+                router.sail("flash_asap", items, family="f", key="k2")
+            self.assertEqual(store.spent(["sail_model"]), booked)
+            prov.close()
+            store.close()
+
 
 class Compaction(ResearcherCase):
     def test_old_conversations_leave_the_providers_file_and_costs_stay(self):

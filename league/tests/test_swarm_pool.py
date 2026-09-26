@@ -228,19 +228,99 @@ class Boxes(PoolCase):
         pool.manage()
         self.assertEqual(len(self.sail.forks), 4)
 
-    def test_boxes_carry_the_swarms_own_name_prefix(self):
+    def test_boxes_carry_the_swarms_own_name_prefix_and_its_stores_token(self):
         pool = self.pool(start_boxes=1)
         pool.submit(job("a"))
         pool.manage()
-        self.assertTrue(all(n.startswith("ltcm-swarm-gym-") for n in self.sail.names.values()), self.sail.names)
+        token = self.store.get("pool_token")
+        self.assertRegex(token, r"^[0-9a-f]{6}$")
+        self.assertTrue(all(n.startswith(f"ltcm-swarm-{token}-gym-") for n in self.sail.names.values()), self.sail.names)
+        self.assertEqual(self.pool().token, token, "the token lives with the store")
 
     def test_strays_named_like_ours_are_terminated_and_other_boxes_left_alone(self):
-        self.sail.extra = [{"sailbox_id": "sb_stray", "name": "ltcm-swarm-gym-1-9", "status": "running"},
+        pool = self.pool()
+        old = self.clock() - 3600
+        self.sail.extra = [{"sailbox_id": "sb_stray", "name": f"ltcm-swarm-{pool.token}-gym-1-9", "status": "running", "created_at": old},
+                           {"sailbox_id": "sb_trial", "name": "ltcm-swarm-0a0a0a-gym-1-9", "status": "running", "created_at": old},
+                           {"sailbox_id": "sb_young", "name": f"ltcm-swarm-{pool.token}-gym-2-9", "status": "running",
+                            "created_at": self.clock() - 30},
                            {"sailbox_id": "sb_w1", "name": "ltcm-gym-image-v1", "status": "running"},
                            {"sailbox_id": "sb_house", "name": "ltcm-floor", "status": "running"}]
-        pool = self.pool()
         pool.adopt()
-        self.assertEqual(self.sail.terminated, ["sb_stray"])
+        self.assertEqual(self.sail.terminated, ["sb_stray"], "another store's boxes and a box made minutes ago are left alone")
+
+    def test_the_cap_counts_the_stores_live_boxes_too(self):
+        for i in range(6):
+            self.store.upsert_box(f"sb_row{i}", kind="gym", version="sbcp_11111111-aaaa", state="ready", detail={})
+        pool = self.pool(start_boxes=4, max_boxes=8, batch_programs=1)
+        for i in range(20):
+            pool.submit(job(f"f{i}"))
+        pool.manage()
+        self.assertEqual(len(self.sail.forks), 2, "eight boxes, six of them known only to the store")
+
+    def test_a_box_that_fails_to_resume_is_failed_in_the_store_and_ended(self):
+        pool = self.pool()
+        box = self.ready_box(pool)
+        self.store.upsert_box(box.id, kind="gym", version=box.version, state="asleep", detail={})
+        box.state = "asleep"
+
+        def refuse(box_id, **kw):
+            raise RuntimeError("HTTP 409 not resumable")
+
+        self.sail.resume = refuse
+        pool.submit(job("a"))
+        self.clock.advance(9)
+        pool.run_batch(box, pool._take(box))
+        self.assertEqual(self.store.boxes(live=False)[0]["state"], "failed")
+        self.assertEqual(self.sail.terminated, [box.id])
+        self.assertEqual(len(pool.queue), 1, "its job goes back to the queue")
+
+    def test_awake_idle_and_resume_time_is_booked_asleep_time_is_not(self):
+        rate = 0.20 / 3600
+        pool = self.pool(idle_sleep_seconds=600)
+        box = self.ready_box(pool)
+        box.booked_at = self.clock()
+        self.clock.advance(400)
+        pool.manage()
+        self.assertAlmostEqual(self.store.spent(["gym_box"]), 400 * rate, places=6)
+        self.clock.advance(300)
+        pool.manage()  # idle 700 s: asleep, its last 300 awake seconds booked
+        self.assertEqual(box.state, "asleep")
+        self.assertAlmostEqual(self.store.spent(["gym_box"]), 700 * rate, places=6)
+        self.clock.advance(3600)
+        pool.manage()
+        self.assertAlmostEqual(self.store.spent(["gym_box"]), 700 * rate, places=6, msg="asleep costs nothing")
+
+        def slow_resume(box_id, **kw):
+            self.clock.advance(30)
+            return {}
+
+        self.sail.resume = slow_resume
+        pool.submit(job("a"))
+        self.clock.advance(9)
+        pool.run_batch(box, pool._take(box))
+        self.assertAlmostEqual(self.store.spent(["gym_box"]), (700 + 30) * rate, places=6)
+
+    def test_stop_waits_for_a_fork_in_flight_and_puts_its_box_to_sleep(self):
+        import threading
+
+        release = threading.Event()
+        real = self.sail.from_checkpoint
+
+        def slow_post(checkpoint, *, name, timeout=900.0):
+            release.wait(5)
+            return real(checkpoint, name=name)
+
+        self.sail.from_checkpoint = slow_post
+        pool = GymPool(self.store, self.sail, settings(start_boxes=1), clock=self.clock, threaded=True,
+                       driver_factory=lambda client, box: FakeDriver(client, box, calls=self.calls))
+        pool.submit(job("a"))
+        pool.manage()
+        threading.Timer(0.2, release.set).start()
+        pool.stop(join_seconds=5)
+        self.assertFalse(any(t.is_alive() for t in pool.fork_threads), "no fork outlives the pool")
+        self.assertEqual([b.state for b in pool.boxes.values()], ["asleep"])
+        self.assertEqual(self.sail.slept, [self.sail.forks[0][1]])
 
     def test_a_fork_in_flight_is_never_taken_for_a_stray(self):
         sail = self.sail

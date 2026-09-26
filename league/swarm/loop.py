@@ -334,7 +334,8 @@ class Swarm:
                 self.sleep(float(self.settings.get("heartbeat_seconds", 20)) / 4)
         finally:
             self.stop.set()
-            self.pool.stop()
+            # Forks in flight get a short wait (the House kills a swarm 30 s after asking it to stop).
+            self.pool.stop(join_seconds=float(self.settings.get("gym", {}).get("stop_join_seconds", 15)))
             try:  # a stopped swarm leaves no box awake (the next one adopts and wakes them)
                 self.pool.scale_to_zero(f"the swarm stopped: {self.why_stopped or 'asked'}")
             except Exception:  # noqa: BLE001

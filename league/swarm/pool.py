@@ -13,9 +13,14 @@
   bandit's share), then the oldest; a short batch waits `batch_wait_seconds` for company.
 - FAILURES. A root the box's store lacks fails its job at once with the Gym's own words; a batch that
   errs or times out is retried once on another box, then its jobs fail. A failure never kills the pool.
-- COST. Each batch books its box time at `box_usd_hour` as `gym_box` spend (an estimate: Sail bills boxes
-  on measured use, about $0.12-0.20 an hour for a busy l box; Sail's meter is the record, and the guard
-  reads the balance itself). Model inference is where the money goes, so boxes scale up without fear.
+- COST. Every awake second of a box (starting, ready and idle, busy, resuming) is booked at `box_usd_hour`
+  as `gym_box` spend, at least every `book_seconds` and whenever it sleeps or ends (an estimate: Sail bills
+  boxes on measured use, about $0.12-0.20 an hour for a busy l box; Sail's meter is the record, and the
+  guard reads the balance itself). A sleeping box books nothing.
+- NAMES. Every box is `ltcm-swarm-<token>-<kind>-<epoch>-<n>`; the token is the store's own (kv
+  `pool_token`), so a pool sweeps (`reconcile`) only its own strays, never another state root's (a laptop
+  trial's) boxes, and never one forked in the last `reconcile_grace_seconds`.
+- CAP. `max_boxes` counts every live box of the kind the pool holds or the store records.
 
 The Gym's driver (`league.gym.driver.GymDriver`) is imported when a box starts; tests hand in fakes.
 Standard library only.
@@ -23,8 +28,10 @@ Standard library only.
 
 from __future__ import annotations
 
+import datetime as dt
 import itertools
 import math
+import secrets
 import threading
 import time
 from dataclasses import dataclass, field
@@ -95,6 +102,23 @@ class Box:
     failures: int = 0
 
 
+AWAKE = ("starting", "ready", "busy")
+
+
+def forked_at(row: Mapping[str, Any]) -> float | None:
+    """When Sail made a listed box: its `created_at` (epoch or ISO), else the epoch in our own name."""
+    value = row.get("created_at")
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str) and value:
+        try:
+            return dt.datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            pass
+    parts = str(row.get("name") or "").split("-")
+    return float(parts[-2]) if len(parts) >= 2 and parts[-2].isdigit() else None
+
+
 class GymPool:
     """The pool (the module docstring)."""
 
@@ -122,6 +146,12 @@ class GymPool:
         #: Forks whose POST is in flight, by name (persisted as `forking` for the operator; a new process starts with none:
         #: a fork a dead process left in flight is a stray, ended by `reconcile`).
         self.forking: dict[str, float] = {}
+        #: The fork threads (joined by `stop`).
+        self.fork_threads: list[threading.Thread] = []
+        self.token = str(store.get("pool_token") or "")
+        if not self.token:
+            self.token = secrets.token_hex(3)
+            store.put("pool_token", self.token)
 
     # ------------------------------------------------------------------ settings
     @property
@@ -215,9 +245,10 @@ class GymPool:
                          store_root=str(g.get("store_root", "/data/store")), python=str(g.get("python", "python3")))
 
     def name_prefix(self, kind: str) -> str:
-        """Every box this pool forks is named `ltcm-swarm-<kind>-...`; no other box on the account is (W1's image boxes are
-        `ltcm-<kind>-image-...`, the House `ltcm-floor`), so a stray of ours can be found and ended by its name alone."""
-        return f"{NAME_PREFIX}{kind}-"
+        """Every box this pool forks is named `ltcm-swarm-<token>-<kind>-...`; no other box on the account is (W1's image
+        boxes are `ltcm-<kind>-image-...`, the House `ltcm-floor`, another state root's pool has another token), so a
+        stray of ours can be found and ended by its name alone."""
+        return f"{NAME_PREFIX}{self.token}-{kind}-"
 
     def _start_box(self, kind: str) -> None:
         """Fork one box from its image, check its seal, make it ready (runs on its own thread). Its start-up time is booked;
@@ -243,7 +274,7 @@ class GymPool:
             self._failed_fork(kind, f"the fork failed: {str(exc)[:200]}")
             self.store.event("swarm.pool", None, {"action": "fork_failed", "kind": kind, "image": image, "error": str(exc)[:300]})
             return
-        box = Box(box_id, kind, str(image), "starting", last_used=self.clock(), booked_at=self.clock())
+        box = Box(box_id, kind, str(image), "starting", last_used=self.clock(), booked_at=began)
         with self._lock:
             self.boxes.pop(placeholder, None)
             self.boxes[box_id] = box
@@ -272,8 +303,8 @@ class GymPool:
                     raise exc
             box.roots = tuple(sorted(r for r, row in (report.get("roots") or {}).items() if row and row.get("nbbo")))
         except Exception as exc:  # noqa: BLE001
+            self._accrue(box)
             box.state = "failed"
-            self._book(box, self.clock() - began, 0)
             self._failed_fork(kind, str(exc)[:200])
             self.store.set_box_state(box_id, "failed")
             self.store.event("swarm.pool", None, {"action": "box_failed", "box": box_id, "kind": kind, "error": str(exc)[:400]})
@@ -284,7 +315,7 @@ class GymPool:
             with self._lock:
                 self.boxes.pop(box_id, None)
             return
-        self._book(box, self.clock() - began, 0)
+        self._accrue(box)
         with self._wake:
             box.state = "ready"
             box.last_used = self.clock()
@@ -293,6 +324,9 @@ class GymPool:
         self.store.upsert_box(box_id, kind=kind, version=str(image), state="ready", detail={"name": name, "roots": list(box.roots),
                                                                                            "bundle": getattr(box.driver, "version", None)})
         self.store.event("swarm.pool", None, {"action": "box_ready", "box": box_id, "kind": kind, "roots": list(box.roots)})
+        if self._stopping:  # the pool stopped while this fork was in flight: it sleeps (the next process adopts it)
+            self._sleep(box)
+            return
         self._spawn(box)
 
     def sealed(self, box_id: str) -> bool:
@@ -335,14 +369,19 @@ class GymPool:
         with self._lock:
             known = set(self.boxes) | {r["id"] for r in self.store.boxes(live=True)}
             in_flight = set(self.forking)
+        mine = f"{NAME_PREFIX}{self.token}-"
+        grace = float(self.gym.get("reconcile_grace_seconds", 300))
         n = 0
         for row in rows:
             box_id, name = str(row.get("sailbox_id") or row.get("id") or ""), str(row.get("name") or "")
             if name in in_flight:
                 continue  # its POST has not returned: ours, not a stray
-            if not name.startswith(NAME_PREFIX) or box_id in known or str(row.get("status")) in ("terminated", "terminating",
-                                                                                                    "failed", "create_failed"):
+            if not name.startswith(mine) or box_id in known or str(row.get("status")) in ("terminated", "terminating",
+                                                                                            "failed", "create_failed"):
                 continue
+            born = forked_at(row)
+            if born is None or self.clock() - born < grace:
+                continue  # made minutes ago (or cannot say when): a fork whose answer may still be on its way
             try:
                 self.client.terminate(box_id)
                 n += 1
@@ -383,12 +422,22 @@ class GymPool:
         if not batch:
             return
         if box.state == "asleep":
+            resuming = self.clock()
             try:
                 self.client.resume(box.id)
             except Exception as exc:  # noqa: BLE001
                 self._requeue(batch, f"resuming {box.id} failed: {exc}")
+                box.booked_at = resuming
+                self._accrue(box, awake=True)
                 box.state = "failed"
+                self.store.set_box_state(box.id, "failed")
+                self.store.event("swarm.pool", None, {"action": "resume_failed", "box": box.id, "error": str(exc)[:300]})
+                try:
+                    self.client.terminate(box.id)
+                except Exception:  # noqa: BLE001
+                    pass
                 return
+            box.booked_at = resuming  # the resume is awake time
         box.state = "busy"
         self.store.set_box_state(box.id, "busy")
         head = batch[0]
@@ -403,7 +452,7 @@ class GymPool:
                                  timeout=int(self.gym.get("run_timeout_seconds", 900)))
         except Exception as exc:  # noqa: BLE001
             elapsed = self.clock() - began
-            self._book(box, elapsed, len(batch))
+            self._accrue(box, jobs=len(batch))
             box.failures += 1
             box.state = "ready" if box.failures < 3 else "failed"
             self.store.box_used(box.id, elapsed, jobs=0)
@@ -419,7 +468,7 @@ class GymPool:
                 self._retire_box(box, "three failed batches")
             return
         elapsed = self.clock() - began
-        self._book(box, elapsed, len(batch))
+        self._accrue(box, jobs=len(batch))
         box.failures = 0
         box.last_used = self.clock()
         box.state = "ready"
@@ -451,9 +500,19 @@ class GymPool:
             self.stats["program_years"] += years
             self.stats["seconds"] += elapsed
 
+    def _accrue(self, box: Box, *, jobs: int = 0, awake: bool | None = None) -> None:
+        """Book a box's awake seconds since it was last booked (none while it sleeps) and start its next stretch."""
+        now = self.clock()
+        with self._lock:
+            was_awake = box.state in AWAKE if awake is None else awake
+            seconds = now - box.booked_at if box.booked_at else 0.0
+            box.booked_at = now
+        if was_awake and seconds > 0 and not box.id.startswith("pending-"):
+            self._book(box, seconds, jobs)
+
     def _book(self, box: Box, seconds: float, jobs: int) -> None:
-        """A batch's box time as `gym_box` spend at `box_usd_hour` (Sail bills measured use: a busy l box is
-        about $0.12-0.20 an hour, measured Sept 26; an idle or sleeping one close to nothing)."""
+        """Box time as `gym_box` spend at `box_usd_hour` (Sail bills measured use: a busy l box is about $0.12-0.20
+        an hour, measured Sept 26)."""
         rate = float(self.gym.get("box_usd_hour", 0.20)) / 3600.0
         if seconds > 0:
             self.store.add_spend("gym_box", seconds * rate, detail={"box": box.id, "seconds": round(seconds, 1), "jobs": jobs})
@@ -469,6 +528,7 @@ class GymPool:
             self._wake.notify_all()
 
     def _retire_box(self, box: Box, why: str) -> None:
+        self._accrue(box)
         box.state = "terminated"
         try:
             self.client.terminate(box.id)
@@ -491,6 +551,9 @@ class GymPool:
             for dead in [k for k, b in self.boxes.items() if b.state in ("terminated", "failed")]:
                 self.boxes.pop(dead, None)  # nothing kept of a box that is gone
             boxes = list(self.boxes.values())
+        for box in boxes:  # idle awake time is paid for too
+            if box.state in AWAKE and box.booked_at and now - box.booked_at >= float(g.get("book_seconds", 300)):
+                self._accrue(box)
         if now - self.reconciled_at >= float(g.get("reconcile_seconds", 600)):
             out["strays"] = self.reconcile()
         for kind in ("gym", "gate"):
@@ -524,13 +587,17 @@ class GymPool:
                              and (b.id.startswith("pending-") or b.version == str(image))]
             per = max(1, int(g.get("batch_programs", 8)))
             if kind == "gym":
-                target = min(int(g.get("max_boxes", 8)), max(int(g.get("start_boxes", 4)), math.ceil(demand / per)))
+                cap = int(g.get("max_boxes", 8))
+                target = min(cap, max(int(g.get("start_boxes", 4)), math.ceil(demand / per)))
             else:
-                target = 1
+                cap = target = 1
+            with self._lock:  # every live box of the kind counts against the cap: the pool's and the store's
+                live = {b.id for b in self.boxes.values() if b.kind == kind and b.state not in ("terminated", "failed")}
+            live |= {r["id"] for r in self.store.boxes(kind=kind, live=True)}
             if now < self.fork_after.get(kind, 0.0):
                 out["fork_backoff"] = round(self.fork_after[kind] - now)
                 continue  # the last fork failed: wait (a bad image must not become a storm of paid boxes)
-            for _ in range(max(0, target - len(available))):
+            for _ in range(max(0, min(target - len(available), cap - len(live)))):
                 with self._lock:
                     self.fork_times = [t for t in self.fork_times if now - t < 3600]
                     if len(self.fork_times) >= int(g.get("max_forks_hour", 16)):
@@ -539,13 +606,17 @@ class GymPool:
                     self.fork_times.append(now)  # counted now; `_start_box` adds nothing twice (see below)
                 out["started"] += 1
                 if self.threaded:
-                    threading.Thread(target=self._start_box, args=(kind,), name=f"fork-{kind}", daemon=True).start()
+                    thread = threading.Thread(target=self._start_box, args=(kind,), name=f"fork-{kind}", daemon=True)
+                    with self._lock:
+                        self.fork_threads = [t for t in self.fork_threads if t.is_alive()] + [thread]
+                    thread.start()
                 else:
                     self._start_box(kind)
         out.update(self.status())
         return out
 
     def _sleep(self, box: Box) -> None:
+        self._accrue(box)
         try:
             self.client.sleep(box.id)
             box.state = "asleep"
@@ -601,10 +672,16 @@ class GymPool:
             self.store.event("swarm.pool", None, {"action": "scaled_to_zero", "boxes": n, "why": why})
         return n
 
-    def stop(self) -> None:
+    def stop(self, *, join_seconds: float = 60.0) -> None:
+        """Stop the dispatchers and wait (up to `join_seconds`) for forks in flight: a fork that lands after the stop
+        sleeps its box, so the caller's `scale_to_zero` leaves nothing awake."""
         with self._wake:
             self._stopping = True
             self._wake.notify_all()
+            forks = list(self.fork_threads)
+        deadline = time.monotonic() + join_seconds
+        for thread in forks:
+            thread.join(max(0.0, deadline - time.monotonic()))
 
     def status(self) -> dict[str, Any]:
         with self._lock:
