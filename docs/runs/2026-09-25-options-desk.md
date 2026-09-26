@@ -233,6 +233,16 @@ run's `config.json` change is its own new `options_structures` key).
   **D-J1 slot (the Jev run, asked 06:28Z):** open for 12:15-12:55Z only if V's watch ends by 11:45Z;
   otherwise Saturday after Deploy B and Deploy G. State (10:33Z): Saturday; **reopened 11:20Z**: V's watch ended 11:18:45Z, so the slot is open from 11:48:45Z if finished before 12:55Z. The Jev run took it (11:22Z): D-J1 (PR #319, no money rule) from 11:50Z, finished before 12:55Z or not started; its release carries V (built on main), a rollback returns to V. D-J1 promoted 11:50:48Z, watched to 12:00:50Z (promoted); `ops.started` 11:51:59Z with all five books incl. options-shadow, none frozen at 11:57Z. Deploy G (the gateway's multi-leg route and the book's spreads, switch off;
   money-digest change 1 of 2) after the forward-first run's Deploy B, not before 20:05Z Sept 25.
+  **The owner's wrap-up (01:32Z Sept 26, all four runs):** build nothing further; ship only what is built, reviewed and
+  CI-green; the order is forward-first's Deploy B (once AZ-SD and LAD-SF settle), this run's **Deploy G**, forward-first's
+  Deploy C, the Jev run's D-J2 (+ J5 gateway), the Kalshi run's K2 (the scale rule, switched off); each only after the
+  previous watch plus 30 minutes, never while a real Kalshi family's game is in play, never 13:25-20:05Z on a trading day.
+  **Deploy G is announced for Deploy B's watch-end plus 30 minutes** (its exact start written here first): PR #344
+  (`g/integration` `1857a610` = `68c78e7e` + main's #350-#352, strategy files only; `league.ci` passes), the gateway (caps
+  and router) first, then the House with the ratify on digest `be1e3ce9` (this run's digest change 1 of 2). The
+  practice-account flip, the watchdog-side rollback guard and the forward harness's switch are NOT built and do not ship in
+  this run: they are named windows after it (see the report). The memory diagnosis started at 01:28Z was stopped at 01:33Z
+  on the wrap-up; a read-only RSS sampler stays on until the report.
 
 **Requests to the forward-first run (06:05Z; also a comment on its PR #297):**
 
