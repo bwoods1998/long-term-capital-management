@@ -278,11 +278,12 @@ class Store:
         except (OSError, ValueError):
             return None
 
-    def calendar(self, client: Any | None = None, years: Sequence[int] = (2022, 2023, 2024, 2025, 2026)) -> sl.Calendar:
+    def calendar(self, client: Any | None = None, years: Sequence[int] = (2022, 2023, 2024, 2025, 2026, 2027)) -> sl.Calendar:
         cache = self.work / "calendar.json"
         try:
             data = json.loads(cache.read_text())
-            if all(str(y) in data.get("years", []) for y in years):
+            # A sealed box (no client) takes what is cached; the data box refreshes a short cache.
+            if client is None or all(str(y) in data.get("years", []) for y in years):
                 return sl.Calendar.from_json(data["exceptions"])
         except (OSError, ValueError, KeyError):
             pass
@@ -593,28 +594,68 @@ def export_subset(store: Store, out_root: Path, roots: Sequence[str], days: Sequ
     return {"files": len(files), "days": [d.isoformat() for d in present], "expiry_rows": len(exp_rows)}
 
 
-def prune(store: Store, keep: Sequence[str], *, drop_key: bool, drop_work: bool, calendar: sl.Calendar) -> dict[str, Any]:
-    """Delete every store file outside `keep` (by the date in its path), recompile, then optionally
-    delete the key and the working area. Used on a fork that becomes the Gym image."""
-    removed = 0
+#: What a gate image keeps of the working area: enough to adopt nightly files and recompile.
+GATE_WORK_KEEP = ("journal.jsonl", "expiries", "calendar.json")
+
+
+def prune(store: Store, keep: Sequence[str], *, drop_key: bool, drop_work: bool, calendar: sl.Calendar,
+          keep_journal: bool = False) -> dict[str, Any]:
+    """Delete every store file outside `keep` (by the date in its path) and every file the journal
+    does not know (a rename a killed run never journaled), recompile, then optionally delete the
+    key and the working area. Used on a fork that becomes the Gym image or the gate image."""
+    removed, orphans = 0, 0
+    known = set(store.journal.files())
     for kind in sl.KINDS:
         base = store.root / kind
         if not base.exists():
             continue
-        for path in base.rglob("*"):
+        for path in sorted(base.rglob("*")):
             if not path.is_file():
                 continue
-            parsed = sl.parse_rel_path(str(path.relative_to(store.root)))
+            rel = str(path.relative_to(store.root))
+            parsed = sl.parse_rel_path(rel)
             if parsed is None or sl.window_of(parsed[2]) not in keep:
                 path.unlink()
                 removed += 1
+            elif rel not in known:
+                path.unlink()
+                orphans += 1
     report = compile_store(store, calendar, windows=keep)
     if drop_work:
         shutil.rmtree(store.work, ignore_errors=True)
         shutil.rmtree("/data/run", ignore_errors=True)
+    elif keep_journal:
+        # The journal keeps only the kept windows' records, so the image never lists a file it lacks.
+        records = [r for r in store.journal.records()
+                   if r.get("type") != "file" or r.get("window") in keep]
+        for child in store.work.iterdir():
+            if child.name not in GATE_WORK_KEEP:
+                shutil.rmtree(child) if child.is_dir() else child.unlink()
+        tmp = store.work / "journal.jsonl.tmp"
+        tmp.write_text("".join(json.dumps(r, sort_keys=True, default=str) + "\n" for r in records))
+        os.replace(tmp, store.work / "journal.jsonl")
     if drop_key:
         shutil.rmtree(Path(sl.KEY_PATH).parent, ignore_errors=True)
-    return {"removed": removed, **report}
+    return {"removed": removed, "orphans": orphans, **report}
+
+
+def day_records(store: Store, day: dt.date, roots: Sequence[str] | None = None) -> list[dict[str, Any]]:
+    """Everything a copy of one day needs: its file records, its expiry lists, the calendar."""
+    out: list[dict[str, Any]] = []
+    for record in store.journal.files().values():
+        if sl.as_date(record["date"]) == day and (roots is None or record["root"] in roots):
+            out.append(record)
+    for record in list(out):
+        if record["kind"] == "nbbo":
+            expiries = store.load_expiries(record["root"], day)
+            if expiries is not None:
+                out.append({"type": "expiries", "root": record["root"], "date": day.isoformat(),
+                            "expiries": [e.isoformat() for e in expiries]})
+    try:
+        out.append({"type": "calendar", "calendar": json.loads((store.work / "calendar.json").read_text())})
+    except (OSError, ValueError):
+        pass
+    return out
 
 
 def adopt(store: Store, records_path: str, calendar: sl.Calendar) -> dict[str, Any]:
@@ -690,6 +731,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     run.add_argument("--first", default="")
     run.add_argument("--names-file", default=None)
     run.add_argument("--checks", default="", help="ROOT:DAY,... fetched first into /data/work/check-store")
+    run.add_argument("--forward-days", default="", help="stage 7: these forward days for the whole universe")
     run.add_argument("--threads", type=int, default=8, help="task threads; more than the slots, so decoding overlaps fetching")
     run.add_argument("--decoders", type=int, default=6, help="processes that decode and write the big frames")
     run.add_argument("--slots", type=int, default=None, help="write this to the slots file first")
@@ -699,6 +741,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     pr.add_argument("--keep", required=True)
     pr.add_argument("--drop-key", action="store_true")
     pr.add_argument("--drop-work", action="store_true")
+    pr.add_argument("--keep-journal", action="store_true", help="keep the journal, expiries and calendar (gate image)")
+    rc = sub.add_parser("records", help="one day's file records (JSON lines) for a nightly copy")
+    rc.add_argument("--date", required=True)
     ad = sub.add_parser("adopt")
     ad.add_argument("--records", required=True)
     sub.add_parser("verify")
@@ -748,8 +793,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             calendar = store.calendar(theta)
             stages = [int(s) for s in args.stages.split(",") if s.strip()]
             names_file = args.names_file or (str(store.work / "universe.json") if (store.work / "universe.json").exists() else None)
+            forward = [dt.date.fromisoformat(d) for d in args.forward_days.split(",") if d.strip()]
             tasks = sl.plan(calendar, stages=stages, names=_names(names_file), first=_first(args.first),
-                            checks=_first(args.checks))
+                            checks=_first(args.checks), forward=forward)
             (store.work / "plan.json").write_text(json.dumps({"stages": stages, "tasks": len(tasks), "first": args.first,
                                                               "names": _names(names_file), "at": sl.utc_now()}))
             log.info("run: stages %s, %d tasks, threads %d, decoders %d", stages, len(tasks), args.threads, args.decoders)
@@ -801,7 +847,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(compile_store(store, calendar)))
     elif args.cmd == "prune":
         keep = [w.strip() for w in args.keep.split(",") if w.strip()]
-        print(json.dumps(prune(store, keep, drop_key=args.drop_key, drop_work=args.drop_work, calendar=calendar)))
+        print(json.dumps(prune(store, keep, drop_key=args.drop_key, drop_work=args.drop_work, calendar=calendar,
+                               keep_journal=args.keep_journal)))
+    elif args.cmd == "records":
+        for record in day_records(store, dt.date.fromisoformat(args.date)):
+            print(json.dumps(record, sort_keys=True, default=str))
     elif args.cmd == "adopt":
         print(json.dumps(adopt(store, args.records, calendar)))
     elif args.cmd == "verify":

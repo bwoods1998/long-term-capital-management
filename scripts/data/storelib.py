@@ -199,6 +199,7 @@ STAGES: dict[int, str] = {
     4: "the 20 names over Train + Validation, then their holdout",
     5: "trade_quote calibration samples: core five, Train days, one in five, 0-7 DTE, 10 strikes",
     6: "back months to 45 DTE, SPY and QQQ",
+    7: "forward: the previous trading day for the whole universe (the nightly job)",
 }
 
 
@@ -210,6 +211,7 @@ def plan(
     first: Sequence[tuple[str, dt.date]] = (),
     core: Sequence[str] = CORE_FIVE,
     checks: Sequence[tuple[str, dt.date]] = (),
+    forward: Sequence[dt.date] = (),
 ) -> list[Task]:
     """Every task in the plan's order. `checks` (stage 0, job `chk`) fetch root-days for the
     agreement check into a side directory, never the store. `first` puts some root-days at the head
@@ -232,6 +234,13 @@ def plan(
     for root, day in checks:
         if calendar.is_trading(day):
             add(Task(0, "chk", root, day))
+    if 7 in stages:  # the nightly forward day(s): every root of the universe, before anything else
+        for day in forward:
+            if window_of(day) != "forward":
+                raise ValueError(f"{day} is not a forward day")
+            if calendar.is_trading(day):
+                for root in list(core) + list(names):
+                    add(Task(7, "day", root, day))
     for root, day in first:
         stage = stage_of(root, day, core)
         if stage in stages and calendar.is_trading(day):
