@@ -165,6 +165,11 @@ positive stretch) is being verified before C-money's brief fixes M1 and M3 for t
 `earned-live-20260921` ratified 20:11:48Z on `d7d910fe` (active), `ops.started` 20:13:21Z, watch verdict promoted, **watch
 ended 20:21:56Z** (the Kalshi run's K1 may start from 20:52Z).
 
+**Deploy B moves up (01:22Z Sept 26, the owner asked why wait):** it starts as soon as the proven family's last two
+real games of the night settle (KXMLBTOTAL AZ-SD, first pitch 01:40Z; LAD-SF, 02:15Z; the other four settled 00:19-01:16Z:
+PIT-DET -$7.33 and TEX-MIN -$6.61 when the totals went over, TB-PHI +$3.93, ATL-MIA +$5.87), not at a fixed 06:00Z; the
+exact start is written here first. Then the options run's G, then Deploy C. Main carries B plus Merton's #350-#352.
+
 **MAIN HOLDS DEPLOY B, UNRELEASED, FROM 22:18:40Z UNTIL DEPLOY B AT 06:00Z SATURDAY.** Merton's #346 (strategy files only,
 merged 21:55:31Z) would have been shipped by the updater at its next look (about 22:26Z), a House restart as the proven
 family's games began (22:40Z), and H3b's in-play hold ships only in Deploy C. #334 (Deploy B, protected files) was merged
