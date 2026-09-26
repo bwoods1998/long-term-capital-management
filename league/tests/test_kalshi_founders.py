@@ -248,12 +248,14 @@ class Switch(HouseCase):
         self.assertNotIn("k1-mlb-model", {a.founder for a in self.house.registry.agents.values()})
         self.assertEqual(alerts(self.house, "warning", "founder"), [])
 
-    def test_the_floor_turns_it_on_and_the_canary_never_does(self):
+    def test_the_options_house_never_turns_it_on(self):
+        """The options overhaul (Sept 26, 2026): the floor's House seats no Kalshi founder, whatever config.json says."""
         import inspect
         from league import service
 
         source = inspect.getsource(service.build)
-        self.assertIn('kalshi_founders=bool(config.get("kalshi_founders", True)) and not canary', source)
+        self.assertIn('kalshi_founders=False', source)
+        self.assertNotIn('config.get("kalshi_founders"', source)
 
 
 class FullLeague(FounderSeats):

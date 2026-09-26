@@ -540,6 +540,12 @@ class Settings:
     deep_replay: bool = True
     deep_replay_days: int = 0  # 0: deep_replay.DEV_DAYS by horizon (252 daily, 63 hourly)
     holdout_gate: bool = True
+    # The credit economy (league/economy.py): an agent wakes only while its credits are above zero, dies when they
+    # reach it (or when it is stuck and broke), and the payout pass pays the day's pool out by standing. The options
+    # House (`service.build`, Sept 26, 2026, Wave 2a) turns it OFF: none of those branches runs in its tick, and the
+    # swarm's per-family budgets (Wave 4) replace credits. Credits are still charged and read by what remains of the
+    # old research path until Wave 2b deletes it. On by default, so every older House and test keeps its game.
+    credit_economy: bool = True
     holdout_lineage_budget: int = 3
     # The tick never waits on a box that background work holds (`House.tick`). A wake whose box is
     # busy (its research replaying a candidate there) is skipped and retried on the next tick; the
@@ -696,6 +702,9 @@ class House:
         self.hypotheses: Any = None  # set by the service: the hypothesis foundry (league/hypotheses.py)
         self.backup: Any = None  # set by the service on the House box: a daily checkpoint of the box, kept by Sail
         self.updater: Any = None  # set by the service on the House box: pulls main, hands it to the watchdog
+        #: The options overhaul's two pluggable steps (`PLUGGABLE_STEPS`): None until Wave 4 and Wave 5 fill them.
+        self.swarm: Any = None
+        self.options_live: Any = None
         #: A cheap deterministic look at a paper agent's first wakes and code (`league/preaudit.py`):
         #: repair reports and a promotion-status mark, never a kill and never a statistic.
         from .preaudit import PreAudit
@@ -9789,12 +9798,13 @@ class House:
         deadline = float(rules.get("replay_deadline_epochs", 3)) * float(rules["epoch_seconds"])
         broke = Decimal(str((self.game.get("research") or {}).get("min_credits_usd", "0.10"))) * 2
         stuck = int(rules.get("idle_broke_wakes", 30))
+        credits = self.settings.credit_economy  # off in the options House: nothing dies for credits
         for agent in self.registry.living():
-            if not self.economy.alive(agent.id):
+            if credits and not self.economy.alive(agent.id):
                 self.kill(agent, "credits", "its compute credits reached zero")
             elif clock and self.evaluator.rung(agent.id) == 0 and self.clock() - _epoch(agent.born_at) > deadline:
                 self.kill(agent, "never qualified", f"it did not pass replay within {rules.get('replay_deadline_epochs', 3)} epochs of its birth")
-            elif clock and self.idle_run(agent)["barren"] >= stuck and self.economy.balance(agent.id) <= broke:
+            elif credits and clock and self.idle_run(agent)["barren"] >= stuck and self.economy.balance(agent.id) <= broke:
                 # Neither able to trade nor able to buy a new idea: it cannot change and it cannot
                 # act, and it will sit at this balance for as long as the floor runs, holding a
                 # seat on its desk that a newcomer could use. A shut market does not count here --
@@ -10289,6 +10299,35 @@ class House:
                                  in sorted(slowest.items(), key=lambda kv: (-kv[1][0], kv[0]))[:self.TICK_STEPS_SLOWEST]],
                 "background": background}
 
+    #: The tick's two pluggable steps (the options overhaul, Sept 26, 2026, Wave 2a), each an attribute that is None
+    #: until its builder sets it (in `service.build` or after it), and then called once a tick with
+    #: `step.tick(house, open_for_business=...)`, inside its own try (a failure is a warning; the tick goes on), with
+    #: its own lap in health.json `tick_steps` and its return value (a small JSON-able dict, or None) in the tick's
+    #: summary under its name. A step never blocks the tick: slow work goes on a lane (`House._background(key, fn,
+    #: *args)`, one job a key at a time) and is read back on a later tick. `open_for_business` is False while the House
+    #: is paused for maintenance or its compute meter is stopped: a step then starts no new paid work.
+    #:
+    #: - `options_live` (Wave 5, the live options path): runs right after the wakes' orders are submitted and before
+    #:   the mark pass. The live chain reads and the shadow book on live OPRA quotes, the paper account's multi-leg
+    #:   route, the real route (netting across agents, the order-rate governor, expiry-day rules, buying-power
+    #:   reservation, assignment polling). Real orders only under `House.grant` (`league/live_trading.py`).
+    #: - `swarm` (Wave 4, the swarm): runs after the research scheduling. Gym batches on the sealed Gym boxes, the
+    #:   researchers' inner loop, the hourly tournament and bandit, forks and retirements, the architect and the gate.
+    PLUGGABLE_STEPS = ("options_live", "swarm")
+
+    def _pluggable_step(self, name: str, summary: dict[str, Any], open_for_business: bool) -> None:
+        """Run one of `PLUGGABLE_STEPS` when it is set; see there."""
+        step = getattr(self, name, None)
+        if step is None:
+            return
+        try:
+            out = step.tick(self, open_for_business=open_for_business)
+            if out is not None:
+                summary[name] = out
+        except Exception as exc:  # noqa: BLE001 - a step that fails this tick runs again on the next
+            self.alert("warning", f"the {name} step failed ({type(exc).__name__}: {str(exc)[:200]})")
+        self._lap(name)
+
     def _tick(self) -> dict[str, Any]:
         lap = self._lap
         if self._burst and not self.campaigns.running():
@@ -10391,7 +10430,8 @@ class House:
             summary["stopped_because"] = stopped_because
         self._note_stopped(stopped_because)
         batches: dict[str, list[Mapping[str, Any]]] = {}
-        waking = [a for a in self.due() if self.economy.alive(a.id)
+        credits = self.settings.credit_economy  # off in the options House: no wake waits on credits (`Settings.credit_economy`)
+        waking = [a for a in self.due() if (not credits or self.economy.alive(a.id))
                   and (open_for_business or self._holds_real_money(a) or (pause and self._holds_position(a)))]
         lap("due")
         # Each wake is mostly waiting on the agent's box, so they run side by side; every agent
@@ -10407,6 +10447,7 @@ class House:
             submitted = self._submit_wakes(name, wakes)
             summary["orders"] += sum(1 for o in submitted if o.status not in ("refused", "duplicate"))
             lap(f"submit:{name}")
+        self._pluggable_step("options_live", summary, open_for_business)  # Wave 5's live options path (`PLUGGABLE_STEPS`)
         try:
             self._release_wind_downs()  # a dead agent's stock or option, held for the open, sells at the bell
         except Exception as exc:  # noqa: BLE001 - the mark pass retries every held sale within minutes
@@ -10490,6 +10531,7 @@ class House:
                 and self._background("house:research", self._house_job, self._schedule_research, open_for_business):
             self._cadence["house:research"] = self.clock()
         lap("research")
+        self._pluggable_step("swarm", summary, open_for_business)  # Wave 4's swarm: Gym, researchers, tournament
         if open_for_business and self.survey_due():
             self._background("niche-survey", self.survey_niches)  # stamped when it ends; one in hand is not started twice
         if open_for_business and self.semantic_lab is not None and self.semantic_lab.due():
@@ -10554,7 +10596,7 @@ class House:
             # Cheap on the tick (a cursor scan of new order rows); the venue calls run on the shards lane.
             self.shards.tick()
         lap("shards")
-        if open_for_business and self.economy.payout_due():
+        if open_for_business and self.settings.credit_economy and self.economy.payout_due():
             self.learn()
             with self._lifecycle_lock:
                 for agent in self.registry.living() if not allocator_module.enabled() else ():
@@ -10568,6 +10610,14 @@ class House:
             self.economy.payout(self.standings(),
                                 pool=self.pacer.credit_pool(per_seconds=float(self.game["economy"]["epoch_seconds"])) if self.pacer.running() else None)
             self.ledger.append("ops.budget", {"what": "expedition", **self.pacer.report()})
+            if self.auditor is not None:
+                self.auditor.score()
+        elif (open_for_business and not self.settings.credit_economy
+              and self._cadence_due("house:learn", float(self.game["economy"]["epoch_seconds"]))):
+            # The options House pays no credits (`Settings.credit_economy`), but the teacher's lessons and the audit's
+            # score still come in once an epoch, as they did with the payout.
+            self._cadence["house:learn"] = self.clock()
+            self.learn()
             if self.auditor is not None:
                 self.auditor.score()
         lap("payout")
@@ -10655,6 +10705,10 @@ class House:
                                      for row in Admissions(self.ledger).rows()[-30:]],
             "recordings": self.recorder.stats(),
             "campaign": self.campaigns.report() if self.campaigns else None,
+            # The options overhaul (Sept 26, 2026): which of the tick's pluggable steps are filled, and whether the
+            # credit economy still runs (off in the options House).
+            "pluggable_steps": {name: getattr(self, name, None) is not None for name in self.PLUGGABLE_STEPS},
+            "credit_economy": bool(self.settings.credit_economy),
             "promotion_status": [dict(row) for agent in self.registry.living()
                                  if (row := self._state.get('promotion_status', {}).get(agent.id))
                                  and row.get('code_sha256') == agent.code_sha256],
