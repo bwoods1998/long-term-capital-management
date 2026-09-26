@@ -507,7 +507,8 @@ while the full ThetaData/SIP completion is pending.
 3. Transfer the verified model privately from the sealed Gym to the House's
    `/data/calibration/fill_model.json` (0600), comparing SHA before and after. Adopt the staged
    image, calibration, universe and calendar records together; preserve the completion receipts.
-   Select the final Gym checkpoint while keeping the gate pointer disabled. Verify that no stale
+   Select the final Gym checkpoint and its complete root list in `swarm.json`, keeping the gate
+   pointer disabled. Verify that no stale
    `gym-forward.json` can override the intended gate pointer; Sunday should have no forward day.
 4. Restart the House so the shadow book loads the new model, then resume supervised research and
    collection. Verify the deployed release, model identity, pool checkpoint identities and fresh
