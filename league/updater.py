@@ -7,7 +7,8 @@ read it: every half hour the House reads the commit at the head of `main`, downl
 and compares the tree's digest with the release it is running. When they differ, and only when
 every wall below holds, it hands the tree to the in-box watchdog (`league/watchdog.py`), which
 runs it as a canary, promotes it, watches the House, and rolls back by itself if health degrades.
-A tree that was refused on its content or rolled back once is never tried again: only new content.
+A tree that was refused on its content is never tried again, nor one rolled back twice: only new
+content (a first rollback is retried once, at the next release train; wall 5).
 
 The walls, in the order they are asked, each one fail-closed (no deploy, a warning on the ledger):
 
@@ -35,6 +36,25 @@ The walls, in the order they are asked, each one fail-closed (no deploy, a warni
    environment and a verdict line keyed by a nonce the judged code never sees.
 4. **`real_money` may not change by this path.** Turning real money on is the owner's deploy from
    his own machine, never something `main` does to the box by itself.
+5. **The release train** (H3 of the forward-first run, Sept 25, 2026). A head that passed the walls
+   above waits, before the trusted content checks run, while any of three holds stands (`schedule`):
+   - *the train*: one updater release every `release_train_hours` (config.json, default 4, bounds
+     2-6 in `league/ci.py` `CONFIG_DIALS`), measured from the last updater release that restarted
+     the House (its `promote` row in `deploys.jsonl`); a rolled-back attempt counts, a canary
+     refusal (the House never restarted) does not;
+   - *the US session*: no launch on a day the House's session calendar (`ltcm.data.
+     us_equity_session`, the function `league/house.py` imports) calls a trading day, from 30
+     minutes before 13:25Z to 20:05Z (the session's own open less five minutes to its close plus
+     five when that is wider: 14:25-21:05Z in winter). The 30-minute lead is the deploy itself: the
+     canary took 2.2-4.0 minutes from launch to restart on Sept 24-25, then the watch is ten
+     minutes, and a rollback restarts the House again inside it;
+   - *a recent start*: none within 30 minutes of the ledger's last `ops.started`, read read-only.
+   Measured: the House restarted 26 times in the 24 hours to 04:23Z Sept 25 (24-37 a day Sept
+   20-24), seven of them inside the Sept 24 US session, and every restart kills the research and
+   wakes in flight. The updater shipped at 21:16, 22:21, 23:00, 23:39, 00:38 and 01:14Z, 35 to 65
+   minutes apart. A hold is `held` with its reasons and the next eligible time, written to
+   `deploys.jsonl` and the ledger once per head per reason, never every look. A rolled-back head
+   is not retired: it may be retried once, at the next train; a second rollback retires it.
 
 Then the watchdog's canary, promotion, watch and rollback, exactly as before. The attestation
 travels with the release: into the watchdog's deploy record (`deploys.jsonl`, whose every row of
@@ -57,16 +77,22 @@ import json
 import os
 import re
 import secrets
+import sqlite3
 import subprocess
 import sys
 import tarfile
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, time as clock_time, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from .watchdog import Releases, iso, tree_digest
+# The House's own session calendar: `league/house.py` imports this function (`_session_open`,
+# `session_time`) and `market_open_at` built on it (`_shut_session`). The holiday list lives there once.
+from ltcm.data import DataError, to_datetime, us_equity_session
+
+from .watchdog import Releases, _ledger_ro, epoch, iso, tree_digest
 
 REPO = "bwoods1998/long-term-capital-management"
 TREES = ("league", "ltcm", "playbooks", "scripts", "deploy")  # what scripts/floor_box.py sends too
@@ -92,6 +118,23 @@ TRUSTED_WORKFLOWS_SHA256 = "4b7755bfe3cb05a326c8b41e6dcf0597cc236f7673ec494e2e0a
 PENDING_ALERT_SECONDS = 2 * 3600
 EGRESS_HINT = ("api.github.com is not on the box's egress allowlist; the owner adds it with "
                "`python3 scripts/floor_box.py hosts --add api.github.com`")
+
+#: The release train (wall 5 above). The hours are the running release's `league/config.json`
+#: `release_train_hours`, held inside the bounds `league/ci.py` `CONFIG_DIALS` gives it; this is
+#: only the value when the key is absent.
+RELEASE_TRAIN_HOURS = 4.0
+RELEASE_TRAIN_KEY = "release_train_hours"
+#: No updater release within this long of the House's last `ops.started`.
+RESTART_QUIET_SECONDS = 30 * 60
+#: The no-release window of a trading day, in UTC: never narrower than 13:25-20:05Z (the EDT session
+#: 13:30-20:00Z with five minutes each side), and the session's own open and close with the same
+#: five minutes when that is wider (EST, 14:30-21:00Z).
+SESSION_WINDOW_UTC = (clock_time(13, 25), clock_time(20, 5))
+SESSION_PAD_SECONDS = 5 * 60
+#: How long before the window a launch is already too late: the canary took 2.2-4.0 minutes from
+#: launch to restart on Sept 24-25, 2026 (six updater deploys), the watch is ten minutes, and a
+#: rollback restarts the House a second time inside it.
+DEPLOY_LEAD_SECONDS = 30 * 60
 
 
 class UpdateError(RuntimeError):
@@ -294,15 +337,156 @@ def unavailable(sha: str | None, reason: str) -> dict[str, Any]:
             "reasons": [reason], "source": "api.github.com actions runs"}
 
 
+# ---------------------------------------------------------------------------- the release train
+def _stamp(ts: float) -> str:
+    return datetime.fromtimestamp(float(ts), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _row_ts(row: Mapping[str, Any]) -> float | None:
+    ts = row.get("ts")
+    return float(ts) if isinstance(ts, (int, float)) else epoch(row.get("at"))
+
+
+def train_hours(trusted: str | Path | None = None) -> float:
+    """`release_train_hours` of the running release's `league/config.json`, inside the bounds the
+    running `league/ci.py` gives it (`CONFIG_DIALS`: the same number the operator's checker holds a
+    pull request to). Absent, unreadable or not a number: `RELEASE_TRAIN_HOURS`."""
+    from .ci import CONFIG_DIALS
+
+    low, high = CONFIG_DIALS.get(RELEASE_TRAIN_KEY, (2.0, 6.0))
+    root = Path(trusted) if trusted else Path(__file__).resolve().parents[1]
+    try:
+        value = float(json.loads((root / "league" / "config.json").read_text(encoding="utf-8")).get(RELEASE_TRAIN_KEY, RELEASE_TRAIN_HOURS))
+    except (OSError, ValueError, TypeError, AttributeError):
+        value = RELEASE_TRAIN_HOURS
+    if value != value:  # NaN
+        value = RELEASE_TRAIN_HOURS
+    return min(float(high), max(float(low), value))
+
+
+def updater_ships(history: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """The updater's deploys that restarted the House, oldest first, from `deploys.jsonl`.
+
+    An updater deploy is one whose rows carry the attested `sha` (the watchdog writes it into every
+    row of an attested deploy; the owner's `floor_box.py` deploy has none). It restarted the House at
+    its `promote` row, whatever its verdict: a rolled-back attempt restarted it twice. One with no
+    verdict yet is in flight and counts from its `start`. One refused before promotion (the canary)
+    never restarted anything and does not count."""
+    deploys: dict[str, dict[str, Any]] = {}
+    for row in history:
+        key, sha = row.get("deploy"), row.get("sha")
+        if not key or not sha:
+            continue
+        seen = deploys.setdefault(str(key), {"deploy": str(key), "release": row.get("release"), "sha": sha})
+        stage, ts = row.get("stage"), _row_ts(row)
+        if stage == "start":
+            seen["started_ts"] = ts
+        elif stage == "promote" and row.get("ok"):
+            seen["promoted_ts"] = ts
+        elif stage == "verdict":
+            seen["verdict"] = row.get("verdict")
+    ships = []
+    for seen in deploys.values():
+        at = seen.get("promoted_ts")
+        if at is None and seen.get("verdict") is None:
+            at = seen.get("started_ts")
+        if at is not None:
+            ships.append({**seen, "ts": at, "at": _stamp(at), "verdict": seen.get("verdict") or "in flight"})
+    return sorted(ships, key=lambda s: s["ts"])
+
+
+def last_start(state_dir: str | Path) -> tuple[float | None, str | None]:
+    """(epoch, problem) of the ledger's last `ops.started`, read through a connection that cannot
+    write (the watchdog's). No ledger: (None, None). A ledger that cannot be read is `problem`."""
+    path = Path(state_dir) / "ledger.sqlite"
+    if not path.exists():
+        return None, None
+    try:
+        with _ledger_ro(path) as db:
+            row = db.execute("SELECT at FROM ledger WHERE kind = 'ops.started' ORDER BY seq DESC LIMIT 1").fetchone()
+    except sqlite3.Error as exc:
+        return None, f"the ledger could not be read ({type(exc).__name__}: {str(exc)[:120]})"
+    return (epoch(row[0]) if row else None), None
+
+
+def session_window(moment: float) -> dict[str, Any] | None:
+    """The no-release window of `moment`'s UTC day, or None on a day the House's calendar calls
+    closed (a weekend, an NYSE holiday). The window lies inside one UTC day, 12:55Z at its earliest
+    with the lead to 21:05Z at its latest, where New York's date is the same day."""
+    day = datetime.fromtimestamp(float(moment), tz=timezone.utc).date()
+    floor_open = datetime.combine(day, SESSION_WINDOW_UTC[0], timezone.utc).timestamp()
+    floor_close = datetime.combine(day, SESSION_WINDOW_UTC[1], timezone.utc).timestamp()
+    try:
+        session = us_equity_session(day)
+    except DataError:
+        # A year outside the computed calendar: every weekday is a trading day, at winter's hours.
+        if day.weekday() >= 5:
+            return None
+        return {"day": day.isoformat(), "session": "outside the computed calendar", "opens": floor_open,
+                "closes": floor_close + 3600, "starts": floor_open - DEPLOY_LEAD_SECONDS}
+    if session is None:
+        return None
+    opened, closed = to_datetime(session.open_at).timestamp(), to_datetime(session.close_at).timestamp()
+    opens = min(floor_open, opened - SESSION_PAD_SECONDS)
+    closes = max(floor_close, closed + SESSION_PAD_SECONDS)
+    return {"day": day.isoformat(), "session": f"{_stamp(opened)[11:16]}-{_stamp(closed)[11:16]}Z" + (" (an early close)" if session.early_close else ""),
+            "opens": opens, "closes": closes, "starts": opens - DEPLOY_LEAD_SECONDS}
+
+
+def schedule(base: str | Path, now: float, *, history: list[Mapping[str, Any]] | None = None, hours: float | None = None,
+             trusted: str | Path | None = None) -> dict[str, Any]:
+    """What holds an updater release at `now`, and when the next one may go. Read-only: the deploy
+    record and the ledger are read, nothing is written, so `scripts/floor_watch.py` asks the very
+    same question on the box. `holds` is empty when a head may ship now; each hold names its kind
+    (`train`, `session`, `recent_start`), the moment it lifts and why, in the owner's words."""
+    base = Path(base)
+    rows = list(history) if history is not None else Releases(base).history()
+    hours = float(hours) if hours is not None else train_hours(trusted)
+    holds: list[dict[str, Any]] = []
+    ships = updater_ships(rows)
+    last = ships[-1] if ships else None
+    if last is not None and now < last["ts"] + hours * 3600:
+        until = last["ts"] + hours * 3600
+        holds.append({"hold": "train", "until": _stamp(until), "until_ts": until,
+                      "why": (f"the release train: the last updater release, {last.get('release')} ({last['verdict']}), restarted the "
+                              f"House at {last['at']}; one updater release every {hours:g} h, so the next at {_stamp(until)}")})
+    started, problem = last_start(base / "state")
+    if problem is not None:
+        started = now  # a ledger that cannot be read is no evidence of quiet: wait as if the House just started
+    if started is not None and now < started + RESTART_QUIET_SECONDS:
+        until = started + RESTART_QUIET_SECONDS
+        holds.append({"hold": "recent_start", "until": _stamp(until), "until_ts": until,
+                      "why": (problem or f"the House started at {_stamp(started)}")
+                             + f"; no updater release within {RESTART_QUIET_SECONDS // 60} minutes of a start, so not before {_stamp(until)}"})
+    window = session_window(now)
+    if window is not None and window["starts"] <= now < window["closes"]:
+        holds.append({"hold": "session", "until": _stamp(window["closes"]), "until_ts": window["closes"],
+                      "why": (f"the US session: {window['day']} is a trading day on the House's calendar (the session {window['session']}); "
+                              f"no updater release from {_stamp(window['starts'])} to {_stamp(window['closes'])}: the window opens at "
+                              f"{_stamp(window['opens'])[11:16]}Z, and a release's canary, promotion and ten-minute watch take up to "
+                              f"{DEPLOY_LEAD_SECONDS // 60} minutes")})
+    # The earliest moment no hold stands: past the train and the quiet, then out of any session window
+    # that moment falls in (a window's end is never inside the next day's).
+    moment = max([now] + [h["until_ts"] for h in holds if h["hold"] != "session"])
+    for _ in range(4):
+        inside = session_window(moment)
+        if inside is None or not inside["starts"] <= moment < inside["closes"]:
+            break
+        moment = inside["closes"]
+    return {"at": _stamp(now), "train_hours": hours, "holds": holds, "next_eligible_ts": moment, "next_eligible_at": _stamp(moment),
+            "last_ship": {k: last.get(k) for k in ("release", "sha", "at", "verdict")} if last else None,
+            "last_start_at": _stamp(started) if started is not None and problem is None else None}
+
+
 # ---------------------------------------------------------------------------------- updater
 class Updater:
     def __init__(self, base: str | Path = "/workspace", *, repo: str = REPO, fetch: Callable[[str], bytes] | None = None,
                  launch: Callable[..., None] | None = None, clock: Callable[[], float] = time.time, every_seconds: int = 1800,
                  judge: Callable[[Path, Path], list[str]] | None = None, head: Callable[[], str] | None = None,
                  attest: Callable[[str], Mapping[str, Any]] | None = None, trusted: str | Path | None = None,
-                 workflows_pin: str = TRUSTED_WORKFLOWS_SHA256):
+                 workflows_pin: str = TRUSTED_WORKFLOWS_SHA256, hours: float | None = None):
         self.base = Path(base)
-        self.releases = Releases(self.base)
+        self.releases = Releases(self.base, clock=clock)  # its rows are dated by the clock the train is measured on
         self.head = head or (lambda: resolve_head(repo))
         self.fetch = fetch or (lambda sha: fetch_commit(sha, repo))
         self.launch = launch or self._launch
@@ -316,12 +500,23 @@ class Updater:
         self.workflows_pin = workflows_pin
         self.clock = clock
         self.every = every_seconds
+        #: The train's hours; None reads the running release's config.json at every look (`train_hours`).
+        self.hours = hours
         self._last = 0.0
+        #: When the last hold lifts: the next look is then, not up to half an hour later.
+        self._wake_at: float | None = None
         self._told: set[tuple[str, str]] = set()
         self._pending_since: dict[str, float] = {}
 
     def due(self) -> bool:
-        return self.clock() - self._last >= self.every
+        now = self.clock()
+        if now - self._last >= self.every:
+            return True
+        return self._wake_at is not None and self._last < self._wake_at <= now
+
+    def schedule(self, history: list[Mapping[str, Any]] | None = None) -> dict[str, Any]:
+        """The release train's holds now (module `schedule`), from this release's own dial."""
+        return schedule(self.base, self.clock(), history=history, hours=self.hours, trusted=self.trusted)
 
     def _launch(self, source: Path, release_id: str, attestation: Path | None = None) -> None:
         """Hand the tree to the watchdog, detached: the canary and the watch outlive this process,
@@ -345,10 +540,29 @@ class Updater:
         a floor that rewrites itself would have dropped its own improvements one at a time.
 
         Nor is a row marked `unjudged`: a head not yet (or not) attested by GitHub, or one refused
-        for workflows that are not part of the tree. Those verdicts belong to a commit, and the same
-        tree under a later commit whose checks pass must still be deployable."""
-        return {str(row["release"]) for row in self.releases.history()
-                if row.get("release") and not row.get("busy") and not row.get("unjudged")}
+        for workflows that are not part of the tree, or one the release train held. Those verdicts
+        belong to a commit or a moment, and the same tree must still be deployable later.
+
+        Nor, once, is a release whose only verdict is one rollback (the release train, Sept 25,
+        2026): it is tried again at the next train, which its own restart holds off for
+        `release_train_hours`. On Sept 24-25 five updater releases in a row (22:21Z to 01:14Z) were
+        rolled back by Sail's checkpoint outage, not by anything in them, the two heads carrying the
+        backup fix (#289) among them. A second rollback, or a refusal, retires it for good."""
+        judged: set[str] = set()
+        verdicts: dict[str, list[str]] = {}
+        starts: dict[str, int] = {}
+        for row in self.releases.history():
+            release = row.get("release")
+            if not release or row.get("busy") or row.get("unjudged"):
+                continue
+            release = str(release)
+            judged.add(release)
+            if row.get("stage") == "verdict":
+                verdicts.setdefault(release, []).append(str(row.get("verdict")))
+            elif row.get("stage") == "start":
+                starts[release] = starts.get(release, 0) + 1
+        again = {r for r in judged if verdicts.get(r) == ["rolled_back"] and starts.get(r, 0) <= 1}
+        return judged - again
 
     def _trusted_identity(self) -> dict[str, Any]:
         def sha_of(name: str) -> str | None:
@@ -362,7 +576,9 @@ class Updater:
 
     def check(self) -> dict[str, Any]:
         """One look at main. Returns what was found and what was done. `new` is True the first
-        time a refusal or a block is seen for this commit, which is when the House says so."""
+        time a refusal or a block is seen for this commit, which is when the House says so.
+        `held` is a head the release train keeps back: `holds` names why (train, session,
+        recent_start), `reasons` says it with the next eligible time, `next_eligible_at` is when."""
         self._last = self.clock()
         current = self.releases.current()
         if current is None:
@@ -406,7 +622,20 @@ class Updater:
         if workflow_problems:
             _remove(incoming)
             return self._refused(release_id, sha, attestation, workflow_problems, unjudged=True)
-        problems = self.vet(incoming, running)
+        problems = self.walls(incoming, running)
+        if problems:
+            _remove(incoming)
+            return self._refused(release_id, sha, attestation, problems)
+        # 5. The release train: a head that may ship waits for its moment. Before the trusted content
+        #    checks, which replay every strategy on the box's one vCPU: a held head is judged once, when
+        #    it goes, not at every look.
+        history = self.releases.history()
+        plan = self.schedule(history)
+        if plan["holds"]:
+            _remove(incoming)
+            return self._held(release_id, sha, plan, history)
+        self._wake_at = None
+        problems = list(self.judge(incoming, running))
         if problems:
             _remove(incoming)
             return self._refused(release_id, sha, attestation, problems)
@@ -438,6 +667,21 @@ class Updater:
         return {"action": action, "release": release_id, "sha": sha, "reasons": list(attestation.get("reasons") or []),
                 "attestation": dict(attestation), "new": new}
 
+    def _held(self, release_id: str, sha: str, plan: Mapping[str, Any], history: list[Mapping[str, Any]]) -> dict[str, Any]:
+        """A head that may ship, held by the release train. `new` (the House's cue for one
+        `ops.deploy` row) is True only for a hold not yet recorded for this head, read from
+        `deploys.jsonl` so a restart does not repeat it: at most one row per head per reason."""
+        holds = [str(h["hold"]) for h in plan["holds"]]
+        reasons = [str(h["why"]) for h in plan["holds"]] + [f"next eligible {plan['next_eligible_at']}"]
+        told = {(row.get("sha"), hold) for row in history if row.get("stage") == "train" for hold in row.get("holds") or []}
+        new = any((sha, hold) not in told for hold in holds)
+        if new:
+            self.releases.record({"release": release_id, "stage": "train", "verdict": "held", "unjudged": True, "sha": sha,
+                                  "holds": holds, "reasons": reasons, "next_eligible_at": plan["next_eligible_at"]})
+        self._wake_at = float(plan["next_eligible_ts"])
+        return {"action": "held", "release": release_id, "sha": sha, "holds": holds, "reasons": reasons,
+                "next_eligible_at": plan["next_eligible_at"], "schedule": dict(plan), "new": new}
+
     def _refused(self, release_id: str, sha: str, attestation: Mapping[str, Any], problems: list[str], *, unjudged: bool = False) -> dict[str, Any]:
         self.releases.record({"release": release_id, "stage": "vet", "verdict": "refused", "reasons": problems[:10], "sha": sha,
                               "attestation": dict(attestation), **({"unjudged": True} if unjudged else {})})
@@ -460,6 +704,14 @@ class Updater:
         release's content checks, run against the candidate tree. GitHub has already run the
         candidate's OWN checks and its whole test suite on the same commit (the attestation); those
         are the supplement, not the judge."""
+        problems = self.walls(incoming, running)
+        if problems:
+            return problems  # a candidate that edits its judges is not run through them
+        return list(self.judge(incoming, running))
+
+    def walls(self, incoming: Path, running: Path) -> list[str]:
+        """The real-money switch and the judges' files: what refuses a candidate before any of its
+        code is run, and whatever the release train says (a protected head is refused at once)."""
         problems = []
         try:
             new = json.loads((incoming / "league" / "config.json").read_text(encoding="utf-8"))
@@ -468,10 +720,7 @@ class Updater:
             return [f"league/config.json cannot be read: {exc}"]
         if bool(new.get("real_money")) != bool(old.get("real_money")):
             problems.append("league/config.json changes real_money: that switch is the owner's own deploy, never an automatic update")
-        problems += protected_changes(incoming, running)
-        if problems:
-            return problems  # a candidate that edits its judges is not run through them
-        return list(self.judge(incoming, running))
+        return problems + protected_changes(incoming, running)
 
     def _judged_by_trusted(self, incoming: Path, running: Path) -> list[str]:
         """The TRUSTED release's content checks, applied to the candidate tree, as their own process.

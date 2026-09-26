@@ -17,6 +17,7 @@ the House (Sail VM)                    this Worker                          outs
                                          (market data, either pair)    ->   data.alpaca.markets
                                        OPENAI_SECRET_KEY               ->   api.openai.com
                                        GITHUB_TOKEN                    ->   api.github.com
+                                       (no credential at all)          ->   one public http(s) page, for research
                                        caps, budgets, kill switch (one Durable Object)
                                        watchdog cron (checkpoint, balance, box)
 ```
@@ -34,13 +35,14 @@ is `401`, including a deployment whose token is missing or shorter than 32 chara
 | `POST` | `/v1/unkill` | Releases it. **Owner token only**; the runtime token is a `401` here. |
 | `GET`/`POST`/`DELETE` | `/v1/kalshi/<path>` | Signs `timestamp + METHOD + /trade-api/v2/<path>` with RSA-PSS SHA-256 (salt 32) and forwards to `https://api.elections.kalshi.com/trade-api/v2/<path>` with the query string. Status and body come back verbatim. |
 | `GET`/`POST`/`DELETE` | `/v1/alpaca/<path>` | Adds `APCA-API-KEY-ID` and `APCA-API-SECRET-KEY` and forwards to `https://api.alpaca.markets/<path>`, or to `https://data.alpaca.markets/<path>` when the path is a market-data one (`v2/stocks/`, `v1beta3/`). The real account. |
-| `GET`/`POST`/`DELETE` | `/v1/alpaca-paper/<path>` | The same paths with the paper key pair, forwarded to `https://paper-api.alpaca.markets/<path>` (market data still goes to the data host). Never metered, and not stopped by the kill switch: see below. |
+| `GET`/`POST`/`DELETE` | `/v1/alpaca-paper/<path>` | The same paths with the paper key pair, forwarded to `https://paper-api.alpaca.markets/<path>` (market data still goes to the data host). Never metered, and not stopped by the kill switch: see below. Its option orders are held to the defined-risk shapes ([Multi-leg structures](#multi-leg-structures-sept-25-2026)). |
 | `GET` | `/v1/kalshi/ws-auth` | The three handshake headers for Kalshi's WebSocket (`/trade-api/ws/v2`), good for 30 seconds. The only route that hands the VM credential material, and what it hands over is short-lived and read-only: Kalshi takes no order over its WebSocket. The first run used it; the league does not. |
 | `POST` | `/v1/frontier/responses` | One metered call to the frontier model (OpenAI Responses API). See [The frontier month](#the-frontier-month). |
 | `POST` | `/v1/typesafe/systemone` | Bounded Jev shadow pilot; requires `X-LTCM-Request`, pinned `jev-1.13.0`, inline state and choice/noul questions. Uses `TYPE_SAFE_TOKEN` only in this Worker. |
 | `GET` | `/v1/frontier/models` | The model ids the key can reach, and which of them are priced. Free. |
 | `POST` | `/v1/github/pr` | Opens one pull request from a proposal `{role, slug, title, body, files}`. See [Pull requests](#pull-requests). Not stopped by the kill switch: it moves no money. |
 | `GET` | `/v1/github/pr/<number>` | That pull request's `state`, `merged`, `mergeable_state`, `head` and its check runs counted into `success`, `failure` or `pending`, so the VM watches CI with no GitHub credential. Free. |
+| `POST` | `/v1/web/fetch` | Reads one public page for research, `{"url", "agent"}`, and answers its readable text. No credential is sent; private, local and own-domain addresses are refused on the request and every redirect; 3,000 pages a UTC day across the floor. See [Research reads the web](#research-reads-the-web). Not stopped by the kill switch: it moves no money. |
 | `POST` | `/v1/notify` | Mails the owner one trade notice composed here from the facts posted (`kind` of `trade`, `settled` or `test`; 32 KiB at most). A `notice_id` makes a repeat a no-op for 48 hours; `NOTIFY_MAX_PER_DAY` (300) a trading day, then `429`. The first run's desks used it; the league does not call it. |
 
 The gateway serves exactly three venue names: `kalshi`, `alpaca` and `alpaca-paper`. Any other is
@@ -88,6 +90,7 @@ redeploying, which is a change the owner makes, not one the VM can.
 | `MAX_DAY_USD` | `4000` | `400` | Notional for the whole trading day, both real venues together. |
 | `MAX_DAY_ORDERS` | `2000` | `60` | Order count for the whole trading day, both real venues together. |
 | `CAP_TIMEZONE` | `America/New_York` | the same | The calendar the day rolls on: the floor's own. |
+| `OPTION_STRUCTURES_REAL` | `off` | `off` | The multi-leg structure types the real Alpaca account admits, comma-separated (`debit_vertical`, ...). `off`, or any name that is not a type, admits none. See [Multi-leg structures](#multi-leg-structures-sept-25-2026). |
 
 Sized for two accounts of about $800 each: one order is never more than a tenth of an account,
 and a day's submitted notional is a few times the floor's capital because resting quotes are
@@ -103,7 +106,8 @@ rounds **against** the order.
 An Alpaca order is priced only as one instrument named by a top-level `symbol`, spelled as a stock
 ticker (`AAPL`, `BRK.B`), a crypto pair (`BTC/USD`) or a standard OCC option symbol (a root of one
 to six capital letters). Each of these is a `400` before any quote is read:
-- an `order_class` other than `simple`, or any `legs` field (multi-leg, bracket, OCO, OTO);
+- an `order_class` other than `simple`, or any `legs` field (multi-leg, bracket, OCO, OTO), except a
+  multi-leg order of a type `OPTION_STRUCTURES_REAL` admits (none as deployed; below);
 - a `type` other than `market` or `limit`. A stop, stop-limit or trailing stop fills at market once
   it triggers, so nothing in its body bounds what it spends. `stop_price`, `trail_price` and
   `trail_percent` are not accepted;
@@ -129,6 +133,70 @@ sets it on a sell, so an exit passes the dollar caps while an entry is still met
 A reservation is returned only when the forward never reached the venue. A venue that answered at
 all keeps its reservation, however it answered, and so does a timeout after dispatch: an
 unconfirmed write is an order until reconciliation says otherwise.
+
+### Multi-leg structures (Sept 25, 2026)
+
+The options-desk run (`docs/goals/LTCM_OPTIONS_DESK.md`, amended by the owner on Sept 25, 2026)
+lets options agents trade level-3 **defined-risk** structures. `lib/caps.mjs` reads a multi-leg
+order (`order_class: "mleg"`, the shape in Alpaca's
+[level-3 guide](https://docs.alpaca.markets/docs/options-level-3-trading)) as ONE structure from its
+legs alone, by the rules of the structure spec that `league/structures.py` implements:
+
+| Type | Legs (one root, whole contracts, no contract twice) |
+| --- | --- |
+| `debit_vertical` | one long, one short, one expiry and right; the long leg the dearer strike (lower call, higher put) |
+| `credit_vertical` | the same, the short leg the dearer strike |
+| `iron_condor` | long put < short put < short call < long call, one expiry |
+| `iron_butterfly` | the same with the short put and short call at one strike |
+| `long_butterfly` | one right and expiry: long 1 low, short 2 middle (`ratio_qty` 2), long 1 high, equal wings |
+| `calendar` | one right and strike: short the near expiry, long the far |
+| `diagonal` | one right: short near, long far, the long strike at least as favourable (a call's lower, a put's higher) |
+| `long_straddle`, `long_strangle` | a long call and a long put of one expiry, one strike or two |
+
+The order around the legs is `qty` (whole structures), `type: "limit"`, `time_in_force: "day"`,
+`limit_price`, 2-4 `legs` of exactly `{symbol, ratio_qty, side, position_intent}` (a standard OCC
+symbol, `ratio_qty` 1 or a butterfly body's 2, a side that agrees with the intent), an optional
+`client_order_id`, and nothing else: no top-level `symbol` or `side`. A structure opens whole (every
+leg `buy_to_open` or `sell_to_open`) and closes whole (every leg `sell_to_close` or `buy_to_close`,
+named by what each leg was). Each of these is a `400` naming the reason, on both accounts:
+- a short leg whose right has no long leg: *"A short leg with no long leg of its right covering it
+  is a naked short: refused."*;
+- a ratio other than a butterfly's body: *"A ratio_qty other than a long butterfly's body of 2 leaves
+  a leg uncovered: refused."*; a broken-wing butterfly; a calendar or diagonal whose short leg
+  expires last; a diagonal whose long strike is less favourable; any leg set that is not a type;
+- legs that open and close at once (legging in or out, or a roll), mixed roots, a contract twice;
+- a `limit_price` of the wrong sign (below), zero on an open, a credit at or over the collateral, or
+  a debit at or over a bounded structure's maximum value (the checks `structures.held_limit` makes).
+  A close at zero passes: it can only give a worthless structure away, or buy one back for nothing,
+  which the expiry-day close of a structure bid at zero must be able to send.
+
+**The sign of `limit_price`.** Alpaca's
+[orders reference](https://docs.alpaca.markets/reference/postorder) (read Sept 25, 2026): for `mleg`,
+"a positive value indicates a debit ... a negative value signifies a credit". alpaca-py's reference
+says the same; the level-3 guide's own iron-condor example (a positive `1.80` for a short condor)
+contradicts it and is not followed. Opening a debit type and buying back a credit type are debits
+(positive); opening a credit type and selling a debit type to close are credits (negative). A limit
+of the other sign is refused, never re-read: a short condor opened at a positive limit would PAY to
+sell premium.
+
+**The practice account** (`alpaca-paper`) forwards every type, opened and closed, unmetered and past
+the kill switch as before. Its other option orders pass only as a single-leg `buy_to_open`,
+`sell_to_close` or `buy_to_close` (the last can only buy back a short the account holds: the book's
+repair of an unmatched short leg); a single-leg `sell_to_open` is a naked short and refused, and so is
+a single-leg option with no `position_intent`, an option named by an asset id, or a field the check
+decides on (`symbol`, `legs`, `order_class`, `position_intent`, `side`) spelled any other way. A body
+that is not JSON is a `400`. Stock and crypto orders pass exactly as before.
+
+**The real account** refuses every multi-leg order while `OPTION_STRUCTURES_REAL` is `off` (as
+deployed). A type it names is metered at its **maximum loss**: a debit type at
+`limit_price x 100 x qty`, a credit type at `(collateral - credit) x 100 x qty` (the collateral is the
+width, or a condor's wider wing), against `MAX_ORDER_USD_ALPACA` and the day's caps like any order; a
+$0.70 debit vertical is $70 and passes the $75 cap, a $0.80 one is refused. The open or close is read
+from the legs' `position_intent`, never from `X-LTCM-Purpose`: an open labelled an exit is still
+metered. A close takes risk off and is metered at zero; the gate counts every order and refuses a
+zero reservation, so a close reserves one micro-dollar as an exit (health rounds it up to a cent):
+the kill switch and the order count stop it, the dollar caps do not. Admitting a type is a
+money-digest change the owner ratifies.
 
 ## Jev shadow pilot
 
@@ -334,6 +402,66 @@ Every rule is enforced here first and by the repository's own CI (`league/ci.py`
 
 The reply is `{"ok": true, "branch", "number", "url", "head"}`.
 
+## Research reads the web
+
+`POST /v1/web/fetch` with `{"url": "...", "agent": "..."}` (Sept 25, 2026, `lib/fetch.mjs`). The
+House box's egress is exact-host -- it holds the Sail key and this Worker's token, and Sail's
+allowlist ignores wildcards -- so a research agent's `web_fetch` (league/researcher.py) is read
+here, on Cloudflare's egress, instead. The strategy boxes stay sealed: only the House calls this,
+on an agent's behalf.
+
+What goes out: a `GET`, with exactly three headers -- `User-Agent: LTCM-research/1.0
+(+https://blakewoods.us/capital)`, an `Accept` for HTML, JSON, XML and text, and
+`Accept-Language: en`. No cookie, no `Authorization`, no credential of any kind, and never a
+header the caller sent.
+
+What is refused, on the request **and on every redirect hop** (redirects are followed by hand,
+`redirect: 'manual'`, at most 5), before anything is fetched:
+
+- a scheme other than `http` or `https`; a port other than the scheme's default; a user or
+  password in the URL; a URL longer than 2,048 characters;
+- an IP-literal host that is not public: private (10/8, 172.16/12, 192.168/16), loopback,
+  link-local (169.254/16, with the metadata address 169.254.169.254 named), CGNAT (100.64/10),
+  multicast, unspecified, reserved and documentation ranges; for IPv6, anything outside global
+  unicast (2000::/3) -- loopback, unspecified, IPv4-mapped, IPv4-compatible, NAT64, ULA
+  (fc00::/7), link-local, multicast -- and the Teredo, 6to4 and documentation prefixes inside it.
+  The URL parser has already turned `2130706433`, `0x7f.1` and `127.1` into `127.0.0.1`;
+- `localhost`, `*.localhost`, `*.local`, `*.internal` (so `metadata.google.internal`),
+  `*.home.arpa`, `*.localdomain`, a host with no dot, and this Worker's own domain (its host and,
+  on workers.dev, its account's subdomain).
+
+A refused URL is `403 {"error", "url", "refused": "url" | "redirect"}` and, when refused on the
+request, takes none of the day's places. Names are not resolved here: a public name that resolves
+to a private address is left to Cloudflare's egress, which has no route to private networks.
+
+What comes back: `{url, final_url, status, content_type, title, text, truncated, bytes,
+fetched_at}`. A page that answers non-2xx is still a `200` from the gateway, with the page's own
+`status`. The read has 15 seconds in all; the body is read to 2 MiB and no further. It reads
+`text/*`, `application/json`, `application/xml`, `application/rss+xml`, `application/atom+xml`
+and `application/xhtml+xml`; any other type, none, or a `Content-Type` that is not a well-formed
+media type of at most 127 characters is `415` naming it (`(none)`, `(malformed)`). HTML becomes
+readable text: the title on its own, and the body without scripts, styles, `noscript`, `svg`,
+`template` or the head, links kept as their text, list items and table cells marked, entities
+decoded, whitespace collapsed. JSON, XML and plain text come back as they are. The text is cut at
+200,000 characters, with `truncated: true` (as it is when the body passed 2 MiB). A page that did
+not answer in time is `504`, one that failed is `502`, too many redirects is `502`.
+
+The HTML is read in one forward pass, linear in the page: no pattern is retried at every `<`
+(the first reader's regexes were super-linear: 32 KB of `<a<a<a...` took 22 seconds on a test
+machine, and a 2 MiB page far longer). A tag that never closes, or a script, style or comment that never ends, ends the text
+there, as it would in a browser. The page is read in the same isolate that serves the order
+routes, so one isolate reads at most `MAX_IN_FLIGHT` (4) pages at once; one more is
+`429 {"busy": true}` with `Retry-After: 5`, before it takes a place of the day's cap.
+
+The floor reads at most **3,000 pages a UTC day** together (`DAY_CAP`), counted in the `Gate` in
+one step with the page's agent, and reported in `/v1/health` as `web_fetch: {day, fetches, cap,
+by_agent}`; over it is `429 {"cap": "web_fetch_day"}`. The House keeps its own budget of 20 pages
+per agent a day, charged like a search. Every answer about a URL names it (`url`), so the House
+can tell a page the gateway judged from a gateway that could not act (a bad body, the cap, busy,
+a Worker error). It charges and counts a judged read and also a Worker error (`5xx` naming no
+url, which is how a page that exhausted the Worker ends) or a timeout: only a request refused
+before any read (`4xx` naming no url) or never received is free.
+
 ## The watchdog, and the mail
 
 The `*/5 * * * *` cron reads the **production** checkpoint
@@ -477,7 +605,8 @@ curl -s -H "Authorization: Bearer $GATEWAY_TOKEN" https://ltcm-gateway.<subdomai
 that carries only the bearer token and a `VenueClient` (both from `ltcm/adapters`) that rewrites
 every call onto `<gateway_url>/v1/<venue>/...` and drops the venue auth headers. There is no
 direct, key-in-process mode in the league: no key file, key id or venue secret exists on Sail.
-`league/frontier.py` calls `/v1/frontier/responses`, `league/merton.py` calls `/v1/github/pr`, and
+`league/frontier.py` calls `/v1/frontier/responses`, `league/merton.py` calls `/v1/github/pr`,
+`league/commons.py` calls `/v1/web/fetch` for research's `web_fetch`, and
 `league/service.py` reads `/v1/health` so the House knows the kill switch is engaged and can refuse
 first. The adapters' gateway mode is covered by `ltcm/tests/test_adapters_gateway.py`.
 

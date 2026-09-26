@@ -56,10 +56,11 @@ import dataclasses
 import hashlib
 import json
 import os
+import re
 import threading
 import time
 from dataclasses import dataclass, field
-from decimal import ROUND_CEILING, ROUND_DOWN, ROUND_FLOOR, Decimal
+from decimal import ROUND_CEILING, ROUND_DOWN, ROUND_FLOOR, ROUND_HALF_UP, Decimal
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Iterable, Mapping, Sequence
@@ -77,8 +78,9 @@ from ltcm.broker import (
 )
 from ltcm.risk import RiskContext, RiskEngine, add_event_exposure, cluster_at_risk, event_cluster, gross_exposure
 
+from . import structures
 from .constitution import CONSTITUTION
-from .fees import QTY_PLACES, Charge, Fees, received
+from .fees import CENT, QTY_PLACES, Charge, Fees, received
 from .ledger import HOUSE, Ledger, now_iso
 
 ZERO = Decimal(0)
@@ -103,6 +105,37 @@ DUST_USD = Decimal("0.01")
 #: cents more, and a dollar is far above them all and far below what an unbooked fill moves (the
 #: smallest Alpaca order is $10). Real-money books keep the freeze: there it is the point.
 PRACTICE_DUST_USD = Decimal("1.00")
+#: H4 (the forward-first run, Sept 25, 2026): the bounds of `allocator.real_book_dust_usd`, the line
+#: under which a REAL book's cash difference that the venue's own fees explain is booked to the House
+#: row as dust, with an error alert, instead of freezing every entry on the venue
+#: (`Book._explain_real_cents`). A key outside them, or one that cannot be read, is no key at all:
+#: the book freezes as it did before (`real_book_dust_usd`).
+REAL_BOOK_DUST_BOUNDS = (Decimal("0.25"), Decimal("1.00"))
+#: What Alpaca takes from cash at an option or stock fill and lists as a FEE activity only hours
+#: later, so that no fill row and no listed activity shows it when the book next reads the venue:
+#: the regulators' fees (ORF and CAT on every option contract; TAF and the SEC fee on sales; CAT on
+#: stock fills), each kept as a running day total rounded UP to the cent as it grows. Measured:
+#:   - the real account, Sept 24, 2026: the one-contract AAL call bought at 18:19:57Z (premium $19.00,
+#:     OCC fee $0.03) took $19.06 from cash at the fill; the $0.03 more was listed at 20:35:02Z ("ORF fee
+#:     for proceed of 2 contracts", $0.03) and 00:31:38Z Sept 25 ("CAT fee for proceed of 2 trades",
+#:     $0.01). The second contract, at 18:52:18Z, took $0.01 more than its premium and OCC fee;
+#:   - the paper account, Sept 21-23: ORF $0.11 for 7 contracts, $0.23 for 15, $0.38 for 25 ($0.0152
+#:     a contract); OPT TAF $0.03 for 8 contracts sold, $0.04 for 11; OPT REG $0.01 on $134-201 of sales.
+#: One fill can so take at most a cent for each of the four fees' rounding, $0.0152 (ORF) and $0.0035
+#: (TAF) a contract, or a stock's $0.000166 a share of TAF and $0.0000278 a dollar of SEC fee (a cent
+#: on the $60 of a stock probe): the room each fill leaves, below. Crypto fees are the book's own
+#: model, charged at the fill (`league/fees.py`), and leave no room.
+UNLISTED_FEE_PER_FILL_USD = Decimal("0.04")
+UNLISTED_FEE_PER_CONTRACT_USD = Decimal("0.02")
+UNLISTED_FEE_PER_SHARE_USD = Decimal("0.0002")
+#: How long a fill's room lasts. The real account took the regulators' cents at the fill (Sept 24),
+#: and the book reads the venue every five minutes, so the first clean reading after the fill meets
+#: them; six hours (a US session) covers a book held frozen for another reason meanwhile, no longer.
+UNLISTED_FEE_HOURS = 6
+#: The FEE activities that list the regulators' fees above (the real account's "ORF fee for proceed of
+#: 2 contracts", "CAT fee for proceed of 2 trades"; the paper account's "OPT TAF fee ...", "OPT REG fee
+#: ..."). Real dust booked on their room has PAID them already (`Book._book_venue_fees`).
+REGULATORS_FEE = re.compile(r"\b(ORF|CAT|TAF|REG|SEC)\b")
 #: How long an event position the venue no longer shows may wait for its settlement row.
 SETTLEMENT_GRACE_SECONDS = 300
 
@@ -173,7 +206,11 @@ def position_key(instrument: Instrument) -> str:
         return f"crypto:{symbol.replace('/', '').replace('-', '')}:{instrument.venue}"
     if instrument.asset_class == "option":
         strike = format(money(instrument.strike).normalize(), "f")
-        return f"option:{symbol}:{instrument.venue}:{instrument.expiry}:{strike}:{instrument.right}"
+        key = f"option:{symbol}:{instrument.venue}:{instrument.expiry}:{strike}:{instrument.right}"
+        # A structure held as one position (`league/structures.py`, Sept 25, 2026) is named by its
+        # type and legs: two structures sharing a first leg, or a structure and that leg's contract
+        # alone, are different positions. A single contract carries no `market_id`, so its key is as it was.
+        return f"{key}:{instrument.market_id}" if instrument.market_id else key
     if instrument.asset_class == "event":
         ticker = (instrument.market_id or symbol).upper()
         return f"event:{ticker}:{instrument.venue}:{instrument.right or 'yes'}"
@@ -198,6 +235,17 @@ def _event_of(ticker: str) -> str:
     return event_key({"market_id": str(ticker or "")}) or str(ticker or "").strip().upper()
 
 
+def real_book_dust_usd() -> Decimal | None:
+    """`allocator.real_book_dust_usd` (H4), or None when it is absent, unreadable or outside
+    `REAL_BOOK_DUST_BOUNDS` ($0.25-1.00, the owner's table): then a real book books no cents it
+    cannot fold into its per-fill tolerance, and freezes, exactly as before the key existed."""
+    value = _allocator_rule("real_book_dust_usd")
+    low, high = REAL_BOOK_DUST_BOUNDS
+    if value is None or not value.is_finite() or not low <= value <= high:
+        return None
+    return value
+
+
 def _allocator_rule(key: str) -> Decimal | None:
     """A decimal money rule of the allocator's constitution that the book reads (X0), or None when
     the key is absent or unreadable: then the book is exactly as it was without it."""
@@ -212,6 +260,8 @@ def _allocator_rule(key: str) -> Decimal | None:
 
 #: `allocator.real_entry_liquidity`'s one value that holds a real event entry to a post-only limit.
 MAKER_UNLESS_TAKER_POSITIVE = "maker_unless_family_taker_positive"
+#: M2 of the forward-first run (Sept 25, 2026): the same, except that a PROBE may take (`family_taker`'s `may_take`).
+PROBE_MAY_TAKE = "probe_may_take"
 #: What the House tells an agent whose own resting order stood in its exit's way (`_clear_the_way`).
 OWN_CROSS_WHY = ("cancelled by the House: your own exit of this instrument would have met it, and an account never "
                  "trades against itself")
@@ -389,6 +439,9 @@ class Working:
     #: at the ask on doubt): such an order never walls the agent's own next exit off (`_withdraw_repriced`) and lives
     #: one pass (`_recheck_repriced`). From the order rows' `house_repriced`, so a restart keeps it (review of #226).
     repriced: dict[str, Any] | None = None
+    #: M6 (Sept 25, 2026): on an Alpaca book, the role the book read for this order when it was placed (`_liquidity_role`),
+    #: written on each of its fills as `liquidity_role`; None elsewhere and on orders placed before it.
+    liquidity_role: str | None = None
 
     @property
     def open(self) -> bool:
@@ -472,6 +525,8 @@ class Reconciliation:
     position_diffs: dict[str, str]
     dust_booked: Decimal
     detail: str = ""
+    #: A real book's cents booked as dust (H4): what explained them. Empty otherwise.
+    explained: str = ""
 
 
 #: The first run's firm rules, kept. See `ltcm/config.json` `event_rules`.
@@ -615,6 +670,24 @@ class Book:
         #: a limit order was booked as a taker and may have been a maker: dollars, and units by key.
         self._fee_slack_usd = ZERO
         self._fee_slack_units: dict[str, Decimal] = {}
+        #: H4 (Sept 25, 2026): the room for the regulators' fees Alpaca takes at each option or stock
+        #: fill and lists only later (`UNLISTED_FEE_PER_FILL_USD`), one `[when, room left, what, at, read
+        #: clean since]` a fill, read over the last `UNLISTED_FEE_HOURS`. Real dust spends it oldest fill
+        #: first, so a fill's room and the dust booked on it lapse together (the review of H4: an old
+        #: fill's dust outlived its room and ate a newer fill's). Folded from the fill and dust rows' own
+        #: times, so a restart neither forgets a fill's room nor spends it twice.
+        self._unlisted_fees: list[list[Any]] = []
+        #: What real dust has PAID of the regulators' fees before Alpaca lists them (`unlisted_fees_usd`
+        #: on the dust rows), less the listings since marked as paid (`covered_usd`): a listing it covers
+        #: is booked at no cash and can explain no later shortfall (`_book_venue_fees`).
+        self._prepaid_fees = ZERO
+        #: H4's one transition: where the book's cash should stand from the venue's at its first clean
+        #: reading, signed, because the last clean reading before it added resting bids back unrounded
+        #: (minus `_bid_rounding`, set by the fold from a `book.reconciled` row without `holds`).
+        self._holds_transition = ZERO
+        #: The working crypto bids the ledger shows open (`_apply_order`): what `_bid_rounding` reads, so
+        #: the fold need not walk every order the book ever sent at each reading it replays.
+        self._open_bids: set[str] = set()
         #: Every instrument the book has ever traded, by position key: a crumb the venue still
         #: shows after its holder sold out must still be valued, or it cannot be called dust.
         self._traded: dict[str, Instrument] = {}
@@ -642,9 +715,18 @@ class Book:
     # ----------------------------------------------------------------- folding
     def _fold(self) -> None:
         """Rebuild state from the ledger. Every mutation below appends first and applies the
-        appended row through `_apply`, so the live state and a rebuilt one are the same state."""
+        appended row through `_apply`, so the live state and a rebuilt one are the same state.
+
+        `book.reconciled` is folded too (H4, Sept 25, 2026), and only here: a clean reading starts the
+        counts "since the last reconciliation" again (`_reset_since_clean`), as it did in the process
+        that wrote it. Before, the fold counted every venue fill the book ever had as one since the last
+        reconciliation, so the first reading after each restart allowed a cent for each of them: $0.12
+        on the real Alpaca book (12 fills), which booked its "cash differs by 0.0108" as dust 1.2 s after
+        the restart of 04:11:49Z Sept 25, and its "-0.0324" 1.0 s after the one of 18:45:21Z Sept 24;
+        $1.39 on the real Kalshi book (139 fills). What no fill since the last clean reading explains
+        stays a freeze across a restart."""
         kinds = ("book.stake", "book.fill", "book.fill_correction", "book.settle", "book.order", "book.baseline", "book.cross_plan",
-                 "book.exit_plan", "agent.intent")
+                 "book.exit_plan", "agent.intent", "book.reconciled")
         for entry in self.ledger.iter(kinds=kinds):
             if entry.payload.get("book") == self.name:
                 self._apply(entry.kind, entry.agent, entry.payload, entry.at)
@@ -681,7 +763,7 @@ class Book:
                 self.day_open[agent] = (opened[0], opened[1] + usd)
         elif kind == "book.fill":
             if agent == HOUSE:
-                self._apply_house(p)
+                self._apply_house(p, at)
             else:
                 self._apply_fill(agent, p, at)
             if p.get("cross_plan_id"):
@@ -739,6 +821,18 @@ class Book:
             self._apply_order(p, at)
         elif kind == "book.exit_plan":
             self._apply_exit_plan(p)
+        elif kind == "book.reconciled":
+            # Read by the fold only: a live reading resets in `_reconcile` and appends its row unapplied.
+            # A clean reading reconciled with no settlement awaited (its `detail` then names none).
+            if p.get("ok") and "awaiting settlement" not in str(p.get("detail") or ""):
+                self._reset_since_clean()
+                if p.get("holds") != "cent":
+                    # Written before H4: its reading added the bids resting then back unrounded and
+                    # booked their sub-cent errors as dust, so the ledger's cash stands that far ABOVE
+                    # the venue's (below, when negative) as the next process reads it (`self.orders` is
+                    # as of this row here). Signed: the review of H4 found that allowing it either way let
+                    # a real shortfall of up to twice it plus a cent be booked as plain dust.
+                    self._holds_transition = -self._bid_rounding()
         elif kind == "book.cross_plan":
             if p.get("complete"):
                 plan = self._cross_plans.get(p["plan_id"])
@@ -758,6 +852,10 @@ class Book:
         if working is not None and p.get("source") == "venue":
             self._fills_since_reconcile += 1
             traded = money(p["quantity"])
+            if self.fees.family == "alpaca" and working.instrument.asset_class in ("option", "equity"):
+                per_unit = UNLISTED_FEE_PER_CONTRACT_USD if working.instrument.asset_class == "option" else UNLISTED_FEE_PER_SHARE_USD
+                self._note_unlisted(at, UNLISTED_FEE_PER_FILL_USD + traded * per_unit,
+                                    f"{p.get('side')} {format(traded.normalize(), 'f')} {working.instrument.symbol} {working.instrument.asset_class}")
             if working.order_type == "limit" and self.fees.family == "alpaca":
                 self._fee_slack_usd += money(p.get("fee_usd") or 0)
                 if money(p.get("fee_quantity") or 0) > 0:
@@ -823,6 +921,7 @@ class Book:
                 liquidity=str(p.get("liquidity") or "taker"),
                 reference_price=None if p.get("reference_price") is None else money(p["reference_price"]),
                 repriced=dict(p["house_repriced"]) if p.get("house_repriced") else None,
+                liquidity_role=p.get("liquidity_role") if p.get("liquidity_role") in ("maker", "taker") else None,
             )
             part = p.get("slice") or {}
             if part.get("plan"):
@@ -834,6 +933,11 @@ class Book:
             working.allocation = dict(p["allocation"])
         if p.get("broker_order_id"):
             working.broker_order_id = p["broker_order_id"]
+        if working.instrument.asset_class == "crypto" and working.side == "buy" and working.limit_price is not None:
+            if working.open:
+                self._open_bids.add(order_id)
+            else:
+                self._open_bids.discard(order_id)
 
     def _apply_exit_plan(self, p: Mapping[str, Any]) -> None:
         plan_id = str(p["plan_id"])
@@ -1104,8 +1208,8 @@ class Book:
         floor = _allocator_rule("longshot_floor_real")
         if floor is not None:
             out["longshot_floor_real"] = float(floor)
-        if str((CONSTITUTION.get("allocator") or {}).get("real_entry_liquidity") or "") == MAKER_UNLESS_TAKER_POSITIVE:
-            out["real_entry_liquidity"] = MAKER_UNLESS_TAKER_POSITIVE
+        if str((CONSTITUTION.get("allocator") or {}).get("real_entry_liquidity") or "") in (MAKER_UNLESS_TAKER_POSITIVE, PROBE_MAY_TAKE):
+            out["real_entry_liquidity"] = str(CONSTITUTION["allocator"]["real_entry_liquidity"])
         share = _allocator_rule("max_event_share")
         if share is not None:
             out["max_event_share"] = float(share)
@@ -1131,7 +1235,10 @@ class Book:
         - `real_entry_liquidity` "maker_unless_family_taker_positive": an entry must be a post-only
           limit unless the agent's family has a positive pooled TAKER record (`family_taker`). The taker
           mechanisms were the loss engine of the allocator's nine promotions to real money (15-minute
-          crypto momentum at 182 bps, MLB-total takers at a 7% fee; settled -$18.62 on 16).
+          crypto momentum at 182 bps, MLB-total takers at a 7% fee; settled -$18.62 on 16). Under
+          "probe_may_take" (M2, Sept 25, 2026) the allocator's `may_take` decides: a PROBE may take, one
+          position at its cap in all (`_probe_taker_room`); a bunt or a swing on the taker record. The
+          refusal names the band.
         - `max_event_share`: the agent's exposure to one event -- its holdings there at cost, its
           working buys on every market of the event, and this order -- at most that share of its
           equity on the book. meriwether-h7d7702 held NO at strikes 6, 7 and 8 of one MLB total, which
@@ -1140,18 +1247,29 @@ class Book:
             return []
         reasons: list[str] = []
         liquidity = str((CONSTITUTION.get("allocator") or {}).get("real_entry_liquidity") or "")
-        if liquidity == MAKER_UNLESS_TAKER_POSITIVE and not (intent.order_type == "limit" and intent.post_only):
+        if liquidity in (MAKER_UNLESS_TAKER_POSITIVE, PROBE_MAY_TAKE) and not (intent.order_type == "limit" and intent.post_only):
             record = self._family_taker(intent.agent)
-            if not (record is not None and record.get("positive") is True):
+            # M2 (Sept 25, 2026): under "probe_may_take" the allocator says whether THIS agent may take (`may_take`: a probe
+            # may; a bunt or a swing on its family's taker proof). A probe's taker entry is one position, its cap.
+            allowed = record is not None and (record.get("may_take") if liquidity == PROBE_MAY_TAKE and "may_take" in record
+                                               else record.get("positive")) is True
+            if allowed and liquidity == PROBE_MAY_TAKE and record.get("positive") is not True:
+                reasons.extend(self._probe_taker_room(intent, quote, account, record))  # a probe's taking: one position
+            if not allowed:
                 family = str((record or {}).get("family") or "").strip()
+                band = str((record or {}).get("band") or "").strip()
                 if record is not None and record.get("n") is not None:
                     bound = record.get("bound")
                     measured = f"{int(record['n'])} taker settlements" + ("" if bound is None else f", bound {float(bound):.4g}")
+                    if record.get("proof_min"):
+                        measured += f"; positive from {int(record['proof_min'])} with the bound above zero"
                 else:
                     measured = "no pooled taker record is measured for this agent's family"
+                who = f"by a {band} " if band else ""
+                probes = "; a probe may take" if liquidity == PROBE_MAY_TAKE else ""
                 reasons.append(
-                    f"a real entry on {family or 'this venue'} must be a post-only limit until the family's pooled taker record "
-                    f"is positive ({measured}): send a limit with post_only, which rests or is refused "
+                    f"a real entry {who}on {family or 'this venue'} must be a post-only limit until the family's pooled taker record "
+                    f"is positive ({measured}{probes}): send a limit with post_only, which rests or is refused "
                     "(constitution allocator.real_entry_liquidity)"
                 )
         share = _allocator_rule("max_event_share")
@@ -1172,6 +1290,53 @@ class Book:
                         "constitution allocator.max_event_share)"
                     )
         return reasons
+
+    def _probe_taker_room(self, intent: Intent, quote: Quote | None, account: Account, record: Mapping[str, Any]) -> list[str]:
+        """M2 (Sept 25, 2026; the Deploy B money review): a PROBE that may take only because it is a probe (its family's
+        taker record is not proven) takes one position at its cap, in all -- what it holds that it bought at the price, its
+        working buys that were not post-only, and this order at most `probe_cap_usd` (`Allocator.family_taker`:
+        `position_share_event` of a probe's stake, $2 of a $10 Kalshi probe), else the book's position cap. The per-market
+        cap alone let a $10 probe take $2 on each of five events, its whole stake at the ask (three filled in the review's
+        run). A taker order the book cannot price is refused: unmeasured is not room."""
+        cap = record.get("probe_cap_usd")
+        if cap is None:
+            limits = self.limits.get(intent.agent)
+            cap = limits.max_position_usd if limits is not None else None
+        rule = "(constitution allocator.real_entry_liquidity: probe_may_take)"
+        price = intent.limit_price if intent.order_type == "limit" and intent.limit_price else (quote.ask if quote is not None else None)
+        if cap is None or price is None or price <= 0:
+            return [f"a probe's taker entry cannot be priced against its one position's cap here: send a limit with post_only {rule}"]
+        cap = money(cap)
+        order = intent.quantity * price * intent.instrument.multiplier
+        taken = self._taker_exposure(intent.agent, account)
+        if taken + order <= cap:
+            return []
+        return [f"a probe takes the price for one position at its cap: it holds or bids ${taken:.2f} it took, and this order's "
+                f"${order:.2f} would make ${taken + order:.2f}, over its ${cap:.2f} (position_share_event of a probe's stake); "
+                f"send a limit with post_only, or take again once what it took has settled {rule}"]
+
+    def _taker_exposure(self, agent: str, account: Account) -> Decimal:
+        """What `agent` holds at cost on event markets it bought at the price (a buy that was not post-only filled there;
+        the whole holding counts, the safe side), plus what is left of its open buys that are not post-only, at their
+        limit: M2's probe taker room (`_probe_taker_room`)."""
+        taken: set[str] = set()
+        working = ZERO
+        with self._lock:
+            for order in list(self.orders.values()):
+                if order.side != "buy" or order.post_only or order.instrument.asset_class != "event":
+                    continue
+                shares = [share for share in order.shares if share.agent == agent]
+                if not shares:
+                    continue
+                if any(share.filled > 0 for share in shares) or order.filled > 0:
+                    taken.add(order.instrument.key)
+                if order.open:
+                    price = order.limit_price or order.reference_price or ZERO
+                    left = sum((share.quantity - share.filled for share in shares), ZERO)
+                    working += max(left, ZERO) * price * order.instrument.multiplier
+            held = sum((h.cost for key, h in account.holdings.items()
+                        if key in taken and h.cost > 0 and h.instrument.asset_class == "event"), ZERO)
+        return held + working
 
     def _manifest(self, agent: str, limits: Limits) -> Any:
         r = self.rules
@@ -1418,6 +1583,11 @@ class Book:
         notional = decision.notional
         if notional is None and reference is not None:
             notional = intent.quantity * reference * intent.instrument.multiplier
+        if structures.is_structure(intent.instrument) and intent.side == "buy" and intent.limit_price is not None:
+            # A structure's cost is its maximum loss, and an open may fill at any ask up to its limit: its order and
+            # position caps (and its cash) are metered at the limit, so no fill can take it over them (review of
+            # Sept 25, 2026: a $0.77 limit counted at a $0.70 ask filled at $0.77, $77 on a $75 cap).
+            notional = intent.quantity * intent.limit_price * intent.instrument.multiplier
         if quote is not None and not reducing:
             age = _age_seconds(quote.as_of, now)
             oldest = self.rules["max_option_quote_age_seconds" if intent.instrument.asset_class == "option" else "max_quote_age_seconds"]
@@ -1470,7 +1640,11 @@ class Book:
         if intent.instrument.asset_class == "option":
             if intent.order_type != "limit" or intent.limit_price is None:
                 reasons.append("an option order must be a limit order")
-            if intent.side == "buy" and str(intent.instrument.expiry or "") <= _new_york_date(now):
+            if intent.side == "buy" and structures.is_structure(intent.instrument):
+                cut = _structure_entry_refusal(str(intent.instrument.expiry or ""), now)
+                if cut:
+                    reasons.append(cut)
+            elif intent.side == "buy" and str(intent.instrument.expiry or "") <= _new_york_date(now):
                 reasons.append("an option entry must expire after today: what expires today is a coin held to the bell")
         if intent.side == "buy" and intent.instrument.asset_class == "event" and limits.max_hours_to_resolve is not None:
             try:
@@ -1518,6 +1692,12 @@ class Book:
         space for Kalshi legs), best price for the intent first -- a sell meets the highest bid first,
         as at the venue -- then the earliest, then by id; an unpriced order (a market order in flight)
         last."""
+        if structures.is_structure(intent.instrument) and "shadow" in self.broker.capabilities():
+            # A structure on the options shadow book (`league/options_shadow.py`, Sept 25, 2026) never meets one of
+            # the House's own orders: that account fills each order against the market alone. Crossed inside the
+            # House, the bidder would buy under the market's ask and the seller sell in the quote its decision saw,
+            # which the account's fill rules never allow; the sell goes to the account as asked.
+            return []
         side, price = yes_space(intent.instrument, intent.side, intent.limit_price)
         key = market_key(intent.instrument)
         found: list[tuple[tuple[Any, ...], Working]] = []
@@ -1950,7 +2130,11 @@ class Book:
             quote = self.broker.quote(instrument)
         except Exception:  # noqa: BLE001 - a venue that cannot quote is a refusal, not a crash
             return None
-        if quote is not None and quote.bid is not None and quote.bid > 0:
+        if quote is not None and quote.bid is not None and (quote.bid > 0 or structures.is_structure(instrument)):
+            # A structure whose legs are quoted and whose bid comes to nothing is worth nothing to sell, and is marked
+            # so (Sept 25, 2026): kept at its last bid it flattered its holder's equity while it died. Only a quote
+            # that is missing (a leg unquoted, no bid computable: `bid` None) keeps the last mark. A single contract
+            # keeps the old rule: Alpaca reports its empty bid as no bid at all, which cannot be told from no quote.
             self.marks[instrument.key] = quote.bid
         return quote
 
@@ -2077,11 +2261,20 @@ class Book:
                 self._commit_cross(plan)
             self._cross_applied.intersection_update(fill["id"] for plan in self._cross_plans.values() for fill in plan["fills"])
 
-    def _apply_house(self, p: Mapping[str, Any]) -> None:
+    def _apply_house(self, p: Mapping[str, Any], at: str = "") -> None:
         """The House row carries balancing cash and units; its units net to dust, never a position
-        it meant to take, so they are held without cost-basis bookkeeping."""
+        it meant to take, so they are held without cost-basis bookkeeping. A real book's dust that the
+        regulators' unlisted fees explained (H4), or a stale listing booked against them, spends that
+        much of their room and has paid that much of their later listings (`unlisted_fees_usd`); a
+        listing marked as so paid (`covered_usd`) uses it up."""
         account = self._account(HOUSE)
         account.cash += money(p["cash_delta"])
+        if p.get("unlisted_fees_usd"):
+            paid = money(p["unlisted_fees_usd"])
+            self._spend_unlisted(at, paid)
+            self._prepaid_fees += paid
+        if p.get("covered_usd"):
+            self._prepaid_fees = max(ZERO, self._prepaid_fees - money(p["covered_usd"]))
         delta = money(p["position_delta"])
         if delta != 0 and p.get("instrument"):
             instrument = Instrument.from_dict(p["instrument"])
@@ -2110,6 +2303,7 @@ class Book:
         liquidity: str = "taker",
         venue_fee: Decimal = ZERO,
         account: Account | None = None,
+        liquidity_role: str | None = None,
     ) -> dict[str, Any]:
         instrument = instrument or intent.instrument
         side = side or intent.side
@@ -2152,11 +2346,13 @@ class Book:
         }
         if source == 'venue' and self.fees.family == 'kalshi':
             payload['venue_accounting_version'] = 2
+        if liquidity_role is not None:
+            payload["liquidity_role"] = liquidity_role  # M6: the Alpaca fill's own role (`_liquidity_role`)
         return payload
 
     def _route(self, intents: Sequence[Intent], quantities: Sequence[Decimal], now: str, *, reference_price: Decimal | None = None,
                slice_of: tuple[str, int] | None = None, note: str = "", repriced: Mapping[str, Any] | None = None,
-               again: str | None = None) -> Outcome:
+               again: str | None = None, quote: Quote | None = None) -> Outcome:
         """Send one venue order for these intents' quantities, then attribute what filled at once.
 
         `slice_of` is (plan id, index) for one slice of a sliced exit: its client order id is
@@ -2196,6 +2392,9 @@ class Book:
             base["slice"] = {"plan": slice_of[0], "index": int(slice_of[1])}
         if repriced is not None:
             base["house_repriced"] = dict(repriced)
+        role = self._liquidity_role(first, quote)
+        if role is not None:
+            base["liquidity_role"] = role  # M6: what its fills are, maker or taker, for the family's record
         # The order is on the ledger before it is on the wire: a crash between the two leaves an
         # `unknown` order the next poll resolves by its client id, never an order nobody recorded.
         def told(reason: str = "") -> str:
@@ -2240,10 +2439,33 @@ class Book:
         """What the book assumes a fill of this order costs. Kalshi reports each order's fee, so
         this only matters on Alpaca, which reports none: there every order is booked at the
         taker's fee (a limit order may really have made, which only the venue knows), and
-        reconciliation hands the difference to the House row within a known allowance."""
+        reconciliation hands the difference to the House row within a known allowance. What a
+        fill WAS, maker or taker, is `_liquidity_role` on Alpaca (M6, Sept 25, 2026)."""
         if self.fees.family == "kalshi" and intent.order_type == "limit" and intent.post_only:
             return "maker"
         return "taker"
+
+    def _liquidity_role(self, intent: Intent, quote: Quote | None) -> str | None:
+        """M6 of the forward-first run (Sept 25, 2026): on an ALPACA book, whether this order's fills made or took liquidity,
+        written on each fill as `liquidity_role` (its `liquidity` stays the fee it is charged at, the taker's: `_liquidity`),
+        which the family record reads where present (`families.TradeTape`): "maker" for a limit order that was not marketable
+        at the touch the book saw when it placed it -- a buy under the ask, a sell over the bid -- so it rested; "taker"
+        otherwise: a market order, a marketable limit, or any order placed with no touch to read. None on a Kalshi book, which
+        reports each fill's fee and so its role (`_attribute`). What the venue does NOT tell us: Alpaca's order and fill
+        answers name no maker or taker and the adapter reads no fee, so this is the book's own reading of its order; the touch
+        can move between the quote and the order's arrival, and a stock order resting into the open fills in the opening
+        auction. Before it, every Alpaca fill read as a taker, post-only dip bids included: at T0 (04:23Z Sept 25)
+        crypto-alts-reversion's record was 292 taker events and no maker, and all five "probe taker entries" of the day were
+        Alpaca's. Fills booked before it keep what they say."""
+        if self.fees.family != "alpaca":
+            return None
+        if intent.order_type != "limit" or intent.limit_price is None or quote is None:
+            return "taker"
+        touch = quote.ask if intent.side == "buy" else quote.bid
+        if touch is None or touch <= 0:
+            return "taker"
+        resting = intent.limit_price < touch if intent.side == "buy" else intent.limit_price > touch
+        return "maker" if resting else "taker"
 
     def _order_row(self, base: Mapping[str, Any], status: str, broker_order_id: str | None, *, suffix: str, reason: str = "", rested: bool | None = None,
                    allocation: Mapping[str, Any] | None = None) -> None:
@@ -2372,6 +2594,7 @@ class Book:
                 source="venue", order_id=working.order_id,
                 instrument=working.instrument, side=working.side, reason=share.reason, intent_id=share.intent_id,
                 liquidity=plan["liquidity"], venue_fee=money(target["venue_fee"]), account=accounts[share.agent],
+                liquidity_role=working.liquidity_role,
             )
             rows.append({"kind": "book.fill", "payload": payload, "agent": share.agent, "id": target["fill_id"], "at": plan["at"]})
             self._apply_account_fill(accounts[share.agent], payload, plan["at"])
@@ -2420,7 +2643,7 @@ class Book:
         """Route one intent's order; a sell worth more than the order cap is sent in slices."""
         if intent.side == "sell" and self._over_cap(intent, quantity, quote):
             return self._start_exit_plan(intent, quantity, now, quote)
-        return self._route([intent], [quantity], now, reference_price=reference_price, note=note)
+        return self._route([intent], [quantity], now, reference_price=reference_price, note=note, quote=quote)
 
     def _slice_quantity(self, intent: Intent, available: Decimal, quote: Quote | None, cap: Decimal) -> Decimal:
         """The next slice: `available` cut into equal parts of at most the cap, on the instrument's
@@ -2864,7 +3087,8 @@ class Book:
     def expire_options(self, *, at: str | None = None) -> int:
         """Write off long options that have expired and that the venue no longer shows: they paid
         nothing. One the venue still shows is left alone (it clears overnight); one that was
-        exercised into shares shows up as a position the book does not know, and freezes it."""
+        exercised into shares shows up as a position the book does not know, and freezes it. A
+        structure is settled at the value its venue paid for it (below), never written off."""
         now = at or now_iso(self.clock)
         today = _new_york_date(now)
         with self._lock:
@@ -2872,18 +3096,34 @@ class Book:
                    if holding.instrument.asset_class == "option" and str(holding.instrument.expiry or "9999") < today]
             if not due:
                 return 0
+            # A structure held as one position (`league/structures.py`, Sept 25, 2026) is never written off at
+            # zero: the venue settles it at its value at expiry (`OptionsShadowBroker.structure_settlements`) and
+            # the book books that same value. One the venue has not settled yet waits for it.
+            codes = {str(h.instrument.market_id) for _, _, h in due if structures.is_structure(h.instrument)}
+            settle = getattr(self.broker, "structure_settlements", None)
+            valued = settle(codes) if codes and settle is not None else {}
             shown = {position_key(p.instrument) for p in self.broker.positions() if money(p.quantity) != 0}
             expired = 0
             for agent, key, holding in due:
                 inst = holding.instrument
-                if position_key(inst) in shown:
+                payout = ZERO
+                if structures.is_structure(inst) and settle is not None:
+                    if str(inst.market_id) not in valued:
+                        continue
+                    payout = q_cash(money(valued[str(inst.market_id)]) * inst.multiplier * holding.quantity)
+                elif position_key(inst) in shown:
                     continue
                 payload = {
                     "book": self.name, "instrument": inst.to_dict(), "result": "expired", "quantity": text(holding.quantity),
-                    "cost": text(q_cash(holding.cost)), "payout": "0", "pnl": text(q_cash(-holding.cost)),
+                    "cost": text(q_cash(holding.cost)), "payout": text(payout), "pnl": text(q_cash(payout - holding.cost)),
                     "reason": holding.reason, "opened_at": holding.opened_at, "real_money": self.real_money,
                 }
-                entry = self.ledger.append("book.settle", payload, agent=agent, id=f"expire:{self.name}:{agent}:{key}", at=at)
+                entry_id = f"expire:{self.name}:{agent}:{key}"
+                if len(entry_id) > 200:
+                    # A structure's key names every leg (about 140 characters for a condor), and a ledger id
+                    # is at most 200: such an id is hashed, as deterministic as the one it replaces.
+                    entry_id = f"expire:{self.name}:" + hashlib.sha256(f"{agent}|{key}".encode()).hexdigest()[:32]
+                entry = self.ledger.append("book.settle", payload, agent=agent, id=entry_id, at=at)
                 self._apply(entry.kind, agent, entry.payload, entry.at)
                 self.marks.pop(key, None)
                 expired += 1
@@ -2931,9 +3171,24 @@ class Book:
             # crypto buy order out of `cash` while the order rests ($80.00 for two $40 bids, to the
             # cent) and gives it back on a cancel. It is still the account's money, so it is added
             # back before comparing, or every resting bid would look like a missing $40.
+            #
+            # It holds each bid at its notional ROUNDED HALF-UP TO THE CENT (H4, measured on the real
+            # account, Sept 25, 2026), not at `remaining x limit` to eighteen places, which the book added
+            # back until then. At 04:37Z the account read $317.95 of cash beside twelve resting bids:
+            # the bids' notionals rounded half-up sum to $147.68, and $317.95 + $147.68 = $465.63, what
+            # its own activities add up to (the $500 deposit, each fill's cash to the cent, the fees);
+            # rounded up, down or not at all they do not. Read that way, the account's cash is unchanged
+            # across every one of the 339 pairs of consecutive readings from Sept 24 00:00Z to Sept 25
+            # 04:26Z with no fill between them; read unrounded it moved across 66, a few tenths of a cent
+            # a bid, each booked as dust. Then four of the eight bids resting at 02:26Z Sept 25 were
+            # cancelled or replaced within a few passes (02:33-02:49Z), the error booked on them
+            # (-0.01075037) was left standing, and the real book froze on "cash differs by 0.0149",
+            # "0.0168", then "0.0108": every Alpaca real entry refused for 93 minutes (02:38:59-04:11:50Z)
+            # with no fill and no fee behind it.
             for order in self.broker.open_orders():
                 if order.instrument.asset_class == "crypto" and order.side == "buy" and order.limit_price is not None:
-                    cash += money(order.remaining) * money(order.limit_price) * order.instrument.multiplier
+                    held = money(order.remaining) * money(order.limit_price) * order.instrument.multiplier
+                    cash += held.quantize(CENT, rounding=ROUND_HALF_UP)
         positions: dict[str, Decimal] = {}
         for position in self.broker.positions():
             instrument, quantity = position.instrument, money(position.quantity)
@@ -2950,9 +3205,21 @@ class Book:
         shortfall (a fee from before the baseline is already in the baseline and explains nothing).
         They are the House's cost: a day's fees are one rounded-up cent or two across every agent.
         An "OCC Clearing Fee" row is not booked where the option fill paid it (`Fees.option_clearing`,
-        a practice book): Alpaca's paper account takes it at the fill and lists it the next morning,
-        and booked again then it only ever explained some other shortfall (Sept 21-24, 2026: every
-        one of the 46 was booked a day late, against an unrelated shortfall)."""
+        every Alpaca book since H4, Sept 25, 2026): Alpaca's paper account takes it at the fill and
+        lists it the next morning, and booked again then it only ever explained some other shortfall
+        (Sept 21-24, 2026: every one of the 46 was booked a day late, against an unrelated shortfall);
+        the real account takes it at the fill too and lists it seconds later (Sept 24, 2026: 11 s and
+        8 s after its two AAL call buys).
+
+        A regulators' fee listing (`REGULATORS_FEE`) that real dust has already paid (`_prepaid_fees`:
+        the real account takes ORF and CAT at the fill, H4 books them as dust at the next reading, and
+        Alpaca lists them hours later with no cash moving) is marked paid instead: a `venue-fee` row at
+        no cash, `covered_usd` its amount, so it can explain no later shortfall. The review of H4 (Sept
+        25, 2026) found such listings standing unbooked by id and taking any later shortfall they fit to
+        zero, with no alert and no freeze -- over the key when a day's fees are listed as one row. Sept
+        25, 02:20:33Z: the CAT $0.01 of Sept 24, its cash gone at the 18:52Z fill, was booked against
+        -0.0147 of the resting bids' rounding. Half a cent of slack takes the dust's sub-cent noise;
+        a listing larger than what the dust paid is booked as before, against its own shortfall."""
         read = getattr(self.broker, "fee_activities", None)
         if read is None:
             return ZERO
@@ -2963,19 +3230,150 @@ class Book:
             return ZERO
         booked = ZERO
         for row in rows:
-            if self.fees.option_clearing and str(row.get("description") or "").lower().startswith("occ clearing fee"):
+            description = str(row.get("description") or "")
+            if self.fees.option_clearing and description.lower().startswith("occ clearing fee"):
                 continue  # the option fill paid it, in the cash the venue took then
             fee = money(row["usd"])
             entry_id = f"venue-fee:{self.name}:{row['id']}"
-            if fee <= 0 or self.ledger.get(entry_id) is not None or booked + fee > shortfall + DUST_USD:
+            if fee <= 0 or self.ledger.get(entry_id) is not None:
+                continue
+            if self._prepaid_fees > 0 and fee <= self._prepaid_fees + DUST_USD / 2 and REGULATORS_FEE.search(description):
+                payload = {"book": self.name, "source": "venue-fee", "side": "fee", "instrument": None, "quantity": "0", "price": "0",
+                           "cash_delta": "0", "position_delta": "0", "fee_usd": "0", "realized": None, "covered_usd": text(fee),
+                           "detail": f"{row.get('date')} {description}: paid at the fill, booked then as real-book dust".strip(),
+                           "real_money": self.real_money}
+                entry = self.ledger.append("book.fill", payload, agent=HOUSE, id=entry_id)
+                self._apply(entry.kind, HOUSE, entry.payload, entry.at)
+                continue
+            if booked + fee > shortfall + DUST_USD:
                 continue
             payload = {"book": self.name, "source": "venue-fee", "side": "fee", "instrument": None, "quantity": "0", "price": "0",
                        "cash_delta": text(-fee), "position_delta": "0", "fee_usd": text(fee), "realized": None,
-                       "detail": f"{row.get('date')} {row.get('description') or 'regulatory fees'}".strip(), "real_money": self.real_money}
+                       "detail": f"{row.get('date')} {description or 'regulatory fees'}".strip(), "real_money": self.real_money}
+            unread = self._unread_room() if self.real_money and REGULATORS_FEE.search(description) else ZERO
+            if unread > 0:
+                # Beside option or stock fills no clean reading has followed, a real shortfall is their
+                # regulators' cents, taken at the fill: a listing booked against it carries its name but
+                # their cash, so it pays their own listings ahead as real dust would, and spends their room.
+                # Else the Sept 24 ORF $0.03, absorbed before H4 and still unbooked, would take $0.03 of
+                # the next option fill's cents and leave that day's listing $0.03 short of paid, standing
+                # to take an unrelated shortfall of its whole size (the review of H4, Sept 25, 2026).
+                payload["unlisted_fees_usd"] = text(min(fee, unread))
             entry = self.ledger.append("book.fill", payload, agent=HOUSE, id=entry_id)
             self._apply(entry.kind, HOUSE, entry.payload, entry.at)
             booked += fee
         return booked
+
+    def _reset_since_clean(self) -> None:
+        """A clean reading (reconciled, no settlement awaited): the counts since the last one start
+        again, and every option or stock fill so far has been read (`_unlisted_began`)."""
+        self._fills_since_reconcile = 0
+        self._fee_slack_usd = ZERO
+        self._fee_slack_units = {}
+        self._holds_transition = ZERO
+        for row in self._unlisted_fees:
+            row[4] = True
+
+    def _bid_rounding(self) -> Decimal:
+        """What the book's working crypto bids add back unrounded beyond what Alpaca holds for them at
+        the cent (`_venue`, H4): the error every reading before H4 booked as dust."""
+        out = ZERO
+        for order_id in self._open_bids:
+            working = self.orders[order_id]
+            if working.open:
+                held = working.remaining * working.limit_price * working.instrument.multiplier
+                out += held - held.quantize(CENT, rounding=ROUND_HALF_UP)
+        return out
+
+    def _row_seconds(self, at: str) -> float:
+        try:
+            return _epoch_seconds(at)
+        except ValueError:
+            return float(self.clock())
+
+    def _note_unlisted(self, at: str, usd: Decimal, what: str) -> None:
+        """A fill's room for the regulators' unlisted fees, at the fill row's own time. Rooms that had
+        lapsed by then can be spent by no later dust, and go (so the fold keeps a few hours of fills)."""
+        when = self._row_seconds(at)
+        self._unlisted_fees = [row for row in self._unlisted_fees if row[0] >= when - UNLISTED_FEE_HOURS * 3600]
+        self._unlisted_fees.append([when, usd, what, at, False])
+
+    def _spend_unlisted(self, at: str, usd: Decimal) -> None:
+        """Real dust booked at `at` spends the rooms still open then, oldest fill first."""
+        when = self._row_seconds(at)
+        self._unlisted_fees = [row for row in self._unlisted_fees if row[0] >= when - UNLISTED_FEE_HOURS * 3600]
+        for row in self._unlisted_fees:
+            if usd <= 0:
+                break
+            take = min(row[1], usd)
+            row[1] -= take
+            usd -= take
+
+    def _unlisted_room(self) -> tuple[Decimal, list[str]]:
+        """The regulators' fees the last `UNLISTED_FEE_HOURS` of option and stock fills may still have
+        taken unlisted, less the real dust already booked on them, and the fills that make the room."""
+        cutoff = float(self.clock()) - UNLISTED_FEE_HOURS * 3600
+        self._unlisted_fees = [row for row in self._unlisted_fees if row[0] >= cutoff]
+        room = sum((row[1] for row in self._unlisted_fees), ZERO)
+        return max(ZERO, room), [row[2] for row in self._unlisted_fees if row[1] > 0]
+
+    def _unread_room(self) -> Decimal:
+        """The room still open on option and stock fills that no clean reading has followed yet."""
+        cutoff = float(self.clock()) - UNLISTED_FEE_HOURS * 3600
+        return max(ZERO, sum((row[1] for row in self._unlisted_fees if row[0] >= cutoff and not row[4]), ZERO))
+
+    def _unlisted_began(self) -> str | None:
+        """When the cents of a real shortfall began, if an option or stock fill that no clean reading
+        has followed yet (still in the window) can have taken them: the newest such fill's row time.
+        The venue takes the regulators' fees AT the fill, so a fill in the minutes before a release's
+        promotion that the old process never read makes cents only the new process books (`began_at`
+        on the dust alert, which the watchdog inherits when it is before the promotion). None when a
+        clean reading has followed every fill in the window: those cents appeared after it, and count
+        against whichever process is running. Kept in ledger order (`_reset_since_clean` marks the
+        fills read), so the fold and the live book agree."""
+        unread = [row for row in self._unlisted_fees if not row[4]]
+        return max(unread, key=lambda row: row[0])[3] if unread else None
+
+    def _explain_real_cents(self, cash_diff: Decimal, tolerance: Decimal) -> tuple[str, Decimal, Decimal, str | None] | None:
+        """Why a REAL book's cash difference is the venue's own fees, or None: then it freezes (H4).
+
+        Called only once every position agrees (after position dust), no order's outcome is unknown,
+        no settlement is awaited, every venue fee activity that fits the shortfall has been booked
+        (`_book_venue_fees`), and the difference is still over the per-fill tolerance (a cent for each
+        venue fill since the last clean reading, the venue's rounding) and the maker's fee slack. It
+        is EXPLAINED, and returned as `(why, dollars booked on the unlisted fees' room, the key, when the
+        cents began or None)` (`_unlisted_began`), only when all of these hold:
+
+        1. `allocator.real_book_dust_usd` is set inside its bounds ($0.25-1.00) and the difference is
+           under it;
+        2. the venue holds LESS than the book says: a shortfall. A surplus beyond the tolerance and
+           the maker's fee slack is no fee of the venue's -- a dividend, interest, a refund, or a fill
+           the book never saw -- and the owner is told by the freeze;
+        3. option or stock fills on this book in the last `UNLISTED_FEE_HOURS` leave room for the
+           regulators' fees Alpaca takes at the fill and lists as FEE activities only later (ORF, CAT,
+           TAF, SEC: `UNLISTED_FEE_PER_FILL_USD` a fill plus `UNLISTED_FEE_PER_CONTRACT_USD` a
+           contract or `UNLISTED_FEE_PER_SHARE_USD` a share), less the real dust already booked on
+           that room, and the shortfall is no more than that room plus the tolerance.
+
+        Nothing else explains: with no option or stock fill in the window a shortfall over the
+        tolerance freezes (crypto fees are the book's own model, charged at the fill), and so does
+        anything at or over the key, beside a position difference or an order in doubt, or larger
+        than the fees could be. What is booked here has PAID the fees (`_prepaid_fees`): when they are
+        listed (that evening, or the next night) the next shortfall's `_book_venue_fees` marks each
+        listing it covers as paid at no cash, so a listing explains no second shortfall."""
+        key = real_book_dust_usd()
+        if key is None or cash_diff >= 0 or -cash_diff >= key:
+            return None
+        room, fills = self._unlisted_room()
+        shortfall = -cash_diff
+        if room <= 0 or shortfall > room + tolerance:
+            return None
+        spent = q_cash(min(shortfall, room))
+        shown = ", ".join(fills[-5:]) + (f" and {len(fills) - 5} more" if len(fills) > 5 else "")
+        why = (f"regulatory fees (ORF, CAT, TAF, SEC) that Alpaca takes at option and stock fills and lists as FEE activities "
+               f"only later: room for ${room:.2f} from the fills of the last {UNLISTED_FEE_HOURS} h ({shown}), and a cent of "
+               f"rounding for each of the {self._fills_since_reconcile} venue fill(s) since the last clean reading")
+        return why, spent, key, self._unlisted_began()
 
     def _ledger_totals(self) -> tuple[Decimal, dict[str, Decimal], dict[str, Instrument]]:
         """The book's own cash (profit and loss, fees, dust: stakes are slices, not deposits) and
@@ -3178,7 +3576,8 @@ class Book:
                 # Dust: under a cent of value, or no more than one quantity step for each venue fill
                 # since the last reconciliation (the venue rounds each in-kind fee its own way).
                 crumbs = step_of(instrument) * max(1, self._fills_since_reconcile) if instrument is not None else ZERO
-                small = instrument is not None and (
+                # A structure is whole units, and one marked at nothing would pass any difference as "under a cent".
+                small = instrument is not None and not structures.is_structure(instrument) and (
                     (mark is not None and abs(diff) * mark * instrument.multiplier < DUST_USD)
                     or (step_of(instrument) < ONE and abs(diff) <= crumbs)
                 )
@@ -3206,7 +3605,10 @@ class Book:
                 if key not in awaiting and key not in diffs:
                     del self._awaiting_settlement[key]
             pending = any(w.status in ("new", "unknown") for w in self.orders.values())
-            if cash_diff <= -DUST_USD and not diffs and not awaiting and not pending:
+            # What the resting bids' old rounding explains at H4's one transition (`_holds_transition`,
+            # zero at every other reading) is no fee: no listing is booked against it (Sept 25, 2026,
+            # 02:20:33Z: the CAT $0.01 of Sept 24 was booked against -0.0147 of that rounding).
+            if cash_diff - self._holds_transition <= -DUST_USD and not diffs and not awaiting and not pending:
                 # The venue holds less than the book says. Alpaca passes on the regulators' fees
                 # (on equity sales and on every option contract) as one FEE activity at the end of
                 # the day, which no fill ever showed: book the ones that explain the shortfall.
@@ -3216,7 +3618,7 @@ class Book:
                 # $0.87 of the day before's fee rows -- their cash long gone, at their fills -- were
                 # booked against it; the fill landed seven seconds later and the book froze on
                 # +0.8700 for ten minutes, until it adopted the venue.
-                booked = self._book_venue_fees(-cash_diff)
+                booked = self._book_venue_fees(self._holds_transition - cash_diff)
                 if booked:
                     cash, _, _ = self._ledger_totals()
                     expected = self.baseline_cash + cash
@@ -3224,7 +3626,16 @@ class Book:
             # A venue shows cash to the cent and rounds each fill's fee its own way: allow a cent
             # of drift for each venue fill since the last reconciliation, and book it as dust.
             tolerance = DUST_USD * max(1, self._fills_since_reconcile)
-            within = abs(cash_diff) < tolerance or ZERO < cash_diff <= self._fee_slack_usd + tolerance
+            # H4's transition (Sept 25, 2026): the first clean reading after the restart into this code
+            # expects the book to stand from the venue by exactly the sub-cent errors the last reading
+            # before it booked on the bids resting then, measured from the ledger's own orders
+            # (`_holds_transition`, signed), and judges only what is left over (`drift`); the dust booked
+            # is the whole difference, which takes those errors back. On the snapshot of 04:26Z Sept 25,
+            # 3 of the real Alpaca book's 101 clean readings since 18:30Z Sept 24 left 1.1-1.3 cents of
+            # them: without this, a restart just after one would freeze the book and roll back the
+            # deploy that ships the fix. Zero at every other reading.
+            drift = cash_diff - self._holds_transition
+            within = abs(drift) < tolerance or ZERO < drift <= self._fee_slack_usd + tolerance
             if awaiting and not within and -tolerance < cash_diff <= sum(awaiting.values(), ZERO) + tolerance:
                 within = True  # the venue has paid a settlement the ledger has not recorded yet
             if not within and self.fees.family == "alpaca":
@@ -3233,14 +3644,26 @@ class Book:
                 # resting crypto bid. If it does, the shortfall is exactly that premium.
                 held = sum((money(o.remaining) * money(o.limit_price) * o.instrument.multiplier for o in self.broker.open_orders()
                             if o.instrument.asset_class == "option" and o.side == "buy" and o.limit_price is not None), ZERO)
-                if held > 0 and abs(cash_diff + held) < tolerance:
-                    within, cash_diff = True, ZERO
+                if held > 0 and abs(drift + held) < tolerance:
+                    within, cash_diff = True, self._holds_transition
             # A practice book is never frozen by cents (`PRACTICE_DUST_USD`): with every position
             # agreeing and no order in doubt, a difference under a dollar either way is the venue's
             # fees and rounding, and is booked as dust now, not after three frozen readings.
             practice_dust = (not within and not self.real_money and not diffs and not pending and not awaiting
                              and abs(cash_diff) < PRACTICE_DUST_USD)
             within = within or practice_dust
+            # A REAL book is never frozen by cents its venue's own fees explain (H4, Sept 25, 2026;
+            # `allocator.real_book_dust_usd`): with every position agreeing, no order in doubt and no
+            # settlement awaited, a shortfall under the key that the regulators' unlisted fees on its
+            # option and stock fills can make (`_explain_real_cents`) is booked to the House row as dust
+            # with an error alert naming it. Sept 24, 2026, 18:23:24Z: the real account's first option
+            # buy froze the book on -0.0308 (its OCC fee and $0.03 of ORF and CAT, all taken at the fill
+            # and listed 11 s, two hours and six hours later), which blocked every Alpaca real entry.
+            # Anything else keeps the freeze for the owner.
+            real_dust = None
+            if not within and self.real_money and not diffs and not pending and not awaiting:
+                real_dust = self._explain_real_cents(drift, tolerance)
+                within = real_dust is not None
             ok = within and not diffs and not pending
             problems = []
             if not within:
@@ -3253,8 +3676,20 @@ class Book:
             dust = ZERO
             if awaiting:
                 detail = "; ".join([detail] if detail else []) + ("; " if detail else "") + "awaiting settlement: " + ", ".join(sorted(awaiting))
+            explained = ""
             if ok and q_cash(cash_diff) != 0 and not awaiting:
                 dust = q_cash(cash_diff)
+                said: dict[str, Any] = {}
+                if practice_dust:
+                    said = {"detail": f"practice book: a cash difference under ${PRACTICE_DUST_USD} with every position agreeing and "
+                                      f"no order in doubt, booked at once instead of freezing entries ({self._fills_since_reconcile} "
+                                      f"fill(s) since the last reconciliation allowed {tolerance:.2f})"}
+                elif real_dust is not None:
+                    explained, spent, key, began = real_dust
+                    said = {"detail": f"real book: a cash difference of {cash_diff:+.4f} under allocator.real_book_dust_usd (${key}) "
+                                      f"with every position agreeing and no order in doubt, explained by {explained}; booked to the "
+                                      "House row instead of freezing entries",
+                            "unlisted_fees_usd": text(spent)}
                 entry = self.ledger.append(
                     "book.fill",
                     {
@@ -3267,19 +3702,25 @@ class Book:
                         "cash_delta": text(dust),
                         "position_delta": "0",
                         "real_money": self.real_money,
-                        **({"detail": f"practice book: a cash difference under ${PRACTICE_DUST_USD} with every position agreeing and "
-                                      f"no order in doubt, booked at once instead of freezing entries ({self._fills_since_reconcile} "
-                                      f"fill(s) since the last reconciliation allowed {tolerance:.2f})"}
-                           if practice_dust else {}),
+                        **said,
                     },
                     agent=HOUSE,
                 )
                 self._apply(entry.kind, HOUSE, entry.payload, entry.at)
+                if real_dust is not None:
+                    # The owner is told, as the freeze used to tell them, but nothing stops. `began_at`: the
+                    # fill whose fees the venue took before any reading saw them (`_unlisted_began`). The
+                    # watchdog counts every error alert after a promotion that did not begin before it, so
+                    # the fees of a fill in the minutes before a promotion rolled that release back (the
+                    # review of H4, Sept 25, 2026); cents that appear after a clean reading still count.
+                    self.ledger.append("ops.alert", {
+                        "level": "error", "book": self.name, "dust_usd": text(dust), "real_book_dust_usd": text(key),
+                        **({"began_at": began} if began else {}),
+                        "text": (f"{self.name}: {dust:+.4f} of cash booked as dust on the House row, not a freeze (under "
+                                 f"allocator.real_book_dust_usd ${key}): {explained}")[:1000]})
             self.frozen = None if ok else detail
             if ok and not awaiting:
-                self._fills_since_reconcile = 0
-                self._fee_slack_usd = ZERO
-                self._fee_slack_units = {}
+                self._reset_since_clean()
             head_seq, head_digest = self.ledger.head()
             self.ledger.append(
                 "book.reconciled",
@@ -3295,11 +3736,13 @@ class Book:
                     "ledger_seq": head_seq,
                     "ledger_digest": head_digest,
                     "real_money": self.real_money,
+                    # H4: this reading added resting bids back at the cent, as the venue holds them.
+                    "holds": "cent",
                     "attribution_issues": {name: self.evidence_integrity(name)['issues']
                                            for name in self._evidence_issues},
                 },
             )
-            return Reconciliation(ok, venue_cash, q_cash(expected), q_cash(cash_diff), diffs, dust, detail)
+            return Reconciliation(ok, venue_cash, q_cash(expected), q_cash(cash_diff), diffs, dust, detail, explained)
 
 
 def _split_cash(total: Decimal, parts: Sequence[Decimal]) -> list[Decimal]:
@@ -3335,6 +3778,41 @@ def _epoch_seconds(now: str) -> float:
     if moment is None:
         raise ValueError(f"not a timestamp: {now!r}")
     return moment.timestamp()
+
+
+#: The last minute a structure may be opened on its earliest expiry day (the spec's section 4): 14:30 New York,
+#: ninety minutes before the bell, and on an early-close day ninety minutes before that close (11:30 on a
+#: 13:00 close), so a structure bought on its last day always has the same time to be closed before it.
+STRUCTURE_ENTRY_CUT_NY = (14, 30)
+STRUCTURE_ENTRY_BEFORE_CLOSE_SECONDS = 90 * 60
+
+
+def _structure_entry_refusal(expiry: str, now: str) -> str | None:
+    """Why a structure whose earliest expiry is `expiry` may not be opened at `now`, or None (Sept 25, 2026):
+    any day before its expiry; on the expiry day itself until the cut (`STRUCTURE_ENTRY_CUT_NY`, earlier on an
+    early close, by the House's calendar `ltcm.data.us_equity_session`); never once expired. A single option
+    keeps its own rule (no entry expiring today)."""
+    from datetime import datetime, time as clock_time
+    from zoneinfo import ZoneInfo
+
+    from ltcm.data import us_equity_session
+
+    today = _new_york_date(now)
+    if expiry > today:
+        return None
+    if expiry < today:
+        return "this structure's earliest leg has expired"
+    new_york = ZoneInfo("America/New_York")
+    session = us_equity_session(today)
+    if session is None:
+        return "a structure is not opened on its expiry day: the market has no session today"
+    cut = min(datetime.combine(datetime.strptime(today, "%Y-%m-%d").date(), clock_time(*STRUCTURE_ENTRY_CUT_NY), new_york).timestamp(),
+              _epoch_seconds(session.close_at) - STRUCTURE_ENTRY_BEFORE_CLOSE_SECONDS)
+    if _epoch_seconds(now) < cut:
+        return None
+    at = datetime.fromtimestamp(cut, new_york).strftime("%H:%M")
+    early = " (ninety minutes before today's early close)" if session.early_close else ""
+    return f"a structure is not opened after {at} New York on its expiry day{early}"
 
 
 def _new_york_date(now: str) -> str:

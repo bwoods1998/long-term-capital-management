@@ -56,6 +56,12 @@ def transport(**overrides) -> FakeTransport:
     return FakeTransport(routes)
 
 
+def recorded_board(name: str) -> dict:
+    """An ESPN scoreboard recorded Sept 25, 2026 and trimmed to the fields `event_row` reads
+    (ltcm/tests/fixtures/feeds/espn_scoreboard_*.json)."""
+    return json.loads((Path(__file__).resolve().parents[2] / "ltcm" / "tests" / "fixtures" / "feeds" / name).read_text(encoding="utf-8"))
+
+
 def perp_row(rate: float) -> dict:
     return {"symbol": "BTC", "okx": {"rate": rate, "open_interest_usd": 2.2e9}, "hyperliquid": None, "kraken": None,
             "dvol": 34.4, "funding_z": 0.5, "funding_history_n": 30}
@@ -186,12 +192,58 @@ class Recorder(StoreCase):
         self.assertTrue(store.due())
         out = store.run()
         self.assertEqual(out["polled"], ["sports:nfl", "sports:epl"])
-        self.assertEqual([call["url"] for call in fake.calls], [NFL, EPL])
-        self.assertTrue(all("dates" not in call["query"] for call in fake.calls))  # today's board, never a past one
+        # The NFL's board is its week; a daily league's board (EPL) is joined by the boards of the New
+        # York days the next 36 hours reach (08:00 New York, Sept 22: that day and the next), never a past one.
+        self.assertEqual([call["url"] for call in fake.calls], [NFL, EPL, EPL + "?dates=20260922", EPL + "?dates=20260923"])
+        self.assertTrue(all(call["query"].get("dates", "20260922") >= "20260922" for call in fake.calls))
         board = store.latest({"sports": ["nfl", "epl"]}, self.clock())["sports"]
         self.assertEqual((board["nfl"]["espn"], [e["id"] for e in board["nfl"]["events"]]), ("football/nfl", ["401872932", "401872933"]))
         self.assertEqual((board["epl"]["events"][0]["status"], board["epl"]["events"][0]["home"]["score"]), ("in", 1))
         self.assertEqual(board["nfl"]["t"], "2026-09-22T12:00:00.000Z")
+
+    def test_college_football_is_the_fbs_and_fcs_weeks_together(self):
+        # Sept 25, 2026: the default board was ESPN's 18 featured games while Kalshi listed 113 NCAAF
+        # spread events; the FBS (groups=80) and FCS (groups=81) week boards held all of them. The
+        # fixtures are four games of each, recorded that morning, one of them (Howard at Rutgers) on both.
+        cfb = HOST + "/apis/site/v2/sports/football/college-football/scoreboard"
+        fbs, fcs = recorded_board("espn_scoreboard_ncaaf_groups80.json"), recorded_board("espn_scoreboard_ncaaf_groups81.json")
+        fake = transport(**{cfb: lambda method, url, body: fbs if "groups=80" in url else fcs if "groups=81" in url else {"events": []}})
+        store = self.recorder({"sports": ["ncaaf"]}, transports=fake)
+        store.run()
+        self.assertEqual([call["query"] for call in fake.calls], [{"groups": "80", "limit": "300"}, {"groups": "81", "limit": "300"}])
+        events = store.latest({"sports": ["KXNCAAFSPREAD"]}, self.clock())["sports"]["ncaaf"]["events"]
+        self.assertEqual(len(events), 7)  # 4 + 4, the game on both boards once
+        self.assertEqual([e["short_name"] for e in events if e["id"] == "401858468"], ["HOW @ RUTG"])
+        self.assertEqual(feeds.sports_days("ncaaf", self.clock()), [])  # a week board: no dated board is asked
+
+    def test_a_daily_board_is_joined_by_today_and_the_next_days_board(self):
+        # 06:18Z Sept 25, 2026: ESPN's default MLB board was still Sept 24 (every game final), so the
+        # day's games and the next day's were on no board. The row joins the dated boards of today and
+        # tomorrow (New York); tomorrow's is read again every 15 minutes, today's at every poll until
+        # the default board shows it.
+        self.clock.set(epoch("2026-09-25T06:18:00Z"))
+        mlb = HOST + "/apis/site/v2/sports/baseball/mlb/scoreboard"
+        boards = {"": recorded_board("espn_scoreboard_mlb_default_20260924.json"),
+                  "dates=20260925": recorded_board("espn_scoreboard_mlb_20260925.json"),
+                  "dates=20260926": recorded_board("espn_scoreboard_mlb_20260926.json")}
+        fake = transport(**{mlb: lambda method, url, body: boards[urllib.parse.urlsplit(url).query]})
+        store = self.recorder({"sports": ["mlb"]}, transports=fake)
+        store.run()
+        self.assertEqual([call["url"] for call in fake.calls], [mlb, mlb + "?dates=20260925", mlb + "?dates=20260926"])
+        row = store.latest({"sports": ["mlb"]}, self.clock())["sports"]["mlb"]
+        self.assertEqual([e["status"] for e in row["events"]], ["post", "post", "pre", "pre", "pre", "pre", "pre", "pre"])
+        self.assertEqual(row["events"][2]["home"]["short"], "Red Sox")
+        store._schedule("sports", "mlb", 0.0)  # due again within the quarter hour
+        self.clock.advance(120)
+        store.run()
+        self.assertEqual([call["url"] for call in fake.calls[3:]], [mlb, mlb + "?dates=20260925"])  # tomorrow's is kept
+        self.assertEqual(len(store.latest({"sports": ["mlb"]}, self.clock())["sports"]["mlb"]["events"]), 8)
+        boards[""] = {**boards["dates=20260925"], "day": {"date": "2026-09-25"}}  # the default board turns to today
+        self.clock.advance(15 * 60)
+        store._schedule("sports", "mlb", 0.0)
+        store.run()
+        self.assertEqual([call["url"] for call in fake.calls[5:]], [mlb, mlb + "?dates=20260926"])  # today's is the board itself
+        self.assertEqual(feeds.sports_days("mlb", epoch("2026-09-25T20:00:00Z")), ["20260925", "20260926", "20260927"])
 
     def test_a_live_board_is_polled_every_minute_and_a_quiet_one_every_quarter_hour(self):
         soon = {"events": [{"id": "9", "name": "A at B", "date": "2026-09-22T13:00Z", "competitions": [{

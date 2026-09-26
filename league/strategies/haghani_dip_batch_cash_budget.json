@@ -1,0 +1,8 @@
+{
+  "family": "crypto-alts-reversion",
+  "name": "haghani-dip-batch-cash-budget",
+  "repair": {
+    "key": "order_refusal:alpaca:needs $# with fees; free cash is $#"
+  },
+  "why": "Corrected child of haghani-56: the supplied parent repeatedly requests approximately $12 dip entries with less than $1 free cash. Preserve its specialty, entry signals and exits, but reserve outstanding buy commitments and fees, cap entries by available cash, and debit one shared budget for each proposed buy. Do not spend anticipated sales or cancellation releases. Born on rung 0 without an inherited record; qualification and forward refusal recurrence remain the judges."
+}

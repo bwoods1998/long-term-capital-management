@@ -1,0 +1,386 @@
+{
+ "events": [
+  {
+   "id": "401858468",
+   "name": "Howard Bison at Rutgers Scarlet Knights",
+   "shortName": "HOW @ RUTG",
+   "date": "2026-09-25T23:00Z",
+   "competitions": [
+    {
+     "id": "401858468",
+     "date": "2026-09-25T23:00Z",
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "id": "164",
+        "location": "Rutgers",
+        "name": "Scarlet Knights",
+        "abbreviation": "RUTG",
+        "displayName": "Rutgers Scarlet Knights",
+        "shortDisplayName": "Rutgers"
+       },
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "overall",
+         "type": "total",
+         "summary": "0-3"
+        }
+       ]
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "id": "47",
+        "location": "Howard",
+        "name": "Bison",
+        "abbreviation": "HOW",
+        "displayName": "Howard Bison",
+        "shortDisplayName": "Howard"
+       },
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "overall",
+         "type": "total",
+         "summary": "1-2"
+        }
+       ]
+      }
+     ],
+     "status": {
+      "period": 0,
+      "displayClock": "0:00",
+      "type": {
+       "state": "pre",
+       "completed": false,
+       "detail": "Fri, September 25th at 7:00 PM EDT",
+       "shortDetail": "9/25 - 7:00 PM EDT"
+      }
+     },
+     "odds": [
+      {
+       "details": "RUTG -43.5",
+       "overUnder": 55.5,
+       "spread": -43.5,
+       "provider": {
+        "id": "100",
+        "name": "Draft Kings"
+       },
+       "homeTeamOdds": {
+        "favorite": true,
+        "underdog": false
+       },
+       "awayTeamOdds": {
+        "favorite": false,
+        "underdog": true
+       },
+       "moneyline": {
+        "displayName": "Moneyline",
+        "shortDisplayName": "ML",
+        "home": {
+         "close": {
+          "odds": "OFF"
+         },
+         "open": {
+          "odds": "OFF"
+         }
+        },
+        "away": {
+         "close": {
+          "odds": "OFF"
+         },
+         "open": {
+          "odds": "OFF"
+         }
+        }
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401867806",
+   "name": "Harvard Crimson at Brown Bears",
+   "shortName": "HARV @ BRWN",
+   "date": "2026-09-25T23:00Z",
+   "competitions": [
+    {
+     "id": "401867806",
+     "date": "2026-09-25T23:00Z",
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "id": "225",
+        "location": "Brown",
+        "name": "Bears",
+        "abbreviation": "BRWN",
+        "displayName": "Brown Bears",
+        "shortDisplayName": "Brown"
+       },
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "overall",
+         "type": "total",
+         "summary": "1-0"
+        }
+       ]
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "id": "108",
+        "location": "Harvard",
+        "name": "Crimson",
+        "abbreviation": "HARV",
+        "displayName": "Harvard Crimson",
+        "shortDisplayName": "Harvard"
+       },
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "overall",
+         "type": "total",
+         "summary": "1-0"
+        }
+       ]
+      }
+     ],
+     "status": {
+      "period": 0,
+      "displayClock": "0:00",
+      "type": {
+       "state": "pre",
+       "completed": false,
+       "detail": "Fri, September 25th at 7:00 PM EDT",
+       "shortDetail": "9/25 - 7:00 PM EDT"
+      }
+     },
+     "odds": [
+      {
+       "details": "HARV -13.5",
+       "overUnder": 45.5,
+       "spread": 13.5,
+       "provider": {
+        "id": "100",
+        "name": "Draft Kings"
+       },
+       "homeTeamOdds": {
+        "favorite": false,
+        "underdog": true
+       },
+       "awayTeamOdds": {
+        "favorite": true,
+        "underdog": false
+       },
+       "moneyline": {
+        "displayName": "Moneyline",
+        "shortDisplayName": "ML",
+        "home": {
+         "close": {
+          "odds": "+385",
+          "link": {
+           "language": "en-US",
+           "rel": [
+            "home",
+            "desktop",
+            "bets",
+            "draft-kings"
+           ],
+           "href": "https://sportsbook.draftkings.com/gateway?s=__s__&wpcid=__wpcid__&wpsrc=413&wpcn=ESPN&wpscn=Widget&wpcrn=BetSlipDeepLink&wpscid=__wpscid__&wpcrid=xx&preurl=https%3A%2F%2Fsportsbook.draftkings.com%2Fevent%2F34718056%3Foutcomes%3D0ML86444552_1",
+           "text": "Home Bet",
+           "shortText": "Home Bet",
+           "isExternal": true,
+           "isPremium": false,
+           "tracking": {
+            "campaign": "betting-integrations",
+            "tags": {
+             "league": "college-football",
+             "sport": "football",
+             "gameId": 401867806,
+             "betSide": "home",
+             "betType": "straight"
+            }
+           }
+          }
+         },
+         "open": {
+          "odds": "+295"
+         }
+        },
+        "away": {
+         "close": {
+          "odds": "-553",
+          "link": {
+           "language": "en-US",
+           "rel": [
+            "away",
+            "desktop",
+            "bets",
+            "draft-kings"
+           ],
+           "href": "https://sportsbook.draftkings.com/gateway?s=__s__&wpcid=__wpcid__&wpsrc=413&wpcn=ESPN&wpscn=Widget&wpcrn=BetSlipDeepLink&wpscid=__wpscid__&wpcrid=xx&preurl=https%3A%2F%2Fsportsbook.draftkings.com%2Fevent%2F34718056%3Foutcomes%3D0ML86444552_3",
+           "text": "Away Bet",
+           "shortText": "Away Bet",
+           "isExternal": true,
+           "isPremium": false,
+           "tracking": {
+            "campaign": "betting-integrations",
+            "tags": {
+             "league": "college-football",
+             "sport": "football",
+             "gameId": 401867806,
+             "betSide": "away",
+             "betType": "straight"
+            }
+           }
+          }
+         },
+         "open": {
+          "odds": "-399"
+         }
+        }
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401866642",
+   "name": "New Hampshire Wildcats at Sacred Heart Pioneers",
+   "shortName": "UNH @ SHU",
+   "date": "2026-09-26T16:00Z",
+   "competitions": [
+    {
+     "id": "401866642",
+     "date": "2026-09-26T16:00Z",
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "id": "2529",
+        "location": "Sacred Heart",
+        "name": "Pioneers",
+        "abbreviation": "SHU",
+        "displayName": "Sacred Heart Pioneers",
+        "shortDisplayName": "Sacred Heart"
+       },
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "overall",
+         "type": "total",
+         "summary": "0-3"
+        }
+       ]
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "id": "160",
+        "location": "New Hampshire",
+        "name": "Wildcats",
+        "abbreviation": "UNH",
+        "displayName": "New Hampshire Wildcats",
+        "shortDisplayName": "New Hampshire"
+       },
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "overall",
+         "type": "total",
+         "summary": "1-3"
+        }
+       ]
+      }
+     ],
+     "status": {
+      "period": 0,
+      "displayClock": "0:00",
+      "type": {
+       "state": "pre",
+       "completed": false,
+       "detail": "Sat, September 26th at 12:00 PM EDT",
+       "shortDetail": "9/26 - 12:00 PM EDT"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "401868263",
+   "name": "Presbyterian Blue Hose at Marist Red Foxes",
+   "shortName": "PRES @ MRST",
+   "date": "2026-09-26T16:00Z",
+   "competitions": [
+    {
+     "id": "401868263",
+     "date": "2026-09-26T16:00Z",
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "id": "2368",
+        "location": "Marist",
+        "name": "Red Foxes",
+        "abbreviation": "MRST",
+        "displayName": "Marist Red Foxes",
+        "shortDisplayName": "Marist"
+       },
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "overall",
+         "type": "total",
+         "summary": "1-2"
+        }
+       ]
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "id": "2506",
+        "location": "Presbyterian",
+        "name": "Blue Hose",
+        "abbreviation": "PRES",
+        "displayName": "Presbyterian Blue Hose",
+        "shortDisplayName": "Presbyterian"
+       },
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "overall",
+         "type": "total",
+         "summary": "1-2"
+        }
+       ]
+      }
+     ],
+     "status": {
+      "period": 0,
+      "displayClock": "0:00",
+      "type": {
+       "state": "pre",
+       "completed": false,
+       "detail": "Sat, September 26th at 12:00 PM EDT",
+       "shortDetail": "9/26 - 12:00 PM EDT"
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

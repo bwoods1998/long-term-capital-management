@@ -59,6 +59,7 @@ export class Gate extends DurableObject {
   typesafeSettle(request) { return this.ctx.storage.transactionSync(() => this.gate.typesafeSettle(request)); }
   pullReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.pullReserve(request)); }
   pullRefund(request) { return this.ctx.storage.transactionSync(() => this.gate.pullRefund(request)); }
+  webFetchReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.webFetchReserve(request)); }
 
   watchdog() { return runWatchdog({ gate: this.gate, env: this.env, mailer: mailerFor(this.env) }); }
 }

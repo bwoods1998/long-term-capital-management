@@ -1,0 +1,8 @@
+{
+  "family": "open-lab-e206cc",
+  "name": "london_rotation_entry_hours",
+  "repair": {
+    "key": "order_refusal:alpaca-paper:outside the regular session no stock or option entry is sent: it could not trade before the open. Th"
+  },
+  "why": "Corrected child of london-l90070a: its mixed crypto/equity program repeatedly requested QQQ after the regular close on 2026-09-25. Preserve its symbols, horizon, ranking, sizing and exits; suppress stock buys outside 09:30-16:00 New York weekdays, or when ctx.now cannot establish that window. Do not replace a closed-session stock leader with a different asset. Crypto entries remain unchanged. The House retains holiday, early-close and risk enforcement. New rung-0 child requiring its own evidence."
+}

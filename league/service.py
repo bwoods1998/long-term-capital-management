@@ -132,6 +132,25 @@ def lab_box_key(config: dict[str, Any], *, canary: bool = False) -> str:
     return str(lab.get("box_key") or "lab")
 
 
+def options_shadow_broker(root: Path, config: dict[str, Any], data_client: Any, alpaca_data: Any) -> Any:
+    """The options shadow account (`league/options_shadow.py`, Sept 25, 2026, the options-desk run's
+    Track S) beside the Kalshi shadow: every level-3 structure on practice, filled on the live option
+    quotes the House's market-data client reads (read-only GETs through the gateway, on a canary too,
+    which gets its own state file under its own root). On by default; `config.json`
+    `options_structures.shadow.enabled: false` leaves it out. `options_structures.book` (read by the
+    House) says whether structure agents trade here or on `alpaca-paper`; the account is built either
+    way, so a structure it holds is still marked and closable after the switch."""
+    from .options_shadow import OptionsShadowBroker, alpaca_leg_quotes, alpaca_underlying_close
+
+    shadow = dict((config.get("options_structures") or {}).get("shadow") or {})
+    if shadow.get("enabled") is False:
+        return None
+    feed = str(config.get("alpaca_option_feed", "indicative"))
+    return OptionsShadowBroker(Path(root) / "options-shadow.json", alpaca_leg_quotes(data_client, feed=feed),
+                               underlying_close=alpaca_underlying_close(alpaca_data),
+                               starting_cash=str(shadow.get("starting_cash", "100000")), feed=feed)
+
+
 def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandbox: bool = False, research: bool = True,
           publish: bool = True, tape: str | None = None, game: dict[str, Any] | None = None, name_prefix: str = "league",
           merton: bool = True, canary: bool = False) -> House:
@@ -149,7 +168,7 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
     from .auditor import Auditor
     from .budget import Budget
     from .campaigns import CampaignBudget
-    from .commons import Commons
+    from .commons import Commons, gateway_fetch
     from .funded import FundedTransport
     from .frontier import Frontier
     from .paper import KalshiShadowBroker
@@ -192,6 +211,11 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         brokers["alpaca"] = gateway_broker("alpaca", gateway_url=gateway_url, token=token(), feed=config.get("alpaca_feed", "iex"),
                                           option_feed=config.get('alpaca_option_feed', 'indicative'))
         brokers["kalshi"] = gateway_broker("kalshi", gateway_url=gateway_url, token=token())
+    # Last: the House's passes walk the books in this order (the horizon rule's has no guard of its own for one
+    # book), and practice must never stand in front of real money.
+    shadow_options = options_shadow_broker(root, config, data_client, alpaca_data)
+    if shadow_options is not None:
+        brokers[shadow_options.venue] = shadow_options
 
     if local_sandbox:
         sandbox: Any = LocalSandbox(root / "boxes")
@@ -217,6 +241,8 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         deep_replay=bool(config.get("deep_replay", True)), holdout_gate=bool(config.get("holdout_gate", True)),
         # The Alpha Lab's own box (league/lab.py, league/labbox.py): its key, when config.json names one; none on a canary.
         lab_box=lab_box_key(config, canary=canary),
+        # K1 (Sept 25, 2026): flagged founder rows seated into a full league (league/kalshi_founders.py); never on a canary.
+        kalshi_founders=bool(config.get("kalshi_founders", True)) and not canary,
     )
     house = House(
         root, brokers=brokers, sandbox=sandbox, alpaca_data=alpaca_data, kalshi_data=kalshi_data, provider=provider,
@@ -225,8 +251,9 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
     )
     # The same clock as the House: `open_requests` drops a request nothing has closed after three
     # days, and a Commons reading a different clock would measure that window against the wrong now.
+    # `fetch`: research's `web_fetch` reads one public page through the gateway (I1, Sept 25, 2026).
     house.commons = Commons(house.ledger, news=News(cache_dir=root / "cache"),
-                            clock=house.clock)
+                            clock=house.clock, fetch=gateway_fetch(gateway_url, token))
     if house.researcher is not None:
         house.researcher.commons = house.commons
     frontier = Frontier(gateway_url, token, spend_guard=campaigns)
@@ -312,6 +339,10 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         if house.jev_floor.gate is not None and getattr(house.researcher, "routes", None) is not None:
             # Sept 24, 2026 (L2): an agent under the abstention lock researches on the cheapest profile.
             house.researcher.routes.lock = house.jev_floor.gate.lock_profile
+        if house.jev_floor.gate is not None and house.researcher is not None:
+            # Review of #311 (Sept 25, 2026, F4): the teacher's control arm does not read the lesson that
+            # names it during the window the lift measures (`ResearchGate.withheld`).
+            house.researcher.withheld = house.jev_floor.gate.withheld
     if not canary:
         from .frontier import FrontierMonth
 
@@ -331,7 +362,7 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
                             schedule_hours=pace.get("schedule_hours"), first_after_hours=pace.get("first_after_hours"), effort=pace.get("effort"),
                             pace=house.frontier_pace, backoff_max=pace.get("backoff_max"),
                             # Sept 24, 2026 (L2): these roles wait while the floor's 24-hour real P&L is not positive.
-                            paused_until_profit=pace.get("paused_until_profit"))
+                            paused_until_profit=pace.get("paused_until_profit"), lift=pace.get("lift"))
     if house.merton is not None:
         # Always built with Merton: switched off in league/engineer.json it still reports (free),
         # and buys nothing.

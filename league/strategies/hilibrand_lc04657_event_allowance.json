@@ -1,0 +1,8 @@
+{
+  "family": "crypto-strikes-lab-955dae",
+  "name": "hilibrand_lc04657_event_allowance",
+  "repair": {
+    "key": "order_refusal:kalshi:one event may hold at most #% of the stake: KXETHD-#SEP# would hold $# of this account's $# (holding"
+  },
+  "why": "Corrected child of hilibrand-lc04657. Three event-cap refusals expose the parent's separate 30% per-market sizing. Preserve hourly KXBTCD/KXETHD post-only NO favourites and settlement holding, but size against 25% of equity minus both-leg holdings at cost, unfilled working buys across all event strikes, and earlier intents in the same decision. Pending cancellations remain reserved. Starts on rung 0 and must qualify on its own evidence."
+}

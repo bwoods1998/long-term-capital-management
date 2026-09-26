@@ -21,6 +21,7 @@ from pathlib import Path
 
 from league import feeds, niches
 from league.commons import Commons
+from league import feeds as feeds_module
 from league.feeds import UNCHANGED, FeedRecorder, request_feed, requested
 from league.ledger import Ledger
 from league.replay import run_replay
@@ -362,13 +363,36 @@ class WhatIsRecorded(RecorderCase):
         self.assertEqual(meteo.asked, [])
         self.assertTrue(store.due())
 
+    def test_a_recorder_that_keeps_giving_way_to_live_boards_goes_ahead_once_it_has_waited(self):
+        # Sept 25, 2026: with the evening's boards live (each due every 60 s) and a pass longer than that, the `odds`
+        # recorder gave way on every pass and asked nothing from 18:48Z to past 21:05Z. It waits STARVE_SECONDS at most.
+        meteo = Meteo(self.clock)
+        store = self.recorder({"weather": ["KNYC", "KLAX"], "sports": ["nfl"]}, transports=meteo.transport())
+        out = {"polled": [], "stored": 0, "failed": []}
+        store._next[("weather", "KLAX")] = 0.0
+        store._next[("weather", "KNYC")] = 0.0
+        store._schedule("sports", "nfl", 0.0)  # a board is due, and stays due: the lane never catches up
+        self.assertFalse(store._poll_source("weather", "KLAX", out))
+        self.clock.advance(feeds_module.STARVE_SECONDS - 1)
+        self.assertFalse(store._poll_source("weather", "KLAX", out), "still inside its wait")
+        self.assertEqual(meteo.asked, [])
+        self.clock.advance(2)
+        self.assertTrue(store._poll_source("weather", "KLAX", out), "waited long enough: it goes ahead of the board")
+        self.assertTrue(meteo.asked)
+        asked = len(meteo.asked)
+        self.assertFalse(store._poll_source("weather", "KNYC", out), "one starved recorder a pass: the next one waits")
+        self.assertEqual(len(meteo.asked), asked)
+        store._forced_this_pass = False  # a new pass (`run` resets it)
+        self.clock.advance(feeds_module.STARVE_SECONDS + 1)
+        self.assertTrue(store._poll_source("weather", "KNYC", out))
+
     def test_requests_for_weather_data_are_answered_once_it_is_recorded(self):
         self.assertEqual({name: request_feed(name) for name in (
             "weather_ensemble_forecasts", "gfs_ecmwf_ensemble_members", "nws_point_forecast", "historical_weather_forecasts",
             "weather_forecast_history_backfill", "live_sports_scores", "weather_station_observations_history")},
             {"weather_ensemble_forecasts": "weather", "gfs_ecmwf_ensemble_members": "weather", "nws_point_forecast": "nws",
              "historical_weather_forecasts": "forecast", "weather_forecast_history_backfill": "forecast",
-             "live_sports_scores": "sports", "weather_station_observations_history": None})
+             "live_sports_scores": "sports", "weather_station_observations_history": "metar"})  # the METARs, Sept 25, 2026
         commons = Commons(self.ledger, clock=self.clock)
         asked = commons.request_tool("mullins-2", "weather_ensemble_forecasts", "the fair value of each bracket I bid on")["queued"]
         store = self.recorder({"weather": ["KNYC"]}, transports=Meteo(self.clock).transport())
@@ -720,6 +744,107 @@ class Odds(RecorderCase):
                          {"nfl_sportsbook_odds": "odds", "live_win_probability_nfl": "odds",
                           "resolved_sports_moneyline_price_outcome_": None, "live_sports_scores": "sports",
                           "sports_moneyline_inseason_replay_tape": None})  # a Kalshi tape, asked by name on Sept 23
+
+
+class OddsCadence(RecorderCase):
+    """Sept 25, 2026 (K1): one pass a league every 30 minutes, at most 16 games, left most of a
+    college-football Saturday (60-110 games within 36 hours) without lines. Each game is now refreshed
+    on its own cadence -- every 30 minutes inside 6 hours of its start, every 2 hours before -- by a
+    pass every 5 minutes of at most 20 games, while the league's row lists every coming game with its
+    last lines and when they were fetched."""
+
+    START = epoch("2026-09-24T03:30:00Z")
+
+    def slate(self, near=3, far=22):
+        """An NFL board of `near` games starting within 6 hours and `far` starting 6 to 36 hours out."""
+        games = [(f"5000{i:02d}", self.START + 3600 * (1 + i), "pre") for i in range(near)]
+        games += [(f"6000{i:02d}", self.START + 3600 * (7 + i), "pre") for i in range(far)]
+        return board(*[(gid, datetime.fromtimestamp(at, timezone.utc).strftime("%Y-%m-%dT%H:%MZ"), state) for gid, at, state in games])
+
+    def transport(self, slate, failing=()):
+        from ltcm.data.sports import CORE_HOST
+        from ltcm.tests.test_data_sports import NFL, core
+
+        lines, predictor = core("espn_core_odds_401872948.json"), core("espn_core_predictor_401872948.json")
+
+        def answer(method, url, body):
+            game = url.split("/events/")[1].split("/")[0]
+            if game in failing:
+                raise TransportError("the host is down")
+            return predictor if url.endswith("/predictor") else lines
+
+        return FakeTransport({NFL: slate, CORE_HOST + "/v2/sports/football/leagues/nfl/events/*": answer})
+
+    def fetched(self, fake):
+        return [c["url"].split("/events/")[1].split("/")[0] for c in fake.calls if c["url"].endswith("/odds")]
+
+    def row(self, store):
+        return store.latest({"odds": ["nfl"]}, self.clock())["odds"]["nfl"]
+
+    def test_a_pass_is_bounded_and_every_game_is_listed_with_when_its_lines_were_fetched(self):
+        fake = self.transport(self.slate())
+        store = self.recorder({"sports": ["nfl"], "odds": ["nfl"]}, transports=fake)
+        store.run()
+        self.assertEqual(len(self.fetched(fake)), feeds.SportsOdds.MAX_FETCHES)  # 20 of 25, soonest first
+        self.assertEqual(self.fetched(fake)[:4], ["500000", "500001", "500002", "600000"])
+        row = self.row(store)
+        self.assertEqual(len(row["events"]), 25)
+        waiting = [e for e in row["events"] if e["fetched"] is None]
+        self.assertEqual(([e["id"] for e in waiting], {len(e["lines"]) for e in waiting}),
+                         (["600017", "600018", "600019", "600020", "600021"], {0}))
+        for event in row["events"]:  # never a line fetched after the row's own stamp
+            self.assertTrue(event["fetched"] is None or epoch(event["fetched"]) <= epoch(row["t"]))
+        self.clock.advance(300)
+        store.run()
+        self.assertEqual(self.fetched(fake)[20:], ["600017", "600018", "600019", "600020", "600021"])  # the rest, next pass
+        self.assertTrue(all(e["fetched"] for e in self.row(store)["events"]))
+        stored = len(self.stamps(store, "odds", "nfl"))
+        self.clock.advance(300)
+        store.run()  # nothing due: nothing fetched, and the unchanged row is not stored again
+        self.assertEqual((len(self.fetched(fake)), len(self.stamps(store, "odds", "nfl"))), (25, stored))
+        self.clock.advance(1800 - 600 + 1)  # 30 minutes after the first pass: the games inside 6 hours are due
+        store.run()
+        self.assertEqual(self.fetched(fake)[25:], ["500000", "500001", "500002"])
+        self.clock.advance(7200 - 1800)  # 2 hours: the games further out are due again too
+        store.run()
+        again = self.fetched(fake)[28:]
+        # Two games have started and are listed no more; the two now inside 6 hours fell due longest ago
+        # (30 minutes after the first pass), then the third near game, then the far games fetched first.
+        self.assertEqual(again, ["600000", "600001", "500002"] + [f"6000{i:02d}" for i in range(2, 17)])
+        self.assertNotIn("500000", [e["id"] for e in self.row(store)["events"]])
+
+    def test_a_game_whose_refresh_fails_keeps_its_last_lines_and_a_pass_that_all_fails_stores_nothing(self):
+        failing: set = set()
+        fake = self.transport(self.slate(near=2, far=0), failing=failing)
+        store = self.recorder({"sports": ["nfl"], "odds": ["nfl"]}, transports=fake)
+        store.run()
+        first = {e["id"]: e["fetched"] for e in self.row(store)["events"]}
+        failing.add("500000")
+        self.clock.advance(1801)
+        out = store.run()
+        self.assertEqual(out["failed"], [])
+        now = {e["id"]: e["fetched"] for e in self.row(store)["events"]}
+        self.assertEqual(now["500000"], first["500000"])  # its last lines, with their own fetch time
+        self.assertGreater(epoch(now["500001"]), epoch(first["500001"]))
+        failing.add("500001")
+        stored = len(self.stamps(store, "odds", "nfl"))
+        self.clock.advance(1801)
+        out = store.run()
+        self.assertEqual([(f, k) for f, k, _ in out["failed"]], [("odds", "nfl")])
+        self.assertEqual(len(self.stamps(store, "odds", "nfl")), stored)
+
+    def test_a_restarted_house_goes_on_from_the_leagues_last_row(self):
+        fake = self.transport(self.slate(near=2, far=0))
+        store = self.recorder({"sports": ["nfl"], "odds": ["nfl"]}, transports=fake)
+        store.run()
+        store.close()
+        self.clock.advance(600)
+        again = FeedRecorder(path=Path(self.dir.name) / "feeds.sqlite", transports=fake, clock=self.clock, ledger=None,
+                             keys={"sports": ["nfl"], "odds": ["nfl"]}, sleep=no_sleep)
+        self.addCleanup(again.close)
+        again.run()
+        self.assertEqual(len(self.fetched(fake)), 2)  # nothing due yet: the lines held are the last row's
+        self.assertTrue(all(e["fetched"] for e in self.row(again)["events"]))
 
 
 # ------------------------------------------------------------------------------------ attention

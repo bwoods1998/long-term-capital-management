@@ -64,6 +64,7 @@ class TooLong(StepCase):
 
     def test_a_row_whose_tape_failed_this_hour_does_not_decide_the_batchs_turn(self):
         """While a submission that cannot be served sits at the front of the queue, the largest-group turn still runs."""
+        self.house.game["lab"]["reserved_share"] = 0.5  # E1's turns: queue, reserved, largest (F1's third: test_lab_forward_first)
         self.insert("0df9a4fc254707132cbba407", {**TOO_LONG, "bars": {"limit": 30, "timeframe": "1Day"}}, niche=MEGACAPS,
                     origin="agent", priority=0)
         seed = self.queue(KNOB.replace('"symbols": ["BTC/USD"]', '"symbols": ["ETH/USD"]'), lineage="founder:seed")  # a tape of its own

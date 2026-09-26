@@ -92,7 +92,7 @@ class Registry:
     def refresh(self) -> None:
         with self._lock:
             while True:
-                batch = self.ledger.read(kinds=("agent.born", "agent.strategy", "agent.died"), after=self._cursor, limit=5000)
+                batch = self.ledger.read(kinds=("agent.born", "agent.strategy", "agent.family", "agent.died"), after=self._cursor, limit=5000)
                 if not batch:
                     return
                 for entry in batch:
@@ -120,6 +120,10 @@ class Registry:
                 self.paused[agent_id] = {"since": at, "note": p.get("note"), "session": p.get("session")}
             elif p.get("control") == "resume_entries":
                 self.paused.pop(agent_id, None)
+        elif kind == "agent.family" and agent_id in self.agents and p.get("family"):
+            # C8 (Sept 25, 2026; `league/families.py`): the family of the agent's program from `since_seq` on -- a birth
+            # or a rewrite filed under its mechanism's family. The birth row keeps the label it was born with.
+            self.agents[agent_id].family = str(p["family"])
         elif kind == "agent.died" and agent_id in self.agents:
             agent = self.agents[agent_id]
             agent.alive = False
