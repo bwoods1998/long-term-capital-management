@@ -170,6 +170,60 @@ clock never restarts.
   merging #358; W2b-docs (the five documents and `archive/`, docs only) launched in W3's slot
   (`~/Work/ltcm-w2b-docs`, `prune/docs`).
 - 07:49:25Z **M2 holds**: #359 merged (CI green on its own run: 3.11 10m11s, 3.14 10m36s); main 6c715d83. The Gym branch merged main (c6e7c9bd) so CI runs its tests with numpy.
+- ~08:00Z The Gym's adversarial review: 6 major, 6 minor, 0 critical (5 majors demonstrated with probes): (1) t and
+  trade count per trade, not per day (one 80-day series split 5 ways moved t 0.93 -> 2.09 and flipped the
+  line); (2) 1.5x stress inert on mid-limit fills, no adverse selection on passive fills; (3) a program's
+  `except Exception` swallows its timeout (2.6 s against 1 s, counted 0); (4) zero-bid wings (bid_size 0:
+  4.7% SPY, 6.4% XSP contract-minutes) block closes, stops silently ignored; (5) `arr.flags` writable,
+  views shared between batch-mates (one program changed another's trades); (6) no settlement on days with
+  no file (zombie positions). Minors: remainder fills at limit, repr addresses, run_id identity, validation
+  boundary returns trades, index settlement at 16:00 minute, forced marks at mid. Clean: lookahead in the
+  data path, sandbox escapes (no route to os/sys/builtins), venue arithmetic. W3 resumed to fix all with
+  tests before #358 merges; W4 told to use daily t and flag price-level constants at the gate.
+- 08:04Z The archive is on the laptop: `~/Work/archive/house-state/state-pre-options-20260926.tar.gz`, sha256
+  e9e5c044... MATCHES the box's. 08:05:38Z the uncompressed old state deleted on the box (tarball + sha kept
+  in `/workspace/archive/`); box disk 9.4 GB used, 21 GB free. numpy 2.4.4 installed in the House box venv.
+  Checkpoint retried in the background.
+- 08:05:56Z The Alpha Lab box `ltcm-lab` sb_742fe765 terminated. Boxes not terminated: ltcm-floor, ltcm-data, one
+  W4 Gym test box, and the two portfolio-app boxes (not LTCM's).
+- 08:09Z **First real inner-loop cycle** (W4, from the laptop): condor-vrp cycle 2 on DeepSeek-V4-Flash (2 model
+  calls, 3 tool calls, $0.0012) revised its program and ran `gym_run` on a sealed Gym box (sb_2f98b91a, a fork
+  of W1's rehearsal image sbcp_2a16a7aa): 5.4 s batch after a 17 s fork + setup; 144 s wall for the cycle
+  (target < 3 min). Box terminated after the test.
+- 08:08Z Docs PR #360 merged (merge commit dc3e0192): `docs/` 218 files -> 3 (design.md, operations.md,
+  goals/LTCM_OPTIONS_SWARM.md); README 104,630 -> 10,068 bytes (148 lines); `archive/` 221 files with
+  `archive/README.md` (a one-page history); CHANGELOG.md started; gateway and deploy READMEs short.
+- 08:08:36Z House checkpoint failed a THIRD time even with 21 GB free. The House box runs guest schema 253 (the new
+  data box 263): upgrading it to the current Sail runtime while the loop is stopped (disk persists).
+- 08:11Z W4's laptop-side trial (real models, real Gym boxes) called GPT-6 Astra once through the gateway with the
+  laptop's gateway token: $0.177 of the OpenAI month (inside the $607 cap). W4 raised the swarm's
+  `openai_reserve_usd` to $25 so OpenAI roles fall back to Sail until the month is raised.
+- 08:38Z The Gym (#358) merged after its review fixes (gym/engine bce0d315: every finding 1-10 and 12 fixed, each
+  with a test that failed before; 78 Gym tests; CI 3.11 10m11s, 3.14 11m21s, 4,087 league tests, the Gym's now
+  running on CI); main b68b3800. Validation runs return the validation view only, with a 1.5x-stress twin.
+- **INCIDENT, the House box.** 08:09Z the main session asked Sail to upgrade the old House box (guest 253) to fix its
+  failing checkpoints; the restore onto the new runtime failed (503 "wait for guest exec agent: context deadline
+  exceeded") and the box went `interrupted_restorable`. Resume failed at 08:15, 08:20, 08:25, 08:31, 08:38Z.
+  Nothing was at risk: the loop was stopped, the grant revoked, the account all cash, the archive on the laptop.
+  Recovery: 08:38:41Z gateway kill switch ENGAGED (precaution); 08:39:04Z `floor_box.py fork --from
+  sbcp_9dc7fd6b (pre-rebuild-20260922) --name ltcm-house --i-know` -> sb_1d99c4a7-bee2-4226-ba7b-c694ccd857d3.
+  **The fork's latch missed the running loop**: the Sept 22 `league run` process (pid 4409) was alive in the
+  restored memory (the latch kills only the pids in the pid files); found at ~08:39:30Z, killed by 08:39:48Z.
+  It did nothing: no site checkpoint or event (404/empty), gateway orders today still the 2 Wave-0 sells,
+  OpenAI calls unchanged, its log's last tick dated Sept 22. Then: Sept 22 state deleted, empty state root with
+  STOP, numpy 2.4.4 installed, `.data/ltcm/box.json` repointed (old box recorded under `retired_boxes`), checkpoint
+  `house-fresh-20260926` sbcp_a3a46ed8 (30 d) WORKS on the new box (guest 253 on the old runtime); PR #361 points
+  the gateway watchdog's SAILBOX_ID at it (215 gateway tests pass); 08:42:32Z kill switch RELEASED.
+  Defect for Wave 2b: `floor_box.py fork` must kill every league process (pgrep), not only the pid files'.
+  Risk to record: the House box is on Sail's old runtime (guest 253); a forced upgrade by Sail could fail the
+  same way. The swarm's Gym boxes are on the current runtime (263).
+- ~08:45Z W5 opened PR #362 (`live/options` 52f41e61; 47 files, +8,346 -390): `league/live/` (shadow = the Gym's
+  engine one minute behind, a decider child with no secrets, the real book and order path, the money table,
+  stops, reconciliation, assignments, the paper proof), constitution `options_money` + a new digest, gateway caps
+  by max loss / flex / watchdog / live_stop (247 node tests), `House.site_inputs` merge, the Monday pre-open
+  checklist in docs/operations.md. 08:47Z the three-lens adversarial review launched as a workflow (money rules
+  and sizing; order path and venue safety; gateway and process boundary; a skeptic verifies each major or
+  critical finding) against a read-only worktree at 52f41e61 (`~/Work/ltcm-review-362`).
 
 ## Scoreboard
 
