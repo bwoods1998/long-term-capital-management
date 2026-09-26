@@ -26,7 +26,7 @@ clock never restarts.
 | Milestone | Target | Done at | Evidence |
 |---|---|---|---|
 | M0 Safe and archived | T0 + 1 h | | |
-| M1 Data flowing | T0 + 2 h | | |
+| M1 Data flowing | T0 + 2 h | 06:58Z (T0 + 35 min) | data box downloading since 06:49:43Z; universe chosen (W1) |
 | M2 The House is options-only | Sat morning | | |
 | M3 The swarm is training | Sat 16:00Z | | |
 | M4 Gated | Sun 22:00Z | | |
@@ -91,6 +91,34 @@ clock never restarts.
   gym|candidate|probe|sized|retired), structures (<=100)}; tape kinds agent.note, agent.trade,
   swarm.news, account.mark; every sentence quote-free. Publisher `build_checkpoint` + a
   `house.site_inputs()` hook for W4/W5.
+- 06:5xZ W2a step 3 committed (`overhaul/options` 7fa58114; steps 1-2 d7c5a7c9 updater off, fac879ae tools
+  off the legacy package): grant `options-swarm-20260928` in `league/live_trading.py`, its own store
+  `<state>/live-grant.sqlite`, empty-root safe, alpaca only, capital = min(equity, config
+  `live_trading.ceiling_usd` 5500), pinned to `money_digest`; every House/allocator/capital/shards/merton
+  call site asks `House.grant`; no grant -> no real entry; the campaign grant no longer read for money.
+- 06:50Z House box facts: Python 3.11.2, no numpy (PyPI in its egress: install numpy at deploy);
+  XSP contracts tradable (european); SPXW lists under underlying SPX root SPXW; XSP snapshots
+  latestQuote only.
+- 06:54Z Old-state tarball done: `/workspace/archive/state-pre-options-20260926.tar.gz`, 8,256,763,269 bytes,
+  sha256 e9e5c04482a3321707902dd376a9902fe260954cd76cbe204eec89be6a16256f; `gzip -t` OK (06:57Z). Box disk
+  ~5 GB free until the uncompressed copy goes.
+- 06:58Z **M1 holds** (T0 + 35 min). Data box `ltcm-data` sb_d69a1ebe-94ea-4f37-9bfe-4d294e946973 (l, 8 vCPU,
+  32 GiB, 256 GiB) downloading since 06:49:43Z; run restarted 06:57:56Z with all six stages queued (32,840
+  tasks), SPY+XSP sample days first. Egress: the two ThetaData hosts only; gRPC over TLS passes the SNI
+  allowlist. Key only in `/data/secrets/thetadata.env` (0600). Universe (2024 EOD): SPY QQQ IWM XSP SPXW +
+  TSLA NVDA TLT AMD SLV AMZN META AAPL PLTR TQQQ SMCI MARA GLD TSM MSFT MU BABA SMH GOOGL SOXL (numbers in
+  `.data/gym/universe.json`, gitignored). **ThetaData allows ONE session per account**: any second login
+  kicks the box's session; nobody else authenticates while the backfill runs; the nightly job stops the
+  backfill, pulls the day, restarts it.
+- 06:59Z W1: the Gym sample on the laptop (`.data/gym-sample/store/`, SPY+XSP, 10 Train days incl. FOMC/CPI/
+  monthly expiry/vol spike/half day; 60 files, 37 MB, sha256-verified); relayed to W3. Notes: the 09:30 row is
+  often absent for ETF roots (first quote at 571); SPXW strike range 40 per side ($5 strikes).
+- 07:00Z House checkpoint retry FAILED again (503 "prepare guest for clean base snapshot: context deadline
+  exceeded"). The archive is the verified tarball; streaming it to `~/Work/archive/house-state/`.
+- 07:02Z W3: the Gym's program API fixed (`gym/engine` e5fe74c3; `league/gym/PROGRAM.md`): NEEDS/PARAMS/decide(ctx)
+  -> intents; live-path pieces importable on Python 3.11 + numpy only (`runtime.py`, `ctx.py` incl.
+  `parity_spot`, `legs.py`, `venue.py`, `fills.py`, `events.py`); holdout/forward days only through a gate
+  capability that needs the store's `GATE` marker. Real sample: 3 programs x 10 days SPY+XSP in 1.3 s.
 
 ## Scoreboard
 
