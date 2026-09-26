@@ -212,6 +212,15 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
     load_env()
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
+    # The options swarm (Sept 26, 2026, Wave 4; league/swarm/) owns the population, the research and the Gym when it is
+    # enabled: the House then seats no agent of its own (`Settings.births`), builds no old researcher, provider or
+    # Merton, and runs the swarm's step (`league/swarm/hook.py`: it keeps `python -m league.swarm run` alive beside the
+    # loop, mirrors the swarm's events into the ledger and reads its bands). Never in a canary.
+    from .swarm import settings as swarm_settings
+
+    swarm_on = bool(swarm_settings.load(root, config=config).get("enabled")) and not canary  # config < <root>/swarm.json
+    if swarm_on:
+        research = merton = False
     gateway_url = config["gateway_url"]
     token = lambda: secret("GATEWAY_TOKEN")  # noqa: E731
     real_money = bool(config.get("real_money"))
@@ -253,7 +262,7 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         # Lab, Kalshi's founders and survey, and the credit economy's wake gate, culling and payouts. The options
         # swarm's Gym (league/gym/) and its evidence lines replace them; nothing here turns one back on.
         deep_replay=False, holdout_gate=False, history_coverage=False, lab_box="", kalshi_founders=False,
-        niche_survey_hours=0.0, credit_economy=False,
+        niche_survey_hours=0.0, credit_economy=False, births=not swarm_on,
     )
     house = House(
         root, brokers=brokers, sandbox=sandbox, alpaca_data=alpaca_data, kalshi_data=None, provider=provider,
@@ -317,6 +326,10 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         from .updater import Updater
 
         house.updater = Updater(REPO.parent.parent)
+    if swarm_on:
+        from .swarm.hook import attach
+
+        attach(house, root, config)
     if publish:
         # The balance chart is the REAL account whatever the agents are doing, so the publisher
         # reads it (balances only) even while every book is practice.
