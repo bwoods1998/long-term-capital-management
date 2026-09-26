@@ -247,7 +247,7 @@ def live(ask):
             quantity = Decimal(str(value))
             if not quantity.is_finite() or quantity != 0:
                 raise RuntimeError("live share inventory remains held or unreadable")
-        proof = kv.get("paper_proof") or {}
+        proof = kv.get("paper_proof", {})
         if not isinstance(proof, dict):
             raise RuntimeError("paper inventory is unreadable")
         if proof and (proof.get("status") not in ('passed', 'waiting') or any(proof.get(k) for k in ('open_id', 'open_cid', 'inventory', 'position_qty'))):

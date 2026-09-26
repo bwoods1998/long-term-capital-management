@@ -1527,6 +1527,11 @@ class StructureGuardSnippetTests(unittest.TestCase):
             ("shares", {"SPY": "-100"}),
             ("shares", {"SPY": "NaN"}),
             ("shares", []),
+            ("paper_proof", []),
+            ("paper_proof", None),
+            ("paper_proof", False),
+            ("paper_proof", 0),
+            ("paper_proof", ""),
         )
         for key, value in cases:
             with self.subTest(key=key, value=value):
