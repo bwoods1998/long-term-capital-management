@@ -473,8 +473,9 @@ class Account:
                 sizes = model.sizes(order.root, q, shape, [leg.ratio for leg in legs])
                 room = min((size - self.liquidity_used.get(leg.key, 0)) // leg.ratio for leg, size in zip(legs, sizes))
                 price = order.limit
-                if stress != 1.0:
-                    # Stress charges a passive fill too: (stress - 1) x the structure's half-spread.
+                if stress > 1.0:
+                    # Stress charges a passive fill too: (stress - 1) x the structure's half-spread. A narrowed
+                    # spread (stress below 1, the robustness run at the mid) never fills a limit better than itself.
                     extra = (stress - 1.0) * abs(plain - mid)
                     price = price + extra if opening else price - extra
             qty = min(work.remaining, cap) if room is None else min(work.remaining, cap, room)

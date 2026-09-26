@@ -1,4 +1,5 @@
-"""The swarm's evidence lines (league/swarm/evidence.py): exactly the plan's, each check able to fail on its own."""
+"""The swarm's evidence lines (league/swarm/evidence.py): the plan's as the owner's decision D2 amended them (Sept 26),
+each check able to fail on its own; and the robust Train objective."""
 
 from __future__ import annotations
 
@@ -19,9 +20,14 @@ def good(**kw):
 
 
 class ValidationLine(unittest.TestCase):
-    def line(self, r, stressed=None, trials=5, sharpes=(0.0, 0.05, -0.05)):
+    def line(self, r, stressed=None, versions=1, sharpes=()):
         stressed = stressed if stressed is not None else {"summary": {"pnl": 100.0}}
-        return E.validation_line(r, stressed, lineage_trials=trials, trial_sharpes=list(sharpes))
+        return E.validation_line(r, stressed, validated_versions=versions, version_sharpes=list(sharpes), lineage_trials=700)
+
+    def test_d2_frequency_is_fifty_trades_on_twenty_five_days(self):
+        self.assertEqual((E.MIN_TRADES, E.MIN_DAYS), (50, 25))
+        self.assertTrue(self.line(good(trades=50, days=25, t=3.0))["checks"]["trades"])
+        self.assertTrue(self.line(good(trades=50, days=25, t=3.0))["checks"]["days"])
 
     def test_a_strong_result_meets_every_check(self):
         out = self.line(good())
@@ -30,8 +36,8 @@ class ValidationLine(unittest.TestCase):
 
     def test_each_check_fails_alone(self):
         cases = {
-            "trades": dict(trades=99),
-            "days": dict(days=59),
+            "trades": dict(trades=49),
+            "days": dict(days=24),
             "mean_positive": dict(mean=-0.01),
             "t": dict(t=1.99),
             "quarters": dict(quarters="2/4"),
@@ -48,13 +54,23 @@ class ValidationLine(unittest.TestCase):
         self.assertEqual([k for k, v in out["checks"].items() if not v], ["stress"])
         self.assertFalse(self.line(good(), stressed={})["checks"]["stress"], "no stress run is no pass")
 
-    def test_the_deflated_sharpe_charges_for_the_lineages_trials(self):
-        rng = random.Random(9)
-        daily = [rng.gauss(1.0, 10.0) for _ in range(250)]  # a thin edge
-        few = self.line(good(daily=daily), trials=2, sharpes=[0.0, 0.01])
-        many = self.line(good(daily=daily), trials=20000, sharpes=[rng.gauss(0, 0.08) for _ in range(500)])
+    def test_the_deflated_sharpe_charges_for_the_lineages_validated_versions_not_its_trials(self):
+        few = self.line(good(t=2.6), versions=1)
+        many = self.line(good(t=2.6), versions=200, sharpes=[0.01 * (i % 21 - 10) for i in range(200)])
+        self.assertTrue(few["checks"]["dsr"], few["numbers"])
         self.assertGreater(few["numbers"]["dsr"], many["numbers"]["dsr"])
         self.assertFalse(many["checks"]["dsr"])
+        self.assertEqual((few["numbers"]["validated_versions"], few["numbers"]["lineage_trials"]), (1, 700),
+                         "the lineage's trials are recorded, not divided by")
+
+    def test_the_deflated_sharpe_is_on_traded_days_so_a_sparse_mechanism_is_not_capped(self):
+        # 30 traded days of 250 with a daily t of 3: the all-days Sharpe of such a series is capped near sqrt(f / (1 - f)).
+        sparse = good(trades=60, days=30, t=3.0, sharpe_daily=0.03)
+        out = self.line(sparse)
+        self.assertAlmostEqual(out["numbers"]["sharpe_traded"], 3.0 / 30 ** 0.5)
+        self.assertTrue(out["checks"]["dsr"], out["numbers"])
+        self.assertAlmostEqual(E.traded_sharpe({"t_daily": 2.0, "days_traded": 16}), 0.5)
+        self.assertIsNone(E.traded_sharpe({"t_daily": 2.0, "days_traded": 0}))
 
     def test_the_t_is_the_daily_one_never_the_per_trade_one(self):
         r = good(t=1.2)
@@ -63,15 +79,19 @@ class ValidationLine(unittest.TestCase):
         del r["summary"]["t_daily"]
         self.assertFalse(self.line(r)["checks"]["t"], "no daily t, no pass")
 
-    def test_a_summary_only_view_is_judged_with_conservative_moments(self):
-        r = good()
+    def test_a_view_without_traded_day_moments_is_judged_with_conservative_ones(self):
+        r = good(t=2.4)
         view = {k: r[k] for k in ("status", "summary")}  # the Gym's validation view: no daily series, no trades
-        view["summary"] = {**r["summary"], "sharpe_daily": 0.35, "days": 250}
         out = self.line(view)
         self.assertTrue(out["checks"]["dsr"], out)
-        normal = self.line({**view, "summary": {**view["summary"], "skew_daily": 0.0, "kurt_daily": 3.0}})
+        normal = self.line({**view, "summary": {**view["summary"], "skew_traded": 0.0, "kurt_traded": 3.0}})
         self.assertGreaterEqual(normal["numbers"]["dsr"], out["numbers"]["dsr"], "missing moments never flatter")
-        self.assertFalse(self.line({**view, "summary": {**view["summary"], "sharpe_daily": 0.02}})["checks"]["dsr"])
+        self.assertFalse(self.line({**view, "summary": {**view["summary"], "t_daily": 0.5}})["checks"]["dsr"])
+
+    def test_checks_passed_is_a_count_only(self):
+        out = self.line(good(t=1.5, quarters="2/4"))
+        self.assertEqual(E.checks_passed(out), (5, 8))  # t, the deflated Sharpe and the quarters fail
+        self.assertEqual(E.checks_passed(None), (0, 0))
 
     def test_a_disqualified_run_never_passes(self):
         self.assertFalse(self.line(good(status="disqualified"))["passed"])
@@ -198,11 +218,53 @@ class Bandit(unittest.TestCase):
         self.assertEqual(E.thompson([]), {})
 
 
-class Score(unittest.TestCase):
-    def test_score_is_the_t_above_a_minimum_of_trades(self):
-        self.assertEqual(E.score(summary(trades=40, t=1.5)), 1.5)
-        self.assertIsNone(E.score(summary(trades=10, t=9.0)))
-        self.assertIsNone(E.score(None))
+def yearly(t=(2.0, 3.0, 2.5), trades=(60, 60, 60), days=(30, 30, 30), quarters="12/12", status="ok"):
+    """A Train result with the Gym's per-year block (2022-2024)."""
+    by_year = {str(2022 + i): {"trades": trades[i], "days": 252, "days_traded": days[i], "pnl": 10.0 * t[i] if t[i] is not None else 0.0,
+                                "t_daily": t[i], "mean_return_on_max_loss_daily": 0.01, "quarters_positive": "4/4"} for i in range(3)}
+    return {"status": status, "summary": {**summary(trades=sum(trades), t=4.0, quarters=quarters)}, "by_year": by_year}
+
+
+class TrainScore(unittest.TestCase):
+    def test_the_score_is_the_worst_year_times_the_share_of_quarters_positive(self):
+        out = E.train_score(yearly(quarters="9/12"))
+        self.assertTrue(out["eligible"], out)
+        self.assertEqual((out["score"], out["worst_year"]), (2.0 * 0.75, "2022"))
+        self.assertEqual(set(out["years"]), {"2022", "2023", "2024"})
+
+    def test_a_losing_worst_year_is_never_flattered_by_fewer_positive_quarters(self):
+        few = E.train_score(yearly(t=(-2.0, 3.0, 3.0), quarters="3/12"))["score"]
+        more = E.train_score(yearly(t=(-2.0, 3.0, 3.0), quarters="9/12"))["score"]
+        self.assertLess(few, more)
+        self.assertLess(more, 0)
+
+    def test_every_train_year_needs_forty_trades_on_twenty_days(self):
+        self.assertEqual((E.TRAIN_YEAR_MIN_TRADES, E.TRAIN_YEAR_MIN_DAYS), (40, 20))
+        for kw in (dict(trades=(60, 39, 60)), dict(days=(30, 30, 19))):
+            out = E.train_score(yearly(**kw))
+            self.assertFalse(out["eligible"], kw)
+            self.assertIsNotNone(out["score"], "the score is still shown")
+            self.assertIn("every Train year", out["why"])
+        self.assertTrue(E.train_score(yearly(trades=(40, 40, 40), days=(20, 20, 20)))["eligible"])
+
+    def test_a_year_without_a_t_or_a_failed_run_has_no_score(self):
+        self.assertIsNone(E.train_score(yearly(t=(2.0, None, 2.0)))["score"])
+        self.assertFalse(E.train_score(yearly(status="disqualified"))["eligible"])
+        self.assertFalse(E.train_score({"status": "ok", "summary": summary()})["eligible"], "no per-year rows, no eligibility")
+
+    def test_a_sparse_full_window_t_no_longer_wins(self):
+        # The old score: one strong year's filter showed a high full-window t on few trades.
+        sparse = E.train_score(yearly(t=(9.0, 0.2, 0.1), trades=(80, 12, 10), days=(40, 8, 6)))
+        steady = E.train_score(yearly(t=(1.5, 1.6, 1.4)))
+        self.assertFalse(sparse["eligible"])
+        self.assertTrue(steady["eligible"])
+
+    def test_years_come_from_the_trades_when_the_gym_sent_no_block(self):
+        daily = [[f"{y}-0{m}-1{d}", 1.0, 0.0] for y in (2023, 2024) for m in (1, 4, 7) for d in range(3)]
+        trades = [{"day": row[0], "pnl": 2.0 if i % 3 else -1.0, "max_loss": 50.0} for i, row in enumerate(daily)]
+        years = E.years_of({"daily": daily, "trades": trades})
+        self.assertEqual(set(years), {"2023", "2024"})
+        self.assertEqual((years["2023"]["trades"], years["2023"]["days_traded"]), (9, 9))
 
 
 if __name__ == "__main__":

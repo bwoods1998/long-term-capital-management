@@ -216,6 +216,9 @@ class HonestFills(unittest.TestCase):
         # At the touch it fills, and under stress pays the extra half-spread: 1.00 + 0.5 x 0.05.
         r = self.run_one(store, prog(name="touch", code=behind, limit="touch", tif=60), fill_model=model, stress=1.5)
         self.assertEqual(r["trades"][0]["entry"], 1.025)
+        # The robustness run at the mid (stress 0) fills that passive limit at its limit, never better than the bid.
+        r = self.run_one(store, prog(name="touch", code=behind, limit="touch", tif=60), fill_model=model, stress=0.0)
+        self.assertEqual(r["trades"][0]["entry"], 1.00)
 
     def test_draws_are_keyed_and_uniform(self):
         u = F.draw([11, 22], 19422, 601, "buy")

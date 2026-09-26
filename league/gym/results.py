@@ -15,12 +15,18 @@ One result per program per run (one TRIAL: one run of one program version over o
   diagnosis only); win_rate, profit_factor, sharpe (daily P&L, annualized by sqrt 252), sharpe_daily,
   skew_daily and kurt_daily (the deflated Sharpe's inputs), max_drawdown (dollars and a fraction of
   capital), turnover (maximum loss opened a year over capital), fees, quarters_positive,
-  median_max_loss_per_structure (one structure's maximum loss, USD: for sizing);
+  median_max_loss_per_structure (one structure's maximum loss, USD: for sizing), skew_traded and
+  kurt_traded (the moments of the daily returns on maximum loss the t is about: the deflated Sharpe on
+  traded days, the owner's decision D2 of Sept 26);
 - `fills`: orders, opens, closes, filled, partial, cancelled, expired, rejected with their reasons,
   liquidated, settled, exercised, fill_rate, the share of fills at the natural, the mean slippage
   from the mid a share and in half-spreads;
 - `breakdown`: n, pnl, win_rate and pnl_per_max_loss by weekday, time_of_day, dte, rv and iv terciles
   (the day's realized and implied vol, cut within the run), quarter, type, root and exit_reason;
+- `by_year`: per calendar year of the days the program's OWN roots had data (a year without a trade
+  included; a year only its batch company had data for is absent): trades, days, days_traded, pnl, the
+  daily mean and `t_daily` on maximum loss, quarters_positive and quarter_pnl (the swarm's robust Train
+  objective, Sept 26: the worst Train year, not the whole window, scores a version);
 - `daily`: [day, P&L, equity] for every trading day of the run (zero days included);
 - `trades`: every trade (entry, exit, legs, fees, maximum loss, P&L, the context at entry);
 - `worst`: the five worst trades with their context;
@@ -156,6 +162,8 @@ def summarize(trades: Sequence[dict], daily: Sequence[Sequence[Any]], capital: f
         median_structure = per_structure[k // 2] if k % 2 else 0.5 * (per_structure[k // 2 - 1] + per_structure[k // 2])
     skew = stats.skewness(pnl_days)
     kurt = stats.kurtosis(pnl_days)
+    skew_traded = stats.skewness(by_day)
+    kurt_traded = stats.kurtosis(by_day)
     curve, peak, drawdown = 0.0, 0.0, 0.0
     for x in pnl_days:
         curve += x
@@ -175,6 +183,8 @@ def summarize(trades: Sequence[dict], daily: Sequence[Sequence[Any]], capital: f
         "t_daily": None if t_daily is None else round(t_daily, 4),
         "skew_daily": None if skew is None else round(skew, 5),
         "kurt_daily": None if kurt is None else round(kurt, 5),
+        "skew_traded": None if skew_traded is None else round(skew_traded, 5),
+        "kurt_traded": None if kurt_traded is None else round(kurt_traded, 5),
         "median_max_loss_per_structure": None if median_structure is None else round(median_structure, 2),
         "win_rate": round(sum(t["pnl"] > 0 for t in trades) / n, 4) if n else None,
         "profit_factor": round(wins / losses, 4) if losses > 0 else (None if wins == 0 else float("inf")),
@@ -186,6 +196,57 @@ def summarize(trades: Sequence[dict], daily: Sequence[Sequence[Any]], capital: f
         "quarters_positive": f"{sum(v > 0 for v in quarters.values())}/{len(quarters)}",
         "avg_trade": round(total / n, 2) if n else None,
     }
+
+
+def by_year(trades: Sequence[dict], daily: Sequence[Sequence[Any]], own_days: Any = None) -> dict[str, dict[str, Any]]:
+    """One row per calendar year of the run's days (a year the program never traded included): trades, days,
+    days_traded, pnl, the mean and t of that year's daily returns on maximum loss (`daily_returns`), its quarters
+    positive and its P&L by quarter. `own_days` (ISO days), when given, keeps only the days the program's own roots had
+    data: a batch mixes roots, and a day only another program's root had data for says nothing of this one. The swarm
+    scores a Train version on its WORST year (Sept 26)."""
+    days = [d for d in daily if own_days is None or str(d[0]) in own_days]
+    out: dict[str, dict[str, Any]] = {}
+    for year in sorted({str(d[0])[:4] for d in days}):
+        mine = [t for t in trades if str(t["day"]).startswith(year)]
+        mean, t = _t(daily_returns(mine))
+        quarters: dict[str, float] = {}
+        for d in days:
+            if str(d[0]).startswith(year):
+                quarters[_quarter(d[0])] = quarters.get(_quarter(d[0]), 0.0) + float(d[1])
+        out[year] = {"trades": len(mine), "days": sum(1 for d in days if str(d[0]).startswith(year)),
+                     "days_traded": len({x["day"] for x in mine}), "pnl": round(sum(x["pnl"] for x in mine), 2),
+                     "mean_return_on_max_loss_daily": None if mean is None else round(mean, 6),
+                     "t_daily": None if t is None else round(t, 4),
+                     "quarters_positive": f"{sum(v > 0 for v in quarters.values())}/{len(quarters)}",
+                     "quarter_pnl": {q: round(v, 2) for q, v in sorted(quarters.items())}}
+    return out
+
+
+def merge_years(parts: Sequence[Mapping[str, Any]], trades: Sequence[dict], daily: Sequence[Sequence[Any]]) -> dict[str, dict[str, Any]]:
+    """`by_year` of a split run from its segments' own rows (each kept to the days its roots had data): the years and
+    their days and quarter P&L summed, the trade statistics recomputed on the whole year's trades."""
+    if not all(isinstance(p.get("by_year"), Mapping) for p in parts):
+        return by_year(trades, daily)
+    days: dict[str, int] = {}
+    quarters: dict[str, dict[str, float]] = {}
+    for p in parts:
+        for year, row in p["by_year"].items():
+            days[year] = days.get(year, 0) + int(row.get("days") or 0)
+            into = quarters.setdefault(year, {})
+            for q, v in (row.get("quarter_pnl") or {}).items():
+                into[q] = into.get(q, 0.0) + float(v)
+    out = {}
+    for year in sorted(days):
+        mine = [t for t in trades if str(t["day"]).startswith(year)]
+        mean, t = _t(daily_returns(mine))
+        qs = quarters.get(year, {})
+        out[year] = {"trades": len(mine), "days": days[year], "days_traded": len({x["day"] for x in mine}),
+                     "pnl": round(sum(x["pnl"] for x in mine), 2),
+                     "mean_return_on_max_loss_daily": None if mean is None else round(mean, 6),
+                     "t_daily": None if t is None else round(t, 4),
+                     "quarters_positive": f"{sum(v > 0 for v in qs.values())}/{len(qs)}",
+                     "quarter_pnl": {q: round(v, 2) for q, v in sorted(qs.items())}}
+    return out
 
 
 def fill_stats(account: Any) -> dict[str, Any]:
@@ -236,6 +297,7 @@ def build(account: Any, cfg: Any, days: Sequence[dt.date], data_version: str, re
             "root": _group(trades, lambda t: t["root"]),
             "exit_reason": _group(trades, lambda t: t["exit_reason"]),
         },
+        "by_year": by_year(trades, account.daily, {d for d, rows in regimes.items() if any(r in rows for r in account.roots)}),
         "daily": [list(d) for d in account.daily],
         "trades": trades,
         "worst": sorted(trades, key=lambda t: t["pnl"])[:5],
@@ -285,7 +347,7 @@ def merge(parts: Sequence[dict]) -> dict[str, Any]:
     result = {"run_id": sha(identity)[:24], "program": first["program"], **identity, "start": parts[0].get("start"),
               "end": parts[-1].get("end"), "trials": 1, "status": status, "needs": first["needs"],
               "summary": summarize(trades, daily, first["capital"]), "fills": fills, "breakdown": breakdown,
-              "daily": daily, "trades": trades, "worst": sorted(trades, key=lambda t: t["pnl"])[:5],
+              "by_year": merge_years(parts, trades, daily), "daily": daily, "trades": trades, "worst": sorted(trades, key=lambda t: t["pnl"])[:5],
               "runtime": {"calls": sum(p["runtime"]["calls"] for p in parts), "errors": sum(p["runtime"]["errors"] for p in parts),
                           "timeouts": sum(p["runtime"]["timeouts"] for p in parts),
                           "messages": [m for p in parts for m in p["runtime"]["messages"]][:10],
@@ -350,4 +412,4 @@ def stress_block(result: Mapping[str, Any]) -> dict[str, Any]:
     return {"stress": result.get("stress"), "status": result.get("status"), **{k: summary.get(k) for k in STRESS_KEYS}}
 
 
-__all__ = ["build", "merge", "view", "stress_block", "summarize", "daily_returns", "sha", "canonical", "ENGINE_VERSION"]
+__all__ = ["build", "merge", "view", "stress_block", "summarize", "daily_returns", "by_year", "merge_years", "sha", "canonical", "ENGINE_VERSION"]

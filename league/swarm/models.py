@@ -1,4 +1,4 @@
-"""The swarm's model calls: Sail for the inner loop and every fallback, OpenAI only when it has room.
+"""The swarm's model calls: Sail for the inner loop and every fallback, Claude and OpenAI only when they have room.
 
 - SAIL (`ModelRouter.sail`): the Responses API through `ltcm.provider.Provider` (durable request rows,
   reservations before dispatch, settled costs, a per-family daily cap and a floor cap). Its own request
@@ -8,7 +8,12 @@
   gateway's month has room above the reserve (`FrontierMonth.remaining`) AND the swarm's own OpenAI
   spend is under its cap (plan: $150 for the burst). A refusal, an error or no room falls back to the
   role's Sail profile. Nonurgent roles request Flex; the latency-sensitive audit requests standard.
-- Every settled cost is a `spend` row (kind `sail_model` or `openai`, by family).
+- CLAUDE (`ModelRouter.ask(claude=True)`, Sept 26, 2026, the swarm sprint): Claude Opus 5.5 through the gateway
+  (`league.claude.Claude`) for the roles in `claude.roles` (the architect, the gate's audit, the diagnostician), first
+  among the paid routes while the gateway's funded total has room above `claude.reserve_usd` and the swarm's own Claude
+  spend is under `claude.usd_cap`. The architect rotates: every other pass asks GPT-6 Astra first. Claude capped, erring
+  or unconfigured falls to OpenAI, then Sail, exactly as before.
+- Every settled cost is a `spend` row (kind `sail_model`, `openai` or `claude`, by family).
 
 Standard library only.
 """
@@ -16,6 +21,8 @@ Standard library only.
 from __future__ import annotations
 
 import json
+import re
+import secrets
 import threading
 import time
 from decimal import Decimal
@@ -25,7 +32,12 @@ from .store import SwarmStore
 
 
 class ModelError(RuntimeError):
-    """A model call could not be completed (the message says why)."""
+    """A model call could not be completed (the message says why). `billed` lists the paid attempts billed anyway (a
+    refusal, a truncation, an empty answer): each `{"route", "stop_reason", "cost_usd"}`."""
+
+    def __init__(self, message: str, *, billed: list[dict[str, Any]] | None = None):
+        super().__init__(message)
+        self.billed = list(billed or [])
 
 
 def extract_json(text: str) -> dict[str, Any] | None:
@@ -48,7 +60,8 @@ class ModelRouter:
     """Routes the swarm's calls (the module docstring)."""
 
     def __init__(self, store: SwarmStore, provider: Any, *, settings: Mapping[str, Any], frontier_factory: Callable[[str], Any] | None = None,
-                 month: Any = None, sleep: Callable[[float], None] | None = None):
+                 month: Any = None, sleep: Callable[[float], None] | None = None, claude_factory: Callable[[str], Any] | None = None,
+                 claude_meter: Any = None):
         import time as _time
 
         self.sleep = sleep or _time.sleep
@@ -57,6 +70,8 @@ class ModelRouter:
         self.settings = settings
         self.frontier_factory = frontier_factory
         self.month = month
+        self.claude_factory = claude_factory
+        self.claude_meter = claude_meter
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------ Sail
@@ -153,6 +168,10 @@ class ModelRouter:
             n += int(self._account_sail(key, cost, kind=hold.get("kind") or "sail_model", family=hold.get("family"),
                                         settled=True, released=row["status"] == "abandoned" and row["cost_usd"] is None,
                                         detail={"key": key[:120], "settles_hold": round(float(hold["usd"]), 6)}))
+        try:  # Claude's holds, from the gateway's record of each call
+            n += self.settle_claude_holds()
+        except Exception:  # noqa: BLE001 - the holds stand until the next pass
+            pass
         return n
 
     def compact(self, *, older_than_seconds: float = 3600.0) -> int:
@@ -212,41 +231,308 @@ class ModelRouter:
             return 0.0
         return max(0.0, min(float(remaining - reserve), self._openai_cap_room()))
 
-    def ask(self, *, role: str, system: str, user: str, family: str | None, key: str, openai_model: str | None, sail_profile: str,
-            max_output: int = 8000, effort: str = "medium", need_usd: float = 1.0, desk: str | None = None,
-            cap_usd_day: float | None = None) -> dict[str, Any]:
-        """A one-shot question for a role (the architect, the reviewer, the auditor, a rewrite). OpenAI first when it has
-        room for both `need_usd` and the actual request's standard-service maximum, else (or on any refusal) Sail.
-        `desk` and `cap_usd_day` are the Provider's fuse for the Sail call. Admission and the durable hold are atomic
-        across store connections; verified cost settles it, a 4xx refusal releases it, and an unknown bill retains it.
-        Unknown cost is reported as None with held_usd, never as a free answer."""
-        self._require_committed_store()
-        errors = []
-        hold = None
-        if openai_model:
-            from ..frontier import request_body, reservation_ceiling
+    # ------------------------------------------------------------------ Claude
+    def _claude_cfg(self) -> Mapping[str, Any]:
+        cfg = self.settings.get("claude")
+        return cfg if isinstance(cfg, Mapping) else {}
 
+    def claude_enabled(self, role: str) -> bool:
+        """Claude is configured (a client and the gateway's meter), names a model, and serves `role` (`claude.roles`)."""
+        cfg = self._claude_cfg()
+        roles = cfg.get("roles")
+        return (self.claude_factory is not None and self.claude_meter is not None and bool(cfg.get("model"))
+                and isinstance(roles, (list, tuple)) and role in roles)
+
+    def _claude_cap_room(self) -> float:
+        try:
+            cap = Decimal(str(self._claude_cfg().get("usd_cap", 100.0)))
+            spent = Decimal(str(self.store.spent(["claude"])))
+            if not cap.is_finite() or not spent.is_finite() or cap < 0:
+                return 0.0
+            return float(max(Decimal(0), cap - max(Decimal(0), spent)))
+        except (ArithmeticError, ValueError, TypeError):
+            return 0.0
+
+    def claude_room(self) -> float:
+        """Dollars the swarm may still spend on Claude now: the lower of the gateway's funded total above
+        `claude.reserve_usd` and what is left of the swarm's own `claude.usd_cap`. 0 when either cannot be read."""
+        if self.claude_meter is None or self.claude_factory is None:
+            return 0.0
+        try:
+            remaining = Decimal(str(self.claude_meter.remaining()))
+            reserve = Decimal(str(self._claude_cfg().get("reserve_usd", 5.0)))
+            if not remaining.is_finite() or not reserve.is_finite() or reserve < 0:
+                return 0.0
+        except Exception:  # noqa: BLE001 - unreadable is no room
+            return 0.0
+        return max(0.0, min(float(remaining - reserve), self._claude_cap_room()))
+
+    def claude_request(self, system: str, user: str, *, schema: Mapping[str, Any] | None = None,
+                       effort: str | None = None) -> tuple[dict[str, Any], float]:
+        """The exact Claude request a role's question becomes, and the hold it needs (the gateway's worst case). `effort`
+        overrides `claude.effort` for this call."""
+        from ..claude import EFFORTS, MAX_TOKENS, reservation_ceiling, request_body
+
+        cfg = self._claude_cfg()
+        effort = str(effort or cfg.get("effort") or "high")
+        body = request_body(str(cfg.get("model")), system, [{"role": "user", "content": user}],
+                            max_tokens=int(cfg.get("max_tokens", MAX_TOKENS)), effort=effort if effort in EFFORTS else "high",
+                            schema=schema, cache=True)
+        return body, float(reservation_ceiling(body))
+
+    def claude_spent(self, *, role: str | None = None, since: float | None = None) -> float:
+        """The swarm's Claude spend (holds included), for one role when named, since an epoch when given."""
+        sql, params = "SELECT usd, detail FROM spend WHERE kind='claude'", []
+        if since is not None:
+            sql += " AND epoch>=?"
+            params.append(float(since))
+        total = 0.0
+        for row in self.store._all(sql, params):
+            if role is None or (json.loads(row["detail"] or "{}") or {}).get("role") == role:
+                total += float(row["usd"])
+        return total
+
+    def _ask_claude(self, *, role: str, system: str, user: str, family: str | None, key: str, need_usd: float,
+                    schema: Mapping[str, Any] | None, errors: list[str], billed: list[dict[str, Any]],
+                    effort: str | None = None) -> dict[str, Any] | None:
+        """The Claude route: the hold is booked (spend kind `claude`) and filed under the call's X-LTCM-Request id (kv
+        `claude_unsettled`) in one transaction committed before the gateway hears of the call, so neither a crash nor a
+        restart mid-call loses it: `settle_claude_holds` trues up whatever is still filed from the gateway's own record.
+        The gateway's settled cost replaces the hold: a refusal, a truncation and an empty answer are billed at their
+        usage, listed in `billed`, and fall through to the next route. A refusal the gateway made before reserving (a 4xx,
+        or a refusal naming its `cap`: no key, the funded total, the kill switch) releases it. An unknown bill stays
+        filed. Settling takes the filing out in the same transaction that books the cost, and only when it is still
+        there, so a true-up and the call's own answer never both book it. None when there is no room, or the call
+        refused or erred (the reason is in `errors`)."""
+        from ..claude import ClaudeError
+
+        cfg = self._claude_cfg()
+        model = str(cfg.get("model"))
+        request_id = re.sub(r"[^A-Za-z0-9:._-]+", "-", key)[:150] + ":" + secrets.token_hex(4)
+        hold = None
+        try:
+            need = Decimal(str(need_usd))
+            if not need.is_finite() or need < 0:
+                raise ValueError("invalid Claude minimum reservation")
+            body, ceiling = self.claude_request(system, user, schema=schema, effort=effort)
+            required = float(max(need, Decimal(str(ceiling))))
+            room = self.claude_room()  # the meter's network read happens outside the write transaction
+            if room < required:
+                errors.append(f"claude: no room (${room:.2f} left above the reserve; this call may cost ${required:.2f})")
+                return None
+            admitted = False
+            with self.store.atomic():
+                if min(room, self._claude_cap_room()) >= required:
+                    self.store.add_spend("claude", required, family=family,
+                                         detail={"role": role, "hold": key[:120], "request": request_id, "model": model,
+                                                 "max_tokens": body["max_tokens"], "effort": body["output_config"]["effort"]})
+                    filed = dict(self.store.get("claude_unsettled") or {})
+                    filed[request_id] = {"usd": required, "family": family, "role": role, "model": model,
+                                         "at": self.store.clock(), "reason": "in flight"}
+                    self.store.put("claude_unsettled", filed)
+                    admitted = True
+            if admitted:  # only after the outer transaction's commit succeeds
+                hold = required
+            else:
+                errors.append("claude: the swarm's own Claude line has no room")
+                return None
+        except Exception as exc:  # noqa: BLE001 - invalid/unknown admission falls through without dispatch
+            errors.append(f"claude admission: {type(exc).__name__}: {str(exc)[:160]}")
+            return None
+
+        def resolve(amount: float, detail: Mapping[str, Any]) -> None:
+            """Book `amount` in place of the hold, once: only while the hold is still filed (a true-up may have)."""
+            with self.store.atomic():
+                filed = dict(self.store.get("claude_unsettled") or {})
+                if request_id not in filed:
+                    return
+                filed.pop(request_id)
+                self.store.put("claude_unsettled", filed)
+                self.store.add_spend("claude", amount - hold, family=family,
+                                     detail={"role": role, "model": model, "settles": key[:120], "request": request_id, **detail})
+
+        def settle(cost: Any, detail: Mapping[str, Any]) -> float | None:
             try:
-                need = Decimal(str(need_usd))
-                if not need.is_finite() or need < 0:
-                    raise ValueError("invalid OpenAI minimum reservation")
-                tier = "default" if role == "audit" else "flex"
-                body = request_body(openai_model, [{"role": "system", "content": system}, {"role": "user", "content": user}],
-                                    max_output_tokens=max_output, effort=effort, service_tier=tier, role=role)
-                required = float(max(need, reservation_ceiling(body)))
-                room = self.openai_room()  # network refresh must not hold the shared SQLite write transaction
-                if room >= required:
-                    admitted = False
-                    with self.store.atomic():
-                        if min(room, self._openai_cap_room()) >= required:
-                            self.store.add_spend("openai", required, family=family,
-                                                 detail={"role": role, "hold": key[:120], "service_tier_requested": tier,
-                                                         "max_output_tokens": body["max_output_tokens"]})
-                            admitted = True
-                    if admitted:  # only after the outer transaction's commit succeeds
-                        hold = required
-            except Exception as exc:  # noqa: BLE001 - invalid/unknown admission falls back without dispatch
-                errors.append(f"openai admission: {type(exc).__name__}: {str(exc)[:160]}")
+                amount = Decimal(str(cost)) if cost is not None else None
+            except ArithmeticError:
+                amount = None
+            if amount is None or not amount.is_finite() or amount < 0:
+                return None
+            resolve(float(amount), detail)
+            return float(amount)
+
+        def unknown(reason: str) -> None:
+            with self.store.atomic():
+                filed = dict(self.store.get("claude_unsettled") or {})
+                if request_id in filed:
+                    filed[request_id] = {**filed[request_id], "reason": reason[:120]}
+                    self.store.put("claude_unsettled", filed)
+
+        try:
+            client = self.claude_factory(model)  # type: ignore[misc]
+            answer = client.ask(system, user, agent=f"swarm-{role}", role=role, max_tokens=body["max_tokens"],
+                                effort=body["output_config"]["effort"], schema=schema, cache=True, request_id=request_id)
+        except ClaudeError as exc:
+            status = exc.status
+            stop = getattr(exc.answer, "stop_reason", None) or type(exc).__name__
+            cost = settle(exc.cost_usd, {"error": type(exc).__name__, "status": status, "stop_reason": stop})
+            if cost is None:
+                if exc.cap or (isinstance(status, int) and 400 <= status < 500):
+                    resolve(0.0, {"refused": status, "cap": exc.cap})
+                else:
+                    unknown(f"{type(exc).__name__}: {status}")
+            elif cost > 0:
+                billed.append({"route": "claude", "stop_reason": stop, "cost_usd": cost})
+            errors.append(f"claude: {type(exc).__name__}: {str(exc)[:160]}")
+            return None
+        except Exception as exc:  # noqa: BLE001 - an unknown failure keeps the hold and falls through
+            unknown(type(exc).__name__)
+            errors.append(f"claude: {type(exc).__name__}: {str(exc)[:160]}")
+            return None
+        cost = settle(answer.cost_usd, {"stop_reason": answer.stop_reason}) if answer.cost_verified else None
+        if cost is None:
+            unknown("the answer's cost was not verified")
+        if not answer.text.strip():
+            if cost:
+                billed.append({"route": "claude", "stop_reason": "empty", "cost_usd": cost})
+            errors.append("claude: the answer carried no text")
+            return None
+        data = answer.data if schema is not None else extract_json(answer.text)
+        return {"text": answer.text, "json": data, "route": "claude", "model": model, "cost_usd": cost,
+                "cost_verified": cost is not None, "held_usd": 0.0 if cost is not None else hold,
+                "stop_reason": answer.stop_reason, "usage": dict(answer.usage)}
+
+    def settle_claude_holds(self, *, min_age: float = 60.0, absent_after: float = 1800.0, budget_seconds: float = 30.0) -> int:
+        """True up the Claude holds whose bill the House never saw (the call's answer was lost, or the swarm restarted
+        mid-call), from the gateway's record of each call: its settled (or kept, unknown) cost replaces the hold; a hold
+        the gateway swept to zero, or a call the gateway has no record of after `absent_after` seconds (it never reached
+        the meter), is released; a call still held waits. It runs on the main loop, so it stops at the first gateway
+        read that fails and after `budget_seconds`: a hung gateway never holds the heartbeat. Returns how many settled."""
+        import time as _time
+
+        deadline = _time.monotonic() + float(budget_seconds)
+        holds = dict(self.store.get("claude_unsettled") or {})
+        if not holds or self.claude_factory is None:
+            return 0
+        try:
+            client = self.claude_factory(str(self._claude_cfg().get("model") or "claude-opus-5-5"))
+        except Exception:  # noqa: BLE001
+            return 0
+        n = 0
+        for request_id, hold in sorted(holds.items()):
+            age = self.store.clock() - float(hold.get("at") or 0)
+            if age < min_age:
+                continue
+            if _time.monotonic() >= deadline:
+                break  # the rest wait for the next pass
+            record = client.settlement(request_id) if callable(getattr(client, "settlement", None)) else None
+            if record is None:
+                break  # the gateway cannot be read now: every hold stands until the next pass
+            state = record.get("state")
+            if state in ("settled", "unknown") and record.get("cost_usd") is not None:
+                cost = float(record["cost_usd"])
+            elif state == "released" or (state == "absent" and age >= absent_after):
+                cost = 0.0
+            else:
+                continue
+            with self.store.atomic():
+                current = dict(self.store.get("claude_unsettled") or {})
+                if request_id not in current:
+                    continue
+                current.pop(request_id)
+                self.store.put("claude_unsettled", current)
+                self.store.add_spend("claude", cost - float(hold["usd"]), family=hold.get("family"),
+                                     detail={"role": hold.get("role"), "model": hold.get("model"), "settles_hold": request_id,
+                                             "gateway_state": state})
+            n += 1
+        return n
+
+    def _turn(self, role: str) -> int:
+        """This call's number among the role's rotating calls (0, 1, 2, ...), kept across restarts."""
+        try:
+            with self.store.atomic():
+                n = int(self.store.get(f"route_turn:{role}", 0) or 0)
+                self.store.put(f"route_turn:{role}", n + 1)
+            return n
+        except Exception:  # noqa: BLE001 - an unreadable counter keeps the primary order
+            return 0
+
+    def ask(self, *, role: str, system: str, user: str, family: str | None, key: str, openai_model: str | None,
+            sail_profile: str | None, max_output: int = 8000, effort: str = "medium", need_usd: float = 1.0,
+            desk: str | None = None, cap_usd_day: float | None = None, claude: bool = False, rotate: bool = False,
+            schema: Mapping[str, Any] | None = None, claude_effort: str | None = None) -> dict[str, Any]:
+        """A one-shot question for a role (the architect, the reviewer, the auditor, a rewrite, the diagnostician).
+
+        The paid routes in order, then Sail: CLAUDE first when `claude` and the role is one of `claude.roles` and the
+        funded total has room above its reserve (`_ask_claude`); OPENAI when it has room for both `need_usd` and the
+        actual request's standard-service maximum (`_ask_openai`). `rotate` alternates the two paid routes' order every
+        other call for the role (the architect's diversity: Astra's pass, when OpenAI has room, else Claude's). A paid
+        route that refuses, errs or has no room falls to the next; `sail_profile` None means no Sail fallback (a
+        ModelError instead). `desk` and `cap_usd_day` are the Provider's fuse for the Sail call. Admission and the
+        durable hold are atomic across store connections; verified cost settles it, a 4xx refusal releases it, and an
+        unknown bill retains it. Unknown cost is reported as None with held_usd, never as a free answer. A ModelError's
+        `billed` lists the paid attempts that were billed without an answer (`claude_effort` overrides `claude.effort`)."""
+        self._require_committed_store()
+        errors: list[str] = []
+        billed: list[dict[str, Any]] = []
+        routes = (["claude"] if claude and self.claude_enabled(role) else []) + (["openai"] if openai_model else [])
+        if rotate and len(routes) == 2 and self._turn(role) % 2 == 1:
+            routes.reverse()
+        for route in routes:
+            if route == "claude":
+                result = self._ask_claude(role=role, system=system, user=user, family=family, key=key, need_usd=need_usd,
+                                          schema=schema, errors=errors, billed=billed, effort=claude_effort)
+            else:
+                result = self._ask_openai(role=role, system=system, user=user, family=family, key=key, openai_model=openai_model,
+                                          max_output=max_output, effort=effort, need_usd=need_usd, errors=errors)
+            if result is not None:
+                return result
+        # A failed COMMIT/ROLLBACK may have left the admission store unusable. Do not turn that
+        # failure into another paid call on the fallback provider.
+        self._require_committed_store()
+        if not sail_profile:
+            raise ModelError("; ".join(errors) or "no paid route was available, and this role has no Sail fallback", billed=billed)
+        items = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+        try:
+            response = self.sail(sail_profile, items, family=desk or family or "swarm", key=key, effort=effort, max_output=max_output,
+                                 cache_key=f"swarm-{role}", tool_choice="auto",
+                                 cap_usd_day=float(cap_usd_day if cap_usd_day is not None else
+                                                   self.settings.get("researcher", {}).get("floor_usd_day", 60.0)),
+                                 kind="sail_model")
+        except Exception as exc:  # noqa: BLE001
+            raise ModelError("; ".join(errors + [f"sail: {type(exc).__name__}: {getattr(exc, 'code', '') or str(exc)[:160]}"]),
+                             billed=billed) from None
+        text = response.output_text or ""
+        return {"text": text, "json": extract_json(text), "route": "sail", "model": sail_profile,
+                "cost_usd": float(response.cost_usd or 0), "fallback_reasons": errors}
+
+    def _ask_openai(self, *, role: str, system: str, user: str, family: str | None, key: str, openai_model: str,
+                    max_output: int, effort: str, need_usd: float, errors: list[str]) -> dict[str, Any] | None:
+        """The OpenAI route (#380): None when it has no room, refused or erred (the reason is in `errors`)."""
+        hold = None
+        from ..frontier import request_body, reservation_ceiling
+
+        try:
+            need = Decimal(str(need_usd))
+            if not need.is_finite() or need < 0:
+                raise ValueError("invalid OpenAI minimum reservation")
+            tier = "default" if role == "audit" else "flex"
+            body = request_body(openai_model, [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                                max_output_tokens=max_output, effort=effort, service_tier=tier, role=role)
+            required = float(max(need, reservation_ceiling(body)))
+            room = self.openai_room()  # network refresh must not hold the shared SQLite write transaction
+            if room >= required:
+                admitted = False
+                with self.store.atomic():
+                    if min(room, self._openai_cap_room()) >= required:
+                        self.store.add_spend("openai", required, family=family,
+                                             detail={"role": role, "hold": key[:120], "service_tier_requested": tier,
+                                                     "max_output_tokens": body["max_output_tokens"]})
+                        admitted = True
+                if admitted:  # only after the outer transaction's commit succeeds
+                    hold = required
+        except Exception as exc:  # noqa: BLE001 - invalid/unknown admission falls back without dispatch
+            errors.append(f"openai admission: {type(exc).__name__}: {str(exc)[:160]}")
         if hold is not None:
             try:
                 frontier = self.frontier_factory(openai_model)  # type: ignore[misc]
@@ -272,26 +558,12 @@ class ModelRouter:
                 if isinstance(status, int) and 400 <= status < 500:
                     self.store.add_spend("openai", -hold, family=family, detail={"role": role, "refused": status})
                 errors.append(f"openai: {type(exc).__name__}: {str(exc)[:160]}")
-        # A failed COMMIT/ROLLBACK may have left the admission store unusable. Do not turn that
-        # failure into another paid call on the fallback provider.
-        self._require_committed_store()
-        items = [{"role": "system", "content": system}, {"role": "user", "content": user}]
-        try:
-            response = self.sail(sail_profile, items, family=desk or family or "swarm", key=key, effort=effort, max_output=max_output,
-                                 cache_key=f"swarm-{role}", tool_choice="auto",
-                                 cap_usd_day=float(cap_usd_day if cap_usd_day is not None else
-                                                   self.settings.get("researcher", {}).get("floor_usd_day", 60.0)),
-                                 kind="sail_model")
-        except Exception as exc:  # noqa: BLE001
-            raise ModelError("; ".join(errors + [f"sail: {type(exc).__name__}: {getattr(exc, 'code', '') or str(exc)[:160]}"])) from None
-        text = response.output_text or ""
-        return {"text": text, "json": extract_json(text), "route": "sail", "model": sail_profile,
-                "cost_usd": float(response.cost_usd or 0), "fallback_reasons": errors}
+        return None
 
 
 def build_router(root: Any, store: SwarmStore, settings: Mapping[str, Any], *, config: Mapping[str, Any] | None = None) -> ModelRouter:
-    """The real router on the box: a Provider on `<root>/swarm-provider.sqlite`; OpenAI through the gateway
-    when the config names one and a gateway token is in the environment."""
+    """The real router on the box: a Provider on `<root>/swarm-provider.sqlite`; OpenAI and Claude through the
+    gateway when the config names one and a gateway token is in the environment."""
     import os
     from pathlib import Path
 
@@ -300,7 +572,7 @@ def build_router(root: Any, store: SwarmStore, settings: Mapping[str, Any], *, c
     researcher = settings.get("researcher", {})
     provider = Provider(Path(root) / "swarm-provider.sqlite", floor_cap_usd_per_day=str(researcher.get("floor_usd_day", 60.0)),
                         poll_timeout=900.0)
-    frontier_factory = month = None
+    frontier_factory = month = claude_factory = claude_meter = None
     gateway = (config or {}).get("gateway_url")
     token_name = "GATEWAY_TOKEN"
     if gateway and os.environ.get(token_name):
@@ -311,7 +583,12 @@ def build_router(root: Any, store: SwarmStore, settings: Mapping[str, Any], *, c
 
         frontier_factory = lambda model: Frontier(gateway, token, model=model, timeout=600.0)  # noqa: E731
         month = FrontierMonth(gateway, token, ttl=120.0)
-    return ModelRouter(store, provider, settings=settings, frontier_factory=frontier_factory, month=month)
+        from ..claude import Claude, ClaudeMeter
+
+        claude_factory = lambda model: Claude(gateway, token, model=model, timeout=600.0)  # noqa: E731
+        claude_meter = ClaudeMeter(gateway, token, ttl=120.0)
+    return ModelRouter(store, provider, settings=settings, frontier_factory=frontier_factory, month=month,
+                       claude_factory=claude_factory, claude_meter=claude_meter)
 
 
 __all__ = ["ModelRouter", "ModelError", "build_router", "extract_json"]

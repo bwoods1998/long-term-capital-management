@@ -84,9 +84,9 @@ The full design is [docs/design.md](docs/design.md); the run that is building it
   SPY paper proof checks the route only.
 - **Evidence.** Train 2022-2024, Validation 2025, a sealed holdout from Jan 2 to Sept 25, 2026, and
   every day after that forward. Every Gym evaluation counts as a trial. A family passes validation
-  with at least 100 trades on 60 days, a t of 2 on P&L per dollar of maximum loss, a deflated Sharpe
-  probability of 0.95 for its trial count, 3 of 4 quarters positive and a profit at 1.5x the
-  half-spread; then one holdout look per version, corrected for every look the swarm has made, and
+  with at least 50 trades on 25 days, a t of 2 on P&L per dollar of maximum loss, a deflated Sharpe
+  probability of 0.95 on traded days for its lineage's validated versions, 3 of 4 quarters positive and
+  a profit at 1.5x the half-spread (the owner's decision D2, Sept 26, 2026); then one holdout look per version, corrected for every look the swarm has made, and
   researchers hear only pass or fail. The forward record sizes money.
 - **Bands.** Gym, Candidate (live shadow only), Probe (real, small), Sized (real, by evidence),
   Retired.

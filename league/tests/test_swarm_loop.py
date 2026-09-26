@@ -124,7 +124,8 @@ class Process(LoopCase):
         self.assertTrue(all(v.get("starter") for v in results.values()))
         self.assertLess(max(v["seconds"] for v in results.values()), 180)
         self.assertLess(elapsed, 60)
-        self.assertEqual(self.store.totals()["trials"], 48)
+        research = self.store._one("SELECT COALESCE(SUM(trials), 0) AS n FROM runs WHERE purpose='train'")["n"]
+        self.assertEqual(research, 48, "one run a family; robustness runs of new bests fill the idle boxes besides")
         self.assertLessEqual(len(self.box_sail.forks), 8)
         self.assertGreaterEqual(len(self.box_sail.forks), 4)
 
@@ -299,7 +300,10 @@ class Process(LoopCase):
         self.assertEqual(sw.run(once=True), 0)
         self.assertEqual(len(self.store.families(alive=True)), 48)
         kinds = [e["payload"].get("action") for e in self.store.events_after(0) if e["kind"] == "swarm.status"]
-        self.assertEqual(kinds, ["started", "stopped"])
+        self.assertEqual(kinds, ["train_objective", "started", "stopped"], "the objective's migration runs once, at the start")
+        self.assertEqual(sw.run(once=True), 0)
+        kinds = [e["payload"].get("action") for e in self.store.events_after(0) if e["kind"] == "swarm.status"]
+        self.assertEqual(kinds.count("train_objective"), 1)
 
 
 class Scheduling(LoopCase):

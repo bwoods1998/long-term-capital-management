@@ -20,7 +20,10 @@ REPO = Path(__file__).resolve().parents[2]
 DEFAULTS: dict[str, Any] = {
     "enabled": False,
     # The population (plan: 48 at the start of the training burst, a ceiling of 96, a floor of 16).
-    "population": {"start": 48, "ceiling": 96, "floor": 16},
+    # `reseed_max`: families a main-loop pass founds from the seeds on untried roots while below the start and the architect
+    # is not due (`Swarm.reseed`). Off (0) by default: reseeds fill the gap the architect's refill cadence keys on, so a
+    # swarm that reseeds sees the architect every `every_seconds` instead of every `refill_seconds`.
+    "population": {"start": 48, "ceiling": 96, "floor": 16, "reseed_max": 0},
     "researcher": {
         # DeepSeek-V4-Flash at asap for the inner loop. V4.1-Flash (`long_profile`) is for long, well-cached histories:
         # measured Sept 26 at the cache share a trimmed history gets (44-66%), it cost four times V4-Flash a call, so it
@@ -34,6 +37,12 @@ DEFAULTS: dict[str, Any] = {
         "rewrite_usd_day": 1.0,         # a family's rewrites a day, on their own fuse
         "top_rewrite_profile": "k3_balanced",
         "top_rewrite_families": 10,
+        # The bandit's top `top_families` by weight run every cycle on a stronger profile at low effort (the sprint, Sept
+        # 26); the rest stay on `profile`. Null `top_profile` turns it off. The hourly pace below governs these cycles too.
+        "top_profile": "pro_asap",
+        "top_reasoning_effort": "low",
+        "top_families": 10,
+        "top_max_output_tokens": 12000,  # low effort's reasoning (1,800-3,800 tokens measured) and a whole program
         "stall_revisions": 5,
         "rewrites_per_day": 4,
         "rewrite_min_hours": 1.0,
@@ -82,6 +91,8 @@ DEFAULTS: dict[str, Any] = {
         "capital": 10000.0,
         "roots": ["SPY", "QQQ", "IWM", "XSP", "SPXW"],
     },
+    # A robustness run waiting this long (its 1.5x run; the mid run twice as long) takes a Train job's priority (aging).
+    "pool": {"robust_age_seconds": 600},
     "tournament": {
         "every_seconds": 3600,
         "explore_share": 0.25,
@@ -90,6 +101,8 @@ DEFAULTS: dict[str, Any] = {
         "retire_evaluations": 2000,
         "retire_dsr_below": 0.05,       # trial-adjusted evidence below the line (after `retire_min_validations`)
         "retire_min_validations": 6,
+        # A version is validated only after its 1.5x-stress Train robustness run came back with a profit (Sept 26).
+        "require_robustness": True,
         "fork_min_t": 1.0,              # a family forks when its validation t is at least this and it is in the top
         "fork_top": 3,
         "fork_cooldown_hours": 6,
@@ -103,6 +116,9 @@ DEFAULTS: dict[str, Any] = {
         "openai_model": "gpt-6-astra",
         "sail_profile": "k3_balanced",
         "max_output_tokens": 12000,
+        # The operator's research agenda (swarm.json, no deploy): when non-empty, the last section of every architect
+        # request (at most 4,000 characters).
+        "agenda": "",
     },
     "gate": {
         "review_openai_model": "gpt-6-sol",
@@ -130,6 +146,32 @@ DEFAULTS: dict[str, Any] = {
         # Never spend the gateway month below this: the House's own roles need its last dollars, and at T0 the month had
         # $10.89 left (effectively none until the owner funds it), so the swarm spends OpenAI only after a raise.
         "openai_reserve_usd": 25.0,
+    },
+    # Claude through the gateway (Sept 26, 2026, the swarm sprint; league/claude.py). The gateway's CLAUDE_USD ($100, the
+    # owner's funded total) is the hard line; `usd_cap` is the swarm's own Claude line inside it and `reserve_usd` is never
+    # spent (the House's post-mortem). `roles` are the calls Claude answers first; removing one routes it as before.
+    "claude": {
+        "model": "claude-opus-5-5",
+        "effort": "high",
+        "usd_cap": 100.0,
+        "reserve_usd": 5.0,
+        "max_tokens": 16000,            # thinking and the answer together (the gateway's non-streaming ceiling)
+        "roles": ["architect", "audit", "diagnostician"],
+    },
+    # The diagnostician (league/swarm/diagnostician.py): Claude reads a family that is stuck or nearly there and rewrites
+    # its mechanism or writes its lesson. Eligible: `min_validations` validations without passing, or the latest
+    # validation passing at least `near_miss_checks` of the line's checks; at most once a family every `family_hours`,
+    # within `usd_day` of Claude spend a day.
+    "diagnostician": {
+        "enabled": True,
+        "every_seconds": 300,
+        "per_round": 2,
+        "family_hours": 6.0,
+        "usd_day": 15.0,
+        "min_validations": 2,
+        "near_miss_checks": 6,
+        "structured": True,             # a JSON-schema answer (structured outputs); false reads the JSON from the text
+        "retry_truncated": True,        # one retry at medium effort after an answer cut off at max_tokens
     },
     "heartbeat_seconds": 20,
     "stale_heartbeat_seconds": 240,     # the House restarts a swarm whose heartbeat is older than this

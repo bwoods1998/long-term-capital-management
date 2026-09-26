@@ -45,11 +45,12 @@ class ProgressCase(unittest.TestCase):
         self.store.add_family({**SPEC, "id": fid}, origin="test", parent=parent, prior_lineage=prior)
         version = self.store.add_version(fid, f"# invented {fid}\nPARAMS = {{'private_marker': 'never-publish-this'}}\n", {}, author="test")
         self.store.update_family(fid, best_version=version["n"], validated_version=version["n"])
-        self.store.bump(fid, trials=1)
+        self.validated(fid, version["n"])
         checks = {k: True for k in ("status_ok", "trades", "days", "mean_positive", "t", "dsr", "quarters", "stress")}
         self.store.set_state(fid, validation_version=version["n"], validation_image="sbcp_synthetic_gym",
             validation_bundle=self.bundle, validation_line={"passed": True, "checks": checks,
                 "numbers": {"trades": 112, "days": 71, "quarters": "4/4", "lineage_trials": self.store.lineage_trials(fid),
+                            "validated_versions": self.store.lineage_validated(fid)[0],
                             "mean": 0.314159, "t": 9.876543, "dsr": 0.998765, "stress_pnl": 98765.4321}},
             review={"sha": run_sha(version), "version": version["n"], "verdict": "pass", "audit": {"verdict": "pass"}},
             banded_version=version["n"], banded_sha=version["sha"], typical_by_version={str(version["n"]): 50},
@@ -58,6 +59,12 @@ class ProgressCase(unittest.TestCase):
             self.store.add_look(fid, version["n"], run_sha(version), passed=True, p_value=.001, detail={"private": 123.456789})
             self.store.set_band(fid, band, reason="synthetic")
         return version
+
+    def validated(self, fid, n):
+        """A validation run of version `n` at the normal spread: one of the lineage's validated versions (D2b's N)."""
+        self.store.add_run(fid, n, {"run_id": f"validation-{fid}-{n}", "status": "ok", "trials": 1,
+                                    "summary": {"t_daily": 2.5, "days_traded": 40}}, window="validation", stress=1.0,
+                           purpose="validation")
 
     def account(self):
         return {"equity": "5481.65", "cash": "5481.65", "stale": False,
@@ -83,7 +90,7 @@ class GymProgress(ProgressCase):
         counts = self.checks(value)
         self.assertEqual((value["target"], value["blocked"]), ("candidate", "holdout_pending"))
         self.assertEqual((counts["validation_trades"], counts["validation_days"], counts["validation_quarters"]),
-                         ((100, 100), (60, 60), (3, 3)))
+                         ((50, 50), (25, 25), (3, 3)))
         self.assertEqual(counts["holdout"], (0, 1))
         encoded = json.dumps(value)
         for secret in ("never-publish-this", "0.314159", "9.876543", "0.998765", "98765.4321", "private_marker", "sbcp_"):
@@ -98,7 +105,7 @@ class GymProgress(ProgressCase):
         line["checks"].update(trades=False, days=False, quarters=False)
         self.store.set_state("synthetic-family", validation_line=line)
         value = self.read()
-        self.assertEqual(self.checks(value)["validation_trades"], (17, 100))
+        self.assertEqual(self.checks(value)["validation_trades"], (17, 50))
         self.assertEqual(value["blocked"], "validation_failed")
 
     def test_missing_or_changed_selected_version_image_and_bundle_are_unavailable(self):
@@ -114,17 +121,21 @@ class GymProgress(ProgressCase):
         self.store.update_family("synthetic-family", best_version=v2["n"])
         self.assertIsNone(self.read(), "the old validated program cannot lend progress to a newer selected one")
 
-    def test_connected_and_prior_lineage_trials_withhold_only_the_cached_dsr_pass(self):
+    def test_connected_and_prior_lineage_validated_versions_withhold_only_the_cached_dsr_pass(self):
         self.family("prior")
         self.family("selected", prior="prior")
         self.family("sibling", parent="selected")
         state = self.store.family("selected")["state"]
         line = copy.deepcopy(state["validation_line"])
-        line["numbers"]["lineage_trials"] = self.store.lineage_trials("selected")
+        line["numbers"]["validated_versions"] = self.store.lineage_validated("selected")[0]
+        self.assertEqual(line["numbers"]["validated_versions"], 3, "the prior slice's and the sibling's versions count")
         self.store.set_state("selected", validation_line=line)
         before = self.read("selected")
         self.assertEqual(self.checks(before)["validation_dsr"], (1, 1))
         self.store.bump("prior", trials=1)
+        self.assertEqual(self.checks(self.read("selected"))["validation_dsr"], (1, 1), "Train trials no longer deflate (D2b)")
+        v2 = self.store.add_version("prior", "# another invented program", {}, author="test")
+        self.validated("prior", v2["n"])  # one more validated version in the lineage set: the cached verdict is stale
         after = self.read("selected")
         self.assertEqual(after["blocked"], "evidence_stale")
         self.assertEqual(self.checks(after)["validation_dsr"], (0, 1))
