@@ -429,7 +429,7 @@ def _sail_client() -> Any:
     try:
         from ..sailbox import SailboxClient  # the options overhaul's home for it
     except ImportError:
-        from ltcm.sailbox import SailboxClient
+        from league.sailbox import SailboxClient
     return SailboxClient()
 
 

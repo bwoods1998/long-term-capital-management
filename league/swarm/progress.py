@@ -95,7 +95,7 @@ def _stamp(value: Any) -> float | None:
 
 def _probe_sessions(fam: Mapping, local: Mapping, now: float) -> int:
     """Same complete-session rule as the live path, without its first-seen writes."""
-    from ltcm.data import us_equity_session
+    from league.data import us_equity_session
 
     fid = fam["id"]
     move = (local.get("band_moves") or {}).get(fid) or {}

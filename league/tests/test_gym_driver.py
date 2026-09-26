@@ -142,7 +142,7 @@ class SealedBoxDriver(unittest.TestCase):
         import tarfile
         names = tarfile.open(fileobj=io.BytesIO(a), mode="r:gz").getnames()
         for needed in ("league/__init__.py", "league/safety.py", "league/structure_core.py", "league/stats.py",
-                       "league/gym/engine.py", "league/gym/batch.py", "league/gym/PROGRAM.md"):
+                       "league/gym/engine.py", "league/gym/batch.py", "league/CONTRACT.md"):
             self.assertIn(needed, names)
         self.assertFalse(any("test" in n for n in names))
 

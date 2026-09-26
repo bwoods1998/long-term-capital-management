@@ -153,7 +153,7 @@ class SailGuard:
 
 
 def provider_reader(provider: Any) -> Callable[[], tuple[Any, Any]]:
-    """(balance, burn a day) from `ltcm.provider.Provider` (its 60-second cache)."""
+    """(balance, burn a day) from `league.provider.Provider` (its 60-second cache)."""
     def read() -> tuple[Any, Any]:
         balance = provider.check_balance()
         return balance, provider.sail_burn_usd_per_day()

@@ -1,61 +1,19 @@
-// The gateway's routing table. Every request arrives here with a bearer token and nothing else;
-// the venue credentials are added on the way out and never come back. The whole surface is:
-//
-//   GET             /v1/health               caps, counters, the caps by maximum loss, kill switch, frontier month, pulls, watchdog
-//   POST            /v1/kill                 engage the kill switch: the runtime token may
-//   POST            /v1/unkill               release it: GATEWAY_ADMIN_TOKEN only, the owner's
-//   GET|POST|DELETE /v1/kalshi/<path>        signed with the Kalshi key, forwarded to the venue
-//   GET|POST|DELETE /v1/alpaca/<path>        keyed with the Alpaca headers, forwarded to the venue; its orders are
-//                                            options capped by maximum loss against the account's own equity, and
-//                                            stock only to close shares it holds (`realOrder`, Sept 26, 2026)
-//   GET|POST|DELETE /v1/alpaca-paper/<path>  the practice account: same paths, simulated money, no caps;
-//                                            its option orders are held to defined-risk shapes
-//   GET             /v1/kalshi/ws-auth       handshake headers for the Kalshi WebSocket, 30 s of life
-//   POST            /v1/notify               one trade notice mailed to the owner, capped per day
-//   GET             /v1/frontier/models      the model ids the OpenAI key can reach, and which are priced
-//   POST            /v1/frontier/responses   one frontier call, reserved and settled against the month
-//   POST            /v1/typesafe/systemone  funded Jev judgments, with durable request identities
-//   POST            /v1/web/fetch            one public page's text for research, capped per day (lib/fetch.mjs)
-//   POST            /v1/github/pr            a proposal becomes a branch and a pull request, never a push
-//   GET             /v1/github/pr/<n>        that pull request and its CI, so the VM can watch it
-//   GET             /v1/github/pr/<n>/failures  why CI refused it: failed runs and their annotations
-//
-// Anything else is a 404, and so is any venue name but these three (Coinbase was removed on
-// Sept 19, 2026). A venue path outside `caps.VENUE_PATHS` is a 403 before any key is touched.
-//
-// The ws-auth route is the only one that hands the VM credential material, and what it hands
-// over is short-lived and read-only: Kalshi accepts no order over its WebSocket. A POST to
-// `/v1/kalshi/account/api_usage_level/upgrade` passes as an ordinary forwarded write; it creates
-// no order, so the caps do not see it (`caps.createsOrder`).
-//
-// The kill switch is checked where an order is reserved, so it stops every order-creating call
-// on a real venue and nothing else: reads and cancels pass, and the paper venue never reaches
-// the gate at all.
-//
-// The GitHub routes move no money, so the kill switch does not stop them: a halted floor may still
-// propose its own repair. There is deliberately no merge route. CI judges a pull request and a
-// repository workflow merges it; the most this gateway can do to `main` is ask.
-//
-// `gate` is the Durable Object stub (or, in tests, the gate itself): every method is awaited, so
-// the same router works against both.
+// Alpaca options, funded model calls, helper pull requests, health and owner notices.
+// Venue credentials remain here. No route grants a researcher access to data or holdout state.
 
 import { json, fail, authorized, readBody } from './http.mjs';
 import { composeNotice, NOTICE_KINDS, FROM, TO } from './email.mjs';
 import {
-  createsOrder, notional, PURPOSE_HEADER, allowedVenuePath, isOptionSymbol, alpacaShapeError,
+  createsOrder, notional, allowedVenuePath, isOptionSymbol, alpacaShapeError,
   admittedStructures, isMultiLegOrder, structureNotional, practiceOrderError, closeLegsHeldError, closedLegRows,
   shortCloseBody, longCloseBody, singleLegOpenError, realStockClose, CREDIT_STRUCTURES,
 } from './caps.mjs';
-import * as kalshi from './kalshi.mjs';
 import * as alpaca from './alpaca.mjs';
 import * as frontier from './frontier.mjs';
-import * as equity from './equity.mjs';
 import * as account from './account.mjs';
-import * as typesafe from './typesafe.mjs';
-import * as web from './fetch.mjs';
 import * as github from './github.mjs';
 
-export const VENUES = ['kalshi', 'alpaca', 'alpaca-paper'];
+export const VENUES = ['alpaca', 'alpaca-paper'];
 //: Venues that hold no real money. Their orders are never metered and the kill switch does not
 //: stop them: the paper league must keep learning while real trading is halted.
 export const PAPER_VENUES = ['alpaca-paper'];
@@ -88,7 +46,7 @@ const ALLOW = METHODS.join(', ');
 
 /** The venue and venue path a gateway path names, or `null` when it names neither. */
 export function parseRoute(pathname) {
-  const match = /^\/v1\/(kalshi|alpaca-paper|alpaca)\/(.+)$/.exec(pathname);
+  const match = /^\/v1\/(alpaca-paper|alpaca)\/(.+)$/.exec(pathname);
   if (!match) return null;
   const path = match[2].replace(/^\/+/, '');
   // No traversal, no empty segments: a forwarded path is a venue path, not a filesystem one.
@@ -147,15 +105,6 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
     return json({ sent: true, subject: message.subject, notices_today: count });
   }
 
-  if (path === '/v1/kalshi/ws-auth') {
-    if (request.method !== 'GET') return fail('Method not allowed.', 405, { Allow: 'GET' });
-    try {
-      return json(await wsCredential(path, env, { now: now() }));
-    } catch (error) {
-      return fail(`Gateway credentials are unusable: ${error.message}`, 503);
-    }
-  }
-
   if (path === '/v1/frontier/models') {
     // Free and read-only: which models the key can reach, so a price is never set on a guess.
     if (request.method !== 'GET') return fail('Method not allowed.', 405, { Allow: 'GET' });
@@ -177,17 +126,6 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
   if (path === '/v1/frontier/responses') {
     if (request.method !== 'POST') return fail('Method not allowed.', 405, { Allow: 'POST' });
     return frontierCall(request, env, { gate, fetcher, now });
-  }
-
-  if (path === '/v1/typesafe/systemone') {
-    if (request.method !== 'POST') return fail('Method not allowed.', 405, { Allow: 'POST' });
-    return typesafeCall(request, env, { gate, fetcher, now });
-  }
-
-  if (path === web.PATH) {
-    // Research reads one public page; it moves no money, so the kill switch does not stop it.
-    if (request.method !== 'POST') return fail('Method not allowed.', 405, { Allow: 'POST' });
-    return web.webFetch(request, env, { gate, fetcher, now });
   }
 
   if (path === '/v1/github/pr') {
@@ -226,7 +164,7 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
   // --- the practice account's order shapes (Sept 25, 2026) --------------------------------------
   // Never metered, but an OPTION order is held to the defined-risk shapes (`caps.practiceOrderError`):
   // until today an order to the practice account was forwarded with no check at all. Stock and
-  // crypto orders pass as before.
+  // non-option practice orders are refused.
   if (PAPER_VENUES.includes(target.venue) && createsOrder(rulesOf(target.venue), request.method, target.path)) {
     let parsed = null;
     try {
@@ -247,18 +185,8 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
     } catch {
       return fail('An order body must be JSON.', 400);
     }
-    let order;
-    if (target.venue === 'alpaca') {
-      // The real Alpaca account (Sept 26, 2026 (the options-swarm run, Wave 5)): `realOrder` decides, from the order
-      // itself and never from the caller's header, whether it opens or closes, and reads what the decision needs.
-      order = await realOrder(parsed, env, { gate, fetcher, now });
-      if (order.response) return order.response;
-    } else {
-      const exit = String(request.headers.get(PURPOSE_HEADER) || '').toLowerCase() === 'exit';
-      const priced = notional(target.venue, parsed, { exit });
-      if (priced.error) return fail(priced.error, 400);
-      order = { micro: priced.micro, exit, credit: false, closeRows: null };
-    }
+    const order = await realOrder(parsed, env, { gate, fetcher, now });
+    if (order.response) return order.response;
     const decision = await gate.reserve({ micro: String(order.micro), exit: order.exit, venue: target.venue, credit: order.credit });
     if (!decision.ok) {
       return json({ error: decision.error, ...(decision.cap ? { cap: decision.cap } : {}) }, decision.status,
@@ -439,13 +367,6 @@ async function realPositions(env, { fetcher, now }) {
 }
 
 /** Short-lived WebSocket credential material for the VM: the Kalshi handshake headers. */
-async function wsCredential(path, env, { now }) {
-  if (path !== '/v1/kalshi/ws-auth') throw new Error('unknown credential route');
-  if (!env.KALSHI_KEY_ID || !env.KALSHI_PRIVATE_KEY) throw new Error('kalshi not configured');
-  const headers = await kalshi.wsAuthHeaders({ keyId: env.KALSHI_KEY_ID, privateKeyPem: env.KALSHI_PRIVATE_KEY, now });
-  return { headers, path: kalshi.WS_PATH, expires_in: kalshi.WS_AUTH_TTL_SECONDS };
-}
-
 async function sign({ venue, path }, request, env, { now }) {
   const search = new URL(request.url).search;
   const headers = {
@@ -463,53 +384,9 @@ async function sign({ venue, path }, request, env, { now }) {
     Object.assign(headers, alpaca.authHeaders({ keyId: env.ALPACA_KEY_ID, secretKey: env.ALPACA_SECRET_KEY }));
     return { url: alpaca.target(path, search), headers };
   }
-  if (venue === 'kalshi') {
-    if (!env.KALSHI_KEY_ID || !env.KALSHI_PRIVATE_KEY) throw new Error('not configured');
-    Object.assign(headers, await kalshi.authHeaders({
-      keyId: env.KALSHI_KEY_ID, privateKeyPem: env.KALSHI_PRIVATE_KEY, method: request.method, path, now,
-    }));
-    return { url: kalshi.target(path, search), headers };
-  }
   throw new Error(`unknown venue ${String(venue)}`);
 }
 
-/** One funded semantic request. Ambiguous responses retain their reservation and identity. */
-async function typesafeCall(request, env, { gate, fetcher, now }) {
-  if (!env.TYPE_SAFE_TOKEN) return fail('TypeSafe is not configured.', 503);
-  const body = await readBody(request, typesafe.MAX_BODY_BYTES);
-  if (body.error) return fail(body.error, 413);
-  let parsed;
-  try { parsed = JSON.parse(body.text || ''); } catch { return fail('The request must be JSON.', 400); }
-  const error = typesafe.admit(parsed);
-  if (error) return fail(error, 400);
-  const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body.text)))]
-    .map(b => b.toString(16).padStart(2, '0')).join('');
-  const hold = await gate.typesafeReserve({ id: request.headers.get('X-LTCM-Request'), digest, at: now() });
-  if (!hold.ok) return json({ error: hold.error, ...(hold.cap ? { cap: hold.cap } : {}) }, hold.status);
-  let upstream, data;
-  try {
-    upstream = await fetcher(typesafe.ENDPOINT, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json',
-        Authorization: `Bearer ${env.TYPE_SAFE_TOKEN}`, 'User-Agent': 'ltcm-gateway/1.0' },
-      body: body.text, redirect: 'manual', signal: AbortSignal.timeout(30000),
-    });
-    const response = await readBody(upstream, 128 * 1024);
-    if (response.error) throw new Error('oversize response');
-    data = JSON.parse(response.text);
-  } catch {
-    await gate.typesafeSettle({ id: hold.id, actual: null });
-    return fail('TypeSafe did not return a complete JSON response; the reservation is retained.', 502);
-  }
-  const cost = typesafe.actualCost(data?.usage);
-  const settled = await gate.typesafeSettle({ id: hold.id, actual: cost === null ? null : String(cost) });
-  const headers = { 'X-LTCM-Cost-USD': settled.cost_usd, 'X-LTCM-Cost-Known': String(settled.cost_known) };
-  // Never echo provider error text: it can contain request data or authentication diagnostics.
-  if (!upstream.ok) return json({ error: `TypeSafe returned HTTP ${upstream.status}; no automatic retry.` }, 502, headers);
-  if (!typesafe.validAnswers(parsed, data)) return json({ error: 'TypeSafe returned incompatible typed answers.' }, 502, headers);
-  return json(data, 200, headers);
-}
-
-/** One frontier call, reserved at a conservative ceiling and settled from reported usage. */
 async function frontierCall(request, env, { gate, fetcher, now }) {
   if (!env.OPENAI_SECRET_KEY) return fail('The frontier model is not configured.', 503);
   const body = await readBody(request, 512 * 1024);
@@ -524,7 +401,6 @@ async function frontierCall(request, env, { gate, fetcher, now }) {
   const admitted = frontier.admit(parsed, env, { role: request.headers.get(frontier.ROLE_HEADER) });
   if (admitted.error) return fail(admitted.error, admitted.status);
   const bytes = new TextEncoder().encode(body.text).length;
-  await equity.refresh(env, gate, { fetcher, now });  // profit-indexed cap: the accounts read at most every ten minutes
   const hold = await gate.frontierReserve({ micro: String(frontier.worstCase(admitted.price, bytes, admitted.maxOutput)), at: now() });
   if (!hold.ok) return json({ error: hold.error, ...(hold.cap ? { cap: hold.cap } : {}) }, hold.status);
   const agent = request.headers.get(frontier.AGENT_HEADER);

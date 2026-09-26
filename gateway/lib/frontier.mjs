@@ -73,6 +73,17 @@ export function priceTable(env = {}) {
   }
 }
 
+/** A funded month expires instead of creating another allowance at the next UTC month boundary. */
+export function monthCapMicro(env = {}, at = Date.now()) {
+  if (Object.hasOwn(env, 'FRONTIER_FUNDED_MONTH')) {
+    const funded = String(env.FRONTIER_FUNDED_MONTH);
+    const time = new Date(at);
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(funded) || !Number.isFinite(time.getTime())
+        || time.toISOString().slice(0, 7) !== funded) return 0n;
+  }
+  return parseUsdMicro(env.FRONTIER_MONTH_USD, 0n);
+}
+
 /** `FRONTIER_ROLE_MAX_OUTPUT` read: `{ role: ceiling }` for each slug with a whole number from 1 to the limit. */
 export function roleCeilings(env = {}) {
   let table;
@@ -98,16 +109,6 @@ export function outputCeiling(env = {}, role = null) {
   return typeof role === 'string' && SLUG.test(role) && Object.hasOwn(table, role) ? table[role] : MAX_OUTPUT_TOKENS;
 }
 
-/** A funded month expires instead of creating another allowance at the next UTC month boundary. */
-export function monthCapMicro(env = {}, at = Date.now()) {
-  if (Object.hasOwn(env, 'FRONTIER_FUNDED_MONTH')) {
-    const funded = String(env.FRONTIER_FUNDED_MONTH);
-    const time = new Date(at);
-    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(funded) || !Number.isFinite(time.getTime())
-        || time.toISOString().slice(0, 7) !== funded) return 0n;
-  }
-  return parseUsdMicro(env.FRONTIER_MONTH_USD, 0n);
-}
 
 const micro = dollars => BigInt(Math.ceil(dollars * 1e6));
 

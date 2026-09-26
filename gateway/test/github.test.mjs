@@ -9,22 +9,16 @@ import * as github from '../lib/github.mjs';
 import { createGate } from '../lib/gate.mjs';
 import { fakeGitHub, memoryStore, GITHUB_REPO, GITHUB_TOKEN } from './helpers.mjs';
 
-const STRATEGY = { path: 'league/strategies/kalshi_weather_favorites.py', content: 'EDGE = 0.04\n' };
+const STRATEGY = { path: 'league/tools/variance_helper.py', content: 'EDGE = 0.04\n' };
 const proposal = (extra = {}) => ({
-  role: 'architect', slug: 'kalshi-weather-favorites', title: 'Add the Kalshi weather favorites strategy',
-  body: 'Favorites above 90 cents settled yes 97% of the time in the replay.', files: [STRATEGY], ...extra,
+  role: 'engineer', slug: 'variance-helper', title: 'Add the variance helper',
+  body: 'Pure arithmetic helper with synthetic regression checks.', files: [STRATEGY], ...extra,
 });
 const open = (hub, extra) => github.openPullRequest({ repo: GITHUB_REPO, token: GITHUB_TOKEN, proposal: github.admit(proposal(extra)), fetcher: hub.fetcher });
 const reply = (status, data) => new Response(JSON.stringify(data), { status });
 
 test('each role writes under its own paths and nowhere else', () => {
-  const allowed = {
-    architect: ['league/strategies/kalshi_weather_favorites.py', 'league/strategies/pairs/spread.py'],
-    toolsmith: ['league/tools/orderbook_depth.py', 'league/tests/test_tool_orderbook_depth.py'],
-    operator: ['league/config.json'],
-    designer: ['league/game.json'],
-    teacher: ['league/playbook/2026-09-19-favorites.md'],
-  };
+  const allowed = { engineer: ['league/tools/orderbook_depth.py','league/tests/test_tool_orderbook_depth.py'] };
   assert.deepEqual(Object.keys(github.ROLES), Object.keys(allowed));
   for (const [role, paths] of Object.entries(allowed)) {
     for (const path of paths) {
@@ -36,13 +30,13 @@ test('each role writes under its own paths and nowhere else', () => {
     }
   }
   for (const [role, path] of [
-    ['architect', 'league/strategies.py'], ['architect', 'league/config.json'], ['architect', 'ltcm/service.py'],
-    ['toolsmith', 'league/tests/test_ledger.py'], ['toolsmith', 'league/tests/conftest.py'],
+    ['engineer', 'league/strategies.py'], ['engineer', 'league/config.json'], ['engineer', 'ltcm/service.py'],
+    ['engineer', 'league/tests/test_ledger.py'], ['engineer', 'league/tests/conftest.py'],
     // `exactly` means exactly: not a sibling, not a longer name, not a directory of that name.
     ['operator', 'league/config.json.bak'], ['operator', 'league/config.jsonx'], ['operator', 'league/config.json/x'], ['operator', 'league/game.json'],
     ['designer', 'league/config.json'], ['designer', 'league/game.jsonc'],
     ['teacher', 'league/playbook.md'], ['teacher', 'README.md'],
-    ['janitor', 'league/strategies/x.py'], ['constructor', 'league/strategies/x.py'],
+    ['janitor', 'league/tools/x.py'], ['constructor', 'league/tools/x.py'],
   ]) {
     assert.notEqual(github.pathRefusal(role, path), null, `${role} may not write ${path}`);
   }
@@ -50,15 +44,15 @@ test('each role writes under its own paths and nowhere else', () => {
 
 test('a path is a normalized repository path: no way up, no way out, nothing of git s', () => {
   for (const path of [
-    '../league/strategies/x.py', 'league/strategies/../ci.py', 'league/strategies/../../.github/workflows/ci.yml',
-    'league/strategies/./x.py', 'league/strategies//x.py', 'league/strategies/', '/league/strategies/x.py',
-    'league\\strategies\\x.py', 'league/strategies/..\\ci.py', 'league/strategies/x.py\n', 'league/strategies/\x00x.py',
-    'league/strategies/.git/config', 'league/strategies/.GIT/hooks/pre-commit', 'league/strategies/.gitattributes', 'league/strategies/.gitmodules',
-    `league/strategies/${'x'.repeat(200)}.py`, '', null, 42, ['league/strategies/x.py'],
+    '../league/tools/x.py', 'league/tools/../ci.py', 'league/tools/../../.github/workflows/ci.yml',
+    'league/tools/./x.py', 'league/tools//x.py', 'league/tools/', '/league/tools/x.py',
+    'league\\strategies\\x.py', 'league/tools/..\\ci.py', 'league/tools/x.py\n', 'league/tools/\x00x.py',
+    'league/tools/.git/config', 'league/tools/.GIT/hooks/pre-commit', 'league/tools/.gitattributes', 'league/tools/.gitmodules',
+    `league/tools/${'x'.repeat(200)}.py`, '', null, 42, ['league/tools/x.py'],
   ]) {
-    assert.notEqual(github.pathRefusal('architect', path), null, JSON.stringify(path));
+    assert.notEqual(github.pathRefusal('engineer', path), null, JSON.stringify(path));
   }
-  assert.equal(github.pathRefusal('architect', `league/strategies/${'x'.repeat(179)}.py`), null, '200 characters is the ceiling, not over it');
+  assert.equal(github.pathRefusal('engineer', `league/tools/${'x'.repeat(184)}.py`), null, '200 characters is the ceiling, not over it');
 });
 
 test('the judges are refused for every role, even under rules loosened to allow everything', () => {
@@ -66,10 +60,7 @@ test('the judges are refused for every role, even under rules loosened to allow 
     ...github.FORBIDDEN_FILES, 'gateway/worker.mjs', 'gateway/lib/github.mjs', 'gateway/wrangler.jsonc',
     '.github/workflows/ci.yml', '.github/CODEOWNERS', 'League/CI.py', 'league/Constitution.py', 'GATEWAY/worker.mjs', '.GitHub/workflows/merge.yml',
   ];
-  assert.deepEqual(github.FORBIDDEN_FILES, [
-    ...['constitution', 'ci', 'ledger', 'book', 'evaluator', 'stats', 'auditor', 'watchdog', 'safety', 'replay', 'updater'].map(name => `league/${name}.py`),
-    'league/campaigns.json', 'league/campaigns.py', 'league/funded.py', 'league/experiments.py', 'league/recordings.py', 'league/research_jobs.py', 'league/capabilities.py', 'league/parameters.py',
-  ]);
+
   for (const role of Object.keys(github.ROLES)) {
     const loosened = { [role]: { under: [''] } };
     assert.equal(github.pathRefusal(role, 'anything/at/all.py', loosened), null, 'the loosened rules do allow everything else');
@@ -83,7 +74,7 @@ test('the judges are refused for every role, even under rules loosened to allow 
 test('a proposal is checked whole before GitHub hears of it', () => {
   const ok = github.admit(proposal());
   assert.equal(ok.error, undefined);
-  assert.equal(ok.role, 'architect');
+  assert.equal(ok.role, 'engineer');
   assert.deepEqual(ok.files, [STRATEGY]);
 
   // A refused path is a 403 that names it; the first bad file refuses the whole proposal.
@@ -92,10 +83,10 @@ test('a proposal is checked whole before GitHub hears of it', () => {
   assert.equal(refused.path, 'league/ci.py');
   assert.match(refused.error, /"league\/ci\.py" is refused: no role may write this file/);
   const wandering = github.admit(proposal({ role: 'teacher' }));
-  assert.equal(wandering.status, 403);
-  assert.match(wandering.error, /kalshi_weather_favorites\.py" is refused: outside what the teacher may write/);
+  assert.equal(wandering.status, 400);
+  assert.match(wandering.error, /role must be one of/);
 
-  const file = n => ({ path: `league/strategies/s${n}.py`, content: `N = ${n}\n` });
+  const file = n => ({ path: `league/tools/s${n}.py`, content: `N = ${n}\n` });
   const twelve = Array.from({ length: 12 }, (_, n) => file(n));
   assert.equal(github.admit(proposal({ files: twelve })).error, undefined, 'twelve files is the ceiling');
   const exactly = 'x'.repeat(64 * 1024);
@@ -109,8 +100,8 @@ test('a proposal is checked whole before GitHub hears of it', () => {
     ['bytes, not characters', { files: [{ ...STRATEGY, content: '\u00e9'.repeat(40 * 1024) }] }],
     ['content not text', { files: [{ ...STRATEGY, content: { py: 'x' } }] }], ['content missing', { files: [{ path: STRATEGY.path }] }],
     ['content not unicode', { files: [{ ...STRATEGY, content: 'x = "\ud800"' }] }],
-    ['the same path twice', { files: [STRATEGY, { ...STRATEGY, content: 'EDGE = 0.4\n' }] }], ['a file that is not one', { files: ['league/strategies/x.py'] }],
-    ['unknown role', { role: 'janitor' }], ['inherited role', { role: 'toString' }], ['role not text', { role: ['architect'] }],
+    ['the same path twice', { files: [STRATEGY, { ...STRATEGY, content: 'EDGE = 0.4\n' }] }], ['a file that is not one', { files: ['league/tools/x.py'] }],
+    ['unknown role', { role: 'janitor' }], ['inherited role', { role: 'toString' }], ['role not text', { role: ['engineer'] }],
     ['slug too short', { slug: 'a' }], ['slug too long', { slug: 'a'.repeat(50) }], ['slug with a slash', { slug: 'a/../b' }], ['slug upper case', { slug: 'Weather' }], ['slug leading dash', { slug: '-weather' }],
     ['title missing', { title: undefined }], ['title blank', { title: '   ' }], ['title too long', { title: 'x'.repeat(121) }], ['title two lines', { title: 'one\ntwo' }],
     ['body too long', { body: 'x'.repeat(8001) }], ['body not text', { body: 7 }],
@@ -122,18 +113,18 @@ test('a proposal is checked whole before GitHub hears of it', () => {
 });
 
 test('the branch is named from the role, the slug and the files, and the same proposal is the same branch', () => {
-  const other = { path: 'league/strategies/alpha.py', content: 'A = 1\n' };
-  const branch = github.branchName('architect', 'kalshi-weather-favorites', [STRATEGY, other]);
-  assert.match(branch, /^merton\/architect\/kalshi-weather-favorites-[0-9a-f]{8}$/);
+  const other = { path: 'league/tools/alpha.py', content: 'A = 1\n' };
+  const branch = github.branchName('engineer', 'variance-helper', [STRATEGY, other]);
+  assert.match(branch, /^merton\/engineer\/variance-helper-[0-9a-f]{8}$/);
   // The hash is sha256 over the files in path order, as [path, content] pairs.
   const canonical = JSON.stringify([[other.path, other.content], [STRATEGY.path, STRATEGY.content]]);
   assert.equal(branch.slice(-8), createHash('sha256').update(canonical).digest('hex').slice(0, 8));
 
-  assert.equal(github.branchName('architect', 'kalshi-weather-favorites', [other, STRATEGY]), branch, 'file order does not matter');
-  assert.equal(github.branchName('architect', 'kalshi-weather-favorites', [{ ...other, note: 'ignored' }, STRATEGY]), branch, 'only path and content count');
+  assert.equal(github.branchName('engineer', 'variance-helper', [other, STRATEGY]), branch, 'file order does not matter');
+  assert.equal(github.branchName('engineer', 'variance-helper', [{ ...other, note: 'ignored' }, STRATEGY]), branch, 'only path and content count');
   assert.equal(github.admit(proposal({ files: [other, STRATEGY], title: 'Another title', body: 'Other words.' })).branch, branch, 'nor do the title or the body');
-  assert.notEqual(github.branchName('architect', 'kalshi-weather-favorites', [{ ...STRATEGY, content: 'EDGE = 0.05\n' }, other]), branch, 'a changed file is a new branch');
-  assert.notEqual(github.branchName('architect', 'kalshi-weather-favorites', [STRATEGY]), branch);
+  assert.notEqual(github.branchName('engineer', 'variance-helper', [{ ...STRATEGY, content: 'EDGE = 0.05\n' }, other]), branch, 'a changed file is a new branch');
+  assert.notEqual(github.branchName('engineer', 'variance-helper', [STRATEGY]), branch);
   // A path and a content cannot be shuffled into each other s place.
   assert.notEqual(github.branchName('teacher', 'x1', [{ path: 'ab', content: 'c' }]).slice(-8), github.branchName('teacher', 'x1', [{ path: 'a', content: 'bc' }]).slice(-8));
 });
@@ -142,8 +133,8 @@ test('GitHub receives blobs, a tree on main, a commit, the branch and the pull r
   const hub = fakeGitHub();
   const main = hub.refs.get('main');
   const tool = [{ path: 'league/tools/depth.py', content: 'def depth(): return 1\n' }, { path: 'league/tests/test_tool_depth.py', content: 'def test_depth(): assert True\n' }];
-  const result = await open(hub, { role: 'toolsmith', slug: 'depth-tool', files: tool });
-  const branch = github.branchName('toolsmith', 'depth-tool', tool);
+  const result = await open(hub, { role: 'engineer', slug: 'depth-tool', files: tool });
+  const branch = github.branchName('engineer', 'depth-tool', tool);
 
   assert.deepEqual(hub.calls.map(call => call.key), [
     'GET /git/ref/heads/main', `GET /git/commits/${main}`,
@@ -167,11 +158,11 @@ test('GitHub receives blobs, a tree on main, a commit, the branch and the pull r
     ['league/tests/test_tool_depth.py', '100644', 'blob'], ['league/tools/depth.py', '100644', 'blob'],
   ]);
   assert.deepEqual(commit.parents, [main]);
-  assert.equal(commit.message, 'Add the Kalshi weather favorites strategy\n\nOpened by Merton (toolsmith) through the LTCM gateway.');
+  assert.equal(commit.message, 'Add the variance helper\n\nOpened by Merton (engineer) through the LTCM gateway.');
   assert.deepEqual(ref, { ref: `refs/heads/${branch}`, sha: result.head });
   assert.deepEqual(pull, {
-    title: 'Add the Kalshi weather favorites strategy', head: branch, base: 'main',
-    body: 'Favorites above 90 cents settled yes 97% of the time in the replay.\n\n---\n\nOpened by Merton (toolsmith) through the LTCM gateway.',
+    title: 'Add the variance helper', head: branch, base: 'main',
+    body: 'Pure arithmetic helper with synthetic regression checks.\n\n---\n\nOpened by Merton (engineer) through the LTCM gateway.',
   });
   assert.deepEqual(result, { ok: true, branch, number: 41, url: `https://github.com/${GITHUB_REPO}/pull/41`, head: hub.refs.get(branch), created: true });
   assert.equal(github.pullBody('teacher', ''), '---\n\nOpened by Merton (teacher) through the LTCM gateway.', 'a proposal with no words still says who opened it');

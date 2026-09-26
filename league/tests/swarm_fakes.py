@@ -1,5 +1,5 @@
 """Fakes for the swarm's tests (league/swarm/): Sail's box API, the Gym's driver, Sail's Responses API (behind
-the real `ltcm.provider.Provider`), the gateway's frontier and its month. No network, no Gym needed."""
+the real `league.provider.Provider`), the gateway's frontier and its month. No network, no Gym needed."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import threading
 from decimal import Decimal
 from typing import Any, Callable
 
-from ltcm.provider import Provider
+from league.provider import Provider
 
 _N = itertools.count(1)
 

@@ -439,13 +439,10 @@ class Broker:
 
 
 class FakeHouse:
-    """What the publisher reads of a House: its ledger, roster, rungs and books."""
-
+    """The publisher reads current plugin inputs and the durable ledger."""
     def __init__(self, ledger, agents=(), books=None, rungs=None):
         self.ledger = ledger
-        self.registry = SimpleNamespace(living=lambda: [a for a in agents if a.alive], dead=lambda: [a for a in agents if not a.alive])
-        self.evaluator = SimpleNamespace(rung=lambda agent_id: (rungs or {}).get(agent_id, 0))
-        self.books = books or {}
+        self.site_inputs = lambda: {"agents": [{"id": a.id, "family": a.family, "band": "candidate", "mechanism": ""} for a in agents if a.alive], "structures": []}
 
 
 def roster_agent(agent_id, alive=True, family="condor-vrp"):
@@ -487,8 +484,8 @@ class PublisherTest(LedgerCase):
         self.assertEqual(checkpoint["account"]["equity"], "481.65")
         self.assertEqual([a["id"] for a in checkpoint["agents"]], ["condor-vrp-3", "orb-4"])
         orb = checkpoint["agents"][1]
-        self.assertEqual(orb["record"]["real"], {"trades": 1, "wins": 1, "pnl_usd": "31.00"}, "its closed real trade, folded from the ledger")
-        self.assertEqual(checkpoint["agents"][0]["mechanism"], "Sells short-dated index premium when realized volatility is low.")
+        self.assertIsNone(orb["record"]["real"], "new family records come from the live/swarm feed, never a retired roster")
+        self.assertEqual(checkpoint["agents"][0]["mechanism"], "", "the publisher never guesses a learned mechanism")
         # A second publish sends only what is new, and writes no second mark inside five minutes.
         site.posts.clear()
         self.clock.now += 60
@@ -541,7 +538,7 @@ class PublisherTest(LedgerCase):
         self.assertEqual(len(body["agents"]), 12)
         self.assertEqual(len(body["structures"]), 4)
         house.site_inputs = lambda: 1 / 0
-        self.assertEqual([a["id"] for a in publisher.checkpoint(house)["agents"]], ["condor-vrp-3"])
+        self.assertEqual(publisher.checkpoint(house)["agents"], [])
 
     def test_missing_options_book_after_a_real_fill_is_not_reported_as_zero_profit(self):
         publisher = self.publisher()
@@ -550,18 +547,6 @@ class PublisherTest(LedgerCase):
         self.row("book.fill", fill(vertical()))
         self.assertIsNone(publisher.checkpoint(house)["trading"]["pnl_usd"])
 
-    def test_open_structures_come_from_the_books_as_what_they_are_never_what_they_are_quoted_at(self):
-        spec = condor()
-        instrument = SimpleNamespace(market_id=spec.code, key="k1", asset_class="option", symbol="XSP", right=None, expiry=spec.expiry, multiplier=D(100))
-        holding = SimpleNamespace(instrument=instrument, quantity=D(1), cost=D("184"), opened_at="2026-09-28T14:02:40.000Z", average_cost=D("1.84"))
-        coin = SimpleNamespace(instrument=SimpleNamespace(market_id="BTC/USD", key="k2", asset_class="crypto", symbol="BTC/USD", right=None, expiry=None,
-                                                          multiplier=D(1)), quantity=D(1), cost=D(5), opened_at=None)
-        book = SimpleNamespace(real_money=True, marks={"k1": D("1.965"), "k2": D(80000)},
-                               accounts={"condor-vrp-3": SimpleNamespace(holdings={"k1": holding, "k2": coin})})
-        rows = self.publisher().checkpoint(FakeHouse(self.ledger, books={"options": book}))["structures"]
-        self.assertEqual(rows, [{"id": f"condor-vrp-3:{spec.code}".replace("|", "_").replace("+", "_"), "agent": "condor-vrp-3", "underlying": "XSP",
-                                 "structure": "iron_condor", "legs": 4, "expiry": "2026-09-28", "quantity": 1, "real": True,
-                                 "opened_at": "2026-09-28T14:02:40.000Z", "max_loss_usd": "184.00", "pnl_usd": "12.50"}])
 
     def test_the_tape_fixture_is_this_modules_own_output(self):
         batch = {"schema_version": 2, "events": self.tape()}

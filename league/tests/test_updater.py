@@ -35,7 +35,7 @@ def passed(sha):
 def nothing_yet(sha):
     return judge_workflow_runs(sha, {"workflow_runs": []}, lambda run_id: {"jobs": []})
 
-GOOD = 'NEEDS = {"venue": "alpaca", "horizon": "hour", "style": "t", "symbols": ["BTC/USD"]}\nPARAMS = {}\n\ndef decide(ctx):\n    return {"intents": []}\n'
+GOOD = 'def double(x):\n    return x * 2\n'
 
 
 def tarball(files: dict[str, str], *, links: dict[str, str] | None = None, sha: str = SHA_A) -> bytes:
@@ -56,12 +56,10 @@ def tarball(files: dict[str, str], *, links: dict[str, str] | None = None, sha: 
 def tree(real_money=False, extra=None, tick_seconds=60):
     files = {
         "league/config.json": json.dumps({"real_money": real_money, "tick_seconds": tick_seconds}),
-        "league/game.json": (Path(__file__).resolve().parents[1] / "game.json").read_text(),
         "league/ci.py": "# a real tree carries its own judge; these tests hand `Updater` a stub one\n",
-        "league/strategies/registry.json": "[]",
         "league/house.py": "# the house\n",
         "league/__main__.py": "# a release is recognised by this file\n",
-        "ltcm/broker.py": "# broker\n",
+        "league/broker.py": "# broker\n",
         "scripts/run.sh": "#!/bin/sh\n",
         "README.md": "not part of a release",
         **WORKFLOWS,
@@ -105,8 +103,7 @@ class UpdaterCase(unittest.TestCase):
         target = self.base / "unpacked"
         unpack(tarball(tree(), links={"league/evil": "/etc/passwd"}), target)
         names = sorted(p.relative_to(target).as_posix() for p in target.rglob("*") if p.is_file())
-        self.assertEqual(names, ["league/__main__.py", "league/ci.py", "league/config.json", "league/game.json", "league/house.py", "league/strategies/registry.json",
-                                 "ltcm/broker.py", "scripts/run.sh"])
+        self.assertEqual(names, ["league/__main__.py", "league/broker.py", "league/ci.py", "league/config.json", "league/house.py", "scripts/run.sh"])
         self.assertEqual((target / "scripts/run.sh").stat().st_mode & 0o777, 0o755)
         self.assertEqual((target / "league/house.py").stat().st_mode & 0o777, 0o644)
         with self.assertRaises(UpdateError):
@@ -118,13 +115,13 @@ class UpdaterCase(unittest.TestCase):
         self.assertEqual(list((self.base / "incoming").iterdir()), [])
 
     def test_a_new_commit_goes_to_the_watchdog_once(self):
-        self.main = tarball(tree(extra={"league/house.py": "# the house, improved\n"}))
+        self.main = tarball(tree(extra={"league/tools/improved.py": "def improve(x): return x\n"}))
         updater = self.updater()
         out = updater.check()
         self.assertEqual(out["action"], "deploying")
         source, release_id = self.launched[0]
         self.assertTrue(release_id.startswith("main-"))
-        self.assertEqual((source / "league/house.py").read_text(), "# the house, improved\n")
+        self.assertEqual((source / "league/tools/improved.py").read_text(), "def improve(x): return x\n")
         # The watchdog records what it did; a tree it already judged is never handed over again.
         self.releases.record({"release": release_id, "stage": "verdict", "verdict": "refused"})
         self.assertEqual(updater.check()["action"], "none")
@@ -136,7 +133,7 @@ class UpdaterCase(unittest.TestCase):
         production that is a subprocess of the trusted tree; here the checks are called directly."""
         from league import ci
 
-        return (ci.check_strategies(incoming) + ci.check_tools(incoming) + ci.check_game(incoming)
+        return (ci.check_programs(incoming) + ci.check_tools(incoming)
                 + ci.check_config(None, incoming, baseline=running))
 
     def test_main_cannot_turn_real_money_on_whatever_its_own_judge_says(self):
@@ -148,8 +145,7 @@ class UpdaterCase(unittest.TestCase):
         self.assertIn("real_money", " ".join(out["reasons"]))
 
     def test_the_incoming_trees_own_checks_refuse_an_unsafe_strategy_and_a_bad_dial(self):
-        self.main = tarball(tree(extra={"league/strategies/bad.py": "import os\ndef decide(ctx):\n    return {}\n",
-                                        "league/strategies/registry.json": json.dumps([{"name": "bad", "family": "t", "file": "bad.py", "why": "x"}])}))
+        self.main = tarball(tree(extra={"league/tools/bad.py": "import os\ndef decide(ctx):\n    return {}\n"}))
         out = self.updater(judge=self.content_judge).check()
         self.assertEqual(out["action"], "refused")
         self.assertEqual(self.launched, [])
@@ -218,7 +214,7 @@ class UpdaterCase(unittest.TestCase):
             self.assertNotIn(name, seen)
 
     def test_a_sound_new_strategy_is_let_through(self):
-        self.main = tarball(tree(extra={"league/strategies/ok.py": GOOD, "league/strategies/registry.json": json.dumps([{"name": "ok", "family": "t", "file": "ok.py", "why": "x"}])}))
+        self.main = tarball(tree(extra={"league/tools/ok.py": GOOD}))
         self.assertEqual(self.updater(judge=self.content_judge).check()["action"], "deploying")
 
     def test_it_looks_at_most_once_an_interval(self):
@@ -242,7 +238,7 @@ class ABusyLockDoesNotRetireACommit(UpdaterCase):
     improvements one at a time, silently, with no retry and no expiry."""
 
     def test_a_release_refused_for_a_busy_lock_is_tried_again(self):
-        self.main = tarball(tree(extra={"league/house.py": "# the house, improved\n"}))
+        self.main = tarball(tree(extra={"league/tools/improved.py": "def improve(x): return x\n"}))
         updater = self.updater()
         self.assertEqual(updater.check()["action"], "deploying")
         _, release_id = self.launched[0]
@@ -253,7 +249,7 @@ class ABusyLockDoesNotRetireACommit(UpdaterCase):
         self.assertEqual(len(self.launched), 2)
 
     def test_a_release_the_watchdog_really_judged_is_not_offered_again(self):
-        self.main = tarball(tree(extra={"league/house.py": "# the house, improved\n"}))
+        self.main = tarball(tree(extra={"league/tools/improved.py": "def improve(x): return x\n"}))
         updater = self.updater()
         self.assertEqual(updater.check()["action"], "deploying")
         _, release_id = self.launched[0]
@@ -308,13 +304,13 @@ class ExactCommitAttestation(UpdaterCase):
     def test_a_later_head_never_inherits_an_earlier_heads_approval(self):
         approved = {SHA_A}
         attest = lambda sha: passed(sha) if sha in approved else nothing_yet(sha)  # noqa: E731
-        self.main = tarball(tree(extra={"league/house.py": "# A\n"}), sha=SHA_A)
+        self.main = tarball(tree(extra={"league/tools/change.py": "# A\n"}), sha=SHA_A)
         out = self.updater(attest=attest).check()
         self.assertEqual((out["action"], out["sha"]), ("deploying", SHA_A))
         self.assertEqual(out["attestation"]["sha"], SHA_A)
         # main moves on; B's checks have not run. A's green is not B's.
         self.sha = SHA_B
-        self.main = tarball(tree(extra={"league/house.py": "# B\n"}), sha=SHA_B)
+        self.main = tarball(tree(extra={"league/tools/change.py": "# B\n"}), sha=SHA_B)
         out = self.updater(attest=attest).check()
         self.assertEqual(out["action"], "waiting")
         self.assertEqual(len(self.launched), 1)
@@ -323,11 +319,11 @@ class ExactCommitAttestation(UpdaterCase):
         self.assertEqual(out["action"], "blocked")
         self.assertEqual(len(self.launched), 1)
         # A tarball that is not of the attested commit is not unpacked at all.
-        self.main = tarball(tree(extra={"league/house.py": "# B\n"}), sha=SHA_A)
+        self.main = tarball(tree(extra={"league/tools/change.py": "# B\n"}), sha=SHA_A)
         self.assertEqual(self.updater(attest=lambda sha: passed(sha)).check()["action"], "blocked")
         self.assertEqual(len(self.launched), 1)
         # B's own checks pass: B deploys, on B's attestation.
-        self.main = tarball(tree(extra={"league/house.py": "# B\n"}), sha=SHA_B)
+        self.main = tarball(tree(extra={"league/tools/change.py": "# B\n"}), sha=SHA_B)
         approved.add(SHA_B)
         out = self.updater(attest=attest).check()
         self.assertEqual((out["action"], out["attestation"]["sha"]), ("deploying", SHA_B))
@@ -340,7 +336,7 @@ class ExactCommitAttestation(UpdaterCase):
         def unreachable(request, timeout=None):
             raise urllib.error.URLError("[Errno -3] Temporary failure in name resolution")
 
-        self.main = tarball(tree(extra={"league/house.py": "# new\n"}))
+        self.main = tarball(tree(extra={"league/tools/change.py": "# new\n"}))
         updater = self.updater(attest=GitHubChecks(opener=unreachable))
         out = updater.check()
         self.assertEqual((out["action"], out["new"]), ("blocked", True))
@@ -393,7 +389,7 @@ class ExactCommitAttestation(UpdaterCase):
         self.assertIn("rate limit", out["reasons"][0])
 
     def test_pending_checks_wait_quietly_then_tell_the_owner(self):
-        self.main = tarball(tree(extra={"league/house.py": "# new\n"}))
+        self.main = tarball(tree(extra={"league/tools/change.py": "# new\n"}))
         updater = self.updater(attest=nothing_yet)
         self.assertEqual((updater.check()["action"], updater.check()["new"]), ("waiting", False))
         self.clock.advance(2 * 3600 + 1)
@@ -401,7 +397,7 @@ class ExactCommitAttestation(UpdaterCase):
 
     def test_changed_workflows_are_refused_without_retiring_the_tree(self):
         self.main = tarball(tree(extra={".github/workflows/checks.yml": "name: Checks\njobs: {tests: {steps: [{run: 'true'}]}}\n",
-                                        "league/house.py": "# new\n"}))
+                                        "league/tools/change.py": "# new\n"}))
         updater = self.updater()
         out = updater.check()
         self.assertEqual(out["action"], "refused")
@@ -410,7 +406,7 @@ class ExactCommitAttestation(UpdaterCase):
         self.assertEqual(self.launched, [])
 
     def test_the_attestation_is_handed_to_the_watchdog(self):
-        self.main = tarball(tree(extra={"league/house.py": "# new\n"}))
+        self.main = tarball(tree(extra={"league/tools/change.py": "# new\n"}))
         records = []
         updater = Updater(self.base, head=lambda: self.sha, fetch=lambda sha: self.main, clock=self.clock, judge=lambda i, r: [],
                           attest=self.attest, launch=lambda source, rid, record=None: records.append(json.loads(record.read_text())),
@@ -522,7 +518,7 @@ class TheWatchdogRecordsTheAttestation(unittest.TestCase):
             releases.stage(source, "first-release")
             releases.promote("first-release")
             candidate = base / "cand"
-            unpack(tarball(tree(extra={"league/house.py": "# new\n"})), candidate)
+            unpack(tarball(tree(extra={"league/tools/change.py": "# new\n"})), candidate)
             dog = Watchdog(releases, run_canary=lambda *a: Health(True), restart_house=lambda: None,
                            read_house_health=lambda: Health(True), sleep=lambda s: None)
             digest = tree_digest(candidate)[0]
@@ -533,7 +529,7 @@ class TheWatchdogRecordsTheAttestation(unittest.TestCase):
             self.assertTrue(rows and all(r.get("sha") == SHA_A for r in rows))
             self.assertEqual(next(r for r in rows if r["stage"] == "start")["attestation"]["sha"], SHA_A)
             other = base / "other"
-            unpack(tarball(tree(extra={"league/house.py": "# other\n"})), other)
+            unpack(tarball(tree(extra={"league/tools/change.py": "# other\n"})), other)
             out = dog.deploy(other, "main-candidate2", watch_seconds=0, attestation=attestation)
             self.assertEqual(out["verdict"], "refused")
             self.assertIn("not the attested one", " ".join(out["reasons"]))
@@ -576,7 +572,7 @@ class TheReleaseTrain(unittest.TestCase):
 
     def setUp(self):
         UpdaterCase.setUp(self)
-        self.main = tarball(tree(extra={"league/house.py": "# the house, improved\n"}))
+        self.main = tarball(tree(extra={"league/tools/improved.py": "def improve(x): return x\n"}))
         self.ledger = None
 
     def tearDown(self):
@@ -755,7 +751,7 @@ class TheReleaseTrain(unittest.TestCase):
         self.assertTrue(self.updater().check()["new"])
         self.assertFalse(self.updater().check()["new"])
         self.sha = "c" * 40
-        self.main = tarball(tree(extra={"league/house.py": "# the house, improved twice\n"}), sha=self.sha)
+        self.main = tarball(tree(extra={"league/tools/change.py": "# improved twice\n"}), sha=self.sha)
         self.assertTrue(self.updater().check()["new"])
         self.assertEqual(len(self.train_rows()), 3)
         held = {row["release"] for row in self.train_rows()}
@@ -844,7 +840,8 @@ class TheReleaseTrain(unittest.TestCase):
     def test_the_calendar_is_the_houses(self):
         from league import house, updater
 
-        self.assertIs(updater.us_equity_session, house.us_equity_session)
+        from league.data import us_equity_session
+        self.assertIs(updater.us_equity_session, us_equity_session)
 
     def test_an_unreadable_ledger_holds_as_a_fresh_start(self):
         self.at("2026-09-26T10:00Z")

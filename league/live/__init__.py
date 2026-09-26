@@ -1,6 +1,6 @@
 """The live options path: the House's minute of live chains, the shadow book, the paper proof and real money.
 
-Built Sept 26, 2026 (the options-swarm run, Wave 5; the plan `docs/goals/LTCM_OPTIONS_SWARM.md`, "The venue", "Money",
+Built Sept 26, 2026 (the options-swarm run, Wave 5; the plan `archive/docs/goals/LTCM_OPTIONS_SWARM.md`, "The venue", "Money",
 "Wave 5"). `House.options_live` is `step.OptionsLive` (`league/service.py` builds it when `config.json` `live.enabled`).
 
 - `step`      the minute: families and instances, chain reads, the shadow book, the real account, the decider batch;

@@ -1,8 +1,8 @@
 """The swarm: researcher agents that write option programs, train them in the Gym, and earn bands.
 
-Built Sept 26, 2026 (the options-swarm run, Wave 4). The plan is `docs/goals/LTCM_OPTIONS_SWARM.md`
+Built Sept 26, 2026 (the options-swarm run, Wave 4). The plan is `archive/docs/goals/LTCM_OPTIONS_SWARM.md`
 ("The agent", "The loops", "Evidence", "Compute"); the program contract the researchers write to is
-`league/CONTRACT.md` (taken from the Gym's `league/gym/PROGRAM.md`).
+`league/CONTRACT.md`.
 
 THE PROCESS. The swarm runs as its own process on the House box (`python -m league.swarm run --root
 /workspace/state`), niced, beside the House loop. The House's `swarm` step (`hook.SwarmStep`, one line
@@ -22,7 +22,7 @@ THE PIECES.
 - `seeds`       the 48 founding families (mechanisms re-expressed for the Gym) and their starter programs;
 - `evidence`    the plan's validation and holdout lines, the leakage alarm, and the bandit's draws;
 - `diagnostics` what a researcher sees of a run (train: a compact table; validation: mean, t, quarters);
-- `models`      the model router (Sail's Responses API through `ltcm.provider.Provider`; OpenAI through
+- `models`      the model router (Sail's Responses API through `league.provider.Provider`; OpenAI through
                 the gateway only when its month has room, else the Sail fallback);
 - `pool`        the Gym box pool (forks of the Gym image, sealed; batches day-major via the Gym's
                 driver) and the gate's boxes;

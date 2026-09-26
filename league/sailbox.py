@@ -24,9 +24,7 @@ version `2026-09-07`, names the create-time network field `egress_policy`; the o
 repository's cached docs describe called it `network_policy`. `create` speaks the current one and
 falls back to the older name when the API rejects it, so the client survives either.
 
-Moved from `ltcm/sailbox.py` in the options overhaul (Sept 26, 2026, trap 4): the operator's tools
-(`scripts/floor_box.py`) must not import the legacy `ltcm` package. `ltcm/sailbox.py` is a thin
-alias of this module until the full prune deletes it.
+Operator and data tools share this module. The former ltcm package has been removed.
 """
 
 from __future__ import annotations
@@ -52,55 +50,18 @@ APPS_BASE = f"https://{APPS_HOST}/v1"
 #: Where the floor's code, logs and data live on the box.
 REMOTE_ROOT = "/workspace"
 
-#: Every host the floor is allowed to open a connection to, and nothing else.
-#:
-#: `api.sailresearch.com` is the model provider; `api.elections.kalshi.com` and `api.coinbase.com`
-#: are the live venues; `blakewoods.us` is the public site the publisher pushes to; the three
-#: `sec.gov` hosts are EDGAR; the two Yahoo hosts and `news.google.com` are research sources;
-#: `docs.sailresearch.com` serves the rate card the provider diffs its frozen prices against; and
-#: `pypi.org` with `files.pythonhosted.org` are needed once, to install `cryptography`.
-FLOOR_HOSTS: tuple[str, ...] = (
-    "api.sailresearch.com",
-    # The Sailbox control plane: the floor forks and drives the desks' sandboxes through it.
-    # Without it every run_code fails in forty milliseconds with a name-resolution error.
-    "sailbox-api.sailresearch.com",
-    "api.elections.kalshi.com",
-    "api.coinbase.com",
-    # The venue WebSockets (contract v2, section 6). Read-only by construction: neither venue
-    # accepts an order over its socket, and the credential material the box uses to open them
-    # is minted by the gateway and lives seconds (Kalshi) or two minutes (Coinbase). Kalshi's
-    # socket is on the API host above; Coinbase's are on their own.
-    "advanced-trade-ws.coinbase.com",
-    "advanced-trade-ws-user.coinbase.com",
-    "blakewoods.us",
-    "www.sec.gov",
-    "data.sec.gov",
-    "efts.sec.gov",
-    "query2.finance.yahoo.com",
-    "feeds.finance.yahoo.com",
-    # leap: weather -- the National Weather Service point forecasts and station readings the
-    # weather desk prices Kalshi's daily temperature markets from. Public, no key.
-    "api.weather.gov",
-    # The arena (Sept 18, 2026): more to read, all public and keyless. Polymarket's odds on
-    # the events Kalshi lists; open-meteo's GFS/ECMWF ensembles for the temperature markets;
-    # Deribit, OKX, Hyperliquid and Kraken for perps funding, basis and implied vol; ESPN's
-    # scoreboards for the sports markets; BLS prints and the Fed's calendar for the macro ones.
-    "gamma-api.polymarket.com",
-    "clob.polymarket.com",
-    "api.open-meteo.com",
-    "ensemble-api.open-meteo.com",
-    "www.deribit.com",
-    "www.okx.com",
-    "api.hyperliquid.xyz",
-    "futures.kraken.com",
-    "site.api.espn.com",
-    "api.bls.gov",
-    "www.federalreserve.gov",
-    "news.google.com",
-    "docs.sailresearch.com",
-    "pypi.org",
-    "files.pythonhosted.org",
-)
+#: House egress: Sail models/hosting, the credential gateway, public site, reviewed code
+#: downloads and pinned dependency installation. Sealed program/data images use their own policies.
+FLOOR_HOSTS = ('api.sailresearch.com',
+ 'sailbox-api.sailresearch.com',
+ 'docs.sailresearch.com',
+ 'blakewoods.us',
+ 'ltcm-gateway.blake-woods-personal-site.workers.dev',
+ 'github.com',
+ 'codeload.github.com',
+ 'api.github.com',
+ 'pypi.org',
+ 'files.pythonhosted.org')
 
 #: The owner's publish gateway. Sail's allowlist accepts a `*.` wildcard covering exactly one
 #: extra name part, so the concrete Worker subdomain does not have to be written down here. If a
@@ -270,7 +231,7 @@ def _key_from_env_file(path: Path) -> str | None:
 
 def default_key_source() -> str:
     """The Sail key from `SAIL_API_KEY`, else the repository's owner-private `.env` (the same rule
-    as `ltcm.provider.default_key_source`). Never logged, stored or put in an error: a missing key
+    as `league.provider.default_key_source`). Never logged, stored or put in an error: a missing key
     is `provider_key_missing` and nothing else."""
     key = os.environ.get("SAIL_API_KEY", "").strip() or _key_from_env_file(REPO_ROOT / ".env") or ""
     if not key:

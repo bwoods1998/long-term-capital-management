@@ -27,23 +27,16 @@ export const MAX_REQUEST_BYTES = 256 * 1024;
 export const MAX_PULLS_PER_DAY = 12;
 
 /** What each role may write: `under` is a path prefix, `only` is a whole path. */
-export const ROLES = {
-  architect: { under: ['league/strategies/'] },
-  toolsmith: { under: ['league/tools/', 'league/tests/test_tool_'] },
-  operator: { only: ['league/config.json'] },
-  designer: { only: ['league/game.json'] },
-  teacher: { under: ['league/playbook/'] },
-};
+export const ROLES = { engineer: { under: ['league/tools/', 'league/tests/test_tool_'] } };
 
 //: The judges. No role writes these, whatever `ROLES` says: a proposal must never be able to
 //: change the rules it is judged by, or the gateway that holds the keys.
 export const FORBIDDEN_FILES = [
-  'league/constitution.py', 'league/ci.py', 'league/ledger.py', 'league/book.py',
-  'league/evaluator.py', 'league/stats.py', 'league/auditor.py', 'league/watchdog.py',
-  'league/safety.py', 'league/replay.py', 'league/updater.py',
-  'league/campaigns.json', 'league/campaigns.py', 'league/funded.py', 'league/experiments.py', 'league/recordings.py', 'league/research_jobs.py', 'league/capabilities.py', 'league/parameters.py',
+  'league/constitution.py', 'league/ci.py', 'league/ledger.py', 'league/stats.py',
+  'league/watchdog.py', 'league/updater.py', 'league/safety.py', 'league/house.py',
+  'league/service.py', 'league/live_trading.py', 'league/engineer.json',
 ];
-export const FORBIDDEN_TREES = ['gateway/', '.github/'];
+export const FORBIDDEN_TREES = ['gateway/', '.github/', 'scripts/', 'deploy/', 'league/live/', 'league/gym/', 'league/swarm/'];
 
 const SLUG = /^[a-z0-9][a-z0-9-]{1,48}$/;
 const REPO = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/;

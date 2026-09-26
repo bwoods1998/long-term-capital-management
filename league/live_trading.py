@@ -74,13 +74,7 @@ def smallest_stake(constitution: Mapping[str, Any] | None = None) -> Decimal:
         floor = Decimal(str((options.get("probe") or {}).get("floor_usd") or 0))
         if floor > 0:
             return floor
-    allocator = rules.get("allocator") or {}
-    if allocator.get("enabled"):
-        stakes = [Decimal(str(v)) for table in ("bunt_usd", "probe_bunt_usd")
-                  for k, v in (allocator.get(table) or {}).items() if k == VENUE or k.startswith(VENUE + "_")]
-        if stakes:
-            return min(stakes)
-    return Decimal(str(rules["rungs"]["2"]["stake_usd"]))
+    raise ValueError("the options money table must name a positive Probe floor")
 
 
 def policy(equity_usd: Any, ceiling_usd: Any) -> dict[str, Any]:

@@ -1,7 +1,7 @@
 """The Gym: where agent-written option programs meet real recorded quotes, fast and honestly.
 
-Built Sept 26, 2026 (the options-swarm run, Wave 3). The plan is `docs/goals/LTCM_OPTIONS_SWARM.md`
-("The Gym", "The agent"); the program contract is `league/gym/PROGRAM.md`.
+Built Sept 26, 2026 (the options-swarm run, Wave 3). The plan is `archive/docs/goals/LTCM_OPTIONS_SWARM.md`
+("The Gym", "The agent"); the program contract is `league/CONTRACT.md`.
 
 The pieces, each importable on its own so the live path (the House's shadow book and real money)
 runs the SAME code on live quotes that the replay runs on recorded ones:

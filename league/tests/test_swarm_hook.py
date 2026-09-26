@@ -382,10 +382,10 @@ class SwarmHouse(BuildCase):
     def test_the_swarms_house_builds_no_old_research_merton_or_births(self):
         house, _ = self.build_on()
         self.assertIsInstance(house.swarm, SwarmStep)
-        self.assertIsNone(house.researcher)
-        self.assertIsNone(house.merton)
+        self.assertFalse(hasattr(house, "researcher"))
+        self.assertFalse(hasattr(house, "merton"))
         self.assertIsNone(getattr(house, "budget", None))
-        self.assertFalse(house.settings.births)
+        self.assertFalse(hasattr(house.settings, "births"))
 
     def test_the_site_reads_the_swarm_until_the_house_has_its_own_site_inputs(self):
         house, _ = self.build_on()
@@ -412,7 +412,7 @@ class SwarmHouse(BuildCase):
         summary = house.tick()
         house.wait(60)
         self.assertEqual([e for e in house.ledger.iter(kinds="agent.born")], [])
-        self.assertEqual(len(house.registry.agents), 0)
+        self.assertFalse(hasattr(house, "registry"))
         self.assertFalse((Path(self.dir.name) / "state" / "provider.sqlite").exists(), "no old provider, no research spend")
         self.assertEqual([e for e in house.ledger.iter(kinds="provider.request")], [])
         self.assertEqual(summary["swarm"]["process"]["action"], "started")
@@ -424,7 +424,7 @@ class SwarmHouse(BuildCase):
         (root / "swarm.json").write_text(json.dumps({"enabled": True}))
         house = self.build(config={"swarm": {"enabled": False}})
         self.assertIsInstance(house.swarm, SwarmStep)
-        self.assertFalse(house.settings.births)
+        self.assertFalse(hasattr(house.settings, "births"))
 
     def test_a_canary_never_runs_the_swarm(self):
         with patch("league.swarm.hook.SwarmStep._popen", side_effect=AssertionError("no swarm in a canary")):

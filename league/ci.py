@@ -1,25 +1,10 @@
-"""The judge of every change Merton proposes. It runs in GitHub Actions on every pull request,
-and again on the House box before a merged change is staged, and it decides alone: nothing here
-asks a model anything.
+"""Deterministic checks for public helper proposals and owner releases.
 
-    python3 -m league.ci --base origin/main [--branch merton/architect/some-slug]
-
-1. **Path guard.** A branch named `merton/<role>/...` may touch only that role's paths. The
-   constitution, the ledger, the book, the evaluator, the statistics, the auditor, the watchdog,
-   this file, the gateway and the workflows are out of reach of every role. (The gateway enforces
-   the same list before a branch exists; this is the second wall, and it also covers a branch
-   pushed some other way.)
-2. **Content checks.** Strategy files must pass the sandbox safety check, declare valid NEEDS, be
-   listed in the registry, and run through the replay simulator on a canned tape without one
-   error. `game.json` must stay inside its bounds. `config.json` may change only its operating
-   dials, never where money or secrets are concerned. Tools must pass the same safety check as
-   strategies, because they run in the same boxes. The real-structure money rows (O1-O5) stay
-   inside their bounds, and the gateway admits exactly the structure types they open (`check_structures`).
-3. **The whole test suite**, and with it the replay regression: every founding seed replayed over
-   the canned tapes must produce exactly the recorded result, so a change that shifts the
-   simulator's arithmetic cannot slip through as a refactor.
-
-Exit 0 means the change may merge. Anything else is a refusal, with the reasons printed.
+Only engineer branches may modify pure helpers and their tests. Protected runtime,
+judges, data, money code and operator tools require owner review. Content checks
+validate public Gym examples, helper safety, operating bounds and the money table;
+the suite covers the current House, Gym, swarm, live path and gateway contract.
+Green CI supplies evidence for review; it never merges or deploys a change.
 """
 
 from __future__ import annotations
@@ -37,67 +22,20 @@ from typing import Any, Iterable
 REPO = Path(__file__).resolve().parents[1]
 
 ROLE_PATHS: dict[str, tuple[str, ...]] = {
-    "architect": ("league/strategies/",),
-    "toolsmith": ("league/tools/", "league/tests/test_tool_"),
-    "operator": ("league/config.json",),
-    "designer": ("league/game.json",),
-    "teacher": ("league/playbook/",),
+    "engineer": ("league/tools/", "league/tests/test_tool_"),
 }
-#: Never, for any role, whatever the table above comes to say.
-FORBIDDEN: tuple[str, ...] = (
-    "league/constitution.py", "league/ci.py", "league/ledger.py", "league/book.py", "league/evaluator.py",
-    "league/stats.py", "league/auditor.py", "league/watchdog.py", "league/safety.py", "league/replay.py", "league/updater.py",
-    "gateway/", ".github/",
-    "league/campaigns.json", "league/campaigns.py", "league/funded.py", "league/experiments.py", "league/recordings.py", "league/research_jobs.py", "league/capabilities.py", "league/parameters.py",
-    "league/live_trading.py", "league/live_pilot.py", "scripts/live_trading.py", "scripts/live_pilot.py",
-    # The live options path (Sept 26, 2026, Wave 5): the order path, the money table's reader, the stops and the real book.
-    "league/live/",
-    # The seal on the agents' boxes (no network, no credential). The box's updater refuses an
-    # automatic release that changes any file here (league/updater.py), so this is also the list of
-    # what only the owner's deploy may change.
-    "league/sandbox.py",
-    # The Alpha Lab's seals: the search never sees the last third of a tape nor the holdout, and one
-    # lineage's many lines share one holdout budget (league/lab.py).
-    "league/lab.py",
-    # The history a strategy is judged on and the seal on its holdout are judges too.
-    "league/history.py", "league/deep_replay.py",
-    # The allocator decides who holds real money and how much (Sept 23, 2026): a money judge.
-    "league/allocator.py",
-    # The mechanism ledger (Sept 24, 2026): the family records that decide probe, bunt and family swing.
-    "league/families.py",
-    # The Kalshi shard funder moves the owner's collateral between exchange shards (Sept 23, 2026):
-    # the one funds move the gateway allows, so a money mover.
-    "league/shards.py",
-    # The lab's batch evaluator: the numbers a lab candidate is judged by, and the door that keeps
-    # the holdout out of the lab box.
-    "league/labbox.py",
-    # The horizon rule's answer (review of #249, Sept 24, 2026): when a Kalshi market is expected to pay,
-    # which the book's `max_hours_to_resolve` judges every entry by, and how it reads the settle lags
-    # the House keeps as data (`settle_lags.json`).
-    "league/resolution.py",
-)
-#: The shared strategy list every architect proposal used to rewrite whole (`league/strategies`).
-RETIRED_REGISTRY = "league/strategies/registry.json"
-#: The only keys of league/config.json the operator may move, with their bounds.
-CONFIG_DIALS: dict[str, tuple[float, float]] = {
-    "tick_seconds": (30, 600), "mark_every_seconds": (60, 1800), "replay_days": (7, 60), "inference_daily_cap_usd": (0.5, 25.0),
-    # The box's updater ships main at most once every this many hours (league/updater.py, the release train).
-    "release_train_hours": (2, 6),
-}
-
-
-#: The branch prefixes a proposal of Merton's may arrive under. `merton/` is what the gateway's
-#: source emits; `astra/` is what the DEPLOYED gateway still emitted on Sept 20, 2026, months after
-#: the rename -- so every pull request he opened landed on a branch the merge workflow ignored, sat
-#: open for ever, and nothing anywhere said so. The floor could propose changes to itself and never
-#: land one. Both are accepted until the gateway is redeployed; the role is the second segment
-#: either way, so the path guard is exactly as tight.
+# Automatic proposals cannot change their judges, money rules, runner, data, or operator tools.
+FORBIDDEN = ("gateway/", ".github/", "scripts/", "deploy/", "league/live/", "league/gym/",
+             "league/swarm/", "league/constitution.py", "league/ledger.py", "league/ci.py",
+             "league/updater.py", "league/watchdog.py", "league/house.py", "league/service.py",
+             "league/live_trading.py", "league/safety.py", "league/engineer.json")
+CONFIG_DIALS = {"tick_seconds": (30, 600), "publish_seconds": (30, 1800), "release_train_hours": (2, 6)}
 PREFIXES = ("merton", "astra")
 
 
 def role_of(branch: str) -> str | None:
     parts = str(branch or "").split("/")
-    return parts[1] if len(parts) >= 3 and parts[0] in PREFIXES and parts[1] in ROLE_PATHS else None
+    return parts[1] if len(parts) >= 3 and parts[0] in PREFIXES else None
 
 
 def guard(paths: Iterable[str], role: str | None) -> list[str]:
@@ -112,7 +50,7 @@ def guard(paths: Iterable[str], role: str | None) -> list[str]:
         if any(lowered == f or (f.endswith("/") and lowered.startswith(f)) for f in FORBIDDEN):
             problems.append(f"{path}: no role may change this file")
         elif role is not None:
-            allowed = ROLE_PATHS[role]
+            allowed = ROLE_PATHS.get(role, ())
             if not any(clean == a or (a.endswith(("/", "_")) and clean.startswith(a)) for a in allowed):
                 problems.append(f"{path}: outside what the {role} may change ({', '.join(allowed)})")
     return problems
@@ -123,161 +61,15 @@ def changed_paths(base: str, head: str = "HEAD", *, cwd: Path = REPO) -> list[st
     return [line.strip() for line in out.stdout.splitlines() if line.strip()]
 
 
-# ------------------------------------------------------------------------ canned tapes
-#: Where a synthetic observed series starts: the spot a strike ladder is written around (the Kalshi
-#: tape's strikes are 80,000 and up), and the other majors near their Sept 2026 prices.
-OBSERVED_START = {"BTC/USD": 80000.0, "ETH/USD": 2600.0, "SOL/USD": 150.0}
-
-
-def regression_tape(venue: str, *, steps: int = 600, seed: int = 7, observe: Any = None, bars: Any = None) -> dict[str, Any]:
-    """A deterministic synthetic tape: enough structure for a strategy to trade on, no meaning.
-
-    `observe` and `bars` are the strategy's NEEDS["observe"] and NEEDS["bars"]. A Kalshi strategy
-    that watches another venue's bars (a strike ladder's spot price) is handed deterministic
-    `observed_bars` for each watched symbol at its declared timeframe, warm-up included, in the
-    shape `House.tape_for` records and `league/replay.py` reads. Sept 24, 2026: without them every
-    such strategy failed this check with "required observed bars are missing" whatever it changed
-    (Merton's repairs of Huang's BTC 15-minute strategy, PRs #217 and #208). A tape for a strategy
-    that watches nothing is exactly what it always was."""
-    rng = random.Random(seed)
-    if venue == "alpaca":
-        prices = {"BTC/USD": 80000.0, "ETH/USD": 2600.0, "SOL/USD": 150.0, "SPY": 650.0, "QQQ": 560.0, "IWM": 230.0, "TLT": 90.0, "GLD": 300.0}
-        rows = []
-        for i in range(steps):
-            minute = i * 15
-            bars = {}
-            for symbol in prices:
-                drift = 0.004 * (1 if (i // 40) % 2 == 0 else -1) / 40
-                move = rng.gauss(drift, 0.004)
-                opened = prices[symbol]
-                closed = max(opened * (1 + move), 0.01)
-                high, low = max(opened, closed) * (1 + abs(rng.gauss(0, 0.001))), min(opened, closed) * (1 - abs(rng.gauss(0, 0.001)))
-                prices[symbol] = closed
-                bars[symbol] = {"o": round(opened, 4), "h": round(high, 4), "l": round(low, 4), "c": round(closed, 4), "v": 10.0}
-            day, rest = divmod(minute, 1440)
-            rows.append({"t": f"2026-08-{3 + day:02d}T{rest // 60:02d}:{rest % 60:02d}:00Z", "bars": bars})
-        return {"venue": "alpaca", "horizon": "hour", "step_seconds": 900, "half_spread_bps": 2.0, "steps": rows, "results": {}}
-    rows, results = [], {}
-    for hour in range(max(steps // 12, 8)):
-        day, clock = divmod(hour, 24)
-        close = f"2026-08-{3 + day:02d}T{clock:02d}:55:00Z"
-        markets = []
-        for strike in range(4):
-            name = f"KXBTCD-REG{hour:03d}-T{80000 + strike * 250}"
-            fair = min(max(0.97 - strike * 0.27 + rng.gauss(0, 0.02), 0.03), 0.97)
-            results[name] = "yes" if rng.random() < fair else "no"
-            markets.append((name, fair))
-        for minute in range(0, 55, 5):
-            stamp = f"2026-08-{3 + day:02d}T{clock:02d}:{minute:02d}:00Z"
-            listed = []
-            for name, fair in markets:
-                bid = round(min(max(fair + rng.gauss(0, 0.01) - 0.01, 0.01), 0.98), 2)
-                ask = round(min(bid + 0.02, 0.99), 2)
-                listed.append({"market": name, "series": "KXBTCD", "title": "Bitcoin price", "yes_bid": bid, "yes_ask": ask,
-                               "yes_ask_low": round(max(ask - 0.02, 0.01), 2), "yes_bid_high": round(min(bid + 0.02, 0.99), 2),
-                               "close_time": close, "volume_24h": 20000.0, "open_interest": 5000.0, "strike": float(name.rsplit("T", 1)[1])})
-            rows.append({"t": stamp, "markets": listed})
-        rows.append({"t": close, "markets": []})
-    tape = {"venue": "kalshi", "horizon": "hour", "step_seconds": 300, "steps": rows, "results": results}
-    watched = [str(s) for s in ((observe or {}).get("symbols") or []) if isinstance(s, str)][:6] if isinstance(observe, dict) else []
-    if watched:
-        _observed_bars(tape, watched, bars if isinstance(bars, dict) else {}, seed)
-    return tape
-
-
-def _observed_bars(tape: dict[str, Any], symbols: list[str], bars: dict[str, Any], seed: int) -> None:
-    """Close-stamped bars of each watched symbol on the declared grid, from `limit` bars before the
-    tape's first step to its last one: a slow random walk from its own seed, so adding a symbol
-    changes no other symbol's series and nothing about the markets. A timeframe the House cannot
-    record gets no bars, and the replay refuses it as it would refuse the real tape."""
-    from datetime import datetime, timezone
-
-    from .tapes import TIMEFRAME_SECONDS
-
-    timeframe = str(bars.get("timeframe") or "1Hour")
-    tape["observed_timeframe"] = timeframe
-    seconds = TIMEFRAME_SECONDS.get(timeframe)
-    if not seconds:
-        tape["observed_bars"] = {}
-        return
-    try:
-        limit = max(1, min(200, int(bars.get("limit") or 60)))
-    except (TypeError, ValueError):
-        limit = 60
-
-    def epoch(stamp: str) -> int:
-        return int(datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp())
-
-    first, last = epoch(tape["steps"][0]["t"]), epoch(tape["steps"][-1]["t"])
-    start = (first // seconds - limit) * seconds
-    out: dict[str, list[dict[str, Any]]] = {}
-    for symbol in symbols:
-        walk = random.Random(f"{seed}:{symbol}")
-        price = OBSERVED_START.get(symbol, 100.0)
-        rows = []
-        for close in range(start + seconds, last + 1, seconds):
-            opened = price
-            price = max(opened * (1 + walk.gauss(0, 0.001)), 0.01)
-            high, low = max(opened, price) * (1 + abs(walk.gauss(0, 0.0003))), min(opened, price) * (1 - abs(walk.gauss(0, 0.0003)))
-            rows.append({"t": datetime.fromtimestamp(close, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                         "o": round(opened, 4), "h": round(high, 4), "l": round(low, 4), "c": round(price, 4), "v": 10.0})
-        out[symbol] = rows
-    tape["observed_bars"] = out
-
-
-# ------------------------------------------------------------------------- content checks
-def check_strategy(path: Path, *, catalogue: dict | None = None) -> list[str]:
-    """`catalogue` is the specialties of the tree being judged (its own `niches.json`, read by this
-    file's code): a strategy must fit the House it will be born into, not the one judging it."""
-    from .replay import run_replay
-    from .runner import needs_of
-
-    code = path.read_text(encoding="utf-8")
-    described = needs_of(code)
-    if not described.get("ok"):
-        return [f"{path.name}: {described.get('error')}"]
-    try:
-        from .agents import niche_of
-
-        venue, _, _ = niche_of(described["needs"])
-        from .parameters import require_valid
-        require_valid(described.get("params") or {}, described["needs"])
-    except ValueError as exc:
-        return [f"{path.name}: {exc}"]
-    from . import niches
-
-    if niches.match(described["needs"], catalogue if catalogue is not None else niches.load()) is None:
-        return [f"{path.name}: its NEEDS sit in no open specialty of league/niches.json (the House would refuse to let it be born)"]
-    needs = described["needs"]
-    result = run_replay(code, {}, regression_tape(venue, steps=240, observe=needs.get("observe"), bars=needs.get("bars")))
-    if not result.get("ok"):
-        return [f"{path.name}: the replay did not run: {result.get('error')}"]
-    if int(result.get("errors") or 0) > 0:
-        return [f"{path.name}: decide raised {result['errors']} times on the canned tape ({result.get('last_error')})"]
-    return []
-
-
-def check_strategies(root: Path = REPO) -> list[str]:
-    from . import niches, strategies
-
-    directory = root / "league" / "strategies"
-    problems = list(strategies.problems(directory))
-    rows = strategies.registry(directory)
-    listed = {row["file"] for row in rows}
-    own = root / "league" / "niches.json"
-    try:
-        catalogue = niches.load(own) if own.exists() else None
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        return [f"league/niches.json: {exc}"]
-    for path in sorted(directory.glob("*.py")):
-        if path.name == "__init__.py":
-            continue
-        if path.name not in listed:
-            problems.append(f"{path.name}: not described; add league/strategies/{path.stem}.json with its name, family and why")
-        problems.extend(check_strategy(path, catalogue=catalogue))
-    for row in rows:
-        if not (directory / row["file"]).exists():
-            problems.append(f"{row['name']} is described as {row['file']}, which does not exist")
+def check_programs(root: Path = REPO) -> list[str]:
+    """Public examples contain no learned parameters and obey the same sealed program contract."""
+    from .gym.safety import check_program, CodeRefused
+    problems = []
+    for path in sorted((root / "league/gym/examples").glob("*.py")):
+        try:
+            check_program(path.read_text(encoding="utf-8"))
+        except (CodeRefused, OSError) as exc:
+            problems.append(f"{path.relative_to(root)}: {exc}")
     return problems
 
 
@@ -293,16 +85,6 @@ def check_tools(root: Path = REPO) -> list[str]:
         except CodeRefused as exc:
             problems.append(f"league/tools/{path.name}: {exc}")
     return problems
-
-
-def check_game(root: Path = REPO) -> list[str]:
-    from .economy import check_bounds
-
-    try:
-        check_bounds(json.loads((root / "league" / "game.json").read_text(encoding="utf-8")))
-    except (ValueError, KeyError) as exc:
-        return [f"league/game.json: {exc}"]
-    return []
 
 
 def check_config(base: str | None, root: Path = REPO, *, baseline: Path | None = None) -> list[str]:
@@ -392,8 +174,6 @@ def check_structures(root: Path = REPO) -> list[str]:
     whose constitution has no such table is judged by the options-desk run's rows (O1-O5, G of Sept 25, 2026): the gateway
     admits exactly `allocator.spread_types_real()` (`option_spread_real_types` while O1 is on, none while it is off). The
     constitution is read from `root` without importing the tree's package."""
-    from . import allocator
-
     path = root / "league" / "constitution.py"
     try:
         # Compiled from its text, never through the import system: a cached bytecode file keyed by the source's mtime and
@@ -404,15 +184,11 @@ def check_structures(root: Path = REPO) -> list[str]:
     except Exception as exc:  # noqa: BLE001 - a constitution that cannot be read is a refusal
         return [f"league/constitution.py could not be read: {type(exc).__name__}: {exc}"]
     table = constitution.get("options_money")
-    if table is not None:
-        problems = [f"league/constitution.py: {p}" for p in namespace["options_money_problems"](constitution)]
-        wanted = sorted(set(table.get("real_types") or [])) if isinstance(table, dict) else []
-        source = f"options_money.real_types {wanted}"
-    else:
-        problems = [f"league/constitution.py: {p}" for p in allocator.spread_problems(constitution)]
-        wanted = sorted(allocator.spread_types_real(constitution))
-        source = (f"allocator.option_spreads_real {bool(constitution.get('allocator', {}).get('option_spreads_real'))}, "
-                  f"option_spread_real_types {constitution.get('allocator', {}).get('option_spread_real_types')}")
+    if not isinstance(table, dict):
+        return ["league/constitution.py: options_money is required"]
+    problems = [f"league/constitution.py: {p}" for p in namespace["options_money_problems"](constitution)]
+    wanted = sorted(set(table.get("real_types") or []))
+    source = f"options_money.real_types {wanted}"
     gateway, unreadable = gateway_structures(root)
     problems += unreadable
     if table is not None and isinstance(table, dict):
@@ -451,14 +227,8 @@ def check(base: str | None, branch: str | None, *, root: Path = REPO, tests: boo
         if role is None:
             problems.append(f"{branch}: not a branch name of the form merton/<role>/<slug>")
         problems.extend(guard(paths, role))
-        if RETIRED_REGISTRY in paths:
-            # Every proposal rewrote this one shared file from a stale copy and dropped the rows
-            # merged after it (PRs #72/#73 against #71, Sept 21, 2026). Each strategy now carries
-            # its own description file, so two proposals cannot overwrite each other.
-            problems.append(f"{RETIRED_REGISTRY}: retired; describe a strategy in league/strategies/<its file stem>.json")
-    problems.extend(check_strategies(root))
+    problems.extend(check_programs(root))
     problems.extend(check_tools(root))
-    problems.extend(check_game(root))
     problems.extend(check_structures(root))
     problems.extend(check_config(base if role == "operator" or "league/config.json" in paths and (branch or "").startswith(tuple(f"{p}/" for p in PREFIXES)) else None, root))
     if tests and not problems:
@@ -507,7 +277,7 @@ def main(argv: list[str] | None = None) -> int:
         # this reversed the Sept 20, 2026 choice to let a tree judge itself.
         root = Path(args.root).resolve() if args.root else REPO
         baseline = Path(args.baseline).resolve() if args.baseline else None
-        problems = check_strategies(root) + check_tools(root) + check_game(root) + check_config(None, root, baseline=baseline)
+        problems = check_programs(root) + check_tools(root) + check_structures(root) + check_config(None, root, baseline=baseline)
     elif args.guard_only:
         problems = guard_branch(args.base or "origin/main", args.head, args.branch)
     else:

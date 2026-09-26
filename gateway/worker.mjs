@@ -43,8 +43,6 @@ export class Gate extends DurableObject {
   }
 
   status() { return this.gate.status(); }
-  equity() { return this.gate.equity(); }
-  recordEquity(reading) { return this.ctx.storage.transactionSync(() => this.gate.recordEquity(reading)); }
   // The real Alpaca account's equity for the caps by maximum loss (Sept 26, 2026 (the options-swarm run, Wave 5)).
   accountEquity() { return this.gate.accountEquity(); }
   recordAccountEquity(reading) { return this.ctx.storage.transactionSync(() => this.gate.recordAccountEquity(reading)); }
@@ -58,11 +56,8 @@ export class Gate extends DurableObject {
   refund(request) { return this.ctx.storage.transactionSync(() => this.gate.refund(request)); }
   frontierReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.frontierReserve(request)); }
   frontierSettle(request) { return this.ctx.storage.transactionSync(() => this.gate.frontierSettle(request)); }
-  typesafeReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.typesafeReserve(request)); }
-  typesafeSettle(request) { return this.ctx.storage.transactionSync(() => this.gate.typesafeSettle(request)); }
   pullReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.pullReserve(request)); }
   pullRefund(request) { return this.ctx.storage.transactionSync(() => this.gate.pullRefund(request)); }
-  webFetchReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.webFetchReserve(request)); }
 
   watchdog() { return runWatchdog({ gate: this.gate, env: this.env, mailer: mailerFor(this.env) }); }
 }

@@ -1,9 +1,0 @@
-{
-  "family": "options-orb-vertical",
-  "name": "krasker_29_marked_touch_child",
-  "repair": {
-    "key": "strategy_defect:krasker-29:defbef61264a",
-    "parent": "krasker-29"
-  },
-  "why": "Corrected child of krasker-29. Its supplied exit logic halves the marked bid for signal/stop closes and substitutes a penny for timed closes, consistent with the audit's 48.15%-50% limit-deviation refusals. Close at the marked touch instead, preserving credit buyback conversion, entry selection, exit triggers, parameters, Alpaca options specialty, daily horizon and five underlyings. Starts at rung 0 and must qualify on its own evidence; CI and paper refusal records judge the repair."
-}

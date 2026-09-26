@@ -6,15 +6,12 @@
 // this module rather than in the Durable Object class is what lets every rule below be tested
 // without a Workers runtime.
 
-import { caps, venueOrderCap } from './caps.mjs';
+import { caps } from './caps.mjs';
 import { monthCapMicro } from './frontier.mjs';
-import * as equity from './equity.mjs';
 import * as account from './account.mjs';
 import { dayCap as pullDayCap } from './github.mjs';
 import { formatUsd, formatUsdMicro } from './money.mjs';
 import { iso } from './http.mjs';
-import * as typesafe from './typesafe.mjs';
-import { DAY_CAP as webFetchDayCap } from './fetch.mjs';
 
 /** The one Gate instance. A single object is what makes a cap a cap and not a per-isolate guess. */
 export const GATE_OBJECT = 'gate-v1';
@@ -29,8 +26,6 @@ export const FRONTIER_KEY = 'frontier';
 //: The frontier month that ended, as it stood when the next month's first call replaced it.
 export const FRONTIER_PREVIOUS_KEY = 'frontier-previous';
 export const PULLS_KEY = 'pulls';
-export const TYPESAFE_KEY = 'typesafe-pilot-v1';
-export const WEB_FETCH_KEY = 'web-fetch';
 
 const read = (store, key, fallback) => {
   const raw = store.get(key);
@@ -89,7 +84,6 @@ export function createGate({ store, env = {}, now = Date.now }) {
   };
 
   /** Today's notional on the venues MAX_DAY_USD caps: everything but the real Alpaca venue's (Kalshi's). */
-  const kalshiNotional = row => (row.notional > row.alpacaNotional ? row.notional - row.alpacaNotional : 0n);
 
   /** How many of the day's orders may open: MAX_DAY_OPEN_ORDERS, never more than MAX_DAY_ORDERS. */
   const openOrdersCap = () => (maxLoss.maxDayOpenOrders < limits.maxDayOrders ? maxLoss.maxDayOpenOrders : limits.maxDayOrders);
@@ -197,34 +191,7 @@ export function createGate({ store, env = {}, now = Date.now }) {
       if (amount <= 0n) return { ok: false, status: 400, cap: 'order', error: 'An order must have a positive notional.' };
       // The real Alpaca venue is capped by maximum loss against its own equity (Sept 26, 2026, Wave 5).
       if (venue === 'alpaca') return reserveReal({ amount, at, exit: exit === true, credit: credit === true, row: counters(at) });
-      // A venue may carry a tighter per-order cap than the floor's (`MAX_ORDER_USD_<VENUE>`):
-      // the accounts are a few hundred dollars each, and one order must never be one account.
-      const venueCap = venueOrderCap(env, venue);
-      const orderCap = venueCap !== null && venueCap < limits.maxOrderMicro ? venueCap : limits.maxOrderMicro;
-      if (!exit && amount > orderCap) {
-        return {
-          ok: false, status: 403, cap: 'order',
-          error: `Order notional $${formatUsd(amount)} exceeds the per-order cap of $${formatUsd(orderCap)}.`,
-        };
-      }
-      const row = counters(at);
-      if (row.orders + 1 > limits.maxDayOrders) {
-        return {
-          ok: false, status: 403, cap: 'day_orders',
-          error: `Today's order count cap of ${limits.maxDayOrders} is already reached.`,
-        };
-      }
-      const spent = kalshiNotional(row);
-      if (!exit && spent + amount > limits.maxDayMicro) {
-        return {
-          ok: false, status: 403, cap: 'day_notional',
-          error: `Order notional $${formatUsd(amount)} would pass today's cap of $${formatUsd(limits.maxDayMicro)} ` +
-                 `(already $${formatUsd(spent)}).`,
-        };
-      }
-      save({ day: row.day, orders: row.orders + 1, notional: row.notional + amount, alpacaOpen: row.alpacaOpen,
-        alpacaNotional: row.alpacaNotional });
-      return { ok: true, day: row.day, micro: String(amount) };
+      return { ok: false, status: 403, cap: 'venue', error: 'Only the real Alpaca options account is metered here.' };
     },
 
     /**
@@ -233,6 +200,7 @@ export function createGate({ store, env = {}, now = Date.now }) {
      * write is an order until reconciliation says otherwise.
      */
     refund({ day, micro, opening = null, venue = null, at = now() }) {
+      if (venue !== 'alpaca') return { ok: false };
       const row = counters(at);
       if (row.day !== day) return { ok: false };
       const amount = BigInt(micro);
@@ -289,7 +257,6 @@ export function createGate({ store, env = {}, now = Date.now }) {
     },
 
     /** The last reading of the real accounts (`equity.readEquity`), or null. */
-    equity: () => read(store, equity.EQUITY_KEY, null),
 
     /** The last reading of the real Alpaca account's equity for the caps by maximum loss, or null (Sept 26, 2026, Wave 5). */
     accountEquity: () => accountReading(),
@@ -339,21 +306,9 @@ export function createGate({ store, env = {}, now = Date.now }) {
       };
     },
 
-    recordEquity(reading) {
-      const row = reading && typeof reading === 'object' ? reading : { ok: false, at: now(), error: 'no reading' };
-      const clean = row.ok === true && /^\d+$/.test(String(row.kalshi_micro)) && /^\d+$/.test(String(row.alpaca_micro))
-        ? { ok: true, at: Number(row.at), kalshi_micro: String(row.kalshi_micro), alpaca_micro: String(row.alpaca_micro) }
-        : { ok: false, at: Number(row.at) || now(), error: String(row.error || 'unreadable').slice(0, 200) };
-      write(store, equity.EQUITY_KEY, clean);
-      return clean;
-    },
-
-    /**
-     * The month's cap: FRONTIER_MONTH_USD raised by a share of verified profit on the real accounts
-     * (`equity.effectiveCap`), and exactly FRONTIER_MONTH_USD whenever that profit is not known.
-     */
+    // Compute credit is owner-funded and expires at its explicit UTC month boundary.
     frontierCap(at = now()) {
-      return equity.effectiveCap(env, this.equity(), at);
+      return { capMicro: monthCapMicro(env, at) };
     },
 
     frontierReserve({ micro, at = now() }) {
@@ -394,49 +349,6 @@ export function createGate({ store, env = {}, now = Date.now }) {
       return { ok: true, cost_usd: formatUsdMicro(cost) };
     },
 
-    // Pilot commitments never reset with a calendar period or a deployment. An accepted id
-    // is never sent upstream a second time, even after an interrupted/ambiguous response.
-    typesafeStatus() {
-      const row = read(store, TYPESAFE_KEY, { spent: '0', calls: 0, pending: 0, breaches: 0 });
-      return { ...row, spent_usd: typesafe.money(row.spent), cap_usd: typesafe.money(typesafe.capMicro(env)),
-        max_calls: typesafe.MAX_CALLS, persistent: env.TYPESAFE_PERSISTENT === 'true',
-        ends: env.TYPESAFE_PERSISTENT === 'true' ? null : env.TYPESAFE_PILOT_END || null, model: typesafe.MODEL };
-    },
-
-    typesafeReserve({ id, digest, at = now() }) {
-      if (typeof id !== 'string' || !/^[A-Za-z0-9:_-]{1,128}$/.test(id)
-          || typeof digest !== 'string' || !/^[a-f0-9]{64}$/.test(digest)) {
-        return { ok: false, status: 400, error: 'A stable request identity and digest are required.' };
-      }
-      const prior = read(store, `${TYPESAFE_KEY}:${id}`, null);
-      if (prior) return { ok: false, status: 409, error: prior.digest === digest
-        ? 'This request was already accepted; it will not be billed again.' : 'This request identity has different content.' };
-      const end = Date.parse(env.TYPESAFE_PILOT_END || '');
-      const cap = typesafe.capMicro(env), row = this.typesafeStatus();
-      const windowOpen = env.TYPESAFE_PERSISTENT === 'true' || (Number.isFinite(end) && at < end);
-      if (!windowOpen || cap <= 0n || row.breaches
-          || row.calls >= typesafe.MAX_CALLS || BigInt(row.spent) + typesafe.RESERVATION_MICRO > cap) {
-        return { ok: false, status: 402, cap: 'typesafe_pilot', error: 'The funded TypeSafe pilot allowance is unavailable.' };
-      }
-      write(store, TYPESAFE_KEY, { spent: String(BigInt(row.spent) + typesafe.RESERVATION_MICRO),
-        calls: row.calls + 1, pending: row.pending + 1, breaches: row.breaches });
-      write(store, `${TYPESAFE_KEY}:${id}`, { digest, at, status: 'pending' });
-      return { ok: true, id, reserved: String(typesafe.RESERVATION_MICRO) };
-    },
-
-    typesafeSettle({ id, actual }) {
-      const request = read(store, `${TYPESAFE_KEY}:${id}`, null);
-      if (!request || request.status !== 'pending') return { ok: false };
-      const cost = actual === null || actual === undefined ? typesafe.RESERVATION_MICRO : BigInt(actual);
-      if (cost < 0n) return { ok: false };
-      const row = this.typesafeStatus();
-      write(store, TYPESAFE_KEY, { spent: String(BigInt(row.spent) - typesafe.RESERVATION_MICRO + cost),
-        calls: row.calls, pending: row.pending - 1,
-        breaches: row.breaches + (cost > typesafe.RESERVATION_MICRO ? 1 : 0) });
-      write(store, `${TYPESAFE_KEY}:${id}`, { ...request, status: actual === null || actual === undefined ? 'unknown' : 'settled', cost: String(cost) });
-      return { ok: true, cost_usd: typesafe.money(cost), cost_known: actual !== null && actual !== undefined };
-    },
-
     /**
      * Pull requests opened today. The day is a UTC calendar day, GitHub's own, and starts at
      * zero. `pullReserve` takes one of the day's places or refuses, in the same step, so two
@@ -463,33 +375,6 @@ export function createGate({ store, env = {}, now = Date.now }) {
       if (day !== iso(at).slice(0, 10)) return { ok: false };
       write(store, PULLS_KEY, { day, count: Math.max(0, this.pullsToday(at) - 1) });
       return { ok: true };
-    },
-
-    /**
-     * Pages research read today through `/v1/web/fetch` (lib/fetch.mjs), the floor's UTC day: the
-     * count, and by agent. `webFetchReserve` takes one of the day's `DAY_CAP` places or refuses, in
-     * the same step. The kill switch is not consulted: a page moves no money.
-     */
-    webFetchDay(at = now()) {
-      const day = iso(at).slice(0, 10);
-      const row = read(store, WEB_FETCH_KEY, {});
-      return row.day === day
-        ? { day, count: Number(row.count) || 0, by_agent: row.by_agent && typeof row.by_agent === 'object' ? row.by_agent : {} }
-        : { day, count: 0, by_agent: {} };
-    },
-
-    webFetchReserve({ at = now(), agent = null } = {}) {
-      const row = this.webFetchDay(at);
-      if (row.count + 1 > webFetchDayCap) {
-        return { ok: false, status: 429, cap: 'web_fetch_day', error: `Today's cap of ${webFetchDayCap} web fetches is already reached.` };
-      }
-      const by = { ...row.by_agent };
-      const name = typeof agent === 'string' && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(agent) ? agent : 'unattributed';
-      // Bounded: past 200 names a day, the rest are counted together.
-      const key = Object.hasOwn(by, name) || Object.keys(by).length < 200 ? name : 'other';
-      by[key] = (Number(by[key]) || 0) + 1;
-      write(store, WEB_FETCH_KEY, { day: row.day, count: row.count + 1, by_agent: by });
-      return { ok: true, day: row.day, count: row.count + 1 };
     },
 
     watchdog: () => read(store, WATCHDOG_KEY, { last_check_at: null, last_action: null, last_action_at: null }),
@@ -549,7 +434,7 @@ export function createGate({ store, env = {}, now = Date.now }) {
     /** True once the day's own caps leave no room for another order. */
     capsExhausted(at = now()) {
       const row = counters(at);
-      return row.orders >= limits.maxDayOrders || kalshiNotional(row) >= limits.maxDayMicro || realDaySpent(row, at);
+      return row.orders >= limits.maxDayOrders || realDaySpent(row, at);
     },
 
     /** The `/v1/health` body. */
@@ -563,17 +448,15 @@ export function createGate({ store, env = {}, now = Date.now }) {
         today: { day: row.day, orders: row.orders, notional_usd: formatUsd(row.notional) },
         notices_today: this.noticesToday(at),
         caps: {
-          max_order_usd: formatUsd(limits.maxOrderMicro),
-          max_day_usd: formatUsd(limits.maxDayMicro),
           max_day_orders: limits.maxDayOrders,
           timezone: limits.timezone,
         },
-        caps_exhausted: row.orders >= limits.maxDayOrders || kalshiNotional(row) >= limits.maxDayMicro || realDaySpent(row, at),
+        caps_exhausted: row.orders >= limits.maxDayOrders || realDaySpent(row, at),
         // The caps by maximum loss on the real Alpaca venue, as they stand now (Sept 26, 2026, Wave 5).
         max_loss: this.maxLossStatus(at),
         frontier: (() => {
           const month = this.frontierMonth(at);
-          const { capMicro, parts } = this.frontierCap(at);
+          const { capMicro } = this.frontierCap(at);
           const previous = this.frontierPrevious(at);
           return {
             // `cap_usd` is the cap in force (the House mirrors it); `profit_index` says how it was reached.
@@ -583,16 +466,11 @@ export function createGate({ store, env = {}, now = Date.now }) {
             settled_usd: formatUsdMicro(month.spent > month.inflight ? month.spent - month.inflight : 0n),
             inflight_usd: formatUsdMicro(month.inflight),
             previous: previous ? { month: previous.month, spent_usd: formatUsd(previous.spent), settled_usd: formatUsdMicro(previous.settled) } : null,
-            base_cap_usd: formatUsd(monthCapMicro(env, at)), profit_index: parts,
+            base_cap_usd: formatUsd(monthCapMicro(env, at)),
             by_agent: Object.fromEntries(Object.entries(month.agents).map(([name, value]) => [name, formatUsd(BigInt(value))])),
           };
         })(),
-        typesafe: this.typesafeStatus(),
         github: { day: iso(at).slice(0, 10), pull_requests: this.pullsToday(at), cap: pullDayCap(env) },
-        web_fetch: (() => {
-          const row = this.webFetchDay(at);
-          return { day: row.day, fetches: row.count, cap: webFetchDayCap, by_agent: row.by_agent };
-        })(),
         watchdog: {
           last_check_at: watch.last_check_at ?? null,
           last_action: watch.last_action ?? null,

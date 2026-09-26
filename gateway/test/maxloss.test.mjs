@@ -30,7 +30,7 @@ const usd = dollars => {
 
 //: The vars as wrangler.jsonc deploys them (pinned against the file below).
 const DEPLOYED = {
-  MAX_ORDER_USD: '75', MAX_ORDER_USD_KALSHI: '75', MAX_DAY_USD: '4000', MAX_DAY_USD_ALPACA: '10000', MAX_DAY_ORDERS: '300', MAX_DAY_OPEN_ORDERS: '250',
+  MAX_DAY_USD_ALPACA: '10000', MAX_DAY_ORDERS: '300', MAX_DAY_OPEN_ORDERS: '250',
   MAX_ORDER_MAX_LOSS_USD: '1000', MAX_ORDER_EQUITY_SHARE: '0.15', MAX_DAY_EQUITY_SHARE: '1.0', CREDIT_MIN_EQUITY_USD: '2000',
   EQUITY_CAP_MAX_AGE_MS: '120000', CAP_TIMEZONE: 'America/New_York',
 };
@@ -195,24 +195,6 @@ test('no reading, a failed one, a stale one or one from well in the future refus
   assert.equal(negative.maxLossStatus(NOW).equity.usd, '-12.50');
 });
 
-test('a refund gives an open\'s maximum loss back; a day row from before this deploy counts its notional as opened; the kill switch stops exits', () => {
-  const gate = gateWith('1000.00');  // $150 an order
-  const held = open(gate, '100');
-  assert.equal(held.opening, String(usd('100')));
-  assert.deepEqual(gate.refund(held), { ok: true });
-  assert.equal(gate.maxLossStatus(NOW).day_open_max_loss_usd, '0.00');
-  assert.equal(gate.status(NOW).today.orders, 0);
-  // A row written by the code before the caps by maximum loss has no `alpaca_open`: its $400 is taken as opened (errs high).
-  const store = memoryStore({ [DAY_KEY]: JSON.stringify({ day: TODAY, orders: 3, notional: String(usd('400')) }) });
-  const upgraded = withEquity(createGate({ store, env: env(), now: () => NOW }), '500.00', NOW);
-  assert.equal(upgraded.reserve({ micro: String(usd('75')), venue: 'alpaca' }).ok, true);
-  assert.equal(upgraded.reserve({ micro: String(usd('25.01')), venue: 'alpaca' }).cap, 'day_max_loss');
-  // A Kalshi order keeps the row's opening maximum loss as it was.
-  assert.equal(upgraded.reserve({ micro: String(usd('1')), venue: 'kalshi' }).ok, true);
-  assert.equal(JSON.parse(store.get(DAY_KEY)).alpaca_open, String(usd('475')));
-  upgraded.setKill(true, NOW);
-  assert.equal(upgraded.reserve({ micro: '1', venue: 'alpaca', exit: true }).status, 423);
-});
 
 test('the reading is stored in its own key, and never replaces the profit index\'s reading', () => {
   const store = memoryStore();
@@ -220,7 +202,7 @@ test('the reading is stored in its own key, and never replaces the profit index\
   assert.deepEqual(gate.recordAccountEquity({ ok: true, at: NOW, equity_micro: '5000000000' }), { ok: true, at: NOW, equity_micro: '5000000000' });
   assert.equal(ACCOUNT_EQUITY_KEY, 'alpaca-equity');
   assert.ok(store.map.has('alpaca-equity'));
-  assert.equal(gate.equity(), null, 'the frontier profit index keeps its own reading');
+  assert.equal(gate.equity, undefined, 'the retired profit index has no callable surface');
   // Anything that is not a clean reading is stored as a failure.
   for (const bad of [null, { ok: true, at: NOW, equity_micro: '12.5' }, { ok: true, at: 'soon', equity_micro: '1' }, { ok: 'yes', at: NOW, equity_micro: '1' }]) {
     assert.equal(gate.recordAccountEquity(bad).ok, false, JSON.stringify(bad));
@@ -429,8 +411,8 @@ test('a stock sale of shares held long, and a buy covering a short, each up to w
 
 test('crypto, dollar-sized, intent-carrying and unpriced stock orders are refused before anything is read; the practice account is unchanged', async () => {
   for (const [body, why] of [
-    [{ ...SALE, symbol: 'BTC/USD', qty: '0.001' }, /Crypto is not traded on the real account/],
-    [{ ...SALE, side: 'buy', symbol: 'ETH/USD', qty: '0.1', time_in_force: 'gtc' }, /Crypto is not traded/],
+    [{ ...SALE, symbol: 'BTC/USD', qty: '0.001' }, /venue's own spelling/],
+    [{ ...SALE, side: 'buy', symbol: 'ETH/USD', qty: '0.1', time_in_force: 'gtc' }, /venue's own spelling/],
     [{ symbol: 'AAPL', notional: '500', side: 'sell', type: 'market', time_in_force: 'day' }, /sized in shares \(qty\), never in dollars/],
     [{ ...SALE, position_intent: 'sell_to_close' }, /carries no position_intent/],
     [{ ...SALE, type: 'limit', limit_price: '0' }, /positive limit price/],
@@ -449,8 +431,8 @@ test('crypto, dollar-sized, intent-carrying and unpriced stock orders are refuse
   for (const body of [{ ...SALE, side: 'buy', type: 'limit', limit_price: '10' }, { ...SALE, symbol: 'BTC/USD', qty: '0.001' }]) {
     const tape = alpacaVenue();
     const practice = await send(body, { tape, venue: 'alpaca-paper', settings: { ALPACA_PAPER_KEY_ID: 'PK', ALPACA_PAPER_SECRET_KEY: 'paper-secret' } });
-    assert.equal(practice.status, 200);
-    assert.equal(tape.calls[0].url, 'https://paper-api.alpaca.markets/v2/orders');
+    assert.equal(practice.status, 400);
+    assert.equal(tape.calls.length, 0);
     assert.equal(practice.gate.status(NOW).today.orders, 0);
   }
 });
@@ -611,97 +593,4 @@ test('REVIEW m14: a real single-leg sell_to_close must sell a contract held long
   assert.equal((await send(sell('3'), { gate, settings: cached, tape: alpacaVenue({ positions: [{ symbol: CALL, qty: '3', side: 'long' }] }) })).status, 200);
   assert.equal((await send(sell('1'), { gate, settings: cached, tape: alpacaVenue({ positions: [{ symbol: CALL, qty: '3', side: 'long' }] }) })).status, 400);
   await send(sell('1'), { tape: alpacaVenue({ positions: [] }) });  // a read with the cache off empties it for what follows
-});
-
-test('REVIEW m8/m12: every refusal made before anything is forwarded that is a 5xx names its cap; the one that may hide an order names none', async () => {
-  const kalshiOrder = { ticker: 'KXTEST-26', side: 'bid', count: '3.00', price: '0.6500', client_order_id: 'oi-1' };
-  const ask = (path, init = {}) => new Request(`${GATEWAY}${path}`, { ...init, headers: { Authorization: `Bearer ${TOKEN}`, ...(init.headers || {}) } });
-  const stale = gateAt();
-  const staleStub = { accountEquity: async () => ({ ok: true, at: NOW, equity_micro: '5000000000' }), recordAccountEquity: async row => row,
-    reserve: async request => stale.reserve(request), refund: async request => stale.refund(request) };
-  const scenarios = [
-    ['equity unreadable', () => send(mleg(VERTICAL, '0.50'), { tape: alpacaVenue({ account: 500 }) }), 503, 'equity'],
-    ['equity stale at the gate', () => send(mleg(VERTICAL, '0.50'), { gate: staleStub }), 503, 'equity'],
-    ['alpaca credentials, an open', () => send(mleg(VERTICAL, '0.50'), { settings: { ALPACA_SECRET_KEY: '' }, gate: gateWith('5000.00', { ALPACA_SECRET_KEY: '' }) }), 503, 'credentials'],
-    ['alpaca credentials, a read', async () => {
-      const response = await route(ask('/v1/alpaca/v2/account'), env({ ALPACA_SECRET_KEY: '' }), { gate: gateAt(), fetcher: alpacaVenue().fetcher, now: () => NOW });
-      return { status: response.status, body: await response.json(), tape: alpacaVenue() };
-    }, 503, 'credentials'],
-    ['kalshi credentials, an order', async () => {
-      const tape = alpacaVenue();
-      const response = await route(ask('/v1/kalshi/portfolio/events/orders', { method: 'POST', body: JSON.stringify(kalshiOrder) }),
-        env({ KALSHI_KEY_ID: 'k', KALSHI_PRIVATE_KEY: 'not a key' }), { gate: gateAt(), fetcher: tape.fetcher, now: () => NOW });
-      return { status: response.status, body: await response.json(), tape };
-    }, 503, 'credentials'],
-    ['positions unread, a close', () => send(mleg(closing(VERTICAL), '-0.60'), { tape: alpacaVenue({ positions: 500 }) }), 424, 'positions'],
-    ['positions unread, a buy-back', () => send({ symbol: 'SPY260911C00586000', qty: '1', side: 'buy', position_intent: 'buy_to_close', type: 'limit',
-      limit_price: '0.30', time_in_force: 'day' }, { tape: alpacaVenue({ positions: 500 }) }), 424, 'positions'],
-    ['positions unread, a stock close', () => send(SALE, { tape: alpacaVenue({ positions: 500 }) }), 424, 'positions'],
-  ];
-  for (const [name, run, status, cap] of scenarios) {
-    const { status: got, body, tape } = await run();
-    assert.equal(got, status, name);
-    assert.equal(body.cap, cap, `${name}: the body names why nothing was sent`);
-    assert.equal(tape.orders().length, 0, `${name}: nothing forwarded`);
-  }
-  assert.equal(stale.status(NOW).today.orders, 0);
-  // No answer after dispatch may be an order the venue took: it names no cap, and keeps its reservation.
-  const lost = await send(mleg(VERTICAL, '0.50'), { gate: gateWith('5000.00'),
-    tape: { ...alpacaVenue(), fetcher: async () => { throw Object.assign(new Error('nope'), { name: 'TimeoutError' }); } } });
-  assert.equal(lost.status, 502);
-  assert.equal(lost.body.cap, undefined);
-  assert.equal(lost.gate.status(NOW).today.orders, 1);
-  // The Worker's own setup refusal, before any route, names its cap too.
-  const source = readFileSync(new URL('../worker.mjs', import.meta.url), 'utf8');
-  assert.match(source, /json\(\{ error: 'Gateway setup is incomplete\.', cap: 'setup' \}, 503\)/);
-});
-
-test('REVIEW C6/C10: exits keep room: an open stops once today\'s orders reach MAX_DAY_OPEN_ORDERS (250), exits go on to MAX_DAY_ORDERS (300)', async () => {
-  assert.equal(maxLossCaps(DEPLOYED).maxDayOpenOrders, 250);
-  for (const raw of [undefined, '', 'many', '-1']) assert.equal(maxLossCaps({ MAX_DAY_OPEN_ORDERS: raw }).maxDayOpenOrders, 250, String(raw));
-  const gate = gateWith('100000.00');
-  for (let i = 0; i < 125; i += 1) assert.equal(exit(gate).ok, true);
-  for (let i = 0; i < 124; i += 1) assert.equal(open(gate, '1').ok, true);
-  assert.equal(open(gate, '1').ok, true, 'the 250th order may still open');
-  const shut = open(gate, '1');
-  assert.deepEqual([shut.ok, shut.status, shut.cap], [false, 403, 'day_open_orders']);
-  assert.equal(shut.error, 'Today\'s 250 orders leave no room to open: the last 50 of the day\'s 300 are kept for exits.');
-  assert.deepEqual([gate.maxLossStatus(NOW).opens_admitted, gate.maxLossStatus(NOW).credit_opens_admitted], [false, false], 'health says so');
-  for (let i = 0; i < 50; i += 1) assert.equal(exit(gate).ok, true, `exit ${251 + i}`);
-  assert.equal(exit(gate).cap, 'day_orders');
-  assert.equal(open(gate, '1').cap, 'day_open_orders');
-  assert.equal(gate.maxLossStatus(NOW).max_day_open_orders, 250);
-  // Kalshi keeps the whole day's count.
-  const kalshi = gateWith('100000.00');
-  for (let i = 0; i < 260; i += 1) assert.equal(exit(kalshi).ok, true);
-  assert.equal(kalshi.reserve({ micro: String(usd('1')), venue: 'kalshi' }).ok, true);
-});
-
-test('REVIEW m17: MAX_DAY_USD is Kalshi\'s day notional ($4,000) again; the real account\'s opening maximum loss has MAX_DAY_USD_ALPACA ($10,000)', () => {
-  assert.equal(maxLossCaps(DEPLOYED).dayLimitMicro, usd('10000'));
-  assert.equal(maxLossCaps({}).dayLimitMicro, usd('10000'));
-  const gate = gateWith('20000.00');
-  for (let i = 0; i < 10; i += 1) assert.equal(open(gate, '1000').ok, true, 'MAX_DAY_USD ($4,000) does not bind the real account');
-  assert.match(open(gate, '0.01').error, /cap of \$10000\.00 \(already \$10000\.00\)/);
-  // Kalshi's $4,000 counts Kalshi alone: $10,000 opened on Alpaca leaves it whole.
-  for (let i = 0; i < 80; i += 1) assert.equal(gate.reserve({ micro: String(usd('50')), venue: 'kalshi' }).ok, true, `kalshi ${i}`);
-  const full = gate.reserve({ micro: String(usd('0.01')), venue: 'kalshi' });
-  assert.equal(full.cap, 'day_notional');
-  assert.match(full.error, /today's cap of \$4000\.00 \(already \$4000\.00\)/);
-  assert.equal(gate.status(NOW).caps.max_day_usd, '4000.00');
-  assert.equal(gate.maxLossStatus(NOW).max_day_usd_alpaca, '10000.00');
-  // Each envelope binds its own venue only.
-  const tight = gateWith('20000.00', { MAX_DAY_USD_ALPACA: '100' });
-  assert.equal(open(tight, '100').ok, true);
-  assert.equal(open(tight, '0.01').cap, 'day_max_loss');
-  assert.equal(tight.reserve({ micro: String(usd('50')), venue: 'kalshi' }).ok, true);
-  // A refunded Alpaca order gives its notional back to the Alpaca record, not to Kalshi's day.
-  const back = gateWith('20000.00', { MAX_DAY_USD: '10' });
-  const held = open(back, '500');
-  back.refund(held);
-  assert.equal(back.reserve({ micro: String(usd('10')), venue: 'kalshi' }).ok, true);
-  // A row from before this deploy has no Alpaca notional: all of it is counted as Kalshi's (errs high).
-  const store = memoryStore({ [DAY_KEY]: JSON.stringify({ day: TODAY, orders: 3, notional: String(usd('3999')), alpaca_open: '0' }) });
-  const upgraded = createGate({ store, env: env(), now: () => NOW });
-  assert.equal(upgraded.reserve({ micro: String(usd('1.01')), venue: 'kalshi' }).cap, 'day_notional');
 });

@@ -126,6 +126,16 @@ class ReadHealthTest(Case):
         self.assertEqual(health.reasons, ("the alpaca-paper book is frozen: cash differs by 12.5000",))
         self.assertEqual(health.detail["books"]["alpaca-paper"], "cash differs by 12.5000")
 
+    def test_the_current_live_options_freeze_is_not_hidden_by_absent_legacy_books(self):
+        write_health(self.root, self.clock, options_live={"frozen": "unknown option inventory"})
+        path = self.root / "health.json"
+        body = json.loads(path.read_text())
+        body.pop("books")
+        path.write_text(json.dumps(body))
+        health = self.read()
+        self.assertFalse(health.ok)
+        self.assertTrue(any("unknown option inventory" in reason for reason in health.reasons))
+
     def test_more_than_half_the_agents_gone(self):
         write_health(self.root, self.clock, living=10, seq=1)
         first = self.read()
@@ -1103,10 +1113,10 @@ class TheEnvironmentClassifier(unittest.TestCase):
         import urllib.error
 
         from league.publish import PublishError
-        from league.sandbox import SandboxError
-        from ltcm.data import TransportError as DataTransportError
-        from ltcm.provider import TransportError as ProviderTransportError
-        from ltcm.sailbox import SailboxError
+        from league.gym.driver import GymError as SandboxError
+        from league.data import TransportError as DataTransportError
+        from league.provider import TransportError as ProviderTransportError
+        from league.sailbox import SailboxError
 
         sail_503 = SailboxError("sailbox api 503: prepare checkpoint warm snapshot: rpc error: code = DeadlineExceeded", status=503)
         for exc in (
@@ -1142,9 +1152,9 @@ class TheEnvironmentClassifier(unittest.TestCase):
         import urllib.error
 
         from league.publish import PublishError
-        from league.sandbox import SandboxError
-        from ltcm.provider import TransportError as ProviderTransportError
-        from ltcm.sailbox import SailboxError
+        from league.gym.driver import GymError as SandboxError
+        from league.provider import TransportError as ProviderTransportError
+        from league.sailbox import SailboxError
 
         sail_503 = SailboxError("sailbox api 503", status=503)
         for exc in (
@@ -1182,9 +1192,9 @@ class TheEnvironmentClassifier(unittest.TestCase):
         those are still judged by it."""
         import errno
 
-        from league.book import BookError
-        from league.sandbox import SandboxError
-        from ltcm.sailbox import SailboxError
+        BookError = RuntimeError
+        from league.gym.driver import GymError as SandboxError
+        from league.sailbox import SailboxError
 
         for exc in (
             raised(lambda: RuntimeError("dictionary changed size during iteration"), inside=ConnectionResetError(errno.ECONNRESET, "reset")),

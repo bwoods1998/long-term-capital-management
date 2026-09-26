@@ -151,7 +151,7 @@ class Snapshot:
 
 
 class ChainView:
-    """One root's chain slice at one minute (PROGRAM.md, "ctx.chain"). Arrays, one entry a contract,
+    """One root's chain slice at one minute (league/CONTRACT.md, "ctx.chain"). Arrays, one entry a contract,
     sorted by expiry, strike, call before put: `id` (the contract's id today: name it in a leg as
     {"id": ...}), `dte`, `strike`, `is_call`, `bid`, `ask`, `mid`, `spread`, `bid_size`, `ask_size`,
     `oi`; computed on first read: `iv`, `delta`, `gamma`, `theta` (a calendar day), `vega` (a vol
@@ -214,7 +214,7 @@ class ChainView:
 
 
 class UnderlyingView:
-    """The underlying of one root (PROGRAM.md, "ctx.under"): `price` now; today's one-minute `prices`
+    """The underlying of one root (league/CONTRACT.md, "ctx.under"): `price` now; today's one-minute `prices`
     from the open to now; `open`, `high`, `low` of today so far; the prior sessions (oldest first,
     up to NEEDS["history"]) as `closes`, `opens`, `highs`, `lows`; `prior_close`."""
 
@@ -271,7 +271,7 @@ def parity_spot(dte: Any, strike: Any, is_call: Any, mid: Any, near: float, *, s
 
 
 class Ctx:
-    """What decide(ctx) receives (PROGRAM.md). Read its attributes; never assign them."""
+    """What decide(ctx) receives (league/CONTRACT.md). Read its attributes; never assign them."""
 
     __slots__ = ("minute", "open_minute", "close_minute", "minutes_to_close", "weekday", "events", "events_next",
                  "roots", "root", "chains", "chain", "underlyings", "under", "positions", "orders", "closed", "rejects",

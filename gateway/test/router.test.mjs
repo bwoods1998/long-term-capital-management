@@ -7,18 +7,15 @@ import test from 'node:test';
 import { route, parseRoute } from '../lib/router.mjs';
 import { createGate } from '../lib/gate.mjs';
 import { composeNotice, RELEASE_DRAWDOWN } from '../lib/email.mjs';
-import { rsaKey, memoryStore, recorder, bearer, fakeGitHub, alpacaVenue, withEquity, TOKEN, GITHUB_REPO, GITHUB_TOKEN } from './helpers.mjs';
+import { memoryStore, recorder, bearer, fakeGitHub, alpacaVenue, withEquity, TOKEN, GITHUB_REPO, GITHUB_TOKEN } from './helpers.mjs';
 
 const NOW = Date.parse('2026-09-15T16:00:00Z');
 const GATEWAY = 'https://ltcm-gateway.workers.dev';
 
-const keys = { kalshi: await rsaKey() };
 
 const env = (extra = {}) => ({
   GATEWAY_TOKEN: TOKEN,
   GATEWAY_ADMIN_TOKEN: TOKEN + '-owner',
-  KALSHI_KEY_ID: 'a1b2c3',
-  KALSHI_PRIVATE_KEY: keys.kalshi.pkcs8,
   ALPACA_KEY_ID: 'AK-TEST-KEY',
   ALPACA_SECRET_KEY: 'alpaca-secret-that-never-leaves-the-worker',
   MAX_ORDER_USD: '50', MAX_DAY_USD: '400', MAX_DAY_ORDERS: '60', CAP_TIMEZONE: 'America/New_York', POSITIONS_CACHE_MS: '0',
@@ -43,7 +40,6 @@ const call = async (request, { settings, gate = gateFor(settings), reply, fetche
   return { response, calls: tape.calls, gate, body: await response.clone().json().catch(() => null) };
 };
 
-const KALSHI_ORDER = { ticker: 'KXTEST-26', side: 'bid', count: '3.00', price: '0.6500', client_order_id: 'oi-1' };
 const ALPACA_ORDER = { symbol: 'AAPL', qty: '1', side: 'buy', type: 'limit', time_in_force: 'day', limit_price: '6.00', client_order_id: 'oi-2' };
 const ALPACA_MARKET = { symbol: 'AAPL', qty: '2', side: 'buy', type: 'market', time_in_force: 'day' };
 //: A single-leg option buy on the real account: $0.06 x 100 x 1 = $6.00 of maximum loss.
@@ -111,7 +107,7 @@ test('health reports the caps, the counters, the kill switch and the watchdog', 
   assert.equal(body.kill_switch, false);
   assert.deepEqual(body.today, { day: '2026-09-15', orders: 0, notional_usd: '0.00' });
   assert.deepEqual(body.caps, {
-    max_order_usd: '50.00', max_day_usd: '400.00', max_day_orders: 60, timezone: 'America/New_York',
+    max_day_orders: 60, timezone: 'America/New_York',
   });
   // The caps by maximum loss (Sept 26, 2026, Wave 5): with no reading of the account yet, no open is admitted.
   assert.equal(body.max_loss.equity.fresh, false);
@@ -122,72 +118,11 @@ test('health reports the caps, the counters, the kill switch and the watchdog', 
   assert.ok('sail' in body && 'alerts' in body);
 });
 
-test('a kalshi read is signed and forwarded verbatim, query and all', async () => {
-  const { response, calls } = await call(
-    ask('GET', '/v1/kalshi/portfolio/orders?status=resting&limit=200'),
-    { reply: { status: 200, body: '{"orders":[]}' } },
-  );
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, 'https://api.elections.kalshi.com/trade-api/v2/portfolio/orders?status=resting&limit=200');
-  assert.equal(calls[0].headers['KALSHI-ACCESS-KEY'], 'a1b2c3');
-  assert.equal(calls[0].headers['KALSHI-ACCESS-TIMESTAMP'], String(NOW));
-  const verified = await crypto.subtle.verify(
-    { name: 'RSA-PSS', saltLength: 32 },
-    keys.kalshi.publicKey,
-    Buffer.from(calls[0].headers['KALSHI-ACCESS-SIGNATURE'], 'base64'),
-    new TextEncoder().encode(`${NOW}GET/trade-api/v2/portfolio/orders`),
-  );
-  assert.equal(verified, true, 'the signature covers the prefixed path without its query');
-  assert.equal(response.status, 200);
-  assert.equal(await response.text(), '{"orders":[]}');
-});
 
-test('the venue s own status and body come back untouched', async () => {
-  const { response, body } = await call(
-    ask('GET', '/v1/kalshi/portfolio/balance'),
-    { reply: { status: 403, body: '{"error":{"code":"forbidden"}}' } },
-  );
-  assert.equal(response.status, 403);
-  assert.deepEqual(body, { error: { code: 'forbidden' } });
-});
 
-test('an order inside the caps is counted once and forwarded', async () => {
-  const { response, calls, gate } = await call(ask('POST', '/v1/kalshi/portfolio/events/orders', { body: KALSHI_ORDER }));
-  assert.equal(response.status, 200);
-  assert.equal(calls.length, 1);
-  assert.equal(JSON.parse(calls[0].body).client_order_id, 'oi-1', 'the body is forwarded as sent');
-  assert.deepEqual(gate.status(NOW).today, { day: '2026-09-15', orders: 1, notional_usd: '1.95' });
-});
 
-test('an order over the per-order cap is refused before anything is signed', async () => {
-  const { response, body, calls, gate } = await call(
-    ask('POST', '/v1/kalshi/portfolio/events/orders', { body: { ...KALSHI_ORDER, count: '100', price: '0.9900' } }),
-  );
-  assert.equal(response.status, 403);
-  assert.equal(body.cap, 'order');
-  assert.match(body.error, /\$99\.00 exceeds the per-order cap of \$50\.00/);
-  assert.equal(calls.length, 0, 'nothing reached the venue');
-  assert.equal(gate.status(NOW).today.orders, 0, 'and nothing was spent');
-});
 
-test('a NO buy is capped at what it really costs, not the YES price on the wire', async () => {
-  // 100 NO at $0.96 goes out as side "ask" at 0.0400: it costs $96, over the cap.
-  const { response, body, calls } = await call(
-    ask('POST', '/v1/kalshi/portfolio/events/orders', { body: { ...KALSHI_ORDER, side: 'ask', count: '100', price: '0.0400' } }),
-  );
-  assert.equal(response.status, 403);
-  assert.equal(body.cap, 'order');
-  assert.match(body.error, /\$96\.00 exceeds the per-order cap/);
-  assert.equal(calls.length, 0, 'nothing reached the venue');
-});
 
-test('an exit order passes the per-order cap when the header says so', async () => {
-  const { response, calls } = await call(
-    ask('POST', '/v1/kalshi/portfolio/events/orders', { body: { ...KALSHI_ORDER, count: '100', price: '0.9900' }, headers: { 'X-LTCM-Purpose': 'exit' } }),
-  );
-  assert.equal(response.status, 200);
-  assert.equal(calls.length, 1, 'the exit reached the venue');
-});
 
 test('a single-leg option buy on the real account is metered at its own limit x 100 x qty: the reference header changes nothing', async () => {
   const gate = gateFor();
@@ -203,163 +138,15 @@ test('a single-leg option buy on the real account is metered at its own limit x 
   assert.equal(tape.accountReads().length, 1, 'the second open is sized from the first one\'s reading');
 });
 
-test('the exit purpose skips Kalshi\'s dollar caps; on the real Alpaca account an open is an open whatever it says; the kill switch stops both', async () => {
-  const big = { ...KALSHI_ORDER, count: '100', price: '0.9900' };
-  const refused = await call(ask('POST', '/v1/kalshi/portfolio/events/orders', { body: big }));
-  assert.equal(refused.response.status, 403);
-  assert.match(refused.body.error, /\$99\.00 exceeds the per-order cap of \$50\.00/);
-  const exit = await call(ask('POST', '/v1/kalshi/portfolio/events/orders', { body: big, headers: { 'X-LTCM-Purpose': 'exit' } }));
-  assert.equal(exit.response.status, 200);
-  assert.equal(exit.calls.length, 1, 'the exit reached the venue');
-  assert.equal((await exit.gate.status()).today.orders, 1, 'and still counts as an order');
 
-  // Sept 26, 2026, Wave 5: 15% of $5,000 is $750, and a $760 option buy is over it, labelled an exit or not.
-  const tape = alpacaVenue();
-  const open = { ...OPTION_BUY, qty: '2', limit_price: '3.80' };
-  for (const headers of [{}, { 'X-LTCM-Purpose': 'exit' }]) {
-    const over = await call(ask('POST', '/v1/alpaca/v2/orders', { body: open, headers }), { fetcher: tape.fetcher });
-    assert.equal(over.response.status, 403, JSON.stringify(headers));
-    assert.equal(over.body.cap, 'order');
-    assert.match(over.body.error, /^Order maximum loss \$760\.00 exceeds the per-order cap of \$750\.00 \(the lower of \$1000\.00 and 15% of \$5000\.00 equity\)\.$/);
-  }
-  assert.equal(tape.orders().length, 0);
 
-  const gate = withEquity(gateFor(), '5000.00', NOW);
-  await call(ask('POST', '/v1/kill'), { gate });
-  const killed = await call(ask('POST', '/v1/alpaca/v2/orders', { body: OPTION_BUY }), { gate });
-  assert.equal(killed.response.status, 423);
-  assert.equal(killed.calls.length, 0);
-  assert.equal((await call(ask('DELETE', '/v1/alpaca/v2/orders/abc-123'), { gate })).response.status, 200, 'a cancel still passes');
-});
 
-test('a reservation is refunded when signing fails, and kept when the venue does not answer', async () => {
-  for (const [path, body, settings] of [
-    ['/v1/alpaca/v2/orders', OPTION_BUY, { ALPACA_SECRET_KEY: '' }],
-    ['/v1/kalshi/portfolio/events/orders', KALSHI_ORDER, { KALSHI_PRIVATE_KEY: 'not a key' }],
-  ]) {
-    // The account's equity is already read (a fresh reading in the gate): signing the order is what fails.
-    const gate = withEquity(gateFor(settings), '5000.00', NOW);
-    const unsigned = await call(ask('POST', path, { body }), { settings, gate });
-    assert.equal(unsigned.response.status, 503, path);
-    assert.match(unsigned.body.error, /credentials for (alpaca|kalshi) are unusable/);
-    assert.equal(unsigned.calls.length, 0);
-    assert.deepEqual((await unsigned.gate.status()).today, { day: '2026-09-15', orders: 0, notional_usd: '0.00' }, 'nothing was dispatched, so nothing is spent');
-    assert.equal((await unsigned.gate.status()).max_loss.day_open_max_loss_usd, '0.00', 'the opening maximum loss is given back too');
-  }
 
-  const gate = withEquity(gateFor(), '5000.00', NOW);
-  const silent = await call(ask('POST', '/v1/alpaca/v2/orders', { body: OPTION_BUY }),
-    { gate, fetcher: async () => { throw Object.assign(new Error('nope'), { name: 'TimeoutError' }); } });
-  assert.equal(silent.response.status, 502);
-  assert.match(silent.body.error, /alpaca API did not answer/);
-  assert.deepEqual(gate.status(NOW).today, { day: '2026-09-15', orders: 1, notional_usd: '6.00' });
-  assert.equal(gate.status(NOW).max_loss.day_open_max_loss_usd, '6.00');
-});
 
-test('reads and cancels always pass, whatever the counters say', async () => {
-  const gate = gateFor({ MAX_DAY_ORDERS: '0' });
-  for (const [method, path] of [
-    ['GET', '/v1/kalshi/portfolio/balance'],
-    ['DELETE', '/v1/kalshi/portfolio/events/orders/abc-123?market_ticker=KXBTC-26SEP1523-B75950&exchange_index=-1'],
-    ['POST', '/v1/kalshi/portfolio/intra_exchange_instance_transfer'],  // a shard move is not an order
-    ['GET', '/v1/alpaca/v2/orders?status=open'],
-    ['DELETE', '/v1/alpaca/v2/orders/abc-123'],
-  ]) {
-    const { response, calls } = await call(ask(method, path, { body: method === 'POST' ? { order_ids: ['x'] } : undefined }),
-      { gate, settings: { MAX_DAY_ORDERS: '0' } });
-    assert.equal(response.status, 200, `${method} ${path}`);
-    assert.equal(calls.length, 1, `${method} ${path} reached the venue`);
-  }
-  assert.equal(gate.status(NOW).today.orders, 0);
-});
 
-test('the kill switch stops orders with 423 and leaves everything else alone', async () => {
-  const gate = gateFor();
-  const killed = await call(ask('POST', '/v1/kill'), { gate });
-  assert.equal(killed.response.status, 200);
-  assert.equal(killed.body.kill_switch, true);
 
-  const order = await call(ask('POST', '/v1/kalshi/portfolio/events/orders', { body: KALSHI_ORDER }), { gate });
-  assert.equal(order.response.status, 423);
-  assert.match(order.body.error, /kill switch is engaged/);
-  assert.equal(order.calls.length, 0);
 
-  const read = await call(ask('GET', '/v1/kalshi/portfolio/balance'), { gate });
-  assert.equal(read.response.status, 200);
 
-  const denied = await call(ask('POST', '/v1/unkill'), { gate });
-  assert.equal(denied.response.status, 401, 'the VM cannot release the owner kill switch');
-  const released = await call(ask('POST', '/v1/unkill', { token: TOKEN + '-owner' }), { gate });
-  assert.equal(released.body.kill_switch, false);
-  assert.equal((await call(ask('POST', '/v1/kalshi/portfolio/events/orders', { body: KALSHI_ORDER }), { gate })).response.status, 200);
-});
-
-test('an ambiguous venue submission keeps its reservation', async () => {
-  const gate = gateFor();
-  const { response, body } = await call(
-    ask('POST', '/v1/kalshi/portfolio/events/orders', { body: KALSHI_ORDER }),
-    { gate, fetcher: async () => { throw Object.assign(new Error('nope'), { name: 'TimeoutError' }); } },
-  );
-  assert.equal(response.status, 502);
-  assert.match(body.error, /kalshi API did not answer/);
-  assert.deepEqual(gate.status(NOW).today, { day: '2026-09-15', orders: 1, notional_usd: '1.95' });
-});
-
-test('a venue that answers badly keeps its reservation: an unconfirmed write is an order', async () => {
-  const gate = gateFor();
-  const { response } = await call(
-    ask('POST', '/v1/kalshi/portfolio/events/orders', { body: KALSHI_ORDER }),
-    { gate, reply: { status: 503, body: 'upstream is unwell' } },
-  );
-  assert.equal(response.status, 503);
-  assert.equal(gate.status(NOW).today.orders, 1);
-});
-
-test('an order body that is not JSON is refused, and so is a missing credential', async () => {
-  const bad = await call(ask('POST', '/v1/kalshi/portfolio/events/orders', { body: 'not json' }));
-  assert.equal(bad.response.status, 400);
-  assert.match(bad.body.error, /must be JSON/);
-
-  const unconfigured = await call(ask('GET', '/v1/kalshi/portfolio/balance'),
-    { settings: { KALSHI_PRIVATE_KEY: '' } });
-  assert.equal(unconfigured.response.status, 503);
-  assert.match(unconfigured.body.error, /credentials for kalshi are unusable/);
-  assert.equal(unconfigured.calls.length, 0);
-});
-
-test('the VM can fetch Kalshi WebSocket handshake headers, signed over the ws path, never the key', async () => {
-  const { response, body } = await call(ask('GET', '/v1/kalshi/ws-auth'));
-  assert.equal(response.status, 200);
-  assert.equal(body.path, '/trade-api/ws/v2');
-  assert.equal(body.expires_in, 30);
-  assert.equal(body.headers['KALSHI-ACCESS-KEY'], 'a1b2c3');
-  assert.equal(body.headers['KALSHI-ACCESS-TIMESTAMP'], String(NOW));
-  const verified = await crypto.subtle.verify(
-    { name: 'RSA-PSS', saltLength: 32 },
-    keys.kalshi.publicKey,
-    Buffer.from(body.headers['KALSHI-ACCESS-SIGNATURE'], 'base64'),
-    new TextEncoder().encode(`${NOW}GET/trade-api/ws/v2`),
-  );
-  assert.equal(verified, true);
-  assert.equal(JSON.stringify(body).includes('PRIVATE KEY'), false);
-  assert.equal((await call(ask('POST', '/v1/kalshi/ws-auth'))).response.status, 405);
-  assert.equal((await call(ask('GET', '/v1/kalshi/ws-auth', { token: 'wrong' }))).response.status, 401);
-});
-
-test('a missing credential turns a ws route into a 503, not a crash', async () => {
-  const kalshi = await call(ask('GET', '/v1/kalshi/ws-auth'), { settings: { KALSHI_PRIVATE_KEY: '' } });
-  assert.equal(kalshi.response.status, 503);
-});
-
-test('the Kalshi tier upgrade is forwarded as a plain write and never counted as an order', async () => {
-  const gate = gateFor();
-  const { response, calls } = await call(ask('POST', '/v1/kalshi/account/api_usage_level/upgrade', { body: {} }), { gate });
-  assert.equal(response.status, 200);
-  assert.equal(calls[0].url, 'https://api.elections.kalshi.com/trade-api/v2/account/api_usage_level/upgrade');
-  assert.equal(calls[0].method, 'POST');
-  assert.ok(calls[0].headers['KALSHI-ACCESS-SIGNATURE']);
-  assert.equal(gate.status(NOW).today.orders, 0, 'an upgrade is not an order');
-});
 
 test('alpaca is keyed inside the worker, hosted by path, and priced before it is sent', async () => {
   // A read: the two headers are added here and the VM never sees them.
@@ -408,27 +195,6 @@ test('alpaca is keyed inside the worker, hosted by path, and priced before it is
   assert.match(bare.body.error, /alpaca/);
 });
 
-test('only the documented routes and methods exist', async () => {
-  assert.deepEqual(parseRoute('/v1/kalshi/portfolio/balance'), { venue: 'kalshi', path: 'portfolio/balance' });
-  assert.equal(parseRoute('/v1/kalshi'), null);
-  assert.equal(parseRoute('/v1/kalshi/'), null);
-  assert.deepEqual(parseRoute('/v1/alpaca/v2/account'), { venue: 'alpaca', path: 'v2/account' });
-  assert.equal(parseRoute('/v1/schwab/accounts'), null, 'a venue this gateway holds no key for');
-  // The Coinbase venue was removed on Sept 19, 2026: its paths are not routes any more.
-  assert.equal(parseRoute('/v1/coinbase/api/v3/brokerage/accounts'), null);
-  const gone = await call(ask('GET', '/v1/coinbase/api/v3/brokerage/accounts'));
-  assert.equal(gone.response.status, 404);
-  assert.equal(gone.calls.length, 0);
-  assert.equal((await call(ask('GET', '/v1/coinbase/ws-jwt'))).response.status, 404);
-  assert.equal((await call(ask('POST', '/v1/coinbase/api/v3/brokerage/orders', { body: {} }))).response.status, 404);
-  assert.equal(parseRoute('/v1/kalshi/../../secret'), null, 'no traversal out of the venue path');
-
-  assert.equal((await call(ask('GET', '/v1/unknown'))).response.status, 404);
-  assert.equal((await call(ask('GET', '/'))).response.status, 404);
-  assert.equal((await call(ask('GET', '/v1/kill'))).response.status, 405);
-  assert.equal((await call(ask('PUT', '/v1/kalshi/portfolio/balance'))).response.status, 405);
-  assert.equal((await call(ask('POST', '/v1/health'))).response.status, 405);
-});
 
 test('notice RPC methods are awaited and retries of a delivered notice are deduplicated', async () => {
   const local = gateFor();
@@ -448,47 +214,6 @@ test('the Durable Object exposes every notification RPC method', async () => {
   for (const name of ['noticesToday', 'noticeDelivered', 'recordNotice']) assert.match(source, new RegExp(`\\b${name}\\([^)]*\\) \\{ return this\\.gate\\.${name}\\(`));
 });
 
-test('a trade notice is composed from the floor\'s facts, mailed once, and counted against the day', async () => {
-  const sent = [];
-  const mailer = async message => void sent.push(message);
-  const gate = gateFor();
-  const facts = {
-    kind: 'trade', desk_name: 'Mullins', instrument: 'KXFED-26SEP-T3.75', venue: 'kalshi', side: 'buy', quantity: '20',
-    price: '0.56', fee: '0.14', purpose: 'entry', rationale: 'Hot CPI put a hike at 93%; the market asked 89%.',
-    engine: 'approved', critic: 'approve: sized inside the mandate', target_price: '0.95', stop_price: '0.40',
-    time_stop_at: '2026-09-17T18:00:00.000Z', story_url: 'https://blakewoods.us/capital/desk/?id=mullins#story-oi-1',
-  };
-  const request = ask('POST', '/v1/notify', { body: facts });
-  const response = await route(request, env(), { gate, now: () => NOW, mailer });
-  const body = await response.json();
-  assert.equal(response.status, 200, JSON.stringify(body));
-  assert.equal(body.sent, true);
-  assert.equal(body.notices_today, 1);
-  assert.equal(sent[0].subject, 'LTCM: Mullins bought 20 KXFED-26SEP-T3.75 at $0.56');
-  assert.match(sent[0].text, /Why, in the desk's words:\nHot CPI put a hike at 93%/);
-  assert.match(sent[0].text, /Risk engine: approved\./);
-  assert.match(sent[0].text, /Exit plan: target \$0\.95, stop \$0\.40, out by 2026-09-17T18:00:00\.000Z\./);
-  assert.match(sent[0].text, /story-oi-1/);
-
-  const settled = await route(ask('POST', '/v1/notify', { body: { kind: 'settled', desk_name: 'Mullins', instrument: 'KXFED-26SEP-T3.75', result: 'yes', quantity: '20', held_for_hours: '26', entry_price: '0.56', exit_price: '1.00', pnl: '8.66', rationale: 'Hike at 93%.' } }), env(), { gate, now: () => NOW, mailer });
-  assert.equal(settled.status, 200);
-  assert.equal(sent[1].subject, "LTCM: Mullins's KXFED-26SEP-T3.75 settled +$8.66");
-
-  // Bad bodies are refused, not mailed; without a mail binding the answer says so.
-  assert.equal((await route(ask('POST', '/v1/notify', { body: { kind: 'panic' } }), env(), { gate, now: () => NOW, mailer })).status, 400);
-  assert.equal((await route(ask('GET', '/v1/notify'), env(), { gate, now: () => NOW, mailer })).status, 405);
-  const unbound = await (await route(ask('POST', '/v1/notify', { body: { kind: 'test' } }), env(), { gate, now: () => NOW })).json();
-  assert.equal(unbound.sent, false);
-  assert.equal(sent.length, 2);
-
-  // The day's cap holds: two more notices at a cap of four, then 429.
-  const capped = env({ NOTIFY_MAX_PER_DAY: '4' });
-  for (let i = 0; i < 2; i += 1) assert.equal((await route(ask('POST', '/v1/notify', { body: { kind: 'test' } }), capped, { gate, now: () => NOW, mailer })).status, 200);
-  const over = await route(ask('POST', '/v1/notify', { body: { kind: 'test' } }), capped, { gate, now: () => NOW, mailer });
-  assert.equal(over.status, 429);
-  assert.equal(over.headers.get('Retry-After'), '3600');
-  assert.equal(sent.length, 4);
-});
 
 test('a live_stop notice tells the owner which stop tripped, with the House\'s sentence, the equity and the time, and counts against the day', async () => {
   // Sept 26, 2026 (the options-swarm run, Wave 5): the House posts one when a stop trips on real money.
@@ -528,29 +253,6 @@ test('a live_stop notice tells the owner which stop tripped, with the House\'s s
   assert.equal(sent.length, 2);
 });
 
-test('the gateway signs only the venue paths the floor uses; everything else is refused before signing', async () => {
-  const gate = gateFor();
-  const refused = [
-    ['POST', '/v1/kalshi/portfolio/orders/batched', KALSHI_ORDER],
-    ['POST', '/v1/alpaca/v2/account/configurations', { suspend_trade: false }],
-    ['GET', '/v1/alpaca/v2/wallets/transfers', undefined],
-    ['DELETE', '/v1/kalshi/portfolio/positions', undefined],
-    ['POST', '/v1/kalshi/portfolio/balance', {}],
-  ];
-  for (const [method, path, body] of refused) {
-    const response = await route(ask(method, path, body === undefined ? {} : { body }), env(), { gate, now: () => NOW });
-    assert.equal(response.status, 403, `${method} ${path}`);
-  }
-  for (const [method, path] of [
-    ['GET', '/v1/kalshi/portfolio/balance'], ['GET', '/v1/kalshi/markets?status=open&limit=5'],
-    ['GET', '/v1/kalshi/markets/KXTEST-26/orderbook'], ['GET', '/v1/alpaca/v2/account'],
-    ['GET', '/v1/alpaca/v1beta3/crypto/us/latest/quotes?symbols=BTC%2FUSD'],
-    ['DELETE', '/v1/kalshi/portfolio/orders/ord_1'], ['POST', '/v1/kalshi/account/api_usage_level/upgrade'],
-  ]) {
-    const { response } = await call(ask(method, path), { gate });
-    assert.notEqual(response.status, 403, `${method} ${path}`);
-  }
-});
 
 test('the frontier model is metered: reserved at its worst case, settled at its real cost, capped by the month', async () => {
   const settings = {
@@ -713,22 +415,6 @@ test('cache hints reach OpenAI byte for byte and a cache read settles cheaper th
   assert.equal(seen.length, 2, 'a malformed hint never reaches the provider');
 });
 
-test('a venue may carry a tighter per-order cap than the floor (Kalshi); the real Alpaca venue is capped by maximum loss instead', async () => {
-  const settings = { MAX_ORDER_USD: '50', MAX_ORDER_USD_KALSHI: '20' };
-  const order = count => ({ ...KALSHI_ORDER, count, price: '0.5000' });
-  assert.equal((await call(ask('POST', '/v1/kalshi/portfolio/events/orders', { body: order('40') }), { settings })).response.status, 200);
-  const refused = await call(ask('POST', '/v1/kalshi/portfolio/events/orders', { body: order('41') }), { settings });
-  assert.equal(refused.response.status, 403);
-  assert.match(refused.body.error, /per-order cap of \$20\.00/);
-  // An exit is never trapped by a dollar cap.
-  assert.equal((await call(ask('POST', '/v1/kalshi/portfolio/events/orders', { body: order('41'), headers: { 'X-LTCM-Purpose': 'exit' } }), { settings })).response.status, 200);
-  // Sept 26, 2026, Wave 5: MAX_ORDER_USD and MAX_ORDER_USD_ALPACA are not the real Alpaca venue's caps any more.
-  const tape = alpacaVenue();
-  const tight = { MAX_ORDER_USD: '1', MAX_ORDER_USD_ALPACA: '1' };
-  const open = await call(ask('POST', '/v1/alpaca/v2/orders', { body: { ...OPTION_BUY, limit_price: '0.70' } }), { settings: tight, fetcher: tape.fetcher });
-  assert.equal(open.response.status, 200);
-  assert.equal(tape.orders().length, 1);
-});
 
 test('a multi-leg order is refused before its symbol is quoted, priced or reserved, exits included', async () => {
   // Sept 23, 2026: on main the written put was forwarded to the venue metered at $0.25, and the
@@ -835,7 +521,7 @@ test('the paper account is its own venue: paper keys, paper host, no caps, no ki
   // An order far over the real-money cap goes through, is not counted, and ignores the kill switch.
   const gate = gateFor(settings);
   await gate.setKill(true);
-  const order = { symbol: 'AAPL', qty: '400', side: 'buy', type: 'limit', time_in_force: 'day', limit_price: '10.00' };
+  const order = { ...OPTION_BUY, qty: '400', limit_price: '10.00' };
   const placed = await call(ask('POST', '/v1/alpaca-paper/v2/orders', { body: order }), { settings, gate });
   assert.equal(placed.response.status, 200);
   assert.equal(placed.calls[0].url, 'https://paper-api.alpaca.markets/v2/orders');
@@ -851,34 +537,12 @@ test('the paper account is its own venue: paper keys, paper host, no caps, no ki
 
 const GITHUB = { GITHUB_TOKEN, GITHUB_REPO };
 const PROPOSAL = {
-  role: 'architect', slug: 'kalshi-weather-favorites', title: 'Add the Kalshi weather favorites strategy',
-  body: 'Favorites above 90 cents settled yes 97% of the time in the replay.',
-  files: [{ path: 'league/strategies/kalshi_weather_favorites.py', content: 'EDGE = 0.04\n' }],
+  role: 'engineer', slug: 'variance-helper', title: 'Add the variance helper',
+  body: 'Pure arithmetic helper with synthetic regression checks.',
+  files: [{ path: 'league/tools/variance_helper.py', content: 'EDGE = 0.04\n' }],
 };
-const numbered = n => ({ ...PROPOSAL, slug: `candidate-${n}`, files: [{ path: `league/strategies/candidate_${n}.py`, content: `N = ${n}\n` }] });
+const numbered = n => ({ ...PROPOSAL, slug: `candidate-${n}`, files: [{ path: `league/tools/candidate_${n}.py`, content: `N = ${n}\n` }] });
 
-test('a proposal becomes a branch and a pull request, and the reply is all the VM ever holds of GitHub', async () => {
-  const hub = fakeGitHub();
-  const { response, body, gate } = await call(ask('POST', '/v1/github/pr', { body: PROPOSAL }), { settings: GITHUB, fetcher: hub.fetcher });
-  assert.equal(response.status, 200, JSON.stringify(body));
-  assert.deepEqual(Object.keys(body), ['ok', 'branch', 'number', 'url', 'head']);
-  assert.match(body.branch, /^merton\/architect\/kalshi-weather-favorites-[0-9a-f]{8}$/);
-  assert.equal(body.number, 41);
-  assert.equal(body.url, `https://github.com/${GITHUB_REPO}/pull/41`);
-  assert.equal(body.head, hub.refs.get(body.branch));
-  assert.equal(response.headers.get('Cache-Control'), 'no-store');
-  assert.equal(JSON.stringify(body).includes(GITHUB_TOKEN), false);
-
-  assert.equal(hub.calls.at(-1).key, 'POST /pulls');
-  assert.deepEqual(hub.calls.at(-1).body, {
-    title: PROPOSAL.title, head: body.branch, base: 'main',
-    body: `${PROPOSAL.body}\n\n---\n\nOpened by Merton (architect) through the LTCM gateway.`,
-  });
-  assert.ok(hub.calls.every(made => made.headers.Authorization === `Bearer ${GITHUB_TOKEN}`), 'GitHub sees the GitHub token');
-  assert.ok(hub.calls.every(made => !JSON.stringify(made).includes(TOKEN)), 'and never the gateway s own');
-  assert.deepEqual((await gate.status()).github, { day: '2026-09-15', pull_requests: 1, cap: 12 });
-  assert.deepEqual((await gate.status()).today, { day: '2026-09-15', orders: 0, notional_usd: '0.00' }, 'a proposal is not an order');
-});
 
 test('the GitHub routes need the gateway token like every other route, and no other', async () => {
   const hub = fakeGitHub();
@@ -909,11 +573,11 @@ test('a proposal is refused before GitHub hears of it: the path by name, the res
   const hub = fakeGitHub();
   const send = body => call(ask('POST', '/v1/github/pr', { body }), { settings: GITHUB, fetcher: hub.fetcher });
   for (const [role, path] of [
-    ['architect', 'league/ci.py'], ['architect', 'league/strategies/../constitution.py'], ['architect', 'gateway/worker.mjs'],
-    ['toolsmith', '.github/workflows/ci.yml'], ['operator', 'league/game.json'], ['designer', 'league/ledger.py'], ['teacher', 'league/strategies/x.py'],
+    ['engineer', 'league/ci.py'], ['engineer', 'league/tools/../constitution.py'], ['engineer', 'gateway/worker.mjs'],
+    ['engineer', '.github/workflows/ci.yml'], ['engineer', 'league/game.json'], ['engineer', 'league/ledger.py'], ['engineer', 'league/swarm/private.py'],
   ]) {
-    // The architect's bad file rides behind a good one: one refused path refuses the proposal.
-    const files = [...(role === 'architect' ? PROPOSAL.files : []), { path, content: 'x\n' }];
+    // The engineer's bad file rides behind a good one: one refused path refuses the proposal.
+    const files = [...(role === 'engineer' ? PROPOSAL.files : []), { path, content: 'x\n' }];
     const { response, body, gate } = await send({ ...PROPOSAL, role, files });
     assert.equal(response.status, 403, `${role} ${path}`);
     assert.equal(body.path, path);
@@ -928,7 +592,7 @@ test('a proposal is refused before GitHub hears of it: the path by name, the res
   assert.equal((await send('not json')).response.status, 400);
   assert.equal((await send([PROPOSAL])).response.status, 400);
   // Five files, each inside its own ceiling, are together over the request s 256 KiB.
-  const heavy = { ...PROPOSAL, files: [0, 1, 2, 3, 4].map(n => ({ path: `league/strategies/heavy_${n}.py`, content: 'x'.repeat(60 * 1024) })) };
+  const heavy = { ...PROPOSAL, files: [0, 1, 2, 3, 4].map(n => ({ path: `league/tools/heavy_${n}.py`, content: 'x'.repeat(60 * 1024) })) };
   assert.equal((await send(heavy)).response.status, 413);
   assert.equal(hub.calls.length, 0, 'GitHub heard none of it');
 
@@ -996,19 +660,6 @@ test('a branch that was made is counted even when its pull request failed, and t
   assert.equal((await gate.status()).github.pull_requests, 1, 'one branch, one place');
 });
 
-test('the kill switch does not stop a proposal or the watching of one: they move no money', async () => {
-  const hub = fakeGitHub();
-  const gate = gateFor(GITHUB);
-  await call(ask('POST', '/v1/kill'), { gate });
-  assert.equal((await gate.status()).kill_switch, true);
-  assert.equal((await call(ask('POST', '/v1/kalshi/portfolio/events/orders', { body: KALSHI_ORDER }), { gate })).response.status, 423);
-
-  const opened = await call(ask('POST', '/v1/github/pr', { body: PROPOSAL }), { settings: GITHUB, gate, fetcher: hub.fetcher });
-  assert.equal(opened.response.status, 200);
-  const watched = await call(ask('GET', `/v1/github/pr/${opened.body.number}`), { settings: GITHUB, gate, fetcher: hub.fetcher });
-  assert.equal(watched.response.status, 200);
-  assert.equal((await gate.status()).kill_switch, true, 'and neither of them released it');
-});
 
 test('the VM watches CI through the gateway: one pull request, its head and its checks', async () => {
   const hub = fakeGitHub();

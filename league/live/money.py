@@ -1,6 +1,6 @@
 """The options money table, read and applied: bands, sizing by maximum loss, and the stops.
 
-The options-swarm run, Wave 5 (Sept 26, 2026; the plan `docs/goals/LTCM_OPTIONS_SWARM.md`, "Money"). The table itself
+The options-swarm run, Wave 5 (Sept 26, 2026; the plan `archive/docs/goals/LTCM_OPTIONS_SWARM.md`, "Money"). The table itself
 is the constitution's `options_money` (`league/constitution.py`, inside `OPTIONS_MONEY_BOUNDS`); this module is its one
 reader, and nothing here holds a number of its own. Money is Decimal; the forward record's statistics are floats.
 

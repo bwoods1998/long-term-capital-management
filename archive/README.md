@@ -58,7 +58,7 @@ returns greater than every input cost. The reasons, as given and as measured:
   recorded one-minute option quotes from ThetaData at thousands of times real speed, and uses the
   live market as the judge, not the teacher.
 
-The plan is [docs/goals/LTCM_OPTIONS_SWARM.md](../docs/goals/LTCM_OPTIONS_SWARM.md).
+The plan is [the original options goal](docs/goals/LTCM_OPTIONS_SWARM.md).
 
 ## Where everything went
 
@@ -67,7 +67,7 @@ The plan is [docs/goals/LTCM_OPTIONS_SWARM.md](../docs/goals/LTCM_OPTIONS_SWARM.
 | The code of every generation | git tag `archive/pre-options-2026-09-26` (main at `89bc49a1`, Sept 26 03:24Z) |
 | Branches that were on GitHub | 78 tags `archive/branch/<name>`; the branches themselves were deleted |
 | Branches that existed only on the laptop | `git bundle` files on the owner's machine, never pushed (the repository is public) |
-| Documents | `archive/docs/`: `docs/` as it stood on Sept 26, moved with `git mv` (`git log --follow` works); only the live plan stayed |
+| Documents | `archive/docs/`: `docs/` as it stood on Sept 26, moved with `git mv` (`git log --follow` works); the options run goal and pre-prune operator documents are preserved here too |
 | The old front page | [archive/docs/README-pre-options.md](docs/README-pre-options.md) |
 | The old operator's page | [archive/docs/operations.md](docs/operations.md) |
 | The old House's state | a tarball on the House box (`/workspace/archive/state-pre-options-20260926.tar.gz`, 8.26 GB, sha256 `e9e5c044...`); a copy to the owner's machine was in progress on Sept 26 |

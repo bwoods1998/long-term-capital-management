@@ -1,46 +1,21 @@
 #!/usr/bin/env bash
-# Place the floor's secrets where they belong. Run this yourself; it never prints a value.
-#
-#   bash scripts/place_secrets.sh
-#
-# 1. Cloudflare gateway secrets (venue keys, Sail key, gateway token) via `wrangler secret put`.
-# 2. The box's own .env (Sail key, publish token, gateway token) via `floor_box.py secrets`.
-#
-# Reads: .env and .data/ltcm/keys/kalshi.pem. Requires: a wrangler login, and the box created
-# by `scripts/floor_box.py create` (its id is in .data/ltcm/box.json).
+# Owner-only credential placement. Reads .env without printing values; no venue keys go to House.
+# Real/paper Alpaca, OpenAI and GitHub keys are placed manually with wrangler; see gateway/README.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-ROOT="$PWD"
-ENV_FILE="$ROOT/.env"
-PEM="$ROOT/.data/ltcm/keys/kalshi.pem"
-
-if ! grep -q '^GATEWAY_TOKEN=' "$ENV_FILE"; then
-  printf 'GATEWAY_TOKEN=%s\n' "$(python3 -c 'import secrets;print(secrets.token_urlsafe(48))')" >> "$ENV_FILE"
-  chmod 600 "$ENV_FILE"
-  echo "generated GATEWAY_TOKEN in .env"
-fi
-
-value() { grep "^$1=" "$ENV_FILE" | head -1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//'; }
-
-echo "== gateway secrets"
-( cd gateway
-  # Coinbase left the project on Sept 19, 2026. The Alpaca, OpenAI and GitHub secrets are placed by
-  # the owner by hand with `npx wrangler secret put NAME` (see gateway/README.md): they are not kept in .env.
-  for name in GATEWAY_TOKEN KALSHI_KEY_ID SAIL_API_KEY; do
-    v="$(value "$name")"
-    if [ -z "$v" ]; then echo "  $name: missing in .env, skipped"; continue; fi
-    printf '%s' "$v" | npx wrangler secret put "$name" >/dev/null 2>&1 && echo "  $name: set" || echo "  $name: FAILED"
-  done
-  if [ -f "$PEM" ]; then
-    npx wrangler secret put KALSHI_PRIVATE_KEY < "$PEM" >/dev/null 2>&1 && echo "  KALSHI_PRIVATE_KEY: set" || echo "  KALSHI_PRIVATE_KEY: FAILED"
-  else
-    echo "  KALSHI_PRIVATE_KEY: kalshi.pem not found, skipped"
-  fi
-  npx wrangler secret list 2>/dev/null | grep -o '"name": *"[A-Z_]*"' | tr -d '" ' | sed 's/^name://' | tr '\n' ' '; echo
-)
-
-echo "== box secrets"
-.venv/bin/python scripts/floor_box.py secrets
-
-echo
-echo "Next: .venv/bin/python scripts/floor_box.py start   # then: scripts/floor_box.py status"
+python3 - <<'OWNER'
+import os, stat, subprocess
+from pathlib import Path
+from league.service import load_env, secret
+path = Path('.env')
+if path.is_symlink() or stat.S_IMODE(path.stat().st_mode) & 0o077:
+    raise SystemExit('.env must be a regular owner-only file (chmod 600)')
+load_env(path)
+for name in ('GATEWAY_TOKEN', 'SAIL_API_KEY'):
+    value = secret(name)
+    if not value:
+        raise SystemExit(name + ' is missing; placement stopped')
+    subprocess.run(['npx','wrangler','secret','put',name],cwd='gateway',input=value.encode(),check=True,stdout=subprocess.DEVNULL)
+    print(name + ': placed')
+OWNER
+python3 scripts/floor_box.py secrets

@@ -340,7 +340,9 @@ def read_health(  # noqa: PLR0913 - one reading, one place
         at = epoch(raw.get("at"))
         living = raw.get("living") if isinstance(raw.get("living"), int) and not isinstance(raw.get("living"), bool) else None
         seq = raw.get("ledger_seq") if isinstance(raw.get("ledger_seq"), int) and not isinstance(raw.get("ledger_seq"), bool) else None
-        books = raw.get("books") if isinstance(raw.get("books"), dict) else {}
+        books = dict(raw.get("books")) if isinstance(raw.get("books"), dict) else {}
+        if isinstance(raw.get("options_live"), dict):
+            books["options_live"] = raw["options_live"]
         detail.update(at=raw.get("at"), living=living, dead=raw.get("dead"), ledger_seq=seq, real_money=raw.get("real_money"),
                       release=raw.get("release"), books={str(name): (book or {}).get("frozen") if isinstance(book, dict) else None for name, book in books.items()})
         if at is None:

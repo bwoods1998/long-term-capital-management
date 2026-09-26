@@ -1,6 +1,6 @@
 """The Gym store's fixed layout and the backfill's plan, standard library only.
 
-The store (v1) is fixed by the options-swarm plan (`docs/goals/LTCM_OPTIONS_SWARM.md`, "The Gym").
+The store (v1) is fixed by the options-swarm plan (`archive/docs/goals/LTCM_OPTIONS_SWARM.md`, "The Gym").
 This module holds everything about it that needs no third-party package: the windows, the trading
 calendar arithmetic, the file paths, the backfill's stages and their order, the per-root strike
 judgement, and the manifest journal. The Parquet writing lives in `frames.py` (polars and pyarrow)

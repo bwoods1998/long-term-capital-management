@@ -25,7 +25,7 @@ numbers, since the data licence forbids publishing quotes):
   carries `legs`, each with its own `id`, `symbol`, `side`, `position_intent`, `ratio_qty`, `qty`, `filled_qty`,
   `filled_avg_price`, `status` (Alpaca's documented response; no multi-leg order has been sent on either account yet).
 - `GET v2/account/activities?activity_types=...&after=&direction=asc&page_size=100&page_token=<last id>`: `{id,
-  activity_type, date | transaction_time, net_amount, qty, symbol, ...}`; funding types are `ltcm.performance.
+  activity_type, date | transaction_time, net_amount, qty, symbol, ...}`; funding types are `league.performance.
   ALPACA_FUNDING`, and the option events OPASN (assigned), OPEXC (exercised), OPEXP (expired).
 
 Rate: the trading API allows 200 requests a minute; the House keeps under the constitution's
@@ -44,7 +44,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
-from ltcm.data import TransportError
+from league.data import TransportError
 
 LIVE_BASE = "https://api.alpaca.markets"
 PAPER_BASE = "https://paper-api.alpaca.markets"

@@ -2,19 +2,15 @@
 // that can create an order is, and it is priced before it is forwarded, from the body the caller
 // actually sent. A body this module cannot price is refused rather than passed through unpriced.
 
-import { parsePico, centsToPico, mulPico, picoToMicro, parseUsdMicro, parseCount, PICO } from './money.mjs';
+import { parsePico, mulPico, picoToMicro, parseUsdMicro, parseCount, PICO } from './money.mjs';
 
 export const REFERENCE_HEADER = 'X-LTCM-Reference-Price';
-// What the order is for. `exit` marks an order that closes or trims a position the floor holds;
-// the dollar caps do not apply to it (Sept 18, 2026: two perp shorts sat past their stops for
-// twenty minutes because the contract had grown past the per-order cap, and the day's cap was
-// spent by the entries). The header is the floor's own claim, so a compromised VM could label an
-// entry an exit: the order count cap still counts every order, and the owner accepts the risk.
+// An exit intent is checked against broker inventory by the route before forwarding.
+// Entry dollar caps do not consume closing capacity; order and request limits still apply.
 export const PURPOSE_HEADER = 'X-LTCM-Purpose';
 
 /** The paths that create an order, by venue. Everything else passes the caps untouched. */
 export const ORDER_PATHS = {
-  kalshi: ['portfolio/events/orders', 'portfolio/orders'],
   alpaca: ['v2/orders'],
 };
 
@@ -23,23 +19,8 @@ export const normalizePath = path => String(path || '').replace(/^\/+/, '').repl
 // The only venue paths this gateway will sign. Everything the floor does is here; anything
 // else, a batched order, a withdrawal, a key management call, is refused before signing, so
 // a bug or a compromise on the box can at most do what the floor already does, inside the caps.
-// The one funds move allowed is Kalshi's intra-account shard transfer: money between exchange
-// shards of the owner's own account (crypto markets live on shard 2 and need collateral there),
-// which cannot leave the account.
 const SEGMENT = '[A-Za-z0-9._~%-]+';
 export const VENUE_PATHS = {
-  kalshi: [
-    ['GET', /^portfolio\/(balance|positions|fills|settlements|deposits|withdrawals)$/],
-    ['GET', /^portfolio\/orders(\/[A-Za-z0-9._~%-]+)?$/],
-    ['GET', /^portfolio\/intra_exchange_instance_transfers?(\/[A-Za-z0-9._~%-]+)?$/],
-    ['POST', /^portfolio\/intra_exchange_instance_transfer$/],
-    ['GET', new RegExp(`^(markets|series|events)(\\/${SEGMENT}(\\/(orderbook|candlesticks|history|markets))?(\\/${SEGMENT})?)?$`)],
-    ['GET', /^exchange\/(status|schedule)$/],
-    ['POST', /^portfolio\/events\/orders$/],
-    ['POST', /^portfolio\/orders$/],
-    ['POST', /^account\/api_usage_level\/upgrade$/],
-    ['DELETE', /^portfolio\/(events\/)?orders\/[A-Za-z0-9._~%-]+$/],
-  ],
   // Alpaca (Sept 19, 2026). Trading and market data share the credential and the allow-list;
   // the host follows the path. No transfers, no journals, no account configuration: the floor
   // reads its account, places and cancels orders, and reads quotes and bars.
@@ -58,7 +39,6 @@ export const VENUE_PATHS = {
     // Market data, read only.
     ['GET', new RegExp(`^v2\\/stocks(\\/${SEGMENT})?\\/(quotes|trades|bars|snapshots?)(\\/latest)?$`)],
     ['GET', /^v2\/stocks\/snapshots$/],
-    ['GET', /^v1beta3\/crypto\/[a-z]{2,4}\/(latest\/)?(quotes|trades|bars|snapshots)$/],
     // Listed options (Sept 19, 2026), read only: the contracts an underlying lists, and their
     // quotes, greeks and bars. Option ORDERS go through `v2/orders` like any other, under the
     // rules of `alpacaNotional` below (long premium only, a limit price, one leg).
@@ -83,24 +63,9 @@ export function createsOrder(venue, method, path) {
   return (ORDER_PATHS[venue] || []).includes(normalizePath(path));
 }
 
-/**
- * A venue's own per-order cap (`MAX_ORDER_USD_KALSHI`), in micro-dollars, or null when unset. Since Sept 26, 2026 (the
- * options-swarm run, Wave 5) the real Alpaca venue is capped by maximum loss (`account.mjs`), never by this or by
- * MAX_ORDER_USD: the gate does not read `MAX_ORDER_USD_ALPACA`, which wrangler.jsonc no longer sets.
- */
-export function venueOrderCap(env = {}, venue) {
-  if (typeof venue !== 'string' || !/^[a-z]{2,16}$/.test(venue)) return null;
-  const raw = env[`MAX_ORDER_USD_${venue.toUpperCase()}`];
-  if (raw === undefined || raw === null || raw === '') return null;
-  const value = parseUsdMicro(raw, -1n);
-  return value > 0n ? value : null;
-}
-
 /** The caps in force, read from `vars`. A malformed value falls back to the documented default. */
 export function caps(env = {}) {
   return {
-    maxOrderMicro: parseUsdMicro(env.MAX_ORDER_USD, 50n * 1000000n),
-    maxDayMicro: parseUsdMicro(env.MAX_DAY_USD, 400n * 1000000n),
     maxDayOrders: parseCount(env.MAX_DAY_ORDERS, 60),
     timezone: typeof env.CAP_TIMEZONE === 'string' && env.CAP_TIMEZONE ? env.CAP_TIMEZONE : 'America/New_York',
   };
@@ -119,40 +84,10 @@ export function caps(env = {}) {
  */
 export function notional(venue, body, { reference = null, exit = false, structures = [] } = {}) {
   if (!body || typeof body !== 'object') return { error: 'An order body is required.' };
-  if (venue === 'kalshi') return kalshiNotional(body, exit);
   if (venue === 'alpaca') {
     return isMultiLegOrder(body) ? structureNotional(body, structures) : alpacaNotional(body, reference);
   }
   return { error: `Cannot price an order for an unknown venue: ${String(venue)}.` };
-}
-
-// Kalshi: count x price, in dollars. The v2 surface quotes decimal dollars (`price`); the legacy
-// surface quotes integer cents (`yes_price` / `no_price`). A contract can never settle above
-// $1.00, so a market order with no price of its own is worth at most its count in dollars.
-//
-// A v2 `price` is on the YES scale for BOTH legs, and `side` names the book side: "bid" buys YES
-// (or sells NO), "ask" sells YES (or buys NO). Buying NO at $0.96 goes out as
-// `side: "ask", price: "0.0400"` and costs $0.96 a contract. Metered on the wire's number it was
-// counted at $0.04, so this independent cap let a NO buy through at up to 24 times its real
-// principal (found Sept 22, 2026; the House's own book priced it right). The price is taken on
-// the leg the order really trades: the complement for an entry on the ask and an exit on the bid.
-function kalshiNotional(body, exit = false) {
-  const count = parsePico(body.count);
-  if (count === null || count <= 0n) return { error: 'Order count is missing or not positive.' };
-  let price = parsePico(body.price);
-  if (price !== null && price > 0n && price < PICO && (body.side === 'bid' || body.side === 'ask')
-      && (body.side === 'ask') === !exit) {
-    price = PICO - price;
-  }
-  if (price === null) price = centsToPico(body.yes_price);
-  if (price === null) price = centsToPico(body.no_price);
-  if (price === null) {
-    const ceiling = centsToPico(body.buy_max_cost);
-    if (ceiling !== null && ceiling > 0n) return { micro: picoToMicro(ceiling) };
-    price = PICO; // an unpriced contract is capped at its $1.00 settlement value
-  }
-  if (price <= 0n) return { error: 'Order price is not positive.' };
-  return { micro: picoToMicro(mulPico(count, price)) };
 }
 
 // Alpaca: `notional` is already the dollar amount. A `qty` is a quantity of the security. A limit
@@ -255,7 +190,7 @@ export function singleLegOpenError(body, admitted = []) {
 //     case-insensitively (Go's does, and folds U+017F to "s" and U+212A to "k") would read
 //     `Order_Class`, `LEGS` or a second `SYMBOL` that this check never saw;
 //   - a top-level `symbol` spelled as exactly one of the three instruments the gateway prices: a
-//     stock ticker, a crypto pair or a STANDARD OCC option symbol. An adjusted contract's OCC
+//     stock ticker or a STANDARD OCC option symbol. An adjusted contract's OCC
 //     symbol has a digit in its root (`XYZ1261016P00005000`) and may deliver other than 100
 //     shares; spelled any looser way it was taken for a stock and a written put worth $5,000 was
 //     metered at $50.00, so it is refused rather than priced;
@@ -269,8 +204,7 @@ export const ALPACA_ORDER_FIELDS = new Set([
 export const ALPACA_ORDER_TYPES = new Set(['market', 'limit']);
 //: A US stock ticker, with an optional share class (`BRK.B`).
 const STOCK_SYMBOL = /^[A-Z]{1,5}(\.[A-Z]{1,2})?$/;
-//: A crypto pair in the venue's spelling (`BTC/USD`).
-const CRYPTO_PAIR = /^[A-Z]{2,10}\/[A-Z]{3,4}$/;
+// Crypto pairs are not an accepted instrument class.
 //: What makes a symbol an option contract to the venue, whatever its root: YYMMDD, C or P, strike.
 const OCC_TAIL = /[0-9]{6}[CP][0-9]{8}$/;
 
@@ -279,11 +213,11 @@ const present = (body, key) => body[key] !== undefined && body[key] !== null;
 /** Why this gateway will not price an Alpaca order symbol, or null when it names one it prices. */
 export function alpacaSymbolError(symbol) {
   if (typeof symbol !== 'string' || symbol === '') return 'An Alpaca order needs a top-level symbol.';
-  if (isOptionSymbol(symbol) || STOCK_SYMBOL.test(symbol) || CRYPTO_PAIR.test(symbol)) return null;
+  if (isOptionSymbol(symbol) || STOCK_SYMBOL.test(symbol)) return null;
   if (OCC_TAIL.test(symbol)) {
     return 'An Alpaca order symbol must be in the venue\'s own spelling, and an option must be a standard OCC symbol (a root of one to six capital letters, YYMMDD, C or P, an eight-digit strike): an adjusted contract is not priced here.';
   }
-  return 'An Alpaca order symbol must be in the venue\'s own spelling: a stock ticker (AAPL, BRK.B), a crypto pair (BTC/USD) or a standard OCC option symbol.';
+  return 'An Alpaca order symbol must be in the venue\'s own spelling: a stock ticker (AAPL, BRK.B) or a standard OCC option symbol.';
 }
 
 /** Why this gateway will not price an Alpaca order body, or null when its shape is one it prices. */
@@ -686,7 +620,7 @@ export function closedLegRows(body) {
 // it holds available) or a BUY that covers a stock it holds SHORT (qty at most the short), read from the account's
 // signed positions like any real close (`closeLegsHeldError`), failing closed when they cannot be read. Such an order
 // takes risk off: it is an exit (no dollar cap; counted in the day's orders; stopped by the kill switch). Every other
-// stock order, and every crypto order, is refused. `alpaca-paper` is unchanged.
+// stock order, and every crypto order, is refused. Paper routes admit only options.
 
 /**
  * A stock order on the real account read as the close it must be: `{ body }` (a one-leg close in the shape
@@ -694,7 +628,7 @@ export function closedLegRows(body) {
  */
 export function realStockClose(body) {
   const symbol = String(body.symbol || '');
-  if (CRYPTO_PAIR.test(symbol)) {
+  if (symbol.includes('/')) {
     return { error: 'Crypto is not traded on the real account: its only stock orders close shares an assignment left on it.' };
   }
   if (!STOCK_SYMBOL.test(symbol)) return { error: alpacaSymbolError(symbol) || 'An Alpaca order needs a top-level symbol.' };
@@ -714,10 +648,8 @@ export function realStockClose(body) {
 }
 
 // --- the practice account ------------------------------------------------------------------------
-// `alpaca-paper` is never metered (no money is behind it), but since Sept 25, 2026 its OPTION orders
-// are held to the same defined-risk shapes: until then an order to the practice account was signed
-// and forwarded with no check at all, so it would have taken a naked short or a ratio spread. What is
-// not an option -- the House's stock and crypto orders -- passes exactly as before.
+// Paper orders prove defined-risk option routing. They are unmetered because no real money
+// is behind them; non-option orders are rejected by the route before this shape validator.
 
 //: The fields the practice check decides on. A venue that matches keys case-insensitively would
 //: read `Legs` or `SYMBOL` as one of these, so any other spelling of them is refused.
@@ -751,7 +683,7 @@ export function practiceOrderError(body) {
   if (isAssetId(symbol)) {
     return 'An order names its instrument by symbol, not by asset id: an asset id could name an option contract this check cannot read.';
   }
-  return null;
+  return 'The practice account accepts option orders only.';
 }
 
 function practiceOptionError(body) {

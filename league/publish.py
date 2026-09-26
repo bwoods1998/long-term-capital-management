@@ -6,7 +6,7 @@ remain separate. It also shows the swarm (each agent's family, its mechanism in 
 record and optional promotion checklist); the Gym's pace; the
 open structures with their maximum loss and P&L; and the tape of the agents' decisions in their own
 words. The site's validators are `personal-site/capital/schema.js`; the contract is
-`league/tests/fixtures/site_contract.md`, and `site_checkpoint.json` / `site_events.json` beside it are
+`docs/design.md`; `league/tests/fixtures/site_checkpoint.json` / `site_events.json` are
 this module's own output, which the site's tests publish and draw.
 
 **The data licenses forbid publishing quotes.** ThetaData's and the market-data subscription's terms
@@ -618,7 +618,7 @@ def league_news(kind: str, agent: str, p: Mapping[str, Any]) -> str | None:
 # ------------------------------------------------------------------------ the owner's money
 class Flows:
     """The owner's deposits less withdrawals on the Brokerage Account since `start_at`, read from the
-    account's own activity history (`ltcm.performance.alpaca_flows`, which raises on any activity it
+    account's own activity history (`league.performance.alpaca_flows`, which raises on any activity it
     cannot classify rather than count it as profit). Read off the publishing path, every five minutes;
     a failed read clears the figure at once, and a figure older than ten minutes is no figure."""
 
@@ -632,7 +632,7 @@ class Flows:
         self.verified: float | None = None
 
     def _alpaca(self, broker: Any) -> Decimal:
-        from ltcm.performance import alpaca_flows
+        from league.performance import alpaca_flows
 
         return sum((value for _venue, _when, value in alpaca_flows(broker, _epoch(self.start_at))), ZERO)
 
@@ -872,8 +872,8 @@ class Publisher:
             performance=given["performance"] if "performance" in given else self._performance(),
             compute={**self._compute(folds, now), **{k: v for k, v in (given.get("compute") or {}).items() if k in COMPUTE_PARTS or k == "as_of"}},
             gym=given.get("gym"),
-            agents=list(given["agents"]) if "agents" in given else self._guard(lambda: self._agents(house, folds), []),
-            structures=list(given["structures"]) if "structures" in given else self._guard(lambda: self._structures(house), []),
+            agents=list(given["agents"]) if "agents" in given else [],
+            structures=list(given["structures"]) if "structures" in given else [],
             trading=self._guard(lambda: trading_snapshot(
                 self.state_path.parent, getattr(house, "options_live", None), at=now,
                 never_traded=(folds is not None and not folds.real_options_seen
@@ -921,58 +921,3 @@ class Publisher:
             for part, rate in rates.items():
                 out[part] = rate * months
         return out
-
-    @staticmethod
-    def _band(house: Any, agent: Any) -> str:
-        """Before the swarm names its bands through `site_inputs`: retired when dead, else the band its rung implies."""
-        if not getattr(agent, "alive", True):
-            return "retired"
-        try:
-            rung = int(house.evaluator.rung(agent.id))
-        except Exception:  # noqa: BLE001
-            rung = 0
-        return "gym" if rung <= 0 else "candidate" if rung == 1 else "probe" if rung == 2 else "sized"
-
-    def _agents(self, house: Any, folds: _Folds | None) -> list[dict[str, Any]]:
-        living, dead = list(house.registry.living()), list(house.registry.dead())
-        rows = []
-        for agent in living + dead[-MAX_DEAD_SHOWN:]:
-            rows.append({
-                "id": agent.id, "family": getattr(agent, "family", None),
-                "mechanism": folds.mechanism.get(agent.id) if folds else None, "structure": None, "band": self._band(house, agent),
-                "born_at": getattr(agent, "born_at", None), "retired_at": None if getattr(agent, "alive", True) else getattr(agent, "died_at", None),
-                "trials": folds.trials.get(agent.id, 0) if folds else 0, "revisions": folds.revisions.get(agent.id, 0) if folds else 0,
-                "forward": folds.tally(agent.id, False) if folds else None, "real": folds.tally(agent.id, True) if folds else None,
-            })
-        return rows
-
-    @staticmethod
-    def _structures(house: Any) -> list[dict[str, Any]]:
-        """Every open option or structure held as one instrument on any book: what it is, whose, its cost
-        to hold (what it can lose: a held structure's price is its maximum loss a share) and its P&L at
-        the book's mark. Nothing else of the book leaves."""
-        from . import structure_core
-
-        rows = []
-        for book in house.books.values():
-            for name, account in book.accounts.items():
-                for holding in list(account.holdings.values()):
-                    inst = holding.instrument
-                    code = str(inst.market_id or "")
-                    try:
-                        if structure_core.is_code(code):
-                            spec = structure_core.spec_of_code(code)
-                            under, kind, legs, expiry = spec.underlying, spec.type, len(spec.legs), spec.expiry
-                        elif inst.asset_class == "option" and str(inst.right or "").lower()[:1] in ("c", "p"):
-                            under, legs, expiry = str(inst.symbol).split(" ")[0], 1, inst.expiry
-                            kind = "long_call" if str(inst.right).lower().startswith("c") else "long_put"
-                        else:
-                            continue
-                    except (ValueError, AttributeError):
-                        continue
-                    mark = book.marks.get(inst.key)
-                    value = holding.quantity * mark * inst.multiplier if mark is not None else None
-                    rows.append({"id": f"{name}:{code or inst.key}", "agent": name, "underlying": under, "structure": kind, "legs": legs,
-                                 "expiry": expiry, "quantity": holding.quantity, "real": bool(book.real_money), "opened_at": holding.opened_at,
-                                 "max_loss_usd": holding.cost, "pnl_usd": value - holding.cost if value is not None else None})
-        return rows

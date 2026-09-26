@@ -1,6 +1,6 @@
 """What a Gym program may contain: numpy and math, no I/O, no way out, and no calendar.
 
-A program is one Python file an agent wrote (`PROGRAM.md`). It runs inside the engine's process on a
+A program is one Python file an agent wrote (`league/CONTRACT.md`). It runs inside the engine's process on a
 sealed box, and the live path runs the same file in the House, so this check is a wall, not advice.
 It is the league's strategy check (`league/safety.py`, hardened against real attempts) with the
 Gym's rules on top:
@@ -169,7 +169,7 @@ def check_program(code: str) -> None:
                 for t in (n.targets if isinstance(n, ast.Assign) else [n.target]) if isinstance(t, ast.Name)}
     for name in ("NEEDS", "PARAMS"):
         if name not in assigned:
-            raise CodeRefused(f"a program assigns {name} at the top level (PROGRAM.md)")
+            raise CodeRefused(f"a program assigns {name} at the top level (league/CONTRACT.md)")
 
 
 __all__ = ["check_program", "CodeRefused", "NUMPY_BANNED", "ALLOWED_IMPORTS"]

@@ -122,8 +122,10 @@ test('the practice account forwards the House\'s stock, crypto and single-leg op
   ]) {
     const text = JSON.stringify(body);
     const { response, calls, gate } = await call(post('alpaca-paper', text));
-    assert.equal(response.status, 200, text);
-    assert.equal(calls[0].body, text, 'the body goes out byte for byte');
+    const option = /[0-9]{6}[CP][0-9]{8}$/.test(body.symbol);
+    assert.equal(response.status, option ? 200 : 400, text);
+    if (option) assert.equal(calls[0].body, text, 'the option body goes out byte for byte');
+    else assert.equal(calls.length, 0);
     assert.equal((await gate.status()).today.orders, 0);
   }
   // Reads and cancels on practice are untouched.
