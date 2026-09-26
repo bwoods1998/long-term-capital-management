@@ -212,16 +212,26 @@ class Stops(unittest.TestCase):
 
     def test_the_daily_stop_nets_the_days_deposits(self):
         s = self.stops
-        f = self.flows(1000, [(500, "5000")], closes=(10.0,))
+        # The session's first reading is the start of the day; a $5,000 deposit lands at 500.
+        s.observe(self.t, at=100, day="d1", equity=D("481.65"), last_equity=D("481.65"), flows=self.flows(200))
+        f = self.flows(1000, [(500, "5000")])
         s.observe(self.t, at=900, day="d1", equity=D("4111.23"), last_equity=D("481.65"), flows=f)
         # base = 481.65 + 5,000 = 5,481.65; day P&L = 4,111.23 - 481.65 - 5,000 = -1,370.42 = -25.0001%: tripped.
         self.assertTrue(s.daily_tripped)
         self.assertIn("no new entry today", s.blocked())
         s2 = M.Stops(start_equity=D("481.65"))
+        s2.observe(self.t, at=100, day="d1", equity=D("481.65"), last_equity=D("481.65"), flows=self.flows(200))
         s2.observe(self.t, at=900, day="d1", equity=D("4111.24"), last_equity=D("481.65"), flows=f)
         self.assertFalse(s2.daily_tripped)            # -1,370.41 is under 25% of 5,481.65 (1,370.4125)
+        # A deposit that had already landed at the session's first reading is in its base, whatever the venue's
+        # last_equity says: no stop on a deposit.
+        s3 = M.Stops(start_equity=D("481.65"))
+        s3.observe(self.t, at=900, day="d1", equity=D("5481.65"), last_equity=D("5481.65"), flows=f)
+        s3.observe(self.t, at=950, day="d1", equity=D("5481.65"), last_equity=D("481.65"), flows=self.flows(1000, [(500, "5000")]))
+        self.assertFalse(s3.daily_tripped)
+        self.assertEqual(s3.day_pnl, D(0))
         # The next session starts clean.
-        s.observe(self.t, at=1900, day="d2", equity=D("4111.23"), last_equity=D("4111.23"), flows=self.flows(2000, [(500, "5000")], closes=(10.0, 1500.0)))
+        s.observe(self.t, at=1900, day="d2", equity=D("4111.23"), last_equity=D("4111.23"), flows=self.flows(2000, [(500, "5000")]))
         self.assertFalse(s.daily_tripped)
 
     def test_the_drawdown_stop_latches_on_a_settled_reading_and_only_the_owner_releases_it(self):

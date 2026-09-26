@@ -35,9 +35,11 @@ plus its open and close fees:
 
 THE STOPS (`Stops`), with deposits and withdrawals netted out:
 
-- The daily stop: the day's P&L = equity - the account's `last_equity` (its equity at the previous session's close) -
-  the net flows since that close; at or below -`daily_stop_share` x (last_equity + those flows), no new real entry
-  that day (exits go on).
+- The daily stop: start-of-day equity is the House's first reading of the account in the session (persisted, so a
+  restart keeps it); the day's P&L = equity now - that reading - the net flows since it; at or below
+  -`daily_stop_share` x (start-of-day equity + those flows), no new real entry that day (exits go on). The venue's
+  own `last_equity` is not used: whether it already carries a deposit that landed after the close is not documented,
+  and reading it wrongly would trip the stop on a deposit.
 - The drawdown stop: profit P = equity - net flows since the reset - the reset's equity; M is the highest P seen on a
   SETTLED observation (one whose flows were read after it, so a deposit not yet read can never pose as profit and
   raise the peak); the peak equity is H = reset equity + flows now + M, and a drawdown (M - P) / H at or above
@@ -337,7 +339,9 @@ class Stops:
     start_equity: Decimal
     peak_profit: Decimal = ZERO          # M: the highest settled profit since the reset
     day: str = ""                        # the New York session day the daily figures are for
-    day_base: Decimal | None = None      # last_equity + flows since the previous close, at the last reading
+    day_base: Decimal | None = None      # start-of-day equity + the day's net flows, at the last reading
+    sod_equity: Decimal | None = None    # the session's first reading of equity
+    sod_at: float | None = None
     day_pnl: Decimal | None = None
     daily_tripped: bool = False
     daily_why: str = ""
@@ -352,6 +356,7 @@ class Stops:
         return {"start_equity": str(self.start_equity), "peak_profit": str(self.peak_profit), "day": self.day,
                 "day_base": None if self.day_base is None else str(self.day_base),
                 "day_pnl": None if self.day_pnl is None else str(self.day_pnl), "daily_tripped": self.daily_tripped,
+                "sod_equity": None if self.sod_equity is None else str(self.sod_equity), "sod_at": self.sod_at,
                 "daily_why": self.daily_why, "drawdown": None if self.drawdown is None else str(self.drawdown),
                 "drawdown_tripped": self.drawdown_tripped, "drawdown_why": self.drawdown_why,
                 "drawdown_at": self.drawdown_at, "provisional": self.provisional,
@@ -366,6 +371,8 @@ class Stops:
         out.day = str(row.get("day") or "")
         out.day_base = None if row.get("day_base") is None else D(row["day_base"])
         out.day_pnl = None if row.get("day_pnl") is None else D(row["day_pnl"])
+        out.sod_equity = None if row.get("sod_equity") is None else D(row["sod_equity"])
+        out.sod_at = row.get("sod_at")
         out.daily_tripped = bool(row.get("daily_tripped"))
         out.daily_why = str(row.get("daily_why") or "")
         out.drawdown = None if row.get("drawdown") is None else D(row["drawdown"])
@@ -393,6 +400,7 @@ class Stops:
         (None: never read)."""
         if day != self.day:
             self.day, self.daily_tripped, self.daily_why, self.day_base, self.day_pnl = day, False, "", None, None
+            self.sod_equity, self.sod_at = equity, at
         self.pending.append((at, equity, last_equity, day))
         del self.pending[:-50]
         self.provisional = ""
@@ -426,15 +434,14 @@ class Stops:
                     self.drawdown_tripped, self.drawdown_why, self.drawdown_at = True, why, t
             else:
                 breaches.append(why)
-        if day == self.day:
-            close = flows.previous_close_of(t)
-            today = flows.net_between(close, t) if close is not None else ZERO
-            base = last_equity + today
-            day_pnl = equity - last_equity - today
+        if day == self.day and self.sod_equity is not None and self.sod_at is not None:
+            today = flows.net_between(self.sod_at, t)
+            base = self.sod_equity + today
+            day_pnl = equity - self.sod_equity - today
             self.day_base, self.day_pnl = base, day_pnl
             if base <= 0 or day_pnl <= -table.daily_stop_share * base:
                 why = (f"the day's P&L ${cents(day_pnl)} is at or past {table.daily_stop_share:.0%} of the day's base "
-                       f"${cents(base)} (the previous close's equity plus today's net deposits)")
+                       f"${cents(base)} (start-of-day equity plus today's net deposits)")
                 if settled:
                     if not self.daily_tripped:
                         self.daily_tripped, self.daily_why = True, why

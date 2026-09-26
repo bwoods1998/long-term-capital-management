@@ -395,8 +395,11 @@ class OptionsLive:
                                   negative=forward_meta.get("negative") if isinstance(forward_meta, Mapping) else None)
         except Exception:  # noqa: BLE001
             fwd = M.Forward(0, None, None, None, 0.0, False)
-        if not self._real_on() or equity is None:
+        grant = self._grant()
+        if not self._real_on() or not grant or not grant.get("active"):
             new, why = ("candidate", "real money is off, or the grant is not active") if band != "candidate" else (band, "")
+        elif equity is None:
+            return band      # the account unread: no band moves until it is
         else:
             new, why = M.band_for(self.table, row, equity, fwd, credit_accepted=credit_ok)
         if new != band:
@@ -516,6 +519,8 @@ class OptionsLive:
     # ------------------------------------------------------------------ the session minute
     def _session_minute(self, day: LiveDay, mi: int, now: float, out: dict) -> None:
         day.advance(mi)
+        if self.real is not None:
+            self._read_account(out)
         self.sync_families(now)
         roots = self._roots()
         self._read(day, mi, roots, out)
@@ -602,11 +607,6 @@ class OptionsLive:
         assert book is not None and self.real is not None
         today = day.day.isoformat()
         try:
-            self.account_row = self.real.account()
-        except Exception as exc:  # noqa: BLE001
-            self.account_row = None
-            out.setdefault("venue_errors", []).append(f"account: {type(exc).__name__}: {str(exc)[:120]}")
-        try:
             rows = self.real.orders(status="all", after=dt.datetime.fromtimestamp(epoch_of(day.day, 0), dt.timezone.utc).isoformat())
             foreign = book.ingest(rows)
             book.look_up(today=today, seen=[str(r.get("client_order_id") or "") for r in rows])
@@ -651,6 +651,13 @@ class OptionsLive:
             except Exception as exc:  # noqa: BLE001
                 out["paper_proof"] = f"error: {type(exc).__name__}"
         self._venue_rules(day, mi, out)
+
+    def _read_account(self, out: dict) -> None:
+        try:
+            self.account_row = self.real.account()
+        except Exception as exc:  # noqa: BLE001
+            self.account_row = None
+            out.setdefault("venue_errors", []).append(f"account: {type(exc).__name__}: {str(exc)[:120]}")
 
     def _flows(self, now: float) -> None:
         if self.real is None or not self.start_at or now - self._flows_at < FLOWS_EVERY:
