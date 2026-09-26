@@ -255,7 +255,14 @@ class Founders(unittest.TestCase):
             self.assertEqual(program_for({**family_spec(s)}), (code.replace(f"# {s['id']}:", f"# {s['id']}:"), params))
 
     @unittest.skipUnless(GYM, "the Gym's own check")
-    def test_every_starter_passes_the_gyms_safety_check_and_loads(self):
+    def test_every_starter_passes_the_gyms_safety_check(self):
+        from league.gym.safety import check_program
+
+        for s in SEEDS:
+            check_program(program_for(s)[0])
+
+    @unittest.skipUnless(GYM and importlib.util.find_spec("numpy") is not None, "numpy (requirements-gym.txt)")
+    def test_every_starter_loads_in_the_gym(self):
         from league.gym.runtime import load_program
 
         for s in SEEDS:
