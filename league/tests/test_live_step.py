@@ -78,11 +78,9 @@ class LiveCase(unittest.TestCase):
 
 class RoundTrip(LiveCase):
     def test_a_probe_family_trades_its_shadow_and_real_books_and_both_reach_the_forward_record(self):
-        live = self.make([family("vert", VERTICAL, band="candidate")])
+        live = self.make([family("vert", VERTICAL, band="probe")])
         out = self.run_to(9, 31)
         self.assertEqual(out["state"], "session")
-        # The live path moved the Candidate to Probe (it passed the holdout, trades a real type, fits the cap).
-        self.assertEqual(self.families.moves[0][:2], ("vert", "probe"))
         self.assertEqual(sorted(live.instances), ["vert@1:r", "vert@1:s"])
         # The real open: sized by maximum loss (3% of the lower of equity 5,481.65 and the grant's 5,500), not by the
         # program's qty of 2.
@@ -114,11 +112,30 @@ class RoundTrip(LiveCase):
         self.assertEqual(self.live.book.reconcile(self.venue.positions(), [], day=MONDAY, after_close=False), [])
 
     def test_a_candidate_trades_shadow_only_while_real_money_is_off(self):
-        live = self.make([family("vert", VERTICAL, band="probe")], real_money=False)
+        live = self.make([family("vert", VERTICAL, band="candidate")], real_money=False)
         self.run_to(9, 33)
         self.assertEqual(sorted(live.instances), ["vert@1:s"])
-        self.assertEqual(self.families.rows["vert"]["band"], "candidate")   # no Probe without real money
+        self.assertEqual(self.families.rows["vert"]["band"], "candidate")   # no band moves without real money
         self.assertEqual(self.venue.sent, [])
+
+    def test_a_family_promoted_in_the_session_trades_real_money_from_the_next_session(self):
+        live = self.make([family("vert", VERTICAL, band="candidate", params={"hold": 3, "opens": 5})])
+        self.run_to(9, 40)
+        self.assertEqual(self.families.rows["vert"]["band"], "probe")
+        self.assertEqual(sorted(live.instances), ["vert@1:s"], "no real instance the session it was promoted")
+        self.assertEqual(self.venue.sent, [])
+        self.clock.set(at(MONDAY + dt.timedelta(days=1), 9, 31))
+        live.minute()
+        self.assertIn("vert@1:r", live.instances)
+        self.assertEqual(len(self.venue.sent), 1)
+
+    def test_a_candidate_whose_typical_loss_is_unknown_stays_shadow_only_and_says_why_once_a_day(self):
+        live = self.make([family("vert", VERTICAL, band="candidate", typical=None)])
+        self.run_to(9, 45)
+        self.assertEqual(self.families.rows["vert"]["band"], "candidate")
+        held = [p for p, a in self.ledger.of("live.band") if p.get("held")]
+        self.assertEqual(len(held), 1)
+        self.assertIn("typical maximum loss is unknown", held[0]["why"])
 
     def test_the_site_sees_structures_and_never_a_price(self):
         live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 30})])
@@ -140,7 +157,7 @@ class Gates(LiveCase):
         live = self.make([family("vert", VERTICAL, band="probe")])
         self.run_to(9, 32)
         self.assertEqual(self.venue.sent, [])
-        self.assertEqual(self.families.rows["vert"]["band"], "candidate")
+        self.assertIn("grant", " ".join(p["why"] for p, a in self.ledger.of("live.refusal")))
 
     def test_the_kill_switch_stops_entries_and_exits(self):
         live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 2})])

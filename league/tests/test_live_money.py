@@ -25,7 +25,7 @@ def fwd(returns, *, max_loss=100.0, negative=None, confidence=0.8):
 
 
 def row(**kw):
-    base = {"family": "f", "band": "candidate", "structure": "debit_vertical", "holdout_passed": True, "typical_max_loss_usd": None}
+    base = {"family": "f", "band": "candidate", "structure": "debit_vertical", "holdout_passed": True, "typical_max_loss_usd": 50.0}
     base.update(kw)
     return base
 
@@ -91,6 +91,11 @@ class Bands(unittest.TestCase):
         band, why = M.band_for(self.t, row(typical_max_loss_usd="150.01"), D("5000"), fwd([]))
         self.assertEqual(band, "candidate")
         self.assertIn("over the Probe's cap of $150.00", why)
+
+    def test_an_unknown_typical_loss_keeps_a_candidate_shadow_only(self):
+        band, why = M.band_for(self.t, row(typical_max_loss_usd=None), D("5481.65"), fwd([]))
+        self.assertEqual(band, "candidate")
+        self.assertIn("typical maximum loss is unknown", why)
 
     def test_the_floor_lets_a_small_account_probe_one_contract(self):
         self.assertEqual(M.band_for(self.t, row(typical_max_loss_usd=60.0), D("481.65"), fwd([]))[0], "probe")

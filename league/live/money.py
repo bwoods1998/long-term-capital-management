@@ -276,15 +276,17 @@ def band_for(table: Table, row: Mapping[str, Any], equity: Decimal, fwd: Forward
     if why:
         return "candidate", why
     typical = row.get("typical_max_loss_usd")
-    if typical is not None:
-        try:
-            unit = D(typical)
-        except (ValueError, ArithmeticError):
-            unit = None
-        if unit is not None and unit > 0 and not fits_probe(table, equity, unit):
-            return "candidate", (f"its typical structure risks ${cents(unit)}, over the Probe's cap of "
-                                 f"${cents(probe_cap(table, equity))} ({table.probe_share:%} of ${cents(equity)}) and the "
-                                 f"one-contract floor of ${table.probe_floor}")
+    try:
+        unit = D(typical) if typical is not None else None
+    except (ValueError, ArithmeticError):
+        unit = None
+    if unit is None or unit <= 0:
+        # The plan's Probe needs its typical maximum loss to fit the cap: unknown, it cannot be shown to fit.
+        return "candidate", "its typical maximum loss is unknown (no structure in the banded version's validation run)"
+    if not fits_probe(table, equity, unit):
+        return "candidate", (f"its typical structure risks ${cents(unit)}, over the Probe's cap of "
+                             f"${cents(probe_cap(table, equity))} ({table.probe_share:%} of ${cents(equity)}) and the "
+                             f"one-contract floor of ${table.probe_floor}")
     if band in ("probe", "sized") and fwd.real_bad:
         return "probe", (f"its {fwd.real_n} real trades lose (mean {fwd.real_mean:.4f} a dollar of maximum loss): held at "
                          "Probe")

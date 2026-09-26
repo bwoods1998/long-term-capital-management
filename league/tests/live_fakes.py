@@ -350,7 +350,7 @@ def decide(ctx):
 
 
 def family(name: str, code: str, *, band: str = "probe", structure: str = "debit_vertical", holdout: bool = True,
-           validation: bool = True, version: int = 1, typical: Any = None, params: Mapping[str, Any] | None = None) -> dict:
+           validation: bool = True, version: int = 1, typical: Any = 50.0, params: Mapping[str, Any] | None = None) -> dict:
     return {"family": name, "band": band, "structure": structure, "roots": ["SPY"], "holdout_passed": holdout,
             "validation_passed": validation, "version": version, "code": code, "params": dict(params or {}),
             "run_sha": f"sha-{name}-{version}", "typical_max_loss_usd": typical, "seed_era": True,

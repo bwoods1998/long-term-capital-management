@@ -407,7 +407,8 @@ class OptionsLive:
             if band in ("candidate", "probe", "sized"):
                 band = self._move_band(row, equity, credit_ok)
                 wanted[f"{fid}@{version}:s"] = (row, "shadow", False)
-                if band in ("probe", "sized") and self._real_on():
+                if band in ("probe", "sized") and self._real_on() and (
+                        f"{fid}@{version}:r" in self.instances or self._real_eligible(fid)):
                     wanted[f"{fid}@{version}:r"] = (dict(row, band=band), "real", False)
             elif (band == "gym" and row.get("validation_passed") and not row.get("holdout_passed") and self._real_on()
                   and self.table.tuition_day > 0 and row.get("structure") in self.table.real_types):
@@ -459,20 +460,46 @@ class OptionsLive:
         except Exception:  # noqa: BLE001
             fwd = M.Forward(0, None, None, None, 0.0, False)
         grant = self._grant()
-        if not self._real_on() or not grant or not grant.get("active"):
-            new, why = ("candidate", "real money is off, or the grant is not active") if band != "candidate" else (band, "")
-        elif equity is None:
-            return band      # the account unread: no band moves until it is
-        else:
-            new, why = M.band_for(self.table, row, equity, fwd, credit_accepted=credit_ok)
+        if not self._real_on() or not grant or not grant.get("active") or equity is None:
+            # No band moves while real money cannot trade (off, no active grant) or the account is unread: a move now
+            # would only be undone, and a Probe trades from the session after its move (`_real_eligible`).
+            return band
+        new, why = M.band_for(self.table, row, equity, fwd, credit_accepted=credit_ok)
         if new != band:
             try:
                 self.families.set_band(fid, new, why)
                 self.record("live.band", {"family": fid, "from": band, "to": new, "why": why}, agent=fid)
+                if band == "candidate" and new in ("probe", "sized"):
+                    moves = dict(self.state.get("band_moves", {}) or {})
+                    moves[fid] = {"band": new, "at": self.clock()}   # onto real money: it trades from the next session
+                    self.state.put("band_moves", moves)
             except Exception as exc:  # noqa: BLE001 - the band stays; tried again at the next refresh
                 self.alert("warning", f"live: {fid}'s band could not be moved to {new} ({type(exc).__name__})")
                 return band
+        elif why and new == "candidate":
+            # Held shadow-only: the reason is recorded once a day (the plan: "else shadow-only, with the reason recorded").
+            told = dict(self.state.get("held_told", {}) or {})
+            today = ny(self.clock()).date().isoformat()
+            if told.get(fid) != today:
+                told[fid] = today
+                self.state.put("held_told", told)
+                self.record("live.band", {"family": fid, "from": band, "to": band, "held": True, "why": why}, agent=fid)
         return new
+
+    def _real_eligible(self, fid: str) -> bool:
+        """A family moved to Probe (or Sized) trades real money from the session AFTER its move (the plan's Probe row:
+        "real from its next session"): its move must precede the open of the current (or next) session."""
+        move = (self.state.get("band_moves", {}) or {}).get(fid)
+        if not move:
+            return True
+        now = self.clock()
+        day = ny(now).date()
+        for _ in range(10):
+            session = session_minutes(day)
+            if session is not None and (day > ny(now).date() or now < epoch_of(day, session[1])):
+                return float(move["at"]) < epoch_of(day, session[0])
+            day += dt.timedelta(days=1)
+        return False
 
     def _persist_instance(self, inst: Instance) -> None:
         import json
