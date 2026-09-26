@@ -334,5 +334,19 @@ class Reconciliation(unittest.TestCase):
         self.assertEqual(self.recon(after_close=True), [])
 
 
+@unittest.skipUnless(HAVE, "numpy not installed")
+class ClientIds(unittest.TestCase):
+    def test_every_process_draws_its_own_nonce_even_on_a_rolled_back_state(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "live.sqlite"
+            first = LiveState(path)
+            nonce = first.nonce
+            first.close()
+            again = LiveState(path)                           # the same file: a restart, or a checkpoint restored
+            self.assertNotEqual(again.nonce, nonce)
+            self.assertIsNone(again.get("nonce"), "never stored with the rows it would repeat")
+            again.close()
+
+
 if __name__ == "__main__":
     unittest.main()

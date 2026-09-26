@@ -195,8 +195,10 @@ def _netns_available() -> bool:
 def protect_house_process() -> bool:
     """The House's process made undumpable (Linux `prctl(PR_SET_DUMPABLE, 0)`): its `/proc/<pid>/environ` and memory,
     where the gateway token lives, are then root's, not readable by a child of the same user (a program that escaped
-    the Gym's sandbox in the decider). True when set. The child runs as the House's user and in its network: this
-    closes the one path to the token that needs no escape past the interpreter (the review of #362, m16)."""
+    the Gym's sandbox in the decider). True when set. This narrows the paths to the House's secrets, it does not close
+    them: the child runs as the House's user, so a program that escaped the interpreter's sandbox could still open the
+    box's env file (mode 600, the same user) and write the live state; a root House is not protected by it at all. A
+    separate user (or seccomp) for the child is the full isolation, left undone on purpose (the review of #362, m16)."""
     import sys as _sys
 
     if not _sys.platform.startswith("linux"):

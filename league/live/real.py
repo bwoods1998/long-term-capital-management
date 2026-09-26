@@ -61,7 +61,8 @@ _SLUG = re.compile(r"[^a-z0-9-]+")
 
 
 def client_id(oid: int, family: str, *, nonce: str = "") -> str:
-    """`lv-<state nonce>-<row id>-<family>`: the live state's nonce makes a new or rolled-back state's ids new."""
+    """`lv-<process nonce>-<row id>-<family>`: the nonce is drawn at every process start (`LiveState.nonce`), so a new or
+    rolled-back state's ids are new even where its row ids repeat."""
     head = f"{PREFIX}{nonce}-" if nonce else PREFIX
     return f"{head}{int(oid):07d}-{_SLUG.sub('-', str(family).lower())[:40].strip('-')}"
 
@@ -480,7 +481,7 @@ class RealBook:
         with self.state.transaction():
             oid = self._next("orders", "oid")
             price = f"{round(abs(limit_value), 2):.2f}" if action == "close_leg" else limit_price(limit_value, action)
-            order = ROrder(oid, client_id(oid, family, nonce=str(self.state.get("nonce") or "")), instance, family, action,
+            order = ROrder(oid, client_id(oid, family, nonce=self.state.nonce), instance, family, action,
                            type_, root, list(legs), int(qty),
                            float(limit_value), price, tif, self.clock(), day, int(minute),
                            pid=pid, forced=forced, reserve=float(reserve), max_loss=float(max_loss), fees_est=float(fees_est),

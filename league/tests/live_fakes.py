@@ -213,11 +213,16 @@ class Venue:
         self._try_fill(order)
         return Submitted(True, self._public(order), "", status=200)
 
+    cancel_delay = 0.0   # seconds a cancel shows as pending_cancel (still working) before it is done
+
     def cancel(self, venue_id: str) -> tuple[bool, str]:
         self.cancels.append(venue_id)
         for o in self.book:
             if o["id"] == venue_id and o["status"] in ("new", "accepted", "partially_filled"):
-                o["status"] = "canceled"
+                if self.cancel_delay:
+                    o["status"], o["_cancel_at"] = "pending_cancel", self.clock() + self.cancel_delay
+                else:
+                    o["status"] = "canceled"
                 return True, ""
         return False, "HTTP 422 order is not cancelable"
 
@@ -236,7 +241,10 @@ class Venue:
 
     def _advance(self) -> None:
         for o in self.book:
-            if o["status"] in ("new", "accepted", "partially_filled"):
+            if o["status"] == "pending_cancel":
+                if self.clock() >= o["_cancel_at"]:
+                    o["status"] = "canceled"
+            elif o["status"] in ("new", "accepted", "partially_filled"):
                 self._try_fill(o)
 
     def _natural(self, order: dict) -> tuple[float, list[float]]:

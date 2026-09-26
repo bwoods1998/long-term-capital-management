@@ -522,13 +522,21 @@ CHURN = VERTICAL.replace('out.append({"close": p["id"], "limit": "natural", "not
 
 
 class OrderBudget(LiveCase):
-    def test_a_real_instance_has_the_gyms_orders_a_day(self):
-        self.venue.fill = "natural"
-        live = self.make([family("vert", CHURN, band="probe", params={"hold": 1})], config={"instance_orders_day": 6})
+    def test_a_real_instance_has_the_gyms_orders_a_day_for_its_opens(self):
+        live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 1, "opens": 10})],
+                         config={"instance_orders_day": 6})
         self.run_to(10, 30)
-        sent = len(self.venue.sent)
-        self.assertLessEqual(sent, 6)
+        opens = [b for b in self.venue.sent if b["legs"][0]["position_intent"] == "buy_to_open"]
+        self.assertEqual(len(opens), 3)                                      # open, close, open, close, open, close
+        self.assertEqual(len(self.venue.sent), 6)
         self.assertTrue(any("order budget" in p["why"] for p, a in self.ledger.of("live.refusal")))
+        self.assertEqual(live.book.positions, {})
+
+    def test_a_program_churning_its_close_is_never_refused_on_the_budget(self):
+        live = self.make([family("vert", CHURN, band="probe", params={"hold": 1})], config={"instance_orders_day": 6})
+        self.run_to(9, 50)
+        self.assertGreater(len(self.venue.sent), 6, "closes are charged but never refused")
+        self.assertFalse(any("order budget" in p["why"] for p, a in self.ledger.of("live.refusal")))
 
     def test_program_closes_leave_the_room_forced_exits_need(self):
         live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 3})])
@@ -585,7 +593,7 @@ class OptionEventsOnce(LiveCase):
     def test_an_old_assignment_is_never_read_again_however_many_events_follow(self):
         live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 600})])
         self.venue.activity_rows.append({"id": "a00001", "activity_type": "OPASN", "symbol": "SPY260925C00600000", "qty": "1",
-                                         "date": "2026-09-25", "transaction_time": "2026-09-25T20:00:00Z"})
+                                         "date": "2026-09-26", "transaction_time": "2026-09-26T14:00:00Z"})
         for i in range(2100):
             self.venue.activity_rows.append({"id": f"b{i:05d}", "activity_type": "OPEXP", "symbol": "SPY260926P00500000",
                                              "qty": "1", "date": "2026-09-27", "transaction_time": "2026-09-27T20:00:00Z"})
@@ -597,6 +605,161 @@ class OptionEventsOnce(LiveCase):
         seen = [p for p, a in self.ledger.of("live.option_event") if p["kind"] == "OPASN"]
         self.assertEqual(len(seen), 1, "the old assignment was processed once")
         self.assertEqual(sum(1 for n in self.notices if n["stop"] == "assignment"), 1)
+
+
+ONE_CLOSE = '''
+NEEDS = {"roots": ["SPY"], "dte": [0, 3], "band": 0.03, "cadence": 1, "history": 0, "start": 571, "end": 958}
+PARAMS = {"hold": 10}
+STATE = {"opened": 0}
+
+def decide(ctx):
+    out = []
+    for p in ctx.positions:
+        if p["held_minutes"] == ctx.params["hold"]:
+            out.append({"close": p["id"], "limit": "natural", "note": "once, at exactly its hold"})
+    if not ctx.positions and not ctx.orders and not STATE["opened"]:
+        STATE["opened"] += 1
+        out.append({"open": "debit_vertical", "root": "SPY", "qty": 1, "limit": "natural",
+                    "legs": [{"side": "long", "right": "C", "dte": 1, "atm": 0},
+                             {"side": "short", "right": "C", "rel": 0, "offset": 1.0}]})
+    return out
+'''
+CANCELLER = RESTER.replace("    return out", "    for o in ctx.orders:\n        out.append({\"cancel\": o[\"id\"]})\n    return out")
+
+
+class VerificationRound(LiveCase):
+    """The fix verification of #362 (regressions R1-R8 and the partly fixed C5, C7): each test failed before its fix."""
+
+    def test_a_deferred_exit_that_raises_is_dropped_and_the_minute_goes_on(self):
+        from unittest import mock
+        from league.live import step as S
+
+        live = self.make([family("holder", VERTICAL, band="probe", params={"hold": 600})])
+        self.run_to(9, 31)
+        [pos] = live.book.positions.values()
+        live.pending_exits[pos.pid] = {"forced": False, "why": "program", "intent": {"close": pos.pid, "tag": "boom"},
+                                       "day": "2026-09-28"}
+        real = S.L.resolve_close
+
+        def boom(intent, *args, **kwargs):
+            if intent.get("tag") == "boom":
+                raise RuntimeError("boom")
+            return real(intent, *args, **kwargs)
+
+        with mock.patch.object(S.L, "resolve_close", boom):
+            out = self.run_to(9, 34)                                           # raised out of minute() before the fix
+        self.assertEqual(out["state"], "session")
+        self.assertEqual(live.pending_exits, {})
+        self.assertTrue(any("boom" in p["why"] for p, a in self.ledger.of("live.refusal") if a == "holder"))
+
+    def test_a_waiting_exit_survives_a_slow_cancel_and_a_restart(self):
+        self.venue.cancel_delay = 150.0
+        rows = [family("holder", ONE_CLOSE, band="probe", params={"hold": 10}),
+                family("rester", RESTER, band="probe", params={"hold": 600})]
+        live = self.make(rows)
+        self.run_to(9, 42)
+        [pos] = [p for p in live.book.positions.values() if p.family == "holder"]
+        self.assertIn(pos.pid, live.pending_exits, "still waiting while the cancel is pending")
+        live.state.close()
+        again = self.make(rows)
+        self.assertIn(pos.pid, again.pending_exits, "the waiting exit is kept in the live state")
+        self.clock.set(self.clock() + 60)
+        self.run_to(9, 50)
+        self.assertNotIn(pos.pid, again.book.positions, "the exit went once the cancel was done")
+        closes = [b for b in self.venue.sent if b.get("legs") and b["legs"][0]["position_intent"] == "sell_to_close"]
+        self.assertEqual(len(closes), 1)
+
+    def test_a_waiting_exit_is_dropped_at_the_day_roll_and_its_program_told(self):
+        live = self.make([family("holder", VERTICAL, band="probe", params={"hold": 600})])
+        self.run_to(9, 31)
+        [pos] = live.book.positions.values()
+        live.pending_exits[pos.pid] = {"forced": False, "why": "program", "day": "2026-09-25",
+                                       "intent": {"close": pos.pid, "limit": {"price": 0.01}}}
+        self.run_to(9, 32)
+        self.assertEqual(live.pending_exits, {})
+        self.assertIn(pos.pid, live.book.positions, "yesterday's close (and its price) is never sent")
+        self.assertTrue(any("waited past" in p["why"] for p, a in self.ledger.of("live.refusal") if a == "holder"))
+
+    def test_a_program_may_close_an_out_of_the_money_expiring_structure_until_the_cutoff(self):
+        self.clock.set(at(MONDAY, 14, 50))
+        far = VERTICAL.replace('"atm": 0', '"atm": 10')                    # 1.7% out of the money: the House leaves it
+        live = self.make([family("vert", far, band="probe", params={"hold": 28, "dte": 0})])
+        self.run_to(15, 20)
+        self.assertFalse(any("the House is closing" in p["why"] for p, a in self.ledger.of("live.refusal")))
+        [pos] = live.book.positions.values()
+        close = live.book.closing_order(pos.pid)
+        self.assertIsNotNone(close, "the program's own close went (worth nothing here, it rests)")
+        self.assertFalse(close.forced)
+
+    def test_the_order_budget_counts_what_reached_the_venue_and_never_refuses_an_exit(self):
+        live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 3, "opens": 5})],
+                         config={"instance_orders_day": 1})
+        self.venue.submit_mode = "gateway"
+        self.run_to(9, 31)                                                   # the gateway refused it (a cap)
+        self.venue.submit_mode = "ratelimited"
+        self.run_to(9, 32)                                                   # never left the House
+        self.venue.submit_mode = "ok"
+        self.run_to(9, 33)
+        self.assertEqual(len(live.book.positions), 1, "refused sends are not charged to the budget")
+        self.run_to(9, 40)
+        self.assertEqual(live.book.positions, {}, "the close goes although the budget is spent")
+        budget = [p["_intent"] for p, a in self.ledger.of("live.refusal") if "order budget" in p["why"]]
+        self.assertTrue(budget and all("open" in i for i in budget), budget)
+
+    def test_a_cancel_of_a_resting_open_is_never_refused_on_the_order_count(self):
+        live = self.make([family("rester", CANCELLER, band="probe", params={"hold": 600})])
+        self.run_to(9, 31)
+        [order] = [o for o in live.book.orders.values() if o.action == "open"]
+        live.book._count("2026-09-28", 244)                                  # 246 of 250 with the open, 4 kept
+        self.run_to(9, 33)
+        self.assertEqual(self.venue.cancels, [order.venue_id])
+
+    def test_an_exit_only_instance_promoted_again_waits_for_the_next_session(self):
+        live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 600})])
+        self.run_to(9, 31)
+        self.families.rows["vert"]["forward"] = {"trades": 25, "negative": True}
+        live._families_at = float("-inf")
+        self.run_to(9, 32)
+        self.assertEqual(live.instances["vert@1:r"].mode, "exit_only")
+        self.families.rows["vert"]["forward"] = {"trades": 25, "negative": False}
+        live._families_at = float("-inf")
+        self.run_to(9, 33)
+        self.assertEqual(self.families.rows["vert"]["band"], "probe")
+        self.assertEqual(live.instances["vert@1:r"].mode, "exit_only", "real money from the next session")
+        self.clock.set(at(MONDAY + dt.timedelta(days=1), 9, 31))
+        live._families_at = float("-inf")
+        live.minute()
+        self.assertEqual(live.instances["vert@1:r"].mode, "live")
+
+    def test_an_option_event_from_before_the_reset_is_not_this_runs(self):
+        self.venue.activity_rows.append({"id": "old1", "activity_type": "OPASN", "symbol": "SPY260925C00600000", "qty": "1",
+                                         "date": "2026-09-25", "transaction_time": "2026-09-25T20:00:00Z"})
+        live = self.make([family("vert", VERTICAL, band="probe")])
+        self.run_to(9, 31)
+        self.assertIsNone(live.state.get("assignment_latch"))
+        self.assertEqual([n for n in self.notices if n["stop"] == "assignment"], [])
+
+    def test_a_broken_leg_left_at_the_close_is_sent_again_at_the_next_open(self):
+        self.clock.set(at(MONDAY, 15, 40))
+        live = self.make([family("condor", CONDOR, band="probe", structure="iron_condor")])
+        self.run_to(15, 40)
+        [pos] = live.book.positions.values()
+        put_short = next(l for l in pos.legs if l.side < 0 and not l.is_call)
+        call_short = next(l for l in pos.legs if l.side < 0 and l.is_call)
+        held = -self.venue.held[put_short.symbol]
+        self.venue.held[put_short.symbol] = D(0)
+        self.venue.held["SPY"] = held * 100
+        self.venue.activity_rows.append({"id": "asn3", "activity_type": "OPASN", "symbol": put_short.symbol, "qty": str(held),
+                                         "date": "2026-09-28"})
+        self.venue.fill = "none"                                             # the leg's order rests and lapses
+        live._activities_at = float("-inf")
+        self.run_to(15, 59)
+        sends = lambda: [b for b in self.venue.sent if b.get("symbol") == call_short.symbol]
+        before = len(sends())
+        self.assertGreater(before, 0)
+        self.clock.set(at(MONDAY + dt.timedelta(days=1), 9, 31))
+        self.run_to(9, 34)
+        self.assertGreater(len(sends()), before, "the short leg is sent again in the next session's first minutes")
 
 
 class Restart(LiveCase):

@@ -56,7 +56,7 @@ from .paper import PaperProof
 from .real import RealBook, RLeg, RPosition, real_legs
 from .shadow import SHADOW_FILE, ShadowAccount, ShadowBook, needs_of
 from .state import STATE_FILE, LiveState
-from .venue import OPTION_EVENTS, Account, MarketData, VenueError, occ_parts, occ_symbol, stock_price
+from .venue import OPTION_EVENTS, Account, MarketData, VenueError, occ_parts, occ_symbol, parse_time, stock_price
 
 NEW_YORK = ZoneInfo("America/New_York")
 FAMILIES_EVERY = 300.0
@@ -155,8 +155,9 @@ class OptionsLive:
         self._stop = threading.Event()
         self._lock = threading.RLock()
         self._rows: list[dict] = []
-        #: pid -> {forced, why, intent}: exits waiting for their contracts (another order works on them).
-        self.pending_exits: dict[int, dict] = {}
+        #: pid -> {forced, why, intent, day}: exits waiting for their contracts (another order works on them), kept in
+        #: the live state so a restart does not lose one the program was told the House sends.
+        self.pending_exits: dict[int, dict] = {int(k): dict(v) for k, v in (self.state.get("pending_exits", {}) or {}).items()}
         self._restore_real_instances()
 
     # ------------------------------------------------------------------ plumbing
@@ -407,8 +408,9 @@ class OptionsLive:
             if band in ("candidate", "probe", "sized"):
                 band = self._move_band(row, equity)
                 wanted[f"{fid}@{version}:s"] = (row, "shadow", False)
+                live_now = self.instances.get(f"{fid}@{version}:r")
                 if band in ("probe", "sized") and self._real_on() and (
-                        f"{fid}@{version}:r" in self.instances or self._real_eligible(fid)):
+                        (live_now is not None and live_now.mode == "live") or self._real_eligible(fid)):
                     wanted[f"{fid}@{version}:r"] = (dict(row, band=band), "real", False)
             elif (band == "gym" and row.get("validation_passed") and not row.get("holdout_passed") and self._real_on()
                   and self.table.tuition_day > 0 and row.get("structure") in self.table.real_types):
@@ -852,7 +854,6 @@ class OptionsLive:
             return
         self._flows_at = now
         from ltcm.performance import ALPACA_FUNDING
-        from .venue import parse_time
 
         try:
             rows = self.real.activities(sorted(ALPACA_FUNDING), after=self.start_at)
@@ -890,19 +891,33 @@ class OptionsLive:
         if self.real is None or now - self._activities_at < ACTIVITIES_EVERY:
             return
         self._activities_at = now
-        # Read from a cursor (the latest event's day, less a day), never again from the reset: the ids seen are kept by
-        # day and pruned with it, so an old assignment is never read twice however many events follow.
-        cursor = str(self.state.get("activities_cursor") or (self.start_at or "")[:10] or "")
+        # Read from a cursor (the latest event's day, less a day) once one is stored, never again from the reset: the ids
+        # seen are kept by day and pruned with it, so an old assignment is never read twice however many events follow.
+        # Before the first event, from the reset itself (`start_at`): an event before it is not this run's.
+        cursor = str(self.state.get("activities_cursor") or "")
         seen: dict[str, str] = dict(self.state.get("activities_seen_by_day", {}) or {})
-        after = (dt.date.fromisoformat(cursor) - dt.timedelta(days=1)).isoformat() if cursor else None
+        since = parse_time(self.start_at) if not cursor and self.start_at else None
+        after = (dt.date.fromisoformat(cursor) - dt.timedelta(days=1)).isoformat() if cursor else (self.start_at or None)
         try:
             rows = self.real.activities(list(OPTION_EVENTS), after=after)
         except Exception as exc:  # noqa: BLE001
             self.alert("warning", f"live: option events could not be read ({type(exc).__name__})")
             return
+
         def event_day(r: Mapping[str, Any]) -> str:
             return str(r.get("date") or r.get("transaction_time") or "")[:10]
-        fresh = [r for r in rows if str(r.get("id")) not in seen and (not after or not event_day(r) or event_day(r) >= after)]
+
+        def this_runs(r: Mapping[str, Any]) -> bool:
+            if since is not None:
+                stamp = parse_time(r.get("transaction_time"))
+                if stamp is not None:
+                    return stamp > since
+                # A dated event on the reset's own day cannot be placed before or after it: it is taken (an assignment
+                # missed costs more than one handled twice; the owner is told either way).
+                return not event_day(r) or event_day(r) >= str(self.start_at)[:10]
+            return not cursor or not event_day(r) or event_day(r) >= str(after)
+
+        fresh = [r for r in rows if str(r.get("id")) not in seen and this_runs(r)]
         for r in fresh:
             seen[str(r.get("id"))] = event_day(r)
             kind, symbol = str(r.get("activity_type")), str(r.get("symbol") or "").upper()
@@ -1023,15 +1038,8 @@ class OptionsLive:
             inst = self.instances.get(pos.instance)
             orphan = inst is None or inst.fatal
             expiring = pos.expiry == today
-            force_why = ""
-            if expiring and rules.kind == "equity" and rules.close_cutoff - self.table.expiry_close_lead_minutes <= minute:
-                snap = day.snapshot(pos.root, mi)
-                spot = snap.spot if snap is not None else float("nan")
-                near = [leg.symbol for leg in pos.legs if leg.expiry == today and _near_money(leg, spot, float(self.table.near_money_share))]
-                if near or not math.isfinite(spot):
-                    force_why = (f"expiring equity options with a leg in or near the money ({', '.join(near) or 'no price'}): "
-                                 f"closed before {rules.close_cutoff // 60}:{rules.close_cutoff % 60:02d} ET")
-            elif orphan:
+            force_why = self._expiry_close(pos, day, mi, minute)
+            if not force_why and orphan:
                 force_why = f"its program is gone ({inst.error if inst else 'no instance'}): the House closes it"
             if not force_why:
                 continue
@@ -1048,28 +1056,62 @@ class OptionsLive:
                 elif mi - working.placed_minute >= 1:
                     book.cancel(working, "re-priced at the natural")
                 continue
-            self._send_close(pos, day, mi, forced=True, why=force_why, out=out)
+            # One position's failure never stops the other forced closes.
+            self._isolated(pos.instance, lambda pos=pos, why=force_why: self._send_close(pos, day, mi, forced=True, why=why, out=out))
 
-    def _in_forced_window(self, pos: RPosition, day: LiveDay, minute: int) -> bool:
-        """Whether an expiring equity structure is the House's to close now (the forced window of `_venue_rules`)."""
+    def _expiry_close(self, pos: RPosition, day: LiveDay, mi: int, minute: int) -> str:
+        """Why the House closes this expiring equity structure itself now, or "": in the window before the close cutoff
+        (`expiry_close_lead_minutes`) with a leg in or near the money, or no underlying price to tell. One predicate for
+        the House's forced close (`_venue_rules`) and for refusing a program's own close of it (`_real_intent`)."""
         rules = day.rules.get(pos.root) or V.rules_for(pos.root, open_minute=day.open_min, close_minute=day.close_min)
-        return (pos.expiry == day.day.isoformat() and rules.kind == "equity"
-                and minute >= rules.close_cutoff - self.table.expiry_close_lead_minutes)
+        today = day.day.isoformat()
+        if not (pos.expiry == today and rules.kind == "equity"
+                and rules.close_cutoff - self.table.expiry_close_lead_minutes <= minute):
+            return ""
+        snap = day.snapshot(pos.root, mi)
+        spot = snap.spot if snap is not None else float("nan")
+        near = [leg.symbol for leg in pos.legs if leg.expiry == today and _near_money(leg, spot, float(self.table.near_money_share))]
+        if near or not math.isfinite(spot):
+            return (f"expiring equity options with a leg in or near the money ({', '.join(near) or 'no price'}): "
+                    f"closed before {rules.close_cutoff // 60}:{rules.close_cutoff % 60:02d} ET")
+        return ""
 
     def _pending_exits(self, day: LiveDay, mi: int, out: dict) -> None:
         """Exits waiting for their contracts (another family's open being cancelled for them, or another close): sent as
         soon as the stream is free, before any new open."""
         book = self.book
         assert book is not None
+        if not self.pending_exits:
+            return
+        today = day.day.isoformat()
         for pid, want in list(self.pending_exits.items()):
+            # Taken off the list first: `_send_close` puts it back only when its contracts are still busy (it waits on).
+            self.pending_exits.pop(pid, None)
             pos = book.positions.get(pid)
             if pos is None or pos.qty <= 0 or book.closing_order(pid) is not None:
-                self.pending_exits.pop(pid, None)
                 continue
-            why = self._send_close(pos, day, mi, forced=want["forced"], why=want["why"], out=out, intent=want.get("intent"),
-                                   pending=True)
-            if why is None:
-                self.pending_exits.pop(pid, None)
+            if want.get("day") != today:
+                why = "your close waited past the session's end for its contracts and was dropped: send it again"
+            else:
+                try:
+                    why = self._send_close(pos, day, mi, forced=bool(want.get("forced")), why=str(want.get("why") or ""),
+                                           out=out, intent=want.get("intent"), pending=True)
+                except Exception as exc:  # noqa: BLE001 - one waiting exit never stops the minute (or the others)
+                    why = f"the waiting close failed: {type(exc).__name__}: {str(exc)[:160]}"
+                    self.state.event("live.error", {"instance": pos.instance, "error": why,
+                                                    "trace": traceback.format_exc()[-2000:]})
+            if why is None or pid in self.pending_exits:
+                continue                                   # sent, or still waiting for its contracts
+            if not want.get("forced"):
+                # Refused now for another reason: the program is told, as for any refused close (it may send it again).
+                book._reject(pos.instance, why)
+                self.record("live.refusal", {"instance": pos.instance, "family": pos.family, "why": why[:300],
+                                             "_intent": {k: v for k, v in (want.get("intent") or {}).items() if k != "note"}},
+                            agent=pos.family)
+        self._save_pending()
+
+    def _save_pending(self) -> None:
+        self.state.put("pending_exits", {str(k): v for k, v in self.pending_exits.items()})
 
     def _pending_symbols(self) -> set[str]:
         if self.book is None:
@@ -1085,12 +1127,14 @@ class OptionsLive:
         assert book is not None
         chain, snap = day.chains.get(pos.root), day.snapshot(pos.root, mi)
         busy = book.busy()
+        now = self.clock()
+        # When each leg was last sent (epoch seconds): a gap of `BROKEN_RESEND_MINUTES` whatever the day.
         sent_at = dict(pos.info.get("leg_sent") or {})
         shorts = [leg for leg in pos.legs if leg.side < 0 and book.leg_remaining(pos, leg) > 0]
         todo = shorts or [leg for leg in pos.legs if leg.side > 0 and book.leg_remaining(pos, leg) > 0]
         for leg in todo:
             left = book.leg_remaining(pos, leg)
-            if leg.symbol in busy or mi - int(sent_at.get(leg.symbol, -10_000)) < BROKEN_RESEND_MINUTES:
+            if leg.symbol in busy or now - float(sent_at.get(leg.symbol, float("-inf"))) < BROKEN_RESEND_MINUTES * 60 - 1:
                 continue
             if chain is None or snap is None:
                 continue
@@ -1103,7 +1147,7 @@ class OptionsLive:
                                   limit_value=price, tif=1, day=day.day.isoformat(), minute=mi, pid=pos.pid, forced=True,
                                   why=f"broken structure: {pos.info.get('broken')}")
             book.send(sent)
-            sent_at[leg.symbol] = mi
+            sent_at[leg.symbol] = now
             out.setdefault("orders", []).append({"oid": sent.oid, "family": pos.family, "action": "close_leg", "status": sent.status})
         if sent_at != (pos.info.get("leg_sent") or {}):
             pos.info["leg_sent"] = sent_at
@@ -1121,8 +1165,10 @@ class OptionsLive:
                 if other.action == "open":
                     if book.cancel(other, "an exit needs this contract"):
                         book._reject(other.instance, f"your open was cancelled: another position's exit needs {', '.join(sorted({l.symbol for l in other.legs} & {l.symbol for l in pos.legs}))}")
-            self.pending_exits[pos.pid] = {"forced": forced, "why": why, "intent": dict(intent) if intent else None}
-            return None if pending else "the close waits for its contracts (another order works on them); the House sends it"
+            self.pending_exits[pos.pid] = {"forced": forced, "why": why, "intent": dict(intent) if intent else None,
+                                           "day": day.day.isoformat()}
+            self._save_pending()
+            return "the close waits for its contracts (another order works on them); the House sends it"
         chain = day.chains.get(pos.root)
         if chain is None:
             return "no chain for this root now"
@@ -1147,6 +1193,8 @@ class OptionsLive:
                                     position=pos.pid)
         except L.Refused as exc:
             return str(exc)
+        except Exception as exc:  # noqa: BLE001 - a malformed close is refused, never raised into the minute
+            return f"a malformed close: {type(exc).__name__}: {str(exc)[:160]}"
         value = order.limit
         if forced:
             tries = int(pos.info.get("forced_tries") or 0)
@@ -1164,20 +1212,20 @@ class OptionsLive:
             return refusal
         if self._killed():
             return "the gateway's kill switch is engaged"
-        if not forced and not self._instance_budget(pos.instance, day):
-            return f"order budget: {int(self.settings['instance_orders_day'])} orders a day (the Gym's)"
+        # An exit is never refused on the instance's order budget (it limits opens); it is charged when it went.
         tif = order.tif if not forced else None
         sent = book.new_order(instance=pos.instance, family=pos.family, action="close", type_=pos.type, root=pos.root,
                               legs=list(pos.legs), qty=order.qty, limit_value=value, tif=tif, day=day.day.isoformat(),
                               minute=mi, pid=pos.pid, forced=forced, fees_est=order.fees, why=why)
         book.send(sent)
-        if not forced:
+        if not forced and sent.dispatched:
             self._instance_spent(pos.instance, day)
         out.setdefault("orders", []).append({"oid": sent.oid, "family": pos.family, "action": "close", "status": sent.status})
         return None if sent.status in ("working", "filled", "unknown") else f"{sent.status}: {sent.answer.get('error')}"
 
     def _instance_budget(self, instance: str, day: LiveDay) -> bool:
-        """A real instance's orders a day, as the Gym allows a program (`instance_orders_day`, the engine's 60)."""
+        """A real instance's orders a day, as the Gym allows a program (`instance_orders_day`, the engine's 60): charged
+        for every order that reached the venue (`dispatched`: not a House or gateway refusal), checked for opens only."""
         row = self.state.get("instance_orders", {}) or {}
         used = int((row.get("counts") or {}).get(instance, 0)) if row.get("day") == day.day.isoformat() else 0
         return used < int(self.settings["instance_orders_day"])
@@ -1286,7 +1334,9 @@ class OptionsLive:
             order = book.orders.get(intent["cancel"]) if isinstance(intent["cancel"], int) else None
             if order is None or order.instance != inst.key or order.forced:
                 return "cancel: no such working order"
-            refusal = book.count_refusal(len(order.legs), day=today)
+            # Withdrawing an open needs no exit room (and the gateway does not count a cancel): only a close's cancel
+            # meets the House's forced-exit reserve.
+            refusal = book.count_refusal(len(order.legs), day=today) if order.action != "open" else None
             if refusal:
                 return refusal
             book.cancel(order, "the program cancelled it")
@@ -1299,7 +1349,7 @@ class OptionsLive:
                 return "close: this position already has a working close (cancel it first)"
             if pos.info.get("broken"):
                 return f"close: this structure is broken ({pos.info['broken']}): the House closes its legs"
-            if self._in_forced_window(pos, day, minute):
+            if self._expiry_close(pos, day, mi, minute):
                 return "close: the House is closing this expiring structure (a leg in or near the money) at the natural"
             rules = day.rules.get(pos.root)
             if rules is not None and pos.expiry == today and minute >= rules.close_cutoff:
@@ -1367,7 +1417,8 @@ class OptionsLive:
                               max_loss=max_loss, fees_est=fees, tuition=inst.tuition,
                               why=str(intent.get("note") or intent.get("tag") or "")[:200])
         book.send(sent)
-        self._instance_spent(inst.key, day)
+        if sent.dispatched:
+            self._instance_spent(inst.key, day)
         out.setdefault("orders", []).append({"oid": sent.oid, "family": inst.family, "action": "open", "qty": qty,
                                              "status": sent.status, "sizing": plan.reason})
         return None if sent.status in ("working", "filled", "unknown") else f"{sent.status}: {sent.answer.get('error')}"

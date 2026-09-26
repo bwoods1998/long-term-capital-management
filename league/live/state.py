@@ -1,7 +1,7 @@
 """The live path's own state on the House's disk: the real book (SQLite) and the shadow books (one JSON file).
 
 The options-swarm run, Wave 5 (Sept 26, 2026). `<root>/live.sqlite` holds what real money depends on, written BEFORE
-anything is sent: every real order (its client order id, derived from its row id, so a restart never sends one twice:
+anything is sent: every real order (its client order id, from its row id and the process's nonce, kept in its row: a restart never sends one twice:
 an order found in the row with status `pending` or `unknown` is looked up at the venue by that id, never re-sent), every
 position each family instance holds, every fill, the program each real instance runs (so an instance a band move or a
 retirement took off the swarm's list can still close what it holds), and the key-values of the stops, the counters and
@@ -82,10 +82,10 @@ class LiveState:
         self.db.execute("PRAGMA synchronous=FULL")
         self.db.executescript(SCHEMA)
         self._depth = 0
-        if self.get("nonce") is None:
-            # Once, when the state is made: part of every client order id, so a new or rolled-back state never sends an
-            # id the venue has seen (it refuses a duplicate, and a lookup by it would find the old order).
-            self.put("nonce", os.urandom(3).hex())
+        #: Drawn at every process start and never stored: part of every client order id, so neither a new state nor one
+        #: rolled back (a Sail checkpoint restored with its old row ids) sends an id the venue has seen (it refuses a
+        #: duplicate, and a lookup by it would find the old order). Each order row keeps its own id for lookups.
+        self.nonce = os.urandom(4).hex()
 
     def close(self) -> None:
         with self.lock:
