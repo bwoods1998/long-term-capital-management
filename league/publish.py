@@ -1,9 +1,9 @@
 """The public record at blakewoods.us/capital: AI agents trading options (schema 2, Sept 26, 2026).
 
-The site starts over for the options swarm. It shows the Brokerage Account's balance from its equity at
-the reset; total profit since the reset, net of the owner's deposits and withdrawals; the running
-timer; the one number beside it (profit after compute: Sail, OpenAI, ThetaData and market data); the
-swarm (each agent's family, its mechanism in a sentence, its band and its record); the Gym's pace; the
+The site starts over for the options swarm. Its masthead shows the full real-options profit, including
+marked open positions, and the running timer. The Brokerage Account's balance and funding/compute basis
+remain separate. It also shows the swarm (each agent's family, its mechanism in a sentence, its band,
+record and optional promotion checklist); the Gym's pace; the
 open structures with their maximum loss and P&L; and the tape of the agents' decisions in their own
 words. The site's validators are `personal-site/capital/schema.js`; the contract is
 `league/tests/fixtures/site_contract.md`, and `site_checkpoint.json` / `site_events.json` beside it are

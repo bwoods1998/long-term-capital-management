@@ -94,10 +94,12 @@ recorded holdout, and count its forward record once per market day (real before 
 Real trade counts cover that selected version only. Probe sessions use the latest durable promotion
 time and complete exchange sessions. Reading progress never changes a band, grant, order or evidence.
 
-The page shows **Total profit** = `account.equity - performance.start_equity - performance.net_flows`
-only when the account is fresh (within ten minutes of `published_at`) and not stale, and the funding was
-verified within ten minutes; the basis is never one dated before the page's `PERFORMANCE_START_AT` (the
-reset). **After compute** = total profit minus the sum of the five compute parts, only when every part
-is known. The publisher's defaults: Sail from the Sail meter's `ops.budget` rows, OpenAI null until the
-House's `site_inputs()` gives it, ThetaData ($80 a month) and market data ($1,000 a year) prorated from
-`performance.start_at`, other 0.
+The masthead shows **Profit** from the optional `trading: {as_of, pnl_usd}` block: the full real-options
+record, including marked open positions. Missing, unpriced or stale trading P&L displays a dash; the
+reading must be within ten minutes of both the checkpoint and the current time. Deposits, withdrawals,
+compute costs and the account's starting balance do not enter this number. **Running** is elapsed time
+since `run.started_at`, falling back to the reset's performance basis when the run timestamp is absent.
+
+The account chart separately shows recorded Brokerage Account balances, which include funding flows.
+The `performance` and `compute` blocks remain available in the payload and account details; they do not
+replace the masthead's trading P&L. Subscription costs remain prorated from `performance.start_at`.
