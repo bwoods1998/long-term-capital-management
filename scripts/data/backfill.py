@@ -378,6 +378,31 @@ def run_task(task: sl.Task, theta: Theta, store: Store, calendar: sl.Calendar) -
         built = _offload(build_nbbo, chunks, task.day, str(target), open_min=open_min, close_min=close_min, max_dte=sl.MAX_DTE)
         return {"status": "ok" if built["rows"] else "empty", "rows": built["rows"], "side": str(target)}
 
+    if task.job == "chk1s":
+        # The sharper agreement check: one-second NBBO for the next three expiries, 12:25-16:00 ET,
+        # 15 strikes a side, into a side directory (never the store).
+        import frames as fr
+        import polars as pl
+
+        listed = theta.call("option_list_contracts", "quote", task.day, task.root, max_dte=10)
+        expiries = [e for e in (fr.expirations(listed, task.day, max_dte=10) if listed is not None else []) if e > task.day][:3]
+        parts = []
+        for expiry in expiries:
+            raw = theta.call("option_history_quote", task.root, expiry, interval="1s", date=task.day, strike_range=15,
+                             start_time="12:25:00", end_time=_hms(close_min))
+            if raw is None or not raw.height:
+                continue
+            ts = pl.col("timestamp")
+            parts.append(raw.select(
+                fr._expiration().alias("expiration"), pl.col("strike").cast(pl.Float64), fr._right().alias("right"),
+                (ts.dt.hour().cast(pl.Int32) * 3600 + ts.dt.minute().cast(pl.Int32) * 60 + ts.dt.second().cast(pl.Int32)).alias("second_of_day"),
+                pl.col("bid").cast(pl.Float64), pl.col("ask").cast(pl.Float64)))
+        if not parts:
+            return {"status": "empty", "why": "no one-second quotes"}
+        target = store.work / "check-store-1s" / task.root / f"{task.day.isoformat()}.parquet"
+        rows, _, _ = fr.write(pl.concat(parts), target)
+        return {"status": "ok", "rows": rows, "expiries": [e.isoformat() for e in expiries], "side": str(target)}
+
     if task.job == "tq":
         chunks = theta.call_raw("option_history_trade_quote", task.root, "*", date=task.day, max_dte=sl.TQ_MAX_DTE,
                                 strike_range=sl.TQ_STRIKE_RANGE, exclusive=True, **window)
@@ -710,12 +735,13 @@ def _names(path: str | None) -> list[str]:
     return [str(x) for x in (data.get("names") if isinstance(data, dict) else data)]
 
 
-def _first(text: str | None) -> list[tuple[str, dt.date]]:
-    out = []
+def _first(text: str | None) -> list[tuple[Any, ...]]:
+    """ROOT:DAY[:JOB],... -> [(root, day[, job])]."""
+    out: list[tuple[Any, ...]] = []
     for item in (text or "").split(","):
-        if ":" in item:
-            root, _, day = item.partition(":")
-            out.append((root.strip(), dt.date.fromisoformat(day.strip())))
+        parts = [p.strip() for p in item.split(":")]
+        if len(parts) >= 2 and parts[0]:
+            out.append((parts[0], dt.date.fromisoformat(parts[1]), *parts[2:3]))
     return out
 
 

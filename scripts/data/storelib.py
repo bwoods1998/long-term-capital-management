@@ -190,7 +190,7 @@ class Task:
 
 #: The jobs: `day` = NBBO + underlying + OI + listed expiries for a root-day (0-14 DTE);
 #: `tq` = the trade_quote sample; `back` = the 15-45 DTE back months merged into the day's NBBO.
-JOBS = ("day", "tq", "back", "chk")
+JOBS = ("day", "tq", "back", "chk", "chk1s")
 
 STAGES: dict[int, str] = {
     1: "core five, 2023-2025 (Train's later part and Validation)",
@@ -231,9 +231,11 @@ def plan(
             seen.add(key)
             out.append(task)
 
-    for root, day in checks:
+    for item in checks:
+        root, day = item[0], item[1]
+        job = item[2] if len(item) > 2 else "chk"
         if calendar.is_trading(day):
-            add(Task(0, "chk", root, day))
+            add(Task(0, job, root, day))
     if 7 in stages:  # the nightly forward day(s): every root of the universe, before anything else
         for day in forward:
             if window_of(day) != "forward":

@@ -240,6 +240,46 @@ def alpaca(quotes_path: Path, store_root: Path, extra_roots: Sequence[Path] = ()
     }
 
 
+def alpaca_seconds(quotes_path: Path, seconds_root: Path) -> dict[str, Any]:
+    """Recorded quotes at hh:mm:ss against ThetaData's one-second NBBO: the row for the next second
+    (the NBBO in force once a quote stamped inside hh:mm:ss had arrived), and that or the same second."""
+    import polars as pl
+
+    quotes = pl.read_csv(quotes_path, schema_overrides={"strike": pl.Float64, "bid": pl.Float64, "ask": pl.Float64})
+    stamp = pl.col("t").str.to_datetime("%Y-%m-%dT%H:%M:%SZ", time_zone="UTC").dt.convert_time_zone("America/New_York")
+    quotes = quotes.with_columns(
+        stamp.dt.date().alias("day"),
+        (stamp.dt.hour().cast(pl.Int32) * 3600 + stamp.dt.minute().cast(pl.Int32) * 60 + stamp.dt.second().cast(pl.Int32)).alias("second_of_day"),
+        pl.col("expiration").str.slice(0, 10).str.to_date("%Y-%m-%d").alias("expiration"),
+        pl.when(pl.col("right").str.to_uppercase().str.starts_with("C")).then(pl.lit("C")).otherwise(pl.lit("P")).alias("right"),
+    )
+    out, parts = [], []
+    for path in sorted(Path(seconds_root).glob("*/*.parquet")):
+        root, day = path.parent.name, dt.date.fromisoformat(path.stem)
+        side = pl.read_parquet(path)
+        key = ["expiration", "strike", "right", "second_of_day"]
+        nxt = side.with_columns((pl.col("second_of_day") - 1).alias("second_of_day")).rename({"bid": "n_bid", "ask": "n_ask"})
+        same = side.rename({"bid": "s_bid", "ask": "s_ask"})
+        group = quotes.filter((pl.col("root") == root) & (pl.col("day") == day))
+        joined = group.join(nxt, on=key, how="inner").join(same, on=key, how="left")
+        out.append({"root": root, "day": day.isoformat(), "recorded": group.height, "matched": joined.height})
+        if joined.height:
+            parts.append(joined)
+    if not parts:
+        return {"compared": 0, "by_root_day": out}
+    both = pl.concat(parts).with_columns(
+        pl.when(pl.col("root").is_in(list(PENNY_ALWAYS)) | (pl.col("ask") < 3.0)).then(0.01).otherwise(0.05).alias("tick"))
+    near = lambda a, b: ((pl.col("bid") - pl.col(a)).abs() <= pl.col("tick") + 1e-6) & ((pl.col("ask") - pl.col(b)).abs() <= pl.col("tick") + 1e-6)  # noqa: E731
+    both = both.with_columns(near("n_bid", "n_ask").alias("next"), (near("n_bid", "n_ask") | near("s_bid", "s_ask").fill_null(False)).alias("either"),
+                             (((pl.col("bid") - pl.col("n_bid")).abs() < 0.005) & ((pl.col("ask") - pl.col("n_ask")).abs() < 0.005)).alias("exact"))
+    per = both.group_by("root").agg(pl.len().alias("n"), pl.col("next").mean(), pl.col("either").mean(), pl.col("exact").mean()).sort("root")
+    return {"at": sl.utc_now(), "compared": both.height, "within_a_tick_next_second": round(float(both["next"].mean()), 4),
+            "within_a_tick_same_or_next_second": round(float(both["either"].mean()), 4),
+            "exact_next_second": round(float(both["exact"].mean()), 4),
+            "per_root": [{k: (round(v, 4) if isinstance(v, float) else v) for k, v in r.items()} for r in per.to_dicts()],
+            "by_root_day": out}
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--store", default=sl.STORE_ROOT)
@@ -254,6 +294,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     a = sub.add_parser("alpaca")
     a.add_argument("--quotes", required=True)
     a.add_argument("--extra", action="append", default=[], help="another store-layout root to look in")
+    a.add_argument("--seconds", default=None, help="a check-store-1s directory: compare at one-second resolution too")
     e = sub.add_parser("export-alpaca")
     e.add_argument("--sqlite", default=str(Path.home() / "Work" / ".options-history" / "options_history.sqlite"))
     e.add_argument("--out", default=str(HERE.parents[1] / ".data" / "gym" / "alpaca_quotes_2026-09-22_24.csv.gz"))
@@ -271,6 +312,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(result, indent=1, default=str))
     elif args.cmd == "alpaca":
         result = alpaca(Path(args.quotes), store, [Path(x) for x in args.extra])
+        if args.seconds:
+            result["one_second"] = alpaca_seconds(Path(args.quotes), Path(args.seconds))
         (work / "checks-alpaca.json").write_text(json.dumps(result, indent=1, default=str))
         print(json.dumps(result, indent=1, default=str))
     elif args.cmd == "export-alpaca":
