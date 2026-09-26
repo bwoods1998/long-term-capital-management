@@ -31,6 +31,10 @@ Use the source-of-truth records together: current release, latest completed tick
 
 The data worker can be stopped with `<state>/data/nightly.stop`; the supervisor enable file is `<state>/data-nightly.json`. Do not launch a second collector by hand while its lifetime lock is held. A process restart must match PID, Linux start ticks and exact argv before signalling it. A stale PID file alone is not permission to kill a process.
 
+## Paper readiness
+
+With `real_money: false`, no enabled grant and real gateway opens off, the paper route proof runs from 09:35 ET without a real-account client or eligible family. Unfinished attempts retain their identity and owned contracts through restarts. A witnessed paper open and close records route evidence; it never changes real-money flags, enables a grant or sends a real order. Real admission still requires the verified receipt and every independent money gate.
+
 ## Owner releases
 
 1. Review the exact commit and all money-code changes independently. Run Python, gateway and content checks and inspect the private checkpoint readiness metadata. Confirm the latest W5 order, paper and accounting fixes are present.
@@ -70,7 +74,7 @@ The daemon holds `nightly.lock` for its lifetime and refreshes `nightly.heartbea
 
 ## Pre-open and post-close record
 
-Before admission opens, inspect cash/equity and funded caps, grant digest/capital, live/market data freshness, model identity, empty or fully reconciled inventory, order reservations and the current session's paper proof. A Candidate without complete proof stays in shadow. A deadline never replaces a failed gate or routing check.
+Before admission opens, inspect cash/equity and funded caps, grant digest/capital, live/market data freshness, model identity, empty or fully reconciled inventory, order reservations and the validated paper-proof receipt or pending session proof. A Candidate without complete proof stays in shadow. A deadline never replaces a failed gate or routing check.
 
 After close, reconcile every fill and remaining position, preserve unknowns, report whole-book real P&L after fees and all known input costs separately, and record promotions, demotions, holds and failures. Monday's result decides what actually happened; the draft cleanup can be reviewed for merge afterward.
 

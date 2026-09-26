@@ -10,6 +10,9 @@ positions showing both legs, close filled) is what `passed` means, and real open
 legs' fills as the House reads them), never the calibration: paper fills are synthetic. Every answer is kept in the
 live state's events for the owner's record.
 
+The session loop runs this proof with real money off and no real-account client. Passing the paper route never
+changes real-money configuration, enables a grant, promotes a family, or sends an order to the real venue.
+
 A timed-out or uneven order is cancelled, then read until the venue confirms it is terminal. Each owned leg is
 reconciled and closed before another attempt, at most `TRIES` opens per session. Client ids, order bodies and the
 initial inventory are committed before dispatch; ambiguous answers and session changes never discard ownership.

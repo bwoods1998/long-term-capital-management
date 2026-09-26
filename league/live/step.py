@@ -645,7 +645,7 @@ class OptionsLive:
         if self.book is not None:
             for pos in self.book.positions.values():
                 out.setdefault(pos.root, [0, 0, 0.02])
-        if self.proof is not None and self._real_on() and not self.proof.passed():
+        if self.proof is not None and not self.proof.passed():
             w = out.setdefault("SPY", [1, 7, 0.01])
             w[1] = max(w[1], 7)
         margin_dte, margin_band = int(self.settings["read_dte_margin"]), float(self.settings["read_band_margin"])
@@ -740,6 +740,8 @@ class OptionsLive:
         real_due: dict[str, Instance] = {}
         if self.book is not None:
             self._real_pre(day, mi, now, out)
+        self._paper_proof(day, mi, out)
+        if self.book is not None:
             for key, inst in self.instances.items():
                 if inst.kind != "real" or inst.error or inst.needs is None:
                     continue
@@ -924,12 +926,15 @@ class OptionsLive:
                     self._flows_at = float("-inf")  # read the flows again at once: a breach waits on them
             except (ValueError, ArithmeticError) as exc:
                 out.setdefault("venue_errors", []).append(f"stops: {exc}")
-        if self.proof is not None and self._real_on() and not self.proof.passed() and "SPY" in day.chains:
+        self._venue_rules(day, mi, out)
+
+    def _paper_proof(self, day: LiveDay, mi: int, out: dict) -> None:
+        """The paper venue proves its route while real execution remains disabled, including recovery."""
+        if self.proof is not None and not self.proof.passed() and "SPY" in day.chains:
             try:
-                out["paper_proof"] = self.proof.step(day=today, mi=mi, snap=day.snapshot("SPY", mi), chain=day.chains["SPY"]).get("status")
+                out["paper_proof"] = self.proof.step(day=day.day.isoformat(), mi=mi, snap=day.snapshot("SPY", mi), chain=day.chains["SPY"]).get("status")
             except Exception as exc:  # noqa: BLE001
                 out["paper_proof"] = f"error: {type(exc).__name__}"
-        self._venue_rules(day, mi, out)
 
     def _read_account(self, out: dict) -> None:
         try:
