@@ -65,6 +65,7 @@ class SwarmStep:
         self.child: Any = None
         self.child_locked = False
         self.child_accounted = True
+        self.alerts: list[str] = []
 
     # ------------------------------------------------------------------ the House calls this
     def tick(self, house: Any = None, open_for_business: bool = True) -> dict[str, Any]:
@@ -74,7 +75,11 @@ class SwarmStep:
         ledger = getattr(house, "ledger", None)
         if ledger is not None:
             try:
+                self.alerts = []
                 out["mirrored"] = self.mirror(ledger)
+                alert = getattr(house, "alert", None)
+                for text in self.alerts if callable(alert) else []:
+                    alert("warning", f"swarm: {text}")  # the owner hears it (the House's ops.alert)
             except Exception as exc:  # noqa: BLE001 - a mirror failure is reported, never raised into the tick
                 out["mirror_error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
         return out
@@ -224,6 +229,8 @@ class SwarmStep:
             if r["kind"] in SKIPPED_KINDS:
                 continue
             payload = dict(r["payload"]) if isinstance(r["payload"], dict) else {"value": r["payload"]}
+            if r["kind"] == "swarm.status" and payload.get("alert"):
+                self.alerts.append(str(payload.get("text") or payload.get("action") or "an alert")[:300])
             if r["kind"] in PUBLIC_KINDS:
                 # The second wall (the researcher filtered the note first): a public row carries words only.
                 fid = r["family"] or ""
@@ -315,11 +322,16 @@ def public_payload(kind: str, payload: dict[str, Any], names: list[str]) -> dict
 
 
 def attach(house: Any, root: str | Path, config: Mapping[str, Any]) -> SwarmStep | None:
-    """Set `house.swarm` when the swarm is enabled (the House's `site_inputs()` reads `house.swarm.site_inputs()`)."""
+    """Set `house.swarm` when the swarm is enabled. The live path's House (#362) has its own `site_inputs()`, which
+    merges `house.swarm.site_inputs()` with its own; a House without one gets the swarm's feed as its `site_inputs`
+    (the publisher's hook), so the page shows the swarm's agents, Gym and compute until then. Its compute is the
+    swarm's own spend only: in swarm mode the House's Sail meter (`Budget`) is off."""
     if not settings_mod.load(root, config=config).get("enabled"):  # config.json "swarm" < <root>/swarm.json
         return None
     step = SwarmStep(root, config=config)
     house.swarm = step
+    if not hasattr(house, "site_inputs"):
+        house.site_inputs = step.site_inputs
     return step
 
 

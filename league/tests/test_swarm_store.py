@@ -53,6 +53,20 @@ class Families(StoreCase):
         self.assertEqual(self.store.lineage_looks(child["id"]), 1)
         self.assertEqual(len(self.store.lineage_trial_sharpes(child["id"])), 4)
 
+    def test_the_lineage_count_is_every_trial_of_the_lineage(self):
+        a = self.store.add_family(SPEC, origin="seed")
+        for i in range(10):
+            self.store.add_run(a["id"], 1, result(f"a{i}"), window="train", stress=1.0, purpose="train")
+        b = self.store.add_family({**SPEC, "id": "b", "roots": ["QQQ"]}, origin="fork", parent=a["id"])
+        c = self.store.add_family({**SPEC, "id": "c", "roots": ["IWM"]}, origin="fork", parent=a["id"])
+        for i in range(50):
+            self.store.add_run(a["id"], 1, result(f"a2{i}"), window="train", stress=1.0, purpose="train")
+        for i in range(30):
+            self.store.add_run(c["id"], 1, result(f"c{i}"), window="train", stress=1.0, purpose="train")
+        counts = {f: self.store.lineage_trials(f) for f in (a["id"], b["id"], c["id"])}
+        self.assertEqual(counts, {a["id"]: 90, b["id"]: 90, c["id"]: 90}, "N and the trial Sharpes are the same set")
+        self.assertEqual(len(self.store.lineage_trial_sharpes(b["id"])), 90)
+
     def test_retire_moves_the_band_and_writes_one_public_event(self):
         fam = self.store.add_family(SPEC, origin="seed")
         self.assertTrue(self.store.retire(fam["id"], "no validation improvement in 30 revisions"))

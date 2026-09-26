@@ -120,6 +120,7 @@ def main(argv: list[str] | None = None) -> int:
         checks["tournament"] = {"result": "FAIL", "why": "no tournament written yet"}
 
     kv = {r["key"]: json.loads(r["value"]) for r in db.execute("SELECT key, value FROM kv")}
+    checks["gym"]["pool_token"] = kv.get("pool_token")  # its boxes are named ltcm-swarm-<token>-<kind>-...
     guard = kv.get("guard") or {}
     checks["guard"] = {"result": "PASS" if guard.get("last") else "FAIL", **(guard.get("last") or {})}
 

@@ -92,7 +92,7 @@ def read(root: str | Path) -> list[dict[str, Any]]:
             # sends a real order.
             review = state.get("review") or {}
             outcome = state.get("gate_outcome") or {}
-            if review.get("sha") != sha or review.get("verdict") != "pass":
+            if review.get("sha") != sha or review.get("verdict") != "pass" or (review.get("audit") or {}).get("verdict") != "pass":
                 continue
             if outcome.get("sha") == sha and outcome.get("result") in ("refused", "failed", "demoted"):
                 continue

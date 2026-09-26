@@ -13,7 +13,7 @@ from unittest.mock import patch
 from league import publish
 from league.ledger import KINDS, Ledger
 from league.swarm import bands, sitefeed
-from league.swarm.hook import SwarmStep
+from league.swarm.hook import SwarmStep, attach
 from league.swarm.store import SwarmStore
 from league.tests.swarm_fakes import Clock, result
 from league.tests.test_options_house import BuildCase
@@ -230,6 +230,25 @@ class Mirror(HookCase):
         self.assertEqual([e["kind"] for e in events], ["swarm.news", "swarm.news", "agent.note"])
         self.assertIn("moves from Gym to Candidate", events[1]["payload"]["text"])
 
+    def test_a_swarm_alert_reaches_the_houses_ops_alerts(self):
+        store = SwarmStore(self.root)
+        store.event("swarm.status", "fly", {"action": "not_the_plans_reviewer", "alert": True, "text": "two Sail models stood in"})
+        store.event("swarm.status", None, {"action": "started"})
+        store.close()
+        alerts = []
+
+        class House:
+            ledger = Ledger(self.root / "ledger.sqlite")
+
+            def alert(self, level, text, **payload):
+                alerts.append((level, text))
+
+        house = House()
+        self.addCleanup(house.ledger.close)
+        self.step().tick(house, open_for_business=False)
+        self.assertEqual(len(alerts), 1)
+        self.assertIn("two Sail models stood in", alerts[0][1])
+
     def test_the_swarm_never_writes_the_houses_own_kinds(self):
         for kind in ("swarm.born", "swarm.retired", "swarm.band", "swarm.note", "swarm.cycle", "swarm.tournament", "swarm.gate",
                      "swarm.architect", "swarm.guard", "swarm.pool", "swarm.status"):
@@ -252,7 +271,7 @@ class Reads(HookCase):
         from league.swarm.gate import run_sha
 
         store.set_state(b["id"], validation_version=1, validation_line={"passed": True}, typical_max_loss_usd=45.0,
-                        review={"sha": run_sha(store.version(b["id"], 1)), "verdict": "pass"})
+                        review={"sha": run_sha(store.version(b["id"], 1)), "verdict": "pass", "audit": {"verdict": "pass"}})
         store.close()
         rows = {r["family"]: r for r in bands.read(self.root)}
         self.assertEqual(set(rows), {"condor-vrp", "tuition"})
@@ -274,11 +293,15 @@ class Reads(HookCase):
             v = store.add_version(fam["id"], f"# {fid}\nNEEDS = {{}}\n", {}, author="seed")
             store.set_state(fid, validation_version=v["n"], validation_line={"passed": True})
             cases[fid] = run_sha(v)
-        store.set_state("reviewed", review={"sha": cases["reviewed"], "verdict": "pass"})
+        store.set_state("reviewed", review={"sha": cases["reviewed"], "verdict": "pass", "audit": {"verdict": "pass"}})
+        fam = store.add_family({**SPEC, "id": "unaudited"}, origin="seed")
+        v = store.add_version("unaudited", "# unaudited\nNEEDS = {}\n", {}, author="seed")
+        store.set_state("unaudited", validation_version=v["n"], validation_line={"passed": True},
+                        review={"sha": run_sha(v), "verdict": "pass"})
         store.set_state("refused", review={"sha": cases["refused"], "verdict": "fail"}, gate_outcome={"sha": cases["refused"], "result": "refused"})
-        store.set_state("looked-failed", review={"sha": cases["looked-failed"], "verdict": "pass"},
+        store.set_state("looked-failed", review={"sha": cases["looked-failed"], "verdict": "pass", "audit": {"verdict": "pass"}},
                         gate_outcome={"sha": cases["looked-failed"], "result": "failed"})
-        store.set_state("demoted", review={"sha": cases["demoted"], "verdict": "pass"},
+        store.set_state("demoted", review={"sha": cases["demoted"], "verdict": "pass", "audit": {"verdict": "pass"}},
                         gate_outcome={"sha": cases["demoted"], "result": "demoted"})
         store.close()
         self.assertEqual([r["family"] for r in bands.read(self.root)], ["reviewed"])
@@ -310,6 +333,23 @@ class Reads(HookCase):
         self.assertEqual({a["id"] for a in checkpoint["agents"]}, {"condor-vrp", "gone"})
         self.assertEqual(checkpoint["gym"]["trials"], 1)
 
+    def test_the_sites_real_record_is_every_real_trade_and_its_trials_the_lineages(self):
+        store = SwarmStore(self.root, clock=self.clock)
+        fam = store.add_family(SPEC, origin="seed")
+        for i in range(3):
+            store.add_run(fam["id"], 1, result(f"p{i}"), window="train", stress=1.0, purpose="train")
+        store.add_forward(fam["id"], "real", [{"id": "r1", "day": "d1", "pnl": 5.0, "max_loss": 50.0}], version=1)
+        store.set_state(fam["id"], banded_version=2)
+        store.add_forward(fam["id"], "shadow", [{"id": "s1", "day": "d2", "pnl": -2.0, "max_loss": 50.0}], version=2)
+        child = store.add_family({**SPEC, "id": "condor-on-qqq", "roots": ["QQQ"]}, origin="fork", parent=fam["id"])
+        store.add_run(child["id"], 1, result("c"), window="train", stress=1.0, purpose="train")
+        store.close()
+        agents = {a["id"]: a for a in sitefeed.site_inputs(self.root)["agents"]}
+        record = agents[fam["id"]]["record"]
+        self.assertEqual(record["real"], {"trades": 1, "wins": 1, "pnl_usd": 5.0}, "real money is real whatever the version")
+        self.assertEqual(record["forward"], {"trades": 1, "wins": 0, "pnl_usd": -2.0}, "the banded version's record")
+        self.assertEqual((record["trials"], agents["condor-on-qqq"]["record"]["trials"]), (4, 4))
+
 
 class SwarmHouse(BuildCase):
     def build_on(self, **kw):
@@ -330,7 +370,23 @@ class SwarmHouse(BuildCase):
         self.assertIsNone(house.merton)
         self.assertIsNone(getattr(house, "budget", None))
         self.assertFalse(house.settings.births)
-        self.assertNotIn("site_inputs", vars(house), "the House's own site_inputs reads house.swarm")
+
+    def test_the_site_reads_the_swarm_until_the_house_has_its_own_site_inputs(self):
+        house, _ = self.build_on()
+        if hasattr(type(house), "site_inputs"):  # the live path's House (#362) merges house.swarm itself
+            self.assertNotIn("site_inputs", vars(house))
+        else:
+            self.assertEqual(house.site_inputs, house.swarm.site_inputs, "the swarm's feed stands in")
+            self.assertIsInstance(house.site_inputs(), dict)
+
+        class OwnHouse:
+            def site_inputs(self):
+                return {"agents": ["the House's own"]}
+
+        own = OwnHouse()
+        step = attach(own, Path(self.dir.name), ON)
+        self.assertIs(own.swarm, step)
+        self.assertEqual(own.site_inputs(), {"agents": ["the House's own"]}, "a House with its own is never overridden")
 
     def test_an_empty_root_tick_seats_no_agent_and_spends_no_research(self):
         house, _ = self.build_on()

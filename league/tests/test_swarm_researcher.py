@@ -217,6 +217,42 @@ class ModelCycles(ResearcherCase):
         self.researcher().cycle(self.fam["id"])
         self.assertEqual(self.pool.jobs[-1].params, {"vrp_min": 1.5})
 
+    def queue_one(self):
+        self.run_first()
+        self.steps = [{"calls": [("gym_run", {"params": {"vrp_min": 1.3}})]}, {"calls": [("gym_run", {"params": {"vrp_min": 1.5}})]}]
+        self.researcher().cycle(self.fam["id"])
+        return len(self.sail.bodies)
+
+    def test_a_queued_run_is_retried_twice_on_a_transient_error_then_the_model_hears_why(self):
+        calls = self.queue_one()
+        self.pool.fail = "the Gym did not answer within 1020 s (queue 3)"
+        for _ in range(2):
+            self.researcher().cycle(self.fam["id"])
+        self.assertEqual(len(self.sail.bodies), calls, "two quiet retries")
+        self.steps = [{"text": "ok"}]
+        out = self.researcher().cycle(self.fam["id"])
+        self.assertEqual(len(self.sail.bodies), calls + 1, "the third failure goes to the model")
+        self.assertIn("did not answer", json.dumps(self.sail.bodies[-1]["input"]))
+        self.assertIsNone(self.store.convo(self.fam["id"])[1], "no longer queued")
+        self.assertIn("gym:", out["error"])
+
+    def test_a_queued_run_the_gym_refuses_is_not_retried(self):
+        calls = self.queue_one()
+        self.pool.fail = "the Gym has no train data for QQQ yet (it holds SPY)"
+        self.steps = [{"text": "ok"}]
+        self.researcher().cycle(self.fam["id"])
+        self.assertEqual(len(self.sail.bodies), calls + 1, "the model hears it at once")
+        self.assertIn("no train data", json.dumps(self.sail.bodies[-1]["input"]))
+        self.assertIsNone(self.store.convo(self.fam["id"])[1])
+
+    def test_a_stalled_family_still_asks_for_its_rewrite_while_its_run_waits(self):
+        self.queue_one()
+        self.store.update_family(self.fam["id"], stall=5)
+        self.pool.fail = "the Gym did not answer within 1020 s (queue 3)"
+        self.steps = [{"text": "```python\n" + self.code + "\n```"}]
+        out = self.researcher().cycle(self.fam["id"])
+        self.assertEqual(out.get("rewrite_asked"), "pro_asap", out)
+
     def test_a_run_that_lands_after_the_researcher_gave_up_is_still_a_trial(self):
         self.run_first()
         self.pool.fail = "late"
@@ -327,6 +363,35 @@ class RateLimits(unittest.TestCase):
             fails["n"] = 3
             with self.assertRaises(ProviderError):
                 router.sail("flash_asap", [{"role": "user", "content": "hi"}], family="f", key="k2")
+            prov.close()
+            store.close()
+
+    def test_a_call_that_timed_out_is_booked_at_its_hold(self):
+        from ltcm.provider import Provider, ProviderError
+
+        with tempfile.TemporaryDirectory() as d:
+            store = SwarmStore(Path(d))
+
+            def transport(method, route, body=None, idempotency_key=None):
+                raise ProviderError("provider_transport_timeout")  # sent; Sail may have run it and billed it
+
+            prov = Provider(Path(d) / "p.sqlite", transport=transport, floor_cap_usd_per_day="100")
+            router = ModelRouter(store, prov, settings=copy.deepcopy(S.DEFAULTS), sleep=lambda s: None)
+            items = [{"role": "user", "content": "hi"}]
+            with self.assertRaises(ProviderError):
+                router.sail("flash_asap", items, family="f:rewrite", key="k1", max_output=8000)
+            booked = store.spent(["sail_model"])
+            self.assertGreater(booked, 0)
+            self.assertEqual(booked, float(prov._db.execute("SELECT reserved_usd FROM requests").fetchone()[0]), "the Provider's hold")
+            self.assertEqual(store._one("SELECT family FROM spend")["family"], "f", "booked to the family, not its role's desk")
+
+            def refuse(method, route, body=None, idempotency_key=None):
+                raise ProviderError("provider_http_400", detail="bad request")  # refused outright: never billed
+
+            prov.transport = refuse
+            with self.assertRaises(ProviderError):
+                router.sail("flash_asap", items, family="f", key="k2")
+            self.assertEqual(store.spent(["sail_model"]), booked)
             prov.close()
             store.close()
 

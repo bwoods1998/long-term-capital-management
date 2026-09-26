@@ -41,6 +41,23 @@ class Defaults(GuardCase):
         g.check()
         self.assertFalse(g.allows())
 
+    def test_after_the_burst_the_daily_allowance_also_reads_sails_own_meter(self):
+        self.clock.advance(BURST_END + 86400 * 3 + 3600 - self.clock())
+        self.reading = (5000.0, 5.0)
+        g = self.guard()
+        g.check()
+        for balance in (4995.0, 4987.5):  # $12.50 metered by Sail today, none of it booked by the swarm
+            self.reading = (balance, 5.0)
+            self.clock.advance(180)
+            g.check()
+        self.assertFalse(g.allows())
+        self.assertIn("today", g.reason)
+        self.clock.advance(86400)  # a new UTC day: its own allowance
+        self.reading = (4987.0, 5.0)
+        out = g.check()
+        self.assertTrue(g.allows(), g.reason)
+        self.assertEqual(out["metered_today"], 0.5)
+
 
 class Guard(GuardCase):
     """The measured-burn line (guard.measured_burn true)."""
