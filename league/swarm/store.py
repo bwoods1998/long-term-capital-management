@@ -12,9 +12,10 @@ TRIALS. Every Gym evaluation is a trial (`add_run` counts the result's own `tria
 total; a family's LINEAGE count is what it inherited at its fork plus its own, and so are its holdout
 looks (`lineage_trials`, `lineage_looks`). Nothing ever lowers a count.
 
-EVENTS. `event(kind, family, payload)` appends a row the House mirrors into its ledger (`hook.py`):
-kinds `swarm.*` (private) and the public kinds the site's tape reads (`agent.born`, `agent.died`,
-`agent.thought`, `eval.verdict`). The table is append-only (triggers refuse UPDATE and DELETE).
+EVENTS. `event(kind, family, payload)` appends a row the House mirrors into its ledger (`hook.py`),
+all of kind `swarm.*`: the public ones the site's tape reads (`swarm.born`, `swarm.retired`, `swarm.band`,
+`swarm.note`) and private ones (cycles, tournaments, the gate, the pool, the guard). Never the House's own
+`agent.*` or `eval.*` kinds: its roster and evaluator read those. The table is append-only.
 
 One connection under one lock, WAL, so the House can read (and write the forward records of shadow and
 real trades, `add_forward`) from its own process. Standard library only.
@@ -145,6 +146,7 @@ CREATE TABLE IF NOT EXISTS events (
     family TEXT,
     payload TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS events_kind ON events(kind, at);
 CREATE TRIGGER IF NOT EXISTS events_no_update BEFORE UPDATE ON events
     BEGIN SELECT RAISE(ABORT, 'swarm events are append-only'); END;
 CREATE TRIGGER IF NOT EXISTS events_no_delete BEFORE DELETE ON events
@@ -359,7 +361,7 @@ class SwarmStore:
             return state
 
     def set_band(self, fid: str, band: str, *, reason: str) -> str | None:
-        """Move a family's band; the move is an `eval.verdict` event (the site's news). Returns the old band."""
+        """Move a family's band; the move is a `swarm.band` event (the site's news). Returns the old band."""
         if band not in BANDS:
             raise ValueError(band)
         with self._lock:
@@ -367,7 +369,7 @@ class SwarmStore:
             if fam is None or fam["band"] == band:
                 return None
             self.update_family(fid, band=band, band_since=self.now())
-            self.event("eval.verdict", fid, {"band_from": fam["band"], "band_to": band, "reason": reason})
+            self.event("swarm.band", fid, {"band_from": fam["band"], "band_to": band, "reason": reason})
             return fam["band"]
 
     def retire(self, fid: str, reason: str) -> bool:
@@ -376,7 +378,7 @@ class SwarmStore:
             if fam is None or fam["retired_at"]:
                 return False
             self.update_family(fid, retired_at=self.now(), retire_reason=reason, band="retired", band_since=self.now())
-            self.event("agent.died", fid, {"cause": reason, "band_from": fam["band"]})
+            self.event("swarm.retired", fid, {"cause": reason, "band_from": fam["band"]})
             return True
 
     def lineage_trials(self, fid: str) -> int:
