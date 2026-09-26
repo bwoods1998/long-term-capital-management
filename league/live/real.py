@@ -322,7 +322,7 @@ class RealBook:
 
     def _save_position(self, pos: RPosition) -> None:
         self.state.upsert("positions", pos.row(), "pid")
-        if pos.status == "closed":
+        if pos.status in ("closed", "unpriced_close"):
             self.positions.pop(pos.pid, None)
         else:
             self.positions[pos.pid] = pos
@@ -415,13 +415,36 @@ class RealBook:
 
     # ------------------------------------------------------------------ the order count
     def count_today(self, day: str) -> int:
+        by_day = self.state.get("counts_by_day", {}) or {}
+        if day in by_day:
+            return int(by_day[day])
         row = self.state.get("count", {}) or {}
         return int(row.get("legs") or 0) if row.get("day") == day else 0
 
     def _count(self, day: str, legs: int) -> None:
+        by_day = self.state.get("counts_by_day", {}) or {}
         row = self.state.get("count", {}) or {}
-        used = int(row.get("legs") or 0) if row.get("day") == day else 0
-        self.state.put("count", {"day": day, "legs": used + int(legs)})
+        if row.get("day"):
+            by_day.setdefault(row["day"], int(row.get("legs") or 0))
+        by_day[day] = max(0, int(by_day.get(day, 0)) + int(legs))
+        self.state.put("counts_by_day", dict(sorted(by_day.items())[-14:]))
+        if day >= str(row.get("day") or ""):
+            self.state.put("count", {"day": day, "legs": by_day[day]})
+
+    def _count_dispatch(self, order: ROrder) -> None:
+        """Reserve before I/O; recovered venue orders acquire the same durable, idempotent reservation."""
+        with self.state.transaction():
+            inserted = self.state.execute("INSERT OR IGNORE INTO dispatch_counts(oid, day, legs) VALUES(?,?,?)",
+                                           (order.oid, order.day, len(order.legs))).rowcount
+            if inserted and not order.dispatched:
+                self._count(order.day, len(order.legs))
+
+    def _refund_dispatch(self, order: ROrder) -> None:
+        with self.state.transaction():
+            rows = self.state.rows("SELECT day, legs FROM dispatch_counts WHERE oid=?", (order.oid,))
+            if rows:
+                self._count(rows[0]["day"], -int(rows[0]["legs"]))
+                self.state.execute("DELETE FROM dispatch_counts WHERE oid=?", (order.oid,))
 
     def exit_reserve(self) -> int:
         """Order-count room every open structure needs to close: its legs, twice (a close and one cancel of it)."""
@@ -494,6 +517,7 @@ class RealBook:
     def send(self, order: ROrder) -> ROrder:
         """POST the order written as `pending`. Never retried (the module docstring)."""
         body = single_leg_body(order) if order.action == "close_leg" else mleg_body(order)
+        self._count_dispatch(order)
         result: Submitted = self.account.submit(body, exit=order.action != "open")
         order.attempts += 1
         if result.ok:
@@ -501,14 +525,13 @@ class RealBook:
             order.venue_id = str(result.order.get("id"))
             order.status = "working"
             order.answer = {"status": result.order.get("status"), "at": self.clock()}
-            self._count(order.day, len(order.legs))
             self._absorb(order, result.order)
         elif result.unknown:
             order.dispatched = True
             order.status = "unknown"
             order.answer = {"error": result.error}
-            self._count(order.day, len(order.legs))
         elif not result.sent:
+            self._refund_dispatch(order)
             order.status = "refused"
             order.answer = {"error": result.error, "house": True}
         else:
@@ -519,8 +542,8 @@ class RealBook:
             order.dispatched = not gateway
             order.status = "refused" if gateway else "rejected"
             order.answer = {"error": result.error, "status": result.status, "gateway": gateway}
-            if not gateway:
-                self._count(order.day, len(order.legs))
+            if gateway:
+                self._refund_dispatch(order)
         self._save_order(order)
         self.record("live.order", {"oid": order.oid, "client_id": order.client_id, "family": order.family,
                                    "instance": order.instance, "action": order.action, "type": order.type, "root": order.root,
@@ -536,9 +559,16 @@ class RealBook:
             return False
         if order.cancel_sent and self.clock() - order.cancel_sent < 50:
             return False
+        from zoneinfo import ZoneInfo
+
+        # The DELETE belongs to today's action count, even for an earlier session's resting order. Persist the
+        # reservation before I/O, so a crash after the venue accepts the cancel cannot erase it.
+        with self.state.transaction():
+            order.cancel_sent = self.clock()
+            today = dt.datetime.fromtimestamp(order.cancel_sent, ZoneInfo("America/New_York")).date().isoformat()
+            self._count(today, len(order.legs))
+            self._save_order(order)
         done, error = self.account.cancel(order.venue_id)
-        order.cancel_sent = self.clock()
-        self._count(order.day, len(order.legs))
         order.answer = {**order.answer, "cancel": why[:200], "cancel_error": error or None}
         self._save_order(order)
         self.record("live.cancel", {"oid": order.oid, "family": order.family, "why": why[:200], "ok": done,
@@ -567,7 +597,7 @@ class RealBook:
             if known and known[0]["status"] in ("lost", "refused"):
                 # An order this book had given up on turned up at the venue: take it back and book what it did.
                 order = ROrder.of(known[0])
-                order.status, order.dispatched = "working", True
+                order.status = "working"
                 self.orders[order.oid] = order
                 self.record("live.order", {"oid": order.oid, "family": order.family, "status": "found",
                                            "venue_status": str(row.get("status") or "")}, agent=order.family)
@@ -603,12 +633,13 @@ class RealBook:
                     order.answer = {**order.answer, "lookup": "not found at the venue by its client id"}
                     self.record("live.order", {"oid": order.oid, "family": order.family, "status": "lost"}, agent=order.family)
             else:
-                order.dispatched = True
                 self._absorb(order, row)
             self._save_order(order)
 
     def _absorb(self, order: ROrder, row: Mapping[str, Any]) -> None:
         """Bring one order up to the venue's row: new whole-structure fills booked, the status carried."""
+        self._count_dispatch(order)
+        order.dispatched = True
         order.venue_id = str(row.get("id") or order.venue_id or "") or order.venue_id
         status = str(row.get("status") or "")
         if order.action == "close_leg":
@@ -721,13 +752,15 @@ class RealBook:
         zero at an expiry out of the money), and the position is broken (its other legs close alone). Returns how many
         contracts the book found."""
         left = int(contracts)
-        for pos in sorted(self.positions.values(), key=lambda p: p.pid):
+        unpriced = [RPosition.of(r) for r in self.state.rows("SELECT * FROM positions WHERE status='unpriced_close'")]
+        for pos in sorted([*self.positions.values(), *unpriced], key=lambda p: p.pid):
             if left <= 0:
                 break
             for leg in pos.legs:
                 if leg.symbol != symbol or left <= 0:
                     continue
-                take = min(self.leg_remaining(pos, leg), left)
+                remaining = pos.info.get("unpriced_remaining") if pos.status == "unpriced_close" else None
+                take = min(int(remaining.get(symbol, 0)) if remaining is not None else self.leg_remaining(pos, leg), left)
                 if take <= 0:
                     continue
                 gone = dict(pos.info.get("gone") or {})
@@ -737,7 +770,16 @@ class RealBook:
                 pos.cash += leg.side * value_share * V.MULTIPLIER * take
                 pos.exit_value_qty += leg.side * value_share * take / max(1, leg.ratio)
                 left -= take
-                self._finish_broken(pos, why)
+                if remaining is not None:
+                    remaining[symbol] -= take
+                    if not any(remaining.values()):
+                        pos.info.pop("unpriced_remaining", None)
+                        pos.info.pop("unpriced_qty", None)
+                        self._close(pos, why, self.clock())
+                    else:
+                        self._save_position(pos)
+                else:
+                    self._finish_broken(pos, why)
         return int(contracts) - left
 
     def _finish_broken(self, pos: RPosition, why: str) -> None:
@@ -767,15 +809,69 @@ class RealBook:
         pos.qty = 0
         self._close(pos, reason, self.clock())
 
-    def closed_trades(self, since_pid: int = 0) -> list[dict]:
+    def closed_trades(self, since_pid: int = 0, *, unexported: bool = False) -> list[dict]:
         """Closed real trades with pid above `since_pid`, as forward-record rows."""
         out = []
-        for r in self.state.rows("SELECT * FROM positions WHERE status='closed' AND pid>? ORDER BY pid", (since_pid,)):
+        query = "SELECT * FROM positions WHERE status='closed' AND pid>?"
+        if unexported:
+            query += " AND pid NOT IN (SELECT pid FROM forward_exports)"
+        for r in self.state.rows(query + " ORDER BY pid", (since_pid,)):
             pos = RPosition.of(r)
             out.append({"pid": pos.pid, "family": pos.family, "instance": pos.instance, "tuition": pos.tuition, "id": f"real:{pos.pid}",
                         "day": pos.opened_day, "pnl": round(pos.cash, 2),
                         "max_loss": round(pos.max_loss_share * V.MULTIPLIER * pos.opened_qty, 2)})
         return out
+
+    def recover_expired(self, held: Mapping[str, int], fills: Sequence[Mapping[str, Any]], *, day: str) -> list[str]:
+        """Attribute external liquidation fills oldest-position first. Missing expired contracts release exposure;
+        without every leg's actual fill value they become unpriced, never measured forward evidence. Retry those
+        rows on later reads. A fill quantity can be used once across families and process restarts."""
+        pending = [RPosition.of(r) for r in self.state.rows("SELECT * FROM positions WHERE status='unpriced_close' ORDER BY pid")]
+        pending += [p for p in self.positions.values() if p.status == "awaiting_expiry" and p.expiry <= day]
+        alerts = []
+        for pos in sorted(pending, key=lambda p: p.pid):
+            if any(held.get(l.symbol, 0) for l in pos.legs) or self.blockers(pos.legs):
+                continue
+            remaining = pos.info.get("unpriced_remaining") or {l.symbol: self.leg_remaining(pos, l) for l in pos.legs}
+            takes = []
+            available = {r["id"]: int(r["qty"]) for r in self.state.rows("SELECT * FROM external_fill_usage")}
+            complete = True
+            for leg in pos.legs:
+                need = int(remaining.get(leg.symbol, 0))
+                for fill in fills:
+                    if (fill["symbol"] != leg.symbol or fill["side"] != ("sell" if leg.side > 0 else "buy")
+                            or fill["at"] < pos.opened_at or need <= 0):
+                        continue
+                    take = min(need, max(0, int(fill["qty"]) - available.get(fill["id"], 0)))
+                    if take:
+                        takes.append((leg, fill, take))
+                        available[fill["id"]] = available.get(fill["id"], 0) + take
+                        need -= take
+                complete &= need == 0
+            if not complete:
+                if pos.status != "unpriced_close":
+                    pos.info["unpriced_remaining"] = remaining
+                    pos.info["unpriced_qty"] = pos.qty
+                    pos.qty, pos.status = 0, "unpriced_close"
+                    pos.reason = "expired contracts absent at venue; external fill values not yet reconciled"
+                    self._save_position(pos)
+                    alerts.append(f"{pos.family}'s {pos.type}: expired legs are absent; exposure cleared, P&L awaiting venue fills")
+                continue
+            with self.state.transaction():
+                for leg, fill, take in takes:
+                    price = float(fill["price"])
+                    single = RLeg(leg.symbol, leg.side, 1, leg.is_call, leg.strike, leg.expiry, leg.key)
+                    fee = leg_fees(pos.root, [single], [price], take, "close")
+                    pos.cash += leg.side * price * V.MULTIPLIER * take - fee
+                    pos.fees += fee
+                    pos.exit_value_qty += leg.side * price * take
+                    self.state.upsert("external_fill_usage", {"id": fill["id"], "qty": available[fill["id"]]}, "id")
+                pos.qty = 0
+                pos.info.pop("unpriced_remaining", None)
+                pos.info.pop("unpriced_qty", None)
+                self._close(pos, "venue liquidation reconciled from external fills", self.clock())
+            alerts.append(f"{pos.family}'s {pos.type}: external liquidation and fees reconciled from venue fills")
+        return alerts
 
     def _reject(self, instance: str, why: str) -> None:
         rows = self.rejects_since.setdefault(instance, [])
@@ -784,7 +880,8 @@ class RealBook:
 
     # ------------------------------------------------------------------ reconciliation
     def reconcile(self, positions: Sequence[Mapping[str, Any]], foreign_orders: Sequence[Mapping[str, Any]], *,
-                  day: dt.date, after_close: bool, shares: Mapping[str, int] | None = None) -> list[str]:
+                  day: dt.date, after_close: bool, shares: Mapping[str, int] | None = None,
+                  include_expired: bool = False) -> list[str]:
         """The account against this book (the module docstring). Returns the mismatches of THIS reading; the freeze
         follows two readings in a row."""
         expected = self.expected_positions()
@@ -817,8 +914,10 @@ class RealBook:
             parts = occ_parts(symbol)
             if parts is not None:
                 expiry = dt.date.fromisoformat(parts[1])
-                if expiry < day or (after_close and expiry <= day):
+                if not include_expired and (expiry < day or (after_close and expiry <= day)):
                     continue  # expired: the venue settles it (after the close); its events adjust the book
+                if include_expired and after_close and expiry <= day and V.is_index(parts[0]):
+                    continue  # cash settlement is already booked; the venue can retain its expired index rows overnight
             if expected.get(symbol, 0) != held.get(symbol, 0):
                 problems.append(f"{symbol}: the account holds {held.get(symbol, 0)}, the book {expected.get(symbol, 0)}")
         for row in foreign_orders:

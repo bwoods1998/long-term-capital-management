@@ -52,7 +52,7 @@ path, Wave 5):
 | `MAX_DAY_OPEN_ORDERS` | 250 | no order OPENS once the day's orders (exits included) reach it: the last 50 are kept for exits (`403 {cap: "day_open_orders"}`) |
 | `CREDIT_MIN_EQUITY_USD` | 2000 | a credit structure (credit vertical, iron condor, iron butterfly) opens only at this equity or more |
 | `EQUITY_CAP_MAX_AGE_MS` | 120000 | the oldest equity reading an opening order is sized against |
-| `OPTION_STRUCTURES_REAL` | the five types | `debit_vertical,credit_vertical,iron_condor,iron_butterfly,long_butterfly`: what the real account may OPEN; a single contract bought to open goes only if `long_call` or `long_put` (by its right) is named, and neither is |
+| `OPTION_STRUCTURES_REAL` | off | No real option opens. Paper structures and closes of already held real positions remain available. |
 | `CAP_TIMEZONE` | America/New_York | the calendar the day rolls on |
 | `MAX_ORDER_USD`, `MAX_ORDER_USD_KALSHI`, `MAX_DAY_USD` | 75, 75, 4000 | Kalshi only (dead until the prune removes it); the real account's orders never spend Kalshi's day |
 
@@ -76,8 +76,8 @@ path, Wave 5):
 - **Structures** (`order_class: "mleg"`, `lib/caps.mjs`) are read from their legs as one of the
   defined-risk types. Any naked short, uncovered ratio, legging in or out, mixed roots or a
   `limit_price` of the wrong sign (positive is a debit, negative a credit) is a `400` on both accounts.
-  `OPTION_STRUCTURES_REAL` must equal the constitution's `options_money.real_types`; `league.ci`
-  refuses a tree where they disagree.
+  If enabled, `OPTION_STRUCTURES_REAL` must equal the constitution's `options_money.real_types`; `league.ci`
+  also accepts `off`, the stricter deployment setting used while real money is disabled.
 - `/v1/health` reports `max_loss`: the equity reading and its age, the per-order cap now, today's
   opening maximum loss and its cap, `max_day_usd_alpaca`, whether opens and credit opens are admitted,
   orders today of `max_day_open_orders` and `max_day_orders`.

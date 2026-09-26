@@ -50,7 +50,7 @@ from ..gym import venue as V
 from ..gym.ctx import order_row, position_row
 from . import money as M
 from .chains import LiveDay, from_ordinal, ordinal, session_minutes, trading_days_around, uses_parity
-from .decider import DeciderError, ProgramRefused
+from .decider import DeciderError, ProgramRefused, MAX_BATCH_SECONDS
 from .families import MemoryFamilies
 from .paper import PaperProof
 from .real import RealBook, RLeg, RPosition, real_legs
@@ -63,6 +63,8 @@ FAMILIES_EVERY = 300.0
 ACTIVITIES_EVERY = 300.0
 FLOWS_EVERY = 300.0
 BROKEN_RESEND_MINUTES = 3    # a broken structure's leg is sent alone at most this often
+EXIT_PREEMPT_SECONDS = 120.0
+DECIDER_ORPHAN_SECONDS = 300.0
 MINUTE_OFFSET = 3.0          # seconds into each minute the live step runs
 DEFAULTS = {
     "enabled": True,
@@ -94,6 +96,8 @@ class Instance:
     error: str = ""
     fatal: bool = False          # the program will not run again (refused, or disqualified): the House closes what it holds
     stats: dict = field(default_factory=dict)
+    error_since: float | None = None
+    retried_at: float = float("-inf")
 
 
 def ny(t: float) -> dt.datetime:
@@ -158,6 +162,7 @@ class OptionsLive:
         #: pid -> {forced, why, intent, day}: exits waiting for their contracts (another order works on them), kept in
         #: the live state so a restart does not lose one the program was told the House sends.
         self.pending_exits: dict[int, dict] = {int(k): dict(v) for k, v in (self.state.get("pending_exits", {}) or {}).items()}
+        self._decision_end = time.monotonic() + MAX_BATCH_SECONDS
         self._restore_real_instances()
 
     # ------------------------------------------------------------------ plumbing
@@ -245,8 +250,11 @@ class OptionsLive:
 
     def minute(self) -> dict:
         """One pass: the session's minute, the close's bookkeeping, or the quiet hours' reconciliation."""
-        self.owner_actions()
         now = self.clock()
+        # Loads, recovery, decisions and drops share one budget; leave five seconds before the next wall minute for
+        # applying answers, exports and persistence. A late data/account read consumes that same allowance.
+        self._decision_end = time.monotonic() + max(0.0, min(MAX_BATCH_SECONDS, 60.0 - now % 60.0 - 5.0))
+        self.owner_actions()
         local = ny(now)
         today = local.date()
         session = session_minutes(today)
@@ -353,21 +361,32 @@ class OptionsLive:
         for r in self.state.rows("SELECT * FROM instances WHERE retired_at IS NULL"):
             inst = Instance(r["id"], r["family"], int(r["version"] or 0), "real", r["code"], dict(json_or(r["params"], {})),
                             r["run_sha"] or "", r["band"] or "", bool(r["tuition"]), r["mode"] or "live")
+            if str(r.get("why") or "").startswith(("disqualified:", "the program does not load:", "its decider could not recover")):
+                inst.error, inst.fatal, inst.mode = r["why"], True, "exit_only"
+                self.instances[inst.key] = inst
+                continue
             self._load(inst)
 
     def _load(self, inst: Instance) -> bool:
+        inst.retried_at = self.clock()
         try:
-            info = self.decider.load(inst.key, inst.code, inst.params, inst.family)
+            info = self.decider.load(inst.key, inst.code, inst.params, inst.family, budget_seconds=self._decision_budget())
             inst.needs = needs_of(info["needs"])
             inst.run_sha = info.get("run_sha") or inst.run_sha
             inst.error = ""
+            inst.error_since = None
         except ProgramRefused as exc:
             inst.error = f"the program does not load: {str(exc)[:200]}"
             inst.fatal = True
         except DeciderError as exc:
             inst.error = f"the decider failed: {str(exc)[:200]}"
+            if inst.error_since is None:
+                inst.error_since = self.clock()
         self.instances[inst.key] = inst
         return not inst.error
+
+    def _decision_budget(self) -> float:
+        return max(0.0, self._decision_end - time.monotonic())
 
     def _real_on(self) -> bool:
         return self.real_money and self.book is not None
@@ -390,6 +409,22 @@ class OptionsLive:
         return min(equity, capital)
 
     def sync_families(self, now: float, *, force: bool = False) -> None:
+        # Retired and superseded programs still own exits. Recover them even when no current swarm row wants them.
+        for inst in list(self.instances.values()):
+            if (inst.kind != "real" or inst.fatal or not inst.error.startswith("the decider failed")
+                    or self.book is None or not (self.book.instance_positions(inst.key) or self.book.instance_orders(inst.key))):
+                continue
+            if inst.error_since is None:
+                inst.error_since = now
+            if now - inst.error_since >= DECIDER_ORPHAN_SECONDS:
+                inst.fatal = True
+                inst.error = "its decider could not recover for five minutes: the House closes its positions"
+                inst.mode = "exit_only"
+                self._persist_instance(inst)
+                self.alert("error", f"live: {inst.family}: {inst.error}")
+            elif now - inst.retried_at >= 60:
+                self._load(inst)
+        self._cancel_inactive_opens()
         if not force and now - self._families_at < FAMILIES_EVERY:
             return
         self._families_at = now
@@ -416,10 +451,15 @@ class OptionsLive:
                   and self.table.tuition_day > 0 and row.get("structure") in self.table.real_types):
                 wanted[f"{fid}@{version}:t"] = (row, "real", True)
         for key, (row, kind, tuition) in wanted.items():
+            if kind == "real":
+                saved = self.state.rows("SELECT why FROM instances WHERE id=?", (key,))
+                if saved and str(saved[0]["why"] or "").startswith(("disqualified:", "the program does not load:",
+                                                                     "its decider could not recover")):
+                    continue
             inst = self.instances.get(key)
-            if inst is not None and inst.error.startswith("the decider failed"):
-                self.instances.pop(key, None)          # a transient failure: load it again
-                inst = None
+            if inst is not None and not inst.fatal and inst.error.startswith("the decider failed"):
+                if now - inst.retried_at >= 60:
+                    self._load(inst)
             if inst is None:
                 inst = Instance(key, str(row["family"]), int(row.get("version") or 0), kind, str(row.get("code") or ""),
                                 dict(row.get("params") or {}), str(row.get("run_sha") or ""), str(row.get("band") or ""), tuition)
@@ -436,7 +476,7 @@ class OptionsLive:
                                               "tuition": tuition, "state": "started"}, agent=inst.family)
             else:
                 inst.band = str(row.get("band") or inst.band)
-                if inst.mode != "live" and kind == "real":
+                if inst.mode != "live" and kind == "real" and not inst.fatal:
                     inst.mode = "live"
                     self._persist_instance(inst)
                 elif kind == "real":
@@ -450,6 +490,17 @@ class OptionsLive:
                 inst.mode = "exit_only"
                 self._persist_instance(inst)
             self.record("live.instance", {"instance": key, "family": inst.family, "state": inst.mode}, agent=inst.family)
+        self._cancel_inactive_opens()
+
+    def _cancel_inactive_opens(self) -> None:
+        if self.book is None:
+            return
+        for order in list(self.book.orders.values()):
+            inst = self.instances.get(order.instance)
+            if order.action == "open" and (inst is None or inst.mode != "live" or inst.error or inst.fatal):
+                why = "its family left the real band or its program is unavailable"
+                if self.book.cancel(order, why):
+                    self.book._reject(order.instance, f"your open was cancelled: {why}")
 
     def _move_band(self, row: dict, equity: Decimal | None) -> str:
         """The live path's band move for a Candidate, Probe or Sized family (the money table)."""
@@ -544,12 +595,12 @@ class OptionsLive:
                     if acc is not None:
                         self._export_one(acc)
                     self.shadow.accounts.pop(key, None)
-                    self.decider.drop(key)
+                    self.decider.drop(key, budget_seconds=self._decision_budget())
                     self.instances.pop(key, None)
             elif inst.kind == "real" and inst.mode == "exit_only" and self.book is not None:
                 if not self.book.instance_positions(key) and not self.book.instance_orders(key):
                     self.state.execute("UPDATE instances SET retired_at=? WHERE id=?", (self.clock(), key))
-                    self.decider.drop(key)
+                    self.decider.drop(key, budget_seconds=self._decision_budget())
                     self.instances.pop(key, None)
 
     # ------------------------------------------------------------------ chains
@@ -733,7 +784,8 @@ class OptionsLive:
         histories = {inst.needs.history for inst in self.instances.values() if inst.needs is not None}
         unders = {(r, h, m): day.under(r, m, h) for (r, m) in snaps for h in histories}
         try:
-            return self.decider.decide(snaps, unders, jobs)
+            jobs.sort(key=lambda job: self.instances[job["key"]].kind != "real")
+            return self.decider.decide(snaps, unders, jobs, budget_seconds=self._decision_budget())
         except DeciderError as exc:
             out["decider"] = str(exc)[:200]
             self.alert("warning", f"live: {exc}")
@@ -769,12 +821,18 @@ class OptionsLive:
         if answer.get("missing") and not inst.error:
             # The decider lost the program (a restart whose reload failed): loaded again at the next families pass.
             inst.error = "the decider failed: the program was not loaded in the decider"
+            inst.error_since = self.clock()
             self._families_at = float("-inf")
         if isinstance(answer.get("stats"), Mapping):
             inst.stats = dict(answer["stats"])
             if inst.stats.get("disqualified") and not inst.fatal:
                 inst.error, inst.fatal = f"disqualified: {inst.stats['disqualified']}", True
+                if inst.kind == "real":
+                    inst.mode = "exit_only"
+                    self._persist_instance(inst)
                 self.record("live.instance", {"instance": key, "family": inst.family, "error": inst.error}, agent=inst.family)
+        if inst.error:
+            self._cancel_inactive_opens()
 
     def _schedule(self, inst: Instance, day: LiveDay) -> set[int]:
         needs = inst.needs
@@ -858,7 +916,7 @@ class OptionsLive:
         try:
             rows = self.real.activities(sorted(ALPACA_FUNDING), after=self.start_at)
             read_at = now
-            flows, unsettled = [], []
+            flows, unsettled, pending_amounts = [], [], []
             start = parse_time(self.start_at) or 0.0
             for r in rows:
                 when = parse_time(r.get("transaction_time") or r.get("created_at") or (str(r.get("date")) + "T00:00:00Z"))
@@ -869,6 +927,7 @@ class OptionsLive:
                 if status not in ("executed", "complete", "completed"):
                     # As `ltcm.performance` reads funding: only a settled flow is netted; a pending one settles nothing.
                     unsettled.append(f"{r.get('activity_type')} {amount} {status}")
+                    pending_amounts.append(amount)
                     continue
                 flows.append((when, amount))
             closes = []
@@ -879,7 +938,7 @@ class OptionsLive:
                 if session is not None:
                     closes.append(epoch_of(day, session[1]))
             self.flows = M.FlowBook(read_at=read_at, rows=tuple(sorted(flows)), closes=tuple(sorted(closes)),
-                                    unsettled=tuple(unsettled))
+                                    unsettled=tuple(unsettled), pending_amounts=tuple(pending_amounts))
         except Exception as exc:  # noqa: BLE001 - the stops wait on a reading (provisional only)
             self.alert("warning", f"live: the account's funding could not be read ({type(exc).__name__}: {str(exc)[:120]})")
 
@@ -896,7 +955,7 @@ class OptionsLive:
         # Before the first event, from the reset itself (`start_at`): an event before it is not this run's.
         cursor = str(self.state.get("activities_cursor") or "")
         seen: dict[str, str] = dict(self.state.get("activities_seen_by_day", {}) or {})
-        since = parse_time(self.start_at) if not cursor and self.start_at else None
+        since = parse_time(self.start_at) if self.start_at else None
         after = (dt.date.fromisoformat(cursor) - dt.timedelta(days=1)).isoformat() if cursor else (self.start_at or None)
         try:
             rows = self.real.activities(list(OPTION_EVENTS), after=after)
@@ -910,11 +969,12 @@ class OptionsLive:
         def this_runs(r: Mapping[str, Any]) -> bool:
             if since is not None:
                 stamp = parse_time(r.get("transaction_time"))
-                if stamp is not None:
-                    return stamp > since
+                if stamp is not None and stamp <= since:
+                    return False
                 # A dated event on the reset's own day cannot be placed before or after it: it is taken (an assignment
                 # missed costs more than one handled twice; the owner is told either way).
-                return not event_day(r) or event_day(r) >= str(self.start_at)[:10]
+                if stamp is None and event_day(r) and event_day(r) < str(self.start_at)[:10]:
+                    return False
             return not cursor or not event_day(r) or event_day(r) >= str(after)
 
         fresh = [r for r in rows if str(r.get("id")) not in seen and this_runs(r)]
@@ -1028,7 +1088,7 @@ class OptionsLive:
             out["kill_switch"] = True
             return
         self._pending_exits(day, mi, out)
-        for pos in list(book.positions.values()):
+        for pos in sorted(book.positions.values(), key=lambda p: (not p.info.get("broken"), p.pid)):
             if pos.qty > 0 and pos.info.get("broken"):
                 self._close_broken(pos, day, mi, out)
                 continue
@@ -1096,7 +1156,7 @@ class OptionsLive:
         if not self.pending_exits:
             return
         today = day.day.isoformat()
-        for pid, want in list(self.pending_exits.items()):
+        for pid, want in sorted(self.pending_exits.items(), key=lambda item: (not item[1].get("forced"), item[1].get("queued_at", 0))):
             # Taken off the list first: `_send_close` puts it back only when its contracts are still busy (it waits on).
             self.pending_exits.pop(pid, None)
             pos = book.positions.get(pid)
@@ -1111,7 +1171,7 @@ class OptionsLive:
             else:
                 try:
                     why = self._send_close(pos, day, mi, forced=bool(want.get("forced")), why=str(want.get("why") or ""),
-                                           out=out, intent=want.get("intent"), pending=True)
+                                           out=out, intent=want.get("intent"), pending=True, queued_at=want.get("queued_at"))
                 except Exception as exc:  # noqa: BLE001 - one waiting exit never stops the minute (or the others)
                     why = f"the waiting close failed: {type(exc).__name__}: {str(exc)[:160]}"
                     self.state.event("live.error", {"instance": pos.instance, "error": why,
@@ -1142,7 +1202,6 @@ class OptionsLive:
         book = self.book
         assert book is not None
         chain, snap = day.chains.get(pos.root), day.snapshot(pos.root, mi)
-        busy = book.busy()
         now = self.clock()
         # When each leg was last sent (epoch seconds): a gap of `BROKEN_RESEND_MINUTES` whatever the day.
         sent_at = dict(pos.info.get("leg_sent") or {})
@@ -1150,7 +1209,9 @@ class OptionsLive:
         todo = shorts or [leg for leg in pos.legs if leg.side > 0 and book.leg_remaining(pos, leg) > 0]
         for leg in todo:
             left = book.leg_remaining(pos, leg)
-            if leg.symbol in busy or now - float(sent_at.get(leg.symbol, float("-inf"))) < BROKEN_RESEND_MINUTES * 60 - 1:
+            if self._yield_contracts(pos, [leg], forced=True, queued_at=now):
+                continue
+            if leg.symbol in book.busy() or now - float(sent_at.get(leg.symbol, float("-inf"))) < BROKEN_RESEND_MINUTES * 60 - 1:
                 continue
             if chain is None or snap is None:
                 continue
@@ -1169,20 +1230,31 @@ class OptionsLive:
             pos.info["leg_sent"] = sent_at
             book._save_position(pos)
 
-    def _send_close(self, pos: RPosition, day: LiveDay, mi: int, *, forced: bool, why: str, out: dict,
-                    intent: Mapping[str, Any] | None = None, pending: bool = False) -> str | None:
+    def _yield_contracts(self, pos: RPosition, legs: list[RLeg], *, forced: bool, queued_at: float) -> bool:
         book = self.book
         assert book is not None
-        blockers = book.blockers(pos.legs, pid=pos.pid)
-        if blockers:
-            # Exits first: another family's working OPEN on one of these contracts is cancelled for this exit, and the
-            # exit waits (`pending_exits`) until the stream is free; a working CLOSE of another position is let finish.
-            for other in blockers:
-                if other.action == "open":
-                    if book.cancel(other, "an exit needs this contract"):
-                        book._reject(other.instance, f"your open was cancelled: another position's exit needs {', '.join(sorted({l.symbol for l in other.legs} & {l.symbol for l in pos.legs}))}")
+        blockers = book.blockers(legs, pid=pos.pid)
+        for other in blockers:
+            if other.action == "open" or (not other.forced and (forced or self.clock() - queued_at >= EXIT_PREEMPT_SECONDS)):
+                why = "an exit needs this contract"
+                if book.cancel(other, why):
+                    book._reject(other.instance, f"your {other.action} was cancelled: {why}")
+        return bool(blockers)
+
+    def _send_close(self, pos: RPosition, day: LiveDay, mi: int, *, forced: bool, why: str, out: dict,
+                    intent: Mapping[str, Any] | None = None, pending: bool = False,
+                    queued_at: float | None = None) -> str | None:
+        book = self.book
+        assert book is not None
+        rules = day.rules.get(pos.root) or V.rules_for(pos.root, open_minute=day.open_min, close_minute=day.close_min)
+        if pos.expiry == day.day.isoformat() and day.open_min + mi >= rules.close_cutoff:
+            self.pending_exits.pop(pos.pid, None)
+            return "expiry cutoff: the waiting close cannot be sent after the close cutoff"
+        if queued_at is None:
+            queued_at = float(self.pending_exits.get(pos.pid, {}).get("queued_at", self.clock()))
+        if self._yield_contracts(pos, pos.legs, forced=forced, queued_at=queued_at):
             self.pending_exits[pos.pid] = {"forced": forced, "why": why, "intent": dict(intent) if intent else None,
-                                           "day": day.day.isoformat()}
+                                           "day": day.day.isoformat(), "queued_at": queued_at}
             self._save_pending()
             return "the close waits for its contracts (another order works on them); the House sends it"
         chain = day.chains.get(pos.root)
@@ -1315,6 +1387,8 @@ class OptionsLive:
             return blocked
         if self.book is not None and self.book.frozen:
             return f"reconciliation: {self.book.frozen}"
+        if self.state.rows("SELECT pid FROM positions WHERE status='unpriced_close' LIMIT 1"):
+            return "reconciliation: expired positions are flat but their venue fill values are still unread"
         latch = self.state.get("assignment_latch")
         if latch:
             return f"{latch.get('why')}: the owner clears it (python3 -m league.live --root <state> --clear-assignment)"
@@ -1374,6 +1448,8 @@ class OptionsLive:
             return "an intent has one of open, close or cancel"
         if inst.mode != "live":
             return f"this instance closes only ({inst.mode}): its family left the real band"
+        if inst.error or inst.fatal:
+            return f"this program is unavailable: {inst.error}"
         blocked = self.real_block(opening=True)
         if blocked:
             return blocked
@@ -1458,8 +1534,9 @@ class OptionsLive:
     def _export_real(self) -> None:
         if self.book is None:
             return
-        since = int(self.state.get("real_exported", 0) or 0)
-        rows = self.book.closed_trades(since)
+        # Position ids follow opens, not closes. Backfill every unacknowledged row, including rows the former
+        # max-pid cursor missed; the swarm deduplicates a retried export by its stable trade id.
+        rows = self.book.closed_trades(unexported=True)
         for row in rows:
             if not row["tuition"]:
                 try:
@@ -1467,8 +1544,8 @@ class OptionsLive:
                 except Exception as exc:  # noqa: BLE001
                     self.alert("warning", f"live: a real trade could not reach the forward record ({type(exc).__name__})")
                     return
-            since = max(since, int(row["pid"]))
-        self.state.put("real_exported", since)
+            self.state.execute("INSERT OR IGNORE INTO forward_exports(pid, exported_at) VALUES(?,?)",
+                               (int(row["pid"]), self.clock()))
 
     # ------------------------------------------------------------------ the close and the quiet hours
     def _end_of_day(self, day: LiveDay, out: dict) -> None:
@@ -1494,12 +1571,12 @@ class OptionsLive:
                 itm = [leg for leg in pos.legs if _intrinsic(leg, level) >= 0.01]
                 if V.is_index(pos.root) and all(leg.expiry == today for leg in pos.legs):
                     self.book.settle(pos, value, "settled")
-                elif not itm and all(leg.expiry == today for leg in pos.legs):
-                    self.book.settle(pos, 0.0, "expired")
                 else:
                     pos.status = "awaiting_expiry"
+                    pos.info["expiry_intrinsic_estimate"] = value
                     self.book._save_position(pos)
-                    self.alert("error", f"live: {pos.family}'s {pos.type} expired with a leg in the money: the venue exercises it")
+                    if itm:
+                        self.alert("warning", f"live: {pos.family}'s {pos.type} expired with a leg in the money: awaiting venue events or liquidation fills")
             self._export_real()
         self.state.put("ended_day", day.day.isoformat())
         self.shadow.save()
@@ -1519,11 +1596,68 @@ class OptionsLive:
             foreign = self.book.ingest(rows)
             self.book.look_up(today=today.isoformat(), seen=[str(r.get("client_order_id") or "") for r in rows])
             positions = self.real.positions()
-            self.book.reconcile(positions, foreign, day=today, after_close=True, shares=self.state.get("shares", {}) or {})
             self.account_row = self.real.account()
         except Exception as exc:  # noqa: BLE001
             out["venue_error"] = f"{type(exc).__name__}: {str(exc)[:160]}"
         self._activities(now)
+        if "venue_error" not in out:
+            if self._activities_changed:
+                positions = self._positions_again(out)
+            if positions is not None:
+                self._reconcile_expiry(rows, positions, today, out)
+                self.book.reconcile(positions, foreign, day=today, after_close=True,
+                                    shares=self.state.get("shares", {}) or {}, include_expired=True)
+                self._export_real()
+
+    def _reconcile_expiry(self, orders: list[dict], positions: list[dict], today: dt.date, out: dict) -> None:
+        book = self.book
+        assert book is not None and self.real is not None
+        if not any(p.status == "awaiting_expiry" for p in book.positions.values()) and not self.state.rows(
+                "SELECT pid FROM positions WHERE status='unpriced_close' LIMIT 1"):
+            return
+        known = {str(r["venue_id"]) for r in self.state.rows("SELECT venue_id FROM orders WHERE venue_id IS NOT NULL")}
+        try:
+            activities = self.real.activities(["FILL"], after=self.start_at or None)
+        except Exception as exc:  # noqa: BLE001 - order fills may still resolve it; unpriced rows remain visible
+            activities = []
+            out["expiry_fill_error"] = type(exc).__name__
+        fills = []
+        activity_orders = {str(r.get("order_id")) for r in activities if r.get("order_id")}
+        for r in activities:
+            if str(r.get("order_id")) in known or not r.get("id"):
+                continue
+            key = f"order:{r['order_id']}:{r.get('symbol')}" if r.get("order_id") else f"activity:{r['id']}"
+            fills.append({"id": key, "symbol": str(r.get("symbol") or ""),
+                          "side": r.get("side"), "qty": r.get("qty"), "price": r.get("price"),
+                          "at": parse_time(r.get("transaction_time"))})
+        for order in orders:
+            if (str(order.get("id")) in known or str(order.get("id")) in activity_orders
+                    or str(order.get("client_order_id") or "").startswith("lv-")):
+                continue
+            for leg in order.get("legs") or [order]:
+                fills.append({"id": f"order:{order.get('id')}:{leg.get('symbol')}", "symbol": str(leg.get("symbol") or ""),
+                              "side": leg.get("side"), "qty": leg.get("filled_qty"), "price": leg.get("filled_avg_price"),
+                              "at": parse_time(leg.get("filled_at") or order.get("filled_at"))})
+        combined = {}
+        for f in fills:
+            try:
+                qty, price = M.D(f["qty"]), M.D(f["price"])
+                if f["at"] is not None and qty > 0 and qty == int(qty) and price >= 0 and occ_parts(f["symbol"]):
+                    previous = combined.get(f["id"])
+                    if previous:
+                        total = previous["qty"] + int(qty)
+                        previous["price"] = (previous["qty"] * previous["price"] + int(qty) * float(price)) / total
+                        previous["qty"] = total
+                        previous["at"] = min(previous["at"], f["at"])
+                    else:
+                        combined[f["id"]] = {**f, "qty": int(qty), "price": float(price)}
+            except (TypeError, ValueError, ArithmeticError):
+                continue
+        held = {str(r.get("symbol")): int(M.D(r.get("qty") or 0)) for r in positions if occ_parts(str(r.get("symbol") or ""))}
+        for message in book.recover_expired(held, sorted(combined.values(), key=lambda f: (f["at"], f["id"])), day=today.isoformat()):
+            self.alert("warning", f"live: {message}")
+            self.record("live.expiry_reconciliation", {"what": message})
+        out["unpriced_closes"] = len(self.state.rows("SELECT pid FROM positions WHERE status='unpriced_close'"))
 
     # ------------------------------------------------------------------ what the site shows
     def site_inputs(self) -> dict:

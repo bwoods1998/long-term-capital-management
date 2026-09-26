@@ -254,6 +254,14 @@ book: every order written before it is sent, positions by family, fills, the sto
 numpy in `/workspace/.venv`. `health.json` carries its block (`options_live`: the last minute, what shuts
 real entries now, the stops, reconciliation, the paper proof, every instance).
 
+On the root House, the decider runs under host uid/gid 65534 with no supplementary groups, in a
+mandatory private network namespace. Its runtime is a root-owned read-only source copy under `/tmp`;
+the production env stays root-owned mode 0600 and the state/deploy directories must not be writable
+by other users. Local runs as an ordinary user retain that user's file permissions. One child and
+one memory allowance are shared, so a hung or exhausted child can cost all programs that minute.
+Loads, pipe writes, decisions and recovery share at most 40 seconds, clamped to five seconds before
+the next minute. Recovery after a timeout happens within a later request's budget.
+
 ```sh
 python3 -m league.live --root /workspace/state                        # the live state: stops, freeze, proof, positions, orders
 python3 -m league.live --root /workspace/state --release-drawdown     # owner: lift the drawdown stop's pause
@@ -266,6 +274,7 @@ reset, deposits netted, a pending deposit or withdrawal settling nothing); recon
 readings in a row that disagree freeze entries, two clean ones lift it; the LTC dust is known); no
 unresolved assignment; the paper proof passed; the House not paused. Exits need only the kill switch
 off, and go first: an exit cancels another family's resting open on its contracts and waits for them.
+A forced exit also cancels a blocking program close; ordinary exits do so after waiting two minutes.
 Expiring equity structures with a leg in or within 1% of the money are the House's to close from ten
 minutes before the close cutoff (15:00 ET for most roots, 15:15 for SPY and QQQ): a program's own
 close is cancelled for the forced one; index structures settle in cash. A family moved onto real money
@@ -276,6 +285,18 @@ orders that reached the venue and checked for opens only: an exit is never refus
 closes (and cancels of its closes) keep room for the House's own exits under 250 legs, and the gateway
 stops opens at 250 orders while exits go on to 300. An exit waiting for its contracts is kept across a
 restart and dropped at the day's end (its program is told).
+
+Demotion, retirement and an unavailable program cancel the instance's working opens. Programs kept
+for exits still reload after a decider failure; five minutes without recovery makes their positions
+orphans for the House to close. Closed real trades are acknowledged individually, so an older
+position that closes late cannot be lost behind a newer trade's export. After expiry, external
+liquidation fills reconcile the missing legs and fees. Missing fill values leave an explicit
+`unpriced_close` row, release stale exposure and block new entries until venue fills or expiry events
+resolve the accounting; estimated intrinsic values never become forward evidence.
+
+The checked-in deployment remains in paper readiness: `real_money: false`, no enabled grant, and
+the gateway's `OPTION_STRUCTURES_REAL: off`. The gateway still admits paper structures and verified
+closes of held real positions. A disabled gateway is a permitted stricter setting in `league.ci`.
 
 **Turning real money on** (M4b): the gateway deployed with the caps by maximum loss and
 `OPTION_STRUCTURES_REAL` set to the five types; a second owner deploy with `real_money` true (the

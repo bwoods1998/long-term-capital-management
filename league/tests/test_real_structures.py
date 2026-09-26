@@ -121,7 +121,7 @@ class OneSourceOfTruth(unittest.TestCase):
 
     FIVE = ["credit_vertical", "debit_vertical", "iron_butterfly", "iron_condor", "long_butterfly"]
     TYPES_LINE = '"real_types": ["debit_vertical", "credit_vertical", "iron_condor", "iron_butterfly", "long_butterfly"],'
-    GATEWAY_LINE = '"OPTION_STRUCTURES_REAL": "debit_vertical,credit_vertical,iron_condor,iron_butterfly,long_butterfly",'
+    GATEWAY_LINE = '"OPTION_STRUCTURES_REAL": "off",'
 
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
@@ -149,17 +149,16 @@ class OneSourceOfTruth(unittest.TestCase):
 
     def test_the_repository_as_it_stands_agrees(self):
         self.assertEqual(ci.check_structures(), [])
-        self.assertEqual(ci.gateway_structures(), (self.FIVE, []))
+        self.assertEqual(ci.gateway_structures(), ([], []))
 
     def test_the_table_and_the_gateway_change_together(self):
         self.assertEqual(self.tree(), [])
         self.assertEqual(self.tree(types=["debit_vertical"], gateway="debit_vertical"), [])
         self.assertEqual(self.tree(types=["debit_vertical"], gateway=" debit_vertical, "), [])
-        refused = self.tree(gateway="off")
-        self.assertEqual(len(refused), 1)
-        self.assertIn("admits none on the real account, but the constitution opens", refused[0])
+        self.assertEqual(self.tree(gateway="off"), [], "the external boundary may always disable real opens")
+        self.assertEqual(self.tree(gateway=",".join(self.FIVE)), [])
         self.assertIn("admits ['debit_vertical'] on the real account", self.tree(gateway="debit_vertical")[0])
-        self.assertIn("admits", self.tree(types=["debit_vertical"])[0])
+        self.assertIn("admits", self.tree(types=["debit_vertical"], gateway=",".join(self.FIVE))[0])
         # A typo would admit none at the gateway, silently: refused whatever the table says.
         self.assertIn("debit_verticle, not a structure type", self.tree(gateway="debit_verticle")[0])
         # A type the venue cannot close in one order is refused by the table's bounds before any comparison.

@@ -65,7 +65,10 @@ class TheChild(unittest.TestCase):
         for d in (self.decider, inline):
             d.load("v", VERTICAL, {}, "vert")
         snaps, unders = {("SPY", 30): snapshot()}, {("SPY", 2, 30): underlying_view("SPY", [600.0, 600.1])}
-        self.assertEqual(self.decider.decide(snaps, unders, [job("v")]), inline.decide(snaps, unders, [job("v")]))
+        remote, local = self.decider.decide(snaps, unders, [job("v")]), inline.decide(snaps, unders, [job("v")])
+        for answer in (remote, local):
+            self.assertGreaterEqual(answer["v"]["stats"].pop("seconds"), 0)
+        self.assertEqual(remote, local)
 
     def test_the_child_has_no_network_where_the_box_allows_a_namespace(self):
         import shutil
@@ -117,13 +120,13 @@ class AHungChild(unittest.TestCase):
         class Stuck(Decider):
             hang = False
 
-            def _spawn(self):
+            def _spawn(self, budget_seconds=10.0):
                 if Stuck.hang:
                     self.proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], stdin=subprocess.PIPE,
                                                  stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
                     Stuck.hang = False
                 else:
-                    super()._spawn()
+                    super()._spawn(budget_seconds=budget_seconds)
 
         decider = Stuck(timeout=0.2, python=sys.executable)
         try:

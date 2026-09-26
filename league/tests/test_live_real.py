@@ -166,6 +166,49 @@ class OrderPath(unittest.TestCase):
         again.ingest(self.venue.orders())
         self.assertEqual(sum(p.qty for p in again.positions.values()), 2)
 
+    def test_a_pending_order_found_after_a_crash_is_counted_exactly_once(self):
+        order = self.book.new_order(instance="f@1:r", family="f", action="open", type_="debit_vertical", root="SPY",
+                                    legs=legs(), qty=1, limit_value=0.5, tif=None, day="2026-09-28", minute=30)
+        self.venue._create(mleg_body(order))  # a legacy crash after POST, before dispatched/count were persisted
+        self.clock.set(self.clock() + 60)
+        again = RealBook(LiveState(self.path, clock=self.clock), self.venue, self.book.table, clock=self.clock)
+        try:
+            again.look_up(today="2026-09-28")
+            self.assertEqual(again.count_today("2026-09-28"), 2)
+            again.ingest(self.venue.orders_rows())
+            self.assertEqual(again.count_today("2026-09-28"), 2)
+        finally:
+            again.state.close()
+
+    def test_dispatch_and_cancel_counts_survive_a_crash_after_the_remote_action(self):
+        def crash(body, *, exit):
+            self.venue._create(body)
+            raise RuntimeError("crashed after POST")
+        from unittest.mock import patch
+
+        with patch.object(self.venue, "submit", side_effect=crash):
+            with self.assertRaises(RuntimeError):
+                self.open()
+        self.assertEqual(self.book.count_today("2026-09-28"), 2)
+        self.clock.set(self.clock() + 60)
+        self.book.look_up(today="2026-09-28")
+        [order] = list(self.book.orders.values())
+        self.assertEqual(self.book.count_today("2026-09-28"), 2)
+        with patch.object(self.venue, "cancel", side_effect=RuntimeError("crashed after DELETE")):
+            with self.assertRaises(RuntimeError):
+                self.book.cancel(order, "stop")
+        self.assertEqual(self.book.count_today("2026-09-28"), 4)
+
+    def test_cancelling_a_previous_days_order_preserves_todays_order_count(self):
+        self.venue.fill = "none"
+        order = self.open()
+        order.day = "2026-09-25"
+        self.book._count("2026-09-28", 198)
+        self.book.cancel(order, "stale day order")
+        self.assertEqual(self.book.count_today("2026-09-28"), 202)
+        self.book._count("2026-09-25", 2)
+        self.assertEqual(self.book.count_today("2026-09-28"), 202)
+
     def test_a_new_live_state_never_reuses_a_client_id(self):
         order = self.open()
         other = RealBook(LiveState(Path(self.dir.name) / "fresh.sqlite", clock=self.clock), self.venue, M.Table.from_constitution(),

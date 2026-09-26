@@ -41,8 +41,9 @@ plus its open and close fees:
 
 THE STOPS (`Stops`), with deposits and withdrawals netted out:
 
-- The daily stop: start-of-day equity is the House's first reading of the account in the session (persisted, so a
-  restart keeps it); the day's P&L = equity now - that reading - the net flows since it; at or below
+- The daily stop: start-of-day equity is the previous session's last clean reading, or the first clean reading when
+  the House has no earlier one (persisted, so a restart keeps it). The day's P&L = equity now - that reading - the
+  change in executed funding observed with those readings; a request timestamp cannot move a flow across this base. At or below
   -`daily_stop_share` x (start-of-day equity + those flows), no new real entry that day (exits go on). The venue's
   own `last_equity` is not used: whether it already carries a deposit that landed after the close is not documented,
   and reading it wrongly would trip the stop on a deposit.
@@ -287,10 +288,10 @@ def band_for(table: Table, row: Mapping[str, Any], equity: Decimal, fwd: Forward
         unit = D(typical) if typical is not None else None
     except (ValueError, ArithmeticError):
         unit = None
-    if unit is None or unit <= 0:
+    if (unit is None or unit <= 0) and band == "candidate":
         # The plan's Probe needs its typical maximum loss to fit the cap: unknown, it cannot be shown to fit.
         return "candidate", "its typical maximum loss is unknown (no structure in the banded version's validation run)"
-    if not fits_probe(table, equity, unit):
+    if unit is not None and unit > 0 and not fits_probe(table, equity, unit):
         return "candidate", (f"its typical structure risks ${cents(unit)}, over the Probe's cap of "
                              f"${cents(probe_cap(table, equity))} ({table.probe_share:%} of ${cents(equity)}) and the "
                              f"one-contract floor of ${table.probe_floor}")
@@ -424,8 +425,9 @@ class Stops:
     peak_profit: Decimal = ZERO          # M: the highest settled profit since the reset
     day: str = ""                        # the New York session day the daily figures are for
     day_base: Decimal | None = None      # start-of-day equity + the day's net flows, at the last reading
-    sod_equity: Decimal | None = None    # the session's first reading of equity
+    sod_equity: Decimal | None = None    # previous clean session close, or first reading without an earlier baseline
     sod_at: float | None = None
+    sod_flows: Decimal | None = None     # executed flow total observed with the day's baseline, not its request time
     day_pnl: Decimal | None = None
     daily_tripped: bool = False
     daily_why: str = ""
@@ -436,6 +438,7 @@ class Stops:
     provisional: str = ""                # a breach seen on an unsettled observation (blocks entries; latches nothing)
     last_profit: Decimal | None = None   # the profit at the latest settled reading (where a release restarts the peak)
     last_reading: list | None = None     # [time, equity, day] of the latest reading (the next session's base)
+    last_reading_flows: Decimal | None = None
     tainted: bool = False                # a funding read showed a pending flow: readings before the next clean read drop
     pending: list = field(default_factory=list)  # [(time, equity, last_equity, day)]: flows not read after them yet
 
@@ -444,6 +447,8 @@ class Stops:
                 "day_base": None if self.day_base is None else str(self.day_base),
                 "day_pnl": None if self.day_pnl is None else str(self.day_pnl), "daily_tripped": self.daily_tripped,
                 "sod_equity": None if self.sod_equity is None else str(self.sod_equity), "sod_at": self.sod_at,
+                "sod_flows": None if self.sod_flows is None else str(self.sod_flows),
+                "last_reading_flows": None if self.last_reading_flows is None else str(self.last_reading_flows),
                 "daily_why": self.daily_why, "drawdown": None if self.drawdown is None else str(self.drawdown),
                 "drawdown_tripped": self.drawdown_tripped, "drawdown_why": self.drawdown_why,
                 "drawdown_at": self.drawdown_at, "provisional": self.provisional,
@@ -462,6 +467,8 @@ class Stops:
         out.day_pnl = None if row.get("day_pnl") is None else D(row["day_pnl"])
         out.sod_equity = None if row.get("sod_equity") is None else D(row["sod_equity"])
         out.sod_at = row.get("sod_at")
+        out.sod_flows = None if row.get("sod_flows") is None else D(row["sod_flows"])
+        out.last_reading_flows = None if row.get("last_reading_flows") is None else D(row["last_reading_flows"])
         out.daily_tripped = bool(row.get("daily_tripped"))
         out.daily_why = str(row.get("daily_why") or "")
         out.drawdown = None if row.get("drawdown") is None else D(row["drawdown"])
@@ -495,11 +502,12 @@ class Stops:
             self.day, self.daily_tripped, self.daily_why, self.day_base, self.day_pnl = day, False, "", None, None
             # The day's base is the previous session's last reading (flows since then are netted), so losses before a
             # House that started late in the session are still the day's; with no previous reading, this one.
-            if self.last_reading is not None and self.last_reading[2] != day:
+            if self.last_reading is not None and self.last_reading[2] != day and self.last_reading_flows is not None:
                 self.sod_at, self.sod_equity = float(self.last_reading[0]), D(self.last_reading[1])
+                self.sod_flows = self.last_reading_flows
             else:
                 self.sod_equity, self.sod_at = equity, at
-        self.last_reading = [at, equity, day]
+                self.sod_flows = flows.net_until(at) if flows is not None else None
         self.pending.append((at, equity, last_equity, day))
         del self.pending[:-50]
         self.provisional = ""
@@ -507,15 +515,33 @@ class Stops:
             self.provisional = "the account's funding history has not been read"
             return
         if flows.unsettled:
-            # A deposit or withdrawal still pending moves equity when it executes, not now, and its row may be timed at
-            # its request: no reading taken while it is pending is ever settled against it (they are dropped, and the
-            # readings up to the first funding read that shows it executed with them).
-            self.provisional = f"a deposit or withdrawal is pending ({'; '.join(flows.unsettled)[:200]})"
-            self.pending = []
+            # Pending requests are not profit or capital. Judge contemporaneous readings without them; do not later
+            # replay these readings against executed rows whose timestamps may still be their request timestamps.
+            # A withdrawal might already have reached equity before its status updates. Latch only a breach that
+            # survives every pending withdrawal having landed; deposits cannot explain a fall in equity.
+            settled = [row for row in self.pending if row[0] <= flows.read_at]
+            self.pending = [row for row in self.pending if row[0] > flows.read_at]
+            for t, e, last, d in settled:
+                self._judge(table, t, e, last, d, flows, settled=False)
+                if flows.pending_amounts is not None:
+                    withdrawal = sum((a for a in flows.pending_amounts if a < 0), ZERO)
+                    conservative = FlowBook(flows.read_at, flows.rows + ((t, withdrawal),), flows.closes,
+                                            flows.unsettled, flows.pending_amounts)
+                    self._judge(table, t, e, last, d, conservative, settled=True)
+            if self.pending:
+                self._judge(table, *self.pending[-1], flows, settled=False)
+            if self.provisional:
+                self.provisional += f"; pending funding: {'; '.join(flows.unsettled)[:200]}"
             self.tainted = True
             return
         if self.tainted:
-            self.pending = [row for row in self.pending if row[0] > flows.read_at]
+            # Only the current reading is known to belong to the newly executed flow snapshot. Older readings in the
+            # gap between the last pending read and this one cannot be placed on either side of its execution.
+            self.pending = [row for row in self.pending if row[0] >= at]
+            if self.last_reading is None:
+                # A House first started during an ambiguous funding transition has no observed clean daily base.
+                # Establish it now; the since-reset drawdown remains judged throughout the transition.
+                self.sod_equity, self.sod_at, self.sod_flows = equity, at, flows.net_until(at)
             self.tainted = False
         # Settled observations: their flows were read after them, so every deposit that was in their equity is known.
         settled = [row for row in self.pending if row[0] <= flows.read_at]
@@ -525,12 +551,15 @@ class Stops:
         if self.pending:
             t, e, last, d = self.pending[-1]
             self._judge(table, t, e, last, d, flows, settled=False)
+        if at <= flows.read_at:
+            self.last_reading = [at, equity, day]
+            self.last_reading_flows = flows.net_until(at)
 
     def _judge(self, table: Table, t: float, equity: Decimal, last_equity: Decimal, day: str, flows: "FlowBook", *,
                settled: bool) -> None:
         since_reset = flows.net_until(t)
         profit = equity - since_reset - self.start_equity
-        if settled:
+        if settled and not flows.unsettled:
             self.last_profit = profit
             if profit > self.peak_profit:
                 self.peak_profit = profit
@@ -547,11 +576,13 @@ class Stops:
             else:
                 breaches.append(why)
         if day == self.day and self.sod_equity is not None and self.sod_at is not None:
-            today = flows.net_between(self.sod_at, t)
+            if self.sod_flows is None:
+                self.sod_flows = flows.net_until(self.sod_at)
+            today = since_reset - self.sod_flows
             base = self.sod_equity + today
             day_pnl = equity - self.sod_equity - today
             self.day_base, self.day_pnl = base, day_pnl
-            if base <= 0 or day_pnl <= -table.daily_stop_share * base:
+            if (base > 0 and day_pnl <= -table.daily_stop_share * base) or (base <= 0 and equity <= 0):
                 why = (f"the day's P&L ${cents(day_pnl)} is at or past {table.daily_stop_share:.0%} of the day's base "
                        f"${cents(base)} (start-of-day equity plus today's net deposits)")
                 if settled:
@@ -578,6 +609,7 @@ class FlowBook:
     rows: tuple[tuple[float, Decimal], ...]
     closes: tuple[float, ...] = ()   # epoch seconds of recent session closes, ascending
     unsettled: tuple[str, ...] = ()  # funding activities not executed yet (queued, pending): nothing settles on them
+    pending_amounts: tuple[Decimal, ...] | None = None  # signed amounts, None when unavailable (no definite latch)
 
     def net_until(self, t: float) -> Decimal:
         return sum((amount for when, amount in self.rows if when <= t), ZERO)

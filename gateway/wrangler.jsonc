@@ -140,14 +140,13 @@
     // defined-risk type goes whatever this says, once the account's positions hold its legs (the
     // review of g/money, Sept 25, 2026: "off" never strands a held structure). The practice account
     // (`alpaca-paper`) takes every defined-risk type unmetered whatever this says. Opening it is a
-    // money-digest change the owner ratifies, not one the VM can make: it lists exactly the
-    // constitution's `allocator.option_spread_real_types` while `allocator.option_spreads_real` (O1)
-    // is true, and is "off" while O1 is false (`league.ci` check_structures refuses anything else).
+    // separately deployed choice: when enabled it lists exactly the constitution's
+    // `options_money.real_types`; "off" is always accepted as the stricter boundary by league.ci.
     // Sept 26, 2026 (the options-swarm run, Wave 5): the five types Alpaca closes in one order. The
     // credit types (credit_vertical, iron_condor, iron_butterfly) open only while the gateway's own
     // reading of the account's equity is at least CREDIT_MIN_EQUITY_USD; debit types need no
-    // threshold. Every open still meets the caps by maximum loss above.
-    "OPTION_STRUCTURES_REAL": "debit_vertical,credit_vertical,iron_condor,iron_butterfly,long_butterfly",
+    // threshold. Every open still meets the caps by maximum loss above. Keep opens off for paper readiness.
+    "OPTION_STRUCTURES_REAL": "off",
 
     // Watchdog.
     "CHECKPOINT_URL": "https://blakewoods.us/api/capital/checkpoint",

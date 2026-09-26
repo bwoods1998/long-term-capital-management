@@ -282,16 +282,16 @@ test('an admitted credit type is metered at its collateral less the credit, and 
   assert.match((await call(post('alpaca', mleg(VERTICAL, '0.70')), { settings })).body.error, /debit_vertical is not admitted/);
 });
 
-test('the deployed configuration admits exactly the five types Alpaca closes in one order on the real account', () => {
+test('the deployed configuration keeps real structure opens disabled for paper readiness', () => {
   // Sept 26, 2026 (the options-swarm run, Wave 5): until today "off". wrangler.jsonc is JSON with comments: the line
   // itself is the check.
   const config = readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
   const lines = config.split('\n').filter(line => /"OPTION_STRUCTURES_REAL"/.test(line));
   assert.equal(lines.length, 1);
-  assert.match(lines[0], /^\s*"OPTION_STRUCTURES_REAL": "debit_vertical,credit_vertical,iron_condor,iron_butterfly,long_butterfly",?\s*$/);
+  assert.match(lines[0], /^\s*"OPTION_STRUCTURES_REAL": "off",?\s*$/);
   const listed = /"OPTION_STRUCTURES_REAL": "([^"]*)"/.exec(lines[0])[1];
   assert.deepEqual(admittedStructures({ OPTION_STRUCTURES_REAL: listed }),
-    ['debit_vertical', 'credit_vertical', 'iron_condor', 'iron_butterfly', 'long_butterfly'], 'every name is a type: none is silently dropped');
+    [], 'no real opening order is admitted by the deployed configuration');
 });
 
 // --- a real close must close legs the account holds (Sept 25, 2026; the route's review, MINOR 1) ---------------------------

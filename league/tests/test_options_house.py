@@ -40,8 +40,9 @@ class BuildCase(unittest.TestCase):
         self.made.append((venue, kwargs))
         return FakeBroker(venue)
 
-    def build(self, *, real_money=False, config=None, sail=None, **kw):
-        config = {**service.load_config(), "options_history": False, **(config or {}), "real_money": real_money}
+    def build(self, *, real_money=False, config=None, sail=None, repository_config=False, **kw):
+        config = {**service.load_config(), **({} if repository_config else {"options_history": False}),
+                  **(config or {}), "real_money": real_money}
         # The House's real desks (league/niches.json: the options desk alone), not the old tests' legacy fixture.
         patches = [patch("league.niches.NICHES_PATH", REAL_NICHES_PATH),
                    patch.object(service, "load_env"), patch.object(service, "secret", return_value="t" * 40),
@@ -170,6 +171,14 @@ class TheLivePath(BuildCase):
         self.assertIs(config["live"]["require_paper_proof"], True)
         self.assertTrue(service.live_enabled(config))
         self.assertFalse(service.live_enabled(config, canary=True))
+
+    def test_the_repositorys_unmodified_defaults_build_on_an_empty_root(self):
+        with patch("ltcm.adapters.VenueClient"):
+            house = self.build(repository_config=True)
+        self.assertIsNotNone(house.options_live)
+        self.assertIsNone(getattr(house, "options_history", None))
+        self.assertFalse(house.options_live.real_money)
+        self.assertFalse(house.grant.allows_live(2))
 
 
 class TheConfigAfterThePrune(unittest.TestCase):

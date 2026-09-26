@@ -388,7 +388,7 @@ def check_structures(root: Path = REPO) -> list[str]:
 
     Since the options swarm (Sept 26, 2026, Wave 5) the constitution's `options_money` table governs real money: its rows
     inside `constitution.OPTIONS_MONEY_BOUNDS` (`options_money_problems`), and the gateway's `OPTION_STRUCTURES_REAL`
-    admitting exactly its `real_types` (the gateway itself holds the credit types back under $2,000 of equity). A tree
+    disabled, or admitting exactly its `real_types` (the gateway holds credit types back under $2,000 of equity). A tree
     whose constitution has no such table is judged by the options-desk run's rows (O1-O5, G of Sept 25, 2026): the gateway
     admits exactly `allocator.spread_types_real()` (`option_spread_real_types` while O1 is on, none while it is off). The
     constitution is read from `root` without importing the tree's package."""
@@ -417,7 +417,7 @@ def check_structures(root: Path = REPO) -> list[str]:
     problems += unreadable
     if table is not None and isinstance(table, dict):
         problems += gateway_caps_problems(root, table, namespace.get("GATEWAY_VARS") or {})
-    if not problems and gateway != wanted:
+    if not problems and gateway != wanted and not (table is not None and not gateway):
         problems.append(f"gateway/wrangler.jsonc: OPTION_STRUCTURES_REAL admits {gateway or 'none'} on the real account, "
                         f"but the constitution opens {wanted or 'none'} ({source}): the two change together, in one deploy")
     return problems

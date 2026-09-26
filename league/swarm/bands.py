@@ -39,7 +39,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from . import DB_NAME
+from . import DB_NAME, settings
 from .store import loads
 
 LIVE_BANDS = ("candidate", "probe", "sized")
@@ -50,6 +50,7 @@ def read(root: str | Path) -> list[dict[str, Any]]:
     path = Path(root) / DB_NAME
     if not path.exists():
         return []
+    image = settings.load(root)["gym"]["image_checkpoint"]
     try:
         db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1.0)
         db.row_factory = sqlite3.Row
@@ -87,6 +88,8 @@ def read(root: str | Path) -> list[dict[str, Any]]:
 
         sha = run_sha({"sha": v["sha"], "params": params})
         if fam["band"] == "gym":
+            if not image or state.get("validation_image") != image:
+                continue
             # Tuition only for a validated version the review (and the audit) passed and the gate has not failed, refused
             # or demoted: a program the reviewer called dangerous, or one whose holdout or forward record failed, never
             # sends a real order.
@@ -101,7 +104,8 @@ def read(root: str | Path) -> list[dict[str, Any]]:
             "family": fam["id"], "band": fam["band"], "structure": fam["structure"], "roots": loads(fam["roots"], []),
             "holdout_passed": fam["band"] in LIVE_BANDS, "validation_passed": validated or fam["band"] in LIVE_BANDS,
             "version": int(v["n"]), "code": code, "params": params, "run_sha": sha,
-            "typical_max_loss_usd": state.get("typical_max_loss_usd") if state.get("validation_version") == v["n"] else None,
+            "typical_max_loss_usd": (state.get("typical_by_version") or {}).get(str(v["n"]),
+                state.get("typical_max_loss_usd") if state.get("validation_version") == v["n"] else None),
             "seed_era": True, "forward": state.get("forward"),
         })
     return out

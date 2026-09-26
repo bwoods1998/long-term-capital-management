@@ -338,7 +338,7 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         house.researcher.commons = house.commons
     frontier = Frontier(gateway_url, token)
     house.frontier = frontier
-    if config.get("options_history", True) and not canary:
+    if config.get("options_history", True) and not canary and not live_on:
         # Listed-option history (market-data GETs only): the options desk's replay. Empty until ingested; then
         # refreshed daily. Superseded by the Gym (league/gym/) and deleted with it in Wave 2b.
         from .options_history import OptionsHistory, gateway_get

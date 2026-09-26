@@ -7,13 +7,17 @@ decisions a minute. What that buys:
 
 - **Time.** The Gym's runner times each call with SIGALRM, which works only on a process's main thread: in the child it
   does (1 s a call, 25 errors and the instance is disqualified, as in the Gym). If the child still does not answer by
-  the batch's deadline (a loop inside numpy's C code, say), the House kills it, starts a fresh one, reloads every
-  program (their memory starts again) and counts the batch as errors: the House's own minute is never held.
-- **Memory.** The child's address space is capped (`RLIMIT_AS`).
+  the batch's deadline (a loop inside numpy's C code, say), the House kills it. Reloads happen in the next request's
+  budget, never as unbounded cleanup after the deadline. Program memory starts again.
+- **Memory.** The child's address space is capped (`RLIMIT_AS`), shared by all its programs. One program can exhaust
+  that shared allowance and cost the other programs their decision for this minute.
 - **Secrets.** The child starts with an empty environment (no GATEWAY_TOKEN, no SAIL_API_KEY) and `-E -s`; the House
   process is undumpable (its `/proc/<pid>/environ` is root's); the child runs in its own network namespace (loopback
-  only) wherever the box allows one; the House reads its answers as JSON, never pickle, so a program that escaped the
-  Gym's sandbox still could not hand the House an object to run, reach the gateway, or read the token.
+  only) wherever the box allows one; answers are JSON, never pickle. These measures are defense in depth, not an OS
+  security boundary on an ordinary-user developer machine, where an escape retains that user's filesystem access.
+  On the root production House the child uses uid/gid 65534, no supplementary groups, a mandatory private network
+  namespace and a dedicated root-owned read-only runtime. No namespace means no child. The secret env must stay
+  root-owned mode 0600; the state and deployment directories must not allow group/other writes.
 
 The parent sends each minute's `Snapshot`s once (pickled; the House is the trusted side), keyed by (root, minute
 index), and each instance's account rows with the minute index it decides on; the child slices each instance's chain with the Gym's own `Snapshot.view(slice_index(...))`, builds the ctx with
@@ -27,10 +31,12 @@ import json
 import os
 import pickle
 import select
+import shutil
 import struct
 import subprocess
 import sys
 import threading
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -156,6 +162,11 @@ def _plain_default(value: Any) -> Any:
 
 
 def child_main() -> None:  # pragma: no cover - run as a subprocess
+    if sys.platform.startswith("linux"):
+        import ctypes
+
+        if ctypes.CDLL(None, use_errno=True).prctl(38, 1, 0, 0, 0) != 0:  # PR_SET_NO_NEW_PRIVS
+            raise RuntimeError("the decider could not disable privilege gains")
     try:
         import resource
 
@@ -175,19 +186,19 @@ def child_main() -> None:  # pragma: no cover - run as a subprocess
 MAX_BATCH_SECONDS = 40.0
 
 
-def batch_deadline(timeout: float, jobs: int) -> float:
+def batch_deadline(timeout: float, jobs: int, budget_seconds: float | None = None) -> float:
     """How long the House waits for a batch: 5 s plus each call's limit and a margin, never past `MAX_BATCH_SECONDS`."""
-    return min(MAX_BATCH_SECONDS, 5.0 + (float(timeout) + 0.25) * int(jobs))
+    return max(0.0, min(MAX_BATCH_SECONDS, 5.0 + (float(timeout) + 0.25) * int(jobs),
+                        float(budget_seconds) if budget_seconds is not None else MAX_BATCH_SECONDS))
 
 
-def _netns_available() -> bool:
+def _netns_available(timeout: float = 10.0, *, credentials: Mapping[str, Any] | None = None) -> bool:
     """Whether this box lets an unprivileged process make a network namespace (probed once)."""
-    import shutil
-
     if not shutil.which("unshare"):
         return False
     try:
-        return subprocess.run(["unshare", "--net", "--map-root-user", "true"], capture_output=True, timeout=10).returncode == 0
+        return subprocess.run(["unshare", "--net", "--map-root-user", "true"], capture_output=True, timeout=timeout,
+                               **dict(credentials or {})).returncode == 0
     except (OSError, subprocess.SubprocessError):
         return False
 
@@ -196,9 +207,8 @@ def protect_house_process() -> bool:
     """The House's process made undumpable (Linux `prctl(PR_SET_DUMPABLE, 0)`): its `/proc/<pid>/environ` and memory,
     where the gateway token lives, are then root's, not readable by a child of the same user (a program that escaped
     the Gym's sandbox in the decider). True when set. This narrows the paths to the House's secrets, it does not close
-    them: the child runs as the House's user, so a program that escaped the interpreter's sandbox could still open the
-    box's env file (mode 600, the same user) and write the live state; a root House is not protected by it at all. A
-    separate user (or seccomp) for the child is the full isolation, left undone on purpose (the review of #362, m16)."""
+    them for a same-user child. The production root House also drops the child's host uid/gid and requires a private
+    network namespace; the module docstring describes that additional boundary."""
     import sys as _sys
 
     if not _sys.platform.startswith("linux"):
@@ -220,32 +230,36 @@ class _Base:
         self.restarts = 0
         self.lock = threading.RLock()
 
-    def load(self, key: str, code: str, params: Mapping[str, Any] | None, name: str) -> dict:
+    def load(self, key: str, code: str, params: Mapping[str, Any] | None, name: str,
+             *, budget_seconds: float | None = None) -> dict:
         """Load a program instance (fresh memory). Its NEEDS, sha and run sha; ProgramRefused when it does not load."""
         with self.lock:
-            answer = self._ask(("load", key, code, dict(params or {}), name, self.timeout, self.max_errors), 30.0)
+            answer = self._ask(("load", key, code, dict(params or {}), name, self.timeout, self.max_errors),
+                               min(30.0, budget_seconds) if budget_seconds is not None else 30.0)
             if not answer.get("ok"):
                 raise ProgramRefused(answer.get("error") or "the program did not load")
             self.loaded[key] = (code, dict(params or {}), name)
             self.info[key] = {"needs": answer["needs"], "sha": answer["sha"], "run_sha": answer["run_sha"]}
             return self.info[key]
 
-    def drop(self, key: str) -> None:
+    def drop(self, key: str, *, budget_seconds: float = 10.0) -> None:
         with self.lock:
             if self.loaded.pop(key, None) is not None:
                 self.info.pop(key, None)
                 try:
-                    self._ask(("drop", key), 10.0)
+                    self._ask(("drop", key), max(0.0, min(10.0, budget_seconds)))
                 except DeciderError:
                     pass
 
-    def decide(self, snaps: Mapping[str, Any], unders: Mapping[Any, Any], jobs: Sequence[Mapping[str, Any]]) -> dict[str, dict]:
+    def decide(self, snaps: Mapping[str, Any], unders: Mapping[Any, Any], jobs: Sequence[Mapping[str, Any]],
+               *, budget_seconds: float | None = None) -> dict[str, dict]:
         """One minute's batch. {key: {"intents": [...], "stats": {...}}}; DeciderError when the child failed (it was
         restarted, every program reloaded with fresh memory)."""
         if not jobs:
             return {}
         with self.lock:
-            answer = self._ask(("decide", dict(snaps), dict(unders), list(jobs)), batch_deadline(self.timeout, len(jobs)))
+            answer = self._ask(("decide", dict(snaps), dict(unders), list(jobs)),
+                               batch_deadline(self.timeout, len(jobs), budget_seconds))
             if not answer.get("ok"):
                 raise DeciderError(answer.get("error") or "the decider failed")
             return answer["results"]
@@ -270,47 +284,92 @@ class Decider(_Base):
         self.memory_mb, self.python, self.log = int(memory_mb), python, log
         self.proc: subprocess.Popen | None = None
         self.pid: int | None = None
+        self._ready: set[str] = set()
+        self.isolated = os.geteuid() == 0
+        self._runtime: Path | None = None
         #: The child runs in its own network namespace (`unshare --net --map-root-user`: loopback only, no route to the
         #: gateway, Sail or anywhere) wherever the box allows an unprivileged one; decided once, at the first spawn.
         self.netns: bool | None = None
 
-    def _spawn(self) -> None:
+    def _spawn(self, budget_seconds: float = 10.0) -> None:
         protect_house_process()
-        err = open(self.log, "ab") if self.log else subprocess.DEVNULL  # noqa: SIM115
+        credentials = {"user": 65534, "group": 65534, "extra_groups": []} if self.isolated else {}
         env = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "HOME": "/tmp", "LIVE_DECIDER_MEMORY_MB": str(self.memory_mb),
                "OPENBLAS_NUM_THREADS": "1", "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1"}
         if self.netns is None:
-            self.netns = _netns_available()
+            self.netns = _netns_available(timeout=max(0.001, min(10.0, budget_seconds)), credentials=credentials)
+        if self.isolated and not self.netns:
+            raise DeciderError("the production decider requires a network namespace under its separate uid")
+        cwd = REPO
+        if self.isolated:
+            if self._runtime is None:
+                self._runtime = Path(tempfile.mkdtemp(prefix="ltcm-decider-runtime-"))
+                files = ("league/__init__.py", "league/safety.py", "league/structure_core.py", "league/live/__init__.py",
+                         "league/live/decider.py", "league/gym/__init__.py", "league/gym/runtime.py", "league/gym/safety.py",
+                         "league/gym/ctx.py", "league/gym/greeks.py", "league/gym/venue.py")
+                for name in files:
+                    path = self._runtime / name
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(REPO / name, path)
+                    path.chmod(0o444)
+                for path in self._runtime.rglob("*"):
+                    if path.is_dir():
+                        path.chmod(0o555)
+                self._runtime.chmod(0o555)
+            cwd = self._runtime
         command = [self.python, "-E", "-s", "-m", "league.live.decider"]
         if self.netns:
             command = ["unshare", "--net", "--map-root-user", *command]
-        self.proc = subprocess.Popen(command, cwd=str(REPO), env=env,
-                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=err, close_fds=True)
-        if err is not subprocess.DEVNULL:
-            err.close()
+        err = open(self.log, "ab") if self.log else subprocess.DEVNULL  # noqa: SIM115
+        try:
+            self.proc = subprocess.Popen(command, cwd=str(cwd), env=env, **credentials,
+                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=err, close_fds=True)
+        finally:
+            if err is not subprocess.DEVNULL:
+                err.close()
         self.pid = self.proc.pid
+        self._ready.clear()
 
     def _kill(self) -> None:
         proc, self.proc = self.proc, None
+        self._ready.clear()
         if proc is None:
             return
         try:
             proc.kill()
-            proc.wait(timeout=5)
+            proc.wait(timeout=0.1)
         except Exception:  # noqa: BLE001
             pass
+        finally:
+            for stream in (proc.stdin, proc.stdout):
+                if stream is not None:
+                    stream.close()
 
     def _raw(self, message: Any, deadline: float) -> dict:
+        end = time.monotonic() + deadline
+        if deadline <= 0:
+            raise DeciderError("the decider's minute budget is exhausted")
         if self.proc is None or self.proc.poll() is not None:
-            self._spawn()
+            self._spawn(budget_seconds=deadline)
         assert self.proc is not None and self.proc.stdin is not None and self.proc.stdout is not None
         data = pickle.dumps(message, protocol=pickle.HIGHEST_PROTOCOL)
+        if len(data) > MAX_FRAME:
+            raise DeciderError(f"the decider input exceeds {MAX_FRAME} bytes")
         try:
-            self.proc.stdin.write(HEADER.pack(len(data)) + data)
-            self.proc.stdin.flush()
+            # A child that does not consume stdin can otherwise hold the House before the response deadline starts.
+            fd = self.proc.stdin.fileno()
+            os.set_blocking(fd, False)
+            frame = memoryview(HEADER.pack(len(data)) + data)
+            while frame:
+                left = end - time.monotonic()
+                if left <= 0 or not select.select([], [fd], [], left)[1]:
+                    raise DeciderError("the decider did not consume its input in time")
+                try:
+                    frame = frame[os.write(fd, frame):]
+                except BlockingIOError:
+                    continue
         except (BrokenPipeError, OSError) as exc:
             raise DeciderError(f"the decider's pipe broke: {exc}") from None
-        end = time.monotonic() + deadline
         head = self._read(HEADER.size, end)
         (size,) = HEADER.unpack(head)
         if size > MAX_FRAME:
@@ -336,24 +395,30 @@ class Decider(_Base):
         return b"".join(chunks)
 
     def _ask(self, message: Any, deadline: float) -> dict:
+        end = time.monotonic() + deadline
         try:
-            return self._raw(message, deadline)
+            if message[0] == "decide":
+                if self.proc is None or self.proc.poll() is not None:
+                    self._ready.clear()
+                for job in message[3]:
+                    key = job["key"]
+                    if key in self._ready or key not in self.loaded:
+                        continue
+                    code, params, name = self.loaded[key]
+                    answer = self._raw(("load", key, code, params, name, self.timeout, self.max_errors), end - time.monotonic())
+                    if not answer.get("ok"):
+                        continue
+                    self._ready.add(key)
+            answer = self._raw(message, end - time.monotonic())
+            if message[0] == "load" and answer.get("ok"):
+                self._ready.add(message[1])
+            elif message[0] == "drop":
+                self._ready.discard(message[1])
+            return answer
         except (DeciderError, ValueError, struct.error) as exc:
             self._kill()
             self.restarts += 1
-            self._reload()
-            raise DeciderError(f"{exc}; the decider was restarted and its programs reloaded (their memory is new)") from None
-
-    def _reload(self) -> None:
-        for key, (code, params, name) in list(self.loaded.items()):
-            try:
-                answer = self._raw(("load", key, code, params, name, self.timeout, self.max_errors), 30.0)
-                if not answer.get("ok"):
-                    self.loaded.pop(key, None)
-                    self.info.pop(key, None)
-            except Exception:  # noqa: BLE001 - a reload that fails leaves the rest for the next batch
-                self._kill()
-                return
+            raise DeciderError(f"{exc}; the child was killed; programs reload within the next request's budget") from None
 
     def close(self) -> None:
         with self.lock:
@@ -363,6 +428,9 @@ class Decider(_Base):
                 except Exception:  # noqa: BLE001
                     pass
             self._kill()
+            if self._runtime is not None:
+                shutil.rmtree(self._runtime)
+                self._runtime = None
 
 
 class InlineDecider(_Base):

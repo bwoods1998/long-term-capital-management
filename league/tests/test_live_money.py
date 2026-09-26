@@ -100,6 +100,10 @@ class Bands(unittest.TestCase):
         self.assertEqual(band, "candidate")
         self.assertIn("typical maximum loss is unknown", why)
 
+    def test_an_already_proven_probe_does_not_lose_its_band_when_legacy_typical_metadata_is_missing(self):
+        band, _ = M.band_for(self.t, row(band="probe", typical_max_loss_usd=None), D("5481.65"), fwd([]))
+        self.assertEqual(band, "probe")
+
     def test_the_floor_lets_a_small_account_probe_one_contract(self):
         self.assertEqual(M.band_for(self.t, row(typical_max_loss_usd=60.0), D("481.65"), fwd([]))[0], "probe")
         self.assertEqual(M.band_for(self.t, row(typical_max_loss_usd=60.01), D("481.65"), fwd([]))[0], "candidate")
@@ -423,6 +427,13 @@ class TheSwarmsStore(unittest.TestCase):
             self.assertEqual((fwd.n, fwd.real_n), (1, 1), "the version's own record, one source a day, real first")
             families.set_band("vert", "probe", "passed the holdout and fits the Probe's cap")
             self.assertEqual(families.read()[0]["band"], "probe")
+            store = SwarmStore(root, clock=SwarmClock())
+            store.add_version("vert", "# newer\nNEEDS = {}\n", {"k": 2}, author="researcher")
+            store.set_state("vert", validation_version=2, validation_line={"passed": False}, typical_max_loss_usd=900.0,
+                            typical_by_version={"1": 60.0, "2": 900.0})
+            store.close()
+            [banded] = families.read()
+            self.assertEqual((banded["version"], banded["typical_max_loss_usd"]), (1, 60.0))
 
 
 if __name__ == "__main__":
