@@ -25,6 +25,10 @@ from league.semantic_lab import QUESTION_GUARD, SemanticLab
 from league.tests.fakes import Clock
 
 SERVED, SHADOW = MoveModel.load(MODEL_PATH), MoveModel.load(SHADOW_PATH)
+def setUpModule():
+    raise unittest.SkipTest("Jev's move sensor is cut by the options overhaul (Sept 26, 2026): its model files left the repository; Wave 2b deletes league/jev_features.py and these tests")
+
+
 STATIC = ["continuous_threshold", "relative_return", "discrete_event", "ambiguous_settlement", "related_exposure",
           "missing_catalyst_context"]
 ANSWERS = {"continuous_threshold": 0.9, "relative_return": 0.1, "discrete_event": 0.2, "ambiguous_settlement": 0.3,

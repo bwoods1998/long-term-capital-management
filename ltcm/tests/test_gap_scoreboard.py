@@ -865,6 +865,8 @@ class ForwardPositiveTest(ScoreboardCase):
 
 
 class CapitalOnProofTest(ScoreboardCase):
+    @unittest.skip("Wave 2b cuts scripts/gap_scoreboard.py: it reads league/niches.json by path, which since the options "
+                   "overhaul (Sept 26, 2026) holds no stock desk")
     def test_the_swing_clock_and_alpaca_real_stock_agents(self):
         f = self.floor
         f.write_json("allocator-board.json", {"families": {"kalshi": {
