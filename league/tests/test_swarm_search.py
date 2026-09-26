@@ -224,17 +224,49 @@ class RobustObjective(ResearcherCase):
         self.assertEqual(self.store.family(self.fam["id"])["state"]["best_train_version"], 1, "v2 is not the best by score")
         self.assertEqual(sorted(j.stress for j in self.pool.queued if j.version == 2), [0.0, 1.5])
 
-    def test_a_failed_robustness_run_is_queued_again_up_to_its_attempts(self):
+    def fail_queued(self, why):
+        for job in [j for j in self.pool.queued if j.late_fail is not None]:
+            job.late_fail(why)
+            job.late = job.late_fail = None
+
+    def test_a_1_5x_run_the_gym_keeps_failing_is_retried_then_demotes_the_version(self):
         researcher = self.researcher()
         researcher.cycle(self.fam["id"])
         for _ in range(4):
-            for job in [j for j in self.pool.queued if j.late_fail is not None]:
-                job.late_fail("the Gym failed twice")
-                job.late_fail = None
+            self.fail_queued("the Gym failed twice: TimeoutError")
             self.steps = [{"text": "ok"}]
             researcher.cycle(self.fam["id"])
-        self.assertEqual(len(self.pool.queued), 2 * 3, "three attempts, then no more")
-        self.assertEqual(self.store.family(self.fam["id"])["state"]["robustness"]["1"]["attempts"], 3)
+        self.assertEqual(len(self.pool.queued), 2 * 3, "three executed failures a label, then no more")
+        fam = self.store.family(self.fam["id"])
+        self.assertEqual(fam["state"]["robustness"]["1"]["failures"], {"stress_1.5": 3, "mid": 3})
+        self.assertEqual((fam["state"]["robust_failed"], fam["state"]["best_train_version"], fam["best_version"]), ([1], None, None))
+        self.assertIn("version 1 its 1.5x run failed 3 times", researcher.status(fam))
+
+    def test_a_non_ok_1_5x_result_is_a_failed_attempt_and_is_retried(self):
+        researcher = self.researcher()
+        researcher.cycle(self.fam["id"])
+        stress = next(j for j in self.pool.queued if j.stress == 1.5)
+        self.pool.land(stress, yearly("dq", status="disqualified", stress=1.5))
+        state = self.store.family(self.fam["id"])["state"]
+        self.assertEqual(state["robustness"]["1"]["failures"], {"stress_1.5": 1})
+        self.assertNotIn(1, state.get("robust_failed") or [], "one failed attempt is no verdict")
+        self.steps = [{"text": "ok"}]
+        researcher.cycle(self.fam["id"])
+        self.assertEqual([j.stress for j in self.pool.queued if j.version == 1], [1.5, 0.0, 1.5], "the 1.5x run is queued again")
+        self.pool.land(self.pool.queued[-1], yearly("fine", pnl=50.0, stress=1.5))
+        from league.swarm.researcher import robust_at_stress
+
+        self.assertTrue(robust_at_stress(self.store.family(self.fam["id"])["state"], 1))
+
+    def test_restarts_and_supersession_charge_no_attempt(self):
+        self.researcher().cycle(self.fam["id"])
+        for _ in range(5):  # five restarts, each losing its queued jobs, and a supersession
+            self.fail_queued("superseded by a newer best before it ran")
+            self.steps = [{"text": "ok"}]
+            self.researcher().cycle(self.fam["id"])
+        row = self.store.family(self.fam["id"])["state"]["robustness"]["1"]
+        self.assertEqual(row.get("failures"), {})
+        self.assertEqual(len([j for j in self.pool.queued if j.late_fail is not None]), 2, "still queued, still owed")
 
     def test_top_profile_null_turns_the_top_ten_off(self):
         self.researcher().cycle(self.fam["id"])

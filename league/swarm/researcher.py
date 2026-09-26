@@ -246,13 +246,16 @@ def sanitize(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 MAX_ROOTS = 5
 #: Eligible versions a family keeps as candidates for its best: the next takes the place of one that loses at 1.5x.
 CANDIDATES = 5
-#: Times a version's robustness runs are queued (a run the Gym failed is queued again, up to this).
+#: Runs of one robustness label the Gym may execute and fail (an error, a timeout, a result that is not "ok") before it
+#: is given up; a 1.5x run given up demotes its version like a loss. A job that never ran (superseded, cancelled) is no try.
 ROBUSTNESS_ATTEMPTS = 3
+#: Pool failures that mean the job never ran on a box (no attempt is charged for them).
+NOT_RUN = ("superseded", "retired", "abandoned", "cancelled")
 
 
 def landed(row: Any) -> bool:
-    """A robustness figure that came back from the Gym (a job the pool failed is not one)."""
-    return isinstance(row, Mapping) and row.get("status") != "failed"
+    """A robustness figure the Gym completed ("ok"); a failed or unfinished run is retried (`queue_robustness`)."""
+    return isinstance(row, Mapping) and row.get("status") == "ok"
 
 
 def robust_at_stress(state: Mapping[str, Any], n: Any) -> bool | None:
@@ -310,8 +313,9 @@ class Researcher:
         self.starter = starter
         self.background = background
         self._rewriting: dict[str, Any] = {}
-        #: (family, version) whose robustness runs this process queued (a restart loses queued jobs: they are queued again).
-        self._robust: set[tuple[str, int]] = set()
+        #: (family, version, label) robustness runs this process has in flight (a restart loses queued jobs: they are
+        #: queued again; a run that failed leaves the set, so a later cycle queues it again).
+        self._robust: set[tuple[str, int, str]] = set()
         self.pace: Callable[[], bool] = lambda: False  # the swarm's hourly spend at its pace: no rewrite starts
 
     @property
@@ -379,8 +383,11 @@ class Researcher:
                 out.append(f"Robustness of your best (version {n}, the same Train window): " + "; ".join(parts) + ".")
         failed = state.get("robust_failed") or []
         if failed:
-            out.append(f"Versions that lost money on Train at 1.5x the half-spread and can never be your best: "
-                       f"{', '.join(str(v) for v in failed[-8:])}.")
+            whys = state.get("robust_why") or {}
+            out.append("Versions that can never be your best (the next eligible one took their place): " + "; ".join(
+                f"version {v} {whys.get(str(v), 'lost money on Train at 1.5x the half-spread')}" for v in failed[-8:]) + ".")
+        elif rows and not landed(rows.get("stress_1.5")):
+            out.append(f"Your best (version {n}) is validated once its 1.5x robustness run comes back with a profit.")
         return " ".join(out)
 
     # ------------------------------------------------------------------ retirement, the top ten
@@ -574,7 +581,8 @@ class Researcher:
             self.store.update_family(fam["id"], best_version=int(run["version"]))
             self.store.set_state(fam["id"], submitted_run=run["run_id"], submitted_note=str(args.get("note") or "")[:300])
             out["submitted"] = int(run["version"])
-            return {"ok": True, "best_version": int(run["version"]), "next": "the tournament validates it within the hour"}
+            return {"ok": True, "best_version": int(run["version"]),
+                    "next": "the tournament validates it once its 1.5x robustness run on Train comes back with a profit"}
         return {"error": f"unknown tool {name}"}
 
     def eligible_run(self, fam: Mapping[str, Any], run: Mapping[str, Any]) -> tuple[bool, str]:
@@ -601,9 +609,10 @@ class Researcher:
         mid that it does not have yet, at the pool's lowest priority (they fill idle boxes and never delay a researcher's
         run or a validation). Each counts as a trial when it lands; its compact figures go to the family's state
         (`robustness`), and a loss at 1.5x demotes the version (`robust_landed`). Not waited for; once per version in
-        flight per process, at most `ROBUSTNESS_ATTEMPTS` times a version (a run that failed is queued again)."""
+        flight per process; a run the Gym executed and failed is queued again, up to `ROBUSTNESS_ATTEMPTS` failures a label
+        (only executed runs count: a restart or a supersession charges nothing)."""
         submit = getattr(self.pool, "submit", None)
-        if submit is None or (fid, int(n)) in self._robust:
+        if submit is None:
             return False
         with self.store.atomic():
             fam = self.store.family(fid) or {}
@@ -611,16 +620,17 @@ class Researcher:
                 return False
             rows = dict((fam.get("state") or {}).get("robustness") or {})
             row = dict(rows.get(str(n)) or {})
-            need = [label for label in ("stress_1.5", "mid") if not landed(row.get(label))]
-            if not need or int(row.get("attempts") or 0) >= ROBUSTNESS_ATTEMPTS:
+            tries = dict(row.get("failures") or {})
+            need = [label for label in ("stress_1.5", "mid") if (fid, int(n), label) not in self._robust
+                    and not landed(row.get(label)) and int(tries.get(label) or 0) < ROBUSTNESS_ATTEMPTS]
+            if not need:
                 return False
-            row.update({label: None for label in need})
-            row.update(queued_at=self.clock(), attempts=int(row.get("attempts") or 0) + 1)
+            row.update(queued_at=self.clock())
             rows[str(n)] = row
             for old in sorted(rows, key=lambda k: float((rows[k] or {}).get("queued_at") or 0))[:-6]:
                 rows.pop(old, None)  # the last six versions' figures are kept
             self.store.set_state(fid, robustness=rows)
-            self._robust.add((fid, int(n)))
+            self._robust.update((fid, int(n), label) for label in need)
         for label, stress in (("stress_1.5", evidence.STRESS), ("mid", 0.0)):
             if label not in need:
                 continue
@@ -636,10 +646,12 @@ class Researcher:
         a restart lost them, or one failed (`queue_robustness` caps the attempts)."""
         state = fam.get("state") or {}
         for n in {state.get("best_train_version"), fam.get("best_version")} - {None}:
-            if (fam["id"], int(n)) in self._robust or int(n) in (state.get("robust_failed") or []):
+            if int(n) in (state.get("robust_failed") or []):
                 continue
             row = (state.get("robustness") or {}).get(str(n)) or {}
-            if landed(row.get("stress_1.5")) and landed(row.get("mid")):
+            tries = row.get("failures") or {}
+            if all((fam["id"], int(n), label) in self._robust or landed(row.get(label)) or int(tries.get(label) or 0) >= ROBUSTNESS_ATTEMPTS
+                   for label in ("stress_1.5", "mid")):
                 continue
             version = self.store.version(fam["id"], int(n))
             if version and version.get("code"):
@@ -653,26 +665,36 @@ class Researcher:
             fam = self.store.family(fid)
             if fam is None:
                 return
+            reason = str(result.get("reason") or "")
+            ran = stress is not None or not any(word in reason for word in NOT_RUN)
             if stress is not None:
                 years = float((result.get("summary") or {}).get("days") or 0) / 252.0 * max(1, len(fam["roots"]))
                 self.store.add_run(fid, n, result, window="train", stress=stress, purpose="robustness", program_years=years)
-            else:
-                self._robust.discard((fid, int(n)))  # the job never ran: a later cycle may queue it again
-            view = evidence.robustness_view(result) if stress is not None else {"status": "failed",
-                                                                                "reason": str(result.get("reason") or "")[:200]}
+            view = evidence.robustness_view(result) if stress is not None else {"status": "failed", "reason": reason[:200]}
+            ok = result.get("status") == "ok"
+            self._robust.discard((fid, int(n), label))  # landed or failed: a failure is queued again later, up to the attempts
             demoted = None
             with self.store.atomic():
                 fam = self.store.family(fid) or fam
                 state = fam.get("state") or {}
                 rows = dict(state.get("robustness") or {})
-                rows[str(n)] = {**(rows.get(str(n)) or {}), label: view}
+                row = dict(rows.get(str(n)) or {})
+                tries = dict(row.get("failures") or {})
+                if not ok and ran:  # the Gym executed it and it failed, erred or did not finish: one attempt spent
+                    tries[label] = int(tries.get(label) or 0) + 1
+                row.update({label: view if ran else None, "failures": tries})
+                rows[str(n)] = row
                 self.store.set_state(fid, robustness=rows)
                 pnl = view.get("pnl")
-                if label == "stress_1.5" and result.get("status") == "ok" and isinstance(pnl, (int, float)) and pnl <= 0 \
-                        and not fam.get("retired_at"):
-                    demoted = self._demote(fam, n)
+                why = None
+                if label == "stress_1.5" and ok and isinstance(pnl, (int, float)) and pnl <= 0:
+                    why = "lost money on Train at 1.5x the half-spread"
+                elif label == "stress_1.5" and int(tries.get(label) or 0) >= ROBUSTNESS_ATTEMPTS:
+                    why = f"its 1.5x run failed {ROBUSTNESS_ATTEMPTS} times"
+                if why and not fam.get("retired_at"):
+                    demoted = self._demote(fam, n, why=why)
             if demoted is not None:
-                self.store.event("swarm.robustness", fid, {"version": n, "action": "demoted", "next": demoted.get("version")})
+                self.store.event("swarm.robustness", fid, {"version": n, "action": "demoted", "why": why, "next": demoted.get("version")})
                 if demoted.get("version") is not None:
                     version = self.store.version(fid, int(demoted["version"]))
                     if version and version.get("code"):
@@ -681,17 +703,19 @@ class Researcher:
         except Exception:  # noqa: BLE001 - on the dispatcher's thread: a robustness record never breaks the pool
             pass
 
-    def _demote(self, fam: Mapping[str, Any], n: int) -> dict[str, Any]:
-        """Version `n` lost at 1.5x: never the best again; the family's next eligible candidate becomes its best (under
-        the store's transaction)."""
+    def _demote(self, fam: Mapping[str, Any], n: int, *, why: str = "lost money on Train at 1.5x the half-spread") -> dict[str, Any]:
+        """Version `n` lost at 1.5x (or its 1.5x run failed every attempt): never the best again; the family's next
+        eligible candidate becomes its best (under the store's transaction). `robust_why` keeps the reason for the status."""
         fid = fam["id"]
         state = fam.get("state") or {}
         failed = list(state.get("robust_failed") or [])
         if n not in failed:
             failed.append(int(n))
+        whys = {**(state.get("robust_why") or {}), str(n): why}
         rest = [c for c in (state.get("train_candidates") or []) if int(c[1]) not in failed]
         fields: dict[str, Any] = {}
-        values: dict[str, Any] = {"robust_failed": failed[-50:], "train_candidates": rest}
+        values: dict[str, Any] = {"robust_failed": failed[-50:], "robust_why": {k: v for k, v in whys.items() if int(k) in failed[-50:]},
+                                  "train_candidates": rest}
         nxt: dict[str, Any] = {"version": None}
         if state.get("best_train_version") == n:
             if rest:
