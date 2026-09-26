@@ -527,6 +527,11 @@ class MemoryIndex:
         elif entry.kind == "playbook.entry":
             if p.get("source") == "graveyard":
                 return None  # the post-mortem itself is indexed
+            if p.get("source") == "teacher":
+                # The teacher's lessons reach agents only through the research gate's `lesson_arm`
+                # split (research_gate.py rule 12): half the floor is its control. Indexing them here
+                # could hand a control agent the lesson it is being kept from (pre-ship review, Sept 26).
+                return None
             kind, text, outcome = "lesson", f"{p.get('title') or ''}: {p.get('text') or ''}", str(p.get("source") or "lesson")
         elif entry.kind == "library.note":
             kind, text, outcome = "library", f"{p.get('title') or ''}: {p.get('text') or ''}", "note"
