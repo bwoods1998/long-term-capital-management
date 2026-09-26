@@ -33,6 +33,8 @@ from typing import Any, Callable, Mapping, Sequence
 from .store import SwarmStore
 
 _IDS = itertools.count(1)
+#: The name of every box the pool forks begins with this (and no other box on the account's does).
+NAME_PREFIX = "ltcm-swarm-"
 
 
 class PoolError(RuntimeError):
@@ -112,6 +114,8 @@ class GymPool:
         self._counter = itertools.count(1)
         self.fork_failures: dict[str, int] = {}
         self.fork_after: dict[str, float] = {}
+        self.fork_times: list[float] = []
+        self.reconciled_at = float("-inf")
 
     # ------------------------------------------------------------------ settings
     @property
@@ -123,8 +127,14 @@ class GymPool:
 
     # ------------------------------------------------------------------ jobs
     def submit(self, job: GymJob) -> GymJob:
+        """Queue a job. A family has at most one Train job waiting: a newer one supersedes it (its waiter, if any, is
+        told; it never ran), so a backlog of orphaned versions cannot build up."""
         job.created = self.clock()
         with self._wake:
+            if job.purpose == "train" and not job.gate:
+                for old in [j for j in self.queue if j.family == job.family and j.purpose == "train" and not j.gate]:
+                    self.queue.remove(old)
+                    self._fail(old, "superseded by a newer version before it ran")
             self.queue.append(job)
             self._wake.notify_all()
         return job
@@ -191,12 +201,20 @@ class GymPool:
         return GymDriver(self.client, box_id, remote_root=str(g.get("remote_root", "/workspace/gym")),
                          store_root=str(g.get("store_root", "/data/store")), python=str(g.get("python", "python3")))
 
+    def name_prefix(self, kind: str) -> str:
+        """Every box this pool forks is named `ltcm-swarm-<kind>-...`; no other box on the account is (W1's image boxes are
+        `ltcm-<kind>-image-...`, the House `ltcm-floor`), so a stray of ours can be found and ended by its name alone."""
+        return f"{NAME_PREFIX}{kind}-"
+
     def _start_box(self, kind: str) -> None:
-        """Fork one box from its image and make it ready (runs on its own thread)."""
+        """Fork one box from its image, check its seal, make it ready (runs on its own thread). Its start-up time is booked;
+        a failure backs the next fork off; the box is recorded as 'forking' before the POST, so a fork whose answer is
+        lost is found by name and ended (`reconcile`)."""
         image = self.image(kind)
         n = next(self._counter)
-        name = f"ltcm-{kind}-{int(self.clock())}-{n}"
+        name = f"{self.name_prefix(kind)}{int(self.clock())}-{n}"
         placeholder = f"pending-{kind}-{n}"
+        began = self.clock()
         with self._lock:
             self.boxes[placeholder] = Box(placeholder, kind, str(image), "starting")
         try:
@@ -205,7 +223,7 @@ class GymPool:
         except Exception as exc:  # noqa: BLE001
             with self._lock:
                 self.boxes.pop(placeholder, None)
-            self._failed_fork(kind)
+            self._failed_fork(kind, f"the fork failed: {str(exc)[:200]}")
             self.store.event("swarm.pool", None, {"action": "fork_failed", "kind": kind, "image": image, "error": str(exc)[:300]})
             return
         box = Box(box_id, kind, str(image), "starting", last_used=self.clock(), booked_at=self.clock())
@@ -214,6 +232,9 @@ class GymPool:
             self.boxes[box_id] = box
         self.store.upsert_box(box_id, kind=kind, version=str(image), state="starting", detail={"name": name})
         try:
+            if not self.sealed(box_id):
+                self.store.event("swarm.pool", None, {"action": "unsealed", "box": box_id, "kind": kind, "image": image})
+                raise RuntimeError(f"the fork of {image} is not sealed (no_network): refused")
             box.driver = self._driver(box_id)
             box.driver.ensure_code()
             roots = [r for r in self.gym.get("roots", [])]
@@ -233,16 +254,21 @@ class GymPool:
             box.roots = tuple(sorted(r for r, row in (report.get("roots") or {}).items() if row and row.get("nbbo")))
         except Exception as exc:  # noqa: BLE001
             box.state = "failed"
-            self._failed_fork(kind)
+            self._book(box, self.clock() - began, 0)
+            self._failed_fork(kind, str(exc)[:200])
             self.store.set_box_state(box_id, "failed")
             self.store.event("swarm.pool", None, {"action": "box_failed", "box": box_id, "kind": kind, "error": str(exc)[:400]})
             try:
                 self.client.terminate(box_id)
             except Exception:  # noqa: BLE001
                 pass
+            with self._lock:
+                self.boxes.pop(box_id, None)
             return
+        self._book(box, self.clock() - began, 0)
         with self._wake:
             box.state = "ready"
+            box.last_used = self.clock()
             self.fork_failures[kind] = 0
             self._wake.notify_all()
         self.store.upsert_box(box_id, kind=kind, version=str(image), state="ready", detail={"name": name, "roots": list(box.roots),
@@ -250,11 +276,58 @@ class GymPool:
         self.store.event("swarm.pool", None, {"action": "box_ready", "box": box_id, "kind": kind, "roots": list(box.roots)})
         self._spawn(box)
 
-    def _failed_fork(self, kind: str) -> None:
-        """Back off after a fork that failed or a box that never became ready: 60 s, doubling to 30 minutes."""
+    def sealed(self, box_id: str) -> bool:
+        """The box runs under `no_network` (read back from Sail; a client that cannot say is trusted only in tests)."""
+        read = getattr(self.client, "egress", None)
+        if read is None:
+            return True
+        try:
+            policy = read(box_id) or {}
+        except Exception:  # noqa: BLE001 - cannot confirm the seal: not sealed
+            return False
+        document = policy.get("document") if isinstance(policy, Mapping) else None
+        return bool(isinstance(document, Mapping) and document.get("no_network")) or policy.get("mode") == "no_network"
+
+    def _failed_fork(self, kind: str, why: str = "") -> None:
+        """Back off after a fork that failed or a box that never became ready: 60 s, doubling to 30 minutes. After
+        `unavailable_after` failures in a row the Gym is UNAVAILABLE (researchers idle; one `swarm.status` alert)."""
         with self._lock:
             self.fork_failures[kind] = self.fork_failures.get(kind, 0) + 1
-            self.fork_after[kind] = self.clock() + min(1800.0, 60.0 * 2 ** (self.fork_failures[kind] - 1))
+            failures = self.fork_failures[kind]
+            self.fork_after[kind] = self.clock() + min(1800.0, 60.0 * 2 ** (failures - 1))
+        if failures == int(self.gym.get("unavailable_after", 3)):
+            self.store.event("swarm.status", None, {"action": f"{kind}_unavailable", "failures": failures, "why": why,
+                                                    "image": self.image(kind)})
+
+    def unavailable(self, kind: str = "gym") -> bool:
+        return self.fork_failures.get(kind, 0) >= int(self.gym.get("unavailable_after", 3))
+
+    def reconcile(self) -> int:
+        """End every box on the account named like ours (`ltcm-swarm-`) that this pool does not know: a fork whose
+        answer was lost, or one a process that died left behind. Returns how many were ended."""
+        lister = getattr(self.client, "list_boxes", None)
+        if lister is None:
+            return 0
+        try:
+            rows = lister(limit=1000)
+        except Exception:  # noqa: BLE001
+            return 0
+        with self._lock:
+            known = set(self.boxes) | {r["id"] for r in self.store.boxes(live=True)}
+        n = 0
+        for row in rows:
+            box_id, name = str(row.get("sailbox_id") or row.get("id") or ""), str(row.get("name") or "")
+            if not name.startswith(NAME_PREFIX) or box_id in known or str(row.get("status")) in ("terminated", "terminating",
+                                                                                                    "failed", "create_failed"):
+                continue
+            try:
+                self.client.terminate(box_id)
+                n += 1
+                self.store.event("swarm.pool", None, {"action": "stray_terminated", "box": box_id, "name": name})
+            except Exception:  # noqa: BLE001
+                pass
+        self.reconciled_at = self.clock()
+        return n
 
     def _spawn(self, box: Box) -> None:
         if self.threaded:
@@ -392,7 +465,11 @@ class GymPool:
         g = self.gym
         out: dict[str, Any] = {"started": 0, "slept": 0, "terminated": 0}
         with self._lock:
+            for dead in [k for k, b in self.boxes.items() if b.state in ("terminated", "failed")]:
+                self.boxes.pop(dead, None)  # nothing kept of a box that is gone
             boxes = list(self.boxes.values())
+        if now - self.reconciled_at >= float(g.get("reconcile_seconds", 600)):
+            out["strays"] = self.reconcile()
         for kind in ("gym", "gate"):
             image = self.image(kind)
             allowed = bool(g.get("enabled")) and bool(image) and self.allowed(kind)
@@ -414,6 +491,9 @@ class GymPool:
             if not allowed:
                 continue
             demand = self.queued(kind)
+            if not demand and kind == "gym" and self.unavailable(kind) and now >= self.fork_after.get(kind, 0.0) \
+                    and not [b for b in boxes if b.kind == kind and b.state == "starting"]:
+                demand = 1  # the researchers idle while the Gym is unavailable: one probe fork after each backoff finds it back
             if not demand:
                 continue
             with self._lock:  # asleep boxes count: their dispatchers wake them when a batch comes
@@ -428,6 +508,12 @@ class GymPool:
                 out["fork_backoff"] = round(self.fork_after[kind] - now)
                 continue  # the last fork failed: wait (a bad image must not become a storm of paid boxes)
             for _ in range(max(0, target - len(available))):
+                with self._lock:
+                    self.fork_times = [t for t in self.fork_times if now - t < 3600]
+                    if len(self.fork_times) >= int(g.get("max_forks_hour", 16)):
+                        out["fork_cap"] = True
+                        break
+                    self.fork_times.append(now)  # counted now; `_start_box` adds nothing twice (see below)
                 out["started"] += 1
                 if self.threaded:
                     threading.Thread(target=self._start_box, args=(kind,), name=f"fork-{kind}", daemon=True).start()
@@ -445,10 +531,18 @@ class GymPool:
             self.store.event("swarm.pool", None, {"action": "sleep_failed", "box": box.id, "error": str(exc)[:200]})
 
     def adopt(self) -> int:
-        """After a restart: take back the boxes the store says are ours (asleep or awake), so a restart never
-        forks a second pool. A box of an old image is terminated."""
+        """After a restart: take back the boxes the store says are ours (asleep or awake), so a restart never forks a
+        second pool; end a box of an old image, one that is no longer sealed, and every stray named like ours."""
         n = 0
         for row in self.store.boxes():
+            if not self.sealed(row["id"]):
+                try:
+                    self.client.terminate(row["id"])
+                except Exception:  # noqa: BLE001
+                    pass
+                self.store.set_box_state(row["id"], "terminated")
+                self.store.event("swarm.pool", None, {"action": "unsealed", "box": row["id"], "kind": row["kind"]})
+                continue
             kind = row["kind"]
             if row["version"] != str(self.image(kind)):
                 try:
@@ -468,6 +562,7 @@ class GymPool:
                 self.boxes[box.id] = box
             self._spawn(box)
             n += 1
+        self.reconcile()
         return n
 
     def scale_to_zero(self, why: str) -> int:

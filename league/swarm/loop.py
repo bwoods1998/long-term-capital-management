@@ -201,10 +201,11 @@ class Swarm:
 
     # ------------------------------------------------------------------ the threads
     def gym_ready(self) -> bool:
-        """The Gym is configured (enabled, with an image): until then nothing that needs it starts (no model is paid to
-        wait for a box that cannot come)."""
+        """The Gym is configured (enabled, with an image) and its boxes start (not `unavailable` after repeated start-up
+        failures): until then nothing that needs it starts (no model is paid to wait for a box that cannot come)."""
         gym = self.settings.get("gym", {})
-        return bool(gym.get("enabled")) and bool(gym.get("image_checkpoint"))
+        unavailable = getattr(self.pool, "unavailable", lambda kind="gym": False)
+        return bool(gym.get("enabled")) and bool(gym.get("image_checkpoint")) and not unavailable("gym")
 
     def over_pace(self) -> bool:
         """The swarm's model spend over the last hour is at `researcher.usd_per_hour` (read at most every 10 s)."""

@@ -92,20 +92,31 @@ class FakeDriver:
 
 
 class FakeSail:
-    """Sail's box API: forks, sleep, resume, terminate (recorded)."""
+    """Sail's box API: forks, sleep, resume, terminate, the box list and the egress policy (recorded)."""
 
-    def __init__(self):
+    def __init__(self, *, sealed: bool = True):
         self.lock = threading.Lock()
         self.forks: list[tuple[str, str]] = []
         self.slept: list[str] = []
         self.resumed: list[str] = []
         self.terminated: list[str] = []
+        self.names: dict[str, str] = {}
+        self.sealed = sealed
+        self.extra: list[dict] = []  # boxes Sail has that were not made by from_checkpoint here
 
     def from_checkpoint(self, checkpoint: str, *, name: str, timeout: float = 900.0) -> dict:
         with self.lock:
             box = f"sb_{len(self.forks) + 1:08d}-0000-0000-0000-000000000000"
             self.forks.append((checkpoint, box))
+            self.names[box] = name
         return {"sailbox_id": box, "checkpoint_id": checkpoint, "status": "running"}
+
+    def egress(self, box: str) -> dict:
+        return {"document": {"no_network": True}} if self.sealed else {"document": {"allowlist": ["mdds-01.thetadata.us"]}}
+
+    def list_boxes(self, **kw) -> list[dict]:
+        rows = [{"sailbox_id": b, "name": n, "status": "terminated" if b in self.terminated else "running"} for b, n in self.names.items()]
+        return rows + [r for r in self.extra if r["sailbox_id"] not in self.terminated]
 
     def sleep(self, box: str, **kw: Any) -> dict:
         self.slept.append(box)

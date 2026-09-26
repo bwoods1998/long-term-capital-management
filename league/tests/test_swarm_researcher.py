@@ -173,6 +173,21 @@ class ModelCycles(ResearcherCase):
         self.assertEqual(self.store.notebook(self.fam["id"])[-1]["text"], "entries were too rare")
         self.assertEqual(self.pool.jobs[-1].params, {"vrp_min": 1.3}, "no code: the latest version with new params")
 
+    def test_a_queued_run_the_gym_cannot_run_costs_no_model_call_and_stays_queued(self):
+        self.run_first()
+        self.steps = [{"calls": [("gym_run", {"params": {"vrp_min": 1.3}})]}, {"calls": [("gym_run", {"params": {"vrp_min": 1.5}})]}]
+        self.researcher().cycle(self.fam["id"])
+        calls = len(self.sail.bodies)
+        self.pool.fail = "the Gym did not answer"
+        out = self.researcher().cycle(self.fam["id"])
+        self.assertEqual(len(self.sail.bodies), calls, "no model paid to read a Gym error")
+        self.assertIn("gym:", out["error"])
+        self.assertTrue(self.store.convo(self.fam["id"])[1], "the run stays queued")
+        self.pool.fail = None
+        self.steps = [{"text": "ok"}]
+        self.researcher().cycle(self.fam["id"])
+        self.assertEqual(self.pool.jobs[-1].params, {"vrp_min": 1.5})
+
     def test_a_run_that_lands_after_the_researcher_gave_up_is_still_a_trial(self):
         self.run_first()
         self.pool.fail = "late"

@@ -355,8 +355,14 @@ class Researcher:
             fam = self.store.family(fid) or fam
         if pending and not gym_done:  # the run asked for at the end of the last cycle (its call was answered "queued" then)
             result = self._execute(fam, "gym_run", pending.get("arguments") or {}, out, author=pending.get("author") or "model")
-            current.append({"role": "user", "content": f"The gym_run you queued last cycle ran:\n{json.dumps(result, default=str)[:12000]}"})
             out["tool_calls"] += 1
+            if result.get("status") == "gym_error":
+                # The Gym could not run it: no model is paid to read that. The run stays queued for the next cycle and
+                # the family backs off (the scheduler's cooldown on an error).
+                out["error"] = f"gym: {str(result.get('error') or '')[:200]}"
+                self.store.save_convo(fid, cycles, pending)
+                return
+            current.append({"role": "user", "content": f"The gym_run you queued last cycle ran:\n{json.dumps(result, default=str)[:12000]}"})
             gym_done = True
             fam = self.store.family(fid) or fam
         pending = None  # run, or superseded by the rewrite (its call was answered "queued" last cycle)
@@ -417,6 +423,9 @@ class Researcher:
                     out["tool_calls"] += 1
                     if call.name == "gym_run":
                         gym_done = True
+                        if isinstance(result, dict) and result.get("status") == "gym_error":
+                            out["error"] = f"gym: {str(result.get('error') or '')[:200]}"  # no further model call this cycle
+                            stop = True
                 current.append({"type": "function_call_output", "call_id": call.call_id,
                                 "output": json.dumps(result, default=str)[:12000]})
                 fam = self.store.family(fid) or fam

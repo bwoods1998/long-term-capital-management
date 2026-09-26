@@ -228,6 +228,87 @@ class Boxes(PoolCase):
         pool.manage()
         self.assertEqual(len(self.sail.forks), 4)
 
+    def test_boxes_carry_the_swarms_own_name_prefix(self):
+        pool = self.pool(start_boxes=1)
+        pool.submit(job("a"))
+        pool.manage()
+        self.assertTrue(all(n.startswith("ltcm-swarm-gym-") for n in self.sail.names.values()), self.sail.names)
+
+    def test_strays_named_like_ours_are_terminated_and_other_boxes_left_alone(self):
+        self.sail.extra = [{"sailbox_id": "sb_stray", "name": "ltcm-swarm-gym-1-9", "status": "running"},
+                           {"sailbox_id": "sb_w1", "name": "ltcm-gym-image-v1", "status": "running"},
+                           {"sailbox_id": "sb_house", "name": "ltcm-floor", "status": "running"}]
+        pool = self.pool()
+        pool.adopt()
+        self.assertEqual(self.sail.terminated, ["sb_stray"])
+
+    def test_an_unsealed_fork_is_terminated_and_never_used(self):
+        self.sail.sealed = False
+        pool = self.pool(start_boxes=1)
+        pool.submit(job("a"))
+        pool.manage()
+        self.assertEqual(len(self.sail.terminated), 1)
+        self.assertFalse([b for b in pool.boxes.values() if b.state == "ready"])
+        events = [e["payload"].get("action") for e in self.store.events_after(0) if e["kind"] == "swarm.pool"]
+        self.assertIn("unsealed", events)
+
+    def test_forks_are_capped_per_hour(self):
+        pool = self.pool(start_boxes=8, max_boxes=8, max_forks_hour=5)
+        for i in range(20):
+            pool.submit(job(f"f{i}"))
+        pool.manage()
+        self.assertEqual(len(self.sail.forks), 5)
+        for b in list(pool.boxes.values()):
+            pool._retire_box(b, "test")
+        pool.manage()
+        self.assertEqual(len(self.sail.forks), 5, "the hour's forks are spent")
+        self.clock.advance(3601)
+        pool.manage()
+        self.assertGreater(len(self.sail.forks), 5)
+
+    def test_startup_time_is_booked(self):
+        class Slow(FakeDriver):
+            def ensure_code(inner):
+                self.clock.advance(120)
+                return "x"
+
+        pool = GymPool(self.store, self.sail, settings(start_boxes=1), clock=self.clock, threaded=False,
+                       driver_factory=lambda client, box: Slow(client, box))
+        pool.submit(job("a"))
+        pool.manage()
+        self.assertAlmostEqual(self.store.spent(["gym_box"]), 120 * 0.20 / 3600, places=6)
+
+    def test_repeated_startup_failures_make_the_gym_unavailable_and_say_so(self):
+        class Broken(FakeDriver):
+            def ensure_code(inner):
+                raise RuntimeError("python not found at /opt/data-venv/bin/python")
+
+        pool = GymPool(self.store, self.sail, settings(start_boxes=1), clock=self.clock, threaded=False,
+                       driver_factory=lambda client, box: Broken(client, box))
+        pool.submit(job("a"))
+        for _ in range(3):
+            pool.manage()
+            self.clock.advance(3600)
+        self.assertTrue(pool.unavailable("gym"))
+        alerts = [e for e in self.store.events_after(0) if e["kind"] == "swarm.status" and e["payload"].get("action") == "gym_unavailable"]
+        self.assertEqual(len(alerts), 1)
+        self.assertEqual([b for b in pool.boxes.values() if b.state == "failed"], [], "failed boxes are not kept")
+        pool.driver_factory = lambda client, box: FakeDriver(client, box)  # the image is fixed
+        pool.cancel_family("a")
+        self.clock.advance(3600)
+        pool.manage()
+        self.assertFalse(pool.unavailable("gym"), "one probe fork after the backoff finds it back with no demand")
+
+    def test_a_newer_train_job_supersedes_a_queued_one_of_the_same_family(self):
+        pool = self.pool()
+        old = pool.submit(job("a"))
+        new = pool.submit(job("a"))
+        pool.submit(job("b"))
+        self.assertEqual(pool.queued(), 2)
+        with self.assertRaises(PoolError):
+            pool.wait(old, 0)
+        self.assertFalse(new.done.is_set())
+
     def test_no_image_no_gym(self):
         pool = self.pool(image_checkpoint=None)
         pool.submit(job("a"))
