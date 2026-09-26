@@ -27,7 +27,7 @@ clock never restarts.
 |---|---|---|---|
 | M0 Safe and archived | T0 + 1 h | | |
 | M1 Data flowing | T0 + 2 h | 06:58Z (T0 + 35 min) | data box downloading since 06:49:43Z; universe chosen (W1) |
-| M2 The House is options-only | Sat morning | | |
+| M2 The House is options-only | Sat morning | 07:49:25Z | #359 merged, CI green; updater off, tools off `ltcm`, grant `options-swarm-20260928`, options-only service and tick |
 | M3 The swarm is training | Sat 16:00Z | | |
 | M4 Gated | Sun 22:00Z | | |
 | M4b The live path deployed | Sun 22:00Z | | |
@@ -119,6 +119,57 @@ clock never restarts.
   -> intents; live-path pieces importable on Python 3.11 + numpy only (`runtime.py`, `ctx.py` incl.
   `parity_spot`, `legs.py`, `venue.py`, `fills.py`, `events.py`); holdout/forward days only through a gate
   capability that needs the store's `GATE` marker. Real sample: 3 programs x 10 days SPY+XSP in 1.3 s.
+- 07:19Z W1 rehearsed images and the nightly job on real boxes (07:08-07:19Z; forks terminated, checkpoints
+  2-day TTL): Sail checkpoints WORK on these boxes (4 made, 0 errors, 38-39 s each; the House box's failure is
+  that box's); a fork from an image checkpoint starts in 3 s and inherits `no_network`. Gym path: stop the
+  backfill, checkpoint the data box, restart; fork, seal, prune to train+validation, scrub, verify inside (no
+  egress, no key line, no file after 2025-12-31, no GATE), checkpoint. Gate path keeps all windows and writes
+  `/data/store/GATE`. Nightly rehearsal: a holdout day (9 files) copied to the sealed gate, sha256-checked,
+  gate re-checkpointed. Quality over 138 root-days (56M rows): 0 crossed/negative/no-offer, 0 outside the
+  session, every listed 0-14 DTE expiry present. Recorded Alpaca OPRA vs ThetaData: 82.2% within a tick at
+  minute resolution (95.9% for quotes in a minute's first 2 s; 149,124 compared); 99.6% within a tick of the
+  same or next second at 1-s resolution (SPY/QQQ/IWM Sept 23; 5,527 compared). Throughput 650-700
+  underlying-days/h (ThetaData server-bound). ETAs: core five 2023-2025 ~12:30-13:00Z -> Gym image v1;
+  holdout ~14:00-14:30Z -> gate image.
+- ~07:2xZ W3 benchmark (gym/engine e89afd66; laptop, one pinned core, real sample, ~1,050-1,100 contracts a
+  day): chain load 52-65 ms a root-day; one program-year (252 days, loads included): light cadence-10
+  16.7-18.1 s, condor-vrp 19.4-20.3 s, putspread-dip 15.8-16.1 s, worst case (cadence 1, all greeks every
+  minute, trades often) 65.4-69.9 s (target 60 s: typical programs pass, the stress case misses by ~10%).
+  Day-major batch of 16 mixed programs: ~420-430 program-years/hour/core (2,000/h needs ~5 cores).
+  Extrapolated, NOT measured on Sail: 4-8 l boxes ~12k-25k program-years/hour. Inner loop (Train ~750 days):
+  ~60 s single-core typical, ~210 s worst; ~30 s with --split 8 on an l box (extrapolated).
+- 07:18Z W6 done: personal-site PR #9 and LTCM PR #357 (publisher) green; both merged 07:20Z (#357 ->
+  main d1855afc; site main 287b495). Schema 2, allowlisted blocks on both sides, quote masking (25 smuggled
+  fields and 19 quoted sentences refused; 3,000 random sentences through the site's `quoteFree`), no venue
+  names. W4 (the swarm) launched in W6's slot (`~/Work/ltcm-w4-swarm`, `swarm/loop`).
+- 07:21Z **Site deployed** (`npm run build && npx wrangler deploy`, version 650a8ac1) and **reset**
+  (`/reset?confirm=erase-everything`, token on stdin): real record cleared 20,000 events, 1,604
+  floor_history, 1 checkpoint, 136 desks; /t/test 283/14/1/4; /t/canary empty. All three checkpoints
+  answer 404; the page reads "AI agents trading options."; 0 venue names on the page. Reset pair:
+  PERFORMANCE_START_AT 2026-09-26T06:25:30.000Z, START_EQUITY 481.65.
+- 07:28Z The archive stream broke at 3.94 GB (IncompleteRead); Sail's files API ignores Range, so the rest is
+  fetched in 1 GiB pieces cut on the box with dd, each sha256-checked, then the whole file checked.
+- 07:35Z **Sail box spend is small**: every box since 06:00Z cost $0.105 (Sail's /sailboxes/spend); the data box
+  $0.035 for its first hour (billed on measured use: ~1.1 vCPU, ~0.7 GiB average). The Sail balance ($118.70)
+  moves with model inference, not boxes: the swarm's researchers are what the Sail guard must watch.
+- ~07:35Z W2a done: PR #359 (`overhaul/options` 6ca2d7dc, +3,795 -18,432, 218 files); CI green on the dispatch run
+  36226798132; `python3 -m league.ci` passed; ltcm/tests 2,002 OK. Empty-root tick builds only `alpaca-paper`
+  and `options-shadow` books; no campaigns/feeds/Jev/lab/foundry/semantic lab/shards/Kalshi. Hooks
+  `house.swarm` (W4) and `house.options_live` (W5) in `House.PLUGGABLE_STEPS`. `real_money` false;
+  `performance` = the reset pair. Left for W4/W5: old Pacer ($100/$100 expedition), Budget (Sail $100/month),
+  the old founding (7 options agents on agent boxes with the old researcher), Merton's teacher.
+- ~07:38Z W5 (the live path) launched in W2a's slot (`~/Work/ltcm-w5-live`, `live/options` from 6ca2d7dc).
+- ~07:40Z W3 done: PR #358 (`gym/engine` eb53aa5f; new files only). 62 Gym tests OK on the laptop (skipped on CI
+  until #359's `pip install -r requirements-gym.txt`). Hand-computed vertical/condor/calendar to the cent;
+  no future/date/year to programs; cutoffs, 15:30 liquidation, exercise, cash settlement; fills keyed by
+  (contract, minute); deterministic. Defects found and fixed by its tests: underlying history never grew;
+  IV solver overwrote solved values; float32 noise in prices; numpy methods failing on first use in a
+  fresh process. Unverified: nothing run on Sail yet; calibration on synthetic prints only; ASSUMED fees
+  (SPXW exchange, XSP >= 10 lots, SEC rate); late-2025/2026 event dates.
+- ~07:42Z An adversarial review of the Gym (lookahead/leakage, fill honesty, P&L arithmetic) launched before
+  merging #358; W2b-docs (the five documents and `archive/`, docs only) launched in W3's slot
+  (`~/Work/ltcm-w2b-docs`, `prune/docs`).
+- 07:49:25Z **M2 holds**: #359 merged (CI green on its own run: 3.11 10m11s, 3.14 10m36s); main 6c715d83. The Gym branch merged main (c6e7c9bd) so CI runs its tests with numpy.
 
 ## Scoreboard
 
