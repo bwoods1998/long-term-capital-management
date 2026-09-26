@@ -50,6 +50,8 @@ FORBIDDEN: tuple[str, ...] = (
     "gateway/", ".github/",
     "league/campaigns.json", "league/campaigns.py", "league/funded.py", "league/experiments.py", "league/recordings.py", "league/research_jobs.py", "league/capabilities.py", "league/parameters.py",
     "league/live_trading.py", "league/live_pilot.py", "scripts/live_trading.py", "scripts/live_pilot.py",
+    # The live options path (Sept 26, 2026, Wave 5): the order path, the money table's reader, the stops and the real book.
+    "league/live/",
     # The seal on the agents' boxes (no network, no credential). The box's updater refuses an
     # automatic release that changes any file here (league/updater.py), so this is also the list of
     # what only the owner's deploy may change.
@@ -354,12 +356,42 @@ def gateway_structures(root: Path = REPO) -> tuple[list[str], list[str]]:
     return sorted(set(names)), []
 
 
+def gateway_caps_problems(root: Path, table: dict[str, Any], names: dict[str, str]) -> list[str]:
+    """The gateway's caps that repeat the options money table (`constitution.GATEWAY_VARS`), equal to it: a cap changes
+    only with the money row it repeats (the review of #362, m17)."""
+    from decimal import Decimal, InvalidOperation
+
+    try:
+        text = (root / "gateway" / "wrangler.jsonc").read_text(encoding="utf-8")
+    except OSError as exc:
+        return [f"gateway/wrangler.jsonc: {exc}"]
+    problems = []
+    for var, path in names.items():
+        found = re.findall(rf'^\s*"{var}"\s*:\s*"([^"]*)"', text, flags=re.M)
+        node: Any = table
+        for key in path.split("."):
+            node = node.get(key) if isinstance(node, dict) else None
+        if len(found) != 1:
+            problems.append(f"gateway/wrangler.jsonc: {var} must be set once (it repeats options_money.{path})")
+            continue
+        try:
+            same = Decimal(found[0]) == Decimal(str(node))
+        except (InvalidOperation, ValueError):
+            same = False
+        if not same:
+            problems.append(f"gateway/wrangler.jsonc: {var} is {found[0]!r} but options_money.{path} is {node!r}: they change together")
+    return problems
+
+
 def check_structures(root: Path = REPO) -> list[str]:
-    """The options-desk run's money rows (O1-O5, G of Sept 25, 2026) inside their bounds (`allocator.spread_problems`),
-    and ONE source of truth for the structure types real money may open: the gateway's `OPTION_STRUCTURES_REAL` admits
-    exactly `allocator.spread_types_real()` of the tree's own constitution -- `option_spread_real_types` while
-    `option_spreads_real` (O1) is on, none while it is off (the plan's G1: the gateway variable is set in the same deploy
-    that flips O1, never before). The constitution is read from `root` without importing the tree's package."""
+    """ONE source of truth for the structure types real money may open, and the money rows inside their bounds.
+
+    Since the options swarm (Sept 26, 2026, Wave 5) the constitution's `options_money` table governs real money: its rows
+    inside `constitution.OPTIONS_MONEY_BOUNDS` (`options_money_problems`), and the gateway's `OPTION_STRUCTURES_REAL`
+    disabled, or admitting exactly its `real_types` (the gateway holds credit types back under $2,000 of equity). A tree
+    whose constitution has no such table is judged by the options-desk run's rows (O1-O5, G of Sept 25, 2026): the gateway
+    admits exactly `allocator.spread_types_real()` (`option_spread_real_types` while O1 is on, none while it is off). The
+    constitution is read from `root` without importing the tree's package."""
     from . import allocator
 
     path = root / "league" / "constitution.py"
@@ -371,17 +403,23 @@ def check_structures(root: Path = REPO) -> list[str]:
         constitution = namespace["CONSTITUTION"]
     except Exception as exc:  # noqa: BLE001 - a constitution that cannot be read is a refusal
         return [f"league/constitution.py could not be read: {type(exc).__name__}: {exc}"]
-    problems = [f"league/constitution.py: {p}" for p in allocator.spread_problems(constitution)]
+    table = constitution.get("options_money")
+    if table is not None:
+        problems = [f"league/constitution.py: {p}" for p in namespace["options_money_problems"](constitution)]
+        wanted = sorted(set(table.get("real_types") or [])) if isinstance(table, dict) else []
+        source = f"options_money.real_types {wanted}"
+    else:
+        problems = [f"league/constitution.py: {p}" for p in allocator.spread_problems(constitution)]
+        wanted = sorted(allocator.spread_types_real(constitution))
+        source = (f"allocator.option_spreads_real {bool(constitution.get('allocator', {}).get('option_spreads_real'))}, "
+                  f"option_spread_real_types {constitution.get('allocator', {}).get('option_spread_real_types')}")
     gateway, unreadable = gateway_structures(root)
     problems += unreadable
-    if not problems:
-        wanted = sorted(allocator.spread_types_real(constitution))
-        if gateway != wanted:
-            problems.append(f"gateway/wrangler.jsonc: OPTION_STRUCTURES_REAL admits {gateway or 'none'} on the real account, "
-                            f"but the constitution opens {wanted or 'none'} (allocator.option_spreads_real "
-                            f"{bool(constitution.get('allocator', {}).get('option_spreads_real'))}, "
-                            f"option_spread_real_types {constitution.get('allocator', {}).get('option_spread_real_types')}): "
-                            "the two change together, in one deploy")
+    if table is not None and isinstance(table, dict):
+        problems += gateway_caps_problems(root, table, namespace.get("GATEWAY_VARS") or {})
+    if not problems and gateway != wanted and not (table is not None and not gateway):
+        problems.append(f"gateway/wrangler.jsonc: OPTION_STRUCTURES_REAL admits {gateway or 'none'} on the real account, "
+                        f"but the constitution opens {wanted or 'none'} ({source}): the two change together, in one deploy")
     return problems
 
 

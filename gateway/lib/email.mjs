@@ -93,10 +93,12 @@ export function compose(kind, facts = {}) {
       );
       break;
     case 'daily_digest':
-      subject = `LTCM daily: equity ${money(facts.equity_usd)}, day P&L ${signed(facts.daily_pnl_usd)}`;
+      // Profit since the reset replaces the day's P&L (Sept 26, 2026 (the options-swarm run, Wave 5)): the schema-2
+      // checkpoint's equity less its start equity less the owner's net deposits, or unknown when any part is missing.
+      subject = `LTCM daily: equity ${money(facts.equity_usd)}, profit since the reset ${signed(facts.profit_usd)}`;
       lines.push(
-        `Equity: ${money(facts.equity_usd)}.`,
-        `Day P&L: ${signed(facts.daily_pnl_usd)}.`,
+        `Equity: ${money(facts.equity_usd)}${facts.equity_stale ? ' (the broker reading is stale)' : ''}.`,
+        `Profit since the reset: ${signed(facts.profit_usd)} (equity less the start equity and the owner's net deposits).`,
         `Orders through the gateway today: ${number(facts.orders)} for ${money(facts.notional_usd)}.`,
         `Sail balance: ${money(facts.balance_usd)}; spend over ${facts.range || 'the window'}: ${money(facts.spend_usd)}; runway ${days(facts.runway_days)}.`,
         `Box: ${facts.box_status || 'unknown'}. Kill switch: ${facts.kill_switch ? 'engaged' : 'open'}.`,
@@ -110,8 +112,13 @@ export function compose(kind, facts = {}) {
   return { subject, text: lines.filter(line => line !== undefined && line !== null).join('\n') + '\n' };
 }
 
-// What the floor may post to /v1/notify: fills, settlements, the sample, and a disk warning.
-export const NOTICE_KINDS = ['trade', 'settled', 'test', 'disk_low'];
+// What the floor may post to /v1/notify: fills, settlements, the sample, a disk warning, and a real-money stop.
+export const NOTICE_KINDS = ['trade', 'settled', 'test', 'disk_low', 'live_stop'];
+//: The stops the House trips on real money (Sept 26, 2026 (the options-swarm run, Wave 5)). A stop not named here is not
+//: composed (a 400): a subject names only these words.
+export const LIVE_STOPS = ['drawdown', 'daily', 'reconciliation', 'assignment'];
+export const RELEASE_DRAWDOWN = 'Exits go on; the Gym keeps running. Release the drawdown pause on the box with python3 -m league.live --root /workspace/state --release-drawdown.';
+const DECIMAL = /^-?\d{1,12}(\.\d{1,6})?$/;
 const clip = (value, max) => (typeof value === 'string' ? value.slice(0, max) : '');
 const price = value => (typeof value === 'string' && value ? `$${value}` : 'unknown');
 
@@ -156,6 +163,24 @@ export function composeNotice(facts = {}) {
         clip(facts.rationale, 1500) || '(no rationale filed)',
         '',
         `Desk page: ${clip(facts.story_url, 300) || FLOOR}`,
+      );
+      break;
+    }
+    case 'live_stop': {
+      // A stop the House tripped on real money (Sept 26, 2026, Wave 5): the drawdown stop pauses real money, the daily
+      // stop holds new real entries until tomorrow, a reconciliation or assignment stop freezes real entries.
+      const stop = LIVE_STOPS.includes(facts.stop) ? facts.stop : null;
+      if (!stop) return null;
+      subject = stop === 'drawdown' ? 'LTCM: real money paused (drawdown)'
+        : stop === 'daily' ? 'LTCM: no new real entries today (daily stop)'
+          : `LTCM: real entries frozen (${stop})`;
+      const equity = typeof facts.equity === 'string' && DECIMAL.test(facts.equity) ? `$${facts.equity}` : 'unknown';
+      lines.push(
+        clip(facts.text, 1500) || '(no reason filed)',
+        '',
+        `Equity: ${equity}.`,
+        `At: ${clip(facts.at, 40) || 'an unknown time'}.`,
+        stop === 'drawdown' ? RELEASE_DRAWDOWN : null,
       );
       break;
     }

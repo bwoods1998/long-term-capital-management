@@ -12,6 +12,7 @@
 
 import { iso } from './http.mjs';
 import { compose, FROM, TO } from './email.mjs';
+import { parsePico } from './money.mjs';
 import {
   usageSummary, boxStatus, resumeBox, execRestart, boundedText, STOPPED, RESUMABLE,
 } from './sail.mjs';
@@ -42,11 +43,30 @@ const positive = (value, fallback) => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
 const amount = value => {
+  if (value === null || value === undefined || value === '') return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-/** The floor's own checkpoint: when it was published, and the numbers the digest reports. */
+/**
+ * Profit since the reset, from a schema-2 checkpoint (Sept 26, 2026 (the options-swarm run, Wave 5)): the account's
+ * equity less the equity it started from less the owner's net deposits since (`performance.net_flows`: deposits are
+ * never profit). Exact to the picodollar, then dollars. Null when any part is missing: the publisher leaves `net_flows`
+ * out until the funding activities that make it are verified, and a profit without them would count a deposit as one.
+ */
+export function profitSinceReset(body) {
+  const equity = parsePico(body?.account?.equity ?? null);
+  const start = parsePico(body?.performance?.start_equity ?? null);
+  const flows = parsePico(body?.performance?.net_flows ?? null);
+  if (equity === null || start === null || flows === null) return null;
+  return Number((equity - start - flows) / 10000n) / 1e8;
+}
+
+/**
+ * The floor's own checkpoint: when it was published, and the numbers the digest reports. Schema 2 since Sept 26, 2026
+ * (`league/publish.py` `build_checkpoint`): `account.equity` is the Brokerage Account's equity, and the day's P&L and
+ * the floor's own `budget.mode` are gone; profit is read since the reset (`profitSinceReset`).
+ */
 export async function readCheckpoint({ url, fetcher }) {
   let reached = false;
   try {
@@ -66,10 +86,10 @@ export async function readCheckpoint({ url, fetcher }) {
     return {
       published_at: body.published_at,
       at: stamp,
-      equity_usd: amount(body.floor?.equity),
-      daily_pnl_usd: amount(body.floor?.daily_pnl),
-      // The floor's own verdict on its credit, under the runway policy; null under a fixed cap.
-      spend_mode: typeof body.budget?.mode === 'string' ? body.budget.mode : null,
+      schema_version: Number.isSafeInteger(body.schema_version) ? body.schema_version : null,
+      equity_usd: amount(body.account?.equity),
+      equity_stale: body.account?.stale === true,
+      profit_usd: profitSinceReset(body),
     };
   } catch (error) {
     return {
@@ -198,7 +218,8 @@ export async function runWatchdog({ gate, env = {}, fetcher = fetch, mailer = nu
     published_at: checkpoint.published_at ?? null,
     age_seconds: age,
     equity_usd: checkpoint.equity_usd ?? null,
-    daily_pnl_usd: checkpoint.daily_pnl_usd ?? null,
+    equity_stale: checkpoint.equity_stale === true,
+    profit_usd: checkpoint.profit_usd ?? null,
     orders: today.orders,
     notional_usd: Number(today.notional_usd),
     kill_switch: gate.killSwitch(),
@@ -223,8 +244,11 @@ export async function runWatchdog({ gate, env = {}, fetcher = fetch, mailer = nu
   };
 
 
-  const floorMode = checkpoint.error ? null : checkpoint.spend_mode;
-  if (floorMode === 'stopped' || (balance !== null && balance <= reserve)) await send('floor_stopped', runway);
+  // "Stopped for lack of credit" is Sail's to say (Sept 26, 2026, Wave 5): the schema-2 checkpoint no longer carries the
+  // floor's own `budget.mode`, so the mail goes when Sail's balance is at or under the reserve (no runway left). A stale
+  // checkpoint is not read as a credit stop: at the reserve the floor keeps publishing (marks, settlements), and a
+  // floor that has gone quiet is `box_not_running`'s mail below, after the restart this pass may already have sent.
+  if (balance !== null && balance <= reserve) await send('floor_stopped', runway);
   else if (balance !== null && (balance < criticalBalance || (runwayDays !== null && runwayDays < criticalRunway))) await send('sail_balance_critical', { threshold_usd: criticalBalance, threshold_days: criticalRunway, ...runway });
   else if (balance !== null && (balance < lowBalance || (runwayDays !== null && runwayDays < lowRunway))) await send('sail_balance_low', { threshold_usd: lowBalance, threshold_days: lowRunway, ...runway });
   // "Not running" is a verdict, not a symptom. A stale checkpoint on the first pass gets a

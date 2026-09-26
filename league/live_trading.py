@@ -63,10 +63,17 @@ def _money(value: Any, what: str) -> Decimal:
 def smallest_stake(constitution: Mapping[str, Any] | None = None) -> Decimal:
     """The smallest real stake the money rules give the Brokerage Account: a grant must cover one,
     and its seat count (`max_agents`) is its capital over this. With the allocator on, the smallest
-    of the account's bunt and probe stakes; otherwise the micro rung's stake."""
+    of the account's bunt and probe stakes; otherwise the micro rung's stake. Since the options swarm's money table
+    (`options_money`), its Probe floor: one contract of at most that maximum loss."""
     from .constitution import CONSTITUTION
 
     rules = constitution or CONSTITUTION
+    options = rules.get("options_money")
+    if isinstance(options, Mapping):
+        # The options swarm (Sept 26, 2026, Wave 5): the smallest real structure is the Probe's one-contract floor.
+        floor = Decimal(str((options.get("probe") or {}).get("floor_usd") or 0))
+        if floor > 0:
+            return floor
     allocator = rules.get("allocator") or {}
     if allocator.get("enabled"):
         stakes = [Decimal(str(v)) for table in ("bunt_usd", "probe_bunt_usd")

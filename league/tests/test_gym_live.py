@@ -106,6 +106,35 @@ class LivePath(unittest.TestCase):
         self.assertEqual(venue.leg_tick("AAPL", 3.5), 0.05)
         self.assertTrue(math.isnan(C.parity_spot([0], [450.0], [True], [1.0], float("nan"))))
 
+    def test_a_malformed_value_is_a_refusal_never_an_exception(self):
+        """A wrong type, NaN or infinity anywhere a program puts a number is refused like any other bad intent: an
+        exception would escape the engine's (and the House's) refusal handling."""
+        snap = self.chain()
+        rules = venue.rules_for("SPY")
+        open_order = L.resolve_open({"open": "debit_vertical", "qty": 1, "legs": [
+            {"side": "long", "right": "C", "dte": 0, "strike": 450}, {"side": "short", "right": "C", "dte": 0, "strike": 451}]},
+            snap, rules, buying_power=5000.0)
+        bad_closes = [{"close": 1, "limit": {"price": None}}, {"close": 1, "limit": {"price": "x"}},
+                      {"close": 1, "limit": {"mid": "x"}}, {"close": 1, "limit": {"mid": None}},
+                      {"close": 1, "limit": {"price": [1]}}, {"close": 1, "qty": float("inf")},
+                      {"close": 1, "qty": float("nan")}, {"close": 1, "tif": float("nan")}, {"close": 1, "tif": [1]}]
+        for intent in bad_closes:
+            with self.subTest(intent=intent), self.assertRaises(L.Refused):
+                L.resolve_close(intent, open_order.type, open_order.legs, 1, snap, rules, position=1)
+        leg = {"side": "long", "right": "C", "dte": 0, "strike": 450}
+        bad_opens = [{"open": "long_call", "legs": [leg], "qty": float("inf")},
+                     {"open": "long_call", "legs": [leg], "qty": float("nan")},
+                     {"open": "long_call", "legs": [leg], "max_loss": float("inf")},
+                     {"open": "long_call", "legs": [dict(leg, dte=float("nan"))], "qty": 1},
+                     {"open": "long_call", "legs": [dict(leg, dte=float("inf"))], "qty": 1},
+                     {"open": "long_call", "legs": [dict(leg, ratio=float("nan"))], "qty": 1},
+                     {"open": "long_call", "legs": [{"side": "long", "right": "C", "id": float("inf")}], "qty": 1},
+                     {"open": "long_call", "legs": [leg], "qty": 1, "limit": {"price": None}},
+                     {"open": "long_call", "legs": [leg], "qty": 1, "limit": {"mid": float("inf")}}]
+        for intent in bad_opens:
+            with self.subTest(intent=intent), self.assertRaises(L.Refused):
+                L.resolve_open(intent, snap, rules, buying_power=5000.0)
+
 
 if __name__ == "__main__":
     unittest.main()
