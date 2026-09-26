@@ -70,13 +70,17 @@ def parse_time(value: Any) -> float | None:
     text = str(value).strip().replace("Z", "+00:00")
     if "." in text:
         head, _, rest = text.partition(".")
-        digits = "".join(ch for ch in rest if ch.isdigit())
-        zone = rest[len(digits):]
-        text = f"{head}.{digits[:6].ljust(6, '0')}{zone}"
+        n = 0
+        while n < len(rest) and rest[n].isdigit():
+            n += 1
+        text = f"{head}.{rest[:n][:6].ljust(6, '0')}{rest[n:]}"
     try:
-        return datetime.fromisoformat(text).timestamp()
+        stamp = datetime.fromisoformat(text)
     except ValueError:
         return None
+    if stamp.tzinfo is None:
+        return None  # a time with no zone is no time: never read as this machine's local time
+    return stamp.timestamp()
 
 
 def occ_parts(symbol: str) -> tuple[str, str, bool, float] | None:

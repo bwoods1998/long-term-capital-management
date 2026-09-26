@@ -94,7 +94,7 @@ def _handle(message: Any, runners: dict, reply: Any) -> bool:
                 out[job["key"]] = {"intents": intents, "stats": runner.stats()}
             reply({"ok": True, "results": out})
         elif kind == "ping":
-            reply({"ok": True, "pid": os.getpid()})
+            reply({"ok": True, "pid": os.getpid(), "env": sorted(os.environ)})
         elif kind == "quit":
             reply({"ok": True})
             return False
@@ -205,6 +205,10 @@ class _Base:
 
     def _ask(self, message: Any, deadline: float) -> dict:  # pragma: no cover - abstract
         raise NotImplementedError
+
+    def ping(self) -> dict:
+        with self.lock:
+            return self._ask(("ping",), 30.0)
 
     def close(self) -> None:
         pass
