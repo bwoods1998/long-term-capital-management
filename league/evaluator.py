@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping, Sequence
 
 from . import stats
+from .book import OWNER_SOURCES, OWNER_TRANSFER
 from .constitution import CONSTITUTION
 from .ledger import HOUSE, Ledger, now_iso
 
@@ -144,6 +145,13 @@ def closed_trade_rows(entries: Iterable[Any], book: str, *, since_seq: int = 0,
             continue
         inst = p.get("instrument") or {}
         key = ":".join(str(inst.get(k)) for k in ("market_id", "symbol", "right", "expiry", "strike") if inst.get(k) is not None)
+        if entry.kind == "book.fill" and p.get("source") == OWNER_TRANSFER:
+            # The owner sold the position at the venue by hand, and it left at its cost (`Book._owner_trades`, Sept 26,
+            # 2026): never a closed trade of the agent's. A position it emptied is gone, with what its partial sales made.
+            if p.get("closes_position"):
+                opened.pop(key, None)
+                running.pop(key, None)
+            continue
         sale = entry.kind == "book.fill" and p.get("realized") is not None and p.get("source") != "dust"
         if entry.kind == "book.fill" and p.get("side") == "buy" and p.get("source") != "dust":
             opened.setdefault(key, (entry.seq, str(p.get("liquidity") or "taker")))
@@ -356,6 +364,10 @@ class Evaluator:
         fills = [
             e for e in self.ledger.iter(kinds=("book.fill", "book.settle"), agent=agent, after=since) if e.payload.get("book") == book
         ]
+        # A position the owner sold at the venue left the account at its cost, not at its mark (`Book._owner_trades`, Sept 26,
+        # 2026): what that moved of its equity is a flow, as a stake is, and never makes a block active -- not its trade.
+        moves = [(e.seq, float(e.payload.get("equity_flow") or 0)) for e in fills if e.payload.get("source") == OWNER_TRANSFER]
+        fills = [e for e in fills if e.payload.get("source") not in OWNER_SOURCES]
         by_block: dict[str, list] = {}
         for entry in marks:
             by_block.setdefault(block_key(entry.at, horizon), []).append(entry)
@@ -378,6 +390,8 @@ class Evaluator:
                 start_equity = previous_equity
                 window = [float(s.payload["usd"]) for s in stakes if previous_seq < s.seq <= last.seq]
             flow = sum(window)
+            began_seq = by_block[key][0].seq if previous_equity is None else previous_seq
+            moved = sum(v for seq, v in moves if began_seq < seq <= last.seq)
             if start_equity <= 0 and any(v > 0 for v in window):
                 # The account was funded INSIDE this block: its marks read zero until the stake
                 # landed. The block starts from the stake, not from nothing, and it counts. Measured
@@ -386,6 +400,7 @@ class Evaluator:
                 # start and only what was taken back is a flow (Sept 23, 2026: the net of both as
                 # the start let a withdrawal in the same block inflate the growth, or read as ruin).
                 start_equity, flow = sum(v for v in window if v > 0), sum(v for v in window if v < 0)
+            flow += moved
             if finished and start_equity > 0 and key not in recorded:
                 active = any(int(m.payload.get("holdings") or 0) > 0 for m in by_block[key]) or any(
                     block_key(f.at, horizon) == key for f in fills

@@ -1363,6 +1363,48 @@ ORDER BY seq DESC LIMIT 20`.
   position difference or order in doubt. To verify after a deploy: `book.reconciled` rows with
   `ok: true`, a `book.fill` `source: dust` row with `unlisted_fees_usd` beside the next real option or
   stock fill, its error alert, and `health.json` `books.alpaca` not frozen.
+- **When you trade the real Kalshi account by hand** (Sept 26, 2026; `Book._owner_trades`). At
+  02:07Z you sold three positions of meriwether-h2d625d on Kalshi (AZ-SD NO 11, LAD-SF NO 13, NYM-WSH
+  NO 16, $15.4802 net of $0.3998 of fees). No House order was behind them, so no poll booked them,
+  and from 02:16:19Z the real book froze on "cash differs by 15.4796; positions differ: ... -11, ...
+  -13, ... -16" (every real Kalshi entry refused; exits went on). At 02:34:14Z the House settled
+  AZ-SD's 11 NO for the agent, units the venue no longer held. Now:
+  - *A sale of what the House holds is booked, not a freeze.* When the venue holds fewer units than
+    the book (after the five-minute settlement grace: a sold position reads "awaiting settlement"
+    first), the book reads the account's own fills (`GET /portfolio/fills`, through the gateway) since
+    the affected positions were opened and takes those of orders it never sent. Kalshi reports your
+    sale of NO as YES bought at the complement (`outcome_side: yes`, `book_side: bid`, `action: sell`,
+    `yes_price_dollars` 0.53 for NO sold at 0.47, `fee_cost` the fee); the book reads it on the leg it
+    holds. It books them only when they explain every missing unit exactly, market by market, and the
+    cash to within a cent a fill plus `allocator.real_book_dust_usd` ($0.50). Then, in one ledger
+    group: each holder's units move to the House row at the agent's cost (`book.fill`
+    `source: owner-transfer`, `realized` null: the agent gets its cost back and has no result, no
+    closed trade, no settlement and no observation from it -- W and the day's loss take the move's
+    `equity_flow` out as a stake's); each of your fills is booked on the House row (`owner-fill`, id
+    `owner-fill:kalshi:<the venue's fill id>`, `realized` the House's result against that cost); the
+    fee rounding left over is House dust. The House row holds none of the units afterwards.
+  - *Units the House had already settled keep their settlement.* It stands as the agent's
+    hold-to-settlement result (the market's verdict on its mechanism), and your proceeds, less what
+    the settlement credited on the sold units, go to the House row as one row
+    `owner-sale:kalshi:<ticker>` (`source: owner`, no instrument, `receipts` the fill ids).
+  - *The House no longer settles units the venue did not hold.* A real Kalshi settlement is booked
+    only when the venue's settlement row (its `yes_count` and `no_count`, which count both legs
+    traded, gross: AZ-SD read 11 and 11) shows the account held at least the book's units; otherwise
+    nothing of that market is settled, an error alert says so, and the reading books your sale as
+    above. Of the 152 real settlements since Sept 18 this refuses one: AZ-SD.
+  - One ERROR alert names your trades, the agents, the units, the prices and the House's result; it
+    begins with the book's name and carries `began_at` (your first fill), so a deploy's watch inherits
+    it. Every id derives from the venue's fill ids: a second reading or a restart books nothing twice.
+  - *What still freezes*, for you to read: a buy (units the book does not know, or more of a leg it
+    holds), a sale of units the book does not hold, fills that explain only some of the missing units,
+    cash the fills do not explain, any baseline units of the market, an order in doubt, both legs of
+    a market held, a fills read that fails or returns 1,000 rows. A practice book never reads fills
+    for this; it adopts the venue as before.
+  - To verify after a deploy (across two readings, not the first: right after a restart a sold
+    position passes as "awaiting settlement"): `book.fill` rows with `source` `owner-transfer`,
+    `owner-fill` and `owner`, the ops.alert beginning "kalshi: the owner's own trades", `book.reconciled`
+    `ok: true` with `cash_diff` 0, `health.json` `books.kalshi.frozen` null, and the agent's family
+    record unchanged by the move.
 - **File a repair.** Drop a JSON file into `/workspace/state/repairs-inbox/`:
   `{"key", "kind", "summary", "agents", "severity"}`. It is admitted whatever its priority.
   `{"drill": "<stamp>"}` plants the labelled synthetic drill; `scripts/repair_drill.py --plant`

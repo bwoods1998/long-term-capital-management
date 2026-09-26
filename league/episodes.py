@@ -81,7 +81,9 @@ def completed(ledger, agent, book, *, since_seq=0, until_seq=None):
                     raise ValueError('unrecorded short position')
                 if positions[key] <= 0:
                     positions.pop(key, None)
-                    if cycle is not None and held > 0:
+                    # A position the owner sold at the venue by hand leaves at its cost (`Book._owner_trades`, source
+                    # 'owner-transfer', Sept 26, 2026): it ends the exposure, but it is no trade of the agent's.
+                    if cycle is not None and held > 0 and p.get('source') != 'owner-transfer':
                         cycle['trades'] += 1
             if cycle is not None:
                 cycle['cash'] += cash

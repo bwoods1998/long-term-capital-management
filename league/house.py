@@ -9847,7 +9847,8 @@ class House:
                 if settlements:
                     for row in settlements(self._state["settled"].get(name)):
                         if row.get("result") in ("yes", "no"):
-                            book.settle(str(row["ticker"]), str(row["result"]))
+                            # The venue's row goes with it: a real book settles no more units than it shows held (Sept 26, 2026).
+                            book.settle(str(row["ticker"]), str(row["result"]), venue_row=row)
                             stamp = str(row.get("settled_time") or "")
                             if stamp > str(self._state["settled"].get(name) or ""):
                                 self._state["settled"][name] = stamp

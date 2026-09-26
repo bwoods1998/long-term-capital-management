@@ -653,6 +653,13 @@ def closed_trades(snap: Snapshot) -> tuple[list[Trade], list[OpenPosition], dict
         market = str(instrument.get("market_id") or instrument.get("symbol") or key)
         slot = (row.agent, book, key)
         closing = False
+        if p.get("source") == "owner-transfer":
+            # The owner sold it at the venue by hand and it left at its cost (`league.book.Book._owner_trades`, Sept 26,
+            # 2026): no trade of the agent's, and a position it emptied is no longer open.
+            if p.get("closes_position"):
+                entries.pop(slot, None)
+                running.pop(slot, None)
+            continue
         if row.kind == "book.settle":
             pnl = running.pop(slot, 0.0) + float(p.get("pnl") or 0)
             how = "settle"

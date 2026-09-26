@@ -92,6 +92,7 @@ from decimal import ROUND_DOWN, Decimal
 from typing import Any, Iterable, Mapping, NamedTuple, Sequence
 
 from . import stats
+from .book import OWNER_TRANSFER
 from .constitution import CONSTITUTION
 from .ledger import HOUSE
 
@@ -108,7 +109,8 @@ STATES = ("unproven", "proven", "swing")
 #: (`agent.family`, C8): which family each stretch of an agent's rows belongs to.
 TAPE_KINDS = ("book.fill", "book.settle", "book.stake", "book.fill_correction", "book.baseline", "book.order", "eval.block",
               "agent.strategy", "agent.born", "agent.family")
-_TAPE_FIELDS = ("book", "pnl", "realized", "source", "flat", "side", "cash_delta", "liquidity", "usd", "quantity", "price", "order_id")
+_TAPE_FIELDS = ("book", "pnl", "realized", "source", "flat", "side", "cash_delta", "liquidity", "usd", "quantity", "price", "order_id",
+                "closes_position")
 _TAPE_INSTRUMENT = ("market_id", "symbol", "right", "expiry", "strike", "event_ticker", "event", "multiplier", "asset_class")
 #: Bid-size buckets for fill rates, the scoreboard's (`scripts/gap_scoreboard.py`): the weather favourites
 #: bid about $10 a market, and a swing's positions step through these as its stake doubles.
@@ -559,6 +561,12 @@ def risked_at_close(rows: Sequence[TapeRow], book: str, until_seq: int) -> dict[
         if p.get("book") != book or r.seq > until_seq or r.kind == "book.stake":
             continue
         key = instrument_key(p.get("instrument"))
+        if r.kind == "book.fill" and p.get("source") == OWNER_TRANSFER:
+            # The owner sold it at the venue and it left at its cost (`Book._owner_trades`, Sept 26, 2026): no close of the
+            # member's, and a position it emptied puts nothing at risk for a later one.
+            if p.get("closes_position"):
+                buys.pop(key, None)
+            continue
         if r.kind == "book.fill" and p.get("side") == "buy" and p.get("source") in ("venue", "cross"):
             with contextlib.suppress(KeyError, TypeError, ValueError):
                 buys[key] = buys.get(key, 0.0) - float(p["cash_delta"])
