@@ -35,7 +35,6 @@
     {
       "id": "condor-vrp-3",
       "family": "condor-vrp",
-      "name": "Condor Vrp 3",
       "mechanism": "Sells short-dated index premium when realized volatility runs under the level the options price in.",
       "structure": "iron_condor",
       "band": "sized",
@@ -59,7 +58,6 @@
     {
       "id": "orb-4",
       "family": "orb",
-      "name": "Orb 4",
       "mechanism": "Trades the break of the opening range in the direction of the break, with a vertical sized by its maximum loss.",
       "structure": "debit_vertical",
       "band": "probe",
@@ -83,7 +81,6 @@
     {
       "id": "putspread-dip-2",
       "family": "putspread-dip",
-      "name": "Putspread Dip 2",
       "mechanism": "Buys a put debit vertical after a gap down that the first hour does not recover, and exits before the close.",
       "structure": "debit_vertical",
       "band": "probe",
@@ -107,7 +104,6 @@
     {
       "id": "butterfly-pin",
       "family": "butterfly-pin",
-      "name": "Butterfly Pin",
       "mechanism": "Buys a long butterfly around the strike with the largest open interest on expiry afternoons, where prices tend to pin.",
       "structure": "long_butterfly",
       "band": "candidate",
@@ -127,7 +123,6 @@
     {
       "id": "ironfly-quiet",
       "family": "ironfly-quiet",
-      "name": "Ironfly Quiet",
       "mechanism": "Sells an at-the-money iron butterfly on quiet mornings when the overnight range was narrow.",
       "structure": "iron_butterfly",
       "band": "candidate",
@@ -147,7 +142,6 @@
     {
       "id": "trend-vertical",
       "family": "trend-vertical",
-      "name": "Trend Vertical",
       "mechanism": "Rides trend days: once the first two hours close far from the open, it buys a vertical in that direction.",
       "structure": "debit_vertical",
       "band": "candidate",
@@ -167,7 +161,6 @@
     {
       "id": "calendar-term",
       "family": "calendar-term",
-      "name": "Calendar Term",
       "mechanism": "Buys a calendar when near-dated options are rich against the month behind them.",
       "structure": "calendar",
       "band": "gym",
@@ -183,7 +176,6 @@
     {
       "id": "eod-drift",
       "family": "eod-drift",
-      "name": "Eod Drift",
       "mechanism": "Buys the last hour's drift into the close on days the index is up from the open.",
       "structure": "long_call",
       "band": "gym",
@@ -199,7 +191,6 @@
     {
       "id": "gap-drift",
       "family": "gap-drift",
-      "name": "Gap Drift",
       "mechanism": "Fades opening gaps that the premarket did not confirm, with a single long option.",
       "structure": "long_call",
       "band": "gym",
@@ -215,7 +206,6 @@
     {
       "id": "skew-revert",
       "family": "skew-revert",
-      "name": "Skew Revert",
       "mechanism": "Sells the side of the smile that has steepened most against its own recent history.",
       "structure": "credit_vertical",
       "band": "gym",
@@ -231,7 +221,6 @@
     {
       "id": "strangle-cheap",
       "family": "strangle-cheap",
-      "name": "Strangle Cheap",
       "mechanism": "Buys a strangle into scheduled news when the move the options expect is small beside past moves.",
       "structure": "long_strangle",
       "band": "gym",
@@ -247,7 +236,6 @@
     {
       "id": "reversal-1",
       "family": "reversal",
-      "name": "Reversal 1",
       "mechanism": "Bought reversals after three down days; it never beat the fill cost on validation.",
       "structure": "debit_vertical",
       "band": "retired",

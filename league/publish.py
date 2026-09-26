@@ -13,7 +13,7 @@ this module's own output, which the site's tests publish and draw.
 forbid republishing quotes, bids, asks, spreads, implied vols, greeks, surfaces, or parameters fitted
 from them, and the repository and the site are public. So every block here is an ALLOWLIST: each output
 dict is built key by key from the fields named below and nothing else is ever copied through, and every
-sentence (an agent's note, a trade's reason, the swarm's news, a mechanism, a name) is masked by
+sentence (an agent's note, a trade's reason, the swarm's news, a mechanism) is masked by
 `scrub_quotes` (no decimal number, no dollar or cent amount, no number beside a quote word) and
 `scrub_venues` (the account is "the Brokerage Account"; a venue is "the broker"). The site refuses the
 same patterns, so a masked sentence always passes and an unmasked one never shows.
@@ -32,7 +32,7 @@ with any of these keys, and anything not yet available as None or an empty list.
     compute      {sail_usd, openai_usd, thetadata_usd, market_data_usd, other_usd}  since the reset;
                  merged part by part over the defaults
     gym          {trials, market_years, families_alive, families_retired}
-    agents       [{id, family, name, mechanism, structure, band, born_at, retired_at,
+    agents       [{id, family, mechanism, structure, band, born_at, retired_at,
                    trials, revisions, forward: {trades, wins, pnl_usd} | None, real: {...} | None}]
     structures   [{id, agent, underlying, structure, legs, expiry, quantity, real, opened_at,
                    max_loss_usd, pnl_usd}]
@@ -388,9 +388,10 @@ def title(agent_id: str) -> str:
 
 
 def site_agent(value: Any, published_at: str) -> dict[str, Any] | None:
-    """One agent, exactly the site's nine fields: id, family, name, mechanism (a sentence), structure, band,
-    born_at, retired_at, and record {trials, revisions, forward, real}. Its program, parameters and anything
-    its program reads are never among them. None when the row cannot be shown honestly."""
+    """One agent, exactly the site's eight fields: id, family, mechanism (a sentence), structure, band, born_at,
+    retired_at, and record {trials, revisions, forward, real}. The page names an agent by its id (a name in
+    words would lose its number to the quote rule: "Skew Revert 2"). Its program, parameters and anything its
+    program reads are never among them. None when the row cannot be shown honestly."""
     if not isinstance(value, Mapping):
         return None
     agent_id = str(value.get("id") or "")
@@ -398,12 +399,11 @@ def site_agent(value: Any, published_at: str) -> dict[str, Any] | None:
     if not _SLUG.match(agent_id) or band not in BANDS:
         return None
     family = slug(value.get("family")) or agent_id
-    name = words(value.get("name") or title(agent_id), 60) or words(title(agent_id), 60) or "Agent"
     structure = value.get("structure") if value.get("structure") in STRUCTURE_TYPES else None
     born, retired = site_instant(value.get("born_at")), site_instant(value.get("retired_at"))
     record = value.get("record") if isinstance(value.get("record"), Mapping) else value
     return {
-        "id": agent_id, "family": family, "name": name, "mechanism": words(value.get("mechanism"), 240), "structure": structure, "band": band,
+        "id": agent_id, "family": family, "mechanism": words(value.get("mechanism"), 240), "structure": structure, "band": band,
         "born_at": born if born is not None and _not_after(born, published_at) else None,
         "retired_at": retired if retired is not None and _not_after(retired, published_at) else None,
         "record": {"trials": _count(record.get("trials")) or 0, "revisions": _count(record.get("revisions"), 1_000_000) or 0,
@@ -554,7 +554,7 @@ def to_events(entry: Entry) -> list[dict[str, Any]]:
     else:
         message = league_news(kind, entry.agent, p)
         text = words(message, 300) if message else ""
-        out = ("swarm", "swarm.news", {"text": text}) if text else None
+        out = ("swarm", "swarm.news", {"agent": agent, "text": text}) if text else None
     if out is None:
         return []
     stream, site_kind, payload = out
@@ -566,22 +566,22 @@ def to_events(entry: Entry) -> list[dict[str, Any]]:
 
 def league_news(kind: str, agent: str, p: Mapping[str, Any]) -> str | None:
     """One plain sentence for the swarm's own events (births, band moves, retirements, audits, new code),
-    before `words` masks it. Anything else says nothing."""
-    name = title(str(agent)) if agent and agent != HOUSE else "The House"
+    before `words` masks it. A sentence about an agent starts with its verb: the agent rides the event's own
+    `agent` field, and the page puts its name in front. Anything else says nothing."""
     if kind == "agent.born":
-        origin = f"forked from {title(str(p['parent']))}" if p.get("parent") else "a new family"
+        origin = "forked from its parent" if p.get("parent") else "a new family"
         mechanism = str(p.get("mechanism") or "").strip()
-        return f"{name} is born, {origin}{': ' + mechanism if mechanism else '.'}"
+        return f"is born, {origin}{': ' + mechanism if mechanism else '.'}"
     if kind == "agent.died":
-        return f"{name} retired: {str(p.get('cause') or 'no reason given')}.".replace("..", ".")
+        return f"retired: {str(p.get('cause') or 'no reason given')}.".replace("..", ".")
     if kind == "eval.verdict":
         start, end = p.get("band_from"), p.get("band_to")
         if start in BANDS and end in BANDS and start != end:
             reason = " ".join(str(p.get("reason") or "").split()).rstrip(". ")
-            return f"{name} moves from {BAND_WORDS[start]} to {BAND_WORDS[end]}{': ' + reason if reason else ''}."
+            return f"moves from {BAND_WORDS[start]} to {BAND_WORDS[end]}{': ' + reason if reason else ''}."
         return None
     if kind == "audit.verdict":
-        return f"The auditor {'approved' if p.get('approve') else 'refused'} {name} for real money. {p.get('summary') or ''}".strip()
+        return f"{'approved' if p.get('approve') else 'refused'} for real money by the auditor. {p.get('summary') or ''}".strip()
     if kind == "ops.deploy":
         if p.get("action") == "deploying":
             return f"New code on main: release {p.get('release')} is on the canary. The watchdog promotes it only if it stays healthy."
@@ -900,7 +900,7 @@ class Publisher:
         rows = []
         for agent in living + dead[-MAX_DEAD_SHOWN:]:
             rows.append({
-                "id": agent.id, "family": getattr(agent, "family", None), "name": title(agent.id),
+                "id": agent.id, "family": getattr(agent, "family", None),
                 "mechanism": folds.mechanism.get(agent.id) if folds else None, "structure": None, "band": self._band(house, agent),
                 "born_at": getattr(agent, "born_at", None), "retired_at": None if getattr(agent, "alive", True) else getattr(agent, "died_at", None),
                 "trials": folds.trials.get(agent.id, 0) if folds else 0, "revisions": folds.revisions.get(agent.id, 0) if folds else 0,

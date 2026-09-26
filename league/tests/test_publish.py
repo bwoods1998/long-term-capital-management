@@ -41,7 +41,7 @@ ALLOWED_KEYS = {
     "run": {"started_at"}, "account": {"equity", "cash", "as_of", "stale"}, "performance": {"start_at", "start_equity", "net_flows", "verified_at"},
     "compute": {"as_of", "sail_usd", "openai_usd", "thetadata_usd", "market_data_usd", "other_usd"},
     "gym": {"as_of", "trials", "market_years", "families_alive", "families_retired"},
-    "agent": {"id", "family", "name", "mechanism", "structure", "band", "born_at", "retired_at", "record"},
+    "agent": {"id", "family", "mechanism", "structure", "band", "born_at", "retired_at", "record"},
     "record": {"trials", "revisions", "forward", "real"}, "tally": {"trades", "wins", "pnl_usd"},
     "structure": {"id", "agent", "underlying", "structure", "legs", "expiry", "quantity", "real", "opened_at", "max_loss_usd", "pnl_usd"},
 }
@@ -80,7 +80,7 @@ def tally(trades, wins, pnl):
 
 
 def agent(agent_id, **overrides):
-    row = {"id": agent_id, "family": agent_id.rsplit("-", 1)[0] if agent_id[-1].isdigit() else agent_id, "name": None,
+    row = {"id": agent_id, "family": agent_id.rsplit("-", 1)[0] if agent_id[-1].isdigit() else agent_id,
            "mechanism": "Sells short-dated index premium when realized volatility runs under the level the options price in.",
            "structure": "iron_condor", "band": "gym", "born_at": "2026-09-26T16:02:11.000Z", "retired_at": None,
            "trials": 1204, "revisions": 17, "forward": None, "real": None}
@@ -283,7 +283,7 @@ class BuildTest(unittest.TestCase):
         self.assertEqual(body["gym"]["market_years"], "51240.5")
         self.assertEqual([a["band"] for a in body["agents"]], ["sized", "probe", "probe", "candidate", "candidate", "candidate", "gym", "gym", "gym", "gym", "gym", "retired"])
         condor_row = body["agents"][0]
-        self.assertEqual((condor_row["name"], condor_row["record"]["real"]), ("Condor Vrp 3", {"trades": 22, "wins": 16, "pnl_usd": "212.40"}))
+        self.assertEqual((condor_row["id"], condor_row["record"]["real"]), ("condor-vrp-3", {"trades": 22, "wins": 16, "pnl_usd": "212.40"}))
         self.assertEqual([s["real"] for s in body["structures"]], [True, True, True, False], "real money first, then the shadow book")
         self.assertEqual(body["structures"][2]["pnl_usd"], None)
 
@@ -363,7 +363,8 @@ class EventsTest(LedgerCase):
             for value in strings(event["payload"]):
                 self.assertTrue(quote_free(value) or value[:1].isdigit(), value)
         self.assertEqual(events[0]["payload"], {"equity": "481.65", "cash": "481.62", "as_of": "2026-09-26T06:30:00.000Z"})
-        self.assertEqual(events[2]["payload"]["text"], "Condor Vrp 3 moves from Probe to Sized: its forward record held over 64 trades.")
+        self.assertEqual(events[2]["payload"], {"agent": "condor-vrp-3", "text": "moves from Probe to Sized: its forward record held over 64 trades."})
+        self.assertEqual(events[1]["payload"]["agent"], "condor-vrp-3", "a birth names its agent in the field, not the sentence")
         self.assertEqual(events[3]["payload"], {"action": "open", "real": True, "underlying": "XSP", "structure": "iron_condor", "legs": 4, "expiry": "2026-09-28",
                                                 "quantity": 1, "max_loss_usd": "184.00", "pnl_usd": None, "why": "the condor fits the quiet tape"})
         self.assertEqual((events[5]["payload"]["action"], events[5]["payload"]["pnl_usd"], events[5]["payload"]["max_loss_usd"]), ("close", "31.00", None))

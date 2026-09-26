@@ -17,7 +17,7 @@ implied vols, greeks, surfaces, or parameters fitted from them, and both reposit
 
 - No block has a field for any of them. The publisher builds every block key by key (an allowlist), and
   the site refuses any key it does not name.
-- Every sentence (an agent's `name`, `mechanism`, a note's `text`, a trade's `why`, the swarm's news) must
+- Every sentence (an agent's `mechanism`, a note's `text`, a trade's `why`, the swarm's news) must
   be **quote-free**: no decimal number (`\d\.\d`), no dollar or cent amount (`$120`, `45¢`), and no number
   within 16 characters after, or 2 before, a quote word (bid, ask, offer, mid, midpoint, nbbo, spread,
   wide, width, iv, implied, vol, volatility, skew, delta, gamma, theta, vega, greek, premium, quote,
@@ -51,7 +51,7 @@ checkpoint is at most a minute after its `published_at`.
 |---|---|---|
 | `agent.note` | `agent:<id>` | `{text}`: 1-2,000 chars of quote-free words. An agent's decision in its own words. |
 | `agent.trade` | `agent:<id>` | `{action: open\|close, real: bool, underlying, structure, legs: 1-4, expiry: day, quantity: 1-10,000, max_loss_usd, pnl_usd, why}`. An open has `max_loss_usd` (money) and `pnl_usd: null`; a close has `pnl_usd` (signedMoney) and `max_loss_usd` money or null. `why` is quote-free prose (<= 240, may be empty). Never a price or a strike. |
-| `swarm.news` | `swarm` | `{text}`: 1-300 chars of quote-free words. Births, band moves, retirements, audits. |
+| `swarm.news` | `swarm` | `{agent: slug \| null, text}`: 1-300 chars of quote-free words. Births, band moves, retirements, audits. A sentence about an agent starts with its verb ("moves from Gym to Candidate: ...") and names the agent in `agent`, never in the words (a name like "Skew Revert 2" would lose its number to the quote rule); `null` is the House's own news. |
 | `account.mark` | `account` | `{equity, cash, as_of}`: one reading of the Brokerage Account. |
 
 `structure` is one of `long_call long_put debit_vertical credit_vertical iron_condor iron_butterfly
@@ -77,7 +77,7 @@ the old ladder's bands, alerts, credits) publishes nothing.
 | `performance` | `null` or `{start_at, start_equity (> 0), net_flows: signedMoney \| null, verified_at: instant \| null}`: the profit basis; flows and their check both or neither; `start_at <= verified_at <= published_at`. |
 | `compute` | `null` or `{as_of, sail_usd, openai_usd, thetadata_usd, market_data_usd, other_usd}`, each money or null: spend since the reset. |
 | `gym` | `null` or `{as_of, trials, market_years (one decimal), families_alive, families_retired}`, each nullable. The pace, never a result. |
-| `agents` | <= 160, ids unique: `{id, family, name, mechanism, structure \| null, band, born_at \| null, retired_at \| null, record: {trials, revisions, forward: tally \| null, real: tally \| null}}`, tally `{trades, wins (<= trades), pnl_usd}`. `band` is `gym candidate probe sized retired`. |
+| `agents` | <= 160, ids unique: `{id, family, mechanism, structure \| null, band, born_at \| null, retired_at \| null, record: {trials, revisions, forward: tally \| null, real: tally \| null}}`, tally `{trades, wins (<= trades), pnl_usd}`. `band` is `gym candidate probe sized retired`. The page names an agent by its id ("condor-vrp-3" reads "Condor Vrp 3"). |
 | `structures` | <= 100, ids unique: `{id, agent, underlying, structure, legs, expiry, quantity, real, opened_at, max_loss_usd, pnl_usd \| null}`. |
 
 The page shows **Total profit** = `account.equity - performance.start_equity - performance.net_flows`

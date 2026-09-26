@@ -19,9 +19,10 @@
       "kind": "swarm.news",
       "at": "2026-09-26T09:14:00.000Z",
       "payload": {
-        "text": "Condor Vrp 3 is born, a new family: Sells short-dated index premium when realized volatility is low."
+        "agent": "condor-vrp-3",
+        "text": "is born, a new family: Sells short-dated index premium when realized volatility is low."
       },
-      "digest": "f1e866015dba8b3130ccbd1abe248bc481f91360f1fd526e589f76d2dfba036b"
+      "digest": "1188058eb433b710b1ce5322bc12d892af865e552197561dad24cfccb5153f1b"
     },
     {
       "id": "le-0003-eval.verdict",
@@ -29,9 +30,10 @@
       "kind": "swarm.news",
       "at": "2026-09-28T12:05:00.000Z",
       "payload": {
-        "text": "Condor Vrp 3 moves from Probe to Sized: its forward record held over 64 trades."
+        "agent": "condor-vrp-3",
+        "text": "moves from Probe to Sized: its forward record held over 64 trades."
       },
-      "digest": "389e8c9d6696e71828bdda33b3ce1e33caf7a7a1e2a4f30c1bcf2838f72d9336"
+      "digest": "90e1e4f4ab961832207aa939d8c209736b18e6446eecdab368f575b4738cb64b"
     },
     {
       "id": "le-0004-book.fill",
