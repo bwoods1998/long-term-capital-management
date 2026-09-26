@@ -1,0 +1,8 @@
+{
+  "family": "weather-favorites-no-887ea6",
+  "name": "mullins_six_event_cost_child",
+  "repair": {
+    "key": "order_refusal:kalshi:one event may hold at most #% of the stake: KXHIGHLAX-#SEP# would hold $# of this account's $# (hold"
+  },
+  "why": "Corrected child of mullins-6, proposed at rung 0 with no inherited qualification. Reserve the 25% event allowance across both-leg holdings at cost, unfilled working buys and proposed bids rather than applying a 30% ceiling independently to each market. Preserve the parent's daily weather NO-favorite selection, half-strike exclusion and effective parameters."
+}
