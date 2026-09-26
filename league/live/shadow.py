@@ -206,6 +206,7 @@ def _working_state(w: E.Working) -> dict:
     o = w.order
     return {"oid": w.oid, "remaining": w.remaining, "placed_mi": w.placed_mi, "arrival_mi": w.arrival_mi,
             "expires_mi": w.expires_mi, "reserve_left": w.reserve_left, "pid": w.pid, "forced": w.forced, "filled": w.filled,
+            "seen": w.seen, "aggressive": w.aggressive, "fill_flags_known": getattr(w, "fill_flags_known", True) is True,
             "order": {"action": o.action, "type": o.type, "root": o.root, "legs": [_leg_state(x) for x in o.legs], "qty": o.qty,
                       "limit": _num(o.limit), "natural": _num(o.natural), "mid": _num(o.mid), "max_loss_share": o.max_loss_share,
                       "collateral": o.collateral, "fees": o.fees, "reserve": o.reserve, "tif": o.tif, "tag": o.tag,
@@ -219,9 +220,17 @@ def _working_from(x: Mapping[str, Any]) -> E.Working:
                     nan(o["natural"]), nan(o["mid"]), float(o["max_loss_share"]), float(o["collateral"]), float(o["fees"]),
                     float(o["reserve"]), o["tif"], o.get("tag") or "", o.get("note") or "", o.get("position"),
                     dict(o.get("extra") or {}))
-    return E.Working(int(x["oid"]), order, int(x["remaining"]), int(x["placed_mi"]), int(x["arrival_mi"]),
+    valid_flags = type(x.get("seen")) is bool and type(x.get("aggressive")) is bool \
+        and (not x["aggressive"] or x["seen"])
+    work = E.Working(int(x["oid"]), order, int(x["remaining"]), int(x["placed_mi"]), int(x["arrival_mi"]),
                      None if x["expires_mi"] is None else int(x["expires_mi"]), float(x["reserve_left"]), int(x["pid"]),
-                     bool(x["forced"]), int(x["filled"]))
+                     bool(x["forced"]), int(x["filled"]),
+                     seen=x["seen"] if valid_flags else False, aggressive=x["aggressive"] if valid_flags else False)
+    # Old saves lost the first-quote classification. Keep their previous fallback without inferring it
+    # from filled quantity; either resting or taking orders can partially fill. Preserve that uncertainty
+    # across later saves for private execution evidence. The marker never participates in fill decisions.
+    work.fill_flags_known = valid_flags and x.get("fill_flags_known", True) is True
+    return work
 
 
 class ShadowBook:
