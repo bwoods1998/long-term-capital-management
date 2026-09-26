@@ -46,7 +46,8 @@ TOOLS: list[dict[str, Any]] = [
          "code": {"type": "string", "description": "the complete program: NEEDS, PARAMS, decide(ctx)"},
          "params": {"type": "object", "description": "PARAMS overrides for this run (keys must exist in PARAMS)"},
          "stress": {"type": "number", "description": "half-spread multiplier, 1.0 (default) or 1.5 (the gate's stress)"},
-         "why": {"type": "string", "description": "one sentence: what this version changes and why it should help"}}}},
+         "why": {"type": "string", "description": "one sentence: what this version changes and why it should help"},
+         "note": {"type": "string", "description": "optional: what you learned from your last run, appended to your notebook"}}}},
     {"name": "read_run", "description": "Read one section of a past Train run of your family.",
      "parameters": {"type": "object", "properties": {
          "run_id": {"type": "string"},
@@ -65,9 +66,14 @@ TOOLS: list[dict[str, Any]] = [
                     "required": ["run_id"]}},
 ]
 
+#: The REVISE turn of a cycle offers gym_run alone, and a tool call is required: every cycle runs something.
+TOOLS_REVISE: list[dict[str, Any]] = [TOOLS[0]]
+
 ROLE = """You are a researcher in the LTCM options swarm. You own one family and improve its program in the Gym.
-Work in short cycles: revise the program, call gym_run, read the diagnostic, write one or two sentences to your notebook,
-submit a run when it is your best, and revise again. Keep every program inside the contract below; the Gym refuses
+Work in short cycles. REVISE: call gym_run with your revised program (the whole file in `code`, or only `params` to
+change parameters) and put what you learned from the last run in its `note`. READ: when the result comes back, read it;
+submit the run if it is your best; queue your next gym_run (it opens your next cycle); use read_run, graveyard or the
+notebook only when the diagnostic leaves you unsure. Keep every program inside the contract below; the Gym refuses
 anything else. Reply with tool calls; keep prose short.
 
 THE CONTRACT (league/CONTRACT.md)
@@ -181,8 +187,8 @@ class Researcher:
             parts.append(f"The gate's last answer: {gate}.")
         if notes:
             parts.append("Your notebook (latest):\n" + "\n".join(f"- {n['text'][:300]}" for n in notes))
-        parts.append("Now: revise and call gym_run (one run per cycle), then read the result, note what you learned, submit "
-                     "when a run is your best.")
+        parts.append("Now: if a run just came back, read it (submit it if it is your best) and queue your next gym_run; "
+                     "otherwise revise and call gym_run, with what you learned in its note.")
         return "\n".join(parts)
 
     # ------------------------------------------------------------------ tools
@@ -194,6 +200,10 @@ class Researcher:
                 return {"error": "you have no version yet: pass `code`"}
             code = latest["code"]
         code = str(code)
+        note = str(args.get("note") or "").strip()
+        if note:
+            self.store.note(fam["id"], note)
+            out["note"] = note
         params = args.get("params") if isinstance(args.get("params"), dict) else {}
         stress = float(args.get("stress") or 1.0)
         if stress not in (1.0, 1.5):
@@ -346,10 +356,13 @@ class Researcher:
             chars = sum(len(json.dumps(i, default=str)) for i in items)
             profile = self._profile(chars)
             key = f"swarm:{fid}:c{n}:m{out['model_calls']}:{int(fam.get('revisions') or 0)}"
-            response = self.router.sail(profile, items, family=fid, key=key, tools=TOOLS,
-                                        effort=str(self.cfg.get("reasoning_effort", "low")),
+            # REVISE (nothing has run this cycle): gym_run alone, and a call is required. READ (a run came back): every tool.
+            revise = not gym_done
+            response = self.router.sail(profile, items, family=fid, key=key, tools=TOOLS_REVISE if revise else TOOLS,
+                                        effort=str(self.cfg.get("reasoning_effort", "minimal")),
                                         max_output=int(self.cfg.get("max_output_tokens", 8000)), cache_key=f"swarm-{fid}",
-                                        cap_usd_day=float(self.cfg.get("family_usd_day", 2.0)))
+                                        cap_usd_day=float(self.cfg.get("family_usd_day", 2.0)),
+                                        tool_choice="required" if revise else "auto")
             out["model_calls"] += 1
             out["cost_usd"] = round(out["cost_usd"] + float(response.cost_usd or 0), 6)
             out["profile"] = profile

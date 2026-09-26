@@ -98,7 +98,12 @@ class ModelCycles(ResearcherCase):
         first = self.sail.bodies[0]
         self.assertEqual(first["prompt_cache_key"], f"swarm-{self.fam['id']}")
         self.assertIn("THE CONTRACT", first["input"][0]["content"])
-        self.assertEqual([t["name"] for t in first["tools"]], ["gym_run", "read_run", "notebook", "graveyard", "submit"])
+        self.assertEqual(([t["name"] for t in first["tools"]], first["tool_choice"]), (["gym_run"], "required"),
+                         "the revise turn runs something")
+        second = self.sail.bodies[1]
+        self.assertEqual(([t["name"] for t in second["tools"]], second["tool_choice"]),
+                         (["gym_run", "read_run", "notebook", "graveyard", "submit"], "auto"), "the read turn has every tool")
+        self.assertEqual(first["reasoning"]["effort"], "minimal")
         self.assertEqual(first["model"], "deepseek-ai/DeepSeek-V4-Flash-0731")
         self.assertEqual(self.store.spent(["sail_model"]) > 0, True)
 
@@ -156,6 +161,14 @@ class ModelCycles(ResearcherCase):
         out = self.researcher().cycle(self.fam["id"])
         self.assertIn("gym_error", out)
         self.assertEqual(self.store.family(self.fam["id"])["revisions"], 2)
+
+    def test_a_runs_note_goes_to_the_notebook(self):
+        self.run_first()
+        self.steps = [{"calls": [("gym_run", {"params": {"vrp_min": 1.3}, "note": "entries were too rare"})]}, {"text": "ok"}]
+        out = self.researcher().cycle(self.fam["id"])
+        self.assertEqual(out["note"], "entries were too rare")
+        self.assertEqual(self.store.notebook(self.fam["id"])[-1]["text"], "entries were too rare")
+        self.assertEqual(self.pool.jobs[-1].params, {"vrp_min": 1.3}, "no code: the latest version with new params")
 
     def test_notes_reach_the_tape_at_most_every_few_cycles(self):
         self.run_first()

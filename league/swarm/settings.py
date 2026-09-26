@@ -29,7 +29,10 @@ DEFAULTS: dict[str, Any] = {
         "top_rewrite_profile": "k3_balanced",
         "top_rewrite_families": 10,
         "stall_revisions": 5,
-        "reasoning_effort": "low",
+        # Measured Sept 26 on a cycle's revise turn: effort low spent 1,800-3,800 reasoning tokens (100-180 s under load);
+        # minimal and none spent none (28-64 s for the same turn, the whole program rewritten). Minimal keeps a cycle
+        # under three minutes; the stall's rewrite thinks harder on a stronger model.
+        "reasoning_effort": "minimal",
         "max_output_tokens": 8000,
         "max_model_calls": 3,          # a cycle's model calls (revise, read, ...)
         "min_call_seconds": 75,         # a later model call starts only with this much of the cycle left
