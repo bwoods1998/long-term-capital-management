@@ -263,7 +263,7 @@ class Researcher:
         model is shown the same facts either way."""
         brief = self.specialty(agent) if self.specialty else ""
         journal = self.journal(agent.id)
-        prior = self._prior_block(agent, session)
+        prior = Researcher._prior_block(self, agent, session)  # callable on a stand-in `self` too (tests pass one)
         pages = "\n".join(f"- [{row['at'][:16]} {row['by']}] {row['text']}" for row in journal)
         return (
             f"You are {agent.id} (family {agent.family}, niche {agent.niche}, generation {agent.generation}).\n"
