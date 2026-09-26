@@ -80,6 +80,20 @@ the old ladder's bands, alerts, credits) publishes nothing.
 | `agents` | <= 160, ids unique: `{id, family, mechanism, structure \| null, band, born_at \| null, retired_at \| null, record: {trials, revisions, forward: tally \| null, real: tally \| null}}`, tally `{trades, wins (<= trades), pnl_usd}`. `band` is `gym candidate probe sized retired`. The page names an agent by its id ("condor-vrp-3" reads "Condor Vrp 3"). |
 | `structures` | <= 100, ids unique: `{id, agent, underlying, structure, legs, expiry, quantity, real, opened_at, max_loss_usd, pnl_usd \| null}`. |
 
+An agent may additionally carry `progress`, either null (unavailable) or
+`{target: candidate|probe|sized|maintain, checks: [{key, done, need}], blocked: null|fixed_reason}`.
+The target's ordered checklist, key and blocker allowlists, and count bounds are defined in
+`league/swarm/progress.py` and mirrored by the site's validator. Binary verdicts use `need: 1`;
+counts are integers clipped at the public requirement. No research statistic, return, quote,
+fitted parameter, raw blocker text or holdout number appears. Progress is checklist completion,
+not a probability or an expected promotion date. Sized's `maintain` has no higher band.
+
+Gym checks bind the selected version to the current Gym image and engine; changed connected-lineage
+trial counts withhold the cached deflated-Sharpe pass. Live-band checks bind the banded version and
+recorded holdout, and count its forward record once per market day (real before shadow before nightly).
+Real trade counts cover that selected version only. Probe sessions use the latest durable promotion
+time and complete exchange sessions. Reading progress never changes a band, grant, order or evidence.
+
 The page shows **Total profit** = `account.equity - performance.start_equity - performance.net_flows`
 only when the account is fresh (within ten minutes of `published_at`) and not stale, and the funding was
 verified within ten minutes; the basis is never one dated before the page's `PERFORMANCE_START_AT` (the

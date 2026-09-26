@@ -413,13 +413,18 @@ def site_agent(value: Any, published_at: str) -> dict[str, Any] | None:
     structure = value.get("structure") if value.get("structure") in STRUCTURE_TYPES else None
     born, retired = site_instant(value.get("born_at")), site_instant(value.get("retired_at"))
     record = value.get("record") if isinstance(value.get("record"), Mapping) else value
-    return {
+    out = {
         "id": agent_id, "family": family, "mechanism": words(value.get("mechanism"), 240), "structure": structure, "band": band,
         "born_at": born if born is not None and _not_after(born, published_at) else None,
         "retired_at": retired if retired is not None and _not_after(retired, published_at) else None,
         "record": {"trials": _count(record.get("trials")) or 0, "revisions": _count(record.get("revisions"), 1_000_000) or 0,
                    "forward": site_tally(record.get("forward")), "real": site_tally(record.get("real"))},
     }
+    if "progress" in value:
+        from .swarm.progress import clean as clean_progress
+
+        out["progress"] = clean_progress(value["progress"], band=band)
+    return out
 
 
 def site_structure(value: Any, published_at: str) -> dict[str, Any] | None:
@@ -875,6 +880,12 @@ class Publisher:
                               and not any(getattr(book, "real_money", False) for book in getattr(house, "books", {}).values()))),
                                 {"as_of": now, "pnl_usd": None}),
         )
+        swarm = getattr(house, "swarm", None)
+        if getattr(swarm, "root", None) is not None:
+            from .swarm.progress import attach as attach_progress
+
+            inputs.agents = self._guard(lambda: attach_progress(inputs.agents, swarm.root,
+                live=getattr(house, "options_live", None), account=inputs.account, now=self.clock()), inputs.agents)
         return inputs
 
     @staticmethod

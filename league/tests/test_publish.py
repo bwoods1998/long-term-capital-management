@@ -56,7 +56,11 @@ def keys_ok(test, body):
         if body[block] is not None:
             test.assertEqual(set(body[block]), ALLOWED_KEYS[block], block)
     for agent in body["agents"]:
-        test.assertEqual(set(agent), ALLOWED_KEYS["agent"])
+        test.assertEqual(set(agent) - {"progress"}, ALLOWED_KEYS["agent"])
+        if agent.get("progress") is not None:
+            from league.swarm.progress import clean as clean_progress
+
+            test.assertEqual(agent["progress"], clean_progress(agent["progress"]))
         test.assertEqual(set(agent["record"]), ALLOWED_KEYS["record"])
         for side in ("forward", "real"):
             if agent["record"][side] is not None:
