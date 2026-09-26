@@ -79,6 +79,7 @@ BROKEN_RESEND_MINUTES = 3    # a broken structure's leg is sent alone at most th
 EXIT_PREEMPT_SECONDS = 120.0
 DECIDER_ORPHAN_SECONDS = 300.0
 MINUTE_OFFSET = 3.0          # seconds into each minute the live step runs
+CALIBRATION_BACKSTOP = 10    # minutes before the close from which the House itself closes a calibration position left open
 DEFAULTS = {
     "enabled": True,
     "thread": True,              # the minute thread (tests drive `minute()` themselves)
@@ -1400,8 +1401,10 @@ class OptionsLive:
                 continue
             rules = day.rules.get(pos.root) or V.rules_for(pos.root, open_minute=day.open_min, close_minute=day.close_min)
             inst = self.instances.get(pos.instance)
-            # The calibration's positions have no family instance: its own ladder closes them (the expiry rules still hold).
-            orphan = (inst is None or inst.fatal) and pos.family != CALIBRATION_FAMILY
+            # The calibration's positions have no family instance: its own ladder closes them (the expiry rules still hold),
+            # and should it fail, the House closes one still open in the session's last `CALIBRATION_BACKSTOP` minutes.
+            orphan = (inst is None or inst.fatal) and (pos.family != CALIBRATION_FAMILY
+                                                       or minute >= day.close_min - CALIBRATION_BACKSTOP)
             expiring = pos.expiry == today
             force_why = self._expiry_close(pos, day, mi, minute)
             if not force_why and orphan:

@@ -181,6 +181,22 @@ class RoundTrip(CalibrationCase):
         self.assertEqual([r["outcome"] for r in self.samples()], ["filled", "cancelled", "cancelled", "filled"])
 
 
+class Backstop(CalibrationCase):
+    def test_a_calibration_position_its_ladder_left_open_is_closed_by_the_house_before_the_close(self):
+        self.venue.fill = "limit"
+        live = self.start(real_money=True)
+        live.calibration._close = lambda *a, **k: None                   # its own ladder broken
+        self.run_to(10, 1)
+        self.assertEqual(len(live.book.positions), 1)
+        self.venue.fill = "natural"
+        self.clock.set(at(MONDAY, 15, 45))
+        self.run_to(15, 49)
+        self.assertEqual(len(live.book.positions), 1, "the House leaves it to the calibration's own ladder until 15:50")
+        self.run_to(15, 51)
+        self.assertEqual(live.book.positions, {}, "from 15:50 the House closes it as it closes an orphan's")
+        self.assertEqual(self.families.forward, {})
+
+
 class Limits(CalibrationCase):
     def test_the_days_fifty_dollars_admit_one_round_trip(self):
         self.venue.fill = "limit"
