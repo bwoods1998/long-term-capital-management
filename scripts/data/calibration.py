@@ -91,7 +91,10 @@ def prepare_pair(*, version: str, api: Any = None, existing: bool = False) -> di
     from league.gym.driver import build_bundle
 
     api = api or bl.client()
-    with process_lock(bl.STATE_DIR / "calibration.lock"):
+    data_box = bl.data_box_id()
+    bl.ensure_running(api, data_box)
+    with process_lock(bl.STATE_DIR / "calibration.lock"), bl.RemoteLease(api, data_box) as lease:
+        lease.check()
         records = bl.read_json(bl.IMAGES)
         gym = (records.get("gym") or {}).get("current")
         gate = (records.get("gate") or {}).get("current")
@@ -115,6 +118,7 @@ def prepare_pair(*, version: str, api: Any = None, existing: bool = False) -> di
             receipt = {**model_receipt(blob), "code_version": code, "prepared_at": bl.now(),
                        "train_checkpoint": gym["checkpoints"][0], "templates": templates}
             for kind, entry in (("gym", gym), ("gate", gate)):
+                lease.check()
                 sealed(api, entry["box_id"], kind)
                 api.exec(entry["box_id"], ["mkdir", "-p", "/data/calibration"], timeout=60).check()
                 api.exec(entry["box_id"], ["chmod", "700", "/data/calibration"], timeout=60).check()
@@ -125,12 +129,15 @@ def prepare_pair(*, version: str, api: Any = None, existing: bool = False) -> di
             checkpoints = {}
             for kind, entry in (("gym", gym), ("gate", gate)):
                 source = entry.get("source_checkpoint") or entry["checkpoints"][0]
-                current = finish(kind, entry["box_id"], version=version, source_checkpoint=source)
+                current = finish(kind, entry["box_id"], version=version, source_checkpoint=source,
+                                 api=api, lease=lease)
                 checkpoints[kind] = current["checkpoints"]
+                lease.check()
                 updated = bl.read_json(bl.IMAGES)
                 updated[kind]["current"]["calibration"] = receipt
                 bl.write_json(bl.IMAGES, updated)
             receipt["checkpoints"] = checkpoints
+            lease.check()
             bl.write_json(bl.STATE_DIR / "calibration.json", receipt)
             return receipt
         finally:

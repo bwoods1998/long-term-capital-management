@@ -91,7 +91,7 @@ class Operations:
             roots = tuple(universe.get("roots") or ())
             if not roots:
                 raise RuntimeError("the full universe has not been recorded")
-            return build(kind, version=version, needs=STAGES, roots=roots)
+            return build(kind, version=version, force=False, needs=STAGES, roots=roots)
 
     def calibrate(self, version: str) -> dict:
         from calibration import prepare_pair

@@ -359,10 +359,18 @@ def _build(kind: str, *, version: str, force: bool, api: Any, sleep: Callable[[f
 
 
 def finish(kind: str, box: str, *, version: str, source_checkpoint: str, ttl_days: int = 365,
-           sleep: Callable[[float], None] = time.sleep) -> dict[str, Any]:
+           sleep: Callable[[float], None] = time.sleep, api: Any = None,
+           lease: Any = None) -> dict[str, Any]:
     """Verify, checkpoint twice and record a fork that `build` already pruned (when a build stopped
     after its prune, e.g. on an interrupted check)."""
-    api = bl.client()
+    api = api or bl.client()
+    if lease is None:
+        data_box = bl.data_box_id()
+        bl.ensure_running(api, data_box)
+        with bl.RemoteLease(api, data_box) as held:
+            return finish(kind, box, version=version, source_checkpoint=source_checkpoint,
+                          ttl_days=ttl_days, sleep=sleep, api=api, lease=held)
+    lease.check()
     bl.ensure_running(api, box)
     if kind == "gate":
         api.upload(box, "/data/store/GATE", f"gate image {version} built {bl.now()}\n".encode(), mode=0o444)
@@ -374,11 +382,13 @@ def finish(kind: str, box: str, *, version: str, source_checkpoint: str, ttl_day
     errors: list[dict[str, Any]] = []
     checkpoints = []
     for label in ("a", "b"):
+        lease.check()
         row = checkpoint_with_retry(api, box, name=f"ltcm-{kind}-image-{version}-{label}", ttl_seconds=ttl_days * 86400,
                                     sleep=sleep, errors=errors)
         checkpoints.append(row["checkpoint_id"])
         say(f"  checkpoint {label}: {row['checkpoint_id']}")
     api.sleep(box)
+    lease.check()
     record = bl.read_json(bl.IMAGES)
     previous = (record.get(kind) or {}).get("current") or {}
     entry = {**(previous if previous.get("box_id") == box else {}),

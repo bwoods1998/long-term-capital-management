@@ -1,6 +1,7 @@
 """The private-model receipt and resumable full-store stages, with synthetic metadata only."""
 
 import datetime as dt
+import inspect
 import json
 import sys
 import tempfile
@@ -53,9 +54,24 @@ class CalibrationReceipt(unittest.TestCase):
             initial = {kind: {"current": {"box_id": "sb_" + kind, "checkpoints": ["old-" + kind, "old-backup"]}}
                        for kind in ("gym", "gate")}
             bl.write_json(bl.IMAGES, initial)
+            bl.write_json(bl.DATA_BOX, {"box_id": "sb_data"})
             api = API()
             calls = []
+            class Lease:
+                held = False
+                def __init__(self, client, box):
+                    self_box.assertEqual(box, "sb_data")
+                def __enter__(self):
+                    self.held = True
+                    return self
+                def check(self):
+                    assert self.held
+                def __exit__(self, *args):
+                    self.held = False
+            self_box = self
             def finish(kind, box, **kwargs):
+                kwargs["lease"].check()
+                self.assertIs(kwargs["api"], api)
                 self.assertEqual(api.files["sb_gym", calibration.MODEL_PATH], blob)
                 self.assertEqual(api.files["sb_gate", calibration.MODEL_PATH], blob)
                 calls.append(kind)
@@ -63,11 +79,26 @@ class CalibrationReceipt(unittest.TestCase):
                 records[kind]["current"]["checkpoints"] = ["new-" + kind, "backup-" + kind]
                 bl.write_json(bl.IMAGES, records)
                 return records[kind]["current"]
-            with patch.object(calibration, "fit_on_gym", return_value=(blob, "engine")), patch.object(images, "finish", finish):
+            with patch.object(calibration, "fit_on_gym", return_value=(blob, "engine")), \
+                    patch.object(images, "finish", finish), patch.object(bl, "RemoteLease", Lease):
                 receipt = calibration.prepare_pair(version="test", api=api)
             self.assertEqual(calls, ["gym", "gate"])
             self.assertEqual(receipt["checkpoints"]["gym"], ["new-gym", "backup-gym"])
             self.assertNotIn("hazard", receipt)
+
+    def test_lost_global_lease_prevents_any_checkpoint_publication(self):
+        with tempfile.TemporaryDirectory() as tmp, bl.using_state(Path(tmp)):
+            bl.write_json(bl.DATA_BOX, {"box_id": "sb_data"})
+            lease = SimpleNamespace(check=lambda: (_ for _ in ()).throw(RuntimeError("lost lease")))
+            class LostLease:
+                def __enter__(self): return lease
+                def __exit__(self, *args): pass
+            api = SimpleNamespace(get=lambda box: {"status": "running"})
+            with patch.object(bl, "RemoteLease", return_value=LostLease()), patch.object(images, "finish") as finish:
+                with self.assertRaisesRegex(RuntimeError, "lost lease"):
+                    calibration.prepare_pair(version="test", api=api)
+            finish.assert_not_called()
+            self.assertFalse((bl.STATE_DIR / "calibration.json").exists())
 
 
 class CompletionReadiness(unittest.TestCase):
@@ -133,9 +164,12 @@ class CompletionReadiness(unittest.TestCase):
             bl.write_json(bl.UNIVERSE, {"roots": ["SPY"]})
             ops = object.__new__(complete.Operations)
             ops.state = state
+            signature = inspect.signature(images.build)
             def build(kind, **kwargs):
+                # Bind the real function's required keywords, even though Sail calls are mocked.
+                signature.bind(kind, **kwargs)
                 self.assertEqual(kwargs["needs"], complete.STAGES)
-                self.assertNotIn("force", kwargs)
+                self.assertIs(kwargs["force"], False)
                 entry = {"box_id": "sb_new_gate", "checkpoints": ["a", "b"]}
                 bl.write_json(bl.IMAGES, {kind: {"current": entry}})
                 return entry

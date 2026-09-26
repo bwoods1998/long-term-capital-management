@@ -189,6 +189,12 @@ class RemoteLease:
                 self.failed = True
                 return
 
+    def check(self) -> None:
+        """Reconfirm ownership before mutating or publishing an image."""
+        if self.failed or not self.command("renew"):
+            self.failed = True
+            raise RuntimeError("the data operation lease was lost; refusing image publication")
+
     def __exit__(self, kind, value, traceback):
         self.stop.set()
         if self.worker:
