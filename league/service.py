@@ -216,7 +216,9 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
     # enabled: the House then seats no agent of its own (`Settings.births`), builds no old researcher, provider or
     # Merton, and runs the swarm's step (`league/swarm/hook.py`: it keeps `python -m league.swarm run` alive beside the
     # loop, mirrors the swarm's events into the ledger and reads its bands). Never in a canary.
-    swarm_on = bool((config.get("swarm") or {}).get("enabled")) and not canary
+    from .swarm import settings as swarm_settings
+
+    swarm_on = bool(swarm_settings.load(root, config=config).get("enabled")) and not canary  # config < <root>/swarm.json
     if swarm_on:
         research = merton = False
     gateway_url = config["gateway_url"]

@@ -40,7 +40,7 @@
     "enabled": false
   },
   "swarm": {
-    "_about": "The swarm (Wave 4): researchers, the tournament and bandit, the architect and the gate, plugged into the House's tick as House.swarm (league/house.py PLUGGABLE_STEPS). A placeholder until the swarm's builder fills it; nothing reads it yet.",
+    "_about": "The swarm (Wave 4, league/swarm/): 48 researcher families in the Gym, the hourly tournament and bandit, the architect, the gate. Its own process beside the House (python -m league.swarm run), kept alive by the House's swarm step. Every key here (league/swarm/settings.py DEFAULTS) can be overridden without a deploy in <state>/swarm.json, including enabled and the gym block's image_checkpoint/gate_checkpoint; a change of enabled takes a House restart (it decides births and the old research at build). Enabled, the House seats no agent of its own and builds no old research or Merton.",
     "enabled": false
   }
 }
