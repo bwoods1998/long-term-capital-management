@@ -121,6 +121,22 @@ class Plan(unittest.TestCase):
         self.assertTrue(all(t.job == "back" for t in six))
 
 
+class RootHistory(unittest.TestCase):
+    def test_meta_was_listed_as_fb_before_the_ticker_change(self):
+        self.assertEqual(sl.source_root("META", D(2022, 6, 8)), "FB")
+        self.assertEqual(sl.source_root("META", D(2022, 6, 9)), "META")
+        self.assertEqual(sl.source_root("SPY", D(2022, 1, 3)), "SPY")
+
+    def test_an_invalidated_task_is_pending_again(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = sl.Journal(Path(tmp) / "j.jsonl")
+            task = sl.Task(4, "day", "META", D(2022, 1, 7))
+            journal.append({"type": "task", "stage": 4, "task": task.id, "status": "ok"})
+            self.assertEqual(sl.pending([task], journal), [])
+            journal.append({"type": "task", "stage": 4, "task": task.id, "status": "invalidated"})
+            self.assertEqual(sl.pending([task], journal), [task])
+
+
 class Paths(unittest.TestCase):
     def test_paths_round_trip_and_refuse_junk(self):
         rel = sl.rel_path("nbbo", "SPY", D(2024, 3, 13))

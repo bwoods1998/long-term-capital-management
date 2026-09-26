@@ -68,6 +68,20 @@ def window_of(day: dt.date) -> str:
     return "gap"  # 2025-01-01 and 2026-01-01 are holidays; nothing lands here
 
 
+#: A root whose options were listed under another symbol before a date: (first day of the new
+#: symbol, the older symbol). Facebook's options were FB until META took the ticker on 2022-06-09;
+#: before that, the symbol META belonged to the Roundhill Ball Metaverse ETF (a different underlying).
+ROOT_HISTORY: dict[str, tuple[tuple[dt.date, str], ...]] = {"META": ((dt.date(2022, 6, 9), "FB"),)}
+
+
+def source_root(root: str, day: dt.date) -> str:
+    """The ThetaData symbol that carried this root's options on `day` (the store keeps `root`)."""
+    for first_day, older in ROOT_HISTORY.get(root, ()):
+        if day < first_day:
+            return older
+    return root
+
+
 def strike_range(root: str) -> int:
     return int(STRIKE_RANGE.get(root, DEFAULT_STRIKE_RANGE))
 
@@ -362,11 +376,17 @@ class Journal:
                     yield row
 
     def done(self) -> dict[str, dict[str, Any]]:
-        """Finished tasks by `stage:id`, the last record winning."""
+        """Finished tasks by `stage:id`, the last record winning; an `invalidated` record (a task whose
+        result was wrong, e.g. fetched under the wrong root) makes it pending again."""
         out: dict[str, dict[str, Any]] = {}
         for row in self.records():
-            if row.get("type") == "task" and row.get("status") in ("ok", "empty"):
-                out[f"{row.get('stage')}:{row.get('task')}"] = row
+            if row.get("type") != "task":
+                continue
+            key = f"{row.get('stage')}:{row.get('task')}"
+            if row.get("status") in ("ok", "empty"):
+                out[key] = row
+            elif row.get("status") == "invalidated":
+                out.pop(key, None)
         return out
 
     def files(self) -> dict[str, dict[str, Any]]:

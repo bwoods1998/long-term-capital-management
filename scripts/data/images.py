@@ -66,9 +66,12 @@ import json, os, pathlib, subprocess
 out = {}
 out["key_file"] = os.path.exists("/data/secrets/thetadata.env") or os.path.exists("/data/secrets")
 # A key LINE (the name assigned a value), not source code that merely names the variable.
-hits = subprocess.run(["grep", "-rIlE", r"THETADATA_API_KEY[[:space:]]*=[[:space:]]*[A-Za-z0-9_-]{8,}",
+# Parquet in the store is columnar data we wrote ourselves; every other file is searched.
+hits = subprocess.run(["grep", "-rIlE", "--exclude=*.parquet", r"THETADATA_API_KEY[[:space:]]*=[[:space:]]*[A-Za-z0-9_-]{8,}",
                        "/data", "/root", "/tmp", "/home", "/etc", "/var/tmp"], capture_output=True, text=True).stdout.split()
 out["key_mentions"] = hits
+out["store_non_parquet"] = sorted(str(p) for p in pathlib.Path("/data/store").rglob("*")
+                                  if p.is_file() and p.suffix != ".parquet" and p.name not in ("VERSION", "GATE"))
 store = pathlib.Path("/data/store")
 dates = sorted(p.stem for p in store.glob("*/*/*.parquet"))
 out["files"] = len(dates)
@@ -138,13 +141,25 @@ def stage_done(journal_lines: list[dict[str, Any]], stages: tuple[int, ...], pla
     return {str(s): {"done": done.get(str(s), 0), "planned": plan_counts.get(str(s))} for s in stages}
 
 
-def verify_inside(api: Any, box: str, kind: str) -> dict[str, Any]:
+def verify_inside(api: Any, box: str, kind: str, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, Any]:
     net = api.exec(box, ["/opt/data-venv/bin/python", "-c", NETWORK_PROBE], timeout=120)
-    inside = api.exec(box, ["/opt/data-venv/bin/python", "-c", INSIDE_CHECK], timeout=600)
-    try:
-        facts = json.loads(inside.stdout.strip().splitlines()[-1])
-    except (ValueError, IndexError):
-        raise SystemExit(f"the inside check failed on {box}: {inside.output[-1500:]}")
+    # Detached and polled: on a store of 20,000 files the check outlived one exec stream (Sept 26 14:31Z).
+    api.upload(box, "/root/inside_check.py", INSIDE_CHECK.encode(), mode=0o600)
+    api.exec(box, "rm -f /root/inside_check.json; setsid nohup /opt/data-venv/bin/python /root/inside_check.py "
+                  "> /root/inside_check.json 2> /root/inside_check.err < /dev/null &", timeout=60, background=True)
+    facts = None
+    for _ in range(120):
+        sleep(10)
+        out = api.exec(box, ["bash", "-c", "cat /root/inside_check.json 2>/dev/null"], timeout=60).stdout.strip()
+        if out:
+            try:
+                facts = json.loads(out.splitlines()[-1])
+                break
+            except ValueError:
+                pass
+    err = api.exec(box, ["bash", "-c", "cat /root/inside_check.err 2>/dev/null; rm -f /root/inside_check.*"], timeout=60).stdout
+    if facts is None:
+        raise SystemExit(f"the inside check did not finish on {box}: {err[-1500:]}")
     lines = net.stdout.strip().splitlines()
     facts["network"] = lines
     problems = []
@@ -152,6 +167,8 @@ def verify_inside(api: Any, box: str, kind: str) -> dict[str, Any]:
         problems.append("a connection out did not fail")
     if facts["key_file"] or facts["key_mentions"]:
         problems.append("a key file or a key line is present")
+    if facts.get("store_non_parquet"):
+        problems.append(f"unexpected files in the store: {facts['store_non_parquet'][:5]}")
     if facts["processes"]:
         problems.append("a data process is running")
     if kind == "gym":
@@ -219,7 +236,7 @@ def wait_until_complete(kind: str, *, poll: float = 120.0, api: Any = None, slee
 
 def build(kind: str, *, version: str, force: bool, api: Any = None, sleep: Callable[[float], None] = time.sleep,
           ttl_days: int = 365, rehearsal: bool = False, keep: bool = False,
-          needs: tuple[int, ...] | None = None) -> dict[str, Any]:
+          needs: tuple[int, ...] | None = None, roots: tuple[str, ...] | None = None) -> dict[str, Any]:
     """Build one image. `rehearsal` runs every step on whatever the store holds now, then
     terminates the fork and records the result under `rehearsals` (never as the current image).
     One build at a time: each stops and restarts the data box's backfill around its checkpoint."""
@@ -229,11 +246,12 @@ def build(kind: str, *, version: str, force: bool, api: Any = None, sleep: Calla
     with open(bl.STATE_DIR / "images.lock", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         return _build(kind, version=version, force=force, api=api, sleep=sleep, ttl_days=ttl_days,
-                      rehearsal=rehearsal, keep=keep, needs=needs)
+                      rehearsal=rehearsal, keep=keep, needs=needs, roots=roots)
 
 
 def _build(kind: str, *, version: str, force: bool, api: Any, sleep: Callable[[float], None],
-           ttl_days: int, rehearsal: bool, keep: bool, needs: tuple[int, ...] | None = None) -> dict[str, Any]:
+           ttl_days: int, rehearsal: bool, keep: bool, needs: tuple[int, ...] | None = None,
+           roots: tuple[str, ...] | None = None) -> dict[str, Any]:
     api = api or bl.client()
     spec = dict(KINDS[kind])
     if needs:
@@ -279,7 +297,8 @@ def _build(kind: str, *, version: str, force: bool, api: Any, sleep: Callable[[f
     seal(api, box)
     api.exec(box, ["bash", "-c", "pkill -f 'backfill.py|universe.py|multiprocessing' ; rm -f /data/work/backfill.pid; true"], timeout=60)
     # 4. prune
-    pruned = bl.run_py(api, box, f"backfill.py prune {spec['prune']}", timeout=3600).check()
+    prune_args = spec["prune"] + (f" --roots {','.join(roots)}" if roots else "")
+    pruned = bl.run_py(api, box, f"backfill.py prune {prune_args}", timeout=3600).check()
     say(f"  pruned: {pruned.stdout.strip().splitlines()[-1]}")
     if kind == "gate":
         # The mark league.gym.store.mint_gate_capability requires; only the gate image carries it.
@@ -318,9 +337,42 @@ def _build(kind: str, *, version: str, force: bool, api: Any, sleep: Callable[[f
     entry = {
         "version": version, "box_id": box, "checkpoints": checkpoints, "source_checkpoint": source["checkpoint_id"],
         "built_at": bl.now(), "ttl_days": ttl_days, "sealed": {"no_network": True}, "windows": list(spec["keep"]),
-        "stages_at_build": have, "checkpoint_errors": errors, "gate_mark": facts["gate_mark"], "verified": {k: facts[k] for k in ("files", "first_date", "last_date", "manifest_rows",
+        "stages_at_build": have, "roots": list(roots) if roots else "all", "checkpoint_errors": errors, "gate_mark": facts["gate_mark"], "verified": {k: facts[k] for k in ("files", "first_date", "last_date", "manifest_rows",
                                                                     "manifest_windows", "network", "version")},
     }
+    record.setdefault(kind, {}).update({"current": entry})
+    record[kind].setdefault("history", []).append(entry)
+    bl.write_json(bl.IMAGES, record)
+    return entry
+
+
+def finish(kind: str, box: str, *, version: str, source_checkpoint: str, ttl_days: int = 365,
+           sleep: Callable[[float], None] = time.sleep) -> dict[str, Any]:
+    """Verify, checkpoint twice and record a fork that `build` already pruned (when a build stopped
+    after its prune, e.g. on an interrupted check)."""
+    api = bl.client()
+    bl.ensure_running(api, box)
+    if kind == "gate":
+        api.upload(box, "/data/store/GATE", f"gate image {version} built {bl.now()}\n".encode(), mode=0o444)
+    facts = verify_inside(api, box, kind, sleep=sleep)
+    say(f"  inside: {json.dumps({k: facts[k] for k in ('passed', 'problems', 'files', 'first_date', 'last_date', 'manifest_windows')})}")
+    if not facts["passed"]:
+        api.sleep(box)
+        raise SystemExit(f"the {kind} image failed its checks; the fork {box} is asleep for inspection")
+    errors: list[dict[str, Any]] = []
+    checkpoints = []
+    for label in ("a", "b"):
+        row = checkpoint_with_retry(api, box, name=f"ltcm-{kind}-image-{version}-{label}", ttl_seconds=ttl_days * 86400,
+                                    sleep=sleep, errors=errors)
+        checkpoints.append(row["checkpoint_id"])
+        say(f"  checkpoint {label}: {row['checkpoint_id']}")
+    api.sleep(box)
+    record = bl.read_json(bl.IMAGES)
+    entry = {"version": version, "box_id": box, "checkpoints": checkpoints, "source_checkpoint": source_checkpoint,
+             "built_at": bl.now(), "ttl_days": ttl_days, "sealed": {"no_network": True}, "windows": list(KINDS[kind]["keep"]),
+             "checkpoint_errors": errors, "gate_mark": facts["gate_mark"], "finished_by": "images.py finish",
+             "verified": {k: facts[k] for k in ("files", "first_date", "last_date", "manifest_rows", "manifest_windows",
+                                                "network", "version")}}
     record.setdefault(kind, {}).update({"current": entry})
     record[kind].setdefault("history", []).append(entry)
     bl.write_json(bl.IMAGES, record)
@@ -354,19 +406,31 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--rehearsal", action="store_true", help="every step on the store as it is; the fork is terminated")
     b.add_argument("--keep", action="store_true", help="with --rehearsal: leave the fork asleep (for a nightly rehearsal)")
     b.add_argument("--when-complete", action="store_true", help="wait until the data box holds what the image needs")
+    b.add_argument("--roots", default="", help="keep only these roots (default: every root in the store)")
     b.add_argument("--needs", default="", help="the stages that must be complete (default gym 1, gate 1,2); "
                                                 "Gym v2: 1,3,5 (2022 and the trade_quote samples)")
     v = sub.add_parser("verify")
     v.add_argument("kind", choices=sorted(KINDS))
     v.add_argument("--checkpoint", default=None)
+    f = sub.add_parser("finish", help="verify, checkpoint and record a fork a build already pruned")
+    f.add_argument("kind", choices=sorted(KINDS))
+    f.add_argument("--box", required=True)
+    f.add_argument("--version", required=True)
+    f.add_argument("--source-checkpoint", required=True)
+    f.add_argument("--ttl-days", type=int, default=365)
     sub.add_parser("status")
     args = parser.parse_args(argv)
     if args.cmd == "build":
         needs = tuple(int(x) for x in args.needs.split(",") if x.strip()) or None
         if args.when_complete:
             wait_until_complete(args.kind, needs=needs)
+        roots = tuple(r.strip() for r in args.roots.split(",") if r.strip()) or None
         print(json.dumps(build(args.kind, version=args.version, force=args.force or args.rehearsal,
-                               ttl_days=args.ttl_days, rehearsal=args.rehearsal, keep=args.keep, needs=needs), indent=1))
+                               ttl_days=args.ttl_days, rehearsal=args.rehearsal, keep=args.keep, needs=needs,
+                               roots=roots), indent=1))
+    elif args.cmd == "finish":
+        print(json.dumps(finish(args.kind, args.box, version=args.version, source_checkpoint=args.source_checkpoint,
+                                ttl_days=args.ttl_days), indent=1))
     elif args.cmd == "verify":
         print(json.dumps(verify(args.kind, args.checkpoint), indent=1))
     else:

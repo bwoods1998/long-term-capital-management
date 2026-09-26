@@ -328,9 +328,11 @@ class Listings:
     def expiries(self, task: sl.Task, theta: "Theta", max_dte: int) -> list[dt.date]:
         import frames as fr
 
+        symbol = sl.source_root(task.root, task.day)
         group = sorted(set(self.peers(task)) | {task.root}) if self.peers else [task.root]
-        if len(group) == 1:
-            listed = theta.call("option_list_contracts", "quote", task.day, task.root, max_dte=max_dte)
+        group = [r for r in group if sl.source_root(r, task.day) == r]
+        if symbol != task.root or len(group) <= 1:
+            listed = theta.call("option_list_contracts", "quote", task.day, symbol, max_dte=max_dte)
             return fr.expirations(listed, task.day, max_dte=max_dte) if listed is not None else []
         key = (task.day, task.stage)
         with self.guard:
@@ -371,6 +373,8 @@ def run_task(task: sl.Task, theta: Theta, store: Store, calendar: sl.Calendar) -
     fetched = sl.utc_now()
     written: list[dict[str, Any]] = []
     rng = sl.strike_range(task.root)
+    symbol = sl.source_root(task.root, task.day)  # FB for META before 2022-06-09; the store keeps task.root
+    via = "" if symbol == task.root else f" (listed as {symbol})"
 
     def put(kind: str, frame: Any, source: str) -> None:
         rows, digest, size = fr.write(frame, store.path(kind, task.root, task.day))
@@ -383,9 +387,9 @@ def run_task(task: sl.Task, theta: Theta, store: Store, calendar: sl.Calendar) -
         if not expiries:
             return {"status": "empty", "why": "no contracts quoted"}
         store.save_expiries(task.root, task.day, expiries)
-        source = f"thetadata option_history_quote 1m exp=* max_dte={sl.MAX_DTE} strike_range={rng}"
+        source = f"thetadata option_history_quote 1m exp=* max_dte={sl.MAX_DTE} strike_range={rng}{via}"
         try:
-            chunks = theta.call_raw("option_history_quote", task.root, "*", interval="1m", date=task.day,
+            chunks = theta.call_raw("option_history_quote", symbol, "*", interval="1m", date=task.day,
                                     strike_range=rng, max_dte=sl.MAX_DTE, **window)
         except Exception as error:  # noqa: BLE001 - one server-side defect has been seen (XSP 2022-06-29)
             if _grpc_code(error) != "INVALID_ARGUMENT":
@@ -396,7 +400,7 @@ def run_task(task: sl.Task, theta: Theta, store: Store, calendar: sl.Calendar) -
             chunks, refused = [], []
             for expiry in [e for e in expiries if (e - task.day).days <= sl.MAX_DTE]:
                 try:
-                    part = theta.call_raw("option_history_quote", task.root, expiry, interval="1m", date=task.day,
+                    part = theta.call_raw("option_history_quote", symbol, expiry, interval="1m", date=task.day,
                                           strike_range=rng, **window)
                 except Exception as inner:  # noqa: BLE001
                     if _grpc_code(inner) != "INVALID_ARGUMENT":
@@ -419,18 +423,18 @@ def run_task(task: sl.Task, theta: Theta, store: Store, calendar: sl.Calendar) -
         under = None
         for expiry in [e for e in expiries if e >= task.day][:3]:
             # Calls only: the same underlying series at half the request time (measured Sept 26).
-            greeks = theta.call("option_history_greeks_first_order", task.root, expiry, interval="1m",
+            greeks = theta.call("option_history_greeks_first_order", symbol, expiry, interval="1m",
                                 date=task.day, strike_range=1, right="call", **window)
             if greeks is not None:
                 under = fr.underlying(greeks, open_min=open_min, close_min=close_min)
                 if under.height:
-                    put("underlying", under, f"thetadata option_history_greeks_first_order underlying_price exp={expiry.isoformat()} strike_range=1 calls")
+                    put("underlying", under, f"thetadata option_history_greeks_first_order underlying_price exp={expiry.isoformat()} strike_range=1 calls{via}")
                     break
-        oi = theta.call("option_history_open_interest", task.root, "*", date=task.day, max_dte=sl.MAX_DTE, strike_range=rng)
+        oi = theta.call("option_history_open_interest", symbol, "*", date=task.day, max_dte=sl.MAX_DTE, strike_range=rng)
         if oi is not None:
             oi_frame = fr.open_interest(oi, task.day, max_dte=sl.MAX_DTE)
             if oi_frame.height:
-                put("oi", oi_frame, f"thetadata option_history_open_interest exp=* max_dte={sl.MAX_DTE} strike_range={rng}")
+                put("oi", oi_frame, f"thetadata option_history_open_interest exp=* max_dte={sl.MAX_DTE} strike_range={rng}{via}")
         for record in written:
             store.journal.append(record)
         kinds = [r["kind"] for r in written]
@@ -439,7 +443,7 @@ def run_task(task: sl.Task, theta: Theta, store: Store, calendar: sl.Calendar) -
 
     if task.job == "chk":
         # The agreement check's contracts: the day's NBBO into a side directory, never the store.
-        chunks = theta.call_raw("option_history_quote", task.root, "*", interval="1m", date=task.day,
+        chunks = theta.call_raw("option_history_quote", symbol, "*", interval="1m", date=task.day,
                                 strike_range=rng, max_dte=sl.MAX_DTE, **window)
         if not chunks:
             return {"status": "empty", "why": "no quotes"}
@@ -453,11 +457,11 @@ def run_task(task: sl.Task, theta: Theta, store: Store, calendar: sl.Calendar) -
         import frames as fr
         import polars as pl
 
-        listed = theta.call("option_list_contracts", "quote", task.day, task.root, max_dte=10)
+        listed = theta.call("option_list_contracts", "quote", task.day, symbol, max_dte=10)
         expiries = [e for e in (fr.expirations(listed, task.day, max_dte=10) if listed is not None else []) if e > task.day][:3]
         parts = []
         for expiry in expiries:
-            raw = theta.call("option_history_quote", task.root, expiry, interval="1s", date=task.day, strike_range=15,
+            raw = theta.call("option_history_quote", symbol, expiry, interval="1s", date=task.day, strike_range=15,
                              start_time="12:25:00", end_time=_hms(close_min))
             if raw is None or not raw.height:
                 continue
@@ -473,7 +477,7 @@ def run_task(task: sl.Task, theta: Theta, store: Store, calendar: sl.Calendar) -
         return {"status": "ok", "rows": rows, "expiries": [e.isoformat() for e in expiries], "side": str(target)}
 
     if task.job == "tq":
-        chunks = theta.call_raw("option_history_trade_quote", task.root, "*", date=task.day, max_dte=sl.TQ_MAX_DTE,
+        chunks = theta.call_raw("option_history_trade_quote", symbol, "*", date=task.day, max_dte=sl.TQ_MAX_DTE,
                                 strike_range=sl.TQ_STRIKE_RANGE, exclusive=True, **window)
         if not chunks:
             return {"status": "empty", "why": "no trades"}
@@ -495,7 +499,7 @@ def run_task(task: sl.Task, theta: Theta, store: Store, calendar: sl.Calendar) -
         far = [e for e in expiries if sl.MAX_DTE < (e - task.day).days <= sl.BACK_MONTH_DTE]
         groups = []
         for expiry in far:
-            chunks = theta.call_raw("option_history_quote", task.root, expiry, interval="1m", date=task.day,
+            chunks = theta.call_raw("option_history_quote", symbol, expiry, interval="1m", date=task.day,
                                     strike_range=rng, **window)
             if chunks:
                 groups.append(chunks)
@@ -506,7 +510,7 @@ def run_task(task: sl.Task, theta: Theta, store: Store, calendar: sl.Calendar) -
                 written.append(sl.file_record("nbbo", task.root, task.day, rows=built["rows"], sha256=built["sha256"],
                                               size=built["bytes"], fetched_at=fetched,
                                               source=f"thetadata option_history_quote 1m max_dte={sl.MAX_DTE} strike_range={rng} + back months to {sl.BACK_MONTH_DTE} DTE by expiry"))
-        oi = theta.call("option_history_open_interest", task.root, "*", date=task.day, max_dte=sl.BACK_MONTH_DTE, strike_range=rng)
+        oi = theta.call("option_history_open_interest", symbol, "*", date=task.day, max_dte=sl.BACK_MONTH_DTE, strike_range=rng)
         if oi is not None:
             oi_frame = fr.open_interest(oi, task.day, max_dte=sl.BACK_MONTH_DTE)
             if oi_frame.height:
@@ -641,13 +645,15 @@ class Runner:
 
 
 # ------------------------------------------------------------------------------ compile, prune, adopt
-def compile_store(store: Store, calendar: sl.Calendar, *, windows: Sequence[str] | None = None) -> dict[str, int]:
+def compile_store(store: Store, calendar: sl.Calendar, *, windows: Sequence[str] | None = None,
+                  roots: Sequence[str] | None = None) -> dict[str, int]:
     """VERSION, calendar.parquet, expiries.parquet and manifest.parquet, from the journal."""
     import frames as fr
 
     store.root.mkdir(parents=True, exist_ok=True)
     (store.root / "VERSION").write_text(sl.STORE_VERSION + "\n")
-    files = [r for r in store.journal.files().values() if windows is None or r.get("window") in windows]
+    files = [r for r in store.journal.files().values() if (windows is None or r.get("window") in windows)
+             and (roots is None or r.get("root") in roots)]
     files = [r for r in files if (store.root / r["path"]).exists()]
     days = sorted({sl.as_date(r["date"]) for r in files})
     cal_rows = []
@@ -661,6 +667,8 @@ def compile_store(store: Store, calendar: sl.Calendar, *, windows: Sequence[str]
     base = store.work / "expiries"
     if base.exists():
         for root_dir in sorted(p for p in base.iterdir() if p.is_dir()):
+            if roots is not None and root_dir.name not in roots:
+                continue
             for path in sorted(root_dir.glob("*.json")):
                 day = dt.date.fromisoformat(path.stem)
                 if windows is not None and sl.window_of(day) not in windows:
@@ -706,7 +714,7 @@ GATE_WORK_KEEP = ("journal.jsonl", "expiries", "calendar.json")
 
 
 def prune(store: Store, keep: Sequence[str], *, drop_key: bool, drop_work: bool, calendar: sl.Calendar,
-          keep_journal: bool = False) -> dict[str, Any]:
+          keep_journal: bool = False, roots: Sequence[str] | None = None) -> dict[str, Any]:
     """Delete every store file outside `keep` (by the date in its path) and every file the journal
     does not know (a rename a killed run never journaled), recompile, then optionally delete the
     key and the working area. Used on a fork that becomes the Gym image or the gate image."""
@@ -721,20 +729,20 @@ def prune(store: Store, keep: Sequence[str], *, drop_key: bool, drop_work: bool,
                 continue
             rel = str(path.relative_to(store.root))
             parsed = sl.parse_rel_path(rel)
-            if parsed is None or sl.window_of(parsed[2]) not in keep:
+            if parsed is None or sl.window_of(parsed[2]) not in keep or (roots is not None and parsed[1] not in roots):
                 path.unlink()
                 removed += 1
             elif rel not in known:
                 path.unlink()
                 orphans += 1
-    report = compile_store(store, calendar, windows=keep)
+    report = compile_store(store, calendar, windows=keep, roots=roots)
     if drop_work:
         shutil.rmtree(store.work, ignore_errors=True)
         shutil.rmtree("/data/run", ignore_errors=True)
     elif keep_journal:
         # The journal keeps only the kept windows' records, so the image never lists a file it lacks.
         records = [r for r in store.journal.records()
-                   if r.get("type") != "file" or r.get("window") in keep]
+                   if r.get("type") != "file" or (r.get("window") in keep and (roots is None or r.get("root") in roots))]
         for child in store.work.iterdir():
             if child.name not in GATE_WORK_KEEP:
                 shutil.rmtree(child) if child.is_dir() else child.unlink()
@@ -785,6 +793,33 @@ def adopt(store: Store, records_path: str, calendar: sl.Calendar) -> dict[str, A
             cache.write_text(json.dumps(record["calendar"]))
             calendar = sl.Calendar.from_json(record["calendar"]["exceptions"])
     return {"adopted": ok, **compile_store(store, calendar)}
+
+
+def invalidate(store: Store, root: str, before: dt.date, why: str) -> dict[str, Any]:
+    """Undo a root's results before a date (e.g. fetched under a symbol that was another underlying
+    then): the files are deleted and journaled as removed, the tasks journaled as invalidated so the
+    next run fetches them again, and the day's expiry lists dropped."""
+    removed, tasks = 0, 0
+    for rel, record in store.journal.files().items():
+        if record["root"] == root and sl.as_date(record["date"]) < before:
+            try:
+                (store.root / rel).unlink()
+            except FileNotFoundError:
+                pass
+            store.journal.append({"type": "removed", "path": rel, "why": why, "at": sl.utc_now()})
+            removed += 1
+    for key, record in store.journal.done().items():
+        _, _, rest = key.partition(":")
+        job, task_root, day = rest.split(":")
+        if task_root == root and dt.date.fromisoformat(day) < before:
+            store.journal.append({"type": "task", "stage": record.get("stage"), "task": record.get("task"),
+                                  "status": "invalidated", "why": why, "at": sl.utc_now()})
+            tasks += 1
+            try:
+                store.expiries_path(root, dt.date.fromisoformat(day)).unlink()
+            except FileNotFoundError:
+                pass
+    return {"files_removed": removed, "tasks_invalidated": tasks}
 
 
 def verify(store: Store) -> dict[str, Any]:
@@ -853,11 +888,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     pr.add_argument("--drop-key", action="store_true")
     pr.add_argument("--drop-work", action="store_true")
     pr.add_argument("--keep-journal", action="store_true", help="keep the journal, expiries and calendar (gate image)")
+    pr.add_argument("--roots", default="", help="keep only these roots (an image carries only complete roots)")
     rc = sub.add_parser("records", help="one day's file records (JSON lines) for a nightly copy")
     rc.add_argument("--date", required=True)
     ad = sub.add_parser("adopt")
     ad.add_argument("--records", required=True)
     sub.add_parser("verify")
+    inv = sub.add_parser("invalidate", help="delete a root's results before a date and queue them again")
+    inv.add_argument("--root", required=True)
+    inv.add_argument("--before", required=True)
+    inv.add_argument("--why", required=True)
     sm = sub.add_parser("sample", help="export some Train root-days as a store-layout tarball")
     sm.add_argument("--roots", required=True)
     sm.add_argument("--days", required=True)
@@ -973,8 +1013,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(compile_store(store, calendar)))
     elif args.cmd == "prune":
         keep = [w.strip() for w in args.keep.split(",") if w.strip()]
+        roots = [r.strip() for r in args.roots.split(",") if r.strip()] or None
         print(json.dumps(prune(store, keep, drop_key=args.drop_key, drop_work=args.drop_work, calendar=calendar,
-                               keep_journal=args.keep_journal)))
+                               keep_journal=args.keep_journal, roots=roots)))
     elif args.cmd == "records":
         for record in day_records(store, dt.date.fromisoformat(args.date)):
             print(json.dumps(record, sort_keys=True, default=str))
@@ -982,6 +1023,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(adopt(store, args.records, calendar)))
     elif args.cmd == "verify":
         print(json.dumps(verify(store)))
+    elif args.cmd == "invalidate":
+        print(json.dumps(invalidate(store, args.root, dt.date.fromisoformat(args.before), args.why)))
     elif args.cmd == "sample":
         import tarfile
 

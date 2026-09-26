@@ -165,6 +165,21 @@ class ImagesPrune(unittest.TestCase):
             self.assertLessEqual(pl.read_parquet(store.root / "calendar.parquet")["date"].max(), dt.date(2025, 12, 31))
             self.assertFalse(store.work.exists())
 
+    def test_a_roots_filter_keeps_only_complete_roots(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bf, store, cal, orphan = self.build(tmp)
+            import frames as fr
+
+            frame, _ = fr.nbbo(raw_quotes(), DAY, open_min=570, close_min=960, max_dte=14)
+            rows, digest, size = fr.write(frame, store.path("nbbo", "META", DAY))
+            store.journal.append(sl.file_record("nbbo", "META", DAY, rows=rows, sha256=digest, size=size,
+                                                source="t", fetched_at="2026-09-26T00:00:00Z"))
+            store.save_expiries("META", DAY, [DAY])
+            bf.prune(store, ["train", "validation"], drop_key=False, drop_work=False, calendar=cal, roots=["SPY"])
+            self.assertEqual(sorted({p.parent.name for p in store.root.glob("nbbo/*/*.parquet")}), ["SPY"])
+            self.assertEqual(set(pl.read_parquet(store.root / "manifest.parquet")["root"].to_list()), {"SPY"})
+            self.assertEqual(set(pl.read_parquet(store.root / "expiries.parquet")["root"].to_list()), {"SPY"})
+
     def test_gate_prune_keeps_everything_and_a_consistent_journal(self):
         with tempfile.TemporaryDirectory() as tmp:
             bf, store, cal, orphan = self.build(tmp)
@@ -233,3 +248,28 @@ class GroupedListings(unittest.TestCase):
         self.assertEqual(results["QQQ"], [dt.date(2024, 3, 15)])  # not in the group answer: fetched alone
         self.assertEqual(sum(1 for c in calls if isinstance(c, list)), 1)
         self.assertEqual([c for c in calls if not isinstance(c, list)], ["QQQ"])
+
+
+@unittest.skipIf(pl is None, "polars/pyarrow are not installed here (they are on the data box)")
+class Invalidate(unittest.TestCase):
+    def test_invalidate_removes_files_and_requeues(self):
+        import backfill as bf
+        import frames as fr
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = bf.Store(str(Path(tmp) / "store"), str(Path(tmp) / "work"))
+            frame, _ = fr.nbbo(raw_quotes(), DAY, open_min=570, close_min=960, max_dte=14)
+            days = [dt.date(2022, 1, 7), dt.date(2022, 6, 10)]
+            for day in days:
+                rows, digest, size = fr.write(frame, store.path("nbbo", "META", day))
+                store.journal.append(sl.file_record("nbbo", "META", day, rows=rows, sha256=digest, size=size,
+                                                    source="t", fetched_at="2026-09-26T00:00:00Z"))
+                store.journal.append({"type": "task", "stage": 4, "task": f"day:META:{day.isoformat()}", "status": "ok"})
+                store.save_expiries("META", day, [day])
+            got = bf.invalidate(store, "META", dt.date(2022, 6, 9), "wrong underlying")
+            self.assertEqual(got, {"files_removed": 1, "tasks_invalidated": 1})
+            self.assertFalse(store.path("nbbo", "META", days[0]).exists())
+            self.assertTrue(store.path("nbbo", "META", days[1]).exists())
+            self.assertEqual(list(store.journal.files()), ["nbbo/META/2022-06-10.parquet"])
+            self.assertNotIn("4:day:META:2022-01-07", store.journal.done())
+            self.assertIsNone(store.load_expiries("META", days[0]))
