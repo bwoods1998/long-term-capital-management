@@ -7,7 +7,7 @@
 - OPENAI (`ModelRouter.ask`): GPT-6 through the gateway (`league.frontier.Frontier`), used only when the
   gateway's month has room above the reserve (`FrontierMonth.remaining`) AND the swarm's own OpenAI
   spend is under its cap (plan: $150 for the burst). A refusal, an error or no room falls back to the
-  role's Sail profile. Flex (`service_tier: "flex"`) is asked for when the gateway supports it (Wave 5).
+  role's Sail profile. Nonurgent roles request Flex; the latency-sensitive audit requests standard.
 - Every settled cost is a `spend` row (kind `sail_model` or `openai`, by family).
 
 Standard library only.
@@ -177,6 +177,25 @@ class ModelRouter:
             db.close()
 
     # ------------------------------------------------------------------ OpenAI
+    def _require_committed_store(self) -> None:
+        try:
+            with self.store._lock:
+                pending = self.store._db.in_transaction
+        except Exception:
+            raise ModelError("model dispatch requires a readable budget store") from None
+        if pending:
+            raise ModelError("model dispatch cannot run inside an uncommitted store transaction")
+
+    def _openai_cap_room(self) -> float:
+        try:
+            cap = Decimal(str(self.settings.get("guard", {}).get("openai_cap_usd", 150.0)))
+            spent = Decimal(str(self.store.spent(["openai"])))
+            if not cap.is_finite() or not spent.is_finite() or cap < 0:
+                return 0.0
+            return float(max(Decimal(0), cap - max(Decimal(0), spent)))
+        except (ArithmeticError, ValueError, TypeError):
+            return 0.0
+
     def openai_room(self) -> float:
         """Dollars the swarm may still spend on OpenAI now: the lower of the gateway month's room above the
         reserve and what is left of the swarm's own cap. 0 when the month cannot be read."""
@@ -185,41 +204,77 @@ class ModelRouter:
             return 0.0
         try:
             remaining = self.month.remaining()
+            remaining = Decimal(str(remaining))
+            reserve = Decimal(str(guard.get("openai_reserve_usd", 5.0)))
+            if not remaining.is_finite() or not reserve.is_finite() or reserve < 0:
+                return 0.0
         except Exception:  # noqa: BLE001 - unreadable is no room
-            remaining = None
-        if remaining is None:
             return 0.0
-        month_room = float(Decimal(str(remaining))) - float(guard.get("openai_reserve_usd", 5.0))
-        cap_room = float(guard.get("openai_cap_usd", 150.0)) - self.store.spent(["openai"])
-        return max(0.0, min(month_room, cap_room))
+        return max(0.0, min(float(remaining - reserve), self._openai_cap_room()))
 
     def ask(self, *, role: str, system: str, user: str, family: str | None, key: str, openai_model: str | None, sail_profile: str,
             max_output: int = 8000, effort: str = "medium", need_usd: float = 1.0, desk: str | None = None,
             cap_usd_day: float | None = None) -> dict[str, Any]:
         """A one-shot question for a role (the architect, the reviewer, the auditor, a rewrite). OpenAI first when it has
-        `need_usd` of room, else (or on any refusal) Sail. `desk` and `cap_usd_day` are the Provider's fuse for the Sail
-        call (a family's role gets its own small one; the swarm's floor cap otherwise). An OpenAI call books a hold of
-        `need_usd` BEFORE it is sent and settles it after (a refusal to $0; a call lost in flight keeps the hold), so the
-        swarm's OpenAI cap never undercounts. Returns {text, json, route, model, cost_usd}."""
+        room for both `need_usd` and the actual request's standard-service maximum, else (or on any refusal) Sail.
+        `desk` and `cap_usd_day` are the Provider's fuse for the Sail call. Admission and the durable hold are atomic
+        across store connections; verified cost settles it, a 4xx refusal releases it, and an unknown bill retains it.
+        Unknown cost is reported as None with held_usd, never as a free answer."""
+        self._require_committed_store()
         errors = []
-        if openai_model and self.openai_room() >= need_usd:
-            hold = float(need_usd)
-            self.store.add_spend("openai", hold, family=family, detail={"role": role, "hold": key[:120]})
+        hold = None
+        if openai_model:
+            from ..frontier import request_body, reservation_ceiling
+
+            try:
+                need = Decimal(str(need_usd))
+                if not need.is_finite() or need < 0:
+                    raise ValueError("invalid OpenAI minimum reservation")
+                tier = "default" if role == "audit" else "flex"
+                body = request_body(openai_model, [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                                    max_output_tokens=max_output, effort=effort, service_tier=tier, role=role)
+                required = float(max(need, reservation_ceiling(body)))
+                room = self.openai_room()  # network refresh must not hold the shared SQLite write transaction
+                if room >= required:
+                    admitted = False
+                    with self.store.atomic():
+                        if min(room, self._openai_cap_room()) >= required:
+                            self.store.add_spend("openai", required, family=family,
+                                                 detail={"role": role, "hold": key[:120], "service_tier_requested": tier,
+                                                         "max_output_tokens": body["max_output_tokens"]})
+                            admitted = True
+                    if admitted:  # only after the outer transaction's commit succeeds
+                        hold = required
+            except Exception as exc:  # noqa: BLE001 - invalid/unknown admission falls back without dispatch
+                errors.append(f"openai admission: {type(exc).__name__}: {str(exc)[:160]}")
+        if hold is not None:
             try:
                 frontier = self.frontier_factory(openai_model)  # type: ignore[misc]
-                answer = frontier.ask(system=system, user=user, agent=f"swarm-{role}", max_output_tokens=min(int(max_output), 16000),
-                                      effort=effort)
-                cost = float(answer.cost_usd or 0)
-                self.store.add_spend("openai", cost - hold, family=family, detail={"role": role, "model": openai_model, "settles": key[:120]})
-                if answer.status == "completed" and answer.text.strip():
+                answer = frontier.ask(system=system, user=user, agent=f"swarm-{role}", max_output_tokens=body["max_output_tokens"],
+                                      effort=effort, role=role, service_tier=tier)
+                verified = getattr(answer, "cost_verified", False) is True and getattr(answer, "model", None) == openai_model
+                cost = None
+                if verified:
+                    amount = Decimal(str(answer.cost_usd))
+                    verified = amount.is_finite() and amount >= 0
+                    if verified:
+                        cost = float(amount)
+                        self.store.add_spend("openai", cost - hold, family=family,
+                                             detail={"role": role, "model": openai_model, "settles": key[:120],
+                                                     "service_tier": getattr(answer, "service_tier", None)})
+                if answer.status == "completed" and answer.text.strip() and getattr(answer, "model", None) == openai_model:
                     return {"text": answer.text, "json": extract_json(answer.text), "route": "openai", "model": openai_model,
-                            "cost_usd": cost}
+                            "cost_usd": cost, "cost_verified": verified, "held_usd": 0.0 if verified else hold,
+                            "service_tier": getattr(answer, "service_tier", None)}
                 errors.append(f"openai answered {answer.status}")
             except Exception as exc:  # noqa: BLE001 - every OpenAI failure falls back to Sail
                 status = getattr(exc, "status", None)
                 if isinstance(status, int) and 400 <= status < 500:
                     self.store.add_spend("openai", -hold, family=family, detail={"role": role, "refused": status})
                 errors.append(f"openai: {type(exc).__name__}: {str(exc)[:160]}")
+        # A failed COMMIT/ROLLBACK may have left the admission store unusable. Do not turn that
+        # failure into another paid call on the fallback provider.
+        self._require_committed_store()
         items = [{"role": "system", "content": system}, {"role": "user", "content": user}]
         try:
             response = self.sail(sail_profile, items, family=desk or family or "swarm", key=key, effort=effort, max_output=max_output,

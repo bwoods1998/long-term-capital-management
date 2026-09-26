@@ -21,7 +21,10 @@ from typing import Any, Callable
 MODEL = "gpt-6-astra"
 COST_HEADER = "X-LTCM-Cost-USD"
 AGENT_HEADER = "X-LTCM-Agent"
+ROLE_HEADER = "X-LTCM-Role"
 MAX_OUTPUT_TOKENS = 16000
+# Mirrors the existing gateway role ceiling; it does not change a funded allowance.
+ROLE_OUTPUT_TOKENS = {"postmortem": 64000}
 # Verified standard-service ceilings, including long-context cache writes. Kept outside
 # game.json: agents may choose a model, but cannot supply the price used to admit its bill.
 # https://developers.openai.com/api/docs/pricing (2026-09-20), dollars / million tokens.
@@ -51,6 +54,7 @@ class Answer:
     model: str
     status: str = 'completed'
     cost_verified: bool = True
+    service_tier: str | None = None
 
     def json(self) -> dict[str, Any]:
         """The first JSON object in the answer. Raises FrontierError when there is none."""
@@ -65,6 +69,43 @@ def attribution(name: str) -> str:
     was unattributed for its colon)."""
     clean = re.sub(r"[^a-z0-9_-]+", "-", str(name or "").lower()).strip("-_")[:64]
     return clean or "house"
+
+
+def output_limit(role: str | None = None) -> int:
+    """Only an explicit, valid role can request the gateway's larger output ceiling."""
+    if role is not None and (not isinstance(role, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", role)):
+        raise FrontierError("invalid frontier role")
+    return ROLE_OUTPUT_TOKENS.get(role, MAX_OUTPUT_TOKENS)
+
+
+def request_body(model: str, messages: list[dict[str, Any]], *, max_output_tokens: int = 6000,
+                 effort: str = "medium", service_tier: str | None = None, role: str | None = None,
+                 cache: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The text-only gateway request, shared by dispatch and conservative reservation."""
+    if service_tier not in (None, "default", "flex"):
+        raise FrontierError("invalid frontier service tier")
+    body = {"model": model, "input": list(messages),
+            "max_output_tokens": max(1, min(int(max_output_tokens), output_limit(role))),
+            "reasoning": {"effort": effort}}
+    if service_tier is not None:
+        body["service_tier"] = service_tier
+    for name in ("prompt_cache_key", "prompt_cache_options"):
+        if cache and cache.get(name) is not None:
+            body[name] = cache[name]
+    return body
+
+
+def reservation_ceiling(body: dict[str, Any]) -> Decimal:
+    """Standard-service worst case, even when flex is requested or a cache may hit."""
+    model = body.get("model")
+    if model not in MODEL_CEILINGS:
+        raise FrontierError("no verified price for this frontier model")
+    input_rate, output_rate = MODEL_CEILINGS[model]
+    size = len(json.dumps(body).encode("utf-8"))
+    value = (Decimal(size + 4096) * input_rate + Decimal(body["max_output_tokens"]) * output_rate) / 1000000
+    # The gateway rounds binary floating-point prices upward to whole micro-dollars. Its
+    # rounding can be one micro-dollar above exact Decimal arithmetic at an integer boundary.
+    return value.quantize(Decimal("0.000001"), rounding="ROUND_CEILING") + Decimal("0.000001")
 
 
 def extract_json(text: str) -> dict[str, Any]:
@@ -103,41 +144,36 @@ class Frontier:
         self.timeout = timeout
         self.spend_guard = spend_guard
 
-    def ask(self, *, system: str, user: str, agent: str, max_output_tokens: int = 6000, effort: str = "medium") -> Answer:
+    def ask(self, *, system: str, user: str, agent: str, max_output_tokens: int = 6000, effort: str = "medium",
+            service_tier: str | None = None, role: str | None = None) -> Answer:
         return self.converse([{"role": "system", "content": system}, {"role": "user", "content": user}],
-                             agent=agent, max_output_tokens=max_output_tokens, effort=effort)
+                             agent=agent, max_output_tokens=max_output_tokens, effort=effort,
+                             service_tier=service_tier, role=role)
 
     def converse(self, messages: list[dict[str, Any]], *, agent: str, max_output_tokens: int = 6000, effort: str = "medium",
-                 cache: dict[str, Any] | None = None) -> Answer:
+                 cache: dict[str, Any] | None = None, service_tier: str | None = None, role: str | None = None) -> Answer:
         """One call over a list of text messages, optionally with prompt-cache hints.
 
         `cache` carries `prompt_cache_key` / `prompt_cache_options` exactly as the Responses API
         names them; the gateway admits only bounded values (gateway/lib/frontier.mjs). A cached
         prefix changes the bill only through the usage block the gateway settles from."""
-        body = {
-            "model": self.model,
-            "input": list(messages),
-            "max_output_tokens": max(1, min(int(max_output_tokens), MAX_OUTPUT_TOKENS)),
-            "reasoning": {"effort": effort},
-        }
-        for name in ("prompt_cache_key", "prompt_cache_options"):
-            if cache and cache.get(name) is not None:
-                body[name] = cache[name]
+        body = request_body(self.model, messages, max_output_tokens=max_output_tokens, effort=effort,
+                            service_tier=service_tier, role=role, cache=cache)
+        headers = {"Authorization": "Bearer " + self.token_source(), "Content-Type": "application/json",
+                   AGENT_HEADER: attribution(agent), "User-Agent": "ltcm-floor/1.0"}
+        if role is not None:
+            headers[ROLE_HEADER] = role
         request = urllib.request.Request(
             self.url, data=json.dumps(body).encode("utf-8"), method="POST",
-            headers={"Authorization": "Bearer " + self.token_source(), "Content-Type": "application/json",
-                     AGENT_HEADER: attribution(agent), "User-Agent": "ltcm-floor/1.0"},
+            headers=headers,
         )
         commitment = "frontier:" + secrets.token_hex(16)
         if self.spend_guard is not None:
             from .campaigns import CampaignClosed
 
-            if self.model not in MODEL_CEILINGS:
-                raise FrontierError("the campaign has no verified price for this model")
             # One UTF-8 byte per possible input token plus framing, including the long-context
-            # and cache-write premiums. Standard service only; no built-in paid tools.
-            input_rate, output_rate = MODEL_CEILINGS[self.model]
-            hold = (Decimal(len(request.data) + 4096) * input_rate + Decimal(body["max_output_tokens"]) * output_rate) / 1000000
+            # and cache-write premiums. No flex discount until the gateway verifies the answer.
+            hold = reservation_ceiling(body)
             try:
                 self.spend_guard.reserve(commitment, "foundation-review", hold)
             except CampaignClosed as exc:
@@ -185,7 +221,8 @@ class Frontier:
             except InvalidOperation:
                 pass  # unknown costs retain the full hold, including across restarts
         return Answer(output_text(payload), cost_usd, dict(payload.get("usage") or {}), str(payload.get("model") or self.model),
-                      str(payload.get('status') or 'completed'), verified)
+                      str(payload.get('status') or 'completed'), verified,
+                      payload.get('service_tier') if payload.get('service_tier') in ('default', 'flex') else None)
 
 
 class FrontierMonth:

@@ -14,7 +14,8 @@ import unittest
 import urllib.error
 from decimal import Decimal
 
-from league.frontier import AGENT_HEADER, COST_HEADER, MAX_OUTPUT_TOKENS, MODEL, Answer, Frontier, FrontierError, extract_json, output_text
+from league.frontier import (AGENT_HEADER, COST_HEADER, MAX_OUTPUT_TOKENS, MODEL, ROLE_HEADER, Answer,
+                             Frontier, FrontierError, extract_json, output_text, request_body, reservation_ceiling)
 
 GATEWAY = "https://gateway.example.test"
 SECRET = "gw-token-5f1c-DO-NOT-LEAK"
@@ -153,6 +154,14 @@ class ReadingTheAnswer(unittest.TestCase):
         self.assertIsInstance(answer.cost_usd, Decimal)
         self.assertEqual(answer.usage, {"input_tokens": 10, "output_tokens": 5})
         self.assertEqual(answer.model, MODEL)
+
+    def test_reported_tier_is_observed_never_inferred_from_the_request(self):
+        for reported, expected in (("flex", "flex"), ("default", "default"), (None, None), ("unknown", None)):
+            with self.subTest(reported=reported):
+                answer = frontier(FakeOpener(ok(service_tier=reported))).ask(
+                    system="s", user="u", agent="swarm-architect", service_tier="flex", role="architect")
+                self.assertEqual(answer.service_tier, expected)
+                self.assertEqual(answer.cost_usd, Decimal("0.0421"))
 
     def test_a_missing_or_unreadable_cost_header_is_zero(self):
         for cost in (None, "", "free", "1,5", "$0.04"):
@@ -321,6 +330,87 @@ class Settlement(unittest.TestCase):
         with self.assertRaises(FrontierError):
             frontier(FakeOpener(TimeoutError("slow")), spend_guard=guard).ask(system="s", user="u", agent="a")
         self.assertEqual(guard.settled, {})  # the provider may have billed a call it received
+
+
+class ServiceRouting(unittest.TestCase):
+    def test_nonurgent_role_and_flex_are_carried_in_the_actual_request(self):
+        opener = FakeOpener(ok(service_tier="flex"))
+        frontier(opener).converse([{"role": "user", "content": "packet"}], agent="swarm-architect",
+                                 role="architect", service_tier="flex", cache={"prompt_cache_key": "architect"})
+        self.assertEqual(opener.headers()[ROLE_HEADER.lower()], "architect")
+        self.assertEqual(opener.body()["service_tier"], "flex")
+        self.assertEqual(opener.body()["prompt_cache_key"], "architect")
+
+    def test_standard_audit_is_explicit(self):
+        opener = FakeOpener(ok(service_tier="default"))
+        frontier(opener).ask(system="s", user="u", agent="swarm-audit", role="audit", service_tier="default")
+        self.assertEqual(opener.body()["service_tier"], "default")
+        self.assertEqual(opener.headers()[ROLE_HEADER.lower()], "audit")
+
+    def test_postmortem_ceiling_requires_explicit_role_not_attribution(self):
+        for role, agent, limit in ((None, "swarm-postmortem", 16000), ("architect", "swarm-postmortem", 16000),
+                                  ("postmortem", "house", 64000), ("postmortem-other", "house", 16000)):
+            with self.subTest(role=role, agent=agent):
+                opener = FakeOpener(ok())
+                frontier(opener).ask(system="s", user="u", agent=agent, role=role, max_output_tokens=100000)
+                self.assertEqual(opener.body()["max_output_tokens"], limit)
+
+    def test_invalid_options_are_rejected_before_credentials_or_dispatch(self):
+        for option in ({"service_tier": "priority"}, {"service_tier": "auto"}, {"service_tier": False},
+                       {"role": "postmortem\nX-Header: value"}, {"role": "Postmortem"}, {"role": True}):
+            with self.subTest(option=option):
+                def no_credentials():
+                    self.fail("invalid request reached credential lookup")
+                opener = FakeOpener()
+                with self.assertRaises(FrontierError):
+                    Frontier(GATEWAY, no_credentials, opener=opener).ask(system="s", user="u", agent="a", **option)
+                self.assertEqual(opener.calls, [])
+
+    def test_flex_holds_standard_worst_case_for_the_actual_large_request(self):
+        guard = Settlement.Guard()
+        opener = FakeOpener(ok(cost="0.04", service_tier="flex"))
+        frontier(opener, spend_guard=guard).ask(system="s", user="\N{SNOWMAN}" * 100, agent="postmortem",
+                                               role="postmortem", service_tier="flex", max_output_tokens=64000)
+        held = next(iter(guard.reserved.values()))
+        minimum = (Decimal(len(opener.request.data) + 4096) * 25 + Decimal(64000) * 75) / 1000000
+        self.assertGreaterEqual(held, minimum)
+        self.assertGreaterEqual(held - minimum, Decimal("0.000001"))
+        self.assertLess(held - minimum, Decimal("0.000002"))
+        self.assertGreater(held, Decimal("4.80"))
+        self.assertEqual(list(guard.settled.values()), [Decimal("0.04")])
+
+    def test_flex_refusal_is_free_and_not_retried_at_another_tier(self):
+        guard = Settlement.Guard()
+        refusal = http_error(429, "Resource Unavailable")
+        self.addCleanup(refusal.close)
+        opener = FakeOpener(refusal)
+        with self.assertRaises(FrontierError) as raised:
+            frontier(opener, spend_guard=guard).ask(system="s", user="u", agent="a", service_tier="flex")
+        self.assertEqual(raised.exception.status, 429)
+        self.assertEqual(len(opener.calls), 1)
+        self.assertEqual(list(guard.settled.values()), [Decimal(0)])
+
+    def test_unverified_flex_cost_retains_the_full_large_hold(self):
+        guard = Settlement.Guard()
+        answer = frontier(FakeOpener(ok(cost=None, service_tier="flex")), spend_guard=guard).ask(
+            system="s", user="u", agent="postmortem", role="postmortem", max_output_tokens=64000, service_tier="flex")
+        self.assertFalse(answer.cost_verified)
+        self.assertEqual(guard.settled, {})
+        self.assertGreater(next(iter(guard.reserved.values())), Decimal("4.80"))
+
+    def test_unpriced_model_cannot_supply_a_reservation(self):
+        body = request_body("unpriced-model", [{"role": "user", "content": "u"}])
+        with self.assertRaises(FrontierError):
+            reservation_ceiling(body)
+
+    def test_ceiling_includes_gateway_binary_rounding_at_a_microdollar_boundary(self):
+        body = request_body("gpt-6-sol", [{"role": "user", "content": ""}],
+                            role="postmortem", max_output_tokens=64000)
+        # Reproduced against gateway/lib/frontier.mjs: 4225 body bytes reserve $1.001606,
+        # one micro-dollar above the exact $1.001605 arithmetic result.
+        body["input"][0]["content"] = "x" * (4225 - len(json.dumps(body).encode()))
+        self.assertEqual(len(json.dumps(body).encode()), 4225)
+        self.assertGreaterEqual(reservation_ceiling(body), Decimal("1.001606"))
 
 
 if __name__ == "__main__":

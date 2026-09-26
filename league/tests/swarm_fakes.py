@@ -172,8 +172,10 @@ class FakeFrontier:
         self.model, self.text, self.cost, self.fail = model, text, cost, fail
         self.asked = asked if asked is not None else []
 
-    def ask(self, *, system: str, user: str, agent: str, max_output_tokens: int = 6000, effort: str = "medium") -> Any:
-        self.asked.append({"model": self.model, "system": system, "user": user, "agent": agent})
+    def ask(self, *, system: str, user: str, agent: str, max_output_tokens: int = 6000, effort: str = "medium",
+            service_tier: str | None = None, role: str | None = None) -> Any:
+        self.asked.append({"model": self.model, "system": system, "user": user, "agent": agent,
+                           "service_tier": service_tier, "role": role, "max_output_tokens": max_output_tokens})
         if self.fail is not None:
             raise self.fail
 
@@ -182,6 +184,7 @@ class FakeFrontier:
 
         a = Answer()
         a.text, a.cost_usd, a.status = self.text, Decimal(self.cost), "completed"
+        a.model, a.cost_verified, a.service_tier = self.model, True, service_tier
         return a
 
 
