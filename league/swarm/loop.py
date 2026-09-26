@@ -326,6 +326,10 @@ class Swarm:
         finally:
             self.stop.set()
             self.pool.stop()
+            try:  # a stopped swarm leaves no box awake (the next one adopts and wakes them)
+                self.pool.scale_to_zero(f"the swarm stopped: {self.why_stopped or 'asked'}")
+            except Exception:  # noqa: BLE001
+                pass
             self.store.event("swarm.status", None, {"action": "stopped", "why": self.why_stopped or "asked"})
             self.heartbeat({"stopped": self.why_stopped or "asked"})
             log(f"stopped: {self.why_stopped or 'asked'}")

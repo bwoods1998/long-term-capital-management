@@ -107,6 +107,8 @@ class GymPool:
         self._stopping = False
         self.stats = {"batches": 0, "jobs": 0, "failed_jobs": 0, "program_years": 0.0, "seconds": 0.0}
         self._counter = itertools.count(1)
+        self.fork_failures: dict[str, int] = {}
+        self.fork_after: dict[str, float] = {}
 
     # ------------------------------------------------------------------ settings
     @property
@@ -189,6 +191,7 @@ class GymPool:
         except Exception as exc:  # noqa: BLE001
             with self._lock:
                 self.boxes.pop(placeholder, None)
+            self._failed_fork(kind)
             self.store.event("swarm.pool", None, {"action": "fork_failed", "kind": kind, "image": image, "error": str(exc)[:300]})
             return
         box = Box(box_id, kind, str(image), "starting", last_used=self.clock(), booked_at=self.clock())
@@ -216,6 +219,7 @@ class GymPool:
             box.roots = tuple(sorted(r for r, row in (report.get("roots") or {}).items() if row and row.get("nbbo")))
         except Exception as exc:  # noqa: BLE001
             box.state = "failed"
+            self._failed_fork(kind)
             self.store.set_box_state(box_id, "failed")
             self.store.event("swarm.pool", None, {"action": "box_failed", "box": box_id, "kind": kind, "error": str(exc)[:400]})
             try:
@@ -225,11 +229,18 @@ class GymPool:
             return
         with self._wake:
             box.state = "ready"
+            self.fork_failures[kind] = 0
             self._wake.notify_all()
         self.store.upsert_box(box_id, kind=kind, version=str(image), state="ready", detail={"name": name, "roots": list(box.roots),
                                                                                            "bundle": getattr(box.driver, "version", None)})
         self.store.event("swarm.pool", None, {"action": "box_ready", "box": box_id, "kind": kind, "roots": list(box.roots)})
         self._spawn(box)
+
+    def _failed_fork(self, kind: str) -> None:
+        """Back off after a fork that failed or a box that never became ready: 60 s, doubling to 30 minutes."""
+        with self._lock:
+            self.fork_failures[kind] = self.fork_failures.get(kind, 0) + 1
+            self.fork_after[kind] = self.clock() + min(1800.0, 60.0 * 2 ** (self.fork_failures[kind] - 1))
 
     def _spawn(self, box: Box) -> None:
         if self.threaded:
@@ -392,6 +403,9 @@ class GymPool:
                 target = min(int(g.get("max_boxes", 8)), max(int(g.get("start_boxes", 4)), math.ceil(demand / per)))
             else:
                 target = 1
+            if now < self.fork_after.get(kind, 0.0):
+                out["fork_backoff"] = round(self.fork_after[kind] - now)
+                continue  # the last fork failed: wait (a bad image must not become a storm of paid boxes)
             for _ in range(max(0, target - len(available))):
                 out["started"] += 1
                 if self.threaded:

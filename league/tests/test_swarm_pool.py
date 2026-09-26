@@ -194,6 +194,24 @@ class Boxes(PoolCase):
         box.state = "ready"
         self.assertEqual(pool.scale_to_zero("brake"), 1)
 
+    def test_a_failed_fork_backs_off_instead_of_forking_again(self):
+        class Refusing(FakeSail):
+            def from_checkpoint(self, checkpoint, *, name, timeout=900.0):
+                self.forks.append((checkpoint, None))
+                raise RuntimeError("checkpoint not found")
+
+        self.sail = Refusing()
+        pool = self.pool(start_boxes=2)
+        pool.submit(job("a"))
+        pool.manage()
+        self.assertEqual(len(self.sail.forks), 2)
+        out = pool.manage()
+        self.assertEqual(len(self.sail.forks), 2, "no storm")
+        self.assertGreater(out["fork_backoff"], 0)
+        self.clock.advance(3600)
+        pool.manage()
+        self.assertEqual(len(self.sail.forks), 4)
+
     def test_no_image_no_gym(self):
         pool = self.pool(image_checkpoint=None)
         pool.submit(job("a"))
