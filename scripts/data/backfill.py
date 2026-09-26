@@ -361,6 +361,16 @@ def run_task(task: sl.Task, theta: Theta, store: Store, calendar: sl.Calendar) -
         return {"status": "ok" if "nbbo" in kinds else "empty", "files": kinds, "expiries": len(expiries),
                 "nbbo": stats, "why": None if "nbbo" in kinds else "no NBBO rows"}
 
+    if task.job == "chk":
+        # The agreement check's contracts: the day's NBBO into a side directory, never the store.
+        chunks = theta.call_raw("option_history_quote", task.root, "*", interval="1m", date=task.day,
+                                strike_range=rng, max_dte=sl.MAX_DTE, **window)
+        if not chunks:
+            return {"status": "empty", "why": "no quotes"}
+        target = store.work / "check-store" / sl.rel_path("nbbo", task.root, task.day)
+        built = _offload(build_nbbo, chunks, task.day, str(target), open_min=open_min, close_min=close_min, max_dte=sl.MAX_DTE)
+        return {"status": "ok" if built["rows"] else "empty", "rows": built["rows"], "side": str(target)}
+
     if task.job == "tq":
         chunks = theta.call_raw("option_history_trade_quote", task.root, "*", date=task.day, max_dte=sl.TQ_MAX_DTE,
                                 strike_range=sl.TQ_STRIKE_RANGE, exclusive=True, **window)
@@ -650,6 +660,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     run.add_argument("--stages", default="1,2,3,4,5,6")
     run.add_argument("--first", default="")
     run.add_argument("--names-file", default=None)
+    run.add_argument("--checks", default="", help="ROOT:DAY,... fetched first into /data/work/check-store")
     run.add_argument("--threads", type=int, default=8, help="task threads; more than the slots, so decoding overlaps fetching")
     run.add_argument("--decoders", type=int, default=6, help="processes that decode and write the big frames")
     run.add_argument("--slots", type=int, default=None, help="write this to the slots file first")
@@ -704,7 +715,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             calendar = store.calendar(theta)
             stages = [int(s) for s in args.stages.split(",") if s.strip()]
             names_file = args.names_file or (str(store.work / "universe.json") if (store.work / "universe.json").exists() else None)
-            tasks = sl.plan(calendar, stages=stages, names=_names(names_file), first=_first(args.first))
+            tasks = sl.plan(calendar, stages=stages, names=_names(names_file), first=_first(args.first),
+                            checks=_first(args.checks))
             (store.work / "plan.json").write_text(json.dumps({"stages": stages, "tasks": len(tasks), "first": args.first,
                                                               "names": _names(names_file), "at": sl.utc_now()}))
             log.info("run: stages %s, %d tasks, threads %d, decoders %d", stages, len(tasks), args.threads, args.decoders)

@@ -190,7 +190,7 @@ class Task:
 
 #: The jobs: `day` = NBBO + underlying + OI + listed expiries for a root-day (0-14 DTE);
 #: `tq` = the trade_quote sample; `back` = the 15-45 DTE back months merged into the day's NBBO.
-JOBS = ("day", "tq", "back")
+JOBS = ("day", "tq", "back", "chk")
 
 STAGES: dict[int, str] = {
     1: "core five, 2023-2025 (Train's later part and Validation)",
@@ -209,10 +209,13 @@ def plan(
     names: Sequence[str] = (),
     first: Sequence[tuple[str, dt.date]] = (),
     core: Sequence[str] = CORE_FIVE,
+    checks: Sequence[tuple[str, dt.date]] = (),
 ) -> list[Task]:
-    """Every task in the plan's order. `first` puts some root-days of stage 1 at the head (the
-    Gym builder's sample). Within stage 1: 2024, then 2025, then 2023, each day across the roots,
-    so every root grows together and the Gym can start on any of them."""
+    """Every task in the plan's order. `checks` (stage 0, job `chk`) fetch root-days for the
+    agreement check into a side directory, never the store. `first` puts some root-days at the head
+    (the Gym builder's sample; each in the stage its date belongs to, if that stage is planned).
+    Within stage 1: 2024, then 2025, then 2023, each day across the roots, so every root grows
+    together and the Gym can start on any of them."""
 
     def days(a: dt.date, b: dt.date) -> list[dt.date]:
         return calendar.days(a, b)
@@ -226,9 +229,13 @@ def plan(
             seen.add(key)
             out.append(task)
 
+    for root, day in checks:
+        if calendar.is_trading(day):
+            add(Task(0, "chk", root, day))
     for root, day in first:
-        if 1 in stages and calendar.is_trading(day):
-            add(Task(1, "day", root, day))
+        stage = stage_of(root, day, core)
+        if stage in stages and calendar.is_trading(day):
+            add(Task(stage, "day", root, day))
     if 1 in stages:
         for a, b in ((dt.date(2024, 1, 1), dt.date(2024, 12, 31)), VALIDATION, (dt.date(2023, 1, 1), dt.date(2023, 12, 31))):
             for day in days(a, b):
@@ -261,6 +268,20 @@ def plan(
                 for root in BACK_MONTH_ROOTS:
                     add(Task(6, "back", root, day))
     return out
+
+
+def stage_of(root: str, day: dt.date, core: Sequence[str] = CORE_FIVE) -> int | None:
+    """Which stage fetches this root-day's NBBO (None: no stage does)."""
+    window = window_of(day)
+    if root not in core:
+        return 4 if window in ("train", "validation", "holdout") else None
+    if window == "holdout":
+        return 2
+    if window == "train" and day.year == 2022:
+        return 3
+    if window in ("train", "validation") and day.year >= 2023:
+        return 1
+    return None
 
 
 # ------------------------------------------------------------------------------ journal

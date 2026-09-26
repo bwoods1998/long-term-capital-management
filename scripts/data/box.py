@@ -127,6 +127,8 @@ def cmd_start(args: argparse.Namespace) -> int:
     extra = f"--stages {shlex.quote(args.stages)} --threads {int(args.threads)}"
     if args.first:
         extra += f" --first {shlex.quote(args.first)}"
+    if args.checks:
+        extra += f" --checks {shlex.quote(args.checks)}"
     if args.slots is not None:
         extra += f" --slots {int(args.slots)}"
     # A string command, detached (Sail's `background`) and in its own session, so the exec's
@@ -148,7 +150,8 @@ def cmd_stop(args: argparse.Namespace) -> int:
     api = bl.client()
     box = bl.data_box_id()
     result = api.exec(box, ["bash", "-c", "p=$(cat /data/work/backfill.pid 2>/dev/null); "
-                                          "if [ -n \"$p\" ] && kill -0 $p 2>/dev/null; then kill $p; echo stopped $p; else echo not running; fi"],
+                                          "if [ -n \"$p\" ] && kill -0 $p 2>/dev/null; then kill -- -$p 2>/dev/null || kill $p; echo stopped $p; "
+                                          "else echo not running; fi; pkill -f 'multiprocessing.spawn' 2>/dev/null; true"],
                       timeout=60)
     say(result.stdout.strip())
     return 0
@@ -219,6 +222,7 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("start")
     s.add_argument("--stages", default="1,2,3,5,6")
     s.add_argument("--first", default="")
+    s.add_argument("--checks", default="")
     s.add_argument("--threads", type=int, default=8)
     s.add_argument("--slots", type=int, default=None)
     s.set_defaults(func=cmd_start)
