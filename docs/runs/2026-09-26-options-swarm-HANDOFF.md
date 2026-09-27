@@ -1,6 +1,6 @@
 # Handoff: the options-swarm run
 
-## THE SPRINT — current state, Sept 27 02:00Z (read this first)
+## THE SPRINT — current state, Sept 27 02:00Z, images updated 12:30Z (read this first)
 
 The owner's `/goal` runs `docs/goals/LTCM_SWARM_SPRINT.md` (merged #386). The owner's decisions:
 - D1 real money for Monday;
@@ -32,17 +32,27 @@ operator tools and receipts are in `~/Work/.ltcm-main/`:
 - **Grant `options-swarm-20260928`:** enabled 00:30:15Z, pinned to money digest `ad9bd54c`, capital
   $481.63, Probe floor $100.
 
-**Images and model.**
-- `core-honest-v1`: Gym `sbcp_4500cd6f`, gate `sbcp_0a6f54da`.
-- Model `fm-c4a0c70c9afbf09f` on the Gym, the gate and the House shadow book.
-- The final 25-root pair: the completion supervisor fits it with the honest code when the ThetaData
-  names and back months finish (about 09:30Z Sunday) and writes `images-ready.json`. Adopt it the same
-  way:
-  1. set `swarm.json` image and gate to the new checkpoints;
-  2. copy `/data/calibration/fill_model.json` from the Gym template to the House, mode 600, verifying
-     the SHA;
-  3. `floor_box.py stop`, then `start`;
-  4. check `health.options_live.fill_model`.
+**Images and model (updated Sept 27 12:30Z).**
+- ADOPTED since 08:57Z: the interim 25-root pair, Gym `sbcp_b358ab73`, gate `sbcp_92c29288`
+  (`names-interim-20260927`).
+  - Stages 1-5: the core five plus twenty names; the deployed model `fm-c4a0c70c` (sha `3de9e2a6`).
+  - Verified by exact reproduction: the founded rebound gave the same 168 trades, t and P&L as on
+    `core-honest-v1`.
+  - It was cut mid-download, so it holds back months (beyond 14 DTE) for SOME days only. The
+    agenda says to keep NEEDS within 14 DTE.
+- NOT adopted: the back-month interim pair (Gym `sbcp_a38bb07a`, gate `sbcp_a5e975a5`, stages 1-6).
+  - The rebound fails on it with a memory-map error: complete back months make the SPY/QQQ NBBO
+    trees about 3 GB each.
+  - The Gym maps the store per root across the window, so three roots exceed the 6 GB
+    per-worker address space (`GYM_WORKER_MEMORY_GB`).
+- DO NOT ADOPT the completion supervisor's final pair (`images-ready.json`, still in its SIP relay) as
+  it stands. It carries the same back months and will break multi-root families. First run the
+  exact-reproduction check (`~/Work/.ltcm-main/sweep`:
+  `sweep.py --templates verify_rebound_rank0 --image <gym ckpt> --top 0`; expect 168 trades,
+  t 2.1864). Then decide the engine change (a larger worker cap for the pool, or back months stored
+  apart). That needs a release, so it is post-Monday.
+- Model `fm-c4a0c70c9afbf09f` on the Gym, the gate and the House shadow book. Names were never
+  sampled, so they fill at the natural only.
 
 **`swarm.json` now** (a backup before every edit, `swarm.json.before-*`):
 - population start 60, floor 44, ceiling 96;
