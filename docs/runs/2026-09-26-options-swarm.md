@@ -1262,6 +1262,20 @@ and this record, and lifts the Saturday continuation's no-real-money scope.
   on a 3.8 GB /tmp tmpfs, and template agents had left 3.1 GB of synthetic stores and venvs in it.
   Cleared. Remote work (the House, the pool, the running sweeps) was unaffected.
 
+- **15:27-15:33Z The first validation pass, and the first holdout look: failed.**
+  - `low-close-location-backmonth-call` v7 (architect-born 14:49Z) passed Validation 2025: 207
+    trades on 51 days, t 2.47, deflated Sharpe 0.997, 3/4 quarters, +$17,998, +$14,867 at 1.5x.
+  - The gate: review pass (GPT-6 Sol, 15:30:19Z), Claude audit pass (Opus 5.5, 15:30:31Z).
+  - The sealed holdout look (15:32:40Z) FAILED: 184 days of 2026, -$9,372, daily Sharpe -0.07,
+    bootstrap LB95 negative, p 0.836.
+  - The family stays in the Gym; the look is spent (one of the lineage's three). No real money was
+    at risk; this is the verifier working as designed.
+  - Reading: calls bought on late-day weakness rode 2022-2025's recoveries; 2026's first nine months
+    did not reward them.
+  - The same hour the operator's rebound back-month call (the strongest Train result) scored 2025
+    t 0.06 on 47 trades.
+  - Train strength in this family of ideas has not transferred to unseen data. The swarm continues.
+
 ## Scoreboard
 
 ### T0 (2026-09-26T06:23Z; repo figures at 06:40Z)
