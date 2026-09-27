@@ -1133,6 +1133,36 @@ and this record, and lifts the Saturday continuation's no-real-money scope.
     - a calendar-window version (turn of month, pre-holiday, pre-FOMC).
   - `liquidity_rebound_names`: the rebound on the twenty names.
 
+- **08:57Z Interim 25-root pair adopted (a `swarm.json` switch, no release).**
+  - Gym `sbcp_b358ab73`, gate `sbcp_92c29288`; the deployed fill model (sha `3de9e2a6`).
+  - Verified before adoption: the founded rebound program on the new Gym image reproduced its
+    core-image result exactly (168 trades, t 2.1864, the same P&L to the cent).
+  - `gym.roots` now admits the core five plus the twenty names; the pool re-forked with every root
+    present.
+  - Every earlier validation is now stale; none had passed.
+- **09:00Z 27 dormant families retired** (operator housekeeping, lessons written to the graveyard).
+  - Each had declared its own mechanism falsified in its last three cycles and was re-running empty
+    placeholder jobs on the Gym.
+  - Kept the three with a positive Train score. Population 60 -> 33; the architect refilled 12 at
+    09:03Z under agenda v3.
+- **09:20Z The rebound on single names: refuted at honest costs.**
+  - Four lineages of up to five names each: mega-cap tech, semis (SMCI dropped: option quotes on
+    only 603 of 753 Train days), high beta, macro ETFs.
+  - 13 of 228 variants positive; no robust Train score above zero; 3 of 20 finalists positive at
+    1.5x (all with a losing year).
+  - Names fill at the natural only in the Gym (their fills were never sampled). A full spread per
+    leg costs more than the rebound earns.
+  - An independent audit also flagged hindsight in the name lists: they are the period's biggest
+    winners, chosen today. Any names finalist would have needed a same-names placebo control.
+  - Agenda v3 was corrected at 09:25Z: names refuted. The architect's next refill targets the index
+    reversal with more trading days, combined with a debit put-write in one family.
+- **Arithmetic of the validation line.**
+  - The index rebound's 2025 edge is about +0.04 per dollar of maximum loss a trading day, with a
+    spread several times that.
+  - One-year daily t >= 2 at that edge would take more trading days than a year has.
+  - A family passes honestly only with a much higher per-trade Sharpe, or by combining uncorrelated
+    positive harvests so more days carry return.
+
 ## Scoreboard
 
 ### T0 (2026-09-26T06:23Z; repo figures at 06:40Z)
