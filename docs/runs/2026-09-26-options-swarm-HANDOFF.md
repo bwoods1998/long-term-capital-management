@@ -1,5 +1,58 @@
 # Handoff: the options-swarm run
 
+## THE SPRINT — Sunday Sept 27, 15:40Z update (read first; the 02:00Z section below still holds for releases and the grant)
+
+**Evidence.**
+- One family passed Validation 2025: `low-close-location-backmonth-call` v7 (t 2.47, deflated
+  Sharpe 0.997). The gate's review and Claude audit passed. Its sealed holdout look FAILED (-$9,372
+  over 184 days of 2026).
+- No holdout passes. Families at 6/8 on 2025: `event-crush-xsp-fly-r` (t 1.03),
+  `sweep-bm-trend-long-option` (t 1.04).
+- Refuted at honest costs: short-dated premium buying and selling, XSP credit, names at the
+  natural, calendars, diagonals, condors, flies, and back-month verticals of any kind.
+- What survives Train and costs: signal plus back-month SINGLE long options on SPY/QQQ.
+- Train strength has not yet transferred to 2025/2026.
+
+**Images.**
+- Adopted since 13:25Z: the complete back-month pair, Gym `sbcp_a38bb07a`, gate `sbcp_a5e975a5`
+  (stages 1-6, 25 roots, model `fm-c4a0c70c`).
+- The pool's split runs fit the 6 GB worker cap. The operator sweep's split-1 runs of 3-root
+  programs do not (`poolcheck.py`).
+- The completion supervisor's final pair: check with `poolcheck.py` before any adoption.
+
+**Push settings** (the owner topped up and said do not throttle):
+- pool `start_boxes` 6 / `max_boxes` 10;
+- researchers $4.5/h, `top_profile` pro_asap for the top 10;
+- population 72, architect hourly, agenda v3 (back-month single options);
+- diagnostician 5/round, $45/day;
+- `claude.usd_cap` 98 (the gateway's lifetime `CLAUDE_USD` is 100).
+
+**Money.**
+- The owner deposited $1,000. Equity $1,481.63; options buying power $481.60 until it settles.
+- Re-ratify the grant at the new capital once buying power shows it.
+- PR #393 (credit) is not merged, by owner agreement.
+- Any back-month long-call family costs about $300-1,500 a contract, over the $100 Probe cap:
+  real money for one needs the settled deposit plus the owner's money-table decision.
+
+**Defects found and handled.**
+- The swarm mirror stalled 14 h (two private kinds unknown to the ledger).
+  - Interim: `operator_mirror.py` on the House. Restart it after any House restart, without
+    `--from-now`.
+- The daily backup looked for the retired box name.
+  - Interim: manual checkpoint `house-manual-20260927` (30 d).
+- Code fixes for both: PR #394, re-review approved. Merge and release after Monday 20:05Z, then
+  stop the operator mirror.
+- The laptop's /tmp quota (the scratchpad on a 3.8 GB tmpfs) filled and blocked the shell: keep
+  bulky scratch in `~/Work/.ltcm-main/scratch/`.
+
+**Site.**
+- The live thought feed has worked again since 13:46Z.
+- The balance chart starts after the deposit (personal-site #14).
+
+**Monday:** the private runbook `~/Work/.ltcm-main/monday-runbook.md`, covering the pre-open
+checks, observe 8 then 60, the 13:35Z paper proof, calibration at 14:00Z, the post-close
+post-mortem, #394, prune #375, rebase #385 and Tuesday's forward job.
+
 ## THE SPRINT — current state, Sept 27 02:00Z, images updated 12:30Z (read this first)
 
 The owner's `/goal` runs `docs/goals/LTCM_SWARM_SPRINT.md` (merged #386). The owner's decisions:
