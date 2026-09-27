@@ -1513,4 +1513,16 @@ looks like beta. Validation 2025 and the holdout judge both.
 | 6 | Money | equity $1,481.63; options buying power $481.60 (the deposit unsettled); 0 orders |
 | 7 | Compute | Sail $157.14 (about $5.6/h; about $56 at the open). Claude $30.70 of $100. OpenAI $606.86 of $707 |
 
+### Sprint scoreboard, T0 + 39 h (21:30Z Sept 27)
+
+| # | Metric | Value |
+|---|---|---|
+| 1 | Population | 75 alive (48 cycling); 11 born and 8 retired in 2 h |
+| 2 | Throughput | 1,290 cycles/h, median 116 s; pool 9 busy; queue 3; 18 provider 502s |
+| 3 | Search | 49,299 trials, 167,908 program-years. Best 2025 validation t in 2 h: `scaled-entry-liquidity-reversal` 1.41, `pre-earnings-iv-runup-straddle` 1.18 |
+| 4 | Evidence | 1 validation pass alive (the IWM fork); holdout looks 2, passes 0 |
+| 5 | Readiness | 24/7 research on (the owner, about 19:45Z): `guard.burst_until` 2026-10-05, `burst_cap_usd` 900. Private tools `preopen.py` (9/9 PASS live) and `fillcheck.py` (replay exact on 921 orders) ready for Monday |
+| 6 | Money | equity $1,481.63; options buying power $481.60; 0 orders |
+| 7 | Compute | Sail $145.98 (about $5.6/h; the $32 line around Monday 17:30Z without a top-up). Claude $32.17 of $100. OpenAI $608.75 of $707 |
+
 ## Report
