@@ -1113,4 +1113,16 @@ Observed 18:22–18:24Z; counters advance during the read. Funding is not revenu
 | 6 | Money | equity $481.63 cash; 0 orders; 0 option positions (LTC dust only) |
 | 7 | Compute | Sail $176.99 (last hour: models $1.78, Gym $1.51, plus the data box about $0.5; the D6 budget is about $3.5/h to Monday's open). OpenAI September $603.47 + $9.36 inflight of $707. Claude $2.20 of the $70 pre-Monday cap (22 calls) |
 
+### Sprint scoreboard, T0 + 21.5 h (03:52Z Sept 27)
+
+| # | Metric | Value |
+|---|---|---|
+| 1 | Population | 60 alive (48 running), 75 retired. Last 2 h: 3 born, 3 retired (2 by the tournament after review, 1 after its diagnostician rewrite) |
+| 2 | Throughput | 1,363 cycles/h, median 102 s; 142 robustness runs in 2 h; Gym queue 5 |
+| 3 | Robustness | honest fill model shared by the Gym, the gate and the shadow book |
+| 4 | Evidence | 26,375 trials, 57,496 program-years. 0 validation passes. Three at 6 of 8 checks (including the revived `pin-qqq-fly-r`); all fail t and the deflated Sharpe. 0 holdout looks |
+| 5 | Readiness | unchanged from the T0+19.5h board |
+| 6 | Money | equity $481.63; 0 orders; 0 option positions |
+| 7 | Compute | Sail $171.24 (about $2.9/h across 01:53-03:52Z, inside the D6 budget). OpenAI $603.74 + $9.36 inflight of $707. Claude $3.34 (29 calls). Data: names about 1,800 tasks/h, back months next |
+
 ## Report
