@@ -1276,6 +1276,25 @@ and this record, and lifts the Saturday continuation's no-real-money scope.
     t 0.06 on 47 trades.
   - Train strength in this family of ideas has not transferred to unseen data. The swarm continues.
 
+- **16:26-16:31Z Generation 7 (direction-neutral back-month single options): both refuted by their own mechanism checks.**
+  - The two-sided rebound (a call after oversold selling in an up-trend, a put after an overbought
+    rally in a down-trend): in 2024, calls made +$5,615 while puts lost -$3,134. In trend mode,
+    67% of trades were calls.
+  - Each side is the year's market drift, not the reversal mechanism.
+  - Cheap-vol back-month straddle: its signal (implied vol under rising realized vol) was on for
+    only about 26 root-sessions a year, under the 40-trade floor. Implied vol rarely sits under
+    realized: that gap is the variance premium itself.
+- **First-principles reading at 16:30Z** (about 45,000 trials; honest fills):
+  - short-dated options: every mechanism loses to the spread;
+  - premium selling: loses after costs at every horizon tested;
+  - back-month single options: survive costs, but their profit is market drift. The sealed holdout
+    rejected the one that passed 2025, and the direction-neutrality check confirms it
+    independently.
+  - What could change the picture is the cost model. The short-dated index rebound is strongly
+    positive at the mid and marginal at honest costs. Monday's D3 calibration round trips measure
+    real fills on exactly that structure (1-lot, $1-wide, near-money SPY/QQQ call verticals, at
+    the mid then mid+1).
+
 ## Scoreboard
 
 ### T0 (2026-09-26T06:23Z; repo figures at 06:40Z)
