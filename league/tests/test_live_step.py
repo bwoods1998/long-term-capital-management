@@ -19,20 +19,9 @@ if HAVE:
     from league.live.decider import InlineDecider
     from league.live.families import MemoryFamilies
     from league.live.step import OptionsLive
-    from league.tests.live_fakes import CONDOR, MONDAY, VERTICAL, Clock, Grant, Market, Venue, at, family, iso
-
-
-def credit_table():
-    """The money table with the credit types among the real types again (as after a deposit to $2,000 and a
-    re-ratification): the tests of credit structures' real mechanics (condors, broken legs) run on it."""
-    import copy
-
-    from league.constitution import CONSTITUTION
-
-    c = copy.deepcopy(CONSTITUTION)
-    c["options_money"]["real_types"] = ["debit_vertical", "credit_vertical", "iron_condor", "iron_butterfly", "long_butterfly",
-                                        "long_call", "long_put"]
-    return M.Table.from_constitution(c)
+    from league.live.venue import occ_symbol
+    from league.tests.live_fakes import (CONDOR, CREDIT_VERTICAL, MONDAY, VERTICAL, Clock, Grant, Market, Venue, at, family,
+                                         iso)
 
 
 class Ledger:
@@ -92,6 +81,12 @@ class LiveCase(unittest.TestCase):
                                 clock=self.clock, record=self.ledger, alert=lambda lvl, text: self.alerts.append((lvl, text)),
                                 notify=self.notices.append)
         return self.live
+
+    def rich(self, equity="60000.00"):
+        """An account (and a grant) large enough that an SPY credit structure's short legs fit 3x the sizing equity in
+        notional (the review of #393): the tests of credit structures' real mechanics on SPY run on it."""
+        self.venue.equity = self.venue.bp = D(equity)
+        self.grant.capital = equity
 
     def run_to(self, hh, mm):
         """Step the live path minute by minute up to hh:mm (inclusive)."""
@@ -228,15 +223,10 @@ class Gates(LiveCase):
         self.run_to(9, 33)
         self.assertEqual(self.families.rows["condor"]["band"], "candidate")
         self.assertEqual(self.venue.sent, [])
-
-    def test_credit_opens_follow_equity_alone_even_after_a_credit_fill(self):
-        live = self.make([family("condor", CONDOR, band="probe", structure="iron_condor", params={"hold": 600})],
-                         table=credit_table())
-        self.run_to(9, 31)
-        self.assertEqual(len(self.venue.sent), 1)                          # a credit structure filled at $5,481.65
-        self.venue.equity = D("1999.99")
-        refusal = live.table.type_allowed("iron_condor", D(live.real.account()["equity"]) if hasattr(live.real, "account") else D("0"))
-        self.assertIn("credit structure", refusal)
+        [(move, _)] = self.ledger.of("live.band")
+        self.assertEqual((move["from"], move["to"]), ("probe", "candidate"))
+        self.assertIn("real credit opens wait until the sizing equity", move["why"])
+        self.assertIn("reads $1500.00", move["why"])
 
     def test_reconciliation_freezes_entries_on_the_second_reading_and_exits_still_go(self):
         live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 2, "opens": 3})])
@@ -248,6 +238,342 @@ class Gates(LiveCase):
         self.assertIn("reconciliation", " ".join(self.refusals()))
         self.assertEqual([b["legs"][0]["position_intent"] for b in self.venue.sent], ["buy_to_open", "sell_to_close"])
         self.assertTrue(any(n["stop"] == "reconciliation" for n in self.notices))
+
+
+if HAVE:
+    #: The credit vertical and the condor on XSP (cash-settled at the close, European: no assignment into shares).
+    XSP_CREDIT_VERTICAL = CREDIT_VERTICAL.replace('"SPY"', '"XSP"')
+    XSP_CONDOR = CONDOR.replace('"SPY"', '"XSP"')
+
+
+class CreditAtTwoThousand(LiveCase):
+    """Credit at $2,000 (Sept 26, 2026; the sprint's "Money on Monday"): credit verticals, iron condors and iron butterflies
+    are real types, opened only while the sizing equity (the lower of the account's equity read this minute and the grant's
+    capital) is $2,000 or more; under it they trade shadow only. Sized by maximum loss, (width - credit) x 100 a structure,
+    and sent as ONE multi-leg order at a NEGATIVE limit (Alpaca's sign for a credit). The review of #393 adds, for a
+    physically settled root (SPY), no short leg deep in the money, no short call beyond five days, and the short legs'
+    notional at most 3x the sizing equity; at Probe one structure an order on any root."""
+
+    def at_equity(self, equity, *, capital="5500"):
+        # No deposit on record: the equity is the account's own (so neither stop trips on the reading).
+        self.venue.activity_rows.clear()
+        self.venue.equity = self.venue.last_equity = self.venue.bp = D(equity)
+        self.grant.capital = capital
+
+    def refusals(self):
+        return [p["why"] for p, a in self.ledger.of("live.refusal")]
+
+    def opens(self):
+        return [b for b in self.venue.sent if b.get("legs") and b["legs"][0]["position_intent"].endswith("_to_open")]
+
+    def check_credit_order(self, body, pos, *, width, cap, per_order=None):
+        """One multi-leg order at a negative limit, sized by maximum loss under the Probe's cap (and `per_order`)."""
+        self.assertEqual(body["order_class"], "mleg")
+        limit = D(body["limit_price"])
+        self.assertLess(limit, 0, "a credit is a negative limit_price (Alpaca's multi-leg sign)")
+        self.assertLess(-limit, D(str(width)), "never a credit at or above the collateral")
+        self.assertEqual(int(body["qty"]), pos.qty)
+        self.assertLess(pos.entry, 0)
+        self.assertAlmostEqual(pos.collateral, width)
+        # Maximum loss a share is the widest wing less the credit: (width x 100 - credit x 100) a structure.
+        self.assertAlmostEqual(pos.max_loss_share, width + pos.entry, places=6)
+        self.assertAlmostEqual(pos.max_loss, (width * 100 + pos.entry * 100) * pos.qty, places=4)
+        # Sized by maximum loss with its fees (`money.plan_open`): as many as fit the Probe's cap, or one under the floor.
+        unit = D(str(round(pos.max_loss_share * 100 + 2 * (pos.fees / pos.qty), 2)))
+        expected = int(cap // unit)
+        if expected < 1 and unit <= D("100"):
+            expected = 1
+        if per_order is not None:
+            expected = min(expected, per_order)
+        self.assertEqual(pos.qty, expected)
+        self.assertLessEqual(D(str(pos.max_loss)), max(cap, D("100")), "under the Probe's cap (or its $100 one-contract floor)")
+
+    # ---------------------------------------------------------------- the $2,000 line
+    def test_below_two_thousand_a_credit_probe_stays_shadow_and_no_order_is_sent(self):
+        self.at_equity("1999.99")
+        live = self.make([family("condor", CONDOR, band="probe", structure="iron_condor"),
+                          family("cv", XSP_CREDIT_VERTICAL, band="probe", structure="credit_vertical"),
+                          family("fly", CONDOR, band="probe", structure="iron_butterfly")])
+        self.run_to(9, 40)
+        self.assertEqual(self.venue.sent, [], "no order reaches the real account")
+        self.assertEqual(sorted(live.instances), ["condor@1:s", "cv@1:s", "fly@1:s"], "shadow instances only")
+        for fid in ("condor", "cv", "fly"):
+            self.assertEqual(self.families.rows[fid]["band"], "candidate", fid)
+        moves = {a: p for p, a in self.ledger.of("live.band")}
+        for fid in ("condor", "cv", "fly"):
+            self.assertIn("credit structure", moves[fid]["why"])
+            self.assertIn("reads $1999.99", moves[fid]["why"])
+        # The shadow book trades them all the same (the forward record is kept).
+        self.assertTrue(live.shadow.accounts["condor@1:s"].positions or live.shadow.accounts["condor@1:s"].trades)
+        self.assertTrue(live.shadow.accounts["cv@1:s"].positions or live.shadow.accounts["cv@1:s"].trades)
+
+    def test_the_grants_capital_under_two_thousand_holds_credit_back_until_it_is_ratified(self):
+        # A deposit that has landed (the account reads $5,481.65) but a grant not ratified since ($481.65 of capital):
+        # the sizing equity is $481.65, so a credit type stays shadow only until the owner's --ratify.
+        self.grant.capital = "481.65"
+        live = self.make([family("condor", XSP_CONDOR, band="probe", structure="iron_condor")])
+        self.run_to(9, 33)
+        self.assertEqual(self.venue.sent, [])
+        self.assertEqual(self.families.rows["condor"]["band"], "candidate")
+        self.assertEqual(sorted(live.instances), ["condor@1:s"])
+
+    def test_a_validation_passer_gets_no_credit_tuition_under_two_thousand(self):
+        self.at_equity("1999.99")
+        live = self.make([family("pre", XSP_CREDIT_VERTICAL, band="gym", structure="credit_vertical", holdout=False,
+                                 validation=True)])
+        self.run_to(9, 33)
+        self.assertEqual(sorted(live.instances), [])
+        self.assertEqual(self.venue.sent, [])
+
+    def test_at_two_thousand_a_validation_passer_measures_one_credit_structure_as_tuition(self):
+        self.at_equity("2000.00")
+        live = self.make([family("pre", XSP_CREDIT_VERTICAL, band="gym", structure="credit_vertical", holdout=False,
+                                 validation=True, params={"hold": 600})])
+        self.run_to(9, 33)
+        self.assertEqual(sorted(live.instances), ["pre@1:t"])
+        [body] = self.opens()
+        self.assertEqual((body["qty"], body["order_class"]), ("1", "mleg"))
+        self.assertLess(D(body["limit_price"]), 0)
+        self.assertEqual(self.families.forward_rows("pre"), [])              # never evidence
+
+    def test_at_two_thousand_a_credit_probe_sends_one_negatively_priced_multi_leg_order_sized_by_maximum_loss(self):
+        self.at_equity("2000.00")
+        live = self.make([family("cv", XSP_CREDIT_VERTICAL, band="probe", structure="credit_vertical", params={"hold": 600})])
+        self.run_to(9, 31)
+        self.assertEqual(sorted(live.instances), ["cv@1:r", "cv@1:s"])
+        [body] = self.venue.sent
+        self.assertTrue(all(l["symbol"].startswith("XSP") for l in body["legs"]))
+        self.assertEqual([(l["side"], l["position_intent"]) for l in body["legs"]],
+                         [("sell", "sell_to_open"), ("buy", "buy_to_open")])
+        [pos] = live.book.positions.values()
+        self.assertEqual(pos.type, "credit_vertical")
+        # 5% of $2,000 is $100: one structure of about $60-80 of maximum loss.
+        self.check_credit_order(body, pos, width=1.0, cap=D("100.00"), per_order=1)
+        self.assertEqual(pos.qty, 1)
+
+    def test_above_two_thousand_a_credit_probe_opens_one_structure_an_order_under_the_probes_cap(self):
+        # The account at $5,481.65 after the deposit, the grant ratified at $5,500: the Probe's cap is 5% of $5,481.65
+        # ($274.08, three or four structures by maximum loss), but a credit Probe sends one structure an order.
+        live = self.make([family("condor", XSP_CONDOR, band="probe", structure="iron_condor"),
+                          family("cv", XSP_CREDIT_VERTICAL, band="probe", structure="credit_vertical", params={"hold": 600, "atm": -5})])
+        self.run_to(9, 31)
+        self.assertEqual(len(self.opens()), 2, self.refusals())
+        cap = D("0.05") * D("5481.65")
+        for body in self.opens():
+            [pos] = [p for p in live.book.positions.values() if {l.symbol for l in p.legs} == {l["symbol"] for l in body["legs"]}]
+            self.check_credit_order(body, pos, width=1.0, cap=cap, per_order=1)
+            self.assertEqual(pos.qty, 1)
+            unit = D(str(round(pos.max_loss_share * 100 + 2 * (pos.fees / pos.qty), 2)))
+            self.assertGreater(int(cap // unit), 1, "the maximum loss alone would have sent more")
+        condor = next(b for b in self.opens() if len(b["legs"]) == 4)
+        self.assertEqual(sorted(l["position_intent"] for l in condor["legs"]),
+                         ["buy_to_open", "buy_to_open", "sell_to_open", "sell_to_open"])
+
+    def test_a_credit_close_is_one_multi_leg_order_and_a_fall_under_two_thousand_stops_new_credit_opens_not_exits(self):
+        self.at_equity("2000.00")
+        live = self.make([family("cv", XSP_CREDIT_VERTICAL, band="probe", structure="credit_vertical",
+                                 params={"hold": 3, "opens": 3})])
+        self.run_to(9, 31)
+        self.assertEqual(len(self.opens()), 1)
+        self.venue.equity = self.venue.bp = D("1999.99")                  # under the line, no latch from the fill
+        self.run_to(9, 35)
+        closes = [b for b in self.venue.sent if b.get("legs") and b["legs"][0]["position_intent"].endswith("_to_close")]
+        self.assertEqual(len(closes), 1, "the exit goes whatever the equity")
+        [close] = closes
+        self.assertEqual(close["order_class"], "mleg")
+        self.assertEqual(sorted(l["position_intent"] for l in close["legs"]), ["buy_to_close", "sell_to_close"])
+        self.assertGreater(D(close["limit_price"]), 0, "buying a credit structure back is a debit: a positive limit")
+        self.assertLess(D(close["limit_price"]), 1, "under its collateral")
+        self.assertEqual(live.book.positions, {})
+        self.assertEqual(len(self.opens()), 1, "no new credit open under $2,000")
+        self.assertTrue(any("real credit opens wait until the sizing equity" in w and "reads $1999.99" in w
+                            for w in self.refusals()), self.refusals())
+        self.run_to(9, 45)
+        self.assertEqual(len(self.opens()), 1)
+        self.assertEqual(self.families.rows["cv"]["band"], "candidate", "back to shadow only at the next band refresh")
+        # Back over $2,000, it is promoted again and trades from the next session.
+        self.venue.equity = self.venue.bp = D("2100.00")
+        self.clock.set(at(MONDAY, 9, 50))
+        self.run_to(9, 55)
+        self.assertEqual(self.families.rows["cv"]["band"], "probe")
+        self.assertEqual(len(self.opens()), 1, "not the session it was promoted in")
+        self.clock.set(at(MONDAY + dt.timedelta(days=1), 9, 31))
+        live.minute()
+        self.assertEqual(len(self.opens()), 2)
+        self.assertLess(D(self.opens()[-1]["limit_price"]), 0)
+
+    # ---------------------------------------------------------------- assignment risk (the review of #393)
+    def test_spys_short_legs_over_three_times_the_sizing_equity_in_notional_are_refused(self):
+        # A put credit vertical on SPY short the 598 put carries $59,800 of short notional a structure; 3x $5,481.65 is
+        # $16,444.95. An early assignment would bring about eleven times the account in shares: refused, nothing sent.
+        live = self.make([family("cv", CREDIT_VERTICAL, band="probe", structure="credit_vertical", params={"hold": 600})])
+        self.run_to(9, 33)
+        self.assertEqual(self.venue.sent, [])
+        self.assertTrue(any("of notional a structure, over 3x the sizing equity $5481.65 ($16444.95)" in w
+                            for w in self.refusals()), self.refusals())
+        self.assertIn("cv@1:r", live.instances, "a Probe still, its real instance simply cannot open that structure")
+
+    def test_spy_credit_opens_once_equity_covers_the_notional_and_a_probe_sends_one_structure(self):
+        self.rich()
+        live = self.make([family("cv", CREDIT_VERTICAL, band="probe", structure="credit_vertical", params={"hold": 600})])
+        self.run_to(9, 31)
+        [body] = self.opens()
+        [pos] = live.book.positions.values()
+        self.check_credit_order(body, pos, width=1.0, cap=D("0.05") * D("60000"), per_order=1)
+        short = next(l for l in pos.legs if l.side < 0)
+        self.assertLessEqual(short.strike * 100 * pos.qty, 3 * 60000)
+
+    def test_a_sized_spy_credit_family_is_capped_by_its_short_legs_notional(self):
+        # Sized by quarter Kelly the family could open many structures (the gateway's $1,000 an order alone allows about a
+        # dozen); the short legs' notional allows floor(3 x $60,000 / (strike x 100)) = 3.
+        self.rich()
+        live = self.make([family("cv", CREDIT_VERTICAL, band="probe", structure="credit_vertical", params={"hold": 600})])
+        returns = [0.30, 0.10, 0.20, -0.10, 0.25] * 5
+        self.families.add_forward("cv", "shadow", [{"id": f"s{i}", "day": f"2026-09-{i % 25 + 1:02d}", "pnl": r * 100.0,
+                                                     "max_loss": 100.0} for i, r in enumerate(returns)])
+        self.families.add_forward("cv", "real", [{"id": f"r{i}", "day": f"2026-08-{i + 1:02d}", "pnl": 6.0, "max_loss": 50.0}
+                                                 for i in range(5)])
+        live.state.put("band_moves", {"cv": {"band": "probe", "at": at(MONDAY, 9, 0) - 7 * 86400}})
+        self.run_to(9, 31)
+        self.assertEqual(self.families.rows["cv"]["band"], "sized")
+        [body] = self.opens()
+        [pos] = live.book.positions.values()
+        short = next(l for l in pos.legs if l.side < 0)
+        by_notional = int(D("180000") // D(str(short.strike * 100)))
+        unit = D(str(round(pos.max_loss_share * 100 + 2 * (pos.fees / pos.qty), 2)))
+        self.assertGreater(int(D("1000") // unit), by_notional, "maximum loss alone would have sent more")
+        self.assertEqual((pos.qty, int(body["qty"])), (by_notional, by_notional))
+        self.assertEqual(by_notional, 3)
+
+    def test_a_short_leg_deep_in_the_money_is_refused_and_an_iron_butterflys_body_at_the_money_is_not(self):
+        self.rich()
+        deep = CREDIT_VERTICAL                                             # short the 608 put with SPY at 600: 1.3% in
+        fly = (CONDOR.replace('"open": "iron_condor"', '"open": "iron_butterfly"')
+               .replace('"atm": -3', '"atm": 0').replace('"atm": 3', '"atm": 0'))
+        self.assertNotEqual(fly, CONDOR)
+        live = self.make([family("deep", deep, band="probe", structure="credit_vertical", params={"hold": 600, "atm": 8}),
+                          family("fly", fly, band="probe", structure="iron_butterfly")])
+        self.run_to(9, 31)
+        self.assertTrue(any("short put at 608 is in the money by more than 1% of its strike" in w for w in self.refusals()),
+                        self.refusals())
+        [body] = self.opens()
+        self.assertEqual(len(body["legs"]), 4, "the iron butterfly's at-the-money body passes")
+        [pos] = live.book.positions.values()
+        self.assertEqual(pos.type, "iron_butterfly")
+
+    def test_a_short_call_more_than_five_days_out_is_refused_on_spy_and_not_on_xsp(self):
+        self.rich()
+        week = CONDOR.replace('"dte": 1', '"dte": 7').replace('"dte": [0, 3]', '"dte": [0, 7]')   # Oct 5: seven days out
+        self.assertNotIn('"dte": 1', week)
+        self.assertIn('"dte": [0, 7]', week)
+        live = self.make([family("spy", week, band="probe", structure="iron_condor"),
+                          family("puts", CREDIT_VERTICAL, band="probe", structure="credit_vertical", params={"hold": 600, "dte": 7}),
+                          family("xsp", week.replace('"SPY"', '"XSP"'), band="probe", structure="iron_condor")])
+        self.run_to(9, 31)
+        self.assertTrue(any("short call expires 7 days out, past the 5" in w for w in self.refusals()), self.refusals())
+        roots = sorted((b["legs"][0]["symbol"][:3], len(b["legs"])) for b in self.opens())
+        self.assertEqual(roots, [("SPY", 2), ("XSP", 4)], "a put credit vertical has no short call; XSP settles in cash")
+
+    # ---------------------------------------------------------------- expiry day (the review of #393)
+    def zero_dte_put_spread(self, short, long, root="SPY"):
+        """Quotes for a 0DTE put credit vertical short `short` / long `long` that pays a credit at the natural."""
+        s = occ_symbol(root, MONDAY.isoformat(), False, float(short))
+        l_ = occ_symbol(root, MONDAY.isoformat(), False, float(long))
+        self.market.overrides[s] = (0.20, 0.22, 20, 20)
+        self.market.overrides[l_] = (0.08, 0.10, 20, 20)
+        return s, l_
+
+    def test_an_expiring_credit_vertical_just_beyond_the_near_money_line_is_closed_by_the_house(self):
+        # Short the 593 put with SPY at 600: 1.2% out of the money, beyond the 1% line (a debit vertical there is left to
+        # expire). A credit structure's short leg could still finish in the money after the cutoff and be assigned alone:
+        # from 15:15 (SPY's cutoff 15:25 less ten minutes) the House closes it in ONE multi-leg order at the natural.
+        self.rich()
+        self.clock.set(at(MONDAY, 14, 40))
+        short, long_ = self.zero_dte_put_spread(593, 592)
+        live = self.make([family("cv", CREDIT_VERTICAL, band="probe", structure="credit_vertical",
+                                 params={"hold": 600, "dte": 0, "atm": -7})])
+        self.run_to(14, 40)
+        [opened] = self.opens()
+        self.assertEqual({l["symbol"] for l in opened["legs"]}, {short, long_})
+        self.assertEqual(opened["limit_price"], "-0.10")
+        self.run_to(15, 14)
+        self.assertEqual(len(self.venue.sent), 1, "held to the window")
+        self.run_to(15, 15)
+        [close] = self.venue.sent[1:]
+        self.assertEqual(close["order_class"], "mleg")
+        self.assertEqual({l["symbol"]: l["position_intent"] for l in close["legs"]}, {short: "buy_to_close", long_: "sell_to_close"})
+        self.assertEqual(close["limit_price"], "0.14", "the natural: buy the 593 at 0.22, sell the 592 at 0.08")
+        self.assertEqual(live.book.positions, {})
+        [why] = [r["why"] for r in live.book.state.rows("SELECT why FROM orders WHERE action='close'")]
+        self.assertIn("whatever its moneyness", why)
+
+    def test_the_last_forced_close_of_an_expiring_credit_structure_before_the_cutoff_is_left_working(self):
+        self.rich()
+        self.clock.set(at(MONDAY, 14, 40))
+        self.zero_dte_put_spread(593, 592)
+        live = self.make([family("cv", CREDIT_VERTICAL, band="probe", structure="credit_vertical",
+                                 params={"hold": 600, "dte": 0, "atm": -7})])
+        self.run_to(14, 40)
+        self.venue.fill = "none"                                          # every buy-back rests: re-priced each minute
+        self.run_to(15, 30)
+        closes = [b for b in self.venue.sent if b["legs"][0]["position_intent"].endswith("_to_close")]
+        self.assertGreaterEqual(len(closes), 2)
+        self.assertEqual([b["limit_price"] for b in closes[:2]], ["0.14", "0.15"], "the natural, then a cent's concession")
+        self.assertTrue(all(len(b["legs"]) == 2 for b in closes), "always the whole structure in one order")
+        [working] = [o for o in live.book.orders.values() if o.action == "close" and o.status == "working"]
+        self.assertTrue(working.forced)
+        self.assertEqual(working.placed_minute, 15 * 60 + 23 - 570, "sent at 15:23 and never cancelled at 15:24")
+
+    def test_a_programs_own_close_of_an_expiring_credit_structure_meets_the_houses_in_the_window(self):
+        self.rich()
+        self.clock.set(at(MONDAY, 14, 40))
+        self.zero_dte_put_spread(593, 592)
+        live = self.make([family("cv", CREDIT_VERTICAL, band="probe", structure="credit_vertical",
+                                 params={"hold": 600, "dte": 0, "atm": -7})])
+        self.run_to(15, 14)
+        [pos] = live.book.positions.values()
+        self.assertEqual(live._program_close_refusal(pos, live.day, 15 * 60 + 13 - 570), None, "before the window: its own")
+        self.assertIn("the House is closing", live._program_close_refusal(pos, live.day, 15 * 60 + 15 - 570))
+
+    def test_an_expiring_xsp_credit_structure_is_left_to_settle_in_cash(self):
+        self.at_equity("2000.00")
+        self.clock.set(at(MONDAY, 14, 40))
+        live = self.make([family("cv", XSP_CREDIT_VERTICAL, band="probe", structure="credit_vertical",
+                                 params={"hold": 600, "dte": 0, "atm": -1})])
+        self.run_to(14, 40)
+        [opened] = self.opens()
+        self.assertTrue(all(l["symbol"].startswith("XSP260928") for l in opened["legs"]))
+        self.run_to(15, 40)
+        self.assertEqual(len(self.venue.sent), 1, "no House close: XSP settles in cash, no shares")
+        [pos] = live.book.positions.values()
+        self.assertEqual(live._expiry_close(pos, live.day, 15 * 60 + 20 - 570, 15 * 60 + 20), "")
+
+    def test_an_expiring_condor_with_a_short_leg_near_the_money_is_closed_by_the_house_in_one_order(self):
+        # The condor's shorts are one strike from the money on a 0DTE SPY expiry. From ten minutes before SPY's close
+        # cutoff (15:25) the House closes it itself, at the natural, in ONE multi-leg order.
+        self.rich()
+        self.clock.set(at(MONDAY, 14, 58))
+        zero = CONDOR.replace('"dte": 1, "atm": -3', '"dte": 0, "atm": -1').replace('"dte": 1, "atm": 3', '"dte": 0, "atm": 1')
+        self.assertNotEqual(zero, CONDOR)
+        live = self.make([family("condor", zero, band="probe", structure="iron_condor", params={"hold": 600})])
+        self.run_to(14, 58)
+        [opened] = self.opens()
+        self.assertLess(D(opened["limit_price"]), 0)
+        self.assertTrue(all("260928" in l["symbol"] for l in opened["legs"]), "today's expiry")
+        [pos] = live.book.positions.values()
+        self.clock.set(at(MONDAY, 15, 0))
+        self.run_to(15, 14)
+        self.assertEqual(len(self.venue.sent), 1, "nothing before the window")
+        self.run_to(15, 15)
+        self.assertEqual(len(self.venue.sent), 2)
+        close = self.venue.sent[1]
+        self.assertEqual(close["order_class"], "mleg")
+        self.assertEqual(len(close["legs"]), 4)
+        self.assertEqual({l["symbol"]: l["position_intent"] for l in close["legs"]},
+                         {leg.symbol: ("sell_to_close" if leg.side > 0 else "buy_to_close") for leg in pos.legs})
+        self.assertGreater(D(close["limit_price"]), 0)
+        self.assertLess(D(close["limit_price"]), D(str(pos.collateral)))
+        self.assertEqual(live.book.positions, {})
 
 
 class OrderPathInTheLoop(LiveCase):
@@ -593,7 +919,8 @@ class ShadowHeldLegs(LiveCase):
 
 class BrokenLegs(LiveCase):
     def test_long_legs_are_never_sold_while_a_short_leg_is_still_held(self):
-        live = self.make([family("condor", CONDOR, band="probe", structure="iron_condor")], table=credit_table())
+        self.rich()                                                         # SPY condors: 3x equity covers them
+        live = self.make([family("condor", CONDOR, band="probe", structure="iron_condor")])
         self.run_to(9, 31)
         [pos] = live.book.positions.values()
         lp, sp, sc, lc = sorted(pos.legs, key=lambda l: (not l.is_call, l.strike))[::-1][::-1] if False else (None, None, None, None)
@@ -727,7 +1054,8 @@ class VerificationRound(LiveCase):
         self.assertTrue(any("expiry cutoff" in p["why"] for p, a in self.ledger.of("live.refusal") if a == "vert"))
 
     def test_a_waiting_exit_of_a_structure_broken_since_is_left_to_the_legs_closes(self):
-        live = self.make([family("condor", CONDOR, band="probe", structure="iron_condor")], table=credit_table())
+        self.rich()                                                         # SPY condors: 3x equity covers them
+        live = self.make([family("condor", CONDOR, band="probe", structure="iron_condor")])
         self.run_to(9, 31)
         [pos] = live.book.positions.values()
         put_short = next(l for l in pos.legs if l.side < 0 and not l.is_call)
@@ -803,7 +1131,8 @@ class VerificationRound(LiveCase):
 
     def test_a_broken_leg_left_at_the_close_is_sent_again_at_the_next_open(self):
         self.clock.set(at(MONDAY, 15, 40))
-        live = self.make([family("condor", CONDOR, band="probe", structure="iron_condor")], table=credit_table())
+        self.rich()                                                         # SPY condors: 3x equity covers them
+        live = self.make([family("condor", CONDOR, band="probe", structure="iron_condor")])
         self.run_to(15, 40)
         [pos] = live.book.positions.values()
         put_short = next(l for l in pos.legs if l.side < 0 and not l.is_call)

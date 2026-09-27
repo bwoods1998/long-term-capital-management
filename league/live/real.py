@@ -22,7 +22,8 @@ to. It is the only writer of real orders, and every rule of the order path is en
   working opens on expiring contracts are cancelled there. An expiring EQUITY-option structure with any leg in or
   within `near_money_share` of the money is closed with one multi-leg order from `expiry_close_lead_minutes` before the
   close cutoff (15:10 ET; 15:25 SPY/QQQ), re-sent at the natural each minute with a growing concession until it fills
-  (legs left at a physically settled expiry become shares the account cannot carry).
+  (legs left at a physically settled expiry become shares the account cannot carry); an expiring CREDIT structure on an
+  equity root is closed there whatever its moneyness (the review of #393).
 - **Types.** Real money opens only the one-order-closeable types `options_money.real_types` names, credit types only
   once credit is allowed; `day` time in force; an order is never replaced, only cancelled and sent anew. A LONG CALL or
   a LONG PUT (the sprint, B4, Sept 26, 2026) is one contract: it opens with a single-leg `buy_to_open` limit and closes

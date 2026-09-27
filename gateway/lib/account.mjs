@@ -6,7 +6,10 @@
 // maximum loss, this order included, at most MAX_DAY_EQUITY_SHARE (100%) of equity and never above MAX_DAY_USD_ALPACA (the
 // owner's whole $10,000 envelope; MAX_DAY_USD is Kalshi's own day again, the review's m17). No order opens once the
 // day's orders reach MAX_DAY_OPEN_ORDERS (250): the rest of MAX_DAY_ORDERS (300) is kept for exits (the review's C6/C10). A credit structure opens only while equity is at least CREDIT_MIN_EQUITY_USD
-// ($2,000): under it Alpaca's account is "limited margin". The $75 premium cap (`MAX_ORDER_USD_ALPACA`) is gone.
+// ($2,000): under it Alpaca's account is "limited margin". The $75 premium cap (`MAX_ORDER_USD_ALPACA`) is gone. A credit
+// structure on a physically settled root opens only while its short legs' notional (strike x 100 x ratio x structures)
+// is at most CREDIT_SHORT_NOTIONAL_EQUITY (3) times equity: an early assignment cannot bring shares many times the account
+// (the review of #393, Sept 26, 2026).
 //
 // The equity is read HERE, through the real account's own keys (`GET v2/account`, field `equity`), never taken from
 // the House: the House cannot raise its own caps by reporting a larger account. The reading is stored in the gate's
@@ -39,6 +42,17 @@ export function shareMillionths(raw, fallback) {
 //: The orders a day that may open (MAX_DAY_OPEN_ORDERS unset): the rest of MAX_DAY_ORDERS is kept for exits.
 export const DAY_OPEN_ORDERS = 250;
 
+//: A credit open's short legs' notional, at most this many times equity (CREDIT_SHORT_NOTIONAL_EQUITY unset or out of
+//: range; the review of #393, Sept 26, 2026), in millionths: 3x.
+export const CREDIT_NOTIONAL_MULTIPLE = 3n * MILLION;
+
+/** A multiple of equity in millionths (3 -> 3000000n), above 0 and at most 5; `fallback` when unset, malformed or outside. */
+export function multipleMillionths(raw, fallback) {
+  const pico = parsePico(typeof raw === 'string' ? raw.trim() : raw);
+  if (pico === null || pico <= 0n || pico > 5n * PICO) return fallback;
+  return pico / MILLION;
+}
+
 /** The caps by maximum loss in force, from `vars`. A malformed value falls back to its documented default. */
 export function maxLossCaps(env = {}) {
   const age = parseCount(env.EQUITY_CAP_MAX_AGE_MS, MAX_AGE_MS);
@@ -50,6 +64,7 @@ export function maxLossCaps(env = {}) {
     // The real account's own absolute day envelope (the review's m17): MAX_DAY_USD is Kalshi's day notional.
     dayLimitMicro: parseUsdMicro(env.MAX_DAY_USD_ALPACA, 10000n * MILLION),
     creditMinMicro: parseUsdMicro(env.CREDIT_MIN_EQUITY_USD, 2000n * MILLION),
+    creditNotionalMultiple: multipleMillionths(env.CREDIT_SHORT_NOTIONAL_EQUITY, CREDIT_NOTIONAL_MULTIPLE),
     maxAgeMs: age > 0 ? age : MAX_AGE_MS,
     // Unset is the default; "0" is a choice (no order opens).
     maxDayOpenOrders: openOrders === undefined || openOrders === null || String(openOrders).trim() === ''
@@ -59,6 +74,11 @@ export function maxLossCaps(env = {}) {
 
 /** `equity x share`, rounded down: a cap never rounds in the order's favour. Negative equity is none. */
 const ofEquity = (equityMicro, share) => (equityMicro > 0n ? equityMicro * share / MILLION : 0n);
+
+/** A credit open's short legs' notional cap on a physically settled root: CREDIT_SHORT_NOTIONAL_EQUITY x equity, down. */
+export function creditNotionalCapMicro(limits, equityMicro) {
+  return ofEquity(equityMicro, limits.creditNotionalMultiple);
+}
 
 /** One opening order's cap: the lower of MAX_ORDER_MAX_LOSS_USD and MAX_ORDER_EQUITY_SHARE of equity. */
 export function orderCapMicro(limits, equityMicro) {

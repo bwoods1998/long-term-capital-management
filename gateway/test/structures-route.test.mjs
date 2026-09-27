@@ -263,14 +263,16 @@ test('an admitted credit type is metered at its collateral less the credit, and 
   // Sept 26, 2026 (the options-swarm run, Wave 5): at $2,000 the per-order cap is 15% of it, $300 (the mechanism at a 15%
   // share; the deployed share is 25% since the sprint).
   const settings = { OPTION_STRUCTURES_REAL: 'iron_condor,credit_vertical', MAX_ORDER_EQUITY_SHARE: '0.15' };
-  const condor = [leg(occ(579, 'P'), BTO), leg(occ(580, 'P'), STO), leg(occ(590), STO), leg(occ(591), BTO)];
+  // On XSP (cash-settled): the short legs' notional cap of a physically settled root (the review of #393) is not in play.
+  const xsp = legs => legs.map(row => ({ ...row, symbol: row.symbol.replace(/^SPY/, 'XSP') }));
+  const condor = xsp([leg(occ(579, 'P'), BTO), leg(occ(580, 'P'), STO), leg(occ(590), STO), leg(occ(591), BTO)]);
   const one = await call(post('alpaca', mleg(condor, '-0.38')), { settings, equity: '2000.00' });
   assert.equal(one.response.status, 200);
   assert.equal((await one.gate.status()).today.notional_usd, '62.00');
   const five = await call(post('alpaca', mleg(condor, '-0.38', { qty: '5' })), { settings, equity: '2000.00' });
   assert.equal(five.response.status, 403);
   assert.equal(five.body.error, 'Order maximum loss $310.00 exceeds the per-order cap of $300.00 (the lower of $1000.00 and 15% of $2000.00 equity).');
-  const vertical = await call(post('alpaca', mleg(CREDIT_VERTICAL, '-0.30')), { settings, equity: '2000.00' });
+  const vertical = await call(post('alpaca', mleg(xsp(CREDIT_VERTICAL), '-0.30')), { settings, equity: '2000.00' });
   assert.equal((await vertical.gate.status()).today.notional_usd, '70.00');
   // Under $2,000 no credit type opens, however small; a debit type is not held back (its own list aside).
   for (const equity of ['1999.99', '500.00']) {
@@ -284,24 +286,69 @@ test('an admitted credit type is metered at its collateral less the credit, and 
   assert.match((await call(post('alpaca', mleg(VERTICAL, '0.70')), { settings })).body.error, /debit_vertical is not admitted/);
 });
 
-test('the deployed configuration opens exactly the four debit types on the real account (the sprint, Sept 26, 2026)', async () => {
-  // Until the sprint "off". The owner's D1 and D4: the two debit structures and a single long call or put, the
-  // constitution's `options_money.real_types` (league.ci holds the two equal); no credit type under $2,000 of equity.
-  // wrangler.jsonc is JSON with comments: the line itself is the check.
+test('the deployed configuration opens the four debit types at any equity and the three credit types only from $2,000 (the sprint, Sept 26, 2026)', async () => {
+  // Until the sprint "off". The owner's D1 and D4: the two debit structures and a single long call or put; since credit at
+  // $2,000 (Sept 26, 2026) the three credit types too, the constitution's `options_money.real_types` (league.ci holds the
+  // two equal). Listing them admits no credit open under $2,000: the gateway's own reading of the account's equity
+  // refuses it (403, `credit_equity`) before anything is sent. wrangler.jsonc is JSON with comments: the line itself is
+  // the check.
   const config = readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
   const lines = config.split('\n').filter(line => /"OPTION_STRUCTURES_REAL"/.test(line));
   assert.equal(lines.length, 1);
-  assert.match(lines[0], /^\s*"OPTION_STRUCTURES_REAL": "debit_vertical,long_butterfly,long_call,long_put",?\s*$/);
+  assert.match(lines[0],
+    /^\s*"OPTION_STRUCTURES_REAL": "debit_vertical,long_butterfly,long_call,long_put,credit_vertical,iron_condor,iron_butterfly",?\s*$/);
   const listed = /"OPTION_STRUCTURES_REAL": "([^"]*)"/.exec(lines[0])[1];
-  assert.deepEqual(admittedStructures({ OPTION_STRUCTURES_REAL: listed }), ['debit_vertical', 'long_butterfly', 'long_call', 'long_put']);
+  assert.deepEqual(admittedStructures({ OPTION_STRUCTURES_REAL: listed }),
+    ['debit_vertical', 'long_butterfly', 'long_call', 'long_put', 'credit_vertical', 'iron_condor', 'iron_butterfly']);
+  assert.equal(/"CREDIT_MIN_EQUITY_USD": "([^"]*)"/.exec(config)[1], '2000');
   const settings = { OPTION_STRUCTURES_REAL: listed };
-  // A debit vertical opens; a credit vertical and a condor do not, at any equity.
-  assert.equal((await call(post('alpaca', mleg(VERTICAL, '0.70')), { settings })).response.status, 200);
-  const condor = [leg(occ(579, 'P'), BTO), leg(occ(580, 'P'), STO), leg(occ(590), STO), leg(occ(591), BTO)];
-  for (const equity of ['500.00', '5000.00']) {
-    const refused = await call(post('alpaca', mleg(condor, '-0.38')), { settings, equity });
-    assert.equal(refused.response.status, 400, equity);
-    assert.match(refused.body.error, /An iron_condor is not admitted on the real account/);
+  // The debit types open under $2,000 (the account's $481.63).
+  for (const [type, legs, limit] of OPENS.filter(([t]) => ['debit_vertical', 'long_butterfly'].includes(t))) {
+    assert.equal((await call(post('alpaca', mleg(legs, limit)), { settings, equity: '481.63' })).response.status, 200, type);
+  }
+  // Every credit type, on SPY (physically settled) and XSP (cash-settled): refused at $481.63, $1,999.00 and $1,999.99 of
+  // equity, and nothing is forwarded. At $2,000 an XSP one goes; an SPY one waits for its short legs' notional (the
+  // review of #393: at most CREDIT_SHORT_NOTIONAL_EQUITY, 3x equity) and goes once equity covers it.
+  assert.equal(/"CREDIT_SHORT_NOTIONAL_EQUITY": "([^"]*)"/.exec(config)[1], '3');
+  const credits = OPENS.filter(([t]) => ['credit_vertical', 'iron_condor', 'iron_butterfly'].includes(t));
+  assert.equal(new Set(credits.map(([t]) => t)).size, 3);
+  const xsp = legs => legs.map(row => ({ ...row, symbol: row.symbol.replace(/^SPY/, 'XSP') }));
+  for (const [type, legs, limit] of credits) {
+    for (const onRoot of [legs, xsp(legs)]) {
+      for (const equity of ['481.63', '1999.00', '1999.99']) {
+        const refused = await call(post('alpaca', mleg(onRoot, limit)), { settings, equity });
+        assert.equal(refused.response.status, 403, `${type} at ${equity}`);
+        assert.equal(refused.body.cap, 'credit_equity');
+        assert.equal(refused.body.error, `A credit structure opens only while the real account's equity is at least $2000.00; it reads $${equity}.`);
+        assert.equal(refused.calls.length, 0, 'nothing is sent');
+        assert.equal((await refused.gate.status()).today.orders, 0, 'nothing is counted');
+      }
+    }
+    const admitted = await call(post('alpaca', mleg(xsp(legs), limit)), { settings, equity: '2000.00' });
+    assert.equal(admitted.response.status, 200, `${type} at 2000.00`);
+    assert.equal(admitted.calls.length, 1);
+    assert.equal(JSON.parse(admitted.calls[0].body).limit_price, limit, 'a credit open goes at its negative limit');
+    assert.ok(limit.startsWith('-'));
+    const spy = await call(post('alpaca', mleg(legs, limit)), { settings, equity: '2000.00' });
+    assert.deepEqual([spy.response.status, spy.body.cap, spy.calls.length], [403, 'credit_notional', 0], type);
+    assert.equal((await call(post('alpaca', mleg(legs, limit)), { settings, equity: '40000.00' })).response.status, 200, type);
+  }
+  // A credit open at a positive limit would PAY to sell: refused as the wrong sign at any equity.
+  const [, condor] = credits.find(([t]) => t === 'iron_condor');
+  const paying = await call(post('alpaca', mleg(condor, '0.38')), { settings, equity: '5000.00' });
+  assert.equal(paying.response.status, 400);
+  assert.match(paying.body.error, /takes in a credit.*wrong sign/);
+  // Its close (buying it back for a debit, a positive limit) is an exit: no equity threshold, once its legs are held.
+  const held = condor.map(row => ({ symbol: row.symbol, qty: row.position_intent === BTO ? '1' : '-1',
+    side: row.position_intent === BTO ? 'long' : 'short', asset_class: 'us_option' }));
+  const close = await call(post('alpaca', mleg(closing(condor), '0.20')), { settings, equity: '1500.00', positions: held });
+  assert.equal(close.response.status, 200);
+  assert.equal(close.accountReads.length, 0, 'an exit reads no equity');
+  // Calendars, diagonals, straddles and strangles stay shadow-only (Alpaca closes them in no one order).
+  for (const [type, legs, limit] of OPENS.filter(([t]) => ['calendar', 'diagonal', 'long_straddle', 'long_strangle'].includes(t))) {
+    const refused = await call(post('alpaca', mleg(legs, limit)), { settings, equity: '9000.00' });
+    assert.equal(refused.response.status, 400, type);
+    assert.match(refused.body.error, /is not admitted on the real account/);
   }
 });
 

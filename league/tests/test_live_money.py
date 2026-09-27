@@ -32,16 +32,19 @@ def row(**kw):
     return base
 
 
-#: The five multi-leg types the venue closes in one order: the table's real types once a deposit brings credit back.
-FIVE = ["debit_vertical", "credit_vertical", "iron_condor", "iron_butterfly", "long_butterfly"]
+#: The four debit types: the table's real types before credit at $2,000 (B4, Sept 26, 2026).
+FOUR = ["debit_vertical", "long_butterfly", "long_call", "long_put"]
+#: The three credit types, real at $2,000 of sizing equity or more (credit at $2,000, Sept 26, 2026).
+CREDIT = ("credit_vertical", "iron_condor", "iron_butterfly")
 
 
 class TheTable(unittest.TestCase):
     def test_the_defaults_are_the_sprints(self):
         """The sprint (Sept 26, 2026), owner decision D4: the bold end of the plan's ranges; D3's calibration cap; the four
-        debit types under $2,000 (the long call and put among them, B4)."""
+        debit types under $2,000 (the long call and put among them, B4), and the three credit types from $2,000 of equity."""
         t = M.Table.from_constitution()
-        self.assertEqual(t.real_types, ("debit_vertical", "long_butterfly", "long_call", "long_put"))
+        self.assertEqual(t.real_types, ("debit_vertical", "long_butterfly", "long_call", "long_put", "credit_vertical",
+                                        "iron_condor", "iron_butterfly"))
         self.assertEqual(t.credit_types, ("credit_vertical", "iron_condor", "iron_butterfly"))
         self.assertEqual((t.probe_share, t.probe_open, t.probe_family_share, t.probe_floor), (D("0.05"), 3, D("0.15"), D("100")))
         self.assertEqual((t.sized_min_trades, t.sized_confidence, t.kelly_fraction), (20, 0.8, 0.25))
@@ -93,21 +96,32 @@ class TheTable(unittest.TestCase):
         c["options_money"]["probe"]["max_loss_share"] = "0.04"
         self.assertNotEqual(money_digest(c), money_digest())
 
-    def test_credit_waits_for_two_thousand_dollars_on_equity_alone(self):
-        # As it stands (the sprint): no credit type is a real type, at any equity; they come back with a deposit.
+    def test_credit_types_are_real_from_two_thousand_dollars_of_equity_alone(self):
+        # Credit at $2,000 (Sept 26, 2026): the three credit types are real types, but real money opens one only while
+        # the sizing equity reads $2,000 or more -- equity alone, judged afresh each time (no latch from an earlier fill).
         t = M.Table.from_constitution()
-        for equity in ("1999.99", "2000", "9000"):
-            self.assertIn("credit structure", t.type_allowed("iron_condor", D(equity)))
-            self.assertIn("ratified again", t.type_allowed("credit_vertical", D(equity)))
-        # With the credit types listed again, they open at $2,000 of equity on equity alone (the gateway's own rule).
-        t = table(real_types=FIVE)
-        self.assertIn("credit structure", t.type_allowed("iron_condor", D("1999.99")))
-        self.assertIsNone(t.type_allowed("iron_condor", D("2000")))
-        # The gateway refuses a credit open under $2,000 on equity alone: no latch from an earlier fill opens it here.
-        self.assertIn("credit structure", t.type_allowed("iron_condor", D("1999.99")))
-        self.assertIsNone(t.type_allowed("debit_vertical", D("100")))
+        for type_ in CREDIT:
+            self.assertIn(type_, t.real_types)
+            for equity in ("0", "481.63", "1999", "1999.99"):
+                why = t.type_allowed(type_, D(equity))
+                self.assertIn("credit structure", why, (type_, equity))
+                self.assertIn(f"reads ${D(equity):.2f}", why)
+                self.assertIn("$2000", why)
+            for equity in ("2000", "2000.01", "5481.65"):
+                self.assertIsNone(t.type_allowed(type_, D(equity)), (type_, equity))
+            self.assertIn("credit structure", t.type_allowed(type_, D("1999.99")), "back under: refused again")
+        self.assertFalse(t.credit_allowed(D("1999.99")))
+        self.assertTrue(t.credit_allowed(D("2000")))
+        # The debit types need no threshold; the shapes the venue closes in more than one order stay shadow-only.
+        for type_ in FOUR:
+            self.assertIsNone(t.type_allowed(type_, D("100")), type_)
         self.assertIn("closes in more than one order", t.type_allowed("calendar", D("9000")))
-        self.assertIn("closes in more than one order", t.type_allowed("long_call", D("9000")), "unless it is listed")
+        # A table without the credit types (as under B4) keeps them shadow-only at any equity.
+        t = table(real_types=FOUR)
+        for equity in ("1999.99", "2000", "9000"):
+            self.assertIn("ratified again", t.type_allowed("iron_condor", D(equity)))
+        self.assertIn("closes in more than one order", table(real_types=["debit_vertical"]).type_allowed("long_call", D("9000")),
+                      "unless it is listed")
 
     def test_a_long_call_and_a_long_put_are_real_types_at_any_equity(self):
         t = M.Table.from_constitution()
@@ -146,10 +160,15 @@ class Bands(unittest.TestCase):
     def test_what_keeps_a_family_shadow_only(self):
         self.assertIn("holdout", M.band_for(self.t, row(holdout_passed=False), D("5000"), fwd([]))[1])
         self.assertIn("more than one order", M.band_for(self.t, row(structure="long_strangle"), D("5000"), fwd([]))[1])
-        self.assertIn("credit structure", M.band_for(self.t, row(structure="iron_condor"), D("1999"), fwd([]))[1])
-        self.assertEqual(M.band_for(self.t, row(structure="iron_condor"), D("2000"), fwd([]))[0], "candidate",
-                         "no credit type is real until a deposit re-ratifies the grant")
-        self.assertEqual(M.band_for(table(real_types=FIVE), row(structure="iron_condor"), D("2000"), fwd([]))[0], "probe")
+        for type_ in CREDIT:
+            band, why = M.band_for(self.t, row(structure=type_), D("1999.99"), fwd([]))
+            self.assertEqual(band, "candidate", type_)
+            self.assertIn("credit structure", why)
+            self.assertEqual(M.band_for(self.t, row(structure=type_), D("2000"), fwd([]))[0], "probe", type_)
+            # A credit Probe whose sizing equity falls under $2,000 goes back to Candidate, shadow only (no latch).
+            self.assertEqual(M.band_for(self.t, row(structure=type_, band="probe"), D("1999.99"), fwd([]))[0], "candidate")
+        self.assertEqual(M.band_for(table(real_types=FOUR), row(structure="iron_condor"), D("2000"), fwd([]))[0], "candidate",
+                         "a table without the credit types keeps them shadow-only at any equity")
         self.assertEqual(M.band_for(self.t, row(structure="long_call"), D("5000"), fwd([]))[0], "probe")
         self.assertEqual(M.band_for(self.t, row(band="gym"), D("5000"), fwd([]))[0], "gym")
 
@@ -306,6 +325,99 @@ class Sizing(unittest.TestCase):
 
     def test_a_candidate_trades_no_real_money(self):
         self.assertIn("shadow only", self.plan(10, band="candidate").reason)
+
+
+class CreditLimits(unittest.TestCase):
+    """The review of #393 (Sept 26, 2026): a credit structure on a physically settled root can be assigned early into
+    shares; sizing by net maximum loss alone would let a deeper short leg (a larger credit, a smaller maximum loss) carry
+    MORE contracts. `money.credit_limit`: no short leg deep in the money, no short call past five days, the short legs'
+    notional at most 3x the sizing equity; one structure an order at Probe, whatever the root."""
+
+    def setUp(self):
+        self.t = M.Table.from_constitution()
+
+    def limit(self, type_="credit_vertical", *, shorts, spot=600.0, equity="60000", physical=True, probe=False):
+        return M.credit_limit(self.t, type_, physical=physical, shorts=shorts, spot=spot, equity=D(equity), probe=probe)
+
+    def test_the_rows_are_the_reviews(self):
+        self.assertEqual((self.t.credit_short_notional, self.t.credit_probe_per_order, self.t.credit_short_call_max_days),
+                         (D("3"), 1, 5))
+        self.assertEqual(OPTIONS_MONEY_BOUNDS["credit.short_notional_equity"], ("1", "5"))
+        self.assertEqual(OPTIONS_MONEY_BOUNDS["credit.probe_per_order"], ("1", "1"))
+        self.assertEqual(OPTIONS_MONEY_BOUNDS["credit.short_call_max_days"], ("0", "5"))
+        for path, value in (("credit__short_notional_equity", "5.01"), ("credit__short_notional_equity", "0.5"),
+                            ("credit__probe_per_order", 2), ("credit__short_call_max_days", 6)):
+            c = copy.deepcopy(CONSTITUTION)
+            node = c["options_money"]
+            keys = path.split("__")
+            node[keys[0]][keys[1]] = value
+            self.assertTrue(options_money_problems(c), path)
+        from league.constitution import GATEWAY_VARS
+
+        self.assertEqual(GATEWAY_VARS["CREDIT_SHORT_NOTIONAL_EQUITY"], "credit.short_notional_equity")
+
+    def test_a_debit_type_has_no_credit_limit(self):
+        for type_ in FOUR:
+            self.assertEqual(self.limit(type_, shorts=[M.ShortLeg(605.0, True, 1, 30)], equity="100", probe=True), (None, ""))
+
+    def test_the_short_legs_notional_is_at_most_three_times_the_sizing_equity(self):
+        put = [M.ShortLeg(598.0, False, 1, 1)]                             # $59,800 of short notional a structure
+        self.assertEqual(self.limit(shorts=put, equity="19933.34")[0], 1)  # 3x is $59,800.02
+        n, why = self.limit(shorts=put, equity="19933.33")                 # 3x is $59,799.99
+        self.assertEqual(n, 0)
+        self.assertIn("$59800.00 of notional a structure, over 3x the sizing equity $19933.33 ($59799.99)", why)
+        self.assertEqual(self.limit(shorts=put, equity="60000")[0], 3)
+        # An iron condor sums both short legs; a butterfly's body counts its ratio.
+        condor = [M.ShortLeg(597.0, False, 1, 1), M.ShortLeg(603.0, True, 1, 1)]
+        self.assertEqual(self.limit("iron_condor", shorts=condor, equity="60000")[0], 1)   # $120,000 a structure
+        self.assertEqual(self.limit("iron_condor", shorts=condor, equity="39999.99")[0], 0)
+        self.assertEqual(self.limit(shorts=[M.ShortLeg(598.0, False, 2, 1)], equity="60000")[0], 1)
+        # At the account's $5,481.65 no SPY credit structure fits; nothing does at no equity.
+        self.assertEqual(self.limit(shorts=put, equity="5481.65")[0], 0)
+        self.assertEqual(self.limit(shorts=put, equity="0")[0], 0)
+
+    def test_a_short_leg_deep_in_the_money_is_refused_and_one_at_the_money_is_not(self):
+        # In the money by more than 1% of its strike: a put above spot x 1/0.99, a call below spot x 1/1.01.
+        self.assertEqual(self.limit(shorts=[M.ShortLeg(606.07, False, 1, 1)])[0], 0)       # 600 < 606.07 x 0.99 = 600.0093
+        self.assertEqual(self.limit(shorts=[M.ShortLeg(606.06, False, 1, 1)])[0], 2)       # 600 >= 599.9994: within 1%
+        n, why = self.limit(shorts=[M.ShortLeg(594.0, True, 1, 1)])                        # 600 > 594 x 1.01 = 599.94
+        self.assertEqual(n, 0)
+        self.assertIn("short call at 594 is in the money by more than 1% of its strike (the underlying at 600.00)", why)
+        self.assertEqual(self.limit(shorts=[M.ShortLeg(594.06, True, 1, 1)])[0], 3)
+        # An iron butterfly's body at the money passes (its two shorts share one strike).
+        fly = [M.ShortLeg(600.0, False, 1, 1), M.ShortLeg(600.0, True, 1, 1)]
+        self.assertEqual(self.limit("iron_butterfly", shorts=fly, spot=600.4)[0], 1)
+        # No price of the underlying: nothing to judge the short legs by.
+        self.assertEqual(self.limit(shorts=[M.ShortLeg(590.0, False, 1, 1)], spot=float("nan"))[0], 0)
+
+    def test_a_short_call_past_five_days_is_refused_and_a_short_put_is_not(self):
+        self.assertEqual(self.limit(shorts=[M.ShortLeg(610.0, True, 1, 5)])[0], 2)
+        n, why = self.limit("iron_condor", shorts=[M.ShortLeg(590.0, False, 1, 6), M.ShortLeg(610.0, True, 1, 6)])
+        self.assertEqual(n, 0)
+        self.assertIn("short call expires 6 days out, past the 5", why)
+        self.assertEqual(self.limit(shorts=[M.ShortLeg(590.0, False, 1, 45)])[0], 3, "a put credit vertical 45 days out")
+
+    def test_a_probe_opens_one_structure_an_order_on_any_root(self):
+        put = [M.ShortLeg(598.0, False, 1, 1)]
+        n, why = self.limit(shorts=put, probe=True)
+        self.assertEqual(n, 1)
+        self.assertIn("a credit Probe opens at most 1 an order", why)
+        self.assertEqual(self.limit(shorts=put, physical=False, probe=True)[0], 1)
+
+    def test_a_cash_settled_root_is_held_to_maximum_loss_alone(self):
+        # XSP and SPXW settle in cash: no assignment into shares, so no notional, moneyness or dividend rule.
+        deep_call_far = [M.ShortLeg(500.0, True, 1, 30)]
+        self.assertEqual(self.limit(shorts=deep_call_far, physical=False, equity="2000"), (None, ""))
+
+    def test_the_gateway_and_the_gym_name_the_same_cash_settled_roots(self):
+        import re
+        from pathlib import Path
+
+        from league.gym.venue import INDEX_ROOTS
+
+        caps = (Path(__file__).resolve().parents[2] / "gateway" / "lib" / "caps.mjs").read_text(encoding="utf-8")
+        listed = re.search(r"export const CASH_SETTLED_ROOTS = \[(.*?)\];", caps).group(1)
+        self.assertEqual(set(re.findall(r"'([A-Z]+)'", listed)), set(INDEX_ROOTS))
 
 
 class Stops(unittest.TestCase):

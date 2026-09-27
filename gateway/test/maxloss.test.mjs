@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 
 import {
   maxLossCaps, shareMillionths, orderCapMicro, dayCapMicro, freshEquity, readAccountEquity, refreshAccountEquity,
-  percent, shareText, formatUsdDown, ACCOUNT_EQUITY_KEY, MAX_AGE_MS,
+  percent, shareText, formatUsdDown, ACCOUNT_EQUITY_KEY, MAX_AGE_MS, multipleMillionths, creditNotionalCapMicro,
 } from '../lib/account.mjs';
 import { realStockClose, closeLegsHeldError, closedLegRows, picoUnits } from '../lib/caps.mjs';
 import { createGate, DAY_KEY } from '../lib/gate.mjs';
@@ -32,7 +32,7 @@ const usd = dollars => {
 const DEPLOYED = {
   MAX_ORDER_USD: '75', MAX_ORDER_USD_KALSHI: '75', MAX_DAY_USD: '4000', MAX_DAY_USD_ALPACA: '10000', MAX_DAY_ORDERS: '300', MAX_DAY_OPEN_ORDERS: '250',
   MAX_ORDER_MAX_LOSS_USD: '1000', MAX_ORDER_EQUITY_SHARE: '0.25', MAX_DAY_EQUITY_SHARE: '1.0', CREDIT_MIN_EQUITY_USD: '2000',
-  EQUITY_CAP_MAX_AGE_MS: '120000', CAP_TIMEZONE: 'America/New_York',
+  CREDIT_SHORT_NOTIONAL_EQUITY: '3', EQUITY_CAP_MAX_AGE_MS: '120000', CAP_TIMEZONE: 'America/New_York',
 };
 const env = (extra = {}) => ({
   GATEWAY_TOKEN: TOKEN, ALPACA_KEY_ID: 'AK-REAL', ALPACA_SECRET_KEY: 'alpaca-real-secret',
@@ -77,7 +77,7 @@ test('the deployed vars are the sprint\'s: $1,000 or 25% an order, 100% of equit
   assert.equal(deployed('MAX_ORDER_USD_ALPACA'), 0, 'the $75 premium cap is gone from the deployed vars');
   const limits = maxLossCaps(DEPLOYED);
   assert.deepEqual(limits, { orderLimitMicro: usd('1000'), orderShare: 250000n, dayShare: M, dayLimitMicro: usd('10000'), creditMinMicro: usd('2000'),
-    maxAgeMs: 120000, maxDayOpenOrders: 250 });
+    creditNotionalMultiple: 3n * M, maxAgeMs: 120000, maxDayOpenOrders: 250 });
   // The sprint (D4, Sept 26, 2026): the constitution's $100 one-contract Probe floor fits at the account's $481.63.
   assert.equal(orderCapMicro(limits, usd('481.63')), usd('120.4075'));
   assert.ok(orderCapMicro(limits, usd('481.63')) >= usd('100'));
@@ -85,7 +85,14 @@ test('the deployed vars are the sprint\'s: $1,000 or 25% an order, 100% of equit
 
 test('the caps come from vars, and a malformed or out-of-range value falls back to the documented default', () => {
   assert.deepEqual(maxLossCaps({}), { orderLimitMicro: usd('1000'), orderShare: 150000n, dayShare: M, dayLimitMicro: usd('10000'), creditMinMicro: usd('2000'),
-    maxAgeMs: MAX_AGE_MS, maxDayOpenOrders: 250 });
+    creditNotionalMultiple: 3n * M, maxAgeMs: MAX_AGE_MS, maxDayOpenOrders: 250 });
+  // The credit notional multiple (the review of #393): above zero and at most 5, else 3.
+  for (const raw of ['0', '-1', '5.000001', '9', 'x', '', undefined, null]) {
+    assert.equal(multipleMillionths(raw, 3n * M), 3n * M, String(raw));
+  }
+  assert.deepEqual([multipleMillionths('1', 7n), multipleMillionths(' 2.5 ', 7n), multipleMillionths('5', 7n)], [M, 2500000n, 5n * M]);
+  assert.equal(creditNotionalCapMicro(maxLossCaps({}), usd('5481.65')), usd('16444.95'));
+  assert.equal(creditNotionalCapMicro(maxLossCaps({}), -usd('1')), 0n);
   for (const raw of ['1.5', '-0.1', 'x', '', undefined, null]) assert.equal(shareMillionths(raw, 7n), 7n, String(raw));
   assert.equal(shareMillionths('0', 7n), 0n, 'zero is a share: the owner may close the route');
   assert.equal(shareMillionths(' 0.125 ', 7n), 125000n);
@@ -372,12 +379,19 @@ test('credit types open at $2,000.00 of the gateway\'s own reading and not at $1
   const credits = OPENS.filter(([type]) => ['credit_vertical', 'iron_condor', 'iron_butterfly'].includes(type));
   const debits = OPENS.filter(([type]) => ['debit_vertical', 'long_butterfly'].includes(type));
   for (const [type, legs, limit] of credits) {
-    const under = await send(mleg(legs, limit), { tape: alpacaVenue({ equity: '1999.99' }) });
-    assert.equal(under.status, 403, type);
-    assert.equal(under.body.cap, 'credit_equity');
-    assert.equal(under.tape.orders().length, 0);
-    const at = await send(mleg(legs, limit), { tape: alpacaVenue({ equity: '2000.00' }) });
-    assert.equal(at.status, 200, type);
+    for (const root of ['SPY', 'XSP']) {
+      const onRoot = legs.map(row => ({ ...row, symbol: row.symbol.replace(/^SPY/, root) }));
+      const under = await send(mleg(onRoot, limit), { tape: alpacaVenue({ equity: '1999.99' }) });
+      assert.equal(under.status, 403, type);
+      assert.equal(under.body.cap, 'credit_equity');
+      assert.equal(under.tape.orders().length, 0);
+    }
+    // At $2,000.00: XSP settles in cash and opens; SPY's short legs (over $59,000 of notional) wait for the notional cap.
+    const xsp = legs.map(row => ({ ...row, symbol: row.symbol.replace(/^SPY/, 'XSP') }));
+    assert.equal((await send(mleg(xsp, limit), { tape: alpacaVenue({ equity: '2000.00' }) })).status, 200, type);
+    const spy = await send(mleg(legs, limit), { tape: alpacaVenue({ equity: '2000.00' }) });
+    assert.deepEqual([spy.status, spy.body.cap], [403, 'credit_notional'], type);
+    assert.equal((await send(mleg(legs, limit), { tape: alpacaVenue({ equity: '40000.00' }) })).status, 200, type);
   }
   for (const [type, legs, limit] of debits) {
     assert.equal((await send(mleg(legs, limit), { tape: alpacaVenue({ equity: '1999.99' }) })).status, 200, type);
@@ -388,6 +402,43 @@ test('credit types open at $2,000.00 of the gateway\'s own reading and not at $1
     assert.equal(refused.status, 400, type);
     assert.match(refused.body.error, /is not admitted on the real account/);
   }
+});
+
+test('REVIEW #393: a credit open on a physically settled root carries short legs of at most 3x equity in notional; XSP, debits and closes carry none', async () => {
+  // A put credit vertical on SPY, short the 581 put: $58,100 of short notional a structure (581 x 100).
+  const put = [leg(occ(581, 'P'), STO), leg(occ(580, 'P'), BTO)];
+  const at = equity => alpacaVenue({ equity, positions: [{ symbol: occ(581, 'P'), qty: '-5', side: 'short' }, { symbol: occ(580, 'P'), qty: '5', side: 'long' }] });
+  // 3 x $19,366.67 is $58,100.01: one structure fits; 3 x $19,366.66 is $58,099.98: it does not.
+  const fits = await send(mleg(put, '-0.30'), { tape: at('19366.67') });
+  assert.equal(fits.status, 200);
+  const over = await send(mleg(put, '-0.30'), { tape: at('19366.66') });
+  assert.deepEqual([over.status, over.body.cap], [403, 'credit_notional']);
+  assert.equal(over.body.error, 'A credit structure\'s short legs carry $58100.00 of notional (strike x 100 x contracts), over 3x the ' +
+    'real account\'s equity of $19366.66 ($58099.98): an early assignment would bring shares the account cannot carry.');
+  assert.equal(over.tape.orders().length, 0, 'nothing is sent');
+  assert.equal(over.gate.maxLossStatus(NOW).orders_today, 0, 'nothing is counted');
+  // Contracts count: two structures need twice the room.
+  assert.equal((await send(mleg(put, '-0.30', { qty: '2' }), { tape: at('19366.67') })).body.cap, 'credit_notional');
+  assert.equal((await send(mleg(put, '-0.30', { qty: '2' }), { tape: at('38733.34') })).status, 200);
+  // An iron condor sums both short legs: 580 + 590 = $117,000 a structure.
+  const condor = [leg(occ(579, 'P'), BTO), leg(occ(580, 'P'), STO), leg(occ(590), STO), leg(occ(591), BTO)];
+  assert.equal((await send(mleg(condor, '-0.38'), { tape: at('38999.99') })).body.cap, 'credit_notional');
+  assert.equal((await send(mleg(condor, '-0.38'), { tape: at('39000.00') })).status, 200);
+  // XSP settles in cash (no shares): the cap does not apply; the $2,000 line and the loss caps do.
+  const xsp = put.map(row => ({ ...row, symbol: row.symbol.replace(/^SPY/, 'XSP') }));
+  assert.equal((await send(mleg(xsp, '-0.30'), { tape: at('2000.00') })).status, 200);
+  // A debit vertical's short leg is covered by a dearer long one: not a credit open, no notional cap.
+  assert.equal((await send(mleg(VERTICAL, '0.50'), { tape: at('500.00') })).status, 200);
+  // A credit structure's close (a buy-back) takes risk off: an exit, never capped.
+  const close = await send(mleg(closing(put), '0.20'), { tape: at('500.00') });
+  assert.equal(close.status, 200);
+  // The gate itself refuses a notional it cannot read, and judges the one it is given.
+  const gate = gateWith('2000.00');
+  assert.equal(open(gate, '70', { credit: true, shortNotional: 'lots' }).cap, 'credit_notional');
+  assert.equal(open(gate, '70', { credit: true, shortNotional: '-1' }).cap, 'credit_notional');
+  assert.equal(open(gate, '70', { credit: true, shortNotional: String(usd('6000')) }).ok, true);
+  assert.equal(open(gate, '70', { credit: true, shortNotional: String(usd('6000.01')) }).cap, 'credit_notional');
+  assert.equal(open(gate, '70', { shortNotional: String(usd('600000')) }).ok, true, 'only a credit open is held to it');
 });
 
 test('300 orders a day through the front door, exits included; opens stop at 250; the 301st is refused', async () => {
@@ -531,6 +582,7 @@ test('health reports the reading and its age, the per-order cap now, the day\'s 
     order_cap_usd: '625.00', max_order_max_loss_usd: '1000.00', order_equity_share: '0.25',
     day_open_max_loss_usd: '70.00', day_open_cap_usd: '2500.00', day_equity_share: '1', max_day_usd_alpaca: '10000.00',
     opens_admitted: true, credit_opens_admitted: true, credit_min_equity_usd: '2000.00',
+    credit_short_notional_equity: '3', credit_short_notional_cap_usd: '7500.00',
     orders_today: 1, max_day_open_orders: 250, max_day_orders: 300,
   });
   // Two minutes on, the reading is too old to open against until an order reads the account again.

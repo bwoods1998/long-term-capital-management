@@ -78,6 +78,12 @@
     "MAX_ORDER_EQUITY_SHARE": "0.25",
     "MAX_DAY_EQUITY_SHARE": "1.0",
     "CREDIT_MIN_EQUITY_USD": "2000",
+    // Sept 26, 2026 (the review of #393): a credit structure on a physically settled root (every root but the
+    // cash-settled index roots, lib/caps.mjs CASH_SETTLED_ROOTS) opens only while its short legs' notional, strike x
+    // 100 x ratio x structures summed over the short legs, is at most this many times the account's equity (the
+    // gateway's own reading): an early assignment of American ETF options cannot bring shares many times the account.
+    // Equal to the constitution's `options_money.credit.short_notional_equity` (league.ci).
+    "CREDIT_SHORT_NOTIONAL_EQUITY": "3",
     "EQUITY_CAP_MAX_AGE_MS": "120000",
     // Sept 21: $104.14 already metered plus $75 owner-reported remaining credit, less ~$5
     // operating reserve. This is an aggregate ceiling, not a fresh $174 allowance.
@@ -166,9 +172,13 @@
     // threshold. Every open still meets the caps by maximum loss above.
     // Sept 26, 2026 (the sprint, B4; owner decisions D1 and D4): real opens ON for exactly the constitution's
     // `options_money.real_types` under $2,000 of equity -- the two debit structures and a single long call or put
-    // (buy_to_open, closed with sell_to_close). The credit types come back only with a deposit to $2,000, in one
-    // deploy with the constitution and a re-ratified grant. league.ci holds this line equal to the constitution.
-    "OPTION_STRUCTURES_REAL": "debit_vertical,long_butterfly,long_call,long_put",
+    // (buy_to_open, closed with sell_to_close). league.ci holds this line equal to the constitution.
+    // Sept 26, 2026 (credit at $2,000; the sprint's "Money on Monday"): the three credit types are listed too, so they
+    // open the moment the account's equity reads CREDIT_MIN_EQUITY_USD ($2,000) with no further deploy. Listing them
+    // admits nothing under it: every credit open is still refused (403, cap `credit_equity`) while the gateway's own
+    // reading of the account's equity is under $2,000 (lib/gate.mjs), and the constitution's House holds them
+    // shadow-only there too. Deployed with the House release that lists them in `options_money.real_types`.
+    "OPTION_STRUCTURES_REAL": "debit_vertical,long_butterfly,long_call,long_put,credit_vertical,iron_condor,iron_butterfly",
 
     // Watchdog.
     "CHECKPOINT_URL": "https://blakewoods.us/api/capital/checkpoint",

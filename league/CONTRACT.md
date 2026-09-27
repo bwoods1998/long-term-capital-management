@@ -186,7 +186,9 @@ from 15:00; no closing order from 15:10 (15:25 SPY/QQQ). From ten minutes before
 (`ctx.rules[root]["expiry_close"]`: 15:00 ET; 15:15 SPY/QQQ) the House closes an expiring equity
 position itself at the natural, in the Gym as on real money: when a leg expiring today is in the money
 or out of it by 1% of the strike or less, and an expiring long call or put whatever its moneyness while
-it has a bid (an exercise would bring 100 shares the account cannot carry). Your own close of it is
+it has a bid (an exercise would bring 100 shares the account cannot carry). On real money only, it also
+closes every expiring credit structure (credit vertical, iron condor, iron butterfly) on an equity root
+there whatever its moneyness; the Gym leaves one whose legs are all further out to expire. Your own close of it is
 refused from then: close expiring equity positions before 15:00 (15:15 SPY/QQQ) if you want your
 price. A position that only comes that close later is liquidated at the natural from 15:30; one whose
 every expiring leg stays further out of the money (a long call or put: with no bid) is left to expire,

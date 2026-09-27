@@ -380,6 +380,28 @@ def decide(ctx):
 '''
 
 
+#: A put credit vertical one dollar wide, its short leg `atm` strikes from the money: opened `opens` times one after
+#: another, each closed at the natural after `hold` minutes (credit at $2,000, Sept 26, 2026).
+CREDIT_VERTICAL = '''
+NEEDS = {"roots": ["SPY"], "dte": [0, 3], "band": 0.03, "cadence": 1, "history": 0, "start": 571, "end": 958}
+PARAMS = {"hold": 3, "opens": 1, "dte": 1, "atm": -2}
+STATE = {"opened": 0}
+
+def decide(ctx):
+    out = []
+    for p in ctx.positions:
+        if p["held_minutes"] >= ctx.params["hold"]:
+            out.append({"close": p["id"], "limit": "natural", "note": "held long enough"})
+    if not ctx.positions and not ctx.orders and STATE["opened"] < ctx.params["opens"]:
+        STATE["opened"] += 1
+        out.append({"open": "credit_vertical", "root": "SPY", "qty": 1, "limit": "natural", "tag": "t",
+                    "note": "a test credit vertical",
+                    "legs": [{"side": "short", "right": "P", "dte": ctx.params["dte"], "atm": ctx.params["atm"]},
+                             {"side": "long", "right": "P", "rel": 0, "offset": -1.0}]})
+    return out
+'''
+
+
 def family(name: str, code: str, *, band: str = "probe", structure: str = "debit_vertical", holdout: bool = True,
            validation: bool = True, version: int = 1, typical: Any = 50.0, params: Mapping[str, Any] | None = None) -> dict:
     return {"family": name, "band": band, "structure": structure, "roots": ["SPY"], "holdout_passed": holdout,

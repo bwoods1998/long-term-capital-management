@@ -118,7 +118,7 @@ export function createGate({ store, env = {}, now = Date.now }) {
    * C6/C10). MAX_ORDER_USD and MAX_DAY_USD are Kalshi's caps; this venue's orders are added to the day's notional as a
    * record, and kept apart in `alpaca_notional` so that they never spend Kalshi's day.
    */
-  const reserveReal = ({ amount, at, exit, credit, row }) => {
+  const reserveReal = ({ amount, at, exit, credit, shortNotional = 0n, row }) => {
     let equityMicro = null;
     if (!exit && row.orders >= openOrdersCap() && openOrdersCap() < limits.maxDayOrders) {
       return {
@@ -141,6 +141,18 @@ export function createGate({ store, env = {}, now = Date.now }) {
           ok: false, status: 403, cap: 'credit_equity',
           error: `A credit structure opens only while the real account's equity is at least $${formatUsd(maxLoss.creditMinMicro)}; ` +
                  `it reads $${account.formatUsdDown(equityMicro)}.`,
+        };
+      }
+      // The review of #393 (Sept 26, 2026): a credit open on a physically settled root, its short legs' notional at most
+      // CREDIT_SHORT_NOTIONAL_EQUITY x equity, so an early assignment cannot bring shares many times the account.
+      const notionalCap = account.creditNotionalCapMicro(maxLoss, equityMicro);
+      if (credit && shortNotional > notionalCap) {
+        return {
+          ok: false, status: 403, cap: 'credit_notional',
+          error: `A credit structure's short legs carry $${formatUsd(shortNotional)} of notional (strike x 100 x contracts), ` +
+                 `over ${account.shareText(maxLoss.creditNotionalMultiple)}x the real account's equity of ` +
+                 `$${account.formatUsdDown(equityMicro)} ($${account.formatUsdDown(notionalCap)}): an early assignment would ` +
+                 'bring shares the account cannot carry.',
         };
       }
       const orderCap = account.orderCapMicro(maxLoss, equityMicro);
@@ -190,16 +202,27 @@ export function createGate({ store, env = {}, now = Date.now }) {
     /**
      * Consume `micro` dollars of today's budget for one order, or refuse.
      * Refusal is `{ ok: false, status, error }`; the caller forwards nothing. On the real Alpaca venue `micro` is an
-     * open's maximum loss, judged by `reserveReal` (`credit` marks a credit structure's open, Sept 26, 2026, Wave 5).
+     * open's maximum loss, judged by `reserveReal` (`credit` marks a credit structure's open, Sept 26, 2026, Wave 5;
+     * `shortNotional`, micro-dollars as a string, its short legs' notional on a physically settled root, the review of #393).
      */
-    reserve({ micro, at = now(), exit = false, venue = null, credit = false }) {
+    reserve({ micro, at = now(), exit = false, venue = null, credit = false, shortNotional = '0' }) {
       if (killed()) {
         return { ok: false, status: 423, error: 'The kill switch is engaged; no orders are being forwarded.' };
       }
       const amount = BigInt(micro);
       if (amount <= 0n) return { ok: false, status: 400, cap: 'order', error: 'An order must have a positive notional.' };
       // The real Alpaca venue is capped by maximum loss against its own equity (Sept 26, 2026, Wave 5).
-      if (venue === 'alpaca') return reserveReal({ amount, at, exit: exit === true, credit: credit === true, row: counters(at) });
+      if (venue === 'alpaca') {
+        // The short legs' notional of a credit open (micro-dollars as a string); anything unreadable is refused, never 0.
+        let notional;
+        try {
+          notional = BigInt(shortNotional ?? '0');
+        } catch {
+          return { ok: false, status: 400, cap: 'credit_notional', error: 'A credit open\'s short-leg notional is unreadable.' };
+        }
+        if (notional < 0n) return { ok: false, status: 400, cap: 'credit_notional', error: 'A credit open\'s short-leg notional is negative.' };
+        return reserveReal({ amount, at, exit: exit === true, credit: credit === true, shortNotional: notional, row: counters(at) });
+      }
       // A venue may carry a tighter per-order cap than the floor's (`MAX_ORDER_USD_<VENUE>`):
       // the accounts are a few hundred dollars each, and one order must never be one account.
       const venueCap = venueOrderCap(env, venue);
@@ -336,6 +359,8 @@ export function createGate({ store, env = {}, now = Date.now }) {
         opens_admitted: equityMicro !== null && !killed() && row.orders < openOrdersCap(),
         credit_opens_admitted: equityMicro !== null && equityMicro >= maxLoss.creditMinMicro && !killed() && row.orders < openOrdersCap(),
         credit_min_equity_usd: formatUsd(maxLoss.creditMinMicro),
+        credit_short_notional_equity: account.shareText(maxLoss.creditNotionalMultiple),
+        credit_short_notional_cap_usd: equityMicro === null ? null : account.formatUsdDown(account.creditNotionalCapMicro(maxLoss, equityMicro)),
         orders_today: row.orders,
         max_day_open_orders: openOrdersCap(),
         max_day_orders: limits.maxDayOrders,

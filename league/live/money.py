@@ -10,10 +10,11 @@ enlarges a stake. Every share in the table is a share of `E`.
 
 BANDS (the live path owns candidate <-> probe <-> sized; the swarm owns gym <-> candidate and retirement):
 
-- PROBE: a Candidate that passed the holdout, whose structure is one of the real types (credit types only while credit
-  opens are allowed), and whose typical maximum loss (one structure, with its round-trip fees) fits the Probe's cap at
-  `E`: `probe.max_loss_share x E`, or `probe.floor_usd` for one contract. Otherwise it stays a Candidate, shadow only,
-  with the reason recorded.
+- PROBE: a Candidate that passed the holdout, whose structure is one of the real types (credit types only while `E` is
+  at least `credit_min_equity_usd`, $2,000: `Table.credit_allowed`), and whose typical maximum loss (one structure, with
+  its round-trip fees) fits the Probe's cap at `E`: `probe.max_loss_share x E`, or `probe.floor_usd` for one contract.
+  Otherwise it stays a Candidate, shadow only, with the reason recorded. A credit Probe or Sized family whose `E` falls
+  under $2,000 goes back to Candidate the same way (no latch), and every real open is judged again at its minute.
 - SIZED: a PROBE (never a Candidate at once) whose forward record has at least `sized.min_trades` trades with a mean
   return on maximum loss above zero and its one-sided `sized.confidence` lower bound above zero. The record
   (`one_record`) is the program version's own, one source a market day (real, else shadow, else nightly).
@@ -34,6 +35,9 @@ plus its open and close fees:
   (`probe.max_loss_share` a structure, `probe.open_per_family` open, `probe.family_share` the family): Sized limits never
   apply at a Probe-sized stake.
 - Tuition: exactly one structure, only while the day's and the week's tuition maximum loss has room.
+- A credit structure (`credit_limit`, the review of #393): on a physically settled root, no short leg deep in the money
+  and no short call beyond `credit.short_call_max_days`, and the short legs' notional at most
+  `credit.short_notional_equity x E`; at Probe `credit.probe_per_order` structures an order.
 - Every open: the book's open maximum loss at most `book_share x E`; the gateway's caps (one order's maximum loss at
   most min(`gateway.order_max_loss_usd`, `gateway.order_equity_share x E`), today's opening maximum loss at most
   `gateway.day_equity_share x E`) are checked here first so the House refuses before the gateway does. Today's opening
@@ -112,6 +116,9 @@ class Table:
     tuition_day: Decimal
     tuition_week: Decimal
     calibration_day: Decimal
+    credit_short_notional: Decimal
+    credit_probe_per_order: int
+    credit_short_call_max_days: int
     max_orders_day: int
     max_requests_minute: int
     bp_buffer: Decimal
@@ -146,6 +153,9 @@ class Table:
             drawdown_stop_share=D(t["drawdown_stop_share"]),
             tuition_day=D(t["tuition"]["day_usd"]), tuition_week=D(t["tuition"]["week_usd"]),
             calibration_day=D(t["calibration"]["day_usd"]),
+            credit_short_notional=D(t["credit"]["short_notional_equity"]),
+            credit_probe_per_order=int(t["credit"]["probe_per_order"]),
+            credit_short_call_max_days=int(t["credit"]["short_call_max_days"]),
             max_orders_day=int(path["max_orders_day"]), max_requests_minute=int(path["max_requests_minute"]),
             bp_buffer=D(path["bp_buffer"]), near_money_share=D(path["near_money_share"]),
             expiry_close_lead_minutes=int(path["expiry_close_lead_minutes"]),
@@ -154,13 +164,14 @@ class Table:
         )
 
     def credit_allowed(self, equity: Decimal) -> bool:
-        """Credit structures on real money: while the account reads `credit_min_equity`. Equity alone, as the gateway
-        judges it (the plan's "or a real credit order is accepted" can only happen at that equity, since the gateway
-        refuses a credit open under it; a latch kept past a fall under it would only send refused orders)."""
+        """Credit structures on real money: while `equity` -- the sizing equity, the lower of the account's equity read
+        this minute and the grant's capital -- is at least `credit_min_equity`. Equity alone, as the gateway judges it
+        (the plan's "or a real credit order is accepted" can only happen at that equity, since the gateway refuses a
+        credit open under it; a latch kept past a fall under it would only send refused orders)."""
         return equity >= self.credit_min_equity
 
     def type_allowed(self, type_: str, equity: Decimal) -> str | None:
-        """Why real money may not open `type_` now, or None."""
+        """Why real money may not open `type_` now, or None. `equity` is the sizing equity (`credit_allowed`)."""
         if type_ in self.credit_types and type_ not in self.real_types:
             return (f"a {type_} is a credit structure: credit opens are not among the types real money opens "
                     f"({', '.join(self.real_types)}) until a deposit takes equity to ${self.credit_min_equity} and the "
@@ -169,8 +180,9 @@ class Table:
             return (f"a {type_} is not one of the types real money opens ({', '.join(self.real_types)}): "
                     "it closes in more than one order at the venue; shadow only until a paper round trip proves it")
         if type_ in self.credit_types and not self.credit_allowed(equity):
-            return (f"a {type_} is a credit structure: real credit opens wait until the account reads "
-                    f"${self.credit_min_equity} of equity (it reads ${cents(equity)}; debit structures only until then)")
+            return (f"a {type_} is a credit structure: real credit opens wait until the sizing equity (the lower of the "
+                    f"account's equity and the grant's capital) reads ${self.credit_min_equity} (it reads "
+                    f"${cents(equity)}; debit structures only until then)")
         return None
 
 
@@ -422,6 +434,65 @@ def plan_open(table: Table, *, band: str, tuition: bool, equity: Decimal, unit: 
     return Plan(qty, cap, why)
 
 
+@dataclass(frozen=True)
+class ShortLeg:
+    """A short leg of a credit structure, as a real open would sell it: `ratio` contracts a structure, expiring `days`
+    calendar days after today."""
+
+    strike: float
+    is_call: bool
+    ratio: int
+    days: int
+
+
+def credit_limit(table: Table, type_: str, *, physical: bool, shorts: Sequence[ShortLeg], spot: float, equity: Decimal,
+                 probe: bool) -> tuple[int | None, str]:
+    """The most structures one real open of `type_` may carry, and why (0 refuses it; None: no credit limit applies).
+    The review of #393 (Sept 26, 2026; the constitution's `options_money.credit`). A credit type only:
+
+    - on a PHYSICALLY settled root (`physical`: SPY, QQQ, IWM and every equity root; American, assignable early into
+      shares): refused when a short leg is in the money by more than `near_money_share` of its strike at `spot` (an iron
+      butterfly's at-the-money body passes); refused when a short CALL expires more than `credit_short_call_max_days`
+      days out (no dividend calendar is read); and capped so that the short legs' notional (strike x 100 x ratio,
+      summed over the short legs, x structures) is at most `credit_short_notional` x `equity` (the sizing equity);
+    - at Probe (and as tuition, `probe`): at most `credit_probe_per_order` structures, whatever the root.
+
+    Cash-settled index roots cannot be assigned into shares: the maximum-loss sizing alone holds them."""
+    if type_ not in table.credit_types:
+        return None, ""
+    limit: int | None = None
+    why = ""
+    if physical:
+        if not shorts:
+            return 0, f"a {type_} with no short leg is not a credit structure"
+        if not math.isfinite(spot) or spot <= 0:
+            return 0, f"a {type_} on a physically settled root: no price of the underlying to judge its short legs by"
+        share = float(table.near_money_share)
+        for leg in shorts:
+            deep = spot > leg.strike * (1.0 + share) if leg.is_call else spot < leg.strike * (1.0 - share)
+            if deep:
+                return 0, (f"a {type_}'s short {'call' if leg.is_call else 'put'} at {leg.strike:g} is in the money by more "
+                           f"than {share:.0%} of its strike (the underlying at {spot:.2f}): an early assignment would bring "
+                           "shares the account cannot carry")
+        for leg in shorts:
+            if leg.is_call and leg.days > table.credit_short_call_max_days:
+                return 0, (f"a {type_}'s short call expires {leg.days} days out, past the {table.credit_short_call_max_days} "
+                           "a real short call may on an equity root (no dividend calendar is read: an in-the-money short "
+                           "call is assigned early before an ex-dividend date)")
+        notional = sum((D(float(leg.strike)) * 100 * leg.ratio for leg in shorts), ZERO)
+        budget = table.credit_short_notional * max(ZERO, equity)
+        limit = int((budget / notional).to_integral_value(rounding=ROUND_FLOOR)) if notional > 0 else 0
+        if limit < 1:
+            return 0, (f"a {type_}'s short legs carry ${cents(notional)} of notional a structure, over "
+                       f"{table.credit_short_notional}x the sizing equity ${cents(equity)} (${cents(budget)}): an early "
+                       "assignment would bring shares the account cannot carry")
+        why = f"short legs' notional ${cents(notional)} a structure, at most ${cents(budget)} ({table.credit_short_notional}x equity)"
+    if probe:
+        limit = table.credit_probe_per_order if limit is None else min(limit, table.credit_probe_per_order)
+        why = (why + "; " if why else "") + f"a credit Probe opens at most {table.credit_probe_per_order} an order"
+    return limit, why
+
+
 # -------------------------------------------------------------------------------------------------------- stops
 @dataclass
 class Stops:
@@ -655,4 +726,4 @@ class FlowBook:
 
 
 __all__ = ["Table", "Forward", "forward_stats", "one_record", "kelly_cap", "sizing_band", "REAL_MIN_TRADES", "band_for", "fits_probe", "probe_cap", "structure_cap", "family_cap",
-           "Exposure", "Plan", "plan_open", "Stops", "FlowBook", "D", "cents", "sized_ok"]
+           "Exposure", "Plan", "plan_open", "ShortLeg", "credit_limit", "Stops", "FlowBook", "D", "cents", "sized_ok"]

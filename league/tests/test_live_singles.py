@@ -60,7 +60,8 @@ class OneList(unittest.TestCase):
         caps = (REPO / "gateway" / "lib" / "caps.mjs").read_text(encoding="utf-8")
         self.assertIn("export const SINGLE_LEG_TYPES = ['long_call', 'long_put'];", caps)
         real = CONSTITUTION["options_money"]["real_types"]
-        self.assertEqual(real, ["debit_vertical", "long_butterfly", "long_call", "long_put"])
+        self.assertEqual(real, ["debit_vertical", "long_butterfly", "long_call", "long_put", "credit_vertical", "iron_condor",
+                                "iron_butterfly"])
         self.assertEqual(ci.gateway_structures(), (sorted(real), []), "the deployed gateway opens exactly these")
         self.assertEqual(ci.check_structures(), [])
         if HAVE:
