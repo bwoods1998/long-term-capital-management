@@ -1525,4 +1525,16 @@ looks like beta. Validation 2025 and the holdout judge both.
 | 6 | Money | equity $1,481.63; options buying power $481.60; 0 orders |
 | 7 | Compute | Sail $145.98 (about $5.6/h; the $32 line around Monday 17:30Z without a top-up). Claude $32.17 of $100. OpenAI $608.75 of $707 |
 
+### Sprint scoreboard, T0 + 41 h (23:30Z Sept 27)
+
+| # | Metric | Value |
+|---|---|---|
+| 1 | Population | 72 alive (48 cycling); 10 born and 13 retired in 2 h |
+| 2 | Throughput | 1,308 cycles/h, median 117 s; pool 8 busy; queue 0 |
+| 3 | Search | 52,060 trials, 182,881 program-years. 2025 validation leaders in 2 h: `pre-earnings-iv-runup-straddle` 1.13-1.18 (names; negative at 1.5x; not a real type), `scaled-entry-liquidity-reversal` 1.17 (43 trades) |
+| 4 | Evidence | 1 validation pass alive (the IWM fork); holdout looks 2, passes 0. A second fork of that lineage is at 7/8 (one look left in the lineage, Holm-stricter) |
+| 5 | Readiness | Unchanged. The account's own history holds 4 option fills (AAL penny calls), so Monday's calibration is the first real-fill measurement for SPY/QQQ verticals |
+| 6 | Money | equity $1,481.63; options buying power $481.60; 0 orders |
+| 7 | Compute | Sail $135.59 (about $5.2/h; the $32 line around Monday 19:30Z without a top-up). Claude $34.23 of $100. OpenAI $610.63 of $707 |
+
 ## Report
