@@ -1306,4 +1306,16 @@ spread held in debit form, so part of its return is equity beta. `liquidity_rebo
 2022, a falling market, so its edge is more than beta. `fear_premium`'s edge is only in 2023-2024, which
 looks like beta. Validation 2025 and the holdout judge both.
 
+### Sprint scoreboard, T0 + 28 h (10:02Z Sept 27)
+
+| # | Metric | Value |
+|---|---|---|
+| 1 | Population | 60 alive before, 39 after 10:05Z. Last 2 h: 30 born (24 names families from the architect under agenda v3; 3 operator-sweep founders), 30 retired (27 self-declared dormant). At 10:05Z, 21 architect names families were retired: none reached a positive eligible Train score in 6-15 versions each, matching the sweep |
+| 2 | Throughput | 953 cycles/h, median 177 s, pool 6 busy, queue 30: the names families' five-chain runs made the Gym the bottleneck (1,625 cycles/h at 08:16Z) |
+| 3 | Search | 35,631 trials, 96,728 program-years. Sweeps since 08:16Z: XSP credit 1 of 229 positive; names rebound 13 of 228, none robust; calendar windows 1 of 72; always-on debit put-write: 12 of 79 ran, all negative (2022 deeply); 67 hit the per-worker memory cap and are re-running in small batches with the combined rebound-plus-put-write template |
+| 4 | Evidence | 0 validation passes, 0 holdout looks. Five families at 5/8, including both founded rebound families (validation t 0.37 and 0.29) |
+| 5 | Readiness | Interim 25-root pair adopted (Gym `sbcp_b358ab73`, gate `sbcp_92c29288`); grant active; real money on; gateway 4 debit real types; observe 8 and calibration on for Monday |
+| 6 | Money | equity $481.63; 0 orders |
+| 7 | Compute | Sail $151.94 (about $2.8/h since 08:16Z including the image builds and up to 6 sweep boxes). Claude $14.07 of the $70 pre-Monday cap (91 calls; diagnostician $13.09; about $1.85/h). OpenAI $604.60 + $9.36 inflight of $707 |
+
 ## Report
