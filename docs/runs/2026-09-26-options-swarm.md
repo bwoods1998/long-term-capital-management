@@ -1161,4 +1161,27 @@ Observed 18:22–18:24Z; counters advance during the read. Funding is not revenu
 | 6 | Money | equity $481.63; 0 orders; 0 option positions |
 | 7 | Compute | Sail $171.24 (about $2.9/h across 01:53-03:52Z, inside the D6 budget). OpenAI $603.74 + $9.36 inflight of $707. Claude $3.34 (29 calls). Data: names about 1,800 tasks/h, back months next |
 
+### Sprint scoreboard, T0 + 24 h (06:20Z Sept 27)
+
+| # | Metric | Value |
+|---|---|---|
+| 1 | Population | 60 alive (48 running), 80 retired; 5 born and 5 retired in 2 h, mostly researchers honestly abandoning long-premium ideas |
+| 2 | Throughput | 1,435 cycles/h, median 102 s; Gym queue 2 |
+| 3 | Search | 30,168 trials, 73,375 program-years. Operator sweep generation 1 (12 templates incl. re-runs, about 950 variants): no Train edge, 0 of about 45 finalists positive at 1.5x stress |
+| 4 | Evidence | 0 validation passes, 0 holdout looks. Nearest: `range-consumed-spxw-credit` 6/8 (fails t, deflated Sharpe) |
+| 5 | Readiness | unchanged; grant active, real money on, gateway 4 debit real types |
+| 6 | Money | equity $481.63; 0 orders |
+| 7 | Compute | Sail $162.85 (about $3.4/h over 2.5 h including sweep boxes; D6 limit about $3.5/h). Claude $7.43 (57 calls; the diagnostician is now active). OpenAI $603.74 + $9.36 inflight of $707 |
+
+First-principles reading, recorded for the owner's morning review:
+- The only durable options edge available to public-data, minute-scale research is a risk premium,
+  mainly the variance risk premium, which sellers earn.
+- Every premium-buying design lost on 2022-2024. Short-dated premium selling was about break-even
+  after honest costs.
+- The documented harvest horizon is 30-45 DTE, managed: generation 3 targets it once the SPY/QQQ back
+  months land.
+- Harvesting it needs credit structures, and real money needs equity >= $2,000. A credit-enable
+  change is being prepared as a PR (not merged); deploying it needs the owner's deposit and an
+  extra release.
+
 ## Report
