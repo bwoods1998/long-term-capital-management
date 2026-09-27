@@ -11,9 +11,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from league import publish
-from league.ledger import KINDS, Ledger
+from league.ledger import KINDS, Ledger, now_iso
 from league.swarm import bands, sitefeed
-from league.swarm.hook import SwarmStep, attach
+from league.swarm.hook import SKIPPED_KINDS, SwarmStep, attach
 from league.swarm.store import SwarmStore
 from league.tests.swarm_fakes import Clock, result
 from league.tests.test_options_house import BuildCase
@@ -248,6 +248,147 @@ class Mirror(HookCase):
         self.step().tick(house, open_for_business=False)
         self.assertEqual(len(alerts), 1)
         self.assertIn("two Sail models stood in", alerts[0][1])
+
+    def test_a_batch_with_a_kind_the_ledger_does_not_know_mirrors_the_rest_and_moves_the_cursor(self):
+        """Sept 26-27, 2026: two new swarm kinds the ledger did not know failed every batch (the ledger rolls a batch back
+        on one bad row), the cursor never moved, and the site got no swarm news for 14 hours. An unknown kind is now
+        skipped and counted; the rows around it land and the cursor moves past all of them."""
+        store = SwarmStore(self.root)
+        fam = store.add_family(SPEC, origin="seed")
+        store.event("swarm.born", fam["id"], {"mechanism": fam["mechanism"], "parent": None})
+        store.event("swarm.not_yet_a_ledger_kind", fam["id"], {"x": 1})
+        store.event("swarm.not_yet_a_ledger_kind", None, {"x": 2})
+        last = store.event("swarm.note", fam["id"], {"text": "condors pay on quiet days"})
+        store.close()
+        self.assertNotIn("swarm.not_yet_a_ledger_kind", KINDS)
+        ledger = Ledger(self.root / "ledger.sqlite")
+        self.addCleanup(ledger.close)
+
+        class House:
+            pass
+
+        house = House()
+        house.ledger = ledger
+        step = self.step()
+        out = step.tick(house, open_for_business=False)
+        self.assertNotIn("mirror_error", out)
+        self.assertEqual(out["mirrored"], 4)
+        self.assertEqual(out["mirror_unknown_kinds"], {"swarm.not_yet_a_ledger_kind": 2})
+        self.assertEqual([r.kind for r in ledger.iter()], ["swarm.born", "swarm.note"])
+        self.assertEqual(json.loads((self.root / "swarm-mirror.json").read_text())["seq"], last)
+        self.assertEqual(step.mirror(ledger), 0, "the cursor moved past the unknown rows")
+        self.assertEqual(step.unknown_kinds, {})
+
+    def test_the_diagnostician_and_robustness_rows_stay_in_the_swarms_table(self):
+        store = SwarmStore(self.root)
+        fam = store.add_family(SPEC, origin="seed")
+        store.event("swarm.diagnostician", fam["id"], {"family": fam["id"], "outcome": "rewrote", "cost_usd": 0.12})
+        store.event("swarm.robustness", fam["id"], {"version": 3, "action": "demoted", "why": "one quarter carried it"})
+        store.event("swarm.note", fam["id"], {"text": "condors pay on quiet days"})
+        store.close()
+        self.assertIn("swarm.diagnostician", SKIPPED_KINDS)
+        self.assertIn("swarm.robustness", SKIPPED_KINDS)
+        ledger = Ledger(self.root / "ledger.sqlite")
+        self.addCleanup(ledger.close)
+        step = self.step()
+        self.assertEqual(step.mirror(ledger), 3)
+        self.assertEqual(step.unknown_kinds, {}, "skipped as private diagnostics, not as unknown kinds")
+        self.assertEqual([r.kind for r in ledger.iter()], ["swarm.note"])
+
+    def test_every_kind_the_swarm_writes_is_a_ledger_kind_or_skipped(self):
+        """The mirror no longer stalls on a new kind, but a new kind should still be decided: public, private, or kept in
+        the swarm's table. This catches the next one in CI instead of in the House's tick."""
+        import re
+
+        source = "\n".join(p.read_text() for p in (Path(__file__).resolve().parents[1] / "swarm").glob("*.py"))
+        written = set(re.findall(r"\.event\(\s*\"(swarm\.[a-z_]+)\"", source))
+        self.assertIn("swarm.diagnostician", written)
+        self.assertEqual(sorted(k for k in written if k not in KINDS and k not in SKIPPED_KINDS), [])
+
+    def test_a_mirror_that_keeps_failing_is_one_house_error_then_an_info_when_it_works(self):
+        """The same mirror error three ticks in a row is ONE error alert dated from the first failure (so a watch counts a
+        failure that began before a promotion as inherited); a restart neither forgets nor repeats it; a success after it
+        is an info."""
+        from league.ledger import LedgerError
+
+        store = SwarmStore(self.root)
+        store.event("swarm.status", None, {"action": "started"})
+        store.close()
+        ledger = Ledger(self.root / "ledger.sqlite")
+        self.addCleanup(ledger.close)
+        alerts: list[tuple[str, str, dict]] = []
+
+        class Broken:
+            fail = True
+
+            def append_many(self, rows):
+                if self.fail:
+                    raise LedgerError("unknown ledger kind 'swarm.something'")
+                return ledger.append_many(rows)
+
+        class House:
+            def __init__(self):
+                self.ledger = Broken()
+
+            def alert(self, level, text, **payload):
+                alerts.append((level, text, payload))
+
+        house = House()
+        step = self.step()
+        began = self.clock()
+        for _ in range(2):
+            self.assertIn("mirror_error", step.tick(house, open_for_business=False))
+            self.clock.advance(30)
+        self.assertEqual(alerts, [], "one or two failed ticks are not an alert")
+        step.tick(house, open_for_business=False)
+        self.assertEqual(len(alerts), 1)
+        level, text, payload = alerts[0]
+        self.assertEqual((level, payload["failures"]), ("error", 3))
+        self.assertEqual(payload["began_at"], now_iso(lambda: began))
+        self.assertIn("the mirror into the House ledger has failed 3 ticks in a row", text)
+        self.assertIn("unknown ledger kind", text)
+        for _ in range(3):
+            self.clock.advance(30)
+            step.tick(house, open_for_business=False)
+        self.assertEqual(len(alerts), 1, "one alert for the run, not one a tick")
+        self.clock.advance(30)
+        self.step().tick(house, open_for_business=False)  # a restart (a deploy) remembers the run
+        self.assertEqual(len(alerts), 1)
+        house.ledger.fail = False
+        self.clock.advance(30)
+        out = self.step().tick(house, open_for_business=False)
+        self.assertNotIn("mirror_error", out)
+        self.assertEqual(out["mirrored"], 1)
+        self.assertEqual([a[0] for a in alerts], ["error", "info"])
+        self.assertEqual((alerts[1][2]["failures"], alerts[1][2]["began_at"]), (7, now_iso(lambda: began)))
+        self.assertFalse((self.root / "swarm-mirror-failing.json").exists())
+        self.step().tick(house, open_for_business=False)
+        self.assertEqual(len(alerts), 2, "a healthy mirror says nothing")
+
+    def test_a_changed_mirror_error_starts_a_new_run(self):
+        store = SwarmStore(self.root)
+        store.event("swarm.status", None, {"action": "started"})
+        store.close()
+        alerts = []
+        errors = iter(["disk I/O error", "disk I/O error", "database is locked", "database is locked", "database is locked"])
+
+        class Broken:
+            def append_many(self, rows):
+                raise RuntimeError(next(errors))
+
+        class House:
+            ledger = Broken()
+
+            def alert(self, level, text, **payload):
+                alerts.append((level, text))
+
+        step = self.step()
+        for _ in range(4):
+            step.tick(House(), open_for_business=False)
+        self.assertEqual(alerts, [], "two of one error, then two of another")
+        step.tick(House(), open_for_business=False)
+        self.assertEqual(len(alerts), 1)
+        self.assertIn("database is locked", alerts[0][1])
 
     def test_the_swarm_never_writes_the_houses_own_kinds(self):
         for kind in ("swarm.born", "swarm.retired", "swarm.band", "swarm.note", "swarm.cycle", "swarm.tournament", "swarm.gate",

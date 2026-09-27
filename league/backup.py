@@ -17,22 +17,50 @@ rolls a release back for them (H2, Sept 25, 2026). `notice` is what the House sa
 attempt: ONE error when a run of failures begins, a warning at each later backoff step, an info
 with the outage's length when a checkpoint succeeds again. A failure that is this code's own
 (anything `service_failed` says no to) is an unmarked error every time, as before.
+
+Which box is the House's (Sept 27, 2026): the box's own identity, `house_box()`. Sail sets `SAILBOX_ID` in the
+guest environment of every command it runs on a Sailbox, and a caller's own environment cannot override it
+(https://docs.sailresearch.com/sailbox-sdk, as `ltcm/hostinfo.py` reads it), so the House checkpoints the box it
+runs on, by id, whatever that box is called. Only without an id (not on a Sailbox, or an image that does not set
+it) does a name decide: `config["backup"]["box_name"]`, else `DEFAULT_BOX_NAME`. Until then the name was fixed at
+`ltcm-floor`, and when the House moved to a box with another name on Sept 26 every daily backup failed ("0
+running boxes are named ltcm-floor").
 """
 
 from __future__ import annotations
 
+import os
+import re
 import time
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from .ledger import Ledger, now_iso
 from .watchdog import ENVIRONMENT, environment
 
+#: The name the first House box was created under (`scripts/floor_box.py create`): the fallback only.
+DEFAULT_BOX_NAME = "ltcm-floor"
+#: What Sail sets on a Sailbox to say which box a process runs on, most specific first (as `ltcm/hostinfo.py`).
+BOX_ID_VARS = ("SAILBOX_ID", "SAIL_SAILBOX_ID")
+_BOX_ID = re.compile(r"^sb_[0-9a-fA-F-]{8,64}$")  # `league.sailbox.box_id`'s shape
+
+
+def house_box(config: Mapping[str, Any] | None = None, env: Mapping[str, str] | None = None) -> dict[str, Any]:
+    """The House box's identity for `Backup(..., **house_box(config))`: `box_id` from Sail's environment when it is a
+    Sailbox id (None otherwise), and `box_name`, the configured fallback (`config["backup"]["box_name"]`)."""
+    env = os.environ if env is None else env
+    box_id = next((value for value in (str(env.get(name) or "").strip() for name in BOX_ID_VARS) if _BOX_ID.match(value)), None)
+    block = (config or {}).get("backup")
+    name = block.get("box_name") if isinstance(block, Mapping) else None
+    return {"box_id": box_id, "box_name": str(name).strip() if isinstance(name, str) and name.strip() else DEFAULT_BOX_NAME}
+
 
 class Backup:
-    def __init__(self, client: Any, ledger: Ledger, *, box_name: str = "ltcm-floor", every_hours: float = 24.0, keep_days: int = 7,
-                 clock: Callable[[], float] = time.time):
+    def __init__(self, client: Any, ledger: Ledger, *, box_id: str | None = None, box_name: str = DEFAULT_BOX_NAME,
+                 every_hours: float = 24.0, keep_days: int = 7, clock: Callable[[], float] = time.time):
         self.client = client
         self.ledger = ledger
+        #: The House box by id (`house_box`): when set, it alone decides, and `box_name` is never read.
+        self.box_id = box_id or None
         self.box_name = box_name
         self.every_hours = float(every_hours)
         self.keep_days = int(keep_days)
@@ -83,20 +111,35 @@ class Backup:
         flight: such a failure is recorded, and `notice` never makes it an error (Sept 25, 2026, 00:04:42-
         00:05:55Z: the OLD House's backup, in flight at the owner's promotion, failed 73 s later inside the
         new release's watch and rolled it back)."""
-        row: dict[str, Any] = {"what": "backup", "at_epoch": self.clock(), "ledger_rows": self.ledger.head()[0]}
+        row: dict[str, Any] = {"what": "backup", "at_epoch": self.clock(), "ledger_rows": self.ledger.head()[0],
+                               "found_by": "id" if self.box_id else "name"}
         try:
-            boxes = [b for b in self.client.list_boxes(limit=300) if b.get("name") == self.box_name and b.get("status") == "running"]
-            if len(boxes) != 1:
-                raise RuntimeError(f"{len(boxes)} running boxes are named {self.box_name}")
+            box = self.house_box_id()
             name = "league-" + now_iso(self.clock)[:10]
-            made = self.client.checkpoint(boxes[0]["sailbox_id"], name=name, ttl_seconds=self.keep_days * 86400)
-            row.update(ok=True, name=name, checkpoint_id=made.get("checkpoint_id"), box=boxes[0]["sailbox_id"])
+            made = self.client.checkpoint(box, name=name, ttl_seconds=self.keep_days * 86400)
+            row.update(ok=True, name=name, checkpoint_id=made.get("checkpoint_id"), box=box)
         except Exception as exc:  # noqa: BLE001 - the floor outlives a failed backup; the alert says so
             row.update(ok=False, error=f"{type(exc).__name__}: {str(exc)[:200]}", **environment("sail", exc))
             if closing is not None and closing():
                 row["during_shutdown"] = True
         self.ledger.append("ops.deploy", row, public=False)
         return row
+
+    def house_box_id(self) -> str:
+        """The id of the box to checkpoint: the House's own (`box_id`) when it is running, else the one running box named
+        `box_name`. It never guesses: anything else raises, and the failure's text (which reaches the House's public
+        alert) never carries a box id."""
+        if self.box_id:
+            seen = self.client.get(self.box_id) or {}
+            if seen.get("sailbox_id") not in (None, self.box_id):
+                raise RuntimeError("Sail answered for another box than the House's own (SAILBOX_ID)")
+            if seen.get("status") != "running":
+                raise RuntimeError(f"the House's own box (SAILBOX_ID) is {seen.get('status') or 'unknown to Sail'}, not running")
+            return self.box_id
+        boxes = [b for b in self.client.list_boxes(limit=300) if b.get("name") == self.box_name and b.get("status") == "running"]
+        if len(boxes) != 1:
+            raise RuntimeError(f"{len(boxes)} running boxes are named {self.box_name}")
+        return str(boxes[0]["sailbox_id"])
 
     def notice(self, row: dict[str, Any], before: list[dict[str, Any]]) -> tuple[str, str, dict[str, Any]] | None:
         """What the House says about one attempt `row`, given the failures in a row BEFORE it (oldest first,

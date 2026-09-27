@@ -378,9 +378,10 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
     if not canary and REPO.parent.name == "releases" and not local_sandbox:
         # On the House box only: a daily checkpoint of the box itself, so the ledger (every agent's
         # code, record and journal) outlives the one disk it lives on.
-        from .backup import Backup
+        from .backup import Backup, house_box
 
-        house.backup = Backup(SailboxClient(), house.ledger)
+        # The box it runs on, by the id Sail gives it (`house_box`): the House box's name changed on Sept 26, 2026.
+        house.backup = Backup(SailboxClient(), house.ledger, **house_box(config))
     if not canary and REPO.parent.name == "releases" and auto_update(config):
         # On the House box the code runs from <base>/releases/<id>: there, main is pulled every
         # half hour and handed to the watchdog. On a developer's machine nothing updates itself.

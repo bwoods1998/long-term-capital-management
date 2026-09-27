@@ -4,17 +4,24 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from league.backup import Backup
+from league.backup import Backup, house_box
 from league.ledger import Ledger
 from league.tests.fakes import Clock
 
 
 class FakeSail:
     def __init__(self, boxes):
-        self.boxes, self.made, self.fail = boxes, [], None
+        self.boxes, self.made, self.fail, self.listed = boxes, [], None, 0
 
     def list_boxes(self, *, limit=100):
+        self.listed += 1
         return self.boxes
+
+    def get(self, sailbox):
+        row = next((b for b in self.boxes if b.get("sailbox_id") == sailbox), None)
+        if row is None:
+            raise RuntimeError("sailbox api 404: not found")
+        return dict(row)
 
     def checkpoint(self, box, *, name=None, ttl_seconds=None):
         if self.fail:
@@ -83,6 +90,62 @@ class BackupTest(unittest.TestCase):
         self.backup.run()
         entry = self.ledger.last("ops.deploy")
         self.assertFalse(entry.public)
+
+
+class TheHouseBoxByItsOwnIdentity(unittest.TestCase):
+    """Sept 26-27, 2026: the House moved to a box with another name, and every daily backup failed on "0 running boxes are
+    named ltcm-floor". The House now checkpoints the box it runs on, by the id Sail sets in its environment; a name only
+    decides where there is no id."""
+
+    HOUSE = "sb_00000001-0000-0000-0000-000000000000"  # a made-up id of the Sailbox shape
+    OTHER = "sb_00000002-0000-0000-0000-000000000000"
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.clock = Clock()
+        self.ledger = Ledger(Path(self.dir.name) / "l.sqlite", clock=self.clock)
+        self.addCleanup(self.ledger.close)
+
+    def test_the_house_box_is_found_by_its_id_whatever_it_is_named(self):
+        sail = FakeSail([{"name": "ltcm-house-2", "status": "running", "sailbox_id": self.HOUSE},
+                         {"name": "ltcm-floor", "status": "running", "sailbox_id": self.OTHER}])
+        backup = Backup(sail, self.ledger, clock=self.clock, **house_box({}, env={"SAILBOX_ID": self.HOUSE}))
+        row = backup.run()
+        self.assertTrue(row["ok"], row)
+        self.assertEqual((row["box"], row["found_by"]), (self.HOUSE, "id"))
+        self.assertEqual(sail.made, [(self.HOUSE, "league-2026-09-10", 7 * 86400)])
+        self.assertEqual(sail.listed, 0, "the old name is never looked up")
+
+    def test_the_old_hardcoded_name_no_longer_decides(self):
+        # No box is named ltcm-floor any more: by name this failed every day; by id it succeeds.
+        sail = FakeSail([{"name": "renamed-house", "status": "running", "sailbox_id": self.HOUSE}])
+        self.assertIn("0 running boxes are named ltcm-floor", Backup(sail, self.ledger, clock=self.clock).run()["error"])
+        backup = Backup(sail, self.ledger, clock=self.clock, **house_box(None, env={"SAILBOX_ID": self.HOUSE}))
+        self.assertTrue(backup.run()["ok"])
+        self.assertEqual([made[0] for made in sail.made], [self.HOUSE])
+
+    def test_a_house_box_that_is_not_running_fails_without_naming_it(self):
+        sail = FakeSail([{"name": "ltcm-floor", "status": "sleeping", "sailbox_id": self.HOUSE}])
+        row = Backup(sail, self.ledger, clock=self.clock, box_id=self.HOUSE).run()
+        self.assertFalse(row["ok"])
+        self.assertIn("SAILBOX_ID) is sleeping, not running", row["error"])
+        self.assertNotIn(self.HOUSE, row["error"], "the error reaches a public alert: never a box id")
+        self.assertEqual(sail.made, [])
+
+    def test_the_identity_comes_from_sails_environment_and_falls_back_to_the_configured_name(self):
+        self.assertEqual(house_box({}, env={"SAILBOX_ID": self.HOUSE}), {"box_id": self.HOUSE, "box_name": "ltcm-floor"})
+        self.assertEqual(house_box({}, env={"SAIL_SAILBOX_ID": self.HOUSE})["box_id"], self.HOUSE)
+        self.assertEqual(house_box({}, env={"SAILBOX_ID": "not-a-box"})["box_id"], None)
+        self.assertEqual(house_box({"backup": {"box_name": "house-b"}}, env={}), {"box_id": None, "box_name": "house-b"})
+        self.assertEqual(house_box({"backup": {"box_name": " "}}, env={})["box_name"], "ltcm-floor")
+        sail = FakeSail([{"name": "house-b", "status": "running", "sailbox_id": self.OTHER}])
+        row = Backup(sail, self.ledger, clock=self.clock, **house_box({"backup": {"box_name": "house-b"}}, env={})).run()
+        self.assertEqual((row["ok"], row["box"], row["found_by"]), (True, self.OTHER, "name"))
+
+    def test_the_service_builds_the_backup_from_the_house_box(self):
+        source = (Path(__file__).resolve().parents[1] / "service.py").read_text()
+        self.assertIn("Backup(SailboxClient(), house.ledger, **house_box(config))", source)
 
 
 
