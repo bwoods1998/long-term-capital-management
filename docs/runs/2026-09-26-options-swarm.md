@@ -1004,6 +1004,24 @@ and this record, and lifts the Saturday continuation's no-real-money scope.
   - 8 are debit types, eligible for real money at this equity.
   - Population 61.
 
+- **01:13-01:21Z Researcher retirements above the start** (population 61 to 56). Five retired, the
+  guard allowing it above 48. Four were weak.
+  - The fifth, `weekend-decay-fly`, had submitted a strong candidate (v48: all Train years positive,
+    9-11 of 12 quarters, about 143 trades on 75 days, positive at 1.5x). It then retired because it
+    could not rebuild v48's exact code to re-check it. Researchers have no tool to read an older
+    version's code, so they rebuild from memory; 8 notebook entries since R2 show the confusion.
+    The tournament's own robustness runs use the stored code and are unaffected.
+  - Mitigation, with no deploy (R2 was the last release):
+    - `weekend-decay-fly-r` revived from v48 (`revive.py --prefer best`), 01:23Z;
+    - `population.start` 48 to 60, so researchers cannot retire below 60 and the architect refills
+      toward 60.
+  - The missing read-version tool is recorded for after Monday.
+- **01:24Z** The first Claude architect pass after streaming: `claude-opus-5-5`, $0.15, 3 families
+  following the operator's agenda (a multi-day VRP debit butterfly, a daily-trend debit vertical, a
+  macro-release drift debit).
+- **01:55Z** `gym.start_boxes` back to 6: the re-validation wave has cleared (queue 12) and Sail pacing
+  needs it (see below).
+
 ## Scoreboard
 
 ### T0 (2026-09-26T06:23Z; repo figures at 06:40Z)
@@ -1082,5 +1100,17 @@ Observed 18:22–18:24Z; counters advance during the read. Funding is not revenu
 | 5 | Readiness | `real_money` false; grant not enabled; gateway types "off" (all by design until R2); Claude route live |
 | 6 | Money | equity $481.63 cash; 0 orders; 0 option positions |
 | 7 | Compute | Sail $184.75 (burn about $45/day; guard line $32, unbraked). OpenAI September about $602 of $707. Claude $0.34 of the $70 pre-Monday cap |
+
+### Sprint scoreboard, T0 + 19.5 h (01:53Z Sept 27, after R2)
+
+| # | Metric | Value |
+|---|---|---|
+| 1 | Population | 60 alive (48 running), 72 retired; 18 born and 6 retired in the last 2 h, including the 13 revived and 1 rescued; `population.start` 60 |
+| 2 | Throughput | 1,240 cycles/h, median cycle 116 s; 205 robustness runs in 2 h; Gym queue 12 on 8 boxes, pool back to 6 |
+| 3 | Robustness | Honest fill model `fm-c4a0c70c9afbf09f` (2,114 cells) shared by the Gym, the gate and the live shadow; stress runs halve passive fill rates |
+| 4 | Evidence | 23,402 trials, 45,221 program-years. 0 validation passes under D2. The nearest two meet 6 of 8 checks (trades, days, mean, quarters and stress pass); both fail t (about 0.45 against 2) and the deflated Sharpe. 0 holdout looks. Gate on (core-honest-v1) |
+| 5 | Readiness | R2 live; `real_money` true; grant active on `ad9bd54c` (capital $481.63, Probe floor $100); gateway real types = 4 debit types, per-order share 0.25; observe 8 and calibration on for Monday; paper proofs (multi-leg and single-leg) at Monday 13:35Z |
+| 6 | Money | equity $481.63 cash; 0 orders; 0 option positions (LTC dust only) |
+| 7 | Compute | Sail $176.99 (last hour: models $1.78, Gym $1.51, plus the data box about $0.5; the D6 budget is about $3.5/h to Monday's open). OpenAI September $603.47 + $9.36 inflight of $707. Claude $2.20 of the $70 pre-Monday cap (22 calls) |
 
 ## Report
