@@ -1429,4 +1429,16 @@ looks like beta. Validation 2025 and the holdout judge both.
 | 6 | Money | equity $481.63; 0 orders. The owner is depositing more; the grant is re-ratified at the new capital once it reaches buying power |
 | 7 | Compute | The owner topped up (Sail to $190, OpenAI $113, Claude balance $100) and said do not throttle. The guard still read $139.67 at 13:28Z. Push settings: Gym pool 12 boxes, researchers $3/h, population 72, architect hourly, diagnostician 5 a round and $45/day, Claude cap 98 (the gateway's lifetime `CLAUDE_USD` 100 binds first: $18.93 spent). Claude $3.08 in the last hour |
 
+### Sprint scoreboard, T0 + 33 h (15:29Z Sept 27)
+
+| # | Metric | Value |
+|---|---|---|
+| 1 | Population | 74 alive, 146 retired. Last 2 h: 21 born (the architect under the back-month single-option agenda), 8 retired |
+| 2 | Throughput | 821 cycles/h; pool 10 ready, queue 0. Only 1 family was cycling: the V4-Pro top profile had spent the $3/h research pace. Rebalanced at 15:31Z (researchers $4.5/h, pool 6-10 boxes) |
+| 3 | Search | 41,349 trials, 126,322 program-years. Rebound as a back-month call: Train plateau across delta 0.25-0.6, but 2025 t 0.06 on 47 trades (the signal was rare in 2025) |
+| 4 | Evidence | **FIRST VALIDATION PASS**: `low-close-location-backmonth-call` (architect-born 14:49Z, version 7). A 30-45 DTE call on SPY/QQQ after an index closes low in its daily range inside an up-trend. Validation 2025: 207 trades on 51 days, daily t 2.47, deflated Sharpe 0.997 (the lineage's 1 validated version, 169 lineage trials), 3 of 4 quarters, +$17,998; at 1.5x +$14,867. All 8 checks. Gate (review, Claude audit, holdout look) pending. Also 6/8: `event-crush-xsp-fly-r`, `sweep-bm-trend-long-option` (2025 t 1.04, +$8,544) |
+| 5 | Readiness | The passing family's typical structure is $559 of maximum loss. Options buying power is $481.60 (the deposit is unsettled). The D4 Probe cap is $100. Real money for it needs the settled deposit AND the owner's decision on a one-contract Probe |
+| 6 | Money | equity $1,481.63 (deposit shown, not yet in options buying power); 0 orders |
+| 7 | Compute | Sail $180.37. Claude $24.04 of the $100 lifetime (143 calls). OpenAI $606.22 + $9.36 inflight of $707 |
+
 ## Report
