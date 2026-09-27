@@ -1,5 +1,80 @@
 # Handoff: the options-swarm run
 
+## THE SPRINT — current state, Sept 27 02:00Z (read this first)
+
+The owner's `/goal` runs `docs/goals/LTCM_SWARM_SPRINT.md` (merged #386). The owner's decisions:
+- D1 real money for Monday;
+- D2 evidence reform;
+- D3 calibration at $50/day;
+- D4 the bold money table;
+- D5 no deposit yet;
+- D6 no Sail top-up (pace so Sail stays above the $32 guard through Tuesday);
+- D7 Claude $100.
+
+The run record `docs/runs/2026-09-26-options-swarm.md` has "The sprint" log and scoreboards. Private
+operator tools and receipts are in `~/Work/.ltcm-main/`:
+- `board.py`: the scoreboard;
+- `R2-runbook.md`;
+- `revive.py`;
+- `claude_probe.py`;
+- `middiag/`: the private diagnostic;
+- `apply_r*_settings.sh`.
+
+**Deployed.**
+- **R1:** `20260926T225946Z-22b18ea9f452` (#388 Claude, #389 search/D2).
+- **R2:** `20260927T002925Z-2bfef7a749bf` (main `440f6de4`: #387 honest fill model, #390 live path,
+  #391 Claude streaming, #392 `real_money` true). Promoted 00:30:02Z; the watch passed.
+- **R2 was the last release before Monday** (the owner's /goal method). Until Monday 20:05Z only
+  `swarm.json` switches, data or image adoption, and a rollback are allowed. The rollback guard
+  refuses while real positions or orders exist (`--force-real-risk` overrides).
+- **Gateway:** version `953a9b46` (Claude route + streaming, `CLAUDE_USD` 100; real types = 4 debit
+  types; `MAX_ORDER_EQUITY_SHARE` 0.25).
+- **Grant `options-swarm-20260928`:** enabled 00:30:15Z, pinned to money digest `ad9bd54c`, capital
+  $481.63, Probe floor $100.
+
+**Images and model.**
+- `core-honest-v1`: Gym `sbcp_4500cd6f`, gate `sbcp_0a6f54da`.
+- Model `fm-c4a0c70c9afbf09f` on the Gym, the gate and the House shadow book.
+- The final 25-root pair: the completion supervisor fits it with the honest code when the ThetaData
+  names and back months finish (about 09:30Z Sunday) and writes `images-ready.json`. Adopt it the same
+  way:
+  1. set `swarm.json` image and gate to the new checkpoints;
+  2. copy `/data/calibration/fill_model.json` from the Gym template to the House, mode 600, verifying
+     the SHA;
+  3. `floor_box.py stop`, then `start`;
+  4. check `health.options_live.fill_model`.
+
+**`swarm.json` now** (a backup before every edit, `swarm.json.before-*`):
+- population start 60, floor 44, ceiling 96;
+- `sail_usd_per_hour` 2.0;
+- `gym.start_boxes` 6;
+- `validation_split` 1;
+- `top_profile` null;
+- `architect.agenda` set, refill 1200 s, every 7200 s;
+- `tournament.retire_revisions` 200;
+- `claude.usd_cap` 70;
+- `live.observe` true, `observe_max` 8, `calibration` true.
+
+**Monday (Sept 28):**
+- pre-open 10:00-13:25Z per `docs/operations.md` (updated by #390);
+- no deploy 13:25-20:05Z;
+- paper proofs at 13:35Z (multi-leg, then single-leg);
+- only families past the holdout become Probe, and a Probe must be moved before 13:30Z to trade
+  Monday;
+- observe starts at 8 instances; raise toward 48 after 30 healthy minutes of `options_live` timings;
+- after the close: post-mortem, calibration report (`python -m league.live --root /workspace/state
+  --calibration`), recalibrate from real fills, prune #375 re-integrated after 20:05Z, rebase #385.
+
+**Known gaps to do after Monday:**
+- researchers cannot read an older version's code (they rebuild from memory);
+- #381 held (review findings on the PR);
+- #384 unmerged;
+- about 26 stale Codex worktrees under ~/Work.
+
+**Evidence so far:** 0 validation passes under D2. The nearest two meet 6 of 8 checks and fail t and
+the deflated Sharpe. 0 holdout looks.
+
+
 ## Current continuation, September 26 20:34Z
 
 Read this update before the historical Claude handoff below. The run record remains the source
