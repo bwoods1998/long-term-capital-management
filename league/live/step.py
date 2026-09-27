@@ -553,7 +553,10 @@ class OptionsLive:
                 if band in ("probe", "sized") and self._real_on() and self._real_eligible(fid):
                     wanted[f"{fid}@{version}:r"] = (dict(row, band=band), "real", False)
             elif (band == "gym" and row.get("validation_passed") and not row.get("holdout_passed") and self._real_on()
-                  and self.table.tuition_day > 0 and row.get("structure") in self.table.real_types):
+                  and self.table.tuition_day > 0
+                  # A real type now: a credit type only at $2,000 of sizing equity (unknown equity opens none).
+                  and self.table.type_allowed(str(row.get("structure") or ""),
+                                              equity if equity is not None else M.ZERO) is None):
                 wanted[f"{fid}@{version}:t"] = (row, "real", True)
         if observed is None:
             # The observe band could not be read: its instances stay as they are (never taken for an empty band).
@@ -1926,11 +1929,12 @@ class OptionsLive:
         unit_intent = {k: v for k, v in intent.items() if k not in ("qty", "max_loss")}
         unit_intent["qty"] = 1
         order = L.resolve_open(unit_intent, snap, rules, buying_power=float("inf"))
-        equity_now = M.D(self.account_row["equity"])
         sizing = self.sizing_equity()
         if sizing is None:
             return "no sizing equity (the grant or the account)"
-        why = self.table.type_allowed(order.type, equity_now)
+        # The type judged at THIS minute on the sizing equity -- the lower of the account's equity read this minute and
+        # the grant's capital, the equity the band was moved on: a credit structure only at $2,000 or more, never a latch.
+        why = self.table.type_allowed(order.type, sizing)
         if why:
             return why
         if (order.type in SINGLE_TYPES and self.settings.get("require_paper_proof", True)

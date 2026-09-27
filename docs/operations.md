@@ -356,11 +356,25 @@ client, grant or eligible family. It keeps an unfinished attempt's identity and 
 through restarts. Passing records paper execution evidence; the real-money flags remain off.
 
 **The money table (the sprint, owner decision D4, Sept 26, 2026)**: real types under $2,000 of equity are
-exactly `debit_vertical`, `long_butterfly`, `long_call`, `long_put` (the credit types come back only with a
-deposit to $2,000, in one deploy with the gateway, and a re-ratified grant); Probe 5% of equity a structure
+exactly `debit_vertical`, `long_butterfly`, `long_call`, `long_put`; from $2,000 the credit types too (credit at
+$2,000, below); Probe 5% of equity a structure
 with a $100 one-contract floor, 3 open, 15% the family; the book 90%; daily stop 35%, drawdown stop 60%;
 tuition $200 a day; the D3 calibration's day bounded at $50 of possible loss. The gateway's per-order cap is the lower of
 $1,000 and 25% of equity (a $100 Probe fits at $481.63), 100% of equity opened a day, 250 of 300 orders open.
+
+**Credit at $2,000** (Sept 26, 2026; in the tree, deployed only on the owner's decision): `credit_vertical`,
+`iron_condor` and `iron_butterfly` are among `options_money.real_types` and the gateway's `OPTION_STRUCTURES_REAL`,
+but real money opens one only while the sizing equity (the lower of the account's equity, read every minute, and
+the grant's capital) is $2,000 or more. The House judges it at every band move and again at every open; under it a
+credit family is a Candidate, shadow only, the reason in its `live.band` row, and a credit Probe or Sized family
+goes back to Candidate (its open structures keep their exits). No latch: a fall under $2,000 stops new credit opens
+at once. The gateway refuses every credit open while its own reading of the account's equity is under
+`CREDIT_MIN_EQUITY_USD` (403, cap `credit_equity`). A credit open is one multi-leg order at a negative
+`limit_price`, sized by maximum loss (the widest wing less the credit, x 100, plus fees) under the Probe's cap; its
+close is one multi-leg order at a positive limit under its collateral, and the expiry-day rule closes it like any
+equity structure with a leg in or within 1% of the money. After the deposit lands, `--ratify` (capital follows
+equity up to the ceiling) is what opens the credit types: a grant ratified at $481 holds them back. A family moved
+onto real money trades from the next session.
 
 **The single-leg paper proof**: once the vertical's has passed, the practice account opens and closes a
 1-lot SPY call about 1-2% out of the money (nearest expiry at least a day out, at the natural, held two
@@ -406,7 +420,8 @@ with `real_money` true (a new money digest); `python3 scripts/live_trading.py --
 4. **The gateway**: `python3 scripts/gateway_admin.py status`: `kill_switch` false; `max_loss` shows a
    fresh equity reading (it reads the account on the first open if stale), the per-order cap = the lower of
    $1,000 and 25% of equity, today's opening maximum loss 0 of 100% of equity; `caps.max_day_orders` 300; the
-   deployed `OPTION_STRUCTURES_REAL` is `debit_vertical,long_butterfly,long_call,long_put`.
+   deployed `OPTION_STRUCTURES_REAL` is `debit_vertical,long_butterfly,long_call,long_put` (followed by
+   `,credit_vertical,iron_condor,iron_butterfly` once credit at $2,000 is deployed).
 5. **The live state**: `python3 -m league.live --root /workspace/state`: `stops` not tripped (no
    `drawdown_tripped`), `reconciliation.frozen` empty, no `assignment_latch`, `paper_proof` absent or
    `passed`, no working orders, no open real positions but the ones expected.
@@ -474,11 +489,11 @@ with `real_money` true (a new money digest); `python3 scripts/live_trading.py --
 | `STOP`, `state/STOP` | `/workspace/` | absent | the loop ends | `floor_box.py stop` / `start` |
 | Kill switch | the gateway | off | every real order-creating call refused | `gateway_admin.py kill` / `unkill` |
 | `MAX_ORDER_MAX_LOSS_USD`, `MAX_ORDER_EQUITY_SHARE`, `MAX_DAY_EQUITY_SHARE`, `MAX_DAY_ORDERS`, `MAX_DAY_OPEN_ORDERS` | `gateway/wrangler.jsonc` | $1,000, 0.25, 1.0, 300, 250 | the real account's caps by maximum loss; equal to the constitution's `options_money.gateway` | gateway deploy with the matching House deploy |
-| `OPTION_STRUCTURES_REAL` | `gateway/wrangler.jsonc` | `debit_vertical,long_butterfly,long_call,long_put` | the types real money may open; must equal the constitution's `options_money.real_types` (`league.ci`) | gateway deploy with the matching House deploy and a ratify |
+| `OPTION_STRUCTURES_REAL` | `gateway/wrangler.jsonc` | `debit_vertical,long_butterfly,long_call,long_put,credit_vertical,iron_condor,iron_butterfly` in the tree since credit at $2,000 (deployed on the owner's decision; the four debit types before it) | the types real money may open, credit types only at `CREDIT_MIN_EQUITY_USD` of equity; must equal the constitution's `options_money.real_types` (`league.ci`) | gateway deploy with the matching House deploy and a ratify |
 | `live.observe`, `live.observe_max` | `swarm.json` on the box | true, 48 | the observe band and its cap; read each minute, no deploy (a swarm.json that is not a JSON object turns it off) | edit `swarm.json` |
 | `live.calibration`, `live.calibration_samples` | `swarm.json` on the box | false, 30 | the D3 round trips (still only with real money on, the grant and the paper proof); samples a symbol's open-at-mid cell stops at | edit `swarm.json` |
 | `FRONTIER_MONTH_USD`, `FRONTIER_MONTH_MAX_USD`, `FRONTIER_FUNDED_MONTH` | `gateway/wrangler.jsonc` | $707, September 2026 only | the OpenAI month; expires before an unfunded month can renew it | gateway deploy |
-| The money rules | `league/constitution.py` | the sprint's D4 table (money `ad9bd54c`) | what real money may do | owner deploy, then `--ratify` |
+| The money rules | `league/constitution.py` | the sprint's D4 table with credit at $2,000 (money `ec0a1bc4`; `ad9bd54c` before it) | what real money may do | owner deploy, then `--ratify` |
 
 In `swarm.json`, `researcher.usd_per_hour` keeps the combined Sail-model and OpenAI trailing-hour pace.
 Set the optional `researcher.sail_usd_per_hour` to the funded Sail rate to pace Sail models separately;

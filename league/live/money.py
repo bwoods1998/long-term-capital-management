@@ -10,10 +10,11 @@ enlarges a stake. Every share in the table is a share of `E`.
 
 BANDS (the live path owns candidate <-> probe <-> sized; the swarm owns gym <-> candidate and retirement):
 
-- PROBE: a Candidate that passed the holdout, whose structure is one of the real types (credit types only while credit
-  opens are allowed), and whose typical maximum loss (one structure, with its round-trip fees) fits the Probe's cap at
-  `E`: `probe.max_loss_share x E`, or `probe.floor_usd` for one contract. Otherwise it stays a Candidate, shadow only,
-  with the reason recorded.
+- PROBE: a Candidate that passed the holdout, whose structure is one of the real types (credit types only while `E` is
+  at least `credit_min_equity_usd`, $2,000: `Table.credit_allowed`), and whose typical maximum loss (one structure, with
+  its round-trip fees) fits the Probe's cap at `E`: `probe.max_loss_share x E`, or `probe.floor_usd` for one contract.
+  Otherwise it stays a Candidate, shadow only, with the reason recorded. A credit Probe or Sized family whose `E` falls
+  under $2,000 goes back to Candidate the same way (no latch), and every real open is judged again at its minute.
 - SIZED: a PROBE (never a Candidate at once) whose forward record has at least `sized.min_trades` trades with a mean
   return on maximum loss above zero and its one-sided `sized.confidence` lower bound above zero. The record
   (`one_record`) is the program version's own, one source a market day (real, else shadow, else nightly).
@@ -154,13 +155,14 @@ class Table:
         )
 
     def credit_allowed(self, equity: Decimal) -> bool:
-        """Credit structures on real money: while the account reads `credit_min_equity`. Equity alone, as the gateway
-        judges it (the plan's "or a real credit order is accepted" can only happen at that equity, since the gateway
-        refuses a credit open under it; a latch kept past a fall under it would only send refused orders)."""
+        """Credit structures on real money: while `equity` -- the sizing equity, the lower of the account's equity read
+        this minute and the grant's capital -- is at least `credit_min_equity`. Equity alone, as the gateway judges it
+        (the plan's "or a real credit order is accepted" can only happen at that equity, since the gateway refuses a
+        credit open under it; a latch kept past a fall under it would only send refused orders)."""
         return equity >= self.credit_min_equity
 
     def type_allowed(self, type_: str, equity: Decimal) -> str | None:
-        """Why real money may not open `type_` now, or None."""
+        """Why real money may not open `type_` now, or None. `equity` is the sizing equity (`credit_allowed`)."""
         if type_ in self.credit_types and type_ not in self.real_types:
             return (f"a {type_} is a credit structure: credit opens are not among the types real money opens "
                     f"({', '.join(self.real_types)}) until a deposit takes equity to ${self.credit_min_equity} and the "
@@ -169,8 +171,9 @@ class Table:
             return (f"a {type_} is not one of the types real money opens ({', '.join(self.real_types)}): "
                     "it closes in more than one order at the venue; shadow only until a paper round trip proves it")
         if type_ in self.credit_types and not self.credit_allowed(equity):
-            return (f"a {type_} is a credit structure: real credit opens wait until the account reads "
-                    f"${self.credit_min_equity} of equity (it reads ${cents(equity)}; debit structures only until then)")
+            return (f"a {type_} is a credit structure: real credit opens wait until the sizing equity (the lower of the "
+                    f"account's equity and the grant's capital) reads ${self.credit_min_equity} (it reads "
+                    f"${cents(equity)}; debit structures only until then)")
         return None
 
 

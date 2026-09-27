@@ -121,10 +121,14 @@ class OneSourceOfTruth(unittest.TestCase):
 
     FIVE = ["credit_vertical", "debit_vertical", "iron_butterfly", "iron_condor", "long_butterfly"]
     # The sprint (B4, Sept 26, 2026): the four debit types under $2,000 of equity, the long call and put among them, open
-    # on the real account; the credit types come back only with a deposit, in one deploy with the gateway.
+    # on the real account.
     FOUR = ["debit_vertical", "long_butterfly", "long_call", "long_put"]
-    TYPES_LINE = '"real_types": ["debit_vertical", "long_butterfly", "long_call", "long_put"],'
-    GATEWAY_LINE = '"OPTION_STRUCTURES_REAL": "debit_vertical,long_butterfly,long_call,long_put",'
+    # Credit at $2,000 (Sept 26, 2026): the three credit types are real types too, opened only from $2,000 of equity (the
+    # House's sizing equity and the gateway's own reading); listed in the constitution and the gateway alike.
+    SEVEN = FOUR + ["credit_vertical", "iron_condor", "iron_butterfly"]
+    TYPES_LINE = ('"real_types": ["debit_vertical", "long_butterfly", "long_call", "long_put", "credit_vertical", "iron_condor", '
+                  '"iron_butterfly"],')
+    GATEWAY_LINE = '"OPTION_STRUCTURES_REAL": "debit_vertical,long_butterfly,long_call,long_put,credit_vertical,iron_condor,iron_butterfly",'
 
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
@@ -152,10 +156,13 @@ class OneSourceOfTruth(unittest.TestCase):
 
     def test_the_repository_as_it_stands_agrees(self):
         self.assertEqual(ci.check_structures(), [])
-        self.assertEqual(ci.gateway_structures(), (sorted(self.FOUR), []))
+        self.assertEqual(ci.gateway_structures(), (sorted(self.SEVEN), []))
 
     def test_the_table_and_the_gateway_change_together(self):
         self.assertEqual(self.tree(), [])
+        self.assertEqual(self.tree(types=self.FOUR, gateway=",".join(self.FOUR)), [], "credit off again: both lists at once")
+        self.assertIn("admits", self.tree(types=self.FOUR)[0], "the gateway may not list credit types the table does not")
+        self.assertIn("admits", self.tree(gateway=",".join(self.FOUR))[0], "nor the table list credit types the gateway does not")
         self.assertEqual(self.tree(types=["debit_vertical"], gateway="debit_vertical"), [])
         self.assertEqual(self.tree(types=["debit_vertical"], gateway=" debit_vertical, "), [])
         self.assertEqual(self.tree(gateway="off"), [], "the external boundary may always disable real opens")

@@ -32,16 +32,19 @@ def row(**kw):
     return base
 
 
-#: The five multi-leg types the venue closes in one order: the table's real types once a deposit brings credit back.
-FIVE = ["debit_vertical", "credit_vertical", "iron_condor", "iron_butterfly", "long_butterfly"]
+#: The four debit types: the table's real types before credit at $2,000 (B4, Sept 26, 2026).
+FOUR = ["debit_vertical", "long_butterfly", "long_call", "long_put"]
+#: The three credit types, real at $2,000 of sizing equity or more (credit at $2,000, Sept 26, 2026).
+CREDIT = ("credit_vertical", "iron_condor", "iron_butterfly")
 
 
 class TheTable(unittest.TestCase):
     def test_the_defaults_are_the_sprints(self):
         """The sprint (Sept 26, 2026), owner decision D4: the bold end of the plan's ranges; D3's calibration cap; the four
-        debit types under $2,000 (the long call and put among them, B4)."""
+        debit types under $2,000 (the long call and put among them, B4), and the three credit types from $2,000 of equity."""
         t = M.Table.from_constitution()
-        self.assertEqual(t.real_types, ("debit_vertical", "long_butterfly", "long_call", "long_put"))
+        self.assertEqual(t.real_types, ("debit_vertical", "long_butterfly", "long_call", "long_put", "credit_vertical",
+                                        "iron_condor", "iron_butterfly"))
         self.assertEqual(t.credit_types, ("credit_vertical", "iron_condor", "iron_butterfly"))
         self.assertEqual((t.probe_share, t.probe_open, t.probe_family_share, t.probe_floor), (D("0.05"), 3, D("0.15"), D("100")))
         self.assertEqual((t.sized_min_trades, t.sized_confidence, t.kelly_fraction), (20, 0.8, 0.25))
@@ -93,21 +96,32 @@ class TheTable(unittest.TestCase):
         c["options_money"]["probe"]["max_loss_share"] = "0.04"
         self.assertNotEqual(money_digest(c), money_digest())
 
-    def test_credit_waits_for_two_thousand_dollars_on_equity_alone(self):
-        # As it stands (the sprint): no credit type is a real type, at any equity; they come back with a deposit.
+    def test_credit_types_are_real_from_two_thousand_dollars_of_equity_alone(self):
+        # Credit at $2,000 (Sept 26, 2026): the three credit types are real types, but real money opens one only while
+        # the sizing equity reads $2,000 or more -- equity alone, judged afresh each time (no latch from an earlier fill).
         t = M.Table.from_constitution()
-        for equity in ("1999.99", "2000", "9000"):
-            self.assertIn("credit structure", t.type_allowed("iron_condor", D(equity)))
-            self.assertIn("ratified again", t.type_allowed("credit_vertical", D(equity)))
-        # With the credit types listed again, they open at $2,000 of equity on equity alone (the gateway's own rule).
-        t = table(real_types=FIVE)
-        self.assertIn("credit structure", t.type_allowed("iron_condor", D("1999.99")))
-        self.assertIsNone(t.type_allowed("iron_condor", D("2000")))
-        # The gateway refuses a credit open under $2,000 on equity alone: no latch from an earlier fill opens it here.
-        self.assertIn("credit structure", t.type_allowed("iron_condor", D("1999.99")))
-        self.assertIsNone(t.type_allowed("debit_vertical", D("100")))
+        for type_ in CREDIT:
+            self.assertIn(type_, t.real_types)
+            for equity in ("0", "481.63", "1999", "1999.99"):
+                why = t.type_allowed(type_, D(equity))
+                self.assertIn("credit structure", why, (type_, equity))
+                self.assertIn(f"reads ${D(equity):.2f}", why)
+                self.assertIn("$2000", why)
+            for equity in ("2000", "2000.01", "5481.65"):
+                self.assertIsNone(t.type_allowed(type_, D(equity)), (type_, equity))
+            self.assertIn("credit structure", t.type_allowed(type_, D("1999.99")), "back under: refused again")
+        self.assertFalse(t.credit_allowed(D("1999.99")))
+        self.assertTrue(t.credit_allowed(D("2000")))
+        # The debit types need no threshold; the shapes the venue closes in more than one order stay shadow-only.
+        for type_ in FOUR:
+            self.assertIsNone(t.type_allowed(type_, D("100")), type_)
         self.assertIn("closes in more than one order", t.type_allowed("calendar", D("9000")))
-        self.assertIn("closes in more than one order", t.type_allowed("long_call", D("9000")), "unless it is listed")
+        # A table without the credit types (as under B4) keeps them shadow-only at any equity.
+        t = table(real_types=FOUR)
+        for equity in ("1999.99", "2000", "9000"):
+            self.assertIn("ratified again", t.type_allowed("iron_condor", D(equity)))
+        self.assertIn("closes in more than one order", table(real_types=["debit_vertical"]).type_allowed("long_call", D("9000")),
+                      "unless it is listed")
 
     def test_a_long_call_and_a_long_put_are_real_types_at_any_equity(self):
         t = M.Table.from_constitution()
@@ -146,10 +160,15 @@ class Bands(unittest.TestCase):
     def test_what_keeps_a_family_shadow_only(self):
         self.assertIn("holdout", M.band_for(self.t, row(holdout_passed=False), D("5000"), fwd([]))[1])
         self.assertIn("more than one order", M.band_for(self.t, row(structure="long_strangle"), D("5000"), fwd([]))[1])
-        self.assertIn("credit structure", M.band_for(self.t, row(structure="iron_condor"), D("1999"), fwd([]))[1])
-        self.assertEqual(M.band_for(self.t, row(structure="iron_condor"), D("2000"), fwd([]))[0], "candidate",
-                         "no credit type is real until a deposit re-ratifies the grant")
-        self.assertEqual(M.band_for(table(real_types=FIVE), row(structure="iron_condor"), D("2000"), fwd([]))[0], "probe")
+        for type_ in CREDIT:
+            band, why = M.band_for(self.t, row(structure=type_), D("1999.99"), fwd([]))
+            self.assertEqual(band, "candidate", type_)
+            self.assertIn("credit structure", why)
+            self.assertEqual(M.band_for(self.t, row(structure=type_), D("2000"), fwd([]))[0], "probe", type_)
+            # A credit Probe whose sizing equity falls under $2,000 goes back to Candidate, shadow only (no latch).
+            self.assertEqual(M.band_for(self.t, row(structure=type_, band="probe"), D("1999.99"), fwd([]))[0], "candidate")
+        self.assertEqual(M.band_for(table(real_types=FOUR), row(structure="iron_condor"), D("2000"), fwd([]))[0], "candidate",
+                         "a table without the credit types keeps them shadow-only at any equity")
         self.assertEqual(M.band_for(self.t, row(structure="long_call"), D("5000"), fwd([]))[0], "probe")
         self.assertEqual(M.band_for(self.t, row(band="gym"), D("5000"), fwd([]))[0], "gym")
 

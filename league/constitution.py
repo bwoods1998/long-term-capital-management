@@ -683,10 +683,11 @@ CONSTITUTION: dict[str, Any] = {
     # capital (`league/live_trading.py`). Deposits and withdrawals are never profit: the daily stop's base and the
     # drawdown's peak net them out (`league/live/money.py` `Stops`).
     #
-    # - `real_types`: what real money opens, the five types the venue closes in ONE order; the others trade shadow only
-    #   until a paper round trip proves them. `credit_types` open for real only once the account reads
-    #   `credit_min_equity_usd` of equity (Alpaca's limited margin under $2,000: debit structures only) or a real credit
-    #   order has been accepted.
+    # - `real_types`: what real money opens, the types the venue closes in ONE order; the others trade shadow only
+    #   until a paper round trip proves them. `credit_types` open for real only while the sizing equity -- the lower of
+    #   the Brokerage Account's equity, read afresh every minute, and the grant's capital -- is at least
+    #   `credit_min_equity_usd` (Alpaca's limited margin under $2,000: debit structures only). Equity alone, never a
+    #   latch: under it a credit type is shadow-only again and its real instance keeps only its exits.
     # - `probe`: a Candidate that passed the holdout, trades a real type, and whose typical maximum loss fits the cap at
     #   the current equity (else shadow-only, the reason recorded). `max_loss_share` a structure, `open_per_family`
     #   structures, `family_share` in all; `floor_usd`: one contract whose maximum loss is at most this, whatever the
@@ -713,12 +714,20 @@ CONSTITUTION: dict[str, Any] = {
     # table at the bold end of the plan's ranges -- Probe 5% a structure with a $100 one-contract floor, the family 15%,
     # the book 90%, the daily stop 35%, the drawdown stop 60%, tuition $200 a day -- and the calibration's $50 a day (D3).
     # Real types under $2,000 of equity are exactly the four debit types the venue closes in one order: debit verticals,
-    # long butterflies, and long calls and puts (one contract bought to open, sold to close; B4). The credit types are
-    # NOT real types now: they return (with the gateway's list, in one deploy) only once a deposit takes equity to $2,000
-    # and the grant is ratified again. The gateway's per-order equity share is 25% so a $100 Probe fits at $481.63 of
+    # long butterflies, and long calls and puts (one contract bought to open, sold to close; B4). The credit types join
+    # them at $2,000 of equity (below). The gateway's per-order equity share is 25% so a $100 Probe fits at $481.63 of
     # equity (its $1,000 absolute cap unchanged; never above funded money).
+    #
+    # CREDIT AT $2,000 (Sept 26, 2026; the sprint's "Money on Monday": "Credit types: only at $2,000 of equity or more"):
+    # the three credit types -- credit verticals, iron condors, iron butterflies, which the venue also closes in one
+    # order -- are real types again, but only while the sizing equity reads `credit_min_equity_usd` ($2,000) or more
+    # (`league/live/money.py` `Table.type_allowed`, judged at every band move and again at every open). Under it they
+    # stay shadow-only, exactly as before, so a deposit that takes equity to $2,000 (and the ratification that follows
+    # it) opens them with no further code. Sized by maximum loss like every type: a credit structure's is its widest
+    # wing less the credit, x 100. Every other row of the D4 table is unchanged. The gateway admits them only on its
+    # own reading of the account's equity at `CREDIT_MIN_EQUITY_USD` or more.
     "options_money": {
-        "real_types": ["debit_vertical", "long_butterfly", "long_call", "long_put"],
+        "real_types": ["debit_vertical", "long_butterfly", "long_call", "long_put", "credit_vertical", "iron_condor", "iron_butterfly"],
         "credit_types": ["credit_vertical", "iron_condor", "iron_butterfly"],
         "credit_min_equity_usd": "2000",
         "probe": {"max_loss_share": "0.05", "open_per_family": 3, "family_share": "0.15", "floor_usd": "100"},
@@ -876,4 +885,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '4f4edaf52f917f90e89d42acc021bebf51c999d662daacf804255d7c7837448d'
+PINNED_DIGEST = '19e83ff1ac09386a087e7d8c8e477f169a74ec6579fba168049926d4b178f710'
