@@ -1058,6 +1058,37 @@ and this record, and lifts the Saturday continuation's no-real-money scope.
 - **04:55Z** Diagnostician widened (Claude was idle): family_hours 3, near_miss_checks 5,
   min_validations 1, per_round 3, `usd_day` 30.
 
+- **06:25-07:45Z Credit-at-$2,000 prepared: PR #393** (not merged, not deployed; the owner decides).
+  - Credit types (`credit_vertical`, `iron_condor`, `iron_butterfly`) become real types when SIZING
+    equity (the lower of account equity and grant capital) is >= $2,000. The gateway independently
+    refuses credit opens under $2,000.
+  - Adversarial 3-lens review with independent verification: two MAJOR findings confirmed.
+    - Assignment risk: an in-the-money short leg gave more contracts through max-loss sizing.
+    - Expiry day: a short leg just outside 1% could be assigned after the cutoff.
+  - Both fixed at `d3627c10`:
+    - refuse real credit with an in-the-money short leg on equity roots;
+    - cap the short-leg stock notional at <= 3x sizing equity, and 1 structure per order at Probe,
+      mirrored in the gateway;
+    - refuse real short calls beyond 5 DTE on equity roots;
+    - close every expiring equity-root credit structure on expiry day whatever its moneyness.
+  - Fix verification: SAFE TO DEPLOY if the owner approves. Money digest `ec0a1bc4` moves again with
+    the fixes; the new digest is in the PR.
+  - Implication: the notional cap means SPY/QQQ/IWM credit structures cannot trade real money below
+    about $20k of equity. Real credit runs through cash-settled XSP/SPXW, which cannot be assigned
+    early.
+  - Deploying needs the owner's approval of a third release before Monday, then --ratify, and a
+    deposit to >= $2,000 followed by --ratify again.
+- **07:40Z Architect agenda v2** in `swarm.json`: the evidence (premium buying loses; short-dated
+  selling about break-even) and the documented directions:
+  - liquidity-provision reversal;
+  - fear-premium ITM call verticals (a debit form of the short put spread);
+  - session-only long gamma;
+  - dealer-gamma regimes;
+  - back-month VRP ladders.
+- **07:39Z Operator sweep, generation 2:** 7 new-signal templates (from 3 idea lenses and a judge,
+  audited and fixed) sweeping on 4 sealed boxes. The single-name earnings template waits for the
+  final image.
+
 ## Scoreboard
 
 ### T0 (2026-09-26T06:23Z; repo figures at 06:40Z)
