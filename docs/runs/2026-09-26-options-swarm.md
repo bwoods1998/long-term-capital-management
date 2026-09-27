@@ -1215,4 +1215,21 @@ First-principles reading, recorded for the owner's morning review:
   change is being prepared as a PR (not merged); deploying it needs the owner's deposit and an
   extra release.
 
+### Sprint scoreboard, T0 + 26 h (08:16Z Sept 27)
+
+| # | Metric | Value |
+|---|---|---|
+| 1 | Population | 60 alive (48 running), 85 retired; 5 born (2 founded by the operator sweep) and 5 retired in 2 h |
+| 2 | Throughput | 1,625 cycles/h, median 102 s; Gym pool 6 busy, 2 ready; queue 1; 3 provider 502s |
+| 3 | Search | 33,632 trials, 86,628 program-years. Sweep generation 2: `liquidity_rebound_itm_vertical` has Train edge (47 of 72 positive; best robust score 0.58, t 2.19; 2 of 5 finalists positive at 1.5x). It was founded as two families; the pool reproduced rank 0 (168 trades, t 2.06). `fear_premium_itm_call_vertical`: 41 of 93 positive, but 2022 is flat or negative in every strong variant (best robust score 0.002). `close_pressure_ibs`: 0 of 5 positive at stress. `day_session_long_gamma`: 0 of 82 positive. The SPXW-reading templates ran the sweep boxes out of memory; they will be re-run with one worker |
+| 4 | Evidence | 0 validation passes, 0 holdout looks. Nearest: `range-consumed-spxw-credit` 6/8 |
+| 5 | Readiness | unchanged; grant active, real money on, gateway 4 debit real types |
+| 6 | Money | equity $481.63; 0 orders |
+| 7 | Compute | Sail $157.10 (about $2.9/h since 06:20Z including 5 sweep boxes). To stay above the $32 line through Tuesday, the burn must drop to about $1/h after Monday's open. Claude $9.36 (67 calls; diagnostician $8.95). OpenAI $603.97 + $9.36 inflight of $707 |
+
+Reading: the two Train edges are both in-the-money call verticals. By put-call parity each is a short put
+spread held in debit form, so part of its return is equity beta. `liquidity_rebound`'s strongest year is
+2022, a falling market, so its edge is more than beta. `fear_premium`'s edge is only in 2023-2024, which
+looks like beta. Validation 2025 and the holdout judge both.
+
 ## Report
