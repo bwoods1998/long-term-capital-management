@@ -1501,4 +1501,16 @@ looks like beta. Validation 2025 and the holdout judge both.
 | 6 | Money | equity $1,481.63 (options buying power $481.60 until the deposit settles); 0 orders |
 | 7 | Compute | Sail $168.63 (about $5.9/h; about $50 expected at Monday's open, above the $32 line). Claude $26.36 of $100 (162 calls). OpenAI $606.41 + $9.36 inflight of $707 |
 
+### Sprint scoreboard, T0 + 37 h (19:32Z Sept 27)
+
+| # | Metric | Value |
+|---|---|---|
+| 1 | Population | 72 alive (48 cycling); 6 born and 6 retired in 2 h |
+| 2 | Throughput | 1,261 cycles/h, median 116 s; pool 6 busy, 4 ready; queue 4 |
+| 3 | Search | 46,643 trials, 154,181 program-years. The architect's direction-neutral volatility births lead Validation 2025: `peer-uncertainty-transfer-straddle` t 1.77 (6/8), `serial-revision-tail-strangle` t 1.20 (6/8), `scaled-entry-liquidity-reversal` (6/8) |
+| 4 | Evidence | 1 validation pass alive (the IWM fork); holdout looks 2, passes 0 |
+| 5 | Readiness | Unchanged: no family eligible for real money; calibration and observe on for Monday |
+| 6 | Money | equity $1,481.63; options buying power $481.60 (the deposit unsettled); 0 orders |
+| 7 | Compute | Sail $157.14 (about $5.6/h; about $56 at the open). Claude $30.70 of $100. OpenAI $606.86 of $707 |
+
 ## Report
