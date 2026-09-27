@@ -1022,6 +1022,42 @@ and this record, and lifts the Saturday continuation's no-real-money scope.
 - **01:55Z** `gym.start_boxes` back to 6: the re-validation wave has cleared (queue 12) and Sail pacing
   needs it (see below).
 
+- **04:05-05:36Z Operator sweep, generation 1**, in response to the owner's push for agent-time search.
+  - A workflow of 27 agents wrote 10 parametric templates (debit-first):
+    - VRP debit butterfly;
+    - weekend theta butterfly;
+    - event IV-crush butterfly;
+    - intraday momentum vertical;
+    - gap fade vertical;
+    - multi-day trend vertical;
+    - dip-rebound call;
+    - range breakout option;
+    - cheap-vol strangle;
+    - a patient short-dated condor (credit).
+    
+    Each was audited adversarially and fixed; all pass the Gym safety check. Programs and parameters
+    stay private.
+  - Swept 790 variants on Train 2022-2024 (SPY/QQQ/IWM pooled) on 4 dedicated sealed forks of
+    `core-honest-v1` with the deployed engine. Each variant was scored with the swarm's own
+    `train_score`, and the top 5 per template were re-run at 1.5x stress, which halves passive fills.
+  - **Result: no Train edge.**
+    - Per template, 0-4 variants were net positive on Train.
+    - The best robust scores were negative for every template.
+    - 0 of the 35 stress-tested finalists were positive at 1.5x.
+    - The short-dated short-premium condor was about break-even (best score -0.36).
+    - Two templates (dip rebound, intraday momentum) failed on dropped exec streams, and one had
+      memory errors on large batches. The runner now saves before stress, retries, and chunks grids
+      of 24.
+  - Reading: under honest fills, 0-7 DTE index-ETF options (bought or sold, directional or
+    volatility) do not clear costs in 2022-2024; buying premium loses systematically (the variance
+    risk premium). Nothing was founded from generation 1.
+  - Next:
+    - generation 2 (novel signals: 3 idea lenses and a judge, 8 templates) and generation 3
+      (15-45 DTE SPY/QQQ back months, the classic VRP horizon), being written by workflows;
+    - generation 3 sweeps on the final image once stage 6 lands (about 09:30-10:00Z).
+- **04:55Z** Diagnostician widened (Claude was idle): family_hours 3, near_miss_checks 5,
+  min_validations 1, per_round 3, `usd_day` 30.
+
 ## Scoreboard
 
 ### T0 (2026-09-26T06:23Z; repo figures at 06:40Z)
