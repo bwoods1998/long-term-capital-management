@@ -1295,6 +1295,21 @@ and this record, and lifts the Saturday continuation's no-real-money scope.
     real fills on exactly that structure (1-lot, $1-wide, near-money SPY/QQQ call verticals, at
     the mid then mid+1).
 
+- **16:35-16:52Z Execution is the index rebound's lever.** Train, split 8 as in the pool.
+  - Patient execution (never chase to the natural, 25-minute entries, exits at the mid) raises the
+    robust score from 0.67 to about 1.0 (pooled t 2.6-2.9), but cuts trades to about 36 a year.
+  - Adding the two-sided pullback rule (up-trend pullbacks in calls, down-trend rallies in puts,
+    z 0.5, 20-day trend) keeps 61-68 trades a year: t 2.69, 183 trades, per-year t 2.37 / 1.58 /
+    0.76. At 1.5x it falls to about zero (+$95, t 0.02).
+  - The edge is execution-bound: it lives in patient fills.
+  - Queued at 16:52Z as the next version of `sweep-liquidity-rebound-itm-vertical` (same lineage,
+    about 90 trials counted). Validation 2025 judges it.
+  - Monday's D3 calibration round trips measure exactly whether real patient fills behave like the
+    Gym's.
+- **16:29-16:33Z** A tournament fork of `low-close-location-backmonth-call` onto IWM (no back months,
+  so the same SPY/QQQ program) passed Validation with the parent's identical t 2.47. Its holdout look
+  failed too. That lineage has spent two of its three looks.
+
 ## Scoreboard
 
 ### T0 (2026-09-26T06:23Z; repo figures at 06:40Z)
