@@ -1240,6 +1240,28 @@ and this record, and lifts the Saturday continuation's no-real-money scope.
   - Balance chart: at the owner's request, it starts after the deposit (13:36:06Z, $1,481.63).
     personal-site #14, deployed 13:50Z; profit already nets funding.
 
+- **14:00-14:40Z The rebound as a back-month single call: the strongest result of the sprint.**
+  - The index rebound signal, held as ONE 28-45 DTE call on SPY/QQQ (delta 0.5-0.6, 3 sessions,
+    take profit and stop, out at 21 DTE).
+    - 50 of 52 Train variants positive; 42 positive in every year.
+    - The best: daily t 2.73 / 2.54 / 2.05 by year (4.14 pooled), 182 trades, +$24,072; at 1.5x,
+      +$23,255 (t 4.20).
+    - Placebos lose: every-session call -$9,648 (t -1.94); trend-inverted -$7,589 (t -0.68). The
+      edge is the signal, not market drift.
+    - The edge holds at delta 0.4 (t 2.27) and 0.45 (t 2.74).
+  - Founded `sweep-rebound-bm-long-call-p2` (14:35Z; 62 sweep trials counted, both halves). Next:
+    the pool's robustness run, Validation 2025, then the gate.
+  - Real money is blocked by size, not evidence. One contract costs about $500-1,500. Options buying
+    power is $481.60 until the deposit settles, and the D4 Probe cap is 5% (floor $100). A pass
+    before Monday trades in shadow unless the owner approves a one-contract Probe after the deposit
+    settles. Cheaper deltas (0.2-0.4) are being swept.
+  - Refuted the same hour:
+    - back-month put-write as call verticals: 0 of 59 positive, t about -7;
+    - low-delta trend options under a $200 cap: too few trades, 2022 empty.
+- **14:05-14:25Z The laptop shell was blocked** (every command failed). The session scratchpad sits
+  on a 3.8 GB /tmp tmpfs, and template agents had left 3.1 GB of synthetic stores and venvs in it.
+  Cleared. Remote work (the House, the pool, the running sweeps) was unaffected.
+
 ## Scoreboard
 
 ### T0 (2026-09-26T06:23Z; repo figures at 06:40Z)
