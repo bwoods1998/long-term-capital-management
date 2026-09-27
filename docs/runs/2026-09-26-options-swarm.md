@@ -942,6 +942,35 @@ and this record, and lifts the Saturday continuation's no-real-money scope.
     lens: fixed after a double count (calibration losses as compute) was removed. Final follow-ups
     (quote overwrite, calibration re-quote, time-bounded observe reads) are on `a06854d9` or later.
 
+- **23:18Z-00:28Z Merges for R2.**
+  - #390 (B4 live path, `ef867ef0`; three-lens adversarial review, fixes verified).
+  - #387 (B2 honest fill model, `da474ede`; review and verification fixes, plus two operator guards:
+    a moneyness exposure floor, and stress runs halve passive hazards).
+  - #391 (B3 Claude streaming, `76151c6b`; review fixes).
+  - #392 (`real_money` true, `440f6de4`; D1).
+  
+  #392's CI exposed a pre-existing wall-clock test that failed between 00:00Z and 07:00Z. It is fixed
+  in the same PR, so the gate's forward test now uses its fake clock.
+- **Gateway deploys.**
+  - 23:18Z: version `9634002d`, with B4's `OPTION_STRUCTURES_REAL` = the four debit types and
+    `MAX_ORDER_EQUITY_SHARE` 0.25.
+  - 23:41Z: version `953a9b46`, Claude streaming. A re-probe settled at $0.001.
+- **23:25Z** `researcher.sail_usd_per_hour` 1.5 to 2.0. The pace had paused researchers (1 of 46
+  running). The D6 arithmetic allows about $3.4/h in total to Monday's open and keeps the balance above
+  the $32 guard through Tuesday.
+- **23:28Z** The population reached 48, the start target (16 at 21:24Z).
+- **00:29-00:30Z R2 deployed.**
+  - House checkpoint `sbcp_9659a2a2` (pre-r2-sprint) first.
+  - Release `20260927T002925Z-2bfef7a749bf` (main `440f6de4`, `real_money` true, money digest
+    `ad9bd54c`, full digest `4f4edaf5`) promoted at 00:30:02Z.
+  - **00:30:15Z Grant enabled:** `options-swarm-20260928` is active and persistent, pinned to
+    `ad9bd54c`, capital $481.63, stake (Probe floor) $100, max_agents 4.
+  - Real entries still need a holdout-passed family (Probe), Monday's multi-leg and single-leg paper
+    proofs, clear stops and the kill switch off.
+  - **00:31Z Switches:** `live.observe` true, `live.observe_max` 8, `live.calibration` true (D3).
+  - This is the last release before Monday. From here to Monday's close, only `swarm.json` switches
+    and data or image adoption, except a rollback.
+
 ## Scoreboard
 
 ### T0 (2026-09-26T06:23Z; repo figures at 06:40Z)
