@@ -1183,6 +1183,29 @@ and this record, and lifts the Saturday continuation's no-real-money scope.
   - 58 trades on 51 days, +$1,177, +$978 at 1.5x, 3 of 4 quarters.
   - It fails t and the deflated Sharpe: 6/8, the closest real-money-type family so far.
 
+- **11:47-12:05Z Back-month pair built; NOT adopted.**
+  - Stage 6 (SPY/QQQ back months, out to about 45 DTE) completed at about 11:45Z. An interim pair
+    was built from stages 1-6: Gym `sbcp_a38bb07a`, gate `sbcp_a5e975a5`.
+  - To take the data-box lease, the completion supervisor was paused for 18 minutes; it resumed
+    its SIP relay at 12:04Z.
+  - The exact-reproduction check FAILED on it. The index rebound hit "Memory mapping file failed".
+  - A fork has 15.7 GB free. But with complete back months, the SPY and QQQ NBBO trees are about
+    3 GB each. The Gym maps the store per root across the window, so three roots pass the 6 GB
+    per-worker address-space cap (`GYM_WORKER_MEMORY_GB`) before a program runs.
+  - Adopting it would break every multi-root family.
+  - The completion supervisor's final pair will have the same property. It must not be adopted
+    without this reproduction check and an engine change (a larger worker cap in the pool, or back
+    months stored apart). That is post-Monday work, because a release is needed.
+  - Side effect: the adopted names pair (`sbcp_b358ab73` / `sbcp_92c29288`) was cut at 08:37Z,
+    mid-download, so it holds back months for some days only.
+    - Four alive families read past 14 DTE and were given an operator note: `event-term-crush-calendar`,
+      `poor-mans-covered-call-diagonal`, `slow-tenor-rebound-debit`, `quiet-tenor-putwrite-debit`.
+    - The agenda now says to keep NEEDS within 14 DTE.
+    - The subset was not selected by outcome, so it thins that evidence rather than flattering it.
+  - Early back-month rows (2-root templates fit): long put butterflies and trend long options at
+    8-45 DTE lose in every Train year, since the Gym charges back-month legs the full spread both
+    ways. The six gen-3 back-month templates are sweeping for the owner's credit question.
+
 ## Scoreboard
 
 ### T0 (2026-09-26T06:23Z; repo figures at 06:40Z)
