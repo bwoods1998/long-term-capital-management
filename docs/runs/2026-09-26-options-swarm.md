@@ -971,6 +971,39 @@ and this record, and lifts the Saturday continuation's no-real-money scope.
   - This is the last release before Monday. From here to Monday's close, only `swarm.json` switches
     and data or image adoption, except a rollback.
 
+- **00:40Z R2 passed its watch** (20 readings; stage prune). The House runs `real_money` true. After it:
+  - 48 families running, 972 cycles/h, 0 cycle errors;
+  - Gym queue 44 on 6 boxes (the one-time re-validation after the Gym code changed, plus robustness
+    runs), so `gym.start_boxes` went to 8 for the wave.
+- **00:41-00:48Z Honest refit** on the House: `scripts/data/calibration.py --version core-honest-v1`,
+  with B2's estimator.
+  - Fitted on the sealed Gym template from Train `trade_quote` only (755 days): model
+    `fm-c4a0c70c9afbf09f`, 2,114 cells, 180 size cells, sha `3de9e2a6…`.
+  - Checkpoints: Gym `sbcp_4500cd6f` (backup `sbcp_bf69c55f`), gate `sbcp_0a6f54da` (backup
+    `sbcp_7ebe850f`).
+  - Both passed the seal check from inside: Gym Train and Validation only, 2022-01-03 to 2025-12-31;
+    gate including the holdout.
+  - Operational note: the data CLI finds the Sail key only through the process environment, so it
+    was passed that way from `/workspace/.env` without printing it.
+- **01:00Z Adopted `core-honest-v1`** in `swarm.json` (image and gate).
+  - **01:01Z** Model copied privately from the sealed Gym template to the House's
+    `/data/calibration/fill_model.json` (mode 600). SHA verified on both ends; nothing stored on the
+    laptop.
+  - **01:01-01:02Z House stop and start** (a restart, not a release). `health.json`
+    `options_live.fill_model` now reads `fm-c4a0c70c9afbf09f`, 2,114 cells. The Gym, the gate and the
+    live shadow share one fill model.
+- **01:03Z Revived 13 retired families** as lineage continuations (`<id>-r`, parent = the retired
+  family). Each has v1 = its validated program, authored operator-revive, and inherits its lineage's
+  trials (41-818) and look ration (0 looks used).
+  - The selection is the operator's, made on the Wave 0 execution diagnostic (validation-window runs
+    at mid). Validation-based selection is exactly what the sealed holdout, Holm across every look
+    and the forward record exist to check.
+  - The revived: butterfly-pin, close-imbalance-iwm-credit, eod-drift-spxw, event-crush-xsp-fly,
+    factor-residual-iwm-debit, gap-revert-iwm-on-spy, open-drive-iwm-fly, orb-break-qqq, orb-fade,
+    orb-fade-iwm, pin-qqq-fly, skew-revert-qqq-on-spy, vrp-condor-xsp.
+  - 8 are debit types, eligible for real money at this equity.
+  - Population 61.
+
 ## Scoreboard
 
 ### T0 (2026-09-26T06:23Z; repo figures at 06:40Z)
