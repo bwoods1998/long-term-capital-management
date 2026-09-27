@@ -615,8 +615,10 @@ class GateTests(RoundCase):
         Gate(self.store, self.pool, self.router, self.settings).run()
         self.answer = lambda job: {**weak(job), "trades": [{"id": i, "day": "2026-09-28", "entry_minute": 600 + i, "root": "SPY",
                                                             "type": "iron_condor", "pnl": -5.0, "max_loss": 60.0} for i in range(25)]}
-        gate = Gate(self.store, self.pool, self.router, self.settings)
-        self.clock.advance(86400)
+        # The test's own clock (05:20Z at the start), a day on and past the 07:00Z forward hour: with the wall clock,
+        # this failed whenever CI ran between 00:00Z and 07:00Z.
+        gate = Gate(self.store, self.pool, self.router, self.settings, clock=self.clock)
+        self.clock.advance(86400 + 2 * 3600)
         self.assertTrue(gate.forward_due())
         out = gate.forward()
         self.assertEqual(out["trades"], 25)
