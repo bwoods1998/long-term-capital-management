@@ -1089,6 +1089,50 @@ and this record, and lifts the Saturday continuation's no-real-money scope.
   audited and fixed) sweeping on 4 sealed boxes. The single-name earnings template waits for the
   final image.
 
+- **08:05-08:30Z Sweep generation 2 results.**
+  - `liquidity_rebound_itm_vertical` has Train edge. Founded as two families; their robustness runs
+    at mid had per-year t of 2.94 / 1.11 / 1.44 (rank 0).
+  - Local search around it: 70 of 72 neighbors positive on Train (a plateau, not a peak); best
+    robust score 0.67; 5 of 6 finalists positive at 1.5x.
+  - `fear_premium_itm_call_vertical`: edge only in 2023-2024. Finalist 0 stayed positive at 1.5x and
+    was founded.
+  - No edge: `close_pressure_ibs`, `day_session_long_gamma`, `intraday_skew`.
+  - `spy_spx_retail_tilt` failed its own mechanism checks.
+  - `dealer_gamma` overruns the Gym's per-program memory on full SPXW chains even at 2 workers:
+    shelved.
+- **08:29Z Validation 2025 on the founded families: 0 passes.**
+
+  | Family | Mean per $ of max loss | Daily t | Failed checks |
+  |---|---|---|---|
+  | rebound rank 0 | +0.039 | 0.29 | t, deflated Sharpe, trades < 50 |
+  | rebound rank 1 | +0.051 | 0.37 | t, deflated Sharpe, stress |
+  | fear premium | +0.003 | 0.06 | t, deflated Sharpe |
+
+  Positive, but far from the one-year t >= 2 line. Reading: the rebound fires a few times a year per
+  root, and t grows only with the square root of independent bets. The honest route to the line is
+  breadth, not a looser line.
+- **08:25-08:42Z Sweep generation 4 (XSP, cash-settled credit): no edge.**
+  - Put credit verticals at 1-7 DTE: 1 of 77 positive.
+  - Condors: 0 of 74.
+  - A weekly put ladder at 7-14 DTE: 0 of 78.
+  - Finalists at 1.5x stress: 0 of 15 positive.
+  - Selling short-dated XSP premium loses after honest costs in 2022-2024; XSP's spreads eat the
+    premium. This is evidence against the XSP-credit route that PR #393 opens.
+- **08:35Z Interim 25-root image pair building (no release).**
+  - The data box already holds the twenty names' full NBBO and underlying history; only stage 6
+    (back months) is still downloading.
+  - An operator job on the House builds a Gym and gate pair from stages 1-5 in a separate staging
+    directory. The completion supervisor's records are untouched.
+  - It installs the deployed honest fill model. Names were never sampled, so they fill at the
+    natural only.
+  - Purpose: a names version of the rebound (breadth) and the names templates, about 7 hours before
+    the final pair.
+- **08:30-08:50Z Two template workflows.**
+  - Generation 5, debit-form VRP (real-money eligible):
+    - an always-on put-write held as an ITM call vertical;
+    - a calendar-window version (turn of month, pre-holiday, pre-FOMC).
+  - `liquidity_rebound_names`: the rebound on the twenty names.
+
 ## Scoreboard
 
 ### T0 (2026-09-26T06:23Z; repo figures at 06:40Z)
