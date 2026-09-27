@@ -18,13 +18,14 @@ attempt: ONE error when a run of failures begins, a warning at each later backof
 with the outage's length when a checkpoint succeeds again. A failure that is this code's own
 (anything `service_failed` says no to) is an unmarked error every time, as before.
 
-Which box is the House's (Sept 27, 2026): the box's own identity, `house_box()`. Sail sets `SAILBOX_ID` in the
-guest environment of every command it runs on a Sailbox, and a caller's own environment cannot override it
-(https://docs.sailresearch.com/sailbox-sdk, as `ltcm/hostinfo.py` reads it), so the House checkpoints the box it
-runs on, by id, whatever that box is called. Only without an id (not on a Sailbox, or an image that does not set
-it) does a name decide: `config["backup"]["box_name"]`, else `DEFAULT_BOX_NAME`. Until then the name was fixed at
-`ltcm-floor`, and when the House moved to a box with another name on Sept 26 every daily backup failed ("0
-running boxes are named ltcm-floor").
+Which box is the House's (Sept 27, 2026): the one `league/config.json` pins (`backup.box_id`, `backup.box_name`,
+read by `house_box()`). Until then the name was fixed at `ltcm-floor`, and when the House moved to a box with another
+name on Sept 26 every daily backup failed ("0 running boxes are named ltcm-floor"). The pin wins over the box id Sail
+sets in the guest environment (`SAILBOX_ID`, as `ltcm/hostinfo.py` reads it). The House box was forked from a running
+box, so an id it inherited can name the box it came from. That box still exists, so a backup by that id would
+checkpoint the wrong box and record ok. The environment's id decides only when the config pins nothing. When it names
+another box than the pin, the House warns ONCE (`identity_notice`) and backs up the pinned box. With neither a pin nor
+an id, the backup fails and says why. There is no default name, and the retired `ltcm-floor` is never used.
 """
 
 from __future__ import annotations
@@ -37,31 +38,41 @@ from typing import Any, Callable, Mapping
 from .ledger import Ledger, now_iso
 from .watchdog import ENVIRONMENT, environment
 
-#: The name the first House box was created under (`scripts/floor_box.py create`): the fallback only.
-DEFAULT_BOX_NAME = "ltcm-floor"
 #: What Sail sets on a Sailbox to say which box a process runs on, most specific first (as `ltcm/hostinfo.py`).
 BOX_ID_VARS = ("SAILBOX_ID", "SAIL_SAILBOX_ID")
 _BOX_ID = re.compile(r"^sb_[0-9a-fA-F-]{8,64}$")  # `league.sailbox.box_id`'s shape
+#: A box or checkpoint id anywhere in a failure's text (Sail's own answer can quote one): replaced before the text is kept,
+#: because that text reaches the House's public alert.
+_ID_IN_TEXT = re.compile(r"\bsb(?:cp)?_[0-9a-fA-F-]{8,64}")
 
 
 def house_box(config: Mapping[str, Any] | None = None, env: Mapping[str, str] | None = None) -> dict[str, Any]:
-    """The House box's identity for `Backup(..., **house_box(config))`: `box_id` from Sail's environment when it is a
-    Sailbox id (None otherwise), and `box_name`, the configured fallback (`config["backup"]["box_name"]`)."""
+    """The House box's identity for `Backup(..., **house_box(config))`. `box_id` and `box_name` are what `league/config.json`
+    pins (`backup.box_id`, `backup.box_name`; None when unset). `env_box_id` is the id in Sail's environment when it has
+    the Sailbox shape (None otherwise). The pin decides, and the environment's id decides only without one (`Backup`)."""
     env = os.environ if env is None else env
-    box_id = next((value for value in (str(env.get(name) or "").strip() for name in BOX_ID_VARS) if _BOX_ID.match(value)), None)
     block = (config or {}).get("backup")
-    name = block.get("box_name") if isinstance(block, Mapping) else None
-    return {"box_id": box_id, "box_name": str(name).strip() if isinstance(name, str) and name.strip() else DEFAULT_BOX_NAME}
+    block = block if isinstance(block, Mapping) else {}
+
+    def text(value: Any) -> str | None:
+        return value.strip() if isinstance(value, str) and value.strip() else None
+
+    env_box_id = next((value for value in (str(env.get(name) or "").strip() for name in BOX_ID_VARS) if _BOX_ID.match(value)), None)
+    return {"box_id": text(block.get("box_id")), "box_name": text(block.get("box_name")), "env_box_id": env_box_id}
 
 
 class Backup:
-    def __init__(self, client: Any, ledger: Ledger, *, box_id: str | None = None, box_name: str = DEFAULT_BOX_NAME,
-                 every_hours: float = 24.0, keep_days: int = 7, clock: Callable[[], float] = time.time):
+    def __init__(self, client: Any, ledger: Ledger, *, box_id: str | None = None, box_name: str | None = None,
+                 env_box_id: str | None = None, every_hours: float = 24.0, keep_days: int = 7,
+                 clock: Callable[[], float] = time.time):
         self.client = client
         self.ledger = ledger
-        #: The House box by id (`house_box`): when set, it alone decides, and `box_name` is never read.
+        #: The House box as `league/config.json` pins it (`house_box`): by id when set, else by name. With both set, the
+        #: name must match what Sail says of the id. The pin always wins over `env_box_id`.
         self.box_id = box_id or None
-        self.box_name = box_name
+        self.box_name = box_name or None
+        #: The box id in Sail's environment. It decides only when nothing is pinned; otherwise a disagreement is warned of once.
+        self.env_box_id = env_box_id or None
         self.every_hours = float(every_hours)
         self.keep_days = int(keep_days)
         self.clock = clock
@@ -112,34 +123,82 @@ class Backup:
         00:05:55Z: the OLD House's backup, in flight at the owner's promotion, failed 73 s later inside the
         new release's watch and rolled it back)."""
         row: dict[str, Any] = {"what": "backup", "at_epoch": self.clock(), "ledger_rows": self.ledger.head()[0],
-                               "found_by": "id" if self.box_id else "name"}
+                               "found_by": self.found_by()}
+        box = None
         try:
             box = self.house_box_id()
             name = "league-" + now_iso(self.clock)[:10]
             made = self.client.checkpoint(box, name=name, ttl_seconds=self.keep_days * 86400)
             row.update(ok=True, name=name, checkpoint_id=made.get("checkpoint_id"), box=box)
         except Exception as exc:  # noqa: BLE001 - the floor outlives a failed backup; the alert says so
-            row.update(ok=False, error=f"{type(exc).__name__}: {str(exc)[:200]}", **environment("sail", exc))
+            row.update(ok=False, error=f"{type(exc).__name__}: {_ID_IN_TEXT.sub('<id>', str(exc))[:200]}", **environment("sail", exc))
             if closing is not None and closing():
                 row["during_shutdown"] = True
+        self._compare_identity(row, box)
         self.ledger.append("ops.deploy", row, public=False)
         return row
 
-    def house_box_id(self) -> str:
-        """The id of the box to checkpoint: the House's own (`box_id`) when it is running, else the one running box named
-        `box_name`. It never guesses: anything else raises, and the failure's text (which reaches the House's public
-        alert) never carries a box id."""
+    def found_by(self) -> str:
+        """Which identity decides (the row's `found_by`): `config.box_id`, `config.box_name`, `environment` or `none`."""
         if self.box_id:
-            seen = self.client.get(self.box_id) or {}
-            if seen.get("sailbox_id") not in (None, self.box_id):
-                raise RuntimeError("Sail answered for another box than the House's own (SAILBOX_ID)")
-            if seen.get("status") != "running":
-                raise RuntimeError(f"the House's own box (SAILBOX_ID) is {seen.get('status') or 'unknown to Sail'}, not running")
-            return self.box_id
-        boxes = [b for b in self.client.list_boxes(limit=300) if b.get("name") == self.box_name and b.get("status") == "running"]
-        if len(boxes) != 1:
-            raise RuntimeError(f"{len(boxes)} running boxes are named {self.box_name}")
-        return str(boxes[0]["sailbox_id"])
+            return "config.box_id"
+        if self.box_name:
+            return "config.box_name"
+        return "environment" if self.env_box_id else "none"
+
+    def house_box_id(self) -> str:
+        """The id of the box to checkpoint, and only when it is running: the box `league/config.json` pins (by id, else
+        by name), or without a pin the one Sail's environment names. It never guesses: anything else raises, and the
+        failure's text (which reaches the House's public alert) never carries a box id."""
+        if self.box_id:
+            if not _BOX_ID.match(self.box_id):
+                raise RuntimeError("league/config.json backup.box_id is not a Sailbox id")
+            return self._running(self.box_id, "the House box league/config.json pins (backup.box_id)", name=self.box_name)
+        if self.box_name:
+            boxes = [b for b in self.client.list_boxes(limit=300) if b.get("name") == self.box_name and b.get("status") == "running"]
+            if len(boxes) != 1:
+                raise RuntimeError(f"{len(boxes)} running boxes are named {self.box_name} (league/config.json backup.box_name)")
+            return str(boxes[0]["sailbox_id"])
+        if self.env_box_id:
+            return self._running(self.env_box_id, "the House box Sail's environment names (SAILBOX_ID)")
+        raise RuntimeError("no House box to back up: league/config.json pins none (backup.box_id, backup.box_name) and "
+                           "Sail's environment names none (SAILBOX_ID)")
+
+    def _running(self, box: str, what: str, *, name: str | None = None) -> str:
+        """`box` when Sail says it is running (and, when `name` is given, that it carries that name); else raise."""
+        seen = self.client.get(box) or {}
+        if seen.get("sailbox_id") not in (None, box):
+            raise RuntimeError(f"Sail answered for another box than {what}")
+        if name and seen.get("name") not in (None, name):
+            raise RuntimeError(f"{what} is named {str(seen.get('name'))[:80]}, not {name} (backup.box_name)")
+        if seen.get("status") != "running":
+            raise RuntimeError(f"{what} is {seen.get('status') or 'unknown to Sail'}, not running")
+        return box
+
+    def _compare_identity(self, row: dict[str, Any], box: str | None) -> None:
+        """Mark `row` when the pinned House box and Sail's environment name two boxes. The row is private, so the ids
+        stay on the box. `identity_disagrees` marks every such row; `identity_new` marks the first row for this pair
+        among the recent backup rows, and that row is when `identity_notice` warns (so a restart does not warn again).
+        A pinned id is compared as it stands, even when the box cannot be reached; a pinned name, by the box it found."""
+        pinned = self.box_id or (box if self.box_name else None)
+        if not pinned or not self.env_box_id or pinned == self.env_box_id:
+            return
+        seen = any(r.get("identity_disagrees") and r.get("pinned_box") == pinned and r.get("env_box_id") == self.env_box_id
+                   for r in self.attempts())
+        row.update(identity_disagrees=True, pinned_box=pinned, env_box_id=self.env_box_id)
+        if not seen:
+            row["identity_new"] = True
+
+    def identity_notice(self, row: Mapping[str, Any]) -> tuple[str, str, dict[str, Any]] | None:
+        """ONE warning, the first time the pinned House box and Sail's environment disagree (`_compare_identity`); None
+        otherwise. Its text reaches a public alert, so it names the config keys, never a box id."""
+        if not row.get("identity_new"):
+            return None
+        pinned = "backup.box_id" if self.box_id else "backup.box_name"
+        return ("warning", f"The House box that league/config.json pins ({pinned}) is not the box Sail's environment names "
+                           "(SAILBOX_ID). The daily backup checkpoints the pinned box, as the config says. If the House has "
+                           "moved to another box, pin that box in backup.box_id and backup.box_name.",
+                {"identity": "config_and_environment_disagree", "found_by": row.get("found_by")})
 
     def notice(self, row: dict[str, Any], before: list[dict[str, Any]]) -> tuple[str, str, dict[str, Any]] | None:
         """What the House says about one attempt `row`, given the failures in a row BEFORE it (oldest first,

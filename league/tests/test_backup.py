@@ -11,13 +11,14 @@ from league.tests.fakes import Clock
 
 class FakeSail:
     def __init__(self, boxes):
-        self.boxes, self.made, self.fail, self.listed = boxes, [], None, 0
+        self.boxes, self.made, self.fail, self.listed, self.got = boxes, [], None, 0, []
 
     def list_boxes(self, *, limit=100):
         self.listed += 1
         return self.boxes
 
     def get(self, sailbox):
+        self.got.append(sailbox)
         row = next((b for b in self.boxes if b.get("sailbox_id") == sailbox), None)
         if row is None:
             raise RuntimeError("sailbox api 404: not found")
@@ -35,8 +36,8 @@ class BackupTest(unittest.TestCase):
         self.dir = tempfile.TemporaryDirectory()
         self.clock = Clock()
         self.ledger = Ledger(Path(self.dir.name) / "l.sqlite", clock=self.clock)
-        self.sail = FakeSail([{"name": "ltcm-floor", "status": "running", "sailbox_id": "sb_house"}, {"name": "league-x", "status": "sleeping", "sailbox_id": "sb_agent"}])
-        self.backup = Backup(self.sail, self.ledger, clock=self.clock)
+        self.sail = FakeSail([{"name": "ltcm-house", "status": "running", "sailbox_id": "sb_house"}, {"name": "league-x", "status": "sleeping", "sailbox_id": "sb_agent"}])
+        self.backup = Backup(self.sail, self.ledger, clock=self.clock, box_name="ltcm-house")
 
     def tearDown(self):
         self.ledger.close()
@@ -82,7 +83,7 @@ class BackupTest(unittest.TestCase):
         self.assertFalse(self.backup.due())  # the next is a day on
 
     def test_it_never_guesses_which_box_is_the_house(self):
-        self.sail.boxes = [{"name": "ltcm-floor", "status": "running", "sailbox_id": "a"}, {"name": "ltcm-floor", "status": "running", "sailbox_id": "b"}]
+        self.sail.boxes = [{"name": "ltcm-house", "status": "running", "sailbox_id": "a"}, {"name": "ltcm-house", "status": "running", "sailbox_id": "b"}]
         self.assertIn("2 running boxes", self.backup.run()["error"])
         self.assertEqual(self.sail.made, [])
 
@@ -92,13 +93,16 @@ class BackupTest(unittest.TestCase):
         self.assertFalse(entry.public)
 
 
-class TheHouseBoxByItsOwnIdentity(unittest.TestCase):
+class TheHouseBoxByItsPinnedIdentity(unittest.TestCase):
     """Sept 26-27, 2026: the House moved to a box with another name, and every daily backup failed on "0 running boxes are
-    named ltcm-floor". The House now checkpoints the box it runs on, by the id Sail sets in its environment; a name only
-    decides where there is no id."""
+    named ltcm-floor". Review of #394: the box id in Sail's environment cannot be the whole answer either. The House box
+    was forked from a running box, so an id it inherited can be stale, and the old box still exists, so a backup by that
+    id would checkpoint the wrong box and record ok. So `league/config.json` pins the House box and wins over the
+    environment, a disagreement is warned of once, and there is no default name at all."""
 
-    HOUSE = "sb_00000001-0000-0000-0000-000000000000"  # a made-up id of the Sailbox shape
+    HOUSE = "sb_00000001-0000-0000-0000-000000000000"  # made-up ids of the Sailbox shape
     OTHER = "sb_00000002-0000-0000-0000-000000000000"
+    PINNED = {"backup": {"box_id": HOUSE, "box_name": "ltcm-house"}}
 
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
@@ -106,45 +110,139 @@ class TheHouseBoxByItsOwnIdentity(unittest.TestCase):
         self.clock = Clock()
         self.ledger = Ledger(Path(self.dir.name) / "l.sqlite", clock=self.clock)
         self.addCleanup(self.ledger.close)
+        # The House box, and the box it was forked from: still running, under the retired name.
+        self.sail = FakeSail([{"name": "ltcm-house", "status": "running", "sailbox_id": self.HOUSE},
+                              {"name": "ltcm-floor", "status": "running", "sailbox_id": self.OTHER}])
 
-    def test_the_house_box_is_found_by_its_id_whatever_it_is_named(self):
-        sail = FakeSail([{"name": "ltcm-house-2", "status": "running", "sailbox_id": self.HOUSE},
-                         {"name": "ltcm-floor", "status": "running", "sailbox_id": self.OTHER}])
-        backup = Backup(sail, self.ledger, clock=self.clock, **house_box({}, env={"SAILBOX_ID": self.HOUSE}))
-        row = backup.run()
+    def backup(self, config, env):
+        return Backup(self.sail, self.ledger, clock=self.clock, **house_box(config, env=env))
+
+    def test_the_config_pin_wins_over_a_stale_id_in_the_environment(self):
+        row = self.backup(self.PINNED, {"SAILBOX_ID": self.OTHER}).run()  # the id the fork inherited
         self.assertTrue(row["ok"], row)
-        self.assertEqual((row["box"], row["found_by"]), (self.HOUSE, "id"))
-        self.assertEqual(sail.made, [(self.HOUSE, "league-2026-09-10", 7 * 86400)])
-        self.assertEqual(sail.listed, 0, "the old name is never looked up")
+        self.assertEqual((row["box"], row["found_by"]), (self.HOUSE, "config.box_id"))
+        self.assertEqual(self.sail.made, [(self.HOUSE, "league-2026-09-10", 7 * 86400)])
+        self.assertEqual((self.sail.got, self.sail.listed), ([self.HOUSE], 0), "the environment's box is never asked for")
+        # A pin by name alone wins too.
+        self.clock.advance(86400)
+        row = self.backup({"backup": {"box_name": "ltcm-house"}}, {"SAILBOX_ID": self.OTHER}).run()
+        self.assertEqual((row["ok"], row["box"], row["found_by"]), (True, self.HOUSE, "config.box_name"))
+        self.assertEqual([made[0] for made in self.sail.made], [self.HOUSE, self.HOUSE])
 
-    def test_the_old_hardcoded_name_no_longer_decides(self):
-        # No box is named ltcm-floor any more: by name this failed every day; by id it succeeds.
-        sail = FakeSail([{"name": "renamed-house", "status": "running", "sailbox_id": self.HOUSE}])
-        self.assertIn("0 running boxes are named ltcm-floor", Backup(sail, self.ledger, clock=self.clock).run()["error"])
-        backup = Backup(sail, self.ledger, clock=self.clock, **house_box(None, env={"SAILBOX_ID": self.HOUSE}))
-        self.assertTrue(backup.run()["ok"])
-        self.assertEqual([made[0] for made in sail.made], [self.HOUSE])
+    def test_a_disagreement_between_the_pin_and_the_environment_is_one_warning(self):
+        backup = self.backup(self.PINNED, {"SAILBOX_ID": self.OTHER})
+        row = backup.run()
+        self.assertEqual((row["identity_disagrees"], row["pinned_box"], row["env_box_id"]), (True, self.HOUSE, self.OTHER))
+        self.assertFalse(self.ledger.last("ops.deploy").public, "the ids stay in a private row")
+        level, text, payload = backup.identity_notice(row)
+        self.assertEqual((level, payload["identity"]), ("warning", "config_and_environment_disagree"))
+        self.assertIn("league/config.json pins (backup.box_id) is not the box Sail's environment names (SAILBOX_ID)", text)
+        for box in (self.HOUSE, self.OTHER):
+            self.assertNotIn(box, text + str(payload), "the warning reaches a public alert: never a box id")
+        self.assertIsNone(backup.notice(row, []), "a routine success says nothing else")
+        self.clock.advance(86400)
+        later = backup.run()
+        self.assertTrue(later["identity_disagrees"])
+        self.assertIsNone(backup.identity_notice(later), "said once, not every day")
+        self.clock.advance(86400)
+        restarted = self.backup(self.PINNED, {"SAILBOX_ID": self.OTHER})  # a restart reads the earlier rows
+        self.assertIsNone(restarted.identity_notice(restarted.run()))
+        # The same id in both says nothing; a failed backup still compares a pinned id.
+        self.assertNotIn("identity_disagrees", self.backup(self.PINNED, {"SAILBOX_ID": self.HOUSE}).run())
+        self.sail.fail = RuntimeError("sail is down")
+        failed = self.backup(self.PINNED, {"SAILBOX_ID": self.OTHER}).run()
+        self.assertEqual((failed["ok"], failed["identity_disagrees"]), (False, True))
 
-    def test_a_house_box_that_is_not_running_fails_without_naming_it(self):
-        sail = FakeSail([{"name": "ltcm-floor", "status": "sleeping", "sailbox_id": self.HOUSE}])
-        row = Backup(sail, self.ledger, clock=self.clock, box_id=self.HOUSE).run()
+    def test_the_house_says_the_disagreement_once(self):
+        from league.tests.test_house import HouseCase
+
+        class Case(HouseCase):
+            def runTest(self):
+                pass
+
+        case = Case()
+        case.setUp()
+        try:
+            house, clock = case.house, case.clock
+            house.backup = Backup(self.sail, house.ledger, clock=clock, **house_box(self.PINNED, env={"SAILBOX_ID": self.OTHER}))
+            for _ in range(3):
+                house._run_backup()
+                clock.advance(86400)
+            said = [e.payload for e in house.ledger.read(kinds="ops.alert", limit=500) if e.payload.get("identity")]
+            self.assertEqual([(a["level"], a["found_by"]) for a in said], [("warning", "config.box_id")])
+            self.assertEqual([made[0] for made in self.sail.made], [self.HOUSE] * 3)
+        finally:
+            case.tearDown()
+
+    def test_there_is_no_default_name(self):
+        """Without a pin and without an id in the environment, the backup fails and says why. It never looks up the retired
+        ltcm-floor, although a running box still carries that name."""
+        self.assertEqual(house_box({}, env={}), {"box_id": None, "box_name": None, "env_box_id": None})
+        self.assertEqual(house_box({"backup": {"box_name": " ", "box_id": ""}}, env={"SAILBOX_ID": "not-a-box"}),
+                         {"box_id": None, "box_name": None, "env_box_id": None})
+        backup = self.backup(None, {})
+        self.assertTrue(backup.due())
+        row = backup.run()
+        self.assertEqual((row["ok"], row["found_by"]), (False, "none"))
+        self.assertIn("no House box to back up: league/config.json pins none (backup.box_id, backup.box_name) and Sail's "
+                      "environment names none (SAILBOX_ID)", row["error"])
+        self.assertEqual((self.sail.made, self.sail.got, self.sail.listed), ([], [], 0))
+        level, text, _ = backup.notice(row, [])
+        self.assertEqual(level, "error")  # the House's own failure: an unmarked error, with the backoff as before
+        self.assertIn("no House box to back up", text)
+        self.assertFalse(backup.due())
+        self.clock.advance(1800)
+        self.assertTrue(backup.due())
+        import league.backup
+
+        self.assertFalse(hasattr(league.backup, "DEFAULT_BOX_NAME"))
+
+    def test_without_a_pin_the_environments_id_decides_and_no_name_is_looked_up(self):
+        row = self.backup({}, {"SAILBOX_ID": self.HOUSE}).run()
+        self.assertEqual((row["ok"], row["box"], row["found_by"]), (True, self.HOUSE, "environment"))
+        self.assertEqual(self.sail.listed, 0)
+        self.assertNotIn("identity_disagrees", row)
+        self.assertEqual(house_box({}, env={"SAIL_SAILBOX_ID": self.HOUSE})["env_box_id"], self.HOUSE)
+
+    def test_a_pinned_box_that_is_not_the_house_or_not_running_fails_without_naming_it(self):
+        self.sail.boxes[0]["status"] = "sleeping"
+        row = self.backup(self.PINNED, {}).run()
         self.assertFalse(row["ok"])
-        self.assertIn("SAILBOX_ID) is sleeping, not running", row["error"])
-        self.assertNotIn(self.HOUSE, row["error"], "the error reaches a public alert: never a box id")
-        self.assertEqual(sail.made, [])
+        self.assertIn("the House box league/config.json pins (backup.box_id) is sleeping, not running", row["error"])
+        self.sail.boxes[0]["status"] = "running"
+        # A pinned id whose box carries another name than the pinned one: the pin is out of date, and nothing is guessed.
+        row = self.backup({"backup": {"box_id": self.OTHER, "box_name": "ltcm-house"}}, {}).run()
+        self.assertIn("(backup.box_id) is named ltcm-floor, not ltcm-house (backup.box_name)", row["error"])
+        row = self.backup({"backup": {"box_id": "ltcm-house"}}, {}).run()
+        self.assertIn("backup.box_id is not a Sailbox id", row["error"])
+        stranger = "sb_00000003-0000-0000-0000-000000000000"
+        self.sail.boxes.append({"name": "a-stopped-box", "status": "stopped", "sailbox_id": stranger})
+        row = self.backup({}, {"SAILBOX_ID": stranger}).run()
+        self.assertIn("the House box Sail's environment names (SAILBOX_ID) is stopped, not running", row["error"])
+        for attempt in self.backup(None, {}).attempts():
+            for box in (self.HOUSE, self.OTHER, stranger):
+                self.assertNotIn(box, attempt.get("error", ""), "the error reaches a public alert: never a box id")
+        self.assertEqual(self.sail.made, [])
 
-    def test_the_identity_comes_from_sails_environment_and_falls_back_to_the_configured_name(self):
-        self.assertEqual(house_box({}, env={"SAILBOX_ID": self.HOUSE}), {"box_id": self.HOUSE, "box_name": "ltcm-floor"})
-        self.assertEqual(house_box({}, env={"SAIL_SAILBOX_ID": self.HOUSE})["box_id"], self.HOUSE)
-        self.assertEqual(house_box({}, env={"SAILBOX_ID": "not-a-box"})["box_id"], None)
-        self.assertEqual(house_box({"backup": {"box_name": "house-b"}}, env={}), {"box_id": None, "box_name": "house-b"})
-        self.assertEqual(house_box({"backup": {"box_name": " "}}, env={})["box_name"], "ltcm-floor")
-        sail = FakeSail([{"name": "house-b", "status": "running", "sailbox_id": self.OTHER}])
-        row = Backup(sail, self.ledger, clock=self.clock, **house_box({"backup": {"box_name": "house-b"}}, env={})).run()
-        self.assertEqual((row["ok"], row["box"], row["found_by"]), (True, self.OTHER, "name"))
+    def test_a_box_id_in_sails_own_answer_is_not_kept(self):
+        class Quoting(FakeSail):
+            def get(self, sailbox):
+                raise RuntimeError(f"sailbox api 404: sailbox {sailbox} not found (checkpoint sbcp_0000000a-0000-0000-0000-000000000000)")
 
-    def test_the_service_builds_the_backup_from_the_house_box(self):
-        source = (Path(__file__).resolve().parents[1] / "service.py").read_text()
+        row = Backup(Quoting([]), self.ledger, clock=self.clock, **house_box(self.PINNED, env={})).run()
+        self.assertEqual(row["error"], "RuntimeError: sailbox api 404: sailbox <id> not found (checkpoint <id>)")
+
+    def test_the_repository_pins_the_house_box_and_the_service_reads_the_pin(self):
+        import json
+        import re
+
+        root = Path(__file__).resolve().parents[2]
+        config = json.loads((root / "league" / "config.json").read_text())
+        pinned = house_box(config, env={})
+        self.assertEqual(pinned["box_name"], "ltcm-house")
+        gateway = re.findall(r'"SAILBOX_ID":\s*"(sb_[0-9a-f-]+)"', (root / "gateway" / "wrangler.jsonc").read_text())
+        self.assertEqual([pinned["box_id"]], gateway, "the backup's pin and the gateway's House box are the same box")
+        source = (root / "league" / "service.py").read_text()
         self.assertIn("Backup(SailboxClient(), house.ledger, **house_box(config))", source)
 
 
@@ -165,9 +263,9 @@ class TheHousesAlert(unittest.TestCase):
         case.setUp()
         try:
             house, clock = case.house, case.clock
-            sail = FakeSail([{"name": "ltcm-floor", "status": "running", "sailbox_id": "sb_house"}])
+            sail = FakeSail([{"name": "ltcm-house", "status": "running", "sailbox_id": "sb_house"}])
             sail.fail = RuntimeError("sailbox api 503: prepare checkpoint warm snapshot")
-            house.backup = Backup(sail, house.ledger, clock=clock)
+            house.backup = Backup(sail, house.ledger, clock=clock, box_name="ltcm-house")
             house._run_backup()
             first = house.ledger.last("ops.alert").payload
             self.assertEqual((first["level"], first["failures"]), ("error", 1))
@@ -207,8 +305,8 @@ class TheOutageIsOneErrorThenWarnings(unittest.TestCase):
         self.dir = tempfile.TemporaryDirectory()
         self.clock = Clock()
         self.ledger = Ledger(Path(self.dir.name) / "l.sqlite", clock=self.clock)
-        self.sail = FakeSail([{"name": "ltcm-floor", "status": "running", "sailbox_id": "sb_house"}])
-        self.backup = Backup(self.sail, self.ledger, clock=self.clock)
+        self.sail = FakeSail([{"name": "ltcm-house", "status": "running", "sailbox_id": "sb_house"}])
+        self.backup = Backup(self.sail, self.ledger, clock=self.clock, box_name="ltcm-house")
 
     def tearDown(self):
         self.ledger.close()
@@ -301,8 +399,8 @@ class AHouseCase:
         self.releases.promote("rel-0001")
         self.house.tick()  # the House under rel-0001, with a health.json, and no backup yet
         self.house.wait(30)
-        self.sail = FakeSail([{"name": "ltcm-floor", "status": "running", "sailbox_id": "sb_house"}])
-        self.house.backup = Backup(self.sail, self.house.ledger, clock=self.clock)
+        self.sail = FakeSail([{"name": "ltcm-house", "status": "running", "sailbox_id": "sb_house"}])
+        self.house.backup = Backup(self.sail, self.house.ledger, clock=self.clock, box_name="ltcm-house")
 
     def deploy(self, during_watch, *, on_restart=None, watch_seconds=2700, watch_every=900):
         """Deploy rel-0002 through the real watchdog and the real `HouseHealth`; `during_watch(n)` runs before the n-th
@@ -502,7 +600,7 @@ class TheShutdownNeverWaitsOnSail(unittest.TestCase):
                 release.wait(30)  # Sept 25, 2026: each failing checkpoint call took 150-162 s
                 raise sail_503()
 
-        house.backup = Backup(HungSail([{"name": "ltcm-floor", "status": "running", "sailbox_id": "sb_house"}]), house.ledger, clock=world.clock)
+        house.backup = Backup(HungSail([{"name": "ltcm-house", "status": "running", "sailbox_id": "sb_house"}]), house.ledger, clock=world.clock, box_name="ltcm-house")
         self.assertTrue(house._background("backup", house._run_backup))
         self.assertTrue(entered.wait(10))
         head = house.ledger.head()[0]

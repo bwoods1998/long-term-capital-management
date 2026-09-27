@@ -17,9 +17,13 @@ Each tick, cheaply and never waiting on the swarm:
    `agent.*` and `eval.*` kinds are never written here (its roster and evaluator read those). A kind the ledger
    does not know (`league.ledger.KINDS`) is skipped and counted, never written: the ledger refuses an unknown kind
    and rolls back the whole batch, so one new swarm kind would otherwise stall every row behind it (Sept 26-27,
-   2026: `swarm.diagnostician` and `swarm.robustness` held the site's swarm news back for 14 hours). A mirror
-   that fails with the same error `MIRROR_ALERT_AFTER` ticks in a row is ONE House error alert, and an info
-   when it works again.
+   2026: `swarm.diagnostician` and `swarm.robustness` held the site's swarm news back for 14 hours). The first
+   time a kind is dropped, the House gets one warning naming it. A batch the ledger refuses for any other reason
+   is written again row by row. A row the ledger refuses on its content (a `LedgerError`) is skipped and counted,
+   with one warning per distinct reason. A failure of the ledger itself stops there, and the cursor moves only
+   past the rows handled before it. A mirror that fails with the same error (`league.house.alert_key`)
+   `MIRROR_ALERT_AFTER` ticks in a row is ONE House error alert, at most one per error every
+   `MIRROR_ERROR_COOLDOWN_SECONDS`, and an info when it works again.
 3. READ. `bands()` (what the live path may run: `bands.read`) and `site_inputs()` (the site's agents, the
    Gym's pace and the swarm's compute), which the House's own `site_inputs()` merges with the live path's.
 
@@ -30,7 +34,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import signal
 import subprocess
 import sys
@@ -42,7 +45,7 @@ from . import HEARTBEAT, LOCK_FILE, LOG_FILE, bands as bands_mod, public, settin
 from .store import SwarmStore
 from .cleanup import StoppedPoolCleanup
 from ..data_job import NightlySupervisor, read_json
-from ..ledger import KINDS as LEDGER_KINDS, now_iso
+from ..ledger import KINDS as LEDGER_KINDS, LedgerError, now_iso
 
 CODE_DIR = Path(__file__).resolve().parents[2]
 PUBLIC_KINDS = ("swarm.born", "swarm.retired", "swarm.band", "swarm.note")
@@ -58,6 +61,24 @@ MIRROR_CURSOR = "swarm-mirror.json"
 MIRROR_FAILING = "swarm-mirror-failing.json"
 #: Failed mirrors in a row with the same error before the House hears of it: one tick's lock or blip is not an alert.
 MIRROR_ALERT_AFTER = 3
+#: At most one error alert per folded mirror error in this long. A mirror that fails and recovers again and again is one
+#: error (and its info), not one every few ticks.
+MIRROR_ERROR_COOLDOWN_SECONDS = 6 * 3600
+#: What the House has already been told about the mirror, kept across runs and restarts: `kinds` (each dropped unknown
+#: kind, warned of once), `reasons` (each folded reason a row was refused for, warned of once) and `errors` (when each
+#: folded mirror error was last an error alert, for the cooldown).
+MIRROR_NOTICES = "swarm-mirror-notices.json"
+#: The most kinds and reasons `MIRROR_NOTICES` remembers, each (the oldest are forgotten first).
+MIRROR_NOTICES_KEPT = 200
+
+
+def _alert_key(text: Any) -> str:
+    """The House's own fold of an alert's text (`league.house.alert_key`: UUIDs and every token with a digit folded), so
+    the mirror's alerts count as the House's own do. Imported when called: the swarm's own process imports this module
+    (`loop.py` reads `read_proc`) and never needs the House."""
+    from ..house import alert_key
+
+    return alert_key(text)
 
 
 class SwarmStep:
@@ -85,6 +106,9 @@ class SwarmStep:
         self.alerts: list[str] = []
         #: Rows the last `mirror` skipped because the ledger does not know their kind, by kind (see the module docstring).
         self.unknown_kinds: dict[str, int] = {}
+        #: Rows the last `mirror` skipped because the ledger refused them one by one, by folded reason: its `count`, the
+        #: first such row's `kind` and the reason's `text`.
+        self.failed_rows: dict[str, dict[str, Any]] = {}
         self.nightly = NightlySupervisor(self.root, code_dir=self.code_dir, python=self.python)
         self.pool_cleanup = StoppedPoolCleanup(self.root)
 
@@ -103,16 +127,19 @@ class SwarmStep:
         if ledger is not None:
             mirrored = False
             try:
-                self.alerts = []
                 out["mirrored"] = self.mirror(ledger)
                 mirrored = True
-                if self.unknown_kinds:
-                    out["mirror_unknown_kinds"] = dict(self.unknown_kinds)
-                alert = getattr(house, "alert", None)
-                for text in self.alerts if callable(alert) else []:
-                    alert("warning", f"swarm: {text}")  # the owner hears it (the House's ops.alert)
             except Exception as exc:  # noqa: BLE001 - a mirror failure is reported, never raised into the tick
                 out["mirror_error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
+            # What the rows the mirror handled said, even when a failure of the ledger stopped it part way.
+            if self.unknown_kinds:
+                out["mirror_unknown_kinds"] = dict(self.unknown_kinds)
+            if self.failed_rows:
+                out["mirror_failed_rows"] = {key: entry["count"] for key, entry in self.failed_rows.items()}
+            try:
+                self.mirror_notices(house)
+            except Exception as exc:  # noqa: BLE001 - telling the House never breaks the tick
+                out["mirror_notice_error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
             try:
                 self.mirror_health(house, None if mirrored else out.get("mirror_error"))
             except Exception as exc:  # noqa: BLE001 - reporting on the mirror never breaks the tick either
@@ -248,9 +275,18 @@ class SwarmStep:
 
     def mirror(self, ledger: Any) -> int:
         """The swarm's new events into the House ledger (at most `mirror_limit`), idempotent by id. Returns the rows read
-        (the cursor moves past all of them). A row whose kind the ledger does not know is skipped and counted in
-        `unknown_kinds`: the ledger would refuse it and roll the whole batch back, and the cursor would never move."""
-        self.unknown_kinds = {}
+        (the cursor moves past all of them).
+
+        - A row whose kind the ledger does not know is skipped and counted in `unknown_kinds`: the ledger would refuse it
+          and roll the whole batch back, and the cursor would never move.
+        - A batch the ledger refuses for another reason is written again row by row (`_one_by_one`). A row refused on its
+          content (a `LedgerError`: a reused id with other content, a payload that is not canonical JSON or too big, a
+          bad agent) is skipped and counted in `failed_rows`. Any other failure is the ledger's own (a locked or full
+          disk). Then the cursor moves only past the rows handled before it, and the failure is raised, so
+          `mirror_health` counts it.
+        - `unknown_kinds`, `failed_rows` and `alerts` (a swarm status row's alert) cover the handled rows only, so a row
+          the next tick reads again is not counted twice."""
+        self.unknown_kinds, self.failed_rows, self.alerts = {}, {}, []
         if not (self.root / "swarm.sqlite").exists():
             return 0
         cursor = self._cursor()
@@ -261,18 +297,21 @@ class SwarmStep:
             store.close()
         if not rows:
             return 0
-        batch = []
+        # One entry per row read, in order: its seq, the ledger row to write (None: nothing to write), the unknown kind
+        # it was dropped for (None: known) and the House alert its payload asks for (None: none).
+        plan: list[tuple[int, dict[str, Any] | None, str | None, str | None]] = []
         names: dict[str, list[str]] = {}
         for r in rows:
             if r["kind"] in SKIPPED_KINDS:
+                plan.append((r["seq"], None, None, None))
                 continue
             if r["kind"] not in LEDGER_KINDS:
-                kind = str(r["kind"])[:80]
-                self.unknown_kinds[kind] = self.unknown_kinds.get(kind, 0) + 1
+                plan.append((r["seq"], None, str(r["kind"])[:80], None))
                 continue
             payload = dict(r["payload"]) if isinstance(r["payload"], dict) else {"value": r["payload"]}
+            said = None
             if r["kind"] == "swarm.status" and payload.get("alert"):
-                self.alerts.append(str(payload.get("text") or payload.get("action") or "an alert")[:300])
+                said = str(payload.get("text") or payload.get("action") or "an alert")[:300]
             if r["kind"] in PUBLIC_KINDS:
                 # The second wall (the researcher filtered the note first): a public row carries words only.
                 fid = r["family"] or ""
@@ -280,31 +319,124 @@ class SwarmStep:
                     names[fid] = self._param_names(fid)
                 payload = public_payload(r["kind"], payload, names[fid])
                 if payload is None:
+                    plan.append((r["seq"], None, None, said))
                     continue
             payload["swarm_seq"] = r["seq"]
             payload["swarm_at"] = r["at"]
-            batch.append({"kind": r["kind"], "payload": payload, "agent": r["family"] or "house", "id": f"swarm:{r['seq']}",
-                          "public": r["kind"] in PUBLIC_KINDS})
+            plan.append((r["seq"], {"kind": r["kind"], "payload": payload, "agent": r["family"] or "house",
+                                    "id": f"swarm:{r['seq']}", "public": r["kind"] in PUBLIC_KINDS}, None, said))
+        batch = [row for _, row, _, _ in plan if row is not None]
+        handled, failure = len(plan), None
         if batch:
-            ledger.append_many(batch)
-        tmp = self.root / (MIRROR_CURSOR + ".tmp")
-        tmp.write_text(json.dumps({"seq": rows[-1]["seq"], "at": self.clock()}))
-        tmp.replace(self.root / MIRROR_CURSOR)
+            try:
+                ledger.append_many(batch)
+            except Exception:  # noqa: BLE001 - the ledger rolled the batch back; row by row says which row, or the ledger
+                handled, failure = self._one_by_one(ledger, plan)
+        for _, _, unknown, said in plan[:handled]:
+            if unknown is not None:
+                self.unknown_kinds[unknown] = self.unknown_kinds.get(unknown, 0) + 1
+            if said is not None:
+                self.alerts.append(said)
+        if handled:
+            tmp = self.root / (MIRROR_CURSOR + ".tmp")
+            tmp.write_text(json.dumps({"seq": plan[handled - 1][0], "at": self.clock()}))
+            tmp.replace(self.root / MIRROR_CURSOR)
+        if failure is not None:
+            raise failure
         return len(rows)
 
+    def _one_by_one(self, ledger: Any, plan: list[tuple[int, dict[str, Any] | None, str | None, str | None]]
+                    ) -> tuple[int, Exception | None]:
+        """Write `plan`'s rows one at a time, after the ledger refused them as one batch. A row the ledger refuses on its
+        content (`LedgerError`) is skipped and counted in `failed_rows` by its folded reason. Returns how many of `plan`'s
+        entries were handled, and the failure that stopped it (None when every entry was handled): any other exception
+        is the ledger's own, and the rows from there on wait for the next tick."""
+        for index, (_, row, _, _) in enumerate(plan):
+            if row is None:
+                continue
+            try:
+                ledger.append_many([row])
+            except LedgerError as exc:
+                reason = f"{type(exc).__name__}: {str(exc)[:200]}"
+                entry = self.failed_rows.setdefault(_alert_key(reason), {"count": 0, "kind": row["kind"], "text": reason})
+                entry["count"] += 1
+            except Exception as exc:  # noqa: BLE001 - the ledger itself failed: stop, and let the tick report it
+                return index, exc
+        return len(plan), None
+
     def _failing(self) -> dict[str, Any]:
+        return self._read_state(MIRROR_FAILING)
+
+    def _read_state(self, name: str) -> dict[str, Any]:
         try:
-            run = json.loads((self.root / MIRROR_FAILING).read_text())
-            return run if isinstance(run, dict) else {}
+            state = json.loads((self.root / name).read_text())
+            return state if isinstance(state, dict) else {}
         except (OSError, ValueError):
             return {}
 
+    def _write_state(self, name: str, state: Mapping[str, Any]) -> None:
+        tmp = self.root / (name + ".tmp")
+        tmp.write_text(json.dumps(state))
+        tmp.replace(self.root / name)
+
+    def _notices(self) -> dict[str, dict[str, Any]]:
+        """`MIRROR_NOTICES`, each of its three maps present (see the constant)."""
+        notes = self._read_state(MIRROR_NOTICES)
+        return {part: dict(notes[part]) if isinstance(notes.get(part), dict) else {} for part in ("kinds", "reasons", "errors")}
+
+    def _save_notices(self, notes: dict[str, dict[str, Any]]) -> None:
+        now = self.clock()
+        notes["errors"] = {key: at for key, at in notes["errors"].items()
+                           if isinstance(at, (int, float)) and now - at < MIRROR_ERROR_COOLDOWN_SECONDS}
+        for part in ("kinds", "reasons"):  # oldest first: dicts keep the order they were told in
+            notes[part] = dict(list(notes[part].items())[-MIRROR_NOTICES_KEPT:])
+        self._write_state(MIRROR_NOTICES, notes)
+
+    def mirror_notices(self, house: Any) -> None:
+        """Tell the House what the last `mirror` handled: each swarm status row's alert (a warning each, as always), ONE
+        warning the first time a kind the ledger does not know is dropped (naming the kind), and ONE warning for each new
+        reason the ledger refused a row for (`failed_rows`). What it has said is kept in `MIRROR_NOTICES`, so neither a
+        later tick nor a restart says it again. A kind or reason is marked told only once its alert is written, so an
+        alert that fails is tried again when the next such row comes."""
+        alert = getattr(house, "alert", None)
+        if not callable(alert):
+            return
+        for text in self.alerts:
+            alert("warning", f"swarm: {text}")  # the owner hears it (the House's ops.alert)
+        if not (self.unknown_kinds or self.failed_rows):
+            return
+        notes = self._notices()
+        told = False
+        try:
+            for kind, count in self.unknown_kinds.items():
+                if kind in notes["kinds"]:
+                    continue
+                alert("warning", f"swarm: the mirror dropped {count} row(s) of kind {kind}, which the House ledger does not "
+                                 "know. It keeps dropping them (the swarm's own table keeps them). To mirror them, add the kind "
+                                 "to league.ledger.KINDS; to keep them private, add it to hook.SKIPPED_KINDS.",
+                      swarm_kind=kind, dropped=count)
+                notes["kinds"][kind], told = now_iso(self.clock), True
+            for key, entry in self.failed_rows.items():
+                if key in notes["reasons"]:
+                    continue
+                alert("warning", f"swarm: the House ledger refused {entry['count']} mirrored row(s) one by one, first a "
+                                 f"{entry['kind']} row ({entry['text']}). The mirror skipped them and moved on; it skips any "
+                                 "row refused for this reason again without a new alert.",
+                      reason=key, swarm_kind=entry["kind"], skipped=entry["count"])
+                notes["reasons"][key], told = now_iso(self.clock), True
+        finally:
+            if told:  # what was said before an alert failed stays said
+                self._save_notices(notes)
+
     def mirror_health(self, house: Any, error: str | None) -> None:
         """Count one mirror, failed (`error`) or not, into the run of failures in a row (`MIRROR_FAILING`), and tell the
-        House once: the same error (digits folded) `MIRROR_ALERT_AFTER` times in a row is ONE error alert carrying the
-        run's `began_at` and its length; a success after that is an info with how long it lasted. Sept 26-27, 2026: every
-        batch failed for 14 hours on two kinds the ledger did not know, the error went only into the tick's summary, and
-        the site's swarm news stopped without a word."""
+        House once. The same error (`league.house.alert_key`, the House's own fold: UUIDs and every token with a digit)
+        `MIRROR_ALERT_AFTER` times in a row is ONE error alert carrying the run's `began_at` and its length. A success
+        after that is an info with how long it lasted. An error already said within `MIRROR_ERROR_COOLDOWN_SECONDS` is not
+        said again (`MIRROR_NOTICES` `errors`), so a mirror that keeps failing and recovering is not an error every few
+        ticks; a run whose error was held back is said once the cooldown is over, if the run goes on. Sept 26-27, 2026:
+        every batch failed for 14 hours on two kinds the ledger did not know, the error went only into the tick's
+        summary, and the site's swarm news stopped without a word."""
         path = self.root / MIRROR_FAILING
         alert = getattr(house, "alert", None)
         if error is None:
@@ -319,24 +451,27 @@ class SwarmStep:
                       began_at=now_iso(lambda: began), failures=int(run.get("count") or 0))
             return
         now = self.clock()
-        key = re.sub(r"\d+", "#", str(error))[:300]
+        key = _alert_key(error)
         run = self._failing()
         if run.get("key") != key:
             run = {"key": key, "since": now, "count": 0, "alerted": False}
         run.update(count=int(run.get("count") or 0) + 1, error=str(error)[:300], last=now)
         if run["count"] >= MIRROR_ALERT_AFTER and not run.get("alerted") and callable(alert):
-            began = float(run["since"])
-            try:
-                alert("error", f"swarm: the mirror into the House ledger has failed {run['count']} ticks in a row since "
-                               f"{now_iso(lambda: began)} ({str(error)[:200]}); the site gets no swarm notes, births or "
-                               "retirements until it works again.",
-                      began_at=now_iso(lambda: began), failures=run["count"])
-                run["alerted"] = True
-            except Exception:  # noqa: BLE001 - a ledger that cannot take the alert is tried again next tick
-                pass
-        tmp = self.root / (MIRROR_FAILING + ".tmp")
-        tmp.write_text(json.dumps(run))
-        tmp.replace(path)
+            notes = self._notices()
+            said = notes["errors"].get(key)
+            if not isinstance(said, (int, float)) or now - said >= MIRROR_ERROR_COOLDOWN_SECONDS:
+                began = float(run["since"])
+                try:
+                    alert("error", f"swarm: the mirror into the House ledger has failed {run['count']} ticks in a row since "
+                                   f"{now_iso(lambda: began)} ({str(error)[:200]}); the site gets no swarm notes, births or "
+                                   "retirements until it works again.",
+                          began_at=now_iso(lambda: began), failures=run["count"])
+                    run["alerted"] = True
+                    notes["errors"][key] = now
+                    self._save_notices(notes)
+                except Exception:  # noqa: BLE001 - a ledger that cannot take the alert is tried again next tick
+                    pass
+        self._write_state(MIRROR_FAILING, run)
 
     def _param_names(self, fid: str) -> list[str]:
         if not fid:

@@ -5277,12 +5277,15 @@ class House:
         `environment: "sail"`, which the watchdog never rolls a release back for; a failure of the House's own code is an
         unmarked error each time, with `began_at` (Sept 24) so one that began before a promotion is inherited. A failure
         that came back while the House was shutting down is a warning, and a backup the shutdown cut off (`close`)
-        writes nothing: its thread dies with the process, or finds the ledger closed."""
+        writes nothing: its thread dies with the process, or finds the ledger closed. The first time the House box that
+        league/config.json pins and the one Sail's environment names disagree, that is one warning too
+        (`Backup.identity_notice`, Sept 27, 2026)."""
         before = self.backup.failures_in_a_row()
-        said = self.backup.notice(self.backup.run(closing=self._closing.is_set), before)
-        if said is not None:
-            level, text, payload = said
-            self.alert(level, text, **payload)
+        row = self.backup.run(closing=self._closing.is_set)
+        for said in (self.backup.notice(row, before), self.backup.identity_notice(row)):
+            if said is not None:
+                level, text, payload = said
+                self.alert(level, text, **payload)
 
     # -------------------------------------------------------------- expedition
     def _note_stopped(self, reason: str) -> None:
