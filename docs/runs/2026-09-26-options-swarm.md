@@ -1489,4 +1489,16 @@ looks like beta. Validation 2025 and the holdout judge both.
 | 6 | Money | equity $1,481.63 (deposit shown, not yet in options buying power); 0 orders |
 | 7 | Compute | Sail $180.37. Claude $24.04 of the $100 lifetime (143 calls). OpenAI $606.22 + $9.36 inflight of $707 |
 
+### Sprint scoreboard, T0 + 35 h (17:29Z Sept 27)
+
+| # | Metric | Value |
+|---|---|---|
+| 1 | Population | 72 alive (48 cycling), 156 retired; 8 born and 10 retired in 2 h |
+| 2 | Throughput | 1,210 cycles/h, median 119 s; pool 4 busy, 6 ready; queue 6; 17 provider 502s |
+| 3 | Search | 43,913 trials, 139,630 program-years. Generation 7 (direction-neutral back-month) failed its own mechanism checks: the two-sided rebound's sides are the year's drift, and cheap vol is too rare. The index rebound's patient two-sided version (v78) scored 2025 t 0.19 |
+| 4 | Evidence | 1 validation pass alive (the IWM fork of `low-close-location-backmonth-call`). Holdout looks 2, passes 0 (both that lineage's; -$9,372 on 2026). 6/8: `sweep-bm-trend-long-option` (t 1.04), `range-consumed-spxw-credit-on-qqq` |
+| 5 | Readiness | Grant active; real money on; calibration on; observe 8. No family is eligible for real money: no holdout pass, and any back-month call costs more than the $100 Probe cap and the $481.60 options buying power |
+| 6 | Money | equity $1,481.63 (options buying power $481.60 until the deposit settles); 0 orders |
+| 7 | Compute | Sail $168.63 (about $5.9/h; about $50 expected at Monday's open, above the $32 line). Claude $26.36 of $100 (162 calls). OpenAI $606.41 + $9.36 inflight of $707 |
+
 ## Report
