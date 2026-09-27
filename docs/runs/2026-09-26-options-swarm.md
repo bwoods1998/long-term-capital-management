@@ -1206,6 +1206,40 @@ and this record, and lifts the Saturday continuation's no-real-money scope.
     8-45 DTE lose in every Train year, since the Gym charges back-month legs the full spread both
     ways. The six gen-3 back-month templates are sweeping for the owner's credit question.
 
+- **13:25-14:00Z The trend lead, the push, and two site defects.**
+  - Complete back-month pair adopted (13:25Z). `poolcheck.py` ran the rebound the pool's way (Train
+    split 8, Validation whole) on both images with identical numbers. The earlier memory failure
+    came only from the operator sweep's split-1 runs.
+  - Founded `sweep-bm-trend-long-option` (13:27Z).
+    - Local search: 40 of 42 neighbours positive on Train, 24 positive in every year; 15 of 15
+      finalists positive at 1.5x stress.
+    - The best neighbour (target 42 DTE) was queued at 13:58Z as the family's next version, in the
+      same lineage (42 trials counted). It scores 0.568 on the robust Train score, t 1.96,
+      +$16,858; at 1.5x, +$15,054 with t 1.79.
+  - An affordable short-dated version (3-14 DTE, $120 cap) had too few trades: 2022 had 7-21.
+  - The owner topped up compute (Sail, OpenAI, Claude) and said not to throttle. Push:
+    - Gym pool 12 boxes, `max_boxes` 12;
+    - researchers $3/h, `top_profile` pro_asap for the top 10;
+    - population 72, architect hourly;
+    - diagnostician 5 a round, $45/day;
+    - `claude.usd_cap` 98.
+  - The owner deposited $1,000. Equity reads $1,481.63; options buying power is still $481.60. The
+    grant is re-ratified at the new capital once buying power reflects it. PR #393 is not merged
+    (the owner agreed; evidence posted on the PR).
+  - Site defect 1: the live thought feed stopped at Sept 26 23:00:56Z.
+    - Cause: R1 added two private swarm event kinds (`swarm.diagnostician`, `swarm.robustness`)
+      that the House ledger does not know. Each 200-row mirror batch rolled back, the error was
+      swallowed, and the cursor stuck at seq 22,468.
+    - Interim: an operator mirror on the House (`operator_mirror.py`, the House's own mirror with
+      those two kinds filtered), started at the present to avoid re-stamping a 14-hour backlog.
+      Notes reach the site again from 13:46:51Z.
+    - Code fix: a PR to merge after Monday's close.
+  - Site defect 2: the House box's daily backup had failed eight times since Sept 26 10:22Z. It
+    looks for a box named `ltcm-floor`; the new House box is `ltcm-house`. A manual 30-day
+    checkpoint was taken at 13:53Z; the code fix is in the same PR.
+  - Balance chart: at the owner's request, it starts after the deposit (13:36:06Z, $1,481.63).
+    personal-site #14, deployed 13:50Z; profit already nets funding.
+
 ## Scoreboard
 
 ### T0 (2026-09-26T06:23Z; repo figures at 06:40Z)
