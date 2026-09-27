@@ -1361,4 +1361,16 @@ looks like beta. Validation 2025 and the holdout judge both.
 | 6 | Money | equity $481.63; 0 orders |
 | 7 | Compute | Sail $151.94 (about $2.8/h since 08:16Z including the image builds and up to 6 sweep boxes). Claude $14.07 of the $70 pre-Monday cap (91 calls; diagnostician $13.09; about $1.85/h). OpenAI $604.60 + $9.36 inflight of $707 |
 
+### Sprint scoreboard, T0 + 31 h (13:28Z Sept 27)
+
+| # | Metric | Value |
+|---|---|---|
+| 1 | Population | 61 alive (48 running), 138 retired. Last 2 h: 4 born, 4 retired. Target raised to 72 at 13:30Z |
+| 2 | Throughput | 1,122 cycles/h, median 151 s; pool 12 busy (raised from 6 at 13:25Z); queue 20. 14 cycles timed out waiting on the Gym during the image switch and scale-up |
+| 3 | Search | 39,366 trials, 116,499 program-years. Back-month sweep (complete image), positive of total: credit ladder 4/63, condor 0/63, long put fly 0/70, calendar 0/66, diagonal 48/64 (2022 flat; not a real type), trend long options 7/8 (best positive every Train year and +$11,929 at 1.5x). Founded `sweep-bm-trend-long-option` at 13:27Z |
+| 4 | Evidence | 0 validation passes, 0 holdout looks. Nearest: `event-crush-xsp-fly-r` 6/8 (2025 t 1.03) |
+| 5 | Readiness | Complete back-month pair adopted 13:25Z (Gym `sbcp_a38bb07a`, gate `sbcp_a5e975a5`). The pool-style check (Train split 8, Validation whole) gave numbers identical to the names image. PR #393 not merged (owner agreed; evidence on the PR) |
+| 6 | Money | equity $481.63; 0 orders. The owner is depositing more; the grant is re-ratified at the new capital once it reaches buying power |
+| 7 | Compute | The owner topped up (Sail to $190, OpenAI $113, Claude balance $100) and said do not throttle. The guard still read $139.67 at 13:28Z. Push settings: Gym pool 12 boxes, researchers $3/h, population 72, architect hourly, diagnostician 5 a round and $45/day, Claude cap 98 (the gateway's lifetime `CLAUDE_USD` 100 binds first: $18.93 spent). Claude $3.08 in the last hour |
+
 ## Report
