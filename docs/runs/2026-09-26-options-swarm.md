@@ -1163,6 +1163,26 @@ and this record, and lifts the Saturday continuation's no-real-money scope.
   - A family passes honestly only with a much higher per-trade Sharpe, or by combining uncorrelated
     positive harvests so more days carry return.
 
+- **09:25-11:45Z Generation 5: debit-form premium harvests (all real-money eligible).**
+  - Calendar windows (turn of month, pre-holiday, pre-FOMC): 1 of 72 positive; 0 of 5 finalists
+    positive at 1.5x stress.
+  - Always-on put-write held as a call vertical below spot, 3-10 DTE:
+    - 12 ungated variants ran, all negative (2022 t -1.5 to -4.9);
+    - the gated variants hit the Gym's 6 GB per-worker cap.
+  - The Gym memory lesson: the store is memory-mapped by the NEEDS window, and a full-session
+    window (from 10:00) with 0-14 DTE exceeds the cap. Reading from 13:30 (`start 810`, as the
+    rebound does) fits. Founded families face the same cap in the pool.
+  - Rebound plus gated put-write in one program (55 rows):
+    - the rebound-only control reproduced exactly (164 trades, pooled t 1.97);
+    - the best combined row raised pooled t to 2.21 on 336 trades;
+    - every combined finalist lost at 1.5x stress (row 8: +$2,303 at 1x, -$1,550 at 1.5x).
+  - The put-write layer's edge is thinner than one extra half-spread, so it was not founded. The
+    index rebound alone remains the only stress-robust program.
+- **11:28Z Tournament:** `event-crush-xsp-fly-r` (a long butterfly on XSP around events) scored t 1.03
+  on 2025.
+  - 58 trades on 51 days, +$1,177, +$978 at 1.5x, 3 of 4 quarters.
+  - It fails t and the deflated Sharpe: 6/8, the closest real-money-type family so far.
+
 ## Scoreboard
 
 ### T0 (2026-09-26T06:23Z; repo figures at 06:40Z)
