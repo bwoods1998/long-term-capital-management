@@ -1570,8 +1570,11 @@ class OptionsLive:
         (`expiry_close_lead_minutes`) with a leg in or near the money, or no underlying price to tell. A LONG CALL or PUT
         (the sprint, B4) closes there WHATEVER its moneyness while it has a bid (or no quote to tell): an exercise would
         bring 100 shares the account cannot carry. Only one with no bid and out of the money by more than
-        `near_money_share` is left to expire worthless (nothing would buy it). One predicate for the House's forced close
-        (`_venue_rules`) and for refusing a program's own close of it (`_real_intent`)."""
+        `near_money_share` is left to expire worthless (nothing would buy it). A CREDIT structure (the review of #393)
+        closes there WHATEVER its moneyness too: a short leg just beyond the near-money line can still finish in the money
+        after the cutoff and be assigned alone, into shares the account cannot carry. (Cash-settled index roots have no
+        window here: they settle in cash.) One predicate for the House's forced close (`_venue_rules`) and for refusing a
+        program's own close of it (`_real_intent`)."""
         rules = day.rules.get(pos.root) or V.rules_for(pos.root, open_minute=day.open_min, close_minute=day.close_min)
         today = day.day.isoformat()
         if not (pos.expiry == today and rules.kind == "equity"
@@ -1589,6 +1592,9 @@ class OptionsLive:
                         f"{rules.close_cutoff // 60}:{rules.close_cutoff % 60:02d} ET so it never exercises (the account "
                         "cannot carry 100 shares)")
             return ""
+        if pos.type in self.table.credit_types:
+            return (f"an expiring {pos.type} on an equity root: closed before {rules.close_cutoff // 60}:"
+                    f"{rules.close_cutoff % 60:02d} ET whatever its moneyness, so no short leg is assigned after the cutoff")
         near = [leg.symbol for leg in pos.legs if leg.expiry == today and _near_money(leg, spot, float(self.table.near_money_share))]
         if near or not math.isfinite(spot):
             return (f"expiring equity options with a leg in or near the money ({', '.join(near) or 'no price'}): "
@@ -1952,12 +1958,22 @@ class OptionsLive:
         if fwd is not None and (fwd.negative or (inst.band == "sized" and (not M.sized_ok(self.table, fwd) or fwd.real_bad))):
             self._families_at = float("-inf")
             return "its current forward evidence no longer qualifies for this real band"
+        # A credit structure's own limits (the review of #393): on a physically settled root no short leg deep in the
+        # money and no short call past the dividend-blind horizon, and the short legs' notional bounded by the sizing
+        # equity, so an early assignment cannot bring shares many times the account; one structure an order at Probe.
+        credit_cap, credit_why = M.credit_limit(
+            self.table, order.type, physical=rules.kind == "equity", spot=float(snap.spot), equity=sizing,
+            shorts=[M.ShortLeg(leg.strike, leg.is_call, leg.ratio, (dt.date.fromisoformat(leg.expiry) - day.day).days)
+                    for leg in legs if leg.side < 0],
+            probe=inst.tuition or M.sizing_band(self.table, inst.band, sizing, fwd) != "sized")
+        if credit_cap is not None and credit_cap < 1:
+            return credit_why
         week_start = (day.day - dt.timedelta(days=day.day.weekday())).isoformat()
         plan = M.plan_open(self.table, band=inst.band, tuition=inst.tuition, equity=sizing, unit=unit, fwd=fwd,
                            exposure=book.exposure(inst.family, day=today, week_start=week_start))
         if plan.qty < 1:
             return plan.reason
-        qty = plan.qty
+        qty = plan.qty if credit_cap is None else min(plan.qty, credit_cap)
         prices = [float(snap.ask[leg.idx] if leg.side > 0 else snap.bid[leg.idx]) for leg in order.legs]
         fees = L.order_fees(root, order.legs, prices, qty, "open")
         max_loss = order.max_loss_share * V.MULTIPLIER * qty
@@ -1990,7 +2006,8 @@ class OptionsLive:
         if sent.dispatched:
             self._instance_spent(inst.key, day)
         out.setdefault("orders", []).append({"oid": sent.oid, "family": inst.family, "action": "open", "qty": qty,
-                                             "status": sent.status, "sizing": plan.reason})
+                                             "status": sent.status,
+                                             "sizing": plan.reason + (f"; {credit_why}" if credit_why else "")})
         return None if sent.status in ("working", "filled", "unknown") else f"{sent.status}: {sent.answer.get('error')}"
 
     # ------------------------------------------------------------------ forward records

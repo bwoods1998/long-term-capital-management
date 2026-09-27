@@ -374,6 +374,10 @@ export const STRUCTURE_TYPES = [...DEBIT_STRUCTURES, ...CREDIT_STRUCTURES];
 export const SINGLE_LEG_TYPES = ['long_call', 'long_put'];
 //: Every name OPTION_STRUCTURES_REAL may carry.
 export const REAL_TYPES = [...STRUCTURE_TYPES, ...SINGLE_LEG_TYPES];
+//: The OCC roots whose options settle in CASH (European index options: `league/gym/venue.py` INDEX_ROOTS, held equal by
+//: `league/tests/test_live_money.py`). Every other root is physically settled and American: an early assignment
+//: of a short leg brings 100 shares a contract, so a credit open there is held to CREDIT_SHORT_NOTIONAL_EQUITY (the gate).
+export const CASH_SETTLED_ROOTS = ['XSP', 'SPXW', 'SPX', 'VIX', 'VIXW', 'DJX'];
 //: The fields of a multi-leg order and of one leg, spelled exactly so (see ALPACA_ORDER_FIELDS on why).
 export const STRUCTURE_ORDER_FIELDS = new Set(['order_class', 'qty', 'type', 'limit_price', 'time_in_force', 'legs', 'client_order_id']);
 export const STRUCTURE_LEG_FIELDS = new Set(['symbol', 'ratio_qty', 'side', 'position_intent']);
@@ -574,7 +578,13 @@ export function structureOrder(body) {
   // Maximum loss a share: the collateral plus the signed limit (a debit adds, a credit takes off).
   const perShare = credit ? collateral - magnitude : magnitude;
   const maxLossMicro = opening ? picoToMicro(mulPico(qty, perShare) * OPTION_MULTIPLIER) : 0n;
-  return { type, opening, collateral, limit, qty, maxLossMicro };
+  // The short legs' notional (the review of #393, Sept 26, 2026): strike x 100 x ratio x structures, summed over the
+  // short legs, in micro-dollars (a strike's thousandths are 1,000 micro-dollars each). What an early assignment of
+  // every short leg would bring in shares.
+  const structures = qty / PICO;
+  const shortNotionalMicro = legs.filter(leg => leg.sign < 0)
+    .reduce((sum, leg) => sum + leg.strike * 1000n * OPTION_MULTIPLIER * BigInt(leg.ratio) * structures, 0n);
+  return { type, opening, collateral, limit, qty, maxLossMicro, root: legs[0].root, shortNotionalMicro };
 }
 
 /**
@@ -593,7 +603,11 @@ export function structureNotional(body, admitted = []) {
   if (read.opening && !admitted.includes(read.type)) {
     return { error: `${named(read.type).replace(/^a/, 'A')} is not admitted on the real account: OPTION_STRUCTURES_REAL admits ${admitted.length ? admitted.join(', ') : 'none'}.` };
   }
-  return { micro: read.maxLossMicro, structure: read.type, opening: read.opening };
+  // A credit OPEN on a physically settled root carries its short legs' notional for the gate's cap
+  // (CREDIT_SHORT_NOTIONAL_EQUITY); a cash-settled index root, a debit type and a close carry none.
+  const physicalCredit = read.opening && CREDIT_STRUCTURES.includes(read.type) && !CASH_SETTLED_ROOTS.includes(read.root);
+  return { micro: read.maxLossMicro, structure: read.type, opening: read.opening,
+    shortNotionalMicro: physicalCredit ? read.shortNotionalMicro : 0n };
 }
 
 // --- a real close holds its legs (Sept 25, 2026) --------------------------------------------------

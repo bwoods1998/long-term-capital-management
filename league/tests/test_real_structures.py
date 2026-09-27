@@ -181,7 +181,8 @@ class OneSourceOfTruth(unittest.TestCase):
     def test_the_gateways_caps_are_the_money_tables(self):
         self.assertEqual(self.tree(), [])
         for var, value in (("MAX_ORDER_MAX_LOSS_USD", "1500"), ("MAX_ORDER_EQUITY_SHARE", "0.2"), ("MAX_DAY_EQUITY_SHARE", "1.5"),
-                           ("MAX_DAY_ORDERS", "400"), ("MAX_DAY_OPEN_ORDERS", "280"), ("CREDIT_MIN_EQUITY_USD", "1000")):
+                           ("MAX_DAY_ORDERS", "400"), ("MAX_DAY_OPEN_ORDERS", "280"), ("CREDIT_MIN_EQUITY_USD", "1000"),
+                           ("CREDIT_SHORT_NOTIONAL_EQUITY", "4")):
             import re as _re
 
             text = _re.sub(rf'"{var}": "[^"]*"', f'"{var}": "{value}"', self.wrangler, count=1)

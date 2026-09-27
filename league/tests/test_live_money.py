@@ -327,6 +327,99 @@ class Sizing(unittest.TestCase):
         self.assertIn("shadow only", self.plan(10, band="candidate").reason)
 
 
+class CreditLimits(unittest.TestCase):
+    """The review of #393 (Sept 26, 2026): a credit structure on a physically settled root can be assigned early into
+    shares; sizing by net maximum loss alone would let a deeper short leg (a larger credit, a smaller maximum loss) carry
+    MORE contracts. `money.credit_limit`: no short leg deep in the money, no short call past five days, the short legs'
+    notional at most 3x the sizing equity; one structure an order at Probe, whatever the root."""
+
+    def setUp(self):
+        self.t = M.Table.from_constitution()
+
+    def limit(self, type_="credit_vertical", *, shorts, spot=600.0, equity="60000", physical=True, probe=False):
+        return M.credit_limit(self.t, type_, physical=physical, shorts=shorts, spot=spot, equity=D(equity), probe=probe)
+
+    def test_the_rows_are_the_reviews(self):
+        self.assertEqual((self.t.credit_short_notional, self.t.credit_probe_per_order, self.t.credit_short_call_max_days),
+                         (D("3"), 1, 5))
+        self.assertEqual(OPTIONS_MONEY_BOUNDS["credit.short_notional_equity"], ("1", "5"))
+        self.assertEqual(OPTIONS_MONEY_BOUNDS["credit.probe_per_order"], ("1", "1"))
+        self.assertEqual(OPTIONS_MONEY_BOUNDS["credit.short_call_max_days"], ("0", "5"))
+        for path, value in (("credit__short_notional_equity", "5.01"), ("credit__short_notional_equity", "0.5"),
+                            ("credit__probe_per_order", 2), ("credit__short_call_max_days", 6)):
+            c = copy.deepcopy(CONSTITUTION)
+            node = c["options_money"]
+            keys = path.split("__")
+            node[keys[0]][keys[1]] = value
+            self.assertTrue(options_money_problems(c), path)
+        from league.constitution import GATEWAY_VARS
+
+        self.assertEqual(GATEWAY_VARS["CREDIT_SHORT_NOTIONAL_EQUITY"], "credit.short_notional_equity")
+
+    def test_a_debit_type_has_no_credit_limit(self):
+        for type_ in FOUR:
+            self.assertEqual(self.limit(type_, shorts=[M.ShortLeg(605.0, True, 1, 30)], equity="100", probe=True), (None, ""))
+
+    def test_the_short_legs_notional_is_at_most_three_times_the_sizing_equity(self):
+        put = [M.ShortLeg(598.0, False, 1, 1)]                             # $59,800 of short notional a structure
+        self.assertEqual(self.limit(shorts=put, equity="19933.34")[0], 1)  # 3x is $59,800.02
+        n, why = self.limit(shorts=put, equity="19933.33")                 # 3x is $59,799.99
+        self.assertEqual(n, 0)
+        self.assertIn("$59800.00 of notional a structure, over 3x the sizing equity $19933.33 ($59799.99)", why)
+        self.assertEqual(self.limit(shorts=put, equity="60000")[0], 3)
+        # An iron condor sums both short legs; a butterfly's body counts its ratio.
+        condor = [M.ShortLeg(597.0, False, 1, 1), M.ShortLeg(603.0, True, 1, 1)]
+        self.assertEqual(self.limit("iron_condor", shorts=condor, equity="60000")[0], 1)   # $120,000 a structure
+        self.assertEqual(self.limit("iron_condor", shorts=condor, equity="39999.99")[0], 0)
+        self.assertEqual(self.limit(shorts=[M.ShortLeg(598.0, False, 2, 1)], equity="60000")[0], 1)
+        # At the account's $5,481.65 no SPY credit structure fits; nothing does at no equity.
+        self.assertEqual(self.limit(shorts=put, equity="5481.65")[0], 0)
+        self.assertEqual(self.limit(shorts=put, equity="0")[0], 0)
+
+    def test_a_short_leg_deep_in_the_money_is_refused_and_one_at_the_money_is_not(self):
+        # In the money by more than 1% of its strike: a put above spot x 1/0.99, a call below spot x 1/1.01.
+        self.assertEqual(self.limit(shorts=[M.ShortLeg(606.07, False, 1, 1)])[0], 0)       # 600 < 606.07 x 0.99 = 600.0093
+        self.assertEqual(self.limit(shorts=[M.ShortLeg(606.06, False, 1, 1)])[0], 2)       # 600 >= 599.9994: within 1%
+        n, why = self.limit(shorts=[M.ShortLeg(594.0, True, 1, 1)])                        # 600 > 594 x 1.01 = 599.94
+        self.assertEqual(n, 0)
+        self.assertIn("short call at 594 is in the money by more than 1% of its strike (the underlying at 600.00)", why)
+        self.assertEqual(self.limit(shorts=[M.ShortLeg(594.06, True, 1, 1)])[0], 3)
+        # An iron butterfly's body at the money passes (its two shorts share one strike).
+        fly = [M.ShortLeg(600.0, False, 1, 1), M.ShortLeg(600.0, True, 1, 1)]
+        self.assertEqual(self.limit("iron_butterfly", shorts=fly, spot=600.4)[0], 1)
+        # No price of the underlying: nothing to judge the short legs by.
+        self.assertEqual(self.limit(shorts=[M.ShortLeg(590.0, False, 1, 1)], spot=float("nan"))[0], 0)
+
+    def test_a_short_call_past_five_days_is_refused_and_a_short_put_is_not(self):
+        self.assertEqual(self.limit(shorts=[M.ShortLeg(610.0, True, 1, 5)])[0], 2)
+        n, why = self.limit("iron_condor", shorts=[M.ShortLeg(590.0, False, 1, 6), M.ShortLeg(610.0, True, 1, 6)])
+        self.assertEqual(n, 0)
+        self.assertIn("short call expires 6 days out, past the 5", why)
+        self.assertEqual(self.limit(shorts=[M.ShortLeg(590.0, False, 1, 45)])[0], 3, "a put credit vertical 45 days out")
+
+    def test_a_probe_opens_one_structure_an_order_on_any_root(self):
+        put = [M.ShortLeg(598.0, False, 1, 1)]
+        n, why = self.limit(shorts=put, probe=True)
+        self.assertEqual(n, 1)
+        self.assertIn("a credit Probe opens at most 1 an order", why)
+        self.assertEqual(self.limit(shorts=put, physical=False, probe=True)[0], 1)
+
+    def test_a_cash_settled_root_is_held_to_maximum_loss_alone(self):
+        # XSP and SPXW settle in cash: no assignment into shares, so no notional, moneyness or dividend rule.
+        deep_call_far = [M.ShortLeg(500.0, True, 1, 30)]
+        self.assertEqual(self.limit(shorts=deep_call_far, physical=False, equity="2000"), (None, ""))
+
+    def test_the_gateway_and_the_gym_name_the_same_cash_settled_roots(self):
+        import re
+        from pathlib import Path
+
+        from league.gym.venue import INDEX_ROOTS
+
+        caps = (Path(__file__).resolve().parents[2] / "gateway" / "lib" / "caps.mjs").read_text(encoding="utf-8")
+        listed = re.search(r"export const CASH_SETTLED_ROOTS = \[(.*?)\];", caps).group(1)
+        self.assertEqual(set(re.findall(r"'([A-Z]+)'", listed)), set(INDEX_ROOTS))
+
+
 class Stops(unittest.TestCase):
     def setUp(self):
         self.t = M.Table.from_constitution()

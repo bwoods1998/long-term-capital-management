@@ -323,7 +323,8 @@ Expiring equity structures with a leg in or within 1% of the money are the House
 minutes before the close cutoff (15:00 ET for most roots, 15:15 for SPY and QQQ): a program's own
 close is cancelled for the forced one; index structures settle in cash. An expiring long call or put is
 the House's to sell there whatever its moneyness while it has a bid (never exercised: the account cannot
-carry 100 shares). The last forced close before the cutoff is never cancelled for a re-price. A family moved onto real money
+carry 100 shares), and an expiring credit structure on an equity root the House's to close there whatever its
+moneyness (a short leg just beyond 1% could still finish in the money after the cutoff). The last forced close before the cutoff is never cancelled for a re-price. A family moved onto real money
 trades it from the next session; a Candidate whose typical maximum loss is unknown stays shadow-only
 (`live.band` rows with `held` say why, once a day). A Probe becomes Sized only after five real Probe
 trades and a whole session at Probe. Each real instance has 60 orders a day (the Gym's), charged for
@@ -370,9 +371,16 @@ credit family is a Candidate, shadow only, the reason in its `live.band` row, an
 goes back to Candidate (its open structures keep their exits). No latch: a fall under $2,000 stops new credit opens
 at once. The gateway refuses every credit open while its own reading of the account's equity is under
 `CREDIT_MIN_EQUITY_USD` (403, cap `credit_equity`). A credit open is one multi-leg order at a negative
-`limit_price`, sized by maximum loss (the widest wing less the credit, x 100, plus fees) under the Probe's cap; its
-close is one multi-leg order at a positive limit under its collateral, and the expiry-day rule closes it like any
-equity structure with a leg in or within 1% of the money. After the deposit lands, `--ratify` (capital follows
+`limit_price`, sized by maximum loss (the widest wing less the credit, x 100, plus fees) under the Probe's cap, and
+at Probe one structure an order. On a physically settled root (SPY, QQQ, IWM: American, assignable early into
+shares; the review of #393) a credit open is also refused when a short leg is in the money by more than 1% of its
+strike, or a short call expires more than five days out (no dividend calendar is read), and capped so that its short
+legs' notional (strike x 100 x contracts, summed) is at most 3x the sizing equity (`options_money.credit`; the gateway
+holds the same cap, `CREDIT_SHORT_NOTIONAL_EQUITY`, cap `credit_notional`). At $5,500 of equity that is $16,500: no SPY
+or QQQ credit structure fits until equity is about $20,000 (a vertical) or $40,000 (a condor); XSP and SPXW settle in
+cash and are held to the maximum-loss sizing alone. Its close is one multi-leg order at a positive limit under its
+collateral, and on expiry day the House closes every expiring credit structure on an equity root from ten minutes
+before the cutoff, whatever its moneyness. After the deposit lands, `--ratify` (capital follows
 equity up to the ceiling) is what opens the credit types: a grant ratified at $481 holds them back. A family moved
 onto real money trades from the next session.
 
@@ -489,11 +497,12 @@ with `real_money` true (a new money digest); `python3 scripts/live_trading.py --
 | `STOP`, `state/STOP` | `/workspace/` | absent | the loop ends | `floor_box.py stop` / `start` |
 | Kill switch | the gateway | off | every real order-creating call refused | `gateway_admin.py kill` / `unkill` |
 | `MAX_ORDER_MAX_LOSS_USD`, `MAX_ORDER_EQUITY_SHARE`, `MAX_DAY_EQUITY_SHARE`, `MAX_DAY_ORDERS`, `MAX_DAY_OPEN_ORDERS` | `gateway/wrangler.jsonc` | $1,000, 0.25, 1.0, 300, 250 | the real account's caps by maximum loss; equal to the constitution's `options_money.gateway` | gateway deploy with the matching House deploy |
+| `CREDIT_MIN_EQUITY_USD`, `CREDIT_SHORT_NOTIONAL_EQUITY` | `gateway/wrangler.jsonc` | $2,000, 3 | credit opens only from $2,000 of equity; on a physically settled root, short legs' notional at most 3x equity; equal to the constitution's `credit_min_equity_usd` and `credit.short_notional_equity` | gateway deploy with the matching House deploy |
 | `OPTION_STRUCTURES_REAL` | `gateway/wrangler.jsonc` | `debit_vertical,long_butterfly,long_call,long_put,credit_vertical,iron_condor,iron_butterfly` in the tree since credit at $2,000 (deployed on the owner's decision; the four debit types before it) | the types real money may open, credit types only at `CREDIT_MIN_EQUITY_USD` of equity; must equal the constitution's `options_money.real_types` (`league.ci`) | gateway deploy with the matching House deploy and a ratify |
 | `live.observe`, `live.observe_max` | `swarm.json` on the box | true, 48 | the observe band and its cap; read each minute, no deploy (a swarm.json that is not a JSON object turns it off) | edit `swarm.json` |
 | `live.calibration`, `live.calibration_samples` | `swarm.json` on the box | false, 30 | the D3 round trips (still only with real money on, the grant and the paper proof); samples a symbol's open-at-mid cell stops at | edit `swarm.json` |
 | `FRONTIER_MONTH_USD`, `FRONTIER_MONTH_MAX_USD`, `FRONTIER_FUNDED_MONTH` | `gateway/wrangler.jsonc` | $707, September 2026 only | the OpenAI month; expires before an unfunded month can renew it | gateway deploy |
-| The money rules | `league/constitution.py` | the sprint's D4 table with credit at $2,000 (money `ec0a1bc4`; `ad9bd54c` before it) | what real money may do | owner deploy, then `--ratify` |
+| The money rules | `league/constitution.py` | the sprint's D4 table with credit at $2,000 (money `5b88d2fa`; `ad9bd54c` before it) | what real money may do | owner deploy, then `--ratify` |
 
 In `swarm.json`, `researcher.usd_per_hour` keeps the combined Sail-model and OpenAI trailing-hour pace.
 Set the optional `researcher.sail_usd_per_hour` to the funded Sail rate to pace Sail models separately;

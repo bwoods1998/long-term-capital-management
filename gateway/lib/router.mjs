@@ -291,7 +291,8 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
       if (priced.error) return fail(priced.error, 400);
       order = { micro: priced.micro, exit, credit: false, closeRows: null };
     }
-    const decision = await gate.reserve({ micro: String(order.micro), exit: order.exit, venue: target.venue, credit: order.credit });
+    const decision = await gate.reserve({ micro: String(order.micro), exit: order.exit, venue: target.venue, credit: order.credit,
+      shortNotional: String(order.shortNotional ?? 0n) });
     if (!decision.ok) {
       return json({ error: decision.error, ...(decision.cap ? { cap: decision.cap } : {}) }, decision.status,
         decision.status === EQUITY_UNREAD_STATUS ? EQUITY_RETRY : {});
@@ -343,7 +344,8 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
  *    (`long_call`, `long_put`: none as deployed, the review's m7/m15) are OPENING orders, whatever `X-LTCM-Purpose` says: metered at their maximum loss (the structure's, or premium x 100 x qty) against the
  *    caps by maximum loss, which need the account's equity read by this Worker in the last EQUITY_CAP_MAX_AGE_MS
  *    (`account.refreshAccountEquity`). No such reading refuses the open (a 503 the House sends again); a credit type opens
- *    only at CREDIT_MIN_EQUITY_USD or more (the gate).
+ *    only at CREDIT_MIN_EQUITY_USD or more, and on a physically settled root only while its short legs' notional is at
+ *    most CREDIT_SHORT_NOTIONAL_EQUITY x equity (the gate; the review of #393).
  *  - Everything else that passes is an EXIT, read no equity and meets no dollar cap: a multi-leg close, a single-leg
  *    `buy_to_close` and a single-leg `sell_to_close` (each admitted only when the account holds what it closes; the
  *    sell_to_close since the review's m14), and a stock order that closes shares the account holds
@@ -439,7 +441,8 @@ async function realOrder(parsed, env, { gate, fetcher, now }) {
         `than ${Math.round(maxAgeMs / 1000)} seconds, so nothing was sent. Send it again.`, EQUITY_UNREAD_STATUS, 'equity', EQUITY_RETRY),
     };
   }
-  return { micro: priced.micro, exit: false, credit: CREDIT_STRUCTURES.includes(priced.structure), closeRows: null };
+  return { micro: priced.micro, exit: false, credit: CREDIT_STRUCTURES.includes(priced.structure),
+    shortNotional: priced.shortNotionalMicro ?? 0n, closeRows: null };
 }
 
 /**

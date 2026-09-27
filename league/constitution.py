@@ -726,6 +726,20 @@ CONSTITUTION: dict[str, Any] = {
     # it) opens them with no further code. Sized by maximum loss like every type: a credit structure's is its widest
     # wing less the credit, x 100. Every other row of the D4 table is unchanged. The gateway admits them only on its
     # own reading of the account's equity at `CREDIT_MIN_EQUITY_USD` or more.
+    #
+    # `credit` (the adversarial review of #393, Sept 26, 2026): sizing by net maximum loss alone lets a credit structure
+    # carry short legs worth many times the account, and an EQUITY-root short leg (SPY, QQQ, IWM: American, physically
+    # settled) can be assigned early into that many shares; a deeper short leg means a larger credit, a smaller maximum
+    # loss and MORE contracts. So on a physically settled root a real credit open is refused when a short leg is in the
+    # money by more than `order_path.near_money_share` of its strike at the open (an iron butterfly's at-the-money body
+    # passes), and when a short CALL expires more than `short_call_max_days` calendar days out (no dividend calendar is
+    # read: an in-the-money short call is assigned early before an ex-dividend date); and its contracts are capped so
+    # that the short legs' notional, strike x 100 x ratio x structures summed over the short legs, is at most
+    # `short_notional_equity` x the sizing equity (the gateway holds the same cap, CREDIT_SHORT_NOTIONAL_EQUITY, on its
+    # own reading of the account's equity). Cash-settled index roots (XSP, SPXW: European, settled in cash) cannot be
+    # assigned into shares and are held to the maximum-loss sizing alone. At Probe (and as tuition) every credit open
+    # carries at most `probe_per_order` structures, whatever the root. On expiry day the House closes every expiring
+    # credit structure on an equity root itself, whatever its moneyness (`league/live/step.py` `_expiry_close`).
     "options_money": {
         "real_types": ["debit_vertical", "long_butterfly", "long_call", "long_put", "credit_vertical", "iron_condor", "iron_butterfly"],
         "credit_types": ["credit_vertical", "iron_condor", "iron_butterfly"],
@@ -738,6 +752,7 @@ CONSTITUTION: dict[str, Any] = {
         "drawdown_stop_share": "0.60",
         "tuition": {"day_usd": "200", "week_usd": "300"},
         "calibration": {"day_usd": "50"},
+        "credit": {"short_notional_equity": "3", "probe_per_order": 1, "short_call_max_days": 5},
         "order_path": {"max_orders_day": 250, "max_requests_minute": 150, "bp_buffer": "0.10",
                        "near_money_share": "0.01", "expiry_close_lead_minutes": 10},
         "gateway": {"order_max_loss_usd": "1000", "order_equity_share": "0.25", "day_equity_share": "1.0",
@@ -798,6 +813,11 @@ OPTIONS_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     "tuition.week_usd": ("0", "600"),
     # D3 (the sprint, Sept 26, 2026): the calibration round trips' maximum loss opened a day, $50 at most.
     "calibration.day_usd": ("0", "50"),
+    # The review of #393 (Sept 26, 2026): a credit structure's short legs on an equity root, at most this many times the
+    # sizing equity in notional; at Probe one structure an order; no short call beyond this many days on an equity root.
+    "credit.short_notional_equity": ("1", "5"),
+    "credit.probe_per_order": ("1", "1"),
+    "credit.short_call_max_days": ("0", "5"),
     "credit_min_equity_usd": ("2000", "2000"),
     "order_path.max_orders_day": ("1", "250"),
     "order_path.max_requests_minute": ("1", "150"),
@@ -821,7 +841,7 @@ OPTIONS_REAL_TYPES = ("debit_vertical", "credit_vertical", "iron_condor", "iron_
 OPTIONS_SINGLE_TYPES = ("long_call", "long_put")
 OPTIONS_CREDIT_TYPES = ("credit_vertical", "iron_condor", "iron_butterfly")
 #: Rows read as whole counts.
-_OPTIONS_COUNTS = ("probe.open_per_family", "sized.min_trades", "sized.min_probe_real_trades", "sized.min_probe_sessions", "order_path.max_orders_day", "order_path.max_requests_minute",
+_OPTIONS_COUNTS = ("credit.probe_per_order", "credit.short_call_max_days", "probe.open_per_family", "sized.min_trades", "sized.min_probe_real_trades", "sized.min_probe_sessions", "order_path.max_orders_day", "order_path.max_requests_minute",
                    "order_path.expiry_close_lead_minutes", "gateway.max_day_orders", "gateway.max_day_open_orders")
 
 
@@ -872,6 +892,7 @@ GATEWAY_VARS = {
     "MAX_DAY_ORDERS": "gateway.max_day_orders",
     "MAX_DAY_OPEN_ORDERS": "gateway.max_day_open_orders",
     "CREDIT_MIN_EQUITY_USD": "credit_min_equity_usd",
+    "CREDIT_SHORT_NOTIONAL_EQUITY": "credit.short_notional_equity",
 }
 
 #: Grants recorded before the money digest existed pinned the whole constitution. Such a grant
@@ -885,4 +906,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '19e83ff1ac09386a087e7d8c8e477f169a74ec6579fba168049926d4b178f710'
+PINNED_DIGEST = 'd806f704391af162c0ee535f8badb544985b09a6fd444374e2961bc2ae9ebddb'

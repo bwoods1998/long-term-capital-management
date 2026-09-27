@@ -78,6 +78,12 @@
     "MAX_ORDER_EQUITY_SHARE": "0.25",
     "MAX_DAY_EQUITY_SHARE": "1.0",
     "CREDIT_MIN_EQUITY_USD": "2000",
+    // Sept 26, 2026 (the review of #393): a credit structure on a physically settled root (every root but the
+    // cash-settled index roots, lib/caps.mjs CASH_SETTLED_ROOTS) opens only while its short legs' notional, strike x
+    // 100 x ratio x structures summed over the short legs, is at most this many times the account's equity (the
+    // gateway's own reading): an early assignment of American ETF options cannot bring shares many times the account.
+    // Equal to the constitution's `options_money.credit.short_notional_equity` (league.ci).
+    "CREDIT_SHORT_NOTIONAL_EQUITY": "3",
     "EQUITY_CAP_MAX_AGE_MS": "120000",
     // Sept 21: $104.14 already metered plus $75 owner-reported remaining credit, less ~$5
     // operating reserve. This is an aggregate ceiling, not a fresh $174 allowance.
