@@ -1989,6 +1989,19 @@ looks like beta. Validation 2025 and the holdout judge both.
   - It is a single sample per cell. `fillcheck.py --replay` compares it with the Gym's hazard for that cell after
     Tuesday's nightly tape. Nothing is fitted on it.
 
+- **14:20Z Exploratory, not a route to Validation: how the replicators combine.** Source: the screen's own 2020-24 runs
+  at 1.0x.
+  - The five rebound implementations are one bet: pairwise daily P&L correlation 0.79-1.00.
+  - Trend and laggard-catchup are independent of the rebound (-0.05 to -0.08) and correlate 0.45 with each other.
+  - An equal-risk book of six of the seven replicators has a per-year t of 1.27 / 1.43 / 2.09 / 1.76 / 0.31
+    (2020-2024); the worst year is 2024, when the rebound fades in a quiet bull. `sweep-rebound-bm-long-call-p2` was
+    missing from the book because of a program-name match error in the script; its window t is 1.98.
+  - At the Gym's costs, the known edges combined stay short of what D2 needs (a per-year t near 2.5-3 in 2025 alone).
+  - The levers left:
+    - more independent edges (breadth, running now);
+    - cheaper real execution, if the calibration round trips keep filling at the mid (1 of 1 today, both legs);
+    - 5-year Train selection (the flip after tonight's close).
+
 ### Sprint scoreboard, T0 + 53 h (11:30Z Sept 28)
 
 | # | Metric | Value |
