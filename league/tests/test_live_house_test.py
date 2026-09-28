@@ -93,6 +93,13 @@ class HouseCase(LiveCase):
         self.install()
         self.switch(True)
 
+    def tearDown(self):
+        live = getattr(self, "live", None)
+        for part in (getattr(live, "house_test", None), getattr(live, "calibration", None)):
+            if part is not None:
+                part.recorder.close()
+        super().tearDown()
+
     def install(self, code: str = STAND_IN, **params) -> dict:
         """The operator's upload: the program and its merged params, the directory 700 and the files 600; the stand-in's
         hashes patched in as the pre-registered ones."""

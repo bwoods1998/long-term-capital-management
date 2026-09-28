@@ -1733,7 +1733,7 @@ class OptionsLive:
                                   legs=[RLeg(leg.symbol, leg.side, 1, leg.is_call, leg.strike, leg.expiry, leg.key)], qty=left,
                                   limit_value=price, tif=1, day=day.day.isoformat(), minute=mi, pid=pos.pid, forced=True,
                                   why=f"broken structure: {pos.info.get('broken')}")
-            if self.house_test is not None and pos.family == HT.FAMILY:
+            if getattr(self, "house_test", None) is not None and pos.family == HT.FAMILY:
                 self.house_test.record(sent, snap, [L.LegFill(i, leg.key, leg.side, 1, 0, leg.strike, leg.is_call)], None,
                                        forced=True)
             book.send(sent)
@@ -1821,14 +1821,15 @@ class OptionsLive:
             return "the gateway's kill switch is engaged"
         # An exit is never refused on the instance's order budget (it limits opens); it is charged when it went.
         tif = order.tif if not forced else None
-        house = self.house_test is not None and pos.family == HT.FAMILY
+        house_test = getattr(self, "house_test", None)
+        house = house_test is not None and pos.family == HT.FAMILY
         if house and not forced:
             why = HT.CLOSE_WHY                              # the program's note stays in its private record
         sent = book.new_order(instance=pos.instance, family=pos.family, action="close", type_=pos.type, root=pos.root,
                               legs=list(pos.legs), qty=order.qty, limit_value=value, tif=tif, day=day.day.isoformat(),
                               minute=mi, pid=pos.pid, forced=forced, fees_est=order.fees, why=why)
         if house:
-            self.house_test.record(sent, snap, legs, intent, forced=forced)
+            house_test.record(sent, snap, legs, intent, forced=forced)
         book.send(sent)
         if not forced and sent.dispatched:
             self._instance_spent(pos.instance, day)
@@ -2006,7 +2007,7 @@ class OptionsLive:
             return f"a debit of {order.limit:.2f} on a {order.type} worth at most {top:.2f} can never pay"
         unit = M.D(round(order.max_loss_share * V.MULTIPLIER + 2 * order.fees, 2))
         # The House live test (`league/live/house_test.py`) has no band and no forward record: its own bounds size it.
-        house = self.house_test is not None and inst.family == HT.FAMILY
+        house = getattr(self, "house_test", None) is not None and inst.family == HT.FAMILY
         evidence = not inst.tuition and not house
         family_rows = self.families.forward_rows(inst.family) if evidence else []
         fwd = M.forward_stats(family_rows, self.table.sized_confidence, version=inst.version) if evidence else None
