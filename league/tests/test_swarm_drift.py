@@ -15,7 +15,7 @@ from unittest.mock import patch
 from league.swarm import diagnostics, evidence
 from league.swarm import settings as S
 from league.swarm.gate import Gate
-from league.swarm.researcher import drift_settings, drift_verdict, idle_dead, screen_best, version_drift
+from league.swarm.researcher import awaiting_validation, drift_settings, drift_verdict, idle_dead, screen_best, version_drift
 from league.swarm.store import SwarmStore
 from league.swarm.tournament import Tournament
 from league.tests.swarm_fakes import drift_block, result
@@ -191,6 +191,30 @@ class Tournaments(RoundCase):
         self.assertIsNone(fam["best_train"])
         self.assertIn("no eligible Train version", idle_dead(fam, self.settings))
 
+    def test_a_family_the_operator_holds_at_the_gate_is_not_demoted(self):
+        """R3's gate hold spares a family (its gate_ready stays): the screen waits for the hold to clear; the gate refuses a
+        failing version then."""
+        self.with_train("z", FAILING)
+        self.store.set_state("z", best_train_version=1, validation_version=1, gate_ready=True)
+        self.store.hold_gate("z")
+        self.assertEqual(screen_best(self.store, "z", self.settings), [])
+        fam = self.store.family("z")
+        self.assertEqual((fam["best_version"], fam["state"]["gate_ready"]), (1, True))
+        self.store.hold_gate("z", False)
+        self.assertEqual([d["version"] for d in screen_best(self.store, "z", self.settings)], [1])
+
+    def test_the_dormancy_exemption_needs_a_best_the_screen_has_not_failed(self):
+        """R3's dormancy clause spares a family whose best awaits validation; a best that failed the drift screen awaits
+        nothing, while one whose figures are only owed still awaits them."""
+        self.settings["researcher"]["dormant_cycles"] = 5
+        self.family("d")
+        self.store.set_state("d", dormant_cycles=9, robustness={"1": {"stress_1.5": {"status": "ok", "pnl": 5.0}}})
+        self.assertTrue(awaiting_validation(self.store.family("d")))
+        self.assertIsNone(idle_dead(self.store.family("d"), self.settings))
+        self.store.set_state("d", drift_failed={"1": "its drift-adjusted alpha has t 0.4 over Train, below 1"})
+        self.assertFalse(awaiting_validation(self.store.family("d")))
+        self.assertIn("no new Gym evaluation", idle_dead(self.store.family("d"), self.settings))
+
     def test_a_validated_version_that_fails_earns_no_fork_and_no_share_by_its_validation(self):
         for fid in ("a", "b"):
             self.family(fid)
@@ -350,6 +374,24 @@ class Researchers(ResearcherCase):
         self.assertNotIn("drift", diagnostics.train_view(train_result(drift=None)))
         self.assertIn("drift", diagnostics.section(train_result(), "drift"))
         self.assertIn("error", diagnostics.section(train_result(drift=None), "drift"))
+
+    def test_a_stored_result_shows_its_drift_lines(self):
+        """NO DUPLICATE RUNS answers the same evaluation from the store: its view carries the drift lines too, from the full
+        result while it is kept, else from the row's figures."""
+        self.drift = "default"
+        researcher = self.researcher()
+        researcher.cycle(self.fam["id"])
+        fam = self.store.family(self.fam["id"])
+        latest = self.store.latest_version(fam["id"])
+        view = researcher._gym_run(fam, {"code": latest["code"], "params": latest.get("params") or {}}, {}, author="t")
+        self.assertIn("already_run", view)
+        self.assertTrue(view["drift"]["screen"].startswith("passes"))
+        run = self.store.run(view["run_id"])
+        (self.root / run["path"]).unlink()
+        self.store._exec("UPDATE runs SET path=NULL WHERE run_id=?", (run["run_id"],))
+        view = researcher._stored_run(fam, self.store.run(run["run_id"]), {}, code=latest["code"], stress=1.0)
+        self.assertIn("kept", view)
+        self.assertTrue(view["drift"]["2022"].startswith("drift-adjusted alpha $150"))
 
     def test_the_drift_lines_never_cost_the_researcher_a_table(self):
         """The diagnostic's size cap drops the long tables first: the drift lines sit outside it."""

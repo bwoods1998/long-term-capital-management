@@ -328,28 +328,35 @@ class ResearcherIdleRetirement(ResearcherCase):
         self.assertTrue(out["retire_refused"])
         self.assertIsNone(self.store.family(self.fam["id"])["retired_at"])
 
-    def test_a_family_that_loops_one_placeholder_is_counted_by_its_evaluations(self):
-        """The case the rule is for (live: hundreds of cycles on a dozen versions): an unchanged program re-run makes no
-        new version (the store returns the existing one), but every evaluation is a trial and counts. The Gym answers an
-        identical re-run with the same run_id: the store keeps one row and still counts the trial."""
-        self.settings["researcher"]["retire_idle_evaluations"] = 12
+    def test_a_family_that_loops_one_placeholder_is_dead_by_its_dormant_cycles(self):
+        """The case the rule is for (live: hundreds of cycles on a dozen versions). Since NO DUPLICATE RUNS (R3) an unchanged
+        program re-run is answered from the store: no version, no run, no trial, so the evaluation count no longer moves.
+        Those cycles are dormant instead, and the dormancy clause makes the family dead after `dormant_cycles` of them."""
+        self.settings["researcher"].update(retire_idle_evaluations=12, dormant_cycles=12)
         self.pool.answer = lambda job: {**result(job.name, roots=job.roots, trades=0), "run_id": "one-placeholder"}
         self.researcher().cycle(self.fam["id"])  # the starter: version 1
-        for _ in range(12):  # twelve cycles re-running the latest version unchanged (no `code`, the same params)
+        for i in range(12):  # twelve cycles re-running the latest version unchanged (no `code`, the same params)
             self.steps = [{"calls": [("gym_run", {"params": {}})]}, {"text": "holding dormant"}]
-            self.researcher().cycle(self.fam["id"])
+            out = self.researcher().cycle(self.fam["id"])
+            self.assertEqual((out["stored"], out.get("trials", 0), out["dormant_cycles"]), (1, 0, i + 1))
         fam = self.store.family(self.fam["id"])
-        self.assertLessEqual(fam["revisions"], 2, "re-runs make no new version")
-        self.assertEqual(fam["trials"], 13)
-        self.assertEqual(len(self.store.runs(self.fam["id"], window="train", limit=50)), 1, "one row, every trial counted")
-        self.assertEqual(idle_evaluations(fam), 13)
-        self.assertEqual(idle_dead(fam, self.settings), "made no eligible Train version in 13 Gym evaluations since its birth")
+        self.assertEqual((fam["revisions"], fam["trials"]), (1, 1), "re-runs make no version and no trial")
+        self.assertEqual(len(self.pool.jobs), 1, "only the starter reached the Gym")
+        self.assertEqual(len(self.store.runs(self.fam["id"], window="train", limit=50)), 1)
+        self.assertEqual(idle_evaluations(fam), 1)
+        self.assertEqual(idle_dead(fam, self.settings),
+                         "made no new Gym evaluation in its last 12 cycles (only stored results, holds and refused runs)")
         self.assertTrue(self.researcher().can_retire(fam))
         # A researcher that never calls retire: the tournament's fallback retires it by the same rule.
         [row] = Tournament(self.store, self.pool, self.settings).retirements(self.store.families(alive=True))
         self.assertEqual(row["family"], self.fam["id"])
+        self.assertEqual(row["why"], "It made no new Gym evaluation in its last 12 cycles (only stored results, holds and "
+                                     f"refused runs). {IDLE_CAUSE}", "the idle rule's wording")
         self.assertEqual(self.store.family(self.fam["id"])["band"], "retired")
         self.assertEqual(self.cancelled, [self.fam["id"]])
+        [lesson] = self.store.graveyard()
+        self.assertIn("Retired by the idle rule", lesson["lesson"])
+        self.assertIn("not a finding that the mechanism has no edge", lesson["lesson"])
 
     def test_a_family_with_an_eligible_version_cannot_retire_under_the_idle_rule(self):
         self.pool.answer = lambda job: result(job.name, roots=job.roots)  # eligible: a positive best Train score

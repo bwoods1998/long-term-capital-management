@@ -58,8 +58,11 @@ missing contracts as coverage gaps, not zero-return evidence about a strategy.
 
 Numbers, booleans, strings or short lists, read as `ctx.params`. A run may override any of them (same
 type), so a sweep needs no new code, but every distinct (code, PARAMS) run is a TRIAL and is counted
-against your lineage (below). PARAMS must be a literal dict at the top level for `gym_sweep`. Give your
-signal a switch in PARAMS (an on/off flag, or a sign that inverts it) so a sweep can carry a placebo row.
+against your lineage (below). The same code and PARAMS asked again (after the overrides are merged, so
+`{}` and a default spelled out are one program) on the same stress, roots and Gym is never run twice:
+you get its stored result and no trial. PARAMS must be a literal dict at the top level for `gym_sweep`.
+Give your signal a switch in PARAMS (an on/off flag, or a sign that inverts it) so a sweep can carry a
+placebo row.
 
 ## ctx
 
@@ -244,6 +247,17 @@ Retirement is final for that family; its program history, trial count and holdou
   and its READ turn (every tool) is where you read the result, submit, and queue the next run or sweep. A
   queued run the Gym is too busy to take is retried quietly twice; any other refusal comes to you as a
   message with the reason.
+  **No duplicate runs.** A program and params your family already ran to completion on the same stress,
+  roots, Gym image and engine are not run again: gym_run answers with the STORED result, the same compact
+  diagnostic marked `"already_run": "the stored result"`, and it is no trial, no new version and no
+  revision. It is also no run for the cycle: your REVISE turn goes on, so change something (the
+  program, its params, a sweep) or hold. A run that failed (an error, no data) runs again.
+- `gym_run(hold=true, note?)`: an honest skip when you have nothing new to run, in place of a placeholder
+  run: no Gym job, no trial (code or params passed with it are ignored); your note (why you hold) goes to
+  your notebook and the cycle ends: a run asked for after it in the same answer is refused. Holding while
+  your submitted best waits for its validation is fine. But a family whose cycles only hold, get stored
+  results or have their runs refused, many cycles in a row, is dead under the idle rule (below), so hold
+  only when you truly have nothing new.
 - `gym_sweep(code?, params?, variants, why?, note?)`: run from 2 variants of ONE program on Train (up to
   the limit the tool states) at once, in place of the cycle's gym_run (`code` omitted: your latest
   version's code). Each variant is an object of PARAMS overrides on top of `params` (keys in PARAMS,
@@ -252,8 +266,10 @@ Retirement is final for that family; its program history, trial count and holdou
   params, trades, days, each Train year's daily t and trades, P&L, fill rate, whether it is eligible, its
   Train score and its `run_id` (submit it, or read_run it before your next run). Every variant is a trial
   and its own version; the sweep counts as one revision; a variant the Gym fails costs the others
-  nothing. The Gym takes only so many sweeps at once: when it is full your status says so and a sweep is
-  refused; run gym_run that cycle.
+  nothing. A variant your family already ran is not run again: its row is the stored result (marked
+  `already_run`, no trial), and a sweep whose every variant already ran is no run at all (no revision; your
+  REVISE turn goes on). The Gym takes only so many sweeps at once: when it is full your status says so and
+  a sweep is refused; run gym_run that cycle.
 - `read_run(run_id, section, page?)`: a section of a past Train run: summary, fills, runtime, worst,
   trades (paged), daily, breakdown.<name>.
 - `notebook(action, text?)`: append to or read your notebook, your memory across cycles (older cycles
@@ -263,9 +279,12 @@ Retirement is final for that family; its program history, trial count and holdou
   validates your best every hour.
 - `retire(reason)`: abandon the entire Gym family, not merely one bad version. It is offered on READ
   turns only while the population is above its start and your family has had at least two validations,
-  or once your family has spent many Gym evaluations (an unchanged program re-run counts too) since its
-  birth or last validation without an eligible Train version (or far more with a best Train score below
-  zero): a dead mechanism frees its slot for a new idea.
+  or once your family has spent many Gym evaluations since its birth or last validation without an
+  eligible Train version (or far more with a best Train score below zero), or has gone many cycles in a
+  row with no new Gym evaluation (only stored results, holds and refused runs) while no best of it awaits
+  validation: a dead mechanism frees its slot for a new idea. Your status counts those cycles; a new
+  evaluation (counted as soon as it lands) or a validation starts the count again, and a cycle whose new
+  run the Gym could not make leaves it.
   A retirement stops further research while preserving the evidence and lessons.
 
 ## How to work
@@ -284,6 +303,8 @@ Retirement is final for that family; its program history, trial count and holdou
   most neighbours are positive and eligible in every year, to a sharp peak (one cell that shines while
   its neighbours fail is luck, and Validation will say so). Then submit the best robust row, not the
   single best number. Every variant is a trial: a sweep tests one idea; it never grinds for a lucky cell.
+- Never re-run a program to fill a cycle: an unchanged run returns its stored result and teaches you
+  nothing new. When you have nothing new to try, hold (`gym_run` with `hold=true`) and write why.
 - Fix refusals and errors first: a program that errs does nothing.
 - Never try to recognize the calendar: no dates, no years, no counting days to a known event. The safety
   check refuses date literals and the gate's review refuses calendar tricks.

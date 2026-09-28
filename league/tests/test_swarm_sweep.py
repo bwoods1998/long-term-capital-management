@@ -228,7 +228,7 @@ class RealPool(SweepCase):
         self.assertEqual(view["status"], "ok", view)
         self.assertEqual([len(c["programs"]) for c in calls], [2, 2], "only the two that never ran run now")
         self.assertEqual((out["trials"], out["sweep"]["reused"], view["completed"]), (2, 2, 4))
-        self.assertEqual(sum(1 for r in view["table"] if r.get("ran_before")), 2)
+        self.assertEqual(sum(1 for r in view["table"] if r.get("already_run") == "the stored result"), 2)
         self.assertEqual(self.store.family(self.fid)["trials"], 4, "each variant evaluated once, each one trial")
         self.assertEqual(len({r["run_id"] for r in view["table"]}), 4)
 
@@ -237,7 +237,7 @@ class Sweeps(SweepCase):
     def test_a_sweep_of_n_variants_makes_n_versions_n_runs_and_n_trials_and_one_revision(self):
         self.first()
         fam = self.store.family(self.fid)
-        values = (1.2, 1.3, 1.4, 1.5)
+        values = (1.25, 1.3, 1.4, 1.5)  # not 1.2: the default, which the starter already ran
         view, out = self.sweep([{"vrp_min": v} for v in values], why="a grid around the entry filter")
         self.assertEqual(view["status"], "ok")
         jobs = self.pool.train()[1:]
@@ -288,7 +288,7 @@ class Sweeps(SweepCase):
         self.first()
         self.pool.fail = lambda job: {1.3: "the Gym failed twice: exec 503", 1.5: "late"}.get(job.params.get("vrp_min"))
         fam = self.store.family(self.fid)
-        view, out = self.sweep([{"vrp_min": v} for v in (1.2, 1.3, 1.4, 1.5)])
+        view, out = self.sweep([{"vrp_min": v} for v in (1.25, 1.3, 1.4, 1.5)])
         self.assertEqual(view["status"], "ok")
         self.assertEqual((view["completed"], len(view["table"]), out["sweep"]["failed"]), (2, 2, 2))
         self.assertEqual(sorted(f["params"]["vrp_min"] for f in view["failed"]), [1.3, 1.5])
@@ -298,7 +298,7 @@ class Sweeps(SweepCase):
         late(landed)
         self.assertEqual(self.store.family(self.fid)["trials"] - fam["trials"], 3, "a variant that lands late is still a trial")
         runs = [r for r in self.store.runs(self.fid, window="train") if r["summary"].get("sweep")]
-        self.assertEqual(sorted(r["summary"]["params"]["vrp_min"] for r in runs), [1.2, 1.4, 1.5])
+        self.assertEqual(sorted(r["summary"]["params"]["vrp_min"] for r in runs), [1.25, 1.4, 1.5])
 
     def test_a_variant_the_gym_ran_and_failed_is_a_trial_and_ranks_last(self):
         self.first()
@@ -368,9 +368,9 @@ class Sweeps(SweepCase):
         self.settings["researcher"]["max_sweep_variants"] = 10
         self.first()
         for i in range(5):  # five earlier ordinary runs: with the starter's, six full results
-            self.researcher()._gym_run(self.store.family(self.fid), {"params": {"vrp_min": 1.0 + i / 10}}, {"tool_calls": 0},
+            self.researcher()._gym_run(self.store.family(self.fid), {"params": {"vrp_min": 1.01 + i / 10}}, {"tool_calls": 0},
                                        author="synthetic")
-        view, _ = self.sweep([{"vrp_min": 1.0 + i / 20} for i in range(10)])
+        view, _ = self.sweep([{"vrp_min": 1.02 + i / 20} for i in range(10)])
         me = self.researcher()
         for row in view["table"]:
             answer = me._local_tool(self.store.family(self.fid), "read_run", {"run_id": row["run_id"], "section": "summary"}, {})
@@ -394,7 +394,7 @@ class Sweeps(SweepCase):
             return wait(job, timeout, **kw)
 
         self.pool.wait = counting
-        view, out = self.sweep([{"vrp_min": v} for v in (1.2, 1.3, 1.4, 1.5)])
+        view, out = self.sweep([{"vrp_min": v} for v in (1.25, 1.3, 1.4, 1.5)])
         self.assertEqual(seen, [0, 1, 2, 3], "a variant's run is recorded before the next one is waited for")
         self.assertEqual(out["trials"], 4)
 
@@ -471,7 +471,9 @@ class Validation(SweepCase):
         view, out = self.sweep([{}, {"vrp_min": 1.2}, {"vrp_min": 1.4}])  # 1.2 is the program's default
         self.assertEqual((view["variants"], view["repeats_dropped"]), (2, 1))
         self.assertEqual(len({r["run_id"] for r in view["table"]}), 2)
-        self.assertEqual(self.store.family(self.fid)["trials"] - fam["trials"], 2)
+        # {} is the starter program as written, which the first cycle ran: its stored result, no new trial (NO DUPLICATE RUNS).
+        self.assertEqual(self.store.family(self.fid)["trials"] - fam["trials"], 1)
+        self.assertEqual([r["params"] for r in view["table"] if r.get("already_run")], [{}])
 
 
 class Turns(SweepCase):
@@ -501,7 +503,7 @@ class Turns(SweepCase):
     def test_a_second_run_or_sweep_is_queued_and_opens_the_next_cycle(self):
         self.first()
         self.steps = [{"calls": [("gym_run", {"params": {"vrp_min": 1.3}})]},
-                      {"calls": [("gym_sweep", {"variants": [{"vrp_min": 1.3}, {"vrp_min": 1.5}]})]}]
+                      {"calls": [("gym_sweep", {"variants": [{"vrp_min": 1.35}, {"vrp_min": 1.5}]})]}]
         out = self.researcher().cycle(self.fid)
         self.assertTrue(out["pending_run"])
         self.assertEqual(self.store.convo(self.fid)[1]["name"], "gym_sweep")
@@ -618,7 +620,7 @@ class Load(SweepCase):
         fam = self.store.family(self.fid)
         self.assertEqual((len(self.pool.jobs), len(self.store.versions(self.fid)), fam["revisions"], fam["trials"]), before)
         me._release_sweep("another-family", 2)  # five in flight: room for three
-        grid = [{"vrp_min": 1.0 + i / 10} for i in range(4)]
+        grid = [{"vrp_min": 1.01 + i / 10} for i in range(4)]
         view = me._gym_sweep(fam, {"variants": grid}, {"tool_calls": 0}, author="synthetic")
         self.assertIn("a sweep of at most 3 variants fits", view["reason"])
         view = me._gym_sweep(fam, {"variants": grid[:3]}, {"tool_calls": 0}, author="synthetic")
@@ -670,7 +672,7 @@ class Load(SweepCase):
         self.pool.wait = held
         views: dict = {}
         mine = threading.Thread(target=lambda: views.setdefault("mine", me._gym_sweep(
-            self.store.family(self.fid), {"variants": [{"vrp_min": v} for v in (1.2, 1.3, 1.4, 1.5)]}, {"tool_calls": 0},
+            self.store.family(self.fid), {"variants": [{"vrp_min": v} for v in (1.25, 1.3, 1.4, 1.5)]}, {"tool_calls": 0},
             author="synthetic")))
         mine.start()
         self.addCleanup(gate.set)
