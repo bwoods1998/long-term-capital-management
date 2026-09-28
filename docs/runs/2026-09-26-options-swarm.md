@@ -1907,6 +1907,16 @@ looks like beta. Validation 2025 and the holdout judge both.
   - 11:37Z: the sweep-only 2020-24 Gym image build (`train2020-v1`) started on the House. The swarm does not adopt it;
     `gym.train_from` stays unset until the pre-registered screen's verdict is written.
 
+- **11:44Z The sweep-only 2020-24 Gym image is built and the pre-registered screen is launched.**
+  - Image `train2020-v1`, calibrated checkpoint `sbcp_13c5a61d-e7e1-453d-8fad-8d3f997ac970`, sealed. The inside check
+    passed: 83,544 files; windows history (from 2019-10-07), train and validation; nothing after 2025-12-31; network
+    closed. The swarm does not adopt it.
+  - The screen's check step: 38 components, 74 programs, 150 runs. Every hash matches the pre-registration
+    (`316fca9c…`), the placebo addendum (`1a95ab2e…`) and the run list, and every program passes the Gym's check and
+    loader. The released tree is main `9fe54351`.
+  - The bridge, the screen and the judge run now on sealed sweep boxes (at most 4). The completion supervisor is
+    resumed.
+
 ### Sprint scoreboard, T0 + 53 h (11:30Z Sept 28)
 
 | # | Metric | Value |
