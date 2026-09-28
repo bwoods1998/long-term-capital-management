@@ -1863,4 +1863,16 @@ looks like beta. Validation 2025 and the holdout judge both.
 | 6 | Money | equity $1,481.63; options buying power $481.60; 0 orders |
 | 7 | Compute | Sail $108.10 (about $4/h; the $32 line around 00:30Z Tuesday). Claude $42.19 of $100. OpenAI $617.04 + $9.36 in flight of $707 |
 
+### Sprint scoreboard, T0 + 49 h (07:30Z Sept 28)
+
+| # | Metric | Value |
+|---|---|---|
+| 1 | Population | 12 alive, 294 retired, all holding at the floor; 0 born in 2 h (see row 5) |
+| 2 | Throughput | 54 cycles in the last hour (the R4 hold backoff; before it about 3,000/h, nearly all holds); 0 cycle errors; pool 1 ready, 9 asleep |
+| 3 | Search | 58,122 trials, 216,646 program-years. Closest: `earnings-idio-drift-call` 3/8 |
+| 4 | Evidence | Validation passes alive 0; holdout looks 2, passes 0 |
+| 5 | Readiness | R5 live (preopen 9/9). The 2020-21 fetch has been running since 07:04Z. **The architect had birthed nothing since agenda v5 (04:55Z):** Claude Opus stopped at max_tokens 16,000 before its JSON, GPT-6 Astra did not complete within 12,000 output tokens, and the Sail fallback (Kimi K3) proposed 0. At 07:31Z `claude.max_tokens` and `architect.max_output_tokens` were raised to 32,000 (streamed) |
+| 6 | Money | equity $1,481.63; options buying power $481.60; 0 orders |
+| 7 | Compute | Sail $105.32 (about $2.5/h with the swarm idle). Claude $44.46 of $100. OpenAI $618.97 + $9.36 in flight of $707 |
+
 ## Report
