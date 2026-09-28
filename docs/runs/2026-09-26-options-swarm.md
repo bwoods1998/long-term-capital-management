@@ -1765,6 +1765,14 @@ looks like beta. Validation 2025 and the holdout judge both.
   both Pythons for the combined tree, the local sensitive suite (live close and parity, memory, drift, holds) passes
   143 tests, the money digest is unchanged, and the SQLite backup is at `state/backups/pre-r4/`. Deploying.
 
+- **06:16Z R4 deployed and verified** (release `20260928T061526Z-971da2b2e678`, main `7effc585`).
+  - The watchdog canaried, promoted and completed its watch.
+  - The swarm restarted on the release with 0 cycle errors.
+  - The hold backoff is visible: 11 of 12 families are waiting instead of cycling every ~12 s.
+  - `researcher.dormant_cycles` is 12 (about 1 h at the 300 s backoff).
+  - `preopen.py` passes 9/9: release, grant, gateway real types, account, swarm, bands (2 observe rows), the House's
+    own mirror (lag 0), the House backup (ok, found by the pinned box id: #394 works), and compute.
+
 ### Sprint scoreboard, T0 + 47 h (05:31Z Sept 28)
 
 | # | Metric | Value |
