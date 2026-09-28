@@ -2045,6 +2045,22 @@ looks like beta. Validation 2025 and the holdout judge both.
     Adding IWM and the extra slots is an operator decision inside D3's dollar bound. The review also found that
     `fillcheck.py`'s Gym replay had been silently broken, falling back to a table estimate; it is fixed.
 
+- **16:06-16:13Z THE SWARM IS ON 5-YEAR TRAIN (2020-2024).** An operator image adoption, not a release: it runs on
+  R5's code. The pre-registered screen's verdict was written first, as the plan requires.
+  - Steps: `swarm.stop`, then a clean exit at 16:12Z. One `swarm.json` edit (backup `swarm.json.before-train2020`):
+    - `gym.image_checkpoint` `sbcp_13c5a61d` (the sealed 2020-24 image);
+    - `gym.train_from` "2020-01-02";
+    - the explicit run timeout removed, so split 16 and 1,500 s derive from the span.
+    The swarm restarted at 16:13Z.
+  - The migration: objective `worst-train-year-v1@2020-01-02`, 38 families migrated, 0 failed. Bests are empty until
+    each family's next 5-year run. The idle and dormancy counts restart, so the flip retires no one.
+  - Why now:
+    - it rejects bull-market drift and selection noise better;
+    - 2020 (crash and rebound) and 2021 (quiet bull) join 2022-24;
+    - worst-year scoring over five regimes demands robustness.
+  - Single-name families are scored only on the years their roots have data (2022-24).
+  - The live trading process is untouched, and the gate image (Validation and holdout) is unchanged.
+
 ### Sprint scoreboard, T0 + 57 h (15:30Z Sept 28, in session)
 
 | # | Metric | Value |
