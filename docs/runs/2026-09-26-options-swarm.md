@@ -1955,6 +1955,31 @@ looks like beta. Validation 2025 and the holdout judge both.
     - That is consistent with its 2025 validation t of 0.19, one draw from a modest true edge.
     - Everything outside the rebound (and one trend variant) was selection noise.
 
+- **13:30-14:07Z The first session: a funding-read bug blocked every real entry; fixed mid-session with the owner's
+  exception to D8.**
+  - At the open, the live path reported "a stop's line is crossed on a reading whose deposits are not read yet: the
+    account's funding history has not been read", which blocks every real entry, the D3 calibration included.
+  - The ledger showed every funding read failing: `alpaca activities: HTTP 422 invalid activity type: WIRE`.
+    `league/live/step.py` queried `ltcm.performance.ALPACA_FUNDING`, which includes WIRE, a classifier entry that
+    Alpaca's activities endpoint refuses as a filter.
+  - A read-only probe on the real account found CSD, CSW, JNLC, JNLS, ACATC, ACATS and CSR fine and only WIRE refused.
+    The owner's deposit is a CSD, executed, created Sunday 13:30Z. The option-event types OPASN, OPEXC and OPEXP are
+    valid (OPXRC is refused but unused), with 0 option-event alerts today.
+  - **PR #405:**
+    - the query leaves out `UNQUERYABLE_FUNDING = {WIRE}`; the classifier is unchanged;
+    - the test fake now refuses WIRE as Alpaca does, and a new test fails with the old query;
+    - 457 live, options and shadow tests pass, CI is green, and the money digest is unchanged.
+  - Adversarial review: SHIP. No real flow is hidden (wires post as CSD/CSW). A simulation of the House's actual stop
+    state unblocks with nothing latched (profit -$0.02, day P&L $0).
+  - The owner chose an exception to the deploy freeze. It was deployed at 14:03Z (release
+    `20260928T140336Z-766c07a9691b`, main `2e51ea71`, backup `pre-r5b`).
+  - At 14:06:41Z `blocked: None`: the deposit is read as a funding flow, and neither the daily nor the drawdown stop
+    latched. The 10:00 ET calibration slot (window to 14:45Z) can still fire.
+  - The paper proof passed at 13:35Z: a multi-leg SPY 768/769 call vertical filled at 0.49.
+- **14:10Z Agenda v6** (live, no deploy): "what is left" now points at breadth for the one replicated mechanism, the
+  liquidity-provision reversal on roots uncorrelated with SPY (TLT, GLD, SLV, SMH, liquid names), and at trend as a
+  diversifier. An operator breadth sweep is running.
+
 ### Sprint scoreboard, T0 + 53 h (11:30Z Sept 28)
 
 | # | Metric | Value |
