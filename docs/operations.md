@@ -489,7 +489,68 @@ distinguished from a publication delay.
 
 A Gym researcher can call `retire(reason)` to abandon its whole family, but only on a READ turn while more
 families live than `population.start` and the family has had at least two validations (Sept 26: an unguarded
-retire on the REVISE turn took the population from 49 to 16). Retirement stops queued research, keeps the best
+retire on the REVISE turn took the population from 49 to 16), or while more live than `population.floor` and the
+family is dead by the idle rule (R3, Sept 27; `researcher.idle_dead`): `researcher.retire_idle_evaluations` (default
+150; 0 or null turns the rule off, in `swarm.json` without a deploy; a boolean or a non-number also reads as off) Gym
+evaluations since its birth or last validation without an eligible Train version, or three times as many with its
+best Train score below zero. It counts evaluations, not versions: the store keeps one version for identical code and
+parameters, so a family re-running one placeholder makes trials but no revisions. A family whose validated version
+awaits the gate (`gate_ready`) or whose holdout look is out is never dead. With the population held at its start,
+dead families never qualified before and looped on placeholder runs (the operator retired 48 by hand on Sept 27). The
+tournament retires a dead family that never calls retire by the same rule, down to `population.floor`; the
+architect refills below `population.start`. The graveyard lesson and the public cause say the idle rule retired it
+(a time limit, not a refutation); the family's own last notebook lines carry its verdict.
+
+No duplicate runs (R3; the harness audit of Sept 28 found 44% of cycles wasted and 45% of trials identical
+re-runs). A `gym_run` or `gym_sweep` variant a family already ran to completion (the same code, merged params,
+stress, window, sorted roots, Gym image and engine, Train split and capital: its `eval_key`, kept in the run row's
+summary with the result's fill model) is answered from the store, marked `already_run`: no Gym job, no trial, no
+version, no revision, and the cycle's REVISE turn goes on. A failed run runs again, and so does a stored result on
+another fill model than the one the Gym last returned (a calibration changed on a box in place) or one that can no
+longer be scored. The key is coarser than the Gym's run_id on purpose: the Gym's day list is the union of its batch's
+roots, so a stored result is the sample of the batch it ran in and is not run again for another batch. Data and the
+fill model are the image's, so a new data set or calibration should come as a new image checkpoint (which is in the
+key). A run that lands after the wait gave up is recorded with its Train score, so asked for again it is scored like
+any run and can become the best. `researcher.reuse_results` (default true, `swarm.json`) false turns it off. A
+REVISE turn may also call `gym_run` with `hold=true`: no run, no trial, a notebook line (its `note` only), and the
+cycle ends; a run call after it in the same answer is refused, and code or params passed beside it are ignored. A
+row recorded before R3 has no key: the next identical run is one more trial (the same Gym run_id, the same row) and
+writes the key, and from then on it answers.
+
+Because stored results and holds add no evaluations, the idle rule has a dormancy clause: a Gym family whose last
+`researcher.dormant_cycles` (default 40; 0 or null turns it off) cycles made no new Gym evaluation, only stored
+results, holds and runs refused for its own doing (its program, NEEDS, params or variants), is dead (the same floor,
+gate exemption and graveyard wording), unless its best awaits validation (not yet validated and not lost at 1.5x).
+A new evaluation of its own restarts the count as soon as it is recorded (in the cycle, or when a run lands after
+the wait), and so does a counted validation. A cycle that asked the Gym for a new evaluation the Gym did not make (a
+Gym error; a run, or every new variant of a sweep, that did not land) leaves it, and a sweep whose new variants all
+failed is a Gym error even when some of its variants were read back from the store. A sweep refused for room leaves
+it too, unless the cycle also held, got a stored result or had a run refused. The count is zero outside the Gym band,
+and a Candidate sent back to the Gym starts afresh. A holding cycle is one model call, so 40 of them can pass in
+well under an hour of a family's cycles; the count is the family's state `dormant_cycles`, and each dormant cycle's
+`swarm.cycle` event carries it.
+
+The operator's gate hold (R3): `python -m league.swarm hold-gate --root /workspace/state --family <id> --reason
+"..."` (or `SwarmStore.hold_gate(fid)` from a shell on the box; a second connection is safe beside the running
+swarm) sets `gate_hold` in the family's state. The gate then starts nothing for it (no review, audit or holdout
+look; a hold set while a review is out stops the stage after it) and leaves `gate_ready` as it is; a look already
+in flight is still judged when it lands. `--clear` releases it, and the next gate round looks at it. The gate
+round's answer lists it under `held`; `python -m league.swarm status` (`gate_held`), the tournament's board and the
+researcher's status say "held by the operator"; the public checklist shows `gate_paused`, since the site's list of
+blockers is closed. Each hold and release is a private `swarm.gate` event with its reason. While a family is held
+with `gate_ready`, no rule retires it: not the idle rule, not the tournament's revision, evaluation or deflated
+Sharpe rules, not its own researcher and not the diagnostician (`SwarmStore.retire_gym` refuses it; `hold-gate`
+answers `retire_exempt: true`). Its clocks keep running while it is held, so a family past one of those rules can
+retire at a tournament round after the hold is cleared if the gate has not started its look by then (the gate
+round comes every few minutes, the tournament hourly). A hold on a family without `gate_ready` protects nothing.
+The hold does not touch tuition of a version whose review and audit already passed (`bands.read`).
+
+Deploy impact (R3): the rule applies at once to every family that is already past it. On Sept 27 (start 72, floor
+44, 74 alive) about 29 families were past it, nearly all long-refuted placeholders, so the first tournament round and
+the dead researchers retiring themselves take the population to about 45 within minutes, and the architect's refill
+(a handful of births a pass) takes hours to restore the start. To stage it, set `researcher.retire_idle_evaluations`
+high in `swarm.json` before the deploy (for example 500, which catches only the longest loops) and lower it toward
+150 over the following passes; the setting reloads each step. Retirement stops queued research, keeps the best
 programs and every trial/look, and leaves existing positions under their exit owner. Researchers and the
 tournament share the same atomic population-floor check. A refused retire (not offered, or the floor) is a plain
 tool answer: no cycle error and no cooldown; it does not retire the family. The raw reason stays private in its

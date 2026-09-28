@@ -54,7 +54,7 @@ class NoteText(unittest.TestCase):
 
         self.assertIn("PUBLIC", ROLE)
         for tool in TOOLS:
-            if tool["name"] == "gym_run":
+            if tool["name"] in ("gym_run", "gym_sweep"):
                 self.assertIn("PUBLIC", tool["parameters"]["properties"]["note"]["description"])
             if tool["name"] == "notebook":
                 self.assertIn("PUBLIC", tool["description"])

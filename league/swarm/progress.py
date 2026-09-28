@@ -175,6 +175,10 @@ def _gym(fam: Mapping, version: Mapping, families: Mapping, looks: Sequence, lin
         blocked = "evidence_stale" if looked["passed"] else "holdout_failed"
     elif not looked and sha not in reserved and len(reserved) >= evidence.LOOKS_PER_LINEAGE:
         blocked = "look_limit"
+    elif state.get("gate_hold"):
+        # Held by the operator (`SwarmStore.hold_gate`): the site's closed list of blockers has no key of its own for it, and
+        # a key it does not know would fail its schema, so the public row says the gate is paused.
+        blocked = "gate_paused"
     elif not review_pass:
         blocked = "review_failed" if review_current and review.get("verdict") == "fail" else "review_pending"
     elif not audit_pass:

@@ -54,6 +54,15 @@ DEFAULTS: dict[str, Any] = {
         "max_model_calls": 3,          # a cycle's model calls (revise, read, ...)
         "min_call_seconds": 75,         # a later model call starts only with this much of the cycle left
         "max_tool_calls": 8,            # a cycle's tool calls
+        # `gym_sweep` (R3, Sept 27): many PARAMS variants of one program in one call, in place of the cycle's one gym_run.
+        # Every variant is a trial; the whole sweep counts as one revision. The pool had no spare boxes when it shipped
+        # (Sept 27: every one of its boxes awake, ~1,300 jobs an hour at ~20 box-seconds a job), so both limits start
+        # small: a sweep's variants, and the variants of every sweep in flight together (a sweep beyond that is refused
+        # and the researcher runs gym_run that cycle). Raise them in swarm.json while gym_seconds' p90 and the pool's
+        # abandoned jobs stay low.
+        "sweep_enabled": True,
+        "max_sweep_variants": 6,
+        "max_sweep_jobs_in_flight": 24,
         "cycle_seconds": 170,           # a cycle's wall-time budget (target under 3 minutes)
         "history_cycles": 4,            # cycles of conversation kept (older ones live in the notebook) ...
         "history_trim_to": 2,           # ... cut back to this many at once, so the cached prefix holds for a few cycles
@@ -69,6 +78,18 @@ DEFAULTS: dict[str, Any] = {
         "floor_usd_day": 150.0,         # every model call of the swarm together, a day (the Provider's floor cap): a fuse
         "idle_seconds": 5,              # between a family's cycles
         "note_every_cycles": 6,         # a public note to the tape at most this often per family
+        # The idle rule (R3, Sept 27): a Gym family with this many Gym evaluations since its birth or last validation and
+        # no eligible Train version (or three times as many with a best Train score below zero) is dead, unless a
+        # validated version awaits the gate. It may retire at `population.start` (only `population.floor` holds it),
+        # and the tournament retires it if it does not. 0 or null turns the rule off (`researcher.idle_dead`).
+        "retire_idle_evaluations": 150,
+        # No duplicate runs (R3, the harness audit of Sept 28: 45% of trials were identical re-runs): a run or sweep variant
+        # the family already evaluated (program, merged params, stress, window, roots, Gym image and engine) is answered
+        # from the store, no job and no trial; false runs it again. A REVISE turn may hold (gym_run hold=true) instead.
+        "reuse_results": True,
+        # The idle rule's dormancy clause: a family whose last this-many cycles made no new Gym evaluation (only stored
+        # results and holds) is dead, unless its best awaits validation; 0 or null turns the clause off.
+        "dormant_cycles": 40,
     },
     "gym": {
         "enabled": False,

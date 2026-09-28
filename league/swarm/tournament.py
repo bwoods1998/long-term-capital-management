@@ -17,8 +17,15 @@
    structure uneconomic.
 5. RETIREMENTS: no validation improvement in 30 revisions or 2,000 Gym evaluations, or trial-adjusted
    evidence below the line (the deflated Sharpe probability under `retire_dsr_below` after
-   `retire_min_validations` validations); never below the population floor. Each retiree's lesson goes to
-   the graveyard (its mechanism, what it tried, its best numbers, its last notebook lines).
+   `retire_min_validations` validations), or, as the fallback for a dead family that never calls retire, THE IDLE
+   RULE (`researcher.idle_dead`, R3: `researcher.retire_idle_evaluations` Gym evaluations since its birth or last
+   validation without an eligible Train version, or three times as many with its best Train score below zero, or
+   `researcher.dormant_cycles` cycles in a row with only stored results, holds and refused runs while its best does
+   not await validation; never while a validated version awaits the gate); never below the population floor, and by
+   no rule while the operator holds its validated version at the gate (`researcher.held_at_gate`). Each retiree's
+   lesson goes to the graveyard (its mechanism, what it tried, its best numbers, its last notebook lines); an idle-rule
+   lesson says it was a time limit, not a refutation. Each counted verdict records the family's trials
+   (`validated_trials`), from which the idle rule counts, and restarts its dormant cycles.
 6. THE LEADERBOARD: one `swarm.tournament` event (the House mirrors it to its ledger) with every family's
    rank, share, validation summary, trials and band, and the totals.
 
@@ -33,13 +40,18 @@ from typing import Any, Callable, Mapping
 
 from . import diagnostics, evidence
 from .pool import GymJob, PoolError
-from .researcher import MAX_ROOTS, needs_roots, robust_at_stress, with_roots
+from .researcher import MAX_ROOTS, held_at_gate, idle_dead, needs_roots, robust_at_stress, with_roots
 from .store import CLOSEABLE, SwarmStore
 
 UNIVERSE_ROTATION = ("SPY", "QQQ", "IWM", "SPXW")
 INDEX = ("XSP", "SPXW")
 #: Never added by a fork (the sprint, Sept 26): XSP's $0.50 a contract makes narrow XSP structures uneconomic.
 NOT_ROTATED = ("XSP",)
+#: The public sentence of an idle-rule retirement (the store publishes only a reason's sentences without a figure), and
+#: the graveyard's reading of it: the architect and researchers read the graveyard as refutations, and the idle rule is
+#: a clock, so it must not bias births away from a mechanism that was only young.
+IDLE_CAUSE = ("Retired by the idle rule, a limit on how long a family may research without an eligible Train version, "
+              "a positive Train score or a new Gym evaluation; it is a time limit, not a finding that the mechanism has no edge")
 
 
 class Tournament:
@@ -169,8 +181,12 @@ class Tournament:
         if improved:
             fields.update(best_validation=float(mean), since_val_revisions=0, since_val_trials=0)
         self.store.update_family(fid, **fields)
-        if counted:  # a re-judged recorded result is no new validation for the bandit
+        if counted:  # a re-judged recorded result is no new validation for the bandit (nor for the idle rule)
             self.store.bump(fid, validations=1)
+            # The idle rule counts the Gym evaluations since the last validation from here (`researcher.idle_evaluations`);
+            # `fam` was read after this validation's own trials were recorded. Its dormancy clause starts again too: a
+            # verdict is news the researcher may act on (`researcher.dormant_count`).
+            self.store.set_state(fid, validated_trials=int(fam.get("trials") or 0), dormant_cycles=0)
         state = fam.get("state") or {}
         typical = dict(state.get("typical_by_version") or {})
         if state.get("validation_version") is not None and state.get("typical_max_loss_usd") is not None:
@@ -268,6 +284,10 @@ class Tournament:
             fam = self.store.family(fam["id"]) or fam
             if fam["band"] != "gym":
                 continue  # a Candidate or better is judged by its forward record, not here
+            if held_at_gate(fam):
+                # The operator holds its validated version at the gate: no rule retires it until the hold is cleared (the
+                # look it holds must still happen; `SwarmStore.retire_gym` refuses it too).
+                continue
             why = None
             if int(fam.get("since_val_revisions") or 0) >= int(self.cfg.get("retire_revisions", 30)):
                 why = f"no validation improvement in {fam['since_val_revisions']} revisions"
@@ -280,6 +300,11 @@ class Tournament:
                         and dsr < float(self.cfg.get("retire_dsr_below", 0.05)):
                     # No figure in the reason: it becomes a graveyard lesson researchers read (D2a).
                     why = "its trial-adjusted evidence fell below the line (the deflated Sharpe probability)"
+            if not why:
+                # The fallback for a dead family that never called retire (R3): Train figures only in the reason.
+                dead = idle_dead(fam, self.settings)
+                if dead:
+                    why = f"It {dead}. {IDLE_CAUSE}"
             if why:
                 if self.retire(fam, why):
                     out.append({"family": fam["id"], "why": why})
@@ -316,6 +341,8 @@ class Tournament:
                           "lineage_trials": self.store.lineage_trials(fam["id"]), "best_train": fam.get("best_train"),
                           "validation": state.get("validation_numbers"), "gate_ready": bool(state.get("gate_ready")),
                           "closeable": fam["structure"] in CLOSEABLE})
+            if state.get("gate_hold"):
+                board[-1]["gate"] = "held by the operator"  # `SwarmStore.hold_gate`: the gate looks at nothing of it
         totals = self.store.totals()
         since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(began - 3600))
         cycles = self.store._all("SELECT COUNT(*) AS n, SUM(CASE WHEN payload LIKE '%\"error\"%' THEN 1 ELSE 0 END) AS errors FROM events"
