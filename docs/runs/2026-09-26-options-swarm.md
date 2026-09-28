@@ -2294,4 +2294,25 @@ looks like beta. Validation 2025 and the holdout judge both.
     - the best remaining move is the book of the replicated mechanisms, at about 3-5% to pass Validation and about
       2% to pass Validation and the holdout.
 
+
+- **22:39-23:09Z The real-fill recalibration protocol is frozen, and the owner has committed to its rule.**
+  - PROTOCOL-v2 is frozen: sha256 `10f78877…`, amending v1 `7882bfa8…`.
+    - Real calibration fills may move the Gym's patient-fill table only through a pre-registered, held-out test:
+      even sessions fit, odd sessions test, at most four looks.
+    - Adoption needs significance with sessions as the unit, no root or patient cell getting worse, and the Gym
+      staying no more optimistic than real fills on price.
+    - The first test session is Tuesday's.
+  - The tool `recal.py` (private) is pinned: pin 2 at 23:04Z, before any test session, self-test 32/32.
+  - `fillcheck.py`'s Gym replay broke on R6's engine (a close's payoff bounds). It is patched, and its self-test now
+    replays 76 of 76 synthetic attempts through the House engine, closes included.
+  - Power study, on synthetic data: at 30 samples a cell only a 2x error in the fill rate is caught.
+    - The owner raised `live.calibration_samples` to 100: the same D3 bound of $50 a day, about months of sampling,
+      catching a 1.5x error about half the time.
+    - False adoption stays at 0-1%.
+  - The owner committed in advance to adopt on a passing look without first seeing any strategy's results under the
+    new table (`recal/owner-commitment.txt`, sha256 `befe90dc…`).
+  - What a higher fill rate would mean for the rebound: the audit's sensitivity already showed no finalist becomes
+    robustly positive. The extra fills are adversely selected, and every real fill so far came exactly at its limit,
+    the Gym's own price.
+
 ## Report
