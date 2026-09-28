@@ -177,6 +177,13 @@ An order meets the quotes of the minute AFTER your decision, and every chance in
   the touch (the bid for a buy, the ask for a sale): the touch fills only in minutes when Train's
   prints there traded through the whole displayed queue ahead of you. A limit behind the touch
   fills only when the market comes through it.
+- A package never trades outside what it can be worth at expiry (a debit vertical 0 to its width, a
+  credit vertical or condor minus its widest wing to 0). When a leg's quote blows out (an index leg in
+  the money quoted with no bid and a far ask, an FOMC minute, the last minutes of an expiry) the legs' touches can
+  add up to a price outside that range: then an open, or a close that would receive more than the
+  package's most, waits for the next minute, and a close that would receive less than its least fills
+  at that least. No position loses more than its maximum loss; a debit structure whose `natural` in
+  `ctx.positions` is below zero is showing such a blown-out quote, not a price anyone pays.
 
 Fees: OCC, ORF, CAT on every contract, TAF and the SEC fee ($20.60 a million of premium) on sells,
 $0.50 plus exchange fees a contract on index options. Buying power: an open reserves (maximum loss +

@@ -566,7 +566,9 @@ class Account:
         mid = L.mid_value(snap, legs)
         opening = order.action == "open"
         if work.forced:
-            price, qty = natural, work.remaining
+            price, qty = self._in_bounds(natural, legs, opening), work.remaining
+            if price is None:
+                return
         else:
             marketable = natural <= order.limit + 1e-9 if opening else natural >= order.limit - 1e-9
             if not work.seen:
@@ -605,6 +607,9 @@ class Account:
                     # spread (stress below 1, the robustness run at the mid) never fills a limit better than itself.
                     extra = (stress - 1.0) * abs(plain - mid)
                     price = price + extra if opening else price - extra
+            price = self._in_bounds(price, legs, opening)
+            if price is None:
+                return
             qty = min(work.remaining, cap) if room is None else min(work.remaining, cap, room)
             if qty <= 0:
                 return
@@ -634,6 +639,23 @@ class Account:
             self._drop(work, None)
         elif work.filled == qty:
             self.counts["partial_fills"] += 1
+
+    @staticmethod
+    def _in_bounds(price: float, legs: Sequence[L.LegFill], opening: bool) -> float | None:
+        """A package trades only inside what it can be worth at expiry (`legs.value_bounds`). Its legs' touches
+        can add up to a price outside that range when a leg's quote blows out (an index leg in the money quoted
+        with no bid and a far ask, the minute of an FOMC release, the last minutes of an expiry): the natural close
+        of a 5-wide debit vertical can then be -30, a loss many times the most the vertical can lose. No one sells a
+        package for less than it can ever be worth or buys it for more (complex-order price checks exist to refuse it), so:
+        an open, or a close that would RECEIVE more than the package's most, does not fill this minute (it keeps
+        working); a close that would receive LESS than the package's least fills at that least (the worst a
+        buyer of it could offer: the position never loses more than its maximum loss). None: no fill."""
+        lo, hi = L.value_bounds(legs)
+        if opening:
+            return price if lo - 1e-9 <= price <= hi + 1e-9 else None
+        if price > hi + 1e-9:
+            return None
+        return max(price, lo)
 
     @staticmethod
     def _adverse(day: DayData, mi: int, root: str, legs: Sequence[L.LegFill], mid: float, buying: bool) -> bool:
@@ -966,7 +988,7 @@ class Account:
         level = settlement_level(chain.underlying) if chain is not None else math.nan
         if not math.isfinite(level):
             # No underlying today (a hole in the store): the position leaves at its last mark, and says so.
-            value = pos.last_mark if math.isfinite(pos.last_mark) else pos.entry
+            value = self._bounded_mark(pos)
             cash = value * venue.MULTIPLIER * pos.qty
             self.cash += cash
             pos.cash += cash
@@ -992,7 +1014,7 @@ class Account:
             level, hole = (float(known[0]), True) if known.size else (math.nan, True)
         if not math.isfinite(level):
             pos.reason = "expired_without_data"
-            value = pos.last_mark if math.isfinite(pos.last_mark) else pos.entry
+            value = self._bounded_mark(pos)
             cash = value * venue.MULTIPLIER * pos.qty
             self.cash += cash
             pos.cash += cash
@@ -1082,14 +1104,21 @@ class Account:
             ask = chain.ask[m, pos.idx]
             if np.isfinite(bid).all() and np.isfinite(ask).all():
                 sides = np.array([leg.side * leg.ratio for leg in pos.legs], dtype=np.float64)
-                pos.last_mark = float(np.sum(sides * 0.5 * (bid + ask)))
+                lo, hi = L.value_bounds(pos.legs)   # a blown-out leg's mid can leave the package's range too
+                pos.last_mark = min(max(float(np.sum(sides * 0.5 * (bid + ask))), lo), hi)
                 return
+
+    @staticmethod
+    def _bounded_mark(pos: Position) -> float:
+        """The position's last mark (else its entry), inside what the package can be worth at expiry."""
+        lo, hi = L.value_bounds(pos.legs)
+        return min(max(pos.last_mark if math.isfinite(pos.last_mark) else pos.entry, lo), hi)
 
     def _split_mark(self, day: DayData, pos: Position) -> None:
         """The end of a segment another segment continues: the position is valued at its mid (the close's
         mark, as the day's equity already counts it) with no fee. An accounting split, not a trade: the
         segment's daily P&L is the unsplit run's, and the next segment starts without it."""
-        value = pos.last_mark if math.isfinite(pos.last_mark) else pos.entry
+        value = self._bounded_mark(pos)
         cash = value * venue.MULTIPLIER * pos.qty
         self.cash += cash
         pos.cash += cash
@@ -1106,11 +1135,15 @@ class Account:
         if snap is not None and all(leg.idx >= 0 for leg in legs):
             value, _ = L.natural_value(snap, legs, "close", stress=self.cfg.stress)
             if math.isfinite(value):
+                # The close's own rule (`_in_bounds`): never below the package's least; above its most, no close.
+                value = self._in_bounds(value, legs, False)
+                value = math.nan if value is None else value
+            if math.isfinite(value):
                 prices = [float(snap.bid[leg.idx] if leg.side > 0 else snap.ask[leg.idx]) for leg in legs]
                 fees = L.order_fees(pos.root, legs, prices, pos.qty, "close")
         reason = "window_end"
         if not math.isfinite(value):
-            value = pos.last_mark if math.isfinite(pos.last_mark) else pos.entry
+            value = self._bounded_mark(pos)
             reason = "window_end_mark"
         cash = value * venue.MULTIPLIER * pos.qty - fees
         self.cash += cash
