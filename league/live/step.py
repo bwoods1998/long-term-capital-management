@@ -2176,8 +2176,9 @@ class OptionsLive:
                              "expiry": from_ordinal(int(pos.expirations.min())).isoformat(), "quantity": pos.qty, "real": False,
                              "opened_at": None, "max_loss_usd": round(pos.max_loss_share * V.MULTIPLIER * pos.qty, 2),
                              "pnl_usd": round((mark - pos.entry) * V.MULTIPLIER * pos.qty, 2) if math.isfinite(mark) else None})
-        # The calibration round trips are never Profit (`league/trading_profit.py`) and never a compute line either: the
-        # site's figure after compute is the equity's change less compute, and equity already carries their result.
+        # The calibration round trips are never an agent's structure here and never a compute line: the site's figure
+        # after compute is the equity's change less compute, and equity already carries their result. Profit counts them
+        # since Sept 28, 2026, as the positions table's "House calibration" rows (`league/trading_profit.py`).
         return {"structures": rows}
 
     def health(self) -> dict:

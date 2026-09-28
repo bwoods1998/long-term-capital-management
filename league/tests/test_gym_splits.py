@@ -281,13 +281,18 @@ class StockSplits(unittest.TestCase):
 
 class TheTable(unittest.TestCase):
     def test_the_public_splits(self):
-        # Public facts (root, ex-date, factor): confirmed in the Gym image's prices and against the issuers' notices.
+        # Public facts (root, ex-date, factor): 2022-25 confirmed in the Gym image's prices and against the issuers'
+        # notices; 2020-21 (names the 2020-24 image holds from 2022 only) against the issuers' notices and a public
+        # split history.
         from league.gym import events
         self.assertEqual([(r, d.isoformat(), f) for r, d, f in events.SPLITS],
-                         [("TQQQ", "2022-01-13", 2.0), ("AMZN", "2022-06-06", 20.0), ("GOOGL", "2022-07-18", 20.0),
+                         [("AAPL", "2020-08-31", 4.0), ("TSLA", "2020-08-31", 5.0), ("TQQQ", "2021-01-21", 2.0),
+                          ("SOXL", "2021-03-02", 15.0), ("NVDA", "2021-07-20", 4.0),
+                          ("TQQQ", "2022-01-13", 2.0), ("AMZN", "2022-06-06", 20.0), ("GOOGL", "2022-07-18", 20.0),
                           ("TSLA", "2022-08-25", 3.0), ("SMH", "2023-05-05", 2.0), ("NVDA", "2024-06-10", 10.0),
                           ("SMCI", "2024-10-01", 10.0), ("TQQQ", "2025-11-20", 2.0)])
         self.assertTrue(all(d.weekday() < 5 for _, d, _ in events.SPLITS))
+        self.assertEqual(list(events.SPLITS), sorted(events.SPLITS, key=lambda s: s[1]))
 
 
 @unittest.skipUnless(HAVE, "numpy/pyarrow not installed (requirements-gym.txt)")

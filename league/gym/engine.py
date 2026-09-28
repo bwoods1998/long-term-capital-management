@@ -85,8 +85,8 @@ def settlement_level(u: Any) -> float:
 
 #: The price cross-check (`split_factor`): the prior session's last price over the next session's first within this share
 #: of an integer k (2..SPLIT_MAX_FACTOR), or of 1/k. On the Gym image's 25 roots, 2022-2025 (Sept 28, 2026), the eight
-#: splits of `events.SPLITS` sit within 0.06 of theirs and the largest overnight move that was not a split (a 29% gap
-#: down) is 0.29 short of 2. It never closes anything: only the table does (the module docstring).
+#: splits of `events.SPLITS` in those years sit within 0.06 of theirs and the largest overnight move that was not a split
+#: (a 29% gap down) is 0.29 short of 2. It never closes anything: only the table does (the module docstring).
 SPLIT_TOLERANCE = 0.15
 SPLIT_MAX_FACTOR = 100
 

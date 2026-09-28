@@ -89,12 +89,21 @@ _RATE_DAYS = [d for d, _ in RATES]
 #: a root's positions close on the eve, since the OCC's adjusted contracts are not in the chain under the old keys); a
 #: program never sees it. Only this table closes anything: the price cross-check (`engine.split_check`, the prior
 #: session's last price over the next session's first near a whole factor) only raises an alert, because read on its
-#: own it would take an overnight crash of about half for a 2-for-1 split, a look into the next session. The eight
-#: below were found by that cross-check in the Gym image's underlying for all 25 roots, 2022-01-03..2025-12-31, and
-#: confirmed against the issuers' announcements (the review of #406, Sept 28, 2026). The Train extension's 2020-21
-#: splits are NOT here: add them, checked the same way, before a run covers those years (the cross-check flags a
-#: split-like gap with no entry in the result).
+#: own it would take an overnight crash of about half for a 2-for-1 split, a look into the next session. The eight of
+#: 2022-25 were found by that cross-check in the Gym image's underlying for all 25 roots, 2022-01-03..2025-12-31, and
+#: confirmed against the issuers' announcements (the review of #406, Sept 28, 2026). The five of 2020-21 are the Train
+#: extension's: the 2020-24 image holds those years for the core five only (SPY, QQQ, IWM, XSP, SPXW), whose prices
+#: show no split there (the cross-check over its Train and Validation, Sept 28, 2026), so these names' rows come from
+#: the issuers' announcements and a public split history, and act only once an image holds their 2020-21 days. None
+#: of the 25 roots split in 2026 to Sept 28 (the public history; the holdout's prices are sealed and were not read).
+#: Add a split the same way before a run covers its day (the cross-check flags a split-like gap with no entry in the
+#: result).
 SPLITS: tuple[tuple[str, dt.date, float], ...] = (
+    ("AAPL", D("2020-08-31"), 4.0),
+    ("TSLA", D("2020-08-31"), 5.0),
+    ("TQQQ", D("2021-01-21"), 2.0),
+    ("SOXL", D("2021-03-02"), 15.0),
+    ("NVDA", D("2021-07-20"), 4.0),
     ("TQQQ", D("2022-01-13"), 2.0),
     ("AMZN", D("2022-06-06"), 20.0),
     ("GOOGL", D("2022-07-18"), 20.0),
