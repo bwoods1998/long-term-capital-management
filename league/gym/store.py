@@ -265,6 +265,25 @@ class Store:
         return Underlying(price=price, open=grid("open"), high=grid("high"), low=grid("low"), close=grid("close"),
                           volume=grid("volume"), settle=grid("settle"))
 
+    def price_ends(self, root: str, day: dt.date) -> tuple[float, float]:
+        """The session's first and last recorded underlying price (NaN, NaN where it has none): exactly the first and
+        last known values of `underlying(root, day).price`, from the minute and price columns alone (the engine's
+        split check reads every root-day of a run: `engine.split_eves`)."""
+        self.check(day)
+        path = self.path("underlying", root, day)
+        if not path.is_file():
+            raise MissingData(f"no underlying for {root} on {day}")
+        open_min, close_min = self.session(day)
+        m = close_min - open_min + 1
+        table = pq.read_table(path, columns=["minute", "price"], memory_map=True)
+        mi = _numpy(table, "minute", np.int32) - open_min
+        keep = (mi >= 0) & (mi < m)
+        price = np.full(m, np.nan)
+        price[mi[keep]] = _numpy(table, "price", np.float64)[keep]
+        price[~(price > 0)] = np.nan
+        known = price[np.isfinite(price)]
+        return (float(known[0]), float(known[-1])) if known.size else (float("nan"), float("nan"))
+
     def chain(self, root: str, day: dt.date) -> DayChain:
         """One root's day of one-minute NBBO as [minute, contract] grids, with the underlying and OI."""
         self.check(day)

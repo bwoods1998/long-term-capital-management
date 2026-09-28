@@ -183,7 +183,13 @@ at the close at intrinsic value (the recorded settlement where the store has one
 index level), never liquidated; hold them to expiry if you like; no calendars there. An expiry on a
 day the run did not replay settles all the same. At the end of a run everything open is closed at
 the natural; at an inner boundary of a split Train run it is valued at the mid with no fee
-(`split_mark`). Validation, holdout and forward runs are never split.
+(`split_mark`). Validation, holdout and forward runs are never split. A stock split is another
+matter: a name's listed contracts change at a split, so on its eve (from the Gym's table of public
+splits, never from prices) everything open on that name is closed at the natural of the session's last
+quoted minute (`stock_split`; leg by leg, at a leg's last quote or else its intrinsic value, when no
+minute quotes them all: `stock_split_legs`), and an opening order on it that would be held across the
+split (a leg expiring after the eve) is not placed. The underlying's history is the price as traded,
+not split-adjusted: a split shows in it as a gap.
 
 ## What a run tells you
 

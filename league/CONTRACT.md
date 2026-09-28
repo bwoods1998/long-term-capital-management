@@ -223,6 +223,10 @@ you like; no calendars or diagonals there). At the end of a run everything open 
 natural; where the Gym splits a Train run into segments to answer faster, a position open at an inner
 boundary is valued at the mid with no fee (exit reason `split_mark`), and your STATE restarts there
 after replaying the prior week without trading. Validation, holdout and forward runs are never split.
+A stock split is another matter: a name's listed contracts change at a split, so on its eve (from a
+table of public splits) the Gym closes everything open on that name at the natural (exit reason
+`stock_split`) and does not place an opening order on it that would be held across the split. The
+underlying's history is the price as traded, not split-adjusted: a split shows in it as a gap.
 Stop sending closes on an expiring contract after its `close_cutoff`.
 
 ## The game you are in
