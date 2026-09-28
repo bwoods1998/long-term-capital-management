@@ -2315,4 +2315,34 @@ looks like beta. Validation 2025 and the holdout judge both.
     robustly positive. The extra fills are adversely selected, and every real fill so far came exactly at its limit,
     the Gym's own price.
 
+
+- **22:34-23:30Z The replicator book (rebound + trend + laggard as one family): NO, it failed Train. Nothing founded,
+  no Validation look spent.**
+  - Pre-registered first (PREREG sha256 `a2650390…`).
+    - Rebound: `rebound_patient_broad_p1#8`, the highest-window-t implementation that fits $95 unchanged.
+    - Laggard and trend, weighted equal-risk.
+    - One slot each, 1 lot, and each structure within its budget.
+  - The build: each frozen component runs byte-for-byte inside one program and reproduces its native run trade for
+    trade (R 279/279, L 224/224, T 405/405). The limits held in every run.
+  - Train 2020-24 at 1.0x: 477 trades, +$2,456, t 2.19. At 1.5x: +$1,213, t 1.08. With natural-only fills: t 1.63.
+    The placebo book lost $2,304. The kill tests:
+
+| Test | Result | Numbers |
+|---|---|---|
+| K1, every year positive at 1.0x and 1.5x | FAIL | 2022 lost $54 at 1.0x and $544 at 1.5x |
+| K2, beats the placebo every year | PASS | |
+| K3, trade count | PASS | 76-107 trades a year |
+| K4, no quarter above 40% | FAIL | 2023Q2 made 43.7% |
+| K5, deflated Sharpe | PASS at N=1 (0.990) | 0.854 at N=5 |
+| K6, the House's drift screen | FAIL | drift-adjusted alpha t -0.24: alpha -$329 against $2,785 of market drift |
+| K7, clean runs | PASS | |
+
+  - Two adversarial reviews (honesty and contamination; correctness) re-derived every number and hold the NO.
+  - The lesson (now in agenda v12):
+    - all three replicated mechanisms are bullish, so their "independence" from each other hid one shared bet on the
+      2020-24 bull market;
+    - components must pass the drift screen alone, balanced by side or conditioned on something the market's own
+      return does not explain, and fit $95 natively. Under the cap, L and T had traded further-out strikes than the
+      contracts that replicated.
+
 ## Report
