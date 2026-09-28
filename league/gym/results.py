@@ -33,6 +33,9 @@ One result per program per run (one TRIAL: one run of one program version over o
   over held days (what that exposure earns on average days); `alpha_usd` = pnl - drift_usd (what its timing added, after
   costs), `alpha` a day, `t` (the one-sample t of the drift-adjusted daily P&L over all days), `days`, `held_days`. Each
   year carries its sufficient `stats`, so a split run merges exactly (`drift`, `drift_fit`, `merge_drift`);
+- `stock_splits` (only when there is something to say; Train view only): `applied`, the table's stock splits that fell
+  on the run's roots (root, ex_date, factor, and the eve its positions closed on), and `alerts`, where the price
+  cross-check disagreed with the table (engine.py's STOCK SPLIT);
 - `daily`: [day, P&L, equity] for every trading day of the run (zero days included);
 - `trades`: every trade (entry, exit, legs, fees, maximum loss, P&L, the context at entry);
 - `worst`: the five worst trades with their context;
@@ -604,6 +607,9 @@ def build(account: Any, cfg: Any, days: Sequence[dt.date], data_version: str, re
     }
     if getattr(cfg, "window", "train") == "train":  # Train only: no other window's figures are ever computed for it
         result["drift"] = drift(account.daily, regimes, getattr(account, "exposure", {}) or {}, account.roots, own)
+    splits = getattr(account, "stock_splits", None)
+    if splits:  # only when a split fell on the run or the price cross-check raised an alert (engine.py)
+        result["stock_splits"] = splits
     result["result_sha"] = sha(result)
     result["seconds"] = round(seconds, 3)
     result["runtime"]["decide_seconds"] = account.runner.stats()["seconds"]
@@ -656,13 +662,29 @@ def merge(parts: Sequence[dict]) -> dict[str, Any]:
     merged_drift = merge_drift(parts)
     if merged_drift is not None:
         result["drift"] = merged_drift
+    splits = merge_splits(parts)
+    if splits:
+        result["stock_splits"] = splits
     result["result_sha"] = sha(result)
     result["seconds"] = round(sum(p.get("seconds", 0.0) for p in parts), 3)
     return result
 
 
+def merge_splits(parts: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """The `stock_splits` block of a split run: each segment's applied splits and alerts, once each, in order."""
+    out: dict[str, list] = {}
+    for key, ident in (("applied", ("root", "ex_date")), ("alerts", ("root", "day"))):
+        rows: dict[tuple, Any] = {}
+        for p in parts:
+            for row in (p.get("stock_splits") or {}).get(key) or []:
+                rows.setdefault(tuple(row.get(k) for k in ident), row)
+        if rows:
+            out[key] = [rows[k] for k in sorted(rows, key=lambda k: (k[1] or "", k[0] or ""))]
+    return out
+
+
 STRESS_KEYS = ("trades", "days_traded", "pnl", "pnl_per_max_loss", "mean_return_on_max_loss_daily", "t_daily", "sharpe_daily")
-_HIDDEN_FROM_VALIDATION = ("trades", "daily", "worst", "start", "end", "segments", "seconds", "drift")
+_HIDDEN_FROM_VALIDATION = ("trades", "daily", "worst", "start", "end", "segments", "seconds", "drift", "stock_splits")
 
 
 def view(result: Mapping[str, Any], window: str) -> dict[str, Any]:
@@ -716,6 +738,6 @@ def stress_block(result: Mapping[str, Any]) -> dict[str, Any]:
     return {"stress": result.get("stress"), "status": result.get("status"), **{k: summary.get(k) for k in STRESS_KEYS}}
 
 
-__all__ = ["build", "merge", "view", "stress_block", "summarize", "daily_returns", "by_year", "merge_years", "drift", "merge_drift",
+__all__ = ["build", "merge", "merge_splits", "view", "stress_block", "summarize", "daily_returns", "by_year", "merge_years", "drift", "merge_drift",
            "drift_fit", "drift_moments", "combine_moments", "drift_stats", "combine_stats", "drift_from_stats", "drift_rows", "sha",
            "canonical", "ENGINE_VERSION"]
