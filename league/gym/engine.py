@@ -214,9 +214,27 @@ class DayData:
     def advance(self, mi: int) -> None:
         """Drop the caches of earlier minutes."""
         if mi != self._minute:
-            self._snaps.clear()
+            self._drop_snapshots()
             self._unders.clear()
             self._minute = mi
+
+    def _drop_snapshots(self) -> None:
+        # Each snapshot a program decided on caches its ChainView, which points back at the snapshot: a
+        # reference cycle. Left alone, every such snapshot, and through its greeks source the root-day's
+        # GreekBlocks and DayChain (the day's [minute, contract] grids), lives until a FULL collection,
+        # which comes rarer as the run's long-lived objects (trades, fills) grow: a worker's memory grew
+        # with the days of its segment. Breaking the cycle frees them by reference count, at once.
+        for snap in self._snaps.values():
+            snap.release()
+        self._snaps.clear()
+
+    def close(self) -> None:
+        """The day is over: drop its snapshots, greek blocks and chains, so the next day loads with this
+        one's grids already freed (`run` calls it last thing each day; nothing reads the day after)."""
+        self._drop_snapshots()
+        self._unders.clear()
+        self._blocks.clear()
+        self.chains = {}
 
     def snapshot(self, root: str, mi: int) -> Snapshot | None:
         key = (root, mi)
@@ -1030,6 +1048,14 @@ def tables_digest() -> str:
 
 
 # --------------------------------------------------------------------------- the run
+def _close_day(data: DayData, history: History) -> None:
+    """The end of a replayed day: its underlying joins the history, then the day is closed (`DayData.close`).
+    A function of its own so no loop variable of `run` keeps one of the day's chains alive into the next."""
+    for root, chain in data.chains.items():
+        history.add(root, chain.underlying.price)
+    data.close()
+
+
 def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Sequence[dt.date] | None = None,
         progress: Any = None, keep: list | None = None) -> list[dict]:
     """Run a batch of programs over the window, day-major; return one result dict per program
@@ -1083,8 +1109,7 @@ def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Se
         for account in live:
             account.warming = False
             account.closed_since, account.rejects_since = [], []
-        for root, chain in data.chains.items():
-            history.add(root, chain.underlying.price)
+        _close_day(data, history)
 
     for n, day in enumerate(days):
         data = DayData(store, day, all_roots, events, history, to_ordinal(day))
@@ -1112,8 +1137,7 @@ def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Se
                     account.step(data, mi, wants)
         for account in live:
             account.end_day(data, last=n == len(days) - 1)
-        for root, chain in data.chains.items():
-            history.add(root, chain.underlying.price)
+        _close_day(data, history)
         if progress is not None:
             progress(n + 1, len(days), day)
     elapsed = time.perf_counter() - began
