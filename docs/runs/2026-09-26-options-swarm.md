@@ -2093,4 +2093,16 @@ looks like beta. Validation 2025 and the holdout judge both.
 | 6 | Readiness | For after the close, built and in review: #404 marking, #406 splits (public split table, a no-look-ahead fix in progress), calibration expansion (six slots, IWM, a 25-min patient cell, the same $50 bound), site positions ledger (House feed and site section, reconciling exactly to Profit). The 5-year Train flip follows |
 | 7 | Compute | Sail $86.33 (about $4/h; the $32 line around 05:00Z Tuesday without a top-up). Claude $59.69 of $100. OpenAI $630.28 + $11.35 in flight of $707 |
 
+### Sprint scoreboard, T0 + 59 h (17:31Z Sept 28, in session)
+
+| # | Metric | Value |
+|---|---|---|
+| 1 | Population | 31 alive, 551 retired; 36 born and 48 retired in 2 h (5-year Train since 16:13Z; agenda v8) |
+| 2 | Throughput | 663 cycles/h, median 10 s; pool 3 busy, 3 ready; 1 cycle error |
+| 3 | Search | 62,557 trials, 269,365 program-years. Closest in Validation 2025: `cross-sector-morning-beta-lag` and `hedge-substitution-metal-call`, 4/8 each. Tournament round 1: 0/6. Round 2 and the real-fill recalibration protocol are running |
+| 4 | Evidence | Validation passes alive 0; holdout looks 2, passes 0 |
+| 5 | Real fills (D3) | 2 round trips. Of 4 filled orders, 3 filled at the mid (opens in 173 s and 19 s, a close in 7 s) and 1 at one tick worse (the QQQ close, after the mid close ran 5 min unfilled) |
+| 6 | Money | Equity $1,475.27: -$6.36 across the two calibration trips (market moves plus fees). Options buying power $475.24. 0 family orders (no family eligible) |
+| 7 | Compute | Sail $83.09 (about $3.7/h). Claude $61.79 of $100. OpenAI $634.41 + $13.33 in flight of $707 |
+
 ## Report
