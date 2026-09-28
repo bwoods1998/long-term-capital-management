@@ -1875,6 +1875,17 @@ looks like beta. Validation 2025 and the holdout judge both.
 | 6 | Money | equity $1,481.63; options buying power $481.60; 0 orders |
 | 7 | Compute | Sail $105.32 (about $2.5/h with the swarm idle). Claude $44.46 of $100. OpenAI $618.97 + $9.36 in flight of $707 |
 
+- **10:00Z Monday pre-open: `preopen.py` passes 9/9 on R5.**
+  - Checks passed: release `20260928T065759Z-aae7108eda03`; grant `options-swarm-20260928` (digest `ad9bd54c`);
+    gateway real types `debit_vertical,long_butterfly,long_call,long_put`; account ACTIVE (equity $1,481.63, options
+    buying power $481.60: the deposit has not settled, so the grant stays at its capital); 2 observe rows; the House's
+    own mirror (lag 9); backup ok; Sail $100.34.
+  - Fill model `fm-c4a0c70c`, calibration on.
+  - No Candidate, Probe, Sized or tuition row, so today's only real orders can be the three calibration round trips
+    (14:00, 16:30, 18:30Z; $50 day loss bound): 1-lot $1-wide near-money SPY/QQQ call verticals at the mid, then mid +
+    1 tick. They are a test set for the fill model; nothing is fitted on them.
+  - Deploy freeze 13:25-20:05Z (rollback only).
+
 ### Sprint scoreboard, T0 + 51 h (09:31Z Sept 28)
 
 | # | Metric | Value |
