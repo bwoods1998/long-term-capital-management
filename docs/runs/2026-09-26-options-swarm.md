@@ -1545,4 +1545,16 @@ looks like beta. Validation 2025 and the holdout judge both.
 | 6 | Money | equity $1,481.63; options buying power $481.60; 0 orders |
 | 7 | Compute | Sail $135.59 (about $5.2/h; the $32 line around Monday 19:30Z without a top-up). Claude $34.23 of $100. OpenAI $610.63 of $707 |
 
+### Sprint scoreboard, T0 + 43 h (01:29Z Sept 28)
+
+| # | Metric | Value |
+|---|---|---|
+| 1 | Population | 74 alive (48 cycling); 19 born and 17 retired in 2 h (10 of the retirements by the operator's dead-family list) |
+| 2 | Throughput | 1,333 cycles/h, median 122 s; pool 8 busy, 2 ready; queue 2; 5 provider 502s |
+| 3 | Search | 54,803 trials, 197,130 program-years. No new leader: the low-close lineage (t 2.47, one look left, to be held for its placebo), `peer-uncertainty-transfer-straddle` 1.77 (not a real type), `stacked-streak-rebound-ladder` 1.27 (SPY debit vertical, 2/4 quarters) |
+| 4 | Evidence | 1 validation pass alive (the IWM fork); holdout looks 2, passes 0 |
+| 5 | Readiness | R3 (`gym_sweep`, idle retire, no duplicate runs, dormancy, gate hold) integrating on #397; deploy before the 10:00Z pre-open, research side only |
+| 6 | Money | equity $1,481.63; options buying power $481.60; 0 orders |
+| 7 | Compute | Sail $125.39 (about $5.1/h; the $32 line around Monday 19:45Z without a top-up). Claude $36.98 of $100. OpenAI $614.37 + $9.36 inflight of $707 |
+
 ## Report
