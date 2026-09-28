@@ -95,10 +95,62 @@ Real trade counts cover that selected version only. Probe sessions use the lates
 time and complete exchange sessions. Reading progress never changes a band, grant, order or evidence.
 
 The masthead shows **Profit** from the optional `trading: {as_of, pnl_usd}` block: the full real-options
-record, including marked open positions. Missing, unpriced or stale trading P&L displays a dash; the
+record, including marked open positions, and what the account's own activity adds outside them (below). Missing, unpriced or stale trading P&L displays a dash; the
 reading must be within ten minutes of both the checkpoint and the current time. Deposits, withdrawals,
 compute costs and the account's starting balance do not enter this number. **Running** is elapsed time
 since `run.started_at`, falling back to the reset's performance basis when the run timestamp is absent.
+
+Since Sept 28, 2026 Profit is **complete**: it includes the House's D3 calibration round trips (real money on the
+owner's account, labelled "House calibration") and the account's own activity outside the book's positions, so
+that the positions table below adds up to it to the cent (`league/trading_profit.py`, `league/account_activity.py`).
+
+## The positions table (optional, only beside `trading`)
+
+The owner's line of sight into what the agents trade: every real-options position on the Brokerage Account since
+`performance.start_at`, open and closed, with its dollar P&L after fees. `site_checkpoint_positions.json` beside this
+file is `site_checkpoint.json` plus `trading` and `positions` (`build_checkpoint`, pinned by `test_publish.py`).
+
+```
+positions: {
+  as_of: instant,                       // == trading.as_of
+  rows: [{                              // <= 300, ids unique; open first (newest opened first), then closed (latest closed first)
+    id: "real:<pid>",
+    source: "agent" | "calibration" | "house",
+    agent: slug | null,                 // the agent's id when source is "agent", else null
+    underlying, structure,              // `structure` is one of the eleven types above
+    right: "call" | "put" | "both",
+    legs: 1-4,
+    quantity: 1-10,000,                 // contracts opened
+    open_quantity: 0..quantity,         // still held; 0 when closed
+    status: "open" | "closed",
+    expiry: day,                        // the nearest leg's
+    opened_at: instant,                 // the broker's fill time where the book kept it, else the book's
+    closed_at: instant | null,          // null exactly when open
+    pnl_usd: signedMoney | null         // closed: realized; open: marked; after the book's fees; null when unpriced
+  }],
+  folded: {positions: counter, pnl_usd: signedMoney | null} | null,   // the oldest closed rows past 300, and any row
+                                                                      // the schema cannot describe, as one line
+  other: {as_of: instant, fees_usd, crypto_usd, interest_usd, misc_usd} | null,   // each signedMoney: "Other account
+        // activity": the broker's charged fees less the book's estimates, crypto fees, interest, other returns
+  sum_usd: signedMoney | null,          // rows + folded + other; null while any of them is
+  profit_usd: signedMoney | null,       // == trading.pnl_usd
+  difference_usd: signedMoney | null    // profit_usd - sum_usd: what the book cannot account for ("Unreconciled");
+                                        // "0.00" when the book and the broker agree; null exactly when profit_usd is
+}
+```
+
+The rule the site checks, in whole cents: when `profit_usd` is not null, every row's `pnl_usd`, `other`, `sum_usd`
+and `difference_usd` are not null, the rows + `folded.pnl_usd` + the four parts of `other` equal `sum_usd`, and
+`sum_usd` + `difference_usd` equal `profit_usd`. A nonzero `difference_usd` is shown as its own line and the House
+alerts on it; it is never folded into a row. A row's share of Profit is the page's own arithmetic (`pnl_usd` /
+Profit), not a published field. The block has no prose, no price, no strike, no mark, no leg's code: only what a
+position is and its dollars. The page names an agent's row with the same `display_name` as its dot (the Worker's
+annotation, as for agents and events); a `calibration` row reads "House calibration".
+
+A site that predates the block refuses a checkpoint carrying it (400, exact keys). The publisher then posts the same
+checkpoint without it and offers the table again half an hour later, so either repository may deploy first. Old
+pages validate strictly too: the Worker should omit `positions` from checkpoint reads unless asked for it (as it does
+`progress` without `?progress=1`).
 
 The account chart separately shows recorded Brokerage Account balances, which include funding flows.
 The chart has its own start: it may begin after an owner's deposit, so its first point need not be the

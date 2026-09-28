@@ -20,6 +20,7 @@ from league.publish import (
     Flows, Publisher, SiteInputs, build_checkpoint, clean, clean_text, event_id, money, quote_free, scrub_quotes, to_events, words,
 )
 from league import structure_core as sc
+from league.account_activity import ActivityLedger
 
 D = Decimal
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -49,7 +50,7 @@ ALLOWED_KEYS = {
 
 def keys_ok(test, body):
     """Every key in `body` is one the site's schema names for that block, and nothing else."""
-    test.assertEqual(set(body) - {"trading"}, ALLOWED_KEYS["top"])
+    test.assertEqual(set(body) - {"trading", "positions"}, ALLOWED_KEYS["top"])
     if body.get("trading") is not None:
         test.assertEqual(set(body["trading"]), {"as_of", "pnl_usd"})
     for block in ("run", "account", "performance", "compute", "gym"):
@@ -144,6 +145,33 @@ FIXTURE_INPUTS = SiteInputs(
     gym={"as_of": "2026-09-28T14:50:00.000Z", "trials": 48213, "market_years": "51240.5", "families_alive": 11, "families_retired": 37},
     agents=FIXTURE_AGENTS, structures=FIXTURE_STRUCTURES,
 )
+
+
+def position(pid, family, **overrides):
+    """A row of the live book's positions table as `league/trading_profit.py` reads it (`position_rows`)."""
+    row = {"pid": pid, "family": family, "source": "calibration" if family.startswith("house:") else "agent", "underlying": "SPY",
+           "structure": "debit_vertical", "right": "call", "legs": 2, "quantity": 1, "open_quantity": 0, "status": "closed",
+           "expiry": "2026-10-02", "opened_at": "2026-09-28T13:40:01.000Z", "closed_at": "2026-09-28T14:10:11.000Z", "pnl_usd": "0.00"}
+    row.update(overrides)
+    return row
+
+
+# The positions table (Sept 28, 2026): two open, four closed, the House's calibration among them; the account's own
+# activity beside them (the broker's charged fees less the book's estimates, the legacy coins' sale fees). Invented
+# numbers, and never a price: the rows add up with Other to Profit, 10.90.
+FIXTURE_BOOK = {"as_of": "2026-09-28T14:57:00.000Z", "pnl_usd": "10.90", "rows": [
+    position(14, "condor-vrp-3", underlying="XSP", structure="iron_condor", right="both", legs=4, open_quantity=1, status="open",
+             expiry="2026-09-28", opened_at="2026-09-28T14:02:40.000Z", closed_at=None, pnl_usd="12.50"),
+    position(13, "orb-4", quantity=2, open_quantity=2, status="open", opened_at="2026-09-28T14:40:05.000Z", closed_at=None, pnl_usd="-8.00"),
+    position(12, "orb-4", quantity=2, opened_at="2026-09-28T14:10:00.000Z", closed_at="2026-09-28T14:30:00.000Z", pnl_usd="31.00"),
+    position(11, "putspread-dip-2", underlying="QQQ", right="put", expiry="2026-09-30", opened_at="2026-09-27T14:35:00.000Z",
+             closed_at="2026-09-28T13:55:00.000Z", pnl_usd="-18.30"),
+    position(10, "house:calibration", pnl_usd="-2.20"),
+    position(9, "reversal-1", structure="long_call", legs=1, opened_at="2026-09-27T15:10:00.000Z", closed_at="2026-09-27T19:40:00.000Z",
+             pnl_usd="-4.10"),
+]}
+FIXTURE_ACCOUNT = {"as_of": "2026-09-28T14:55:02.000Z", "fees_usd": "0.08", "crypto_usd": "-0.08", "interest_usd": "0", "misc_usd": "0",
+                   "unreconciled_usd": "0", "problems": []}
 
 
 def condor(expiry="2026-09-28", root="XSP"):
@@ -342,6 +370,25 @@ class BuildTest(unittest.TestCase):
         late = {"equity": "1", "cash": "1", "as_of": "2026-09-28T15:30:00.000Z", "stale": False}
         self.assertIsNone(build_checkpoint(SiteInputs(account=late), PUBLISHED_AT)["account"], "a reading after the stamp is refused by the site")
 
+    def test_the_positions_fixture_is_this_modules_own_output_and_adds_up(self):
+        """`site_checkpoint_positions.json`: the same checkpoint with Profit and the positions table, for the site's
+        contract test of the table (`site_checkpoint.json` stays as the site before the table takes it)."""
+        from league.trading_profit import complete
+
+        trading, positions = complete(FIXTURE_BOOK, FIXTURE_ACCOUNT, at=PUBLISHED_AT)
+        body = build_checkpoint(SiteInputs(**{**FIXTURE_INPUTS.__dict__, "trading": trading, "positions": positions}), PUBLISHED_AT)
+        keys_ok(self, body)
+        block = body["positions"]
+        self.assertEqual(body["trading"], {"as_of": "2026-09-28T14:57:00.000Z", "pnl_usd": "10.90"})
+        self.assertEqual((block["sum_usd"], block["profit_usd"], block["difference_usd"]), ("10.90", "10.90", "0.00"))
+        self.assertEqual([row["id"] for row in block["rows"]], ["real:13", "real:14", "real:12", "real:10", "real:11", "real:9"],
+                         "open first, newest first; then the most recently closed")
+        self.assertEqual((block["rows"][3]["source"], block["rows"][3]["agent"]), ("calibration", None))
+        path = FIXTURES / "site_checkpoint_positions.json"
+        if os.environ.get("LTCM_WRITE_SITE_FIXTURES"):
+            path.write_text(json.dumps(body, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), body)
+
     def test_the_fixture_is_this_modules_own_output(self):
         """`site_checkpoint.json` is `build_checkpoint(FIXTURE_INPUTS)`: the site's contract test publishes and draws it.
         LTCM_WRITE_SITE_FIXTURES=1 rewrites both fixtures from here."""
@@ -452,11 +499,18 @@ def roster_agent(agent_id, alive=True, family="condor-vrp"):
     return SimpleNamespace(id=agent_id, family=family, alive=alive, born_at="2026-09-26T09:14:00.000Z", died_at=None if alive else "2026-09-27T21:40:00.000Z")
 
 
+#: The account's activity with nothing outside the book's positions (`league/account_activity.py`).
+QUIET_ACCOUNT = {"as_of": PUBLISHED_AT, "fees_usd": "0", "crypto_usd": "0", "interest_usd": "0", "misc_usd": "0",
+                 "unreconciled_usd": "0", "problems": []}
+
+
 class PublisherTest(LedgerCase):
     def publisher(self, site=None, broker=None, **performance):
         performance = performance or {"start_at": RESET_AT, "start_equity": "481.65"}
         publisher = Publisher("https://blakewoods.us", lambda: "t" * 40, Path(self.dir) / "publish.json", tape="test", opener=site or Site(),
                               clock=lambda: self.clock.now, performance=performance, real_brokers={"alpaca": broker or Broker()})
+        # The fake broker keeps no activity record: the account's side of Profit is read from a quiet one, in this thread.
+        publisher.activity = ActivityLedger(None, RESET_AT, self.dir, clock=lambda: self.clock.now, threaded=False, reader=lambda: QUIET_ACCOUNT)
         return publisher
 
     def test_the_houses_calls_keep_their_signatures(self):
