@@ -225,12 +225,16 @@ DEFAULTS: dict[str, Any] = {
     # The House's live path's switches (league/live/step.py `OptionsLive.switches`; the sprint, B4, Sept 26, 2026): these
     # defaults, overlaid by <state>/swarm.json "live" read DIRECTLY by the live path each minute (never config.json), so
     # they work in the no-deploy window. A switch is on only while it is JSON true; a swarm.json that is not a JSON object
-    # turns observe and calibration off. They switch work off or bound it; no money rule lives here (the constitution's).
+    # turns observe, calibration and the House live test off. They switch work off or bound it; no money rule lives here
+    # (the constitution's).
     "live": {
         "observe": True,                # every alive Gym-band family with a validated version trades shadow (never real)
         "observe_max": 48,              # at most this many observe instances (the likeliest by validation t first)
         "calibration": False,           # the D3 real-fill round trips: ON only by swarm.json {"live": {"calibration": true}}
         "calibration_samples": 30,      # a symbol's round trips stop once its open-at-mid cell has this many samples
+        # The House live test (league/live/house_test.py): ON only by swarm.json {"live": {"house_test": true}}, and then
+        # only with real money on, the grant, the paper proof and its private program verified. Off: exits only.
+        "house_test": False,
     },
     # Claude through the gateway (Sept 26, 2026, the swarm sprint; league/claude.py). The gateway's CLAUDE_USD ($100, the
     # owner's funded total) is the hard line; `usd_cap` is the swarm's own Claude line inside it and `reserve_usd` is never
