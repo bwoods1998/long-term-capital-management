@@ -1837,6 +1837,20 @@ looks like beta. Validation 2025 and the holdout judge both.
     - At most 28 of the 30 House components can now replicate. The decision rule is unchanged: at least 6 replicators
       across at least 3 mechanism classes.
 
+- **06:58Z R5 deployed and verified** (release `20260928T065759Z-aae7108eda03`, main `9fe54351`; PR #399 Train
+  2020-21 code with the switch OFF).
+  - It shipped this morning, not after the close, because its main cost, a bundle move that re-validates families and
+    pauses tuition rows, was nearly zero: no family passing Validation and no tuition row alive.
+  - Two reviews, a verification and a final-head verification: 837 tests; with the switch off no migration, no alerts
+    and the adopted pair accepted; drift decisions identical to R4 on 3,000 random cases.
+  - SQLite backup at `state/backups/pre-r5/`. `preopen.py` passes 9/9; there are no span alerts.
+- **07:04Z The 2020-21 fetch started** on the data box from the House (`box.py start --stages 1,2,3,4,5,6,9,10`),
+  with the completion supervisor paused.
+  - The probes confirm the ThetaData plan reaches 2020: SPY on 2020-03-16 (the crash) returned 18 expiries, and the
+    late-2019 warm-up history returned.
+  - 3,833 tasks are pending, an estimated 3-4.5 h.
+  - The swarm never sees 2020-21 until the frozen screen's verdict is written; the screen runs on a sweep-only image.
+
 ### Sprint scoreboard, T0 + 47 h (05:31Z Sept 28)
 
 | # | Metric | Value |
