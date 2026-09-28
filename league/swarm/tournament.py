@@ -20,8 +20,9 @@
    `retire_min_validations` validations), or, as the fallback for a dead family that never calls retire, THE IDLE
    RULE (`researcher.idle_dead`, R3: `researcher.retire_idle_evaluations` Gym evaluations since its birth or last
    validation without an eligible Train version, or three times as many with its best Train score below zero, or
-   `researcher.dormant_cycles` cycles in a row with only stored results and holds while its best does not await
-   validation; never while a validated version awaits the gate); never below the population floor. Each retiree's
+   `researcher.dormant_cycles` cycles in a row with only stored results, holds and refused runs while its best does
+   not await validation; never while a validated version awaits the gate); never below the population floor, and by
+   no rule while the operator holds its validated version at the gate (`researcher.held_at_gate`). Each retiree's
    lesson goes to the graveyard (its mechanism, what it tried, its best numbers, its last notebook lines); an idle-rule
    lesson says it was a time limit, not a refutation. Each counted verdict records the family's trials
    (`validated_trials`), from which the idle rule counts, and restarts its dormant cycles.
@@ -39,7 +40,7 @@ from typing import Any, Callable, Mapping
 
 from . import diagnostics, evidence
 from .pool import GymJob, PoolError
-from .researcher import MAX_ROOTS, idle_dead, needs_roots, robust_at_stress, with_roots
+from .researcher import MAX_ROOTS, held_at_gate, idle_dead, needs_roots, robust_at_stress, with_roots
 from .store import CLOSEABLE, SwarmStore
 
 UNIVERSE_ROTATION = ("SPY", "QQQ", "IWM", "SPXW")
@@ -283,6 +284,10 @@ class Tournament:
             fam = self.store.family(fam["id"]) or fam
             if fam["band"] != "gym":
                 continue  # a Candidate or better is judged by its forward record, not here
+            if held_at_gate(fam):
+                # The operator holds its validated version at the gate: no rule retires it until the hold is cleared (the
+                # look it holds must still happen; `SwarmStore.retire_gym` refuses it too).
+                continue
             why = None
             if int(fam.get("since_val_revisions") or 0) >= int(self.cfg.get("retire_revisions", 30)):
                 why = f"no validation improvement in {fam['since_val_revisions']} revisions"

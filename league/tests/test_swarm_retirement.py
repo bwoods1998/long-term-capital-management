@@ -345,13 +345,13 @@ class ResearcherIdleRetirement(ResearcherCase):
         self.assertEqual(len(self.store.runs(self.fam["id"], window="train", limit=50)), 1)
         self.assertEqual(idle_evaluations(fam), 1)
         self.assertEqual(idle_dead(fam, self.settings),
-                         "made no new Gym evaluation in its last 12 cycles (only stored results and holds)")
+                         "made no new Gym evaluation in its last 12 cycles (only stored results, holds and refused runs)")
         self.assertTrue(self.researcher().can_retire(fam))
         # A researcher that never calls retire: the tournament's fallback retires it by the same rule.
         [row] = Tournament(self.store, self.pool, self.settings).retirements(self.store.families(alive=True))
         self.assertEqual(row["family"], self.fam["id"])
-        self.assertEqual(row["why"], f"It made no new Gym evaluation in its last 12 cycles (only stored results and holds). "
-                                     f"{IDLE_CAUSE}", "the idle rule's wording")
+        self.assertEqual(row["why"], "It made no new Gym evaluation in its last 12 cycles (only stored results, holds and "
+                                     f"refused runs). {IDLE_CAUSE}", "the idle rule's wording")
         self.assertEqual(self.store.family(self.fam["id"])["band"], "retired")
         self.assertEqual(self.cancelled, [self.fam["id"]])
         [lesson] = self.store.graveyard()

@@ -542,6 +542,9 @@ class Gate:
         if record["negative"] and fam["band"] == "candidate":
             if self.store.set_band(fid, "gym", reason=f"its forward record turned negative over {record['trades']} trades") is None:
                 return None
+            # Back in the Gym, its dormancy clause starts afresh (`researcher.dormant_count`): holding while its forward
+            # record was measured was honest, and must not count against it now.
+            self.store.set_state(fid, dormant_cycles=0)
             if state.get("banded_sha"):
                 version = self.store.version(fid, n)
                 if version is not None:

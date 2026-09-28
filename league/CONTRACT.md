@@ -253,10 +253,11 @@ Retirement is final for that family; its program history, trial count and holdou
   revision. It is also no run for the cycle: your REVISE turn goes on, so change something (the
   program, its params, a sweep) or hold. A run that failed (an error, no data) runs again.
 - `gym_run(hold=true, note?)`: an honest skip when you have nothing new to run, in place of a placeholder
-  run: no code and no params, no Gym job, no trial; your note (why you hold) goes to your notebook and the
-  cycle ends. Holding while your submitted best waits for its validation is fine. But a family whose
-  cycles only hold or get stored results, many cycles in a row, is dead under the idle rule (below), so
-  hold only when you truly have nothing new.
+  run: no Gym job, no trial (code or params passed with it are ignored); your note (why you hold) goes to
+  your notebook and the cycle ends: a run asked for after it in the same answer is refused. Holding while
+  your submitted best waits for its validation is fine. But a family whose cycles only hold, get stored
+  results or have their runs refused, many cycles in a row, is dead under the idle rule (below), so hold
+  only when you truly have nothing new.
 - `gym_sweep(code?, params?, variants, why?, note?)`: run from 2 variants of ONE program on Train (up to
   the limit the tool states) at once, in place of the cycle's gym_run (`code` omitted: your latest
   version's code). Each variant is an object of PARAMS overrides on top of `params` (keys in PARAMS,
@@ -280,9 +281,10 @@ Retirement is final for that family; its program history, trial count and holdou
   turns only while the population is above its start and your family has had at least two validations,
   or once your family has spent many Gym evaluations since its birth or last validation without an
   eligible Train version (or far more with a best Train score below zero), or has gone many cycles in a
-  row with no new Gym evaluation (only stored results and holds) while no best of it awaits validation:
-  a dead mechanism frees its slot for a new idea. Your status counts those cycles; a new evaluation or a
-  validation starts the count again.
+  row with no new Gym evaluation (only stored results, holds and refused runs) while no best of it awaits
+  validation: a dead mechanism frees its slot for a new idea. Your status counts those cycles; a new
+  evaluation (counted as soon as it lands) or a validation starts the count again, and a cycle whose new
+  run the Gym could not make leaves it.
   A retirement stops further research while preserving the evidence and lessons.
 
 ## How to work

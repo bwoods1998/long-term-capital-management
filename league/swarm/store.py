@@ -439,8 +439,10 @@ class SwarmStore:
     def hold_gate(self, fid: str, hold: bool = True, *, reason: str = "") -> bool:
         """THE OPERATOR'S GATE HOLD: while a family's state has `gate_hold` true the gate (`gate.Gate.run`) looks at nothing
         of it (no review, audit or holdout look), and leaves its `gate_ready` as it is, so it is looked at once the hold is
-        cleared (`hold=False`). One private `swarm.gate` event says who held or released it and why. False when there is no
-        such family. The operator's call on the box (a second connection is safe):
+        cleared (`hold=False`). While it is held with `gate_ready` no rule retires it (`retire_gym` refuses: the researcher's,
+        the tournament's and the diagnostician's); its clocks keep running, so a family past a retirement rule may retire
+        at the first round after the hold is cleared, before the gate looks. One private `swarm.gate` event says who held or
+        released it and why. False when there is no such family. The operator's call on the box (a second connection is safe):
         `python -m league.swarm hold-gate --family <id> [--clear] [--reason ...]`."""
         with self.atomic():
             if self.family(fid) is None:
@@ -491,6 +493,13 @@ class SwarmStore:
                 return {"status": "retired", "already_retired": True}
             if fam["band"] != "gym":
                 return {"status": "refused", "reason": "only a Gym family can retire through research"}
+            held = fam.get("state") or {}
+            if held.get("gate_hold") and held.get("gate_ready"):
+                # THE OPERATOR'S GATE HOLD (`hold_gate`): the look the operator is holding must still happen, so no rule
+                # (the researcher's, the tournament's or the diagnostician's) retires the family until the hold is cleared.
+                return {"status": "refused", "deferred": "gate_hold",
+                        "reason": "the operator holds this family's validated version at the gate; it retires only once the "
+                                  "hold is cleared"}
             alive = self._one("SELECT COUNT(*) AS n FROM families WHERE retired_at IS NULL")["n"]
             if int(alive) <= max(0, int(floor)):
                 return {"status": "refused", "deferred": "population_floor",
@@ -734,8 +743,9 @@ class SwarmStore:
         counted: every evaluation the Gym makes is a trial. `prune=False` (a sweep's variants) leaves the pruning of full
         Train results to the caller (`prune_runs(keep=...)` once the sweep is recorded). `key` is the researcher's
         evaluation key (`researcher.Researcher.eval_key`), kept in the row's summary as `eval_key` so the same evaluation
-        asked again is answered from the store (`evaluated`); a row recorded before keys existed takes it on its next
-        identical evaluation."""
+        asked again is answered from the store (`evaluated`), with the result's `fill_model` beside it (a stored result on
+        another fill model is not reused); a row recorded before keys existed takes both on its next identical evaluation,
+        and its Train score and eligibility when it had none."""
         run_id = str(result.get("run_id") or code_sha(dumps(result))[:24])
         trials = int(result.get("trials", 0) or 0)
         status = str(result.get("status") or "unknown")
@@ -744,6 +754,8 @@ class SwarmStore:
             summary = {"reason": result.get("reason")}
         if key:
             summary["eval_key"] = str(key)
+            if result.get("fill_model"):
+                summary["fill_model"] = str(result["fill_model"])
         with self._lock:
             mine = f"{run_id}-{fid}"[:64]
             existing = self._one("SELECT * FROM runs WHERE (run_id=? OR run_id=?) AND family=?", (run_id, mine, fid))
@@ -753,8 +765,11 @@ class SwarmStore:
                                (trials, float(program_years), existing["run_id"]))
                     self.bump(fid, trials=trials, since_val_trials=trials)
                 old = loads(existing["summary"], {}) or {}
-                if key and old.get("eval_key") != str(key):
-                    self._exec("UPDATE runs SET summary=? WHERE run_id=?", (dumps({**old, "eval_key": str(key)}), existing["run_id"]))
+                if key:
+                    new = {**old, **{k: summary[k] for k in ("train_score", "train_eligible") if k in summary and k not in old},
+                           **{k: summary[k] for k in ("eval_key", "fill_model") if k in summary}}
+                    if new != old:
+                        self._exec("UPDATE runs SET summary=? WHERE run_id=?", (dumps(new), existing["run_id"]))
                 return self._one("SELECT * FROM runs WHERE run_id=?", (existing["run_id"],))  # type: ignore[return-value]
             if self._one("SELECT 1 FROM runs WHERE run_id=?", (run_id,)) is not None:
                 run_id = mine

@@ -5,7 +5,8 @@
 - `seed-check`: every founding family's starter program through the Gym's safety check and `load_program`
   (needs the Gym on this tree; numpy for `load_program`).
 - `hold-gate --family <id> [--clear] [--reason ...]`: the operator's gate hold (`SwarmStore.hold_gate`): the gate looks
-  at nothing of the family until it is cleared; its `gate_ready` is kept. Safe beside a running swarm.
+  at nothing of the family until it is cleared; its `gate_ready` is kept, and while it is, no rule retires the family
+  (`retire_exempt` in the answer). Safe beside a running swarm.
 """
 
 from __future__ import annotations
@@ -41,8 +42,11 @@ def main(argv: list[str] | None = None) -> int:
             state = (store.family(args.family) or {}).get("state") or {}
         finally:
             store.close()
+        # While held with gate_ready no rule retires it (`SwarmStore.retire_gym`); without gate_ready (nothing awaits the
+        # gate) the hold protects nothing from retirement.
         print(json.dumps({"family": args.family, "found": ok, "gate_hold": bool(state.get("gate_hold")),
-                          "gate_ready": bool(state.get("gate_ready"))}))
+                          "gate_ready": bool(state.get("gate_ready")),
+                          "retire_exempt": bool(state.get("gate_hold") and state.get("gate_ready"))}))
         return 0 if ok else 1
     if args.command == "status":
         from . import HEARTBEAT, bands

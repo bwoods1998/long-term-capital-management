@@ -14,7 +14,7 @@ from league.swarm import progress
 from league.swarm.__main__ import main as swarm_main
 from league.swarm.gate import Gate
 from league.swarm.researcher import (ALREADY_RUN, DORMANT_CYCLES, Researcher, awaiting_validation, dormant_count, dormant_limit,
-                                     holding, idle_dead)
+                                     held_at_gate, holding, idle_dead)
 from league.swarm.store import dumps
 from league.swarm.tournament import IDLE_CAUSE, Tournament
 from league.tests.swarm_fakes import result
@@ -23,7 +23,7 @@ from league.tests.test_swarm_researcher import ResearcherCase, calls_in
 from league.tests.test_swarm_rounds import RoundCase, weak
 from league.tests.test_swarm_sweep import SweepCase, scored
 
-DEAD = "made no new Gym evaluation in its last {n} cycles (only stored results and holds)"
+DEAD = "made no new Gym evaluation in its last {n} cycles (only stored results, holds and refused runs)"
 
 
 class DedupeCase(ResearcherCase):
@@ -157,6 +157,85 @@ class StoredResults(DedupeCase):
         self.assertTrue(out["improved"])
         self.assertEqual(len(self.pool.jobs), 2)
 
+    def test_a_late_result_is_scored_from_its_row_once_its_full_result_is_pruned(self):
+        """The review of R3: a late result was recorded without its Train score, so once pruned it was never scored and
+        dedupe forbade running it again. Its row now keeps the score, as a run's does."""
+        self.pool.answer = scored  # vrp_min 1.4 scores 3.0; the starter's default scores 2.0
+        self.first()
+        self.pool.fail = "late"
+        self.run_({"params": {"vrp_min": 1.4}})
+        late, landed = self.pool.late
+        self.pool.fail = None
+        late(landed)
+        [row] = [r for r in self.store.runs(self.fid, window="train") if r["version"] == 2]
+        self.assertEqual((row["summary"]["train_score"], row["summary"]["train_eligible"]), (3.0, True))
+        for i in range(8):  # newer runs prune its full result (the newest six and the best are kept)
+            self.run_({"params": {"vrp_min": 1.0 + i / 100}})
+        self.assertIsNone(self.store.run_result(row["run_id"]), "pruned")
+        self.assertEqual(self.store.family(self.fid)["best_train"], 2.0)
+        jobs = len(self.pool.jobs)
+        view, out = self.run_({"params": {"vrp_min": 1.4}})
+        self.assertEqual((view["already_run"], view["new_best_train_score"], len(self.pool.jobs)), (ALREADY_RUN, 3.0, jobs))
+        self.assertEqual(self.store.family(self.fid)["best_train"], 3.0)
+        self.assertTrue(out["improved"])
+
+    def test_a_stored_row_that_can_no_longer_be_scored_runs_again(self):
+        self.first()
+        self.run_({"params": {"vrp_min": 1.3}})
+        [row] = [r for r in self.store.runs(self.fid, window="train") if r["version"] == 2]
+        summary = {k: v for k, v in row["summary"].items() if k not in ("train_score", "train_eligible")}
+        self.store._exec("UPDATE runs SET summary=?, path=NULL WHERE run_id=?", (dumps(summary), row["run_id"]))
+        view, _ = self.run_({"params": {"vrp_min": 1.3}})
+        self.assertNotIn("already_run", view, "neither its full result nor a score: it runs again")
+        self.assertEqual(len(self.pool.jobs), 3)
+        self.assertEqual(self.run_({"params": {"vrp_min": 1.3}})[0]["already_run"], ALREADY_RUN)
+
+    def test_a_row_recorded_before_keys_takes_its_score_too(self):
+        self.pool.answer = lambda job: {**result(job.name, roots=job.roots), "run_id": "legacy-placeholder"}
+        self.first()
+        row = self.store.run("legacy-placeholder")
+        summary = {k: v for k, v in row["summary"].items() if k not in ("eval_key", "train_score", "train_eligible")}
+        self.store._exec("UPDATE runs SET summary=? WHERE run_id=?", (dumps(summary), "legacy-placeholder"))
+        self.run_({})
+        summary = self.store.run("legacy-placeholder")["summary"]
+        self.assertTrue({"eval_key", "train_score", "train_eligible"} <= set(summary))
+
+    def test_a_stored_result_on_another_fill_model_runs_again(self):
+        """A calibration changed on a box in place (no new image): once a result on the new fill model lands, a stored
+        result on the old one is not reused."""
+        fill = {"model": "fill-one"}
+        self.pool.answer = lambda job: {**result(job.name, roots=job.roots), "fill_model": fill["model"]}
+        self.first()
+        me = self.researcher()
+        self.assertEqual(self.store.runs(self.fid, window="train")[0]["summary"]["fill_model"], "fill-one")
+        self.assertEqual(self.run_({}, me)[0]["already_run"], ALREADY_RUN, "no newer fill model seen yet")
+        fill["model"] = "fill-two"
+        self.assertNotIn("already_run", self.run_({"params": {"vrp_min": 1.3}}, me)[0])
+        self.assertNotIn("already_run", self.run_({}, me)[0], "stored on the old fill model: runs again")
+        self.assertEqual(self.run_({}, me)[0]["already_run"], ALREADY_RUN)
+        self.assertEqual(len(self.pool.jobs), 3)
+
+    def test_the_key_sorts_the_roots_as_the_gym_does(self):
+        me = self.researcher()
+
+        def key(roots):
+            return me.eval_key(self.code, {}, stress=1.0, window="train", roots=roots)
+
+        self.assertEqual(key(["QQQ", "SPY"]), key(["spy", "QQQ"]))
+        self.assertNotEqual(key(["SPY"]), key(["SPY", "QQQ"]))
+
+    def test_a_run_landing_late_restarts_the_dormant_count(self):
+        self.first()
+        self.store.set_state(self.fid, dormant_cycles=5)
+        self.pool.fail = "late"
+        view, out = self.run_({"params": {"vrp_min": 1.3}})
+        self.assertEqual((view["status"], out["gym_asked"]), ("gym_error", True))
+        self.assertEqual(dormant_count(self.store.family(self.fid)), 5)
+        late, landed = self.pool.late
+        late(landed)
+        fam = self.store.family(self.fid)
+        self.assertEqual((fam["trials"], dormant_count(fam)), (2, 0), "a new evaluation of its own, landed late")
+
     def test_in_a_cycle_a_stored_result_keeps_the_revise_turn_and_a_new_run_may_follow(self):
         self.first()
         self.steps = [{"calls": [("gym_run", {"params": {}})]},
@@ -258,15 +337,43 @@ class Holds(DedupeCase):
         event = [e for e in self.store.events_after(0) if e["kind"] == "swarm.cycle"][-1]["payload"]
         self.assertTrue(event["hold"])
 
-    def test_a_hold_with_code_or_params_is_refused(self):
+    def test_a_hold_with_code_or_params_is_still_a_hold(self):
+        """A model passing its current program beside hold=true is a plausible mistake: it holds (the dormancy clause counts
+        it), never a refusal that would leave both idle clauses still."""
         self.first()
-        notes = len(self.store.notebook(self.fid))
-        for args in ({"hold": True, "params": {"vrp_min": 1.3}}, {"hold": True, "code": self.code}):
+        before, notes = self.counts(), len(self.store.notebook(self.fid))
+        for args, ignored in (({"hold": True, "params": {"vrp_min": 1.3}, "note": "Nothing new."}, "params"),
+                              ({"hold": True, "code": self.code, "note": "Nothing new."}, "code"),
+                              ({"hold": True, "code": self.code, "params": {"vrp_min": 1.3}}, "code and params")):
             view, out = self.run_(args)
-            self.assertEqual(view["status"], "refused")
-            self.assertIn("hold takes no code and no params", view["reason"])
-            self.assertNotIn("hold", out)
-        self.assertEqual((len(self.pool.jobs), len(self.store.notebook(self.fid))), (1, notes))
+            self.assertEqual(view["status"], "held")
+            self.assertIn(f"its {ignored} were ignored", view["ignored"])
+            self.assertTrue(out["hold"])
+            self.assertNotIn("run_refused", out)
+        self.assertEqual((len(self.pool.jobs), len(self.store.notebook(self.fid))), (1, notes + 3))
+        self.assertEqual(self.counts(), before, "no trial, no revision, no version")
+
+    def test_a_run_after_a_hold_in_the_same_answer_is_refused(self):
+        self.first()
+        self.steps = [{"calls": [("gym_run", {"hold": True, "note": "Nothing new."}), ("gym_run", {"params": {"vrp_min": 1.3}}),
+                                 ("gym_sweep", {"variants": [{"vrp_min": 1.3}, {"vrp_min": 1.4}]})]}, {"text": "never asked"}]
+        out = self.researcher().cycle(self.fid)
+        self.assertEqual((out["hold"], out.get("trials", 0), len(self.pool.jobs), out["pending_run"], out["model_calls"]),
+                         (True, 0, 1, False, 1), "a hold ends the cycle: nothing runs or is queued after it")
+        outputs = [json.loads(i["output"]) for i in self.store.convo(self.fid)[0][-1]["items"] if i.get("type") == "function_call_output"]
+        self.assertEqual([o["status"] for o in outputs], ["held", "refused", "refused"])
+        self.assertIn("after a hold", outputs[1]["reason"])
+        self.assertEqual(out["dormant_cycles"], 1)
+
+    def test_only_the_public_note_reaches_the_notebook_and_the_tape(self):
+        self.first()
+        view, out = self.run_({"hold": True, "why": "the private reason, never published"})
+        self.assertEqual(view["status"], "held")
+        self.assertEqual(self.store.notebook(self.fid)[-1]["text"], "Held a cycle (no run): nothing new to run")
+        self.assertNotIn("note", out, "`why` is not marked PUBLIC: it never reaches the cycle's note")
+        view, out = self.run_({"hold": True, "why": "private", "note": "Waiting on the breakdowns."})
+        self.assertEqual((out["note"], self.store.notebook(self.fid)[-1]["text"]),
+                         ("Waiting on the breakdowns.", "Held a cycle (no run): Waiting on the breakdowns."))
 
     def test_a_hold_on_the_read_turn_is_never_queued(self):
         self.first()
@@ -285,8 +392,8 @@ class Holds(DedupeCase):
 
 
 class Dormancy(DedupeCase):
-    """THE IDLE RULE's dormancy clause: `dormant_cycles` cycles in a row with only stored results and holds make a family
-    dead (the same floor, gate exemption and graveyard wording as the evaluation clause of #395)."""
+    """THE IDLE RULE's dormancy clause: `dormant_cycles` cycles in a row with only stored results, holds and refused runs
+    make a family dead (the same floor, gate exemption and graveyard wording as the evaluation clause of #395)."""
 
     def setUp(self):
         super().setUp()
@@ -321,7 +428,7 @@ class Dormancy(DedupeCase):
         self.assertTrue(self.researcher().can_retire(fam), "a dead family may retire at the start")
         status = self.researcher().status(fam)
         self.assertIn(f"Your family {DEAD.format(n=40)}", status)
-        self.assertIn("Cycles in a row without a new Gym evaluation (only stored results and holds): 40.", status)
+        self.assertIn("Cycles in a row without a new Gym evaluation (only stored results, holds and refused runs): 40.", status)
         # A researcher that never calls retire: the tournament's fallback retires it with the idle rule's wording.
         [row] = Tournament(self.store, self.pool, self.settings).retirements(self.store.families(alive=True))
         self.assertEqual(row["why"], f"It {DEAD.format(n=40)}. {IDLE_CAUSE}")
@@ -405,6 +512,21 @@ class DormancyAndValidation(RoundCase):
         self.assertEqual(dormant_count(self.store.family("a")), 7)
 
 
+    def test_a_candidate_sent_back_to_the_gym_starts_its_dormant_count_afresh(self):
+        self.family("a")
+        Tournament(self.store, self.pool, self.settings).validate(self.store.families(alive=True))
+        self.replies = [{"text": json.dumps({"verdict": "pass", "reasons": []})}] * 2
+        Gate(self.store, self.pool, self.router, self.settings).run()
+        self.assertEqual(self.store.family("a")["band"], "candidate")
+        self.store.set_state("a", dormant_cycles=45)
+        self.store.add_forward("a", "shadow", [{"id": f"t{i}", "day": f"d{i:02d}", "pnl": -5.0, "max_loss": 60.0}
+                                               for i in range(25)], version=1)
+        self.assertEqual(Gate(self.store, self.pool, self.router, self.settings).judge_forward("a"), {"family": "a", "to": "gym"})
+        fam = self.store.family("a")
+        self.assertEqual((fam["band"], dormant_count(fam)), ("gym", 0))
+        self.assertIsNone(idle_dead(fam, self.settings))
+
+
 class GateHold(RoundCase):
     def ready(self, fid="a"):
         self.family(fid)
@@ -447,6 +569,40 @@ class GateHold(RoundCase):
         self.assertEqual(self.store.family("a")["band"], "candidate")
         self.assertNotIn("held by the operator", me.status(self.store.family("a")))
 
+    def test_a_held_family_awaiting_the_gate_is_retired_by_no_rule(self):
+        """The review of R3: the hold spared a held family only the idle rule; the tournament's revision rule, its own
+        researcher and the diagnostician could still retire it, and its held look would never happen."""
+        self.ready()
+        for fid in ("b", "c"):
+            self.family(fid)
+        self.settings["population"].update(start=1, floor=0)
+        self.store.update_family("a", since_val_revisions=31, validations=2)
+        self.store.hold_gate("a", reason="the operator reads the program first")
+        self.assertTrue(held_at_gate(self.store.family("a")))
+        t = Tournament(self.store, self.pool, self.settings)
+        self.assertEqual(t.retirements(self.store.families(alive=True)), [])
+        me = Researcher(self.store, self.router, self.pool, self.settings, contract="THE CONTRACT", clock=self.clock)
+        self.assertFalse(me.can_retire(self.store.family("a")), "two validations above the start, but held")
+        refused = self.store.retire_gym("a", "the diagnostician: no capturable edge", floor=0, source="diagnostician")
+        self.assertEqual((refused["status"], refused["deferred"]), ("refused", "gate_hold"))
+        self.assertIsNone(self.store.family("a")["retired_at"])
+        self.assertTrue(self.store.family("a")["state"]["gate_ready"])
+        # Cleared, the rules apply again.
+        self.store.hold_gate("a", False)
+        self.assertTrue(me.can_retire(self.store.family("a")))
+        [row] = t.retirements(self.store.families(alive=True))
+        self.assertEqual((row["family"], row["why"]), ("a", "no validation improvement in 31 revisions"))
+
+    def test_a_hold_without_gate_ready_protects_nothing(self):
+        for fid in ("a", "b", "c"):
+            self.family(fid)
+        self.settings["population"].update(start=1, floor=0)
+        self.store.update_family("a", since_val_revisions=31)
+        self.store.hold_gate("a")
+        self.assertFalse(held_at_gate(self.store.family("a")))
+        [row] = Tournament(self.store, self.pool, self.settings).retirements(self.store.families(alive=True))
+        self.assertEqual(row["family"], "a")
+
     def test_a_hold_set_while_the_review_is_out_stops_the_next_stage(self):
         self.ready()
 
@@ -477,12 +633,13 @@ class GateHold(RoundCase):
             return code, json.loads(buf.getvalue())
 
         code, answer = cli("hold-gate", "--root", str(self.root), "--family", "a", "--reason", "reading the program")
-        self.assertEqual((code, answer), (0, {"family": "a", "found": True, "gate_hold": True, "gate_ready": True}))
+        self.assertEqual((code, answer), (0, {"family": "a", "found": True, "gate_hold": True, "gate_ready": True,
+                                              "retire_exempt": True}))
         code, status = cli("status", "--root", str(self.root))
         self.assertEqual(status["gate_held"], [{"family": "a", "gate": "held by the operator", "gate_ready": True}])
         self.assertEqual(self.gate().run()["held"], ["a"])
         code, answer = cli("hold-gate", "--root", str(self.root), "--family", "a", "--clear")
-        self.assertEqual((code, answer["gate_hold"]), (0, False))
+        self.assertEqual((code, answer["gate_hold"], answer["retire_exempt"]), (0, False, False))
         self.assertEqual(cli("status", "--root", str(self.root))[1]["gate_held"], [])
         self.assertEqual(cli("hold-gate", "--root", str(self.root), "--family", "nobody")[0], 1)
         self.assertEqual(cli("hold-gate", "--root", str(self.root))[0], 2)
@@ -499,6 +656,131 @@ class HeldProgress(ProgressCase):
         self.assertNotIn("private reason", json.dumps(value))
         self.store.hold_gate("synthetic-family", False)
         self.assertEqual(self.read()["blocked"], "holdout_pending")
+
+
+class MixedSweeps(SweepCase):
+    """The review of R3: a sweep that mixes stored variants with new ones, and none of the new ones lands, is a Gym error:
+    no run for the cycle (no READ turn), a backoff, and no dormant cycle."""
+
+    def setUp(self):
+        super().setUp()
+        self.first()
+        self.sweep([{"vrp_min": 1.3}, {"vrp_min": 1.4}])  # stored from here on
+        self.store.set_state(self.fid, dormant_cycles=3)
+
+    @staticmethod
+    def failing(why):
+        return lambda job: why if job.params.get("vrp_min") == 1.45 else None
+
+    def test_every_new_variant_failing_is_a_gym_error_whatever_the_store_read_back(self):
+        self.pool.fail = self.failing("the Gym failed twice: exec 503")
+        view, out = self.sweep([{"vrp_min": 1.3}, {"vrp_min": 1.4}, {"vrp_min": 1.45}])
+        self.assertEqual(view["status"], "gym_error")
+        self.assertIn("the Gym failed twice", view["error"])
+        self.assertIn("2 of its variants already ran", view["already_run"])
+        self.assertEqual((out.get("trials", 0), "run_id" in out, out["gym_asked"], "gym_error" in out), (0, False, True, True))
+
+    def test_in_a_cycle_it_stops_backs_off_and_leaves_the_dormant_count(self):
+        self.pool.fail = self.failing("the Gym failed twice: exec 503")
+        self.steps = [{"calls": [("gym_sweep", {"variants": [{}, {"vrp_min": 1.3}, {"vrp_min": 1.45}]})]}, {"text": "never asked"}]
+        out = self.researcher().cycle(self.fid)
+        self.assertEqual([b["tool_choice"] for b in self.sail.bodies], ["required"], "no READ turn: nothing new ran")
+        self.assertIn("gym:", out["error"], "the family backs off")
+        self.assertNotIn("run_id", out)
+        self.assertNotIn("dormant_cycles", out)
+        self.assertEqual(dormant_count(self.store.family(self.fid)), 3, "the Gym could not make what was asked")
+
+    def test_a_new_variant_landing_late_is_no_dormant_cycle_and_its_trial_restarts_the_count(self):
+        self.pool.fail = self.failing("late")
+        self.steps = [{"calls": [("gym_sweep", {"variants": [{"vrp_min": 1.3}, {"vrp_min": 1.45}]})]}]
+        out = self.researcher().cycle(self.fid)
+        self.assertIn("gym_error", out)
+        self.assertEqual(dormant_count(self.store.family(self.fid)), 3)
+        trials = self.store.family(self.fid)["trials"]
+        [(late, landed)] = self.pool.lates
+        late(landed)
+        fam = self.store.family(self.fid)
+        self.assertEqual((fam["trials"], dormant_count(fam)), (trials + 1, 0), "the late trial is a new evaluation")
+
+    def test_a_mixed_sweep_whose_new_variant_lands_is_a_run(self):
+        view, out = self.sweep([{"vrp_min": 1.3}, {"vrp_min": 1.45}])
+        self.assertEqual((view["status"], out["trials"], out["stored"]), ("ok", 1, 1))
+        self.assertIn("run_id", out)
+        self.assertEqual(dormant_count(self.store.family(self.fid)), 0, "reset as the new variant was recorded")
+
+
+class DormancyReview(DedupeCase):
+    """The review of R3's dormancy clause: counted in the Gym band only, reset as soon as a new evaluation is recorded,
+    and refusal-only cycles count."""
+
+    def setUp(self):
+        super().setUp()
+        self.settings["population"].update(start=1, floor=0)
+        self.pool.answer = lambda job: result(job.name, roots=job.roots, trades=10)  # ineligible: nothing awaits validation
+        self.pool.cancel_family = lambda fid: None
+
+    def hold(self):
+        self.steps = [{"calls": [("gym_run", {"hold": True, "note": "Nothing new."})]}]
+        return self.researcher().cycle(self.fid)
+
+    def test_a_candidate_holding_is_not_dormant_and_starts_afresh_back_in_the_gym(self):
+        self.first()
+        self.store.set_state(self.fid, dormant_cycles=10)
+        self.store.set_band(self.fid, "candidate", reason="passed its holdout look")
+        for _ in range(45):
+            out = self.hold()
+            self.assertNotIn("dormant_cycles", out)
+        self.assertEqual(dormant_count(self.store.family(self.fid)), 0, "holding while its forward record is measured")
+        self.store.set_band(self.fid, "gym", reason="its forward record turned negative")
+        fam = self.store.family(self.fid)
+        self.assertIsNone(idle_dead(fam, self.settings))
+        self.assertEqual(Tournament(self.store, self.pool, self.settings).retirements(self.store.families(alive=True)), [])
+
+    def test_a_new_evaluation_restarts_the_count_before_the_read_turn(self):
+        self.first()
+        self.store.set_state(self.fid, dormant_cycles=45)
+        self.assertTrue(self.researcher().can_retire(self.store.family(self.fid)), "dead at the cycle's start")
+        seen: dict = {}
+
+        def read(body):
+            seen.update(dormant=dormant_count(self.store.family(self.fid)), tools=[t["name"] for t in body["tools"]])
+            return {"calls": [("retire", {"reason": "the mechanism is dead"})]}
+
+        self.steps = [{"calls": [("gym_run", {"params": {"vrp_min": 1.3}})]}, read]
+        out = self.researcher().cycle(self.fid)
+        self.assertEqual(seen["dormant"], 0, "reset as the run was recorded")
+        self.assertNotIn("retire", seen["tools"], "not offered on the READ turn after a new run")
+        self.assertTrue(out["retire_refused"])
+        self.assertIsNone(self.store.family(self.fid)["retired_at"])
+
+    def test_cycles_of_refused_runs_are_dormant(self):
+        self.first()
+        broken = "import os\nNEEDS = {'roots': ['SPY']}\nPARAMS = {}\ndef decide(ctx):\n    return []\n"
+        for i in range(3):
+            self.steps = [{"calls": [("gym_run", {"code": broken})]}] * 3
+            out = self.researcher().cycle(self.fid)
+            self.assertEqual((out["run_refused"], out.get("trials", 0), out["dormant_cycles"]), (3, 0, i + 1))
+        self.steps = [{"calls": [("gym_run", {"hold": True, "code": self.code, "note": "Nothing new."})]}]
+        out = self.researcher().cycle(self.fid)
+        self.assertEqual((out["hold"], out["dormant_cycles"]), (True, 4), "a hold with code is a hold")
+        self.assertEqual(len(self.pool.jobs), 1)
+        self.store.set_state(self.fid, dormant_cycles=40)
+        self.assertEqual(idle_dead(self.store.family(self.fid), self.settings), DEAD.format(n=40))
+
+    def test_a_sweep_refused_for_room_leaves_the_count_unless_the_cycle_also_held(self):
+        self.first()
+        me = self.researcher()
+        self.assertTrue(me._reserve_sweep("another-family", me.max_sweep_jobs))
+        sweep = ("gym_sweep", {"variants": [{"vrp_min": 1.3}, {"vrp_min": 1.4}]})
+        self.steps = [{"calls": [sweep]}] * 3
+        out = me.cycle(self.fid)
+        self.assertTrue(out["sweep_busy"])
+        self.assertNotIn("run_refused", out, "the Gym's load, not the researcher's doing")
+        self.assertNotIn("dormant_cycles", out)
+        self.assertEqual(dormant_count(self.store.family(self.fid)), 0)
+        self.steps = [{"calls": [sweep]}, {"calls": [("gym_run", {"hold": True, "note": "Nothing new."})]}]
+        out = me.cycle(self.fid)
+        self.assertEqual((out["sweep_busy"], out["hold"], out["dormant_cycles"]), (True, True, 1))
 
 
 if __name__ == "__main__":
