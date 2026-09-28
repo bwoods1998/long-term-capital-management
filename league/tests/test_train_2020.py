@@ -995,13 +995,13 @@ class DriftSpanResearcher(ResearcherCase):
         verdict = drift_verdict(self.store, self.store.family(fid), v["n"], self.settings)
         self.assertEqual((verdict["known"], verdict["years"], verdict["passed"]), (True, 5, False), "2 of 5 negative: fails")
 
-    def test_the_migration_clears_the_submitted_run(self):
+    def test_the_migration_clears_the_submitted_run_and_the_old_spans_drift_marks(self):
         fid = self.fam["id"]
         self.store.put("train_objective", OBJECTIVE)
-        self.store.set_state(fid, submitted_run="run-old", submitted_note="mine")
+        self.store.set_state(fid, submitted_run="run-old", submitted_note="mine", drift_failed={"3": "t 0.4 over 2022-2024"})
         migrate_objective(self.store, settings=with_switch(ON))
         state = self.store.family(fid)["state"]
-        self.assertEqual((state.get("submitted_run"), state.get("submitted_note")), (None, None))
+        self.assertEqual((state.get("submitted_run"), state.get("submitted_note"), state.get("drift_failed")), (None, None, {}))
 
 
 # ------------------------------------------------------------------------------------------------ the verifier's pool probe

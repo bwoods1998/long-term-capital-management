@@ -2449,8 +2449,9 @@ def migrate_objective(store: SwarmStore, *, beat: Callable[[], None] | None = No
                                     stall=0)
                 # A span change restarts the idle count and the dormancy clause (`idle_evaluations`): most bests are empty now
                 # and must be earned again over the new span, which evaluations over the old one say nothing about.
-                restart = {"span_trials": int((store.family(fid) or fam).get("trials") or 0), "dormant_cycles": 0} \
-                    if since is not None else {}
+                # Its drift-screen marks were verdicts over the old span's years: the screen judges again over the new.
+                restart = {"span_trials": int((store.family(fid) or fam).get("trials") or 0), "dormant_cycles": 0,
+                           "drift_failed": {}} if since is not None else {}
                 # The submitted run is another span's too: the best (submitted or by Train score) is chosen anew from here.
                 store.set_state(fid, **{key: replaced}, objective_migrated=objective,
                                 best_train_version=int(best[1]) if best else None, best_train_run=best[2] if best else None,
@@ -2467,7 +2468,8 @@ def migrate_objective(store: SwarmStore, *, beat: Callable[[], None] | None = No
             try:
                 with store.atomic():
                     store.update_family(fid, best_train=None, best_version=None, stall=0)
-                    restart = {"span_trials": int(fam.get("trials") or 0), "dormant_cycles": 0} if since is not None else {}
+                    restart = {"span_trials": int(fam.get("trials") or 0), "dormant_cycles": 0,
+                               "drift_failed": {}} if since is not None else {}
                     store.set_state(fid, **{key: {**replaced, "error": f"{type(exc).__name__}: {str(exc)[:200]}"}},
                                     objective_migrated=objective, best_train_version=None, best_train_run=None,
                                     train_candidates=[], robust_failed=[], robustness={}, submitted_run=None,
