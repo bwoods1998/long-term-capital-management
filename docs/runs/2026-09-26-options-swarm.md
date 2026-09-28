@@ -2246,4 +2246,29 @@ looks like beta. Validation 2025 and the holdout judge both.
   - The lesson: the binding constraint is year-to-year stability, not pooled significance. Across these rows, round
     3's predecessors and about 65,000 swarm trials, nothing reaches a per-year t of 2.5 even at zero cost.
 
+
+- **22:20Z D5: the grant re-ratified at the deposited capital.**
+  - The deposit reached options buying power, $1,473.08 (it read $473.08 at 21:22Z).
+  - `live_trading.py --ratify` on the House: grant `options-swarm-20260928`, 1 ratification.
+    - Capital: $481.63 → $1,473.11, the lower of equity and the owner's $5,500 ceiling.
+    - Max agents: 4 → 14.
+    - The money digest is unchanged (`ad9bd54c`), and the grant is active.
+  - Nothing was open at the time: 0 real positions and 0 working orders.
+  - preopen: 8/9.
+    - Sizing equity is $1,473.11: a Probe cap of $73.65 (5%), the one-contract floor $100, a gateway order cap of
+      $368.27.
+    - The one fail is the Sail projection (the owner is topping up).
+
+### Sprint scoreboard, T0 + 64 h (22:20Z Sept 28)
+
+| # | Metric | Value |
+|---|---|---|
+| 1 | Population | 52 alive, 674 retired; 60 born and 54 retired in 2 h (agenda v10) |
+| 2 | Throughput | 721 cycles/h, median 52 s (tournament and research boxes share the pool); 1 provider 502, 1 missing tool call |
+| 3 | Search | 65,266 trials, 308,662 program-years. Closest in Validation 2025: `corroborated-demand-call` (single-name long call) at 6/8, failing the deflated Sharpe and t. Round 3 (six single-name convexity and volatility mechanisms) and the replicator book are running on sealed Train-only boxes |
+| 4 | Evidence | Validation passes alive 0; holdout looks 2, passes 0 |
+| 5 | Real fills (D3) | none since the close |
+| 6 | Money | Equity $1,473.11; options buying power $1,473.08; grant capital $1,473.11 (re-ratified 22:20Z); 0 positions, 0 orders |
+| 7 | Compute | Sail $68.73 (the guard's burn is $75/day; the owner is topping up). Claude $71.05 of $100. OpenAI $641.99 + $11.40 in flight of $707. The swarm spent $14.66 in 2 h |
+
 ## Report
