@@ -187,6 +187,18 @@ class Gates(LiveCase):
         self.assertEqual(self.venue.sent, [])
         self.assertIn("grant", " ".join(p["why"] for p, a in self.ledger.of("live.refusal")))
 
+    def test_the_funding_read_names_only_types_the_venue_accepts_and_the_stops_settle(self):
+        # Sept 28, 2026: the query named WIRE, Alpaca refused it (HTTP 422), the funding history was never read, and
+        # the stops stayed provisional, blocking every real entry, the owner's deposit unexplained. The fake venue now
+        # refuses WIRE as the real one does.
+        live = self.make([])
+        self.run_to(9, 45)
+        self.assertIsNotNone(live.flows, "the funding history was read")
+        self.assertEqual([t for lvl, t in self.alerts if "funding could not be read" in t], [])
+        self.assertEqual(live.stops.provisional, "")
+        self.assertIsNone(live.stops.blocked())
+        self.assertEqual(live.flows.rows[-1][1], D("5000"))
+
     def test_the_kill_switch_stops_entries_and_exits(self):
         live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 2})])
         self.run_to(9, 31)

@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 
 from league.gym import greeks as G
-from league.live.venue import Rate, Submitted, occ_parts, occ_symbol
+from league.live.venue import Rate, Submitted, VenueError, occ_parts, occ_symbol
 from ltcm.data import TransportError
 
 NY = ZoneInfo("America/New_York")
@@ -199,7 +199,14 @@ class Venue:
                 return self._public(o)
         return None
 
+    #: Types Alpaca's `GET /v2/account/activities?activity_types=` refuses with HTTP 422 "invalid activity type" (the
+    #: real account, Sept 28, 2026: WIRE). A filter naming one fails the whole read, as on the venue.
+    REFUSED_ACTIVITY_TYPES = frozenset({"WIRE"})
+
     def activities(self, types, *, after=None) -> list[dict]:
+        refused = sorted(set(types) & self.REFUSED_ACTIVITY_TYPES)
+        if refused:
+            raise VenueError(f"{self.venue} activities: HTTP 422 invalid activity type: {refused[0]}")
         return [dict(r) for r in self.activity_rows if r["activity_type"] in set(types)]
 
     # ---------------------------------------------------------------- writes
