@@ -27,7 +27,7 @@ if HAVE:
 
 #: The stand-in: a program of the frozen one's shape (NEEDS, PARAMS, STATE, decide) that opens `opens` $1-wide SPY call
 #: verticals from minute `at`, `step` strikes apart, asking for `qty`, and closes each after `hold` minutes. Its notes
-#: carry signal-like words that must never reach a public row.
+#: say "private": they must never reach a public row.
 STAND_IN = '''
 NEEDS = {"roots": ["SPY"], "dte": [0, 3], "band": 0.03, "cadence": 1, "history": 0, "start": 571, "end": 958}
 PARAMS = {"at": 571, "opens": 1, "qty": 3, "hold": 3, "limit": "natural", "atm": 0, "width": 1.0, "step": 2, "tif": 30}
@@ -38,12 +38,12 @@ def decide(ctx):
     out = []
     for pos in ctx.positions:
         if pos["held_minutes"] >= p["hold"]:
-            out.append({"close": pos["id"], "limit": "natural", "note": "time exit z5 -2.31"})
+            out.append({"close": pos["id"], "limit": "natural", "note": "private close note sig -2.31"})
     if STATE["opened"] < p["opens"] and ctx.minute >= p["at"] and not ctx.orders:
         k = p["atm"] + p["step"] * STATE["opened"]
         STATE["opened"] += 1
         out.append({"open": "debit_vertical", "root": "SPY", "qty": p["qty"], "limit": p["limit"], "tif": p["tif"],
-                    "tag": "rebound_up", "note": "streak 3 z5 -2.31 trend 0.0123 dte 1",
+                    "tag": "stand_in_tag", "note": "private open note sig -2.31",
                     "legs": [{"side": "long", "right": "C", "dte": 1, "atm": k},
                              {"side": "short", "right": "C", "rel": 0, "offset": p["width"]}]})
     return out
@@ -202,7 +202,7 @@ class TheRoute(HouseCase):
         fills = self.ledger.of("book.fill")
         self.assertEqual([(p["side"], p.get("reason"), p.get("entry_reason")) for p, _ in fills],
                          [("buy", HT.OPEN_WHY, None), ("sell", "program", HT.OPEN_WHY)])
-        self.assertNotIn("z5", json.dumps([row[1] for row in self.ledger.rows], default=str))
+        self.assertNotIn("note sig", json.dumps([row[1] for row in self.ledger.rows], default=str))
         # Never evidence: no forward row, marked exported.
         [trade] = live.book.closed_trades()
         self.assertEqual(self.families.forward, {})
@@ -210,9 +210,9 @@ class TheRoute(HouseCase):
         # Its own private record: each leg's NBBO in the snapshot, the mid and natural, the program's rule, tag and note.
         rows = self.samples()
         self.assertEqual([(r["action"], r["offset"], r["outcome"], r["tag"]) for r in rows],
-                         [("open", "natural", "filled", "rebound_up"), ("close", "natural", "filled", "")])
-        self.assertIn("z5", rows[0]["note"])
-        self.assertIn("z5", rows[1]["note"])
+                         [("open", "natural", "filled", "stand_in_tag"), ("close", "natural", "filled", "")])
+        self.assertIn("private open note", rows[0]["note"])
+        self.assertIn("private close note", rows[1]["note"])
         quote = json.loads(rows[0]["quote"])
         self.assertEqual(len(quote["legs"]), 2)
         self.assertTrue(all(leg["bid"] is not None and leg["ask"] is not None for leg in quote["legs"]))
