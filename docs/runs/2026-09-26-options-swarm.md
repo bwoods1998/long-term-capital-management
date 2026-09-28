@@ -1579,4 +1579,16 @@ looks like beta. Validation 2025 and the holdout judge both.
 | 6 | Money | equity $1,481.63; options buying power $481.60; 0 orders |
 | 7 | Compute | Sail $125.39 (about $5.1/h; the $32 line around Monday 19:45Z without a top-up). Claude $36.98 of $100. OpenAI $614.37 + $9.36 inflight of $707 |
 
+### Sprint scoreboard, T0 + 45 h (03:30Z Sept 28, after R3)
+
+| # | Metric | Value |
+|---|---|---|
+| 1 | Population | 12 alive at 03:30Z. 70 retired in 2 h: 60 by the operator (researchers that had declared their own mechanism refuted and held 20-135 cycles), 10 by the tournament. `population.floor` 12. The architect (GPT-6 Astra) refills every 20 min, 12 a pass, toward 72: 3 born 03:06Z, 12 born 03:30Z, all two-sided under agenda v4 |
+| 2 | Throughput | 3,000 cycles/h, mostly holds before the retirements, median 2.8 s; 0 cycle errors; pool 1 busy, 9 ready |
+| 3 | Search | 57,318 trials, 211,123 program-years. The swarm's own verdict after about 57,000 trials: no family survives at the Gym's costs. Closest now 3 of 8 checks |
+| 4 | Evidence | Validation passes alive 0; holdout looks 2, passes 0. The low-close lineage is held at the gate |
+| 5 | Readiness | R3 live. Being built or reviewed for R4: the drift screen (#398, second review), hold backoff with dead families able to exit, the Gym daily-GC memory fix, and the fill-model audit (does the adverse-selection rule double-count against patient orders?). #399 (Train 2020) is being fixed after its review; it merges after the close |
+| 6 | Money | equity $1,481.63; options buying power $481.60; 0 orders |
+| 7 | Compute | Sail $116.11 (about $4.6/h; the $32 line around 21:50Z without a top-up). Claude $39.59 of $100. OpenAI $615.00 + $9.36 in flight of $707 |
+
 ## Report
