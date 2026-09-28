@@ -2271,4 +2271,27 @@ looks like beta. Validation 2025 and the holdout judge both.
 | 6 | Money | Equity $1,473.11; options buying power $1,473.08; grant capital $1,473.11 (re-ratified 22:20Z); 0 positions, 0 orders |
 | 7 | Compute | Sail $68.73 (the guard's burn is $75/day; the owner is topping up). Claude $71.05 of $100. OpenAI $641.99 + $11.40 in flight of $707. The swarm spent $14.66 in 2 h |
 
+
+- **21:00-22:45Z Tournament round 3 (single-name convexity and volatility, trend in cheap convexity): 0 of 6 pass.**
+  - Each mechanism was pre-registered with its kill tests and cost hurdle before any run (proposals sha256
+    `72f4a673…`). All ran on sealed 2020-24 boxes, Train 2022-24, and every box was terminated.
+  - The six:
+    - bellwether earnings-print variance spilling to peers;
+    - persistence of unresolved-print variance;
+    - trend held in cheap-strike convexity;
+    - an idiosyncratic-variance discount;
+    - lottery-demand cheap puts;
+    - displayed-depth informed demand.
+  - All six failed K0, the ceiling at the mid. Worst-year mid t per mechanism: 0.65, -0.18, -0.83, -0.28, -1.46,
+    -0.79. Only the bellwether spillover's mid edge beat the cost gap (1.59x), and all of that edge was 2024.
+  - All six were lottery-shaped even at zero cost: each year went negative after dropping its five best trades,
+    which D2's deflated Sharpe refuses.
+  - Event mechanisms produce only 10-35 structures a year under the $95 cap. By 2024 the cap makes most names
+    unaffordable (AMD, TSM, MU and GOOGL fit in only 4-22% of sessions).
+  - The judge's binding conclusions:
+    - single-name long premium inside the envelope is refuted as a class;
+    - no round 4 in single names or daily index direction;
+    - the best remaining move is the book of the replicated mechanisms, at about 3-5% to pass Validation and about
+      2% to pass Validation and the holdout.
+
 ## Report
