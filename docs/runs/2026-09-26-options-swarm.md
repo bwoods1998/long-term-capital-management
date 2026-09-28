@@ -1930,6 +1930,31 @@ looks like beta. Validation 2025 and the holdout judge both.
     dependence. That is the effect the pre-registration anticipated. The bridge was accepted with that evidence
     recorded, and the screen started at about 11:52Z.
 
+- **11:52-12:02Z THE PRE-REGISTERED 2020-21 REPLICATION SCREEN: decision STOP.**
+  - Inputs: the 2020-24 image `sbcp_13c5a61d`, the released bundle, split 16, the pre-registration `316fca9c…` and
+    the addendum `1a95ab2e…`. 150 of 150 runs were counted: 0 failed, 0 infrastructure reruns, 0 undefined t.
+  - **7 components replicated**, passing all six tests on 2020-21 entries: window t at least 1.0, positive at 1.5x,
+    each year t above -0.5, beats its placebo in 2020 and 2021, positive with March 2020 removed, natural twin run:
+    - R (index reversal, liquidity provision), 6 of 25:
+      - `sweep-rebound-bm-long-call-p2` (t 1.98);
+      - the rebound sweep finalists `rebound_patient_broad_p1#8` (1.85), `rebound_patient_broad_p2#8` (1.61),
+        `rebound_exec_p1#14` (1.60) and `rebound_exec_p2#14` (1.59);
+      - `index-laggard-catchup-call` (1.25).
+    - T (trend), 1 of 6: `sweep-bm-trend-long-option-on-spxw-3` (1.62).
+  - **No replicator in any other class:** E 0/2, O 0/1, M 0/1, C 0/1, L 0/1, F 0/1.
+  - Inventory mean t is 0.19 (noise predicted about -0.4); the mean of the class means is -0.38.
+  - **Decision: STOP.** The rule needs at least 6 replicators across at least 3 mechanism classes; these span two. No
+    book is built, and nothing from this screen goes to Validation.
+    - Before the run, the alignment step flagged slot 13's class tag as doubtful (relative momentum tagged R).
+      Re-tagging it after seeing results would flip the decision, and the frozen tag stands.
+  - **What it means.**
+    - The index liquidity-provision rebound is real: several independent implementations replicate on unseen years,
+      beat their placebos in both years, and survive removing the March 2020 crash.
+    - Its strength, a window t of about 1.6-2.0 over two years (roughly 1.1-1.4 a year), is well below what D2 needs
+      for good odds: a per-year t near 2.5-3 in 2025 alone.
+    - That is consistent with its 2025 validation t of 0.19, one draw from a modest true edge.
+    - Everything outside the rebound (and one trend variant) was selection noise.
+
 ### Sprint scoreboard, T0 + 53 h (11:30Z Sept 28)
 
 | # | Metric | Value |
