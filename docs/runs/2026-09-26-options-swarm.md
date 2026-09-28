@@ -2113,6 +2113,17 @@ looks like beta. Validation 2025 and the holdout judge both.
   - Agenda v9 (live): daily index direction is refuted as a class, and idiosyncratic single-name drivers with large
     per-trade moves are the priority.
 
+- **18:35-18:50Z Order-flow screen (new information the programs never had): NOT.**
+  - Pre-registered at 18:40:10Z (PREREG sha256 `350fe16c…`) before any flow feature was computed.
+  - Signed option volume (buyer versus seller initiated, from the Gym's trade-print samples: 151 days per root,
+    2022-24, 0-7 DTE, 20 strikes an expiry) against next-day and next-5-day returns. Controls: same-day return,
+    5-day drift, absolute return, plus a within-year shuffle placebo.
+  - 24 tests. The largest incremental t was 1.11 (ETF family) and 1.10 (S&P family) against a bar of 2 with the same
+    sign every year; the smallest placebo p was 0.28.
+  - A signal of the size D2 needs would have shown here. Smaller, literature-sized index effects remain possible but
+    could not carry a family through D2.
+  - One sealed box, terminated.
+
 ### Sprint scoreboard, T0 + 59 h (17:31Z Sept 28, in session)
 
 | # | Metric | Value |
