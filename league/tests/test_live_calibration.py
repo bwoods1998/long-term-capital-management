@@ -242,8 +242,8 @@ class Backstop(CalibrationCase):
 
 
 class TheReview(CalibrationCase):
-    """The review of #390: the closes are budgeted and capped, calibration yields to the families, and it is never
-    Profit (a cost instead)."""
+    """The review of #390: the closes are budgeted and capped, calibration yields to the families, and it is never a
+    compute line (since Sept 28, 2026 it is in Profit, as the House's own rows of the positions table)."""
 
     def closes_do(self, **mode):
         """The open fills at its limit; every close then meets the venue as `mode` says."""

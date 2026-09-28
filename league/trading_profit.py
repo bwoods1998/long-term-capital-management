@@ -26,8 +26,8 @@ The D3 calibration round trips (`league/live/calibration.py`, family `house:cali
 2026: they are real money on the owner's account, and the positions table has to add up to the headline. They are
 labelled "House calibration" (a row's `source`), never an agent's. They stay what they were everywhere else: never an
 agent's structure on the site, never a forward record, never a compute line (`league/live/step.py`). The docstring of
-`league/live/calibration.py` and a comment in `league/live/step.py` still say Profit leaves them out: `league/live/` is
-`league/ci.py`'s FORBIDDEN, so even a comment there makes a release the owner's deploy, and they wait for one.
+`league/live/calibration.py` and the comment in `league/live/step.py` say so too (a comment-only change there: a file
+of `league/ci.py`'s FORBIDDEN, so it ships with the owner's deploy).
 
 No field published here is a price: a row carries what the position is (root, structure kind, right, legs, quantity,
 expiry, times to the minute) and its dollar P&L, never a strike, a fill price, a mark or a leg's code. An open row's

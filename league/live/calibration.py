@@ -72,10 +72,12 @@ comments). Since #381 the bound the code enforces is $50 of net possible loss (r
 IWM and the six slots' larger volume (about $430-540 of maximum loss dispatched on a heavy day, against about $270
 before) are an operator decision inside that bound (Sept 28, 2026). The money table and its digest are unchanged.
 
-NEVER EVIDENCE, NEVER PROFIT: the orders and positions belong to `FAMILY` ("house:calibration", never a swarm family's
-slug), whose closed trades never reach a forward record (`OptionsLive._export_real`), whose structures the site never
-shows, which Profit leaves out (`league/trading_profit.py`; the equity-based figure after compute carries their result
-already), and whose positions the House takes for an orphan's only in the session's last minutes.
+NEVER EVIDENCE, THE HOUSE'S OWN PROFIT: the orders and positions belong to `FAMILY` ("house:calibration", never a swarm
+family's slug), whose closed trades never reach a forward record (`OptionsLive._export_real`), whose structures the site
+never shows as an agent's, which Profit counts since Sept 28, 2026 as the positions table's "House calibration" rows
+(`league/trading_profit.py`: real money on the owner's account, and the table adds up to Profit) and never as a compute
+line (the equity-based figure after compute carries their result already), and whose positions the House takes for an
+orphan's only in the session's last minutes.
 
 RECORDS (`Recorder`, `<state>/calibration.sqlite`, mode 0600): one row per attempt (per order), written in one
 transaction when it is sent and completed in one when it ends: the order and client order ids; the symbol, legs, cell
