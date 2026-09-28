@@ -343,6 +343,32 @@ def max_loss_share(type_: str, value: float, collateral: float) -> float:
     return value
 
 
+def value_bounds(legs: Sequence[LegFill], expirations: Sequence[Any]) -> tuple[float, float]:
+    """The least and the most a structure can be worth a share at its expiry, from its payoff: a debit
+    vertical [0, width], a credit vertical [-width, 0], an iron condor [-widest wing, 0], a long call
+    [0, inf). The package's no-arbitrage range: no one sells it for less than it can ever be worth, or
+    buys it for more. (-inf, inf) when its legs expire on different days (a calendar or a diagonal).
+
+    `expirations` is each leg's expiry (any comparable value: a day ordinal, a date), passed explicitly and
+    never read from the legs' `dte`: the live path builds a held position's legs with 0 placeholders there
+    (`league/live/step.py`), which would make a calendar look like one expiry."""
+    expirations = list(expirations)
+    if len(expirations) != len(legs):
+        raise ValueError(f"value_bounds: {len(legs)} legs but {len(expirations)} expirations")
+    if not legs or len(set(expirations)) > 1:
+        return -math.inf, math.inf
+
+    def payoff(level: float) -> float:
+        return sum(leg.side * leg.ratio * (max(0.0, level - leg.strike) if leg.is_call else max(0.0, leg.strike - level))
+                   for leg in legs)
+
+    # Piecewise linear in the settlement level, kinked at the strikes: its extremes lie at zero, at a
+    # strike, or beyond the highest strike (where the calls' net ratio is the slope).
+    values = [payoff(level) for level in [0.0, *sorted({float(leg.strike) for leg in legs})]]
+    slope = sum(leg.side * leg.ratio for leg in legs if leg.is_call)
+    return (-math.inf if slope < 0 else min(values)), (math.inf if slope > 0 else max(values))
+
+
 def order_fees(root: str, legs: Sequence[LegFill], snap_prices: Sequence[float], qty: int, action: str) -> float:
     """The fees of filling `qty` structures: each leg's contracts at its price, buys and sells as the action makes them."""
     total = 0.0
@@ -432,4 +458,4 @@ def resolve_close(intent: Mapping[str, Any], type_: str, legs: Sequence[LegFill]
 
 
 __all__ = ["Order", "LegFill", "Refused", "resolve_open", "resolve_close", "resolve_legs", "natural_value", "mid_value",
-           "limit_value", "classify", "max_loss_share", "order_fees", "tick_of", "DEBIT", "CREDIT"]
+           "limit_value", "classify", "max_loss_share", "order_fees", "tick_of", "value_bounds", "DEBIT", "CREDIT"]

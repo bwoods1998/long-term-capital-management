@@ -623,7 +623,8 @@ def merge(parts: Sequence[dict]) -> dict[str, Any]:
         for k, v in p["fills"].items():
             if isinstance(v, (int, float)) and not isinstance(v, bool) and k in ("orders", "opens", "closes", "filled", "partial_fills",
                                                                                    "cancelled", "expired", "rejected", "liquidated",
-                                                                                   "settled", "exercised", "fills"):
+                                                                                   "settled", "exercised", "fills", "bounded_close",
+                                                                                   "blocked_out_of_range"):
                 fills[k] = fills.get(k, 0) + v
     reasons: dict[str, int] = {}
     for p in parts:
