@@ -358,7 +358,6 @@ class Position:
     idx: np.ndarray | None = None  # today's snapshot index of each leg (-1: not in today's chain)
     last_mark: float = math.nan
     closing: int = 0              # working close order id (0: none)
-    mark_bounded: bool = False    # the last mark was held inside `bounds()` (recomputed with every mark; not saved)
     range_: tuple[float, float] | None = field(default=None, repr=False, compare=False)   # `bounds()`, once
 
     @property
@@ -588,11 +587,16 @@ class Account:
         plain = natural if stress == 1.0 else L.natural_value(snap, legs, order.action)[0]
         if not self._tradeable(plain, lo, hi, opening):
             # The legs' touches add up to a price the package can never trade at: nothing fills this minute, and the
-            # order keeps working. When this is its first look, it arrived and RESTS (seen, never aggressive): a
-            # blocked minute never makes a patient order a taker that later takes the natural past its own limit.
+            # order keeps working. When this is its first look, the minute tells nothing about the market, so the
+            # order is judged against the natural it was decided on: one marketable there is a taker (it takes the
+            # next real natural, as on a normal arrival), a patient one rests at its own limit. A blocked minute
+            # never turns a patient order into a taker, nor a taker into an order that sells at a limit far through
+            # the market.
             self.counts["blocked_out_of_range"] += 1
             if not work.seen:
-                work.seen, work.aggressive = True, False
+                decided = order.natural
+                taker = math.isfinite(decided) and (decided <= order.limit + 1e-9 if opening else decided >= order.limit - 1e-9)
+                work.seen, work.aggressive = True, taker
             return
         if work.forced:
             price, qty = natural, work.remaining
@@ -692,7 +696,7 @@ class Account:
         package for less than it can ever be worth or buys it for more (complex-order price checks exist to refuse it), so:
         an open at or below the package's least (a free package) or above its most, or a close that would RECEIVE more
         than its most, does not fill this minute (it keeps working); a close that would receive LESS than the package's
-        least fills at that least, so the position never loses more than its maximum loss. None: no fill.
+        least fills at that least, so a close never loses more than the maximum loss. None: no fill.
 
         The floor is honest because it is the live path's own: `league/live/step.py` `OptionsLive._send_close` (the
         lines after "A close's limit stays one the gateway takes") never sends a close below 0 for a debit structure,
@@ -801,8 +805,9 @@ class Account:
             "max_loss": round(max_loss, 2), "fees": round(pos.fees, 2), "pnl": round(pos.cash, 2),
             "return_on_max_loss": round(pos.cash / max_loss, 4) if max_loss > 0 else None,
             "exit_reason": pos.reason, "context": pos.info.get("context", {}), "note": pos.note,
-            # Its exit was set by the package's range, not by a market price: a close filled at the package's least,
-            # or an exit at a mark held inside the range (`_in_bounds`, `_bounded_mark`).
+            # Its exit was set by the package's range, not by this minute's market: a close filled at the package's
+            # least, or an exit at the last price the package traded at because the latest quote left its range
+            # (`_in_bounds`, `_fallback_close`).
             "bounded": bool(pos.info.get("bounded")),
         }
 
@@ -887,8 +892,8 @@ class Account:
                 mark = L.mid_value(snap, legs)
                 natural = L.natural_value(snap, legs, "close")[0]
                 if math.isfinite(mark):
-                    # The account's mark (equity, a mark exit) is held inside the package's range; the program's row
-                    # keeps the raw mid and natural, as the live path's rows do.
+                    # The account's mark (equity, a mark exit) is a mid inside the package's range (`_set_mark`); the
+                    # program's row keeps the raw mid and natural, as the live path's rows do.
                     self._set_mark(pos, mark)
             leg_rows = [{"id": int(leg.idx), "dte": int(exp - day.ordinal), "strike": leg.strike, "is_call": leg.is_call,
                          "side": "long" if leg.side > 0 else "short", "ratio": leg.ratio}
@@ -1041,10 +1046,11 @@ class Account:
         level = settlement_level(chain.underlying) if chain is not None else math.nan
         if not math.isfinite(level):
             # No underlying today (a hole in the store): the position leaves at its last mark, and says so.
-            value = self._bounded_mark(pos)
-            cash = value * venue.MULTIPLIER * pos.qty
+            value, fees = self._mark_exit(day, pos, day.minutes - 1)
+            cash = value * venue.MULTIPLIER * pos.qty - fees
             self.cash += cash
             pos.cash += cash
+            pos.fees += fees
             pos.exit_value_qty += value * pos.qty
             pos.exit_day, pos.exit_mi, pos.reason, pos.qty = day.ordinal, day.minutes - 1, "expired_without_data", 0
             self._finish(pos, day)
@@ -1067,10 +1073,11 @@ class Account:
             level, hole = (float(known[0]), True) if known.size else (math.nan, True)
         if not math.isfinite(level):
             pos.reason = "expired_without_data"
-            value = self._bounded_mark(pos)
-            cash = value * venue.MULTIPLIER * pos.qty
+            value, fees = self._mark_exit(day, pos, None)   # its expiry was an earlier day: never today's chain
+            cash = value * venue.MULTIPLIER * pos.qty - fees
             self.cash += cash
             pos.cash += cash
+            pos.fees += fees
             pos.exit_value_qty += value * pos.qty
             pos.exit_day, pos.exit_mi, pos.qty = day.ordinal, 0, 0
             self._finish(pos, day)
@@ -1158,35 +1165,93 @@ class Account:
             if np.isfinite(bid).all() and np.isfinite(ask).all():
                 sides = np.array([leg.side * leg.ratio for leg in pos.legs], dtype=np.float64)
                 self._set_mark(pos, float(np.sum(sides * 0.5 * (bid + ask))))
-                return
+                break
+        # The day's last price the package traded at, for an exit at a mark on a later day (`_fallback_close`).
+        found = self._last_close(day, pos, mi)
+        if found is not None:
+            pos.info["close_at"] = [found[0], found[1], int(day.ordinal), int(found[2])]
 
     @staticmethod
     def _set_mark(pos: Position, value: float) -> None:
-        """The position's mark, held inside what the package can be worth at expiry: a blown-out leg's mid can leave
-        the package's range too."""
+        """The position's mark: a mid inside what the package can be worth at expiry. A mid outside it (a blown-out
+        leg's) is no price: the mark stays at the last one inside, and `mark_out` in the position's info (saved with
+        it) says so until a mid inside comes back. Never clamped to a bound: a quote blown out in the position's favour
+        would mark it at the package's most."""
         lo, hi = pos.bounds()
-        pos.last_mark = min(max(value, lo), hi)
-        pos.mark_bounded = pos.last_mark != value
+        if lo - 1e-9 <= value <= hi + 1e-9:
+            pos.last_mark = value
+            pos.info.pop("mark_out", None)
+        else:
+            pos.info["mark_out"] = True
 
-    @staticmethod
-    def _bounded_mark(pos: Position) -> float:
-        """The position's last mark (else its entry), inside what the package can be worth at expiry. An exit at a mark
-        the range held (`_set_mark`) flags its trade `bounded`."""
+    def _last_close(self, day: DayData, pos: Position, mi: int | None) -> tuple[float, list[float], int] | None:
+        """The latest minute at or before `mi` of today's chain whose close natural (at the run's stress) is a price
+        the package trades at (`_tradeable`): (that natural, its legs' close prices for the fees, the minute). None when
+        today has none, or no chain holds the position's legs."""
+        chain = day.chains.get(pos.root)
+        if mi is None or chain is None or pos.idx is None or (pos.idx < 0).any():
+            return None
+        lo, hi = pos.bounds()
+        stress = self.cfg.stress
+        for m in range(min(int(mi), day.minutes - 1), -1, -1):
+            bid, ask = chain.bid[m, pos.idx], chain.ask[m, pos.idx]
+            if not (np.isfinite(bid).all() and np.isfinite(ask).all()):
+                continue
+            value, prices = 0.0, []
+            for leg, b, a in zip(pos.legs, bid.tolist(), ask.tolist()):
+                prices.append(b if leg.side > 0 else a)
+                if stress != 1.0:   # `legs.natural_value`'s stress: every half-spread widened
+                    mid, half = 0.5 * (b + a), 0.5 * (a - b) * stress
+                    b, a = max(0.0, mid - half), mid + half
+                value += leg.side * leg.ratio * (b if leg.side > 0 else a)
+            if self._tradeable(value, lo, hi, False):
+                return value, prices, m
+        return None
+
+    def _fallback_close(self, day: DayData, pos: Position, mi: int | None) -> tuple[float, float]:
+        """(value a share, fees) of the honest exit when the latest quote is no price for the package: the last price it
+        traded at, the latest tradeable close natural at or before `mi` today (`_last_close`), else the one a day's
+        close recorded before (`_mark`), with its fees, held at the package's least like any close. With neither, its
+        last mark (else its entry) and no fee. The trade is flagged `bounded`."""
+        pos.info["bounded"] = True
+        lo, hi = pos.bounds()
+        found = self._last_close(day, pos, mi)
+        if found is None:
+            stored = pos.info.get("close_at")
+            if stored and (int(stored[2]) < day.ordinal or (mi is not None and int(stored[3]) <= mi)):
+                found = (float(stored[0]), [float(x) for x in stored[1]], int(stored[3]))
+        if found is None:
+            raw = pos.last_mark if math.isfinite(pos.last_mark) else pos.entry
+            return min(max(raw, lo), hi), 0.0
+        value, prices, _ = found
+        if value < lo:
+            self.counts["bounded_close"] += 1
+            value = lo
+        return value, L.order_fees(pos.root, pos.legs, prices, pos.qty, "close")
+
+    def _mark_exit(self, day: DayData, pos: Position, mi: int | None) -> tuple[float, float]:
+        """(value a share, fees) of an exit at the position's mark (a split, a window end with no quote, a data hole):
+        its mark with no fee, an accounting value as the day's equity counts it; but when the latest mid was outside the
+        package's range (`mark_out`), the mark is stale and the exit is `_fallback_close`'s."""
+        if pos.info.get("mark_out"):
+            return self._fallback_close(day, pos, mi)
         lo, hi = pos.bounds()
         raw = pos.last_mark if math.isfinite(pos.last_mark) else pos.entry
-        value = min(max(raw, lo), hi)
-        if value != raw or (math.isfinite(pos.last_mark) and pos.mark_bounded):
+        value = min(max(raw, lo), hi)   # inside by construction; a state saved before the rule may hold one outside
+        if value != raw:
             pos.info["bounded"] = True
-        return value
+        return value, 0.0
 
     def _split_mark(self, day: DayData, pos: Position) -> None:
         """The end of a segment another segment continues: the position is valued at its mid (the close's
         mark, as the day's equity already counts it) with no fee. An accounting split, not a trade: the
-        segment's daily P&L is the unsplit run's, and the next segment starts without it."""
-        value = self._bounded_mark(pos)
-        cash = value * venue.MULTIPLIER * pos.qty
+        segment's daily P&L is the unsplit run's, and the next segment starts without it. When the close's mid was
+        outside the package's range, the last price it traded at, with its fees (`_mark_exit`)."""
+        value, fees = self._mark_exit(day, pos, day.minutes - 1)
+        cash = value * venue.MULTIPLIER * pos.qty - fees
         self.cash += cash
         pos.cash += cash
+        pos.fees += fees
         pos.exit_value_qty += value * pos.qty
         pos.qty = 0
         pos.exit_day, pos.exit_mi, pos.reason = day.ordinal, day.minutes - 1, "split_mark"
@@ -1197,6 +1262,7 @@ class Account:
         legs = pos.legs_today()
         value = math.nan
         fees = 0.0
+        blocked = False
         if snap is not None and all(leg.idx >= 0 for leg in legs):
             value, _ = L.natural_value(snap, legs, "close", stress=self.cfg.stress)
             if math.isfinite(value):
@@ -1204,18 +1270,21 @@ class Account:
                 lo, hi = pos.bounds()
                 bounded = self._in_bounds(value, lo, hi, False)
                 if bounded is None:
+                    # Over the package's most: no close there. It leaves at the last price the package traded at
+                    # today, with its fees, never at a mark the blown-out quote moved.
                     self.counts["blocked_out_of_range"] += 1
-                    value = math.nan
+                    value, fees = self._fallback_close(day, pos, day.minutes - 2)
+                    blocked = True
                 elif bounded != value:
                     self.counts["bounded_close"] += 1
                     pos.info["bounded"] = True
                     value = bounded
-            if math.isfinite(value):
+            if math.isfinite(value) and not blocked:
                 prices = [float(snap.bid[leg.idx] if leg.side > 0 else snap.ask[leg.idx]) for leg in legs]
                 fees = L.order_fees(pos.root, legs, prices, pos.qty, "close")
         reason = "window_end"
         if not math.isfinite(value):
-            value = self._bounded_mark(pos)
+            value, fees = self._mark_exit(day, pos, day.minutes - 2)
             reason = "window_end_mark"
         cash = value * venue.MULTIPLIER * pos.qty - fees
         self.cash += cash

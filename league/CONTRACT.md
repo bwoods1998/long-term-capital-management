@@ -184,12 +184,20 @@ An order meets the quotes of the minute AFTER your decision, and every chance in
   minutes of an expiry) the legs' touches can add up to a price outside that range, and that minute is no
   market for the package: an open whose natural is at or below its least (a vertical for 0.00 is free) or
   above its most, or a close whose natural would receive more than its most, fills nothing that minute,
-  whatever its limit. It keeps working, and an order that arrives in such a minute rests: it is not a taker
-  when the market later comes through its limit. A close whose natural would receive less than the
-  package's least fills at that least (as a real close is never sent below it). No position loses more
-  than its maximum loss; a debit structure whose `natural` in `ctx.positions` is below zero is showing
-  such a blown-out quote, not a price anyone pays. Results count these (`fills.bounded_close`,
-  `fills.blocked_out_of_range`) and flag each trade whose exit the range set (`bounded`).
+  whatever its limit. It keeps working; an order that first meets such a minute is judged by the natural
+  it was decided on (marketable there: it takes the next real natural; patient: it rests at its limit). A
+  close whose natural would receive less than the package's least fills at that least (as a real close is
+  never sent below it), so a close never loses more than the maximum loss. That is a bound on closes, not
+  on every position: on an equity root (SPY, QQQ, IWM, single names) an expiry close the rule holds back
+  until the close cutoff lets the position expire and be exercised into shares, and the next session's
+  open can move those shares past the maximum loss. The account's mark is the last mid inside the
+  package's range; an exit at a mark whose latest mid was outside it (a split, a window end, a data
+  hole), or a window end whose natural is over the most, leaves at the last natural the package traded
+  at, with its fees. A debit structure whose `natural` in `ctx.positions` is below zero is showing such a
+  blown-out quote, not a price anyone pays. The rule also fires on ordinary quotes (a worthless vertical
+  whose natural close is -0.01 closes at 0.00; a deep in-the-money credit buy-back priced past the width
+  closes at the width). Results count these (`fills.bounded_close`, `fills.blocked_out_of_range`) and flag
+  each trade whose exit the range set (`bounded`).
 
 Fees: OCC, ORF, CAT on every contract, TAF and the SEC fee ($20.60 a million of premium) on sells,
 $0.50 plus exchange fees a contract on index options. Buying power: an open reserves (maximum loss +

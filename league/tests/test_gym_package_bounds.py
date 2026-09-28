@@ -10,17 +10,20 @@ number is worked out in the comments.
 """
 
 import datetime as dt
+import json
 import math
 import shutil
 import tempfile
 import unittest
 
 try:
-    import numpy  # noqa: F401
+    import numpy
     import pyarrow  # noqa: F401
     HAVE = True
 except ImportError:  # pragma: no cover
     HAVE = False
+
+from types import SimpleNamespace
 
 if HAVE:
     from league.gym import engine as E
@@ -78,7 +81,7 @@ class PackageBounds(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.dir, ignore_errors=True)
 
-    def run_day(self, steps, *, expiration=None, then=None, **params):
+    def run_day(self, steps, *, expiration=None, then=None, split_mark=False, **params):
         """One day of `steps` (and a second day of `then` steps, when given)."""
         w = synth.Writer(self.dir)
         w.calendar([D1] if then is None else [D1, D2])
@@ -87,7 +90,7 @@ class PackageBounds(unittest.TestCase):
             day(w, D2, then, expiration=expiration)
         w.finish()
         [r] = E.run([R.load_program(PROGRAM, name="bounds", params=params)], S.Store(self.dir),
-                    E.RunConfig(window="train", roots=("SPXW",)))
+                    E.RunConfig(window="train", roots=("SPXW",), split_mark=split_mark))
         self.assertEqual(r["status"], "ok", r["runtime"])
         return r
 
@@ -179,16 +182,112 @@ class PackageBounds(unittest.TestCase):
         self.assertEqual((t["exit"], t["exit_minute"]), (3.00, 750))
         self.assertEqual(r["fills"]["blocked_out_of_range"], 1)
 
-    def test_the_account_mark_stays_inside_the_package(self):
-        # A 1-DTE vertical held overnight: the program's last look (929) is a blown-out quote whose mid is
-        # (0 + 24) / 2 - (5 + 30) / 2 = -5.50, and the last half hour has no quote, so the day's close finds no newer
-        # mark. The day's equity counts the vertical at its least, 0.00, never at -5.50 (a loss of 890 on a 340 risk).
-        r = self.run_day({571: NORMAL, 900: BLOWN, 930: GONE}, expiration=D2, dte=1, hold=True, then={571: NORMAL})
+    def test_the_account_mark_keeps_its_last_price_inside_the_package(self):
+        # A 1-DTE vertical held overnight: from 900 its quotes blow out (mid (0 + 24) / 2 - (5 + 30) / 2 = -5.50, or
+        # (20.00 + 20.40) / 2 - 7.20 = 13.00 in its favour) and the last half hour has no quote, so the day's close
+        # finds no newer mark. The day's equity counts it at its last mid inside the package, 3.00 (10.20 - 7.20):
+        # never -5.50 (a loss of 890 on a 340 risk), never 13.00, and never a bound (0.00 or the full 5.00 width).
+        # Day one: -340.00 paid, 2.43 of open fees, +300.00 of mark: -42.43.
+        for blown in (BLOWN, RICH):
+            self.fresh()
+            r = self.run_day({571: NORMAL, 900: blown, 930: GONE}, expiration=D2, dte=1, hold=True, then={571: NORMAL})
+            [t] = r["trades"]
+            self.assertEqual(t["max_loss"], 340.0)
+            self.assertAlmostEqual(r["daily"][0][1], -42.43, places=6)
+
+    def test_a_window_end_in_a_favourable_blow_out_leaves_at_the_last_real_price(self):
+        # The verification's case: a 1-DTE vertical still open when a one-day run ends, its last hour blown out in its
+        # favour (natural close 12.60, over the 5.00 width). No close there; before this fix it left at its mark
+        # clamped to the full width, 5.00, for +157.57. It leaves at the last natural the package traded at (2.60,
+        # 899) with its close fees: -84.87, exactly the run with normal quotes to the end.
+        normal = self.run_day({571: NORMAL}, expiration=D2, dte=1, hold=True)
+        [n] = normal["trades"]
+        self.assertEqual((n["exit"], n["exit_reason"], n["pnl"]), (2.60, "window_end", -84.87))
+        for steps in ({571: NORMAL, 900: RICH}, {571: NORMAL, 959: RICH, 960: NORMAL}):
+            with self.subTest(steps=sorted(steps)):
+                self.fresh()
+                r = self.run_day(steps, expiration=D2, dte=1, hold=True)
+                [t] = r["trades"]
+                self.assertEqual((t["exit"], t["exit_reason"], t["pnl"], t["fees"]), (2.60, "window_end", n["pnl"], n["fees"]))
+                self.assertTrue(t["bounded"])
+                self.assertGreaterEqual(r["fills"]["blocked_out_of_range"], 1)
+
+    def test_a_split_mark_in_a_favourable_blow_out_leaves_at_the_last_real_price(self):
+        # The same position ending a segment another continues: the close's mid (13.00) is no price, so the split is
+        # not an accounting mark at it (nor at 5.00): the last natural the package traded at (2.60) with its fees.
+        r = self.run_day({571: NORMAL, 900: RICH}, expiration=D2, dte=1, hold=True, split_mark=True)
         [t] = r["trades"]
-        first_day_pnl = r["daily"][0][1]
-        self.assertEqual(t["max_loss"], 340.0)
-        self.assertGreaterEqual(first_day_pnl, -(t["max_loss"] + t["fees"]) - 1e-6)
-        self.assertLess(first_day_pnl, -340.0 + 1e-6)
+        self.assertEqual((t["exit"], t["exit_reason"], t["pnl"]), (2.60, "split_mark", -84.87))
+        self.assertTrue(t["bounded"])
+        # With normal quotes the split stays an accounting mark: the mid, 3.00, with no fee.
+        self.fresh()
+        r = self.run_day({571: NORMAL}, expiration=D2, dte=1, hold=True, split_mark=True)
+        [t] = r["trades"]
+        self.assertEqual((t["exit"], t["exit_reason"], t["pnl"], t["bounded"]), (3.00, "split_mark", -42.43, False))
+
+    def test_a_marketable_close_arriving_in_a_blocked_minute_takes_the_next_real_natural(self):
+        # The verification's case: closes decided at 700 on normal quotes (natural 2.60) with limits at or through it
+        # (0.05, 2.00, the natural): takers. They arrive at 701 into a blown-out quote (natural 12.60): nothing fills,
+        # and at 702 they take the natural, 2.60, as on a normal arrival. Before this fix the close at 0.05 rested
+        # and sold at 0.05 against a 2.60 market.
+        for price in (0.05, 2.0, 0):
+            with self.subTest(close_price=price):
+                self.fresh()
+                r = self.run_day({571: NORMAL, 701: RICH, 702: NORMAL}, close_price=price)
+                [t] = r["trades"]
+                self.assertEqual((t["exit"], t["exit_minute"], t["pnl"]), (2.60, 702, -84.87))
+
+    def test_an_exit_at_a_stale_mark_takes_the_last_real_price_with_fees(self):
+        # A data-hole exit (`_mark_exit`) with no chain today. Its mark (3.00) is inside the package: it leaves there
+        # with no fee. When the latest mid was outside (`mark_out`), the mark is stale: it leaves at the last natural a
+        # day's close recorded (2.60, its legs 10.00 / 7.40) with that close's fees; with none recorded, at its mark.
+        acc = E.Account(R.load_program(PROGRAM, name="bounds"), E.RunConfig(window="train", roots=("SPXW",)), ("SPXW",))
+        legs = (L.LegFill(0, 1, 1, 1, 1, 5000.0, True), L.LegFill(1, 2, -1, 1, 1, 5005.0, True))
+        prior = D1.toordinal()
+
+        def position(**info):
+            return E.Position(pid=1, type="debit_vertical", root="SPXW", legs=legs, keys=numpy.array([1, 2]),
+                              expirations=numpy.array([prior + 1, prior + 1]), qty=2, opened_qty=2, entry=3.40,
+                              max_loss_share=3.40, collateral=0.0, opened_day=prior, opened_mi=31, opened_session=0,
+                              info=dict(info), idx=numpy.array([-1, -1]), last_mark=3.00)
+
+        day = SimpleNamespace(chains={}, ordinal=prior + 2, minutes=391)
+        pos = position()
+        self.assertEqual(acc._mark_exit(day, pos, None), (3.00, 0.0))
+        self.assertNotIn("bounded", pos.info)
+        pos = position(mark_out=True, close_at=[2.60, [10.00, 7.40], prior, 389])
+        value, fees = acc._mark_exit(day, pos, None)
+        self.assertEqual(value, 2.60)
+        self.assertEqual(fees, L.order_fees("SPXW", legs, [10.00, 7.40], 2, "close"))
+        self.assertGreater(fees, 0.0)
+        self.assertTrue(pos.info["bounded"])
+        pos = position(mark_out=True)
+        self.assertEqual(acc._mark_exit(day, pos, None), (3.00, 0.0))
+        # A close recorded LATER today than the exit is never used (no look ahead).
+        pos = position(mark_out=True, close_at=[2.60, [10.00, 7.40], prior + 2, 389])
+        self.assertEqual(acc._mark_exit(day, pos, 388), (3.00, 0.0))
+
+    def test_a_mark_outside_the_package_is_dropped_never_clamped(self):
+        pos = SimpleNamespace(last_mark=3.00, info={}, bounds=lambda: (0.0, 5.0))
+        E.Account._set_mark(pos, 13.00)
+        self.assertEqual((pos.last_mark, pos.info), (3.00, {"mark_out": True}))
+        E.Account._set_mark(pos, -5.50)
+        self.assertEqual((pos.last_mark, pos.info), (3.00, {"mark_out": True}))
+        E.Account._set_mark(pos, 3.20)
+        self.assertEqual((pos.last_mark, pos.info), (3.20, {}))
+
+    def test_the_shadow_book_saves_the_stale_mark_flag(self):
+        # The shadow book (league/live/shadow.py, unchanged) saves a position's info and last mark: the flag and the
+        # recorded close survive a restart without a change to the live code.
+        from league.live.shadow import _position_from, _position_state
+        pos = E.Position(pid=1, type="debit_vertical", root="SPXW", legs=(L.LegFill(0, 1, 1, 1, 1, 5000.0, True),
+                         L.LegFill(1, 2, -1, 1, 1, 5005.0, True)), keys=numpy.array([1, 2]),
+                         expirations=numpy.array([738951, 738951]), qty=1, opened_qty=1, entry=3.40, max_loss_share=3.40,
+                         collateral=0.0, opened_day=738950, opened_mi=31, opened_session=0,
+                         info={"mark_out": True, "close_at": [2.6, [10.0, 7.4], 738950, 329]}, idx=numpy.array([0, 1]),
+                         last_mark=3.00)
+        back = _position_from(json.loads(json.dumps(_position_state(pos))))
+        self.assertEqual((back.last_mark, back.info), (3.00, pos.info))
 
     def test_a_blown_out_leg_never_closes_a_vertical_below_zero(self):
         r = self.run_day({571: NORMAL, 700: BLOWN}, close_at=700)
