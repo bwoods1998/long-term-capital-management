@@ -1875,4 +1875,16 @@ looks like beta. Validation 2025 and the holdout judge both.
 | 6 | Money | equity $1,481.63; options buying power $481.60; 0 orders |
 | 7 | Compute | Sail $105.32 (about $2.5/h with the swarm idle). Claude $44.46 of $100. OpenAI $618.97 + $9.36 in flight of $707 |
 
+### Sprint scoreboard, T0 + 51 h (09:31Z Sept 28)
+
+| # | Metric | Value |
+|---|---|---|
+| 1 | Population | 32 alive, 323 retired; 49 born and 29 retired in 2 h. The architect is back after the output-token fix: GPT-6 Astra proposed and birthed 12 of 12 in three of four passes (one Sail fallback proposed 0) |
+| 2 | Throughput | 623 cycles/h, median 22 s (backoff on holds, real runs otherwise); pool 3 busy, 6 ready; 4 Gym timeouts (1,020 s) |
+| 3 | Search | 58,784 trials, 224,649 program-years. Closest: `supplier-demand-cascade-put` 6/8 in Validation 2025 (fails quarters and t), born under agenda v5 |
+| 4 | Evidence | Validation passes alive 0; holdout looks 2, passes 0 |
+| 5 | Readiness | R5 live. 2020-21 fetch: stage 9 (core, 0-14 DTE) 2,825/2,825, 0 failing; stage 10 (SPY/QQQ back months) running, done about 10:20Z. Underlying sources match 2022-24, so no relay is needed. The pre-registered screen tooling is ready (150 runs, hash-checked, judge self-tested). #404 is ready for the after-close release |
+| 6 | Money | equity $1,481.63; options buying power $481.60; 0 orders |
+| 7 | Compute | Sail $101.64 (about $4.3/h; the $32 line around 01:30Z Tuesday without a top-up). Claude $47.79 of $100. OpenAI $623.12 + $11.37 in flight of $707 |
+
 ## Report
