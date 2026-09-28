@@ -101,5 +101,8 @@ compute costs and the account's starting balance do not enter this number. **Run
 since `run.started_at`, falling back to the reset's performance basis when the run timestamp is absent.
 
 The account chart separately shows recorded Brokerage Account balances, which include funding flows.
-The `performance` and `compute` blocks remain available in the payload and account details; they do not
+The chart has its own start: it may begin after an owner's deposit, so its first point need not be the
+account's starting balance, and a later deposit or withdrawal moves the line. **Profit** never moves
+with funding: it always nets deposits and withdrawals out, whatever the chart's start. The
+`performance` and `compute` blocks remain available in the payload and account details; they do not
 replace the masthead's trading P&L. Subscription costs remain prorated from `performance.start_at`.
