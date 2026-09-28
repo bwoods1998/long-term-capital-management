@@ -1545,6 +1545,28 @@ looks like beta. Validation 2025 and the holdout judge both.
 | 6 | Money | equity $1,481.63; options buying power $481.60; 0 orders |
 | 7 | Compute | Sail $135.59 (about $5.2/h; the $32 line around Monday 19:30Z without a top-up). Claude $34.23 of $100. OpenAI $610.63 of $707 |
 
+- **02:56Z Sept 28 R3 deployed** (release `20260928T025520Z-8d5e8eec714a`, main `e4c9fe5a`; PRs #394 and #397).
+  - Contents:
+    - mirror and backup identity fixes (#394);
+    - researcher `gym_sweep` (up to 6 variants in one call);
+    - dead families can retire (idle rule by Gym evaluations);
+    - identical re-runs return the stored result with no trial;
+    - honest holds and a 40-cycle dormancy clause;
+    - the operator's gate hold.
+  - Reviewed adversarially twice: 8 findings, all fixed in `327d3d21` and verified.
+  - Research side only: no `league/gym`, money or gateway file changed; the money digest is `ad9bd54c`, the grant's pin.
+  - Sail could not take a warm checkpoint (503), so a consistent SQLite backup of the swarm, ledger, live and grant
+    databases is kept on the box at `state/backups/pre-r3/`.
+  - Staged first: `researcher.retire_idle_evaluations` 500.
+- **03:00-03:10Z What R3 showed at once: the dead families were only waiting for an exit.**
+  - In the first 9 minutes, 1,183 of 1,428 cycles were holds (about 4 s and $0.0005 each).
+  - Nearly every holder's own note said its mechanism was refuted and that the retire tool was not offered to it.
+  - The operator retired 29 such families (not gate-ready, no passing validation), taking the population from 73 to 44.
+  - `population.floor` 30, so the dormancy clause can clear the rest; `architect.every_seconds` 1800, so v4-agenda
+    births refill faster (fewer, deeper families).
+  - Gate hold on `low-close-location-backmonth-call-on`: the lineage's last look waits for the drift screen (#398).
+  - The interim operator mirror is stopped; the House's own mirror advances.
+
 ### Sprint scoreboard, T0 + 43 h (01:29Z Sept 28)
 
 | # | Metric | Value |
