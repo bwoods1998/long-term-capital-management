@@ -154,7 +154,11 @@ deploy`. Deploy the gateway before a House release that needs its change. After 
 
 **The site.** In `~/Work/personal-site`: `npm test`, then `npm run build && npx wrangler deploy`
 (its `DEPLOYMENT.md` has the details). When the publisher's schema or a bound changes, the site
-deploys first: it refuses a whole checkpoint for one field it does not allow.
+deploys first: it refuses a whole checkpoint for one field it does not allow. The one exception is the
+positions table (`positions`, Sept 28, 2026): refused, the publisher posts the checkpoint again without it
+and offers it again half an hour later (a warning per distinct reply of the site, "positions table: the site
+refused the positions table (old site, or a row it rejects) ... (the site said: ...)"), so either may go
+first. The planned order for this first release: the House, then the site.
 
 **Checkpoint the House box before risky work:** `python3 scripts/floor_box.py checkpoint --name why
 --ttl-days 30` (`checkpoints` lists them). A checkpoint holds the box's `.env`. Sail's checkpoint
@@ -388,8 +392,8 @@ slowest, so at most about 110 before the House's backstop); and a working open w
 real open was refused on is cancelled at once, its round trip ended (recorded `interrupted`). An attempt
 cancelled before its time in force ran out (a real-entry block, the House's cancel, that yield) is
 `interrupted`: never a sample, never in a fill rate. Only with real money on, the grant active, real
-entries open and the paper proof passed; family `house:calibration`, never evidence and never Profit (the
-equity-based figure after compute carries it). The owner's written D3 terms (`league/constitution.py`'s
+entries open and the paper proof passed; family `house:calibration`, never evidence; in Profit since Sept 28, 2026, as the positions table's "House
+calibration" rows (`league/trading_profit.py`; the table must add up to Profit). The owner's written D3 terms (`league/constitution.py`'s
 comments) say 1-lot SPY and QQQ; IWM and the six slots' volume (about $430-540 of maximum loss dispatched
 on a heavy day, against about $270 before) are the operator's decision inside D3's $50 net bound (Sept 28,
 2026), the money table unchanged. Samples: `/workspace/state/calibration.sqlite` (0600; each row its
@@ -462,6 +466,18 @@ with `real_money` true (a new money digest); `python3 scripts/live_trading.py --
   the body the House would post from `/workspace/state` (read-only) and run the site's validators
   (`capital/schema.js`) over it to find the field. Widen a bound on the site first and deploy the
   site before the House.
+- **"positions table: ..." warnings.** The positions table and Profit are read from the live book and the
+  account's own activity (`league/account_activity.py`). Each reason the table does not reconcile is said
+  once: a fill or a fee on an order the live book does not hold (an owner's trade by hand, a lost answer),
+  a finished order whose fills at the broker differ from the book's, an option event on a contract the book
+  never held, a cash event the book never counts, the broker's cash for an assignment, an exercise or an
+  index expiry the book settled against the book's own value, an activity of an unknown type; and "the
+  table carries an unreconciled X", the line the page shows beside the rows. Nothing is hidden: fix the book
+  or classify the type, and the line goes back to 0.00. Profit shows a dash (said once) while shares an
+  assignment left are held, while the book has not taken an assignment, and while a broker fill on a
+  contract the book still holds is unmatched. "position real:N cannot be described" or "open position
+  real:N is not listed": the row is counted in the page's not-listed line. "could not be read": Profit
+  shows a dash ten minutes after the last good reading (a restart keeps the last reading).
 - **Sail's checkpoint API is down.** The House's backup fails as a marked vendor error (one error,
   then warnings at 30 min, 1 h, 2 h, 4 h, then every 6 h) and never rolls a release back. The images
   have two checkpoints each and `images.py` rebuilds them.

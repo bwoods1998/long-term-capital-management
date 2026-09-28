@@ -2,7 +2,8 @@
 and IWM debit verticals the House sends at the mid (at 12:00 and 14:00 ET the patient mid of 25 minutes), then one tick
 worse, and closes at the mid, one tick under, then the natural; six hourly slots, 10:00 through 15:00 ET; only with real
 money on, the grant active and the paper proof passed; at most the constitution's $50 of maximum loss a day; through the
-real book's order path; recorded in their own file; never evidence, never on the site; leaving the families two Probe
+real book's order path; recorded in their own file; never evidence, never an agent's structure on the site (since Sept 28, 2026 they are in
+Profit, as the House's own rows of the positions table); leaving the families two Probe
 floors of the day cap and most of the day's legs, and yielding a working open to a family refused on its contracts
 (the reviews of #407). With the fakes of `live_fakes` (the venue's shapes, invented numbers)."""
 
@@ -292,9 +293,10 @@ class TheReview(CalibrationCase):
         self.assertFalse([b for b in self.mine() if b["legs"][0]["symbol"].startswith("SPY")], "SPY left to the family")
         self.assertTrue([b for b in self.mine() if b["legs"][0]["symbol"].startswith("QQQ")], "QQQ goes instead")
 
-    def test_it_is_never_profit_and_never_a_compute_line(self):
-        # The review of #390: the site's figure after compute is the equity's change less compute, and equity already
-        # carries the calibration's result, so publishing it as compute too would count it twice.
+    def test_it_is_profit_as_the_houses_own_row_and_never_a_compute_line(self):
+        # The owner's positions table (Sept 28, 2026): the round trips are real money on the account, so Profit carries
+        # them, as the House's calibration and never an agent's. The review of #390 still holds: the site's figure after
+        # compute is the equity's change less compute, and equity carries their result, so they are never compute too.
         from league import trading_profit
 
         self.assertEqual(trading_profit.CALIBRATION_FAMILY, C.FAMILY)
@@ -304,8 +306,11 @@ class TheReview(CalibrationCase):
         [trade] = live.book.closed_trades()
         self.assertNotEqual(trade["pnl"], 0)
         at = "2026-09-28T14:05:00.000Z"
-        self.assertEqual(trading_profit.snapshot(self.root, live, at=at)["pnl_usd"], "0.00", "no family traded")
+        self.assertEqual(D(trading_profit.snapshot(self.root, live, at=at)["pnl_usd"]), D(str(trade["pnl"])).quantize(D("0.01")))
+        [row] = trading_profit.ledger(self.root, live, at=at)["rows"]
+        self.assertEqual((row["source"], row["status"], row["structure"], row["right"]), ("calibration", "closed", "debit_vertical", "call"))
         self.assertNotIn("compute", live.site_inputs())
+        self.assertEqual(live.site_inputs()["structures"], [], "never an agent's open structure")
 
     def test_it_requotes_its_contracts_just_before_it_sends(self):
         # The review of #390 (lens 2): it sends after the minute's decider batch, so it prices from a fresh read of its
