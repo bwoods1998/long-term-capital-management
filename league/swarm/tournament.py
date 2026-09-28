@@ -282,42 +282,76 @@ class Tournament:
     # ------------------------------------------------------------------ 5. retirements
     def retirements(self, fams: list[dict[str, Any]]) -> list[dict[str, Any]]:
         out = []
+        current = self.identity()
         for fam in sorted(fams, key=lambda f: (f.get("weight") or 0.0)):
-            fam = self.store.family(fam["id"]) or fam
-            if fam["band"] != "gym":
-                continue  # a Candidate or better is judged by its forward record, not here
-            if held_at_gate(fam):
-                # The operator holds its validated version at the gate: no rule retires it until the hold is cleared (the
-                # look it holds must still happen; `SwarmStore.retire_gym` refuses it too).
-                continue
-            why = None
-            if int(fam.get("since_val_revisions") or 0) >= int(self.cfg.get("retire_revisions", 30)):
-                why = f"no validation improvement in {fam['since_val_revisions']} revisions"
-            elif int(fam.get("since_val_trials") or 0) >= int(self.cfg.get("retire_evaluations", 2000)):
-                why = f"no validation improvement in {fam['since_val_trials']} Gym evaluations"
-            else:
-                line = (fam.get("state") or {}).get("validation_line") or {}
-                dsr = (line.get("numbers") or {}).get("dsr")
-                if int(fam.get("validations") or 0) >= int(self.cfg.get("retire_min_validations", 6)) and dsr is not None \
-                        and dsr < float(self.cfg.get("retire_dsr_below", 0.05)):
-                    # No figure in the reason: it becomes a graveyard lesson researchers read (D2a).
-                    why = "its trial-adjusted evidence fell below the line (the deflated Sharpe probability)"
-            if not why:
-                # The fallback for a dead family that never called retire (R3): Train figures only in the reason.
-                why = self.idle_why(fam)
+            why = self._retire_if(fam["id"], lambda fam: self._why(fam, current))
             if why:
-                if self.retire(fam, why):
-                    out.append({"family": fam["id"], "why": why})
+                out.append({"family": fam["id"], "why": why})
         return out
 
-    def idle_why(self, fam: Mapping[str, Any]) -> str | None:
+    def _why(self, fam: Mapping[str, Any], current: tuple[Any, Any]) -> str | None:
+        """The hourly round's reason to retire a family (its rules in order, the idle rule last), or None."""
+        if fam["band"] != "gym":
+            return None  # a Candidate or better is judged by its forward record, not here
+        if held_at_gate(fam):
+            # The operator holds its validated version at the gate: no rule retires it until the hold is cleared (the
+            # look it holds must still happen; `SwarmStore.retire_gym` refuses it too).
+            return None
+        why = None
+        if int(fam.get("since_val_revisions") or 0) >= int(self.cfg.get("retire_revisions", 30)):
+            why = f"no validation improvement in {fam['since_val_revisions']} revisions"
+        elif int(fam.get("since_val_trials") or 0) >= int(self.cfg.get("retire_evaluations", 2000)):
+            why = f"no validation improvement in {fam['since_val_trials']} Gym evaluations"
+        else:
+            line = (fam.get("state") or {}).get("validation_line") or {}
+            dsr = (line.get("numbers") or {}).get("dsr")
+            if int(fam.get("validations") or 0) >= int(self.cfg.get("retire_min_validations", 6)) and dsr is not None \
+                    and dsr < float(self.cfg.get("retire_dsr_below", 0.05)):
+                # No figure in the reason: it becomes a graveyard lesson researchers read (D2a).
+                why = "its trial-adjusted evidence fell below the line (the deflated Sharpe probability)"
+        if not why:
+            # The fallback for a dead family that never called retire (R3): Train figures only in the reason.
+            why = self.idle_why(fam, current=current)
+        return why
+
+    def identity(self) -> tuple[Any, Any]:
+        """(the Gym image, its engine bundle) the pool runs now, as `validate` reads them."""
+        image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
+        bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
+        return image, bundle
+
+    def idle_why(self, fam: Mapping[str, Any], *, current: tuple[Any, Any] | None = None) -> str | None:
         """THE IDLE RULE's reason to retire a living Gym family (`researcher.idle_dead`), or None: never outside the Gym
         band nor while the operator holds its validated version at the gate (`held_at_gate`); `idle_dead` itself exempts
-        a version at the gate or a look out, and, from its dormancy clause, a best that awaits validation."""
+        a version at the gate, a look out, a passing validation owed again on the Gym running now (`current`, R4) and,
+        from its dormancy clause, a best that awaits validation."""
         if fam.get("band") != "gym" or fam.get("retired_at") or held_at_gate(fam):
             return None
-        dead = idle_dead(fam, self.settings)
+        dead = idle_dead(fam, self.settings, current=current if current is not None else self.identity())
         return f"It {dead}. {IDLE_CAUSE}" if dead else None
+
+    def _retire_if(self, fid: str, judge: Callable[[Mapping[str, Any]], str | None]) -> str | None:
+        """Read the family, judge it and retire it in ONE store transaction (R4, the review of PR #402): a result landing
+        meanwhile (its trials, its dormant count restarted) either lands first and is judged, or waits for the retirement
+        and counts on the retired family; never judged on one state and retired on another. `SwarmStore.retire_gym` nests
+        in it and checks `population.floor`. The pool's queued work is cancelled after, outside the transaction (the pool
+        takes its own lock before the store's). The reason, or None."""
+        with self.store.atomic():
+            fam = self.store.family(fid)
+            if fam is None or fam.get("retired_at"):
+                return None
+            why = judge(fam)
+            if not why:
+                return None
+            result = self.store.retire_gym(fid, why, floor=int(self.settings.get("population", {}).get("floor", 16)),
+                                           source="tournament")
+        if result["status"] != "retired" or result.get("already_retired"):
+            return None
+        try:
+            self.pool.cancel_family(fid)
+        except Exception:  # noqa: BLE001
+            pass
+        return why
 
     def idle_due(self) -> bool:
         """THE IDLE PASS is due: `tournament.retire_every_seconds` (300) since the last; 0, null, a boolean or not a finite
@@ -327,20 +361,25 @@ class Tournament:
             return False
         return self.clock() - self.idle_at >= float(raw)
 
-    def idle_pass(self) -> dict[str, Any]:
+    def idle_pass(self, *, busy: Callable[[str], bool] | None = None) -> dict[str, Any]:
         """THE IDLE PASS (R4, Sept 28): the hourly round's idle-rule retirements alone, every `retire_every_seconds` between
         its rounds, so a dead family leaves within minutes of dying (after R3 dead families held until the hourly round,
         which the operator did not wait for: 60 retired by hand). The same rule, reasons and lessons as the round's
-        fallback (`idle_why`), the least favoured first, and never below `population.floor` (`SwarmStore.retire_gym`
-        checks it atomically). No model call and no Gym job."""
+        fallback (`idle_why`), the least favoured first, each read, judged and retired in one transaction (`_retire_if`),
+        never below `population.floor`. A family `busy` says is in a researcher's cycle now is left to the next pass (its
+        cycle may be making the evaluation that keeps it alive). The loop never runs it while the hourly round runs. No
+        model call and no Gym job."""
         self.idle_at = self.clock()
-        retired = []
+        current = self.identity()
+        retired, skipped = [], []
         for fam in sorted(self.store.families(alive=True), key=lambda f: (f.get("weight") or 0.0, f["id"])):
-            fam = self.store.family(fam["id"]) or fam
-            why = self.idle_why(fam)
-            if why and self.retire(fam, why):
+            if busy is not None and busy(fam["id"]):
+                skipped.append(fam["id"])
+                continue
+            why = self._retire_if(fam["id"], lambda fam: self.idle_why(fam, current=current))
+            if why:
                 retired.append({"family": fam["id"], "why": why})
-        return {"retired": retired, "alive": len(self.store.families(alive=True))}
+        return {"retired": retired, "busy": len(skipped), "alive": len(self.store.families(alive=True))}
 
     def retire(self, fam: Mapping[str, Any], why: str) -> bool:
         result = self.store.retire_gym(fam["id"], why, floor=int(self.settings.get("population", {}).get("floor", 16)),

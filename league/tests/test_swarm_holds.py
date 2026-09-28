@@ -7,21 +7,26 @@ family's REVISE offers retire (league/swarm/researcher.py); THE IDLE PASS betwee
 from __future__ import annotations
 
 import copy
+import json
+import sqlite3
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
 
 from league.swarm import settings as S
+from league.swarm.gate import Gate, run_sha
 from league.swarm.loop import HOLD_IDLE_MAX_SECONDS, HOLD_IDLE_SECONDS, Scheduler, hold_wait
-from league.swarm.researcher import DORMANT_CYCLES, awaiting_validation, held_at_gate, idle_dead
+from league.swarm.researcher import (DORMANT_CYCLES, Researcher, awaiting_validation, held_at_gate, idle_dead,
+                                     revalidation_owed)
 from league.swarm.seeds import SEEDS, family_spec
 from league.swarm.store import SwarmStore
 from league.swarm.tournament import IDLE_CAUSE, Tournament
 from league.tests.swarm_fakes import Clock, result
 from league.tests.test_swarm_loop import LoopCase
 from league.tests.test_swarm_researcher import ResearcherCase
-from league.tests.test_swarm_rounds import RoundCase
+from league.tests.test_swarm_rounds import FakeGymPool, RoundCase, weak
 
 DEAD = f"made no new Gym evaluation in its last {DORMANT_CYCLES} cycles (only stored results, holds and refused runs)"
 
@@ -139,6 +144,78 @@ class HoldBackoff(unittest.TestCase):
         self.store.set_state(self.fid, note_seen=True)
         self.store.update_family(self.fid, weight=0.9)
         self.assertIsNone(self.take())
+
+    def test_a_result_or_a_gate_verdict_landing_during_the_holding_cycle_is_news(self):
+        """The review's probe P3: news that lands while the holding cycle's model answers (after its status was built) is
+        measured from the cycle's start, so the family is taken again at once to read it."""
+        self.assertEqual(self.take(), self.fid)
+        self.store.bump(self.fid, trials=1, since_val_trials=1)  # its late Train run lands ...
+        self.store.set_state(self.fid, dormant_cycles=0)         # ... `_restart_dormancy`
+        self.store.set_state(self.fid, dormant_cycles=1)         # the cycle's end: its hold counts
+        self.sched.release(self.fid, {"family": self.fid, "hold": True, "dormant_cycles": 1})
+        self.assertEqual(self.take(), self.fid, "its own result landed mid-cycle: no wait")
+        self.store.set_state(self.fid, gate_ready=True)          # a validation passed mid-cycle
+        self.sched.release(self.fid, {"family": self.fid, "hold": True, "dormant_cycles": 1})
+        self.assertEqual(self.take(), self.fid, "its gate place changed mid-cycle: no wait")
+        self.sched.release(self.fid, {"family": self.fid, "hold": True, "dormant_cycles": 1})
+        self.assertIsNone(self.take(), "nothing new: it waits")
+        self.store.set_state(self.fid, gate_ready=False)         # the gate's verdict while it waits
+        self.assertEqual(self.take(), self.fid)
+
+    def test_release_never_strands_a_family(self):
+        """The review's probe: a store that cannot be read at release means no hold wait, never a family left running."""
+        self.assertEqual(self.take(), self.fid)
+        real = self.store.family
+
+        def locked(fid):
+            raise sqlite3.OperationalError("database is locked")
+        self.store.family = locked
+        try:
+            self.sched.release(self.fid, {"family": self.fid, "hold": True, "dormant_cycles": 3})
+        finally:
+            self.store.family = real
+        self.assertNotIn(self.fid, self.sched.running)
+        self.assertNotIn(self.fid, self.sched.held, "no wait when the store cannot be read")
+        self.assertEqual(self.take(), self.fid)
+        self.sched.release(self.fid, None)  # a malformed outcome still frees the family
+        self.assertNotIn(self.fid, self.sched.running)
+
+    def test_idle_workers_sleep_until_the_next_family_could_be_ready(self):
+        """The review's probe P5: every idle worker decoded every family's state every 2 s while the families held."""
+        other = self.store.add_family(family_spec(SEEDS[1]), origin="seed")["id"]
+        self.store.update_family(other, weight=0.1)
+        self.hold()                                     # the favourite waits 300 s
+        self.assertEqual(self.take(), other)
+        self.assertIsNone(self.take(), "the other is in its cycle")
+        self.assertEqual(self.sched.pause(), Scheduler.MAX_PAUSE, "a hold's end 300 s away: the longest sleep")
+        self.clock.advance(295)
+        self.assertIsNone(self.take())
+        self.assertEqual(self.sched.pause(), 5.0, "until the hold ends")
+        self.clock.advance(4.5)
+        self.assertIsNone(self.take())
+        self.assertEqual(self.sched.pause(), Scheduler.MIN_PAUSE, "never shorter than the old 2 s")
+        self.sched.release(other, {"family": other})
+        self.assertIsNone(self.sched.take(idle_seconds=5))
+        self.assertEqual(self.sched.pause(), Scheduler.MIN_PAUSE, "the hold ends in half a second")
+
+    def test_waiting_counts_only_living_families_still_waiting(self):
+        other = self.store.add_family(family_spec(SEEDS[1]), origin="seed")["id"]
+        self.store.update_family(other, weight=0.01)
+        self.hold()
+        self.store.set_state(other, dormant_cycles=1)
+        self.assertEqual(self.take(), other)
+        self.sched.release(other, {"family": other, "hold": True, "dormant_cycles": 1})
+        self.assertEqual(self.sched.waiting(), 2)
+        self.store.bump(other, trials=1)                # news lifts the other's wait
+        self.assertEqual(self.sched.waiting(), 1)
+        self.store.retire(self.fid, "test")              # a retired family's hold is forgotten
+        self.assertEqual(self.sched.waiting(), 0)
+        self.assertEqual(self.sched.held, {})
+
+    def test_the_clock_going_back_never_lengthens_a_wait(self):
+        self.hold()
+        self.clock.advance(-3600)
+        self.assertEqual(self.take(), self.fid, "the clock went back past the hold: its wait is over")
 
     def test_other_families_run_while_one_waits(self):
         other = self.store.add_family(family_spec(SEEDS[1]), origin="seed")["id"]
@@ -325,6 +402,176 @@ class IdlePass(RoundCase):
         self.assertEqual(causes, [IDLE_CAUSE] * 2)
 
 
+class BundlePool(FakeGymPool):
+    """A pool that names its engine bundle (a Gym code deploy changes it) and lets a test act while a round waits on it."""
+
+    def __init__(self, answer):
+        super().__init__(answer)
+        self.current = "bundle-1"
+        self.during_wait = None
+
+    def bundle(self):
+        return self.current
+
+    def wait(self, job, timeout=None, late=None, late_fail=None):
+        if self.during_wait is not None:  # what another thread does while this round waits on the Gym
+            self.during_wait(job)
+        return super().wait(job, timeout, late, late_fail)
+
+
+class ReviewProbes(RoundCase):
+    """The adversarial review of PR #402 (its probes, as tests): gate verdicts are news, a passing validation owed again
+    after a Gym deploy is never dead, and the idle rule's check and retirement are one transaction."""
+
+    def setUp(self):
+        super().setUp()
+        self.pool = BundlePool(lambda job: {**self.answer(job), "gym_bundle": self.pool.current})
+        self.settings["population"].update(start=48, floor=0)
+
+    def validated_at_gate(self, fid="a"):
+        self.family(fid)
+        self.family("other")
+        t = Tournament(self.store, self.pool, self.settings, clock=self.clock)
+        t.validate(self.store.families(alive=True))
+        self.assertTrue(self.store.family(fid)["state"].get("gate_ready"), "validated and at the gate")
+        # It held at the gate (nothing to do) long past the clause: exempt while gate_ready.
+        self.store.set_state(fid, dormant_cycles=DORMANT_CYCLES + 20)
+        self.assertIsNone(idle_dead(self.store.family(fid), self.settings))
+        return t
+
+    def researcher(self):
+        return Researcher(self.store, self.router, self.pool, self.settings, clock=self.clock, contract="", background=False)
+
+    def test_a_gate_refusal_lifts_the_wait_at_once_and_the_family_reads_the_verdict(self):
+        """Probe P1: the refusal cleared gate_ready with 60 dormant cycles standing; the family waited out an 1800 s hold
+        and the idle pass retired it 60 s later, before its researcher heard the verdict."""
+        t = self.validated_at_gate()
+        sched = Scheduler(self.store, clock=self.clock, settings=self.settings)
+        self.store.update_family("other", weight=0.0)
+        self.store.update_family("a", weight=1.0)
+        self.assertEqual(sched.take(idle_seconds=0), "a")
+        sched.release("a", {"hold": True, "dormant_cycles": DORMANT_CYCLES + 20})
+        self.assertEqual(sched.take(idle_seconds=0), "other", "a waits out its hold")
+        sched.release("other", {})
+        self.assertNotIn(sched.take(idle_seconds=0), ("a",))
+        fam = self.store.family("a")
+        n = fam["state"]["validation_version"]
+        Gate(self.store, self.pool, None, self.settings, clock=self.clock).refuse(
+            fam, n, run_sha(self.store.version("a", n)), "review", ["lookahead in decide()"], {"refused": []})
+        fam = self.store.family("a")
+        self.assertEqual((fam["state"]["gate"], fam["state"]["gate_ready"], fam["state"]["dormant_cycles"]),
+                         ("fail (the review: lookahead in decide())", False, 0), "a verdict restarts the dormant count")
+        sched.release("other", {})
+        self.assertEqual(sched.take(idle_seconds=0), "a", "the wait lifts at once")
+        self.assertIn("The gate's last answer: fail (the review: lookahead in decide()).", self.researcher().status(fam))
+        self.clock.advance(60)
+        self.assertEqual(t.idle_pass()["retired"], [], "not dead: it has not held since the verdict")
+
+    def test_a_holdout_look_and_a_third_failed_look_are_news_too(self):
+        self.validated_at_gate()
+        self.answer = weak  # the holdout fails
+        self.replies = [{"text": json.dumps({"verdict": "pass", "reasons": []})}] * 2  # the review and the audit
+        out = Gate(self.store, self.pool, self.router, self.settings, clock=self.clock).run()
+        self.assertEqual(out["looked"], [{"family": "a", "passed": False}])
+        state = self.store.family("a")["state"]
+        self.assertEqual((state["gate"], state["gate_ready"], state["dormant_cycles"]), ("fail", False, 0))
+        # The gate box could not look three times: a refusal, news like any other.
+        self.family("b")
+        Tournament(self.store, self.pool, self.settings, clock=self.clock).validate([self.store.family("b")])
+        self.store.set_state("b", dormant_cycles=DORMANT_CYCLES + 5)
+        gate = Gate(self.store, self.pool, self.router, self.settings, clock=self.clock)
+        n = self.store.family("b")["state"]["validation_version"]
+        sha = run_sha(self.store.version("b", n))
+        for _ in range(3):
+            gate.owe("b", n, sha)
+        state = self.store.family("b")["state"]
+        self.assertEqual((state["gate_ready"], state["dormant_cycles"]), (False, 0))
+
+    def test_a_passing_validation_owed_again_after_a_gym_deploy_is_never_retired(self):
+        """Probes P2 and P2b: a Gym code deploy changes the bundle; the tournament clears gate_ready to validate again. While
+        that validation is owed (in flight, failed, or waiting), neither the idle pass, the hourly round nor the researcher's
+        REVISE turn may treat the family as dead."""
+        t = self.validated_at_gate()
+        self.pool.current = "bundle-2"
+        seen = {}
+
+        def concurrent_idle_pass(job):  # the loop's "idle" round while the "tournament" round waits on the Gym
+            if job.family == "a" and job.window == "validation":
+                fam = self.store.family("a")
+                seen["gate_ready"] = fam["state"]["gate_ready"]
+                seen["owed"] = revalidation_owed(fam, t.identity())
+                seen["retired"] = [r["family"] for r in t.idle_pass()["retired"]]
+        self.pool.during_wait = concurrent_idle_pass
+        self.pool.fail.add("a")  # and the validation on the new bundle fails: it stays owed
+        out = t.validate(self.store.families(alive=True))
+        self.assertIn("a", out["errors"])
+        self.assertEqual(seen, {"gate_ready": False, "owed": True, "retired": []})
+        fam = self.store.family("a")
+        self.assertEqual((fam["state"]["gate_ready"], fam["state"]["validation_bundle"], fam["retired_at"]), (False, "bundle-1", None))
+        self.assertIsNotNone(idle_dead(fam, self.settings), "dead by its dormant count, were the Gym running now not known")
+        self.assertIsNone(idle_dead(fam, self.settings, current=t.identity()))
+        self.assertEqual(t.idle_pass()["retired"], [])
+        self.assertEqual(t.retirements(self.store.families(alive=True)), [])
+        r = self.researcher()
+        self.assertIsNone(r.dead(fam))
+        self.assertFalse(r.can_retire(fam), "no retire on its REVISE turn")
+        # Validated again on the new bundle, it is judged as before.
+        self.pool.fail.discard("a")
+        self.pool.during_wait = None
+        t.validate(self.store.families(alive=True))
+        fam = self.store.family("a")
+        self.assertEqual((fam["state"]["validation_bundle"], fam["state"]["gate_ready"], fam["state"]["dormant_cycles"]),
+                         ("bundle-2", True, 0))
+        self.assertFalse(revalidation_owed(fam, t.identity()))
+
+    def test_the_check_and_the_retirement_are_one_transaction(self):
+        """Probe P4: a late Train result landed between the idle rule's check and `retire_gym`, and the family was retired
+        on a state it no longer had. Now the landing waits for the transaction (or lands first and is judged), and the
+        pool's work is cancelled after it, outside the store's lock."""
+        for how in ("idle-pass", "retirements"):
+            with self.subTest(how):
+                fid = f"dead-by-{how}"
+                self.family(fid)
+                self.store.update_family(fid, validated_version=1)  # nothing awaits validation
+                self.store.set_state(fid, dormant_cycles=DORMANT_CYCLES)
+                t = Tournament(self.store, self.pool, self.settings, clock=self.clock)
+                landed = threading.Event()
+                blocked = {}
+
+                def land(fid=fid):
+                    self.store.bump(fid, trials=1, since_val_trials=1)
+                    self.store.set_state(fid, dormant_cycles=0)
+                    landed.set()
+                real = t.idle_why
+
+                def judged_while_a_result_lands(fam, **kw):
+                    why = real(fam, **kw)
+                    if fam["id"] == fid:
+                        threading.Thread(target=land, daemon=True).start()
+                        blocked["landed_before_the_retirement"] = landed.wait(0.3)
+                    return why
+                t.idle_why = judged_while_a_result_lands
+                cancelled_in_transaction = []
+                self.pool.cancel_family = lambda f: cancelled_in_transaction.append(self.store._db.in_transaction)
+                out = t.idle_pass() if how == "idle-pass" else {"retired": t.retirements(self.store.families(alive=True))}
+                self.assertTrue(landed.wait(5))
+                self.assertEqual(blocked, {"landed_before_the_retirement": False}, "the landing waited for the transaction")
+                self.assertEqual([r["family"] for r in out["retired"]], [fid])
+                self.assertEqual(cancelled_in_transaction, [False], "cancelled after the transaction")
+                fam = self.store.family(fid)
+                self.assertIsNotNone(fam["retired_at"])
+                self.assertEqual(fam["trials"], 1, "the late result counts on the retired family")
+
+    def test_the_idle_pass_leaves_a_family_in_a_cycle_to_the_next_pass(self):
+        self.family("a")
+        self.store.update_family("a", validated_version=1)
+        self.store.set_state("a", dormant_cycles=DORMANT_CYCLES)
+        t = Tournament(self.store, self.pool, self.settings, clock=self.clock)
+        out = t.idle_pass(busy=lambda fid: fid == "a")
+        self.assertEqual((out["retired"], out["busy"]), ([], 1))
+        self.assertEqual([r["family"] for r in t.idle_pass(busy=lambda fid: False)["retired"]], ["a"])
+
+
 class IdlePassInTheLoop(LoopCase):
     def test_the_main_loop_runs_the_idle_pass_between_the_hourly_rounds_and_wires_the_backoff(self):
         sw = self.swarm()
@@ -344,6 +591,29 @@ class IdlePassInTheLoop(LoopCase):
         self.assertFalse(sw.tournament.idle_due(), "the next pass in five minutes")
         sw.tournament.idle_at = time.time() - 301
         self.assertTrue(sw.tournament.idle_due())
+
+    def test_never_while_the_hourly_round_runs_and_never_on_a_family_in_its_cycle(self):
+        sw = self.swarm()
+        sw.seed()
+        dead = [f["id"] for f in self.store.families(alive=True)[:2]]
+        for fid in dead:
+            self.store.set_state(fid, dormant_cycles=DORMANT_CYCLES)
+        release = threading.Event()
+        sw.rounds["tournament"] = threading.Thread(target=release.wait, daemon=True)  # the hourly round, waiting on the Gym
+        sw.rounds["tournament"].start()
+        try:
+            sw.step()
+            self.assertNotIn("idle", sw.rounds, "no idle pass while the hourly round runs")
+            self.assertTrue(sw.tournament.idle_due())
+        finally:
+            release.set()
+            sw.rounds["tournament"].join(5)
+        sw.scheduler.running.add(dead[0])  # a researcher's cycle of the first
+        sw.step()
+        for t in list(sw.rounds.values()):
+            t.join(30)
+        self.assertIn("idle", sw.rounds)
+        self.assertEqual([f["id"] for f in self.store.families(alive=False)], [dead[1]], "the family in its cycle waits")
 
 
 if __name__ == "__main__":

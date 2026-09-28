@@ -601,7 +601,19 @@ def idle_evaluations(fam: Mapping[str, Any]) -> int:
     return since
 
 
-def idle_dead(fam: Mapping[str, Any], settings: Mapping[str, Any]) -> str | None:
+def revalidation_owed(fam: Mapping[str, Any], current: tuple[Any, Any] | None) -> bool:
+    """R4 (the review of PR #402): the family's validation passed the line on another Gym image or engine bundle than the
+    one running now (`current`, (image, bundle)). A deploy that changes either clears its `gate_ready` (the tournament
+    owes it validation on the current data and engine first), so without this it would read as dead by the idle rule
+    while its passing version waits to be validated again. False when `current` is not known."""
+    if current is None:
+        return False
+    state = fam.get("state") or {}
+    passed = bool((state.get("validation_line") or {}).get("passed"))
+    return passed and (state.get("validation_image"), state.get("validation_bundle")) != tuple(current)
+
+
+def idle_dead(fam: Mapping[str, Any], settings: Mapping[str, Any], *, current: tuple[Any, Any] | None = None) -> str | None:
     """THE IDLE RULE (R3, Sept 27). A living Gym family is dead when it has spent `researcher.retire_idle_evaluations`
     Gym evaluations since its birth or last validation (`idle_evaluations`) without an eligible Train version (no
     `best_train`: none met 40 trades on 20 days in every Train year, or every one lost at 1.5x), or `NEGATIVE_FACTOR`
@@ -619,7 +631,8 @@ def idle_dead(fam: Mapping[str, Any], settings: Mapping[str, Any]) -> str | None
     if (limit <= 0 and dormant <= 0) or fam.get("band") != "gym" or fam.get("retired_at"):
         return None
     state = fam.get("state") or {}
-    if state.get("gate_ready") or state.get("look_inflight"):
+    # Nor while a validation that passed is owed again on the Gym running now (`revalidation_owed`, R4).
+    if state.get("gate_ready") or state.get("look_inflight") or revalidation_owed(fam, current):
         return None
     if limit > 0:
         idle = idle_evaluations(fam)
@@ -717,7 +730,7 @@ class Researcher:
         if notes:
             parts.append("Your notebook (latest):\n" + "\n".join(f"- {diagnostics.scrub(n['text'])[:300]}" for n in notes))
         may_retire = self.can_retire(fam)
-        dead = idle_dead(fam, self.settings) if may_retire else None
+        dead = self.dead(fam) if may_retire else None
         if dead:
             parts.append(f"Your family {dead}. If its mechanism is dead, call retire with your reason when the tool is offered "
                          "rather than re-running a placeholder: its slot goes to a new idea.")
@@ -886,6 +899,10 @@ class Researcher:
         return " ".join(out)
 
     # ------------------------------------------------------------------ retirement, the top ten
+    def dead(self, fam: Mapping[str, Any]) -> str | None:
+        """`idle_dead` against the Gym the pool runs now (a passing validation owed again is never dead)."""
+        return idle_dead(fam, self.settings, current=self._gym_identity())
+
     def can_retire(self, fam: Mapping[str, Any]) -> bool:
         """`retire` is offered (and accepted) for a Gym family with at least two validations while more families live
         than `population.start` (the sprint, Sept 26), and for a dead family (`idle_dead`, R3) while more live than
@@ -895,7 +912,7 @@ class Researcher:
             return False
         pop = self.settings.get("population", {})
         alive = len(self.store.families(alive=True))
-        if idle_dead(fam, self.settings) and alive > int(pop.get("floor", 16)):
+        if self.dead(fam) and alive > int(pop.get("floor", 16)):
             return True
         return int(fam.get("validations") or 0) >= 2 and alive > int(pop.get("start", 48))
 
@@ -904,7 +921,7 @@ class Researcher:
         `population.floor` for a dead family (`idle_dead`), else the start (never below the floor)."""
         pop = self.settings.get("population", {})
         floor = int(pop.get("floor", 16))
-        return floor if idle_dead(fam, self.settings) else max(floor, int(pop.get("start", 48)))
+        return floor if self.dead(fam) else max(floor, int(pop.get("start", 48)))
 
     def is_top(self, fam: Mapping[str, Any], *, top: int) -> bool:
         """Among the bandit's `top` families by weight (a weight of zero or none never is)."""
@@ -1771,7 +1788,7 @@ class Researcher:
             # family may retire (`can_retire`). A DEAD family's REVISE offers retire too (R4, Sept 28: researchers that
             # found their mechanism refuted held every cycle, "retire tool not offered", since a hold never reaches READ).
             revise = not gym_done
-            tools = self.tools(revise=revise, retire=self.can_retire(fam) and (not revise or bool(idle_dead(fam, self.settings))))
+            tools = self.tools(revise=revise, retire=self.can_retire(fam) and (not revise or bool(self.dead(fam))))
             response = self.router.sail(profile, items, family=fid, key=key, tools=tools, effort=effort, max_output=most,
                                         cache_key=f"swarm-{fid}", cap_usd_day=float(self.cfg.get("family_usd_day", 2.0)),
                                         tool_choice="required" if revise else "auto")
@@ -2038,4 +2055,4 @@ __all__ = ["Researcher", "TOOLS", "TOOLS_READ", "TOOLS_REVISE", "RUNS", "needs_o
            "sanitize", "date_like", "candidates_with", "migrate_objective", "OBJECTIVE", "params_of", "check_params",
            "sweep_variants", "sweep_tool", "merged_key", "MAX_SWEEP_VARIANTS", "MAX_SWEEP_JOBS_IN_FLIGHT", "idle_dead",
            "idle_evaluations", "idle_limit", "RETIRE_IDLE_EVALUATIONS", "NEGATIVE_FACTOR", "DORMANT_CYCLES", "ALREADY_RUN",
-           "dormant_limit", "dormant_count", "awaiting_validation", "holding", "held_at_gate", "new_run"]
+           "dormant_limit", "dormant_count", "awaiting_validation", "holding", "held_at_gate", "new_run", "revalidation_owed"]

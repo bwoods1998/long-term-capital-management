@@ -85,9 +85,12 @@ class Gate:
         looks = self.store.looks()
         return evidence.leakage_alarm(len(looks), sum(1 for x in looks if x["passed"]))
 
-    def tell(self, fid: str, answer: str) -> None:
-        """What the researcher hears (its status line): pass or fail, and for a refusal before the look, why."""
-        self.store.set_state(fid, gate=answer)
+    def tell(self, fid: str, answer: str, *, verdict: bool = False) -> None:
+        """What the researcher hears (its status line): pass or fail, and for a refusal before the look, why. A VERDICT
+        (a refusal, a look's pass or fail) is news (R4): the family's dormant count restarts, as a counted validation's
+        does, so a researcher waiting out a hold (the scheduler's HOLD BACKOFF) is taken at once to read it, and the idle
+        rule's dormancy clause cannot retire the family before it has."""
+        self.store.set_state(fid, gate=answer, **({"dormant_cycles": 0} if verdict else {}))
 
     # ------------------------------------------------------------------ the review
     def review(self, fam: Mapping[str, Any], version: Mapping[str, Any]) -> dict[str, Any]:
@@ -133,10 +136,13 @@ class Gate:
     def refuse(self, fam: Mapping[str, Any], n: int, sha: str, stage: str, reasons: list[str], out: dict[str, Any]) -> None:
         """A refusal, recorded; the version's gate place is cleared only if it is still the one validated."""
         self.store.refuse(fam["id"], n, stage, "; ".join(reasons) or f"refused by the {stage}")
-        if not self.store.compare_and_set_state(fam["id"], {"validation_version": n}, gated_sha=sha, gate_ready=False):
+        # Its gate place and its dormant count go together (a verdict is news, `tell`): never gate_ready cleared with the
+        # count of the cycles it held at the gate still standing.
+        if not self.store.compare_and_set_state(fam["id"], {"validation_version": n}, gated_sha=sha, gate_ready=False,
+                                                dormant_cycles=0):
             return
         self.outcome(fam["id"], sha, "refused")
-        self.tell(fam["id"], f"fail (the {stage}: " + "; ".join(reasons)[:400] + ")")
+        self.tell(fam["id"], f"fail (the {stage}: " + "; ".join(reasons)[:400] + ")", verdict=True)
         out["refused"].append(fam["id"])
 
     # ------------------------------------------------------------------ one round
@@ -326,7 +332,8 @@ class Gate:
         self.store.put(f"look_tries:{sha}", tries)
         if tries < 3:
             self.store.compare_and_set_state(fid, {"validation_version": n}, gated_sha=None, gate_ready=True)
-        elif self.store.compare_and_set_state(fid, {"validation_version": n}, gated_sha=sha, gate_ready=False) and tries == 3:
+        elif self.store.compare_and_set_state(fid, {"validation_version": n}, gated_sha=sha, gate_ready=False,
+                                              dormant_cycles=0) and tries == 3:  # a refusal: news, like `refuse`
             self.store.refuse(fid, n, "gym", "the gate box could not make this holdout look three times")
             self.store.event("swarm.status", fid, {"action": "look_failed_three_times", "alert": True, "version": n,
                                                    "text": "the gate box could not make a holdout look three times"})
@@ -362,7 +369,7 @@ class Gate:
                                              "_line": line})  # the numbers stay private (underscore)
         if not line["numbers"].get("holm_reachable", True):
             self.store.event("swarm.status", None, {"action": "holm_unreachable", "looks": len(previous) + 1})
-        self.tell(fid, "pass" if line["passed"] else "fail")
+        self.tell(fid, "pass" if line["passed"] else "fail", verdict=True)
         self.outcome(fid, sha, "passed" if line["passed"] else "failed")
         has_image = callable(getattr(self.pool, "image", None))
         has_bundle = callable(getattr(self.pool, "bundle", None))

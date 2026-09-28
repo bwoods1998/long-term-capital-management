@@ -80,10 +80,10 @@ DEFAULTS: dict[str, Any] = {
         # HOLD BACKOFF (R4, Sept 28: 2,223 of 2,364 cycles in ten minutes were holds, a holding family back every ~12 s,
         # ~$6.6/h of holds against a $4.5/h pace). A family whose cycle ended in a hold with no new evaluation (and no run
         # queued) waits `hold_idle_seconds` before its next turn; news lifts the wait at once (a result of its own landed,
-        # its dormant count restarted, a rewrite is ready). The wait doubles for each dormant cycle past `dormant_cycles`
-        # (a family the idle rule exempts: awaiting validation, at the gate, at the floor), up to `hold_idle_max_seconds`;
-        # below that count it never doubles, so the dormancy clause still decides a family that only holds within about
-        # `dormant_cycles` x `hold_idle_seconds`. 0 or null `hold_idle_seconds` turns the backoff off (`idle_seconds` alone);
+        # a gate verdict or validation, its gate place or band changed, a rewrite is ready: `loop.Scheduler`). The wait
+        # doubles for each dormant cycle past `dormant_cycles` (a family the idle rule exempts: awaiting validation, at the
+        # gate, at the floor), up to `hold_idle_max_seconds`; below that count it never doubles, so the dormancy clause
+        # still decides a family that only holds within about `dormant_cycles` x `hold_idle_seconds`. 0 or null `hold_idle_seconds` turns the backoff off (`idle_seconds` alone);
         # null `hold_idle_max_seconds` turns the doubling off (`loop.hold_wait`).
         "hold_idle_seconds": 300,
         "hold_idle_max_seconds": 1800,
