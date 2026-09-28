@@ -126,8 +126,13 @@ def _epoch(value: Any) -> float | None:
         return None
     if isinstance(value, (int, float)):
         return float(value)
+    text = str(value).strip().replace('Z', '+00:00')
+    if '.' in text:  # the broker's nanoseconds: Python reads six digits
+        head, _, rest = text.partition('.')
+        digits = len(rest) - len(rest.lstrip('0123456789'))
+        text = f"{head}.{rest[:digits][:6].ljust(6, '0')}{rest[digits:]}"
     try:
-        stamp = dt.datetime.fromisoformat(str(value).strip().replace('Z', '+00:00'))
+        stamp = dt.datetime.fromisoformat(text)
     except ValueError:
         return None
     return stamp.timestamp() if stamp.tzinfo is not None else None

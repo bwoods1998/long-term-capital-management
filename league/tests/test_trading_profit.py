@@ -132,6 +132,13 @@ class TradingProfitTest(unittest.TestCase):
         chain.quote_revision = 5  # the writer has begun, but has not finished this row
         self.assertIsNone(marked_value(row, day))
 
+    def test_the_brokers_fill_times_are_read_to_the_microsecond_whatever_their_precision(self):
+        from league.trading_profit import _epoch
+
+        self.assertEqual(_epoch('2026-09-28T14:10:01.312Z'), _epoch('2026-09-28T14:10:01.312000000Z'))
+        self.assertAlmostEqual(_epoch('2026-09-28T14:07:11.776268123Z') - _epoch('2026-09-28T14:07:11Z'), 0.776268, places=6)
+        self.assertIsNone(_epoch('2026-09-28T14:07:11'), 'a time without a zone is no time')
+
     def test_existing_corrupt_state_is_unknown(self):
         with tempfile.TemporaryDirectory() as directory:
             (Path(directory) / 'live.sqlite').write_bytes(b'not a database')
