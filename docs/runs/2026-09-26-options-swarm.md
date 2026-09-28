@@ -1980,6 +1980,15 @@ looks like beta. Validation 2025 and the holdout judge both.
   liquidity-provision reversal on roots uncorrelated with SPY (TLT, GLD, SLV, SMH, liquid names), and at trend as a
   diversifier. An operator breadth sweep is running.
 
+- **14:08-14:10Z THE FIRST REAL-MONEY OPTIONS ROUND TRIP (D3 calibration, `house:calibration`, never evidence for a
+  family).** The 10:00 ET slot fired at 14:08Z, after the unblock: a 1-lot SPY $1-wide near-money call vertical, 1 DTE.
+  - **Open:** limit at the package mid, filled at the mid (0 ticks from the mid) after 173 s.
+  - **Close:** limit at the mid, filled at the mid (0 ticks) in 6.6 s.
+  - **Result:** -$2.20 including $0.20 of fees. The package mid moved 2 cents against it in about 3 minutes, and no
+    spread was paid. The day's possible loss was bounded at $49.20 (D3 $50).
+  - It is a single sample per cell. `fillcheck.py --replay` compares it with the Gym's hazard for that cell after
+    Tuesday's nightly tape. Nothing is fitted on it.
+
 ### Sprint scoreboard, T0 + 53 h (11:30Z Sept 28)
 
 | # | Metric | Value |
