@@ -22,8 +22,9 @@ minute is adverse for both sides) and `hazard_favourable` on the rest, with the 
 `"adverse": "conditional"`. The test is the engine's (`engine.Account._next_move`, the same 1e-9
 tolerance on the same mid 0.5 x (bid + ask)); a contract-minute whose next minute has no two-sided quote
 is in neither (the engine fills nothing passively there). Each condition is shrunk toward its own
-coarser cells with the same prior, and its cells are exactly the unconditional table's (the
-`min_bucket` rule reads the unconditional exposure), so exposure-weighted the two rates are the
+coarser cells with the same prior, on exactly the unconditional table's buckets (the `min_bucket`
+rule reads the unconditional exposure; as everywhere, a rate that rounds to zero at six decimals is
+left out, so a table may lack a cell another holds at 1e-6), so exposure-weighted the two rates are the
 unconditional one up to the shrinkage. Sizes are not split. An unconditional fit's output is unchanged.
 
 The touch (bucket 0: a buy resting at the bid, a sell at the ask, up to a quarter-spread short of the
@@ -188,7 +189,7 @@ def shrink(exposure: dict[tuple[str, int], float], hits: dict[tuple[str, int], f
     `min_bucket` side-minutes of exposure, from exposures and hits keyed by (root, cell code): the MLE shrunk
     toward (root, d, k), (root, d), (root), then every root pooled (the module docstring). Nothing else.
     `gate`: the exposure that decides which roots and buckets have cells (a conditional table's exposure
-    and hits, with the unconditional exposure as the gate, has exactly the unconditional table's cells)."""
+    and hits, with the unconditional exposure as the gate, get exactly the unconditional table's buckets)."""
     total_n = sum(exposure.values())
     if total_n <= 0:
         return {}
@@ -390,7 +391,7 @@ def fit(store: Store, roots: Sequence[str], *, days: Sequence[dt.date] | None = 
             "each cell also measured on the side-minutes whose next minute's mid moves against the resting order or holds "
             "(hazard_adverse) and on those where it moves the order's way (hazard_favourable), the engine's own test; a "
             "contract-minute with no next two-sided quote is in neither; each condition shrunk toward its own coarser cells "
-            "with the same prior, on the unconditional table's cells")
+            "with the same prior, on the unconditional table's buckets")
     return fitted
 
 

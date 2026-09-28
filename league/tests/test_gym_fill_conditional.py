@@ -250,7 +250,7 @@ class ConditionalAdverse(unittest.TestCase):
         for cell in ("SPY|q2|s|d0|k0|t0", "SPY|q2|s|d0|k0|t1", "SPY|q2|s|d0|k0|t2"):
             for name in ("hazard_adverse", "hazard_favourable"):
                 self.assertAlmostEqual(table[name][cell] / table["hazard"][cell], 1.0, delta=0.25, msg=(cell, name))
-        # The cells are the unconditional table's, no more.
+        # The cells are the unconditional table's buckets (and on this market no rate rounds to zero: its cells, no more).
         self.assertLessEqual(set(table["hazard_adverse"]) | set(table["hazard_favourable"]), set(table["hazard"]))
 
     def test_no_favourable_cells_is_the_unconditional_rule_up_to_the_rate(self):
