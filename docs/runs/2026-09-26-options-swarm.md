@@ -1579,6 +1579,36 @@ looks like beta. Validation 2025 and the holdout judge both.
 | 6 | Money | equity $1,481.63; options buying power $481.60; 0 orders |
 | 7 | Compute | Sail $125.39 (about $5.1/h; the $32 line around Monday 19:45Z without a top-up). Claude $36.98 of $100. OpenAI $614.37 + $9.36 inflight of $707 |
 
+- **01:50-04:00Z Sept 28 The fill-model audit (a workflow: measure, build, sensitivity, three skeptics).** Train only; private numbers in the operator's files.
+  - **The defect is real.** The engine lets a resting order's calibrated fill draw happen only on minutes when the
+    structure's next-minute mid moves against it or stays flat. The hazard was measured over all minutes, so the rule
+    removes roughly half of the calibrated draws and all favourable-minute fills.
+  - **Most single-leg Gym fills are crosses**, where the next minute's natural comes through the limit. All-in, the
+    Gym's single-leg fill rate is somewhat below the measured one. The distortion is mostly in fill quality: the Gym's
+    passive fills are almost all adverse.
+  - **Draft PR #400 (a conditional rule behind the fitted table; bit-identical with the adopted table) is NOT adopted.**
+    The skeptics found that its fit over-credits favourable minutes for a fixed-price limit (it uses calibrate's pegged
+    hit definition, not a print anchored to the limit's minute). Its package conditioning is mismatched, and it still
+    overlaps with the engine's certain fills. For complex orders the Gym may already fill more often than a strict
+    complex-book truth.
+  - **Sensitivity:** eight rebound finalists (patient and two-sided variants) under today's model and the conditional
+    one, at 1.0x and 1.5x.
+    - Under either model, no finalist is robustly positive at 1.5x: 2024 loses at 1.5x for 7 of 8 under the conditional
+      model and 6 of 8 under today's.
+    - Trades both models take got cheaper, but the extra fills the conditional rule allows lost money: adverse
+      selection is real.
+    - Harness checks: the branch engine with the adopted table was bit-identical in 16 of 16 runs.
+  - **Conclusion:** the fill model is not what stands between the rebound and a pass. The rebound's patient version
+    scored 2025 t 0.19, and its Train edge fades in 2024. Monday's calibration round trips are a test set only: no
+    table is fitted or tuned on them, and `fillcheck.py --replay` against Tuesday's tape classifies each worked minute
+    as the engine does.
+- **Also built tonight (R4 candidates, each adversarially reviewed):**
+  - #398 drift screen: the fit was rebuilt after the first review found a variance-weighted bias;
+  - #401 Gym memory: a snapshot/view cycle kept every day's chains alive, and a 150-day worker falls from about 1.2 GB
+    to about 0.23 GB, byte-identical;
+  - #402 hold backoff, with dead families offered retire on the REVISE turn and an idle pass every 5 minutes;
+  - #399 Train 2020-21: being fixed after review; merges after the close.
+
 ### Sprint scoreboard, T0 + 45 h (03:30Z Sept 28, after R3)
 
 | # | Metric | Value |
