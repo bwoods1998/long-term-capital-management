@@ -114,6 +114,7 @@ masked there for quotes) at most every `note_every_cycles` cycles. Standard libr
 from __future__ import annotations
 
 import ast
+import datetime as dt
 import hashlib
 import json
 import math
@@ -124,6 +125,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from . import diagnostics, evidence, public
+from . import settings as settings_mod
 from .pool import ROBUSTNESS_PRIORITY, GymJob, PoolError
 from .store import SwarmStore
 
@@ -611,11 +613,18 @@ def idle_evaluations(fam: Mapping[str, Any]) -> int:
     `since_val_trials` (evaluations since its validation last improved, or since its birth when it never validated: the
     only count a family validated before R3 has). Every evaluation counts (the store keeps one version for identical code
     and parameters, so revisions miss a family that loops a placeholder); an unchanged re-run is no evaluation since NO
-    DUPLICATE RUNS answers it from the store, and the dormancy clause (`idle_dead`) counts those cycles instead."""
+    DUPLICATE RUNS answers it from the store, and the dormancy clause (`idle_dead`) counts those cycles instead.
+
+    A change of Train's span (the 2020-21 switch: `migrate_objective` records the trials then as `span_trials`) starts
+    the count again: every best was chosen anew over the new span, most of them empty, and evaluations over the old span
+    say nothing about whether the family can make an eligible version over the new one."""
     since = int(fam.get("since_val_trials") or 0)
-    mark = (fam.get("state") or {}).get("validated_trials")
-    if isinstance(mark, int) and not isinstance(mark, bool):
-        return max(0, min(since, int(fam.get("trials") or 0) - mark))
+    state = fam.get("state") or {}
+    trials = int(fam.get("trials") or 0)
+    for key in ("validated_trials", "span_trials"):
+        mark = state.get(key)
+        if isinstance(mark, int) and not isinstance(mark, bool):
+            since = max(0, min(since, trials - mark))
     return since
 
 
@@ -639,6 +648,17 @@ def revalidation_owed(fam: Mapping[str, Any], current: tuple[Any, Any] | None) -
         return False
     demoted = {int(v) for v in (state.get("robust_failed") or []) if isinstance(v, int) and not isinstance(v, bool)}
     return n not in demoted and str(n) not in (state.get("drift_failed") or {})
+
+
+def _idle_since(fam: Mapping[str, Any]) -> str:
+    """What the idle count runs from, in words: the Train span's change, the last validation, or the birth."""
+    state = fam.get("state") or {}
+    span_mark = state.get("span_trials")
+    if isinstance(span_mark, int) and not isinstance(span_mark, bool):
+        valid_mark = state.get("validated_trials")
+        if not (isinstance(valid_mark, int) and not isinstance(valid_mark, bool) and valid_mark > span_mark):
+            return "Train's span changed"
+    return "its last validation" if int(fam.get("validations") or 0) else "its birth"
 
 
 def idle_dead(fam: Mapping[str, Any], settings: Mapping[str, Any], *, current: tuple[Any, Any] | None = None) -> str | None:
@@ -665,7 +685,7 @@ def idle_dead(fam: Mapping[str, Any], settings: Mapping[str, Any], *, current: t
         return None
     if limit > 0:
         idle = idle_evaluations(fam)
-        since = "its last validation" if int(fam.get("validations") or 0) else "its birth"
+        since = _idle_since(fam)
         best = fam.get("best_train")
         if best is None and idle >= limit:
             return f"made no eligible Train version in {idle} Gym evaluations since {since}"
@@ -710,25 +730,39 @@ def drift_row(row: Mapping[str, Any] | None, n: int) -> dict[str, Any] | None:
     return evidence.drift_numbers((row.get("summary") or {}).get("drift"))
 
 
+def row_span(row: Mapping[str, Any] | None) -> str:
+    """The Train span a run row covered (its summary's `train_from`; a row from before the 2020-21 switch: 2022-01-03)."""
+    return str(((row or {}).get("summary") or {}).get("train_from") or CORE_SPAN)
+
+
+def running_span(store: SwarmStore) -> str:
+    """The running swarm's Train span (ISO): its store's migrated objective (`settings.objective_span`)."""
+    return settings_mod.objective_span(store.get("train_objective")).isoformat()
+
+
 def version_drift(store: SwarmStore, fam: Mapping[str, Any], n: Any) -> dict[str, Any] | None:
     """Version `n`'s drift figures (`evidence.drift_numbers`), the cheapest source first: its "drift" robustness run (a
     Train run made again for the figures, in the family's state), else its best or submitted run's row, else its newest
     normal-spread Train row (`SwarmStore.version_runs`: the store keeps every Train row's figures, `add_run`). None when no
-    run of it carries them (every run predates them)."""
+    run of it carries them (every run predates them). Rows over the running Train span only (`row_span`): a 2022-2024 run's
+    figures never screen a version over 2020-2024 (the state's robustness figures are the span's: a span change resets
+    them, and a robustness run over another span is never recorded there, `robust_landed`)."""
     if n is None:
         return None
     n = int(n)
+    span = running_span(store)
     state = fam.get("state") or {}
     again = ((state.get("robustness") or {}).get(str(n)) or {}).get("drift")
     if landed(again) and evidence.drift_numbers(again) is not None:
         return evidence.drift_numbers(again)
     for key, of in (("best_train_run", state.get("best_train_version")), ("submitted_run", fam.get("best_version"))):
         if state.get(key) and of == n:
-            numbers = drift_row(store.run(str(state[key])), n)
+            row = store.run(str(state[key]))
+            numbers = drift_row(row, n) if row_span(row) == span else None
             if numbers is not None:
                 return numbers
     for row in store.version_runs(fam["id"], n, window="train", stress=1.0, limit=20):
-        numbers = drift_row(row, n)
+        numbers = drift_row(row, n) if row_span(row) == span else None
         if numbers is not None:
             return numbers
     return None
@@ -740,7 +774,8 @@ def drift_verdict(store: SwarmStore, fam: Mapping[str, Any], n: Any, settings: M
     cfg = drift_settings(settings)
     if cfg is None:
         return None
-    return evidence.drift_screen(version_drift(store, fam, n), min_t=cfg[0], years_positive=cfg[1])
+    return evidence.drift_screen(version_drift(store, fam, n), min_t=cfg[0], years_positive=cfg[1],
+                                 first_year=int(running_span(store)[:4]))
 
 
 #: The drift-failed marks a family keeps (its newest versions'), and the length of each one's reason: a mark matters for
@@ -876,6 +911,31 @@ class Researcher:
     def cfg(self) -> Mapping[str, Any]:
         return self.settings.get("researcher", {})
 
+    def train_span(self) -> str:
+        """The running swarm's Train span (ISO): its store's migrated objective (`settings.objective_span`), never the
+        setting alone, which takes effect when the next start migrates to it."""
+        return settings_mod.objective_span(self.store.get("train_objective")).isoformat()
+
+    def train_first_year(self) -> int:
+        return int(self.train_span()[:4])
+
+    def prompt(self) -> str:
+        """The researcher's system prompt with Train's span (the same string while Train is 2022-2024)."""
+        return settings_mod.train_span_text(self.system, dt.date.fromisoformat(self.train_span()))
+
+    def run_timeout(self) -> float:
+        """How long a Train run may take on the Gym (the span's, unless the operator set `gym.run_timeout_seconds`)."""
+        return settings_mod.run_timeout(self.settings, dt.date.fromisoformat(self.train_span()))
+
+    def _robust_of(self, result: Mapping[str, Any]) -> dict[str, Any]:
+        """A Train result's score over ITS OWN span (`span_of`: the years from its first day on, and a 2020-21 year only
+        when every root of its had data): what its row records. Whether it may count now is `_counts_now`."""
+        return evidence.train_score(result, first_year=int(span_of(result)[:4]))
+
+    def _counts_now(self, span: Any) -> bool:
+        """A score over `span` may enter the family's candidates and best only while it is the running swarm's span."""
+        return str(span or CORE_SPAN) == self.train_span()
+
     # ------------------------------------------------------------------ the prompt
     def brief(self, fam: Mapping[str, Any]) -> str:
         spec = fam.get("spec") or {}
@@ -973,7 +1033,7 @@ class Researcher:
         return image, bundle
 
     def eval_key(self, code: str, params: Mapping[str, Any] | None, *, stress: float, window: str, roots: Any,
-                 image: Any = None, bundle: Any = None, current: bool = True) -> str:
+                 image: Any = None, bundle: Any = None, current: bool = True, span: str | None = None) -> str:
         """One evaluation's identity (NO DUPLICATE RUNS): the code, its MERGED params (`merged_key`: `{}` and a default
         spelled out are one program), the stress, window and roots (sorted, as the Gym sorts them), the Gym's image and
         engine (the pool's now when `current`, else `image` and `bundle`: the ones a result was stamped with) and the Train
@@ -985,15 +1045,22 @@ class Researcher:
         sampling, never as new evidence, so it is not run again. (2) Data and the fill model are the image's: a new data
         set or calibration comes as a new image checkpoint, which is in the key. A fill model changed on a box in place
         (`/data/calibration/fill_model.json`) is caught when the results land: a stored result whose `fill_model` differs
-        from the latest one the Gym returned is not reused (`_reusable`)."""
+        from the latest one the Gym returned is not reused (`_reusable`). A Train evaluation over a span other than
+        2022-01-03 (the 2020-21 switch) carries its span, so a 2022-2024 run never answers for a 2020-2024 one (a key
+        with the default span is the key it always was)."""
         if current:
             image, bundle = self._gym_identity()
+            span = self.train_span()
+        span = str(span or CORE_SPAN)
         gym = self.settings.get("gym", {})
+        split = (settings_mod.train_split(self.settings, dt.date.fromisoformat(span)) if window == "train"
+                 else gym.get("validation_split", 1))
         body = {"code": hashlib.sha256(str(code).encode("utf-8")).hexdigest(),
                 "params": merged_key(params_of(str(code)) or {}, dict(params or {})), "stress": float(stress),
                 "window": str(window), "roots": sorted(str(r).upper() for r in roots or ()), "image": image, "bundle": bundle,
-                "split": gym.get("train_split", gym.get("split", 8)) if window == "train" else gym.get("validation_split", 1),
-                "capital": gym.get("capital", 10000.0)}
+                "split": split, "capital": gym.get("capital", 10000.0)}
+        if window == "train" and span != CORE_SPAN:
+            body["span"] = span
         return hashlib.sha256(json.dumps(body, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:32]
 
     def _result_key(self, job: GymJob, result: Mapping[str, Any]) -> str:
@@ -1003,7 +1070,7 @@ class Researcher:
             self._fill_model = str(result["fill_model"])
         image, bundle = self._gym_identity()
         return self.eval_key(job.code, job.params, stress=job.stress, window=job.window, roots=job.roots, current=False,
-                             image=result.get("gym_image", image), bundle=result.get("gym_bundle", bundle))
+                             image=result.get("gym_image", image), bundle=result.get("gym_bundle", bundle), span=span_of(result))
 
     def _reusable(self, run: Mapping[str, Any] | None, *, stress: float) -> Mapping[str, Any] | None:
         """A stored run (`SwarmStore.evaluated`) that may answer a request, or None (the request runs): not one whose fill
@@ -1029,14 +1096,14 @@ class Researcher:
             if fam is not None and dormant_count(fam):
                 self.store.set_state(fid, dormant_cycles=0)
 
-    @staticmethod
-    def _with_score(result: Mapping[str, Any], stress: float) -> tuple[Mapping[str, Any], dict[str, Any] | None]:
+    def _with_score(self, result: Mapping[str, Any], stress: float) -> tuple[Mapping[str, Any], dict[str, Any] | None]:
         """(the result as its run's row records it, its Train score): at the normal spread the row keeps the score and
-        eligibility (`submit` reads them, and a stored result whose full result was pruned is scored from them)."""
-        robust = evidence.train_score(result) if stress == 1.0 else None
+        eligibility over the result's own span, and the span (`train_from`): `submit` reads them, and a stored result whose
+        full result was pruned is scored from them; `_counts_now` decides whether they may count."""
+        robust = self._robust_of(result) if stress == 1.0 else None
         if robust is not None and isinstance(result.get("summary"), Mapping):
             return {**result, "summary": {**result["summary"], "train_score": robust["score"],
-                                          "train_eligible": robust["eligible"]}}, robust
+                                          "train_eligible": robust["eligible"], "train_from": span_of(result)}}, robust
         return result, robust
 
     @property
@@ -1106,7 +1173,7 @@ class Researcher:
         if cfg is None or n is None:
             return ""
         numbers = version_drift(self.store, fam, n)
-        verdict = evidence.drift_screen(numbers, min_t=cfg[0], years_positive=cfg[1])
+        verdict = evidence.drift_screen(numbers, min_t=cfg[0], years_positive=cfg[1], first_year=self.train_first_year())
         head = f"Drift screen of version {n} (the version the tournament validates next)"
         if not verdict["known"]:
             return (f"{head}: its Train run predates the drift figures, so it is run on Train once more before it can be "
@@ -1243,7 +1310,7 @@ class Researcher:
             if self._terminal(fam["id"], out):
                 return {"status": "retired", "reason": "the family is retired; no run started"}
             out["gym_asked"] = True  # a new evaluation asked of the Gym: a cycle it does not land in is not dormant (DORMANCY)
-            result = self.pool.run(job, timeout=float(self.settings.get("gym", {}).get("run_timeout_seconds", 900)) + 120, late=late)
+            result = self.pool.run(job, timeout=self.run_timeout() + 120, late=late)
         except PoolError as exc:
             out["gym_error"] = str(exc)[:300]
             return {"status": "gym_error", "version": version["n"], "error": str(exc)[:500],
@@ -1260,16 +1327,20 @@ class Researcher:
         view = diagnostics.train_view(result, lineage_trials=self.store.lineage_trials(fam["id"]), screen=drift_settings(self.settings))
         view["version"] = version["n"]
         view["run_id"] = run["run_id"]
-        score = self._scored(fam, version["n"], run["run_id"], robust, view, out, code=code, params=params)
+        score = self._scored(fam, version["n"], run["run_id"], robust, view, out, code=code, params=params, span=span_of(result))
         out["score"] = None if score is None else round(score, 3)
         return view
 
     def _scored(self, fam: Mapping[str, Any], n: int, run_id: str, robust: Mapping[str, Any] | None, view: dict[str, Any],
-                out: dict[str, Any], *, code: str, params: Mapping[str, Any]) -> float | None:
+                out: dict[str, Any], *, code: str, params: Mapping[str, Any], span: str | None = None) -> float | None:
         """A Train run's score into the family's candidates and best (a new best queues its robustness runs) and into its
         view; returns the score when it is eligible (None otherwise). Idempotent: a stored result read again changes
-        nothing its run already changed. A version whose drift figures fail the screen is not eligible (`drift_blocks`)."""
-        score = robust["score"] if robust is not None and robust["eligible"] and robust["score"] is not None else None
+        nothing its run already changed. A version whose drift figures fail the screen is not eligible (`drift_blocks`). A
+        run over another Train span than the running swarm's (a job queued before a switch, an image adopted early) is
+        shown but never enters the candidates or the best."""
+        other = not self._counts_now(span)
+        score = (robust["score"] if robust is not None and robust["eligible"] and robust["score"] is not None and not other
+                 else None)
         blocked = self.drift_blocks(fam["id"], n, version_drift(self.store, fam, n)) if score is not None else None
         best = failed = False
         with self.store.atomic():
@@ -1290,7 +1361,11 @@ class Researcher:
             view["train_score"] = {"score": robust["score"], "eligible": bool(robust["eligible"]) and not failed and not blocked,
                                    "worst_year": robust.get("worst_year"), "quarters_positive": robust.get("quarters"),
                                    "by_year": robust.get("years")}
-            if not robust["eligible"]:
+            if other:
+                view["train_score"]["eligible"] = False
+                view["train_score"]["why_not_eligible"] = (f"this run covered Train from {span or CORE_SPAN}, and Train now "
+                                                           f"starts {self.train_span()}: run it again")
+            elif not robust["eligible"]:
                 view["train_score"]["why_not_eligible"] = robust.get("why") or ("not eligible under the Train score (40 trades "
                                                                                  "on 20 days in every Train year)")
             elif failed:
@@ -1311,9 +1386,10 @@ class Researcher:
         fid, n = fam["id"], int(run["version"])
         full = self.store.run_result(run["run_id"])
         summary = run.get("summary") or {}
+        span = span_of(full) if full is not None else str(summary.get("train_from") or CORE_SPAN)
         if full is not None:
             view = diagnostics.train_view(full, lineage_trials=self.store.lineage_trials(fid), screen=drift_settings(self.settings))
-            robust = evidence.train_score(full) if stress == 1.0 else None
+            robust = self._robust_of(full) if stress == 1.0 else None
         else:
             view = {"run_id": run["run_id"], "status": run.get("status"), "window": "train", "stress": run.get("stress"),
                     "summary": {k: summary[k] for k in diagnostics.SUMMARY_KEYS if k in summary},
@@ -1322,7 +1398,8 @@ class Researcher:
             robust = None
             if stress == 1.0 and summary.get("train_score") is not None:
                 robust = {"score": summary["train_score"], "eligible": bool(summary.get("train_eligible")), "why": None}
-            drift = diagnostics.drift_view(summary.get("drift"), screen=drift_settings(self.settings))
+            drift = diagnostics.drift_view(summary.get("drift"), screen=drift_settings(self.settings),
+                                           first_year=int(str(summary.get("train_from") or CORE_SPAN)[:4]))
             if drift is not None:  # the row keeps the figures (`SwarmStore.add_run`)
                 view["drift"] = drift
         view["version"] = n
@@ -1332,7 +1409,7 @@ class Researcher:
                         "Change the program or its params, or call gym_run with hold=true if you have nothing new")
         out["stored"] = out.get("stored", 0) + 1
         params = (self.store.version(fid, n) or {}).get("params") or {}
-        self._scored(fam, n, run["run_id"], robust, view, out, code=code, params=params)
+        self._scored(fam, n, run["run_id"], robust, view, out, code=code, params=params, span=span)
         return view
 
     def _hold(self, fam: Mapping[str, Any], args: Mapping[str, Any], out: dict[str, Any]) -> dict[str, Any]:
@@ -1363,11 +1440,11 @@ class Researcher:
         """One sweep variant's Train result, recorded as its own run of its own version (a trial, as every Gym evaluation
         is): its row keeps its Train score and eligibility (`submit` reads them), its params and its sweep. A sweep records
         its variants unpruned (`prune=False`) and prunes once at its end, keeping all its rows for `read_run`."""
-        robust = robust if robust is not None else evidence.train_score(result)
+        robust = robust if robust is not None else self._robust_of(result)
         recorded = dict(result)
         if isinstance(result.get("summary"), Mapping):
             recorded["summary"] = {**result["summary"], "train_score": robust["score"], "train_eligible": robust["eligible"],
-                                   "params": dict(job.params or {}), "sweep": sweep}
+                                   "train_from": span_of(result), "params": dict(job.params or {}), "sweep": sweep}
         days = float((result.get("summary") or {}).get("days") or 0)
         run = self.store.add_run(job.family, job.version, recorded, window="train", stress=1.0, purpose="train",
                                  program_years=days / 252.0 * max(1, len(job.roots)), prune=prune,
@@ -1378,7 +1455,7 @@ class Researcher:
     @staticmethod
     def _variant_row(job: GymJob, run_id: str, status: Any, summary: Mapping[str, Any], *, robust: Mapping[str, Any] | None,
                      fill_rate: Any = None, reason: Any = None, trials: int = 0, reused: bool = False,
-                     drift: Any = None) -> dict[str, Any]:
+                     drift: Any = None, span: str | None = None) -> dict[str, Any]:
         """A landed variant, compact: all a sweep keeps of it while it waits for the others (its full result is on disk).
         `robust` None: only the run row's summary is left (its full result was pruned), so no per-year figures. `drift`: the
         result's drift block or figures (the row shows its pooled alpha t and its years of positive alpha)."""
@@ -1395,7 +1472,7 @@ class Researcher:
         return {"job": job, "run_id": str(run_id), "status": status, "reason": reason, "score": score, "eligible": eligible,
                 "why": why, "years": years, "trades": summary.get("trades"), "days": summary.get("days_traded"),
                 "pnl": _round(summary.get("pnl"), 2), "fill_rate": _round(fill_rate, 3), "trials": int(trials), "reused": reused,
-                "drift": compact, "figures": numbers}
+                "drift": compact, "figures": numbers, "span": str(span or summary.get("train_from") or CORE_SPAN)}
 
     def _sweep_group(self, fid: str, code: str, variants: list[dict[str, Any]], roots: Any) -> str:
         """A sweep's group id is its content (the family, the code, the variants, the roots, the Gym's image and engine): the
@@ -1476,7 +1553,7 @@ class Researcher:
         todo = [GymJob(family=fid, version=int(v["n"]), code=code, params=dict(p), window="train", roots=tuple(fam["roots"]),
                        stress=1.0, purpose="train", priority=float(fam.get("weight") or 0.0), group=group)
                 for p, v in zip(fresh, versions)]
-        timeout = float(self.settings.get("gym", {}).get("run_timeout_seconds", 900)) + 120
+        timeout = self.run_timeout() + 120
 
         def late(job: GymJob) -> Callable[[Mapping[str, Any]], None]:
             return lambda result: self._record_variant(job, result, sweep=group)  # a trial whenever it lands
@@ -1491,19 +1568,20 @@ class Researcher:
             full = self.store.run_result(run["run_id"])
             if full is not None:
                 rows.append(self._variant_row(job, run["run_id"], full.get("status"), full.get("summary") or {},
-                                              robust=evidence.train_score(full), fill_rate=(full.get("fills") or {}).get("fill_rate"),
-                                              reused=True, drift=full.get("drift")))
+                                              robust=self._robust_of(full), fill_rate=(full.get("fills") or {}).get("fill_rate"),
+                                              reused=True, drift=full.get("drift"), span=span_of(full)))
             else:
                 rows.append(self._variant_row(job, run["run_id"], run.get("status"), run.get("summary") or {}, robust=None,
                                               reused=True, drift=(run.get("summary") or {}).get("drift")))
 
         def land(job: GymJob, result: Mapping[str, Any]) -> None:
             # Recorded as it lands; only its compact row stays in memory (many sweeps in flight must not hold every trade).
-            robust = evidence.train_score(result)
+            robust = self._robust_of(result)
             run = self._record_variant(job, result, robust, sweep=group, prune=False)
             rows.append(self._variant_row(job, run["run_id"], result.get("status"), result.get("summary") or {}, robust=robust,
                                           fill_rate=(result.get("fills") or {}).get("fill_rate"), reason=result.get("reason"),
-                                          trials=int(result.get("trials", 0) or 0), drift=result.get("drift")))
+                                          trials=int(result.get("trials", 0) or 0), drift=result.get("drift"),
+                                          span=span_of(result)))
             job.result = None
 
         began = self.clock()
@@ -1549,11 +1627,11 @@ class Researcher:
                    for why in [self.drift_blocks(fid, int(r["job"].version or 0), r.get("figures"))] if why}
 
         def counts(row: Mapping[str, Any]) -> bool:
-            """Completed, eligible, not demoted and not failing the drift screen: only such a row may be the best or head the
-            table."""
+            """Completed, eligible, not demoted, not failing the drift screen and over the running Train span: only such a
+            row may be the best or head the table."""
             version = int(row["job"].version or 0)
             return row["status"] == "ok" and row["eligible"] and row["score"] is not None and version not in demoted \
-                and version not in blocked
+                and version not in blocked and self._counts_now(row["span"])
 
         rows.sort(key=lambda r: (r["status"] != "ok", not counts(r), -(r["score"] if r["score"] is not None else -math.inf),
                                  r["job"].id))
@@ -1593,7 +1671,9 @@ class Researcher:
                 "trades": r["trades"], "days": r["days"], "pnl": r["pnl"], "fill_rate": r["fill_rate"], "years": r["years"]}
             if r.get("drift"):
                 row["drift"] = r["drift"]
-            if r["eligible"] and r["status"] == "ok" and not ok:
+            if r["eligible"] and r["status"] == "ok" and not ok and not self._counts_now(r["span"]):
+                row["why_not"] = f"it covered Train from {r['span']}, and Train now starts {self.train_span()}"
+            elif r["eligible"] and r["status"] == "ok" and not ok:
                 version = int(job.version or 0)
                 row["why_not"] = (f"this version fails the drift screen: {blocked[version]}" if version in blocked
                                   else f"this version {failed_why(state, version)}")
@@ -1731,13 +1811,19 @@ class Researcher:
         if verdict is not None and verdict["known"] and not verdict["passed"]:
             return False, f"its version fails the drift screen: {verdict['why']}"
         summary = run.get("summary") or {}
+        # Its row says the span it was scored on (a row from before the 2020-21 switch: 2022-01-03); a row recorded
+        # late, without a score, has it in its kept result.
+        result = None if "train_eligible" in summary else self.store.run_result(run["run_id"])
+        span = str(summary.get("train_from") or (span_of(result) if result is not None else CORE_SPAN))
+        if span != self.train_span():
+            return False, (f"it was scored on Train from {span}, and Train now starts {self.train_span()}: run the version "
+                           "again to score it on the whole of Train")
         if "train_eligible" in summary:
             return (True, "") if summary["train_eligible"] else (False, "it is not eligible under the Train score (40 trades on "
                                                                          "20 days in every Train year)")
-        result = self.store.run_result(run["run_id"])
         if result is None:
             return False, "its full result is no longer kept, so its Train score cannot be checked: run it again"
-        robust = evidence.train_score(result)
+        robust = self._robust_of(result)
         return (True, "") if robust["eligible"] else (False, str(robust["why"]))
 
     # ------------------------------------------------------------------ robustness runs
@@ -1753,7 +1839,7 @@ class Researcher:
         if cfg is None or not isinstance(source, Mapping):
             return None
         numbers = evidence.drift_numbers(source if "pooled" in source else source.get("drift"))
-        verdict = evidence.drift_screen(numbers, min_t=cfg[0], years_positive=cfg[1])
+        verdict = evidence.drift_screen(numbers, min_t=cfg[0], years_positive=cfg[1], first_year=self.train_first_year())
         if not verdict["known"] or verdict["passed"]:
             return None
         with self.store.atomic():
@@ -1770,7 +1856,7 @@ class Researcher:
         if cfg is None:
             return "the drift screen is off"
         numbers = version_drift(self.store, fam, n)
-        verdict = evidence.drift_screen(numbers, min_t=cfg[0], years_positive=cfg[1])
+        verdict = evidence.drift_screen(numbers, min_t=cfg[0], years_positive=cfg[1], first_year=self.train_first_year())
         if not verdict["known"]:
             return "its drift figures are owed (its Train run predates them): it runs on Train once more before it is validated"
         pooled = numbers["pooled"]
@@ -1863,8 +1949,11 @@ class Researcher:
             ran = stress is not None or not any(word in reason for word in NOT_RUN)
             if stress is not None:
                 years = float((result.get("summary") or {}).get("days") or 0) / 252.0 * max(1, len(fam["roots"]))
-                # A drift run is the version's normal-spread Train run made again: its row's figures are the version's.
-                self.store.add_run(fid, n, result, window="train", stress=stress, purpose="drift" if label == "drift" else "robustness",
+                # A drift run is the version's normal-spread Train run made again: its row's figures are the version's. Its
+                # row keeps the Train span it covered (`row_span`: `version_drift` reads the running span's rows only).
+                recorded = ({**result, "summary": {**result["summary"], "train_from": span_of(result)}}
+                            if isinstance(result.get("summary"), Mapping) else result)
+                self.store.add_run(fid, n, recorded, window="train", stress=stress, purpose="drift" if label == "drift" else "robustness",
                                    program_years=years, key=key)
             view = evidence.robustness_view(result) if stress is not None else {"status": "failed", "reason": reason[:200]}
             ok = result.get("status") == "ok"
@@ -1873,6 +1962,8 @@ class Researcher:
                 ok = ok and numbers is not None
                 view = {"status": "ok", **numbers} if ok else {"status": "failed", "reason": (reason or "no drift figures came back")[:200]}
             self._robust.discard((fid, int(n), label))  # landed or failed: a failure is queued again later, up to the attempts
+            if stress is not None and not self._counts_now(span_of(result)):
+                return  # run over another Train span (queued before a switch): a trial, never this span's robustness
             demoted = None
             with self.store.atomic():
                 fam = self.store.family(fid) or fam
@@ -2057,7 +2148,7 @@ class Researcher:
             if self._terminal(fid, out):
                 break
             history = [i for c in cycles for i in c.get("items", [])]
-            items = [{"role": "system", "content": self.system}, {"role": "user", "content": self.brief(fam)}]
+            items = [{"role": "system", "content": self.prompt()}, {"role": "user", "content": self.brief(fam)}]
             items += sanitize(history + current)
             chars = sum(len(json.dumps(i, default=str)) for i in items)
             profile, effort, most = self._profile(chars, fam)
@@ -2210,7 +2301,7 @@ class Researcher:
             try:
                 if (self.store.family(fid) or {}).get("retired_at"):
                     return
-                answer = self.router.ask(role="rewrite", system=self.system, user=user, family=fid, key=key, openai_model=None,
+                answer = self.router.ask(role="rewrite", system=self.prompt(), user=user, family=fid, key=key, openai_model=None,
                                          sail_profile=profile, max_output=12000, effort="medium", desk=f"{fid}:rewrite",
                                          cap_usd_day=float(self.cfg.get("rewrite_usd_day", 1.0)))
                 match = CODE_BLOCK.search(answer.get("text") or "")
@@ -2263,32 +2354,76 @@ class Researcher:
 
 #: The Train objective the families' bests are chosen by (`store.get("train_objective")`).
 OBJECTIVE = "worst-train-year-v1"
+#: Train's first day before the 2020-21 switch: every result without a `train_from` was run from it.
+CORE_SPAN = settings_mod.TRAIN_CORE_START.isoformat()
 
 
-def migrate_objective(store: SwarmStore, *, beat: Callable[[], None] | None = None, beat_seconds: float = 10.0) -> dict[str, Any]:
-    """Once per store (the swarm's start): every living family's best chosen ANEW under `evidence.train_score`, so an old
-    score (the full-Train t with a 30-trade floor) is never compared with a new one. Its kept full Train runs at the
-    normal spread are rescored; the eligible best becomes both its best by Train score and its submitted best (none: both
-    empty until an eligible run comes). The old selection stays in the family's state as `legacy_best`. The stall
-    counter restarts. Returns {"migrated", "with_best", "failed"} (zeros when it already ran).
+def span_of(result: Mapping[str, Any] | None) -> str:
+    """The first Train day a result was run from (the pool stamps it; an older result: 2022-01-03)."""
+    return str((result or {}).get("train_from") or CORE_SPAN)
+
+
+def objective_for(settings: Mapping[str, Any] | None, running: Any = None) -> str:
+    """The objective's name under the 2020-21 switch: OBJECTIVE itself while Train starts 2022-01-03, else
+    OBJECTIVE@<first day>. Turning the switch on, or back off, so re-chooses every best at the swarm's next start.
+    `running` (the store's migrated span) is what an ignored or missing setting keeps (`settings.parse_train_from`)."""
+    first = settings_mod.train_from(settings, running).isoformat()
+    return OBJECTIVE if first == CORE_SPAN else f"{OBJECTIVE}@{first}"
+
+
+def _migrated_to(state: Mapping[str, Any]) -> str | None:
+    """The objective a family's best was last chosen under (the Sept 26 pass left only `legacy_best`)."""
+    if state.get("objective_migrated"):
+        return str(state["objective_migrated"])
+    return OBJECTIVE if "legacy_best" in state else None
+
+
+def migrate_objective(store: SwarmStore, *, beat: Callable[[], None] | None = None, beat_seconds: float = 10.0,
+                      settings: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Once per store and objective (the swarm's start): every living family's best chosen ANEW under
+    `evidence.train_score`, so an old score (the full-Train t with a 30-trade floor) is never compared with a new one. Its
+    kept full Train runs at the normal spread are rescored; the eligible best becomes both its best by Train score and its
+    submitted best (none: both empty until an eligible run comes). The old selection stays in the family's state as
+    `legacy_best`. The stall counter restarts. Returns {"migrated", "with_best", "failed"} (zeros when it already ran).
 
     Restart-safe (the House restarts a swarm whose heartbeat is 240 s old): `beat` is called at least every `beat_seconds`
-    (the heartbeat); a family already carrying `legacy_best` was done by an earlier, interrupted pass and is skipped (its
-    record is never overwritten); an unreadable result is skipped, and a family whose rescoring fails anyway has its
-    best emptied (never an old score beside new ones) and is named in the `swarm.status` event."""
-    if store.get("train_objective") == OBJECTIVE:
-        return {"migrated": 0, "with_best": 0, "failed": 0}
+    (the heartbeat); a family already migrated to this objective (`objective_migrated`, or for the first objective a
+    `legacy_best`) was done by an earlier, interrupted pass and is skipped (its record is never overwritten); an
+    unreadable result is skipped, and a family whose rescoring fails anyway has its best emptied (never an old score
+    beside new ones) and is named in the `swarm.status` event.
+
+    THE 2020-21 SWITCH (Sept 27): `settings` names the objective (`objective_for`). When Train's first day changes, the
+    pass runs again: only runs over the new span (their result's `train_from`) are candidates, each scored from the span's
+    first year, so a 2022-2024 score never meets a 2020-2024 one. The selection it replaces goes to `previous_best` (the
+    Sept 26 `legacy_best` stays as it is), the family's robustness runs start over, and its notebook says why."""
+    since = store.get("train_objective")
+    running = settings_mod.objective_span(since)  # an ignored or missing setting keeps it (never a silent switch back)
+    objective = objective_for(settings, running)
+    first = settings_mod.train_from(settings, running)
+    span = first.isoformat()
+    families = store.families(alive=True)
+    if since == objective:
+        # Done before, but a pass toward another span that a process death interrupted (the switch flipped, then back,
+        # before a start completed it) may have left families migrated to that span: they come back to this one.
+        families = [f for f in families if (f.get("state") or {}).get("objective_migrated") not in (None, objective)]
+        if not families:
+            return {"migrated": 0, "with_best": 0, "failed": 0}
     migrated = with_best = 0
     failed: list[str] = []
     last = time.monotonic()
-    for fam in store.families(alive=True):
+    for fam in families:
         fid = fam["id"]
         state = fam.get("state") or {}
-        if "legacy_best" in state:
+        if _migrated_to(state) == objective:
             continue
-        legacy = {"best_train": fam.get("best_train"), "best_version": fam.get("best_version"),
-                  "best_train_version": state.get("best_train_version"), "best_train_run": state.get("best_train_run"),
-                  "objective": "full-Train t_daily, 30-trade floor", "replaced_by": OBJECTIVE}
+        # The objective its best was chosen under: its own mark, else the store's (a family born after the last pass), else
+        # the full-Train t before Sept 26 (only a family from before the first pass has neither).
+        chosen = state.get("objective_migrated") or since or _migrated_to(state) or "full-Train t_daily, 30-trade floor"
+        replaced = {"best_train": fam.get("best_train"), "best_version": fam.get("best_version"),
+                    "best_train_version": state.get("best_train_version"), "best_train_run": state.get("best_train_run"),
+                    "objective": chosen, "replaced_by": objective}
+        # The first pass (Sept 26) keeps its `legacy_best`; every later one (a span change) writes `previous_best`.
+        key = "previous_best" if since is not None or "legacy_best" in state else "legacy_best"
         try:
             rows: list[list[Any]] = []
             for run in store.runs(fid, window="train", limit=1000):
@@ -2298,8 +2433,10 @@ def migrate_objective(store: SwarmStore, *, beat: Callable[[], None] | None = No
                     beat()
                     last = time.monotonic()
                 result = store.run_result(run["run_id"])
+                if result is not None and span_of(result) != span:
+                    continue  # run over another Train span: its score never stands beside this span's
                 try:
-                    robust = evidence.train_score(result) if result is not None else None
+                    robust = evidence.train_score(result, first_year=first.year) if result is not None else None
                 except Exception:  # noqa: BLE001 - a malformed result is no candidate
                     robust = None
                 if robust is not None and robust["eligible"] and run.get("version") is not None:
@@ -2310,8 +2447,20 @@ def migrate_objective(store: SwarmStore, *, beat: Callable[[], None] | None = No
                     continue
                 store.update_family(fid, best_train=float(best[0]) if best else None, best_version=int(best[1]) if best else None,
                                     stall=0)
-                store.set_state(fid, legacy_best=legacy, best_train_version=int(best[1]) if best else None,
-                                best_train_run=best[2] if best else None, train_candidates=rows, robust_failed=[], robustness={})
+                # A span change restarts the idle count and the dormancy clause (`idle_evaluations`): most bests are empty now
+                # and must be earned again over the new span, which evaluations over the old one say nothing about.
+                # Its drift-screen marks were verdicts over the old span's years: the screen judges again over the new.
+                restart = {"span_trials": int((store.family(fid) or fam).get("trials") or 0), "dormant_cycles": 0,
+                           "drift_failed": {}} if since is not None else {}
+                # The submitted run is another span's too: the best (submitted or by Train score) is chosen anew from here.
+                store.set_state(fid, **{key: replaced}, objective_migrated=objective,
+                                best_train_version=int(best[1]) if best else None, best_train_run=best[2] if best else None,
+                                train_candidates=rows, robust_failed=[], robustness={}, submitted_run=None,
+                                submitted_note=None, **restart)
+            if since is not None:  # a span change (the first objective's pass, Sept 26, wrote no note)
+                store.note(fid, f"Train now runs from {span} to {settings_mod.TRAIN_END.isoformat()}. Your best was chosen "
+                                "again from runs over that span only" + ("." if best else ", and none has one yet: run your "
+                                                                         "best program again to score it on the whole of Train."))
             migrated += 1
             with_best += bool(best)
         except Exception as exc:  # noqa: BLE001 - one family never stops the swarm's start
@@ -2319,13 +2468,18 @@ def migrate_objective(store: SwarmStore, *, beat: Callable[[], None] | None = No
             try:
                 with store.atomic():
                     store.update_family(fid, best_train=None, best_version=None, stall=0)
-                    store.set_state(fid, legacy_best={**legacy, "error": f"{type(exc).__name__}: {str(exc)[:200]}"},
-                                    best_train_version=None, best_train_run=None, train_candidates=[], robust_failed=[], robustness={})
+                    restart = {"span_trials": int(fam.get("trials") or 0), "dormant_cycles": 0,
+                               "drift_failed": {}} if since is not None else {}
+                    store.set_state(fid, **{key: {**replaced, "error": f"{type(exc).__name__}: {str(exc)[:200]}"}},
+                                    objective_migrated=objective, best_train_version=None, best_train_run=None,
+                                    train_candidates=[], robust_failed=[], robustness={}, submitted_run=None,
+                                    submitted_note=None, **restart)
             except Exception:  # noqa: BLE001
                 pass
-    store.put("train_objective", OBJECTIVE)
+    store.put("train_objective", objective)
     out = {"migrated": migrated, "with_best": with_best, "failed": len(failed)}
-    store.event("swarm.status", None, {"action": "train_objective", "objective": OBJECTIVE, **out, "failed_families": failed[:50]})
+    store.event("swarm.status", None, {"action": "train_objective", "objective": objective, "train_from": span, **out,
+                                       "failed_families": failed[:50]})
     return out
 
 
@@ -2333,4 +2487,5 @@ __all__ = ["Researcher", "TOOLS", "TOOLS_READ", "TOOLS_REVISE", "RUNS", "needs_o
            "sanitize", "date_like", "candidates_with", "migrate_objective", "OBJECTIVE", "params_of", "check_params",
            "sweep_variants", "sweep_tool", "merged_key", "MAX_SWEEP_VARIANTS", "MAX_SWEEP_JOBS_IN_FLIGHT", "idle_dead",
            "idle_evaluations", "idle_limit", "RETIRE_IDLE_EVALUATIONS", "NEGATIVE_FACTOR", "DORMANT_CYCLES", "ALREADY_RUN",
-           "dormant_limit", "dormant_count", "awaiting_validation", "holding", "held_at_gate", "new_run", "revalidation_owed"]
+           "dormant_limit", "dormant_count", "awaiting_validation", "holding", "held_at_gate", "new_run", "revalidation_owed",
+           "objective_for", "span_of", "CORE_SPAN"]

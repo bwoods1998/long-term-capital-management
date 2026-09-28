@@ -7,6 +7,16 @@ judgement, and the manifest journal. The Parquet writing lives in `frames.py` (p
 and the ThetaData calls in `backfill.py`; both run on the data box.
 
 Nothing here reads a key, a quote or a price. Dates appear only in paths and in the manifest.
+
+THE 2020-21 EXTENSION (stages 9 and 10, Sept 27, 2026). Train can reach back to `TRAIN_EARLIEST` (2020-01-02: the
+COVID crash and rebound, then 2021's low-volatility bull), but only once the owner's switch says so: the swarm's
+`gym.train_from` (league/swarm/settings.py) and a Gym image built with `images.py build gym --train-from 2020-01-02`.
+Until then `window_of` calls those days "pre", exactly as before: stages 9 and 10 fetch them onto the data box, the
+journal labels them "pre", and every image built without `--train-from` prunes them, so no Gym or gate image changes.
+Stage 9 also fetches the underlying alone for the `HISTORY_SESSIONS` (60) sessions before 2020-01-02 (job `under`): the
+history a program may ask for (NEEDS `history`, at most 60) going into the March 2020 crash. An image built with
+`--train-from` keeps the underlying of the 60 sessions before its first Train day as "history" (never Train: no chain, no
+trade); every other image keeps none. `--early-roots` leaves a root out of stages 9 and 10 (and of an image's 2020-21).
 """
 
 from __future__ import annotations
@@ -33,6 +43,18 @@ CORE_FIVE: tuple[str, ...] = ("SPY", "QQQ", "IWM", "XSP", "SPXW")
 TRAIN = (dt.date(2022, 1, 3), dt.date(2024, 12, 31))
 VALIDATION = (dt.date(2025, 1, 2), dt.date(2025, 12, 31))
 HOLDOUT = (dt.date(2026, 1, 2), dt.date(2026, 9, 25))
+#: The earliest day Train may reach (the 2020-21 extension; the module docstring) and the stretch stages 9 and 10 fetch.
+TRAIN_EARLIEST = dt.date(2020, 1, 2)
+EARLY = (TRAIN_EARLIEST, dt.date(2021, 12, 31))
+#: The sessions of underlying alone before Train's first day that give a program its history (NEEDS `history` is at most
+#: 60 sessions): stage 9 fetches them before 2020-01-02, and an image with `--train-from` keeps them as "history".
+HISTORY_SESSIONS = 60
+#: The calendar years (ThetaData `calendar_year`) the backfill needs: stages 1-8 from 2022; stages 9 and 10 add 2020-21
+#: and 2019 (the history sessions): their holidays and half days (without them a 2020 half day would be stored as a full
+#: session).
+CALENDAR_YEARS: tuple[int, ...] = (2022, 2023, 2024, 2025, 2026, 2027)
+EARLY_STAGES = (9, 10)
+EARLY_YEARS = (2019, 2020, 2021)
 
 #: Strikes per side of the money that the one-minute NBBO keeps (ThetaData `strike_range`). The
 #: index roots with $5 strikes near the money get more, so the band covers a similar distance.
@@ -54,8 +76,13 @@ NORMAL_OPEN, NORMAL_CLOSE, HALF_CLOSE = 570, 960, 780
 KINDS = ("nbbo", "underlying", "oi", "trade_quote")
 
 
-def window_of(day: dt.date) -> str:
-    if day < TRAIN[0]:
+def window_of(day: dt.date, train_from: dt.date | None = None) -> str:
+    """The day's window. `train_from` is where Train starts (default `TRAIN[0]`, 2022-01-03: what every stage, journal
+    record and image has used); an image built with `--train-from 2020-01-02` passes it, so 2020-21 count as Train there."""
+    first = TRAIN[0] if train_from is None else train_from
+    if not TRAIN_EARLIEST <= first <= TRAIN[0]:
+        raise ValueError(f"Train starts between {TRAIN_EARLIEST} and {TRAIN[0]}, not {first}")
+    if day < first:
         return "pre"
     if day <= TRAIN[1]:
         return "train"
@@ -84,6 +111,29 @@ def source_root(root: str, day: dt.date) -> str:
 
 def strike_range(root: str) -> int:
     return int(STRIKE_RANGE.get(root, DEFAULT_STRIKE_RANGE))
+
+
+def calendar_years(stages: Sequence[int] = ()) -> tuple[int, ...]:
+    """The calendar years a run of `stages` needs: 2019-2021 as well when it plans stage 9 or 10."""
+    early = EARLY_YEARS if set(stages) & set(EARLY_STAGES) else ()
+    return tuple(sorted(set(CALENDAR_YEARS) | set(early)))
+
+
+def history_days(calendar: "Calendar", first: dt.date, sessions: int = HISTORY_SESSIONS) -> list[dt.date]:
+    """The `sessions` trading days just before `first` (a program's history going into Train's first day)."""
+    return calendar.days(first - dt.timedelta(days=2 * sessions + 30), first - dt.timedelta(days=1))[-int(sessions):]
+
+
+def early_roots(roots: Sequence[str] | None, core: Sequence[str] = CORE_FIVE) -> list[str]:
+    """The roots stages 9 and 10 fetch: `roots` (the operator's `--early-roots`, e.g. without XSP) within the core five,
+    else the core five."""
+    if not roots:
+        return list(core)
+    wanted = {str(r).upper() for r in roots}
+    unknown = wanted - set(core)
+    if unknown:
+        raise ValueError(f"--early-roots takes core roots only ({', '.join(core)}), not {', '.join(sorted(unknown))}")
+    return [r for r in core if r in wanted]
 
 
 # ------------------------------------------------------------------------------ calendar
@@ -134,6 +184,11 @@ class Calendar:
         while not self.is_trading(day):
             day -= dt.timedelta(days=1)
         return day
+
+    def covers(self, year: int) -> bool:
+        """Whether the exceptions hold the year (every NYSE year has full closes on weekdays): a calendar fetched
+        without that year would call its holidays trading days and its half days full sessions."""
+        return any(v is None and d.year == year and d.weekday() < 5 for d, v in self.exceptions.items())
 
     def to_json(self) -> dict[str, Any]:
         return {d.isoformat(): (list(v) if v else None) for d, v in sorted(self.exceptions.items())}
@@ -203,8 +258,9 @@ class Task:
 
 
 #: The jobs: `day` = NBBO + underlying + OI + listed expiries for a root-day (0-14 DTE);
-#: `tq` = the trade_quote sample; `back` = the 15-45 DTE back months merged into the day's NBBO.
-JOBS = ("day", "tq", "back", "chk", "chk1s")
+#: `tq` = the trade_quote sample; `back` = the 15-45 DTE back months merged into the day's NBBO; `under` = the
+#: underlying alone (history sessions before Train's first day, stage 9).
+JOBS = ("day", "tq", "back", "chk", "chk1s", "under")
 
 STAGES: dict[int, str] = {
     1: "core five, 2023-2025 (Train's later part and Validation)",
@@ -215,6 +271,8 @@ STAGES: dict[int, str] = {
     6: "back months to 45 DTE, SPY and QQQ",
     7: "forward: the previous trading day for the whole universe (the nightly job)",
     8: "forward: that day's back months to 45 DTE, SPY and QQQ (the nightly job, after stage 7)",
+    9: "the 2020-21 extension: core five, 2020-01-02..2021-12-31, 0-14 DTE (window 'pre' until the switch)",
+    10: "the 2020-21 extension: back months to 45 DTE, SPY and QQQ, 2020-01-02..2021-12-31 (after stage 9)",
 }
 
 
@@ -228,13 +286,18 @@ def plan(
     checks: Sequence[tuple[str, dt.date]] = (),
     forward: Sequence[dt.date] = (),
     order: Sequence[int] = (1, 2, 3, 4, 5, 6),
+    early: Sequence[str] | None = None,
 ) -> list[Task]:
     """Every task in the plan's order. `checks` (stage 0, job `chk`) fetch root-days for the
     agreement check into a side directory, never the store. `first` puts some root-days at the head
     (the Gym builder's sample; each in the stage its date belongs to, if that stage is planned).
     Within stage 1: 2024, then 2025, then 2023, each day across the roots, so every root grows
     together and the Gym can start on any of them. `order` is the order the stages are worked in
-    (the plan's is 1..6; on Sept 26 the main session moved 5, the fill-calibration samples, ahead of 4)."""
+    (the plan's is 1..6; on Sept 26 the main session moved 5, the fill-calibration samples, ahead of 4). Stages 9 and
+    10 (the 2020-21 extension) come after every stage `order` names unless it names them, 9 before 10 (a back-month
+    task merges into its day's file); they need a calendar holding 2019-2021 (`calendar_years`). Stage 9 is the history
+    sessions' underlying (job `under`), then the day chains; `early` (the operator's `--early-roots`) leaves roots out of
+    both stages."""
 
     def days(a: dt.date, b: dt.date) -> list[dt.date]:
         return calendar.days(a, b)
@@ -270,7 +333,7 @@ def plan(
                 for root in BACK_MONTH_ROOTS:
                     add(Task(8, "back", root, day))
     for root, day in first:
-        stage = stage_of(root, day, core)
+        stage = stage_of(root, day, core, early)
         if stage in stages and calendar.is_trading(day):
             add(Task(stage, "day", root, day))
     head = len(out)  # the checks and the sample stay at the front, whatever the stage order
@@ -305,16 +368,37 @@ def plan(
             for day in days(a, b):
                 for root in BACK_MONTH_ROOTS:
                     add(Task(6, "back", root, day))
+    if set(stages) & set(EARLY_STAGES):
+        missing = [year for year in EARLY_YEARS if not calendar.covers(year)]
+        if missing:
+            raise ValueError(f"the calendar lacks {', '.join(map(str, missing))} (holidays and half days): fetch it with "
+                             f"calendar_years({sorted(set(stages) & set(EARLY_STAGES))}) before planning stages 9-10")
+        fetched = early_roots(early, core)
+    if 9 in stages:
+        for day in history_days(calendar, EARLY[0]):
+            for root in fetched:
+                add(Task(9, "under", root, day))
+        for day in days(*EARLY):
+            for root in fetched:
+                add(Task(9, "day", root, day))
+    if 10 in stages:
+        for day in days(*EARLY):
+            for root in BACK_MONTH_ROOTS:
+                if root in fetched:
+                    add(Task(10, "back", root, day))
     front, rest = out[:head], out[head:]
     rest.sort(key=lambda t: rank.get(t.stage, len(rank)))  # stable: each stage keeps its own order
     return front + rest
 
 
-def stage_of(root: str, day: dt.date, core: Sequence[str] = CORE_FIVE) -> int | None:
-    """Which stage fetches this root-day's NBBO (None: no stage does)."""
+def stage_of(root: str, day: dt.date, core: Sequence[str] = CORE_FIVE, early: Sequence[str] | None = None) -> int | None:
+    """Which stage fetches this root-day's NBBO (None: no stage does). A 2020-21 day is stage 9's only for a root the
+    operator's `--early-roots` (`early`) keeps."""
     window = window_of(day)
     if root not in core:
         return 4 if window in ("train", "validation", "holdout") else None
+    if EARLY[0] <= day <= EARLY[1]:
+        return 9 if root in early_roots(early, core) else None
     if window == "holdout":
         return 2
     if window == "train" and day.year == 2022:

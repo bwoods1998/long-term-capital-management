@@ -42,6 +42,7 @@ import time
 from typing import Any, Callable, Mapping
 
 from . import evidence
+from . import settings as settings_mod
 from .pool import GymJob, PoolError
 from .researcher import drift_verdict, needs_roots
 from .store import SwarmStore, dumps
@@ -158,7 +159,7 @@ class Gate:
                                                       "passes": sum(1 for x in self.store.looks() if x["passed"])})
             out["alarm"] = True
             return out
-        limit = float(self.settings.get("gym", {}).get("run_timeout_seconds", 900)) + 1200
+        limit = settings_mod.run_timeout(self.settings) + 1200
         for fam in self.store.families():
             state = fam.get("state") or {}
             inflight = state.get("look_inflight") or {}
@@ -301,7 +302,7 @@ class Gate:
                      roots=needs_roots(version["code"], fam["roots"]), gate=f"holdout look {fam['id']} v{n}", purpose="holdout",
                      priority=10.0)  # the version's own NEEDS roots, as its validation ran (a family's roots may move)
         try:
-            result = self.pool.run(job, timeout=float(self.settings.get("gym", {}).get("run_timeout_seconds", 900)) + 600,
+            result = self.pool.run(job, timeout=settings_mod.run_timeout(self.settings) + 600,
                                    late=lambda r: self.finish(fam["id"], version, sha, r, validation_sharpe=vsharpe,
                                                               validation_image=image, validation_bundle=bundle, marker=marker),
                                    late_fail=lambda why: self.owe(fam["id"], n, sha, marker=marker))
@@ -449,7 +450,7 @@ class Gate:
             jobs.append((fam, int(n), self.pool.submit(job)))
         for fam, n, job in jobs:
             try:
-                result = self.pool.wait(job, float(self.settings.get("gym", {}).get("run_timeout_seconds", 900)) + 600,
+                result = self.pool.wait(job, settings_mod.run_timeout(self.settings) + 600,
                                         late=lambda r, fid=fam["id"], n=n: self.record_forward(fid, n, r))
             except PoolError as exc:
                 out.setdefault("errors", {})[fam["id"]] = str(exc)[:200]
@@ -487,7 +488,7 @@ class Gate:
             jobs.append((fam["id"], int(n), self.pool.submit(job)))
         for fid, n, job in jobs:
             try:
-                result = self.pool.wait(job, float(self.settings.get("gym", {}).get("run_timeout_seconds", 900)) + 600,
+                result = self.pool.wait(job, settings_mod.run_timeout(self.settings) + 600,
                                         late=lambda r, fid=fid, n=n: self.record_ready_forward(fid, n, r, target))
             except PoolError as exc:
                 out.setdefault("errors", {})[fid] = str(exc)[:200]

@@ -54,6 +54,10 @@ def log(message: str) -> None:
     print(f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}  {message}", flush=True)
 
 
+#: How often a standing 2020-21 switch alert is raised again as a `swarm.status` event (`Swarm.train_span_notice`).
+TRAIN_SPAN_NOTICE_EVERY = 600.0
+
+
 def load_env(path: str | os.PathLike | None) -> None:
     """NAME=value lines into the environment (never overriding what is set), like `league.service.load_env`."""
     if not path:
@@ -378,6 +382,8 @@ class Swarm:
     def heartbeat(self, extra: Mapping[str, Any] | None = None) -> None:
         body = {"pid": os.getpid(), "at": self.clock(), "release": str(CODE_DIR), "started_at": self.started_at,
                 "status": self.status(), **(extra or {})}
+        if getattr(self, "span_alert", None):
+            body["train_span_alert"] = self.span_alert.get("text")
         tmp = self.root / (HEARTBEAT + ".tmp")
         tmp.write_text(json.dumps(body, default=str))
         tmp.replace(self.root / HEARTBEAT)
@@ -480,10 +486,43 @@ class Swarm:
         self.rounds[name] = thread
         thread.start()
 
+    def train_span_notice(self) -> dict[str, Any] | None:
+        """THE 2020-21 SWITCH, as the operator sees it, while something about it stands: `gym.train_from` snapped, ignored or
+        missing while Train is not 2022-2024 (`settings.train_from_note`: the running span is kept, never a silent switch
+        back), or asking for a Train span the running swarm has not migrated to (its next start does). Every loop it is in
+        the heartbeat (`train_span_alert`); the `swarm.status` alert and the log line come when it changes and again every
+        `TRAIN_SPAN_NOTICE_EVERY` seconds until it is resolved. Returns the event's payload when one was raised."""
+        running = settings_mod.objective_span(self.store.get("train_objective"))
+        wanted = settings_mod.train_from(self.settings, running)
+        note = settings_mod.train_from_note(self.settings, running)
+        if note is None and wanted == running:
+            self.span_alert = None
+            return None
+        raw = (self.settings.get("gym") or {}).get("train_from")
+        text = " ".join(x for x in (note, None if wanted == running else
+                                    f"gym.train_from asks for Train from {wanted}; the running swarm scores Train from {running} "
+                                    "until its next start migrates (restart the swarm, with the matching Gym image)") if x)
+        payload = {"action": "train_span_pending" if wanted != running else "train_from_setting", "alert": True, "text": text,
+                   "setting": raw, "wanted": wanted.isoformat(), "running": running.isoformat()}
+        self.span_alert = payload
+        seen = f"{raw!r}|{running}"
+        last = self.store.get("train_span_notice")
+        now = float(self.clock())
+        if isinstance(last, dict) and last.get("seen") == seen and now - float(last.get("at") or 0) < TRAIN_SPAN_NOTICE_EVERY:
+            return None
+        self.store.put("train_span_notice", {"seen": seen, "at": now})
+        self.store.event("swarm.status", None, payload)
+        log(text)
+        return payload
+
     def step(self) -> None:
         """One pass of the main loop (tests call it directly)."""
         fresh = settings_mod.load(self.root, config=self.config)
         self.settings.update(fresh)  # in place (every piece holds this dict), and no key ever disappears mid-read
+        try:
+            self.train_span_notice()
+        except Exception:  # noqa: BLE001 - a notice never stops the loop
+            pass
         if getattr(self.guard, "due", lambda: True)():
             was = not self.guard.allows()
             self.guard.check()
@@ -547,8 +586,11 @@ class Swarm:
         born = self.seed()
         if born:
             log(f"seeded {len(born)} families")
-        try:  # once per store: the bests chosen anew under the robust Train objective, beating so the House waits for it
-            moved = migrate_objective(self.store, beat=lambda: self.heartbeat({"starting": True, "migrating": True}))
+        # once per store and Train span (`gym.train_from`, the 2020-21 switch): the bests chosen anew under the robust Train
+        # objective, beating so the House waits for it
+        try:
+            moved = migrate_objective(self.store, beat=lambda: self.heartbeat({"starting": True, "migrating": True}),
+                                      settings=self.settings)
             if moved["migrated"] or moved["failed"]:
                 log(f"train objective: {moved['migrated']} families' bests chosen anew, {moved['with_best']} with an eligible best, "
                     f"{moved['failed']} emptied after an error")

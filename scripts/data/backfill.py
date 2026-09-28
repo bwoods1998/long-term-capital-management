@@ -6,8 +6,10 @@
                                                work the plan's queue until it is empty; resumable
     backfill.py status                         the queue by stage, underlying-days, rate and ETAs
     backfill.py compile                        VERSION, calendar, expiries and manifest from the journal
-    backfill.py prune --keep train,validation [--drop-key] [--drop-work]
-                                               delete other windows' files (a Gym image fork)
+    backfill.py prune --keep train,validation [--drop-key] [--drop-work] [--train-from 2020-01-02]
+                                               delete other windows' files (a Gym image fork); Train
+                                               starts at --train-from (default 2022-01-03: the 2020-21
+                                               extension's days are "pre" and pruned)
     backfill.py adopt --records F              take files a nightly copy put in place (gate image)
     backfill.py verify                         every file's sha256 against the journal
 
@@ -283,17 +285,23 @@ class Store:
         except (OSError, ValueError):
             return None
 
-    def calendar(self, client: Any | None = None, years: Sequence[int] = (2022, 2023, 2024, 2025, 2026, 2027)) -> sl.Calendar:
+    def calendar(self, client: Any | None = None, years: Sequence[int] = sl.CALENDAR_YEARS) -> sl.Calendar:
+        """The trading calendar for `years` from the cache, fetched when the cache lacks one of them. A fetch takes the
+        union of the years asked and the years cached, so a narrower request (`one` on another year's day, the nightly
+        job's years) never drops a year a wider run needed (2019-2021 for stages 9 and 10)."""
         cache = self.work / "calendar.json"
+        cached: list[int] = []
         try:
             data = json.loads(cache.read_text())
+            cached = [int(y) for y in data.get("years", [])]
             # A sealed box (no client) takes what is cached; the data box refreshes a short cache.
             if client is None or all(str(y) in data.get("years", []) for y in years):
                 return sl.Calendar.from_json(data["exceptions"])
-        except (OSError, ValueError, KeyError):
+        except (OSError, ValueError, KeyError, TypeError):
             pass
         if client is None:
             raise SystemExit("no calendar cached and no client to fetch it")
+        years = sorted(set(int(y) for y in years) | set(cached))
         rows: list[dict[str, Any]] = []
         for year in years:
             frame = client.call("calendar_year", str(year))
@@ -493,10 +501,29 @@ def run_task(task: sl.Task, theta: Theta, store: Store, calendar: sl.Calendar) -
             store.journal.append(record)
         return {"status": "ok", "files": ["trade_quote"], "rows": built["rows"]}
 
+    if task.job == "under":
+        # The underlying alone (a history session before Train's first day: stage 9): no chain, no OI, no expiry list.
+        expiries = (LISTINGS or Listings()).expiries(task, theta, sl.EXPIRY_LIST_DTE)
+        for expiry in [e for e in expiries if e >= task.day][:3]:
+            greeks = theta.call("option_history_greeks_first_order", symbol, expiry, interval="1m",
+                                date=task.day, strike_range=1, right="call", **window)
+            if greeks is not None:
+                under = fr.underlying(greeks, open_min=open_min, close_min=close_min)
+                if under.height:
+                    put("underlying", under, f"thetadata option_history_greeks_first_order underlying_price exp={expiry.isoformat()} "
+                                             f"strike_range=1 calls{via} (history)")
+                    break
+        for record in written:
+            store.journal.append(record)
+        return {"status": "ok" if written else "empty", "files": [r["kind"] for r in written],
+                "why": None if written else "no underlying price that day"}
+
     if task.job == "back":
         target = store.path("nbbo", task.root, task.day)
         expiries = store.load_expiries(task.root, task.day)
         if expiries is None or not target.exists():
+            if day_found_nothing(store, task):
+                return {"status": "empty", "why": "the day's chain task found no NBBO: no back months to add"}
             raise RuntimeError("the day's NBBO is not in the store yet (stage 1-3 first)")
         far = [e for e in expiries if sl.MAX_DTE < (e - task.day).days <= sl.BACK_MONTH_DTE]
         groups = []
@@ -522,6 +549,14 @@ def run_task(task: sl.Task, theta: Theta, store: Store, calendar: sl.Calendar) -
         return {"status": "ok", "files": [r["kind"] for r in written], "back_expiries": len(far)}
 
     raise ValueError(f"unknown job {task.job}")
+
+
+def day_found_nothing(store: Store, task: sl.Task) -> bool:
+    """Whether the day task for a back-month task's root-day finished `empty` (no contracts, no NBBO rows): the back
+    months have nothing to merge into, for good. Read only when the day's file is missing (rare: the journal is long)."""
+    done = store.journal.done()
+    rows = [row for key, row in done.items() if key.endswith(f":day:{task.root}:{task.day.isoformat()}")]
+    return bool(rows) and all(row.get("status") == "empty" for row in rows)
 
 
 # ------------------------------------------------------------------------------ the runner
@@ -648,21 +683,57 @@ class Runner:
 
 
 # ------------------------------------------------------------------------------ compile, prune, adopt
+class ImageView:
+    """The window each file has in an image. `train_from` None: the journal's own label (a file's path date for a prune),
+    exactly as before the 2020-21 extension, so stages 9 and 10's files are "pre" and no image takes them. With
+    `train_from` (an image built with the extension on): the window its date has when Train starts there; the underlying
+    of the `HISTORY_SESSIONS` sessions before it is "history" (a program's history, never a Train day); and a root outside
+    `early_roots` (the operator's list, e.g. without XSP) has no Train day before 2022-01-03."""
+
+    def __init__(self, calendar: sl.Calendar, train_from: dt.date | None = None, early_roots: Sequence[str] | None = None):
+        self.train_from = train_from
+        self.early = {str(r).upper() for r in early_roots} if early_roots else None
+        self.history = set(sl.history_days(calendar, train_from)) if train_from is not None else set()
+
+    def window(self, kind: str, root: str, day: dt.date, label: str | None = None) -> str:
+        if self.train_from is None:
+            return label if label is not None else sl.window_of(day)
+        window = sl.window_of(day, self.train_from)
+        if window == "pre" and kind == "underlying" and day in self.history:
+            return "history"
+        if window == "train" and day < sl.TRAIN[0] and self.early is not None and root not in self.early:
+            return "pre"
+        return window
+
+    def keep(self, windows: Sequence[str]) -> set[str]:
+        """The windows an image keeps: `windows`, and the history sessions whenever Train keeps its extension."""
+        return set(windows) | ({"history"} if self.train_from is not None and "train" in windows else set())
+
+    def records(self, records: Any) -> list[dict[str, Any]]:
+        return [{**r, "window": self.window(str(r.get("kind")), str(r.get("root")), sl.as_date(r["date"]), r.get("window"))}
+                for r in records]
+
+
 def compile_store(store: Store, calendar: sl.Calendar, *, windows: Sequence[str] | None = None,
-                  roots: Sequence[str] | None = None) -> dict[str, int]:
-    """VERSION, calendar.parquet, expiries.parquet and manifest.parquet, from the journal."""
+                  roots: Sequence[str] | None = None, train_from: dt.date | None = None,
+                  early_roots: Sequence[str] | None = None) -> dict[str, int]:
+    """VERSION, calendar.parquet, expiries.parquet and manifest.parquet, from the journal. `train_from` (an image
+    built with the 2020-21 extension switched on) moves Train's first day, keeps the history sessions' calendar days and
+    relabels the manifest to match (`ImageView`)."""
     import frames as fr
 
+    view = ImageView(calendar, train_from, early_roots)
+    keep = view.keep(windows) if windows is not None else None
     store.root.mkdir(parents=True, exist_ok=True)
     (store.root / "VERSION").write_text(sl.STORE_VERSION + "\n")
-    files = [r for r in store.journal.files().values() if (windows is None or r.get("window") in windows)
-             and (roots is None or r.get("root") in roots)]
+    files = [r for r in view.records(store.journal.files().values())
+             if (keep is None or r.get("window") in keep) and (roots is None or r.get("root") in roots)]
     files = [r for r in files if (store.root / r["path"]).exists()]
     days = sorted({sl.as_date(r["date"]) for r in files})
     cal_rows = []
     if days:
         for day in calendar.days(min(sl.TRAIN[0], days[0]), days[-1]):
-            if windows is None or sl.window_of(day) in windows:
+            if windows is None or sl.window_of(day, train_from) in windows or day in view.history:
                 hours = calendar.hours(day)
                 cal_rows.append((day, hours[0], hours[1]))
     fr.write(fr.calendar_frame(cal_rows), store.root / "calendar.parquet")
@@ -674,7 +745,7 @@ def compile_store(store: Store, calendar: sl.Calendar, *, windows: Sequence[str]
                 continue
             for path in sorted(root_dir.glob("*.json")):
                 day = dt.date.fromisoformat(path.stem)
-                if windows is not None and sl.window_of(day) not in windows:
+                if windows is not None and view.window("nbbo", root_dir.name, day) not in windows:
                     continue
                 for expiry in json.loads(path.read_text()):
                     exp_rows.append((root_dir.name, day, dt.date.fromisoformat(expiry)))
@@ -717,10 +788,15 @@ GATE_WORK_KEEP = ("journal.jsonl", "expiries", "calendar.json")
 
 
 def prune(store: Store, keep: Sequence[str], *, drop_key: bool, drop_work: bool, calendar: sl.Calendar,
-          keep_journal: bool = False, roots: Sequence[str] | None = None) -> dict[str, Any]:
+          keep_journal: bool = False, roots: Sequence[str] | None = None, train_from: dt.date | None = None,
+          early_roots: Sequence[str] | None = None) -> dict[str, Any]:
     """Delete every store file outside `keep` (by the date in its path) and every file the journal
     does not know (a rename a killed run never journaled), recompile, then optionally delete the
-    key and the working area. Used on a fork that becomes the Gym image or the gate image."""
+    key and the working area. Used on a fork that becomes the Gym image or the gate image. Train starts at
+    `train_from` (None: 2022-01-03, so the 2020-21 extension's days are "pre" and go; with it, the history sessions'
+    underlying stays too) and `early_roots` limits the roots whose 2020-21 days stay (`ImageView`)."""
+    view = ImageView(calendar, train_from, early_roots)
+    kept = view.keep(keep)
     removed, orphans = 0, 0
     known = set(store.journal.files())
     for kind in sl.KINDS:
@@ -732,20 +808,21 @@ def prune(store: Store, keep: Sequence[str], *, drop_key: bool, drop_work: bool,
                 continue
             rel = str(path.relative_to(store.root))
             parsed = sl.parse_rel_path(rel)
-            if parsed is None or sl.window_of(parsed[2]) not in keep or (roots is not None and parsed[1] not in roots):
+            if parsed is None or view.window(parsed[0], parsed[1], parsed[2]) not in kept or (roots is not None and parsed[1] not in roots):
                 path.unlink()
                 removed += 1
             elif rel not in known:
                 path.unlink()
                 orphans += 1
-    report = compile_store(store, calendar, windows=keep, roots=roots)
+    report = compile_store(store, calendar, windows=keep, roots=roots, train_from=train_from, early_roots=early_roots)
     if drop_work:
         shutil.rmtree(store.work, ignore_errors=True)
         shutil.rmtree("/data/run", ignore_errors=True)
     elif keep_journal:
         # The journal keeps only the kept windows' records, so the image never lists a file it lacks.
         records = [r for r in store.journal.records()
-                   if r.get("type") != "file" or (r.get("window") in keep and (roots is None or r.get("root") in roots))]
+                   if r.get("type") != "file" or (view.window(str(r.get("kind")), str(r.get("root")), sl.as_date(r["date"]),
+                                                              r.get("window")) in kept and (roots is None or r.get("root") in roots))]
         for child in store.work.iterdir():
             if child.name not in GATE_WORK_KEEP:
                 shutil.rmtree(child) if child.is_dir() else child.unlink()
@@ -934,6 +1011,7 @@ def _main(argv: Sequence[str] | None = None) -> int:
     run.add_argument("--checks", default="", help="ROOT:DAY,... fetched first into /data/work/check-store")
     run.add_argument("--forward-days", default="", help="stage 7: these forward days for the whole universe")
     run.add_argument("--order", default="1,2,3,4,5,6", help="the order the stages are worked in")
+    run.add_argument("--early-roots", default="", help="stages 9-10: these core roots only (e.g. SPY,QQQ,IWM,SPXW)")
     run.add_argument("--threads", type=int, default=8, help="task threads; more than the slots, so decoding overlaps fetching")
     run.add_argument("--decoders", type=int, default=6, help="processes that decode and write the big frames")
     run.add_argument("--passes", type=int, default=12, help="passes over the queue before giving up on failing tasks")
@@ -947,6 +1025,9 @@ def _main(argv: Sequence[str] | None = None) -> int:
     pr.add_argument("--drop-work", action="store_true")
     pr.add_argument("--keep-journal", action="store_true", help="keep the journal, expiries and calendar (gate image)")
     pr.add_argument("--roots", default="", help="keep only these roots (an image carries only complete roots)")
+    pr.add_argument("--train-from", default="", help="Train's first day (2020-01-02 keeps the 2020-21 extension; "
+                                                      "default 2022-01-03)")
+    pr.add_argument("--early-roots", default="", help="with --train-from: only these roots keep their 2020-21 days")
     rc = sub.add_parser("records", help="one day's file records (JSON lines) for a nightly copy")
     rc.add_argument("--date", required=True)
     ad = sub.add_parser("adopt")
@@ -997,13 +1078,14 @@ def _main(argv: Sequence[str] | None = None) -> int:
         try:
             limiter = Limiter(4, slots_file)
             theta = Theta(open_client, limiter)
-            calendar = store.calendar(theta)
             stages = [int(s) for s in args.stages.split(",") if s.strip()]
+            calendar = store.calendar(theta, years=sl.calendar_years(stages))
             names_file = args.names_file or (str(store.work / "universe.json") if (store.work / "universe.json").exists() else None)
             forward = [dt.date.fromisoformat(d) for d in args.forward_days.split(",") if d.strip()]
             order = [int(x) for x in args.order.split(",") if x.strip()]
+            early = [r.strip() for r in args.early_roots.split(",") if r.strip()] or None
             tasks = sl.plan(calendar, stages=stages, names=_names(names_file), first=_first(args.first),
-                            checks=_first(args.checks), forward=forward, order=order)
+                            checks=_first(args.checks), forward=forward, order=order, early=early)
             (store.work / "plan.json").write_text(json.dumps({"stages": stages, "tasks": len(tasks), "first": args.first,
                                                               "names": _names(names_file), "at": sl.utc_now()}))
             log.info("run: stages %s, %d tasks, threads %d, decoders %d", stages, len(tasks), args.threads, args.decoders)
@@ -1014,7 +1096,7 @@ def _main(argv: Sequence[str] | None = None) -> int:
             POOL = ProcessPoolExecutor(max_workers=args.decoders, mp_context=multiprocessing.get_context("spawn"))
             groups: dict[tuple[dt.date, int], set[str]] = {}
             for task in tasks:
-                if task.job == "day":
+                if task.job in ("day", "under"):
                     groups.setdefault((task.day, task.stage), set()).add(task.root)
             LISTINGS = Listings(lambda t: sorted(groups.get((t.day, t.stage), {t.root})))
             try:
@@ -1041,7 +1123,7 @@ def _main(argv: Sequence[str] | None = None) -> int:
         job, root, day = args.task.split(":")
         task = sl.Task(args.stage, job, root, dt.date.fromisoformat(day))
         theta = Theta(open_client, Limiter(1))
-        calendar = store.calendar(theta)
+        calendar = store.calendar(theta, years=sorted(set(sl.CALENDAR_YEARS) | {task.day.year}))
         started = time.monotonic()
         record = run_task(task, theta, store, calendar)
         store.journal.append({"type": "task", "stage": task.stage, "task": task.id, "status": record.get("status", "ok"),
@@ -1071,8 +1153,10 @@ def _main(argv: Sequence[str] | None = None) -> int:
     elif args.cmd == "prune":
         keep = [w.strip() for w in args.keep.split(",") if w.strip()]
         roots = [r.strip() for r in args.roots.split(",") if r.strip()] or None
+        train_from = dt.date.fromisoformat(args.train_from) if args.train_from else None
+        early = [r.strip().upper() for r in args.early_roots.split(",") if r.strip()] or None
         print(json.dumps(prune(store, keep, drop_key=args.drop_key, drop_work=args.drop_work, calendar=calendar,
-                               keep_journal=args.keep_journal, roots=roots)))
+                               keep_journal=args.keep_journal, roots=roots, train_from=train_from, early_roots=early)))
     elif args.cmd == "records":
         for record in day_records(store, dt.date.fromisoformat(args.date)):
             print(json.dumps(record, sort_keys=True, default=str))

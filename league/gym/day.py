@@ -14,8 +14,13 @@ from typing import Any
 import numpy as np
 
 EPOCH = dt.date(1970, 1, 1)
+#: Train's reach. Its first day is 2020-01-02 (the 2020-21 extension, Sept 27, 2026); what a run covers is the image's
+#: data from the swarm's `gym.train_from` on (league/swarm/settings.py), and until the owner switches it on no Gym
+#: image holds a day before `TRAIN_CORE_START` and every Train run starts there. Ordinals count from EPOCH, never
+#: from a window, so extending a window moves none of them.
+TRAIN_CORE_START = dt.date(2022, 1, 3)
 WINDOWS: dict[str, tuple[dt.date, dt.date | None]] = {
-    "train": (dt.date(2022, 1, 3), dt.date(2024, 12, 31)),
+    "train": (dt.date(2020, 1, 2), dt.date(2024, 12, 31)),
     "validation": (dt.date(2025, 1, 2), dt.date(2025, 12, 31)),
     "holdout": (dt.date(2026, 1, 2), dt.date(2026, 9, 25)),
     "forward": (dt.date(2026, 9, 26), None),
@@ -106,4 +111,4 @@ def contract_key(expiration: Any, strike: Any, is_call: Any) -> np.ndarray:
     return (e * 100_000_000 + k) * 2 + c
 
 
-__all__ = ["EPOCH", "WINDOWS", "SEALED", "window_of", "ordinal", "from_ordinal", "Underlying", "DayChain", "contract_key"]
+__all__ = ["EPOCH", "TRAIN_CORE_START", "WINDOWS", "SEALED", "window_of", "ordinal", "from_ordinal", "Underlying", "DayChain", "contract_key"]

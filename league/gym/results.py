@@ -204,12 +204,26 @@ def summarize(trades: Sequence[dict], daily: Sequence[Sequence[Any]], capital: f
     }
 
 
-def by_year(trades: Sequence[dict], daily: Sequence[Sequence[Any]], own_days: Any = None) -> dict[str, dict[str, Any]]:
+#: A root "had data" in a year when it had a chain on at least this share of the year's days (the program's own days): a
+#: root with a few stray sessions in 2020 is not a 2020 root (the Train extension, Sept 27; `by_year`, `drift`).
+ROOT_YEAR_SHARE = 0.5
+
+
+def roots_in_year(root_days: Mapping[str, Any], days: int, share: float = ROOT_YEAR_SHARE) -> list[str]:
+    """The roots with data on at least `share` of a year's `days` ({root: days with a chain})."""
+    return sorted(str(r) for r, n in (root_days or {}).items() if days > 0 and int(n) >= share * days)
+
+
+def by_year(trades: Sequence[dict], daily: Sequence[Sequence[Any]], own_days: Any = None,
+            roots_by_day: Any = None) -> dict[str, dict[str, Any]]:
     """One row per calendar year of the run's days (a year the program never traded included): trades, days,
     days_traded, pnl, the mean and t of that year's daily returns on maximum loss (`daily_returns`), its quarters
     positive and its P&L by quarter. `own_days` (ISO days), when given, keeps only the days the program's own roots had
     data: a batch mixes roots, and a day only another program's root had data for says nothing of this one. The swarm
-    scores a Train version on its WORST year (Sept 26)."""
+    scores a Train version on its WORST year (Sept 26). `roots_by_day` ({ISO day: the program's roots with data that day})
+    adds each year's `root_days` ({root: days with a chain}) and `roots` (those with data on `ROOT_YEAR_SHARE` of the
+    year's days): the swarm counts a 2020-21 year only when every one of the program's roots had data in it (the Train
+    extension of Sept 27: a name has no 2020-21 chains)."""
     days = [d for d in daily if own_days is None or str(d[0]) in own_days]
     out: dict[str, dict[str, Any]] = {}
     for year in sorted({str(d[0])[:4] for d in days}):
@@ -225,6 +239,14 @@ def by_year(trades: Sequence[dict], daily: Sequence[Sequence[Any]], own_days: An
                      "t_daily": None if t is None else round(t, 4),
                      "quarters_positive": f"{sum(v > 0 for v in quarters.values())}/{len(quarters)}",
                      "quarter_pnl": {q: round(v, 2) for q, v in sorted(quarters.items())}}
+        if roots_by_day is not None:
+            counts: dict[str, int] = {}
+            for d in days:
+                if str(d[0]).startswith(year):
+                    for r in roots_by_day.get(str(d[0]), ()):
+                        counts[str(r)] = counts.get(str(r), 0) + 1
+            out[year]["root_days"] = dict(sorted(counts.items()))
+            out[year]["roots"] = roots_in_year(counts, out[year]["days"])
     return out
 
 
@@ -235,9 +257,14 @@ def merge_years(parts: Sequence[Mapping[str, Any]], trades: Sequence[dict], dail
         return by_year(trades, daily)
     days: dict[str, int] = {}
     quarters: dict[str, dict[str, float]] = {}
+    root_days: dict[str, dict[str, int]] = {}
     for p in parts:
         for year, row in p["by_year"].items():
             days[year] = days.get(year, 0) + int(row.get("days") or 0)
+            if isinstance(row.get("root_days"), Mapping):
+                into_roots = root_days.setdefault(year, {})
+                for r, n in row["root_days"].items():
+                    into_roots[str(r)] = into_roots.get(str(r), 0) + int(n)
             into = quarters.setdefault(year, {})
             for q, v in (row.get("quarter_pnl") or {}).items():
                 into[q] = into.get(q, 0.0) + float(v)
@@ -252,6 +279,9 @@ def merge_years(parts: Sequence[Mapping[str, Any]], trades: Sequence[dict], dail
                      "t_daily": None if t is None else round(t, 4),
                      "quarters_positive": f"{sum(v > 0 for v in qs.values())}/{len(qs)}",
                      "quarter_pnl": {q: round(v, 2) for q, v in sorted(qs.items())}}
+        if year in root_days:
+            out[year]["root_days"] = dict(sorted(root_days[year].items()))
+            out[year]["roots"] = roots_in_year(root_days[year], days[year])
     return out
 
 
@@ -473,8 +503,17 @@ def drift_from_stats(stats: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
     pooled = {"days": days, "held_days": held, "pnl": sum(f["pnl"] for f in fits.values()), "alpha": total / days if days else 0.0,
               "alpha_usd": total, "beta": sum(f["beta"] * f["held_days"] for f in fits.values()) / held if held else 0.0,
               "drift_usd": sum(f["drift_usd"] for f in fits.values()), "t": t}
-    return {"basis": DRIFT_BASIS, "years": {y: {**_drift_row(f), "stats": stats[y]} for y, f in fits.items()},
+    return {"basis": DRIFT_BASIS, "years": {y: {**_drift_row(f), **_drift_extent(f, stats[y]), "stats": stats[y]}
+                                            for y, f in fits.items()},
             "pooled": _drift_row(pooled)}
+
+
+def _drift_extent(f: Mapping[str, Any], st: Mapping[str, Any]) -> dict[str, Any]:
+    """What lets the swarm pool a SUBSET of the years again (the Train extension, Sept 27: a 2020-21 year some root of the
+    program had no data in is left out): the year's sums of the drift-adjusted P&L's squares and of the P&L's, and each
+    root's days with data (the statistics themselves are dropped where rows are kept)."""
+    return {"sum_sq": float(f["sum_sq"]), "sum_pp": float(f["sum_pp"]),
+            "root_days": {str(r): int(acc[0]) for r, acc in sorted((st.get("roots") or {}).items())}}
 
 
 def drift(daily: Sequence[Sequence[Any]], returns: Mapping[str, Mapping[str, Any]], exposure: Mapping[str, Mapping[str, Any]],
@@ -482,7 +521,7 @@ def drift(daily: Sequence[Sequence[Any]], returns: Mapping[str, Mapping[str, Any
     """The run's drift-adjusted alpha (the swarm's drift screen, Sept 27): a long call in a bull year earns whatever its
     signal says, so what a program's timing adds is measured net of the market's own drift over the hours it held
     exposure, a calendar year at a time (`drift_rows`, `drift_stats`, `drift_fit`, `drift_from_stats`)."""
-    return drift_from_stats(drift_stats(drift_rows(daily, returns, exposure, roots, own_days)))
+    return {**drift_from_stats(drift_stats(drift_rows(daily, returns, exposure, roots, own_days))), "roots": sorted(roots)}
 
 
 def merge_drift(parts: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
@@ -490,6 +529,8 @@ def merge_drift(parts: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
     (`combine_stats`: sums added, held moments combined exactly), then fitted once, so the result equals the fit of the
     whole window's days. None when a segment has no block (a result from before it)."""
     stats: dict[str, dict[str, Any]] = {}
+    roots = next((list(p["drift"]["roots"]) for p in parts if isinstance(p.get("drift"), Mapping)
+                  and isinstance(p["drift"].get("roots"), list)), None)
     for p in parts:
         block = p.get("drift")
         if not isinstance(block, Mapping) or not isinstance(block.get("years"), Mapping):
@@ -500,7 +541,10 @@ def merge_drift(parts: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
                 return None
             stats[year] = combine_stats(stats[year], st) if year in stats else combine_stats(
                 {"n": 0, "p": 0.0, "pp": 0.0, "held": [0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}, st)
-    return drift_from_stats(stats)
+    out = drift_from_stats(stats)
+    if roots is not None:
+        out["roots"] = roots
+    return out
 
 
 def fill_stats(account: Any) -> dict[str, Any]:
@@ -552,7 +596,7 @@ def build(account: Any, cfg: Any, days: Sequence[dt.date], data_version: str, re
             "root": _group(trades, lambda t: t["root"]),
             "exit_reason": _group(trades, lambda t: t["exit_reason"]),
         },
-        "by_year": by_year(trades, account.daily, own),
+        "by_year": by_year(trades, account.daily, own, {d: [r for r in account.roots if r in rows] for d, rows in regimes.items()}),
         "daily": [list(d) for d in account.daily],
         "trades": trades,
         "worst": sorted(trades, key=lambda t: t["pnl"])[:5],
