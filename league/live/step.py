@@ -76,6 +76,11 @@ NEW_YORK = ZoneInfo("America/New_York")
 FAMILIES_EVERY = 300.0
 ACTIVITIES_EVERY = 300.0
 FLOWS_EVERY = 300.0
+#: Funding types `ltcm.performance.ALPACA_FUNDING` classifies but Alpaca's activities endpoint does not accept as a
+#: filter: naming one fails the whole read with HTTP 422 "invalid activity type: WIRE" (the real account, Sept 28,
+#: 2026, the first session after the owner's deposit), and with no funding read the stops stay provisional and block
+#: every real entry. They are left out of the query only; the classifier keeps them.
+UNQUERYABLE_FUNDING = frozenset({"WIRE"})
 BROKEN_RESEND_MINUTES = 3    # a broken structure's leg is sent alone at most this often
 EXIT_PREEMPT_SECONDS = 120.0
 DECIDER_ORPHAN_SECONDS = 300.0
@@ -1347,7 +1352,7 @@ class OptionsLive:
         from ltcm.performance import ALPACA_FUNDING
 
         try:
-            rows = self.real.activities(sorted(ALPACA_FUNDING), after=self.start_at)
+            rows = self.real.activities(sorted(set(ALPACA_FUNDING) - UNQUERYABLE_FUNDING), after=self.start_at)
             read_at = self.clock()
             flows, unsettled, pending_amounts = [], [], []
             start = parse_time(self.start_at) or 0.0
