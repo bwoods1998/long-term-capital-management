@@ -1656,6 +1656,115 @@ looks like beta. Validation 2025 and the holdout judge both.
 | 6 | Money | equity $1,481.63; options buying power $481.60; 0 orders |
 | 7 | Compute | Sail $116.11 (about $4.6/h; the $32 line around 21:50Z without a top-up). Claude $39.59 of $100. OpenAI $615.00 + $9.36 in flight of $707 |
 
+- **05:00-05:15Z Sept 28 Pre-registration: the frozen 2020-21 replication screen.** It is written before any 2020-21
+  option data exists: PR #399 merges after today's close and the fetch runs after it. Nothing from 2020-21 was read to
+  write it. No box was used, and the House was read only.
+  - **Why.** Train winners have not transferred to 2025. 2020 (the crash and rebound) and 2021 (a quiet bull) are new,
+    unseen regimes. Fixing the inventory and the kill test now makes the screen a real out-of-sample test.
+  - **Verifiable later.** The private file `prereg-2020-21.json` has sha256
+    `316fca9c62bea407d84c1e32cf77dc7592294f5515a45948e9376fbdfd0391d2`. It holds:
+    - each component's family id and version, code sha256, merged-params sha256 and the Gym's run sha;
+    - for sweep rows, the template name, grid index and the frozen placebo's hashes;
+    - the Train figures the selection used, the mechanism tags, the exclusions and every rule below.
+
+    It holds no program code and no parameter values.
+  - **The inventory: 38 frozen components.**
+    - **30 Train winners of the real-money types.** For each family, take the version with the best robust Train score,
+      keeping only those with a positive worst Train year. Then drop:
+      - clones with an identical Train result (7);
+      - families with roots outside the 2020-21 fetch (7);
+      - premium sold in debit form, per the critique: put-writes as call verticals, variance-premium ITM verticals, and
+        long butterflies as iron-fly twins (5);
+      - multi-leg XSP/SPXW (2).
+
+      The top 30 by Train t remain (6 fell below the cut).
+    - **The 8 rebound sweep finalists.** These are the top 2 by Train score from each of the four exec and
+      patient-broad runs, the same set as the fill audit.
+    - No Validation or holdout number was used to select or tag any component.
+  - **Mechanism classes. Replication is counted by mechanism, not by version.**
+
+    | Class | Mechanism | Components |
+    |---|---|---|
+    | R | Index short-horizon reversal (liquidity provision). Every rebound variant and its mirror counts as ONE mechanism | 25 |
+    | T | Multi-session trend continuation held in long convexity | 6 |
+    | E | Directional drift around scheduled macro events | 2 |
+    | O | Overnight premium after closing inventory pressure | 1 |
+    | M | Intraday liquidation continuation read from quote compression | 1 |
+    | C | Calendar flows (month and quarter turns, pre-holiday, opex week) | 1 |
+    | L | Leveraged-ETF close rebalancing flow | 1 |
+    | F | Intraday opening-range breakout failure | 1 |
+  - **The kill test.**
+    - **Window.** 2020-01-02..2021-12-31. A trade belongs to the window by its entry day.
+    - **Statistic.** t is the Gym's daily t on max loss.
+    - **A component replicates only if all of these hold:**
+      1. at 1.0x, t ≥ 1.0 over the window;
+      2. at 1.5x, P&L > 0 over the window;
+      3. at 1.0x, t > -0.5 in 2020 and in 2021;
+      4. it beats its placebo in 2020 and in 2021: its mean daily return on max loss is strictly above the placebo's;
+      5. at 1.0x, P&L > 0 with every trade that was open at any time in March 2020 removed;
+      6. a natural-only twin was run and reported. It gates nothing, but a component without one does not replicate.
+    - **Placebos.** A directional component's placebo is its signal inverted. A fly's placebo would be every eligible
+      session, but no fly remains in the inventory.
+      - The sweep rows' placebos are frozen in the file.
+      - Each House component's inverted program changes only the entry condition. Its hashes go in an addendum, and that
+        addendum's sha256 is recorded here before any 2020-21 run. A component with no frozen placebo by then fails
+        test 4.
+    - **Undefined results.** A t that cannot be computed fails the test that needs it. A program error counts as a
+      failure. Only an infrastructure failure may be rerun, with the identical hashes.
+    - **Runs.**
+      - Train on the verified 2020-2024 Gym image, never a gate image.
+      - Split 16, with each program's own roots.
+      - Every run's code and params hashes are checked against the file before it counts.
+  - **The decision.** The route continues only if at least 6 components replicate across at least 3 mechanism classes.
+    Otherwise it stops: no book is built and nothing from this screen goes to Validation.
+  - **Inventory mean.** The screen also reports the mean window t over all 38 components and the mean of the class means.
+    Noise predicts about -0.4. This mean is descriptive only.
+  - **The book rule** (only if the route continues):
+    - The members are all the replicators, equally weighted.
+    - Each member risks $100 of max loss (fees included) on each of its entry days.
+    - The book's daily new max loss is fixed at N × $100. An unused slice is not reallocated, so there is no look-ahead.
+    - The book's daily return is the mean of the members' daily returns on max loss, with zero for a member that did not
+      enter. Its t is taken over days with any entry.
+  - **The predicted 2025 t.** It is computed with this formula and recorded here before any Validation run of a
+    replicator or the book, and before anyone reads their 2025 numbers from stored runs.
+    - **Each member.** The shrunk per-year t is θ̂ = μ0 + k (t_window - √2 μ0), with k = √2 σ0² / (2 σ0² + 1). The
+      constants are fixed now: μ0 = -0.2 and σ0² = 0.4, from the Train-positive versions' 2025 spread.
+    - **The book.** T̂ = Σ wᵢ θ̂ᵢ / √(Σᵢ Σⱼ ρᵢⱼ wᵢ wⱼ).
+      - wᵢ is the sd of member i's daily returns × √(its entry days a year).
+      - ρᵢⱼ is the correlation of the members' all-session daily returns.
+      - Both are measured on the 2022-24 part of the screen runs.
+    - **What it implies.** Take 6 equal members, each at window t 1.5, with correlation 0.1: the book is predicted near
+      t 0.7. At window t 2.5 it is predicted near t 1.35. **Even a passing screen predicts a book below the verifier's
+      2**, unless replication is both strong and broad.
+  - **Caveat: 2025 is not clean for this book.** 14 of the 30 House components already have a 2025 Validation run of the
+    same version in the store. The clean tests are 2020-21 and the holdout, which this screen never touches.
+- **05:11-05:18Z Earnings event-variance premium (S1), phase 0: killed.** The kill tests were written before any run. It
+  was a 1-lot centred long call fly at a max loss of $95 or less with fees, with a matched placebo, on 14 reporting
+  names in 3 shards, at 1.0x and 1.5x. All four kill tests fired:
+  - pooled t at or below 0 in every Train year at both stresses;
+  - the event arm not above the placebo in 2023 and 2024;
+  - under 40 trades on 20 days in every year;
+  - losses driven by max-loss trades.
+  Filled at the mid, as a diagnostic only, it still misses the agenda's bar: t 1.93 / 1.00 / -1.14 in 2022-24. Buying
+  at the natural costs about 30% a round trip. Only 71 of about 168 reports fit the $95 budget. The premium exists but
+  is small: realised report gaps averaged about 0.7 of the priced move. Any future attempt needs a mechanism-level
+  change.
+- **05:00-06:20Z The SPXW "artifact" was the operator's own labelling bug, and the hunt found a real Gym marking bug.**
+  - `middiag.py` paired the batch's name-sorted results with families in export order, so 68 of 72 rows in its private
+    results carried another family's numbers. It is fixed and the file relabelled; its aggregate verdict did not depend
+    on labels.
+  - The t 8.24 row belongs to an SPXW nickel-credit spread whose sample holds no tail event. The daily t cannot see its
+    risk, and its max loss is far above the Probe cap. Settlement is sound: the store's 16:00 index level matches the
+    official close on all 753 Train days.
+  - **The real bug:** when one leg's quote blows out, the sum of the legs' touches (the natural) can fall outside what
+    the package can ever be worth, for example a debit vertical closed below zero, and the engine filled there. It is
+    rare on Train and bites in blow-out episodes. Draft PR #404 bounds fills and marks to each structure's payoff range.
+    The full suite is green and the money digest unchanged; it goes to review for the after-close release.
+  - No real or shadow position was ever in XSP or SPXW.
+- **06:15Z R4 merged** (#403 = #401 Gym memory + #402 hold backoff and idle pass + #398 drift screen). CI is green on
+  both Pythons for the combined tree, the local sensitive suite (live close and parity, memory, drift, holds) passes
+  143 tests, the money digest is unchanged, and the SQLite backup is at `state/backups/pre-r4/`. Deploying.
+
 ### Sprint scoreboard, T0 + 47 h (05:31Z Sept 28)
 
 | # | Metric | Value |
