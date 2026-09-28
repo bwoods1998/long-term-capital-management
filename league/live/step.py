@@ -35,6 +35,13 @@ THE CALIBRATION ROUND TRIPS (D3; `league/live/calibration.py`): the House's own 
 hourly from 10:00 to 15:00 ET (a patient 25-minute mid at 12:00 and 14:00), sent through the same order path, only while
 real opens may go and the paper proof has passed; never evidence.
 
+THE HOUSE LIVE TEST (the owner, Sept 28, 2026; `league/live/house_test.py`): the House's second route whose orders no
+family's intent produced. One frozen, pre-registered program (private: only its hashes are public) runs as the House's
+own real instance `house:rebound-live@0:h` in the same decider child and through the same order path as a family's, with
+the test's own bounds from the money table (`options_money.house_test`) in place of a band's sizing, its intents applied
+after the families' of each minute, and its opens yielding to theirs; switched by `live.house_test` in `<state>/swarm.json`
+(off: exits only). Never a band, a promotion, a forward record or an agent's structure; its positions are Profit.
+
 Real opens need every one of: `config.json` `real_money`; the grant `options-swarm-20260928` active on the money digest
 in force (`House.grant`); the gateway's kill switch off; no stop tripped (`money.Stops`); reconciliation clean; the
 paper proof passed this session or before (`live.require_paper_proof`); the House not paused; the family's band (or
@@ -62,6 +69,7 @@ from ..gym.engine import settlement_level
 from ..gym import venue as V
 from ..gym.ctx import order_row, position_row
 from . import money as M
+from . import house_test as HT
 from .calibration import FAMILY as CALIBRATION_FAMILY, Calibration
 from .chains import LiveDay, from_ordinal, ordinal, session_minutes, trading_days_around, uses_parity
 from .decider import BudgetSpent, DeciderError, ProgramRefused, MAX_BATCH_SECONDS
@@ -190,6 +198,7 @@ class OptionsLive:
         self.proof_single = (PaperProof(self.state, paper, record=self.record, clock=clock, kind="single")
                              if paper is not None else None)
         self.calibration = Calibration(self) if self.book is not None else None
+        self.house_test = HT.HouseTest(self) if self.book is not None else None
         perf = dict(performance or {})
         self.start_at = str(perf.get("start_at") or "")
         start_equity = M.D(perf.get("start_equity") or 0)
@@ -269,6 +278,8 @@ class OptionsLive:
                 pass
         if self.calibration is not None:
             self.calibration.recorder.close()
+        if self.house_test is not None:
+            self.house_test.recorder.close()
         self.observe_store.close()
 
     def switches(self) -> dict[str, Any]:
@@ -282,7 +293,7 @@ class OptionsLive:
             return self._switches
         import json
 
-        off = {"observe": False, "observe_max": 0, "calibration": False, "calibration_samples": 0}
+        off = {"observe": False, "observe_max": 0, "calibration": False, "calibration_samples": 0, "house_test": False}
         try:
             from ..swarm import settings as swarm_settings
 
@@ -299,8 +310,8 @@ class OptionsLive:
         except Exception as exc:  # noqa: BLE001
             if not self._switches_told:
                 self._switches_told = True
-                self.alert("warning", f"live: <state>/swarm.json could not be read ({type(exc).__name__}): observe and "
-                                      "calibration are OFF until it can")
+                self.alert("warning", f"live: <state>/swarm.json could not be read ({type(exc).__name__}): observe, "
+                                      "calibration and the House live test are OFF until it can")
             self._switches = off
             return self._switches
         self._switches_told = False
@@ -314,7 +325,8 @@ class OptionsLive:
         self._switches = {"observe": raw.get("observe", defaults["observe"]) is True,
                           "observe_max": count("observe_max", 0, 256),
                           "calibration": raw.get("calibration", defaults["calibration"]) is True,
-                          "calibration_samples": count("calibration_samples", 0, 1000)}
+                          "calibration_samples": count("calibration_samples", 0, 1000),
+                          "house_test": raw.get("house_test", defaults.get("house_test", False)) is True}
         return self._switches
 
     def _decider_of(self, inst: Instance) -> Any:
@@ -475,21 +487,54 @@ class OptionsLive:
 
     def _load(self, inst: Instance) -> bool:
         inst.retried_at = self.clock()
+        house = inst.family == HT.FAMILY
+        identity = False                                    # the House live test's program is not the pre-registered one
         try:
+            if house:
+                # The House live test's program is the pre-registered one, byte for byte, at every load (a restart's
+                # restore from the live state too), and so is the decider's own run sha.
+                why = HT.verify(inst.code, inst.params)
+                if why:
+                    identity = True
+                    raise ProgramRefused(why)
             info = self._decider_of(inst).load(inst.key, inst.code, inst.params, inst.family,
                                                budget_seconds=self._decision_budget())
+            if house and info.get("run_sha") != HT.FROZEN["run_sha"]:
+                self._decider_of(inst).drop(inst.key, budget_seconds=self._decision_budget())
+                identity = True
+                raise ProgramRefused(f"its run sha {str(info.get('run_sha'))[:12]} is not the pre-registered "
+                                     f"{HT.FROZEN['run_sha'][:12]}")
             inst.needs = needs_of(info["needs"])
             inst.run_sha = info.get("run_sha") or inst.run_sha
             inst.error = ""
             inst.error_since = None
+            if house:
+                # A load starts the program's memory afresh: inside a decision's window (the private pre-registration
+                # names it) that is a deviation of the test, recorded so its analysis can list every one.
+                self.record("live.instance", {"instance": inst.key, "family": inst.family,
+                                              "state": "house test program loaded (fresh memory)", "at": self.clock(),
+                                              "new_york": ny(self.clock()).strftime("%Y-%m-%d %H:%M")}, agent=inst.family)
             if inst.kind == "shadow" and inst.key not in self.shadow.accounts:
                 # Whenever it loads: its first load, or a reload after one that failed.
                 self.shadow.accounts[inst.key] = ShadowAccount(
                     instance=inst.key, family=inst.family, needs=inst.needs, params=inst.params,
                     capital=float(self.settings["shadow_capital"]), fill_model=self.shadow.fill_model)
         except ProgramRefused as exc:
-            inst.error = f"the program does not load: {str(exc)[:200]}"
-            inst.fatal = True
+            if house and not identity:
+                # The House live test's verified bytes refused by the decider child (a transient failure there, never
+                # its identity): retried as a decider failure, never for good.
+                if inst.error_since is None:
+                    self.alert("warning", f"live: the House live test's program did not load; retried: {str(exc)[:200]}")
+                    inst.error_since = self.clock()
+                inst.error = f"the decider failed: {str(exc)[:200]}"
+            else:
+                inst.error = f"the program does not load: {str(exc)[:200]}"
+                inst.fatal = True
+            if house and identity:
+                # For good (a restart keeps it): exits only, and the House closes what it holds as an orphan's.
+                inst.mode = "exit_only"
+                self._persist_instance(inst)
+                self.alert("error", f"live: the House live test's program does not load: {str(exc)[:200]}")
         except DeciderError as exc:
             inst.error = f"the decider failed: {str(exc)[:200]}"
             if inst.error_since is None:
@@ -561,6 +606,12 @@ class OptionsLive:
             elif (band == "gym" and row.get("validation_passed") and not row.get("holdout_passed") and self._real_on()
                   and self.table.tuition_day > 0 and row.get("structure") in self.table.real_types):
                 wanted[f"{fid}@{version}:t"] = (row, "real", True)
+        if self.house_test is not None:
+            # The House live test (`league/live/house_test.py`): its own real instance while its switch, real money, its
+            # bounds and its verified private program allow; otherwise the loop below sends it to exits only.
+            house_row = self.house_test.wanted_row()
+            if house_row is not None:
+                wanted[HT.INSTANCE] = (house_row, "real", False)
         if observed is None:
             # The observe band could not be read: its instances stay as they are (never taken for an empty band).
             for key, inst in self.instances.items():
@@ -1009,6 +1060,8 @@ class OptionsLive:
         if self.book is not None:
             self._real_pre(day, mi, now, out)
         self._paper_proof(day, mi, out)
+        if self.house_test is not None:
+            self._house_test(lambda: self.house_test.observe(day, mi))
         if self.book is not None:
             for key, inst in self.instances.items():
                 if inst.kind != "real" or inst.error or inst.needs is None:
@@ -1024,10 +1077,13 @@ class OptionsLive:
         for key, acc in shadow_due.items():
             answer = results.get(key) or {}
             self._isolated(key, lambda: (self._stats(key, answer), self._shadow_intents(key, acc, day, mi - 1, answer.get("intents") or [])))
-        for key, inst in real_due.items():
+        # The families' real intents first, the House live test's last: it takes only what they left.
+        for key, inst in sorted(real_due.items(), key=lambda item: item[1].family == HT.FAMILY):
             answer = results.get(key) or {}
             self._isolated(key, lambda: (self._stats(key, answer),
                                          self._real_intents(inst, day, mi, answer.get("intents") or [], out)))
+        if self.house_test is not None:
+            self._house_test(lambda: self.house_test.step(day, mi, out))
         if self.book is not None:
             self._calibration_step(day, mi, out)    # after the agents' orders of the minute: it takes what they left
         # The observe band last: its chains, its program loads and its decisions, in its own child.
@@ -1315,6 +1371,15 @@ class OptionsLive:
         except Exception as exc:  # noqa: BLE001 - never the minute's end
             self.alert("warning", f"live: the calibration step failed ({type(exc).__name__}: {str(exc)[:160]})")
             self.state.event("live.error", {"instance": "calibration", "error": f"{type(exc).__name__}: {exc}",
+                                            "trace": traceback.format_exc()[-2000:]})
+
+    def _house_test(self, work: Callable[[], Any]) -> None:
+        """The House live test's part of the minute (`league/live/house_test.py`): never the minute's end."""
+        try:
+            work()
+        except Exception as exc:  # noqa: BLE001
+            self.alert("warning", f"live: the House live test's step failed ({type(exc).__name__}: {str(exc)[:160]})")
+            self.state.event("live.error", {"instance": HT.INSTANCE, "error": f"{type(exc).__name__}: {exc}",
                                             "trace": traceback.format_exc()[-2000:]})
 
     def _paper_proof(self, day: LiveDay, mi: int, out: dict) -> None:
@@ -1685,6 +1750,9 @@ class OptionsLive:
                                   legs=[RLeg(leg.symbol, leg.side, 1, leg.is_call, leg.strike, leg.expiry, leg.key)], qty=left,
                                   limit_value=price, tif=1, day=day.day.isoformat(), minute=mi, pid=pos.pid, forced=True,
                                   why=f"broken structure: {pos.info.get('broken')}")
+            if getattr(self, "house_test", None) is not None and pos.family == HT.FAMILY:
+                self.house_test.record(sent, snap, [L.LegFill(i, leg.key, leg.side, 1, 0, leg.strike, leg.is_call)], None,
+                                       forced=True)
             book.send(sent)
             sent_at[leg.symbol] = now
             out.setdefault("orders", []).append({"oid": sent.oid, "family": pos.family, "action": "close_leg", "status": sent.status})
@@ -1770,9 +1838,15 @@ class OptionsLive:
             return "the gateway's kill switch is engaged"
         # An exit is never refused on the instance's order budget (it limits opens); it is charged when it went.
         tif = order.tif if not forced else None
+        house_test = getattr(self, "house_test", None)
+        house = house_test is not None and pos.family == HT.FAMILY
+        if house and not forced:
+            why = HT.CLOSE_WHY                              # the program's note stays in its private record
         sent = book.new_order(instance=pos.instance, family=pos.family, action="close", type_=pos.type, root=pos.root,
                               legs=list(pos.legs), qty=order.qty, limit_value=value, tif=tif, day=day.day.isoformat(),
                               minute=mi, pid=pos.pid, forced=forced, fees_est=order.fees, why=why)
+        if house:
+            house_test.record(sent, snap, legs, intent, forced=forced)
         book.send(sent)
         if not forced and sent.dispatched:
             self._instance_spent(pos.instance, day)
@@ -1949,14 +2023,21 @@ class OptionsLive:
         if order.type in L.DEBIT and top is not None and order.limit >= top - 1e-9:
             return f"a debit of {order.limit:.2f} on a {order.type} worth at most {top:.2f} can never pay"
         unit = M.D(round(order.max_loss_share * V.MULTIPLIER + 2 * order.fees, 2))
-        family_rows = self.families.forward_rows(inst.family) if not inst.tuition else []
-        fwd = M.forward_stats(family_rows, self.table.sized_confidence, version=inst.version) if not inst.tuition else None
+        # The House live test (`league/live/house_test.py`) has no band and no forward record: its own bounds size it.
+        house = getattr(self, "house_test", None) is not None and inst.family == HT.FAMILY
+        evidence = not inst.tuition and not house
+        family_rows = self.families.forward_rows(inst.family) if evidence else []
+        fwd = M.forward_stats(family_rows, self.table.sized_confidence, version=inst.version) if evidence else None
         if fwd is not None and (fwd.negative or (inst.band == "sized" and (not M.sized_ok(self.table, fwd) or fwd.real_bad))):
             self._families_at = float("-inf")
             return "its current forward evidence no longer qualifies for this real band"
         week_start = (day.day - dt.timedelta(days=day.day.weekday())).isoformat()
-        plan = M.plan_open(self.table, band=inst.band, tuition=inst.tuition, equity=sizing, unit=unit, fwd=fwd,
-                           exposure=book.exposure(inst.family, day=today, week_start=week_start))
+        exposure = book.exposure(inst.family, day=today, week_start=week_start)
+        if house:
+            plan = self.house_test.plan(unit=unit, equity=sizing, exposure=exposure, day=day)
+        else:
+            plan = M.plan_open(self.table, band=inst.band, tuition=inst.tuition, equity=sizing, unit=unit, fwd=fwd,
+                               exposure=exposure)
         if plan.qty < 1:
             return plan.reason
         qty = plan.qty
@@ -1977,17 +2058,21 @@ class OptionsLive:
             return f"order budget: {int(self.settings['instance_orders_day'])} orders a day (the Gym's)"
         tif = order.tif
         identity = dict(self._entry_identity(inst), forward_rows=family_rows)
-        with self.families.admit_open(identity, real=True) as allowed:
+        admit = self.house_test.admit(day.day) if house else self.families.admit_open(identity, real=True)
+        # A fill's reason is public on the tape: the House live test's orders carry a fixed text, never the program's note.
+        why = HT.OPEN_WHY if house else str(intent.get("note") or intent.get("tag") or "")[:200]
+        with admit as allowed:
             if allowed:
                 sent = book.new_order(instance=inst.key, family=inst.family, action="open", type_=order.type, root=root, legs=legs,
                                       qty=qty, limit_value=order.limit, tif=tif, day=today, minute=mi, reserve=reserve,
-                                      max_loss=max_loss, fees_est=fees, tuition=inst.tuition,
-                                      why=str(intent.get("note") or intent.get("tag") or "")[:200])
+                                      max_loss=max_loss, fees_est=fees, tuition=inst.tuition, why=why)
         if not allowed:
             inst.mode = "exit_only"
             self._persist_instance(inst)
             self._cancel_inactive_opens()
             return "its family or version is no longer eligible to open"
+        if house:
+            self.house_test.record(sent, snap, order.legs, intent, forced=False)
         book.send(sent)
         if sent.dispatched:
             self._instance_spent(inst.key, day)
@@ -2027,8 +2112,9 @@ class OptionsLive:
         # max-pid cursor missed; the swarm deduplicates a retried export by its stable trade id.
         rows = self.book.closed_trades(unexported=True)
         for row in rows:
-            # Tuition and the calibration round trips are never evidence: marked exported, never sent.
-            if not row["tuition"] and row["family"] != CALIBRATION_FAMILY:
+            # Tuition and the House's own trades (the calibration round trips, the House live test) are never evidence:
+            # marked exported, never sent.
+            if not row["tuition"] and not str(row["family"]).startswith("house:"):
                 try:
                     self.families.add_forward(row["family"], "real", [{**row, "version": _version_of(row.get("instance") or "")}])
                 except Exception as exc:  # noqa: BLE001
@@ -2160,8 +2246,8 @@ class OptionsLive:
         rows = []
         if self.book is not None:
             for pos in list(self.book.positions.values()):
-                if pos.qty <= 0 or pos.family == CALIBRATION_FAMILY:
-                    continue  # the calibration round trips are the House's, never an agent's structure
+                if pos.qty <= 0 or str(pos.family).startswith("house:"):
+                    continue  # the calibration round trips and the House live test are the House's, never an agent's
                 rows.append({"id": f"real:{pos.pid}", "agent": pos.family, "underlying": pos.root, "structure": pos.type,
                              "legs": len(pos.legs), "expiry": pos.expiry, "quantity": pos.qty, "real": True,
                              "opened_at": dt.datetime.fromtimestamp(pos.opened_at, dt.timezone.utc).isoformat(),
@@ -2198,7 +2284,8 @@ class OptionsLive:
                 # calibration's samples file belongs to the minute thread (`python -m league.live --calibration` reads it).
                 "observe": {"switches": dict(self._switches or {}), "pins": self.state.get("observe_pins")},
                 "budget_spent": dict(self.budget_spent),
-                "calibration": self.calibration.status() if self.calibration is not None else None}
+                "calibration": self.calibration.status() if self.calibration is not None else None,
+                "house_test": self.house_test.status() if self.house_test is not None else None}
 
 
 def _is_observe(instance: str) -> bool:

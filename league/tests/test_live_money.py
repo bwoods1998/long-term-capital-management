@@ -48,6 +48,9 @@ class TheTable(unittest.TestCase):
         self.assertEqual((t.sized_share, t.sized_family_share, t.book_share), (D("0.10"), D("0.30"), D("0.90")))
         self.assertEqual((t.daily_stop_share, t.drawdown_stop_share), (D("0.35"), D("0.60")))
         self.assertEqual((t.tuition_day, t.tuition_week, t.calibration_day), (D("200"), D("300"), D("50")))
+        # The House live test (the owner, Sept 28, 2026): its pre-registered bounds.
+        self.assertEqual((t.house_test_structure, t.house_test_open, t.house_test_envelope, t.house_test_stop,
+                          t.house_test_sessions, t.house_test_round_trips), (D("100"), 3, D("300"), D("150"), 20, 30))
         self.assertEqual((t.max_orders_day, t.max_requests_minute, t.bp_buffer), (250, 150, D("0.10")))
         self.assertEqual((t.gateway_order_max_loss, t.gateway_order_share, t.gateway_day_share, t.gateway_max_orders),
                          (D("1000"), D("0.25"), D("1.0"), 300))

@@ -23,6 +23,10 @@ class ConstitutionTest(unittest.TestCase):
         # The forward-first run's M5 (Sept 25, 2026): the hold turns on an 80% bound, one observation a block period.
         self.assertEqual(CONSTITUTION["allocator"]["family_probe"],
                          {"losing_min_blocks": 6, "reseat": "bound_since_demotion", "reseat_confidence": "0.8"})
+        # The House live test's pre-registered bounds (the owner, Sept 28, 2026: a new money digest).
+        self.assertEqual(CONSTITUTION["options_money"]["house_test"],
+                         {"structure_usd": "100", "open": 3, "envelope_usd": "300", "stop_usd": "150", "sessions": 20,
+                          "round_trips": 30})
 
     def test_sizing_stays_on_the_lower_bound_and_death_keeps_its_budget(self):
         """Whatever the owner's appetite, two properties hold: the scaled rung is never sized above
