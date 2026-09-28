@@ -2093,6 +2093,26 @@ looks like beta. Validation 2025 and the holdout judge both.
 | 6 | Readiness | For after the close, built and in review: #404 marking, #406 splits (public split table, a no-look-ahead fix in progress), calibration expansion (six slots, IWM, a 25-min patient cell, the same $50 bound), site positions ledger (House feed and site section, reconciling exactly to Profit). The 5-year Train flip follows |
 | 7 | Compute | Sail $86.33 (about $4/h; the $32 line around 05:00Z Tuesday without a top-up). Claude $59.69 of $100. OpenAI $630.28 + $11.35 in flight of $707 |
 
+- **17:30-18:40Z Tournament round 2 (with round 1's lessons as rules): 0 of 6 pass.**
+  - Six mechanisms, kill tests written first, on the sealed 2020-24 image:
+    - the pre-release uncertainty premium;
+    - the buyback-window reopening;
+    - a volatility-state autocorrelation switch;
+    - a jump-composition reversal;
+    - diffusive-move continuation;
+    - intermediary-capacity premium.
+  - The release premium stopped at its outcome-blind precondition: 2020-21 chains priced no release kink. The other
+    five failed K0 at the mid; the best worst-year t was 0.07 (diffusive continuation, beaten by drift in 2020 and
+    2024). 60 runs; the deflated Sharpe's ledger is about 62,104. All 10 boxes were terminated.
+  - The judge's conclusions:
+    - daily index-ETF direction is used up with the Gym's information set: 12 strong-model mechanisms over two rounds,
+      none reached a worst-year t of 1.5 even at zero cost;
+    - the cost gap is about 5x, and multi-day holds do not close it, because legs past 7 DTE fill at the natural;
+    - better real fills cannot rescue these, since every one failed at the mid;
+    - the only 2025 near-passes are single-name convex programs, which the deflated Sharpe refuses as fat-tailed.
+  - Agenda v9 (live): daily index direction is refuted as a class, and idiosyncratic single-name drivers with large
+    per-trade moves are the priority.
+
 ### Sprint scoreboard, T0 + 59 h (17:31Z Sept 28, in session)
 
 | # | Metric | Value |
