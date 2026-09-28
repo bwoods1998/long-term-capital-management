@@ -59,7 +59,9 @@ idle rule (`idle_dead`: the same floor, gate exemption and graveyard wording), u
 (`awaiting_validation`: holding while the tournament validates it is honest).
 
 RETIRE (Sept 26: an unguarded `retire` on the REVISE turn took the population from 49 to 16 in 24 minutes). A REVISE
-turn offers `gym_run` and `gym_sweep` alone: a REVISE always revises. A READ turn offers `retire` only while more
+turn offers `gym_run` and `gym_sweep` alone (a REVISE always revises), and `retire` beside them only to a dead family
+(`idle_dead`, under `can_retire`: R4, Sept 28, a family that holds never reaches a READ turn, so its researcher could not
+retire the mechanism it found refuted and held every cycle instead). A READ turn offers `retire` only while more
 families live than `population.start` and the family has had at least two validations, or, by THE IDLE RULE (R3, Sept
 27: with the population held at its start, dead families never qualified and looped on placeholder runs), while more
 live than `population.floor` and the family is dead (`idle_dead`: `researcher.retire_idle_evaluations` Gym evaluations
@@ -204,8 +206,8 @@ TOOLS: list[dict[str, Any]] = [
                     "is abandoned; retained in the private notebook and graveyard."}}, "required": ["reason"]}},
 ]
 
-#: A REVISE turn requires a run or a sweep (a REVISE always revises: `retire` is never offered there); a missing call
-#: fails and uses the normal backoff.
+#: A REVISE turn requires a run or a sweep (a REVISE always revises: `retire` is offered there only to a dead family,
+#: `idle_dead`, R4); a missing call fails and uses the normal backoff.
 TOOLS_REVISE: list[dict[str, Any]] = [t for t in TOOLS if t["name"] in RUNS]
 #: A READ turn without `retire` (the family may not retire now: `Researcher.can_retire`).
 TOOLS_READ: list[dict[str, Any]] = TOOLS[:-1]
@@ -855,9 +857,10 @@ class Researcher:
                 self._sweeping.pop(fid, None)
 
     def tools(self, *, revise: bool, retire: bool) -> list[dict[str, Any]]:
-        """A turn's tools: REVISE a run or a sweep (the call is required), READ every tool, `retire` only when the family
-        may retire (`can_retire`); `gym_sweep` only while sweeps are on, its limit from the settings."""
-        base = TOOLS_REVISE if revise else (TOOLS if retire else TOOLS_READ)
+        """A turn's tools: REVISE a run or a sweep (a call is required), READ every tool, `retire` only when the family
+        may retire (`can_retire`; on REVISE only a dead family, `idle_dead`); `gym_sweep` only while sweeps are on, its
+        limit from the settings."""
+        base = (TOOLS_REVISE + TOOLS[-1:] if retire else TOOLS_REVISE) if revise else (TOOLS if retire else TOOLS_READ)
         if not self.sweeps:
             return [t for t in base if t["name"] != "gym_sweep"]
         return [sweep_tool(self.max_variants) if t["name"] == "gym_sweep" else t for t in base]
@@ -1764,10 +1767,11 @@ class Researcher:
             chars = sum(len(json.dumps(i, default=str)) for i in items)
             profile, effort, most = self._profile(chars, fam)
             key = f"swarm:{fid}:c{n}:m{out['model_calls']}:{int(fam.get('revisions') or 0)}"
-            # REVISE requires a run or a sweep (never retire); READ follows a completed run and offers every tool, retire
-            # only when the family may retire (`can_retire`).
+            # REVISE requires a run or a sweep; READ follows a completed run and offers every tool, retire only when the
+            # family may retire (`can_retire`). A DEAD family's REVISE offers retire too (R4, Sept 28: researchers that
+            # found their mechanism refuted held every cycle, "retire tool not offered", since a hold never reaches READ).
             revise = not gym_done
-            tools = self.tools(revise=revise, retire=not revise and self.can_retire(fam))
+            tools = self.tools(revise=revise, retire=self.can_retire(fam) and (not revise or bool(idle_dead(fam, self.settings))))
             response = self.router.sail(profile, items, family=fid, key=key, tools=tools, effort=effort, max_output=most,
                                         cache_key=f"swarm-{fid}", cap_usd_day=float(self.cfg.get("family_usd_day", 2.0)),
                                         tool_choice="required" if revise else "auto")

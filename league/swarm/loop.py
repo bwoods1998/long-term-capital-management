@@ -3,9 +3,11 @@
 One process beside the House loop, niced. Its threads:
 
 - RESEARCHERS: `researcher.concurrency` workers, each taking the next family (the bandit's share first,
-  then the longest-waiting) and running one cycle, while the guard allows;
+  then the longest-waiting) and running one cycle, while the guard allows; a family that held waits out its hold
+  (`Scheduler`'s HOLD BACKOFF);
 - THE GYM POOL's dispatchers (one per box) and forks (`pool.py`);
-- ROUNDS on their own threads so none blocks another: the tournament (hourly), the gate (every few
+- ROUNDS on their own threads so none blocks another: the tournament (hourly), the idle pass between its rounds (every
+  five minutes, the idle rule's retirements alone: `Tournament.idle_pass`), the gate (every few
   minutes), the nightly forward (once a day), the architect (every four hours), the diagnostician (every few
   minutes, Claude on the stuck and the nearly-there families);
 - RESEEDS (the sprint, Sept 26): below `population.start` while the architect is not due, the seeds' mechanisms are
@@ -40,7 +42,7 @@ from .diagnostician import Diagnostician
 from .gate import Gate
 from .guard import SailGuard, provider_reader
 from .pool import GymPool
-from .researcher import Researcher, migrate_objective
+from .researcher import Researcher, dormant_count, dormant_limit, migrate_objective
 from .seeds import SEEDS, family_spec, program_for
 from .store import SwarmStore
 from .tournament import INDEX, NOT_ROTATED, Tournament
@@ -65,24 +67,85 @@ def load_env(path: str | os.PathLike | None) -> None:
             os.environ.setdefault(name.strip(), value.strip().strip('"').strip("'"))
 
 
-class Scheduler:
-    """Which family runs next: the bandit's share first, then the longest wait; one cycle per family at a time."""
+#: `researcher.hold_idle_seconds` and `researcher.hold_idle_max_seconds` unless the settings say otherwise (HOLD BACKOFF).
+HOLD_IDLE_SECONDS = 300.0
+HOLD_IDLE_MAX_SECONDS = 1800.0
 
-    def __init__(self, store: SwarmStore, *, clock: Callable[[], float] = time.time):
+
+def _seconds(raw: Any, default: float) -> float:
+    """A wait in seconds: null is 0 (off); a boolean, a non-number, a negative or a non-finite number is the default."""
+    if raw is None:
+        return 0.0
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not math.isfinite(raw) or raw < 0:
+        return float(default)
+    return float(raw)
+
+
+def hold_wait(settings: Mapping[str, Any], dormant: int) -> float:
+    """HOLD BACKOFF (R4, Sept 28): the wait before the next turn of a family whose cycle ended in a hold with no new
+    evaluation and no run queued, its dormant cycles (`researcher.dormant_count`) counted after that cycle.
+    `researcher.hold_idle_seconds`, doubled for each dormant cycle past `researcher.dormant_cycles` (a family the idle
+    rule exempts while it holds: its best awaits validation, a version is at the gate, the population is at its floor),
+    up to `researcher.hold_idle_max_seconds`. Below the dormancy clause's count it never doubles: doubling from the first
+    hold would stretch the clause from about 3.4 hours of holds (40 x 300 s) to about 19 (40 holds, most of them 1800 s
+    apart), keeping families whose mechanism is refuted in their slots. With the clause off (`dormant_cycles` 0) it
+    doubles from the second hold. 0 when the backoff is off."""
+    cfg = settings.get("researcher") or {}
+    base = _seconds(cfg.get("hold_idle_seconds", HOLD_IDLE_SECONDS), HOLD_IDLE_SECONDS)
+    if base <= 0:
+        return 0.0
+    cap = max(base, _seconds(cfg.get("hold_idle_max_seconds", HOLD_IDLE_MAX_SECONDS), HOLD_IDLE_MAX_SECONDS))
+    past = max(0, int(dormant) - max(1, dormant_limit(settings)))
+    return min(cap, base * 2.0 ** min(past, 30))
+
+
+class Scheduler:
+    """Which family runs next: the bandit's share first, then the longest wait; one cycle per family at a time.
+
+    HOLD BACKOFF (R4, Sept 28): a family whose cycle ended in a hold with no new evaluation and no run queued for its next
+    cycle is not taken again for `hold_wait` seconds (`researcher.hold_idle_seconds`), unless news comes first: its
+    trials rose (a result of its own landed late: a Train run, a sweep variant, a robustness run, a validation), its
+    dormant count went down (a counted validation, a return to the Gym) or a stronger model's rewrite is ready. Any cycle
+    that is not such a hold ends the wait (a new evaluation, a queued run, a retirement). Kept in memory: a restarted
+    swarm takes every family once, and its next hold waits again by its stored dormant count."""
+
+    def __init__(self, store: SwarmStore, *, clock: Callable[[], float] = time.time, settings: Mapping[str, Any] | None = None):
         self.store = store
         self.clock = clock
+        self.settings = settings if settings is not None else {}  # the Swarm's dict, re-read in place every loop
         self._lock = threading.Lock()
         self.running: set[str] = set()
         self.last: dict[str, float] = {}
         self.cooldown: dict[str, float] = {}
         self.errors: dict[str, int] = {}
+        #: family -> (until, its trials, its dormant cycles) after a hold (HOLD BACKOFF).
+        self.held: dict[str, tuple[float, int, int]] = {}
+
+    def holding(self, fam: Mapping[str, Any], now: float) -> bool:
+        """The family waits out a hold (HOLD BACKOFF); a wait that ran out or that news lifted is forgotten. Under the lock."""
+        held = self.held.get(fam["id"])
+        if held is None:
+            return False
+        until, trials, dormant = held
+        news = (int(fam.get("trials") or 0) > trials or dormant_count(fam) < dormant
+                or bool((fam.get("state") or {}).get("rewrite_ready")))
+        if now >= until or news:
+            del self.held[fam["id"]]
+            return False
+        return True
+
+    def waiting(self) -> int:
+        """Families waiting out a hold now (the heartbeat's `holding`)."""
+        now = self.clock()
+        with self._lock:
+            return sum(1 for until, _, _ in self.held.values() if until > now)
 
     def take(self, *, idle_seconds: float = 5.0) -> str | None:
         now = self.clock()
         fams = self.store.families(alive=True)
         with self._lock:
             ready = [f for f in fams if f["id"] not in self.running and self.cooldown.get(f["id"], 0) <= now
-                     and now - self.last.get(f["id"], 0) >= idle_seconds]
+                     and now - self.last.get(f["id"], 0) >= idle_seconds and not self.holding(f, now)]
             if not ready:
                 return None
             n = max(1, len(fams))
@@ -95,7 +158,23 @@ class Scheduler:
             return fid
 
     def release(self, fid: str, result: Mapping[str, Any]) -> None:
+        held = None
+        if result.get("hold") and not int(result.get("trials") or 0) and not result.get("pending_run") \
+                and not result.get("retired"):
+            fam = self.store.family(fid)
+            if fam is not None and not fam.get("retired_at"):
+                dormant = dormant_count(fam)
+                wait = hold_wait(self.settings, dormant)
+                counted = result.get("dormant_cycles")
+                if isinstance(counted, int) and dormant < counted:
+                    wait = 0.0  # its dormant count restarted since the cycle ended (a result of its own landed): news
+                if wait > 0:
+                    held = (self.clock() + wait, int(fam.get("trials") or 0), dormant)
         with self._lock:
+            if held is None:
+                self.held.pop(fid, None)
+            else:
+                self.held[fid] = held
             self.running.discard(fid)
             self.last[fid] = self.clock()
             error = str(result.get("error") or "")
@@ -134,7 +213,7 @@ class Swarm:
                 client = _sail_client()
             pool = GymPool(self.store, client, self.settings, clock=clock, allowed=lambda kind: self.guard.allows(kind))
         self.pool = pool
-        self.scheduler = Scheduler(self.store, clock=clock)
+        self.scheduler = Scheduler(self.store, clock=clock, settings=self.settings)
         self.researcher = Researcher(self.store, self.router, self.pool, self.settings, clock=clock,
                                      starter=lambda spec: program_for(spec))
         self.researcher.pace = self.over_pace
@@ -219,6 +298,7 @@ class Swarm:
                   self.store._all("SELECT payload FROM events WHERE kind='swarm.cycle' AND at >= ? ORDER BY seq DESC LIMIT 3000", (since,))]
         seconds = sorted(float(p.get("seconds") or 0) for p in recent[:300] if not p.get("error"))
         return {"families_alive": len(self.store.families(alive=True)), "running": len(self.scheduler.running),
+                "holding": self.scheduler.waiting(),
                 "totals": self.store.totals(), "spend_last_hour": spend, "usd_per_hour": round(sum(spend.values()), 4),
                 "median_cycle_seconds": seconds[len(seconds) // 2] if seconds else None, "cycles_last_hour": len(recent),
                 "cycle_errors_last_hour": sum(1 for p in recent if p.get("error")),
@@ -348,6 +428,8 @@ class Swarm:
         if self.guard.allows() and self.gym_ready():
             if self.tournament.due():
                 self._round("tournament", self.tournament.run)
+            elif self.tournament.idle_due():  # the idle rule alone between the hourly rounds (THE IDLE PASS)
+                self._round("idle", self.tournament.idle_pass)
             if self.gate.due():
                 self._round("gate", self.gate.run)
             if self.gate.forward_due():

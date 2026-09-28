@@ -25,7 +25,8 @@
    no rule while the operator holds its validated version at the gate (`researcher.held_at_gate`). Each retiree's
    lesson goes to the graveyard (its mechanism, what it tried, its best numbers, its last notebook lines); an idle-rule
    lesson says it was a time limit, not a refutation. Each counted verdict records the family's trials
-   (`validated_trials`), from which the idle rule counts, and restarts its dormant cycles.
+   (`validated_trials`), from which the idle rule counts, and restarts its dormant cycles. THE IDLE PASS (R4,
+   `idle_pass`) retires by the idle rule alone every `tournament.retire_every_seconds` (300) between the rounds.
 6. THE LEADERBOARD: one `swarm.tournament` event (the House mirrors it to its ledger) with every family's
    rank, share, validation summary, trials and band, and the totals.
 
@@ -62,6 +63,7 @@ class Tournament:
         self.settings = settings
         self.clock = clock
         self.rng = rng or random.Random()
+        self.idle_at = float("-inf")  # the last idle pass (`idle_due`); in memory: a restarted swarm runs one at once
 
     @property
     def cfg(self) -> Mapping[str, Any]:
@@ -302,13 +304,43 @@ class Tournament:
                     why = "its trial-adjusted evidence fell below the line (the deflated Sharpe probability)"
             if not why:
                 # The fallback for a dead family that never called retire (R3): Train figures only in the reason.
-                dead = idle_dead(fam, self.settings)
-                if dead:
-                    why = f"It {dead}. {IDLE_CAUSE}"
+                why = self.idle_why(fam)
             if why:
                 if self.retire(fam, why):
                     out.append({"family": fam["id"], "why": why})
         return out
+
+    def idle_why(self, fam: Mapping[str, Any]) -> str | None:
+        """THE IDLE RULE's reason to retire a living Gym family (`researcher.idle_dead`), or None: never outside the Gym
+        band nor while the operator holds its validated version at the gate (`held_at_gate`); `idle_dead` itself exempts
+        a version at the gate or a look out, and, from its dormancy clause, a best that awaits validation."""
+        if fam.get("band") != "gym" or fam.get("retired_at") or held_at_gate(fam):
+            return None
+        dead = idle_dead(fam, self.settings)
+        return f"It {dead}. {IDLE_CAUSE}" if dead else None
+
+    def idle_due(self) -> bool:
+        """THE IDLE PASS is due: `tournament.retire_every_seconds` (300) since the last; 0, null, a boolean or not a finite
+        number turns it off (the hourly round still retires by the same rule)."""
+        raw = self.cfg.get("retire_every_seconds", 300)
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not 0 < raw < float("inf"):
+            return False
+        return self.clock() - self.idle_at >= float(raw)
+
+    def idle_pass(self) -> dict[str, Any]:
+        """THE IDLE PASS (R4, Sept 28): the hourly round's idle-rule retirements alone, every `retire_every_seconds` between
+        its rounds, so a dead family leaves within minutes of dying (after R3 dead families held until the hourly round,
+        which the operator did not wait for: 60 retired by hand). The same rule, reasons and lessons as the round's
+        fallback (`idle_why`), the least favoured first, and never below `population.floor` (`SwarmStore.retire_gym`
+        checks it atomically). No model call and no Gym job."""
+        self.idle_at = self.clock()
+        retired = []
+        for fam in sorted(self.store.families(alive=True), key=lambda f: (f.get("weight") or 0.0, f["id"])):
+            fam = self.store.family(fam["id"]) or fam
+            why = self.idle_why(fam)
+            if why and self.retire(fam, why):
+                retired.append({"family": fam["id"], "why": why})
+        return {"retired": retired, "alive": len(self.store.families(alive=True))}
 
     def retire(self, fam: Mapping[str, Any], why: str) -> bool:
         result = self.store.retire_gym(fam["id"], why, floor=int(self.settings.get("population", {}).get("floor", 16)),
