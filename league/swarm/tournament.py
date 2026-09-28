@@ -4,8 +4,9 @@
    validated yet runs on Validation once, but only after that version's 1.5x-stress Train robustness run came back
    with a profit (`tournament.require_robustness`, Sept 26: a version that loses at 1.5x never reaches the gate), and only
    when it passes THE DRIFT SCREEN (`tournament.drift_screen`, Sept 27, `evidence.drift_screen`: its Train drift-adjusted
-   alpha has a pooled t of at least `drift_min_t` and is positive in all Train years but one; a version whose Train run
-   predates the figures waits until the researcher's robustness label "drift" has run it again). The Gym runs its
+   alpha has a pooled t of at least `drift_min_t` and is positive in all Train years but one: a candidate that fails is
+   demoted, `researcher.screen_best`, and the next candidate that passes is validated in its place; a version whose Train
+   run predates the figures waits until the researcher's robustness label "drift" has run it again). The Gym runs its
    1.5x-half-spread twin in the same batch (two trials, counted) and returns only the validation VIEW (no trades, dates
    or daily series). The
    researcher is told only whether the line was met and how many of its checks passed (D2a). A version runs on
@@ -14,8 +15,9 @@
    days with N = the lineage's validated versions (`SwarmStore.lineage_validated`). A family that meets it goes to
    the gate's queue.
 3. THE BANDIT (`evidence.thompson`): each family's share of researcher cycles and Gym priority from its
-   validation evidence, with 25% for new families.
-4. FORKS: the top families with a positive validation t fork (a new family on the parent's roots plus one more
+   validation evidence, with 25% for new families; a validated version that failed the drift screen earns nothing by its
+   validation (the family counts as unvalidated).
+4. FORKS: the top families with a positive validation t fork (never one whose validated version failed the drift screen) (a new family on the parent's roots plus one more
    root of the rotation, same mechanism and structure; it inherits the lineage's trial count and holdout looks),
    while the population is under its ceiling. XSP is out of the rotation: its $0.50 a contract makes a narrow
    structure uneconomic.
@@ -42,7 +44,8 @@ from typing import Any, Callable, Mapping
 
 from . import diagnostics, evidence
 from .pool import GymJob, PoolError
-from .researcher import MAX_ROOTS, drift_verdict, idle_dead, needs_roots, robust_at_stress, with_roots
+from .researcher import (MAX_ROOTS, drift_verdict, idle_dead, needs_roots, robust_at_stress, screen_best, validation_drift_failed,
+                         with_roots)
 from .store import CLOSEABLE, SwarmStore
 
 UNIVERSE_ROTATION = ("SPY", "QQQ", "IWM", "SPXW")
@@ -91,6 +94,8 @@ class Tournament:
         image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
         bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
         for fam in fams:
+            # THE DRIFT SCREEN first: a candidate whose figures fail is demoted and the next one that passes stands in its place.
+            drift["failed"] += [fam["id"]] * len(screen_best(self.store, fam["id"], self.settings, clock=self.clock))
             current = self.store.family(fam["id"])
             if current is None or current.get("retired_at"):
                 continue
@@ -109,8 +114,8 @@ class Tournament:
                                                            "validation_bundle": state.get("validation_bundle")}, gate_ready=False)
             screen = drift_verdict(self.store, fam, n, self.settings)
             if screen is not None and not screen["passed"]:
-                # THE DRIFT SCREEN (Sept 27): Train profit its average exposure would have made is not an edge. A version
-                # whose Train run predates the figures waits for its run again (the researcher's robustness label "drift").
+                # A version whose Train run predates the figures waits for its run again (the researcher's robustness label
+                # "drift"); one that fails was demoted above, so this is a candidate the demotion could not replace.
                 drift["failed" if screen["known"] else "waiting"].append(fam["id"])
                 continue
             version = self.store.version(fam["id"], n)
@@ -139,7 +144,7 @@ class Tournament:
             if row is not None:
                 judged[fam["id"]] = row
         return {"queued": len(jobs), "judged": judged, "errors": errors, "waiting_robustness": waiting,
-                "waiting_drift": drift["waiting"], "failed_drift": drift["failed"]}
+                "waiting_drift": drift["waiting"], "failed_drift": sorted(set(drift["failed"]))}
 
     def recorded_validation(self, fid: str, n: int) -> dict[str, Any] | None:
         """The full result of a validation this version already had on the Gym image in use now (the same program on the
@@ -216,7 +221,8 @@ class Tournament:
     def allocate(self, fams: list[dict[str, Any]]) -> dict[str, float]:
         rows = []
         for fam in fams:
-            nums = (fam.get("state") or {}).get("validation_numbers") or {}
+            # A validated version that failed the drift screen earns no share by its validation: it counts as unvalidated.
+            nums = {} if validation_drift_failed(fam) else (fam.get("state") or {}).get("validation_numbers") or {}
             rows.append({"id": fam["id"], "validations": fam.get("validations") or 0, "mean": nums.get("mean"), "t": nums.get("t")})
         shares = evidence.thompson(rows, explore_share=float(self.cfg.get("explore_share", 0.25)),
                                    new_validations=int(self.cfg.get("new_family_validations", 2)), rng=self.rng)
@@ -234,6 +240,8 @@ class Tournament:
         cooldown = float(self.cfg.get("fork_cooldown_hours", 6)) * 3600
         scored = []
         for fam in fams:
+            if validation_drift_failed(fam):
+                continue  # its validated version failed the drift screen: nothing to fork
             nums = (fam.get("state") or {}).get("validation_numbers") or {}
             t = nums.get("t")
             if isinstance(t, (int, float)) and t >= float(self.cfg.get("fork_min_t", 1.0)) and (nums.get("mean") or 0) > 0:

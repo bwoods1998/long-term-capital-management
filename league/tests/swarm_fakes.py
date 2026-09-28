@@ -37,11 +37,10 @@ def drift_block(t: float = 2.0, alpha_usd: float = 150.0, drift_usd: float = 20.
     """An invented Gym `drift` block (the real one: `league.gym.results.drift`): every year alike, the pooled line their sum.
     The default passes the drift screen (t 2, alpha positive every year)."""
     def row(alpha: float, drift: float, tt: float | None, days: int) -> dict[str, Any]:
-        return {"days": days, "pnl": round(alpha + drift, 2), "mean_return": 0.0004, "alpha": round(alpha / days, 4) if days else 0.0,
+        return {"days": days, "held_days": days * 2 // 5, "pnl": round(alpha + drift, 2), "alpha": round(alpha / days, 4) if days else 0.0,
                 "alpha_usd": alpha, "t": tt, "beta": 200.0, "drift_usd": drift}
-    per_year = {y: {**row(alpha_usd, drift_usd, t if year_t is None else year_t, 250), "moments": [250, 0.0004, 0.68, 0.025, 900.0, 5.0]}
-                for y in years}
-    return {"basis": "held", "years": per_year, "pooled": row(alpha_usd * len(years), drift_usd * len(years), t, 250 * len(years))}
+    per_year = {y: row(alpha_usd, drift_usd, t if year_t is None else year_t, 250) for y in years}
+    return {"basis": "held-hours", "years": per_year, "pooled": row(alpha_usd * len(years), drift_usd * len(years), t, 250 * len(years))}
 
 
 def result(name: str, *, status: str = "ok", daily: list[float] | None = None, trades: int = 150, window: str = "train",

@@ -6,8 +6,8 @@
   implied vol tercile, quarter, type, root, exit reason) as rows of [n, pnl, win rate, pnl per $ of max
   loss], the five worst trades with their context, and the program's errors. Train is the window the
   agents see in full; `read_run` pages through the rest (`section`). And THE DRIFT LINES (`drift_view`, Sept 27):
-  per Train year and over Train, "drift-adjusted alpha $X (t Y), drift $Z", so a researcher learns that a profit its
-  average exposure to the root's own move would have made is drift, not an edge, and the screen's verdict.
+  per Train year and over Train, "drift-adjusted alpha $X (t Y), drift $Z", so a researcher learns that what its exposure
+  earns at the roots' average return over the hours it held is drift, not an edge, and the screen's verdict.
 - VALIDATION (`validation_view`): pass or fail, and how many of the line's checks passed (the owner's
   decision D2a, Sept 26: "Researchers see Validation only as pass or fail and a count of checks
   passed"). Never a number the run measured, nor which checks failed: a researcher that saw Validation's
@@ -66,9 +66,12 @@ def _trade(t: Mapping[str, Any]) -> dict[str, Any]:
 
 
 #: What the drift lines mean, once a view (the figures are Train's; nothing another window measured).
-DRIFT_NOTE = ("P&L = drift + alpha. Drift is what your average exposure to the root's daily move (beta, dollars per 1% move) "
-              "earned from the market's own trend that year: a placebo holding that exposure every day earns it too. Alpha "
-              "is what your timing added beyond it, after costs; only alpha is an edge.")
+DRIFT_NOTE = ("P&L = drift + alpha. Beta is your exposure (dollars per 1% move), measured on the days you held a position "
+              "against the move of the roots you held over the hours you held them. Drift is what that exposure earns at "
+              "the roots' AVERAGE return over those hours (the year's average overnight move when you held from the prior "
+              "close, its average intraday move for the minutes held): a placebo holding the same exposure over the same "
+              "hours on random days earns it too. Alpha is the rest, after costs: what your choice of days added. Only alpha "
+              "is an edge; its t is over every day of the year.")
 
 
 def _usd(value: Any) -> str:
@@ -83,16 +86,17 @@ def _tval(value: Any) -> str:
 
 def drift_view(block: Any, *, screen: tuple[float, int | None] | None = None) -> dict[str, Any] | None:
     """THE DRIFT LINES of a Train result's `drift` block (or its compact figures): per year and over Train, "drift-adjusted
-    alpha $X (t Y), drift $Z, beta $B per 1% move", the note, and with `screen` (min t, years positive: the researcher's
-    `drift_settings`) the screen's verdict. None when the run predates the figures."""
+    alpha $X (t Y), drift $Z, beta $B per 1% move, held H of D days", the note (`DRIFT_NOTE`), and with `screen` (min t,
+    years positive: the researcher's `drift_settings`) the screen's verdict. None when the run predates the figures."""
     numbers = evidence.drift_numbers(block)
     if numbers is None:
         return None
 
     def line(row: Mapping[str, Any]) -> str:
         beta = evidence._num(row.get("beta"))
+        held = f", held {row.get('held_days')} of {row.get('days')} days" if row.get("held_days") is not None else ""
         return (f"drift-adjusted alpha {_usd(row.get('alpha_usd'))} (t {_tval(row.get('t'))}), drift {_usd(row.get('drift_usd'))}, "
-                f"beta {_usd(None if beta is None else beta / 100.0)} per 1% move")
+                f"beta {_usd(None if beta is None else beta / 100.0)} per 1% move{held}")
 
     out: dict[str, Any] = {year: line(row) for year, row in numbers["years"].items()}
     out["train"] = line(numbers["pooled"])
@@ -126,9 +130,6 @@ def train_view(result: Mapping[str, Any], *, lineage_trials: int | None = None,
         "runtime": {"calls": rt.get("calls"), "errors": rt.get("errors"), "timeouts": rt.get("timeouts"),
                     "disqualified": rt.get("disqualified"), "messages": list(rt.get("messages") or [])[:4]},
     }
-    drift = drift_view(result.get("drift"), screen=screen)
-    if drift is not None:
-        view["drift"] = drift
     if lineage_trials is not None:
         view["lineage_trials"] = int(lineage_trials)
     text = json.dumps(view, default=str)
@@ -137,6 +138,9 @@ def train_view(result: Mapping[str, Any], *, lineage_trials: int | None = None,
             view["by"].pop(name, None)
             if len(json.dumps(view, default=str)) <= MAX_CHARS:
                 break
+    drift = drift_view(result.get("drift"), screen=screen)
+    if drift is not None:  # outside the cap: a few hundred characters that never cost the researcher a table
+        view["drift"] = drift
     return view
 
 

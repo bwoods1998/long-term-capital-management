@@ -27,12 +27,12 @@ One result per program per run (one TRIAL: one run of one program version over o
   included; a year only its batch company had data for is absent): trades, days, days_traded, pnl, the
   daily mean and `t_daily` on maximum loss, quarters_positive and quarter_pnl (the swarm's robust Train
   objective, Sept 26: the worst Train year, not the whole window, scores a version);
-- `drift` (Train only; the swarm's drift screen, Sept 27): per calendar year of the program's own days and pooled, the
-  fit P_t = a + b r_t + e_t of the day's P&L after costs (zero days included) on the day's close-to-close return of the
-  roots it held (else of its own roots): `alpha` (a, dollars a day), `alpha_usd` (a x days: what its timing added beyond
-  drift), `t` (a over its plain OLS standard error), `beta` (dollars per unit return), `drift_usd` (b x mean r x days:
-  what holding its average exposure every day earned); pnl = alpha_usd + drift_usd. Each year carries its `moments`, so
-  a split run merges exactly (`drift`, `merge_drift`); the pooled line keeps each year's own beta;
+- `drift` (Train only; the swarm's drift screen, Sept 27): per calendar year of the program's own days and pooled:
+  `beta`, the slope of the day's P&L on the move of the roots it held over the hours it held them, over HELD days only
+  (its exposure, dollars per unit return); `drift_usd`, beta x the roots' unconditional drift over those hours summed
+  over held days (what that exposure earns on average days); `alpha_usd` = pnl - drift_usd (what its timing added, after
+  costs), `alpha` a day, `t` (the one-sample t of the drift-adjusted daily P&L over all days), `days`, `held_days`. Each
+  year carries its sufficient `stats`, so a split run merges exactly (`drift`, `drift_fit`, `merge_drift`);
 - `daily`: [day, P&L, equity] for every trading day of the run (zero days included);
 - `trades`: every trade (entry, exit, legs, fees, maximum loss, P&L, the context at entry);
 - `worst`: the five worst trades with their context;
@@ -45,7 +45,6 @@ series and no drift block; holdout and forward: the gate's inputs only). Standar
 
 from __future__ import annotations
 
-import bisect
 import datetime as dt
 import hashlib
 import json
@@ -257,61 +256,25 @@ def merge_years(parts: Sequence[Mapping[str, Any]], trades: Sequence[dict], dail
 
 
 # --------------------------------------------------------------------------- drift (Sept 27)
-#: What a drift block's r_t is: each day, the mean close-to-close return of the roots the program HELD that day (a
-#: position open at any time of it, from its entry day to its exit day), else, on a day it held nothing, of its own roots.
-DRIFT_BASIS = "held"
-#: A residual sum of squares at or below this share of the P&L's own is an exact linear fit (rounding, not noise): the
-#: alpha's error is not estimable and its t is None.
-_EXACT_FIT = 1e-12
-
-
-def held_roots(trades: Sequence[dict], days: Sequence[str]) -> dict[str, set[str]]:
-    """{day: the roots of the positions open at any time of it} over `days` (ISO days), entry and exit days included (a
-    position without an exit day is open to the last day)."""
-    order = sorted(set(str(d) for d in days))
-    out: dict[str, set[str]] = {}
-    if not order:
-        return out
-    for t in trades:
-        start = str(t.get("day") or "")
-        end = str(t.get("exit_day") or order[-1])
-        for day in order[bisect.bisect_left(order, start):bisect.bisect_right(order, end)]:
-            out.setdefault(day, set()).add(str(t.get("root")))
-    return out
-
-
-def drift_rows(trades: Sequence[dict], daily: Sequence[Sequence[Any]], returns: Mapping[str, Mapping[str, Any]],
-               roots: Sequence[str], own_days: Any = None) -> list[tuple[str, float, float]]:
-    """(day, P&L, r) for every day of the run (zero days included) with a return: r is the mean close-to-close return of
-    the roots held that day (`held_roots`), else of the program's own `roots` that had one (`DRIFT_BASIS`). `returns` is
-    {day: {root: return}} (the engine's regimes' `ret`); `own_days`, as in `by_year`, keeps the days its roots had data."""
-    held = held_roots(trades, [str(d[0]) for d in daily])
-    out = []
-    for d in daily:
-        day = str(d[0])
-        if own_days is not None and day not in own_days:
-            continue
-        today = returns.get(day) or {}
-
-        def known(names: Iterable[str]) -> list[float]:
-            values = [today.get(r) for r in names]
-            return [float(v) for v in values if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)]
-
-        pick = known(sorted(held.get(day, ()))) or known(roots)
-        if pick:
-            out.append((day, float(d[1]), sum(pick) / len(pick)))
-    return out
+#: What a drift block's charge rests on: on each HELD day (a position open at any time of it), the program's exposure was
+#: measured against the move of the roots it held over the hours it held them (`Account.exposure`), and it is charged the
+#: root's UNCONDITIONAL drift over those hours: the year's mean overnight return if it held from the prior close, plus the
+#: year's mean intraday return a minute for each minute held.
+DRIFT_BASIS = "held-hours"
+#: A variance of the drift-adjusted daily P&L at or below this share of the P&L's mean square is rounding, not noise (the
+#: drift charge took all of it): its t is None.
+_NO_VARIANCE = 1e-12
 
 
 def drift_moments(pairs: Sequence[tuple[float, float]]) -> list[float]:
-    """[n, mean r, mean P, S_rr, S_pp, S_rp] of (r, P) pairs, the sums centered (two passes): what `merge` adds up."""
+    """[n, mean x, mean P, S_xx, S_pp, S_xp] of (x, P) pairs, the sums centered (two passes): what `merge` combines."""
     n = len(pairs)
     if not n:
         return [0, 0.0, 0.0, 0.0, 0.0, 0.0]
-    mr = sum(r for r, _ in pairs) / n
+    mx = sum(x for x, _ in pairs) / n
     mp = sum(p for _, p in pairs) / n
-    return [n, mr, mp, sum((r - mr) ** 2 for r, _ in pairs), sum((p - mp) ** 2 for _, p in pairs),
-            sum((r - mr) * (p - mp) for r, p in pairs)]
+    return [n, mx, mp, sum((x - mx) ** 2 for x, _ in pairs), sum((p - mp) ** 2 for _, p in pairs),
+            sum((x - mx) * (p - mp) for x, p in pairs)]
 
 
 def combine_moments(a: Sequence[float], b: Sequence[float]) -> list[float]:
@@ -320,82 +283,209 @@ def combine_moments(a: Sequence[float], b: Sequence[float]) -> list[float]:
     if not na or not nb:
         return [float(x) if i else int(x) for i, x in enumerate(b if not na else a)]
     n = na + nb
-    dr, dp, w = float(b[1]) - float(a[1]), float(b[2]) - float(a[2]), na * nb / n
-    return [n, float(a[1]) + dr * nb / n, float(a[2]) + dp * nb / n, float(a[3]) + float(b[3]) + dr * dr * w,
-            float(a[4]) + float(b[4]) + dp * dp * w, float(a[5]) + float(b[5]) + dr * dp * w]
+    dx, dp, w = float(b[1]) - float(a[1]), float(b[2]) - float(a[2]), na * nb / n
+    return [n, float(a[1]) + dx * nb / n, float(a[2]) + dp * nb / n, float(a[3]) + float(b[3]) + dx * dx * w,
+            float(a[4]) + float(b[4]) + dp * dp * w, float(a[5]) + float(b[5]) + dx * dp * w]
 
 
-def drift_fit(m: Sequence[float]) -> dict[str, Any]:
-    """P_t = a + b r_t + e_t by OLS from moments: {days, pnl, mean_return, alpha (a, dollars a day), alpha_usd (a x days),
-    beta (b, dollars per unit return), drift_usd (b x mean r x days: what holding the average exposure every day earned),
-    var_alpha, t (a over its plain OLS standard error)}. pnl = alpha_usd + drift_usd. t is None under three days, with no
-    residual (P a line in r: all drift, or no P&L at all) or no variance."""
-    n, mr, mp, srr, spp, srp = int(m[0]), float(m[1]), float(m[2]), float(m[3]), float(m[4]), float(m[5])
-    beta = srp / srr if srr > 0 else 0.0
-    alpha = mp - beta * mr
-    var = None
-    if n >= 3:
-        sse = max(0.0, spp - beta * srp)
-        if sse > _EXACT_FIT * spp:
-            var = sse / (n - 2) * (1.0 / n + (mr * mr / srr if srr > 0 else 0.0))
-    t = alpha / math.sqrt(var) if var is not None and var > 0 else None
-    return {"days": n, "pnl": mp * n, "mean_return": mr, "alpha": alpha, "alpha_usd": alpha * n, "beta": beta,
-            "drift_usd": beta * mr * n, "var_alpha": var, "t": t}
+def drift_rows(daily: Sequence[Sequence[Any]], returns: Mapping[str, Mapping[str, Any]], exposure: Mapping[str, Mapping[str, Any]],
+               roots: Sequence[str], own_days: Any = None) -> list[tuple[str, float, dict, dict]]:
+    """(day, P&L, base, held) for every day of the run (zero days included) on which one of its own `roots` had a full day's
+    return: `base` {root: (overnight return, intraday return, session minutes)} from the engine's regimes (`returns`: {day:
+    {root: {"ret_on", "ret_in", "session"}}}); `held` {root: (carried from the prior close 0/1, minutes held, the root's
+    return over the hours held)} from the account's `exposure` ({} on a flat day). `own_days`, as in `by_year`, keeps the
+    days its roots had data."""
+    def finite(*xs: Any) -> bool:
+        return all(isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) for x in xs)
+
+    out = []
+    for d in daily:
+        day = str(d[0])
+        if own_days is not None and day not in own_days:
+            continue
+        today = returns.get(day) or {}
+        base = {}
+        for root in roots:
+            row = today.get(root) or {}
+            on, intra, session = row.get("ret_on"), row.get("ret_in"), row.get("session")
+            if finite(on, intra, session):
+                base[root] = (float(on), float(intra), float(session))
+        if not base:
+            continue
+        held = {}
+        for root, span in sorted((exposure.get(day) or {}).items()):
+            if isinstance(span, (list, tuple)) and len(span) == 3 and finite(*span):
+                held[str(root)] = (int(span[0]), float(span[1]), float(span[2]))
+        out.append((day, float(d[1]), base, held))
+    return out
+
+
+def _add(into: dict[str, float], key: str, value: float) -> None:
+    into[key] = into.get(key, 0.0) + value
+
+
+def drift_stats(rows: Sequence[tuple[str, float, Mapping[str, Any], Mapping[str, Any]]]) -> dict[str, dict[str, Any]]:
+    """Each year's sufficient statistics of `drift_rows`, every one a sum but `held` (centered moments), so segments add up
+    exactly (`combine_stats`):
+
+    - `n`, `p`, `pp`: the days, and the sum and sum of squares of P, over ALL days;
+    - `held`: the moments of (x, P) over HELD days, x the day's mean return of the roots held over their hours held;
+    - `v`: over held days, the weights on each root's overnight and intraday drift ({"SPY:on": days held from the prior
+      close, "SPY:in": minutes held}, a day's weights averaged over the roots it held);
+    - `roots`: {root: [days, sum of overnight returns, sum of intraday returns, sum of session minutes]} over ALL days;
+    - `rp`, `rr`: over ALL days, the sums of P times each root's overnight and intraday return ("SPY:on", "SPY:in"), and of
+      their pairwise products: what the t of the drift-adjusted daily P&L needs (`drift_fit`)."""
+    years: dict[str, dict[str, Any]] = {}
+    pairs: dict[str, list[tuple[float, float]]] = {}
+    for day, pnl, base, held in rows:
+        st = years.setdefault(day[:4], {"n": 0, "p": 0.0, "pp": 0.0, "held": [0, 0.0, 0.0, 0.0, 0.0, 0.0], "v": {}, "roots": {},
+                                          "rp": {}, "rr": {}})
+        st["n"] += 1
+        st["p"] += pnl
+        st["pp"] += pnl * pnl
+        comp: dict[str, float] = {}
+        for root, (on, intra, session) in base.items():
+            acc = st["roots"].setdefault(root, [0, 0.0, 0.0, 0.0])
+            acc[0] += 1
+            acc[1] += on
+            acc[2] += intra
+            acc[3] += session
+            comp[f"{root}:on"], comp[f"{root}:in"] = on, intra
+        for a, xa in comp.items():
+            _add(st["rp"], a, pnl * xa)
+            for b, xb in comp.items():
+                if a <= b:
+                    _add(st["rr"], f"{a}|{b}", xa * xb)
+        if held:
+            w = 1.0 / len(held)
+            pairs.setdefault(day[:4], []).append((sum(span[2] for span in held.values()) * w, pnl))
+            for root, (carried, minutes, _) in held.items():
+                _add(st["v"], f"{root}:on", w * carried)
+                _add(st["v"], f"{root}:in", w * minutes)
+    for year, rows_ in pairs.items():
+        years[year]["held"] = drift_moments(rows_)
+    return years
+
+
+def combine_stats(a: Mapping[str, Any], b: Mapping[str, Any]) -> dict[str, Any]:
+    """Two sets of days' statistics together: sums added, the held moments combined (`combine_moments`). Exact."""
+    out: dict[str, Any] = {"n": int(a["n"]) + int(b["n"]), "p": float(a["p"]) + float(b["p"]), "pp": float(a["pp"]) + float(b["pp"]),
+                           "held": combine_moments(a["held"], b["held"]), "roots": {}}
+    for name in ("v", "rp", "rr"):
+        merged: dict[str, float] = {}
+        for side in (a, b):
+            for key, value in (side.get(name) or {}).items():
+                _add(merged, str(key), float(value))
+        out[name] = merged
+    for side in (a, b):
+        for root, acc in (side.get("roots") or {}).items():
+            into = out["roots"].setdefault(str(root), [0, 0.0, 0.0, 0.0])
+            into[0] += int(acc[0])
+            for i in (1, 2, 3):
+                into[i] += float(acc[i])
+    return out
+
+
+def drift_fit(st: Mapping[str, Any]) -> dict[str, Any]:
+    """One year's drift-adjusted alpha from its statistics (`drift_stats`):
+
+    - beta: the OLS slope of P on x over HELD days only (dollars per unit return): the exposure it held, whatever those
+      days' variance (a slope over every day weighs held days by their variance: a calm-day holder's drift passed for
+      alpha, a volatile rebound edge for a loss);
+    - drift_usd: beta x the roots' unconditional drift over the hours held: for each held day, the year's mean overnight
+      return if it was held from the prior close, plus the year's mean intraday return a minute for each minute held.
+      What that exposure over those hours earns on average days;
+    - alpha_usd = pnl - drift_usd; alpha = alpha_usd over the year's days;
+    - t: the one-sample t, over ALL the year's days, of the drift-adjusted daily P&L z_d = P_d - beta x (the day's share of
+      the drift charge). The charge rests on the year's mean returns, estimated from every day, so each day carries its
+      share: C/N of its overnight return and K/S of its intraday return (C the held days from the prior close, K the
+      minutes held, N the days, S the session minutes, per root). The z_d sum to alpha_usd exactly, and their variance
+      holds both the P&L's noise and the drift estimate's (a charge per held day at a fixed mean would leave the latter out:
+      a calm-day holder's t came out too high, a volatile-day holder's and an always-held carry's too low). None under two
+      days or with no variance (P a line in the return: pure drift)."""
+    n = int(st["n"])
+    n_h, _, _, sxx, _, sxp = st["held"]
+    beta = float(sxp) / float(sxx) if int(n_h) >= 3 and float(sxx) > 0 else 0.0
+    v = st.get("v") or {}
+    coef: dict[str, float] = {}
+    for root, (days, _on, _intra, session) in (st.get("roots") or {}).items():
+        coef[f"{root}:on"] = float(v.get(f"{root}:on", 0.0)) / int(days) if int(days) else 0.0
+        coef[f"{root}:in"] = float(v.get(f"{root}:in", 0.0)) / float(session) if float(session) > 0 else 0.0
+    sums = {}
+    for root, (_days, on, intra, _session) in (st.get("roots") or {}).items():
+        sums[f"{root}:on"], sums[f"{root}:in"] = float(on), float(intra)
+    pnl = float(st["p"])
+    drift_usd = beta * sum(coef[k] * sums[k] for k in coef)
+    alpha_usd = pnl - drift_usd
+    cross = sum(coef.get(k, 0.0) * float(x) for k, x in (st.get("rp") or {}).items())
+    square = 0.0
+    for key, x in (st.get("rr") or {}).items():
+        a, b = key.split("|")
+        square += (1.0 if a == b else 2.0) * coef.get(a, 0.0) * coef.get(b, 0.0) * float(x)
+    sq = float(st["pp"]) - 2.0 * beta * cross + beta * beta * square   # the sum of z_d squared
+    t = _t_of(alpha_usd, sq, n, float(st["pp"]))
+    return {"days": n, "held_days": int(n_h), "pnl": pnl, "alpha": alpha_usd / n if n else 0.0, "alpha_usd": alpha_usd,
+            "beta": beta, "drift_usd": drift_usd, "t": t, "sum_sq": sq, "sum_pp": float(st["pp"])}
+
+
+def _t_of(total: float, sq: float, n: int, pp: float) -> float | None:
+    """The one-sample t of n daily values from their sum and sum of squares; None under two days, or when their variance is
+    no more than rounding against the P&L's own mean square `pp`/n (the drift charge took all of it: pure drift)."""
+    if n < 2:
+        return None
+    var = (sq - total * total / n) / (n - 1)
+    if var <= _NO_VARIANCE * max(pp / n, 1e-300):
+        return None
+    return (total / n) / math.sqrt(var / n)
 
 
 def _drift_row(f: Mapping[str, Any]) -> dict[str, Any]:
     def r(x: Any, places: int) -> Any:
         return None if x is None else round(float(x), places)
-    return {"days": f["days"], "pnl": r(f["pnl"], 2), "mean_return": r(f["mean_return"], 7), "alpha": r(f["alpha"], 4),
+    return {"days": f["days"], "held_days": f["held_days"], "pnl": r(f["pnl"], 2), "alpha": r(f["alpha"], 4),
             "alpha_usd": r(f["alpha_usd"], 2), "t": r(f["t"], 4), "beta": r(f["beta"], 2), "drift_usd": r(f["drift_usd"], 2)}
 
 
-def drift_from_moments(moments: Mapping[str, Sequence[float]]) -> dict[str, Any]:
-    """The `drift` block from each year's moments: per year its fit (with its moments, for `merge`) and the POOLED line:
-    each year keeps its own beta (a year's drift is removed at that year's exposure, so three bull or bear years cannot
-    pass for timing), alpha_usd and drift_usd are the years' sums, and t = the summed alpha over its standard error with
-    the years independent, sqrt(sum days^2 var_alpha) over the years whose error is estimable."""
-    fits = {y: drift_fit(m) for y, m in sorted(moments.items()) if int(m[0]) > 0}
+def drift_from_stats(stats: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    """The `drift` block from each year's statistics: per year its fit (`drift_fit`, with its `stats` for `merge`), and the
+    POOLED line over Train: each year keeps its own beta and drift, alpha_usd and drift_usd are the years' sums, and t is
+    the one-sample t of the whole Train window's drift-adjusted daily P&L."""
+    fits = {y: drift_fit(st) for y, st in sorted(stats.items()) if int(st.get("n") or 0) > 0}
     days = sum(f["days"] for f in fits.values())
-    est = [f for f in fits.values() if f["var_alpha"] is not None]
-    var = sum(f["days"] ** 2 * f["var_alpha"] for f in est)
-    pooled = {"days": days, "pnl": sum(f["pnl"] for f in fits.values()), "mean_return": None,
-              "alpha": sum(f["alpha_usd"] for f in fits.values()) / days if days else 0.0,
-              "alpha_usd": sum(f["alpha_usd"] for f in fits.values()),
-              "t": sum(f["alpha_usd"] for f in est) / math.sqrt(var) if var > 0 else None,
-              "beta": sum(f["beta"] * f["days"] for f in fits.values()) / days if days else 0.0,
-              "drift_usd": sum(f["drift_usd"] for f in fits.values())}
-    return {"basis": DRIFT_BASIS, "years": {y: {**_drift_row(f), "moments": [int(moments[y][0])] + [float(x) for x in moments[y][1:6]]}
-                                            for y, f in fits.items()},
+    total = sum(f["alpha_usd"] for f in fits.values())
+    t = _t_of(total, sum(f["sum_sq"] for f in fits.values()), days, sum(f["sum_pp"] for f in fits.values()))
+    held = sum(f["held_days"] for f in fits.values())
+    pooled = {"days": days, "held_days": held, "pnl": sum(f["pnl"] for f in fits.values()), "alpha": total / days if days else 0.0,
+              "alpha_usd": total, "beta": sum(f["beta"] * f["held_days"] for f in fits.values()) / held if held else 0.0,
+              "drift_usd": sum(f["drift_usd"] for f in fits.values()), "t": t}
+    return {"basis": DRIFT_BASIS, "years": {y: {**_drift_row(f), "stats": stats[y]} for y, f in fits.items()},
             "pooled": _drift_row(pooled)}
 
 
-def drift(trades: Sequence[dict], daily: Sequence[Sequence[Any]], returns: Mapping[str, Mapping[str, Any]], roots: Sequence[str],
-          own_days: Any = None) -> dict[str, Any]:
+def drift(daily: Sequence[Sequence[Any]], returns: Mapping[str, Mapping[str, Any]], exposure: Mapping[str, Mapping[str, Any]],
+          roots: Sequence[str], own_days: Any = None) -> dict[str, Any]:
     """The run's drift-adjusted alpha (the swarm's drift screen, Sept 27): a long call in a bull year earns whatever its
-    signal says, so what a program's timing adds is measured net of the market's own drift. Within each calendar year,
-    P_t (the day's P&L after costs, zero days included) = a + b r_t + e_t (`drift_rows`, `drift_fit`); the block has
-    each year and the pooled line (`drift_from_moments`)."""
-    years: dict[str, list[tuple[float, float]]] = {}
-    for day, pnl, r in drift_rows(trades, daily, returns, roots, own_days):
-        years.setdefault(day[:4], []).append((r, pnl))
-    return drift_from_moments({y: drift_moments(v) for y, v in years.items()})
+    signal says, so what a program's timing adds is measured net of the market's own drift over the hours it held
+    exposure, a calendar year at a time (`drift_rows`, `drift_stats`, `drift_fit`, `drift_from_stats`)."""
+    return drift_from_stats(drift_stats(drift_rows(daily, returns, exposure, roots, own_days)))
 
 
 def merge_drift(parts: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
-    """The drift block of a split run from its segments' moments (summed a year at a time, so the fit is the unsplit fit
-    on the same days); None when a segment has none (a result from before the block)."""
-    moments: dict[str, list[float]] = {}
+    """The drift block of a split run: each year's statistics from every segment that has the year, combined
+    (`combine_stats`: sums added, held moments combined exactly), then fitted once, so the result equals the fit of the
+    whole window's days. None when a segment has no block (a result from before it)."""
+    stats: dict[str, dict[str, Any]] = {}
     for p in parts:
         block = p.get("drift")
         if not isinstance(block, Mapping) or not isinstance(block.get("years"), Mapping):
             return None
         for year, row in block["years"].items():
-            m = row.get("moments") if isinstance(row, Mapping) else None
-            if not isinstance(m, (list, tuple)) or len(m) != 6:
+            st = row.get("stats") if isinstance(row, Mapping) else None
+            if not isinstance(st, Mapping) or not isinstance(st.get("held"), (list, tuple)) or len(st["held"]) != 6:
                 return None
-            moments[year] = combine_moments(moments[year], m) if year in moments else [int(m[0])] + [float(x) for x in m[1:]]
-    return drift_from_moments(moments)
+            stats[year] = combine_stats(stats[year], st) if year in stats else combine_stats(
+                {"n": 0, "p": 0.0, "pp": 0.0, "held": [0, 0.0, 0.0, 0.0, 0.0, 0.0]}, st)
+    return drift_from_stats(stats)
 
 
 def fill_stats(account: Any) -> dict[str, Any]:
@@ -454,8 +544,7 @@ def build(account: Any, cfg: Any, days: Sequence[dt.date], data_version: str, re
         "runtime": {k: v for k, v in account.runner.stats().items() if k != "seconds"},
     }
     if getattr(cfg, "window", "train") == "train":  # Train only: no other window's figures are ever computed for it
-        returns = {day: {root: row.get("ret") for root, row in rows.items()} for day, rows in regimes.items()}
-        result["drift"] = drift(trades, account.daily, returns, account.roots, own)
+        result["drift"] = drift(account.daily, regimes, getattr(account, "exposure", {}) or {}, account.roots, own)
     result["result_sha"] = sha(result)
     result["seconds"] = round(seconds, 3)
     result["runtime"]["decide_seconds"] = account.runner.stats()["seconds"]
@@ -569,5 +658,5 @@ def stress_block(result: Mapping[str, Any]) -> dict[str, Any]:
 
 
 __all__ = ["build", "merge", "view", "stress_block", "summarize", "daily_returns", "by_year", "merge_years", "drift", "merge_drift",
-           "drift_fit", "drift_moments", "combine_moments", "drift_from_moments", "drift_rows", "held_roots", "sha", "canonical",
-           "ENGINE_VERSION"]
+           "drift_fit", "drift_moments", "combine_moments", "drift_stats", "combine_stats", "drift_from_stats", "drift_rows", "sha",
+           "canonical", "ENGINE_VERSION"]

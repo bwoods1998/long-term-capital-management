@@ -246,19 +246,25 @@ class DayData:
 
     def regime(self, root: str) -> dict[str, float]:
         """The day's regime features (engine-side, for the results' terciles): the realized vol of
-        the prior ten sessions and the at-the-money implied vol at 10:00 of the nearest expiry; and
-        `ret`, the day's close-to-close return (today's last price over the root's last session's close
-        in the history, which holds earlier sessions only), for the results' drift block. A program
-        never sees any of them."""
-        out = {"rv": math.nan, "iv": math.nan, "ret": math.nan}
+        the prior ten sessions and the at-the-money implied vol at 10:00 of the nearest expiry; and,
+        for the results' drift block, the day's overnight return `ret_on` (its first price over the
+        root's last session's close in the history, which holds earlier sessions only), its intraday
+        return `ret_in` (last price over first) and `session` (the minutes between them), and `ret`,
+        close to close. A program never sees any of them."""
+        out = {"rv": math.nan, "iv": math.nan, "ret": math.nan, "ret_on": math.nan, "ret_in": math.nan, "session": math.nan}
         opens, highs, lows, closes = self.history.arrays(root, 11)
         if closes.size >= 3:
             r = np.diff(np.log(closes))
             out["rv"] = float(np.std(r, ddof=1) * math.sqrt(252.0))
         chain = self.chains.get(root)
-        today = chain.underlying.price[np.isfinite(chain.underlying.price)] if chain is not None else np.zeros(0)
-        if closes.size and today.size and closes[-1] > 0:
-            out["ret"] = float(today[-1] / closes[-1] - 1.0)
+        known = np.flatnonzero(np.isfinite(chain.underlying.price)) if chain is not None else np.zeros(0, dtype=np.int64)
+        if known.size:
+            first, last = float(chain.underlying.price[known[0]]), float(chain.underlying.price[known[-1]])
+            out["ret_in"] = last / first - 1.0 if first > 0 else math.nan
+            out["session"] = float(known[-1] - known[0])
+            if closes.size and closes[-1] > 0:
+                out["ret"] = last / float(closes[-1]) - 1.0
+                out["ret_on"] = first / float(closes[-1]) - 1.0
         mi = min(30, self.minutes - 2)
         snap = self.snapshot(root, mi)
         if snap is not None and np.isfinite(snap.spot):
@@ -362,6 +368,11 @@ class Account:
         self.warming = False          # replaying warm-up days: decide runs, its intents are dropped
         self.liquidity_at: tuple[int, int] | None = None   # the minute `liquidity_used` counts
         self.liquidity_used: dict[int, int] = {}           # contract key -> contracts passive fills took this minute
+        #: The hours it held exposure (the results' drift block): ISO day -> root -> (1 when held from the prior close, the
+        #: minutes held after the first price, the root's return over the hours held). `_held` is today's span per root:
+        #: [start minute index (-1: the prior close; None: not opened today), end minute index (None: not ended yet)].
+        self.exposure: dict[str, dict[str, tuple[int, float, float]]] = {}
+        self._held: dict[str, list] = {}
 
     # ------------------------------------------------------------------ helpers
     def _id(self) -> int:
@@ -389,10 +400,41 @@ class Account:
         last = min(self.needs.end - day.open_min, day.minutes - 3)
         return set(range(first, last + 1, self.needs.cadence)) if first <= last else set()
 
+    def _hold(self, root: str, start: int | None = None, end: int | None = None) -> None:
+        """Widen today's exposure span of `root`: the earliest start (-1: from the prior close), the latest end."""
+        span = self._held.setdefault(root, [None, None])
+        if start is not None:
+            span[0] = start if span[0] is None else min(span[0], start)
+        if end is not None:
+            span[1] = end if span[1] is None else max(span[1], end)
+
+    def _exposure(self, day: DayData) -> None:
+        """Today's `exposure` from the spans held: a span that began before today starts at the prior close (a carried
+        position, or exercised shares that gapped to the open); one that did not end is held to the close."""
+        out: dict[str, tuple[int, float, float]] = {}
+        for root, (start, end) in self._held.items():
+            chain = day.chains.get(root)
+            price = chain.underlying.price if chain is not None else np.zeros(0)
+            known = np.flatnonzero(np.isfinite(price))
+            if not known.size:
+                continue
+            first, last = int(known[0]), int(known[-1])
+            closes = day.history.arrays(root, 1)[3]
+            carried = (start is None or start < 0) and bool(closes.size) and float(closes[-1]) > 0
+            begin = first if start is None or start < first else min(int(start), last)
+            stop = last if end is None else max(begin, min(int(end), last))
+            at_start = float(closes[-1]) if carried else float(price[known[known <= begin][-1]])
+            at_end = float(price[known[known <= stop][-1]])
+            out[root] = (1 if carried else 0, float(stop - begin), at_end / at_start - 1.0)
+        if out:
+            self.exposure[day.day.isoformat()] = out
+
     # ------------------------------------------------------------------ the day
     def begin_day(self, day: DayData) -> None:
         self.orders_today = 0
+        self._held = {}
         for pos, root, shares, ref in self.pending_shares:
+            self._hold(root, -1, 0)  # exercised shares: held from the prior close to the open's gap
             chain = day.chains.get(root)
             price = chain.underlying.price if chain is not None else np.zeros(0)
             first = price[np.isfinite(price)]
@@ -403,6 +445,7 @@ class Account:
             self._finish(pos, day)
         self.pending_shares = []
         for pos in self.positions.values():
+            self._hold(pos.root, -1)  # carried from the prior close
             chain = day.chains.get(pos.root)
             pos.idx = chain.index_of(pos.keys) if chain is not None else np.full(len(pos.legs), -1)
         for pos in list(self.positions.values()):
@@ -562,6 +605,7 @@ class Account:
         pos.cash += cash
         pos.fees += fees
         pos.last_mark = pos.entry if not math.isfinite(pos.last_mark) else pos.last_mark
+        self._hold(pos.root, mi)
 
     @staticmethod
     def _defined(order: L.Order, value: float) -> bool:
@@ -586,6 +630,7 @@ class Account:
             self._finish(pos, day)
 
     def _finish(self, pos: Position, day: DayData) -> None:
+        self._hold(pos.root, None, pos.exit_mi if pos.exit_day == day.ordinal else 0)
         self.positions.pop(pos.pid, None)
         if pos.closing:
             self.orders.pop(pos.closing, None)
@@ -832,6 +877,9 @@ class Account:
                 pos.info["share_gap"] = 0.0
                 self._finish(pos, day)
             self.pending_shares = []
+        for pos in self.positions.values():
+            self._hold(pos.root, None, day.minutes - 1)  # still open: held to the close
+        self._exposure(day)
         equity = self.equity()
         self.daily.append((day.day.isoformat(), round(equity - self.equity_prev, 6), round(equity, 6)))
         self.equity_prev = equity

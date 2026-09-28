@@ -33,13 +33,15 @@ with a 30-trade floor it replaced rewarded sparse filters that could never meet 
 
 THE DRIFT SCREEN (`drift_screen`, Sept 27; the owner approved tightening pre-Validation with a placebo test after the
 one family that passed Validation, back-month long SPY calls after low closes, failed its holdout: its Train and 2025
-profit was the bull market's drift, which long calls earn whatever the signal says). The Gym fits each Train year's daily
-P&L on the day's return of the roots held (`league.gym.results.drift`): alpha is what the timing added beyond holding the
-average exposure every day, after costs. A version is validated only when its pooled alpha t is at least
+profit was the bull market's drift, which long calls earn whatever the signal says). The Gym measures, each Train year, the
+exposure a program held (the slope of its P&L on the move of the roots it held over the hours it held them, held days
+only) and charges it the roots' unconditional drift over those hours (`league.gym.results.drift_fit`): alpha is what its
+timing added beyond that, after costs. A version is validated only when its pooled alpha t is at least
 `tournament.drift_min_t` (1.0) and its alpha is positive in `tournament.drift_years_positive` Train years (all but one);
-the gate refuses a look at one that fails. It only ADDS a brake: it is a setting, `tournament.drift_screen`, because it
-is the operator's tightening, not a line of the plan. A run from before the figures is not screened (`known` False): it is
-never validated until its Train run is made again (`researcher.py`, the robustness label "drift").
+a version that fails is never the family's best again (`researcher.py`), and the gate refuses a look at one. It only ADDS
+a brake: it is a setting, `tournament.drift_screen`, because it is the operator's tightening, not a line of the plan. A
+run from before the figures is not screened (`known` False): it is never validated until its Train run is made again
+(`researcher.py`, the robustness label "drift").
 
 THE HOLDOUT LINE (one look per program version, at most three per lineage; the gate's box only):
   - P&L after fees above zero;
@@ -260,12 +262,13 @@ DRIFT_MIN_T = 1.0
 
 
 def drift_numbers(block: Any) -> dict[str, Any] | None:
-    """A Gym Train result's `drift` block without its moments: {"pooled": {...}, "years": {year: {...}}}, what a run row's
-    summary and a family's state keep. None when there is no block (a run from before the figures) or it is malformed."""
+    """A Gym Train result's `drift` block without its statistics: {"pooled": {...}, "years": {year: {...}}}, what a run
+    row's summary and a family's state keep. None when there is no block (a run from before the figures) or it is
+    malformed."""
     if not isinstance(block, Mapping) or not isinstance(block.get("years"), Mapping) or not isinstance(block.get("pooled"), Mapping):
         return None
-    return {"pooled": {k: v for k, v in block["pooled"].items() if k != "moments"},
-            "years": {str(y): {k: v for k, v in row.items() if k != "moments"} for y, row in sorted(block["years"].items())
+    return {"pooled": {k: v for k, v in block["pooled"].items() if k not in ("stats", "moments")},
+            "years": {str(y): {k: v for k, v in row.items() if k not in ("stats", "moments")} for y, row in sorted(block["years"].items())
                       if isinstance(row, Mapping)}}
 
 

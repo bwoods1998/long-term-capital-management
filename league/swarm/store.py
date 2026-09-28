@@ -804,6 +804,18 @@ class SwarmStore:
             r["summary"] = loads(r["summary"], {})
         return rows
 
+    def version_runs(self, fid: str, version: int, *, window: str = "train", stress: float | None = None,
+                     limit: int = 20) -> list[dict[str, Any]]:
+        """One version's run rows, newest first (optionally at one `stress`): a lookup by version in SQL, so a family's
+        thousands of other rows are never decoded."""
+        sql, args = "SELECT * FROM runs WHERE family=? AND version=? AND window=?", [fid, int(version), window]
+        if stress is not None:
+            sql, args = sql + " AND stress=?", args + [float(stress)]
+        rows = self._all(sql + " ORDER BY at DESC, rowid DESC LIMIT ?", (*args, int(limit)))
+        for r in rows:
+            r["summary"] = loads(r["summary"], {})
+        return rows
+
     def totals(self) -> dict[str, Any]:
         row = self._one("SELECT COALESCE(SUM(trials),0) AS trials, COALESCE(SUM(program_years),0) AS years, COUNT(*) AS runs FROM runs")
         alive = self._one("SELECT COUNT(*) AS n FROM families WHERE retired_at IS NULL")
