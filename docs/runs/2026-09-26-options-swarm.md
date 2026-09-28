@@ -1898,4 +1898,16 @@ looks like beta. Validation 2025 and the holdout judge both.
 | 6 | Money | equity $1,481.63; options buying power $481.60; 0 orders |
 | 7 | Compute | Sail $101.64 (about $4.3/h; the $32 line around 01:30Z Tuesday without a top-up). Claude $47.79 of $100. OpenAI $623.12 + $11.37 in flight of $707 |
 
+### Sprint scoreboard, T0 + 53 h (11:30Z Sept 28)
+
+| # | Metric | Value |
+|---|---|---|
+| 1 | Population | 42 alive, 373 retired; 60 born and 50 retired in 2 h |
+| 2 | Throughput | 793 cycles/h, median 8 s; pool 1 busy, 8 ready; `gym.run_timeout_seconds` 1,500 since 10:05Z (batches of heavier single-name programs were timing out at 900 s) |
+| 3 | Search | 59,828 trials, 237,878 program-years. Closest in Validation 2025: `finite-sell-program-exhaustion` and `supplier-demand-cascade-put-on-spy`, 5/8 each (fail DSR, mean, t) |
+| 4 | Evidence | Validation passes alive 0; holdout looks 2, passes 0 |
+| 5 | Readiness | Pre-open 9/9 at 10:00Z. The 2020-21 fetch finishes stage 10 about now; then quality checks, the 2020-24 sweep-only image, and the pre-registered screen |
+| 6 | Money | equity $1,481.63; options buying power $481.60; 0 orders |
+| 7 | Compute | Sail $96.52 (about $4.2/h; the $32 line around 02:30Z Tuesday). Claude $52.90 of $100. OpenAI $625.73 + $11.37 in flight of $707 |
+
 ## Report
