@@ -1656,4 +1656,16 @@ looks like beta. Validation 2025 and the holdout judge both.
 | 6 | Money | equity $1,481.63; options buying power $481.60; 0 orders |
 | 7 | Compute | Sail $116.11 (about $4.6/h; the $32 line around 21:50Z without a top-up). Claude $39.59 of $100. OpenAI $615.00 + $9.36 in flight of $707 |
 
+### Sprint scoreboard, T0 + 47 h (05:31Z Sept 28)
+
+| # | Metric | Value |
+|---|---|---|
+| 1 | Population | 12 alive, 294 retired. 12 born and 24 retired in 2 h: architect births refute themselves and retire within about an hour, so the population sits at the floor. Agenda v5 has been live since about 04:55Z |
+| 2 | Throughput | 3,000 cycles/h, still mostly hold spin until #402 ships; median 2.6 s; 2 provider 502s; pool 1 busy, 9 ready |
+| 3 | Search | 58,086 trials, 216,438 program-years. Closest: `earnings-idio-drift-call` 3/8 |
+| 4 | Evidence | Validation passes alive 0; holdout looks 2, passes 0 |
+| 5 | Readiness | R4: #401 (Gym memory) ready, CI green; #402 (hold backoff) verified SHIP, one small fix in progress; #398 (drift screen) CI 3.11 green, 3.14 pending; #399 (Train 2020-21, switch off) under verification. Follow-up tracks running: SPXW artifact, pre-registration, earnings premium, frozen runner |
+| 6 | Money | equity $1,481.63; options buying power $481.60; 0 orders |
+| 7 | Compute | Sail $108.10 (about $4/h; the $32 line around 00:30Z Tuesday). Claude $42.19 of $100. OpenAI $617.04 + $9.36 in flight of $707 |
+
 ## Report
