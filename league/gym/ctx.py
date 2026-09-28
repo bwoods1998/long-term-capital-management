@@ -149,6 +149,15 @@ class Snapshot:
             self._views[key] = found
         return found
 
+    def release(self) -> None:
+        """Forget the cached views. A cached view holds its snapshot (for the greeks), so the two form a
+        reference cycle that reference counting never frees; only Python's cyclic collector does, and a
+        cycle that survived a young collection waits for a full one. The replay calls this when it
+        drops a snapshot (`engine.DayData`), so the snapshot, and the day's chain grids and greek blocks
+        it reaches, go at once. A view a program still holds keeps working (it still holds the
+        snapshot); a later `view` call only builds a fresh one."""
+        self._views.clear()
+
 
 class ChainView:
     """One root's chain slice at one minute (PROGRAM.md, "ctx.chain"). Arrays, one entry a contract,

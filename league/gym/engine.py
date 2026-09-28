@@ -174,6 +174,23 @@ class GreekBlocks:
         self.done[np.ix_(cols, rows)] = True
 
 
+class DayClosed(RuntimeError):
+    """A closed day (`DayData.close`) was read. Its chains are gone: answering "no chain" would settle every expiring
+    position as `expired_without_data`, so a read after the close is a bug, and says so."""
+
+
+class _ClosedChains:
+    """What a closed day's `chains` becomes: any use of it raises `DayClosed` (never an empty mapping)."""
+
+    def __init__(self, day: dt.date):
+        self.day = day
+
+    def _refuse(self, *args: Any, **kwargs: Any) -> Any:
+        raise DayClosed(f"the replay's day {self.day} is closed: its chains were freed")
+
+    get = __getitem__ = __contains__ = __iter__ = __len__ = items = keys = values = _refuse
+
+
 class DayData:
     """One trading day: each root's chain once, and one shared snapshot per root and minute."""
 
@@ -200,12 +217,18 @@ class DayData:
         self._wanted: dict[str, set[int]] = {}
         self._unders: dict[tuple[str, int, int], Any] = {}
         self._minute = -1
+        self.closed = False
 
     def want(self, root: str, minutes: Any) -> None:
         """Minutes some program decides on (the greek blocks cover these)."""
         self._wanted.setdefault(root, set()).update(int(m) for m in minutes)
 
+    def _check_open(self) -> None:
+        if self.closed:
+            raise DayClosed(f"the replay's day {self.day} is closed: its snapshots, greek blocks and chains were freed")
+
     def blocks(self, root: str) -> "GreekBlocks | None":
+        self._check_open()
         found = self._blocks.get(root)
         if found is None and root in self.chains:
             found = self._blocks[root] = GreekBlocks(self.chains[root], self.rate, self.close_min, sorted(self._wanted.get(root, ())))
@@ -214,11 +237,32 @@ class DayData:
     def advance(self, mi: int) -> None:
         """Drop the caches of earlier minutes."""
         if mi != self._minute:
-            self._snaps.clear()
+            self._drop_snapshots()
             self._unders.clear()
             self._minute = mi
 
+    def _drop_snapshots(self) -> None:
+        # Each snapshot a program decided on caches its ChainView, which points back at the snapshot: a
+        # reference cycle. Left alone, every such snapshot, and through its greeks source the root-day's
+        # GreekBlocks and DayChain (the day's [minute, contract] grids), lives until a FULL collection,
+        # which comes rarer as the run's long-lived objects (trades, fills) grow: a worker's memory grew
+        # with the days of its segment. Breaking the cycle frees them by reference count, at once.
+        for snap in self._snaps.values():
+            snap.release()
+        self._snaps.clear()
+
+    def close(self) -> None:
+        """The day is over: drop its snapshots, greek blocks and chains, so the next day loads with this
+        one's grids already freed (`run` calls it last thing each day). A closed day refuses every read
+        (`DayClosed`): `snapshot`, `blocks`, `under` and its `chains` raise rather than answer "no data"."""
+        self._drop_snapshots()
+        self._unders.clear()
+        self._blocks.clear()
+        self.chains = _ClosedChains(self.day)  # type: ignore[assignment]
+        self.closed = True
+
     def snapshot(self, root: str, mi: int) -> Snapshot | None:
+        self._check_open()
         key = (root, mi)
         found = self._snaps.get(key)
         if found is not None:
@@ -235,6 +279,7 @@ class DayData:
         return snap
 
     def under(self, root: str, mi: int, history: int):
+        self._check_open()
         key = (root, mi, history)
         found = self._unders.get(key)
         if found is None:
@@ -1030,6 +1075,14 @@ def tables_digest() -> str:
 
 
 # --------------------------------------------------------------------------- the run
+def _close_day(data: DayData, history: History) -> None:
+    """The end of a replayed day: its underlying joins the history, then the day is closed (`DayData.close`).
+    A function of its own so no loop variable of `run` keeps one of the day's chains alive into the next."""
+    for root, chain in data.chains.items():
+        history.add(root, chain.underlying.price)
+    data.close()
+
+
 def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Sequence[dt.date] | None = None,
         progress: Any = None, keep: list | None = None) -> list[dict]:
     """Run a batch of programs over the window, day-major; return one result dict per program
@@ -1083,8 +1136,7 @@ def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Se
         for account in live:
             account.warming = False
             account.closed_since, account.rejects_since = [], []
-        for root, chain in data.chains.items():
-            history.add(root, chain.underlying.price)
+        _close_day(data, history)
 
     for n, day in enumerate(days):
         data = DayData(store, day, all_roots, events, history, to_ordinal(day))
@@ -1112,8 +1164,7 @@ def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Se
                     account.step(data, mi, wants)
         for account in live:
             account.end_day(data, last=n == len(days) - 1)
-        for root, chain in data.chains.items():
-            history.add(root, chain.underlying.price)
+        _close_day(data, history)
         if progress is not None:
             progress(n + 1, len(days), day)
     elapsed = time.perf_counter() - began
@@ -1123,4 +1174,4 @@ def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Se
             for a in accounts]
 
 
-__all__ = ["RunConfig", "run", "Account", "DayData", "History"]
+__all__ = ["RunConfig", "run", "Account", "DayData", "DayClosed", "History"]
