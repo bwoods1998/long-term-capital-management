@@ -2030,6 +2030,21 @@ looks like beta. Validation 2025 and the holdout judge both.
 | 6 | Money | equity $1,481.63; options buying power $481.60; 0 orders |
 | 7 | Compute | Sail $96.52 (about $4.2/h; the $32 line around 02:30Z Tuesday). Claude $52.90 of $100. OpenAI $625.73 + $11.37 in flight of $707 |
 
+- **15:50Z Operator decisions under the owner's delegation (Sept 28: "decide yourself how best to proceed").**
+  Guardrails kept: D2, the money table, money movement and secrets.
+  - `researcher.top_families` 1 to 6: the six highest-weight families research on V4-Pro instead of Flash.
+  - A strong-model hypothesis tournament runs on the idle Gym capacity:
+    - six new mechanisms outside the refuted list and graveyard, each with kill tests written before any run;
+    - swept on the sealed 2020-24 image over Train 2020-2024 at split 16, with placebos;
+    - survivors are founded into the swarm, and their predicted 2025 t is written before Validation.
+  - PR #407, the calibration expansion, is ready for tonight's release:
+    - six hourly slots and IWM within D3's unchanged $50 bound;
+    - a 25-minute patient `mid25` cell at 12:00 and 14:00 ET;
+    - $200 of the day cap left for families, a legs cap, and yielding to any family order on the same contracts;
+    - interrupted attempts never count as samples.
+    Adding IWM and the extra slots is an operator decision inside D3's dollar bound. The review also found that
+    `fillcheck.py`'s Gym replay had been silently broken, falling back to a table estimate; it is fixed.
+
 ### Sprint scoreboard, T0 + 57 h (15:30Z Sept 28, in session)
 
 | # | Metric | Value |
