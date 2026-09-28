@@ -2030,4 +2030,16 @@ looks like beta. Validation 2025 and the holdout judge both.
 | 6 | Money | equity $1,481.63; options buying power $481.60; 0 orders |
 | 7 | Compute | Sail $96.52 (about $4.2/h; the $32 line around 02:30Z Tuesday). Claude $52.90 of $100. OpenAI $625.73 + $11.37 in flight of $707 |
 
+### Sprint scoreboard, T0 + 57 h (15:30Z Sept 28, in session)
+
+| # | Metric | Value |
+|---|---|---|
+| 1 | Population | 43 alive, 503 retired; 58 born and 67 retired in 2 h (agendas v6 and v7) |
+| 2 | Throughput | 763 cycles/h, median 12 s; 3 cycle errors (2 Gym exec failures, 3 provider 502s) |
+| 3 | Search | 61,976 trials, 261,661 program-years. **Closest ever in Validation 2025:** `second-session-assimilation-call`, 7/8, failing only the deflated Sharpe (0.0): t 2.22, 4/4 quarters, positive at 1.5x. It is a long-call program on five high-momentum names with 2,358 trades whose P&L comes from a few very large days; the deflated Sharpe exists to refuse that fat-tailed profile. Runner-up `confirmed-round-level-release-call` 6/8 (t 1.40, deflated Sharpe 0.945) |
+| 4 | Evidence | Validation passes alive 0; holdout looks 2, passes 0 |
+| 5 | Money | Equity $1,479.44 (calibration round trip -$2.20 incl. fees; its legs filled at the mid). Options buying power $479.41. The live path has been unblocked since 14:06Z (#405) |
+| 6 | Readiness | For after the close, built and in review: #404 marking, #406 splits (public split table, a no-look-ahead fix in progress), calibration expansion (six slots, IWM, a 25-min patient cell, the same $50 bound), site positions ledger (House feed and site section, reconciling exactly to Profit). The 5-year Train flip follows |
+| 7 | Compute | Sail $86.33 (about $4/h; the $32 line around 05:00Z Tuesday without a top-up). Claude $59.69 of $100. OpenAI $630.28 + $11.35 in flight of $707 |
+
 ## Report
