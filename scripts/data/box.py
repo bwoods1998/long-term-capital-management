@@ -7,7 +7,7 @@
     python3 scripts/data/box.py key               copy the ThetaData key into /data/secrets (0600)
     python3 scripts/data/box.py push              upload scripts/data/*.py to /data/code
     python3 scripts/data/box.py probe             authenticate and make one request from the box
-    python3 scripts/data/box.py start [--stages 1,2,3,5,6] [--first ...] [--threads 4]
+    python3 scripts/data/box.py start [--stages 1,2,3,5,6] [--first ...] [--threads 4] [--early-roots SPY,QQQ,IWM,SPXW]
                                                   run the backfill in the background (nohup)
     python3 scripts/data/box.py stop              stop the backfill (it resumes from the journal)
     python3 scripts/data/box.py status            the box, its egress, and the backfill's progress
@@ -131,6 +131,8 @@ def cmd_start(args: argparse.Namespace) -> int:
         extra += f" --checks {shlex.quote(args.checks)}"
     if args.order:
         extra += f" --order {shlex.quote(args.order)}"
+    if args.early_roots:
+        extra += f" --early-roots {shlex.quote(args.early_roots)}"
     if args.slots is not None:
         extra += f" --slots {int(args.slots)}"
     # A string command, detached (Sail's `background`) and in its own session, so the exec's
@@ -283,6 +285,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--first", default="")
     s.add_argument("--checks", default="")
     s.add_argument("--order", default="1,2,3,5,4,6", help="stage order (Sept 26: fill calibration before the names)")
+    s.add_argument("--early-roots", default="", help="stages 9-10: these core roots only (default the core five)")
     s.add_argument("--threads", type=int, default=8)
     s.add_argument("--slots", type=int, default=None)
     s.set_defaults(func=cmd_start)

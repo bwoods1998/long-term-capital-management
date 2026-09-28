@@ -6,9 +6,14 @@ under `<root>/nbbo/<ROOT>/<YYYY-MM-DD>.parquet` (one-minute NBBO), `underlying/`
 Dates appear only in paths and in the manifest; the engine turns them into day ordinals and days to
 expiry, and a program never sees one.
 
-THE WINDOWS. Every date belongs to one window: train 2022-01-03..2024-12-31, validation
+THE WINDOWS. Every date belongs to one window: train 2020-01-02..2024-12-31, validation
 2025-01-02..2025-12-31, holdout 2026-01-02..2026-09-25 (the last full trading day before T0), forward
-every trading day after that. A holdout or forward day opens only for a `Store` built with a
+every trading day after that. Train's 2020-21 years (the extension of Sept 27) are in a Gym image only when it was
+built with them (`images.py build gym --train-from 2020-01-02`), and a Train run covers them only from the swarm's
+`gym.train_from`; until the owner's switch every image starts at 2022-01-03, as before. An image built with them also
+holds the underlying alone for the 60 sessions before 2020-01-02 (window "pre": a program's history going into the
+March 2020 crash, never a day a run trades). `train_first` is the first Train day an image holds: the swarm refuses a
+Train run whose span is not the image's. A holdout or forward day opens only for a `Store` built with a
 `GateCapability`, and one is minted only on a store that carries the gate image's `GATE` mark (the
 Gym image has neither the mark nor the days). It is an object the gate's code holds, not a flag: a
 program runs inside `decide(ctx)`, imports only numpy and math, and never reaches the store at all.
@@ -139,6 +144,11 @@ class Store:
     def trading_days(self) -> list[dt.date]:
         """Every trading day the calendar lists (dates only: no data is opened)."""
         return list(self._trading)
+
+    def train_first(self) -> dt.date | None:
+        """The first Train day this store's calendar holds (2022-01-03 on every image before the 2020-21 extension,
+        2020-01-02 on one built with it): the span a Train run here covers, which the swarm checks against its own."""
+        return next((d for d in self._trading if window_of(d) == "train"), None)
 
     def next_trading_day(self, day: dt.date) -> dt.date | None:
         i = int(np.searchsorted(self._ordinals, ordinal(day), side="right"))
@@ -353,7 +363,9 @@ def describe(store: Store, window: str, roots: Sequence[str], *, sample: int = 2
     """What a box holds for a window: days per root and kind (the driver's data check), and how far each
     root's chains reach: `dte` = [the shortest, the longest] furthest expiry over every `sample`-th NBBO
     day (and the last), and `back_months` = the share of those days reaching past FRONT_DTE."""
-    out: dict[str, Any] = {"store": str(store.root), "window": window, "gate": store.gate, "roots": {}}
+    first = store.train_first()
+    out: dict[str, Any] = {"store": str(store.root), "window": window, "gate": store.gate, "roots": {},
+                           "train_first": first.isoformat() if first else None}
     for root in roots:
         row: dict[str, Any] = {}
         for kind in ("nbbo", "underlying", "oi"):

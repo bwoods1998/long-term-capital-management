@@ -70,8 +70,9 @@ class FakeDriver:
     """The Gym's driver on one box: `answer(name, code, params, window, stress, roots)` makes each result."""
 
     def __init__(self, client: Any, box: str, *, answer: Callable[..., dict] | None = None, roots: tuple[str, ...] = ("SPY", "QQQ", "IWM", "XSP", "SPXW"),
-                 fail: Callable[[], Exception | None] | None = None, calls: list | None = None):
+                 fail: Callable[[], Exception | None] | None = None, calls: list | None = None, train_first: str | None = None):
         self.client, self.box, self.version = client, box, "gym-engine-1-fake"
+        self.train_first = train_first  # the image's first Train day the Gym reports (None: a driver that does not say)
         self.answer = answer or (lambda name, code, params, window, stress, roots: result(name, window=window, roots=tuple(roots)))
         self.roots = roots
         self.fail = fail
@@ -84,13 +85,16 @@ class FakeDriver:
         missing = [r for r in roots if r not in self.roots]
         if missing and len(roots) == 1:
             raise RuntimeError(f"the box is missing data: no {window} days for {missing[0]}")
-        return {"roots": {r: {"nbbo": 10, "underlying": 10} for r in roots if r in self.roots}}
+        out = {"roots": {r: {"nbbo": 10, "underlying": 10} for r in roots if r in self.roots}}
+        if self.train_first:
+            out["train_first"] = self.train_first
+        return out
 
     def run(self, programs: dict, *, window: str, roots: list[str], workers: int = 8, split: int = 1, stress: float = 1.0,
             capital: float = 10000.0, detail: str = "full", start: Any = None, end: Any = None, gate_reason: Any = None,
             timeout: int = 900) -> dict:
         self.calls.append({"box": self.box, "programs": sorted(programs), "window": window, "roots": list(roots), "stress": stress,
-                           "gate": gate_reason, "split": split})
+                           "gate": gate_reason, "split": split, "start": start, "end": end, "timeout": timeout})
         if self.fail is not None:
             exc = self.fail()
             if exc is not None:
@@ -101,7 +105,10 @@ class FakeDriver:
             r = self.answer(name, code, params, window, stress, roots)
             r["program"] = name
             results.append(r)
-        return {"batch": {"days": 250, "programs": len(programs), "trials": len(results), "window": window}, "results": results}
+        batch = {"days": 250, "programs": len(programs), "trials": len(results), "window": window}
+        if self.train_first and window == "train":
+            batch["train_first"] = self.train_first
+        return {"batch": batch, "results": results}
 
 
 class FakeSail:

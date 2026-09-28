@@ -278,6 +278,9 @@ def run_batch(jobs: Sequence[tuple[str, str, dict]], *, store_root: str, window:
     seconds = time.time() - began
     dated = {} if window == "validation" else {"first_day": days[0].isoformat() if days else None,
                                                "last_day": days[-1].isoformat() if days else None}
+    if window == "train":  # the image's first Train day: the span the swarm checks its Train score against
+        first = store.train_first()
+        dated["train_first"] = first.isoformat() if first else None
     return {"batch": {"engine": ENGINE_VERSION, "store": str(store_root), "window": window, "roots": list(roots),
                       "days": len(days), **dated, "workers": workers, "split": split,
                       "stress": stress, "capital": capital, "programs": len(jobs),

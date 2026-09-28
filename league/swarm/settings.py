@@ -4,6 +4,19 @@ re-reads it every loop).
 
 The EVIDENCE LINES are not settings: they are the plan's, in `evidence.py`, and loosening one is the
 owner's decision. Everything here is throughput and money: how many, how often, how much.
+
+THE 2020-21 SWITCH (`gym.train_from`, Sept 27, 2026). Train's first day: "2022-01-03" (the default: Train is 2022-2024,
+exactly as before) or "2020-01-02" (Train is 2020-2024: the COVID crash and rebound and 2021's low-volatility bull join
+the worst-year score); nothing else. The setting is what the swarm's NEXT START migrates to
+(`researcher.migrate_objective`, which re-chooses every family's best from runs over that span only); until then the
+running swarm keeps scoring, stamping and running Train over the span its store was migrated to (`objective_span` of
+`store.get("train_objective")`), and the loop raises one `swarm.status` alert that a restart is pending. Switching it on
+also needs a Gym image that holds those years (`images.py build gym --train-from 2020-01-02`, adopted as
+`gym.image_checkpoint` in the same edit): the pool refuses a Train run on an image whose first Train day is not the
+span's (both ways). A date in the first days of January snaps to that year's first session (2020-01-01 is 2020-01-02);
+any other value is the default, and the loop raises an alert naming it. With the switch on, `train_split` and
+`run_timeout_seconds` follow the span unless the operator sets them (`train_split`, `run_timeout`: 16 and 1500 s over
+five years, 8 and 900 s over three).
 """
 
 from __future__ import annotations
@@ -11,11 +24,24 @@ from __future__ import annotations
 import copy
 import datetime as dt
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any, Mapping
 
 REPO = Path(__file__).resolve().parents[2]
+
+#: Train's first day by default and at its earliest, and its last day (league/gym/day.py's windows; a test holds them
+#: equal). The swarm is standard library only, so they are repeated here rather than imported from the Gym.
+TRAIN_CORE_START = dt.date(2022, 1, 3)
+TRAIN_EARLIEST = dt.date(2020, 1, 2)
+TRAIN_END = dt.date(2024, 12, 31)
+#: The first session of each year Train may start in: the only values `gym.train_from` takes.
+TRAIN_STARTS = {2020: TRAIN_EARLIEST, 2022: TRAIN_CORE_START}
+#: The Train split and run timeout over three years (the defaults before the switch); `train_split` and `run_timeout`
+#: scale them with the span unless the operator sets `gym.train_split` or `gym.run_timeout_seconds`.
+BASE_TRAIN_SPLIT = 8
+BASE_RUN_TIMEOUT = 900
 
 DEFAULTS: dict[str, Any] = {
     "enabled": False,
@@ -111,9 +137,11 @@ DEFAULTS: dict[str, Any] = {
         "batch_wait_seconds": 8,        # how long a short batch waits for company
         "workers": 8,
         "split": 8,                      # the inner loop's segments (latency: one program, 3 years, 8 cores)
-        "train_split": 8,
+        # None: follow Train's span (`train_split`: 8 over three years, 16 over five, two full waves of 8 workers). A
+        # number is the operator's and wins.
+        "train_split": None,
         "validation_split": 1,          # Validation, holdout and forward run whole (the Gym refuses to split them)
-        "run_timeout_seconds": 900,
+        "run_timeout_seconds": None,     # None: follow Train's span (`run_timeout`: 900 s over three years, 1500 over five)
         "idle_sleep_seconds": 600,      # a box idle this long sleeps (sleeping boxes cost nothing)
         "box_usd_hour": 0.20,           # a busy l box (Sail bills measured use; $0.12-0.20/h measured Sept 26)
         "remote_root": "/workspace/gym",
@@ -121,6 +149,8 @@ DEFAULTS: dict[str, Any] = {
         "python": "/opt/data-venv/bin/python",  # the Gym image is a fork of the data box: its venv has numpy and pyarrow
         "capital": 10000.0,
         "roots": ["SPY", "QQQ", "IWM", "XSP", "SPXW"],
+        # Train's first day (the module docstring's 2020-21 switch): "2020-01-02" with a Gym image that holds 2020-21.
+        "train_from": "2022-01-03",
     },
     # A robustness run waiting this long (its 1.5x run; the mid run twice as long) takes a Train job's priority (aging).
     "pool": {"robust_age_seconds": 600},
@@ -245,6 +275,106 @@ def _merge(base: dict[str, Any], over: Mapping[str, Any]) -> dict[str, Any]:
     return out
 
 
+def parse_train_from(raw: Any) -> tuple[dt.date, str | None]:
+    """(Train's first day, a note for the operator or None) from a `gym.train_from` value: one of `TRAIN_STARTS`; a date
+    in the first days of January before that year's first session snaps to it (with a note); anything else is the default
+    2022-01-03, with a note saying the value was ignored."""
+    if raw is None or raw == TRAIN_CORE_START.isoformat():
+        return TRAIN_CORE_START, None
+    day: dt.date | None = None
+    if isinstance(raw, dt.date):
+        day = raw
+    elif isinstance(raw, int) and not isinstance(raw, bool) and raw in TRAIN_STARTS:
+        day = dt.date(raw, 1, 1)
+    elif isinstance(raw, str):
+        try:
+            day = dt.date.fromisoformat(raw.strip())
+        except ValueError:
+            day = None
+    if day is not None and day.year in TRAIN_STARTS and day.month == 1 and day <= TRAIN_STARTS[day.year]:
+        start = TRAIN_STARTS[day.year]
+        note = None if day == start else f"gym.train_from {raw!r} is before {day.year}'s first session: Train starts {start}"
+        return start, note
+    return TRAIN_CORE_START, (f"gym.train_from {raw!r} is not a Train start ({', '.join(d.isoformat() for d in TRAIN_STARTS.values())}): "
+                              f"ignored, Train starts {TRAIN_CORE_START}")
+
+
+def train_from(settings: Mapping[str, Any] | None) -> dt.date:
+    """The first Train day `gym.train_from` asks for (`parse_train_from`): what the swarm's next start migrates to."""
+    return parse_train_from(((settings or {}).get("gym") or {}).get("train_from"))[0]
+
+
+def train_from_note(settings: Mapping[str, Any] | None) -> str | None:
+    """Why `gym.train_from` was snapped or ignored (None: it was taken as written)."""
+    return parse_train_from(((settings or {}).get("gym") or {}).get("train_from"))[1]
+
+
+def objective_span(objective: Any) -> dt.date:
+    """The first Train day of a stored objective name (`researcher.objective_for`: "worst-train-year-v1@2020-01-02");
+    2022-01-03 for the base name, none, or anything unreadable. The running swarm's span is its store's objective's."""
+    _, _, tail = str(objective or "").partition("@")
+    try:
+        day = dt.date.fromisoformat(tail)
+    except ValueError:
+        return TRAIN_CORE_START
+    return day if day in TRAIN_STARTS.values() else TRAIN_CORE_START
+
+
+def span_years(span: dt.date | None) -> tuple[int, ...]:
+    """The calendar years Train covers from `span` (2022-01-03 when None) to 2024."""
+    return tuple(range((span or TRAIN_CORE_START).year, TRAIN_END.year + 1))
+
+
+def train_years(settings: Mapping[str, Any] | None) -> tuple[int, ...]:
+    """The calendar years Train covers under `gym.train_from`: (2022, 2023, 2024) by default, 2020-2024 with it on."""
+    return span_years(train_from(settings))
+
+
+def _explicit(settings: Mapping[str, Any] | None, name: str) -> float | None:
+    value = ((settings or {}).get("gym") or {}).get(name)
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def train_split(settings: Mapping[str, Any] | None, span: dt.date | None = None) -> int:
+    """The Train split: `gym.train_split` when the operator set it, else 8 per three years of Train rounded up (8 over
+    2022-2024; 16 over 2020-2024: two full waves on 8 workers, segments shorter than today's)."""
+    explicit = _explicit(settings, "train_split")
+    if explicit is not None:
+        return max(1, int(explicit))
+    return BASE_TRAIN_SPLIT * max(1, math.ceil(len(span_years(span)) / 3))
+
+
+def run_timeout(settings: Mapping[str, Any] | None, span: dt.date | None = None) -> float:
+    """A Gym batch's time limit in seconds: `gym.run_timeout_seconds` when the operator set it, else 900 s scaled by the
+    Train years a Train batch covers (`span`; None: any other window, 900): 1500 over five years."""
+    explicit = _explicit(settings, "run_timeout_seconds")
+    if explicit is not None:
+        return explicit
+    return float(round(BASE_RUN_TIMEOUT * max(3, len(span_years(span))) / 3))
+
+
+#: The prompts' words for Train's span, as written for the default (2022-2024).
+_SPAN_TEXT = (("Train 2022-2024", "Train {a}-{b}"), ("Train (2022-2024)", "Train ({a}-{b})"),
+              ("earn in 2022, 2023 and 2024 alike", "earn in {years} alike"))
+
+
+def train_span_text(text: str, span: dt.date | None) -> str:
+    """A prompt with Train's span (the running swarm's, `objective_span`): `text` itself (the same string) while Train
+    is 2022-2024."""
+    years = span_years(span)
+    if years == (2022, 2023, 2024):
+        return text
+    listed = ", ".join(str(y) for y in years[:-1]) + f" and {years[-1]}"
+    for old, new in _SPAN_TEXT:
+        text = text.replace(old, new.format(a=years[0], b=years[-1], years=listed))
+    return text
+
+
 def load(root: str | Path | None = None, *, config: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """The swarm's settings: DEFAULTS < config.json "swarm" (and its "gym" block into "gym") < <root>/swarm.json."""
     if config is None:
@@ -279,4 +409,6 @@ def load(root: str | Path | None = None, *, config: Mapping[str, Any] | None = N
     return out
 
 
-__all__ = ["DEFAULTS", "load"]
+__all__ = ["DEFAULTS", "load", "train_from", "train_from_note", "parse_train_from", "objective_span", "span_years",
+           "train_years", "train_split", "run_timeout", "train_span_text", "TRAIN_CORE_START", "TRAIN_EARLIEST", "TRAIN_END",
+           "TRAIN_STARTS"]

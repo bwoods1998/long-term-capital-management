@@ -480,10 +480,37 @@ class Swarm:
         self.rounds[name] = thread
         thread.start()
 
+    def train_span_notice(self) -> dict[str, Any] | None:
+        """THE 2020-21 SWITCH, as the operator sees it: one `swarm.status` alert per distinct situation when
+        `gym.train_from` was snapped or ignored (`settings.train_from_note`), or asks for a Train span the running swarm has
+        not migrated to (the next start does: until then every Train run, score and stamp keeps the store's span)."""
+        running = settings_mod.objective_span(self.store.get("train_objective"))
+        wanted = settings_mod.train_from(self.settings)
+        note = settings_mod.train_from_note(self.settings)
+        if note is None and wanted == running:
+            return None
+        text = " ".join(x for x in (note, None if wanted == running else
+                                    f"gym.train_from asks for Train from {wanted}; the running swarm scores Train from {running} "
+                                    "until its next start migrates (restart the swarm, with the matching Gym image)") if x)
+        seen = f"{(self.settings.get('gym') or {}).get('train_from')!r}|{running}"
+        if self.store.get("train_span_notice") == seen:
+            return None
+        self.store.put("train_span_notice", seen)
+        payload = {"action": "train_span_pending" if wanted != running else "train_from_setting", "alert": True, "text": text,
+                   "setting": (self.settings.get("gym") or {}).get("train_from"), "wanted": wanted.isoformat(),
+                   "running": running.isoformat()}
+        self.store.event("swarm.status", None, payload)
+        log(text)
+        return payload
+
     def step(self) -> None:
         """One pass of the main loop (tests call it directly)."""
         fresh = settings_mod.load(self.root, config=self.config)
         self.settings.update(fresh)  # in place (every piece holds this dict), and no key ever disappears mid-read
+        try:
+            self.train_span_notice()
+        except Exception:  # noqa: BLE001 - a notice never stops the loop
+            pass
         if getattr(self.guard, "due", lambda: True)():
             was = not self.guard.allows()
             self.guard.check()
@@ -547,8 +574,11 @@ class Swarm:
         born = self.seed()
         if born:
             log(f"seeded {len(born)} families")
-        try:  # once per store: the bests chosen anew under the robust Train objective, beating so the House waits for it
-            moved = migrate_objective(self.store, beat=lambda: self.heartbeat({"starting": True, "migrating": True}))
+        # once per store and Train span (`gym.train_from`, the 2020-21 switch): the bests chosen anew under the robust Train
+        # objective, beating so the House waits for it
+        try:
+            moved = migrate_objective(self.store, beat=lambda: self.heartbeat({"starting": True, "migrating": True}),
+                                      settings=self.settings)
             if moved["migrated"] or moved["failed"]:
                 log(f"train objective: {moved['migrated']} families' bests chosen anew, {moved['with_best']} with an eligible best, "
                     f"{moved['failed']} emptied after an error")

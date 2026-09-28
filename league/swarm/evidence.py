@@ -29,7 +29,9 @@ THE TRAIN OBJECTIVE (`train_score`, the sprint's "robust Train objective", Sept 
 Train year (the `t_daily` of each year its own roots had data, the Gym's `by_year`), times the share of those years'
 quarters that were positive. It is eligible to be a family's best only with at least 40 trades on at least 20 traded days in EVERY Train
 year with data; a version whose 1.5x-stress Train run loses is never the best (`researcher.py`). The full-window t
-with a 30-trade floor it replaced rewarded sparse filters that could never meet the line's frequency.
+with a 30-trade floor it replaced rewarded sparse filters that could never meet the line's frequency. The Train years
+are the ones from the swarm's `gym.train_from` on (2022-2024 by default, 2020-2024 with the 2020-21 switch on,
+Sept 27): `first_year` drops any earlier year a result may carry, so 2020 and 2021 enter the worst year only once on.
 
 THE DRIFT SCREEN (`drift_screen`, Sept 27; the owner approved tightening pre-Validation with a placebo test after the
 one family that passed Validation, back-month long SPY calls after low closes, failed its holdout: its Train and 2025
@@ -83,6 +85,10 @@ BOOTSTRAP_DRAWS = 2000
 #: The robust Train objective's eligibility: every Train year with data (the sprint, Sept 26).
 TRAIN_YEAR_MIN_TRADES = 40
 TRAIN_YEAR_MIN_DAYS = 20
+#: The Train extension's years (2020-21, Sept 27) count for a result only when EVERY root of its had data in them (the
+#: Gym's per-year `roots`): a program pooling SPY with a name that has no 2020-21 chains would otherwise be scored there on
+#: SPY alone, another program than the one it is.
+PARTIAL_YEARS_BEFORE = 2022
 
 
 def _num(value: Any) -> float | None:
@@ -211,14 +217,26 @@ def years_of(result: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
         return {}
 
 
-def train_score(result: Mapping[str, Any]) -> dict[str, Any]:
+def train_score(result: Mapping[str, Any], *, first_year: int | None = None) -> dict[str, Any]:
     """The robust Train objective (the module docstring): {score, eligible, why, worst_year, quarters, years}.
+    `first_year` (the switch's first Train year) leaves out any year before it; None counts every year with data. A year
+    before `PARTIAL_YEARS_BEFORE` counts only when every root of the result had data in it (its Gym row's `roots`).
 
     score = the lowest per-year `t_daily` over the Train years with data, times the share of Train quarters positive (a
     worst year below zero is scaled by 2 - share instead, so fewer positive quarters never flatter a loss); None when a
     year has no t. eligible: a score, and at least `TRAIN_YEAR_MIN_TRADES` trades on `TRAIN_YEAR_MIN_DAYS` traded days
     in every year; `why` names the first year short of it."""
     years = years_of(result)
+    if first_year is not None:
+        years = {y: r for y, r in years.items() if not (y[:4].isdigit() and int(y[:4]) < int(first_year))}
+    # The program's own roots: its NEEDS within the batch's (a result's `roots` is its batch's universe).
+    wanted = {str(r).upper() for r in result.get("roots") or ()}
+    declared = (result.get("needs") or {}).get("roots") if isinstance(result.get("needs"), Mapping) else None
+    if isinstance(declared, (list, tuple)) and declared:
+        wanted &= {str(r).upper() for r in declared}
+    years = {y: r for y, r in years.items()
+             if not (y[:4].isdigit() and int(y[:4]) < PARTIAL_YEARS_BEFORE and isinstance(r.get("roots"), list)
+                     and wanted - {str(x).upper() for x in r["roots"]})}
     k, n = quarters_positive(result.get("summary") or {})
     quarters = [v for r in years.values() for v in ((r.get("quarter_pnl") or {}).values() if isinstance(r.get("quarter_pnl"), Mapping) else [])]
     if quarters:  # the quarters the program's own roots had data in (the Gym's per-year block), not its batch company's

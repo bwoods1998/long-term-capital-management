@@ -40,6 +40,7 @@ import time
 from typing import Any, Callable, Mapping
 
 from . import diagnostics
+from . import settings as settings_mod
 from .researcher import CODE_BLOCK, CONTRACT, check_code, needs_of
 from .store import SwarmStore
 
@@ -384,7 +385,7 @@ class Diagnostician:
              effort: str | None = None) -> tuple[dict[str, Any] | None, list[dict[str, Any]], str | None]:
         """(the answer or None, the paid attempts billed without one, the error)."""
         try:
-            answer = self.router.ask(role=ROLE, system=self.system, user=user, family=fid,
+            answer = self.router.ask(role=ROLE, system=settings_mod.train_span_text(self.system, settings_mod.objective_span(self.store.get("train_objective"))), user=user, family=fid,
                                      key=f"swarm:{fid}:diagnose:{seen['validations']}:{int(began)}{':' + effort if effort else ''}",
                                      openai_model=None, sail_profile=None, max_output=16000, effort="high", need_usd=0.0,
                                      claude=True, schema=self.schema, claude_effort=effort)
@@ -395,7 +396,8 @@ class Diagnostician:
     def affordable(self, user: str, *, effort: str | None = None) -> str | None:
         """Why a call with this packet cannot be made now (the day's budget, Claude's room), or None."""
         try:
-            _, ceiling = self.router.claude_request(self.system, user, schema=self.schema, effort=effort)
+            _, ceiling = self.router.claude_request(settings_mod.train_span_text(self.system, settings_mod.objective_span(self.store.get("train_objective"))), user, schema=self.schema,
+                                                    effort=effort)
         except Exception as exc:  # noqa: BLE001
             return f"the request could not be priced: {exc}"[:300]
         spent = self.router.claude_spent(role=ROLE, since=self.clock() - 86400)

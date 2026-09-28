@@ -204,12 +204,15 @@ def summarize(trades: Sequence[dict], daily: Sequence[Sequence[Any]], capital: f
     }
 
 
-def by_year(trades: Sequence[dict], daily: Sequence[Sequence[Any]], own_days: Any = None) -> dict[str, dict[str, Any]]:
+def by_year(trades: Sequence[dict], daily: Sequence[Sequence[Any]], own_days: Any = None,
+            roots_by_day: Any = None) -> dict[str, dict[str, Any]]:
     """One row per calendar year of the run's days (a year the program never traded included): trades, days,
     days_traded, pnl, the mean and t of that year's daily returns on maximum loss (`daily_returns`), its quarters
     positive and its P&L by quarter. `own_days` (ISO days), when given, keeps only the days the program's own roots had
     data: a batch mixes roots, and a day only another program's root had data for says nothing of this one. The swarm
-    scores a Train version on its WORST year (Sept 26)."""
+    scores a Train version on its WORST year (Sept 26). `roots_by_day` ({ISO day: the program's roots with data that day})
+    adds each year's `roots`: the swarm counts a 2020-21 year only when every one of the program's roots had data in it
+    (the Train extension of Sept 27: a name has no 2020-21 chains)."""
     days = [d for d in daily if own_days is None or str(d[0]) in own_days]
     out: dict[str, dict[str, Any]] = {}
     for year in sorted({str(d[0])[:4] for d in days}):
@@ -225,6 +228,8 @@ def by_year(trades: Sequence[dict], daily: Sequence[Sequence[Any]], own_days: An
                      "t_daily": None if t is None else round(t, 4),
                      "quarters_positive": f"{sum(v > 0 for v in quarters.values())}/{len(quarters)}",
                      "quarter_pnl": {q: round(v, 2) for q, v in sorted(quarters.items())}}
+        if roots_by_day is not None:
+            out[year]["roots"] = sorted({r for d in days if str(d[0]).startswith(year) for r in roots_by_day.get(str(d[0]), ())})
     return out
 
 
@@ -235,9 +240,12 @@ def merge_years(parts: Sequence[Mapping[str, Any]], trades: Sequence[dict], dail
         return by_year(trades, daily)
     days: dict[str, int] = {}
     quarters: dict[str, dict[str, float]] = {}
+    roots: dict[str, set[str]] = {}
     for p in parts:
         for year, row in p["by_year"].items():
             days[year] = days.get(year, 0) + int(row.get("days") or 0)
+            if isinstance(row.get("roots"), list):
+                roots.setdefault(year, set()).update(row["roots"])
             into = quarters.setdefault(year, {})
             for q, v in (row.get("quarter_pnl") or {}).items():
                 into[q] = into.get(q, 0.0) + float(v)
@@ -252,6 +260,8 @@ def merge_years(parts: Sequence[Mapping[str, Any]], trades: Sequence[dict], dail
                      "t_daily": None if t is None else round(t, 4),
                      "quarters_positive": f"{sum(v > 0 for v in qs.values())}/{len(qs)}",
                      "quarter_pnl": {q: round(v, 2) for q, v in sorted(qs.items())}}
+        if year in roots:
+            out[year]["roots"] = sorted(roots[year])
     return out
 
 
@@ -552,7 +562,7 @@ def build(account: Any, cfg: Any, days: Sequence[dt.date], data_version: str, re
             "root": _group(trades, lambda t: t["root"]),
             "exit_reason": _group(trades, lambda t: t["exit_reason"]),
         },
-        "by_year": by_year(trades, account.daily, own),
+        "by_year": by_year(trades, account.daily, own, {d: [r for r in account.roots if r in rows] for d, rows in regimes.items()}),
         "daily": [list(d) for d in account.daily],
         "trades": trades,
         "worst": sorted(trades, key=lambda t: t["pnl"])[:5],

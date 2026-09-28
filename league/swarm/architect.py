@@ -26,6 +26,7 @@ import time
 from typing import Any, Callable, Mapping
 
 from . import diagnostics
+from . import settings as settings_mod
 from .researcher import MAX_ROOTS
 from .store import STRUCTURES, SwarmStore
 
@@ -223,7 +224,9 @@ class Architect:
             self.store.event("swarm.architect", None, out)
             return out
         try:
-            answer = self.router.ask(role="architect", system=SYSTEM, user=self.prompt(), family=None,
+            # SYSTEM itself while Train is 2022-2024; else the running swarm's span (its store's migrated objective)
+            system = settings_mod.train_span_text(SYSTEM, settings_mod.objective_span(self.store.get("train_objective")))
+            answer = self.router.ask(role="architect", system=system, user=self.prompt(), family=None,
                                      key=f"swarm:architect:{int(began)}", openai_model=self.cfg.get("openai_model"),
                                      sail_profile=str(self.cfg.get("sail_profile", "k3_balanced")),
                                      max_output=int(self.cfg.get("max_output_tokens", 12000)), effort="high", need_usd=2.0,

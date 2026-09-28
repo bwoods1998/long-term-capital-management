@@ -30,6 +30,14 @@
   its boxes `ltcm-swarm-<kind>-<epoch>-<n>` without a token: `adopt` takes back every box the store knows
   whatever its name, and `reconcile` also ends an untokened one it does not know (`LEGACY_NAME`).
 - CAP. `max_boxes` counts every live box of the kind the pool holds, the store records, or Sail lists.
+- TRAIN'S FIRST DAY (the 2020-21 switch, Sept 27, 2026). Every Train job without its own `start` starts at the running
+  swarm's span: its store's migrated objective (`settings.objective_span`; 2022-01-03 until a start migrates the switch
+  on), stamped when it is queued (`start`, `span`). A box learns its image's first Train day when it starts (the Gym's
+  `train_first`), and a Train batch whose image does not start Train at the job's span is refused, both ways: a
+  2022-2024 image under a 2020-2024 swarm would score three years as five, and a 2020 image under a 2022 swarm would
+  give January 2022 a history the old image never had. A result carries the span its image covered as `train_from`,
+  which a batch reports; the Train split and time limit follow the span unless the operator sets them
+  (`settings.train_split`, `settings.run_timeout`).
 
 The Gym's driver (`league.gym.driver.GymDriver`) is imported when a box starts; tests hand in fakes.
 Standard library only.
@@ -48,6 +56,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+from . import settings as settings_mod
 from .store import SwarmStore
 
 _IDS = itertools.count(1)
@@ -94,6 +103,8 @@ class GymJob:
     late_fail: Any = None
     #: The jobs of one researcher sweep (`gym_sweep`) share a group: they never supersede one another.
     group: str | None = None
+    #: Train's first day this job was stamped with (the running swarm's span; None: a job with its own `start`).
+    span: str | None = None
 
     @property
     def name(self) -> str:
@@ -115,6 +126,7 @@ class Box:
     booked_at: float = 0.0
     thread: threading.Thread | None = None
     failures: int = 0
+    train_first: str | None = None    # its image's first Train day (the Gym's data check says; None: not known)
 
 
 AWAKE = ("starting", "ready", "busy")
@@ -165,6 +177,7 @@ class GymPool:
         self.forking: dict[str, float] = {}
         #: The fork threads (joined by `stop`).
         self.fork_threads: list[threading.Thread] = []
+        self._span_alerts: set[tuple[Any, ...]] = set()
         self.token = str(store.get("pool_token") or "")
         if not self.token:
             self.token = secrets.token_hex(3)
@@ -174,6 +187,22 @@ class GymPool:
     @property
     def gym(self) -> Mapping[str, Any]:
         return self.settings.get("gym", {})
+
+    def span(self) -> dt.date:
+        """The running swarm's Train span: its store's migrated objective (`settings.objective_span`), not the setting,
+        which takes effect at the next start's migration."""
+        return settings_mod.objective_span(self.store.get("train_objective"))
+
+    def _span_refused(self, box: Box, span: str, found: str, jobs: Sequence[GymJob]) -> None:
+        why = (f"the Gym image starts Train at {found} but the swarm scores Train from {span}: adopt the image built for that "
+               "span (gym.image_checkpoint) and restart, or set gym.train_from back")
+        key = (box.version, span, found)
+        if key not in self._span_alerts:
+            self._span_alerts.add(key)
+            self.store.event("swarm.status", None, {"action": "train_span_mismatch", "box": box.id, "image": box.version,
+                                                    "image_train_first": found, "span": span, "alert": True, "text": why})
+        for job in jobs:
+            self._fail(job, why)
 
     def image(self, kind: str) -> str | None:
         return self.gym.get("image_checkpoint") if kind == "gym" else self.gym.get("gate_checkpoint")
@@ -192,6 +221,8 @@ class GymPool:
         """Queue a job. A family has at most one Train job (or one sweep's jobs: the same `group`) waiting: a newer one
         supersedes it (its waiter, if any, is told; it never ran), so a backlog of orphaned versions cannot build up."""
         job.created = self.clock()
+        if job.window == "train" and not job.gate and job.start is None:
+            job.start = job.span = self.span().isoformat()
         with self._wake, self.store.atomic():
             if (self.store.family(job.family) or {}).get("retired_at"):
                 self._fail(job, "the family retired before dispatch")
@@ -368,6 +399,7 @@ class GymPool:
                 if not report["roots"]:
                     raise exc
             box.roots = tuple(sorted(r for r, row in (report.get("roots") or {}).items() if row and row.get("nbbo")))
+            box.train_first = report.get("train_first") if kind == "gym" and isinstance(report, Mapping) else None
         except Exception as exc:  # noqa: BLE001
             self._accrue(box)
             box.state = "failed"
@@ -388,7 +420,8 @@ class GymPool:
             self.fork_failures[kind] = 0
             self._wake.notify_all()
         self.store.upsert_box(box_id, kind=kind, version=str(image), state="ready", detail={"name": name, "roots": list(box.roots),
-                                                                                           "bundle": getattr(box.driver, "version", None)})
+                                                                                           "bundle": getattr(box.driver, "version", None),
+                                                                                           "train_first": box.train_first})
         self.store.event("swarm.pool", None, {"action": "box_ready", "box": box_id, "kind": kind, "roots": list(box.roots)})
         if self._stopping:  # the pool stopped while this fork was in flight: it sleeps (the next process adopts it)
             self._sleep(box)
@@ -487,6 +520,10 @@ class GymPool:
         batch = [job for job, _ in runnable]
         if not batch:
             return
+        span = batch[0].span if batch[0].window == "train" else None
+        if span and box.train_first and box.train_first != span:
+            self._span_refused(box, span, box.train_first, batch)  # nothing runs: the image covers another Train span
+            return
         if box.state == "asleep":
             resuming = self.clock()
             try:
@@ -508,8 +545,10 @@ class GymPool:
         self.store.set_box_state(box.id, "busy")
         head = batch[0]
         roots = sorted({r for j in batch for r in j.roots})
-        # Only Train is split (a boundary values open positions at the mid): every other window runs whole.
-        split = head.split or (int(self.gym.get("train_split", self.gym.get("split", 8))) if head.window == "train"
+        # Only Train is split (a boundary values open positions at the mid): every other window runs whole. The split and
+        # the time limit follow Train's span unless the operator set them.
+        span_day = dt.date.fromisoformat(head.start) if head.window == "train" and head.start else None
+        split = head.split or (settings_mod.train_split(self.settings, span_day) if head.window == "train"
                                else int(self.gym.get("validation_split", 1)))
         programs = {job.name: (job.code, dict(job.params or {})) for job in batch}
         began = self.clock()
@@ -517,7 +556,7 @@ class GymPool:
             doc = box.driver.run(programs, window=head.window, roots=roots, workers=int(self.gym.get("workers", 8)), split=split,
                                  stress=float(head.stress), capital=float(self.gym.get("capital", 10000.0)), detail=head.detail,
                                  start=head.start, end=head.end, gate_reason=head.gate,
-                                 timeout=int(self.gym.get("run_timeout_seconds", 900)))
+                                 timeout=int(settings_mod.run_timeout(self.settings, span_day)))
         except Exception as exc:  # noqa: BLE001
             elapsed = self.clock() - began
             self._accrue(box, jobs=len(batch))
@@ -544,6 +583,12 @@ class GymPool:
         self.store.set_box_state(box.id, "ready")
         by_name = {str(r.get("program")): r for r in (doc.get("results") or []) if isinstance(r, Mapping)}
         info = dict(doc.get("batch") or {})
+        covered = info.get("train_first") if head.window == "train" else None
+        if covered and not box.train_first:
+            box.train_first = str(covered)
+        if span and covered and str(covered) != span:
+            self._span_refused(box, span, str(covered), batch)  # ran, but over another span: never delivered as this one
+            return
         years = 0.0
         for job in batch:
             result = by_name.get(job.name)
@@ -551,6 +596,10 @@ class GymPool:
                 self._fail(job, "the batch returned no result for this program")
                 continue
             result = {**result, "gym_image": box.version, "gym_bundle": getattr(box.driver, "version", None)}
+            if job.window == "train":
+                # The span the Train score is over: the image's first Train day the batch reported (a job stamped with the
+                # swarm's span never gets here on another one), else the job's own start.
+                result["train_from"] = str(covered) if covered and job.span else job.start
             job.result = result
             job.batch = {**info, "box": box.id, "programs_in_batch": len(batch), "wall_seconds": round(elapsed, 2)}
             days = (result.get("summary") or {}).get("days") or len(result.get("daily") or [])
@@ -734,6 +783,7 @@ class GymPool:
             try:
                 box.driver = self._driver(box.id)
                 box.roots = tuple((row.get("detail") or {}).get("roots") or ())
+                box.train_first = (row.get("detail") or {}).get("train_first")
             except Exception:  # noqa: BLE001
                 continue
             with self._lock:
