@@ -718,8 +718,10 @@ def drift_verdict(store: SwarmStore, fam: Mapping[str, Any], n: Any, settings: M
     return evidence.drift_screen(version_drift(store, fam, n), min_t=cfg[0], years_positive=cfg[1])
 
 
-#: The drift-failed marks a family keeps (its newest versions').
-DRIFT_FAILED_KEPT = 200
+#: The drift-failed marks a family keeps (its newest versions'), and the length of each one's reason: a mark matters for
+#: the family's candidates and its validated version, which are recent, and the reason's full text is in `robust_why`.
+DRIFT_FAILED_KEPT = 24
+DRIFT_WHY_CHARS = 80
 
 
 def failed_why(state: Mapping[str, Any], n: Any) -> str:
@@ -745,17 +747,19 @@ def screen_best(store: SwarmStore, fid: str, settings: Mapping[str, Any], *, clo
     and again: while the candidate's figures are known and fail, it is marked (`drift_failed`) and demoted like a loss at
     1.5x (`demote_version`: never the best again; the next eligible candidate takes its place), so a failing best never
     sits in front of one that passes, and a family left with none has no eligible Train version (the idle rule). One whose
-    figures are owed stays (it waits for them), and so does a family the operator holds at the gate (`held_at_gate`: the
-    hold spares it, and the gate refuses a failing version once the hold is cleared). Returns the demotions; nothing
-    while the screen is off."""
+    figures are owed stays (it waits for them), and so does a family the operator holds at the gate (`gate_hold`, with or
+    without its gate_ready: the hold spares it, and the gate refuses a failing version once the hold is cleared). Returns
+    the demotions; nothing while the screen is off."""
     if drift_settings(settings) is None:
         return []
     out: list[dict[str, Any]] = []
     with store.atomic():
         for _ in range(CANDIDATES + 2):
             fam = store.family(fid)
-            if fam is None or fam.get("retired_at") or held_at_gate(fam):
-                break  # the operator's hold keeps the family as it is (its gate_ready too); the gate screens it once cleared
+            if fam is None or fam.get("retired_at") or (fam.get("state") or {}).get("gate_hold"):
+                # The operator's hold keeps the family as it is, whatever its gate_ready says (an engine or image change
+                # clears that while it is re-validated); the gate screens it once the hold is cleared.
+                break
             state = fam.get("state") or {}
             n = fam.get("best_version") or state.get("best_train_version")
             if n is None:
@@ -764,7 +768,7 @@ def screen_best(store: SwarmStore, fid: str, settings: Mapping[str, Any], *, clo
             if verdict is None or not verdict["known"] or verdict["passed"]:
                 break
             why = f"fails the drift screen: {verdict['why']}"
-            marks = {**(state.get("drift_failed") or {}), str(int(n)): verdict["why"]}
+            marks = {**(state.get("drift_failed") or {}), str(int(n)): str(verdict["why"])[:DRIFT_WHY_CHARS]}
             store.set_state(fid, drift_failed={k: marks[k] for k in sorted(marks, key=lambda k: int(k))[-DRIFT_FAILED_KEPT:]})
             nxt = demote_version(store, store.family(fid) or fam, int(n), why=why, clock=clock)
             out.append({"version": int(n), "why": why, "next": nxt.get("version")})
@@ -1687,7 +1691,7 @@ class Researcher:
     def eligible_run(self, fam: Mapping[str, Any], run: Mapping[str, Any]) -> tuple[bool, str]:
         """Can this Train run's version be the family's best? A run at the normal spread that the Train score finds
         eligible (its row's score, else its kept full result), of a version that has not lost at 1.5x the half-spread."""
-        if float(run.get("stress") or 1.0) != 1.0 or run.get("purpose") not in (None, "train"):
+        if run.get("stress") is None or float(run["stress"]) != 1.0 or run.get("purpose") not in (None, "train", "drift"):
             return False, "only a Train run of yours at the normal spread counts"
         current = self.store.family(fam["id"]) or fam
         state = current.get("state") or {}
@@ -1724,8 +1728,8 @@ class Researcher:
             return None
         with self.store.atomic():
             marks = dict(((self.store.family(fid) or {}).get("state") or {}).get("drift_failed") or {})
-            if marks.get(str(int(n))) != verdict["why"]:
-                marks[str(int(n))] = verdict["why"]
+            if marks.get(str(int(n))) != str(verdict["why"])[:DRIFT_WHY_CHARS]:
+                marks[str(int(n))] = str(verdict["why"])[:DRIFT_WHY_CHARS]
                 keep = sorted(marks, key=lambda k: int(k))[-DRIFT_FAILED_KEPT:]
                 self.store.set_state(fid, drift_failed={k: marks[k] for k in keep})
         return verdict["why"]

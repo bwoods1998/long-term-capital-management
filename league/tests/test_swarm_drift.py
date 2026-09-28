@@ -15,11 +15,14 @@ from unittest.mock import patch
 from league.swarm import diagnostics, evidence
 from league.swarm import settings as S
 from league.swarm.gate import Gate
-from league.swarm.researcher import awaiting_validation, drift_settings, drift_verdict, idle_dead, screen_best, version_drift
+from league.swarm.pool import ROBUSTNESS_PRIORITY, GymJob
+from league.swarm.researcher import (DRIFT_FAILED_KEPT, DRIFT_WHY_CHARS, awaiting_validation, drift_settings, drift_verdict,
+                                     held_at_gate, idle_dead, screen_best, version_drift)
 from league.swarm.store import SwarmStore
 from league.swarm.tournament import Tournament
 from league.tests.swarm_fakes import drift_block, result
 from league.tests.test_swarm_researcher import FakePool, ResearcherCase, calls_in
+from league.tests.test_swarm_pool import PoolCase
 from league.tests.test_swarm_rounds import RoundCase
 from league.tests.test_swarm_sweep import SweepCase, scored
 
@@ -203,6 +206,47 @@ class Tournaments(RoundCase):
         self.store.hold_gate("z", False)
         self.assertEqual([d["version"] for d in screen_best(self.store, "z", self.settings)], [1])
 
+    def revalidating(self, fid: str) -> None:
+        """A validated, gate-ready family on the old engine whose only Train run predates the drift figures; the pool now
+        runs a new engine (a deploy's bundle change)."""
+        self.pool.image = lambda kind: "img"
+        self.pool.bundle = lambda: "NEW-bundle"
+        self.family(fid)
+        self.store.add_run(fid, 1, train_result(fid, drift=None), window="train", stress=1.0, purpose="train")
+        self.store.update_family(fid, validated_version=1)
+        self.store.set_state(fid, best_train_version=1, validation_version=1, gate_ready=True, validation_image="img",
+                             validation_bundle="OLD-bundle", validation_line={"passed": True})
+
+    def test_a_family_owed_its_figures_after_an_engine_change_keeps_its_gate_ready(self):
+        """The review of #402: re-validation after an engine change cleared gate_ready, then waited for the drift figures, so
+        the family was neither exempt from the idle rules nor alive, and a round retired it. The figures are checked first."""
+        self.revalidating("v")
+        self.settings["researcher"].update(dormant_cycles=5, retire_idle_evaluations=10)
+        self.store.update_family("v", best_train=None, since_val_trials=500, trials=500)
+        self.store.set_state("v", dormant_cycles=50)
+        out = Tournament(self.store, self.pool, self.settings).validate(self.store.families(alive=True))
+        self.assertEqual((out["waiting_drift"], self.pool.jobs), (["v"], []))
+        fam = self.store.family("v")
+        self.assertTrue(fam["state"]["gate_ready"])
+        self.assertIsNone(idle_dead(fam, self.settings), "exempt while it waits")
+
+    def test_the_operators_hold_survives_an_engine_change(self):
+        """The second review of #398 (hold_bundle.py): a held family whose figures fail after the deploy is spared until the
+        operator clears the hold, whatever its gate_ready says."""
+        self.revalidating("z")
+        self.store.hold_gate("z")
+        out = Tournament(self.store, self.pool, self.settings).validate(self.store.families(alive=True))
+        fam = self.store.family("z")
+        self.assertEqual(out["waiting_drift"], ["z"])
+        self.assertTrue(held_at_gate(fam))
+        self.store.set_state("z", robustness={"1": {"drift": {"status": "ok", **evidence.drift_numbers(FAILING)}}},
+                             gate_ready=False)  # whatever gate_ready says
+        self.assertEqual(screen_best(self.store, "z", self.settings), [])
+        fam = self.store.family("z")
+        self.assertEqual((fam["best_version"], fam["state"]["gate_hold"]), (1, True))
+        self.store.hold_gate("z", False)
+        self.assertEqual([d["version"] for d in screen_best(self.store, "z", self.settings)], [1])
+
     def test_the_dormancy_exemption_needs_a_best_the_screen_has_not_failed(self):
         """R3's dormancy clause spares a family whose best awaits validation; a best that failed the drift screen awaits
         nothing, while one whose figures are only owed still awaits them."""
@@ -359,6 +403,22 @@ class Researchers(ResearcherCase):
         self.assertTrue(ok["ok"])
         self.assertTrue(ok["drift"].startswith("it passes the drift screen: drift-adjusted alpha $450 (t 2.00)"), ok["drift"])
 
+    def test_a_stored_drift_row_can_be_submitted_and_the_marks_stay_small(self):
+        self.drift = "default"
+        researcher = self.researcher()
+        researcher.cycle(self.fam["id"])
+        fid = self.fam["id"]
+        v2 = self.store.add_version(fid, self.code, {"vrp_min": 1.45}, author="t")
+        row = self.store.add_run(fid, v2["n"], train_result("again"), window="train", stress=1.0, purpose="drift")
+        ok = researcher._local_tool(self.store.family(fid), "submit", {"run_id": row["run_id"]}, {})
+        self.assertTrue(ok.get("ok"), ok)
+        for n in range(100, 100 + DRIFT_FAILED_KEPT + 10):
+            researcher.drift_blocks(fid, n, drift_block(t=0.2))
+        marks = self.store.family(fid)["state"]["drift_failed"]
+        self.assertEqual(len(marks), DRIFT_FAILED_KEPT)
+        self.assertEqual(min(int(k) for k in marks), 110, "the newest versions' marks")
+        self.assertTrue(all(len(v) <= DRIFT_WHY_CHARS for v in marks.values()))
+
     def test_a_best_with_figures_needs_no_run_again_and_its_view_shows_the_lines(self):
         self.drift = "default"
         self.researcher().cycle(self.fam["id"])
@@ -433,6 +493,24 @@ class Sweeps(SweepCase):
         fam = self.store.family(self.fid)
         self.assertEqual(fam["state"]["best_train_version"], rows[1.35]["version"])
         self.assertIn(str(rows[1.4]["version"]), fam["state"]["drift_failed"])
+
+
+
+class Aging(PoolCase):
+    def test_a_drift_run_ages_like_the_1_5x_run_since_validation_waits_on_it(self):
+        pool = self.pool(batch_programs=1)
+        box = self.ready_box(pool)
+        self.ready_box(pool).state = "busy"  # no spare box: a young robustness run would wait
+        for fid, stress in (("drift", 1.0), ("mid", 0.0)):
+            pool.submit(GymJob(family=fid, version=1, code="NEEDS = {}", params={}, window="train", roots=("SPY",), stress=stress,
+                               purpose="robustness", priority=ROBUSTNESS_PRIORITY))
+        self.clock.advance(601)
+        for i in range(2):
+            pool.submit(GymJob(family=f"t{i}", version=1, code="NEEDS = {}", params={}, window="train", roots=("SPY",),
+                               priority=0.7 - i / 10))
+        self.clock.advance(9)
+        self.assertEqual([j.family for j in pool._take(box)], ["drift"], "aged at the 1.5x run's age, not the mid run's")
+        self.assertEqual([j.family for j in pool._take(box)], ["t0"])
 
 
 if __name__ == "__main__":

@@ -266,35 +266,43 @@ DRIFT_BASIS = "held-hours"
 _NO_VARIANCE = 1e-12
 
 
-def drift_moments(pairs: Sequence[tuple[float, float]]) -> list[float]:
-    """[n, mean x, mean P, S_xx, S_pp, S_xp] of (x, P) pairs, the sums centered (two passes): what `merge` combines."""
+#: The lowest daily variance a held day's weight uses (a flat or missing day never weighs without bound).
+RV_FLOOR = 1e-8
+
+
+def drift_moments(pairs: Sequence[tuple[float, float]], weights: Sequence[float] | None = None) -> list[float]:
+    """[n, W, mean x, mean P, S_xx, S_pp, S_xp] of (x, P) pairs under `weights` (W their sum; all 1 when None), the sums
+    centered on the weighted means (two passes): what `merge` combines."""
     n = len(pairs)
     if not n:
-        return [0, 0.0, 0.0, 0.0, 0.0, 0.0]
-    mx = sum(x for x, _ in pairs) / n
-    mp = sum(p for _, p in pairs) / n
-    return [n, mx, mp, sum((x - mx) ** 2 for x, _ in pairs), sum((p - mp) ** 2 for _, p in pairs),
-            sum((x - mx) * (p - mp) for x, p in pairs)]
+        return [0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    w = [1.0] * n if weights is None else [float(v) for v in weights]
+    total = sum(w)
+    mx = sum(wi * x for wi, (x, _) in zip(w, pairs)) / total
+    mp = sum(wi * p for wi, (_, p) in zip(w, pairs)) / total
+    return [n, total, mx, mp, sum(wi * (x - mx) ** 2 for wi, (x, _) in zip(w, pairs)),
+            sum(wi * (p - mp) ** 2 for wi, (_, p) in zip(w, pairs)), sum(wi * (x - mx) * (p - mp) for wi, (x, p) in zip(w, pairs))]
 
 
 def combine_moments(a: Sequence[float], b: Sequence[float]) -> list[float]:
-    """The moments of two sets of days together (Chan's pairwise update): exactly the moments of their union."""
+    """The weighted moments of two sets of days together (Chan's pairwise update): exactly the moments of their union."""
     na, nb = int(a[0]), int(b[0])
     if not na or not nb:
         return [float(x) if i else int(x) for i, x in enumerate(b if not na else a)]
-    n = na + nb
-    dx, dp, w = float(b[1]) - float(a[1]), float(b[2]) - float(a[2]), na * nb / n
-    return [n, float(a[1]) + dx * nb / n, float(a[2]) + dp * nb / n, float(a[3]) + float(b[3]) + dx * dx * w,
-            float(a[4]) + float(b[4]) + dp * dp * w, float(a[5]) + float(b[5]) + dx * dp * w]
+    wa, wb = float(a[1]), float(b[1])
+    total = wa + wb
+    dx, dp, f = float(b[2]) - float(a[2]), float(b[3]) - float(a[3]), wa * wb / total
+    return [na + nb, total, float(a[2]) + dx * wb / total, float(a[3]) + dp * wb / total, float(a[4]) + float(b[4]) + dx * dx * f,
+            float(a[5]) + float(b[5]) + dp * dp * f, float(a[6]) + float(b[6]) + dx * dp * f]
 
 
 def drift_rows(daily: Sequence[Sequence[Any]], returns: Mapping[str, Mapping[str, Any]], exposure: Mapping[str, Mapping[str, Any]],
                roots: Sequence[str], own_days: Any = None) -> list[tuple[str, float, dict, dict]]:
     """(day, P&L, base, held) for every day of the run (zero days included) on which one of its own `roots` had a full day's
-    return: `base` {root: (overnight return, intraday return, session minutes)} from the engine's regimes (`returns`: {day:
-    {root: {"ret_on", "ret_in", "session"}}}); `held` {root: (carried from the prior close 0/1, minutes held, the root's
-    return over the hours held)} from the account's `exposure` ({} on a flat day). `own_days`, as in `by_year`, keeps the
-    days its roots had data."""
+    return: `base` {root: (overnight return, intraday return, session minutes, the day's realized variance or None)} from
+    the engine's regimes (`returns`: {day: {root: {"ret_on", "ret_in", "session", "rv_day"}}}); `held` {root: (carried
+    from the prior close 0/1, minutes held, the root's return over the hours held)} from the account's `exposure` ({} on a
+    flat day). `own_days`, as in `by_year`, keeps the days its roots had data."""
     def finite(*xs: Any) -> bool:
         return all(isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) for x in xs)
 
@@ -307,9 +315,9 @@ def drift_rows(daily: Sequence[Sequence[Any]], returns: Mapping[str, Mapping[str
         base = {}
         for root in roots:
             row = today.get(root) or {}
-            on, intra, session = row.get("ret_on"), row.get("ret_in"), row.get("session")
+            on, intra, session, rv = row.get("ret_on"), row.get("ret_in"), row.get("session"), row.get("rv_day")
             if finite(on, intra, session):
-                base[root] = (float(on), float(intra), float(session))
+                base[root] = (float(on), float(intra), float(session), float(rv) if finite(rv) and rv > 0 else None)
         if not base:
             continue
         held = {}
@@ -329,7 +337,10 @@ def drift_stats(rows: Sequence[tuple[str, float, Mapping[str, Any], Mapping[str,
     exactly (`combine_stats`):
 
     - `n`, `p`, `pp`: the days, and the sum and sum of squares of P, over ALL days;
-    - `held`: the moments of (x, P) over HELD days, x the day's mean return of the roots held over their hours held;
+    - `held`: the moments of (x, P) over HELD days, x the day's mean return of the roots held over their hours held, each
+      day weighted by 1 / its realized variance (the held roots' mean `rv_day`, at least `RV_FLOOR`; 1 when a row has
+      none): a program that sizes to a premium budget holds less on a volatile day, and an unweighted slope would weigh
+      those days by their variance and take part of the drift for alpha;
     - `v`: over held days, the weights on each root's overnight and intraday drift ({"SPY:on": days held from the prior
       close, "SPY:in": minutes held}, a day's weights averaged over the roots it held);
     - `roots`: {root: [days, sum of overnight returns, sum of intraday returns, sum of session minutes]} over ALL days;
@@ -337,14 +348,15 @@ def drift_stats(rows: Sequence[tuple[str, float, Mapping[str, Any], Mapping[str,
       their pairwise products: what the t of the drift-adjusted daily P&L needs (`drift_fit`)."""
     years: dict[str, dict[str, Any]] = {}
     pairs: dict[str, list[tuple[float, float]]] = {}
+    weights: dict[str, list[float]] = {}
     for day, pnl, base, held in rows:
-        st = years.setdefault(day[:4], {"n": 0, "p": 0.0, "pp": 0.0, "held": [0, 0.0, 0.0, 0.0, 0.0, 0.0], "v": {}, "roots": {},
-                                          "rp": {}, "rr": {}})
+        st = years.setdefault(day[:4], {"n": 0, "p": 0.0, "pp": 0.0, "held": [0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "v": {},
+                                          "roots": {}, "rp": {}, "rr": {}})
         st["n"] += 1
         st["p"] += pnl
         st["pp"] += pnl * pnl
         comp: dict[str, float] = {}
-        for root, (on, intra, session) in base.items():
+        for root, (on, intra, session, *_rv) in base.items():
             acc = st["roots"].setdefault(root, [0, 0.0, 0.0, 0.0])
             acc[0] += 1
             acc[1] += on
@@ -359,11 +371,13 @@ def drift_stats(rows: Sequence[tuple[str, float, Mapping[str, Any], Mapping[str,
         if held:
             w = 1.0 / len(held)
             pairs.setdefault(day[:4], []).append((sum(span[2] for span in held.values()) * w, pnl))
+            rvs = [base[r][3] for r in held if r in base and len(base[r]) > 3 and base[r][3] is not None]
+            weights.setdefault(day[:4], []).append(1.0 / max(sum(rvs) / len(rvs), RV_FLOOR) if rvs else 1.0)
             for root, (carried, minutes, _) in held.items():
                 _add(st["v"], f"{root}:on", w * carried)
                 _add(st["v"], f"{root}:in", w * minutes)
     for year, rows_ in pairs.items():
-        years[year]["held"] = drift_moments(rows_)
+        years[year]["held"] = drift_moments(rows_, weights[year])
     return years
 
 
@@ -389,9 +403,10 @@ def combine_stats(a: Mapping[str, Any], b: Mapping[str, Any]) -> dict[str, Any]:
 def drift_fit(st: Mapping[str, Any]) -> dict[str, Any]:
     """One year's drift-adjusted alpha from its statistics (`drift_stats`):
 
-    - beta: the OLS slope of P on x over HELD days only (dollars per unit return): the exposure it held, whatever those
-      days' variance (a slope over every day weighs held days by their variance: a calm-day holder's drift passed for
-      alpha, a volatile rebound edge for a loss);
+    - beta: the slope of P on x over HELD days only, weighted by 1 / each day's realized variance (dollars per unit
+      return): the exposure it held, whatever those days' variance. A slope over every day weighs held days by their
+      variance (a calm-day holder's drift passed for alpha, a volatile rebound edge for a loss), and an unweighted one
+      over held days still does when the exposure itself moves with the volatility (a premium budget);
     - drift_usd: beta x the roots' unconditional drift over the hours held: for each held day, the year's mean overnight
       return if it was held from the prior close, plus the year's mean intraday return a minute for each minute held.
       What that exposure over those hours earns on average days;
@@ -404,7 +419,7 @@ def drift_fit(st: Mapping[str, Any]) -> dict[str, Any]:
       a calm-day holder's t came out too high, a volatile-day holder's and an always-held carry's too low). None under two
       days or with no variance (P a line in the return: pure drift)."""
     n = int(st["n"])
-    n_h, _, _, sxx, _, sxp = st["held"]
+    n_h, _, _, _, sxx, _, sxp = st["held"]
     beta = float(sxp) / float(sxx) if int(n_h) >= 3 and float(sxx) > 0 else 0.0
     v = st.get("v") or {}
     coef: dict[str, float] = {}
@@ -481,10 +496,10 @@ def merge_drift(parts: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
             return None
         for year, row in block["years"].items():
             st = row.get("stats") if isinstance(row, Mapping) else None
-            if not isinstance(st, Mapping) or not isinstance(st.get("held"), (list, tuple)) or len(st["held"]) != 6:
+            if not isinstance(st, Mapping) or not isinstance(st.get("held"), (list, tuple)) or len(st["held"]) != 7:
                 return None
             stats[year] = combine_stats(stats[year], st) if year in stats else combine_stats(
-                {"n": 0, "p": 0.0, "pp": 0.0, "held": [0, 0.0, 0.0, 0.0, 0.0, 0.0]}, st)
+                {"n": 0, "p": 0.0, "pp": 0.0, "held": [0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}, st)
     return drift_from_stats(stats)
 
 

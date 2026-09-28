@@ -66,12 +66,9 @@ def _trade(t: Mapping[str, Any]) -> dict[str, Any]:
 
 
 #: What the drift lines mean, once a view (the figures are Train's; nothing another window measured).
-DRIFT_NOTE = ("P&L = drift + alpha. Beta is your exposure (dollars per 1% move), measured on the days you held a position "
-              "against the move of the roots you held over the hours you held them. Drift is what that exposure earns at "
-              "the roots' AVERAGE return over those hours (the year's average overnight move when you held from the prior "
-              "close, its average intraday move for the minutes held): a placebo holding the same exposure over the same "
-              "hours on random days earns it too. Alpha is the rest, after costs: what your choice of days added. Only alpha "
-              "is an edge; its t is over every day of the year.")
+DRIFT_NOTE = ("P&L = drift + alpha. Beta: your exposure per 1% move of the roots you held, over the hours you held them. "
+              "Drift: what that exposure earns at the roots' average return over those hours; a placebo holding it on random "
+              "days earns it too. Alpha: the rest, after costs. Only alpha is an edge.")
 
 
 def _usd(value: Any) -> str:

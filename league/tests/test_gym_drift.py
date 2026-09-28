@@ -180,6 +180,29 @@ class Fits(unittest.TestCase):
         g = RS.drift_fit(RS.drift_stats(RS.drift_rows(daily, naive, close_to_close, ["SPY"]))["2023"])
         self.assertGreater(g["alpha_usd"], 0.3 * g["pnl"], "the bias the held hours remove")
 
+    def test_a_premium_budget_holder_without_timing_has_no_alpha(self):
+        """The second review of #398: a program that spends a fixed premium holds less exposure on a volatile day (contracts
+        ~ 1/sigma). An unweighted slope over held days weighs those days by their variance and read 12-39% of the P&L as
+        alpha; weighted by 1 / the day's realized variance, beta is the mean exposure and alpha is noise around zero."""
+        rng = random.Random(47)
+        n, x, rets, daily, exposure, expo = 80_000, 0.0, {}, [], {}, []
+        for i in range(n):
+            day = f"2023-{i:06d}"
+            x = 0.97 * x + rng.gauss(0.0, 0.5 * math.sqrt(1 - 0.97 ** 2))
+            sigma = 0.0085 * math.exp(x)
+            r = 0.0009 + sigma * rng.gauss(0.0, 1.0)
+            size = 5000.0 * 0.0085 / sigma
+            expo.append(size)
+            rets[day] = {"SPY": {"ret_on": r, "ret_in": 0.0, "session": FULL, "rv_day": sigma * sigma}}
+            daily.append([day, size * r, 0.0])
+            exposure[day] = {"SPY": (1, FULL, r)}
+        f = RS.drift_fit(RS.drift_stats(RS.drift_rows(daily, rets, exposure, ["SPY"]))["2023"])
+        self.assertLess(abs(f["alpha_usd"]), 0.05 * f["pnl"], f)
+        self.assertAlmostEqual(f["beta"], sum(expo) / n, delta=0.03 * sum(expo) / n)
+        unweighted = {d: {"SPY": {k: v for k, v in row["SPY"].items() if k != "rv_day"}} for d, row in rets.items()}
+        g = RS.drift_fit(RS.drift_stats(RS.drift_rows(daily, unweighted, exposure, ["SPY"]))["2023"])
+        self.assertGreater(g["alpha_usd"], 0.2 * g["pnl"], "the leak the weights remove")
+
     def test_pure_timing_passes(self):
         """Long only on the day after a decline, when the root's return is higher: the timing is alpha, in every year,
         net of a dollar of costs a day held."""
@@ -293,10 +316,15 @@ class SplitMerge(unittest.TestCase):
         block = RS.drift(daily, rets, exposure, ["SPY"])
         self.assertIsNone(RS.merge_drift([{"drift": block}, {}]), "a segment from before the block: not screened")
 
-    def test_combining_with_an_empty_set_is_the_other(self):
-        m = RS.drift_moments([(0.01, 5.0), (-0.02, -3.0), (0.005, 1.0)])
-        self.assertEqual(RS.combine_moments([0, 0.0, 0.0, 0.0, 0.0, 0.0], m), m)
-        self.assertEqual(RS.combine_moments(m, [0, 0.0, 0.0, 0.0, 0.0, 0.0]), m)
+    def test_combining_with_an_empty_set_is_the_other_and_weights_combine_exactly(self):
+        m = RS.drift_moments([(0.01, 5.0), (-0.02, -3.0), (0.005, 1.0)], [2.0, 1.0, 0.5])
+        self.assertEqual(RS.combine_moments([0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], m), m)
+        self.assertEqual(RS.combine_moments(m, [0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]), m)
+        pairs = [(0.01, 5.0), (-0.02, -3.0), (0.005, 1.0), (0.03, 9.0), (-0.01, -1.0)]
+        w = [2.0, 1.0, 0.5, 3.0, 1.5]
+        both = RS.combine_moments(RS.drift_moments(pairs[:2], w[:2]), RS.drift_moments(pairs[2:], w[2:]))
+        for a, b in zip(both, RS.drift_moments(pairs, w)):
+            self.assertAlmostEqual(a, b, places=12)
 
 
 class Views(unittest.TestCase):
@@ -355,7 +383,8 @@ def decide(ctx):
             first, close = float(price[known[0]]), float(price[known[-1]])
             if last is not None:
                 out[day.isoformat()] = {"SPY": {"ret_on": first / last - 1.0, "ret_in": close / first - 1.0,
-                                                "session": float(known[-1] - known[0])}}
+                                                "session": float(known[-1] - known[0]),
+                                                "rv_day": float(numpy.sum(numpy.diff(numpy.log(price[known])) ** 2))}}
             last = close
         return out
 
@@ -383,8 +412,15 @@ def decide(ctx):
         prior = self.train[self.train.index(exit_day) - 1]
         before, known_before = self.prices(prior)
         price, known = self.prices(exit_day)
-        self.assertGreaterEqual(minutes, float(first["exit_minute"] - 570), "to its exit, or to the close if it reopened")
-        self.assertAlmostEqual(ret, float(price[int(minutes)]) / float(before[known_before[-1]]) - 1.0, places=9)
+        out_at = first["exit_minute"] - 570
+        expected, held = float(price[out_at]) / float(before[known_before[-1]]), float(out_at)
+        again = next((t for t in result["trades"] if t["day"] == first["exit_day"]), None)
+        if again is not None:  # it reopened later that day: a second interval, to its exit or the close
+            in_at = again["filled_minute"] - 570
+            end = again["exit_minute"] - 570 if again["exit_day"] == again["day"] else int(known[-1])
+            expected, held = expected * float(price[end]) / float(price[in_at]), held + float(end - in_at)
+        self.assertEqual(minutes, held)
+        self.assertAlmostEqual(ret, expected - 1.0, places=9)
         block = result["drift"]
         self.assertEqual(set(block["years"]), {"2022", "2023"})
         self.assertEqual(sum(r["days"] for r in block["years"].values()), len(self.train) - 1,
@@ -405,6 +441,45 @@ def decide(ctx):
         for year in expected["years"]:
             for key in ("days", "held_days", "pnl", "alpha_usd", "drift_usd", "beta"):
                 self.assertAlmostEqual(merged["drift"]["years"][year][key], expected["years"][year][key], places=2, msg=f"{year} {key}")
+
+    ROLLER = '''
+NEEDS = {"roots": ["SPY"], "dte": [0, 4], "band": 0.05, "cadence": 10}
+PARAMS = {}
+def decide(ctx):
+    out = [{"close": p["id"]} for p in ctx.positions if 600 <= ctx.minute < 700 and p["held_minutes"] > 30]
+    if not ctx.positions and not ctx.orders and ctx.minute >= 900:
+        out.append({"open": "long_call", "legs": [{"side": "long", "right": "C", "dte": 2, "atm": 0}], "qty": 1})
+    return out
+'''
+
+    def test_an_overnight_roller_holds_two_intervals_not_the_whole_day(self):
+        """The second review of #398: a morning exit and an afternoon entry on one day were one span from the prior close to
+        the close (390 minutes, close to close), so the overnight drift of a daily roller passed for alpha. Each holding
+        has its own interval; a root's are merged where they overlap, its return their product, its minutes their sum."""
+        accounts: list = []
+        cfg = E.RunConfig(roots=("SPY",), fill_model=self.model, window="train")
+        result = E.run([R.load_program(self.ROLLER, name="roller")], self.store, cfg, keep=accounts)[0]
+        self.assertEqual(result["status"], "ok", result["runtime"])
+        trades = result["trades"]
+        self.assertGreaterEqual(len(trades), 3)
+        exited, entered = trades[0], trades[1]  # the first roll: held overnight, out in the morning, in again that afternoon
+        self.assertEqual((exited["exit_day"], entered["day"]), (entered["day"], entered["day"]))
+        day = dt.date.fromisoformat(entered["day"])
+        carried, minutes, ret = accounts[0].exposure[entered["day"]]["SPY"]
+        price, known = self.prices(day)
+        before, known_before = self.prices(self.train[self.train.index(day) - 1])
+        out_at, in_at, close = exited["exit_minute"] - 570, entered["filled_minute"] - 570, int(known[-1])
+        self.assertEqual(carried, 1)
+        self.assertEqual(minutes, float(out_at + (close - in_at)), "the morning and the afternoon, not the whole session")
+        expected = (float(price[out_at]) / float(before[known_before[-1]])) * (float(price[close]) / float(price[in_at])) - 1.0
+        self.assertAlmostEqual(ret, expected, places=9)
+
+    def test_a_live_forward_account_records_no_hours(self):
+        """The shadow book runs the Gym's Account with window "forward" on a live day: the drift record is Train's alone."""
+        accounts: list = []
+        cfg = E.RunConfig(roots=("SPY",), fill_model=self.model, window="validation")
+        E.run([R.load_program(self.ROLLER, name="roller")], self.store, cfg, keep=accounts)
+        self.assertEqual((accounts[0].exposure, accounts[0]._held), ({}, {}))
 
     def test_a_validation_run_computes_no_block(self):
         result = self.run_one(window="validation")

@@ -97,6 +97,13 @@ class GymAndLiveAgree(unittest.TestCase):
         self.assertGreaterEqual(len(gym.trades), 2)
         self.assertAlmostEqual(live.cash, gym.cash, places=9)
         self.assertEqual(live.counts, gym.counts)
+        # The day's end on a live day, for both kinds of account (the review of #398: the Gym's Train-only drift record read
+        # `day.history.arrays`, which a LiveDay's dict has not, and the shadow book raised at every close).
+        gym.end_day(day, last=False)
+        live.end_day(day, last=False)
+        self.assertEqual(live.daily, gym.daily)
+        self.assertEqual(len(live.daily), 1)
+        self.assertEqual((gym.exposure, live.exposure), ({}, {}), "a forward (live) account records no drift hours")
 
 
 @unittest.skipUnless(HAVE, "numpy not installed")

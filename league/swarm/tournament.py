@@ -111,15 +111,17 @@ class Tournament:
                 continue
             if n == fam.get("validated_version") and state.get("validation_image") == image and state.get("validation_bundle") == bundle:
                 continue
-            if state.get("validation_image") != image or state.get("validation_bundle") != bundle:
-                self.store.compare_and_set_state(fam["id"], {"validation_image": state.get("validation_image"),
-                                                           "validation_bundle": state.get("validation_bundle")}, gate_ready=False)
             screen = drift_verdict(self.store, fam, n, self.settings)
             if screen is not None and not screen["passed"]:
                 # A version whose Train run predates the figures waits for its run again (the researcher's robustness label
-                # "drift"); one that fails was demoted above, so this is a candidate the demotion could not replace.
+                # "drift"); one that fails was demoted above, so this is a candidate the demotion could not replace. Before
+                # the image/engine reset below: a validated family owed re-validation keeps its gate_ready (its idle-rule
+                # exemption and the operator's hold) while its figures are made.
                 drift["failed" if screen["known"] else "waiting"].append(fam["id"])
                 continue
+            if state.get("validation_image") != image or state.get("validation_bundle") != bundle:
+                self.store.compare_and_set_state(fam["id"], {"validation_image": state.get("validation_image"),
+                                                           "validation_bundle": state.get("validation_bundle")}, gate_ready=False)
             version = self.store.version(fam["id"], n)
             if version is None or not version.get("code"):
                 continue

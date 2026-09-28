@@ -249,9 +249,11 @@ class DayData:
         the prior ten sessions and the at-the-money implied vol at 10:00 of the nearest expiry; and,
         for the results' drift block, the day's overnight return `ret_on` (its first price over the
         root's last session's close in the history, which holds earlier sessions only), its intraday
-        return `ret_in` (last price over first) and `session` (the minutes between them), and `ret`,
-        close to close. A program never sees any of them."""
-        out = {"rv": math.nan, "iv": math.nan, "ret": math.nan, "ret_on": math.nan, "ret_in": math.nan, "session": math.nan}
+        return `ret_in` (last price over first) and `session` (the minutes between them), `ret`, close
+        to close, and `rv_day`, the day's own realized variance (the sum of its squared one-minute log
+        returns: the drift fit's weights). A program never sees any of them."""
+        out = {"rv": math.nan, "iv": math.nan, "ret": math.nan, "ret_on": math.nan, "ret_in": math.nan, "session": math.nan,
+               "rv_day": math.nan}
         opens, highs, lows, closes = self.history.arrays(root, 11)
         if closes.size >= 3:
             r = np.diff(np.log(closes))
@@ -262,6 +264,9 @@ class DayData:
             first, last = float(chain.underlying.price[known[0]]), float(chain.underlying.price[known[-1]])
             out["ret_in"] = last / first - 1.0 if first > 0 else math.nan
             out["session"] = float(known[-1] - known[0])
+            path = chain.underlying.price[known]
+            if known.size >= 2 and bool(np.all(path > 0)):
+                out["rv_day"] = float(np.sum(np.diff(np.log(path)) ** 2))
             if closes.size and closes[-1] > 0:
                 out["ret"] = last / float(closes[-1]) - 1.0
                 out["ret_on"] = first / float(closes[-1]) - 1.0
@@ -368,11 +373,12 @@ class Account:
         self.warming = False          # replaying warm-up days: decide runs, its intents are dropped
         self.liquidity_at: tuple[int, int] | None = None   # the minute `liquidity_used` counts
         self.liquidity_used: dict[int, int] = {}           # contract key -> contracts passive fills took this minute
-        #: The hours it held exposure (the results' drift block): ISO day -> root -> (1 when held from the prior close, the
-        #: minutes held after the first price, the root's return over the hours held). `_held` is today's span per root:
-        #: [start minute index (-1: the prior close; None: not opened today), end minute index (None: not ended yet)].
+        #: The hours it held exposure (the results' drift block, Train runs only): ISO day -> root -> (1 when held from the
+        #: prior close, the minutes held after the first price, the root's return over the hours held). `_held` is today's
+        #: interval per holding: key -> [root, start minute index (-1: the prior close; None: not opened today), end minute
+        #: index (None: not ended yet)].
         self.exposure: dict[str, dict[str, tuple[int, float, float]]] = {}
-        self._held: dict[str, list] = {}
+        self._held: dict[Any, list] = {}
 
     # ------------------------------------------------------------------ helpers
     def _id(self) -> int:
@@ -400,32 +406,56 @@ class Account:
         last = min(self.needs.end - day.open_min, day.minutes - 3)
         return set(range(first, last + 1, self.needs.cadence)) if first <= last else set()
 
-    def _hold(self, root: str, start: int | None = None, end: int | None = None) -> None:
-        """Widen today's exposure span of `root`: the earliest start (-1: from the prior close), the latest end."""
-        span = self._held.setdefault(root, [None, None])
+    def _hold(self, key: Any, root: str, start: int | None = None, end: int | None = None) -> None:
+        """Widen today's interval of one holding (`key`: a position's id, or its exercised shares'): its earliest start
+        (-1: from the prior close), its latest end. Train runs only: the drift block is Train's, and a live account's day
+        (the shadow book's `LiveDay`) has none of what `_exposure` reads."""
+        if getattr(self.cfg, "window", "train") != "train":
+            return
+        span = self._held.setdefault(key, [root, None, None])
         if start is not None:
-            span[0] = start if span[0] is None else min(span[0], start)
+            span[1] = start if span[1] is None else min(span[1], start)
         if end is not None:
-            span[1] = end if span[1] is None else max(span[1], end)
+            span[2] = end if span[2] is None else max(span[2], end)
 
     def _exposure(self, day: DayData) -> None:
-        """Today's `exposure` from the spans held: a span that began before today starts at the prior close (a carried
-        position, or exercised shares that gapped to the open); one that did not end is held to the close."""
+        """Today's `exposure` per root from its holdings' intervals, merged where they overlap: an interval that began
+        before today starts at the prior close (a carried position, or exercised shares that gapped to the open), one that
+        did not end is held to the close. A root's return over the hours held is the product of its merged intervals'
+        returns and its minutes their sum, so a position closed in the morning and one opened in the afternoon are two
+        intervals, never the whole day. Train runs only (`_hold`)."""
+        if getattr(self.cfg, "window", "train") != "train" or not self._held:
+            return
+        arrays = getattr(day.history, "arrays", None)
+        by_root: dict[str, list[tuple[int, int | None]]] = {}
+        for root, begin, end in self._held.values():
+            by_root.setdefault(root, []).append((-1 if begin is None else int(begin), end))
         out: dict[str, tuple[int, float, float]] = {}
-        for root, (start, end) in self._held.items():
+        for root, spans in by_root.items():
             chain = day.chains.get(root)
             price = chain.underlying.price if chain is not None else np.zeros(0)
             known = np.flatnonzero(np.isfinite(price))
             if not known.size:
                 continue
             first, last = int(known[0]), int(known[-1])
-            closes = day.history.arrays(root, 1)[3]
-            carried = (start is None or start < 0) and bool(closes.size) and float(closes[-1]) > 0
-            begin = first if start is None or start < first else min(int(start), last)
-            stop = last if end is None else max(begin, min(int(end), last))
-            at_start = float(closes[-1]) if carried else float(price[known[known <= begin][-1]])
-            at_end = float(price[known[known <= stop][-1]])
-            out[root] = (1 if carried else 0, float(stop - begin), at_end / at_start - 1.0)
+            closes = arrays(root, 1)[3] if callable(arrays) else np.zeros(0)
+            prior = float(closes[-1]) if closes.size and float(closes[-1]) > 0 else None
+            merged: list[list[int]] = []
+            for begin, end in sorted((b, last if e is None else int(e)) for b, e in spans):
+                if merged and begin <= merged[-1][1]:
+                    merged[-1][1] = max(merged[-1][1], end)
+                else:
+                    merged.append([begin, end])
+            growth, minutes, carried = 1.0, 0.0, 0
+            for begin, end in merged:
+                from_close = begin < 0 and prior is not None
+                a = first if begin < first else min(begin, last)
+                b = max(a, min(end, last))
+                at_start = prior if from_close else float(price[known[known <= a][-1]])
+                growth *= float(price[known[known <= b][-1]]) / at_start
+                minutes += float(b - a)
+                carried |= 1 if from_close else 0
+            out[root] = (carried, minutes, growth - 1.0)
         if out:
             self.exposure[day.day.isoformat()] = out
 
@@ -434,7 +464,7 @@ class Account:
         self.orders_today = 0
         self._held = {}
         for pos, root, shares, ref in self.pending_shares:
-            self._hold(root, -1, 0)  # exercised shares: held from the prior close to the open's gap
+            self._hold(("shares", pos.pid), root, -1, 0)  # exercised shares: held from the prior close to the open's gap
             chain = day.chains.get(root)
             price = chain.underlying.price if chain is not None else np.zeros(0)
             first = price[np.isfinite(price)]
@@ -445,7 +475,7 @@ class Account:
             self._finish(pos, day)
         self.pending_shares = []
         for pos in self.positions.values():
-            self._hold(pos.root, -1)  # carried from the prior close
+            self._hold(pos.pid, pos.root, -1)  # carried from the prior close
             chain = day.chains.get(pos.root)
             pos.idx = chain.index_of(pos.keys) if chain is not None else np.full(len(pos.legs), -1)
         for pos in list(self.positions.values()):
@@ -605,7 +635,7 @@ class Account:
         pos.cash += cash
         pos.fees += fees
         pos.last_mark = pos.entry if not math.isfinite(pos.last_mark) else pos.last_mark
-        self._hold(pos.root, mi)
+        self._hold(pos.pid, pos.root, mi)
 
     @staticmethod
     def _defined(order: L.Order, value: float) -> bool:
@@ -630,7 +660,7 @@ class Account:
             self._finish(pos, day)
 
     def _finish(self, pos: Position, day: DayData) -> None:
-        self._hold(pos.root, None, pos.exit_mi if pos.exit_day == day.ordinal else 0)
+        self._hold(pos.pid, pos.root, None, pos.exit_mi if pos.exit_day == day.ordinal else 0)
         self.positions.pop(pos.pid, None)
         if pos.closing:
             self.orders.pop(pos.closing, None)
@@ -878,7 +908,7 @@ class Account:
                 self._finish(pos, day)
             self.pending_shares = []
         for pos in self.positions.values():
-            self._hold(pos.root, None, day.minutes - 1)  # still open: held to the close
+            self._hold(pos.pid, pos.root, None, day.minutes - 1)  # still open: held to the close
         self._exposure(day)
         equity = self.equity()
         self.daily.append((day.day.isoformat(), round(equity - self.equity_prev, 6), round(equity, 6)))
