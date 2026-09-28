@@ -5,7 +5,9 @@
   the fills (rate, slippage, rejects and why), the breakdowns (weekday, time of day, DTE, realized and
   implied vol tercile, quarter, type, root, exit reason) as rows of [n, pnl, win rate, pnl per $ of max
   loss], the five worst trades with their context, and the program's errors. Train is the window the
-  agents see in full; `read_run` pages through the rest (`section`).
+  agents see in full; `read_run` pages through the rest (`section`). And THE DRIFT LINES (`drift_view`, Sept 27):
+  per Train year and over Train, "drift-adjusted alpha $X (t Y), drift $Z", so a researcher learns that what its exposure
+  earns at the roots' average return over the hours it held is drift, not an edge, and the screen's verdict.
 - VALIDATION (`validation_view`): pass or fail, and how many of the line's checks passed (the owner's
   decision D2a, Sept 26: "Researchers see Validation only as pass or fail and a count of checks
   passed"). Never a number the run measured, nor which checks failed: a researcher that saw Validation's
@@ -63,8 +65,49 @@ def _trade(t: Mapping[str, Any]) -> dict[str, Any]:
     return out
 
 
-def train_view(result: Mapping[str, Any], *, lineage_trials: int | None = None) -> dict[str, Any]:
-    """The compact diagnostic of a train run (see the module docstring)."""
+#: What the drift lines mean, once a view (the figures are Train's; nothing another window measured).
+DRIFT_NOTE = ("P&L = drift + alpha. Beta: your exposure per 1% move of the roots you held, over the hours you held them. "
+              "Drift: what that exposure earns at the roots' average return over those hours; a placebo holding it on random "
+              "days earns it too. Alpha: the rest, after costs. Only alpha is an edge.")
+
+
+def _usd(value: Any) -> str:
+    x = evidence._num(value)
+    return "n/a" if x is None else f"{'-' if x < 0 else ''}${abs(x):,.0f}"
+
+
+def _tval(value: Any) -> str:
+    x = evidence._num(value)
+    return "n/a" if x is None else f"{x:.2f}"
+
+
+def drift_view(block: Any, *, screen: tuple[float, int | None] | None = None) -> dict[str, Any] | None:
+    """THE DRIFT LINES of a Train result's `drift` block (or its compact figures): per year and over Train, "drift-adjusted
+    alpha $X (t Y), drift $Z, beta $B per 1% move, held H of D days", the note (`DRIFT_NOTE`), and with `screen` (min t,
+    years positive: the researcher's `drift_settings`) the screen's verdict. None when the run predates the figures."""
+    numbers = evidence.drift_numbers(block)
+    if numbers is None:
+        return None
+
+    def line(row: Mapping[str, Any]) -> str:
+        beta = evidence._num(row.get("beta"))
+        held = f", held {row.get('held_days')} of {row.get('days')} days" if row.get("held_days") is not None else ""
+        return (f"drift-adjusted alpha {_usd(row.get('alpha_usd'))} (t {_tval(row.get('t'))}), drift {_usd(row.get('drift_usd'))}, "
+                f"beta {_usd(None if beta is None else beta / 100.0)} per 1% move{held}")
+
+    out: dict[str, Any] = {year: line(row) for year, row in numbers["years"].items()}
+    out["train"] = line(numbers["pooled"])
+    if screen is not None:
+        verdict = evidence.drift_screen(numbers, min_t=screen[0], years_positive=screen[1])
+        out["screen"] = (f"passes (Validation needs t >= {screen[0]:g} over Train and alpha positive in {verdict['need']} of "
+                         f"{verdict['years']} years)" if verdict["passed"] else f"fails: {verdict['why']}")
+    out["note"] = DRIFT_NOTE
+    return out
+
+
+def train_view(result: Mapping[str, Any], *, lineage_trials: int | None = None,
+               screen: tuple[float, int | None] | None = None) -> dict[str, Any]:
+    """The compact diagnostic of a train run (see the module docstring); `screen` adds the drift screen's verdict."""
     if result.get("status") == "refused":
         return {"run_id": result.get("run_id"), "status": "refused", "reason": str(result.get("reason") or "")[:600],
                 "hint": "the program was refused before it ran: fix the rule named (league/CONTRACT.md) and run again"}
@@ -92,12 +135,15 @@ def train_view(result: Mapping[str, Any], *, lineage_trials: int | None = None) 
             view["by"].pop(name, None)
             if len(json.dumps(view, default=str)) <= MAX_CHARS:
                 break
+    drift = drift_view(result.get("drift"), screen=screen)
+    if drift is not None:  # outside the cap: a few hundred characters that never cost the researcher a table
+        view["drift"] = drift
     return view
 
 
 def section(result: Mapping[str, Any], name: str, *, page: int = 0, per_page: int = 25) -> dict[str, Any]:
-    """One section of a past train run for `read_run`: summary, fills, runtime, worst, trades (paged),
-    or breakdown.<name>."""
+    """One section of a past train run for `read_run`: summary, fills, runtime, worst, trades (paged), daily,
+    drift, or breakdown.<name>."""
     name = str(name or "summary")
     if name == "trades":
         trades = result.get("trades") or []
@@ -116,8 +162,11 @@ def section(result: Mapping[str, Any], name: str, *, page: int = 0, per_page: in
         return {"worst": [_trade(t) for t in (result.get("worst") or [])]}
     if name == "daily":
         return {"daily": [[d[0], _r(d[1], 2)] for d in (result.get("daily") or [])][-120:]}
-    return {"error": "sections: summary, fills, runtime, worst, trades (with page), daily, breakdown.<weekday|time_of_day|dte|"
-                     "rv_tercile|iv_tercile|quarter|type|root|exit_reason>"}
+    if name == "drift":
+        drift = drift_view(result.get("drift"))
+        return {"drift": drift} if drift is not None else {"error": "this run predates the drift figures: run it again"}
+    return {"error": "sections: summary, fills, runtime, worst, trades (with page), daily, drift, breakdown.<weekday|time_of_day|"
+                     "dte|rv_tercile|iv_tercile|quarter|type|root|exit_reason>"}
 
 
 def validation_view(result: Mapping[str, Any], line: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -166,4 +215,4 @@ def scrub(text: Any) -> str:
     return _T_IS.sub("t = (withheld)", out)
 
 
-__all__ = ["train_view", "section", "validation_view", "validation_words", "scrub"]
+__all__ = ["train_view", "drift_view", "section", "validation_view", "validation_words", "scrub", "DRIFT_NOTE"]

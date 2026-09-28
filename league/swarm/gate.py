@@ -2,7 +2,9 @@
 
 THE GATE (when a family's validated best meets the validation line):
 1. RATIONS: one holdout look per program version (code + parameters), at most three per LINEAGE (a fork
-   inherits its parent's looks); the leakage alarm (>= 10 looks, > 30% passing) stops the gate.
+   inherits its parent's looks); the leakage alarm (>= 10 looks, > 30% passing) stops the gate. THE DRIFT SCREEN
+   (Sept 27, `evidence.drift_screen`) again, in depth: a version whose Train drift-adjusted alpha fails it is refused
+   (stage "drift screen": no review is paid, no look is spent); one whose figures are owed waits.
 2. THE REVIEW: GPT-6 Sol through the gateway when OpenAI has room, else DeepSeek-V4-Pro balanced on Sail,
    reads the program for lookahead, leakage (calendar recognition, hard-coded regimes) and fill abuse. A
    failed review is a recorded refusal and costs no look. An unclear answer is asked again next round.
@@ -41,7 +43,7 @@ from typing import Any, Callable, Mapping
 
 from . import evidence
 from .pool import GymJob, PoolError
-from .researcher import needs_roots
+from .researcher import drift_verdict, needs_roots
 from .store import SwarmStore, dumps
 
 REVIEW = """You review option-trading programs before they meet sealed data. A program is one Python file (NEEDS, PARAMS,
@@ -85,9 +87,12 @@ class Gate:
         looks = self.store.looks()
         return evidence.leakage_alarm(len(looks), sum(1 for x in looks if x["passed"]))
 
-    def tell(self, fid: str, answer: str) -> None:
-        """What the researcher hears (its status line): pass or fail, and for a refusal before the look, why."""
-        self.store.set_state(fid, gate=answer)
+    def tell(self, fid: str, answer: str, *, verdict: bool = False) -> None:
+        """What the researcher hears (its status line): pass or fail, and for a refusal before the look, why. A VERDICT
+        (a refusal, a look's pass or fail) is news (R4): the family's dormant count restarts, as a counted validation's
+        does, so a researcher waiting out a hold (the scheduler's HOLD BACKOFF) is taken at once to read it, and the idle
+        rule's dormancy clause cannot retire the family before it has."""
+        self.store.set_state(fid, gate=answer, **({"dormant_cycles": 0} if verdict else {}))
 
     # ------------------------------------------------------------------ the review
     def review(self, fam: Mapping[str, Any], version: Mapping[str, Any]) -> dict[str, Any]:
@@ -133,10 +138,13 @@ class Gate:
     def refuse(self, fam: Mapping[str, Any], n: int, sha: str, stage: str, reasons: list[str], out: dict[str, Any]) -> None:
         """A refusal, recorded; the version's gate place is cleared only if it is still the one validated."""
         self.store.refuse(fam["id"], n, stage, "; ".join(reasons) or f"refused by the {stage}")
-        if not self.store.compare_and_set_state(fam["id"], {"validation_version": n}, gated_sha=sha, gate_ready=False):
+        # Its gate place and its dormant count go together (a verdict is news, `tell`): never gate_ready cleared with the
+        # count of the cycles it held at the gate still standing.
+        if not self.store.compare_and_set_state(fam["id"], {"validation_version": n}, gated_sha=sha, gate_ready=False,
+                                                dormant_cycles=0):
             return
         self.outcome(fam["id"], sha, "refused")
-        self.tell(fam["id"], f"fail (the {stage}: " + "; ".join(reasons)[:400] + ")")
+        self.tell(fam["id"], f"fail (the {stage}: " + "; ".join(reasons)[:400] + ")", verdict=True)
         out["refused"].append(fam["id"])
 
     # ------------------------------------------------------------------ one round
@@ -184,6 +192,13 @@ class Gate:
                 continue
             if (state.get("look_inflight") or {}).get("sha") == sha:
                 continue  # its look is in flight
+            screen = drift_verdict(self.store, fam, n, self.settings)
+            if screen is not None and not screen["passed"]:  # defense in depth: the tournament validates none of these
+                if screen["known"]:
+                    self.refuse(fam, n, sha, "drift screen", [screen["why"]], out)
+                else:
+                    out["waiting"].append(fam["id"])  # figures owed (a Train run from before them): no look, no refusal
+                continue
             if self.store.lineage_looks(fam["id"], include_inflight=True) >= evidence.LOOKS_PER_LINEAGE:
                 if self.store.lineage_looks(fam["id"]) >= evidence.LOOKS_PER_LINEAGE:
                     self.refuse(fam, n, sha, "rations", ["the lineage's three holdout looks are spent"], out)
@@ -326,7 +341,8 @@ class Gate:
         self.store.put(f"look_tries:{sha}", tries)
         if tries < 3:
             self.store.compare_and_set_state(fid, {"validation_version": n}, gated_sha=None, gate_ready=True)
-        elif self.store.compare_and_set_state(fid, {"validation_version": n}, gated_sha=sha, gate_ready=False) and tries == 3:
+        elif self.store.compare_and_set_state(fid, {"validation_version": n}, gated_sha=sha, gate_ready=False,
+                                              dormant_cycles=0) and tries == 3:  # a refusal: news, like `refuse`
             self.store.refuse(fid, n, "gym", "the gate box could not make this holdout look three times")
             self.store.event("swarm.status", fid, {"action": "look_failed_three_times", "alert": True, "version": n,
                                                    "text": "the gate box could not make a holdout look three times"})
@@ -362,7 +378,7 @@ class Gate:
                                              "_line": line})  # the numbers stay private (underscore)
         if not line["numbers"].get("holm_reachable", True):
             self.store.event("swarm.status", None, {"action": "holm_unreachable", "looks": len(previous) + 1})
-        self.tell(fid, "pass" if line["passed"] else "fail")
+        self.tell(fid, "pass" if line["passed"] else "fail", verdict=True)
         self.outcome(fid, sha, "passed" if line["passed"] else "failed")
         has_image = callable(getattr(self.pool, "image", None))
         has_bundle = callable(getattr(self.pool, "bundle", None))

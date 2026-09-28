@@ -45,6 +45,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 from . import DB_NAME, PROGRAMS_DIR, RUNS_DIR
+from .evidence import drift_numbers
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS families (
@@ -752,6 +753,9 @@ class SwarmStore:
         summary = dict(result.get("summary") or {})
         if status == "refused":
             summary = {"reason": result.get("reason")}
+        elif window == "train" and drift_numbers(result.get("drift")) is not None:
+            # A Train run's drift figures stay with its row after its full result is pruned: the drift screen reads them.
+            summary["drift"] = drift_numbers(result.get("drift"))
         if key:
             summary["eval_key"] = str(key)
             if result.get("fill_model"):
@@ -849,6 +853,18 @@ class SwarmStore:
             rows = self._all("SELECT * FROM runs WHERE family=? AND window=? ORDER BY at DESC, rowid DESC LIMIT ?", (fid, window, limit))
         else:
             rows = self._all("SELECT * FROM runs WHERE family=? ORDER BY at DESC, rowid DESC LIMIT ?", (fid, limit))
+        for r in rows:
+            r["summary"] = loads(r["summary"], {})
+        return rows
+
+    def version_runs(self, fid: str, version: int, *, window: str = "train", stress: float | None = None,
+                     limit: int = 20) -> list[dict[str, Any]]:
+        """One version's run rows, newest first (optionally at one `stress`): a lookup by version in SQL, so a family's
+        thousands of other rows are never decoded."""
+        sql, args = "SELECT * FROM runs WHERE family=? AND version=? AND window=?", [fid, int(version), window]
+        if stress is not None:
+            sql, args = sql + " AND stress=?", args + [float(stress)]
+        rows = self._all(sql + " ORDER BY at DESC, rowid DESC LIMIT ?", (*args, int(limit)))
         for r in rows:
             r["summary"] = loads(r["summary"], {})
         return rows

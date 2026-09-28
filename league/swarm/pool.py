@@ -272,14 +272,15 @@ class GymPool:
         mine = [j for j in self.queue if bool(j.gate) == gate]
         if not mine:
             return []
-        # AGING: a robustness run waiting past `pool.robust_age_seconds` (the 1.5x run, which validation waits on; the mid
-        # run at twice that) takes a Train job's priority, the top one waiting, so it has its turn by age on any free box.
+        # AGING: a robustness run waiting past `pool.robust_age_seconds` (the 1.5x run and the drift run at the normal spread,
+        # which validation waits on; the mid run at twice that) takes a Train job's priority, the top one waiting, so it has
+        # its turn by age on any free box.
         now = self.clock()
         age = float(self.settings.get("pool", {}).get("robust_age_seconds", 600))
         train = max([j.priority for j in mine if j.purpose == "train"] + [0.0])
 
         def aged(j: GymJob) -> bool:
-            return j.purpose == "robustness" and now - j.created >= age * (1.0 if float(j.stress) == 1.5 else 2.0)
+            return j.purpose == "robustness" and now - j.created >= age * (1.0 if float(j.stress) in (1.5, 1.0) else 2.0)
 
         mine.sort(key=lambda j: (-(train if aged(j) else j.priority), j.created, j.id))
         head = mine[0]

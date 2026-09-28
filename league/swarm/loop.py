@@ -3,9 +3,11 @@
 One process beside the House loop, niced. Its threads:
 
 - RESEARCHERS: `researcher.concurrency` workers, each taking the next family (the bandit's share first,
-  then the longest-waiting) and running one cycle, while the guard allows;
+  then the longest-waiting) and running one cycle, while the guard allows; a family that held waits out its hold
+  (`Scheduler`'s HOLD BACKOFF);
 - THE GYM POOL's dispatchers (one per box) and forks (`pool.py`);
-- ROUNDS on their own threads so none blocks another: the tournament (hourly), the gate (every few
+- ROUNDS on their own threads so none blocks another: the tournament (hourly), the idle pass between its rounds (every
+  five minutes, the idle rule's retirements alone: `Tournament.idle_pass`), the gate (every few
   minutes), the nightly forward (once a day), the architect (every four hours), the diagnostician (every few
   minutes, Claude on the stuck and the nearly-there families);
 - RESEEDS (the sprint, Sept 26): below `population.start` while the architect is not due, the seeds' mechanisms are
@@ -40,7 +42,7 @@ from .diagnostician import Diagnostician
 from .gate import Gate
 from .guard import SailGuard, provider_reader
 from .pool import GymPool
-from .researcher import Researcher, migrate_objective
+from .researcher import Researcher, dormant_count, dormant_limit, migrate_objective
 from .seeds import SEEDS, family_spec, program_for
 from .store import SwarmStore
 from .tournament import INDEX, NOT_ROTATED, Tournament
@@ -65,25 +67,133 @@ def load_env(path: str | os.PathLike | None) -> None:
             os.environ.setdefault(name.strip(), value.strip().strip('"').strip("'"))
 
 
-class Scheduler:
-    """Which family runs next: the bandit's share first, then the longest wait; one cycle per family at a time."""
+#: `researcher.hold_idle_seconds` and `researcher.hold_idle_max_seconds` unless the settings say otherwise (HOLD BACKOFF).
+HOLD_IDLE_SECONDS = 300.0
+HOLD_IDLE_MAX_SECONDS = 1800.0
 
-    def __init__(self, store: SwarmStore, *, clock: Callable[[], float] = time.time):
+
+def _seconds(raw: Any, default: float) -> float:
+    """A wait in seconds: null is 0 (off); a boolean, a non-number, a negative or a non-finite number is the default."""
+    if raw is None:
+        return 0.0
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not math.isfinite(raw) or raw < 0:
+        return float(default)
+    return float(raw)
+
+
+def hold_wait(settings: Mapping[str, Any], dormant: int) -> float:
+    """HOLD BACKOFF (R4, Sept 28): the wait before the next turn of a family whose cycle ended in a hold with no new
+    evaluation and no run queued, its dormant cycles (`researcher.dormant_count`) counted after that cycle.
+    `researcher.hold_idle_seconds`, doubled for each dormant cycle past `researcher.dormant_cycles` (a family the idle
+    rule exempts while it holds: its best awaits validation, a version is at the gate, the population is at its floor),
+    up to `researcher.hold_idle_max_seconds`. Below the dormancy clause's count it never doubles: doubling from the first
+    hold would stretch the clause from about 3.4 hours of holds (40 x 300 s) to about 19 (40 holds, most of them 1800 s
+    apart), keeping families whose mechanism is refuted in their slots. With the clause off (`dormant_cycles` 0) it
+    doubles from the second hold. 0 when the backoff is off."""
+    cfg = settings.get("researcher") or {}
+    base = _seconds(cfg.get("hold_idle_seconds", HOLD_IDLE_SECONDS), HOLD_IDLE_SECONDS)
+    if base <= 0:
+        return 0.0
+    cap = max(base, _seconds(cfg.get("hold_idle_max_seconds", HOLD_IDLE_MAX_SECONDS), HOLD_IDLE_MAX_SECONDS))
+    past = max(0, int(dormant) - max(1, dormant_limit(settings)))
+    return min(cap, base * 2.0 ** min(past, 30))
+
+
+class Scheduler:
+    """Which family runs next: the bandit's share first, then the longest wait; one cycle per family at a time.
+
+    HOLD BACKOFF (R4, Sept 28): a family whose cycle ended in a hold with no new evaluation and no run queued for its next
+    cycle is not taken again for `hold_wait` seconds (`researcher.hold_idle_seconds`), unless news comes first (`news`):
+    its trials rose since its cycle began (a result of its own landed: a Train run, a sweep variant, a robustness run, a
+    validation), its gate place or band changed since then, its dormant count went down since the cycle ended (a counted
+    validation, a gate verdict, a return to the Gym) or a stronger model's rewrite is ready. Any cycle that is not such a
+    hold ends the wait (a new evaluation, a queued run, a retirement), and so does the clock going back past the hold (no
+    wait outlasts its own length). Kept in memory: a restarted swarm takes every family once, and its next hold waits
+    again by its stored dormant count."""
+
+    #: A worker with nothing to take sleeps until the next family could be ready (its hold's end, its idle seconds, its
+    #: cooldown), at least `MIN_PAUSE` and at most `MAX_PAUSE` (news is noticed within it), so idle workers do not all
+    #: decode every family's state every 2 s while the families wait out holds.
+    MIN_PAUSE = 2.0
+    MAX_PAUSE = 10.0
+
+    def __init__(self, store: SwarmStore, *, clock: Callable[[], float] = time.time, settings: Mapping[str, Any] | None = None):
         self.store = store
         self.clock = clock
+        self.settings = settings if settings is not None else {}  # the Swarm's dict, re-read in place every loop
         self._lock = threading.Lock()
         self.running: set[str] = set()
         self.last: dict[str, float] = {}
         self.cooldown: dict[str, float] = {}
         self.errors: dict[str, int] = {}
+        #: family -> (trials, gate_ready, band) when its running cycle began: the baseline of its news (HOLD BACKOFF).
+        self.began: dict[str, tuple[int, bool, Any]] = {}
+        #: family -> (since, until, trials, gate_ready, band, dormant) while it waits out a hold (HOLD BACKOFF).
+        self.held: dict[str, tuple[float, float, int, bool, Any, int]] = {}
+        self.soon = float("-inf")  # when the last `take` that found nothing saw the next family ready (`pause`)
+
+    @staticmethod
+    def seen(fam: Mapping[str, Any]) -> tuple[int, bool, Any]:
+        return int(fam.get("trials") or 0), bool((fam.get("state") or {}).get("gate_ready")), fam.get("band")
+
+    @staticmethod
+    def news(fam: Mapping[str, Any], held: tuple[float, float, int, bool, Any, int]) -> bool:
+        """Something the family's researcher should read happened since the hold's baseline."""
+        _, _, trials, gate_ready, band, dormant = held
+        trials_now, gate_now, band_now = Scheduler.seen(fam)
+        return (trials_now > trials or gate_now != gate_ready or band_now != band or dormant_count(fam) < dormant
+                or bool((fam.get("state") or {}).get("rewrite_ready")))
+
+    def holding(self, fam: Mapping[str, Any], now: float) -> bool:
+        """The family waits out a hold (HOLD BACKOFF); a wait that ran out, that news lifted or that the clock going back
+        passed is forgotten. Under the lock."""
+        held = self.held.get(fam["id"])
+        if held is None:
+            return False
+        since, until = held[0], held[1]
+        if now >= until or now < since or self.news(fam, held):
+            del self.held[fam["id"]]
+            return False
+        return True
+
+    def waiting(self) -> int:
+        """Families waiting out a hold now (the heartbeat's `holding`): not a retired one, nor one whose news lifted it."""
+        fams = self.store.families(alive=True)
+        now = self.clock()
+        with self._lock:
+            self._prune(fams)
+            return sum(1 for f in fams if self.holding(f, now))
+
+    def _prune(self, fams: list[dict[str, Any]]) -> None:
+        """Forget the holds of families no longer alive (under the lock)."""
+        alive = {f["id"] for f in fams}
+        for fid in [fid for fid in self.held if fid not in alive]:
+            del self.held[fid]
+
+    def pause(self) -> float:
+        """How long a worker that found nothing to take sleeps: until the next family could be ready as the last such
+        `take` saw it, within [MIN_PAUSE, MAX_PAUSE] (MAX_PAUSE when every family was in a cycle)."""
+        return max(self.MIN_PAUSE, min(self.MAX_PAUSE, self.soon - self.clock()))
 
     def take(self, *, idle_seconds: float = 5.0) -> str | None:
         now = self.clock()
         fams = self.store.families(alive=True)
         with self._lock:
-            ready = [f for f in fams if f["id"] not in self.running and self.cooldown.get(f["id"], 0) <= now
-                     and now - self.last.get(f["id"], 0) >= idle_seconds]
+            self._prune(fams)
+            ready, soon = [], float("inf")
+            for f in fams:
+                if f["id"] in self.running:
+                    continue
+                # A last turn "in the future" (the clock went back) never strands a family (nor, `holding`, does a hold).
+                at = max(self.cooldown.get(f["id"], 0), min(self.last.get(f["id"], 0), now) + idle_seconds)
+                if self.holding(f, now):
+                    at = max(at, self.held[f["id"]][1])
+                if at <= now:
+                    ready.append(f)
+                else:
+                    soon = min(soon, at)
             if not ready:
+                self.soon = soon
                 return None
             n = max(1, len(fams))
             # A family's share (the bandit's) buys it an earlier turn: a share at the average is worth nothing, twice it
@@ -92,21 +202,59 @@ class Scheduler:
             fid = ready[0]["id"]
             self.running.add(fid)
             self.last[fid] = now
+            self.began[fid] = self.seen(ready[0])
             return fid
 
-    def release(self, fid: str, result: Mapping[str, Any]) -> None:
+    def busy(self, fid: str) -> bool:
+        """The family is in a researcher's cycle now."""
         with self._lock:
-            self.running.discard(fid)
-            self.last[fid] = self.clock()
-            error = str(result.get("error") or "")
-            if "budget" in error.lower() or "BudgetExceeded" in error:
-                midnight = self.clock() - (self.clock() % 86400) + 86400
-                self.cooldown[fid] = midnight  # its model budget is spent for today
-            elif error:
-                self.errors[fid] = self.errors.get(fid, 0) + 1
-                self.cooldown[fid] = self.clock() + min(1800.0, 30.0 * 2 ** min(self.errors[fid], 6))
-            else:
-                self.errors.pop(fid, None)
+            return fid in self.running
+
+    def _hold_after(self, fid: str, result: Mapping[str, Any], began: tuple[int, bool, Any] | None) -> tuple | None:
+        """The hold a finished cycle leaves (HOLD BACKOFF), or None: only a hold with no new evaluation and no run queued,
+        on a living family, with no news since its cycle began (a result landing mid-cycle, unseen by its model, is news)."""
+        if not result.get("hold") or int(result.get("trials") or 0) or result.get("pending_run") or result.get("retired"):
+            return None
+        fam = self.store.family(fid)
+        if fam is None or fam.get("retired_at"):
+            return None
+        dormant = dormant_count(fam)
+        wait = hold_wait(self.settings, dormant)
+        counted = result.get("dormant_cycles")
+        if wait <= 0 or (isinstance(counted, int) and dormant < counted):
+            return None  # no backoff; or its dormant count restarted since the cycle ended (a result of its own landed)
+        now = self.clock()
+        held = (now, now + wait, *(began if began is not None else self.seen(fam)), dormant)
+        return None if self.news(fam, held) else held
+
+    def release(self, fid: str, result: Mapping[str, Any]) -> None:
+        """The cycle ended: its hold (if any) is recorded and its error backs it off. Never raises, and the family is never
+        left marked running (a store that cannot be read means no hold wait)."""
+        result = result if isinstance(result, Mapping) else {}
+        with self._lock:
+            began = self.began.pop(fid, None)
+        try:
+            held = self._hold_after(fid, result, began)
+        except Exception:  # noqa: BLE001 - a hold is an economy, never a reason to strand a family
+            held = None
+        with self._lock:
+            try:
+                if held is None:
+                    self.held.pop(fid, None)
+                else:
+                    self.held[fid] = held
+                self.last[fid] = self.clock()
+                error = str(result.get("error") or "")
+                if "budget" in error.lower() or "BudgetExceeded" in error:
+                    midnight = self.clock() - (self.clock() % 86400) + 86400
+                    self.cooldown[fid] = midnight  # its model budget is spent for today
+                elif error:
+                    self.errors[fid] = self.errors.get(fid, 0) + 1
+                    self.cooldown[fid] = self.clock() + min(1800.0, 30.0 * 2 ** min(self.errors[fid], 6))
+                else:
+                    self.errors.pop(fid, None)
+            finally:
+                self.running.discard(fid)
 
 
 class Swarm:
@@ -134,7 +282,7 @@ class Swarm:
                 client = _sail_client()
             pool = GymPool(self.store, client, self.settings, clock=clock, allowed=lambda kind: self.guard.allows(kind))
         self.pool = pool
-        self.scheduler = Scheduler(self.store, clock=clock)
+        self.scheduler = Scheduler(self.store, clock=clock, settings=self.settings)
         self.researcher = Researcher(self.store, self.router, self.pool, self.settings, clock=clock,
                                      starter=lambda spec: program_for(spec))
         self.researcher.pace = self.over_pace
@@ -219,6 +367,7 @@ class Swarm:
                   self.store._all("SELECT payload FROM events WHERE kind='swarm.cycle' AND at >= ? ORDER BY seq DESC LIMIT 3000", (since,))]
         seconds = sorted(float(p.get("seconds") or 0) for p in recent[:300] if not p.get("error"))
         return {"families_alive": len(self.store.families(alive=True)), "running": len(self.scheduler.running),
+                "holding": self.scheduler.waiting(),
                 "totals": self.store.totals(), "spend_last_hour": spend, "usd_per_hour": round(sum(spend.values()), 4),
                 "median_cycle_seconds": seconds[len(seconds) // 2] if seconds else None, "cycles_last_hour": len(recent),
                 "cycle_errors_last_hour": sum(1 for p in recent if p.get("error")),
@@ -296,7 +445,7 @@ class Swarm:
                 continue
             fid = self.scheduler.take(idle_seconds=idle)
             if fid is None:
-                self.sleep(2.0)
+                self.sleep(self.scheduler.pause())
                 continue
             result: dict[str, Any] = {}
             try:
@@ -305,7 +454,14 @@ class Swarm:
                 result = {"error": f"{type(exc).__name__}: {exc}"}
                 log(f"cycle {fid} crashed: {traceback.format_exc()[-800:]}")
             finally:
-                self.scheduler.release(fid, result)
+                try:
+                    self.scheduler.release(fid, result)
+                except Exception:  # noqa: BLE001 - release never strands the family (it leaves `running` first)
+                    log(f"release {fid} failed: {traceback.format_exc()[-800:]}")
+
+    def round_alive(self, name: str) -> bool:
+        thread = self.rounds.get(name)
+        return thread is not None and thread.is_alive()
 
     def _round(self, name: str, fn: Callable[[], Any]) -> None:
         thread = self.rounds.get(name)
@@ -348,6 +504,10 @@ class Swarm:
         if self.guard.allows() and self.gym_ready():
             if self.tournament.due():
                 self._round("tournament", self.tournament.run)
+            elif self.tournament.idle_due() and not self.round_alive("tournament"):
+                # THE IDLE PASS: the idle rule alone between the hourly rounds, never while one runs (its validations may be
+                # re-validating the very families the pass would judge), never on a family in a researcher's cycle.
+                self._round("idle", lambda: self.tournament.idle_pass(busy=self.scheduler.busy))
             if self.gate.due():
                 self._round("gate", self.gate.run)
             if self.gate.forward_due():

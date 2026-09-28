@@ -59,7 +59,9 @@ idle rule (`idle_dead`: the same floor, gate exemption and graveyard wording), u
 (`awaiting_validation`: holding while the tournament validates it is honest).
 
 RETIRE (Sept 26: an unguarded `retire` on the REVISE turn took the population from 49 to 16 in 24 minutes). A REVISE
-turn offers `gym_run` and `gym_sweep` alone: a REVISE always revises. A READ turn offers `retire` only while more
+turn offers `gym_run` and `gym_sweep` alone (a REVISE always revises), and `retire` beside them only to a dead family
+(`idle_dead`, under `can_retire`: R4, Sept 28, a family that holds never reaches a READ turn, so its researcher could not
+retire the mechanism it found refuted and held every cycle instead). A READ turn offers `retire` only while more
 families live than `population.start` and the family has had at least two validations, or, by THE IDLE RULE (R3, Sept
 27: with the population held at its start, dead families never qualified and looped on placeholder runs), while more
 live than `population.floor` and the family is dead (`idle_dead`: `researcher.retire_idle_evaluations` Gym evaluations
@@ -81,6 +83,17 @@ lowest priority; they come back into the family's status, count as trials, and a
 the best again (`robust_failed`; the next eligible candidate takes its place; one already validated leaves the gate's
 queue with the gate outcome "demoted"). The tournament validates a version only once its 1.5x run landed with a profit. `migrate_objective` chose every living family's best
 anew under this score once, keeping the old selection in `legacy_best`.
+
+THE DRIFT SCREEN (Sept 27, `evidence.drift_screen`): every Train run carries the Gym's drift block, and the researcher
+reads it per year as "drift-adjusted alpha $X (t Y), drift $Z" (`diagnostics.drift_view`: its gym_run view, `read_run`
+drift, the sweep table's alpha t, the status line of the version the tournament validates next, `submit`'s answer). A
+version whose own figures fail is never the family's best (`drift_blocks`; it is marked in `drift_failed`), and a best
+found failing later is demoted like a loss at 1.5x, the next candidate taking its place (`screen_best`; so a family left
+with none has no eligible Train version, and the idle rule counts it). The tournament validates, and the gate looks at,
+only a version whose figures pass (`drift_verdict`). A version whose Train run predates the figures is run on Train once
+more as a robustness run labelled "drift" (`robust_labels`; its row's purpose is "drift"): the screen binds from its first
+day instead of waving the old bests through, the run costs one trial, and a version whose drift run fails three times is
+demoted.
 
 ROOTS. A family holds one to five roots of the admitted list (`gym.roots`). A program whose NEEDS names other
 admitted roots changes the family's roots (a Gym family only); its validation and holdout runs use the version's own
@@ -130,8 +143,9 @@ def sweep_tool(limit: int = MAX_SWEEP_VARIANTS) -> dict[str, Any]:
         "name": "gym_sweep",
         "description": "Run several PARAMS variants of ONE program on the Train window at once (the Gym batches them) and get a "
                        "compact table sorted by the Train score: per variant its params, trades, days, per-year daily t and "
-                       "trades, P&L, fill rate, eligibility, Train score and run_id (submit a row's run_id, or read_run it before "
-                       "your next run). It takes the place of gym_run: one run OR one sweep a cycle; when the Gym is full of "
+                       "trades, P&L, fill rate, drift-adjusted alpha t, eligibility, Train score and run_id (submit a row's "
+                       "run_id, or read_run it before your next run). It takes the place of gym_run: one run OR one sweep a "
+                       "cycle; when the Gym is full of "
                        "other sweeps it is refused (your status says so): run gym_run then. Every variant is a trial counted "
                        "against your lineage; the sweep is one revision. Sweep a small grid around your current program, include a placebo "
                        "row (your signal switched off or inverted), prefer a plateau of positive neighbours to a lone peak, then "
@@ -176,7 +190,7 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "read_run", "description": "Read one section of a past Train run of your family.",
      "parameters": {"type": "object", "properties": {
          "run_id": {"type": "string"},
-         "section": {"type": "string", "description": "summary, fills, runtime, worst, trades, daily, or breakdown.<weekday|"
+         "section": {"type": "string", "description": "summary, fills, runtime, worst, trades, daily, drift, or breakdown.<weekday|"
                                                       "time_of_day|dte|rv_tercile|iv_tercile|quarter|type|root|exit_reason>"},
          "page": {"type": "integer"}}, "required": ["run_id", "section"]}},
     {"name": "notebook", "description": "Your memory across cycles: append what you learned, or read your recent entries. "
@@ -204,8 +218,8 @@ TOOLS: list[dict[str, Any]] = [
                     "is abandoned; retained in the private notebook and graveyard."}}, "required": ["reason"]}},
 ]
 
-#: A REVISE turn requires a run or a sweep (a REVISE always revises: `retire` is never offered there); a missing call
-#: fails and uses the normal backoff.
+#: A REVISE turn requires a run or a sweep (a REVISE always revises: `retire` is offered there only to a dead family,
+#: `idle_dead`, R4); a missing call fails and uses the normal backoff.
 TOOLS_REVISE: list[dict[str, Any]] = [t for t in TOOLS if t["name"] in RUNS]
 #: A READ turn without `retire` (the family may not retire now: `Researcher.can_retire`).
 TOOLS_READ: list[dict[str, Any]] = TOOLS[:-1]
@@ -230,6 +244,11 @@ THE TRAIN SCORE you climb is your WORST Train year's daily t, times the share of
 version counts only with at least 40 trades on at least 20 days in EVERY Train year, and never if it loses money at 1.5x
 the half-spread (the Gym re-runs each new best at 1.5x and at the mid; the results come back in your status). Seek a
 mechanism that earns in every year, not a filter that shines in one.
+DRIFT IS NOT AN EDGE. Long calls (or short puts) in a rising year make money whatever the signal says. Every Train run's
+`drift` splits each year's P&L into drift (what your exposure, measured on the days you held, earns at the roots' average
+return over the hours you held) and drift-adjusted alpha (what your choice of days added beyond it, after costs, with its
+t). A version whose alpha fails the drift screen over Train is never your best and is never validated (your status and
+each run give the line); a placebo row that holds the same exposure on random days earns the drift and nothing else.
 Your family trades one to five of the Gym's roots; to change them, name the new roots in your program's NEEDS.
 The retire tool appears only while the population is above its start and your family has had at least two
 validations, or once your family has spent many Gym evaluations since its birth or last validation without an eligible
@@ -560,15 +579,16 @@ def dormant_count(fam: Mapping[str, Any]) -> int:
 
 def awaiting_validation(fam: Mapping[str, Any]) -> bool:
     """The family's best (submitted, else by Train score: the version the tournament validates next) has not been
-    validated and has not lost at 1.5x the half-spread: the tournament validates it once its 1.5x robustness run lands with
-    a profit. A researcher with nothing new may hold meanwhile without the dormancy clause counting it dead."""
+    validated, has not lost at 1.5x the half-spread and has not failed the drift screen (`drift_failed`: a version whose
+    figures are only owed still awaits them): the tournament validates it once its 1.5x robustness run lands with a
+    profit. A researcher with nothing new may hold meanwhile without the dormancy clause counting it dead."""
     state = fam.get("state") or {}
     n = fam.get("best_version") or state.get("best_train_version")
     if not n or isinstance(n, bool):
         return False
     if fam.get("validated_version") is not None and int(fam["validated_version"]) == int(n):
         return False
-    return robust_at_stress(state, n) is not False
+    return robust_at_stress(state, n) is not False and drift_failed(fam, n) is None
 
 
 def held_at_gate(fam: Mapping[str, Any]) -> bool:
@@ -599,11 +619,34 @@ def idle_evaluations(fam: Mapping[str, Any]) -> int:
     return since
 
 
-def idle_dead(fam: Mapping[str, Any], settings: Mapping[str, Any]) -> str | None:
+def revalidation_owed(fam: Mapping[str, Any], current: tuple[Any, Any] | None) -> bool:
+    """R4 (the review of PR #402): the family's validation passed the line on another Gym image or engine bundle than the
+    one running now (`current`, (image, bundle)), and the version it passed is still the one the tournament validates
+    next (its submitted best, else its best by Train score) and was never demoted (`robust_failed`: a loss at 1.5x, or a
+    failed drift screen, whose marker `drift_failed` counts too). A deploy that changes the image or bundle clears its
+    `gate_ready` (the tournament owes it validation on the current data and engine first), so without this it would read
+    as dead by the idle rule while its passing version waits to be validated again. It ends when that validation lands
+    (the identity is current again) or the version stops being the candidate. False when `current` is not known."""
+    if current is None:
+        return False
+    state = fam.get("state") or {}
+    if not (state.get("validation_line") or {}).get("passed"):
+        return False
+    if (state.get("validation_image"), state.get("validation_bundle")) == tuple(current):
+        return False
+    n, validated = fam.get("best_version") or state.get("best_train_version"), state.get("validation_version")
+    if not isinstance(n, int) or isinstance(n, bool) or not isinstance(validated, int) or int(validated) != n:
+        return False
+    demoted = {int(v) for v in (state.get("robust_failed") or []) if isinstance(v, int) and not isinstance(v, bool)}
+    return n not in demoted and str(n) not in (state.get("drift_failed") or {})
+
+
+def idle_dead(fam: Mapping[str, Any], settings: Mapping[str, Any], *, current: tuple[Any, Any] | None = None) -> str | None:
     """THE IDLE RULE (R3, Sept 27). A living Gym family is dead when it has spent `researcher.retire_idle_evaluations`
     Gym evaluations since its birth or last validation (`idle_evaluations`) without an eligible Train version (no
-    `best_train`: none met 40 trades on 20 days in every Train year, or every one lost at 1.5x), or `NEGATIVE_FACTOR`
-    times as many with its best Train score below zero. Never while a validated version awaits the gate (`gate_ready`)
+    `best_train`: none met 40 trades on 20 days in every Train year, or every one lost at 1.5x or failed the drift screen,
+    `screen_best`), or `NEGATIVE_FACTOR` times as many with its best Train score below zero. Never while a validated
+    version awaits the gate (`gate_ready`)
     or a holdout look is out (`look_inflight`). Returns a clause saying which ("made no eligible Train version in 157 Gym
     evaluations since its birth"), or None. A dead family may retire at `population.start` (only `population.floor`
     holds it); the tournament retires one that does not. Train figures only: nothing Validation or the holdout measured
@@ -617,7 +660,8 @@ def idle_dead(fam: Mapping[str, Any], settings: Mapping[str, Any]) -> str | None
     if (limit <= 0 and dormant <= 0) or fam.get("band") != "gym" or fam.get("retired_at"):
         return None
     state = fam.get("state") or {}
-    if state.get("gate_ready") or state.get("look_inflight"):
+    # Nor while a validation that passed is owed again on the Gym running now (`revalidation_owed`, R4).
+    if state.get("gate_ready") or state.get("look_inflight") or revalidation_owed(fam, current):
         return None
     if limit > 0:
         idle = idle_evaluations(fam)
@@ -631,6 +675,173 @@ def idle_dead(fam: Mapping[str, Any], settings: Mapping[str, Any]) -> str | None
     if dormant > 0 and cycles >= dormant and not awaiting_validation(fam):
         return f"made no new Gym evaluation in its last {cycles} cycles (only stored results, holds and refused runs)"
     return None
+
+
+def drift_settings(settings: Mapping[str, Any]) -> tuple[float, int | None] | None:
+    """THE DRIFT SCREEN's settings (`tournament.drift_screen`, `drift_min_t`, `drift_years_positive`): (min t, years
+    positive or None for every Train year but one), or None when the screen is off. It is a brake, so only JSON false
+    turns it off, and a misread threshold (not a finite number, or a negative t) is its default, never no threshold."""
+    cfg = settings.get("tournament") or {}
+    if cfg.get("drift_screen", True) is False:
+        return None
+    raw_t = cfg.get("drift_min_t", evidence.DRIFT_MIN_T)
+    min_t = float(raw_t) if isinstance(raw_t, (int, float)) and not isinstance(raw_t, bool) and math.isfinite(raw_t) and raw_t >= 0 \
+        else evidence.DRIFT_MIN_T
+    raw_years = cfg.get("drift_years_positive")
+    years = int(raw_years) if isinstance(raw_years, (int, float)) and not isinstance(raw_years, bool) and math.isfinite(raw_years) \
+        and float(raw_years) == int(raw_years) and raw_years >= 0 else None
+    return min_t, years
+
+
+#: The run rows whose drift figures are a version's: its normal-spread Train runs (a researcher's, or its Train run made
+#: again for the figures, `robust_labels`), never a robustness run at the mid (zero costs) or at 1.5x.
+DRIFT_PURPOSES = (None, "train", "drift")
+
+
+def drift_row(row: Mapping[str, Any] | None, n: int) -> dict[str, Any] | None:
+    """A run row's drift figures when it is version `n`'s completed run at exactly the normal spread with a drift purpose
+    (`DRIFT_PURPOSES`: a mid run's stress 0.0 is not 1.0), else None."""
+    if not isinstance(row, Mapping):
+        return None
+    stress = row.get("stress")
+    if row.get("version") != n or stress is None or float(stress) != 1.0 or row.get("status") != "ok" \
+            or row.get("purpose") not in DRIFT_PURPOSES:
+        return None
+    return evidence.drift_numbers((row.get("summary") or {}).get("drift"))
+
+
+def version_drift(store: SwarmStore, fam: Mapping[str, Any], n: Any) -> dict[str, Any] | None:
+    """Version `n`'s drift figures (`evidence.drift_numbers`), the cheapest source first: its "drift" robustness run (a
+    Train run made again for the figures, in the family's state), else its best or submitted run's row, else its newest
+    normal-spread Train row (`SwarmStore.version_runs`: the store keeps every Train row's figures, `add_run`). None when no
+    run of it carries them (every run predates them)."""
+    if n is None:
+        return None
+    n = int(n)
+    state = fam.get("state") or {}
+    again = ((state.get("robustness") or {}).get(str(n)) or {}).get("drift")
+    if landed(again) and evidence.drift_numbers(again) is not None:
+        return evidence.drift_numbers(again)
+    for key, of in (("best_train_run", state.get("best_train_version")), ("submitted_run", fam.get("best_version"))):
+        if state.get(key) and of == n:
+            numbers = drift_row(store.run(str(state[key])), n)
+            if numbers is not None:
+                return numbers
+    for row in store.version_runs(fam["id"], n, window="train", stress=1.0, limit=20):
+        numbers = drift_row(row, n)
+        if numbers is not None:
+            return numbers
+    return None
+
+
+def drift_verdict(store: SwarmStore, fam: Mapping[str, Any], n: Any, settings: Mapping[str, Any]) -> dict[str, Any] | None:
+    """THE DRIFT SCREEN on version `n` (`evidence.drift_screen` on `version_drift`), or None while the screen is off. The
+    tournament validates, and the gate looks at, only a version it passes; one whose figures are not `known` waits."""
+    cfg = drift_settings(settings)
+    if cfg is None:
+        return None
+    return evidence.drift_screen(version_drift(store, fam, n), min_t=cfg[0], years_positive=cfg[1])
+
+
+#: The drift-failed marks a family keeps (its newest versions'), and the length of each one's reason: a mark matters for
+#: the family's candidates and its validated version, which are recent, and the reason's full text is in `robust_why`.
+DRIFT_FAILED_KEPT = 24
+DRIFT_WHY_CHARS = 80
+
+
+def failed_why(state: Mapping[str, Any], n: Any) -> str:
+    """Why version `n` can never be the best again (`robust_why`), for a status or a refusal."""
+    return (state.get("robust_why") or {}).get(str(n)) or "lost money on Train at 1.5x the half-spread"
+
+
+def drift_failed(fam: Mapping[str, Any], n: Any) -> str | None:
+    """Why version `n` failed the drift screen (the family's per-version marker, `drift_failed`), or None."""
+    if n is None or isinstance(n, bool):
+        return None
+    return ((fam.get("state") or {}).get("drift_failed") or {}).get(str(int(n)))
+
+
+def validation_drift_failed(fam: Mapping[str, Any]) -> bool:
+    """The family's validated version failed the drift screen: its validation numbers earn it no fork and no bandit share
+    (the tournament), whatever they were."""
+    return drift_failed(fam, (fam.get("state") or {}).get("validation_version")) is not None
+
+
+def screen_best(store: SwarmStore, fid: str, settings: Mapping[str, Any], *, clock: Callable[[], float] = time.time) -> list[dict[str, Any]]:
+    """THE DRIFT SCREEN on the family's candidate for Validation (its submitted best, else its best by Train score), again
+    and again: while the candidate's figures are known and fail, it is marked (`drift_failed`) and demoted like a loss at
+    1.5x (`demote_version`: never the best again; the next eligible candidate takes its place), so a failing best never
+    sits in front of one that passes, and a family left with none has no eligible Train version (the idle rule). One whose
+    figures are owed stays (it waits for them), and so does a family the operator holds at the gate (`gate_hold`, with or
+    without its gate_ready: the hold spares it, and the gate refuses a failing version once the hold is cleared). Returns
+    the demotions; nothing while the screen is off."""
+    if drift_settings(settings) is None:
+        return []
+    out: list[dict[str, Any]] = []
+    with store.atomic():
+        for _ in range(CANDIDATES + 2):
+            fam = store.family(fid)
+            if fam is None or fam.get("retired_at") or (fam.get("state") or {}).get("gate_hold"):
+                # The operator's hold keeps the family as it is, whatever its gate_ready says (an engine or image change
+                # clears that while it is re-validated); the gate screens it once the hold is cleared.
+                break
+            state = fam.get("state") or {}
+            n = fam.get("best_version") or state.get("best_train_version")
+            if n is None:
+                break
+            verdict = drift_verdict(store, fam, n, settings)
+            if verdict is None or not verdict["known"] or verdict["passed"]:
+                break
+            why = f"fails the drift screen: {verdict['why']}"
+            marks = {**(state.get("drift_failed") or {}), str(int(n)): str(verdict["why"])[:DRIFT_WHY_CHARS]}
+            store.set_state(fid, drift_failed={k: marks[k] for k in sorted(marks, key=lambda k: int(k))[-DRIFT_FAILED_KEPT:]})
+            nxt = demote_version(store, store.family(fid) or fam, int(n), why=why, clock=clock)
+            out.append({"version": int(n), "why": why, "next": nxt.get("version")})
+    for row in out:
+        store.event("swarm.robustness", fid, {"version": row["version"], "action": "demoted", "why": row["why"], "next": row["next"]})
+    return out
+
+
+def demote_version(store: SwarmStore, fam: Mapping[str, Any], n: int, *, why: str = "lost money on Train at 1.5x the half-spread",
+               clock: Callable[[], float] = time.time) -> dict[str, Any]:
+    """Version `n` lost at 1.5x, its 1.5x or drift run failed every attempt, or it fails the drift screen: never the best
+    again; the family's next eligible candidate becomes its best (under the store's transaction). `robust_why` keeps the
+    reason for the status."""
+    fid = fam["id"]
+    state = fam.get("state") or {}
+    failed = list(state.get("robust_failed") or [])
+    if n not in failed:
+        failed.append(int(n))
+    whys = {**(state.get("robust_why") or {}), str(n): why}
+    rest = [c for c in (state.get("train_candidates") or []) if int(c[1]) not in failed]
+    fields: dict[str, Any] = {}
+    values: dict[str, Any] = {"robust_failed": failed[-50:], "robust_why": {k: v for k, v in whys.items() if int(k) in failed[-50:]},
+                              "train_candidates": rest}
+    nxt: dict[str, Any] = {"version": None}
+    if state.get("best_train_version") == n:
+        if rest:
+            score, version, run_id = rest[0]
+            fields.update(best_train=float(score), stall=0)
+            values.update(best_train_version=int(version), best_train_run=run_id)
+            nxt = {"version": int(version), "score": float(score)}
+        else:
+            fields.update(best_train=None)
+            values.update(best_train_version=None, best_train_run=None)
+    if fam.get("best_version") == n:
+        fields.update(best_version=None)  # the tournament validates the best by Train score instead
+    if state.get("validation_version") == n:
+        # Validated before its 1.5x robustness run landed: it leaves the gate's queue, and live tuition (`bands.read`)
+        # refuses a version whose gate outcome is "demoted".
+        from .gate import run_sha
+
+        version = store.version(fid, n)
+        values.update(gate_ready=False)
+        if version is not None:
+            values.update(gate_outcome={"sha": run_sha(version), "result": "demoted", "at": clock()})
+    if fields:
+        store.update_family(fid, **fields)
+    store.set_state(fid, **values)
+    return nxt
 
 
 class Researcher:
@@ -700,6 +911,9 @@ class Researcher:
         robust = self.robustness_text(fam)
         if robust:
             parts.append(robust)
+        drift = self.drift_text(fam)
+        if drift:
+            parts.append(drift)
         parts.append(f"The validation line requires at least {evidence.MIN_TRADES} trades on at least {evidence.MIN_DAYS} days, "
                      "daily t >= 2, a deflated Sharpe probability >= 0.95 on traded days, 3 of 4 quarters positive, and positive "
                      "P&L at 1.5x spread. Seek mechanisms that produce enough independent opportunities to measure; never force "
@@ -715,7 +929,7 @@ class Researcher:
         if notes:
             parts.append("Your notebook (latest):\n" + "\n".join(f"- {diagnostics.scrub(n['text'])[:300]}" for n in notes))
         may_retire = self.can_retire(fam)
-        dead = idle_dead(fam, self.settings) if may_retire else None
+        dead = self.dead(fam) if may_retire else None
         if dead:
             parts.append(f"Your family {dead}. If its mechanism is dead, call retire with your reason when the tool is offered "
                          "rather than re-running a placeholder: its slot goes to a new idea.")
@@ -855,9 +1069,10 @@ class Researcher:
                 self._sweeping.pop(fid, None)
 
     def tools(self, *, revise: bool, retire: bool) -> list[dict[str, Any]]:
-        """A turn's tools: REVISE a run or a sweep (the call is required), READ every tool, `retire` only when the family
-        may retire (`can_retire`); `gym_sweep` only while sweeps are on, its limit from the settings."""
-        base = TOOLS_REVISE if revise else (TOOLS if retire else TOOLS_READ)
+        """A turn's tools: REVISE a run or a sweep (a call is required), READ every tool, `retire` only when the family
+        may retire (`can_retire`; on REVISE only a dead family, `idle_dead`); `gym_sweep` only while sweeps are on, its
+        limit from the settings."""
+        base = (TOOLS_REVISE + TOOLS[-1:] if retire else TOOLS_REVISE) if revise else (TOOLS if retire else TOOLS_READ)
         if not self.sweeps:
             return [t for t in base if t["name"] != "gym_sweep"]
         return [sweep_tool(self.max_variants) if t["name"] == "gym_sweep" else t for t in base]
@@ -882,7 +1097,33 @@ class Researcher:
             out.append(f"Your best (version {n}) is validated once its 1.5x robustness run comes back with a profit.")
         return " ".join(out)
 
+    def drift_text(self, fam: Mapping[str, Any]) -> str:
+        """The drift screen's line of the status (Train figures only): the version the tournament validates next (the
+        submitted best, else the best by Train score), its drift-adjusted alpha over Train and the verdict."""
+        cfg = drift_settings(self.settings)
+        state = fam.get("state") or {}
+        n = fam.get("best_version") or state.get("best_train_version")
+        if cfg is None or n is None:
+            return ""
+        numbers = version_drift(self.store, fam, n)
+        verdict = evidence.drift_screen(numbers, min_t=cfg[0], years_positive=cfg[1])
+        head = f"Drift screen of version {n} (the version the tournament validates next)"
+        if not verdict["known"]:
+            return (f"{head}: its Train run predates the drift figures, so it is run on Train once more before it can be "
+                    "validated (a gym_run of the same program and params gives them at once).")
+        pooled = numbers["pooled"]
+        figures = (f"over Train, drift-adjusted alpha {diagnostics._usd(pooled.get('alpha_usd'))} (t {diagnostics._tval(pooled.get('t'))}), "
+                   f"drift {diagnostics._usd(pooled.get('drift_usd'))}; alpha positive in {verdict['positive']} of {verdict['years']} years")
+        if verdict["passed"]:
+            return f"{head}: {figures}: it passes (Validation needs t >= {cfg[0]:g} and {verdict['need']} positive years)."
+        return (f"{head}: {figures}: it FAILS ({verdict['why']}), so it is not validated. Improve the timing, or submit a "
+                "version that passes.")
+
     # ------------------------------------------------------------------ retirement, the top ten
+    def dead(self, fam: Mapping[str, Any]) -> str | None:
+        """`idle_dead` against the Gym the pool runs now (a passing validation owed again is never dead)."""
+        return idle_dead(fam, self.settings, current=self._gym_identity())
+
     def can_retire(self, fam: Mapping[str, Any]) -> bool:
         """`retire` is offered (and accepted) for a Gym family with at least two validations while more families live
         than `population.start` (the sprint, Sept 26), and for a dead family (`idle_dead`, R3) while more live than
@@ -892,7 +1133,7 @@ class Researcher:
             return False
         pop = self.settings.get("population", {})
         alive = len(self.store.families(alive=True))
-        if idle_dead(fam, self.settings) and alive > int(pop.get("floor", 16)):
+        if self.dead(fam) and alive > int(pop.get("floor", 16)):
             return True
         return int(fam.get("validations") or 0) >= 2 and alive > int(pop.get("start", 48))
 
@@ -901,7 +1142,7 @@ class Researcher:
         `population.floor` for a dead family (`idle_dead`), else the start (never below the floor)."""
         pop = self.settings.get("population", {})
         floor = int(pop.get("floor", 16))
-        return floor if idle_dead(fam, self.settings) else max(floor, int(pop.get("start", 48)))
+        return floor if self.dead(fam) else max(floor, int(pop.get("start", 48)))
 
     def is_top(self, fam: Mapping[str, Any], *, top: int) -> bool:
         """Among the bandit's `top` families by weight (a weight of zero or none never is)."""
@@ -1016,7 +1257,7 @@ class Researcher:
         out["run_id"] = run["run_id"]
         # This evaluation's trials (the row's own count also holds earlier identical evaluations of a row recorded before keys).
         out["trials"] = out.get("trials", 0) + int(result.get("trials", 0) or 0)
-        view = diagnostics.train_view(result, lineage_trials=self.store.lineage_trials(fam["id"]))
+        view = diagnostics.train_view(result, lineage_trials=self.store.lineage_trials(fam["id"]), screen=drift_settings(self.settings))
         view["version"] = version["n"]
         view["run_id"] = run["run_id"]
         score = self._scored(fam, version["n"], run["run_id"], robust, view, out, code=code, params=params)
@@ -1027,14 +1268,15 @@ class Researcher:
                 out: dict[str, Any], *, code: str, params: Mapping[str, Any]) -> float | None:
         """A Train run's score into the family's candidates and best (a new best queues its robustness runs) and into its
         view; returns the score when it is eligible (None otherwise). Idempotent: a stored result read again changes
-        nothing its run already changed."""
+        nothing its run already changed. A version whose drift figures fail the screen is not eligible (`drift_blocks`)."""
         score = robust["score"] if robust is not None and robust["eligible"] and robust["score"] is not None else None
+        blocked = self.drift_blocks(fam["id"], n, version_drift(self.store, fam, n)) if score is not None else None
         best = failed = False
         with self.store.atomic():
             current = self.store.family(fam["id"]) or {}
             state = current.get("state") or {}
             failed = n in (state.get("robust_failed") or [])
-            if not current.get("retired_at") and score is not None and not failed:
+            if not current.get("retired_at") and score is not None and not failed and not blocked:
                 candidates = candidates_with(state.get("train_candidates"), score, n, run_id)
                 if candidates != state.get("train_candidates"):
                     self.store.set_state(fam["id"], train_candidates=candidates)
@@ -1045,17 +1287,19 @@ class Researcher:
                     out["improved"] = True
                     best = True
         if robust is not None:
-            view["train_score"] = {"score": robust["score"], "eligible": bool(robust["eligible"]) and not failed,
+            view["train_score"] = {"score": robust["score"], "eligible": bool(robust["eligible"]) and not failed and not blocked,
                                    "worst_year": robust.get("worst_year"), "quarters_positive": robust.get("quarters"),
                                    "by_year": robust.get("years")}
             if not robust["eligible"]:
                 view["train_score"]["why_not_eligible"] = robust.get("why") or ("not eligible under the Train score (40 trades "
                                                                                  "on 20 days in every Train year)")
             elif failed:
-                view["train_score"]["why_not_eligible"] = "this version lost money on Train at 1.5x the half-spread"
+                view["train_score"]["why_not_eligible"] = f"this version {failed_why(state, n)}"
+            elif blocked:
+                view["train_score"]["why_not_eligible"] = f"this version fails the drift screen: {blocked}"
         if best:
             self.queue_robustness(fam["id"], n, code, params, needs_roots(code, fam["roots"]))
-        return score
+        return None if blocked else score
 
     def _stored_run(self, fam: Mapping[str, Any], run: Mapping[str, Any], out: dict[str, Any], *, code: str,
                     stress: float) -> dict[str, Any]:
@@ -1068,7 +1312,7 @@ class Researcher:
         full = self.store.run_result(run["run_id"])
         summary = run.get("summary") or {}
         if full is not None:
-            view = diagnostics.train_view(full, lineage_trials=self.store.lineage_trials(fid))
+            view = diagnostics.train_view(full, lineage_trials=self.store.lineage_trials(fid), screen=drift_settings(self.settings))
             robust = evidence.train_score(full) if stress == 1.0 else None
         else:
             view = {"run_id": run["run_id"], "status": run.get("status"), "window": "train", "stress": run.get("stress"),
@@ -1078,6 +1322,9 @@ class Researcher:
             robust = None
             if stress == 1.0 and summary.get("train_score") is not None:
                 robust = {"score": summary["train_score"], "eligible": bool(summary.get("train_eligible")), "why": None}
+            drift = diagnostics.drift_view(summary.get("drift"), screen=drift_settings(self.settings))
+            if drift is not None:  # the row keeps the figures (`SwarmStore.add_run`)
+                view["drift"] = drift
         view["version"] = n
         view["run_id"] = run["run_id"]
         view["already_run"] = ALREADY_RUN
@@ -1130,9 +1377,16 @@ class Researcher:
 
     @staticmethod
     def _variant_row(job: GymJob, run_id: str, status: Any, summary: Mapping[str, Any], *, robust: Mapping[str, Any] | None,
-                     fill_rate: Any = None, reason: Any = None, trials: int = 0, reused: bool = False) -> dict[str, Any]:
+                     fill_rate: Any = None, reason: Any = None, trials: int = 0, reused: bool = False,
+                     drift: Any = None) -> dict[str, Any]:
         """A landed variant, compact: all a sweep keeps of it while it waits for the others (its full result is on disk).
-        `robust` None: only the run row's summary is left (its full result was pruned), so no per-year figures."""
+        `robust` None: only the run row's summary is left (its full result was pruned), so no per-year figures. `drift`: the
+        result's drift block or figures (the row shows its pooled alpha t and its years of positive alpha)."""
+        numbers = evidence.drift_numbers(drift)
+        compact = None if numbers is None else {
+            "alpha_t": _round(numbers["pooled"].get("t"), 2),
+            "alpha_positive_years": f"{sum(1 for r in numbers['years'].values() if (evidence._num(r.get('alpha_usd')) or 0) > 0)}"
+                                    f"/{len(numbers['years'])}"}
         if robust is not None:
             score, eligible, why = robust["score"], bool(robust["eligible"]), robust.get("why")
             years = {y: {"t": _round(r.get("t_daily"), 2), "trades": r.get("trades")} for y, r in (robust.get("years") or {}).items()}
@@ -1140,7 +1394,8 @@ class Researcher:
             score, eligible, why, years = summary.get("train_score"), bool(summary.get("train_eligible")), None, {}
         return {"job": job, "run_id": str(run_id), "status": status, "reason": reason, "score": score, "eligible": eligible,
                 "why": why, "years": years, "trades": summary.get("trades"), "days": summary.get("days_traded"),
-                "pnl": _round(summary.get("pnl"), 2), "fill_rate": _round(fill_rate, 3), "trials": int(trials), "reused": reused}
+                "pnl": _round(summary.get("pnl"), 2), "fill_rate": _round(fill_rate, 3), "trials": int(trials), "reused": reused,
+                "drift": compact, "figures": numbers}
 
     def _sweep_group(self, fid: str, code: str, variants: list[dict[str, Any]], roots: Any) -> str:
         """A sweep's group id is its content (the family, the code, the variants, the roots, the Gym's image and engine): the
@@ -1237,10 +1492,10 @@ class Researcher:
             if full is not None:
                 rows.append(self._variant_row(job, run["run_id"], full.get("status"), full.get("summary") or {},
                                               robust=evidence.train_score(full), fill_rate=(full.get("fills") or {}).get("fill_rate"),
-                                              reused=True))
+                                              reused=True, drift=full.get("drift")))
             else:
                 rows.append(self._variant_row(job, run["run_id"], run.get("status"), run.get("summary") or {}, robust=None,
-                                              reused=True))
+                                              reused=True, drift=(run.get("summary") or {}).get("drift")))
 
         def land(job: GymJob, result: Mapping[str, Any]) -> None:
             # Recorded as it lands; only its compact row stays in memory (many sweeps in flight must not hold every trade).
@@ -1248,7 +1503,7 @@ class Researcher:
             run = self._record_variant(job, result, robust, sweep=group, prune=False)
             rows.append(self._variant_row(job, run["run_id"], result.get("status"), result.get("summary") or {}, robust=robust,
                                           fill_rate=(result.get("fills") or {}).get("fill_rate"), reason=result.get("reason"),
-                                          trials=int(result.get("trials", 0) or 0)))
+                                          trials=int(result.get("trials", 0) or 0), drift=result.get("drift")))
             job.result = None
 
         began = self.clock()
@@ -1290,9 +1545,15 @@ class Researcher:
             return answer
         demoted = {int(v) for v in (((self.store.family(fid) or {}).get("state") or {}).get("robust_failed") or [])}
 
+        blocked = {int(r["job"].version or 0): why for r in rows if r["status"] == "ok" and r["eligible"]
+                   for why in [self.drift_blocks(fid, int(r["job"].version or 0), r.get("figures"))] if why}
+
         def counts(row: Mapping[str, Any]) -> bool:
-            """Completed, eligible and not demoted at 1.5x: only such a row may be the best or head the table."""
-            return row["status"] == "ok" and row["eligible"] and row["score"] is not None and int(row["job"].version or 0) not in demoted
+            """Completed, eligible, not demoted and not failing the drift screen: only such a row may be the best or head the
+            table."""
+            version = int(row["job"].version or 0)
+            return row["status"] == "ok" and row["eligible"] and row["score"] is not None and version not in demoted \
+                and version not in blocked
 
         rows.sort(key=lambda r: (r["status"] != "ok", not counts(r), -(r["score"] if r["score"] is not None else -math.inf),
                                  r["job"].id))
@@ -1330,8 +1591,12 @@ class Researcher:
                 "run_id": r["run_id"], "version": job.version, "status": r["status"],
                 "score": None if r["score"] is None else round(float(r["score"]), 3), "eligible": ok,
                 "trades": r["trades"], "days": r["days"], "pnl": r["pnl"], "fill_rate": r["fill_rate"], "years": r["years"]}
+            if r.get("drift"):
+                row["drift"] = r["drift"]
             if r["eligible"] and r["status"] == "ok" and not ok:
-                row["why_not"] = "this version lost money on Train at 1.5x the half-spread"
+                version = int(job.version or 0)
+                row["why_not"] = (f"this version fails the drift screen: {blocked[version]}" if version in blocked
+                                  else f"this version {failed_why(state, version)}")
             elif not ok:
                 row["why_not"] = str(r["why"] or "")[:160]
             if r["status"] != "ok":
@@ -1448,18 +1713,23 @@ class Researcher:
             self.store.update_family(fam["id"], best_version=int(run["version"]))
             self.store.set_state(fam["id"], submitted_run=run["run_id"], submitted_note=str(args.get("note") or "")[:300])
             out["submitted"] = int(run["version"])
-            return {"ok": True, "best_version": int(run["version"]),
-                    "next": "the tournament validates it once its 1.5x robustness run on Train comes back with a profit"}
+            return {"ok": True, "best_version": int(run["version"]), "drift": self.drift_words(self.store.family(fam["id"]) or fam, run["version"]),
+                    "next": "the tournament validates it once its 1.5x robustness run on Train comes back with a profit and it "
+                            "passes the drift screen"}
         return {"error": f"unknown tool {name}"}
 
     def eligible_run(self, fam: Mapping[str, Any], run: Mapping[str, Any]) -> tuple[bool, str]:
         """Can this Train run's version be the family's best? A run at the normal spread that the Train score finds
         eligible (its row's score, else its kept full result), of a version that has not lost at 1.5x the half-spread."""
-        if float(run.get("stress") or 1.0) != 1.0 or run.get("purpose") not in (None, "train"):
+        if run.get("stress") is None or float(run["stress"]) != 1.0 or run.get("purpose") not in (None, "train", "drift"):
             return False, "only a Train run of yours at the normal spread counts"
-        state = (self.store.family(fam["id"]) or fam).get("state") or {}
+        current = self.store.family(fam["id"]) or fam
+        state = current.get("state") or {}
         if int(run["version"]) in (state.get("robust_failed") or []):
-            return False, "its version lost money on Train at 1.5x the half-spread"
+            return False, f"its version {failed_why(state, run['version'])}"
+        verdict = drift_verdict(self.store, current, run["version"], self.settings)
+        if verdict is not None and verdict["known"] and not verdict["passed"]:
+            return False, f"its version fails the drift screen: {verdict['why']}"
         summary = run.get("summary") or {}
         if "train_eligible" in summary:
             return (True, "") if summary["train_eligible"] else (False, "it is not eligible under the Train score (40 trades on "
@@ -1471,16 +1741,66 @@ class Researcher:
         return (True, "") if robust["eligible"] else (False, str(robust["why"]))
 
     # ------------------------------------------------------------------ robustness runs
+    def screen(self, fid: str) -> list[dict[str, Any]]:
+        """THE DRIFT SCREEN on the family's candidate (`screen_best`): failing ones demoted, the next taking their place."""
+        return screen_best(self.store, fid, self.settings, clock=self.clock)
+
+    def drift_blocks(self, fid: str, n: int, source: Any) -> str | None:
+        """Why a run's own drift figures (`source`: its result, or the figures) fail the screen, having marked version `n`
+        (`drift_failed`: a failing version never becomes the family's best), or None (it passes, the screen is off, or the
+        run has no figures)."""
+        cfg = drift_settings(self.settings)
+        if cfg is None or not isinstance(source, Mapping):
+            return None
+        numbers = evidence.drift_numbers(source if "pooled" in source else source.get("drift"))
+        verdict = evidence.drift_screen(numbers, min_t=cfg[0], years_positive=cfg[1])
+        if not verdict["known"] or verdict["passed"]:
+            return None
+        with self.store.atomic():
+            marks = dict(((self.store.family(fid) or {}).get("state") or {}).get("drift_failed") or {})
+            if marks.get(str(int(n))) != str(verdict["why"])[:DRIFT_WHY_CHARS]:
+                marks[str(int(n))] = str(verdict["why"])[:DRIFT_WHY_CHARS]
+                keep = sorted(marks, key=lambda k: int(k))[-DRIFT_FAILED_KEPT:]
+                self.store.set_state(fid, drift_failed={k: marks[k] for k in keep})
+        return verdict["why"]
+
+    def drift_words(self, fam: Mapping[str, Any], n: Any) -> str:
+        """The drift screen's verdict on version `n`, in words (`submit` reports it)."""
+        cfg = drift_settings(self.settings)
+        if cfg is None:
+            return "the drift screen is off"
+        numbers = version_drift(self.store, fam, n)
+        verdict = evidence.drift_screen(numbers, min_t=cfg[0], years_positive=cfg[1])
+        if not verdict["known"]:
+            return "its drift figures are owed (its Train run predates them): it runs on Train once more before it is validated"
+        pooled = numbers["pooled"]
+        figures = (f"drift-adjusted alpha {diagnostics._usd(pooled.get('alpha_usd'))} (t {diagnostics._tval(pooled.get('t'))}) "
+                   f"over Train, positive in {verdict['positive']} of {verdict['years']} years")
+        return f"it passes the drift screen: {figures}" if verdict["passed"] else f"it fails the drift screen: {verdict['why']}"
+
+    def robust_labels(self, fam: Mapping[str, Any], n: int) -> tuple[str, ...]:
+        """The robustness runs version `n` needs: at 1.5x the half-spread and at the mid; and "drift", its Train run once
+        more at the normal spread, while the drift screen is on and no run of it carries the drift figures (a version whose
+        Train run predates them, Sept 27: the screen binds, so it is made again rather than waved through)."""
+        if drift_settings(self.settings) is not None and version_drift(self.store, fam, n) is None:
+            return ("stress_1.5", "mid", "drift")
+        return ("stress_1.5", "mid")
+
     def queue_robustness(self, fid: str, n: int, code: str, params: Mapping[str, Any], roots: tuple[str, ...]) -> bool:
         """The Train runs of a best version (a new best by score, or a submitted one) at 1.5x the half-spread and at the
-        mid that it does not have yet, at the pool's lowest priority (they fill idle boxes and never delay a researcher's
-        run or a validation). Each counts as a trial when it lands; its compact figures go to the family's state
-        (`robustness`), and a loss at 1.5x demotes the version (`robust_landed`). Not waited for; once per version in
-        flight per process; a run the Gym executed and failed is queued again, up to `ROBUSTNESS_ATTEMPTS` failures a label
-        (only executed runs count: a restart or a supersession charges nothing)."""
+        mid that it does not have yet (and at the normal spread for the drift figures, `robust_labels`), at the pool's
+        lowest priority (they fill idle boxes and never delay a researcher's run or a validation). Each counts as a trial
+        when it lands; its compact figures go to the family's state (`robustness`), and a loss at 1.5x demotes the version
+        (`robust_landed`). Not waited for; once per version in flight per process; a run the Gym executed and failed is
+        queued again, up to `ROBUSTNESS_ATTEMPTS` failures a label (only executed runs count: a restart or a supersession
+        charges nothing)."""
         submit = getattr(self.pool, "submit", None)
         if submit is None:
             return False
+        self.screen(fid)  # a candidate whose drift figures fail is demoted first: it needs no robustness run
+        if int(n) in (((self.store.family(fid) or {}).get("state") or {}).get("robust_failed") or []):
+            return False
+        labels = self.robust_labels(self.store.family(fid) or {"id": fid}, int(n))
         with self.store.atomic():
             fam = self.store.family(fid) or {}
             if fam.get("retired_at"):
@@ -1488,7 +1808,7 @@ class Researcher:
             rows = dict((fam.get("state") or {}).get("robustness") or {})
             row = dict(rows.get(str(n)) or {})
             tries = dict(row.get("failures") or {})
-            need = [label for label in ("stress_1.5", "mid") if (fid, int(n), label) not in self._robust
+            need = [label for label in labels if (fid, int(n), label) not in self._robust
                     and not landed(row.get(label)) and int(tries.get(label) or 0) < ROBUSTNESS_ATTEMPTS]
             if not need:
                 return False
@@ -1498,7 +1818,7 @@ class Researcher:
                 rows.pop(old, None)  # the last six versions' figures are kept
             self.store.set_state(fid, robustness=rows)
             self._robust.update((fid, int(n), label) for label in need)
-        for label, stress in (("stress_1.5", evidence.STRESS), ("mid", 0.0)):
+        for label, stress in (("stress_1.5", evidence.STRESS), ("mid", 0.0), ("drift", 1.0)):
             if label not in need:
                 continue
             job = GymJob(family=fid, version=int(n), code=code, params=dict(params or {}), window="train", roots=tuple(roots),
@@ -1512,7 +1832,10 @@ class Researcher:
 
     def ensure_robustness(self, fam: Mapping[str, Any]) -> None:
         """The robustness runs of the family's best by Train score and of its submitted best, when they were never queued,
-        a restart lost them, or one failed (`queue_robustness` caps the attempts)."""
+        a restart lost them, or one failed (`queue_robustness` caps the attempts); first the drift screen on its candidate
+        (`screen`)."""
+        if self.screen(fam["id"]):
+            fam = self.store.family(fam["id"]) or fam
         state = fam.get("state") or {}
         for n in {state.get("best_train_version"), fam.get("best_version")} - {None}:
             if int(n) in (state.get("robust_failed") or []):
@@ -1520,7 +1843,7 @@ class Researcher:
             row = (state.get("robustness") or {}).get(str(n)) or {}
             tries = row.get("failures") or {}
             if all((fam["id"], int(n), label) in self._robust or landed(row.get(label)) or int(tries.get(label) or 0) >= ROBUSTNESS_ATTEMPTS
-                   for label in ("stress_1.5", "mid")):
+                   for label in self.robust_labels(fam, int(n))):
                 continue
             version = self.store.version(fam["id"], int(n))
             if version and version.get("code"):
@@ -1540,10 +1863,15 @@ class Researcher:
             ran = stress is not None or not any(word in reason for word in NOT_RUN)
             if stress is not None:
                 years = float((result.get("summary") or {}).get("days") or 0) / 252.0 * max(1, len(fam["roots"]))
-                self.store.add_run(fid, n, result, window="train", stress=stress, purpose="robustness", program_years=years,
-                                   key=key)
+                # A drift run is the version's normal-spread Train run made again: its row's figures are the version's.
+                self.store.add_run(fid, n, result, window="train", stress=stress, purpose="drift" if label == "drift" else "robustness",
+                                   program_years=years, key=key)
             view = evidence.robustness_view(result) if stress is not None else {"status": "failed", "reason": reason[:200]}
             ok = result.get("status") == "ok"
+            if label == "drift" and stress is not None:  # the drift figures are what this run is for
+                numbers = evidence.drift_numbers(result.get("drift"))
+                ok = ok and numbers is not None
+                view = {"status": "ok", **numbers} if ok else {"status": "failed", "reason": (reason or "no drift figures came back")[:200]}
             self._robust.discard((fid, int(n), label))  # landed or failed: a failure is queued again later, up to the attempts
             demoted = None
             with self.store.atomic():
@@ -1563,6 +1891,9 @@ class Researcher:
                     why = "lost money on Train at 1.5x the half-spread"
                 elif label == "stress_1.5" and int(tries.get(label) or 0) >= ROBUSTNESS_ATTEMPTS:
                     why = f"its 1.5x run failed {ROBUSTNESS_ATTEMPTS} times"
+                elif label == "drift" and int(tries.get(label) or 0) >= ROBUSTNESS_ATTEMPTS:
+                    # Its drift figures can never be made: it can never pass the screen, so the next candidate takes its place.
+                    why = f"its Train run for the drift figures failed {ROBUSTNESS_ATTEMPTS} times"
                 if why and not fam.get("retired_at"):
                     demoted = self._demote(fam, n, why=why)
             if demoted is not None:
@@ -1572,47 +1903,14 @@ class Researcher:
                     if version and version.get("code"):
                         self.queue_robustness(fid, int(demoted["version"]), version["code"], version.get("params") or {},
                                               needs_roots(version["code"], fam["roots"]))
+            if label == "drift" and ok and self.screen(fid):  # the figures failed: the next candidate's robustness runs
+                self.ensure_robustness(self.store.family(fid) or fam)
         except Exception:  # noqa: BLE001 - on the dispatcher's thread: a robustness record never breaks the pool
             pass
 
     def _demote(self, fam: Mapping[str, Any], n: int, *, why: str = "lost money on Train at 1.5x the half-spread") -> dict[str, Any]:
-        """Version `n` lost at 1.5x (or its 1.5x run failed every attempt): never the best again; the family's next
-        eligible candidate becomes its best (under the store's transaction). `robust_why` keeps the reason for the status."""
-        fid = fam["id"]
-        state = fam.get("state") or {}
-        failed = list(state.get("robust_failed") or [])
-        if n not in failed:
-            failed.append(int(n))
-        whys = {**(state.get("robust_why") or {}), str(n): why}
-        rest = [c for c in (state.get("train_candidates") or []) if int(c[1]) not in failed]
-        fields: dict[str, Any] = {}
-        values: dict[str, Any] = {"robust_failed": failed[-50:], "robust_why": {k: v for k, v in whys.items() if int(k) in failed[-50:]},
-                                  "train_candidates": rest}
-        nxt: dict[str, Any] = {"version": None}
-        if state.get("best_train_version") == n:
-            if rest:
-                score, version, run_id = rest[0]
-                fields.update(best_train=float(score), stall=0)
-                values.update(best_train_version=int(version), best_train_run=run_id)
-                nxt = {"version": int(version), "score": float(score)}
-            else:
-                fields.update(best_train=None)
-                values.update(best_train_version=None, best_train_run=None)
-        if fam.get("best_version") == n:
-            fields.update(best_version=None)  # the tournament validates the best by Train score instead
-        if state.get("validation_version") == n:
-            # Validated before its 1.5x robustness run landed: it leaves the gate's queue, and live tuition (`bands.read`)
-            # refuses a version whose gate outcome is "demoted".
-            from .gate import run_sha
-
-            version = self.store.version(fid, n)
-            values.update(gate_ready=False)
-            if version is not None:
-                values.update(gate_outcome={"sha": run_sha(version), "result": "demoted", "at": self.clock()})
-        if fields:
-            self.store.update_family(fid, **fields)
-        self.store.set_state(fid, **values)
-        return nxt
+        """Version `n` can never be the best again (`demote_version`, under the store's transaction)."""
+        return demote_version(self.store, fam, n, why=why, clock=self.clock)
 
     def _terminal(self, fid: str, out: dict[str, Any]) -> bool:
         fam = self.store.family(fid)
@@ -1764,10 +2062,11 @@ class Researcher:
             chars = sum(len(json.dumps(i, default=str)) for i in items)
             profile, effort, most = self._profile(chars, fam)
             key = f"swarm:{fid}:c{n}:m{out['model_calls']}:{int(fam.get('revisions') or 0)}"
-            # REVISE requires a run or a sweep (never retire); READ follows a completed run and offers every tool, retire
-            # only when the family may retire (`can_retire`).
+            # REVISE requires a run or a sweep; READ follows a completed run and offers every tool, retire only when the
+            # family may retire (`can_retire`). A DEAD family's REVISE offers retire too (R4, Sept 28: researchers that
+            # found their mechanism refuted held every cycle, "retire tool not offered", since a hold never reaches READ).
             revise = not gym_done
-            tools = self.tools(revise=revise, retire=not revise and self.can_retire(fam))
+            tools = self.tools(revise=revise, retire=self.can_retire(fam) and (not revise or bool(self.dead(fam))))
             response = self.router.sail(profile, items, family=fid, key=key, tools=tools, effort=effort, max_output=most,
                                         cache_key=f"swarm-{fid}", cap_usd_day=float(self.cfg.get("family_usd_day", 2.0)),
                                         tool_choice="required" if revise else "auto")
@@ -2034,4 +2333,4 @@ __all__ = ["Researcher", "TOOLS", "TOOLS_READ", "TOOLS_REVISE", "RUNS", "needs_o
            "sanitize", "date_like", "candidates_with", "migrate_objective", "OBJECTIVE", "params_of", "check_params",
            "sweep_variants", "sweep_tool", "merged_key", "MAX_SWEEP_VARIANTS", "MAX_SWEEP_JOBS_IN_FLIGHT", "idle_dead",
            "idle_evaluations", "idle_limit", "RETIRE_IDLE_EVALUATIONS", "NEGATIVE_FACTOR", "DORMANT_CYCLES", "ALREADY_RUN",
-           "dormant_limit", "dormant_count", "awaiting_validation", "holding", "held_at_gate", "new_run"]
+           "dormant_limit", "dormant_count", "awaiting_validation", "holding", "held_at_gate", "new_run", "revalidation_owed"]

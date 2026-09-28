@@ -2,16 +2,22 @@
 
 1. VALIDATION. Every living family whose best version (submitted, else its best Train score) has not been
    validated yet runs on Validation once, but only after that version's 1.5x-stress Train robustness run came back
-   with a profit (`tournament.require_robustness`, Sept 26: a version that loses at 1.5x never reaches the gate); the Gym runs its 1.5x-half-spread twin in the same batch (two
-   trials, counted) and returns only the validation VIEW (no trades, dates or daily series). The
+   with a profit (`tournament.require_robustness`, Sept 26: a version that loses at 1.5x never reaches the gate), and only
+   when it passes THE DRIFT SCREEN (`tournament.drift_screen`, Sept 27, `evidence.drift_screen`: its Train drift-adjusted
+   alpha has a pooled t of at least `drift_min_t` and is positive in all Train years but one: a candidate that fails is
+   demoted, `researcher.screen_best`, and the next candidate that passes is validated in its place; a version whose Train
+   run predates the figures waits until the researcher's robustness label "drift" has run it again). The Gym runs its
+   1.5x-half-spread twin in the same batch (two trials, counted) and returns only the validation VIEW (no trades, dates
+   or daily series). The
    researcher is told only whether the line was met and how many of its checks passed (D2a). A version runs on
    its own NEEDS roots (a family's roots may have moved since).
 2. THE LINE (`evidence.validation_line`, as the owner's decision D2 amended it): its deflated Sharpe is on traded
    days with N = the lineage's validated versions (`SwarmStore.lineage_validated`). A family that meets it goes to
    the gate's queue.
 3. THE BANDIT (`evidence.thompson`): each family's share of researcher cycles and Gym priority from its
-   validation evidence, with 25% for new families.
-4. FORKS: the top families with a positive validation t fork (a new family on the parent's roots plus one more
+   validation evidence, with 25% for new families; a validated version that failed the drift screen earns nothing by its
+   validation (the family counts as unvalidated).
+4. FORKS: the top families with a positive validation t fork (never one whose validated version failed the drift screen) (a new family on the parent's roots plus one more
    root of the rotation, same mechanism and structure; it inherits the lineage's trial count and holdout looks),
    while the population is under its ceiling. XSP is out of the rotation: its $0.50 a contract makes a narrow
    structure uneconomic.
@@ -25,7 +31,8 @@
    no rule while the operator holds its validated version at the gate (`researcher.held_at_gate`). Each retiree's
    lesson goes to the graveyard (its mechanism, what it tried, its best numbers, its last notebook lines); an idle-rule
    lesson says it was a time limit, not a refutation. Each counted verdict records the family's trials
-   (`validated_trials`), from which the idle rule counts, and restarts its dormant cycles.
+   (`validated_trials`), from which the idle rule counts, and restarts its dormant cycles. THE IDLE PASS (R4,
+   `idle_pass`) retires by the idle rule alone every `tournament.retire_every_seconds` (300) between the rounds.
 6. THE LEADERBOARD: one `swarm.tournament` event (the House mirrors it to its ledger) with every family's
    rank, share, validation summary, trials and band, and the totals.
 
@@ -40,7 +47,8 @@ from typing import Any, Callable, Mapping
 
 from . import diagnostics, evidence
 from .pool import GymJob, PoolError
-from .researcher import MAX_ROOTS, held_at_gate, idle_dead, needs_roots, robust_at_stress, with_roots
+from .researcher import (MAX_ROOTS, drift_verdict, held_at_gate, idle_dead, needs_roots, robust_at_stress, screen_best,
+                         validation_drift_failed, with_roots)
 from .store import CLOSEABLE, SwarmStore
 
 UNIVERSE_ROTATION = ("SPY", "QQQ", "IWM", "SPXW")
@@ -62,6 +70,7 @@ class Tournament:
         self.settings = settings
         self.clock = clock
         self.rng = rng or random.Random()
+        self.idle_at = float("-inf")  # the last idle pass (`idle_due`); in memory: a restarted swarm runs one at once
 
     @property
     def cfg(self) -> Mapping[str, Any]:
@@ -85,9 +94,12 @@ class Tournament:
         errors = {}
         judged = {}
         waiting: list[str] = []
+        drift: dict[str, list[str]] = {"waiting": [], "failed": []}
         image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
         bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
         for fam in fams:
+            # THE DRIFT SCREEN first: a candidate whose figures fail is demoted and the next one that passes stands in its place.
+            drift["failed"] += [fam["id"]] * len(screen_best(self.store, fam["id"], self.settings, clock=self.clock))
             current = self.store.family(fam["id"])
             if current is None or current.get("retired_at"):
                 continue
@@ -100,6 +112,14 @@ class Tournament:
                 waiting.append(fam["id"])  # its robustness run at 1.5x has not landed (or lost): not validated yet
                 continue
             if n == fam.get("validated_version") and state.get("validation_image") == image and state.get("validation_bundle") == bundle:
+                continue
+            screen = drift_verdict(self.store, fam, n, self.settings)
+            if screen is not None and not screen["passed"]:
+                # A version whose Train run predates the figures waits for its run again (the researcher's robustness label
+                # "drift"); one that fails was demoted above, so this is a candidate the demotion could not replace. Before
+                # the image/engine reset below: a validated family owed re-validation keeps its gate_ready (its idle-rule
+                # exemption and the operator's hold) while its figures are made.
+                drift["failed" if screen["known"] else "waiting"].append(fam["id"])
                 continue
             if state.get("validation_image") != image or state.get("validation_bundle") != bundle:
                 self.store.compare_and_set_state(fam["id"], {"validation_image": state.get("validation_image"),
@@ -129,7 +149,8 @@ class Tournament:
             row = self.judge(fam["id"], n, result)
             if row is not None:
                 judged[fam["id"]] = row
-        return {"queued": len(jobs), "judged": judged, "errors": errors, "waiting_robustness": waiting}
+        return {"queued": len(jobs), "judged": judged, "errors": errors, "waiting_robustness": waiting,
+                "waiting_drift": drift["waiting"], "failed_drift": sorted(set(drift["failed"]))}
 
     def recorded_validation(self, fid: str, n: int) -> dict[str, Any] | None:
         """The full result of a validation this version already had on the Gym image in use now (the same program on the
@@ -200,14 +221,27 @@ class Tournament:
                              typical_max_loss_usd=loss, typical_by_version=typical,
                              validation_numbers={"mean": mean, "t": t, "sharpe_daily": summary.get("sharpe_daily"),
                                                  "quarters": summary.get("quarters_positive")},
-                             gate_ready=bool(line["passed"]))
+                             gate_ready=bool(line["passed"]) and not self.gate_spent(fid, n, state))
         return {"version": n, "passed": line["passed"], "mean": mean, "t": t}
+
+    def gate_spent(self, fid: str, n: int, state: Mapping[str, Any]) -> bool:
+        """The gate is done with version `n` (R4, the verification of PR #402): its holdout look was made or the gate refused
+        it (`gated_sha`), so the gate never takes it up again (`Gate.run` skips it). Validated again after a Gym deploy, it
+        does not go back to `gate_ready`, which would keep it from the idle rule with nothing ever to look at."""
+        from .gate import run_sha  # a local import: the tournament only reads the gate's mark
+
+        version = self.store.version(fid, n)
+        if version is None or not version.get("sha"):
+            return False
+        sha = run_sha(version)
+        return bool(self.store.looked(sha) or state.get("gated_sha") == sha)
 
     # ------------------------------------------------------------------ 3. the bandit
     def allocate(self, fams: list[dict[str, Any]]) -> dict[str, float]:
         rows = []
         for fam in fams:
-            nums = (fam.get("state") or {}).get("validation_numbers") or {}
+            # A validated version that failed the drift screen earns no share by its validation: it counts as unvalidated.
+            nums = {} if validation_drift_failed(fam) else (fam.get("state") or {}).get("validation_numbers") or {}
             rows.append({"id": fam["id"], "validations": fam.get("validations") or 0, "mean": nums.get("mean"), "t": nums.get("t")})
         shares = evidence.thompson(rows, explore_share=float(self.cfg.get("explore_share", 0.25)),
                                    new_validations=int(self.cfg.get("new_family_validations", 2)), rng=self.rng)
@@ -225,6 +259,8 @@ class Tournament:
         cooldown = float(self.cfg.get("fork_cooldown_hours", 6)) * 3600
         scored = []
         for fam in fams:
+            if validation_drift_failed(fam):
+                continue  # its validated version failed the drift screen: nothing to fork
             nums = (fam.get("state") or {}).get("validation_numbers") or {}
             t = nums.get("t")
             if isinstance(t, (int, float)) and t >= float(self.cfg.get("fork_min_t", 1.0)) and (nums.get("mean") or 0) > 0:
@@ -280,35 +316,110 @@ class Tournament:
     # ------------------------------------------------------------------ 5. retirements
     def retirements(self, fams: list[dict[str, Any]]) -> list[dict[str, Any]]:
         out = []
+        current = self.identity()
         for fam in sorted(fams, key=lambda f: (f.get("weight") or 0.0)):
-            fam = self.store.family(fam["id"]) or fam
-            if fam["band"] != "gym":
-                continue  # a Candidate or better is judged by its forward record, not here
-            if held_at_gate(fam):
-                # The operator holds its validated version at the gate: no rule retires it until the hold is cleared (the
-                # look it holds must still happen; `SwarmStore.retire_gym` refuses it too).
-                continue
-            why = None
-            if int(fam.get("since_val_revisions") or 0) >= int(self.cfg.get("retire_revisions", 30)):
-                why = f"no validation improvement in {fam['since_val_revisions']} revisions"
-            elif int(fam.get("since_val_trials") or 0) >= int(self.cfg.get("retire_evaluations", 2000)):
-                why = f"no validation improvement in {fam['since_val_trials']} Gym evaluations"
-            else:
-                line = (fam.get("state") or {}).get("validation_line") or {}
-                dsr = (line.get("numbers") or {}).get("dsr")
-                if int(fam.get("validations") or 0) >= int(self.cfg.get("retire_min_validations", 6)) and dsr is not None \
-                        and dsr < float(self.cfg.get("retire_dsr_below", 0.05)):
-                    # No figure in the reason: it becomes a graveyard lesson researchers read (D2a).
-                    why = "its trial-adjusted evidence fell below the line (the deflated Sharpe probability)"
-            if not why:
-                # The fallback for a dead family that never called retire (R3): Train figures only in the reason.
-                dead = idle_dead(fam, self.settings)
-                if dead:
-                    why = f"It {dead}. {IDLE_CAUSE}"
+            why = self._retire_if(fam["id"], lambda fam: self._why(fam, current))
             if why:
-                if self.retire(fam, why):
-                    out.append({"family": fam["id"], "why": why})
+                out.append({"family": fam["id"], "why": why})
         return out
+
+    def _why(self, fam: Mapping[str, Any], current: tuple[Any, Any]) -> str | None:
+        """The hourly round's reason to retire a family (its rules in order, the idle rule last), or None."""
+        if fam["band"] != "gym":
+            return None  # a Candidate or better is judged by its forward record, not here
+        if held_at_gate(fam):
+            # The operator holds its validated version at the gate: no rule retires it until the hold is cleared (the
+            # look it holds must still happen; `SwarmStore.retire_gym` refuses it too).
+            return None
+        why = None
+        if int(fam.get("since_val_revisions") or 0) >= int(self.cfg.get("retire_revisions", 30)):
+            why = f"no validation improvement in {fam['since_val_revisions']} revisions"
+        elif int(fam.get("since_val_trials") or 0) >= int(self.cfg.get("retire_evaluations", 2000)):
+            why = f"no validation improvement in {fam['since_val_trials']} Gym evaluations"
+        else:
+            line = (fam.get("state") or {}).get("validation_line") or {}
+            dsr = (line.get("numbers") or {}).get("dsr")
+            if int(fam.get("validations") or 0) >= int(self.cfg.get("retire_min_validations", 6)) and dsr is not None \
+                    and dsr < float(self.cfg.get("retire_dsr_below", 0.05)):
+                # No figure in the reason: it becomes a graveyard lesson researchers read (D2a).
+                why = "its trial-adjusted evidence fell below the line (the deflated Sharpe probability)"
+        if not why:
+            # The fallback for a dead family that never called retire (R3): Train figures only in the reason.
+            why = self.idle_why(fam, current=current)
+        return why
+
+    def identity(self) -> tuple[Any, Any]:
+        """(the Gym image, its engine bundle) the pool runs now, as `validate` reads them; what could not be read is None
+        (like `Researcher._gym_identity`: a pool error never fails a retirement pass, and an unknown identity only makes
+        a passing validation look owed, `revalidation_owed`, never a family dead)."""
+        image = bundle = None
+        try:
+            image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
+            bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
+        except Exception:  # noqa: BLE001
+            pass
+        return image, bundle
+
+    def idle_why(self, fam: Mapping[str, Any], *, current: tuple[Any, Any] | None = None) -> str | None:
+        """THE IDLE RULE's reason to retire a living Gym family (`researcher.idle_dead`), or None: never outside the Gym
+        band nor while the operator holds its validated version at the gate (`held_at_gate`); `idle_dead` itself exempts
+        a version at the gate, a look out, a passing validation owed again on the Gym running now (`current`, R4) and,
+        from its dormancy clause, a best that awaits validation."""
+        if fam.get("band") != "gym" or fam.get("retired_at") or held_at_gate(fam):
+            return None
+        dead = idle_dead(fam, self.settings, current=current if current is not None else self.identity())
+        return f"It {dead}. {IDLE_CAUSE}" if dead else None
+
+    def _retire_if(self, fid: str, judge: Callable[[Mapping[str, Any]], str | None]) -> str | None:
+        """Read the family, judge it and retire it in ONE store transaction (R4, the review of PR #402): a result landing
+        meanwhile (its trials, its dormant count restarted) either lands first and is judged, or waits for the retirement
+        and counts on the retired family; never judged on one state and retired on another. `SwarmStore.retire_gym` nests
+        in it and checks `population.floor`. The pool's queued work is cancelled after, outside the transaction (the pool
+        takes its own lock before the store's). The reason, or None."""
+        with self.store.atomic():
+            fam = self.store.family(fid)
+            if fam is None or fam.get("retired_at"):
+                return None
+            why = judge(fam)
+            if not why:
+                return None
+            result = self.store.retire_gym(fid, why, floor=int(self.settings.get("population", {}).get("floor", 16)),
+                                           source="tournament")
+        if result["status"] != "retired" or result.get("already_retired"):
+            return None
+        try:
+            self.pool.cancel_family(fid)
+        except Exception:  # noqa: BLE001
+            pass
+        return why
+
+    def idle_due(self) -> bool:
+        """THE IDLE PASS is due: `tournament.retire_every_seconds` (300) since the last; 0, null, a boolean or not a finite
+        number turns it off (the hourly round still retires by the same rule)."""
+        raw = self.cfg.get("retire_every_seconds", 300)
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not 0 < raw < float("inf"):
+            return False
+        return self.clock() - self.idle_at >= float(raw)
+
+    def idle_pass(self, *, busy: Callable[[str], bool] | None = None) -> dict[str, Any]:
+        """THE IDLE PASS (R4, Sept 28): the hourly round's idle-rule retirements alone, every `retire_every_seconds` between
+        its rounds, so a dead family leaves within minutes of dying (after R3 dead families held until the hourly round,
+        which the operator did not wait for: 60 retired by hand). The same rule, reasons and lessons as the round's
+        fallback (`idle_why`), the least favoured first, each read, judged and retired in one transaction (`_retire_if`),
+        never below `population.floor`. A family `busy` says is in a researcher's cycle now is left to the next pass (its
+        cycle may be making the evaluation that keeps it alive). The loop never runs it while the hourly round runs. No
+        model call and no Gym job."""
+        self.idle_at = self.clock()
+        current = self.identity()
+        retired, skipped = [], []
+        for fam in sorted(self.store.families(alive=True), key=lambda f: (f.get("weight") or 0.0, f["id"])):
+            if busy is not None and busy(fam["id"]):
+                skipped.append(fam["id"])
+                continue
+            why = self._retire_if(fam["id"], lambda fam: self.idle_why(fam, current=current))
+            if why:
+                retired.append({"family": fam["id"], "why": why})
+        return {"retired": retired, "busy": len(skipped), "alive": len(self.store.families(alive=True))}
 
     def retire(self, fam: Mapping[str, Any], why: str) -> bool:
         result = self.store.retire_gym(fam["id"], why, floor=int(self.settings.get("population", {}).get("floor", 16)),

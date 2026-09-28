@@ -77,6 +77,16 @@ DEFAULTS: dict[str, Any] = {
         "family_usd_day": 3.0,          # each family's daily model budget (the Provider's desk cap): a fuse
         "floor_usd_day": 150.0,         # every model call of the swarm together, a day (the Provider's floor cap): a fuse
         "idle_seconds": 5,              # between a family's cycles
+        # HOLD BACKOFF (R4, Sept 28: 2,223 of 2,364 cycles in ten minutes were holds, a holding family back every ~12 s,
+        # ~$6.6/h of holds against a $4.5/h pace). A family whose cycle ended in a hold with no new evaluation (and no run
+        # queued) waits `hold_idle_seconds` before its next turn; news lifts the wait at once (a result of its own landed,
+        # a gate verdict or validation, its gate place or band changed, a rewrite is ready: `loop.Scheduler`). The wait
+        # doubles for each dormant cycle past `dormant_cycles` (a family the idle rule exempts: awaiting validation, at the
+        # gate, at the floor), up to `hold_idle_max_seconds`; below that count it never doubles, so the dormancy clause
+        # still decides a family that only holds within about `dormant_cycles` x `hold_idle_seconds`. 0 or null `hold_idle_seconds` turns the backoff off (`idle_seconds` alone);
+        # null `hold_idle_max_seconds` turns the doubling off (`loop.hold_wait`).
+        "hold_idle_seconds": 300,
+        "hold_idle_max_seconds": 1800,
         "note_every_cycles": 6,         # a public note to the tape at most this often per family
         # The idle rule (R3, Sept 27): a Gym family with this many Gym evaluations since its birth or last validation and
         # no eligible Train version (or three times as many with a best Train score below zero) is dead, unless a
@@ -116,6 +126,10 @@ DEFAULTS: dict[str, Any] = {
     "pool": {"robust_age_seconds": 600},
     "tournament": {
         "every_seconds": 3600,
+        # THE IDLE PASS (R4, Sept 28): the idle rule's retirements alone (`researcher.idle_dead`: the hourly round's own
+        # fallback, the same floor and exemptions) every this many seconds between the hourly rounds, so a dead family
+        # leaves within minutes (the operator retired 60 by hand after R3). 0 or null: the hourly round only.
+        "retire_every_seconds": 300,
         "explore_share": 0.25,
         "new_family_validations": 2,    # a family is "new" to the bandit until this many validation looks
         "retire_revisions": 30,
@@ -124,6 +138,14 @@ DEFAULTS: dict[str, Any] = {
         "retire_min_validations": 6,
         # A version is validated only after its 1.5x-stress Train robustness run came back with a profit (Sept 26).
         "require_robustness": True,
+        # THE DRIFT SCREEN (Sept 27, `evidence.drift_screen`): a version is validated only when its Train drift-adjusted
+        # alpha (the daily P&L net of the root's own daily move at the version's average exposure, a year at a time) has a
+        # pooled t of at least `drift_min_t` and is positive in `drift_years_positive` Train years (null: every Train year but
+        # one); the gate refuses a look at a version that fails it. Off only by JSON false. A version whose Train run predates
+        # the figures waits for one Train run again (the researcher queues it with its robustness runs).
+        "drift_screen": True,
+        "drift_min_t": 1.0,
+        "drift_years_positive": None,
         "fork_min_t": 1.0,              # a family forks when its validation t is at least this and it is in the top
         "fork_top": 3,
         "fork_cooldown_hours": 6,
