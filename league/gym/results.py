@@ -28,8 +28,8 @@ One result per program per run (one TRIAL: one run of one program version over o
   daily mean and `t_daily` on maximum loss, quarters_positive and quarter_pnl (the swarm's robust Train
   objective, Sept 26: the worst Train year, not the whole window, scores a version);
 - `drift` (Train only; the swarm's drift screen, Sept 27): per calendar year of the program's own days and pooled:
-  `beta`, the slope of the day's P&L on the move of the roots it held over the hours it held them, over HELD days only
-  (its exposure, dollars per unit return); `drift_usd`, beta x the roots' unconditional drift over those hours summed
+  `beta`, the slope of the day's P&L on the move of the roots it held over the hours it held them, over HELD days only,
+  each weighted by 1 / its realized variance (its exposure, dollars per unit return); `drift_usd`, beta x the roots' unconditional drift over those hours summed
   over held days (what that exposure earns on average days); `alpha_usd` = pnl - drift_usd (what its timing added, after
   costs), `alpha` a day, `t` (the one-sample t of the drift-adjusted daily P&L over all days), `days`, `held_days`. Each
   year carries its sufficient `stats`, so a split run merges exactly (`drift`, `drift_fit`, `merge_drift`);
