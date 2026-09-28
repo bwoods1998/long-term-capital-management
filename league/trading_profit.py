@@ -49,6 +49,10 @@ from zoneinfo import ZoneInfo
 
 #: The calibration round trips' family (`league.live.calibration.FAMILY`, held equal by its test): the House's own.
 CALIBRATION_FAMILY = 'house:calibration'
+#: The House live test (`league/live/house_test.py` `FAMILY`; spelled here so this module imports nothing live).
+HOUSE_TEST_FAMILY = 'house:rebound-live'
+#: A House family the site has no word for: never one of `publish.POSITION_SOURCES`.
+HOUSE_UNLISTED = 'house_unlisted'
 #: The parts of the "Other account activity" line (`league.account_activity.classify`), in the order the site draws them.
 OTHER_PARTS = ('fees_usd', 'crypto_usd', 'interest_usd', 'misc_usd')
 CENT = Decimal('0.01')
@@ -173,12 +177,16 @@ def _venue_fill_time(order: Mapping[str, Any] | None) -> float | None:
 
 
 def source_of(family: Any) -> str:
-    """Who a position belongs to on the site: "calibration" (the House's calibration round trips), "house" (any other
-    of the House's own families, `house:*`), else "agent" (the family is the agent's id)."""
+    """Who a position belongs to on the site: "calibration" (the House's calibration round trips), "house" (exactly the
+    House live test, `HOUSE_TEST_FAMILY`: the site reads "house" as "House live test"), else "agent" (the family is the
+    agent's id). Any other of the House's own families (`house:*`) has no source the site knows (`HOUSE_UNLISTED`): its
+    rows fold into the table's not-listed line (alerted, and the sum still holds) until it is given its own."""
     family = str(family or '')
     if family == CALIBRATION_FAMILY:
         return 'calibration'
-    return 'house' if family.startswith('house:') else 'agent'
+    if family == HOUSE_TEST_FAMILY:
+        return 'house'
+    return HOUSE_UNLISTED if family.startswith('house:') else 'agent'
 
 
 def _expiry_close(day: str | None) -> float | None:

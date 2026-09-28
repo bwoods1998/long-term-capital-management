@@ -402,6 +402,43 @@ order's time in force and cancel reason), read with `python3 -m league.live --ro
 attempts, outcomes, fill rate, mean fill against the mid in ticks, median seconds to fill). Off by default:
 `swarm.json` `{"live": {"calibration": true}}` turns it on.
 
+**The House live test** (the owner, Sept 28, 2026; `league/live/house_test.py`; a new shadow-to-real route,
+pre-registered in a private file whose sha256 is `c73e2d262b8d2e9493b53c427400ba7adc37490db8c981ddd96644fdb6977954`):
+one frozen swarm program (1-lot debit verticals; private, only its hashes are public) runs as the House's own
+real instance `house:rebound-live@0:h`, through the families' decider child and order path, only to measure its
+real fills and P&L. Never a band, a promotion, evidence or a forward record; D2 unchanged.
+
+- Bounds (the money table's `options_money.house_test`): one structure of at most $100 with fees, at most 3 held or
+  working, its NET realized loss plus what is held or working plus the new open at most $300 at every open, no new
+  open ever again once its net realized loss reaches $150 (from the book's fee estimates; Profit uses the broker's, so
+  they can differ by cents), new opens only through its 20th session from the start and while its round trips are
+  under 30. It leaves the families $200 (two Probe floors) of both the day cap and the book's cap, and opens nothing
+  while its record (`/workspace/state/house-test.sqlite`) cannot be written.
+- The families first: its intents go after theirs each minute, and its working open yields to a family order refused
+  on its contracts after the open was placed (never to an older refusal). A position it holds refuses a family's open
+  of the other side of that contract ("positions net across the account"), as any held position does.
+- The same gates as the calibration (real money, the grant, the kill switch, the stops, reconciliation, the paper
+  proof). Its losses count toward the account's daily and drawdown stops like any position's: a bad day for it can
+  trip them for everyone.
+- Its orders say "House live test (pre-registered)", never the program's note. Its positions are Profit, the positions
+  table's "House live test" rows (`source` `house`, which `league/trading_profit.py` gives only this family).
+- The program and its params: on the box at `/workspace/state/house-test/rebound-live/program.py` and `params.json`
+  (directory 700, files 600, root's), placed by the operator's private upload script (`--apply`, through the Sail
+  file API, never on a command line), and in `live.sqlite`'s `instances` row as every real instance's. Checked at
+  every load: an identity mismatch (the hashes, the run sha) and it never runs, a restored instance fails for good and
+  the House closes what it holds; any other load failure is retried as a decider failure.
+- `health.json` `options_live.house_test` shows the files, the start (day, release, fill model), the sessions used, the
+  round trips, the realized and possible loss, and a stop or end. Each order's quotes at submit and its outcome are in
+  `house-test.sqlite` (an unfilled order ended by its time in force, the close cutoff for expiring contracts or the
+  session's close is a full-window sample; any other end is "interrupted").
+- Off by default: `swarm.json` `{"live": {"house_test": true}}` turns it on (only after the analysis script's sha256
+  is pinned in the private addendum); off again sends it to exits only and cancels its working open within a minute.
+- While it runs: no House deploy or restart inside the decision window the private pre-registration names (each load
+  of its program is a `live.instance` "house test program loaded (fresh memory)" row; one inside that window, a
+  decider-child restart or a skipped minute there is a deviation of the test, logged in the private addendum). Before a rollback
+  past the release that carries it: switch it off and wait until it is flat (an older release would run it as an
+  ordinary instance, export its trades as forward rows and show its positions as an agent's).
+
 **Turning real money on** (M4b; the sprint's R2): the gateway deployed first (`OPTION_STRUCTURES_REAL`
 `debit_vertical,long_butterfly,long_call,long_put`, `MAX_ORDER_EQUITY_SHARE` 0.25); then the owner deploy
 with `real_money` true (a new money digest); `python3 scripts/live_trading.py --enable` (first time), then
@@ -506,8 +543,10 @@ with `real_money` true (a new money digest); `python3 scripts/live_trading.py --
 | `OPTION_STRUCTURES_REAL` | `gateway/wrangler.jsonc` | `debit_vertical,long_butterfly,long_call,long_put` | the types real money may open; must equal the constitution's `options_money.real_types` (`league.ci`) | gateway deploy with the matching House deploy and a ratify |
 | `live.observe`, `live.observe_max` | `swarm.json` on the box | true, 48 | the observe band and its cap; read each minute, no deploy (a swarm.json that is not a JSON object turns it off) | edit `swarm.json` |
 | `live.calibration`, `live.calibration_samples` | `swarm.json` on the box | false, 30 | the D3 round trips (still only with real money on, the grant and the paper proof); samples a symbol's open cell (the mid, or the patient mid at 12:00 and 14:00) stops at | edit `swarm.json` |
+| `live.house_test` | `swarm.json` on the box | false | the House live test (still only with real money on, the grant, the paper proof and its private program verified); off: exits only | edit `swarm.json` |
+| The House live test's program | `/workspace/state/house-test/rebound-live/` on the box | absent | the frozen program and its params, hash-checked against `league/live/house_test.py` `FROZEN` | the operator's private upload script, `--apply` |
 | `FRONTIER_MONTH_USD`, `FRONTIER_MONTH_MAX_USD`, `FRONTIER_FUNDED_MONTH` | `gateway/wrangler.jsonc` | $707, September 2026 only | the OpenAI month; expires before an unfunded month can renew it | gateway deploy |
-| The money rules | `league/constitution.py` | the sprint's D4 table (money `ad9bd54c`) | what real money may do | owner deploy, then `--ratify` |
+| The money rules | `league/constitution.py` | the sprint's D4 table and the House live test's bounds (money `a3e2aa7c`) | what real money may do | owner deploy, then `--ratify` |
 
 In `swarm.json`, `researcher.usd_per_hour` keeps the combined Sail-model and OpenAI trailing-hour pace.
 Set the optional `researcher.sail_usd_per_hour` to the funded Sail rate to pace Sail models separately;

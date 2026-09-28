@@ -34,6 +34,10 @@ plus its open and close fees:
   (`probe.max_loss_share` a structure, `probe.open_per_family` open, `probe.family_share` the family): Sized limits never
   apply at a Probe-sized stake.
 - Tuition: exactly one structure, only while the day's and the week's tuition maximum loss has room.
+- The House live test (`league/live/house_test.py`, not a family): one structure of at most `house_test.structure_usd`,
+  at most `house_test.open` held or working, its realized loss plus what is held or working at most
+  `house_test.envelope_usd`, no new open once its realized loss reaches `house_test.stop_usd`, after `house_test.sessions`
+  sessions or `house_test.round_trips` round trips; its own module applies them.
 - Every open: the book's open maximum loss at most `book_share x E`; the gateway's caps (one order's maximum loss at
   most min(`gateway.order_max_loss_usd`, `gateway.order_equity_share x E`), today's opening maximum loss at most
   `gateway.day_equity_share x E`) are checked here first so the House refuses before the gateway does. Today's opening
@@ -112,6 +116,12 @@ class Table:
     tuition_day: Decimal
     tuition_week: Decimal
     calibration_day: Decimal
+    house_test_structure: Decimal
+    house_test_open: int
+    house_test_envelope: Decimal
+    house_test_stop: Decimal
+    house_test_sessions: int
+    house_test_round_trips: int
     max_orders_day: int
     max_requests_minute: int
     bp_buffer: Decimal
@@ -132,7 +142,7 @@ class Table:
         if problems:
             raise ValueError("the options money table is refused: " + "; ".join(problems))
         t = rules["options_money"]
-        probe, sized, path, gate = t["probe"], t["sized"], t["order_path"], t["gateway"]
+        probe, sized, path, gate, house = t["probe"], t["sized"], t["order_path"], t["gateway"], t["house_test"]
         return cls(
             real_types=tuple(t["real_types"]), credit_types=tuple(t["credit_types"]),
             credit_min_equity=D(t["credit_min_equity_usd"]),
@@ -146,6 +156,9 @@ class Table:
             drawdown_stop_share=D(t["drawdown_stop_share"]),
             tuition_day=D(t["tuition"]["day_usd"]), tuition_week=D(t["tuition"]["week_usd"]),
             calibration_day=D(t["calibration"]["day_usd"]),
+            house_test_structure=D(house["structure_usd"]), house_test_open=int(house["open"]),
+            house_test_envelope=D(house["envelope_usd"]), house_test_stop=D(house["stop_usd"]),
+            house_test_sessions=int(house["sessions"]), house_test_round_trips=int(house["round_trips"]),
             max_orders_day=int(path["max_orders_day"]), max_requests_minute=int(path["max_requests_minute"]),
             bp_buffer=D(path["bp_buffer"]), near_money_share=D(path["near_money_share"]),
             expiry_close_lead_minutes=int(path["expiry_close_lead_minutes"]),

@@ -708,6 +708,16 @@ CONSTITUTION: dict[str, Any] = {
     #   evidence for any family: a strict bound on the day's possible loss, `day_usd` (a new open goes only while today's
     #   realized calibration loss, net and floored at zero, plus what is still held or working, plus its own maximum loss
     #   stays within it; a closed round trip frees its maximum loss).
+    # - `house_test`: the House live test (`league/live/house_test.py`, family `house:rebound-live`, not a swarm family):
+    #   one frozen, pre-registered program traded 1-lot with real money only to measure its real fills and real P&L,
+    #   never evidence, never a promotion. The owner, Sept 28, 2026, asked whether to add it as a new shadow-to-real
+    #   route: "proceed as you see best fit, you are in the best position possible to make these decisions"; the
+    #   operator decided yes on these terms, fixed in a private pre-registration whose sha256 is
+    #   c73e2d262b8d2e9493b53c427400ba7adc37490db8c981ddd96644fdb6977954.
+    #   One structure's maximum loss with its fees at most `structure_usd`; at most `open` held or working; its realized
+    #   loss plus what is held or working plus the new open at most `envelope_usd` at every open; no new open ever again
+    #   once its realized loss reaches `stop_usd`; new opens only through its `sessions`th session and while its round
+    #   trips are under `round_trips`. D2 and every promotion rule are unchanged.
     #
     # THE SPRINT (docs/goals/LTCM_SWARM_SPRINT.md, Sept 26, 2026; the owner's decisions D1, D3 and D4, all "yes"): the
     # table at the bold end of the plan's ranges -- Probe 5% a structure with a $100 one-contract floor, the family 15%,
@@ -729,6 +739,8 @@ CONSTITUTION: dict[str, Any] = {
         "drawdown_stop_share": "0.60",
         "tuition": {"day_usd": "200", "week_usd": "300"},
         "calibration": {"day_usd": "50"},
+        "house_test": {"structure_usd": "100", "open": 3, "envelope_usd": "300", "stop_usd": "150", "sessions": 20,
+                       "round_trips": 30},
         "order_path": {"max_orders_day": 250, "max_requests_minute": 150, "bp_buffer": "0.10",
                        "near_money_share": "0.01", "expiry_close_lead_minutes": 10},
         "gateway": {"order_max_loss_usd": "1000", "order_equity_share": "0.25", "day_equity_share": "1.0",
@@ -789,6 +801,14 @@ OPTIONS_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     "tuition.week_usd": ("0", "600"),
     # D3 (the sprint, Sept 26, 2026): the calibration round trips' maximum loss opened a day, $50 at most.
     "calibration.day_usd": ("0", "50"),
+    # The House live test (the owner, Sept 28, 2026; `league/live/house_test.py`): its pre-registered bounds are the top of
+    # each range. A bound may only tighten; loosening one is the owner's.
+    "house_test.structure_usd": ("0", "100"),
+    "house_test.open": ("0", "3"),
+    "house_test.envelope_usd": ("0", "300"),
+    "house_test.stop_usd": ("0", "150"),
+    "house_test.sessions": ("0", "20"),
+    "house_test.round_trips": ("0", "30"),
     "credit_min_equity_usd": ("2000", "2000"),
     "order_path.max_orders_day": ("1", "250"),
     "order_path.max_requests_minute": ("1", "150"),
@@ -813,7 +833,8 @@ OPTIONS_SINGLE_TYPES = ("long_call", "long_put")
 OPTIONS_CREDIT_TYPES = ("credit_vertical", "iron_condor", "iron_butterfly")
 #: Rows read as whole counts.
 _OPTIONS_COUNTS = ("probe.open_per_family", "sized.min_trades", "sized.min_probe_real_trades", "sized.min_probe_sessions", "order_path.max_orders_day", "order_path.max_requests_minute",
-                   "order_path.expiry_close_lead_minutes", "gateway.max_day_orders", "gateway.max_day_open_orders")
+                   "order_path.expiry_close_lead_minutes", "gateway.max_day_orders", "gateway.max_day_open_orders",
+                   "house_test.open", "house_test.sessions", "house_test.round_trips")
 
 
 def options_money_problems(constitution: dict[str, Any] | None = None) -> list[str]:
@@ -876,4 +897,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '4f4edaf52f917f90e89d42acc021bebf51c999d662daacf804255d7c7837448d'
+PINNED_DIGEST = 'fcf8d735734d7f3512d684fb68ed4002b4f494c74a65e22bc7f9fcb877a8d60e'
