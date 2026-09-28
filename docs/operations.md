@@ -489,7 +489,24 @@ distinguished from a publication delay.
 
 A Gym researcher can call `retire(reason)` to abandon its whole family, but only on a READ turn while more
 families live than `population.start` and the family has had at least two validations (Sept 26: an unguarded
-retire on the REVISE turn took the population from 49 to 16). Retirement stops queued research, keeps the best
+retire on the REVISE turn took the population from 49 to 16), or while more live than `population.floor` and the
+family is dead by the idle rule (R3, Sept 27; `researcher.idle_dead`): `researcher.retire_idle_evaluations` (default
+150; 0 or null turns the rule off, in `swarm.json` without a deploy; a boolean or a non-number also reads as off) Gym
+evaluations since its birth or last validation without an eligible Train version, or three times as many with its
+best Train score below zero. It counts evaluations, not versions: the store keeps one version for identical code and
+parameters, so a family re-running one placeholder makes trials but no revisions. A family whose validated version
+awaits the gate (`gate_ready`) or whose holdout look is out is never dead. With the population held at its start,
+dead families never qualified before and looped on placeholder runs (the operator retired 48 by hand on Sept 27). The
+tournament retires a dead family that never calls retire by the same rule, down to `population.floor`; the
+architect refills below `population.start`. The graveyard lesson and the public cause say the idle rule retired it
+(a time limit, not a refutation); the family's own last notebook lines carry its verdict.
+
+Deploy impact (R3): the rule applies at once to every family that is already past it. On Sept 27 (start 72, floor
+44, 74 alive) about 29 families were past it, nearly all long-refuted placeholders, so the first tournament round and
+the dead researchers retiring themselves take the population to about 45 within minutes, and the architect's refill
+(a handful of births a pass) takes hours to restore the start. To stage it, set `researcher.retire_idle_evaluations`
+high in `swarm.json` before the deploy (for example 500, which catches only the longest loops) and lower it toward
+150 over the following passes; the setting reloads each step. Retirement stops queued research, keeps the best
 programs and every trial/look, and leaves existing positions under their exit owner. Researchers and the
 tournament share the same atomic population-floor check. A refused retire (not offered, or the floor) is a plain
 tool answer: no cycle error and no cooldown; it does not retire the family. The raw reason stays private in its
