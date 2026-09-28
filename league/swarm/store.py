@@ -43,6 +43,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 from . import DB_NAME, PROGRAMS_DIR, RUNS_DIR
+from .evidence import drift_numbers
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS families (
@@ -723,6 +724,9 @@ class SwarmStore:
         summary = dict(result.get("summary") or {})
         if status == "refused":
             summary = {"reason": result.get("reason")}
+        elif window == "train" and drift_numbers(result.get("drift")) is not None:
+            # A Train run's drift figures stay with its row after its full result is pruned: the drift screen reads them.
+            summary["drift"] = drift_numbers(result.get("drift"))
         with self._lock:
             mine = f"{run_id}-{fid}"[:64]
             existing = self._one("SELECT * FROM runs WHERE (run_id=? OR run_id=?) AND family=?", (run_id, mine, fid))

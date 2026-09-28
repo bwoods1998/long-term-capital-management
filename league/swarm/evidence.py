@@ -31,6 +31,16 @@ quarters that were positive. It is eligible to be a family's best only with at l
 year with data; a version whose 1.5x-stress Train run loses is never the best (`researcher.py`). The full-window t
 with a 30-trade floor it replaced rewarded sparse filters that could never meet the line's frequency.
 
+THE DRIFT SCREEN (`drift_screen`, Sept 27; the owner approved tightening pre-Validation with a placebo test after the
+one family that passed Validation, back-month long SPY calls after low closes, failed its holdout: its Train and 2025
+profit was the bull market's drift, which long calls earn whatever the signal says). The Gym fits each Train year's daily
+P&L on the day's return of the roots held (`league.gym.results.drift`): alpha is what the timing added beyond holding the
+average exposure every day, after costs. A version is validated only when its pooled alpha t is at least
+`tournament.drift_min_t` (1.0) and its alpha is positive in `tournament.drift_years_positive` Train years (all but one);
+the gate refuses a look at one that fails. It only ADDS a brake: it is a setting, `tournament.drift_screen`, because it
+is the operator's tightening, not a line of the plan. A run from before the figures is not screened (`known` False): it is
+never validated until its Train run is made again (`researcher.py`, the robustness label "drift").
+
 THE HOLDOUT LINE (one look per program version, at most three per lineage; the gate's box only):
   - P&L after fees above zero;
   - a day-block bootstrap one-sided 95% lower bound on mean daily P&L above zero, with a Holm-Bonferroni
@@ -244,6 +254,46 @@ def robustness_view(result: Mapping[str, Any]) -> dict[str, Any]:
                         for y, r in sorted(years_of(result).items())}}
 
 
+# ---------------------------------------------------------------------------- the drift screen
+#: The screen's defaults (`tournament.drift_min_t`; `drift_years_positive` None is every Train year but one).
+DRIFT_MIN_T = 1.0
+
+
+def drift_numbers(block: Any) -> dict[str, Any] | None:
+    """A Gym Train result's `drift` block without its moments: {"pooled": {...}, "years": {year: {...}}}, what a run row's
+    summary and a family's state keep. None when there is no block (a run from before the figures) or it is malformed."""
+    if not isinstance(block, Mapping) or not isinstance(block.get("years"), Mapping) or not isinstance(block.get("pooled"), Mapping):
+        return None
+    return {"pooled": {k: v for k, v in block["pooled"].items() if k != "moments"},
+            "years": {str(y): {k: v for k, v in row.items() if k != "moments"} for y, row in sorted(block["years"].items())
+                      if isinstance(row, Mapping)}}
+
+
+def drift_screen(numbers: Mapping[str, Any] | None, *, min_t: float = DRIFT_MIN_T, years_positive: int | None = None) -> dict[str, Any]:
+    """THE DRIFT SCREEN (the module docstring) on a version's drift figures (`drift_numbers`): {known, passed, t, positive,
+    years, need, why}. `known` is False when there are no figures (a run from before them); a year's alpha is positive
+    when its alpha dollars are; `need` is `years_positive`, or every year but one (at least one) when None."""
+    out: dict[str, Any] = {"known": False, "passed": False, "t": None, "positive": 0, "years": 0, "need": None, "why": None}
+    if not isinstance(numbers, Mapping) or not isinstance(numbers.get("years"), Mapping):
+        out["why"] = "its Train run predates the drift figures: it is run again before it is screened"
+        return out
+    years = {y: r for y, r in numbers["years"].items() if isinstance(r, Mapping)}
+    t = _num((numbers.get("pooled") or {}).get("t"))
+    positive = sum(1 for r in years.values() if (_num(r.get("alpha_usd")) or 0.0) > 0)
+    need = max(1, len(years) - 1) if years_positive is None else min(max(0, int(years_positive)), len(years))
+    out.update(known=True, t=t, positive=positive, years=len(years), need=need)
+    if not years:
+        out["why"] = "no Train year has a return to fit"
+    elif t is None or t < float(min_t):
+        out["why"] = (f"its drift-adjusted alpha has t {'n/a' if t is None else round(t, 2)} over Train, below {float(min_t):g}: "
+                      "its profit is the market's drift, not its timing")
+    elif positive < need:
+        out["why"] = f"its drift-adjusted alpha is positive in {positive} of {len(years)} Train years; the screen needs {need}"
+    else:
+        out["passed"] = True
+    return out
+
+
 # ---------------------------------------------------------------------------- the holdout line
 def _seed(text: str) -> int:
     return int(hashlib.sha256(text.encode("utf-8")).hexdigest()[:16], 16)
@@ -427,4 +477,4 @@ def _allocate(draws: Mapping[str, float], total: float, out: dict[str, float]) -
 __all__ = ["validation_line", "holdout_line", "block_bootstrap", "holm_passes", "leakage_alarm", "forward_record", "thompson",
            "train_score", "years_of", "robustness_view", "traded_sharpe", "checks_passed", "quarters_positive", "daily_pnl",
            "one_record", "MIN_TRADES", "MIN_DAYS", "MIN_T", "MIN_DSR", "STRESS", "LOOKS_PER_LINEAGE", "TRAIN_YEAR_MIN_TRADES",
-           "TRAIN_YEAR_MIN_DAYS"]
+           "TRAIN_YEAR_MIN_DAYS", "drift_numbers", "drift_screen", "DRIFT_MIN_T"]

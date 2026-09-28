@@ -87,6 +87,8 @@ class RoundCase(unittest.TestCase):
         # These rounds test validation and the gate themselves: a best's robustness runs are the researcher's
         # (league/tests/test_swarm_search.py tests the tournament waiting for them).
         self.settings["tournament"]["require_robustness"] = False
+        # Nor the drift screen: these families have no Train run (league/tests/test_swarm_drift.py tests it).
+        self.settings["tournament"]["drift_screen"] = False
         self.answer = strong
         self.pool = FakeGymPool(lambda job: self.answer(job))
         self.replies: list = []

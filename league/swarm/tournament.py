@@ -2,8 +2,12 @@
 
 1. VALIDATION. Every living family whose best version (submitted, else its best Train score) has not been
    validated yet runs on Validation once, but only after that version's 1.5x-stress Train robustness run came back
-   with a profit (`tournament.require_robustness`, Sept 26: a version that loses at 1.5x never reaches the gate); the Gym runs its 1.5x-half-spread twin in the same batch (two
-   trials, counted) and returns only the validation VIEW (no trades, dates or daily series). The
+   with a profit (`tournament.require_robustness`, Sept 26: a version that loses at 1.5x never reaches the gate), and only
+   when it passes THE DRIFT SCREEN (`tournament.drift_screen`, Sept 27, `evidence.drift_screen`: its Train drift-adjusted
+   alpha has a pooled t of at least `drift_min_t` and is positive in all Train years but one; a version whose Train run
+   predates the figures waits until the researcher's robustness label "drift" has run it again). The Gym runs its
+   1.5x-half-spread twin in the same batch (two trials, counted) and returns only the validation VIEW (no trades, dates
+   or daily series). The
    researcher is told only whether the line was met and how many of its checks passed (D2a). A version runs on
    its own NEEDS roots (a family's roots may have moved since).
 2. THE LINE (`evidence.validation_line`, as the owner's decision D2 amended it): its deflated Sharpe is on traded
@@ -38,7 +42,7 @@ from typing import Any, Callable, Mapping
 
 from . import diagnostics, evidence
 from .pool import GymJob, PoolError
-from .researcher import MAX_ROOTS, idle_dead, needs_roots, robust_at_stress, with_roots
+from .researcher import MAX_ROOTS, drift_verdict, idle_dead, needs_roots, robust_at_stress, with_roots
 from .store import CLOSEABLE, SwarmStore
 
 UNIVERSE_ROTATION = ("SPY", "QQQ", "IWM", "SPXW")
@@ -83,6 +87,7 @@ class Tournament:
         errors = {}
         judged = {}
         waiting: list[str] = []
+        drift: dict[str, list[str]] = {"waiting": [], "failed": []}
         image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
         bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
         for fam in fams:
@@ -102,6 +107,12 @@ class Tournament:
             if state.get("validation_image") != image or state.get("validation_bundle") != bundle:
                 self.store.compare_and_set_state(fam["id"], {"validation_image": state.get("validation_image"),
                                                            "validation_bundle": state.get("validation_bundle")}, gate_ready=False)
+            screen = drift_verdict(self.store, fam, n, self.settings)
+            if screen is not None and not screen["passed"]:
+                # THE DRIFT SCREEN (Sept 27): Train profit its average exposure would have made is not an edge. A version
+                # whose Train run predates the figures waits for its run again (the researcher's robustness label "drift").
+                drift["failed" if screen["known"] else "waiting"].append(fam["id"])
+                continue
             version = self.store.version(fam["id"], n)
             if version is None or not version.get("code"):
                 continue
@@ -127,7 +138,8 @@ class Tournament:
             row = self.judge(fam["id"], n, result)
             if row is not None:
                 judged[fam["id"]] = row
-        return {"queued": len(jobs), "judged": judged, "errors": errors, "waiting_robustness": waiting}
+        return {"queued": len(jobs), "judged": judged, "errors": errors, "waiting_robustness": waiting,
+                "waiting_drift": drift["waiting"], "failed_drift": drift["failed"]}
 
     def recorded_validation(self, fid: str, n: int) -> dict[str, Any] | None:
         """The full result of a validation this version already had on the Gym image in use now (the same program on the

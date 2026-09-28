@@ -27,6 +27,12 @@ One result per program per run (one TRIAL: one run of one program version over o
   included; a year only its batch company had data for is absent): trades, days, days_traded, pnl, the
   daily mean and `t_daily` on maximum loss, quarters_positive and quarter_pnl (the swarm's robust Train
   objective, Sept 26: the worst Train year, not the whole window, scores a version);
+- `drift` (Train only; the swarm's drift screen, Sept 27): per calendar year of the program's own days and pooled, the
+  fit P_t = a + b r_t + e_t of the day's P&L after costs (zero days included) on the day's close-to-close return of the
+  roots it held (else of its own roots): `alpha` (a, dollars a day), `alpha_usd` (a x days: what its timing added beyond
+  drift), `t` (a over its plain OLS standard error), `beta` (dollars per unit return), `drift_usd` (b x mean r x days:
+  what holding its average exposure every day earned); pnl = alpha_usd + drift_usd. Each year carries its `moments`, so
+  a split run merges exactly (`drift`, `merge_drift`); the pooled line keeps each year's own beta;
 - `daily`: [day, P&L, equity] for every trading day of the run (zero days included);
 - `trades`: every trade (entry, exit, legs, fees, maximum loss, P&L, the context at entry);
 - `worst`: the five worst trades with their context;
@@ -34,11 +40,12 @@ One result per program per run (one TRIAL: one run of one program version over o
 - `result_sha`: a hash of everything above but the timing, so two runs of the same inputs agree.
 
 `view(result, window)` is what leaves a run of each window (validation: no trades, no dates, no daily
-series; holdout and forward: the gate's inputs only). Standard library only.
+series and no drift block; holdout and forward: the gate's inputs only). Standard library only.
 """
 
 from __future__ import annotations
 
+import bisect
 import datetime as dt
 import hashlib
 import json
@@ -249,6 +256,148 @@ def merge_years(parts: Sequence[Mapping[str, Any]], trades: Sequence[dict], dail
     return out
 
 
+# --------------------------------------------------------------------------- drift (Sept 27)
+#: What a drift block's r_t is: each day, the mean close-to-close return of the roots the program HELD that day (a
+#: position open at any time of it, from its entry day to its exit day), else, on a day it held nothing, of its own roots.
+DRIFT_BASIS = "held"
+#: A residual sum of squares at or below this share of the P&L's own is an exact linear fit (rounding, not noise): the
+#: alpha's error is not estimable and its t is None.
+_EXACT_FIT = 1e-12
+
+
+def held_roots(trades: Sequence[dict], days: Sequence[str]) -> dict[str, set[str]]:
+    """{day: the roots of the positions open at any time of it} over `days` (ISO days), entry and exit days included (a
+    position without an exit day is open to the last day)."""
+    order = sorted(set(str(d) for d in days))
+    out: dict[str, set[str]] = {}
+    if not order:
+        return out
+    for t in trades:
+        start = str(t.get("day") or "")
+        end = str(t.get("exit_day") or order[-1])
+        for day in order[bisect.bisect_left(order, start):bisect.bisect_right(order, end)]:
+            out.setdefault(day, set()).add(str(t.get("root")))
+    return out
+
+
+def drift_rows(trades: Sequence[dict], daily: Sequence[Sequence[Any]], returns: Mapping[str, Mapping[str, Any]],
+               roots: Sequence[str], own_days: Any = None) -> list[tuple[str, float, float]]:
+    """(day, P&L, r) for every day of the run (zero days included) with a return: r is the mean close-to-close return of
+    the roots held that day (`held_roots`), else of the program's own `roots` that had one (`DRIFT_BASIS`). `returns` is
+    {day: {root: return}} (the engine's regimes' `ret`); `own_days`, as in `by_year`, keeps the days its roots had data."""
+    held = held_roots(trades, [str(d[0]) for d in daily])
+    out = []
+    for d in daily:
+        day = str(d[0])
+        if own_days is not None and day not in own_days:
+            continue
+        today = returns.get(day) or {}
+
+        def known(names: Iterable[str]) -> list[float]:
+            values = [today.get(r) for r in names]
+            return [float(v) for v in values if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)]
+
+        pick = known(sorted(held.get(day, ()))) or known(roots)
+        if pick:
+            out.append((day, float(d[1]), sum(pick) / len(pick)))
+    return out
+
+
+def drift_moments(pairs: Sequence[tuple[float, float]]) -> list[float]:
+    """[n, mean r, mean P, S_rr, S_pp, S_rp] of (r, P) pairs, the sums centered (two passes): what `merge` adds up."""
+    n = len(pairs)
+    if not n:
+        return [0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    mr = sum(r for r, _ in pairs) / n
+    mp = sum(p for _, p in pairs) / n
+    return [n, mr, mp, sum((r - mr) ** 2 for r, _ in pairs), sum((p - mp) ** 2 for _, p in pairs),
+            sum((r - mr) * (p - mp) for r, p in pairs)]
+
+
+def combine_moments(a: Sequence[float], b: Sequence[float]) -> list[float]:
+    """The moments of two sets of days together (Chan's pairwise update): exactly the moments of their union."""
+    na, nb = int(a[0]), int(b[0])
+    if not na or not nb:
+        return [float(x) if i else int(x) for i, x in enumerate(b if not na else a)]
+    n = na + nb
+    dr, dp, w = float(b[1]) - float(a[1]), float(b[2]) - float(a[2]), na * nb / n
+    return [n, float(a[1]) + dr * nb / n, float(a[2]) + dp * nb / n, float(a[3]) + float(b[3]) + dr * dr * w,
+            float(a[4]) + float(b[4]) + dp * dp * w, float(a[5]) + float(b[5]) + dr * dp * w]
+
+
+def drift_fit(m: Sequence[float]) -> dict[str, Any]:
+    """P_t = a + b r_t + e_t by OLS from moments: {days, pnl, mean_return, alpha (a, dollars a day), alpha_usd (a x days),
+    beta (b, dollars per unit return), drift_usd (b x mean r x days: what holding the average exposure every day earned),
+    var_alpha, t (a over its plain OLS standard error)}. pnl = alpha_usd + drift_usd. t is None under three days, with no
+    residual (P a line in r: all drift, or no P&L at all) or no variance."""
+    n, mr, mp, srr, spp, srp = int(m[0]), float(m[1]), float(m[2]), float(m[3]), float(m[4]), float(m[5])
+    beta = srp / srr if srr > 0 else 0.0
+    alpha = mp - beta * mr
+    var = None
+    if n >= 3:
+        sse = max(0.0, spp - beta * srp)
+        if sse > _EXACT_FIT * spp:
+            var = sse / (n - 2) * (1.0 / n + (mr * mr / srr if srr > 0 else 0.0))
+    t = alpha / math.sqrt(var) if var is not None and var > 0 else None
+    return {"days": n, "pnl": mp * n, "mean_return": mr, "alpha": alpha, "alpha_usd": alpha * n, "beta": beta,
+            "drift_usd": beta * mr * n, "var_alpha": var, "t": t}
+
+
+def _drift_row(f: Mapping[str, Any]) -> dict[str, Any]:
+    def r(x: Any, places: int) -> Any:
+        return None if x is None else round(float(x), places)
+    return {"days": f["days"], "pnl": r(f["pnl"], 2), "mean_return": r(f["mean_return"], 7), "alpha": r(f["alpha"], 4),
+            "alpha_usd": r(f["alpha_usd"], 2), "t": r(f["t"], 4), "beta": r(f["beta"], 2), "drift_usd": r(f["drift_usd"], 2)}
+
+
+def drift_from_moments(moments: Mapping[str, Sequence[float]]) -> dict[str, Any]:
+    """The `drift` block from each year's moments: per year its fit (with its moments, for `merge`) and the POOLED line:
+    each year keeps its own beta (a year's drift is removed at that year's exposure, so three bull or bear years cannot
+    pass for timing), alpha_usd and drift_usd are the years' sums, and t = the summed alpha over its standard error with
+    the years independent, sqrt(sum days^2 var_alpha) over the years whose error is estimable."""
+    fits = {y: drift_fit(m) for y, m in sorted(moments.items()) if int(m[0]) > 0}
+    days = sum(f["days"] for f in fits.values())
+    est = [f for f in fits.values() if f["var_alpha"] is not None]
+    var = sum(f["days"] ** 2 * f["var_alpha"] for f in est)
+    pooled = {"days": days, "pnl": sum(f["pnl"] for f in fits.values()), "mean_return": None,
+              "alpha": sum(f["alpha_usd"] for f in fits.values()) / days if days else 0.0,
+              "alpha_usd": sum(f["alpha_usd"] for f in fits.values()),
+              "t": sum(f["alpha_usd"] for f in est) / math.sqrt(var) if var > 0 else None,
+              "beta": sum(f["beta"] * f["days"] for f in fits.values()) / days if days else 0.0,
+              "drift_usd": sum(f["drift_usd"] for f in fits.values())}
+    return {"basis": DRIFT_BASIS, "years": {y: {**_drift_row(f), "moments": [int(moments[y][0])] + [float(x) for x in moments[y][1:6]]}
+                                            for y, f in fits.items()},
+            "pooled": _drift_row(pooled)}
+
+
+def drift(trades: Sequence[dict], daily: Sequence[Sequence[Any]], returns: Mapping[str, Mapping[str, Any]], roots: Sequence[str],
+          own_days: Any = None) -> dict[str, Any]:
+    """The run's drift-adjusted alpha (the swarm's drift screen, Sept 27): a long call in a bull year earns whatever its
+    signal says, so what a program's timing adds is measured net of the market's own drift. Within each calendar year,
+    P_t (the day's P&L after costs, zero days included) = a + b r_t + e_t (`drift_rows`, `drift_fit`); the block has
+    each year and the pooled line (`drift_from_moments`)."""
+    years: dict[str, list[tuple[float, float]]] = {}
+    for day, pnl, r in drift_rows(trades, daily, returns, roots, own_days):
+        years.setdefault(day[:4], []).append((r, pnl))
+    return drift_from_moments({y: drift_moments(v) for y, v in years.items()})
+
+
+def merge_drift(parts: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
+    """The drift block of a split run from its segments' moments (summed a year at a time, so the fit is the unsplit fit
+    on the same days); None when a segment has none (a result from before the block)."""
+    moments: dict[str, list[float]] = {}
+    for p in parts:
+        block = p.get("drift")
+        if not isinstance(block, Mapping) or not isinstance(block.get("years"), Mapping):
+            return None
+        for year, row in block["years"].items():
+            m = row.get("moments") if isinstance(row, Mapping) else None
+            if not isinstance(m, (list, tuple)) or len(m) != 6:
+                return None
+            moments[year] = combine_moments(moments[year], m) if year in moments else [int(m[0])] + [float(x) for x in m[1:]]
+    return drift_from_moments(moments)
+
+
 def fill_stats(account: Any) -> dict[str, Any]:
     counts = dict(account.counts)
     rows = account.fill_rows
@@ -276,6 +425,7 @@ def build(account: Any, cfg: Any, days: Sequence[dt.date], data_version: str, re
 
     identity = {"program_sha": program.sha, "run_sha": program.run_sha, "params": program.params,
                 "roots": list(account.roots), "data_version": data_version, "code": code, "tables": tables, **cfg.identity()}
+    own = {d for d, rows in regimes.items() if any(r in rows for r in account.roots)}
     status = "ok"
     if account.runner.disqualified:
         status = "disqualified"
@@ -297,12 +447,15 @@ def build(account: Any, cfg: Any, days: Sequence[dt.date], data_version: str, re
             "root": _group(trades, lambda t: t["root"]),
             "exit_reason": _group(trades, lambda t: t["exit_reason"]),
         },
-        "by_year": by_year(trades, account.daily, {d for d, rows in regimes.items() if any(r in rows for r in account.roots)}),
+        "by_year": by_year(trades, account.daily, own),
         "daily": [list(d) for d in account.daily],
         "trades": trades,
         "worst": sorted(trades, key=lambda t: t["pnl"])[:5],
         "runtime": {k: v for k, v in account.runner.stats().items() if k != "seconds"},
     }
+    if getattr(cfg, "window", "train") == "train":  # Train only: no other window's figures are ever computed for it
+        returns = {day: {root: row.get("ret") for root, row in rows.items()} for day, rows in regimes.items()}
+        result["drift"] = drift(trades, account.daily, returns, account.roots, own)
     result["result_sha"] = sha(result)
     result["seconds"] = round(seconds, 3)
     result["runtime"]["decide_seconds"] = account.runner.stats()["seconds"]
@@ -352,21 +505,24 @@ def merge(parts: Sequence[dict]) -> dict[str, Any]:
                           "timeouts": sum(p["runtime"]["timeouts"] for p in parts),
                           "messages": [m for p in parts for m in p["runtime"]["messages"]][:10],
                           "disqualified": next((p["runtime"]["disqualified"] for p in parts if p["runtime"]["disqualified"]), None)}}
+    merged_drift = merge_drift(parts)
+    if merged_drift is not None:
+        result["drift"] = merged_drift
     result["result_sha"] = sha(result)
     result["seconds"] = round(sum(p.get("seconds", 0.0) for p in parts), 3)
     return result
 
 
 STRESS_KEYS = ("trades", "days_traded", "pnl", "pnl_per_max_loss", "mean_return_on_max_loss_daily", "t_daily", "sharpe_daily")
-_HIDDEN_FROM_VALIDATION = ("trades", "daily", "worst", "start", "end", "segments", "seconds")
+_HIDDEN_FROM_VALIDATION = ("trades", "daily", "worst", "start", "end", "segments", "seconds", "drift")
 
 
 def view(result: Mapping[str, Any], window: str) -> dict[str, Any]:
     """What leaves a run of `window`, the one place these rules live:
 
-    - "train": everything (a researcher sees all of Train);
-    - "validation": the statistics a line needs and the breakdowns, with NO trades, NO dates and NO
-      daily series (quarters become q1..q4): summary (sharpe_daily, days, skew_daily, kurt_daily,
+    - "train": everything (a researcher sees all of Train), the drift block included;
+    - "validation": the statistics a line needs and the breakdowns, with NO trades, NO dates, NO
+      daily series and NO drift block (quarters become q1..q4): summary (sharpe_daily, days, skew_daily, kurt_daily,
       t_daily, days_traded, trades, quarters_positive, median_max_loss_per_structure, ...), fills,
       runtime counts, and `stress_1.5` when the batch ran the stress twin;
     - "holdout": for the gate only (a researcher hears pass or fail): the summary and the daily P&L
@@ -412,4 +568,6 @@ def stress_block(result: Mapping[str, Any]) -> dict[str, Any]:
     return {"stress": result.get("stress"), "status": result.get("status"), **{k: summary.get(k) for k in STRESS_KEYS}}
 
 
-__all__ = ["build", "merge", "view", "stress_block", "summarize", "daily_returns", "by_year", "merge_years", "sha", "canonical", "ENGINE_VERSION"]
+__all__ = ["build", "merge", "view", "stress_block", "summarize", "daily_returns", "by_year", "merge_years", "drift", "merge_drift",
+           "drift_fit", "drift_moments", "combine_moments", "drift_from_moments", "drift_rows", "held_roots", "sha", "canonical",
+           "ENGINE_VERSION"]

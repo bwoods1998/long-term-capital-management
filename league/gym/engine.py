@@ -246,12 +246,19 @@ class DayData:
 
     def regime(self, root: str) -> dict[str, float]:
         """The day's regime features (engine-side, for the results' terciles): the realized vol of
-        the prior ten sessions and the at-the-money implied vol at 10:00 of the nearest expiry."""
-        out = {"rv": math.nan, "iv": math.nan}
+        the prior ten sessions and the at-the-money implied vol at 10:00 of the nearest expiry; and
+        `ret`, the day's close-to-close return (today's last price over the root's last session's close
+        in the history, which holds earlier sessions only), for the results' drift block. A program
+        never sees any of them."""
+        out = {"rv": math.nan, "iv": math.nan, "ret": math.nan}
         opens, highs, lows, closes = self.history.arrays(root, 11)
         if closes.size >= 3:
             r = np.diff(np.log(closes))
             out["rv"] = float(np.std(r, ddof=1) * math.sqrt(252.0))
+        chain = self.chains.get(root)
+        today = chain.underlying.price[np.isfinite(chain.underlying.price)] if chain is not None else np.zeros(0)
+        if closes.size and today.size and closes[-1] > 0:
+            out["ret"] = float(today[-1] / closes[-1] - 1.0)
         mi = min(30, self.minutes - 2)
         snap = self.snapshot(root, mi)
         if snap is not None and np.isfinite(snap.spot):
