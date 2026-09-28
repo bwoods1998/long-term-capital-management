@@ -2002,6 +2002,22 @@ looks like beta. Validation 2025 and the holdout judge both.
     - cheaper real execution, if the calibration round trips keep filling at the mid (1 of 1 today, both legs);
     - 5-year Train selection (the flip after tonight's close).
 
+- **14:20-14:40Z Breadth sweep (operator, Train only): the replicated reversal does not generalise across assets.**
+  - Setup: the replicated rebound templates, signal and exits unchanged, on TLT, GLD, SLV, SMH, TSLA, NVDA and AAPL.
+    12 rows a root at 1.0x and 1.5x, both placebos, and daily P&L correlation against the SPY finalists.
+  - No root meets the bar (positive at 1.5x every Train year, beats its placebo, correlation under 0.5 with SPY):
+    - TLT is flat and negative in 2024;
+    - on GLD and SLV the signal picks worse days than its own placebo;
+    - SMH tracks SPY (0.40, and 0.60 on days both hold) and fails 2024;
+    - TSLA and NVDA are negative at 1.5x in 2022;
+    - AAPL is a lone near-miss (1.5x t 0.25 / 1.18 / 0.29).
+  - Pooling the best roots into one family gains nothing. A per-year t near 2.5-3 would need about five independent
+    roots each as strong as SPY after costs, and none was found.
+  - Agenda v7 marks this breadth as tested, so the architect does not re-propose it.
+  - The sweep found a Gym defect: a single-name position held across a stock split cannot be closed and settles as
+    worthless (TSLA 2022-08-25, SMH 2023-05-05, NVDA 2024-06-10). No top row was affected. The fix is being built for
+    the after-close release.
+
 ### Sprint scoreboard, T0 + 53 h (11:30Z Sept 28)
 
 | # | Metric | Value |
