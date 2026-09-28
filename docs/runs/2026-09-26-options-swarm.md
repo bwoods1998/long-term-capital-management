@@ -2195,4 +2195,19 @@ looks like beta. Validation 2025 and the holdout judge both.
     the one mechanism that replicated.
   - Status: built and adversarially reviewed as money code. It deploys only outside the 13:25-20:05Z freeze.
 
+
+- **20:34-20:52Z News-data ceiling study: NOT (pre-registered, sha256 `75523905…`, locked before any news was fetched).**
+  - The question: would pre-open headline data give the Gym's 14 single names a daily signal worth building in?
+  - Reachability: the gateway does not sign Alpaca's news route (403). The data box holds only the options-data key.
+    So no news was fetched and the signal tests did not run. Opening the route would take one read-only allowlist
+    line plus an owner gateway deploy.
+  - The finding that does not need news is the cost hurdle. It covers 1-lot adjacent-strike verticals filled at the
+    natural, on 14 names, 2022-24, 753 sessions each:
+    - a round trip costs about 63% of what perfect foresight of the session's direction would earn, so a direction
+      signal would need about an 81% hit rate on the median name to break even;
+    - an at-the-money straddle's hurdle is 0.25;
+    - the index roots' hurdle is 0.29-0.37.
+  - Daily direction on names is closed by cost, whatever the information. A news volatility signal would also have to
+    beat the opening implied move. The route stays unopened unless a volatility mechanism earns it.
+
 ## Report
