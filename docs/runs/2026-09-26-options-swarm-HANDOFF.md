@@ -1,5 +1,7 @@
 # Handoff: the options-swarm run
 
+**D8 (owner, Sept 27 about 23:45Z): the two-release limit before Monday is lifted; the Monday 13:25-20:05Z freeze stands.**
+
 ## THE SPRINT — Sunday Sept 27, 15:40Z update (read first; the 02:00Z section below still holds for releases and the grant)
 
 **Evidence.**

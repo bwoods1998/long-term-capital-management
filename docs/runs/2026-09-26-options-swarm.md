@@ -1310,6 +1310,14 @@ and this record, and lifts the Saturday continuation's no-real-money scope.
   so the same SPY/QQQ program) passed Validation with the parent's identical t 2.47. Its holdout look
   failed too. That lineage has spent two of its three looks.
 
+- **About 23:45Z Owner decision D8: the two-release limit is lifted.** The owner asked to build everything
+  possible before Monday's open and to ignore "at most two releases before Monday". Releases before
+  Monday's open are allowed. The deploy freeze Monday 13:25-20:05Z (except a rollback) stands. Plan:
+  - the harness audit's `swarm.json` switches now;
+  - research-side code (a researcher sweep tool, a park action for dead families, richer run
+    diagnostics), each adversarially reviewed, in one release R3 before 13:25Z Monday. The money path
+    (`league/live`, the gateway, the grant and the money table) is untouched.
+
 ## Scoreboard
 
 ### T0 (2026-09-26T06:23Z; repo figures at 06:40Z)
