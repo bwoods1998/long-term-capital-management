@@ -2061,6 +2061,26 @@ looks like beta. Validation 2025 and the holdout judge both.
   - Single-name families are scored only on the years their roots have data (2022-24).
   - The live trading process is untouched, and the gate image (Validation and holdout) is unchanged.
 
+- **15:50-17:05Z Strong-model hypothesis tournament on 5-year Train: 0 of 6 pass.**
+  - Six new mechanisms, none in the refuted list or the graveyard, each with kill tests written before any run.
+    Proposals `scratch/tourney/proposals.json` sha256 0b8762f1…
+  - They were swept on the sealed 2020-24 image (split 16, 1,258 days).
+  - All six failed K0, the ceiling with every fill at the mid:
+    - expiry-exercise inventory gap: worst year -2.03;
+    - charm flow overnight: -1.11;
+    - charm flow on expiry sessions: -0.78;
+    - expiry concession reversal: -1.24;
+    - cross-root hedging pressure: -0.17, 40 trades in 5 years;
+    - scheduled-event vanna: -0.73.
+  - Several lost to their own placebos. The always-long drift placebo beat the charm signal, and the next-expiry
+    placebo beat exercise inventory.
+  - 44 trials were used; the deflated Sharpe's ledger is about 62,044. All 10 boxes were terminated.
+  - Lessons, now agenda v8:
+    - dealer-positioning and open-interest signals on the index ETFs carry no direction beyond drift;
+    - a one-day $1-wide vertical costs 7-14% of its max loss per round trip at honest costs, so a mechanism needs a
+      large per-trade edge;
+    - screen at the mid first, and check the trade count before any box.
+
 ### Sprint scoreboard, T0 + 57 h (15:30Z Sept 28, in session)
 
 | # | Metric | Value |
