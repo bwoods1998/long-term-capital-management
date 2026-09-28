@@ -2136,4 +2136,16 @@ looks like beta. Validation 2025 and the holdout judge both.
 | 6 | Money | Equity $1,475.27: -$6.36 across the two calibration trips (market moves plus fees). Options buying power $475.24. 0 family orders (no family eligible) |
 | 7 | Compute | Sail $83.09 (about $3.7/h). Claude $61.79 of $100. OpenAI $634.41 + $13.33 in flight of $707 |
 
+### Sprint scoreboard, T0 + 61 h (19:31Z Sept 28, the session's last half hour)
+
+| # | Metric | Value |
+|---|---|---|
+| 1 | Population | 45 alive, 597 retired; 60 born and 46 retired in 2 h (5-year Train, agenda v9) |
+| 2 | Throughput | 804 cycles/h, median 20 s; 22 provider 503s and 6 502s (the model provider) |
+| 3 | Search | 63,858 trials, 288,652 program-years. Closest in Validation 2025: three families at 4/8 (`hedge-substitution-metal-call`, `monthly-reporting-stock-leader-call`, `turn-loser-rebound-call`) |
+| 4 | Evidence | Validation passes alive 0; holdout looks 2, passes 0 |
+| 5 | Real fills (D3) | 3 round trips (SPY, QQQ, SPY). Of 6 filled orders, 5 were at the mid and 1 one tick worse. Opens 3/3 at the mid; closes 2/3 at the mid |
+| 6 | Money | Equity $1,473.11: -$8.52 across the three calibration trips (market moves plus broker fees). Options buying power $473.08. 0 family orders (no family eligible) |
+| 7 | Compute | Sail $77.10 (about $3.5/h). Claude $67.17 of $100 (about $3.3/h since the architect's 32k answers). OpenAI $636.07 + $11.40 in flight of $707 |
+
 ## Report
