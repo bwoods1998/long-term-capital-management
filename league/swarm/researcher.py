@@ -14,9 +14,12 @@ its own `prompt_cache_key`.
 
 RETIRE (Sept 26: an unguarded `retire` on the REVISE turn took the population from 49 to 16 in 24 minutes). A REVISE
 turn offers `gym_run` alone: a REVISE always revises. A READ turn offers `retire` only while more families live than
-`population.start` and the family has had at least two validations (`can_retire`); a retire that is refused anyway
-is a plain refusal, never a cycle error (an error backs the family off for up to 30 minutes). The tournament's own
-retirements are unchanged.
+`population.start` and the family has had at least two validations, or, by THE IDLE RULE (R3, Sept 27: with the
+population held at its start, dead families never qualified and looped on placeholder runs), while more live than
+`population.floor` and the family is dead (`idle_dead`: `researcher.retire_idle_revisions` revisions since its last
+validation without an eligible Train version, or with its best Train score below zero) (`can_retire`). A retire that
+is refused anyway is a plain refusal, never a cycle error (an error backs the family off for up to 30 minutes). The
+tournament retires a dead family that never calls retire by the same rule; the architect refills below the start.
 
 WHAT IT SEES. Train in full; of Validation only pass or fail and how many of the line's checks passed (the owner's
 decision D2a, `diagnostics.validation_view`); of the holdout only the gate's pass or fail. Never a date in ctx (the
@@ -97,7 +100,9 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "retire", "description": "End research on your entire Gym family when you abandon its mechanism, not merely "
                                      "its latest version. This is final: best programs, evidence and trial counts remain; "
                                      "no further runs or tools start. Offered only while the population is above its start "
-                                     "and your family has had at least two validations.",
+                                     "and your family has had at least two validations, or once your family has spent many "
+                                     "revisions since its last validation without an eligible Train version (or with a best "
+                                     "Train score below zero).",
      "parameters": {"type": "object", "properties": {"reason": {"type": "string", "description": "Why the entire mechanism "
                     "is abandoned; retained in the private notebook and graveyard."}}, "required": ["reason"]}},
 ]
@@ -121,8 +126,10 @@ the half-spread (the Gym re-runs each new best at 1.5x and at the mid; the resul
 mechanism that earns in every year, not a filter that shines in one.
 Your family trades one to five of the Gym's roots; to change them, name the new roots in your program's NEEDS.
 The retire tool appears only while the population is above its start and your family has had at least two
-validations. Call it only when you abandon the entire mechanism, not one rejected version. Retirement is final for
-the family and preserves its best program and all evidence.
+validations, or once your family has spent many revisions since its last validation without an eligible Train version
+(or with a best Train score below zero). Call it only when you abandon the entire mechanism, not one rejected version;
+a dead mechanism is better retired than kept on placeholder runs, since its slot goes to a new idea. Retirement is
+final for the family and preserves its best program and all evidence.
 Your notes (the notebook and gym_run's note) are PUBLIC: they may appear on the public site. Write the mechanism and your
 reasoning there, never a threshold, level, delta, ratio, date or any other fitted value, in digits or in words; the
 numbers belong in your program and in the diagnostics, which stay private.
@@ -297,6 +304,47 @@ def completed_run(result: Mapping[str, Any]) -> bool:
     return result.get("status") == "ok" and bool(result.get("run_id"))
 
 
+#: The idle rule's default (`researcher.retire_idle_revisions`).
+RETIRE_IDLE_REVISIONS = 40
+
+
+def idle_revisions(fam: Mapping[str, Any]) -> int:
+    """Revisions since the family's last validation: its revisions less those it had at its last counted validation
+    (`validated_revisions`, which the tournament's verdict records from R3 on), and never more than `since_val_revisions`
+    (revisions since its validation last improved, or since its birth when it never validated: the only count a
+    family validated before R3 has)."""
+    since = int(fam.get("since_val_revisions") or 0)
+    mark = (fam.get("state") or {}).get("validated_revisions")
+    if isinstance(mark, int) and not isinstance(mark, bool):
+        return max(0, min(since, int(fam.get("revisions") or 0) - mark))
+    return since
+
+
+def idle_dead(fam: Mapping[str, Any], settings: Mapping[str, Any]) -> str | None:
+    """THE IDLE RULE (R3, Sept 27). A living Gym family is dead when it has spent `researcher.retire_idle_revisions`
+    revisions since its last validation (`idle_revisions`) without an eligible Train version (no `best_train`: none met
+    40 trades on 20 days in every Train year, or every one lost at 1.5x) or with its best Train score below zero. Returns
+    a clause saying which ("made no eligible Train version in 57 revisions since its last validation"), or None. A dead
+    family may retire at `population.start` (only `population.floor` holds it); the tournament retires one that does
+    not. Train figures only: nothing Validation or the holdout measured (D2)."""
+    limit = (settings.get("researcher") or {}).get("retire_idle_revisions", RETIRE_IDLE_REVISIONS)
+    try:
+        limit = int(limit or 0)
+    except (TypeError, ValueError):
+        return None
+    if limit <= 0 or fam.get("band") != "gym" or fam.get("retired_at"):
+        return None
+    idle = idle_revisions(fam)
+    if idle < limit:
+        return None
+    best = fam.get("best_train")
+    if best is None:
+        return f"made no eligible Train version in {idle} revisions since its last validation"
+    if float(best) < 0:
+        return f"kept its best Train score below zero over {idle} revisions since its last validation"
+    return None
+
+
 class Researcher:
     """Runs cycles for any family (one call per cycle; the loop's workers call it concurrently)."""
 
@@ -365,9 +413,14 @@ class Researcher:
             parts.append(f"The gate's last answer: {gate}.")
         if notes:
             parts.append("Your notebook (latest):\n" + "\n".join(f"- {diagnostics.scrub(n['text'])[:300]}" for n in notes))
+        may_retire = self.can_retire(fam)
+        dead = idle_dead(fam, self.settings) if may_retire else None
+        if dead:
+            parts.append(f"Your family {dead}. If its mechanism is dead, call retire with your reason when the tool is offered "
+                         "rather than re-running a placeholder: its slot goes to a new idea.")
         parts.append("Now: if a run just came back, read it (submit it if it is your best) and queue your next gym_run; "
                      "otherwise revise and call gym_run, with what you learned in its note."
-                     + (" If you abandon the entire mechanism, call retire with your reason." if self.can_retire(fam) else ""))
+                     + (" If you abandon the entire mechanism, call retire with your reason." if may_retire else ""))
         return "\n".join(parts)
 
     def robustness_text(self, fam: Mapping[str, Any]) -> str:
@@ -392,11 +445,23 @@ class Researcher:
 
     # ------------------------------------------------------------------ retirement, the top ten
     def can_retire(self, fam: Mapping[str, Any]) -> bool:
-        """`retire` is offered (and accepted) only for a Gym family with at least two validations while more families live
-        than `population.start` (the sprint, Sept 26)."""
-        if fam.get("band") != "gym" or int(fam.get("validations") or 0) < 2:
+        """`retire` is offered (and accepted) for a Gym family with at least two validations while more families live
+        than `population.start` (the sprint, Sept 26), and for a dead family (`idle_dead`, R3) while more live than
+        `population.floor`, whatever the start."""
+        if fam.get("band") != "gym":
             return False
-        return len(self.store.families(alive=True)) > int(self.settings.get("population", {}).get("start", 48))
+        pop = self.settings.get("population", {})
+        alive = len(self.store.families(alive=True))
+        if idle_dead(fam, self.settings) and alive > int(pop.get("floor", 16)):
+            return True
+        return int(fam.get("validations") or 0) >= 2 and alive > int(pop.get("start", 48))
+
+    def retire_floor(self, fam: Mapping[str, Any]) -> int:
+        """The population a researcher's retirement may not take the swarm to (`retire_gym` checks it atomically):
+        `population.floor` for a dead family (`idle_dead`), else the start (never below the floor)."""
+        pop = self.settings.get("population", {})
+        floor = int(pop.get("floor", 16))
+        return floor if idle_dead(fam, self.settings) else max(floor, int(pop.get("start", 48)))
 
     def is_top(self, fam: Mapping[str, Any], *, top: int) -> bool:
         """Among the bandit's `top` families by weight (a weight of zero or none never is)."""
@@ -513,15 +578,19 @@ class Researcher:
 
     def _execute(self, fam: Mapping[str, Any], name: str, args: Mapping[str, Any], out: dict[str, Any], *, author: str) -> Any:
         if name == "retire":
-            # Refused unless offered (`can_retire`); a refusal is a tool answer, never a cycle error (no backoff).
-            if not self.can_retire(self.store.family(fam["id"]) or fam):
-                out["retire_refused"] = True
-                return {"status": "refused", "reason": "retire is not available to your family now (it needs at least two "
-                                                       "validations and a population above its start): keep researching"}
-            pop = self.settings.get("population", {})
-            # The store checks the population atomically: a researcher's retirement never takes it to its start or below.
-            result = self.store.retire_gym(fam["id"], args.get("reason"), floor=max(int(pop.get("floor", 16)), int(pop.get("start", 48))),
-                                           source="researcher")
+            # Refused unless offered (`can_retire`); a refusal is a tool answer, never a cycle error (no backoff). The
+            # family is read, judged and retired in one transaction, so its floor follows the state it retires in.
+            with self.store.atomic():
+                current = self.store.family(fam["id"]) or fam
+                if not self.can_retire(current):
+                    out["retire_refused"] = True
+                    return {"status": "refused", "reason": "retire is not available to your family now (it needs at least two "
+                                                           "validations and a population above its start, or many revisions "
+                                                           "without an eligible Train version): keep researching"}
+                # The store checks the population atomically: a researcher's retirement never takes it to its start or
+                # below, a dead family's (`idle_dead`) never to its floor or below.
+                result = self.store.retire_gym(fam["id"], args.get("reason"), floor=self.retire_floor(current),
+                                               source="researcher")
             if result["status"] == "retired":
                 out["retired"] = True
                 try:
@@ -1114,4 +1183,5 @@ def migrate_objective(store: SwarmStore, *, beat: Callable[[], None] | None = No
 
 
 __all__ = ["Researcher", "TOOLS", "TOOLS_READ", "TOOLS_REVISE", "needs_of", "needs_roots", "with_roots", "check_code", "sanitize",
-           "date_like", "candidates_with", "migrate_objective", "OBJECTIVE"]
+           "date_like", "candidates_with", "migrate_objective", "OBJECTIVE", "idle_dead", "idle_revisions",
+           "RETIRE_IDLE_REVISIONS"]

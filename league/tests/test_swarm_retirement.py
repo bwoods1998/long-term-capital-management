@@ -6,9 +6,10 @@ from concurrent.futures import ThreadPoolExecutor
 
 from league.swarm.architect import Architect
 from league.swarm.gate import Gate
-from league.swarm.researcher import Researcher
+from league.swarm.researcher import Researcher, idle_dead, idle_revisions
+from league.swarm.seeds import family_spec
 from league.swarm.store import SwarmStore
-from league.swarm.tournament import Tournament
+from league.swarm.tournament import IDLE_CAUSE, Tournament
 from league.tests.swarm_fakes import result
 from league.tests.test_swarm_researcher import ResearcherCase
 from league.tests.test_swarm_rounds import RoundCase, strong
@@ -259,6 +260,177 @@ class ResearcherRetirement(ResearcherCase):
         self.assertEqual(len(self.sail.bodies), 1)
         self.assertEqual(len(self.pool.jobs), 1)
         self.assertEqual(self.researcher().cycle(self.fam["id"])["skipped"], "retired")
+
+
+class ResearcherIdleRetirement(ResearcherCase):
+    """THE IDLE RULE (R3, Sept 27): a dead family (`retire_idle_revisions` revisions since its last validation without an
+    eligible Train version, or with a best Train score below zero) may retire with the population AT its start; only
+    `population.floor` holds it. Every Train run here is ineligible (10 trades a year) unless a case says otherwise."""
+
+    def setUp(self):
+        super().setUp()
+        self.settings["population"].update(start=1, floor=0)  # one family alive: at the start, above the floor
+        self.pool.answer = lambda job: result(job.name, roots=job.roots, trades=10)
+        self.cancelled = []
+        self.pool.cancel_family = self.cancelled.append
+
+    def idle(self, revisions=40, fid=None):
+        self.store.update_family(fid or self.fam["id"], since_val_revisions=revisions)
+
+    def read_turn(self, *calls, researcher=None, params=None):
+        """One cycle: a REVISE (a new version: one more revision), then a READ turn making `calls`."""
+        self.read_body = len(self.sail.bodies) + 1
+        self.steps = [{"calls": [("gym_run", {"params": params or {"vrp_min": 1.3}})]}, {"calls": list(calls)}, {"text": "ok"}]
+        return (researcher or self.researcher()).cycle(self.fam["id"])
+
+    def offered(self):
+        return "retire" in [t["name"] for t in self.sail.bodies[self.read_body]["tools"]]
+
+    def status(self):
+        """The cycle's status (written before its REVISE turn: the idle count before the new version)."""
+        return next(i["content"] for i in reversed(self.sail.bodies[self.read_body]["input"])
+                    if i.get("role") == "user" and "Now: if a run just came back" in str(i.get("content")))
+
+    def test_a_dead_family_retires_at_the_start_and_its_lesson_is_written(self):
+        self.researcher().cycle(self.fam["id"])
+        fam = self.store.family(self.fam["id"])
+        self.assertIsNone(fam["best_train"], "no eligible Train version")
+        self.assertEqual(fam["validations"], 0, "the old rule (two validations, above the start) would refuse")
+        self.idle(40)
+        reason = "The mechanism made 10 trades a year at best. Condors on this root are dead."
+        out = self.read_turn(("retire", {"reason": reason}))
+        self.assertTrue(self.offered(), "READ offers retire to a dead family at the start")
+        self.assertIn("made no eligible Train version in 40 revisions since its last validation", self.status())
+        self.assertTrue(out["retired"])
+        self.assertNotIn("error", out)
+        self.assertEqual(self.store.family(self.fam["id"])["band"], "retired")
+        self.assertEqual(self.cancelled, [self.fam["id"]])
+        [lesson] = self.store.graveyard()
+        self.assertIn(reason, lesson["lesson"])
+        self.assertIn("Tried 2 versions", lesson["lesson"])
+        self.assertIn(f"Retired by researcher: {reason}", self.store.notebook(self.fam["id"])[-1]["text"])
+        [event] = [e for e in self.store.events_after(0) if e["kind"] == "swarm.retired"]
+        self.assertEqual(event["payload"]["cause"], "Condors on this root are dead.", "a figure never reaches the public cause")
+
+    def test_below_the_idle_count_the_old_rule_still_applies(self):
+        self.researcher().cycle(self.fam["id"])
+        self.idle(38)  # the REVISE turn's new version makes 39
+        out = self.read_turn(("retire", {"reason": "Costs defeated the mechanism."}))
+        self.assertFalse(self.offered())
+        self.assertNotIn("eligible Train version in", self.status())
+        self.assertTrue(out["retire_refused"])
+        self.assertIsNone(self.store.family(self.fam["id"])["retired_at"])
+
+    def test_a_family_with_an_eligible_version_cannot_retire_under_the_idle_rule(self):
+        self.pool.answer = lambda job: result(job.name, roots=job.roots)  # eligible: a positive best Train score
+        self.researcher().cycle(self.fam["id"])
+        self.idle(60)
+        out = self.read_turn(("retire", {"reason": "Costs defeated the mechanism."}))
+        fam = self.store.family(self.fam["id"])
+        self.assertGreater(fam["best_train"], 0)
+        self.assertIsNone(idle_dead(fam, self.settings))
+        self.assertFalse(self.offered(), "at the start with no validations: the old rule refuses, the idle rule does not apply")
+        self.assertTrue(out["retire_refused"])
+        self.assertNotIn("error", out)
+        self.assertIsNone(fam["retired_at"])
+        self.assertEqual(self.store.graveyard(), [])
+
+    def test_a_best_train_score_below_zero_counts_as_dead_and_zero_does_not(self):
+        fam = {**self.store.family(self.fam["id"]), "since_val_revisions": 40}
+        self.assertIn("below zero over 40 revisions", idle_dead({**fam, "best_train": -0.4}, self.settings))
+        self.assertIsNone(idle_dead({**fam, "best_train": 0.0}, self.settings))
+        self.assertIn("no eligible Train version", idle_dead({**fam, "best_train": None}, self.settings))
+        self.assertIsNone(idle_dead({**fam, "best_train": None, "band": "candidate"}, self.settings))
+        for off in (0, None):
+            self.settings["researcher"]["retire_idle_revisions"] = off
+            self.assertIsNone(idle_dead({**fam, "best_train": None}, self.settings), "0 or null turns the rule off")
+
+    def test_the_idle_count_starts_again_at_each_validation(self):
+        fam = {**self.store.family(self.fam["id"]), "best_train": None, "revisions": 70, "since_val_revisions": 70}
+        self.assertEqual(idle_revisions(fam), 70, "no validation mark (a family validated before R3): since_val_revisions")
+        marked = {**fam, "state": {"validated_revisions": 40}}
+        self.assertEqual(idle_revisions(marked), 30)
+        self.assertIsNone(idle_dead(marked, self.settings))
+        self.assertIsNotNone(idle_dead({**marked, "revisions": 80, "since_val_revisions": 80}, self.settings))
+
+    def test_the_floor_still_holds_for_a_dead_family(self):
+        self.settings["population"]["floor"] = 1
+        self.researcher().cycle(self.fam["id"])
+        self.idle(40)
+        out = self.read_turn(("retire", {"reason": "The mechanism is dead."}))
+        self.assertFalse(self.offered(), "at the floor: not offered")
+        self.assertTrue(out["retire_refused"])
+        self.assertNotIn("eligible Train version in", self.status(), "no nudge while the family may not retire")
+        # A stale "above the floor" read: the store's own count refuses at the floor (the dead family's floor, not the start).
+        r = self.researcher()
+        self.assertEqual(r.retire_floor(self.store.family(self.fam["id"])), 1)
+        r.can_retire = lambda fam: True
+        out = self.read_turn(("retire", {"reason": "Dead."}), researcher=r, params={"vrp_min": 1.5})
+        self.assertTrue(out["retire_refused"])
+        self.assertNotIn("error", out)
+        self.assertIsNone(self.store.family(self.fam["id"])["retired_at"])
+        self.assertEqual(self.store.graveyard(), [])
+
+    def test_a_dead_familys_retirement_goes_below_the_start_down_to_the_floor_only(self):
+        other = self.store.add_family({**family_spec(self.spec), "id": "other-dead"}, origin="seed")
+        self.settings["population"].update(start=2, floor=1)
+        self.researcher().cycle(self.fam["id"])
+        self.idle(40)
+        self.idle(40, fid=other["id"])
+        self.assertTrue(self.researcher().can_retire(self.store.family(other["id"])))
+        out = self.read_turn(("retire", {"reason": "The mechanism is dead."}))
+        self.assertTrue(out["retired"])
+        self.assertEqual(len(self.store.families(alive=True)), 1, "below the start (2), at the floor (1)")
+        self.assertFalse(self.researcher().can_retire(self.store.family(other["id"])), "the floor holds the last one")
+
+
+class TournamentIdleRetirement(RoundCase):
+    """The tournament's fallback for a dead family that never calls retire: the same idle rule, down to the floor only."""
+
+    def setUp(self):
+        super().setUp()
+        # The operator's running swarm.json keeps the old revision rule far out; the idle rule acts on its own.
+        self.settings["tournament"].update(retire_revisions=200, retire_evaluations=10 ** 6)
+
+    def test_dead_families_retire_at_the_start_down_to_the_floor_and_eligible_ones_stay(self):
+        for i in range(6):
+            self.family(f"f{i}")
+        self.settings["population"].update(start=6, floor=3)
+        for fid in ("f0", "f1", "f2", "f3", "f4"):
+            self.store.update_family(fid, since_val_revisions=40)
+        self.store.update_family("f1", best_train=-0.3)         # dead: a best Train score below zero
+        self.store.update_family("f3", best_train=1.2)          # an eligible version with a positive score: alive
+        self.store.update_family("f5", since_val_revisions=39)  # one revision short
+        self.store.note("f0", "the placeholder never trades")
+        t = Tournament(self.store, self.pool, self.settings)
+        out = t.retirements(self.store.families(alive=True))
+        self.assertEqual([r["family"] for r in out], ["f0", "f1", "f2"])
+        self.assertEqual(sorted(f["id"] for f in self.store.families(alive=True)), ["f3", "f4", "f5"])
+        self.assertEqual(out[0]["why"], f"It made no eligible Train version in 40 revisions since its last validation. {IDLE_CAUSE}")
+        self.assertIn("kept its best Train score below zero", out[1]["why"])
+        self.assertIn("f0", self.pool.cancelled)
+        lesson = self.store.graveyard("placeholder")[0]
+        self.assertEqual(lesson["family"], "f0")
+        self.assertIn("made no eligible Train version in 40 revisions", lesson["lesson"])
+        causes = [e["payload"]["cause"] for e in self.store.events_after(0) if e["kind"] == "swarm.retired"]
+        self.assertEqual(causes, [IDLE_CAUSE] * 3, "the public cause carries no figure")
+        # f4 is dead too, but the floor (3) holds it.
+        self.assertIsNotNone(idle_dead(self.store.family("f4"), self.settings))
+        self.assertEqual(t.retirements(self.store.families(alive=True)), [])
+        self.assertEqual(len(self.store.families(alive=True)), 3)
+
+    def test_a_counted_validation_restarts_the_idle_count(self):
+        self.family("a")
+        self.settings["population"].update(start=1, floor=0)
+        self.store.update_family("a", revisions=5)
+        Tournament(self.store, self.pool, self.settings).validate(self.store.families(alive=True))
+        fam = self.store.family("a")
+        self.assertEqual((fam["validations"], fam["state"]["validated_revisions"]), (1, 5))
+        self.store.update_family("a", revisions=44, since_val_revisions=90)
+        self.assertEqual(idle_revisions(self.store.family("a")), 39)
+        self.assertEqual(Tournament(self.store, self.pool, self.settings).retirements(self.store.families(alive=True)), [])
+        self.store.update_family("a", revisions=45)
+        self.assertEqual(len(Tournament(self.store, self.pool, self.settings).retirements(self.store.families(alive=True))), 1)
 
 
 class RoundRetirement(RoundCase):

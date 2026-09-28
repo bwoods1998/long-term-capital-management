@@ -69,6 +69,10 @@ DEFAULTS: dict[str, Any] = {
         "floor_usd_day": 150.0,         # every model call of the swarm together, a day (the Provider's floor cap): a fuse
         "idle_seconds": 5,              # between a family's cycles
         "note_every_cycles": 6,         # a public note to the tape at most this often per family
+        # The idle rule (R3, Sept 27): a Gym family with this many revisions since its last validation and no eligible
+        # Train version (or a best Train score below zero) is dead. It may retire at `population.start` (only
+        # `population.floor` holds it), and the tournament retires it if it does not. 0 or null turns the rule off.
+        "retire_idle_revisions": 40,
     },
     "gym": {
         "enabled": False,

@@ -489,7 +489,13 @@ distinguished from a publication delay.
 
 A Gym researcher can call `retire(reason)` to abandon its whole family, but only on a READ turn while more
 families live than `population.start` and the family has had at least two validations (Sept 26: an unguarded
-retire on the REVISE turn took the population from 49 to 16). Retirement stops queued research, keeps the best
+retire on the REVISE turn took the population from 49 to 16), or while more live than `population.floor` and the
+family is dead by the idle rule (R3, Sept 27; `researcher.idle_dead`): `researcher.retire_idle_revisions` (default
+40; 0 or null turns the rule off, in `swarm.json` without a deploy) revisions since its last validation without an
+eligible Train version, or with its best Train score below zero. With the population held at its start, dead
+families never qualified before and looped on placeholder runs (the operator retired 48 by hand on Sept 27). The
+tournament retires a dead family that never calls retire by the same rule, down to `population.floor`; the
+architect refills below `population.start`. Retirement stops queued research, keeps the best
 programs and every trial/look, and leaves existing positions under their exit owner. Researchers and the
 tournament share the same atomic population-floor check. A refused retire (not offered, or the floor) is a plain
 tool answer: no cycle error and no cooldown; it does not retire the family. The raw reason stays private in its
