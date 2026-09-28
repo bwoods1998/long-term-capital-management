@@ -372,18 +372,31 @@ forward row, never on the site. Its programs load and decide after every real de
 their own decider child (1 GB); its chains are read after the real path, under the minute's data budget.
 Its trades are kept in `/workspace/state/observe.sqlite` (0600) for the post-mortem only.
 
-**The D3 calibration round trips**: 1-lot SPY and QQQ call verticals one dollar wide nearest the money,
-at 10:00, 12:30 and 14:30 ET; open at the mid, then once at the mid plus a tick; close at the mid, a tick
-under, then the natural (at most six close attempts a position a day, backing off after a refusal). One
-round trip at a time, within a strict $50 bound on the day's possible loss: a new open goes only while
-today's realized calibration loss (net, floored at zero) plus what is still held or working plus its own
-maximum loss stays within $50; a closed round trip frees its maximum loss. Only with real money on, the
-grant active, real entries open and the paper proof passed; family
-`house:calibration`, never evidence and never Profit (the equity-based figure after compute carries it). Samples:
-`/workspace/state/calibration.sqlite` (0600), read with
-`python3 -m league.live --root /workspace/state --calibration` (per cell: attempts, outcomes, fill rate,
-mean fill against the mid in ticks, median seconds to fill). Off by default: `swarm.json`
-`{"live": {"calibration": true}}` turns it on.
+**The D3 calibration round trips**: 1-lot SPY, QQQ and IWM call verticals one dollar wide nearest the
+money, hourly at 10:00, 11:00, 12:00, 13:00, 14:00 and 15:00 ET (none starts from 15:15); open at the mid
+for 5 minutes -- at 12:00 and 14:00 the patient cell `mid25`, the mid for 25 minutes -- then once at the mid
+plus a tick (its own cell `mid25+1` after the patient open), only after an open its time in force ended;
+close at the mid, a tick under, then the natural (at most six close attempts a position a day, backing off
+after a refusal; every ladder, at its slowest, is sent before the 15:45 last resort). One round trip at a
+time, within a strict $50 bound on the day's possible loss: a new open goes only while today's realized
+calibration loss (net, floored at zero) plus what is still held or working plus its own maximum loss stays
+within $50; a closed round trip frees its maximum loss. What it leaves the families: every calibration open
+leaves two Probe floors ($200) of the account-wide day cap (1.0 x sizing equity, which every dispatched open
+fills by its whole maximum loss, cancelled ones too); no round trip starts once its own legs today (orders
+and cancels) reach 80 of the day's 250 (a round trip is 4 legs when both mids fill, about 30 at its
+slowest, so at most about 110 before the House's backstop); and a working open whose contracts a family's
+real open was refused on is cancelled at once, its round trip ended (recorded `interrupted`). An attempt
+cancelled before its time in force ran out (a real-entry block, the House's cancel, that yield) is
+`interrupted`: never a sample, never in a fill rate. Only with real money on, the grant active, real
+entries open and the paper proof passed; family `house:calibration`, never evidence and never Profit (the
+equity-based figure after compute carries it). The owner's written D3 terms (`league/constitution.py`'s
+comments) say 1-lot SPY and QQQ; IWM and the six slots' volume (about $430-540 of maximum loss dispatched
+on a heavy day, against about $270 before) are the operator's decision inside D3's $50 net bound (Sept 28,
+2026), the money table unchanged. Samples: `/workspace/state/calibration.sqlite` (0600; each row its
+order's time in force and cancel reason), read with `python3 -m league.live --root /workspace/state
+--calibration` (the plan, then every cell, `mid25`, `mid25+1` and the unsampled included: working minutes,
+attempts, outcomes, fill rate, mean fill against the mid in ticks, median seconds to fill). Off by default:
+`swarm.json` `{"live": {"calibration": true}}` turns it on.
 
 **Turning real money on** (M4b; the sprint's R2): the gateway deployed first (`OPTION_STRUCTURES_REAL`
 `debit_vertical,long_butterfly,long_call,long_put`, `MAX_ORDER_EQUITY_SHARE` 0.25); then the owner deploy
@@ -476,7 +489,7 @@ with `real_money` true (a new money digest); `python3 scripts/live_trading.py --
 | `MAX_ORDER_MAX_LOSS_USD`, `MAX_ORDER_EQUITY_SHARE`, `MAX_DAY_EQUITY_SHARE`, `MAX_DAY_ORDERS`, `MAX_DAY_OPEN_ORDERS` | `gateway/wrangler.jsonc` | $1,000, 0.25, 1.0, 300, 250 | the real account's caps by maximum loss; equal to the constitution's `options_money.gateway` | gateway deploy with the matching House deploy |
 | `OPTION_STRUCTURES_REAL` | `gateway/wrangler.jsonc` | `debit_vertical,long_butterfly,long_call,long_put` | the types real money may open; must equal the constitution's `options_money.real_types` (`league.ci`) | gateway deploy with the matching House deploy and a ratify |
 | `live.observe`, `live.observe_max` | `swarm.json` on the box | true, 48 | the observe band and its cap; read each minute, no deploy (a swarm.json that is not a JSON object turns it off) | edit `swarm.json` |
-| `live.calibration`, `live.calibration_samples` | `swarm.json` on the box | false, 30 | the D3 round trips (still only with real money on, the grant and the paper proof); samples a symbol's open-at-mid cell stops at | edit `swarm.json` |
+| `live.calibration`, `live.calibration_samples` | `swarm.json` on the box | false, 30 | the D3 round trips (still only with real money on, the grant and the paper proof); samples a symbol's open cell (the mid, or the patient mid at 12:00 and 14:00) stops at | edit `swarm.json` |
 | `FRONTIER_MONTH_USD`, `FRONTIER_MONTH_MAX_USD`, `FRONTIER_FUNDED_MONTH` | `gateway/wrangler.jsonc` | $707, September 2026 only | the OpenAI month; expires before an unfunded month can renew it | gateway deploy |
 | The money rules | `league/constitution.py` | the sprint's D4 table (money `ad9bd54c`) | what real money may do | owner deploy, then `--ratify` |
 
