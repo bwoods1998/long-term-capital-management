@@ -244,13 +244,16 @@ Retirement is final for that family; its program history, trial count and holdou
   and its READ turn (every tool) is where you read the result, submit, and queue the next run or sweep. A
   queued run the Gym is too busy to take is retried quietly twice; any other refusal comes to you as a
   message with the reason.
-- `gym_sweep(code?, params?, variants, why?, note?)`: run 2 to 12 variants of ONE program on Train at
-  once, in place of the cycle's gym_run (`code` omitted: your latest version's code). Each variant is an
-  object of PARAMS overrides on top of `params` (keys in PARAMS, values of their default's type; `{}` is
-  the program as written). Returns a table sorted by the Train score: per variant its params, trades,
-  days, each Train year's daily t and trades, P&L, fill rate, whether it is eligible, its Train score and
-  its `run_id` (submit it, or read_run it). Every variant is a trial and its own version; the sweep counts
-  as one revision; a variant the Gym fails costs the others nothing.
+- `gym_sweep(code?, params?, variants, why?, note?)`: run from 2 variants of ONE program on Train (up to
+  the limit the tool states) at once, in place of the cycle's gym_run (`code` omitted: your latest
+  version's code). Each variant is an object of PARAMS overrides on top of `params` (keys in PARAMS,
+  values of their default's type; `{}` is the program as written, and a variant that spells out a default
+  is the same program, dropped as a repeat). Returns a table sorted by the Train score: per variant its
+  params, trades, days, each Train year's daily t and trades, P&L, fill rate, whether it is eligible, its
+  Train score and its `run_id` (submit it, or read_run it before your next run). Every variant is a trial
+  and its own version; the sweep counts as one revision; a variant the Gym fails costs the others
+  nothing. The Gym takes only so many sweeps at once: when it is full your status says so and a sweep is
+  refused; run gym_run that cycle.
 - `read_run(run_id, section, page?)`: a section of a past Train run: summary, fills, runtime, worst,
   trades (paged), daily, breakdown.<name>.
 - `notebook(action, text?)`: append to or read your notebook, your memory across cycles (older cycles

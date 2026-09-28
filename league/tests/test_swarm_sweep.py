@@ -8,12 +8,15 @@ from __future__ import annotations
 import copy
 import json
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 
 from league.swarm import settings as S
 from league.swarm.pool import Box, GymJob, GymPool, PoolError
-from league.swarm.researcher import Researcher, sweep_tool, sweep_variants
+from league.swarm.researcher import Researcher, params_of, sweep_tool, sweep_variants
+from league.swarm.seeds import SEEDS, family_spec, program_for
 from league.swarm.store import SwarmStore
 from league.tests.swarm_fakes import Clock, FakeDriver, FakeSail, result
 from league.tests.test_swarm_researcher import ResearcherCase, calls_in
@@ -137,23 +140,37 @@ class Pool(unittest.TestCase):
         self.assertFalse(any(j.done.is_set() for j in mine + [other]))
 
 class RealPool(SweepCase):
-    def test_a_sweep_on_the_real_pool_is_one_batch_and_every_variant_lands(self):
+    def real_pool(self, *, batch: int = 5, answer_hook=None, block: threading.Event | None = None, **gym) -> list:
+        """The real threaded GymPool with one box and a fake driver; the driver's batches (their program names) come back.
+        `answer_hook()` runs before each program's answer (on the box's thread); `block` holds every batch until it is set."""
         calls: list = []
 
         def answer(name, code, params, window, stress, roots):
+            if answer_hook is not None:
+                answer_hook()
             out = scored(GymJob(family="x", version=1, code=code, params=params, window=window, roots=tuple(roots)))
             out["program"] = name
             return out
 
-        self.settings["gym"].update({"enabled": True, "image_checkpoint": "sbcp_11111111-aaaa", "batch_programs": 5,
-                                     "batch_wait_seconds": 8})
+        class Driver(FakeDriver):
+            def run(self, programs, **kw):
+                if block is not None:
+                    block.wait(10)
+                return super().run(programs, **kw)
+
+        self.settings["gym"].update({"enabled": True, "image_checkpoint": "sbcp_11111111-aaaa", "batch_programs": batch,
+                                     "batch_wait_seconds": 8, **gym})
         self.pool = GymPool(self.store, FakeSail(), self.settings, clock=self.clock, threaded=True,
-                            driver_factory=lambda client, box: FakeDriver(client, box, answer=answer, calls=calls))
+                            driver_factory=lambda client, box: Driver(client, box, answer=answer, calls=calls))
         self.addCleanup(self.pool.stop, join_seconds=1)
         box = Box("sb_00000001-ffff-ffff-ffff-ffffffffffff", "gym", "sbcp_11111111-aaaa", "ready",
-                  driver=FakeDriver(None, "x", answer=answer, calls=calls), roots=("SPY", "QQQ"), last_used=self.clock())
+                  driver=Driver(None, "x", answer=answer, calls=calls), roots=("SPY", "QQQ"), last_used=self.clock())
         self.pool.boxes[box.id] = box
         self.pool._spawn(box)  # its dispatcher: a short batch waits for company on the frozen clock, a full one goes
+        return calls
+
+    def test_a_sweep_on_the_real_pool_is_one_batch_and_every_variant_lands(self):
+        calls = self.real_pool()
         view, out = self.sweep([{"vrp_min": v} for v in (1.2, 1.3, 1.4, 1.5, 1.6)], code=self.code)
         self.assertEqual(view["status"], "ok", view)
         self.assertEqual(len(calls), 1, "the pool ran the five variants as one day-major batch: none superseded another")
@@ -161,6 +178,59 @@ class RealPool(SweepCase):
         self.assertEqual((view["completed"], len(view["table"]), out["trials"]), (5, 5, 5))
         self.assertEqual(self.store.family(self.fid)["trials"], 5)
         self.assertEqual(len(self.store.runs(self.fid, window="train")), 5)
+
+    def test_a_sweep_larger_than_a_batch_runs_a_full_batch_then_a_partial_one(self):
+        self.settings["researcher"]["max_sweep_variants"] = 8
+        queued, all_in, ticked = [], threading.Event(), []
+
+        def tick():  # the first answer waits for every variant to be queued, then the batch takes 10 s of clock
+            if not ticked:
+                ticked.append(all_in.wait(10))
+                self.clock.advance(10)
+
+        calls = self.real_pool(batch=5, answer_hook=tick)
+        submit = self.pool.submit
+
+        def counting(job):
+            queued.append(job)
+            submit(job)
+            if len(queued) == 7:
+                all_in.set()
+            return job
+
+        self.pool.submit = counting
+        view, out = self.sweep([{"vrp_min": 1.0 + i / 10} for i in range(7)], code=self.code)
+        self.assertEqual(ticked, [True])
+        self.assertEqual(view["status"], "ok", view)
+        self.assertEqual([len(c["programs"]) for c in calls], [5, 2], "the two left over waited batch_wait_seconds, then went")
+        self.assertEqual((view["completed"], len(view["table"]), out["trials"]), (7, 7, 7))
+        self.assertEqual(len([r for r in self.store.runs(self.fid, window="train") if r["summary"].get("sweep")]), 7)
+        self.assertTrue(all(j.result is None for j in queued), "only a compact row of each landed variant is kept")
+
+    def test_a_sweep_that_outlives_its_wait_lands_late_and_its_retry_runs_only_the_rest(self):
+        gate = threading.Event()
+        calls = self.real_pool(batch=2, block=gate, run_timeout_seconds=-119.5)  # the researcher waits 0.5 s a variant
+        grid = [{"vrp_min": v} for v in (1.2, 1.3, 1.4, 1.5)]
+        view, out = self.sweep(grid, code=self.code)
+        self.assertEqual(view["status"], "gym_error", view)
+        self.assertIn("did not answer", view["error"])
+        self.assertEqual(self.pool.queued(), 0, "the two variants still queued were abandoned: nothing is left behind")
+        self.assertEqual(self.store.family(self.fid)["trials"], 0)
+        gate.set()  # the running batch (two variants) lands after the researcher gave up on it
+        for _ in range(200):
+            if self.store.family(self.fid)["trials"] >= 2:
+                break
+            time.sleep(0.02)
+        self.assertEqual(self.store.family(self.fid)["trials"], 2, "a variant that lands late is a trial")
+        self.assertEqual([len(c["programs"]) for c in calls], [2], "the abandoned ones never ran")
+        self.settings["gym"]["run_timeout_seconds"] = 900
+        view, out = self.sweep(grid, code=self.code)  # the same sweep again: a queued sweep's quiet retry
+        self.assertEqual(view["status"], "ok", view)
+        self.assertEqual([len(c["programs"]) for c in calls], [2, 2], "only the two that never ran run now")
+        self.assertEqual((out["trials"], out["sweep"]["reused"], view["completed"]), (2, 2, 4))
+        self.assertEqual(sum(1 for r in view["table"] if r.get("ran_before")), 2)
+        self.assertEqual(self.store.family(self.fid)["trials"], 4, "each variant evaluated once, each one trial")
+        self.assertEqual(len({r["run_id"] for r in view["table"]}), 4)
 
 
 class Sweeps(SweepCase):
@@ -279,6 +349,55 @@ class Sweeps(SweepCase):
         self.assertEqual(self.store.family(self.fid)["roots"], ["SPY", "QQQ"])
         self.assertTrue(all(j.roots == ("SPY", "QQQ") and j.code == pooled for j in self.pool.train()[1:]))
 
+    def test_a_version_demoted_at_1_5x_ranks_with_the_ineligible_and_never_heads_the_table(self):
+        self.first()
+        first, _ = self.sweep([{"vrp_min": 1.4}, {"vrp_min": 1.3}])
+        peak = first["table"][0]["version"]
+        self.store.set_state(self.fid, robust_failed=[peak])
+        view, out = self.sweep([{"vrp_min": 1.4}, {"vrp_min": 1.3}, {"vrp_min": 1.5}])
+        self.assertNotEqual(view["version"], peak)
+        self.assertEqual(view["run_id"], view["table"][0]["run_id"])
+        self.assertEqual(out["run_id"], view["table"][0]["run_id"])
+        self.assertTrue(view["table"][0]["eligible"])
+        demoted = view["table"][-1]
+        self.assertEqual((demoted["version"], demoted["eligible"]), (peak, False))
+        self.assertIn("1.5x", demoted["why_not"])
+        self.assertEqual(out["score"], view["table"][0]["score"], "the sweep's score is its best row that counts")
+
+    def test_every_row_of_a_sweep_stays_readable_until_the_next_run(self):
+        self.settings["researcher"]["max_sweep_variants"] = 10
+        self.first()
+        for i in range(5):  # five earlier ordinary runs: with the starter's, six full results
+            self.researcher()._gym_run(self.store.family(self.fid), {"params": {"vrp_min": 1.0 + i / 10}}, {"tool_calls": 0},
+                                       author="synthetic")
+        view, _ = self.sweep([{"vrp_min": 1.0 + i / 20} for i in range(10)])
+        me = self.researcher()
+        for row in view["table"]:
+            answer = me._local_tool(self.store.family(self.fid), "read_run", {"run_id": row["run_id"], "section": "summary"}, {})
+            self.assertNotIn("error", answer, row)
+        self.researcher()._gym_run(self.store.family(self.fid), {"params": {"vrp_min": 1.33}}, {"tool_calls": 0}, author="synthetic")
+        state = self.store.family(self.fid)["state"]
+        rows = [r for r in self.store.runs(self.fid, window="train") if r["purpose"] != "robustness"]
+        newest = {r["run_id"] for r in rows[:SwarmStore.KEEP_FULL_TRAIN_RUNS]}
+        kept = {r["run_id"] for r in rows if r["path"]}
+        self.assertLessEqual(newest, kept, "the next run prunes by age as ever: the newest six ...")
+        self.assertLessEqual(kept - newest, {state.get("best_train_run"), state.get("submitted_run")}, "... and the best")
+        self.assertEqual(len(rows), 17)
+
+    def test_each_variant_is_recorded_as_it_lands(self):
+        self.first()
+        seen: list[int] = []
+        wait = self.pool.wait
+
+        def counting(job, timeout=None, **kw):
+            seen.append(sum(1 for r in self.store.runs(self.fid, window="train") if r["summary"].get("sweep")))
+            return wait(job, timeout, **kw)
+
+        self.pool.wait = counting
+        view, out = self.sweep([{"vrp_min": v} for v in (1.2, 1.3, 1.4, 1.5)])
+        self.assertEqual(seen, [0, 1, 2, 3], "a variant's run is recorded before the next one is waited for")
+        self.assertEqual(out["trials"], 4)
+
 
 class Validation(SweepCase):
     def refused(self, variants, **args):
@@ -304,7 +423,7 @@ class Validation(SweepCase):
     def test_one_variant_or_too_many_is_refused(self):
         self.assertIn("at least 2", self.refused([{"vrp_min": 1.3}]))
         self.setUp()
-        self.assertIn("at most 12", self.refused([{"vrp_min": 1.0 + i / 100} for i in range(13)]))
+        self.assertIn("at most 6", self.refused([{"vrp_min": 1.0 + i / 100} for i in range(7)]), "the default is 6")
         self.setUp()
         self.settings["researcher"]["max_sweep_variants"] = 3
         self.assertIn("at most 3", self.refused([{"vrp_min": 1.0 + i / 100} for i in range(4)]))
@@ -336,6 +455,24 @@ class Validation(SweepCase):
         self.assertIsNone(why)
         self.assertEqual((out, dropped), ([{"a": 2.0}, {"a": 3.0, "b": False}], 1))
 
+    def test_a_default_spelled_out_is_the_program_as_written(self):
+        code = "NEEDS = {'roots': ['SPY']}\nPARAMS = {'a': 1.0, 'b': True}\n"
+        out, dropped, why = sweep_variants(code, [{"a": 1.0}, {}])
+        self.assertIn("fewer than 2 distinct", why, "{} and the default spelled out are one program")
+        out, dropped, why = sweep_variants(code, [{}, {"a": 1.0, "b": True}, {"a": 2.0}])
+        self.assertIsNone(why)
+        self.assertEqual((out, dropped), ([{}, {"a": 2.0}], 1))
+        out, dropped, why = sweep_variants(code, [{}, {"a": 2.0}], {"a": 2.0})
+        self.assertIn("fewer than 2 distinct", why, "a variant that repeats the base is the base")
+
+    def test_a_default_spelled_out_is_one_version_one_run_and_one_trial(self):
+        self.first()
+        fam = self.store.family(self.fid)
+        view, out = self.sweep([{}, {"vrp_min": 1.2}, {"vrp_min": 1.4}])  # 1.2 is the program's default
+        self.assertEqual((view["variants"], view["repeats_dropped"]), (2, 1))
+        self.assertEqual(len({r["run_id"] for r in view["table"]}), 2)
+        self.assertEqual(self.store.family(self.fid)["trials"] - fam["trials"], 2)
+
 
 class Turns(SweepCase):
     def names(self, body):
@@ -359,7 +496,7 @@ class Turns(SweepCase):
         self.assertEqual(self.store.version(self.fid, fam["best_version"])["params"], {"vrp_min": 1.4})
         sweep = next(t for t in revise["tools"] if t["name"] == "gym_sweep")
         self.assertIn("PUBLIC", sweep["parameters"]["properties"]["note"]["description"])
-        self.assertIn("2 to 12", sweep["parameters"]["properties"]["variants"]["description"])
+        self.assertIn("2 to 6", sweep["parameters"]["properties"]["variants"]["description"])
 
     def test_a_second_run_or_sweep_is_queued_and_opens_the_next_cycle(self):
         self.first()
@@ -409,11 +546,158 @@ class Turns(SweepCase):
         self.assertIn("gym_sweep is switched off", self.sail.bodies[0]["input"][-1]["content"])
 
     def test_the_limit_in_the_tool_follows_the_setting(self):
-        self.settings["researcher"]["max_sweep_variants"] = 6
+        self.settings["researcher"]["max_sweep_variants"] = 4
         tools = self.researcher().tools(revise=True, retire=False)
         sweep = next(t for t in tools if t["name"] == "gym_sweep")
-        self.assertEqual(sweep, sweep_tool(6))
-        self.assertIn("2 to 6", sweep["parameters"]["properties"]["variants"]["description"])
+        self.assertEqual(sweep, sweep_tool(4))
+        self.assertIn("2 to 4", sweep["parameters"]["properties"]["variants"]["description"])
+
+    def test_a_queued_sweeps_quiet_retry_never_reruns_a_variant_that_landed_late(self):
+        self.first()
+        grid = {"variants": [{"vrp_min": v} for v in (1.3, 1.4, 1.5)], "why": "a grid"}
+        cycles, _ = self.store.convo(self.fid)
+        self.store.save_convo(self.fid, cycles, {"call_id": "q", "name": "gym_sweep", "arguments": grid, "author": "synthetic"})
+        fam = self.store.family(self.fid)
+        # The Gym gives up on all three: two were running (they land after the wait), one never started.
+        self.pool.fail = lambda job: "late" if job.params["vrp_min"] != 1.5 else "abandoned before it ran"
+        out = self.researcher().cycle(self.fid)
+        self.assertIn("gym:", out["error"])
+        pending = self.store.convo(self.fid)[1]
+        self.assertEqual((pending["name"], pending["tries"]), ("gym_sweep", 1), "kept for a quiet retry")
+        self.assertEqual(self.sail.bodies, [], "no model is paid to read a busy Gym")
+        for late, landed in self.pool.lates:
+            late(landed)
+        self.assertEqual(self.store.family(self.fid)["trials"] - fam["trials"], 2)
+        self.pool.fail = lambda job: None
+        jobs = len(self.pool.train())
+        self.steps = [{"text": "read it"}]
+        out = self.researcher().cycle(self.fid)
+        self.assertEqual([j.params for j in self.pool.train()[jobs:]], [{"vrp_min": 1.5}], "only the variant that never ran")
+        self.assertEqual(out["sweep"], {"variants": 3, "completed": 3, "eligible": 3, "failed": 0, "reused": 2})
+        self.assertEqual(out["trials"], 1)
+        self.assertEqual(self.store.family(self.fid)["trials"] - fam["trials"], 3, "each variant evaluated once, one trial each")
+        self.assertIsNone(self.store.convo(self.fid)[1])
+        self.assertIn("The gym_sweep you queued last cycle ran:", json.dumps(self.sail.bodies[-1]["input"]))
+
+
+class Load(SweepCase):
+    """SWEEP LOAD (the review of PR #396): a sweep's variants, and the variants of every sweep in flight together, are
+    capped, since the pool had no spare boxes; a sweep beyond the room is a plain refusal, and gym_run still runs."""
+
+    def other_family(self):
+        spec = next(s for s in SEEDS if s["id"] == "putspread-dip")
+        fam = self.store.add_family(family_spec(spec), origin="seed")
+        code, _ = program_for(spec)
+        key, value = next((k, v) for k, v in params_of(code).items() if isinstance(v, float) and v)
+        return fam["id"], [{key: value * 0.8}, {key: value * 1.2}]
+
+    def test_the_defaults_are_conservative(self):
+        cfg = S.DEFAULTS["researcher"]
+        self.assertEqual((cfg["max_sweep_variants"], cfg["max_sweep_jobs_in_flight"]), (6, 24))
+        me = self.researcher()
+        self.assertEqual((me.max_variants, me.max_sweep_jobs, me.sweep_room()), (6, 24, 24))
+        gym = S.DEFAULTS["gym"]
+        self.assertLess(cfg["max_sweep_jobs_in_flight"], gym["max_boxes"] * gym["batch_programs"],
+                        "every sweep in flight fits in one round of the pool's batches")
+
+    def test_a_sweep_that_does_not_fit_is_refused_and_nothing_reaches_the_gym(self):
+        self.first()
+        self.settings["researcher"]["max_sweep_jobs_in_flight"] = 8
+        me = self.researcher()
+        self.assertTrue(me._reserve_sweep("another-family", 7))
+        fam = self.store.family(self.fid)
+        before = (len(self.pool.jobs), len(self.store.versions(self.fid)), fam["revisions"], fam["trials"])
+        out: dict = {"tool_calls": 0}
+        view = me._gym_sweep(fam, {"variants": [{"vrp_min": 1.3}, {"vrp_min": 1.5}]}, out, author="synthetic")
+        self.assertEqual(view["status"], "refused")
+        self.assertIn("full of other families' sweeps", view["reason"])
+        self.assertNotIn("fits", view["reason"])
+        self.assertIn("gym_run", view["hint"])
+        self.assertTrue(out["sweep_busy"])
+        self.assertNotIn("error", out, "a plain refusal: no backoff")
+        fam = self.store.family(self.fid)
+        self.assertEqual((len(self.pool.jobs), len(self.store.versions(self.fid)), fam["revisions"], fam["trials"]), before)
+        me._release_sweep("another-family", 2)  # five in flight: room for three
+        grid = [{"vrp_min": 1.0 + i / 10} for i in range(4)]
+        view = me._gym_sweep(fam, {"variants": grid}, {"tool_calls": 0}, author="synthetic")
+        self.assertIn("a sweep of at most 3 variants fits", view["reason"])
+        view = me._gym_sweep(fam, {"variants": grid[:3]}, {"tool_calls": 0}, author="synthetic")
+        self.assertEqual(view["status"], "ok")
+        self.assertEqual(me.sweep_room(), 3, "its room came back when it returned")
+        run = me._gym_run(self.store.family(self.fid), {"params": {"vrp_min": 1.33}}, {"tool_calls": 0}, author="synthetic")
+        self.assertEqual(run["status"], "ok", "a gym_run never needs sweep room")
+
+    def test_the_room_is_held_while_the_sweep_waits_and_freed_after_even_on_a_crash(self):
+        self.first()
+        me = self.researcher()
+        rooms: list[int] = []
+        wait = self.pool.wait
+
+        def watching(job, timeout=None, **kw):
+            rooms.append(me.sweep_room())
+            return wait(job, timeout, **kw)
+
+        self.pool.wait = watching
+        view = me._gym_sweep(self.store.family(self.fid), {"variants": [{"vrp_min": v} for v in (1.3, 1.4, 1.5)]},
+                             {"tool_calls": 0}, author="synthetic")
+        self.assertEqual(view["status"], "ok")
+        self.assertEqual((rooms, me.sweep_room()), ([21, 21, 21], 24))
+
+        def crash(job, timeout=None, **kw):
+            raise RuntimeError("synthetic failure inside the wait")
+
+        self.pool.wait = crash
+        with self.assertRaises(RuntimeError):
+            me._gym_sweep(self.store.family(self.fid), {"variants": [{"vrp_min": 1.1}, {"vrp_min": 1.6}]}, {"tool_calls": 0},
+                          author="synthetic")
+        self.assertEqual(me.sweep_room(), 24, "an exception frees the room too")
+
+    def test_two_families_sweeping_at_once_share_the_room(self):
+        self.first()
+        other, grid = self.other_family()
+        me = self.researcher()
+        me.cycle(other)  # its starter program: version 1
+        self.settings["researcher"]["max_sweep_jobs_in_flight"] = 4
+        inside, gate = threading.Event(), threading.Event()
+        wait = self.pool.wait
+
+        def held(job, timeout=None, **kw):
+            if job.family == self.fid:
+                inside.set()
+                gate.wait(10)
+            return wait(job, timeout, **kw)
+
+        self.pool.wait = held
+        views: dict = {}
+        mine = threading.Thread(target=lambda: views.setdefault("mine", me._gym_sweep(
+            self.store.family(self.fid), {"variants": [{"vrp_min": v} for v in (1.2, 1.3, 1.4, 1.5)]}, {"tool_calls": 0},
+            author="synthetic")))
+        mine.start()
+        self.addCleanup(gate.set)
+        self.assertTrue(inside.wait(10))
+        self.assertEqual(me.sweep_room(), 0)
+        self.assertIn("full of other families' sweeps", me.status(self.store.family(other)))
+        out: dict = {"tool_calls": 0}
+        busy = me._gym_sweep(self.store.family(other), {"variants": grid}, out, author="synthetic")
+        self.assertEqual((busy["status"], out.get("sweep_busy")), ("refused", True))
+        self.assertFalse(any(j.family == other and j.group for j in self.pool.jobs), "nothing of it reached the Gym")
+        run = me._gym_run(self.store.family(other), {"params": grid[0]}, {"tool_calls": 0}, author="synthetic")
+        self.assertEqual(run["status"], "ok", "its gym_run runs while the other family sweeps")
+        gate.set()
+        mine.join(10)
+        self.assertEqual(views["mine"]["status"], "ok")
+        self.assertEqual(me.sweep_room(), 4)
+
+    def test_the_status_says_how_big_a_sweep_fits_and_when_none_does(self):
+        self.first()
+        me = self.researcher()
+        self.assertIn("A sweep of up to 6 variants fits in the Gym now.", me.status(self.store.family(self.fid)))
+        me._reserve_sweep("another-family", 20)
+        self.assertIn("A sweep of up to 4 variants fits in the Gym now.", me.status(self.store.family(self.fid)))
+        me._reserve_sweep("another-family", 3)
+        text = me.status(self.store.family(self.fid))
+        self.assertIn("full of other families' sweeps now: a gym_sweep this cycle would be refused", text)
+        self.assertNotIn("fits in the Gym", text)
 
 
 if __name__ == "__main__":

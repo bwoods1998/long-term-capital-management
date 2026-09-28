@@ -55,9 +55,14 @@ DEFAULTS: dict[str, Any] = {
         "min_call_seconds": 75,         # a later model call starts only with this much of the cycle left
         "max_tool_calls": 8,            # a cycle's tool calls
         # `gym_sweep` (R3, Sept 27): many PARAMS variants of one program in one call, in place of the cycle's one gym_run.
-        # Every variant is a trial; the whole sweep counts as one revision.
+        # Every variant is a trial; the whole sweep counts as one revision. The pool had no spare boxes when it shipped
+        # (Sept 27: every one of its boxes awake, ~1,300 jobs an hour at ~20 box-seconds a job), so both limits start
+        # small: a sweep's variants, and the variants of every sweep in flight together (a sweep beyond that is refused
+        # and the researcher runs gym_run that cycle). Raise them in swarm.json while gym_seconds' p90 and the pool's
+        # abandoned jobs stay low.
         "sweep_enabled": True,
-        "max_sweep_variants": 12,
+        "max_sweep_variants": 6,
+        "max_sweep_jobs_in_flight": 24,
         "cycle_seconds": 170,           # a cycle's wall-time budget (target under 3 minutes)
         "history_cycles": 4,            # cycles of conversation kept (older ones live in the notebook) ...
         "history_trim_to": 2,           # ... cut back to this many at once, so the cached prefix holds for a few cycles

@@ -712,10 +712,11 @@ class SwarmStore:
 
     # ------------------------------------------------------------------ runs
     def add_run(self, fid: str, version: int | None, result: Mapping[str, Any], *, window: str, stress: float, purpose: str,
-                program_years: float = 0.0) -> dict[str, Any]:
+                program_years: float = 0.0, prune: bool = True) -> dict[str, Any]:
         """Record one Gym result (every result is a trial when its `trials` says so) and keep it in full. The same
         evaluation run again (same code, parameters, data and settings: the same `run_id`) is stored once and still
-        counted: every evaluation the Gym makes is a trial."""
+        counted: every evaluation the Gym makes is a trial. `prune=False` (a sweep's variants) leaves the pruning of full
+        Train results to the caller (`prune_runs(keep=...)` once the sweep is recorded)."""
         run_id = str(result.get("run_id") or code_sha(dumps(result))[:24])
         trials = int(result.get("trials", 0) or 0)
         status = str(result.get("status") or "unknown")
@@ -741,7 +742,7 @@ class SwarmStore:
                         dumps(summary), str(path.relative_to(self.root))))
             if trials:
                 self.bump(fid, trials=trials, since_val_trials=trials)
-            if window == "train":
+            if window == "train" and prune:
                 self.prune_runs(fid)
         return self._one("SELECT * FROM runs WHERE run_id=?", (run_id,))  # type: ignore[return-value]
 
@@ -752,10 +753,12 @@ class SwarmStore:
     #: Full robustness results kept per family (their compact figures live in the family's state).
     KEEP_FULL_ROBUSTNESS_RUNS = 2
 
-    def prune_runs(self, fid: str) -> int:
+    def prune_runs(self, fid: str, keep: Iterable[str] = ()) -> int:
+        """Drop the full results beyond the newest few (the constants above), never the best, the submitted run or `keep`
+        (a sweep's rows, which its researcher reads next)."""
         fam = self.family(fid) or {}
         state = fam.get("state") or {}
-        keep = {state.get("best_train_run"), state.get("submitted_run")}
+        protected = {state.get("best_train_run"), state.get("submitted_run"), *keep}
         rows = self._all("SELECT run_id, path, purpose FROM runs WHERE family=? AND window='train' AND path IS NOT NULL "
                          "ORDER BY at DESC, rowid DESC", (fid,))
         # The researcher's own runs and the robustness runs are kept apart, so robustness never pushes out a run it reads.
@@ -763,7 +766,7 @@ class SwarmStore:
         robustness = [r for r in rows if r["purpose"] == "robustness"][self.KEEP_FULL_ROBUSTNESS_RUNS:]
         n = 0
         for row in research + robustness:
-            if row["run_id"] in keep:
+            if row["run_id"] in protected:
                 continue
             try:
                 (self.root / row["path"]).unlink()
