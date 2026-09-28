@@ -3,6 +3,7 @@
     <root>/swarm.sqlite            families, versions, runs, notebooks, graveyard, looks, forward,
                                    events, spend, boxes, conversations, key-values
     <root>/programs/<family>/      v<n>-<sha12>.py (and .json: its PARAMS overrides), one per version
+                                   (a sweep's variants share one .py: `add_versions`)
     <root>/swarm-runs/<id>.json.gz every Gym result in full (trades and daily series: licensed-data
                                    derivatives, so never in git and never on the site)
 
@@ -620,13 +621,7 @@ class SwarmStore:
         sha = code_sha(code)
         params = dict(params or {})
         with self._lock:
-            fam = self.family(fid)
-            if fam is not None:
-                for other in self._all("SELECT DISTINCT f.lineage,f.structure,f.roots FROM versions v JOIN families f "
-                                       "ON f.id=v.family WHERE v.sha=? AND f.lineage!=?", (sha, fam["lineage"])):
-                    if other["structure"] == fam["structure"] and sorted(loads(other["roots"], [])) == sorted(fam["roots"]):
-                        a, b = sorted((fam["lineage"], other["lineage"]))
-                        self._exec("INSERT OR IGNORE INTO lineage_links(a,b) VALUES(?,?)", (a, b))
+            self._link_code(fid, sha)
             for v in self._all("SELECT * FROM versions WHERE family=? AND sha=?", (fid, sha)):
                 if loads(v["params"], {}) == params:
                     return self.version(fid, v["n"])  # type: ignore[return-value]
@@ -641,6 +636,56 @@ class SwarmStore:
                        (fid, n, sha, dumps(params), str(path.relative_to(self.root)), self.now(), author, str(note or "")[:500]))
             self.bump(fid, revisions=1, stall=1, since_val_revisions=1)
         return self.version(fid, n)  # type: ignore[return-value]
+
+    def _link_code(self, fid: str, sha: str) -> None:
+        """Identical code on the same structure and roots joins the lineages (the module docstring)."""
+        fam = self.family(fid)
+        if fam is None:
+            return
+        for other in self._all("SELECT DISTINCT f.lineage,f.structure,f.roots FROM versions v JOIN families f "
+                               "ON f.id=v.family WHERE v.sha=? AND f.lineage!=?", (sha, fam["lineage"])):
+            if other["structure"] == fam["structure"] and sorted(loads(other["roots"], [])) == sorted(fam["roots"]):
+                a, b = sorted((fam["lineage"], other["lineage"]))
+                self._exec("INSERT OR IGNORE INTO lineage_links(a,b) VALUES(?,?)", (a, b))
+
+    def add_versions(self, fid: str, code: str, params_list: Sequence[Mapping[str, Any] | None], *, author: str,
+                     note: str = "") -> list[dict[str, Any]]:
+        """The versions of ONE program under several PARAMS overrides (a sweep's variants, `researcher.py`), in order.
+        Each variant is a version of its own, because the tournament, the gate and the live path read a version's params;
+        the code is stored once (new rows share one file of it), and the whole sweep counts as ONE revision when it adds
+        any version. A variant whose code and params a version of the family already has is that version."""
+        sha = code_sha(code)
+        numbers: list[int] = []
+        with self._lock:
+            self._link_code(fid, sha)
+            same = self._all("SELECT n, params, path FROM versions WHERE family=? AND sha=? ORDER BY n DESC", (fid, sha))
+            known = [(loads(v["params"], {}), int(v["n"])) for v in same]
+            shared = next((v["path"] for v in same if (self.root / v["path"]).is_file()), None)
+            last = self._one("SELECT MAX(n) AS n FROM versions WHERE family=?", (fid,))
+            n = int((last or {}).get("n") or 0)
+            folder = self.programs / fid
+            added = 0
+            for params in params_list:
+                params = dict(params or {})
+                match = next((k for p, k in known if p == params), None)
+                if match is not None:
+                    numbers.append(match)
+                    continue
+                n += 1
+                folder.mkdir(parents=True, exist_ok=True)
+                if shared is None:
+                    path = folder / f"v{n}-{sha[:12]}.py"
+                    path.write_text(code)
+                    shared = str(path.relative_to(self.root))
+                (folder / f"v{n}-{sha[:12]}.json").write_text(dumps(params))
+                self._exec("INSERT INTO versions(family, n, sha, params, path, created_at, author, note) VALUES(?,?,?,?,?,?,?,?)",
+                           (fid, n, sha, dumps(params), shared, self.now(), author, str(note or "")[:500]))
+                known.append((params, n))
+                numbers.append(n)
+                added += 1
+            if added:
+                self.bump(fid, revisions=1, stall=1, since_val_revisions=1)
+        return [self.version(fid, k) for k in numbers]  # type: ignore[misc]
 
     def version(self, fid: str, n: int | None) -> dict[str, Any] | None:
         if n is None:

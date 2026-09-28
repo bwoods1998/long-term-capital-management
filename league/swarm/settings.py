@@ -54,6 +54,10 @@ DEFAULTS: dict[str, Any] = {
         "max_model_calls": 3,          # a cycle's model calls (revise, read, ...)
         "min_call_seconds": 75,         # a later model call starts only with this much of the cycle left
         "max_tool_calls": 8,            # a cycle's tool calls
+        # `gym_sweep` (R3, Sept 27): many PARAMS variants of one program in one call, in place of the cycle's one gym_run.
+        # Every variant is a trial; the whole sweep counts as one revision.
+        "sweep_enabled": True,
+        "max_sweep_variants": 12,
         "cycle_seconds": 170,           # a cycle's wall-time budget (target under 3 minutes)
         "history_cycles": 4,            # cycles of conversation kept (older ones live in the notebook) ...
         "history_trim_to": 2,           # ... cut back to this many at once, so the cached prefix holds for a few cycles

@@ -102,11 +102,11 @@ class ModelCycles(ResearcherCase):
         first = self.sail.bodies[0]
         self.assertEqual(first["prompt_cache_key"], f"swarm-{self.fam['id']}")
         self.assertIn("THE CONTRACT", first["input"][0]["content"])
-        self.assertEqual(([t["name"] for t in first["tools"]], first["tool_choice"]), (["gym_run"], "required"),
-                         "the revise turn always revises: a run, never retire")
+        self.assertEqual(([t["name"] for t in first["tools"]], first["tool_choice"]), (["gym_run", "gym_sweep"], "required"),
+                         "the revise turn always revises: a run or a sweep, never retire")
         second = self.sail.bodies[1]
         self.assertEqual(([t["name"] for t in second["tools"]], second["tool_choice"]),
-                         (["gym_run", "read_run", "notebook", "graveyard", "submit"], "auto"),
+                         (["gym_run", "gym_sweep", "read_run", "notebook", "graveyard", "submit"], "auto"),
                          "the read turn has every tool but retire, which a family without two validations is not offered")
         self.assertEqual(first["reasoning"]["effort"], "minimal")
         self.assertEqual(first["model"], "deepseek-ai/DeepSeek-V4-Flash-0731")
