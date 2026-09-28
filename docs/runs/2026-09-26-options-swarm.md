@@ -1898,6 +1898,15 @@ looks like beta. Validation 2025 and the holdout judge both.
 | 6 | Money | equity $1,481.63; options buying power $481.60; 0 orders |
 | 7 | Compute | Sail $101.64 (about $4.3/h; the $32 line around 01:30Z Tuesday without a top-up). Claude $47.79 of $100. OpenAI $623.12 + $11.37 in flight of $707 |
 
+- **11:31Z The 2020-21 fetch completed.**
+  - Stage 9 (the core roots at 0-14 DTE, plus 60 sessions of late-2019 underlying as history) 2,825/2,825 and stage
+    10 (SPY/QQQ 15-45 DTE) 1,010/1,010, 0 failing, in about 4.5 h.
+  - The quality check on a 300-day sample of the new window passed: 109.5M rows, 282k contracts, 0 bad quotes, 0
+    outside hours, 0 unlisted or missing expiries, 0 missing underlying.
+  - Underlying sources match 2022-24 (ThetaData), so no relay is needed.
+  - 11:37Z: the sweep-only 2020-24 Gym image build (`train2020-v1`) started on the House. The swarm does not adopt it;
+    `gym.train_from` stays unset until the pre-registered screen's verdict is written.
+
 ### Sprint scoreboard, T0 + 53 h (11:30Z Sept 28)
 
 | # | Metric | Value |
