@@ -59,7 +59,9 @@ idle rule (`idle_dead`: the same floor, gate exemption and graveyard wording), u
 (`awaiting_validation`: holding while the tournament validates it is honest).
 
 RETIRE (Sept 26: an unguarded `retire` on the REVISE turn took the population from 49 to 16 in 24 minutes). A REVISE
-turn offers `gym_run` and `gym_sweep` alone: a REVISE always revises. A READ turn offers `retire` only while more
+turn offers `gym_run` and `gym_sweep` alone (a REVISE always revises), and `retire` beside them only to a dead family
+(`idle_dead`, under `can_retire`: R4, Sept 28, a family that holds never reaches a READ turn, so its researcher could not
+retire the mechanism it found refuted and held every cycle instead). A READ turn offers `retire` only while more
 families live than `population.start` and the family has had at least two validations, or, by THE IDLE RULE (R3, Sept
 27: with the population held at its start, dead families never qualified and looped on placeholder runs), while more
 live than `population.floor` and the family is dead (`idle_dead`: `researcher.retire_idle_evaluations` Gym evaluations
@@ -204,8 +206,8 @@ TOOLS: list[dict[str, Any]] = [
                     "is abandoned; retained in the private notebook and graveyard."}}, "required": ["reason"]}},
 ]
 
-#: A REVISE turn requires a run or a sweep (a REVISE always revises: `retire` is never offered there); a missing call
-#: fails and uses the normal backoff.
+#: A REVISE turn requires a run or a sweep (a REVISE always revises: `retire` is offered there only to a dead family,
+#: `idle_dead`, R4); a missing call fails and uses the normal backoff.
 TOOLS_REVISE: list[dict[str, Any]] = [t for t in TOOLS if t["name"] in RUNS]
 #: A READ turn without `retire` (the family may not retire now: `Researcher.can_retire`).
 TOOLS_READ: list[dict[str, Any]] = TOOLS[:-1]
@@ -599,7 +601,29 @@ def idle_evaluations(fam: Mapping[str, Any]) -> int:
     return since
 
 
-def idle_dead(fam: Mapping[str, Any], settings: Mapping[str, Any]) -> str | None:
+def revalidation_owed(fam: Mapping[str, Any], current: tuple[Any, Any] | None) -> bool:
+    """R4 (the review of PR #402): the family's validation passed the line on another Gym image or engine bundle than the
+    one running now (`current`, (image, bundle)), and the version it passed is still the one the tournament validates
+    next (its submitted best, else its best by Train score) and was never demoted (`robust_failed`: a loss at 1.5x, or a
+    failed drift screen, whose marker `drift_failed` counts too). A deploy that changes the image or bundle clears its
+    `gate_ready` (the tournament owes it validation on the current data and engine first), so without this it would read
+    as dead by the idle rule while its passing version waits to be validated again. It ends when that validation lands
+    (the identity is current again) or the version stops being the candidate. False when `current` is not known."""
+    if current is None:
+        return False
+    state = fam.get("state") or {}
+    if not (state.get("validation_line") or {}).get("passed"):
+        return False
+    if (state.get("validation_image"), state.get("validation_bundle")) == tuple(current):
+        return False
+    n, validated = fam.get("best_version") or state.get("best_train_version"), state.get("validation_version")
+    if not isinstance(n, int) or isinstance(n, bool) or not isinstance(validated, int) or int(validated) != n:
+        return False
+    demoted = {int(v) for v in (state.get("robust_failed") or []) if isinstance(v, int) and not isinstance(v, bool)}
+    return n not in demoted and str(n) not in (state.get("drift_failed") or {})
+
+
+def idle_dead(fam: Mapping[str, Any], settings: Mapping[str, Any], *, current: tuple[Any, Any] | None = None) -> str | None:
     """THE IDLE RULE (R3, Sept 27). A living Gym family is dead when it has spent `researcher.retire_idle_evaluations`
     Gym evaluations since its birth or last validation (`idle_evaluations`) without an eligible Train version (no
     `best_train`: none met 40 trades on 20 days in every Train year, or every one lost at 1.5x), or `NEGATIVE_FACTOR`
@@ -617,7 +641,8 @@ def idle_dead(fam: Mapping[str, Any], settings: Mapping[str, Any]) -> str | None
     if (limit <= 0 and dormant <= 0) or fam.get("band") != "gym" or fam.get("retired_at"):
         return None
     state = fam.get("state") or {}
-    if state.get("gate_ready") or state.get("look_inflight"):
+    # Nor while a validation that passed is owed again on the Gym running now (`revalidation_owed`, R4).
+    if state.get("gate_ready") or state.get("look_inflight") or revalidation_owed(fam, current):
         return None
     if limit > 0:
         idle = idle_evaluations(fam)
@@ -715,7 +740,7 @@ class Researcher:
         if notes:
             parts.append("Your notebook (latest):\n" + "\n".join(f"- {diagnostics.scrub(n['text'])[:300]}" for n in notes))
         may_retire = self.can_retire(fam)
-        dead = idle_dead(fam, self.settings) if may_retire else None
+        dead = self.dead(fam) if may_retire else None
         if dead:
             parts.append(f"Your family {dead}. If its mechanism is dead, call retire with your reason when the tool is offered "
                          "rather than re-running a placeholder: its slot goes to a new idea.")
@@ -855,9 +880,10 @@ class Researcher:
                 self._sweeping.pop(fid, None)
 
     def tools(self, *, revise: bool, retire: bool) -> list[dict[str, Any]]:
-        """A turn's tools: REVISE a run or a sweep (the call is required), READ every tool, `retire` only when the family
-        may retire (`can_retire`); `gym_sweep` only while sweeps are on, its limit from the settings."""
-        base = TOOLS_REVISE if revise else (TOOLS if retire else TOOLS_READ)
+        """A turn's tools: REVISE a run or a sweep (a call is required), READ every tool, `retire` only when the family
+        may retire (`can_retire`; on REVISE only a dead family, `idle_dead`); `gym_sweep` only while sweeps are on, its
+        limit from the settings."""
+        base = (TOOLS_REVISE + TOOLS[-1:] if retire else TOOLS_REVISE) if revise else (TOOLS if retire else TOOLS_READ)
         if not self.sweeps:
             return [t for t in base if t["name"] != "gym_sweep"]
         return [sweep_tool(self.max_variants) if t["name"] == "gym_sweep" else t for t in base]
@@ -883,6 +909,10 @@ class Researcher:
         return " ".join(out)
 
     # ------------------------------------------------------------------ retirement, the top ten
+    def dead(self, fam: Mapping[str, Any]) -> str | None:
+        """`idle_dead` against the Gym the pool runs now (a passing validation owed again is never dead)."""
+        return idle_dead(fam, self.settings, current=self._gym_identity())
+
     def can_retire(self, fam: Mapping[str, Any]) -> bool:
         """`retire` is offered (and accepted) for a Gym family with at least two validations while more families live
         than `population.start` (the sprint, Sept 26), and for a dead family (`idle_dead`, R3) while more live than
@@ -892,7 +922,7 @@ class Researcher:
             return False
         pop = self.settings.get("population", {})
         alive = len(self.store.families(alive=True))
-        if idle_dead(fam, self.settings) and alive > int(pop.get("floor", 16)):
+        if self.dead(fam) and alive > int(pop.get("floor", 16)):
             return True
         return int(fam.get("validations") or 0) >= 2 and alive > int(pop.get("start", 48))
 
@@ -901,7 +931,7 @@ class Researcher:
         `population.floor` for a dead family (`idle_dead`), else the start (never below the floor)."""
         pop = self.settings.get("population", {})
         floor = int(pop.get("floor", 16))
-        return floor if idle_dead(fam, self.settings) else max(floor, int(pop.get("start", 48)))
+        return floor if self.dead(fam) else max(floor, int(pop.get("start", 48)))
 
     def is_top(self, fam: Mapping[str, Any], *, top: int) -> bool:
         """Among the bandit's `top` families by weight (a weight of zero or none never is)."""
@@ -1764,10 +1794,11 @@ class Researcher:
             chars = sum(len(json.dumps(i, default=str)) for i in items)
             profile, effort, most = self._profile(chars, fam)
             key = f"swarm:{fid}:c{n}:m{out['model_calls']}:{int(fam.get('revisions') or 0)}"
-            # REVISE requires a run or a sweep (never retire); READ follows a completed run and offers every tool, retire
-            # only when the family may retire (`can_retire`).
+            # REVISE requires a run or a sweep; READ follows a completed run and offers every tool, retire only when the
+            # family may retire (`can_retire`). A DEAD family's REVISE offers retire too (R4, Sept 28: researchers that
+            # found their mechanism refuted held every cycle, "retire tool not offered", since a hold never reaches READ).
             revise = not gym_done
-            tools = self.tools(revise=revise, retire=not revise and self.can_retire(fam))
+            tools = self.tools(revise=revise, retire=self.can_retire(fam) and (not revise or bool(self.dead(fam))))
             response = self.router.sail(profile, items, family=fid, key=key, tools=tools, effort=effort, max_output=most,
                                         cache_key=f"swarm-{fid}", cap_usd_day=float(self.cfg.get("family_usd_day", 2.0)),
                                         tool_choice="required" if revise else "auto")
@@ -2034,4 +2065,4 @@ __all__ = ["Researcher", "TOOLS", "TOOLS_READ", "TOOLS_REVISE", "RUNS", "needs_o
            "sanitize", "date_like", "candidates_with", "migrate_objective", "OBJECTIVE", "params_of", "check_params",
            "sweep_variants", "sweep_tool", "merged_key", "MAX_SWEEP_VARIANTS", "MAX_SWEEP_JOBS_IN_FLIGHT", "idle_dead",
            "idle_evaluations", "idle_limit", "RETIRE_IDLE_EVALUATIONS", "NEGATIVE_FACTOR", "DORMANT_CYCLES", "ALREADY_RUN",
-           "dormant_limit", "dormant_count", "awaiting_validation", "holding", "held_at_gate", "new_run"]
+           "dormant_limit", "dormant_count", "awaiting_validation", "holding", "held_at_gate", "new_run", "revalidation_owed"]
