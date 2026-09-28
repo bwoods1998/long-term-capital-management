@@ -2223,4 +2223,27 @@ looks like beta. Validation 2025 and the holdout judge both.
 | 6 | Money | Equity $1,473.11; Profit -$8.44, all of it calibration and fees. Options buying power $473.08 (the deposit is not in it yet) |
 | 7 | Compute | Sail $71.38; the guard's burn estimate is $77/day, and its $32 line (where it brakes research to keep the House running) comes Tuesday morning without a top-up. Claude $68.85 of $100. OpenAI $639.69 + $11.40 in flight of $707. The swarm spent $15.01 in 2 h |
 
+
+- **21:35-22:00Z New-roots structural-premium screen: 0 of 25 rows pass (pre-registered, sha256 `e1b6e279…`).**
+  - The question: do underlyings the Gym does not hold carry a structural premium strong enough to justify fetching
+    their option history?
+  - Seven hypotheses with a concrete payer, 25 rows, on 19 roots: SPY, VXX, VIXM, UVXY, SVXY, TLT, LQD, HYG, the
+    nine sector ETFs, KRE and XBI.
+    - H1-H3: volatility-ETP roll-down with contango, trend and variance-premium gates.
+    - H4-H5: month-end rebalancing, SPY against TLT, and bond duration extension.
+    - H6: sector residual reversal.
+    - H7: credit-ETF dips.
+  - Daily underlying returns at zero cost. Train 2020-24 only; no 2025-26 row was loaded.
+  - The bar: a t of 2.5 in every year, the placebo beaten every year, and Holm across the 25 rows.
+  - Results:
+    - Best worst-year t: 0.38 (month-end TLT). Best pooled t: 1.92 (month-end LQD).
+    - Short-volatility ETP carry peaks at t of about 1.8 in single years and is flat or negative in 2020, 2022 and
+      2024. The spot VIX term-structure gate adds almost nothing over always-short.
+    - Sector residuals and LQD dips continue rather than revert, and the flipped signs also fail the per-year bar.
+  - An independent verifier rebuilt all 25 rows with its own code and matched every t to within 0.015. No
+    look-ahead, split or window errors.
+  - The verdict: no new root earns an option-data fetch.
+  - The lesson: the binding constraint is year-to-year stability, not pooled significance. Across these rows, round
+    3's predecessors and about 65,000 swarm trials, nothing reaches a per-year t of 2.5 even at zero cost.
+
 ## Report
