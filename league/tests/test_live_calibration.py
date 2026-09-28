@@ -2,8 +2,9 @@
 and IWM debit verticals the House sends at the mid (at 12:00 and 14:00 ET the patient mid of 25 minutes), then one tick
 worse, and closes at the mid, one tick under, then the natural; six hourly slots, 10:00 through 15:00 ET; only with real
 money on, the grant active and the paper proof passed; at most the constitution's $50 of maximum loss a day; through the
-real book's order path; recorded in their own file; never evidence, never on the site. With the fakes of `live_fakes`
-(the venue's shapes, invented numbers)."""
+real book's order path; recorded in their own file; never evidence, never on the site; leaving the families two Probe
+floors of the day cap and most of the day's legs, and yielding a working open to a family refused on its contracts
+(the reviews of #407). With the fakes of `live_fakes` (the venue's shapes, invented numbers)."""
 
 import io
 import json
@@ -23,6 +24,36 @@ if HAVE:
     from league.live.step import OptionsLive
     from league.live.decider import InlineDecider
     from league.tests.live_fakes import MONDAY, NY, VERTICAL, at, family
+
+#: A probe family's real open of the nearest-the-money $1 call vertical on the nearest expiry a day out -- the patient
+#: cell's own contracts -- at the mid, from 12:05 (the review of #407: the rebound mechanism's entry).
+REBOUND = '''
+NEEDS = {"roots": ["SPY"], "dte": [0, 3], "band": 0.03, "cadence": 1, "history": 2, "start": 571, "end": 958}
+PARAMS = {}
+STATE = {"opened": 0}
+
+def decide(ctx):
+    if STATE["opened"] or ctx.positions or ctx.orders or ctx.minute < 725:
+        return []
+    return [{"open": "debit_vertical", "root": "SPY", "qty": 1, "limit": "mid", "tag": "t", "note": "rebound",
+             "legs": [{"side": "long", "right": "C", "dte": 1, "atm": 0},
+                      {"side": "short", "right": "C", "rel": 0, "offset": 1.0}]}]
+'''
+
+#: A probe family's one real open late in the day (15:20), two days out (never the calibration's contracts).
+LATE = '''
+NEEDS = {"roots": ["SPY"], "dte": [0, 3], "band": 0.03, "cadence": 1, "history": 2, "start": 571, "end": 958}
+PARAMS = {}
+STATE = {"opened": 0}
+
+def decide(ctx):
+    if STATE["opened"] or ctx.positions or ctx.orders or ctx.minute < 920:
+        return []
+    STATE["opened"] = 1
+    return [{"open": "debit_vertical", "root": "SPY", "qty": 1, "limit": "natural", "tag": "t", "note": "late",
+             "legs": [{"side": "long", "right": "C", "dte": 2, "atm": 0},
+                      {"side": "short", "right": "C", "rel": 0, "offset": 1.0}]}]
+'''
 
 HOLD_600C = '''
 NEEDS = {"roots": ["SPY"], "dte": [0, 3], "band": 0.03, "cadence": 1, "history": 0, "start": 571, "end": 958}
@@ -505,9 +536,12 @@ class Timing(CalibrationCase):
         self.assertEqual(second["legs"], first["legs"], "the same contracts")
         self.run_to(12, 45)
         self.assertEqual(len(self.mine()), 2, "once, then nothing more this slot")
-        self.assertEqual([(r["cell"], r["outcome"], r["ticks"]) for r in self.samples()],
-                         [("SPY:open:mid25", "cancelled", 0), ("SPY:open:mid+1", "cancelled", 1)])
-        self.assertEqual(self.sent_minutes(), [("open:mid25", 720), ("open:mid+1", 746)])
+        # The re-price after the patient open is its own cell (the review of #407): the same order as mid+1, after 25
+        # unfilled minutes at the mid rather than 5.
+        self.assertEqual([(r["cell"], r["outcome"], r["ticks"], r["tif"]) for r in self.samples()],
+                         [("SPY:open:mid25", "cancelled", 0, 24), ("SPY:open:mid25+1", "cancelled", 1, 4)])
+        self.assertTrue(all(r["cancel_reason"].startswith("its time in force") for r in self.samples()))
+        self.assertEqual(self.sent_minutes(), [("open:mid25", 720), ("open:mid25+1", 746)])
         self.assertEqual({r["trip"] for r in self.samples()}, {"20260928-720-SPY"})
         self.assertEqual(live.state.rows("SELECT tif FROM orders WHERE family=? ORDER BY oid", (C.FAMILY,)),
                          [{"tif": 24}, {"tif": 4}])
@@ -520,7 +554,7 @@ class Timing(CalibrationCase):
         self.run_to(14, 30)
         self.venue.fill = "limit"                                         # the re-price fills in its last minute
         self.run_to(14, 50)
-        self.assertEqual(self.sent_minutes(), [("open:mid25", 840), ("open:mid+1", 866), ("close:mid", 871),
+        self.assertEqual(self.sent_minutes(), [("open:mid25", 840), ("open:mid25+1", 866), ("close:mid", 871),
                                                ("close:mid-1", 877), ("close:natural", 883)])
         self.assertEqual(883, 840 + C.ladder_minutes(C.PATIENT_MINUTES), "the arithmetic is the order path's")
         self.assertEqual(live.book.positions, {})
@@ -620,11 +654,15 @@ class Report(CalibrationCase):
         self.assertEqual(report["plan"]["slots_et"], ["10:00", "11:00", "12:00", "13:00", "14:00", "15:00"])
         self.assertEqual(report["plan"]["patient_slots_et"], ["12:00", "14:00"])
         self.assertEqual(report["plan"]["symbols"], ["SPY", "QQQ", "IWM"])
-        self.assertEqual(report["plan"]["works_minutes"]["open"], {"mid": 5, "mid+1": 5, "mid25": 25})
-        self.assertEqual(len(report["cells"]), 18, "3 symbols x (3 open + 3 close cells)")
+        self.assertEqual(report["plan"]["works_minutes"]["open"], {"mid": 5, "mid+1": 5, "mid25": 25, "mid25+1": 5})
+        self.assertEqual(report["plan"]["repriced_as"], {"mid": "mid+1", "mid25": "mid25+1"})
+        self.assertEqual(report["plan"]["leaves_families"], {"day_cap_probe_floors": 2, "no_new_trip_from_legs": 80})
+        self.assertEqual(len(report["cells"]), 21, "3 symbols x (4 open + 3 close cells)")
         for symbol in C.SYMBOLS:
             cell = report["cells"][f"{symbol}:open:mid25"]
-            self.assertEqual((cell["works_minutes"], cell["attempts"], cell["fill_rate"]), (25, 0, None))
+            self.assertEqual((cell["works_minutes"], cell["attempts"], cell["fill_rate"], cell["interrupted"]),
+                             (25, 0, None, 0))
+            self.assertEqual(report["cells"][f"{symbol}:open:mid25+1"]["works_minutes"], 5)
         self.assertIn("IWM:open:mid25", json.loads(out.getvalue())["cells"])
         # Once sampled, the patient cell counts its own.
         self.venue.fill = "limit"
@@ -653,6 +691,230 @@ class Recorder(CalibrationCase):
         self.assertEqual([C.outcome_of(s, q) for s, q in (("filled", 1), ("cancelled", 0), ("expired", 1), ("rejected", 0),
                                                           ("refused", 0), ("working", 0), ("lost", 0))],
                          ["filled", "cancelled", "partial", "rejected", "rejected", None, None])
+
+
+class TheReviewOf407(CalibrationCase):
+    """The reviews of #407: what the calibration leaves the families (the day cap's room and the day's legs), yielding a
+    working open to a family refused on its contracts, an open cut short never a sample and never re-priced, each row's
+    own time in force, and the half day through the order path."""
+
+    def is_mine(self, body) -> bool:
+        return str(body.get("client_order_id") or "").endswith("house-calibration")
+
+    def cancel_reasons(self, live):
+        return [json.loads(r["answer"]).get("cancel") for r in
+                live.state.rows("SELECT answer FROM orders WHERE family=? ORDER BY oid", (C.FAMILY,))]
+
+    def test_it_leaves_the_families_two_probe_floors_of_the_day_cap(self):
+        # The live account's sizing equity: the grant pins $481.63, so the account-wide day cap (1.0 x equity) is
+        # $481.63, and every dispatched open counts its whole maximum loss toward it, filled or not. A heavy day (every
+        # calibration mid unfilled, every re-price filled) once took $426 of it; now the calibration leaves $200.
+        self.grant.capital = "481.63"
+        n = {"cal_open": 0}
+
+        def hook(body):
+            if not self.is_mine(body):
+                self.venue.fill = "natural"                             # the family's open
+            elif body["legs"][0]["position_intent"] == "buy_to_open":
+                n["cal_open"] += 1
+                self.venue.fill = "none" if n["cal_open"] % 2 else "limit"
+            else:
+                self.venue.fill = "limit"
+
+        self.venue.on_submit = hook
+        live = self.start([family("late", LATE, band="probe")], real_money=True)
+        whys = set()
+        while self.minute_of(self.clock()) <= 15 * 60 + 25:
+            live.minute()
+            whys.add((live.state.get("calibration") or {}).get("why"))
+            self.clock.set(self.clock() + 60)
+        today = MONDAY.isoformat()
+        cap = live.table.gateway_day_share * live.sizing_equity()
+        self.assertEqual(cap, D("481.63"))
+        room = 2 * live.table.probe_floor                               # two Probe floors: $200
+        self.assertEqual(room, D("200"))
+        rows = live.state.rows("SELECT max_loss, answer FROM orders WHERE family=? AND action='open'", (C.FAMILY,))
+        dispatched = sum(D(str(r["max_loss"])) for r in rows if json.loads(r["answer"]).get("dispatched"))
+        self.assertGreater(dispatched, D("180"), "a heavy day: the calibration used what it may")
+        self.assertLessEqual(dispatched + room, cap, "never past the cap less the families' room")
+        self.assertTrue(any(w and "kept for the families' opens" in w for w in whys), whys)
+        # The family's late open still goes: the day cap has room for it.
+        [fam] = live.state.rows("SELECT status, max_loss FROM orders WHERE family='late' AND action='open'")
+        self.assertEqual(fam["status"], "filled")
+        self.assertLessEqual(live.book.exposure("late", day=today, week_start=today).day_opened, cap)
+        self.assertEqual(C.FAMILY_ROOM_PROBES, 2)
+
+    def test_no_round_trip_starts_once_its_own_legs_today_reach_the_cap(self):
+        # The day's count is 250 legs, a cancel's counted too; the calibration's own are counted as the House counts
+        # them and no round trip starts from `DAY_LEGS`.
+        n = {"open": 0}
+
+        def hook(body):
+            if body["legs"][0]["position_intent"] == "buy_to_open":
+                n["open"] += 1
+                self.venue.fill = "none" if n["open"] == 1 else "limit"  # the mid rests and is cancelled; the re-price
+            else:
+                self.venue.fill = "limit"
+
+        self.venue.on_submit = hook
+        today = MONDAY.isoformat()
+        with mock.patch.object(C, "DAY_LEGS", 8):
+            live = self.start(real_money=True)
+            self.run_to(10, 8)
+            self.assertEqual(live.book.positions, {})
+            # The mid and its cancel, the re-price, the close: 2 + 2 + 2 + 2, exactly the House's own count.
+            self.assertEqual(live.calibration.day_legs(today), 8)
+            self.assertEqual(live.book.count_today(today), 8)
+            self.clock.set(at(MONDAY, 10, 59))
+            self.run_to(11, 5)
+        self.assertEqual(len(self.opens()), 2, "no round trip at 11:00")
+        cal = live.state.get("calibration")
+        self.assertIn(660, cal["slots"]["fired"])
+        self.assertIn("8 legs today", cal["why"])
+        self.assertEqual(C.DAY_LEGS, 80)
+
+    def test_a_working_open_yields_to_a_family_refused_on_its_contracts(self):
+        # The patient open holds the rebound mechanism's own contracts for 25 minutes; a family's real open of them is
+        # refused ("one order stream per contract"). The calibration cancels its open the minute it sees the refusal
+        # and ends the round trip without its re-price; the family's open goes the next minute.
+        def hook(body):
+            self.venue.fill = "none" if self.is_mine(body) else "limit"
+
+        self.venue.on_submit = hook
+        self.venue.fill = "none"
+        live = self.start([family("reb", REBOUND, band="probe")], real_money=True, hh=11, mm=58)
+        self.run_to(12, 4)
+        [row] = self.samples()
+        self.assertEqual(row["cell"], "SPY:open:mid25")
+        self.run_to(12, 5)
+        self.assertEqual(len(self.venue.cancels), 1, "cancelled at 12:05, the minute the family was refused")
+        self.run_to(12, 40)
+        fam = live.state.rows("SELECT status, placed_minute, legs FROM orders WHERE family='reb' AND action='open'")
+        self.assertEqual(len(fam), 1)
+        self.assertEqual(fam[0]["status"], "filled")
+        self.assertLessEqual(fam[0]["placed_minute"] + live.day.open_min, 12 * 60 + 7, "the family's open went at once")
+        cal_legs = {leg["symbol"] for leg in json.loads(live.state.rows(
+            "SELECT legs FROM orders WHERE family=? ORDER BY oid", (C.FAMILY,))[0]["legs"])}
+        self.assertTrue(cal_legs & {leg["symbol"] for leg in json.loads(fam[0]["legs"])}, "the same contracts")
+        # Interrupted: never a sample, never counted, never re-priced.
+        [row] = [r for r in self.samples() if r["action"] == "open"]
+        self.assertEqual((row["cell"], row["outcome"]), ("SPY:open:mid25", "interrupted"))
+        self.assertTrue(row["cancel_reason"].startswith("yielded"))
+        self.assertEqual(live.calibration.recorder.counts(), {})
+        self.assertIsNone(live.state.get("calibration")["trip"])
+        self.assertIn("yielded", live.state.get("calibration")["why"])
+        cell = C.report(self.root)["cells"]["SPY:open:mid25"]
+        self.assertEqual((cell["attempts"], cell["interrupted"], cell["ended"], cell["fill_rate"]), (1, 1, 0, None))
+
+    def test_a_refusal_naming_other_contracts_is_not_a_yield(self):
+        self.venue.fill = "none"
+        live = self.start(real_money=True, hh=11, mm=58)
+        self.run_to(12, 1)
+        order = next(o for o in live.book.orders.values() if o.family == C.FAMILY)
+        mine = sorted(leg.symbol for leg in order.legs)
+        other = mine[0][:-8] + f"{int(mine[0][-8:]) + 50000:08d}"             # 50 strikes away
+        live.book.rejects_since["ghost@1:r"] = [f"one order stream per contract: {other} already has a working order",
+                                                 f"the day's order count: 10 legs sent of 250 ({mine[0]})"]
+        self.run_to(12, 10)
+        self.assertEqual(self.venue.cancels, [], "a refusal naming other contracts, or another refusal, is not a yield")
+        live.book.rejects_since["ghost@1:r"] = [f"positions net across the account: this open takes the other side of "
+                                                 f"{mine[1]}, which the account holds"]
+        self.run_to(12, 11)
+        self.assertEqual(len(self.venue.cancels), 1, "the account's net guard naming its contract: it yields")
+        self.run_to(12, 40)
+        self.assertEqual([(r["cell"], r["outcome"]) for r in self.samples()], [("SPY:open:mid25", "interrupted")])
+
+    def test_an_open_cut_short_by_a_real_entry_block_is_interrupted_and_never_repriced(self):
+        # The review of #407 (review 2): the kill switch at 12:07 during the patient open. It was recorded as a full
+        # 25-minute "cancelled" sample (and re-priced); now it is interrupted: never counted, never in the fill rate.
+        self.venue.fill = "none"
+        live = self.start(real_money=True, hh=11, mm=58)
+        self.run_to(12, 6)
+        self.killed = True
+        self.run_to(12, 8)
+        self.killed = False
+        self.run_to(12, 45)
+        self.assertEqual(len(self.opens()), 1, "no re-price after an open cut short")
+        [row] = self.samples()
+        self.assertEqual((row["cell"], row["outcome"], row["tif"]), ("SPY:open:mid25", "interrupted", 24))
+        self.assertEqual(row["cancel_reason"], "real entries are shut: the gateway's kill switch is engaged")
+        self.assertEqual(live.calibration.recorder.counts(), {})
+        self.assertIn("cut short", live.state.get("calibration")["why"])
+        cell = C.report(self.root)["cells"]["SPY:open:mid25"]
+        self.assertEqual((cell["interrupted"], cell["ended"], cell["cancelled"]), (1, 0, 0))
+
+    def test_every_row_records_its_time_in_force_and_an_older_file_gains_the_columns(self):
+        # A file the first release wrote (no `tif`, no `cancel_reason`): the recorder adds both, its row kept.
+        db = sqlite3.connect(self.root / C.FILE)
+        db.executescript(C.SCHEMA.replace(", tif INTEGER, cancel_reason TEXT", ""))
+        db.execute("INSERT INTO samples(oid, client_id, trip, day, symbol, legs, action, offset, ticks, cell, "
+                   "limit_price, limit_value, qty, quote, submitted_at, outcome) VALUES(9000, 'c9000', 't', "
+                   "'2026-09-25', 'SPY', '[]', 'open', 'mid', 0, 'SPY:open:mid', '0.40', 0.4, 1, '{}', 0.0, 'filled')")
+        db.commit()
+        self.assertNotIn("tif", {r[1] for r in db.execute("PRAGMA table_info(samples)")})
+        db.close()
+        modes = ["none", "limit", "none", "none", "natural"]
+
+        def hook(body):
+            self.venue.fill = modes.pop(0) if modes else "natural"
+
+        self.venue.on_submit = hook
+        self.start(real_money=True)
+        self.run_to(10, 30)
+        *rows, older = self.samples()
+        self.assertEqual((older["oid"], older["tif"], older["cancel_reason"]), (9000, None, None),
+                         "the older row kept: its time in force is its offset's")
+        # SPY has the older sample, so QQQ goes first.
+        self.assertEqual([(r["cell"], r["tif"]) for r in rows],
+                         [("QQQ:open:mid", 4), ("QQQ:open:mid+1", 4), ("QQQ:close:mid", 4), ("QQQ:close:mid-1", 4),
+                          ("QQQ:close:natural", 0)])
+        self.assertEqual([r["outcome"] for r in rows], ["cancelled", "filled", "cancelled", "cancelled", "filled"])
+        self.assertEqual(C.report(self.root)["cells"]["SPY:open:mid"]["ended"], 1)
+
+
+@unittest.skipUnless(HAVE, "numpy not installed")
+class HalfDay(CalibrationCase):
+    """A half day (a 13:00 close) through the order path: the patient slot opens at the plain mid, the last round trip
+    starts at 12:14 and its slowest ladder sends its natural by 12:37, before the 12:45 last resort."""
+
+    def setUp(self):
+        super().setUp()
+        patch = mock.patch("league.live.step.session_minutes", lambda day: (570, 780))
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_the_patient_slot_opens_at_the_plain_mid_and_the_last_ladder_ends_before_the_last_resort(self):
+        closes = []
+
+        def hook(body):
+            if body["legs"][0]["position_intent"] == "buy_to_open":
+                self.venue.fill = "none"
+            else:
+                closes.append(body)
+                self.venue.fill = "none" if len(closes) < 3 else "natural"
+
+        self.venue.fill = "none"
+        self.venue.on_submit = hook
+        live = self.start(real_money=True, hh=12, mm=14)
+        self.assertEqual(live.day.close_min if live.day else 780, 780)
+        self.run_to(12, 24)
+        self.venue.fill = "limit"                                         # the re-price fills in its last minute
+        self.run_to(12, 44)
+        self.assertEqual(live.day.close_min, 780)
+        self.assertEqual([(r["cell"].split(":", 1)[1], self.minute_of(r["submitted_at"])) for r in self.samples()],
+                         [("open:mid", 734), ("open:mid+1", 740), ("close:mid", 745), ("close:mid-1", 751),
+                          ("close:natural", 757)])
+        self.assertLess(757 + C.LADDER_SLACK, 780 - C.LAST_RESORT_MINUTES)
+        self.assertEqual(live.state.rows("SELECT tif FROM orders WHERE family=? AND action='open' ORDER BY oid",
+                                         (C.FAMILY,)), [{"tif": 4}, {"tif": 4}])
+        self.assertEqual(live.book.positions, {})
+
+    def test_no_round_trip_starts_from_12_15(self):
+        self.venue.fill = "limit"
+        live = self.start(real_money=True, hh=12, mm=15)
+        self.run_to(12, 40)
+        self.assertEqual(self.mine(), [])
+        self.assertEqual(live.calibration.roots(self.clock()), {})
 
 
 if __name__ == "__main__":

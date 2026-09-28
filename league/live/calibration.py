@@ -29,40 +29,66 @@ orders of the minute, so it takes only what they left):
   nothing. THE PATIENT CELL ("mid25"; Sept 28, 2026): at the `PATIENT_SLOTS` (12:00 and 14:00 ET) the open works at the
   mid for `PATIENT_MINUTES` (25; time in force 24, the Gym's convention) before that single re-price -- the entry the
   swarm's best mechanism uses (an index rebound bought with a patient mid limit), so the samples say whether the Gym
-  overcharges patient fills. It is its own cell ("SPY:open:mid25"); its re-price is the ordinary "mid+1" cell (the
-  same order: the then mid plus a tick for `WAIT_MINUTES`; its trip's rows show which open it followed). Not at 15:00:
-  from 15:00 its slowest ladder (25 + 1 + 5 + 12 minutes) would send its natural at 15:43, two minutes before the last
-  resort, with no room for a late cancel; a patient slot whose ladder does not fit with `LADDER_SLACK` to spare (a half
-  day) opens at the plain mid instead, as does one whose symbols all have the patient cell's target.
+  overcharges patient fills. It is its own cell ("SPY:open:mid25"), and so is its re-price ("SPY:open:mid25+1": the
+  same order as "mid+1", the then mid plus a tick for `WAIT_MINUTES`, recorded apart because it follows 25 unfilled
+  minutes at the mid, not 5). Not at 15:00: from 15:00 its slowest ladder (25 + 1 + 5 + 12 minutes) would send its
+  natural at 15:43, two minutes before the last resort, with no room for a late cancel; a patient slot whose ladder does
+  not fit with `LADDER_SLACK` to spare (a half day) opens at the plain mid instead, as does one whose symbols all have
+  the patient cell's target. The re-price follows only an open its time in force ended: one cut short (a real-entry
+  block, the House's cancel, a yield) ends the round trip.
 - The close, once filled: at the mid, then at the mid less one tick, then at the natural, each for `WAIT_MINUTES`; at
   the natural at once from `LAST_RESORT_MINUTES` before the session's close. Charged to the day's order budget like a
   program's close (only that last resort may use the room kept for the House's own exits); at most `CLOSE_ATTEMPTS_DAY`
   attempts a position a day, backing off `REJECT_BACKOFF_MINUTES` (doubling) after a refused one; a natural of a tick
   or less (nothing bids for it) is never sent. The House's own expiry-day rules apply to these positions as to any,
   and from `CALIBRATION_BACKSTOP` minutes before the close the House itself closes one still open.
-- It yields: a root on which any family works a real order is left to the families that minute.
+- It yields to the families, twice: a root on which any family works a real order is left to the families when a
+  round trip would start; and while its open works (the patient cell's 25 minutes above all), a family's real open
+  refused because that open holds one of its contracts ("one order stream per contract", or the account's net: the
+  refusal names the contract) makes it cancel the open at once and end the round trip without its re-price
+  (`_yield`; recorded "interrupted", never a sample).
 - Every order goes through the real book (`league/live/real.py` `RealBook`): written before it is sent, one order stream
   per contract, never the opposite side of a contract the account holds (the wash-trade guard), the day's order count
-  (250, every leg counted), buying power reserved, and the gateway's own caps and kill switch behind them.
+  (250, every leg counted, a cancel's too), buying power reserved, and the gateway's own caps and kill switch behind
+  them.
 - New round trips only while: `config.json` real_money, the grant active and every real-entry rule open
   (`OptionsLive.real_block`: the kill switch, the stops, reconciliation, the House), the paper proof PASSED,
-  `live.calibration` true in `<state>/swarm.json` (off by default), the day's loss bound with room, the book's, the
-  gateway's order and day caps and buying power with room, and the recorder readable. Closes need only the kill switch off.
+  `live.calibration` true in `<state>/swarm.json` (off by default), the day's loss bound with room, the book's and the
+  gateway's per-order caps, buying power, and the recorder readable. Closes need only the kill switch off.
+
+WHAT IT LEAVES THE FAMILIES (the review of #407): every dispatched open, filled or cancelled, counts its whole maximum
+loss toward the account-wide day cap (`gateway.day_equity_share` x sizing equity, the lower of the account's equity and
+the grant's capital: $481.63 on Sept 28, 2026), and six slots can dispatch twelve opens of $35-50. So a calibration
+open (the re-price too) goes only while it leaves `FAMILY_ROOM_PROBES` Probe floors (`probe.floor_usd`, $200) of that
+cap for the families' opens. And no round trip starts once the calibration's own legs today (orders and cancels, as
+the House counts them: `day_legs`) reach `DAY_LEGS` (80): a round trip is 4 legs when both mids fill and about 30 at
+its slowest (the open and its cancel, the re-price, six close attempts and their cancels), so the calibration takes at
+most about 110 of the day's 250 legs before the House's own backstop, usually 20-50. At the gateway it is at most 12
+opening orders of its 250 and 48 orders of its 300 (cancels are not counted there); the families' own
+`instance_orders_day` (60 each) is never charged.
+
+D3'S TERMS: the owner authorised D3 as 1-lot SPY and QQQ round trips within $50 a day (`league/constitution.py`'s
+comments). Since #381 the bound the code enforces is $50 of net possible loss (realized, plus what is held or working);
+IWM and the six slots' larger volume (about $430-540 of maximum loss dispatched on a heavy day, against about $270
+before) are an operator decision inside that bound (Sept 28, 2026). The money table and its digest are unchanged.
 
 NEVER EVIDENCE, NEVER PROFIT: the orders and positions belong to `FAMILY` ("house:calibration", never a swarm family's
 slug), whose closed trades never reach a forward record (`OptionsLive._export_real`), whose structures the site never
 shows, which Profit leaves out (`league/trading_profit.py`; the equity-based figure after compute carries their result
 already), and whose positions the House takes for an orphan's only in the session's last minutes.
 
-RECORDS (`Recorder`, `<state>/calibration.sqlite`, mode 0600): one row per attempt (per order), written in one transaction
-when it is sent and completed in one when it ends: the order and client order ids; the symbol, legs, cell (symbol x
-offset x open/close), limit price and tick offset; each leg's NBBO and the structure's mid and natural at submit; the
-submit, fill and cancel times; the fill price and filled quantity; the fees (the book's venue-table estimate: the
-venue's own are not read here); and the outcome (filled, partial, cancelled or rejected). A failure to record never
-blocks or delays an order: it is caught, logged and alerted once. Never published (the repository is public; these are
-quotes). `python -m league.live --root <state> --calibration` reads it: the plan (symbols, slots, the patient slots) and
-every cell, those not yet sampled included, with its working minutes, counts, fill rate, mean fill against the mid in
-ticks and median seconds to fill.
+RECORDS (`Recorder`, `<state>/calibration.sqlite`, mode 0600): one row per attempt (per order), written in one
+transaction when it is sent and completed in one when it ends: the order and client order ids; the symbol, legs, cell
+(symbol x offset x open/close), limit price, tick offset and time in force (`tif`, the order's own: its window is the
+market's minutes m + 1 through m + 1 + tif); each leg's NBBO and the structure's mid and natural at submit; the submit,
+fill and cancel times and the cancel's reason; the fill price and filled quantity; the fees (the book's venue-table
+estimate: the venue's own are not read here); and the outcome: filled, partial, cancelled (its time in force ran out
+unfilled), rejected, or INTERRUPTED (cancelled unfilled for any other reason -- a real-entry block, the House's cancel,
+a yield -- so it never worked its whole window: never a sample, never counted toward a target or a fill rate). A failure
+to record never blocks or delays an order: it is caught, logged and alerted once. Never published (the repository is
+public; these are quotes). `python -m league.live --root <state> --calibration` reads it: the plan (symbols, slots, the
+patient slots, the caps it leaves the families) and every cell, those not yet sampled included, with its working
+minutes, counts, fill rate, mean fill against the mid in ticks and median seconds to fill.
 """
 
 from __future__ import annotations
@@ -71,6 +97,7 @@ import datetime as dt
 import json
 import math
 import os
+import re
 import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
@@ -98,12 +125,15 @@ SLOT_WINDOW = 45
 WAIT_MINUTES = 5
 TIF = WAIT_MINUTES - 1
 #: The patient open cell "mid25": at these slots (12:00 and 14:00 ET) the open works at the mid for `PATIENT_MINUTES`
-#: (time in force one less, by the same convention) before its single re-price. Not 15:00: its slowest ladder would send
-#: its natural two minutes before the last resort (`ladder_minutes`), inside `LADDER_SLACK`.
+#: (time in force one less, by the same convention) before its single re-price, its own cell "mid25+1". Not 15:00: its
+#: slowest ladder would send its natural two minutes before the last resort (`ladder_minutes`), inside `LADDER_SLACK`.
 PATIENT_SLOTS = (720, 840)
 PATIENT_MINUTES = 25
 PATIENT_TIF = PATIENT_MINUTES - 1
 PATIENT = "mid25"
+#: The single re-price that follows each open cell, by the open's cell: the same order (the then mid plus a tick for
+#: `WAIT_MINUTES`), recorded apart after the patient open (it follows 25 unfilled minutes at the mid, not 5).
+REPRICE = {"mid": "mid+1", PATIENT: "mid25+1"}
 #: Minutes before the session's close from which an open position closes at the natural at once.
 LAST_RESORT_MINUTES = 15
 #: Minutes a round trip's slowest ladder keeps in hand before the last resort: a cancel the venue confirms late, or an
@@ -118,18 +148,37 @@ CANDIDATES = 4
 #: A position's close attempts a day (the mid, a tick under, then the natural), and the back-off after a refused one.
 CLOSE_ATTEMPTS_DAY = 6
 REJECT_BACKOFF_MINUTES = 5.0
+#: What a calibration open leaves the families of the account-wide day cap (`gateway.day_equity_share` x sizing
+#: equity, which every dispatched open fills by its whole maximum loss, filled or not): this many Probe floors
+#: (`probe.floor_usd`; 2 x $100). The review of #407: six slots' opens could otherwise take $430 of the $481.63 cap on
+#: a heavy day.
+FAMILY_ROOM_PROBES = 2
+#: No new round trip once the calibration's own legs today (its orders and their cancels, as the House counts the day's
+#: 250) reach this: a round trip is 4 legs when both mids fill and about 30 at its slowest, so the day stays under about
+#: 110 of the 250 (the review of #407; before the House's own backstop closes).
+DAY_LEGS = 80
+#: The reason the order path gives a cancel when an order's time in force runs out (`OptionsLive._venue_rules`): only
+#: such an unfilled attempt worked its whole window, so only it is a "cancelled" sample; any other cancel is
+#: "interrupted" (never counted), and only such an open is re-priced.
+TIF_CANCEL = "its time in force"
+INTERRUPTED = "interrupted"
+#: A family's refusals that name a contract the calibration's working open holds (`RealBook.path_refusal`): it yields.
+YIELD_REFUSALS = ("one order stream per contract", "positions net across the account")
+OCC = re.compile(r"\b[A-Z]{1,6}\d{6}[CP]\d{8}\b")
 WIDTH = 1.0
 TICK = V.NET_TICK
 FILE = "calibration.sqlite"
 #: One row per attempt; the recorder stops writing (and the program starts no round trip) past this many.
 MAX_ROWS = 20000
 #: The cells' offsets (the Gym's limit rule and its ticks from the mid): open at the mid (for `WAIT_MINUTES`, or the
-#: patient cell's `PATIENT_MINUTES`) and one tick over; close at the mid, one tick under, and the natural.
-OPEN_OFFSETS = {"mid": ("mid", 0), "mid+1": ({"mid": 1}, 1), PATIENT: ("mid", 0)}
+#: patient cell's `PATIENT_MINUTES`) and one tick over (after either); close at the mid, one tick under, and the
+#: natural.
+OPEN_OFFSETS = {"mid": ("mid", 0), "mid+1": ({"mid": 1}, 1), PATIENT: ("mid", 0), REPRICE[PATIENT]: ({"mid": 1}, 1)}
 CLOSE_OFFSETS = {"mid": ("mid", 0), "mid-1": ({"mid": 1}, 1), "natural": ("natural", None)}
-#: Each cell's time in force (the natural close: 0, one minute).
-OPEN_TIF = {"mid": TIF, "mid+1": TIF, PATIENT: PATIENT_TIF}
+#: Each cell's time in force (the natural close: 0, one minute). Each row records its order's own (`tif`).
+OPEN_TIF = {"mid": TIF, "mid+1": TIF, PATIENT: PATIENT_TIF, REPRICE[PATIENT]: TIF}
 CLOSE_TIF = {"mid": TIF, "mid-1": TIF, "natural": 0}
+#: The outcomes that are samples (an interrupted attempt never is).
 COUNTED = ("filled", "partial", "cancelled")
 #: Minutes from the close's first rung (the mid) to its natural rung: the mid and a tick under, each sent, worked
 #: `WAIT_MINUTES` and cancelled, the next going the minute after.
@@ -161,6 +210,7 @@ def open_cell(slot: int, minute: int, close_min: int) -> str:
         return PATIENT
     return "mid"
 
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS samples (
     oid INTEGER PRIMARY KEY, client_id TEXT NOT NULL, trip TEXT NOT NULL, day TEXT NOT NULL, symbol TEXT NOT NULL,
@@ -168,10 +218,13 @@ CREATE TABLE IF NOT EXISTS samples (
     limit_price TEXT NOT NULL, limit_value REAL NOT NULL, qty INTEGER NOT NULL, quote TEXT NOT NULL, mid REAL, natural REAL,
     submitted_at REAL NOT NULL, venue_submitted_at TEXT, filled_at TEXT, canceled_at TEXT, cancel_sent REAL,
     done_at REAL, status TEXT, outcome TEXT, filled_qty INTEGER, fill_value REAL, fees REAL,
-    fees_source TEXT);
+    fees_source TEXT, tif INTEGER, cancel_reason TEXT);
 CREATE INDEX IF NOT EXISTS samples_cell ON samples(symbol, cell, outcome);
 CREATE INDEX IF NOT EXISTS samples_open ON samples(outcome);
 """
+#: Columns added after the first file was written (Sept 28, 2026): `CREATE TABLE IF NOT EXISTS` never adds them to an
+#: existing file, so `Recorder` adds each one missing (its older rows read NULL: their time in force is their offset's).
+ADDED = {"tif": "INTEGER", "cancel_reason": "TEXT"}
 
 
 def cell_of(symbol: str, action: str, offset: str) -> str:
@@ -208,10 +261,18 @@ class Recorder:
             os.chmod(self.path, 0o600)
             # A short timeout: the minute thread never waits on this file (the report command only reads it).
             db = sqlite3.connect(str(self.path), timeout=0.05, isolation_level=None, check_same_thread=False)
-            db.row_factory = sqlite3.Row
-            db.execute("PRAGMA journal_mode=WAL")
-            db.execute("PRAGMA synchronous=NORMAL")
-            db.executescript(SCHEMA)
+            try:
+                db.row_factory = sqlite3.Row
+                db.execute("PRAGMA journal_mode=WAL")
+                db.execute("PRAGMA synchronous=NORMAL")
+                db.executescript(SCHEMA)
+                have = {r[1] for r in db.execute("PRAGMA table_info(samples)")}
+                for column, kind in ADDED.items():
+                    if column not in have:
+                        db.execute(f"ALTER TABLE samples ADD COLUMN {column} {kind}")
+            except Exception:
+                db.close()                                  # tried afresh at the next call
+                raise
             self.db = db
         return self.db
 
@@ -248,7 +309,7 @@ class Recorder:
     def open_rows(self) -> list[dict]:
         try:
             return [dict(r) for r in self._connect().execute(
-                "SELECT oid FROM samples WHERE outcome IS NULL ORDER BY oid LIMIT 50")]
+                "SELECT oid, cancel_reason FROM samples WHERE outcome IS NULL ORDER BY oid LIMIT 50")]
         except Exception as exc:  # noqa: BLE001
             self._failed("read", exc)
             return []
@@ -308,7 +369,7 @@ class Calibration:
         if trip:
             trip.pop("legs", None)                          # contracts are not a status line's
         return {"trip": trip, "slots": st.get("slots"), "why": st.get("why"),
-                "day_possible_loss_usd": st.get("day_possible_loss_usd")}
+                "day_possible_loss_usd": st.get("day_possible_loss_usd"), "day_legs": st.get("day_legs")}
 
     def positions(self) -> list[RPosition]:
         book = self.live.book
@@ -350,6 +411,7 @@ class Calibration:
         self.live.book.closed_since.pop(INSTANCE, None)
         self.live.book.rejects_since.pop(INSTANCE, None)
         self._finish_rows()
+        self.live._isolated(INSTANCE, self._yield)
         self.live._isolated(INSTANCE, lambda: self._open(day, mi, out))
         if not self.live._killed():
             for pos in self.positions():
@@ -365,14 +427,51 @@ class Calibration:
             outcome = outcome_of(order.status, order.filled_qty)
             if outcome is None:
                 continue
+            # The first cancel's reason (a yield writes its own at once; a later cancel of the same order may overwrite
+            # the book's): an unfilled attempt that did not run out its time in force never worked its whole window.
+            reason = row.get("cancel_reason") or order.answer.get("cancel")
+            if outcome == "cancelled" and not str(reason or "").startswith(TIF_CANCEL):
+                outcome = INTERRUPTED
             fees = state.rows("SELECT COALESCE(SUM(fees), 0) AS f FROM fills WHERE oid=?", (order.oid,))[0]["f"]
             self.recorder.finished(order.oid, {
                 "status": order.status, "outcome": outcome, "filled_qty": int(order.filled_qty),
+                "cancel_reason": reason,
                 "fill_value": float(order.fill_value) if order.filled_qty > 0 else None,
                 "venue_submitted_at": order.answer.get("submitted_at"), "filled_at": order.answer.get("filled_at"),
                 "canceled_at": order.answer.get("canceled_at") or order.answer.get("expired_at"),
                 "cancel_sent": order.cancel_sent, "done_at": self.live.clock(),
                 "fees": float(fees) if order.filled_qty > 0 else 0.0, "fees_source": "book_estimate"})
+
+    def _yield(self) -> None:
+        """While the round trip's open works: a family's real open refused (this minute, or since its last decision)
+        because this open holds one of its contracts -- the refusal names it (`YIELD_REFUSALS`) -- cancels the open at
+        once and ends the round trip without its re-price (`_open`). The attempt is recorded "interrupted" (its cancel's
+        reason is written now, before any later cancel of the order could replace it), never a sample. The families'
+        path is untouched: the calibration reads their refusals only."""
+        st = self._st()
+        trip = st.get("trip")
+        book = self.live.book
+        if not trip or trip.get("yielded"):
+            return
+        order = book.orders.get(int(trip["oid"]))
+        if order is None or not order.working or order.action != "open" or order.family != FAMILY:
+            return
+        mine = {leg.symbol for leg in order.legs}
+        wanted = any(why.startswith(YIELD_REFUSALS) and mine & set(OCC.findall(why))
+                     for instance, refusals in book.rejects_since.items() if instance != INSTANCE for why in refusals)
+        if not wanted:
+            return
+        reason = "yielded: a family's real open was refused on its contracts"
+        ours = book.cancel(order, reason) or order.answer.get("cancel") == reason
+        trip["yielded"] = True                              # no re-price, whichever cancel ends it
+        st = self._st()
+        st["trip"] = trip
+        st["why"] = f"{trip.get('day')}: {reason}; the round trip ends without its re-price"
+        self._put(st)
+        if ours:
+            self.recorder.finished(order.oid, {"cancel_reason": reason})
+        self.live.record("live.calibration", {"trip": trip["id"], "oid": order.oid, "action": "open", "held": reason,
+                                              "cancelled": bool(ours)})
 
     # ------------------------------------------------------------------ opening
     def _open(self, day: Any, mi: int, out: dict) -> None:
@@ -386,24 +485,32 @@ class Calibration:
             order = ROrder.of(found[0]) if found else None
             if order is not None and order.working:
                 return
-            if (order is None or order.filled_qty >= 1 or trip.get("attempt") not in ("mid", PATIENT)
-                    or trip.get("day") != today or order.status not in ("cancelled", "expired")):
+            unfilled = (order is not None and order.filled_qty < 1 and order.status in ("cancelled", "expired")
+                        and trip.get("attempt") in REPRICE and trip.get("day") == today)
+            reason = str(order.answer.get("cancel") or "") if order is not None else ""
+            if not unfilled or trip.get("yielded") or not reason.startswith(TIF_CANCEL):
                 if order is not None and order.filled_qty >= 1 and order.pid in book.positions:
                     pos = book.positions[order.pid]         # filled: the close ladder takes it, under this trip's name
                     if pos.info.get("cal_trip") != trip["id"]:
                         pos.info["cal_trip"] = trip["id"]
                         book._save_position(pos)
-                st["trip"] = None                           # filled, its attempts spent, or its session over
+                elif unfilled and not trip.get("yielded"):
+                    # Cut short before its time in force ran out (a real-entry block, the House's cancel): no re-price,
+                    # whose sample would follow a shorter wait than its cell's.
+                    cut = (reason or order.status)[:160]
+                    st["why"] = f"{today}: the {trip['attempt']} open was cut short ({cut}); no re-price"
+                st["trip"] = None                           # filled, yielded, cut short, spent, or its session over
                 self._put(st)
                 return
-            # The mid (or the patient mid) went unfilled: once more at the mid plus one tick, on the same contracts, if
-            # it still may (its own ladder, not the slots' `NO_NEW_MINUTES`, bounds it by the close).
+            # The mid (or the patient mid) ran out its time unfilled: once more at the mid plus one tick, on the same
+            # contracts, if it still may (its own ladder, not the slots' `NO_NEW_MINUTES`, bounds it by the close).
             legs = [RLeg.of(x) for x in trip["legs"]]
+            offset = REPRICE[trip["attempt"]]
             why = self._may_open(day, minute, rest=REPRICE_REST)
-            sent = None if why else self._send_open(day, mi, trip["symbol"], legs, "mid+1", trip["id"], out)
+            sent = None if why else self._send_open(day, mi, trip["symbol"], legs, offset, trip["id"], out)
             st = self._st()
             if isinstance(sent, ROrder):
-                trip.update(attempt="mid+1", oid=sent.oid)
+                trip.update(attempt=offset, oid=sent.oid)
                 st["trip"] = trip
             else:
                 st["trip"] = None
@@ -419,6 +526,12 @@ class Calibration:
         counts = self.recorder.counts()
         if counts is None:
             return  # an unreadable recorder starts nothing (its closes go on)
+        legs_today = self.day_legs(today)
+        if legs_today >= DAY_LEGS:
+            self._fire(st, today, slot, f"{today}: the calibration sent {legs_today} legs today (orders and "
+                                        f"cancels); no round trip starts from {DAY_LEGS}: the rest of the day's count "
+                                        "is the families'")
+            return
         target = int(live.switches()["calibration_samples"])
         # The slot's open cell: the patient mid at a patient slot while its ladder fits and a symbol still wants it,
         # else the plain mid.
@@ -616,8 +729,13 @@ class Calibration:
             return f"the book's cap: ${M.cents(exposure.book_loss)} open of ${M.cents(table.book_share * equity)}"
         if loss > min(table.gateway_order_max_loss, table.gateway_order_share * equity):
             return "the gateway's per-order cap"
-        if exposure.day_opened + loss > table.gateway_day_share * equity:
-            return "the gateway's day cap"
+        # The account-wide day cap, less the room kept for the families' opens (`FAMILY_ROOM_PROBES`): the calibration
+        # takes only what leaves them that much.
+        day_cap = table.gateway_day_share * equity
+        room = FAMILY_ROOM_PROBES * table.probe_floor
+        if exposure.day_opened + loss + room > day_cap:
+            return (f"the gateway's day cap: ${M.cents(exposure.day_opened)} of ${M.cents(day_cap)} opened today, and "
+                    f"${M.cents(room)} is kept for the families' opens")
         reserve = (max_loss + 2 * fees) * (1 + float(table.bp_buffer))
         free = float(M.D(live.account_row.get("options_buying_power") or 0)) - book.reserved() if live.account_row else 0.0
         if reserve > free + 1e-9:
@@ -723,7 +841,8 @@ class Calibration:
             "legs": json.dumps([leg.row() for leg in legs], sort_keys=True), "action": action, "offset": offset,
             "ticks": ticks, "cell": cell_of(symbol, action, offset), "limit_price": order.limit_price,
             "limit_value": float(order.limit_value), "qty": int(order.qty), "quote": json.dumps(quote, sort_keys=True),
-            "mid": quote.get("mid"), "natural": quote.get("natural"), "submitted_at": float(order.placed_at)})
+            "mid": quote.get("mid"), "natural": quote.get("natural"), "submitted_at": float(order.placed_at),
+            "tif": int(order.tif) if order.tif is not None else None})
 
     def day_possible_loss(self, today: str) -> M.Decimal:
         """The most the calibration can lose on session day `today` as things stand, from the live state's own rows (never
@@ -757,7 +876,18 @@ class Calibration:
     def _possible_note(self, today: str) -> None:
         st = self._st()
         st["day_possible_loss_usd"] = {"day": today, "usd": str(M.cents(self.day_possible_loss(today)))}
+        st["day_legs"] = {"day": today, "legs": self.day_legs(today)}
         self._put(st)
+
+    def day_legs(self, today: str) -> int:
+        """The legs the calibration's orders of session day `today` took from the day's count, as the House counts
+        them (`RealBook._count_dispatch`, `RealBook.cancel`): each dispatched order's legs, and its cancel's."""
+        n = 0
+        sql = ("SELECT o.legs, o.cancel_sent, d.legs AS sent FROM orders o "
+               "LEFT JOIN dispatch_counts d ON d.oid = o.oid WHERE o.family=? AND o.day=?")
+        for r in self.live.state.rows(sql, (FAMILY, today)):
+            n += int(r["sent"] or 0) + (len(json.loads(r["legs"] or "[]")) if r["cancel_sent"] is not None else 0)
+        return n
 
 
 def _num(value: Any) -> float | None:
@@ -783,21 +913,24 @@ def plan() -> dict:
 
     return {"symbols": list(SYMBOLS), "slots_et": [hm(s) for s in SLOTS],
             "patient_slots_et": [hm(s) for s in PATIENT_SLOTS], "no_new_trip_from_et": hm(960 - NO_NEW_MINUTES),
-            "last_resort_from_et": hm(960 - LAST_RESORT_MINUTES),
+            "last_resort_from_et": hm(960 - LAST_RESORT_MINUTES), "repriced_as": dict(REPRICE),
             "works_minutes": {"open": {k: v + 1 for k, v in OPEN_TIF.items()},
-                              "close": {k: v + 1 for k, v in CLOSE_TIF.items()}}}
+                              "close": {k: v + 1 for k, v in CLOSE_TIF.items()}},
+            "leaves_families": {"day_cap_probe_floors": FAMILY_ROOM_PROBES, "no_new_trip_from_legs": DAY_LEGS},
+            "counted": list(COUNTED)}
 
 
 def _blank(action: str, offset: str) -> dict:
     tif = (OPEN_TIF if action == "open" else CLOSE_TIF).get(offset)
     return {"works_minutes": tif + 1 if tif is not None else None, "attempts": 0, "ended": 0, "filled": 0, "partial": 0,
-            "cancelled": 0, "rejected": 0, "open": 0, "_ticks": [], "_seconds": []}
+            "cancelled": 0, "rejected": 0, INTERRUPTED: 0, "open": 0, "_ticks": [], "_seconds": []}
 
 
 def report(root: str | Path) -> dict:
     """The read-only report (`python -m league.live --root <state> --calibration`): the plan, then per cell -- every
-    cell the plan samples, those without a sample yet included (the patient "mid25" among them) -- its working minutes,
-    attempts, fills, fill rate, mean fill against the mid in ticks (positive: worse than the mid) and median seconds to
+    cell the plan samples, those without a sample yet included (the patient "mid25" and its re-price "mid25+1" among
+    them) -- its working minutes, attempts, outcomes (an interrupted attempt apart: never ended, never in the fill
+    rate), fills, fill rate, mean fill against the mid in ticks (positive: worse than the mid) and median seconds to
     fill. Opens the file read-only."""
     path = Path(root) / FILE
     cells: dict[str, dict] = {cell_of(s, action, offset): _blank(action, offset)
@@ -818,7 +951,7 @@ def report(root: str | Path) -> dict:
         if outcome is None:
             c["open"] += 1
             continue
-        c[outcome] += 1
+        c[outcome] = c.get(outcome, 0) + 1
         if outcome in COUNTED:
             c["ended"] += 1
         if outcome in ("filled", "partial") and r["fill_value"] is not None and r["mid"] is not None:
