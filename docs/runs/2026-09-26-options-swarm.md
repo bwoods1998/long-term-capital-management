@@ -2148,4 +2148,51 @@ looks like beta. Validation 2025 and the holdout judge both.
 | 6 | Money | Equity $1,473.11: -$8.52 across the three calibration trips (market moves plus broker fees). Options buying power $473.08. 0 family orders (no family eligible) |
 | 7 | Compute | Sail $77.10 (about $3.5/h). Claude $67.17 of $100 (about $3.3/h since the architect's 32k answers). OpenAI $636.07 + $11.40 in flight of $707 |
 
+
+- **20:07Z R6 deployed after the close (release `20260928T200729Z-5bdeb710c88b`, main `2981566d`, PR #409): PROMOTED
+  20:08:12Z.**
+  - Contents:
+    - #404, payoff-range fills and marks;
+    - #406, stock splits from a public table;
+    - #407, D3 calibration expansion (six hourly slots, SPY/QQQ/IWM, a 25-minute patient mid cell, the same $50 bound);
+    - #408, the positions ledger, with Profit now including calibration and the broker's actual fees.
+  - The money digest is unchanged (`ad9bd54c`), and so is the grant.
+  - preopen: 8/9. The one fail is compute: the Sail projection runs out at Tuesday's close without a top-up.
+  - The site's positions table (personal-site #15) is live under the chart:
+    - three closed calibration round trips: SPY -$2.12, QQQ -$4.12, SPY -$2.12;
+    - other: crypto fees -$0.08;
+    - unreconciled $0.00;
+    - the rows plus other add to -$8.44, exactly the Profit at the top.
+
+- **Monday's close, the post-mortem (D3 real fills, `fillcheck.py`; the Gym replay waits for Tuesday's 06:00Z tape).**
+  - The three round trips were 1-lot $1-wide call verticals, 0-1 DTE.
+  - Resting passive orders: 5 of 6 filled at the mid (83%, 95% CI 44-97%). The hazard table predicts 78% (exact
+    p = 1: consistent).
+    - Opens: 3/3 at the mid, median 30 s.
+    - Closes: 2/3 at the mid. The third rested 300 s unfilled, then closed at mid-1, one tick worse, in 2 s.
+  - Real fills averaged +0.00 ticks against the mid, and the Gym would have charged the same.
+  - Six attempts in one session are far too few to recalibrate anything. The patient 25-minute cell starts Tuesday.
+  - The money: -$8.44 of trading P&L (market moves on the verticals plus the broker's fees). No family order: none is
+    eligible.
+  - The day's Net: about -$8.44 real, minus about $117 of compute (Sail about $58, Claude about $33, OpenAI about
+    $26), about -$125.
+
+- **20:30Z Decision: a pre-registered live test of the one replicated edge, at tuition size (the owner said "proceed
+  as you see best fit" to the recommendation).**
+  - What: the rebound finalist that replicated in the pre-registered 2020-21 screen, run unchanged as a House program
+    in the pattern of D3 calibration:
+    - its own family and its own records;
+    - never evidence, never a promotion, and D2 unchanged.
+  - The bounds, in code and fail-closed:
+    - 1 lot, and at most $100 max loss a structure;
+    - at most 3 open, and at most $300 of realized loss plus open max loss;
+    - a permanent stop at $150 realized loss (exits still run);
+    - it ends at 20 trading days or 30 closed round trips.
+  - Why: the verifier says no family is ready, and the evidence says the rebound is about half the strength D2 needs.
+    What remains unmeasured is how its actual trades fill and pay in the real market: 1-3 day holds, in-the-money
+    legs, and the 15:35 ET decision. Calibration round trips cannot measure that. Thirty trades cannot prove
+    profitability, and the pre-registration says so. What they can show is whether real execution matches the Gym on
+    the one mechanism that replicated.
+  - Status: built and adversarially reviewed as money code. It deploys only outside the 13:25-20:05Z freeze.
+
 ## Report
