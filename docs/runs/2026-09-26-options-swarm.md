@@ -2210,4 +2210,17 @@ looks like beta. Validation 2025 and the holdout judge both.
   - Daily direction on names is closed by cost, whatever the information. A news volatility signal would also have to
     beat the opening implied move. The route stays unopened unless a volatility mechanism earns it.
 
+
+### Sprint scoreboard, T0 + 63 h (21:22Z Sept 28, after the close)
+
+| # | Metric | Value |
+|---|---|---|
+| 1 | Population | 48 alive, 642 retired; 48 born and 51 retired in 2 h (5-year Train; agenda v10 since 21:05Z) |
+| 2 | Throughput | 741 cycles/h, median 11 s; 6 provider 502s |
+| 3 | Search | 64,794 trials, 301,752 program-years. Closest in Validation 2025: two single-name long-call families at 5/8 (`corroborated-demand-call`, failing the deflated Sharpe, t and trade count; `focal-level-release-call`, failing the deflated Sharpe, quarters and t). Tournament round 3 (single-name convexity) is running |
+| 4 | Evidence | Validation passes alive 0; holdout looks 2, passes 0 |
+| 5 | Real fills (D3) | 3 round trips today (see the post-mortem above); none after the close |
+| 6 | Money | Equity $1,473.11; Profit -$8.44, all of it calibration and fees. Options buying power $473.08 (the deposit is not in it yet) |
+| 7 | Compute | Sail $71.38; the guard's burn estimate is $77/day, and its $32 line (where it brakes research to keep the House running) comes Tuesday morning without a top-up. Claude $68.85 of $100. OpenAI $639.69 + $11.40 in flight of $707. The swarm spent $15.01 in 2 h |
+
 ## Report
