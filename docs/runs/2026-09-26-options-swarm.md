@@ -1609,6 +1609,41 @@ looks like beta. Validation 2025 and the holdout judge both.
   - #402 hold backoff, with dead families offered retire on the REVISE turn and an idle pass every 5 minutes;
   - #399 Train 2020-21: being fixed after review; merges after the close.
 
+- **04:00-04:50Z Sept 28 Design review (a workflow: five independent lenses, a judge, a critic).** Honest result: the
+  odds that any family passes Validation and the holdout within 2-5 days are about 2%.
+  - **Power.** Under D2, a family needs a true per-year t near 2.5-3 net of costs for decent odds. At an expected
+    per-year t of 1.0, Validation passes 16% of the time and both stages about 1%; at 2.5, 68% and 35%.
+  - **Train does not transfer.** The 168 Train-eligible versions with a positive worst year averaged a 2025 t of -0.21;
+    1.8% reached t 2, below a zero-edge program's 2.3%. Rank correlation of Train t with 2025 t is 0.39, so only Train
+    t of about 3+ carries information after about 400 trials a family.
+  - **The rebound has no headroom.** At zero cost, as the underlying, its per-year t never reaches 2 in 2019-2025.
+  - **Ensembles do not rescue it.** Train winners are nearly uncorrelated, so books look like Sharpe-3 portfolios on
+    Train. Pre-registered on Train, the top-12 book would have scored 2025 t -0.89; the components' 2025 mean t is -0.3.
+  - **The volatility premium in the real types:** mid edge is well under the round-trip cost.
+  - **Metric mismatch.** Validation's t is per dollar of max loss; the holdout judges daily dollars. For programs whose
+    risk varies by day, the dollar t is a third to two thirds of the ratio t.
+  - **The critic's corrections.**
+    - A full-size (wider) rebound was already validated by the swarm at $109-278 max loss, t at most 1.41.
+    - Debit twins of credit and iron winners belong to a refuted class.
+    - Live sizing allows a Probe structure only up to $100 of max loss including fees, with at most 3 open structures
+      a family.
+    - One SPXW diagnostic run looks like a settlement or marking artifact and is being investigated.
+  - **Actions.**
+    - Agenda v5 is live (architect): the Sharpe arithmetic, ceiling-first at the mid, the rebound and real-type VRP
+      added to the refuted list, idiosyncratic and quarterly-recurring drivers first, and sizes of $60-95 with fees.
+    - Follow-up tracks running:
+      - the SPXW artifact hunt;
+      - the pre-registration of a frozen 2020-21 replication screen, frozen before the data exists and counted by
+        mechanism (at least 6 replicators across at least 3 mechanisms);
+      - the single-name earnings event-variance premium at Probe size with a placebo, the one large documented
+        premium never tested;
+      - the frozen-version runner for that screen.
+    - Holdout looks are protected: the operator gate-holds any new validation pass until it clears the drift screen
+      and, once it exists, the 2020-21 replication.
+  - If the pre-registered tests all fail by about Wednesday, the honest reading will be that no one-contract debit
+    strategy of $100 or less on this data has the Sharpe D2 demands. The owner then chooses between full push and a
+    low-cost standing mode.
+
 ### Sprint scoreboard, T0 + 45 h (03:30Z Sept 28, after R3)
 
 | # | Metric | Value |
