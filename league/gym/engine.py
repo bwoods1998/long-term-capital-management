@@ -174,6 +174,23 @@ class GreekBlocks:
         self.done[np.ix_(cols, rows)] = True
 
 
+class DayClosed(RuntimeError):
+    """A closed day (`DayData.close`) was read. Its chains are gone: answering "no chain" would settle every expiring
+    position as `expired_without_data`, so a read after the close is a bug, and says so."""
+
+
+class _ClosedChains:
+    """What a closed day's `chains` becomes: any use of it raises `DayClosed` (never an empty mapping)."""
+
+    def __init__(self, day: dt.date):
+        self.day = day
+
+    def _refuse(self, *args: Any, **kwargs: Any) -> Any:
+        raise DayClosed(f"the replay's day {self.day} is closed: its chains were freed")
+
+    get = __getitem__ = __contains__ = __iter__ = __len__ = items = keys = values = _refuse
+
+
 class DayData:
     """One trading day: each root's chain once, and one shared snapshot per root and minute."""
 
@@ -200,12 +217,18 @@ class DayData:
         self._wanted: dict[str, set[int]] = {}
         self._unders: dict[tuple[str, int, int], Any] = {}
         self._minute = -1
+        self.closed = False
 
     def want(self, root: str, minutes: Any) -> None:
         """Minutes some program decides on (the greek blocks cover these)."""
         self._wanted.setdefault(root, set()).update(int(m) for m in minutes)
 
+    def _check_open(self) -> None:
+        if self.closed:
+            raise DayClosed(f"the replay's day {self.day} is closed: its snapshots, greek blocks and chains were freed")
+
     def blocks(self, root: str) -> "GreekBlocks | None":
+        self._check_open()
         found = self._blocks.get(root)
         if found is None and root in self.chains:
             found = self._blocks[root] = GreekBlocks(self.chains[root], self.rate, self.close_min, sorted(self._wanted.get(root, ())))
@@ -230,13 +253,16 @@ class DayData:
 
     def close(self) -> None:
         """The day is over: drop its snapshots, greek blocks and chains, so the next day loads with this
-        one's grids already freed (`run` calls it last thing each day; nothing reads the day after)."""
+        one's grids already freed (`run` calls it last thing each day). A closed day refuses every read
+        (`DayClosed`): `snapshot`, `blocks`, `under` and its `chains` raise rather than answer "no data"."""
         self._drop_snapshots()
         self._unders.clear()
         self._blocks.clear()
-        self.chains = {}
+        self.chains = _ClosedChains(self.day)  # type: ignore[assignment]
+        self.closed = True
 
     def snapshot(self, root: str, mi: int) -> Snapshot | None:
+        self._check_open()
         key = (root, mi)
         found = self._snaps.get(key)
         if found is not None:
@@ -253,6 +279,7 @@ class DayData:
         return snap
 
     def under(self, root: str, mi: int, history: int):
+        self._check_open()
         key = (root, mi, history)
         found = self._unders.get(key)
         if found is None:
@@ -1147,4 +1174,4 @@ def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Se
             for a in accounts]
 
 
-__all__ = ["RunConfig", "run", "Account", "DayData", "History"]
+__all__ = ["RunConfig", "run", "Account", "DayData", "DayClosed", "History"]
