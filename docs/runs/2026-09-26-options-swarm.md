@@ -1773,6 +1773,70 @@ looks like beta. Validation 2025 and the holdout judge both.
   - `preopen.py` passes 9/9: release, grant, gateway real types, account, swarm, bands (2 observe rows), the House's
     own mirror (lag 0), the House backup (ok, found by the pinned box id: #394 works), and compute.
 
+- **07:02Z Sept 28 Placebo addendum to the 2020-21 pre-registration.** It is frozen before any 2020-21 run, as
+  the pre-registration requires. No 2020-21 option data was read, no box was used, and the House was read only.
+  - **Verifiable later.** The private file `prereg-2020-21-placebo-addendum.json` has sha256
+    `1a95ab2e2b673c69521b547e02ce2a2ec3d4b14ba98fb28f75f3848d4f9f633d`.
+    - It names the pre-registration it extends by that file's sha256,
+      `316fca9c62bea407d84c1e32cf77dc7592294f5515a45948e9376fbdfd0391d2`, which is unchanged.
+    - For each of the 30 House components it holds the placebo's status. For each frozen placebo it also holds the code
+      sha256, the merged-params sha256 and the Gym run sha a placebo run must report.
+    - It holds no program code and no parameter values. The placebo programs stay private and never enter git.
+  - **The rule.** A directional component's placebo is its signal inverted.
+    - Only the entry condition changes. The placebo trades the same structure, side, size, strikes, horizon, exits and
+      timing, but enters when the signal says the opposite.
+    - A regime or trend filter is kept and the move inside it flips: a pullback in an uptrend becomes a rally in an
+      uptrend, and a rebound after lower closes becomes the same trade after higher closes.
+    - A two-sided program has each side's trigger inverted. The structure and the side of the trade are never flipped.
+    - Where the entry condition cannot be isolated honestly, no placebo is invented, and the component fails test 4 by
+      rule.
+  - **How it was checked.**
+    - A writer drafted each placebo from the frozen code, and an independent checker reviewed each one. The checker
+      confirmed the original's hashes, read the diff, ran mirror tests of the trigger and ran the Gym's own safety check
+      and loader.
+    - All 30 verdicts were ok. The hashes were then recomputed from the files on disk.
+    - Each placebo keeps its original's params unchanged, so its params hash equals the original's.
+  - **Result: 28 frozen, 0 rejected, 2 not isolable.**
+    - **Frozen (28):**
+
+    | Slot | Family |
+    |---|---|
+    | 1 | sweep-rebound-bm-long-call-p2 |
+    | 2 | bear-regime-rally-fade-putvert |
+    | 3 | low-close-location-backmonth-call--2 |
+    | 4 | scaled-entry-liquidity-reversal |
+    | 5 | sweep-liquidity-rebound-itm-vertic-2 |
+    | 6 | sweep-liquidity-rebound-itm-vertical |
+    | 7 | stacked-streak-rebound-ladder |
+    | 8 | daily-oversold-rebound-vertical |
+    | 9 | low-close-location-backmonth-call--3 |
+    | 10 | tight-spread-liquidation-puts |
+    | 11 | low-close-location-backmonth-call-on |
+    | 13 | index-laggard-catchup-call |
+    | 14 | overnight-inventory-call |
+    | 15 | slow-tenor-rebound-debit |
+    | 16 | slow-breadth-tail-call |
+    | 18 | sweep-bm-trend-long-option-on-spxw-3 |
+    | 19 | sweep-bm-trend-long-option |
+    | 20 | spy-flush-stabilization-call |
+    | 21 | orb-fade-iwm-r |
+    | 22 | balanced-regime-reversal-vertical |
+    | 23 | pre-announcement-drift-debit |
+    | 24 | sweep-bm-trend-long-option-on-iwm |
+    | 25 | shock-day-rebound-debit |
+    | 26 | leverage-reset-close-momentum |
+    | 27 | calendar-flow-harvest-basket |
+    | 28 | downtrend-rally-fade-put-vertical |
+    | 29 | low-close-location-backmonth-call |
+    | 30 | macro-release-drift-debit |
+
+    - **Not isolable (2). Each has no frozen placebo and fails test 4 by rule.**
+      - Slot 12 `persistent-breakdown-tail-put`: its entry gate also decides when its exits run. The entry cannot change without
+        changing the exits.
+      - Slot 17 `crossasset-liquidation-tail-put`: the frozen version has no directional trigger to invert.
+    - At most 28 of the 30 House components can now replicate. The decision rule is unchanged: at least 6 replicators
+      across at least 3 mechanism classes.
+
 ### Sprint scoreboard, T0 + 47 h (05:31Z Sept 28)
 
 | # | Metric | Value |
