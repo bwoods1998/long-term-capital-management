@@ -603,14 +603,24 @@ def idle_evaluations(fam: Mapping[str, Any]) -> int:
 
 def revalidation_owed(fam: Mapping[str, Any], current: tuple[Any, Any] | None) -> bool:
     """R4 (the review of PR #402): the family's validation passed the line on another Gym image or engine bundle than the
-    one running now (`current`, (image, bundle)). A deploy that changes either clears its `gate_ready` (the tournament
-    owes it validation on the current data and engine first), so without this it would read as dead by the idle rule
-    while its passing version waits to be validated again. False when `current` is not known."""
+    one running now (`current`, (image, bundle)), and the version it passed is still the one the tournament validates
+    next (its submitted best, else its best by Train score) and was never demoted (`robust_failed`: a loss at 1.5x, or a
+    failed drift screen, whose marker `drift_failed` counts too). A deploy that changes the image or bundle clears its
+    `gate_ready` (the tournament owes it validation on the current data and engine first), so without this it would read
+    as dead by the idle rule while its passing version waits to be validated again. It ends when that validation lands
+    (the identity is current again) or the version stops being the candidate. False when `current` is not known."""
     if current is None:
         return False
     state = fam.get("state") or {}
-    passed = bool((state.get("validation_line") or {}).get("passed"))
-    return passed and (state.get("validation_image"), state.get("validation_bundle")) != tuple(current)
+    if not (state.get("validation_line") or {}).get("passed"):
+        return False
+    if (state.get("validation_image"), state.get("validation_bundle")) == tuple(current):
+        return False
+    n, validated = fam.get("best_version") or state.get("best_train_version"), state.get("validation_version")
+    if not isinstance(n, int) or isinstance(n, bool) or not isinstance(validated, int) or int(validated) != n:
+        return False
+    demoted = {int(v) for v in (state.get("robust_failed") or []) if isinstance(v, int) and not isinstance(v, bool)}
+    return n not in demoted and str(n) not in (state.get("drift_failed") or {})
 
 
 def idle_dead(fam: Mapping[str, Any], settings: Mapping[str, Any], *, current: tuple[Any, Any] | None = None) -> str | None:

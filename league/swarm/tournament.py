@@ -202,8 +202,20 @@ class Tournament:
                              typical_max_loss_usd=loss, typical_by_version=typical,
                              validation_numbers={"mean": mean, "t": t, "sharpe_daily": summary.get("sharpe_daily"),
                                                  "quarters": summary.get("quarters_positive")},
-                             gate_ready=bool(line["passed"]))
+                             gate_ready=bool(line["passed"]) and not self.gate_spent(fid, n, state))
         return {"version": n, "passed": line["passed"], "mean": mean, "t": t}
+
+    def gate_spent(self, fid: str, n: int, state: Mapping[str, Any]) -> bool:
+        """The gate is done with version `n` (R4, the verification of PR #402): its holdout look was made or the gate refused
+        it (`gated_sha`), so the gate never takes it up again (`Gate.run` skips it). Validated again after a Gym deploy, it
+        does not go back to `gate_ready`, which would keep it from the idle rule with nothing ever to look at."""
+        from .gate import run_sha  # a local import: the tournament only reads the gate's mark
+
+        version = self.store.version(fid, n)
+        if version is None or not version.get("sha"):
+            return False
+        sha = run_sha(version)
+        return bool(self.store.looked(sha) or state.get("gated_sha") == sha)
 
     # ------------------------------------------------------------------ 3. the bandit
     def allocate(self, fams: list[dict[str, Any]]) -> dict[str, float]:
@@ -315,9 +327,15 @@ class Tournament:
         return why
 
     def identity(self) -> tuple[Any, Any]:
-        """(the Gym image, its engine bundle) the pool runs now, as `validate` reads them."""
-        image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
-        bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
+        """(the Gym image, its engine bundle) the pool runs now, as `validate` reads them; what could not be read is None
+        (like `Researcher._gym_identity`: a pool error never fails a retirement pass, and an unknown identity only makes
+        a passing validation look owed, `revalidation_owed`, never a family dead)."""
+        image = bundle = None
+        try:
+            image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
+            bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
+        except Exception:  # noqa: BLE001
+            pass
         return image, bundle
 
     def idle_why(self, fam: Mapping[str, Any], *, current: tuple[Any, Any] | None = None) -> str | None:

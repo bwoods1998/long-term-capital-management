@@ -26,7 +26,7 @@ from league.swarm.tournament import IDLE_CAUSE, Tournament
 from league.tests.swarm_fakes import Clock, result
 from league.tests.test_swarm_loop import LoopCase
 from league.tests.test_swarm_researcher import ResearcherCase
-from league.tests.test_swarm_rounds import FakeGymPool, RoundCase, weak
+from league.tests.test_swarm_rounds import FakeGymPool, RoundCase, strong, weak
 
 DEAD = f"made no new Gym evaluation in its last {DORMANT_CYCLES} cycles (only stored results, holds and refused runs)"
 
@@ -523,6 +523,70 @@ class ReviewProbes(RoundCase):
         self.assertEqual((fam["state"]["validation_bundle"], fam["state"]["gate_ready"], fam["state"]["dormant_cycles"]),
                          ("bundle-2", True, 0))
         self.assertFalse(revalidation_owed(fam, t.identity()))
+
+    def test_the_exemption_ends_once_the_passing_version_is_not_the_candidate(self):
+        """Verification probe V1 (and V4 with #398 merged): a passing validation on bundle-1 whose version was later demoted
+        (a loss at 1.5x, or a failed drift screen: `robust_failed`, `drift_failed`) or moved past, or whose best was
+        cleared, is owed nothing after a Gym deploy: the exemption must end, or the family never retires."""
+        t = self.validated_at_gate()
+        fam = self.store.family("a")
+        n = fam["state"]["validation_version"]
+        Gate(self.store, self.pool, None, self.settings, clock=self.clock).refuse(
+            fam, n, run_sha(self.store.version("a", n)), "review", ["lookahead in decide()"], {"refused": []})
+        self.pool.current = "bundle-2"
+        self.assertTrue(revalidation_owed(self.store.family("a"), t.identity()), "its passing version is still the candidate")
+        self.store.add_version("a", "# a v2\nNEEDS = {'roots': ['SPY']}\nPARAMS = {}\ndef decide(ctx):\n    return []\n", {},
+                               author="test")
+        base = self.store.family("a")
+        cases = {
+            "moved past (a new best)": {**base, "best_version": 2},
+            "demoted at 1.5x": {**base, "state": {**base["state"], "robust_failed": [n]}},
+            "failed the drift screen (#398's marker)": {**base, "state": {**base["state"], "drift_failed": {str(n): "t below"}}},
+            "best cleared": {**base, "best_version": None, "state": {**base["state"], "best_train_version": None}},
+            "validated on the Gym running now": {**base, "state": {**base["state"], "validation_bundle": "bundle-2"}},
+        }
+        for name, fam in cases.items():
+            self.assertFalse(revalidation_owed(fam, t.identity()), name)
+        # `Researcher._demote` with no other candidate, then hourly rounds after the deploy: it dies by its dormant count.
+        self.store.update_family("a", best_version=None, best_train=None)
+        self.store.set_state("a", best_train_version=None, robust_failed=[n], gate_ready=False, dormant_cycles=DORMANT_CYCLES * 10)
+        out = t.validate(self.store.families(alive=True))
+        self.assertNotIn("a", out["judged"], "nothing of it is validated again")
+        self.assertEqual([r["family"] for r in t.idle_pass()["retired"]], ["a"])
+
+    def test_a_pool_error_never_fails_a_retirement_pass(self):
+        t = self.validated_at_gate()
+        self.family("plain")
+        self.store.set_state("plain", dormant_cycles=DORMANT_CYCLES)  # dead: no validation, nothing awaits it
+        self.store.update_family("plain", best_version=None)
+
+        def broken():
+            raise RuntimeError("the Gym's engine bundle could not be built")
+        self.pool.bundle = broken
+        self.assertEqual(t.identity(), (None, None))
+        self.store.set_state("a", gate_ready=False)  # "a" passed on bundle-1: with the Gym unknown it is treated as owed
+        self.assertEqual([r["family"] for r in t.idle_pass()["retired"]], ["plain"])
+        self.assertEqual(t.retirements(self.store.families(alive=True)), [])
+        self.assertIsNone(self.store.family("a")["retired_at"])
+
+    def test_a_version_the_gate_is_done_with_is_not_gate_ready_again_after_a_gym_deploy(self):
+        """Verification probe V1b (older than R4): a version whose holdout look failed was validated again after a Gym
+        deploy and got gate_ready back, for a sha the gate never looks at again: exempt from the idle rule for ever."""
+        t = self.validated_at_gate()
+        self.store.set_state("other", gate_ready=False)  # only "a" goes to the gate now
+        self.answer = weak  # its holdout look fails
+        self.replies = [{"text": json.dumps({"verdict": "pass", "reasons": []})}] * 2
+        out = Gate(self.store, self.pool, self.router, self.settings, clock=self.clock).run()
+        self.assertEqual(out["looked"], [{"family": "a", "passed": False}])
+        self.answer = strong
+        self.pool.current = "bundle-2"  # a Gym deploy: every validated best is validated again
+        judged = t.validate(self.store.families(alive=True))["judged"]
+        self.assertTrue(judged["a"]["passed"] and judged["other"]["passed"])
+        a, other = self.store.family("a")["state"], self.store.family("other")["state"]
+        self.assertEqual((a["gate_ready"], other["gate_ready"]), (False, True), "the gate is done with a's version only")
+        self.assertEqual(Gate(self.store, self.pool, self.router, self.settings, clock=self.clock).run()["refused"], [])
+        self.store.set_state("a", dormant_cycles=DORMANT_CYCLES * 10)
+        self.assertEqual([r["family"] for r in t.idle_pass()["retired"]], ["a"])
 
     def test_the_check_and_the_retirement_are_one_transaction(self):
         """Probe P4: a late Train result landed between the idle rule's check and `retire_gym`, and the family was retired
