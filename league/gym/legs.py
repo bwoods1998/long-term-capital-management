@@ -343,12 +343,19 @@ def max_loss_share(type_: str, value: float, collateral: float) -> float:
     return value
 
 
-def value_bounds(legs: Sequence[LegFill]) -> tuple[float, float]:
+def value_bounds(legs: Sequence[LegFill], expirations: Sequence[Any]) -> tuple[float, float]:
     """The least and the most a structure can be worth a share at its expiry, from its payoff: a debit
     vertical [0, width], a credit vertical [-width, 0], an iron condor [-widest wing, 0], a long call
     [0, inf). The package's no-arbitrage range: no one sells it for less than it can ever be worth, or
-    buys it for more. (-inf, inf) when its legs expire on different days (a calendar or a diagonal)."""
-    if not legs or len({int(leg.dte) for leg in legs}) > 1:
+    buys it for more. (-inf, inf) when its legs expire on different days (a calendar or a diagonal).
+
+    `expirations` is each leg's expiry (any comparable value: a day ordinal, a date), passed explicitly and
+    never read from the legs' `dte`: the live path builds a held position's legs with 0 placeholders there
+    (`league/live/step.py`), which would make a calendar look like one expiry."""
+    expirations = list(expirations)
+    if len(expirations) != len(legs):
+        raise ValueError(f"value_bounds: {len(legs)} legs but {len(expirations)} expirations")
+    if not legs or len(set(expirations)) > 1:
         return -math.inf, math.inf
 
     def payoff(level: float) -> float:

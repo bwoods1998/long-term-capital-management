@@ -358,10 +358,18 @@ class Position:
     idx: np.ndarray | None = None  # today's snapshot index of each leg (-1: not in today's chain)
     last_mark: float = math.nan
     closing: int = 0              # working close order id (0: none)
+    mark_bounded: bool = False    # the last mark was held inside `bounds()` (recomputed with every mark; not saved)
+    range_: tuple[float, float] | None = field(default=None, repr=False, compare=False)   # `bounds()`, once
 
     @property
     def credit(self) -> bool:
         return self.type in L.CREDIT
+
+    def bounds(self) -> tuple[float, float]:
+        """What the package can be worth a share at expiry (`legs.value_bounds`), from its legs' own expirations."""
+        if self.range_ is None:
+            self.range_ = L.value_bounds(self.legs, [int(e) for e in self.expirations])
+        return self.range_
 
     def legs_today(self) -> tuple[L.LegFill, ...]:
         return tuple(L.LegFill(int(i), leg.key, leg.side, leg.ratio, leg.dte, leg.strike, leg.is_call)
@@ -382,6 +390,7 @@ class Working:
     filled: int = 0
     seen: bool = False            # met a two-sided quote at least once
     aggressive: bool = False      # marketable when it first met one: its remainder keeps taking the natural
+    range_: tuple[float, float] | None = field(default=None, repr=False, compare=False)   # an open's package bounds, once
 
 
 #: A forced close's order note -> the trade's exit reason (the note survives the shadow book's saved state).
@@ -407,8 +416,12 @@ class Account:
         self.trades: list[dict] = []
         self.daily: list[tuple[str, float, float]] = []
         self.fill_rows: list[tuple[str, float, float, bool]] = []  # (action, slip a share, slip in half-spreads, at natural)
+        #: bounded_close: closes (a program's, the House's, the window's end) filled at the package's least because the
+        #: legs' touches added up to less (`_in_bounds`); blocked_out_of_range: order-minutes held back because the
+        #: legs' touches added up to a price the package can never trade at (`_tradeable`).
         self.counts = {"orders": 0, "opens": 0, "closes": 0, "filled": 0, "partial_fills": 0, "cancelled": 0, "expired": 0,
-                       "rejected": 0, "liquidated": 0, "settled": 0, "exercised": 0, "fills": 0}
+                       "rejected": 0, "liquidated": 0, "settled": 0, "exercised": 0, "fills": 0, "bounded_close": 0,
+                       "blocked_out_of_range": 0}
         self.reject_reasons: dict[str, int] = {}
         self.pending_shares: list[tuple[Position, str, float, float]] = []  # (trade, root, shares, reference price)
         self.closed_since: list[dict] = []
@@ -557,18 +570,32 @@ class Account:
             legs = pos.legs_today()
             if any(leg.idx < 0 for leg in legs):
                 return
+            lo, hi = pos.bounds()
         else:
             legs = order.legs
+            # An open works the day it was decided (`end_day` drops every order), so its legs' dte are today's.
+            if work.range_ is None:
+                work.range_ = L.value_bounds(legs, [day.ordinal + int(leg.dte) for leg in legs])
+            lo, hi = work.range_
         stress = self.cfg.stress
         natural, cap = L.natural_value(snap, legs, order.action, stress=stress)
         if not math.isfinite(natural):
             return
         mid = L.mid_value(snap, legs)
         opening = order.action == "open"
+        # The UNSTRESSED natural: stress changes what a fill costs, never which limits can fill (a limit behind the
+        # touch stays behind it) or which minutes are a market at all.
+        plain = natural if stress == 1.0 else L.natural_value(snap, legs, order.action)[0]
+        if not self._tradeable(plain, lo, hi, opening):
+            # The legs' touches add up to a price the package can never trade at: nothing fills this minute, and the
+            # order keeps working. When this is its first look, it arrived and RESTS (seen, never aggressive): a
+            # blocked minute never makes a patient order a taker that later takes the natural past its own limit.
+            self.counts["blocked_out_of_range"] += 1
+            if not work.seen:
+                work.seen, work.aggressive = True, False
+            return
         if work.forced:
-            price, qty = self._in_bounds(natural, legs, opening), work.remaining
-            if price is None:
-                return
+            price, qty = natural, work.remaining
         else:
             marketable = natural <= order.limit + 1e-9 if opening else natural >= order.limit - 1e-9
             if not work.seen:
@@ -580,9 +607,6 @@ class Account:
                 # its own limit.
                 price = natural if work.aggressive else order.limit
             else:
-                # q is measured against the UNSTRESSED quotes: stress changes what a fill costs, never
-                # which limits can fill (a limit behind the touch stays behind it).
-                plain = natural if stress == 1.0 else L.natural_value(snap, legs, order.action)[0]
                 span = plain - mid
                 q = (order.limit - mid) / span if abs(span) > 1e-12 else 1.0
                 shape = [(int(snap.dte[leg.idx]), leg.strike / snap.spot - 1.0 if np.isfinite(snap.spot) else math.nan)
@@ -607,9 +631,13 @@ class Account:
                     # spread (stress below 1, the robustness run at the mid) never fills a limit better than itself.
                     extra = (stress - 1.0) * abs(plain - mid)
                     price = price + extra if opening else price - extra
-            price = self._in_bounds(price, legs, opening)
-            if price is None:
-                return
+        bounded = self._in_bounds(price, lo, hi, opening)
+        if bounded is None:
+            self.counts["blocked_out_of_range"] += 1
+            return
+        floored = bounded != price
+        price = bounded
+        if not work.forced:
             qty = min(work.remaining, cap) if room is None else min(work.remaining, cap, room)
             if qty <= 0:
                 return
@@ -621,9 +649,15 @@ class Account:
             buying = (leg.side > 0) == opening
             leg_prices.append(float(snap.ask[leg.idx] if buying else snap.bid[leg.idx]))
         fees = L.order_fees(order.root, legs, leg_prices, qty, order.action)
-        half = abs(natural - mid)
-        slip = (price - mid) if opening else (mid - price)
-        self.fill_rows.append((order.action, slip, slip / half if half > 1e-12 else 0.0, abs(price - natural) < 1e-9))
+        if floored:
+            # A close held at the package's least has no market price to measure slippage against (its mid is the
+            # blown-out quote's): it is counted here and flagged on its trade, never as price improvement over the mid.
+            self.counts["bounded_close"] += 1
+            self.positions[work.pid].info["bounded"] = True
+        else:
+            half = abs(natural - mid)
+            slip = (price - mid) if opening else (mid - price)
+            self.fill_rows.append((order.action, slip, slip / half if half > 1e-12 else 0.0, abs(price - natural) < 1e-9))
         self.counts["fills"] += 1
         if opening:
             self._open_fill(day, mi, work, price, qty, fees)
@@ -641,20 +675,34 @@ class Account:
             self.counts["partial_fills"] += 1
 
     @staticmethod
-    def _in_bounds(price: float, legs: Sequence[L.LegFill], opening: bool) -> float | None:
-        """A package trades only inside what it can be worth at expiry (`legs.value_bounds`). Its legs' touches
-        can add up to a price outside that range when a leg's quote blows out (an index leg in the money quoted
+    def _tradeable(natural: float, lo: float, hi: float, opening: bool) -> bool:
+        """Whether this minute's natural is a price the package [lo, hi] (`legs.value_bounds`) can trade at: an open's
+        inside the range (above the least, strictly: a vertical bought for 0.00 would be free), a close's at or below
+        the most (below the least it still trades, at the least: `_in_bounds`). Outside, nothing fills that minute."""
+        if natural > hi + 1e-9:
+            return False
+        return not opening or natural > lo + 1e-9
+
+    @staticmethod
+    def _in_bounds(price: float, lo: float, hi: float, opening: bool) -> float | None:
+        """A package trades only inside what it can be worth at expiry, [lo, hi] (`legs.value_bounds`). Its legs'
+        touches can add up to a price outside that range when a leg's quote blows out (an index leg in the money quoted
         with no bid and a far ask, the minute of an FOMC release, the last minutes of an expiry): the natural close
         of a 5-wide debit vertical can then be -30, a loss many times the most the vertical can lose. No one sells a
         package for less than it can ever be worth or buys it for more (complex-order price checks exist to refuse it), so:
-        an open, or a close that would RECEIVE more than the package's most, does not fill this minute (it keeps
-        working); a close that would receive LESS than the package's least fills at that least (the worst a
-        buyer of it could offer: the position never loses more than its maximum loss). None: no fill."""
-        lo, hi = L.value_bounds(legs)
-        if opening:
-            return price if lo - 1e-9 <= price <= hi + 1e-9 else None
+        an open at or below the package's least (a free package) or above its most, or a close that would RECEIVE more
+        than its most, does not fill this minute (it keeps working); a close that would receive LESS than the package's
+        least fills at that least, so the position never loses more than its maximum loss. None: no fill.
+
+        The floor is honest because it is the live path's own: `league/live/step.py` `OptionsLive._send_close` (the
+        lines after "A close's limit stays one the gateway takes") never sends a close below 0 for a debit structure,
+        below -(collateral - 0.01) for a credit one, or below a tick for a long call or put. Each of those is at or
+        above this least, so a real close never sells for less than the Gym's floor, and one that does not fill keeps a
+        package worth at least that least (`test_live_parity.LiveCloseFloor` pins it for each bounded structure type)."""
         if price > hi + 1e-9:
             return None
+        if opening:
+            return price if price > lo + 1e-9 else None
         return max(price, lo)
 
     @staticmethod
@@ -753,6 +801,9 @@ class Account:
             "max_loss": round(max_loss, 2), "fees": round(pos.fees, 2), "pnl": round(pos.cash, 2),
             "return_on_max_loss": round(pos.cash / max_loss, 4) if max_loss > 0 else None,
             "exit_reason": pos.reason, "context": pos.info.get("context", {}), "note": pos.note,
+            # Its exit was set by the package's range, not by a market price: a close filled at the package's least,
+            # or an exit at a mark held inside the range (`_in_bounds`, `_bounded_mark`).
+            "bounded": bool(pos.info.get("bounded")),
         }
 
     def _drop(self, work: Working, why: str | None) -> None:
@@ -836,7 +887,9 @@ class Account:
                 mark = L.mid_value(snap, legs)
                 natural = L.natural_value(snap, legs, "close")[0]
                 if math.isfinite(mark):
-                    pos.last_mark = mark
+                    # The account's mark (equity, a mark exit) is held inside the package's range; the program's row
+                    # keeps the raw mid and natural, as the live path's rows do.
+                    self._set_mark(pos, mark)
             leg_rows = [{"id": int(leg.idx), "dte": int(exp - day.ordinal), "strike": leg.strike, "is_call": leg.is_call,
                          "side": "long" if leg.side > 0 else "short", "ratio": leg.ratio}
                         for leg, exp in zip(legs, pos.expirations)]
@@ -1104,15 +1157,27 @@ class Account:
             ask = chain.ask[m, pos.idx]
             if np.isfinite(bid).all() and np.isfinite(ask).all():
                 sides = np.array([leg.side * leg.ratio for leg in pos.legs], dtype=np.float64)
-                lo, hi = L.value_bounds(pos.legs)   # a blown-out leg's mid can leave the package's range too
-                pos.last_mark = min(max(float(np.sum(sides * 0.5 * (bid + ask))), lo), hi)
+                self._set_mark(pos, float(np.sum(sides * 0.5 * (bid + ask))))
                 return
 
     @staticmethod
+    def _set_mark(pos: Position, value: float) -> None:
+        """The position's mark, held inside what the package can be worth at expiry: a blown-out leg's mid can leave
+        the package's range too."""
+        lo, hi = pos.bounds()
+        pos.last_mark = min(max(value, lo), hi)
+        pos.mark_bounded = pos.last_mark != value
+
+    @staticmethod
     def _bounded_mark(pos: Position) -> float:
-        """The position's last mark (else its entry), inside what the package can be worth at expiry."""
-        lo, hi = L.value_bounds(pos.legs)
-        return min(max(pos.last_mark if math.isfinite(pos.last_mark) else pos.entry, lo), hi)
+        """The position's last mark (else its entry), inside what the package can be worth at expiry. An exit at a mark
+        the range held (`_set_mark`) flags its trade `bounded`."""
+        lo, hi = pos.bounds()
+        raw = pos.last_mark if math.isfinite(pos.last_mark) else pos.entry
+        value = min(max(raw, lo), hi)
+        if value != raw or (math.isfinite(pos.last_mark) and pos.mark_bounded):
+            pos.info["bounded"] = True
+        return value
 
     def _split_mark(self, day: DayData, pos: Position) -> None:
         """The end of a segment another segment continues: the position is valued at its mid (the close's
@@ -1136,8 +1201,15 @@ class Account:
             value, _ = L.natural_value(snap, legs, "close", stress=self.cfg.stress)
             if math.isfinite(value):
                 # The close's own rule (`_in_bounds`): never below the package's least; above its most, no close.
-                value = self._in_bounds(value, legs, False)
-                value = math.nan if value is None else value
+                lo, hi = pos.bounds()
+                bounded = self._in_bounds(value, lo, hi, False)
+                if bounded is None:
+                    self.counts["blocked_out_of_range"] += 1
+                    value = math.nan
+                elif bounded != value:
+                    self.counts["bounded_close"] += 1
+                    pos.info["bounded"] = True
+                    value = bounded
             if math.isfinite(value):
                 prices = [float(snap.bid[leg.idx] if leg.side > 0 else snap.ask[leg.idx]) for leg in legs]
                 fees = L.order_fees(pos.root, legs, prices, pos.qty, "close")

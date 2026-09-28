@@ -154,9 +154,10 @@ An order meets the quotes of the minute AFTER your decision, and every chance in
 A package never trades outside what it can be worth at expiry (a debit vertical 0 to its width, a credit
 vertical or condor minus its widest wing to 0): when a leg's quote blows out (an index leg in the money
 quoted with no bid and a far ask, an FOMC minute, the last minutes of an expiry) and the legs' touches add up to a price
-outside that range, an open, or a close that would receive more than the package's most, does not fill
-that minute (it keeps working), and a close that would receive less than its least fills at that least,
-so no position loses more than its maximum loss. Calendars and diagonals have no such bound.
+outside that range, that minute is no market: an open at or below the package's least (a vertical for 0.00) or above
+its most, or a close that would receive more than its most, fills nothing that minute whatever its limit (it keeps
+working, and an order arriving then rests rather than takes), and a close that would receive less than its least fills
+at that least, so no position loses more than its maximum loss. Calendars and diagonals have no such bound.
 A long wing with no bid is closed at zero. Fees: OCC, ORF, CAT on every contract, TAF and the SEC fee
 ($20.60 a million of premium) on sells, $0.50 plus exchange fees on index options. Buying power: an open reserves (maximum loss + fees) x 1.1; a credit position holds its
 collateral. A debit at or over a bounded structure's width is refused. The gate also runs you at 1.5x
