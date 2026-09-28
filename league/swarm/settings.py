@@ -138,6 +138,14 @@ DEFAULTS: dict[str, Any] = {
         "retire_min_validations": 6,
         # A version is validated only after its 1.5x-stress Train robustness run came back with a profit (Sept 26).
         "require_robustness": True,
+        # THE DRIFT SCREEN (Sept 27, `evidence.drift_screen`): a version is validated only when its Train drift-adjusted
+        # alpha (the daily P&L net of the root's own daily move at the version's average exposure, a year at a time) has a
+        # pooled t of at least `drift_min_t` and is positive in `drift_years_positive` Train years (null: every Train year but
+        # one); the gate refuses a look at a version that fails it. Off only by JSON false. A version whose Train run predates
+        # the figures waits for one Train run again (the researcher queues it with its robustness runs).
+        "drift_screen": True,
+        "drift_min_t": 1.0,
+        "drift_years_positive": None,
         "fork_min_t": 1.0,              # a family forks when its validation t is at least this and it is in the top
         "fork_top": 3,
         "fork_cooldown_hours": 6,

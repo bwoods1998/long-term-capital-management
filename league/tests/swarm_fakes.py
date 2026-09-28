@@ -32,6 +32,17 @@ def summary(trades: int = 150, days: int = 120, pnl: float = 500.0, mean: float 
             "max_drawdown": 200.0, "fees": 30.0, "quarters_positive": quarters, "avg_trade": pnl / max(trades, 1)}
 
 
+def drift_block(t: float = 2.0, alpha_usd: float = 150.0, drift_usd: float = 20.0, *,
+                years: tuple[str, ...] = ("2022", "2023", "2024"), year_t: float | None = None) -> dict[str, Any]:
+    """An invented Gym `drift` block (the real one: `league.gym.results.drift`): every year alike, the pooled line their sum.
+    The default passes the drift screen (t 2, alpha positive every year)."""
+    def row(alpha: float, drift: float, tt: float | None, days: int) -> dict[str, Any]:
+        return {"days": days, "held_days": days * 2 // 5, "pnl": round(alpha + drift, 2), "alpha": round(alpha / days, 4) if days else 0.0,
+                "alpha_usd": alpha, "t": tt, "beta": 200.0, "drift_usd": drift}
+    per_year = {y: row(alpha_usd, drift_usd, t if year_t is None else year_t, 250) for y in years}
+    return {"basis": "held-hours", "years": per_year, "pooled": row(alpha_usd * len(years), drift_usd * len(years), t, 250 * len(years))}
+
+
 def result(name: str, *, status: str = "ok", daily: list[float] | None = None, trades: int = 150, window: str = "train",
            roots: tuple[str, ...] = ("SPY",), **kw: Any) -> dict[str, Any]:
     daily = daily if daily is not None else [3.0 + (i % 5) - 1.5 for i in range(250)]
@@ -44,6 +55,8 @@ def result(name: str, *, status: str = "ok", daily: list[float] | None = None, t
             "fills": {"orders": 300, "filled": 290, "fill_rate": 0.97, "reject_reasons": {}}, "breakdown": {"weekday": {"Mon": {"n": 30, "pnl": 100.0, "win_rate": 0.6, "pnl_per_max_loss": 0.05}}},
             "daily": rows, "trades": trade_rows, "worst": trade_rows[:5], "runtime": {"calls": 1000, "errors": 0, "timeouts": 0, "messages": [],
                                                                                    "disqualified": None}}
+    if window == "train" and status == "ok":  # the Gym's Train result carries its drift block (Sept 27)
+        out["drift"] = drift_block()
     if window == "validation":  # the Gym's validation view: no trades, dates or daily series; the stress twin's figures
         s = out["summary"]
         s["median_max_loss_per_structure"] = 60.0
