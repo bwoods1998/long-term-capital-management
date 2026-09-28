@@ -10,7 +10,8 @@
 - BATCHES. Jobs (one program version, one window) queue here; a box's dispatcher takes up to
   `batch_programs` jobs with the same settings and runs them together, day-major (the Gym's
   `driver.run`: each day's chain is loaded once for the whole batch). The highest priority first (the
-  bandit's share), then the oldest; a short batch waits `batch_wait_seconds` for company.
+  bandit's share), then the oldest; a short batch waits `batch_wait_seconds` for company. A researcher's sweep
+  (`gym_sweep`) queues its variants at once as one `group`, so they ride the same batches and never supersede one another.
 - ROBUSTNESS runs (a new best version re-run on Train at 1.5x the half-spread and at the mid, Sept 26) have the lowest
   priority (`ROBUSTNESS_PRIORITY`): a box takes them only when nothing else waits AND another Gym box is free (ready or
   asleep), so they fill idle boxes and never delay a researcher's run or a validation. They never start, grow or keep
@@ -91,6 +92,8 @@ class GymJob:
     #: Called with the reason when a job whose waiter gave up then FAILS (retried out, cancelled, missing data): the
     #: waiter's owner learns the job will never land (the gate owes a look it could not make).
     late_fail: Any = None
+    #: The jobs of one researcher sweep (`gym_sweep`) share a group: they never supersede one another.
+    group: str | None = None
 
     @property
     def name(self) -> str:
@@ -186,15 +189,16 @@ class GymPool:
 
     # ------------------------------------------------------------------ jobs
     def submit(self, job: GymJob) -> GymJob:
-        """Queue a job. A family has at most one Train job waiting: a newer one supersedes it (its waiter, if any, is
-        told; it never ran), so a backlog of orphaned versions cannot build up."""
+        """Queue a job. A family has at most one Train job (or one sweep's jobs: the same `group`) waiting: a newer one
+        supersedes it (its waiter, if any, is told; it never ran), so a backlog of orphaned versions cannot build up."""
         job.created = self.clock()
         with self._wake, self.store.atomic():
             if (self.store.family(job.family) or {}).get("retired_at"):
                 self._fail(job, "the family retired before dispatch")
                 return job
             if job.purpose == "train" and not job.gate:
-                for old in [j for j in self.queue if j.family == job.family and j.purpose == "train" and not j.gate]:
+                for old in [j for j in self.queue if j.family == job.family and j.purpose == "train" and not j.gate
+                            and (job.group is None or j.group != job.group)]:
                     self.queue.remove(old)
                     self._fail(old, "superseded by a newer version before it ran")
             if job.purpose == "robustness":

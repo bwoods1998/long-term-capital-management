@@ -134,7 +134,7 @@ class ResearcherRetirement(ResearcherCase):
         out = self.researcher().cycle(self.fam["id"])
         self.assertNotIn("retired", out)
         self.assertNotIn("error", out, "a refused retire is never a cycle error")
-        self.assertEqual(self.tools_of(self.sail.bodies[0]), ["gym_run"], "REVISE never offers retire")
+        self.assertEqual(self.tools_of(self.sail.bodies[0]), ["gym_run", "gym_sweep"], "REVISE never offers retire")
         self.assertEqual(len(self.pool.jobs), 2, "the revision ran")
         outputs = [json.loads(i["output"]) for i in self.store.convo(self.fam["id"])[0][-1]["items"]
                    if i.get("type") == "function_call_output"]

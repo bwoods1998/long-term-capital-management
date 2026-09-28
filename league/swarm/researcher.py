@@ -6,19 +6,41 @@ the researcher asked for at the end of its last cycle (a `gym_run` carried over)
 it read, write its notebook and revise, and carry its next `gym_run` to the next cycle. A family's very
 first cycle runs its starter program without a model call (seeds only).
 
-THE TOOLS (`TOOLS`): `gym_run` (a new version on Train; its compact diagnostic), `read_run` (a section of
-a past Train run), `notebook` (append / read: its memory), `graveyard` (lessons of retired families),
-`submit` (make an eligible version its best: the tournament validates it), `retire` (explicitly abandon the entire
-Gym family). The contract (`league/CONTRACT.md`) is the shared, cached prefix of every call; each family's calls carry
-its own `prompt_cache_key`.
+THE TOOLS (`TOOLS`): `gym_run` (a new version on Train; its compact diagnostic), `gym_sweep` (many PARAMS variants of
+one program on Train at once; a table sorted by the Train score), `read_run` (a section of a past Train run), `notebook`
+(append / read: its memory), `graveyard` (lessons of retired families), `submit` (make an eligible version its best: the
+tournament validates it), `retire` (explicitly abandon the entire Gym family). The contract (`league/CONTRACT.md`) is the
+shared, cached prefix of every call; each family's calls carry its own `prompt_cache_key`.
+
+SWEEPS (R3, Sept 27: every Train edge of the sprint's weekend came from the operator's sweeps, many variants of one
+program at once, never from one run a cycle). `gym_sweep` takes the place of the cycle's one `gym_run` (one run OR one
+sweep a cycle; a second is queued for the next cycle like a second run). Its variants (2 to `max_sweep_variants`, each
+key in the program's PARAMS and of its default's type) are queued on the pool together as one `group`, so they share
+batches and never supersede one another, and waited for under gym_run's timeout. Each variant is a version of its own
+(the tournament, the gate and the live path read a version's params; `SwarmStore.add_versions` stores the code once
+and counts the whole sweep as ONE revision) and its own Train run (its params in the run's summary), and every variant
+the Gym evaluates is a trial, exactly as a gym_run's. A variant that fails costs the others nothing. The table the
+researcher reads is sorted by the Train score (a version demoted at 1.5x ranks with the ineligible ones): its best
+eligible variant can become the family's best (robustness runs follow as for a gym_run), and any row's run_id can be
+submitted or read (the sweep's rows keep their full results until the family's next run). `sweep_enabled` false takes
+the tool away.
+
+SWEEP LOAD (the review of PR #396: the pool had no spare boxes; a strict priority queue lets one family's group go
+first and the lowest-weight families' variants time out). Two limits: `max_sweep_variants` (6) a sweep, and
+`max_sweep_jobs_in_flight` (24) the variants of every sweep this process has in flight together; a sweep that would pass
+it is refused (a plain refusal, no backoff) and the status says to use gym_run. The tool stays offered either way (the
+tool list is part of the cached prefix). Repeats are dropped by the MERGED params (`{}` and a default spelled out are
+one program). Each variant is recorded as it lands and only its compact row is kept. A sweep's group id is its content
+(family, code, variants, roots, the Gym's image and engine), so the same sweep asked again (a queued sweep's quiet retry
+after the Gym gave up) reads back the variants that landed late instead of running them twice.
 
 RETIRE (Sept 26: an unguarded `retire` on the REVISE turn took the population from 49 to 16 in 24 minutes). A REVISE
-turn offers `gym_run` alone: a REVISE always revises. A READ turn offers `retire` only while more families live than
-`population.start` and the family has had at least two validations, or, by THE IDLE RULE (R3, Sept 27: with the
-population held at its start, dead families never qualified and looped on placeholder runs), while more live than
-`population.floor` and the family is dead (`idle_dead`: `researcher.retire_idle_evaluations` Gym evaluations since its
-birth or last validation without an eligible Train version, or three times as many with its best Train score below
-zero; never while a validated version awaits the gate) (`can_retire`). A retire that is refused anyway is a plain
+turn offers `gym_run` and `gym_sweep` alone: a REVISE always revises. A READ turn offers `retire` only while more
+families live than `population.start` and the family has had at least two validations, or, by THE IDLE RULE (R3, Sept
+27: with the population held at its start, dead families never qualified and looped on placeholder runs), while more
+live than `population.floor` and the family is dead (`idle_dead`: `researcher.retire_idle_evaluations` Gym evaluations
+since its birth or last validation without an eligible Train version, or three times as many with its best Train score
+below zero; never while a validated version awaits the gate) (`can_retire`). A retire that is refused anyway is a plain
 refusal, never a cycle error (an error backs the family off for up to 30 minutes). The tournament retires a dead family
 that never calls retire by the same rule; the architect refills below the start.
 
@@ -53,8 +75,11 @@ masked there for quotes) at most every `note_every_cycles` cycles. Standard libr
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
+import math
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -65,10 +90,47 @@ from .store import SwarmStore
 
 CONTRACT = Path(__file__).resolve().parents[1] / "CONTRACT.md"
 
+#: The tools that run the Gym: one of them a cycle (a second call opens the next cycle).
+RUNS = ("gym_run", "gym_sweep")
+#: A sweep's variants unless `researcher.max_sweep_variants` says otherwise.
+MAX_SWEEP_VARIANTS = 6
+#: The variants of every sweep in flight together unless `researcher.max_sweep_jobs_in_flight` says otherwise.
+MAX_SWEEP_JOBS_IN_FLIGHT = 24
+
+
+def sweep_tool(limit: int = MAX_SWEEP_VARIANTS) -> dict[str, Any]:
+    """The `gym_sweep` tool, its limit in words (`researcher.max_sweep_variants`)."""
+    return {
+        "name": "gym_sweep",
+        "description": "Run several PARAMS variants of ONE program on the Train window at once (the Gym batches them) and get a "
+                       "compact table sorted by the Train score: per variant its params, trades, days, per-year daily t and "
+                       "trades, P&L, fill rate, eligibility, Train score and run_id (submit a row's run_id, or read_run it before "
+                       "your next run). It takes the place of gym_run: one run OR one sweep a cycle; when the Gym is full of "
+                       "other sweeps it is refused (your status says so): run gym_run then. Every variant is a trial counted "
+                       "against your lineage; the sweep is one revision. Sweep a small grid around your current program, include a placebo "
+                       "row (your signal switched off or inverted), prefer a plateau of positive neighbours to a lone peak, then "
+                       "submit the best robust row.",
+        "parameters": {"type": "object", "properties": {
+            "code": {"type": "string", "description": "the complete program: NEEDS, PARAMS, decide(ctx) (omit it to sweep your "
+                                                      "latest version's code)"},
+            "params": {"type": "object", "description": "optional: PARAMS overrides every variant starts from (a variant's own "
+                                                        "keys win); nothing else carries over from an earlier version"},
+            "variants": {"type": "array", "items": {"type": "object"},
+                         "description": f"2 to {int(limit)} objects, one a variant: its PARAMS overrides (keys must exist in "
+                                        "PARAMS and keep their default's type; {} is the program as written)"},
+            "why": {"type": "string", "description": "one sentence: what the grid tests and why it should help"},
+            "note": {"type": "string", "description": "optional: what you learned from your last run, appended to your notebook. "
+                                                      "PUBLIC: it may appear on the public site, so describe the mechanism and "
+                                                      "your reasoning only, never a threshold, level, delta, ratio or any other "
+                                                      "fitted value (in digits or in words)"}},
+            "required": ["variants"]}}
+
+
 TOOLS: list[dict[str, Any]] = [
     {"name": "gym_run", "description": "Run a version of your program on the Train window in the Gym and get its compact "
                                        "diagnostic. `code` is the whole program file (omit it to rerun your latest version, e.g. "
-                                       "with other params). One run per cycle: a second call runs at the start of your next cycle.",
+                                       "with other params). One run (or one gym_sweep) per cycle: a second call runs at the start "
+                                       "of your next cycle.",
      "parameters": {"type": "object", "properties": {
          "code": {"type": "string", "description": "the complete program: NEEDS, PARAMS, decide(ctx)"},
          "params": {"type": "object", "description": "PARAMS overrides for this run (keys must exist in PARAMS)"},
@@ -78,6 +140,7 @@ TOOLS: list[dict[str, Any]] = [
                                                    "PUBLIC: it may appear on the public site, so describe the mechanism and "
                                                    "your reasoning only, never a threshold, level, delta, ratio or any other "
                                                    "fitted value (in digits or in words)"}}}},
+    sweep_tool(),
     {"name": "read_run", "description": "Read one section of a past Train run of your family.",
      "parameters": {"type": "object", "properties": {
          "run_id": {"type": "string"},
@@ -108,19 +171,25 @@ TOOLS: list[dict[str, Any]] = [
                     "is abandoned; retained in the private notebook and graveyard."}}, "required": ["reason"]}},
 ]
 
-#: A REVISE turn requires a run (a REVISE always revises: `retire` is never offered there); a missing call fails and
-#: uses the normal backoff.
-TOOLS_REVISE: list[dict[str, Any]] = [TOOLS[0]]
+#: A REVISE turn requires a run or a sweep (a REVISE always revises: `retire` is never offered there); a missing call
+#: fails and uses the normal backoff.
+TOOLS_REVISE: list[dict[str, Any]] = [t for t in TOOLS if t["name"] in RUNS]
 #: A READ turn without `retire` (the family may not retire now: `Researcher.can_retire`).
 TOOLS_READ: list[dict[str, Any]] = TOOLS[:-1]
 
 ROLE = """You are a researcher in the LTCM options swarm. You own one family and improve its program in the Gym.
 Work in short cycles. REVISE: call gym_run with your revised program (the whole file in `code`, or only `params` to
-change parameters) and put what you learned from the last run in its `note`. A REVISE always revises: never repeat an
+change parameters) and put what you learned from the last run in its `note`, or call gym_sweep to run a small grid of
+PARAMS variants of one program at once (one run OR one sweep a cycle). A REVISE always revises: never repeat an
 empty or unchanged program. READ: when the result comes back, read it; submit the run if it is your best; queue your
-next gym_run (it opens your next cycle); use read_run, graveyard or the notebook only when the diagnostic leaves you
-unsure. Keep every program inside the contract below; the Gym refuses anything else. Reply with tool calls; keep prose
-short.
+next gym_run or gym_sweep (it opens your next cycle); use read_run, graveyard or the notebook only when the diagnostic
+leaves you unsure. Keep every program inside the contract below; the Gym refuses anything else. Reply with tool calls;
+keep prose short.
+SWEEPS found every Train edge so far. Sweep a small grid around your current program (the program as written, {}, and a
+step either side of the parameters that matter), include a placebo row (your signal switched off or inverted: it should
+lose; if it earns as much, the edge is not your signal), and read the table as a surface: prefer a plateau, where most
+neighbours are positive and eligible, to a lone peak, which is luck. Then submit the best robust row's run_id. Every
+variant is a trial counted against your lineage: sweep to test one idea's robustness, never to grind for a lucky cell.
 THE TRAIN SCORE you climb is your WORST Train year's daily t, times the share of Train quarters that were positive. A
 version counts only with at least 40 trades on at least 20 days in EVERY Train year, and never if it loses money at 1.5x
 the half-spread (the Gym re-runs each new best at 1.5x and at the mid; the results come back in your status). Seek a
@@ -160,6 +229,13 @@ def date_like(value: Any) -> bool:
             v = int(value)
             return 1 <= (v // 100) % 100 <= 12 and 1 <= v % 100 <= 31
     return False
+
+
+def _round(value: Any, places: int) -> Any:
+    """A finite number rounded (None for anything else): a sweep's table stays compact and valid JSON."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return round(float(value), places) if math.isfinite(float(value)) else None
 
 
 def needs_of(code: str) -> dict[str, Any] | None:
@@ -230,6 +306,90 @@ def check_code(code: str) -> str | None:
     except Exception as exc:  # noqa: BLE001 - CodeRefused and friends
         return str(exc)
     return None
+
+
+def params_of(code: str) -> dict[str, Any] | None:
+    """The program's PARAMS literal, without running it (None when absent or not a literal dict)."""
+    try:
+        tree = ast.parse(code)
+    except (SyntaxError, ValueError):
+        return None
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "PARAMS" for t in node.targets):
+            try:
+                value = ast.literal_eval(node.value)
+            except (ValueError, SyntaxError):
+                return None
+            return value if isinstance(value, dict) else None
+    return None
+
+
+def check_params(defaults: Mapping[str, Any], overrides: Mapping[str, Any]) -> str | None:
+    """Why the Gym would refuse these PARAMS overrides (None when it would not): the Gym's own rule when it is importable
+    here (every key in PARAMS, a value of its default's type), else the keys alone."""
+    try:
+        from ..gym.runtime import merge_params
+    except ImportError:  # the Gym not on this tree: the box checks the types
+        unknown = [k for k in overrides if k not in defaults]
+        return f"parameter {unknown[0]!r} is not in the program's PARAMS" if unknown else None
+    try:
+        merge_params(defaults, overrides)
+    except Exception as exc:  # noqa: BLE001 - NeedsRefused and friends
+        return str(exc)[:300]
+    return None
+
+
+def merged_key(defaults: Mapping[str, Any], overrides: Mapping[str, Any]) -> str:
+    """The program's whole PARAMS under these overrides, canonical: what the Gym runs (its run_id hashes the merged params),
+    so `{}` and a default spelled out are one program. Call it after `check_params` accepted the overrides."""
+    try:
+        from ..gym.runtime import merge_params
+        merged = merge_params(defaults, overrides)
+    except Exception:  # noqa: BLE001 - the Gym not on this tree (the keys were checked): a plain merge
+        merged = {**defaults, **overrides}
+    return json.dumps(merged, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def sweep_variants(code: str, variants: Any, base: Any = None, *, limit: int = MAX_SWEEP_VARIANTS
+                   ) -> tuple[list[dict[str, Any]], int, str | None]:
+    """A sweep's variants as whole PARAMS overrides (`base`, then each variant's own keys), in order, a repeat (the same
+    merged PARAMS: `merged_key`) dropped: (variants, how many were dropped, why the sweep is refused or None). 2 to
+    `limit` variants; every key in the program's PARAMS literal with its default's type (`check_params`); never a date
+    or a year (`date_like`)."""
+    if base is None:
+        base = {}
+    if not isinstance(base, dict):
+        return [], 0, "`params` must be an object of PARAMS overrides"
+    if not isinstance(variants, list) or not all(isinstance(v, dict) for v in variants):
+        return [], 0, "`variants` must be a list of objects, each one variant's PARAMS overrides"
+    if len(variants) < 2:
+        return [], 0, "a sweep needs at least 2 variants (one variant is a gym_run)"
+    if len(variants) > limit:
+        return [], 0, f"a sweep runs at most {limit} variants; this one has {len(variants)}"
+    defaults = params_of(code)
+    if defaults is None:
+        return [], 0, "gym_sweep needs the program's PARAMS as a literal dict at the top level (its keys are what a variant sets)"
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    dropped = 0
+    for i, variant in enumerate(variants, 1):
+        params = {**base, **variant}
+        dated = [k for k, v in params.items() if date_like(v)]
+        if dated:
+            return [], 0, (f"variant {i}: a date or a year in the parameter overrides ({', '.join(map(str, dated))}): no program "
+                           "may see the calendar")
+        why = check_params(defaults, params)
+        if why:
+            return [], 0, f"variant {i}: {why}"
+        key = merged_key(defaults, params)  # a repeat is the same PROGRAM (merged PARAMS), not the same overrides
+        if key in seen:
+            dropped += 1
+            continue
+        seen.add(key)
+        out.append(params)
+    if len(out) < 2:
+        return [], dropped, "fewer than 2 distinct variants: a sweep needs at least two different programs (one is a gym_run)"
+    return out, dropped, None
 
 
 def sanitize(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -389,6 +549,10 @@ class Researcher:
         #: (family, version, label) robustness runs this process has in flight (a restart loses queued jobs: they are
         #: queued again; a run that failed leaves the set, so a later cycle queues it again).
         self._robust: set[tuple[str, int, str]] = set()
+        #: family -> the variants its sweep has in flight; every worker shares this Researcher, so their sum is the load
+        #: sweeps add to the pool (`max_sweep_jobs_in_flight`, the module docstring's SWEEP LOAD).
+        self._sweeping: dict[str, int] = {}
+        self._sweep_lock = threading.Lock()
         self.pace: Callable[[], bool] = lambda: False  # the swarm's hourly spend at its pace: no rewrite starts
 
     @property
@@ -415,7 +579,7 @@ class Researcher:
         line = state.get("validation_line")
         gate = state.get("gate")
         notes = self.store.notebook(fam["id"], limit=5)
-        parts = [f"Cycle {int(fam['cycles']) + 1}. Versions so far: {fam['revisions']}. Lineage trials: "
+        parts = [f"Cycle {int(fam['cycles']) + 1}. Revisions so far (a sweep is one): {fam['revisions']}. Lineage trials: "
                  f"{self.store.lineage_trials(fam['id'])}. Revisions since a better Train score: {fam['stall']} "
                  f"(a rewrite from a stronger model comes at {self.cfg.get('stall_revisions', 5)})."]
         if state.get("best_train_version") is not None:
@@ -443,10 +607,64 @@ class Researcher:
         if dead:
             parts.append(f"Your family {dead}. If its mechanism is dead, call retire with your reason when the tool is offered "
                          "rather than re-running a placeholder: its slot goes to a new idea.")
-        parts.append("Now: if a run just came back, read it (submit it if it is your best) and queue your next gym_run; "
-                     "otherwise revise and call gym_run, with what you learned in its note."
-                     + (" If you abandon the entire mechanism, call retire with your reason." if may_retire else ""))
+        retire_hint = " If you abandon the entire mechanism, call retire with your reason." if may_retire else ""
+        fit = min(self.sweep_room(), self.max_variants)
+        if self.sweeps and fit >= 2:
+            parts.append("Now: if a run just came back, read it (submit it if it is your best) and queue your next gym_run or "
+                         "gym_sweep; otherwise revise and call gym_run or gym_sweep, with what you learned in its note. A sweep of "
+                         f"up to {fit} variants fits in the Gym now." + retire_hint)
+        elif self.sweeps:
+            parts.append("Now: if a run just came back, read it (submit it if it is your best) and queue your next gym_run or "
+                         "gym_sweep; otherwise revise and call gym_run, with what you learned in its note. The Gym is full of other "
+                         "families' sweeps now: a gym_sweep this cycle would be refused." + retire_hint)
+        else:
+            parts.append("Now: if a run just came back, read it (submit it if it is your best) and queue your next gym_run; "
+                         "otherwise revise and call gym_run, with what you learned in its note. gym_sweep is switched off now."
+                         + retire_hint)
         return "\n".join(parts)
+
+    # ------------------------------------------------------------------ the tools a turn offers
+    @property
+    def sweeps(self) -> bool:
+        """`gym_sweep` is offered (and accepted) only while `researcher.sweep_enabled` is true (the default)."""
+        return bool(self.cfg.get("sweep_enabled", True))
+
+    @property
+    def max_variants(self) -> int:
+        return max(2, int(self.cfg.get("max_sweep_variants", MAX_SWEEP_VARIANTS)))
+
+    @property
+    def max_sweep_jobs(self) -> int:
+        return max(2, int(self.cfg.get("max_sweep_jobs_in_flight", MAX_SWEEP_JOBS_IN_FLIGHT)))
+
+    def sweep_room(self) -> int:
+        """Variants a new sweep may put on the pool now: `max_sweep_jobs_in_flight` less every sweep in flight."""
+        with self._sweep_lock:
+            return max(0, self.max_sweep_jobs - sum(self._sweeping.values()))
+
+    def _reserve_sweep(self, fid: str, n: int) -> bool:
+        """Take `n` of the in-flight variants for a family's sweep (False, nothing taken, when they do not fit)."""
+        with self._sweep_lock:
+            if sum(self._sweeping.values()) + n > self.max_sweep_jobs:
+                return False
+            self._sweeping[fid] = self._sweeping.get(fid, 0) + n
+            return True
+
+    def _release_sweep(self, fid: str, n: int) -> None:
+        with self._sweep_lock:
+            left = self._sweeping.get(fid, 0) - n
+            if left > 0:
+                self._sweeping[fid] = left
+            else:
+                self._sweeping.pop(fid, None)
+
+    def tools(self, *, revise: bool, retire: bool) -> list[dict[str, Any]]:
+        """A turn's tools: REVISE a run or a sweep (the call is required), READ every tool, `retire` only when the family
+        may retire (`can_retire`); `gym_sweep` only while sweeps are on, its limit from the settings."""
+        base = TOOLS_REVISE if revise else (TOOLS if retire else TOOLS_READ)
+        if not self.sweeps:
+            return [t for t in base if t["name"] != "gym_sweep"]
+        return [sweep_tool(self.max_variants) if t["name"] == "gym_sweep" else t for t in base]
 
     def robustness_text(self, fam: Mapping[str, Any]) -> str:
         """The "Robustness" block of the family's status: its best version's Train runs at 1.5x the half-spread and at the
@@ -494,6 +712,31 @@ class Researcher:
         return bool(weight_rank) and top > 0 and (fam.get("weight") or 0.0) >= weight_rank[min(top, len(weight_rank)) - 1] > 0
 
     # ------------------------------------------------------------------ tools
+    def _admit(self, fam: Mapping[str, Any], code: str, out: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str], bool]:
+        """(a refusal or None, the roots its NEEDS names, whether they change the family's): the Gym's safety check, NEEDS a
+        literal, and roots only from the admitted list, at most `MAX_ROOTS`, changed only by a Gym family."""
+        why = check_code(code)
+        if why:
+            out["refused"] = out.get("refused", 0) + 1
+            return {"status": "refused", "reason": why[:600], "hint": "fix the rule named (the contract) and run again"}, [], False
+        needs = needs_of(code)
+        if needs is None:
+            return {"status": "refused", "reason": "NEEDS must be a literal dict at the top level"}, [], False
+        roots = list(needs_roots(code))
+        admitted = [str(r).upper() for r in self.settings.get("gym", {}).get("roots", [])]
+        change = bool(roots) and set(roots) != set(fam["roots"])
+        if change:
+            outside = [r for r in roots if r not in admitted]
+            if outside:
+                return {"status": "refused", "reason": f"NEEDS names {', '.join(outside)}, not in the Gym's roots "
+                                                       f"({', '.join(admitted)})"}, roots, change
+            if len(roots) > MAX_ROOTS:
+                return {"status": "refused", "reason": f"a family holds at most {MAX_ROOTS} roots; NEEDS names {len(roots)}"}, roots, change
+            if fam.get("band") != "gym":
+                return {"status": "refused", "reason": f"your family trades {', '.join(fam['roots'])} in its band; only a Gym family "
+                                                       "changes its roots"}, roots, change
+        return None, roots, change
+
     def _gym_run(self, fam: Mapping[str, Any], args: Mapping[str, Any], out: dict[str, Any], *, author: str) -> dict[str, Any]:
         if self._terminal(fam["id"], out):
             return {"status": "retired", "reason": "the family is retired; no run started"}
@@ -517,25 +760,9 @@ class Researcher:
         stress = float(args.get("stress") or 1.0)
         if stress not in (1.0, 1.5):
             stress = 1.0
-        why = check_code(code)
-        if why:
-            out["refused"] = out.get("refused", 0) + 1
-            return {"status": "refused", "reason": why[:600], "hint": "fix the rule named (the contract) and run again"}
-        needs = needs_of(code)
-        if needs is None:
-            return {"status": "refused", "reason": "NEEDS must be a literal dict at the top level"}
-        roots = list(needs_roots(code))
-        admitted = [str(r).upper() for r in self.settings.get("gym", {}).get("roots", [])]
-        change = bool(roots) and set(roots) != set(fam["roots"])
-        if change:
-            outside = [r for r in roots if r not in admitted]
-            if outside:
-                return {"status": "refused", "reason": f"NEEDS names {', '.join(outside)}, not in the Gym's roots ({', '.join(admitted)})"}
-            if len(roots) > MAX_ROOTS:
-                return {"status": "refused", "reason": f"a family holds at most {MAX_ROOTS} roots; NEEDS names {len(roots)}"}
-            if fam.get("band") != "gym":
-                return {"status": "refused", "reason": f"your family trades {', '.join(fam['roots'])} in its band; only a Gym family "
-                                                       "changes its roots"}
+        refused, roots, change = self._admit(fam, code, out)
+        if refused is not None:
+            return refused
         with self.store.atomic():
             if self._terminal(fam["id"], out):
                 return {"status": "retired", "reason": "the family is retired; no run started"}
@@ -601,6 +828,248 @@ class Researcher:
             self.queue_robustness(fam["id"], version["n"], code, params, needs_roots(code, fam["roots"]))
         return view
 
+    def _record_variant(self, job: GymJob, result: Mapping[str, Any], robust: Mapping[str, Any] | None = None, *,
+                        sweep: str, prune: bool = True) -> dict[str, Any]:
+        """One sweep variant's Train result, recorded as its own run of its own version (a trial, as every Gym evaluation
+        is): its row keeps its Train score and eligibility (`submit` reads them), its params and its sweep. A sweep records
+        its variants unpruned (`prune=False`) and prunes once at its end, keeping all its rows for `read_run`."""
+        robust = robust if robust is not None else evidence.train_score(result)
+        recorded = dict(result)
+        if isinstance(result.get("summary"), Mapping):
+            recorded["summary"] = {**result["summary"], "train_score": robust["score"], "train_eligible": robust["eligible"],
+                                   "params": dict(job.params or {}), "sweep": sweep}
+        days = float((result.get("summary") or {}).get("days") or 0)
+        return self.store.add_run(job.family, job.version, recorded, window="train", stress=1.0, purpose="train",
+                                  program_years=days / 252.0 * max(1, len(job.roots)), prune=prune)
+
+    @staticmethod
+    def _variant_row(job: GymJob, run_id: str, status: Any, summary: Mapping[str, Any], *, robust: Mapping[str, Any] | None,
+                     fill_rate: Any = None, reason: Any = None, trials: int = 0, reused: bool = False) -> dict[str, Any]:
+        """A landed variant, compact: all a sweep keeps of it while it waits for the others (its full result is on disk).
+        `robust` None: only the run row's summary is left (its full result was pruned), so no per-year figures."""
+        if robust is not None:
+            score, eligible, why = robust["score"], bool(robust["eligible"]), robust.get("why")
+            years = {y: {"t": _round(r.get("t_daily"), 2), "trades": r.get("trades")} for y, r in (robust.get("years") or {}).items()}
+        else:
+            score, eligible, why, years = summary.get("train_score"), bool(summary.get("train_eligible")), None, {}
+        return {"job": job, "run_id": str(run_id), "status": status, "reason": reason, "score": score, "eligible": eligible,
+                "why": why, "years": years, "trades": summary.get("trades"), "days": summary.get("days_traded"),
+                "pnl": _round(summary.get("pnl"), 2), "fill_rate": _round(fill_rate, 3), "trials": int(trials), "reused": reused}
+
+    def _sweep_group(self, fid: str, code: str, variants: list[dict[str, Any]], roots: Any) -> str:
+        """A sweep's group id is its content (the family, the code, the variants, the roots, the Gym's image and engine): the
+        same sweep asked again (a queued sweep's quiet retry after the Gym gave up) finds the variants that landed late."""
+        image = bundle = None
+        try:
+            image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
+            bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
+        except Exception:  # noqa: BLE001 - no image or engine known: the content alone
+            pass
+        body = json.dumps({"code": code, "variants": variants, "roots": list(roots), "image": image, "bundle": bundle},
+                          sort_keys=True, default=str)
+        return f"{fid}:sweep:{hashlib.sha256(body.encode('utf-8')).hexdigest()[:16]}"
+
+    def _gym_sweep(self, fam: Mapping[str, Any], args: Mapping[str, Any], out: dict[str, Any], *, author: str) -> dict[str, Any]:
+        """`gym_sweep` (the module docstring, SWEEPS and SWEEP LOAD): the variants of one program on Train at once, each its
+        own version and its own run and trial; a table sorted by the Train score."""
+        fid = fam["id"]
+        if self._terminal(fid, out):
+            return {"status": "retired", "reason": "the family is retired; no run started"}
+        if not self.sweeps:
+            return {"status": "refused", "reason": "gym_sweep is switched off now: use gym_run"}
+        code = args.get("code")
+        if not code:
+            latest = self.store.latest_version(fid)
+            if latest is None or not latest.get("code"):
+                return {"error": "you have no version yet: pass `code`"}
+            code = latest["code"]
+        code = str(code)
+        refused, roots, change = self._admit(fam, code, out)
+        if refused is not None:
+            return refused
+        base = args.get("params") if isinstance(args.get("params"), dict) else {}
+        variants, dropped, why = sweep_variants(code, args.get("variants"), args.get("params"), limit=self.max_variants)
+        if why:
+            return {"status": "refused", "reason": why[:600], "hint": "fix the variants (each key in your PARAMS, of its type) and "
+                                                                     "sweep again"}
+        if not self._reserve_sweep(fid, len(variants)):  # the pool's room for sweeps (SWEEP LOAD): a plain refusal, no backoff
+            room = self.sweep_room()
+            out["sweep_busy"] = True
+            return {"status": "refused", "reason": "the Gym is full of other families' sweeps now"
+                                                   + (f": a sweep of at most {room} variants fits" if room >= 2 else ""),
+                    "hint": "call gym_run this cycle, with your note (a sweep can come in a later cycle)"}
+        try:
+            # The note once the sweep is taken: a refused sweep's note comes again with the call that follows it.
+            note = str(args.get("note") or "").strip()
+            if note:
+                self.store.note(fid, note)
+                out["note"] = note
+            return self._run_sweep(fam, args, out, code=code, base=base, variants=variants, dropped=dropped, roots=roots,
+                                   change=change, author=author)
+        finally:
+            self._release_sweep(fid, len(variants))
+
+    def _run_sweep(self, fam: Mapping[str, Any], args: Mapping[str, Any], out: dict[str, Any], *, code: str,
+                   base: Mapping[str, Any], variants: list[dict[str, Any]], dropped: int, roots: list[str], change: bool,
+                   author: str) -> dict[str, Any]:
+        fid = fam["id"]
+        with self.store.atomic():
+            if self._terminal(fid, out):
+                return {"status": "retired", "reason": "the family is retired; no run started"}
+            if change:  # as a gym_run: the family's slice follows the program's NEEDS
+                self.store.update_family(fid, roots=roots)
+                self.store.note(fid, f"Roots changed from {', '.join(fam['roots'])} to {', '.join(roots)}.")
+                out["roots"] = roots
+                fam = {**fam, "roots": roots}
+            versions = self.store.add_versions(fid, code, variants, author=author, note=str(args.get("why") or "")[:300])
+        group = self._sweep_group(fid, code, variants, fam["roots"])
+        jobs = [GymJob(family=fid, version=int(v["n"]), code=code, params=dict(p), window="train", roots=tuple(fam["roots"]),
+                       stress=1.0, purpose="train", priority=float(fam.get("weight") or 0.0), group=group)
+                for p, v in zip(variants, versions)]
+        timeout = float(self.settings.get("gym", {}).get("run_timeout_seconds", 900)) + 120
+
+        def late(job: GymJob) -> Callable[[Mapping[str, Any]], None]:
+            return lambda result: self._record_variant(job, result, sweep=group)  # a trial whenever it lands
+
+        if self._terminal(fid, out):
+            return {"status": "retired", "reason": "the family is retired; no run started"}
+        rows: list[dict[str, Any]] = []
+        failed: list[tuple[GymJob, str]] = []
+        # The same sweep asked again (its group is its content): a variant that already landed (late, after the Gym gave
+        # up on it last time) is read back, never run twice. It was a trial when it landed.
+        earlier: dict[int, dict[str, Any]] = {}
+        for run in self.store.runs(fid, window="train", limit=200):
+            if (run.get("summary") or {}).get("sweep") == group and run.get("status") == "ok" and run.get("version") is not None:
+                earlier.setdefault(int(run["version"]), run)
+        todo: list[GymJob] = []
+        for job in jobs:
+            run = earlier.get(int(job.version or 0))
+            if run is None:
+                todo.append(job)
+                continue
+            full = self.store.run_result(run["run_id"])
+            if full is not None:
+                rows.append(self._variant_row(job, run["run_id"], full.get("status"), full.get("summary") or {},
+                                              robust=evidence.train_score(full), fill_rate=(full.get("fills") or {}).get("fill_rate"),
+                                              reused=True))
+            else:
+                rows.append(self._variant_row(job, run["run_id"], run.get("status"), run.get("summary") or {}, robust=None,
+                                              reused=True))
+
+        def land(job: GymJob, result: Mapping[str, Any]) -> None:
+            # Recorded as it lands; only its compact row stays in memory (many sweeps in flight must not hold every trade).
+            robust = evidence.train_score(result)
+            run = self._record_variant(job, result, robust, sweep=group, prune=False)
+            rows.append(self._variant_row(job, run["run_id"], result.get("status"), result.get("summary") or {}, robust=robust,
+                                          fill_rate=(result.get("fills") or {}).get("fill_rate"), reason=result.get("reason"),
+                                          trials=int(result.get("trials", 0) or 0)))
+            job.result = None
+
+        began = self.clock()
+        submit, wait = getattr(self.pool, "submit", None), getattr(self.pool, "wait", None)
+        if callable(submit) and callable(wait):
+            for job in todo:  # queued together: the pool batches them (one group: none supersedes another)
+                submit(job)
+            deadline = began + timeout  # gym_run's timeout, for every variant, from the moment all were queued
+            for job in todo:
+                try:
+                    result = wait(job, max(0.0, deadline - self.clock()), late=late(job))
+                except PoolError as exc:
+                    failed.append((job, str(exc)))
+                    continue
+                land(job, result)
+        else:  # a pool that only runs one job at a time
+            for job in todo:
+                try:
+                    result = self.pool.run(job, timeout=timeout, late=late(job))
+                except PoolError as exc:
+                    failed.append((job, str(exc)))
+                    continue
+                land(job, result)
+        out["gym_seconds"] = round(self.clock() - began, 2)
+        numbers = [int(v["n"]) for v in versions]
+        if not rows:
+            error = failed[0][1] if failed else "the Gym returned nothing"
+            out["gym_error"] = error[:300]
+            return {"status": "gym_error", "versions": numbers, "error": error[:500],
+                    "hint": "the Gym could not run the sweep now; its versions are saved: sweep again next cycle"}
+        demoted = {int(v) for v in (((self.store.family(fid) or {}).get("state") or {}).get("robust_failed") or [])}
+
+        def counts(row: Mapping[str, Any]) -> bool:
+            """Completed, eligible and not demoted at 1.5x: only such a row may be the best or head the table."""
+            return row["status"] == "ok" and row["eligible"] and row["score"] is not None and int(row["job"].version or 0) not in demoted
+
+        rows.sort(key=lambda r: (r["status"] != "ok", not counts(r), -(r["score"] if r["score"] is not None else -math.inf),
+                                 r["job"].id))
+        out["trials"] = out.get("trials", 0) + sum(r["trials"] for r in rows)
+        new_best, best_score = None, None
+        with self.store.atomic():
+            current = self.store.family(fid) or {}
+            state = current.get("state") or {}
+            demoted.update(int(v) for v in (state.get("robust_failed") or []))  # `counts` reads the set
+            if not current.get("retired_at"):
+                candidates = state.get("train_candidates")
+                best_score = current.get("best_train")
+                for r in rows:
+                    if not counts(r):
+                        continue
+                    candidates = candidates_with(candidates, float(r["score"]), int(r["job"].version or 0), r["run_id"])
+                    if best_score is None or float(r["score"]) > float(best_score):
+                        best_score, new_best = float(r["score"]), r
+                if candidates != state.get("train_candidates"):
+                    self.store.set_state(fid, train_candidates=candidates)
+                if new_best is not None:
+                    self.store.update_family(fid, best_train=best_score, stall=0)
+                    self.store.set_state(fid, best_train_run=new_best["run_id"], best_train_version=int(new_best["job"].version or 0))
+                    out["improved"] = True
+        # Every row of the sweep stays readable (`read_run`) until the family's next run prunes by age, as ever.
+        self.store.prune_runs(fid, keep={r["run_id"] for r in rows})
+        table, eligible, positive = [], 0, 0
+        for r in rows:
+            job = r["job"]
+            ok = counts(r)
+            eligible += ok
+            positive += r["score"] is not None and r["score"] > 0
+            row: dict[str, Any] = {
+                "params": {k: v for k, v in job.params.items() if k not in base or base[k] != v},
+                "run_id": r["run_id"], "version": job.version, "status": r["status"],
+                "score": None if r["score"] is None else round(float(r["score"]), 3), "eligible": ok,
+                "trades": r["trades"], "days": r["days"], "pnl": r["pnl"], "fill_rate": r["fill_rate"], "years": r["years"]}
+            if r["eligible"] and r["status"] == "ok" and not ok:
+                row["why_not"] = "this version lost money on Train at 1.5x the half-spread"
+            elif not ok:
+                row["why_not"] = str(r["why"] or "")[:160]
+            if r["status"] != "ok":
+                row["reason"] = str(r["reason"] or "")[:200]
+            if r["reused"]:
+                row["ran_before"] = True  # this very sweep's variant landed after the Gym gave up on it last time
+            table.append(row)
+        top = rows[0]
+        top_score = next((float(r["score"]) for r in rows if counts(r)), None)
+        reused = sum(1 for r in rows if r["reused"])
+        out["run_id"] = top["run_id"]
+        out["score"] = None if top_score is None else round(top_score, 3)
+        out["sweep"] = {"variants": len(jobs), "completed": sum(1 for r in rows if r["status"] == "ok"), "eligible": eligible,
+                        "failed": len(failed)}
+        if reused:
+            out["sweep"]["reused"] = reused
+        view: dict[str, Any] = {
+            "status": "ok" if any(r["status"] == "ok" for r in rows) else str(top["status"] or "failed"),
+            "run_id": top["run_id"], "version": top["job"].version, "base_params": dict(base),
+            "variants": len(jobs), "completed": out["sweep"]["completed"], "eligible": eligible, "positive_score": positive,
+            "table": table, "lineage_trials": self.store.lineage_trials(fid),
+            "next": "submit the best ROBUST row's run_id (a plateau of positive neighbours beats a lone peak), or read_run it"}
+        if dropped:
+            view["repeats_dropped"] = dropped
+        if failed:
+            view["failed"] = [{"params": {k: v for k, v in job.params.items() if k not in base or base[k] != v}, "version": job.version,
+                               "error": why[:200]} for job, why in failed]
+        if new_best is not None:
+            view["new_best_train_score"] = round(float(best_score or 0.0), 3)
+            job = new_best["job"]
+            self.queue_robustness(fid, int(job.version or 0), code, dict(job.params), needs_roots(code, fam["roots"]))
+        return view
+
     def _execute(self, fam: Mapping[str, Any], name: str, args: Mapping[str, Any], out: dict[str, Any], *, author: str) -> Any:
         if name == "retire":
             # Refused unless offered (`can_retire`); a refusal is a tool answer, never a cycle error (no backoff). The
@@ -627,6 +1096,8 @@ class Researcher:
             return result
         if name == "gym_run":
             return self._gym_run(fam, args, out, author=author)
+        if name == "gym_sweep":
+            return self._gym_sweep(fam, args, out, author=author)
         with self.store.atomic():  # local tools cannot change the best or notebook after another connection retires it
             if self._terminal(fam["id"], out):
                 return {"status": "refused", "reason": "the family is retired; no further tools run"}
@@ -911,7 +1382,9 @@ class Researcher:
             pending = None  # the rewrite supersedes the queued input, including when the rewrite needs repair
             fam = self.store.family(fid) or fam
         if pending and not gym_done:  # the run asked for at the end of the last cycle (its call was answered "queued" then)
-            result = self._execute(fam, "gym_run", pending.get("arguments") or {}, out, author=pending.get("author") or "model")
+            # A queued sweep carries its tool's name; a run queued before sweeps existed carries none.
+            tool = pending.get("name") if pending.get("name") in RUNS else "gym_run"
+            result = self._execute(fam, tool, pending.get("arguments") or {}, out, author=pending.get("author") or "model")
             out["tool_calls"] += 1
             if result.get("status") == "gym_error":
                 out["error"] = f"gym: {str(result.get('error') or '')[:200]}"
@@ -924,13 +1397,14 @@ class Researcher:
                         self.request_rewrite(fam, out)
                     return
                 # The Gym will not run it (or failed it three times): the model hears why and revises.
-                current.append({"role": "user", "content": "The gym_run you queued last cycle could not run: "
+                current.append({"role": "user", "content": f"The {tool} you queued last cycle could not run: "
                                                            f"{str(result.get('error') or '')[:600]}. {result.get('hint') or ''}"})
             elif completed_run(result):
-                current.append({"role": "user", "content": f"The gym_run you queued last cycle ran:\n{json.dumps(result, default=str)[:12000]}"})
+                current.append({"role": "user", "content": f"The {tool} you queued last cycle ran:\n"
+                                                           f"{json.dumps(result, default=str)[:12000]}"})
                 gym_done = True
             else:
-                current.append({"role": "user", "content": "The gym_run you queued last cycle did not complete a Gym run:\n"
+                current.append({"role": "user", "content": f"The {tool} you queued last cycle did not complete a Gym run:\n"
                                                            f"{json.dumps(result, default=str)[:12000]}"})
             fam = self.store.family(fid) or fam
         pending = None  # run, or superseded by the rewrite (its call was answered "queued" last cycle)
@@ -951,10 +1425,10 @@ class Researcher:
             chars = sum(len(json.dumps(i, default=str)) for i in items)
             profile, effort, most = self._profile(chars, fam)
             key = f"swarm:{fid}:c{n}:m{out['model_calls']}:{int(fam.get('revisions') or 0)}"
-            # REVISE requires a run (never retire); READ follows a completed run and offers every tool, retire only when
-            # the family may retire (`can_retire`).
+            # REVISE requires a run or a sweep (never retire); READ follows a completed run and offers every tool, retire
+            # only when the family may retire (`can_retire`).
             revise = not gym_done
-            tools = TOOLS_REVISE if revise else (TOOLS if self.can_retire(fam) else TOOLS_READ)
+            tools = self.tools(revise=revise, retire=not revise and self.can_retire(fam))
             response = self.router.sail(profile, items, family=fid, key=key, tools=tools, effort=effort, max_output=most,
                                         cache_key=f"swarm-{fid}", cap_usd_day=float(self.cfg.get("family_usd_day", 2.0)),
                                         tool_choice="required" if revise else "auto")
@@ -978,22 +1452,22 @@ class Researcher:
                                     "output": json.dumps({"status": "refused", "reason": "the family is retired; no further tools run"})})
                     stop = True
                     continue
-                if call.name == "gym_run" and (out.get("run_id") or "gym_error" in out or
-                                              self.clock() > deadline - 30 or out["tool_calls"] >= max_tools) \
+                if call.name in RUNS and (out.get("run_id") or "gym_error" in out or
+                                          self.clock() > deadline - 30 or out["tool_calls"] >= max_tools) \
                         and pending is None and not call.error:
-                    # One run a cycle: this one opens the next cycle. Its call is answered now (every call keeps its output
-                    # beside it in the history); its result arrives as a message when it has run.
-                    pending = {"call_id": call.call_id, "arguments": call.arguments, "author": profile}
+                    # One run (or one sweep) a cycle: this one opens the next cycle. Its call is answered now (every call keeps
+                    # its output beside it in the history); its result arrives as a message when it has run.
+                    pending = {"call_id": call.call_id, "name": call.name, "arguments": call.arguments, "author": profile}
                     stop = True
                     current.append({"type": "function_call_output", "call_id": call.call_id,
                                     "output": json.dumps({"status": "queued", "note": "this run opens your next cycle; its result "
                                                           "comes then"})})
                     continue
-                if call.name == "gym_run" and pending is not None:
+                if call.name in RUNS and pending is not None:
                     current.append({"type": "function_call_output", "call_id": call.call_id,
                                     "output": json.dumps({"error": "one run is already queued for your next cycle"})})
                     continue
-                if call.name == "retire" and tools is not TOOLS:  # not offered (a REVISE turn, or `can_retire` said no)
+                if call.name == "retire" and not any(t["name"] == "retire" for t in tools):  # not offered (REVISE, or `can_retire`)
                     result: Any = {"status": "refused", "reason": "retire is not offered on this turn: revise and run"}
                     out["retire_refused"] = True  # a plain refusal, never a cycle error (no backoff)
                 elif out["tool_calls"] >= max_tools:
@@ -1003,7 +1477,7 @@ class Researcher:
                 else:
                     result = self._execute(fam, call.name, call.arguments, out, author=profile)
                     out["tool_calls"] += 1
-                    if call.name == "gym_run":
+                    if call.name in RUNS:
                         gym_done = completed_run(result)
                         if isinstance(result, dict) and result.get("status") == "gym_error":
                             out["error"] = f"gym: {str(result.get('error') or '')[:200]}"  # no further model call this cycle
@@ -1207,6 +1681,7 @@ def migrate_objective(store: SwarmStore, *, beat: Callable[[], None] | None = No
     return out
 
 
-__all__ = ["Researcher", "TOOLS", "TOOLS_READ", "TOOLS_REVISE", "needs_of", "needs_roots", "with_roots", "check_code", "sanitize",
-           "date_like", "candidates_with", "migrate_objective", "OBJECTIVE", "idle_dead", "idle_evaluations",
-           "idle_limit", "RETIRE_IDLE_EVALUATIONS", "NEGATIVE_FACTOR"]
+__all__ = ["Researcher", "TOOLS", "TOOLS_READ", "TOOLS_REVISE", "RUNS", "needs_of", "needs_roots", "with_roots", "check_code",
+           "sanitize", "date_like", "candidates_with", "migrate_objective", "OBJECTIVE", "params_of", "check_params",
+           "sweep_variants", "sweep_tool", "merged_key", "MAX_SWEEP_VARIANTS", "MAX_SWEEP_JOBS_IN_FLIGHT", "idle_dead",
+           "idle_evaluations", "idle_limit", "RETIRE_IDLE_EVALUATIONS", "NEGATIVE_FACTOR"]
