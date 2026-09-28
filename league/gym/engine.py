@@ -27,6 +27,20 @@ a leg has no quote). A segment of a split run (`RunConfig.split_mark`) ends diff
 still open is valued at the mid with no fee (an accounting split, not a trade), and a later segment's
 programs first replay `RunConfig.warmup` prior days without trading (`batch.py`).
 
+A STOCK SPLIT (`split_eves`) is a different thing: the OCC adjusts a name's listed options (strikes,
+deliverable, often the symbol), so a contract held into the split session is not in that session's
+chain under its old key and can be neither marked nor closed; left alone it would expire against the
+post-split price (a call spread worthless, a put spread at its width). The store's underlying is the
+price as traded, never adjusted, so a split shows as the prior session's last price over the next
+session's first price near an integer k (a k-for-1 split; near 1/k, a 1-for-k reverse split). On the
+EVE (the root's last replayed session before it) every position on that root still open at the close
+is closed at the natural of the session's last quoted minute, with its fees (exit reason
+`stock_split`; `stock_split_mark`, at its last mark with no fee, when no minute of the last half hour
+quotes every leg), exercised shares of that root are marked at the eve's settlement level, and an
+opening order on it that would be held across the split (a leg expiring after the eve) is refused.
+Splits are public weeks ahead, so the engine knowing one on the eve reads nothing a trader did not
+know. A run with no split in its days runs exactly as before.
+
 Deterministic: the same programs, parameters, store files, fill model and window give the same
 result (`results.py` hashes it). numpy only here; the store reader brings pyarrow.
 """
@@ -38,7 +52,7 @@ import datetime as dt
 import math
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Sequence
+from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 import numpy as np
 
@@ -63,6 +77,68 @@ def settlement_level(u: Any) -> float:
             if known.size:
                 return float(known[-1])
     return float("nan")
+
+
+#: A stock split in the store's underlying (the module docstring): the prior session's last price over the next
+#: session's first within this share of an integer k (2..SPLIT_MAX_FACTOR), or of 1/k. Measured on the Gym image's 25
+#: roots, 2022-2025 (Sept 28, 2026): the eight splits there (TQQQ 2022-01-13 2:1, AMZN 2022-06-06 20:1, GOOGL
+#: 2022-07-18 20:1, TSLA 2022-08-25 3:1, SMH 2023-05-05 2:1, NVDA 2024-06-10 10:1, SMCI 2024-10-01 10:1, TQQQ 2025-11-20
+#: 2:1) sit within 0.06 of theirs; the largest overnight move that was not a split (a 29% gap down) is 0.29 short of 2.
+SPLIT_TOLERANCE = 0.15
+SPLIT_MAX_FACTOR = 100
+
+
+def split_factor(before: float, after: float) -> float | None:
+    """The split between two sessions of one root, from the prior session's last price (`before`) and the next
+    session's first (`after`): k for a k-for-1 split, 1/k for a 1-for-k reverse split, None for no split."""
+    try:
+        before, after = float(before), float(after)
+    except (TypeError, ValueError):
+        return None
+    if not (math.isfinite(before) and math.isfinite(after) and before > 0 and after > 0):
+        return None
+    ratio = before / after
+    k = round(ratio if ratio >= 1.0 else 1.0 / ratio)
+    if not 2 <= k <= SPLIT_MAX_FACTOR:
+        return None
+    off = ratio / k - 1.0 if ratio >= 1.0 else ratio * k - 1.0
+    if abs(off) > SPLIT_TOLERANCE:
+        return None
+    return float(k) if ratio >= 1.0 else 1.0 / k
+
+
+def split_label(factor: float) -> str:
+    """'3-for-1' (a split), '1-for-10' (a reverse split)."""
+    return f"{factor:g}-for-1" if factor >= 1.0 else f"1-for-{1.0 / factor:g}"
+
+
+def _price_ends(store: Any, root: str, day: dt.date) -> tuple[float, float]:
+    ends = getattr(store, "price_ends", None)
+    if callable(ends):
+        return ends(root, day)
+    price = np.asarray(store.underlying(root, day).price, dtype=np.float64)
+    known = price[np.isfinite(price) & (price > 0)]
+    return (float(known[0]), float(known[-1])) if known.size else (math.nan, math.nan)
+
+
+def split_eves(store: Any, roots: Sequence[str], days: Sequence[dt.date]) -> dict[dt.date, dict[str, float]]:
+    """{eve: {root: factor}} over the run's `days`: for each root, the replayed session (one whose chain the engine
+    loads: NBBO and underlying) whose NEXT replayed session of that root opens split from its close (`split_factor`).
+    Only the run's own days are read, so a run's data is exactly its `data_version`'s files; a split right after the
+    run's last day is the window's end (or a segment's mid mark), never held across either."""
+    out: dict[dt.date, dict[str, float]] = {}
+    for root in roots:
+        prior: tuple[dt.date, float] | None = None
+        for day in days:
+            if not (store.has("nbbo", root, day) and store.has("underlying", root, day)):
+                continue
+            first, last = _price_ends(store, root, day)
+            if prior is not None:
+                factor = split_factor(prior[1], first)
+                if factor is not None:
+                    out.setdefault(prior[0], {})[root] = factor
+            prior = (day, last)
+    return out
 
 
 @dataclass
@@ -195,10 +271,12 @@ class DayData:
     """One trading day: each root's chain once, and one shared snapshot per root and minute."""
 
     def __init__(self, store: "Store", day: dt.date, roots: Sequence[str], events: EventCalendar, history: History,
-                 ordinal: int):
+                 ordinal: int, *, split_eve: Mapping[str, float] | None = None):
         self.day = day
         self.store = store
         self.ordinal = ordinal
+        #: {root: factor} for each root whose next replayed session is a stock split (`split_eves`): today is its eve.
+        self.split_eve: dict[str, float] = dict(split_eve or {})
         self.weekday = day.weekday()
         self.open_min, self.close_min = store.session(day)
         self.minutes = self.close_min - self.open_min + 1
@@ -903,7 +981,11 @@ class Account:
         order = L.resolve_open(intent, snap, rules, buying_power=self.buying_power(), stress=self.cfg.stress)
         if any(leg.dte == 0 for leg in order.legs) and minute >= rules.open_cutoff:
             raise L.Refused(f"expiry cutoff: no new opening order on an expiring contract from {rules.open_cutoff // 60}:{rules.open_cutoff % 60:02d} ET")
-        order.extra = {"minute": day.open_min + mi, "open_min": day.open_min, "context": self._context(day, snap, order)}
+        split = (getattr(day, "split_eve", None) or {}).get(root)
+        if split is not None and any(leg.dte > 0 for leg in order.legs):
+            raise L.Refused(f"stock split: {root} splits {split_label(split)} before the next session; no opening order "
+                            f"that would be held across it (its open positions close at today's close)")
+        order.extra ={"minute": day.open_min + mi, "open_min": day.open_min, "context": self._context(day, snap, order)}
         work = Working(self._id(), order, order.qty, mi, arrival, self._expiry(order, arrival), order.reserve)
         self.orders[work.oid] = work
         self.orders_today += 1
@@ -942,6 +1024,9 @@ class Account:
                 self._expire(day, pos)
         for pos in list(self.positions.values()):
             self._mark(day, pos, close_mi)
+        splitting = getattr(day, "split_eve", None)
+        if splitting:
+            self._split_eve(day, splitting)
         if last:
             for pos in list(self.positions.values()):
                 if self.cfg.split_mark:
@@ -1098,6 +1183,51 @@ class Account:
         pos.exit_day, pos.exit_mi, pos.reason = day.ordinal, day.minutes - 1, "split_mark"
         self._finish(pos, day)
 
+    def _split_eve(self, day: DayData, splitting: Mapping[str, float]) -> None:
+        """The close of a split's eve (the module docstring): every position on a splitting root still open is closed
+        at the natural of the session's last quoted minute (`_split_close`); shares an expiry on it left pending are
+        marked at today's settlement level (no gap), as at a window's end: nothing on the root is held across."""
+        for pos in list(self.positions.values()):
+            if pos.root in splitting:
+                self._split_close(day, pos)
+        keep = []
+        for pos, root, shares, ref in self.pending_shares:
+            if root in splitting:
+                pos.info["share_gap"] = 0.0
+                self._finish(pos, day)
+            else:
+                keep.append((pos, root, shares, ref))
+        self.pending_shares = keep
+
+    def _split_close(self, day: DayData, pos: Position, back: int = 30) -> None:
+        """Close one position on a split's eve at the natural of the session's last minute that quotes every leg (the
+        last stepped minute, or up to `back` minutes before it), stress applied, with its fees (`stock_split`); with no
+        such minute, at its last mark with no fee (`stock_split_mark`), as a window's end does."""
+        legs = pos.legs_today()
+        value, fees, at = math.nan, 0.0, day.minutes - 2
+        if pos.root in day.chains and all(leg.idx >= 0 for leg in legs):
+            for mi in range(day.minutes - 2, max(0, day.minutes - 2 - back), -1):
+                snap = day.snapshot(pos.root, mi)
+                if snap is None:
+                    break
+                natural, _ = L.natural_value(snap, legs, "close", stress=self.cfg.stress)
+                if math.isfinite(natural):
+                    prices = [float(snap.bid[leg.idx] if leg.side > 0 else snap.ask[leg.idx]) for leg in legs]
+                    value, fees, at = natural, L.order_fees(pos.root, legs, prices, pos.qty, "close"), mi
+                    break
+        reason = "stock_split"
+        if not math.isfinite(value):
+            value = pos.last_mark if math.isfinite(pos.last_mark) else pos.entry
+            reason = "stock_split_mark"
+        cash = value * venue.MULTIPLIER * pos.qty - fees
+        self.cash += cash
+        pos.cash += cash
+        pos.fees += fees
+        pos.exit_value_qty += value * pos.qty
+        pos.qty = 0
+        pos.exit_day, pos.exit_mi, pos.reason = day.ordinal, at, reason
+        self._finish(pos, day)
+
     def _window_end(self, day: DayData, pos: Position) -> None:
         snap = day.snapshot(pos.root, day.minutes - 2) if pos.root in day.chains else None
         legs = pos.legs_today()
@@ -1205,6 +1335,8 @@ def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Se
     regimes: dict[str, dict[str, dict[str, float]]] = {}
     from .day import ordinal as to_ordinal
 
+    eves = split_eves(store, all_roots, days) if days else {}
+
     for day in warm:
         data = DayData(store, day, all_roots, events, history, to_ordinal(day))
         live = [a for a in accounts if a.roots and not a.runner.disqualified]
@@ -1224,7 +1356,7 @@ def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Se
         _close_day(data, history)
 
     for n, day in enumerate(days):
-        data = DayData(store, day, all_roots, events, history, to_ordinal(day))
+        data = DayData(store, day, all_roots, events, history, to_ordinal(day), split_eve=eves.get(day))
         live = [a for a in accounts if a.roots]
         for account in live:
             account.begin_day(data)
@@ -1259,4 +1391,4 @@ def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Se
             for a in accounts]
 
 
-__all__ = ["RunConfig", "run", "Account", "DayData", "DayClosed", "History"]
+__all__ = ["RunConfig", "run", "Account", "DayData", "DayClosed", "History", "split_factor", "split_eves", "split_label"]
