@@ -134,6 +134,33 @@ class SealedBoxDriver(unittest.TestCase):
             self.driver(FakeSail(timeout_exec=True)).run({"dip": (EXAMPLES / "putspread_dip.py").read_text()},
                                                         window="train", roots=["SPY"], timeout=5)
 
+    def test_a_named_fill_model_reaches_the_batch_and_names_the_job(self):
+        from league.gym import fills as F
+
+        table = self.dir / "tables" / "fill_model.conditional.json"
+        table.parent.mkdir(parents=True, exist_ok=True)
+        table.write_text(json.dumps({"hazard": {"SPY|q2|s|d0|k0|t0": 0.1}, "adverse": "conditional",
+                                     "hazard_adverse": {"SPY|q2|s|d0|k0|t0": 0.12}, "hazard_favourable": {}}))
+        client = FakeSail()
+        drv = self.driver(client)
+        code = (EXAMPLES / "putspread_dip.py").read_text()
+        named = drv.run({"dip": code}, window="train", roots=["SPY"], workers=1, fill_model=str(table))
+        default = drv.run({"dip": code}, window="train", roots=["SPY"], workers=1)
+        self.assertEqual(named["results"][0]["fill_model"], F.FillModel.load(table).version)
+        self.assertNotEqual(default["results"][0]["fill_model"], named["results"][0]["fill_model"])
+        batches = [c for kind, c in client.log if kind == "exec" and "league.gym.batch --programs" in c]
+        self.assertIn(f"--fill-model {table}", batches[0])
+        self.assertNotIn("--fill-model", batches[1])
+        # Another table is another job; a run without one keeps the job name it had before the option existed.
+        self.assertNotEqual(named["batch"]["job"], default["batch"]["job"])
+        settings = {"window": "train", "roots": ["SPY"], "workers": 1, "split": 1, "stress": 1.0, "capital": 10_000.0,
+                    "detail": "full", "start": None, "end": None, "gate": None, "store": str(self.store)}
+        self.assertEqual(default["batch"]["job"], drv.job_id({"dip": code}, settings))
+        # A table that is not there is an error result, never a silent natural-only run.
+        [missing] = drv.run({"dip": code}, window="train", roots=["SPY"], workers=1, fill_model=str(table) + ".absent")["results"]
+        self.assertEqual(missing["status"], "error")
+        self.assertIn("no fill model", missing["reason"])
+
     def test_the_bundle_is_reproducible_and_complete(self):
         a, va = DR.build_bundle()
         b, vb = DR.build_bundle()

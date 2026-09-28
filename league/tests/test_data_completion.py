@@ -49,6 +49,24 @@ class CalibrationReceipt(unittest.TestCase):
             with self.assertRaises(ValueError):
                 calibration.model_receipt(json.dumps(table).encode())
 
+    def test_a_conditional_table_is_validated_cell_by_cell(self):
+        table = {"source": "league.gym.calibrate", "hazard": {"SPY|q2|s|d0|k0|t0": 0.1}, "adverse": "conditional",
+                 "hazard_adverse": {"SPY|q2|s|d0|k0|t0": 0.12}, "hazard_favourable": {"SPY|q2|s|d0|k0|t0": 0.05},
+                 "meta": {"fitted_on": {"days": 2, "prints": 20}}}
+        receipt = calibration.model_receipt(json.dumps(table).encode())
+        from league.gym.fills import FillModel
+        self.assertEqual(receipt["model_version"], FillModel.from_json(table).version)
+        self.assertEqual((receipt["adverse"], receipt["cells_adverse"], receipt["cells_favourable"]), ("conditional", 1, 1))
+        self.assertNotIn("hazard_adverse", receipt)
+        for name in ("hazard_adverse", "hazard_favourable"):
+            for bad in ({"SPY|q2|s|d0|k0|t0": 1.5}, {"SPY|q2|s|d3|k0|t0": 0.1}, {"SPY|q2|s|d0|k0|t0": True}, None):
+                with self.assertRaises(ValueError):
+                    calibration.model_receipt(json.dumps(dict(table, **{name: bad})).encode())
+        with self.assertRaises(ValueError):
+            calibration.model_receipt(json.dumps(dict(table, adverse="per-leg")).encode())
+        plain = {k: v for k, v in table.items() if k not in ("adverse", "hazard_adverse", "hazard_favourable")}
+        self.assertNotIn("adverse", calibration.model_receipt(json.dumps(plain).encode()))
+
     def test_both_images_receive_the_same_private_model_before_any_checkpoint(self):
         blob = json.dumps({"source": "league.gym.calibrate", "hazard": {"SPY|q2|s|d0|k0|t0": 0.1},
                            "meta": {"fitted_on": {"days": 2, "prints": 20}}}).encode()

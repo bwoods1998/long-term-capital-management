@@ -175,8 +175,11 @@ class GymDriver:
 
     def run(self, programs: Mapping[str, Any], *, window: str, roots: Sequence[str], workers: int = 8, split: int = 1,
             stress: float = 1.0, capital: float = 10_000.0, detail: str = "full", start: str | None = None,
-            end: str | None = None, gate_reason: str | None = None, timeout: int = 3600) -> dict:
-        """Run `programs` ({name: code} or {name: (code, params or [params, ...])}) and return the batch's document."""
+            end: str | None = None, gate_reason: str | None = None, timeout: int = 3600,
+            fill_model: str | None = None) -> dict:
+        """Run `programs` ({name: code} or {name: (code, params or [params, ...])}) and return the batch's document.
+        `fill_model`: a fill-model table's path ON THE BOX (`batch.py --fill-model`); None loads the box's default
+        (`fills.FillModel.load`). Each result names the model it ran under (`fill_model`, its version)."""
         if not programs:
             raise GymError("no programs to run")
         if window == "validation" and (start or end):
@@ -185,6 +188,8 @@ class GymDriver:
         settings = {"window": window, "roots": [r.upper() for r in roots], "workers": int(workers), "split": int(split),
                     "stress": float(stress), "capital": float(capital), "detail": detail, "start": start, "end": end,
                     "gate": gate_reason, "store": self.store_root}
+        if fill_model:
+            settings["fill_model"] = str(fill_model)   # part of the job's name: another table is another job
         self.ensure_code()
         job = self.job_id(programs, settings)
         jobdir = f"{self.remote_root}/jobs/{job}"
@@ -201,6 +206,8 @@ class GymDriver:
                 args += f" --end {q(end)}"
             if gate_reason:
                 args += f" --gate {q(gate_reason)}"
+            if fill_model:
+                args += f" --fill-model {q(str(fill_model))}"
             command = (f"mkdir -p {q(jobdir + '/programs')} && tar -xzf {q(jobdir + '/programs.tgz')} -C {q(jobdir + '/programs')} && "
                        + self._batch(args))
             result = self._exec(command, timeout=int(timeout))

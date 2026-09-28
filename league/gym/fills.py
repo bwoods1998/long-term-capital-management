@@ -25,6 +25,28 @@ A passive fill takes at most the contracts Train's fills at that level typically
 queue (`size`, per root, level, leg class and days to expiry; one structure where unknown), and one
 minute's passive liquidity on a contract is shared by all of a program's orders on it.
 
+ADVERSE SELECTION: the engine reads the NEXT minute's quotes (the program never sees them) to say whether
+the structure's mid then moves against a resting order or stays flat ("adverse": a buyer is not filled
+just before the mid rises) or moves in its favour. Two tables, one rule each:
+
+- an UNCONDITIONAL table (`hazard` only; every table fitted before Sept 27, 2026): a passive order fills
+  only on adverse-or-flat minutes, drawing against `hazard`, and never on a favourable one. `hazard` is
+  measured over ALL quoted minutes, so this fills less often than Train's prints say (the measured rate
+  times the share of adverse-or-flat minutes) and never where the market moves the order's way;
+- a CONDITIONAL table (`"adverse": "conditional"`, from `calibrate.py --adverse conditional`): the same
+  cells measured separately on adverse-or-flat minutes (`hazard_adverse`) and on favourable minutes
+  (`hazard_favourable`), and the engine draws against the one the next minute calls for. The average
+  rate is then the measured one, and fills still lean toward the minutes that move against the order
+  as far as Train's prints did. A package takes the lowest over its legs within that condition, the
+  condition being the whole structure's next-minute mid (the legs were measured each on its own). A
+  limit at or through the real natural that works only because a stress run widened the spread is no
+  measured cell and keeps the unconditional rule (certain on adverse-or-flat minutes, never on others),
+  so a conditional table with no favourable cells fills exactly as an unconditional one would. The
+  file also carries `hazard`: an engine before this rule reads it as the unconditional table it holds.
+
+Either way a minute with no next quote on a leg fills nothing passively, and the draw is the same keyed
+draw (below).
+
 The draw is keyed by (the contracts, the day, the minute, the side) with a fixed seed, never by the
 program: a trivial edit to a program cannot re-roll its luck, and two programs that send the same
 order at the same minute fill or miss together. The table is a point estimate per cell, fitted from
@@ -67,6 +89,8 @@ STRESS_HAZARD = 0.5
 MONEY_EDGES = (0.005, 0.015, 0.03)
 TOD_EDGES = (630, 900)
 DEFAULT_PATHS = ("/data/calibration/fill_model.json",)
+#: The table-level marker (`"adverse"`) of a table whose cells are measured per next-minute condition.
+CONDITIONAL = "conditional"
 #: Every modelled (dte, moneyness, time) cell suffix: d0-d2 only (8+ days is never modelled).
 F_CELLS = tuple(f"d{d}|k{k}|t{t}" for d in range(len(DTE_EDGES) - 1) for k in range(len(MONEY_EDGES) + 1)
                 for t in range(len(TOD_EDGES) + 1))
@@ -111,36 +135,58 @@ def size_cell(root: str, q: float, legs: int, dte: int) -> str:
 @dataclass
 class FillModel:
     """A hazard table (cell -> per-minute probability) and a size table (size cell -> contracts). Empty:
-    natural fills only."""
+    natural fills only. A conditional table also carries the same cells measured on adverse-or-flat
+    next minutes (`hazard_adverse`) and on favourable ones (`hazard_favourable`): both or neither."""
 
     hazard: dict[str, float] = field(default_factory=dict)
     source: str = "default: natural only"
     meta: dict[str, Any] = field(default_factory=dict)
     size: dict[str, int] = field(default_factory=dict)
+    hazard_adverse: dict[str, float] | None = None
+    hazard_favourable: dict[str, float] | None = None
+
+    def __post_init__(self) -> None:
+        if (self.hazard_adverse is None) != (self.hazard_favourable is None):
+            raise ValueError("a conditional fill model needs both hazard_adverse and hazard_favourable")
+
+    @property
+    def conditional(self) -> bool:
+        """True when passive fills draw against the hazard of the next minute's condition (the module docstring)."""
+        return self.hazard_adverse is not None
 
     @property
     def version(self) -> str:
+        if self.conditional:
+            body: Any = {"adverse": CONDITIONAL, "hazard": self.hazard, "size": self.size,
+                         "hazard_adverse": self.hazard_adverse, "hazard_favourable": self.hazard_favourable}
+            return "fm-" + hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()[:16]
         if not self.hazard:
             return "natural-only"
         body = self.hazard if not self.size else {"hazard": self.hazard, "size": self.size}
         return "fm-" + hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()[:16]
 
-    def p(self, root: str, q: float, legs: Sequence[tuple[int, float]], minute: int) -> float:
+    def p(self, root: str, q: float, legs: Sequence[tuple[int, float]], minute: int, adverse: bool | None = None) -> float:
         """The per-minute hazard of a limit at `q` on a structure whose legs are (days to expiry,
         moneyness K/S - 1): 1 at or through the natural; 0 behind the touch, with any leg past
-        MODELLED_DTE or a moneyness unknown, or where the table has no cell (the module docstring)."""
+        MODELLED_DTE or a moneyness unknown, or where the table has no cell (the module docstring).
+        `adverse` picks a conditional table's cells (True: the next minute moves against the order or
+        stays flat; False: in its favour); None, or an unconditional table, reads `hazard`."""
         if q >= 1.0 - 1e-12:
-            return 1.0
-        if not self.hazard or q < TOUCH - 1e-6 or not legs:
+            # At or through the real natural (still working only in a stress run) is no measured cell: under a
+            # conditional table it keeps the unconditional rule, certain on an adverse-or-flat minute, never on another.
+            return 0.0 if adverse is False and self.conditional else 1.0
+        table = self.hazard if adverse is None or not self.conditional else (
+            self.hazard_adverse if adverse else self.hazard_favourable)
+        if not table or q < TOUCH - 1e-6 or not legs:
             return 0.0  # behind the touch: only the market coming through it fills it
         rates = []
         for dte, moneyness in legs:
             if int(dte) > MODELLED_DTE or not math.isfinite(moneyness):
                 return 0.0
-            single = float(self.hazard.get(cell(root, q, 1, dte, moneyness, minute), 0.0))
+            single = float(table.get(cell(root, q, 1, dte, moneyness, minute), 0.0))
             if len(legs) == 1:
                 return single
-            rates.append(min(single, float(self.hazard.get(cell(root, q, 2, dte, moneyness, minute), 0.0))))
+            rates.append(min(single, float(table.get(cell(root, q, 2, dte, moneyness, minute), 0.0))))
         return min(rates)
 
     def sizes(self, root: str, q: float, legs: Sequence[tuple[int, float]], ratios: Sequence[int]) -> list[int]:
@@ -154,11 +200,23 @@ class FillModel:
 
     @classmethod
     def from_json(cls, data: Mapping[str, Any], source: str = "") -> "FillModel":
+        """A table as `calibrate.py` writes it. An `"adverse"` marker other than "conditional", or a
+        conditional table without both conditional hazards, is refused (ValueError): a rule this engine
+        does not know is never read as another one."""
         hazard = {str(k): float(v) for k, v in dict(data.get("hazard") or {}).items() if 0.0 <= float(v) <= 1.0}
         size = {str(k): int(v) for k, v in dict(data.get("size") or {}).items()
                 if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 1}
+        conditional: dict[str, Any] = {}
+        marker = data.get("adverse")
+        if marker is not None:
+            if marker != CONDITIONAL:
+                raise ValueError(f"unknown adverse-selection rule {marker!r} in the fill model")
+            for name in ("hazard_adverse", "hazard_favourable"):
+                if not isinstance(data.get(name), Mapping):
+                    raise ValueError(f"a conditional fill model without {name}")
+                conditional[name] = {str(k): float(v) for k, v in data[name].items() if 0.0 <= float(v) <= 1.0}
         return cls(hazard=hazard, source=source or str(data.get("source") or "file"), meta=dict(data.get("meta") or {}),
-                   size=size)
+                   size=size, **conditional)
 
     @classmethod
     def load(cls, path: str | os.PathLike | None = None) -> "FillModel":
@@ -181,4 +239,4 @@ def draw(keys: Sequence[int], day: int, minute: int, side: str) -> float:
 
 
 __all__ = ["FillModel", "draw", "cell", "size_cell", "q_bucket", "dte_bucket", "money_bucket", "tod_bucket", "SEED", "TOUCH",
-           "MODELLED_DTE", "STRESS_HAZARD"]
+           "MODELLED_DTE", "STRESS_HAZARD", "CONDITIONAL"]

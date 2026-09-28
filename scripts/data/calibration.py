@@ -36,7 +36,17 @@ def model_receipt(blob: bytes) -> dict[str, Any]:
     hazard = table.get("hazard")
     if not isinstance(hazard, dict):
         raise ValueError("calibration has no hazard table")
-    for key, value in hazard.items():
+    tables = [hazard]
+    # A conditional table (`calibrate.py --adverse conditional`) carries the same cells per next-minute condition.
+    conditional = table.get("adverse")
+    if conditional is not None:
+        if conditional != "conditional":
+            raise ValueError("unknown adverse-selection rule")
+        for name in ("hazard_adverse", "hazard_favourable"):
+            if not isinstance(table.get(name), dict):
+                raise ValueError(f"conditional calibration has no {name} table")
+            tables.append(table[name])
+    for key, value in ((k, v) for t in tables for k, v in t.items()):
         # ROOT|q|class|dte|moneyness|time (league/gym/fills.py, Sept 27, 2026): q0 is the touch, q1-q5 the levels from
         # a quarter-spread short of the mid; d0-d2 only (8+ days to expiry is never modelled).
         if (not re.fullmatch(r"[A-Z][A-Z0-9.]{0,7}\|q[0-5]\|[sm]\|d[0-2]\|k[0-9]+\|t[0-9]+", key)
@@ -58,9 +68,13 @@ def model_receipt(blob: bytes) -> dict[str, Any]:
     from league.gym.fills import FillModel  # the engine's own version string: the receipt names what boxes will load
 
     version = FillModel.from_json(table).version
-    return {"sha256": hashlib.sha256(blob).hexdigest(), "model_version": version, "cells": len(hazard), "sizes": len(size),
-            "roots": sorted({key.split("|", 1)[0] for key in hazard}), "samples": samples,
-            "fitted_at": table.get("meta", {}).get("fitted_at")}
+    receipt = {"sha256": hashlib.sha256(blob).hexdigest(), "model_version": version, "cells": len(hazard), "sizes": len(size),
+               "roots": sorted({key.split("|", 1)[0] for key in hazard}), "samples": samples,
+               "fitted_at": table.get("meta", {}).get("fitted_at")}
+    if conditional is not None:
+        receipt.update(adverse="conditional", cells_adverse=len(table["hazard_adverse"]),
+                       cells_favourable=len(table["hazard_favourable"]))
+    return receipt
 
 
 def sealed(api: Any, box: str, kind: str) -> None:

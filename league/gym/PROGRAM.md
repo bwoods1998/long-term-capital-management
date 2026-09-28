@@ -137,7 +137,9 @@ An order meets the quotes of the minute AFTER your decision, and every chance in
   that leg's single-leg rate. A passive fill takes at most the contracts Train's fills at that
   distance typically found (one structure where unknown), and in one minute all your orders on a
   contract share that liquidity: the rest keeps working. It never fills on a minute after which the
-  mid holds still or moves your way (a passive fill is someone else's good trade). **Not modelled,
+  mid moves your way (a passive fill is someone else's good trade); a fill model fitted per
+  next-minute condition instead gives such minutes, and the ones after which the mid holds or moves
+  against you, each the rate Train's prints showed there (`fills.py`). **Not modelled,
   so natural only:** a structure with any leg 8 or more days to expiry (the trade sample stops at 7
   days; back months fill at or through the natural until they are sampled), a root the sample never
   covered, and a leg further from the money than the sample reached often enough (far wings: a

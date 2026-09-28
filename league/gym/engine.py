@@ -461,11 +461,21 @@ class Account:
                 shape = [(int(snap.dte[leg.idx]), leg.strike / snap.spot - 1.0 if np.isfinite(snap.spot) else math.nan)
                          for leg in legs]
                 model = self.cfg.fill_model
-                p = model.p(order.root, q, shape, snap.minute)
-                if stress > 1.0:
-                    p *= F.STRESS_HAZARD  # a stress run also asks: does it survive patient orders filling half as often?
-                if p <= 0.0 or not self._adverse(day, mi, order.root, legs, mid, opening):
-                    return
+                if model.conditional:
+                    # A conditional table: the hazard Train measured on minutes like this one, adverse-or-flat
+                    # or favourable (`fills.py`), so the average rate is the measured one. No next quote: none.
+                    move = self._next_move(day, mi, order.root, legs, mid, opening)
+                    p = 0.0 if move is None else model.p(order.root, q, shape, snap.minute, adverse=move)
+                    if stress > 1.0:
+                        p *= F.STRESS_HAZARD
+                    if p <= 0.0:
+                        return
+                else:
+                    p = model.p(order.root, q, shape, snap.minute)
+                    if stress > 1.0:
+                        p *= F.STRESS_HAZARD  # a stress run also asks: does it survive patient orders filling half as often?
+                    if p <= 0.0 or not self._adverse(day, mi, order.root, legs, mid, opening):
+                        return
                 if F.draw([leg.key for leg in legs], day.ordinal, snap.minute, "buy" if opening else "sell") >= p:
                     return
                 # The passive liquidity of this minute: what Train's fills at this level found beyond the
@@ -511,22 +521,31 @@ class Account:
             self.counts["partial_fills"] += 1
 
     @staticmethod
-    def _adverse(day: DayData, mi: int, root: str, legs: Sequence[L.LegFill], mid: float, buying: bool) -> bool:
-        """Adverse selection: a passive order is filled by someone who wants the other side, so it never
-        fills on a minute after which the structure moves in its favour (a buyer is not filled just
-        before the mid rises; a seller not just before it falls). The engine reads the NEXT minute's
-        quotes to decide this; the program never sees them."""
+    def _next_move(day: DayData, mi: int, root: str, legs: Sequence[L.LegFill], mid: float, buying: bool) -> bool | None:
+        """Where the structure's mid goes over the NEXT minute, for a resting order: True when it moves
+        against the order or stays flat (a buyer's mid falls or holds; a seller's rises or holds), False
+        when it moves in the order's favour, None when the next minute has no quote on a leg (or there
+        is no next minute). The engine reads the next minute's quotes; the program never sees them.
+        `calibrate.py --adverse conditional` classifies each contract-minute by this same test."""
         chain = day.chains.get(root)
         nxt = mi + 1
         if chain is None or nxt >= day.minutes:
-            return False
+            return None
         value = 0.0
         for leg in legs:
             bid, ask = float(chain.bid[nxt, leg.idx]), float(chain.ask[nxt, leg.idx])
             if not (math.isfinite(bid) and math.isfinite(ask)):
-                return False
+                return None
             value += leg.side * leg.ratio * 0.5 * (bid + ask)
         return value <= mid + 1e-9 if buying else value >= mid - 1e-9
+
+    @classmethod
+    def _adverse(cls, day: DayData, mi: int, root: str, legs: Sequence[L.LegFill], mid: float, buying: bool) -> bool:
+        """Adverse selection under an unconditional table: a passive order is filled by someone who wants
+        the other side, so it never fills on a minute after which the structure moves in its favour (a
+        buyer is not filled just before the mid rises; a seller not just before it falls), nor on one
+        with no next quote (`_next_move`). A conditional table replaces this rule (`fills.py`)."""
+        return cls._next_move(day, mi, root, legs, mid, buying) is True
 
     def _open_fill(self, day: DayData, mi: int, work: Working, price: float, qty: int, fees: float) -> None:
         order = work.order
