@@ -19,6 +19,13 @@ move bands and never select among Gym programs: a CANDIDATE whose forward record
 is negative over 20 trades goes back to the Gym; a Probe or Sized family's record is kept in its state
 (`forward`, flagged `negative`) for the live path, which alone moves those bands.
 
+THE OPERATOR'S HOLD (R3): a family whose state has `gate_hold` true (`SwarmStore.hold_gate`, or
+`python -m league.swarm hold-gate --family <id>`) is skipped: no review, audit or holdout look starts, a stage between
+two others stops, and its `gate_ready` is left as it is, so the gate looks at it once the hold is cleared. A look
+already in flight is still judged when it lands. The round's answer lists it under `held`; the researcher's status,
+the tournament's board and `python -m league.swarm status` say "held by the operator"; the public progress shows the
+site's `gate_paused` (the site's closed list of blockers has no key of its own for it).
+
 Every step is a `swarm.gate` event; band moves are `swarm.band` events (the site's news).
 Standard library only.
 """
@@ -135,7 +142,7 @@ class Gate:
     # ------------------------------------------------------------------ one round
     def run(self) -> dict[str, Any]:
         self.store.put("gate_at", self.clock())
-        out: dict[str, Any] = {"looked": [], "refused": [], "waiting": []}
+        out: dict[str, Any] = {"looked": [], "refused": [], "waiting": [], "held": []}
         if self.alarm():
             if not self.store.get("leakage_alarm"):
                 self.store.put("leakage_alarm", {"at": self.clock(), "looks": len(self.store.looks())})
@@ -158,6 +165,11 @@ class Gate:
             if state.get("look_inflight"):
                 continue  # one look per family in flight; its reservation must survive until it resolves
             if fam.get("retired_at") or fam["band"] != "gym" or not state.get("gate_ready"):
+                continue
+            if state.get("gate_hold"):
+                # THE OPERATOR'S HOLD (`SwarmStore.hold_gate`): nothing of it is looked at (no review, audit or look), and
+                # its gate_ready stays, so it is looked at once the hold is cleared.
+                out["held"].append(fam["id"])
                 continue
             image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
             bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
@@ -246,6 +258,7 @@ class Gate:
         fam = self.store.family(fid) or {}
         state = fam.get("state") or {}
         return bool(not fam.get("retired_at") and fam.get("band") == "gym" and state.get("gate_ready")
+                    and not state.get("gate_hold")  # held by the operator between two stages: no further paid stage
                     and state.get("validation_version") == n and state.get("validation_image") == image
                     and state.get("validation_bundle") == bundle)
 
@@ -263,9 +276,9 @@ class Gate:
         # is in flight (not `gated_sha`: a look cut off by a restart must be owed, not forgotten).
         with self.store.atomic():
             current = self.store.family(fam["id"]) or {}
-            if current.get("retired_at") or self.store.looked(sha) or \
+            if current.get("retired_at") or (current.get("state") or {}).get("gate_hold") or self.store.looked(sha) or \
                     self.store.lineage_looks(fam["id"], include_inflight=True) >= evidence.LOOKS_PER_LINEAGE:
-                return None
+                return None  # (held by the operator meanwhile: no look is spent, gate_ready stays)
             if not self.store.compare_and_set_state(fam["id"], {"validation_version": n, "validation_image": image, "validation_bundle": bundle,
                                                                "look_inflight": None}, gate_ready=False, look_inflight=marker):
                 return None

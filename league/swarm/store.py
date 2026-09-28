@@ -10,8 +10,10 @@
 Nothing here is ever committed: the repository is public and programs are fitted to licensed data.
 
 TRIALS. Every Gym evaluation is a trial (`add_run` counts the result's own `trials`), per family and in
-total. A family's LINEAGE trial count is the sum over every family of its lineage (ancestors, siblings,
-descendants, alive or retired) and over any lineage its root was born on the slice of (`prior_lineage`: an
+total. An evaluation the family already made (its `eval_key` on a completed Train run: `evaluated`) is never asked of
+the Gym again: the researcher answers it from here, so it is no trial (R3, `researcher.py`'s NO DUPLICATE RUNS). A
+family's LINEAGE trial count is the sum over every family of its lineage (ancestors, siblings, descendants, alive or
+retired) and over any lineage its root was born on the slice of (`prior_lineage`: an
 architect's new idea on a dead family's slice): `lineage_trials`, the same set `lineage_trial_sharpes` reads. Since the
 owner's decision D2 (Sept 26) the deflated Sharpe's N is that set's VALIDATED versions (`lineage_validated`), not its trials.
 Holdout LOOKS are a ration, counted live across the whole connected lineage (`lineage_looks`), including
@@ -434,6 +436,20 @@ class SwarmStore:
                 if self._exec("UPDATE families SET state=? WHERE id=? AND state=?", (dumps(state), fid, row["state"])).rowcount:
                     return True
 
+    def hold_gate(self, fid: str, hold: bool = True, *, reason: str = "") -> bool:
+        """THE OPERATOR'S GATE HOLD: while a family's state has `gate_hold` true the gate (`gate.Gate.run`) looks at nothing
+        of it (no review, audit or holdout look), and leaves its `gate_ready` as it is, so it is looked at once the hold is
+        cleared (`hold=False`). One private `swarm.gate` event says who held or released it and why. False when there is no
+        such family. The operator's call on the box (a second connection is safe):
+        `python -m league.swarm hold-gate --family <id> [--clear] [--reason ...]`."""
+        with self.atomic():
+            if self.family(fid) is None:
+                return False
+            self.set_state(fid, gate_hold=bool(hold))
+            self.event("swarm.gate", fid, {"action": "gate_hold" if hold else "gate_hold_cleared", "by": "operator",
+                                           "reason": str(reason or "")[:300]})
+        return True
+
     def set_band(self, fid: str, band: str, *, reason: str) -> str | None:
         """Move a family's band; the move is a `swarm.band` event (the site's news). Returns the old band."""
         if band not in BANDS:
@@ -712,17 +728,22 @@ class SwarmStore:
 
     # ------------------------------------------------------------------ runs
     def add_run(self, fid: str, version: int | None, result: Mapping[str, Any], *, window: str, stress: float, purpose: str,
-                program_years: float = 0.0, prune: bool = True) -> dict[str, Any]:
+                program_years: float = 0.0, prune: bool = True, key: str | None = None) -> dict[str, Any]:
         """Record one Gym result (every result is a trial when its `trials` says so) and keep it in full. The same
         evaluation run again (same code, parameters, data and settings: the same `run_id`) is stored once and still
         counted: every evaluation the Gym makes is a trial. `prune=False` (a sweep's variants) leaves the pruning of full
-        Train results to the caller (`prune_runs(keep=...)` once the sweep is recorded)."""
+        Train results to the caller (`prune_runs(keep=...)` once the sweep is recorded). `key` is the researcher's
+        evaluation key (`researcher.Researcher.eval_key`), kept in the row's summary as `eval_key` so the same evaluation
+        asked again is answered from the store (`evaluated`); a row recorded before keys existed takes it on its next
+        identical evaluation."""
         run_id = str(result.get("run_id") or code_sha(dumps(result))[:24])
         trials = int(result.get("trials", 0) or 0)
         status = str(result.get("status") or "unknown")
         summary = dict(result.get("summary") or {})
         if status == "refused":
             summary = {"reason": result.get("reason")}
+        if key:
+            summary["eval_key"] = str(key)
         with self._lock:
             mine = f"{run_id}-{fid}"[:64]
             existing = self._one("SELECT * FROM runs WHERE (run_id=? OR run_id=?) AND family=?", (run_id, mine, fid))
@@ -731,6 +752,9 @@ class SwarmStore:
                     self._exec("UPDATE runs SET trials=trials+?, program_years=program_years+? WHERE run_id=?",
                                (trials, float(program_years), existing["run_id"]))
                     self.bump(fid, trials=trials, since_val_trials=trials)
+                old = loads(existing["summary"], {}) or {}
+                if key and old.get("eval_key") != str(key):
+                    self._exec("UPDATE runs SET summary=? WHERE run_id=?", (dumps({**old, "eval_key": str(key)}), existing["run_id"]))
                 return self._one("SELECT * FROM runs WHERE run_id=?", (existing["run_id"],))  # type: ignore[return-value]
             if self._one("SELECT 1 FROM runs WHERE run_id=?", (run_id,)) is not None:
                 run_id = mine
@@ -781,6 +805,20 @@ class SwarmStore:
         if row is not None:
             row["summary"] = loads(row["summary"], {})
         return row
+
+    def evaluated(self, fid: str, key: str | None) -> dict[str, Any] | None:
+        """The family's completed ("ok") Train run of this evaluation (its `eval_key`: the program, its merged params, the
+        stress, window and roots, the Gym's image and engine), the latest, or None. A researcher asking for it again is
+        answered from here: no Gym job, no trial, no version (`researcher.py`, NO DUPLICATE RUNS)."""
+        if not key:
+            return None
+        key = str(key)
+        for row in self._all("SELECT * FROM runs WHERE family=? AND window='train' AND status='ok' AND version IS NOT NULL "
+                             "AND summary LIKE ? ORDER BY at DESC, rowid DESC", (fid, f'%"eval_key":"{key}"%')):
+            row["summary"] = loads(row["summary"], {})
+            if (row["summary"] or {}).get("eval_key") == key:
+                return row
+        return None
 
     def run_result(self, run_id: str) -> dict[str, Any] | None:
         row = self._one("SELECT path FROM runs WHERE run_id=?", (run_id,))

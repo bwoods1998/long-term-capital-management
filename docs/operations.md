@@ -501,6 +501,33 @@ tournament retires a dead family that never calls retire by the same rule, down 
 architect refills below `population.start`. The graveyard lesson and the public cause say the idle rule retired it
 (a time limit, not a refutation); the family's own last notebook lines carry its verdict.
 
+No duplicate runs (R3; the harness audit of Sept 28 found 44% of cycles wasted and 45% of trials identical
+re-runs). A `gym_run` or `gym_sweep` variant a family already ran to completion (the same code, merged params,
+stress, window, roots, Gym image and engine, Train split and capital: its `eval_key`, kept in the run row's summary)
+is answered from the store, marked `already_run`: no Gym job, no trial, no version, no revision, and the cycle's
+REVISE turn goes on. A failed run runs again. `researcher.reuse_results` (default true, `swarm.json`) false turns
+it off. A REVISE turn may also call `gym_run` with `hold=true` (no code, no params): no run, no trial, a notebook
+line, and the cycle ends. A row recorded before R3 has no key: the next identical run is one more trial (the same
+Gym run_id, the same row) and writes the key, and from then on it answers. Because stored results and holds add no
+evaluations, the idle rule has a dormancy clause: a family whose last `researcher.dormant_cycles` (default 40; 0 or
+null turns it off) cycles made no new Gym evaluation, only stored results and holds, is dead (the same floor, gate
+exemption and graveyard wording), unless its best awaits validation (not yet validated and not lost at 1.5x). A
+cycle with a new evaluation, and a counted validation, restart the count; a cycle whose new run the Gym could not
+make (a Gym error, a sweep refused for room) leaves it. A holding cycle is one model call, so 40 of them can pass in
+well under an hour of a family's cycles; the count is the family's state `dormant_cycles`, and each dormant
+cycle's `swarm.cycle` event carries it.
+
+The operator's gate hold (R3): `python -m league.swarm hold-gate --root /workspace/state --family <id> --reason
+"..."` (or `SwarmStore.hold_gate(fid)` from a shell on the box; a second connection is safe beside the running
+swarm) sets `gate_hold` in the family's state. The gate then starts nothing for it (no review, audit or holdout
+look; a hold set while a review is out stops the stage after it) and leaves `gate_ready` as it is; a look already
+in flight is still judged when it lands. `--clear` releases it, and the next gate round looks at it. The gate
+round's answer lists it under `held`; `python -m league.swarm status` (`gate_held`), the tournament's board and the
+researcher's status say "held by the operator"; the public checklist shows `gate_paused`, since the site's list of
+blockers is closed. Each hold and release is a private `swarm.gate` event with its reason. A held family still
+awaits the gate, so the idle rule never finds it dead. The hold does not touch tuition of a version whose review
+and audit already passed (`bands.read`).
+
 Deploy impact (R3): the rule applies at once to every family that is already past it. On Sept 27 (start 72, floor
 44, 74 alive) about 29 families were past it, nearly all long-refuted placeholders, so the first tournament round and
 the dead researchers retiring themselves take the population to about 45 within minutes, and the architect's refill

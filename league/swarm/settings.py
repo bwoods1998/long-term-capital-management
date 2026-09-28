@@ -83,6 +83,13 @@ DEFAULTS: dict[str, Any] = {
         # validated version awaits the gate. It may retire at `population.start` (only `population.floor` holds it),
         # and the tournament retires it if it does not. 0 or null turns the rule off (`researcher.idle_dead`).
         "retire_idle_evaluations": 150,
+        # No duplicate runs (R3, the harness audit of Sept 28: 45% of trials were identical re-runs): a run or sweep variant
+        # the family already evaluated (program, merged params, stress, window, roots, Gym image and engine) is answered
+        # from the store, no job and no trial; false runs it again. A REVISE turn may hold (gym_run hold=true) instead.
+        "reuse_results": True,
+        # The idle rule's dormancy clause: a family whose last this-many cycles made no new Gym evaluation (only stored
+        # results and holds) is dead, unless its best awaits validation; 0 or null turns the clause off.
+        "dormant_cycles": 40,
     },
     "gym": {
         "enabled": False,

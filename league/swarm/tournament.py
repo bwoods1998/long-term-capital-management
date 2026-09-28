@@ -19,11 +19,12 @@
    evidence below the line (the deflated Sharpe probability under `retire_dsr_below` after
    `retire_min_validations` validations), or, as the fallback for a dead family that never calls retire, THE IDLE
    RULE (`researcher.idle_dead`, R3: `researcher.retire_idle_evaluations` Gym evaluations since its birth or last
-   validation without an eligible Train version, or three times as many with its best Train score below zero; never
-   while a validated version awaits the gate); never below the population floor. Each retiree's lesson goes to the
-   graveyard (its mechanism, what it tried, its best numbers, its last notebook lines); an idle-rule lesson says it
-   was a time limit, not a refutation. Each counted verdict records the family's trials (`validated_trials`), from
-   which the idle rule counts.
+   validation without an eligible Train version, or three times as many with its best Train score below zero, or
+   `researcher.dormant_cycles` cycles in a row with only stored results and holds while its best does not await
+   validation; never while a validated version awaits the gate); never below the population floor. Each retiree's
+   lesson goes to the graveyard (its mechanism, what it tried, its best numbers, its last notebook lines); an idle-rule
+   lesson says it was a time limit, not a refutation. Each counted verdict records the family's trials
+   (`validated_trials`), from which the idle rule counts, and restarts its dormant cycles.
 6. THE LEADERBOARD: one `swarm.tournament` event (the House mirrors it to its ledger) with every family's
    rank, share, validation summary, trials and band, and the totals.
 
@@ -48,8 +49,8 @@ NOT_ROTATED = ("XSP",)
 #: The public sentence of an idle-rule retirement (the store publishes only a reason's sentences without a figure), and
 #: the graveyard's reading of it: the architect and researchers read the graveyard as refutations, and the idle rule is
 #: a clock, so it must not bias births away from a mechanism that was only young.
-IDLE_CAUSE = ("Retired by the idle rule, a limit on how long a family may research without an eligible Train version or "
-              "a positive Train score; it is a time limit, not a finding that the mechanism has no edge")
+IDLE_CAUSE = ("Retired by the idle rule, a limit on how long a family may research without an eligible Train version, "
+              "a positive Train score or a new Gym evaluation; it is a time limit, not a finding that the mechanism has no edge")
 
 
 class Tournament:
@@ -182,8 +183,9 @@ class Tournament:
         if counted:  # a re-judged recorded result is no new validation for the bandit (nor for the idle rule)
             self.store.bump(fid, validations=1)
             # The idle rule counts the Gym evaluations since the last validation from here (`researcher.idle_evaluations`);
-            # `fam` was read after this validation's own trials were recorded.
-            self.store.set_state(fid, validated_trials=int(fam.get("trials") or 0))
+            # `fam` was read after this validation's own trials were recorded. Its dormancy clause starts again too: a
+            # verdict is news the researcher may act on (`researcher.dormant_count`).
+            self.store.set_state(fid, validated_trials=int(fam.get("trials") or 0), dormant_cycles=0)
         state = fam.get("state") or {}
         typical = dict(state.get("typical_by_version") or {})
         if state.get("validation_version") is not None and state.get("typical_max_loss_usd") is not None:
@@ -334,6 +336,8 @@ class Tournament:
                           "lineage_trials": self.store.lineage_trials(fam["id"]), "best_train": fam.get("best_train"),
                           "validation": state.get("validation_numbers"), "gate_ready": bool(state.get("gate_ready")),
                           "closeable": fam["structure"] in CLOSEABLE})
+            if state.get("gate_hold"):
+                board[-1]["gate"] = "held by the operator"  # `SwarmStore.hold_gate`: the gate looks at nothing of it
         totals = self.store.totals()
         since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(began - 3600))
         cycles = self.store._all("SELECT COUNT(*) AS n, SUM(CASE WHEN payload LIKE '%\"error\"%' THEN 1 ELSE 0 END) AS errors FROM events"

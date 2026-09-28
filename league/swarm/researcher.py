@@ -34,14 +34,33 @@ one program). Each variant is recorded as it lands and only its compact row is k
 (family, code, variants, roots, the Gym's image and engine), so the same sweep asked again (a queued sweep's quiet retry
 after the Gym gave up) reads back the variants that landed late instead of running them twice.
 
+NO DUPLICATE RUNS (R3, the harness audit of Sept 28: 44% of cycles were waste and 45% of trials identical re-runs, each
+one still a trial, and every REVISE turn had to call a run). A run the family already evaluated (the same program, its
+MERGED params, the stress, window and roots, the Gym's image and engine, and the Train split and capital: `eval_key`,
+kept on its run's row) is answered from the store (`SwarmStore.evaluated`): the same compact view, marked `already_run:
+"the stored result"`, with no Gym job, no trial, no version and no revision. So is every sweep variant already
+evaluated. A stored result is no completed run: the cycle's REVISE turn goes on (the researcher changes something or
+holds) and a real run may still follow in the same cycle. Only a completed ("ok") run is stored; a failed one runs again.
+`researcher.reuse_results` false turns this off. HOLD: a REVISE turn may call `gym_run` with `hold` true (no code, no
+params) when the researcher has nothing new: no job, no trial, a line in its notebook, and the cycle ends.
+
+DORMANCY (the audit's critique: stored results and holds would let a dead family hide forever, since the idle rule
+counts Gym evaluations and the tournament's clocks count revisions and trials). A cycle that ends with only stored
+results or holds and no new evaluation adds one to the family's `dormant_cycles` (its state); a cycle with a new
+evaluation (a trial) sets it to zero, and so does a counted validation; any other cycle (a Gym error, a refusal) leaves
+it. A family whose last `researcher.dormant_cycles` (40) cycles were dormant is dead for the idle rule (`idle_dead`: the
+same floor, gate exemption and graveyard wording), unless its best awaits validation (`awaiting_validation`: holding
+while the tournament validates it is honest).
+
 RETIRE (Sept 26: an unguarded `retire` on the REVISE turn took the population from 49 to 16 in 24 minutes). A REVISE
 turn offers `gym_run` and `gym_sweep` alone: a REVISE always revises. A READ turn offers `retire` only while more
 families live than `population.start` and the family has had at least two validations, or, by THE IDLE RULE (R3, Sept
 27: with the population held at its start, dead families never qualified and looped on placeholder runs), while more
 live than `population.floor` and the family is dead (`idle_dead`: `researcher.retire_idle_evaluations` Gym evaluations
 since its birth or last validation without an eligible Train version, or three times as many with its best Train score
-below zero; never while a validated version awaits the gate) (`can_retire`). A retire that is refused anyway is a plain
-refusal, never a cycle error (an error backs the family off for up to 30 minutes). The tournament retires a dead family
+below zero, or `researcher.dormant_cycles` dormant cycles in a row; never while a validated version awaits the gate)
+(`can_retire`). A retire that is refused anyway is a plain refusal, never a cycle error (an error backs the family off
+for up to 30 minutes). The tournament retires a dead family
 that never calls retire by the same rule; the architect refills below the start.
 
 WHAT IT SEES. Train in full; of Validation only pass or fail and how many of the line's checks passed (the owner's
@@ -130,11 +149,17 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "gym_run", "description": "Run a version of your program on the Train window in the Gym and get its compact "
                                        "diagnostic. `code` is the whole program file (omit it to rerun your latest version, e.g. "
                                        "with other params). One run (or one gym_sweep) per cycle: a second call runs at the start "
-                                       "of your next cycle.",
+                                       "of your next cycle. A program and params your family already ran (same stress, roots and "
+                                       "Gym) are not run again: you get the stored result (already_run), no trial; change "
+                                       "something. With nothing new to run, call it with hold=true and no code or params: no run, "
+                                       "no trial, your note goes to your notebook. Many cycles in a row of holds and stored "
+                                       "results count against your family under the idle rule.",
      "parameters": {"type": "object", "properties": {
          "code": {"type": "string", "description": "the complete program: NEEDS, PARAMS, decide(ctx)"},
          "params": {"type": "object", "description": "PARAMS overrides for this run (keys must exist in PARAMS)"},
          "stress": {"type": "number", "description": "half-spread multiplier, 1.0 (default) or 1.5 (the gate's stress)"},
+         "hold": {"type": "boolean", "description": "true, with no code and no params: skip this cycle honestly because you "
+                                                    "have nothing new to run (say why in `note`)"},
          "why": {"type": "string", "description": "one sentence: what this version changes and why it should help"},
          "note": {"type": "string", "description": "optional: what you learned from your last run, appended to your notebook. "
                                                    "PUBLIC: it may appear on the public site, so describe the mechanism and "
@@ -166,7 +191,8 @@ TOOLS: list[dict[str, Any]] = [
                                      "no further runs or tools start. Offered only while the population is above its start "
                                      "and your family has had at least two validations, or once your family has spent many "
                                      "Gym evaluations since its birth or last validation without an eligible Train version "
-                                     "(or far more with a best Train score below zero).",
+                                     "(or far more with a best Train score below zero), or many cycles in a row with only "
+                                     "holds and stored results.",
      "parameters": {"type": "object", "properties": {"reason": {"type": "string", "description": "Why the entire mechanism "
                     "is abandoned; retained in the private notebook and graveyard."}}, "required": ["reason"]}},
 ]
@@ -181,9 +207,12 @@ ROLE = """You are a researcher in the LTCM options swarm. You own one family and
 Work in short cycles. REVISE: call gym_run with your revised program (the whole file in `code`, or only `params` to
 change parameters) and put what you learned from the last run in its `note`, or call gym_sweep to run a small grid of
 PARAMS variants of one program at once (one run OR one sweep a cycle). A REVISE always revises: never repeat an
-empty or unchanged program. READ: when the result comes back, read it; submit the run if it is your best; queue your
-next gym_run or gym_sweep (it opens your next cycle); use read_run, graveyard or the notebook only when the diagnostic
-leaves you unsure. Keep every program inside the contract below; the Gym refuses anything else. Reply with tool calls;
+empty or unchanged program. A program and params your family already ran are never run again: you get the stored
+result, marked already_run, and no trial. When you have nothing new to try, call gym_run with hold=true (no code, no
+params) and say why in its note: an honest skip, better than a placeholder run. A family whose cycles only hold or
+repeat for many cycles in a row is dead under the idle rule. READ: when the result comes back, read it; submit the run
+if it is your best; queue your next gym_run or gym_sweep (it opens your next cycle); use read_run, graveyard or the
+notebook only when the diagnostic leaves you unsure. Keep every program inside the contract below; the Gym refuses anything else. Reply with tool calls;
 keep prose short.
 SWEEPS found every Train edge so far. Sweep a small grid around your current program (the program as written, {}, and a
 step either side of the parameters that matter), include a placebo row (your signal switched off or inverted: it should
@@ -196,11 +225,11 @@ the half-spread (the Gym re-runs each new best at 1.5x and at the mid; the resul
 mechanism that earns in every year, not a filter that shines in one.
 Your family trades one to five of the Gym's roots; to change them, name the new roots in your program's NEEDS.
 The retire tool appears only while the population is above its start and your family has had at least two
-validations, or once your family has spent many Gym evaluations (an unchanged program re-run counts too) since its birth
-or last validation without an eligible Train version (or far more with a best Train score below zero). Call it only
-when you abandon the entire mechanism, not one rejected version; a dead mechanism is better retired than kept on
-placeholder runs, since its slot goes to a new idea. Retirement is final for the family and preserves its best program
-and all evidence.
+validations, or once your family has spent many Gym evaluations since its birth or last validation without an eligible
+Train version (or far more with a best Train score below zero), or many cycles in a row with only holds and stored
+results. Call it only when you abandon the entire mechanism, not one rejected version; a dead mechanism is better
+retired than kept on holds, since its slot goes to a new idea. Retirement is final for the family and preserves its best
+program and all evidence.
 Your notes (the notebook and gym_run's note) are PUBLIC: they may appear on the public site. Write the mechanism and your
 reasoning there, never a threshold, level, delta, ratio, date or any other fitted value, in digits or in words; the
 numbers belong in your program and in the diagnostics, which stay private.
@@ -466,6 +495,12 @@ def completed_run(result: Mapping[str, Any]) -> bool:
     return result.get("status") == "ok" and bool(result.get("run_id"))
 
 
+def new_run(result: Any) -> bool:
+    """A completed run the Gym made now: a stored result (`already_run`, NO DUPLICATE RUNS) is none, so the cycle's REVISE
+    turn goes on after it."""
+    return isinstance(result, Mapping) and completed_run(result) and not result.get("already_run")
+
+
 #: The idle rule's default (`researcher.retire_idle_evaluations`): Gym evaluations (trials, `add_run`) since a family's birth
 #: or last validation without an eligible Train version. Calibrated on the run's history (Sept 27): every family that
 #: ever made an eligible version made its first within about a hundred Train runs of its birth, and a family makes
@@ -478,10 +513,19 @@ RETIRE_IDLE_EVALUATIONS = 150
 NEGATIVE_FACTOR = 3
 
 
-def idle_limit(settings: Mapping[str, Any]) -> int:
-    """`researcher.retire_idle_evaluations`; 0 (off) when it is 0, null, negative, a boolean or not a number (a misread
+#: The dormancy clause's default (`researcher.dormant_cycles`): cycles in a row with only stored results or holds and no new
+#: Gym evaluation (DORMANCY in the module docstring). A holding cycle is one model call and no Gym run, so forty of them
+#: pass in well under an hour of a family's cycles.
+DORMANT_CYCLES = 40
+
+#: What a stored result says (NO DUPLICATE RUNS): its view's `already_run`, and a sweep row's.
+ALREADY_RUN = "the stored result"
+
+
+def _count_setting(settings: Mapping[str, Any], name: str, default: int) -> int:
+    """`researcher.<name>` as a count; 0 (off) when it is 0, null, negative, a boolean or not a finite number (a misread
     setting never retires anyone)."""
-    raw = (settings.get("researcher") or {}).get("retire_idle_evaluations", RETIRE_IDLE_EVALUATIONS)
+    raw = (settings.get("researcher") or {}).get(name, default)
     if raw is None or isinstance(raw, bool):
         return 0
     try:
@@ -490,12 +534,49 @@ def idle_limit(settings: Mapping[str, Any]) -> int:
         return 0
 
 
+def idle_limit(settings: Mapping[str, Any]) -> int:
+    """`researcher.retire_idle_evaluations`; 0 (off) when it is 0, null, negative, a boolean or not a number (a misread
+    setting never retires anyone)."""
+    return _count_setting(settings, "retire_idle_evaluations", RETIRE_IDLE_EVALUATIONS)
+
+
+def dormant_limit(settings: Mapping[str, Any]) -> int:
+    """`researcher.dormant_cycles`; 0 (off) when it is 0, null, negative, a boolean or not a number."""
+    return _count_setting(settings, "dormant_cycles", DORMANT_CYCLES)
+
+
+def dormant_count(fam: Mapping[str, Any]) -> int:
+    """The family's dormant cycles in a row (its state's `dormant_cycles`; 0 when absent or not a count)."""
+    raw = (fam.get("state") or {}).get("dormant_cycles")
+    return max(0, int(raw)) if isinstance(raw, int) and not isinstance(raw, bool) else 0
+
+
+def awaiting_validation(fam: Mapping[str, Any]) -> bool:
+    """The family's best (submitted, else by Train score: the version the tournament validates next) has not been
+    validated and has not lost at 1.5x the half-spread: the tournament validates it once its 1.5x robustness run lands with
+    a profit. A researcher with nothing new may hold meanwhile without the dormancy clause counting it dead."""
+    state = fam.get("state") or {}
+    n = fam.get("best_version") or state.get("best_train_version")
+    if not n or isinstance(n, bool):
+        return False
+    if fam.get("validated_version") is not None and int(fam["validated_version"]) == int(n):
+        return False
+    return robust_at_stress(state, n) is not False
+
+
+def holding(args: Any) -> bool:
+    """A `gym_run` call that holds (`hold` true: NO DUPLICATE RUNS' HOLD)."""
+    value = args.get("hold") if isinstance(args, Mapping) else None
+    return value is True or (isinstance(value, str) and value.strip().lower() == "true")
+
+
 def idle_evaluations(fam: Mapping[str, Any]) -> int:
     """Gym evaluations since the family's birth or last validation: its trials less those it had at its last counted
     validation (`validated_trials`, which the tournament's verdict records from R3 on), and never more than
     `since_val_trials` (evaluations since its validation last improved, or since its birth when it never validated: the
-    only count a family validated before R3 has). Every evaluation counts, an unchanged program re-run included (the
-    store keeps one version for identical code and parameters, so revisions miss a family that loops a placeholder)."""
+    only count a family validated before R3 has). Every evaluation counts (the store keeps one version for identical code
+    and parameters, so revisions miss a family that loops a placeholder); an unchanged re-run is no evaluation since NO
+    DUPLICATE RUNS answers it from the store, and the dormancy clause (`idle_dead`) counts those cycles instead."""
     since = int(fam.get("since_val_trials") or 0)
     mark = (fam.get("state") or {}).get("validated_trials")
     if isinstance(mark, int) and not isinstance(mark, bool):
@@ -511,22 +592,28 @@ def idle_dead(fam: Mapping[str, Any], settings: Mapping[str, Any]) -> str | None
     or a holdout look is out (`look_inflight`). Returns a clause saying which ("made no eligible Train version in 157 Gym
     evaluations since its birth"), or None. A dead family may retire at `population.start` (only `population.floor`
     holds it); the tournament retires one that does not. Train figures only: nothing Validation or the holdout measured
-    (D2). It is a time limit, not a finding that the mechanism has no edge."""
-    limit = idle_limit(settings)
-    if limit <= 0 or fam.get("band") != "gym" or fam.get("retired_at"):
+    (D2). It is a time limit, not a finding that the mechanism has no edge.
+
+    DORMANCY (R3, NO DUPLICATE RUNS): a family is dead too, whatever its best, when its last `researcher.dormant_cycles`
+    cycles in a row made no new Gym evaluation, only stored results and holds (`dormant_count`), unless its best awaits
+    validation (`awaiting_validation`). The same exemptions, floor and wording as above."""
+    limit, dormant = idle_limit(settings), dormant_limit(settings)
+    if (limit <= 0 and dormant <= 0) or fam.get("band") != "gym" or fam.get("retired_at"):
         return None
     state = fam.get("state") or {}
     if state.get("gate_ready") or state.get("look_inflight"):
         return None
-    idle = idle_evaluations(fam)
-    since = "its last validation" if int(fam.get("validations") or 0) else "its birth"
-    best = fam.get("best_train")
-    if best is None:
-        if idle >= limit:
+    if limit > 0:
+        idle = idle_evaluations(fam)
+        since = "its last validation" if int(fam.get("validations") or 0) else "its birth"
+        best = fam.get("best_train")
+        if best is None and idle >= limit:
             return f"made no eligible Train version in {idle} Gym evaluations since {since}"
-        return None
-    if float(best) < 0 and idle >= NEGATIVE_FACTOR * limit:
-        return f"kept its best Train score below zero over {idle} Gym evaluations since {since}"
+        if best is not None and float(best) < 0 and idle >= NEGATIVE_FACTOR * limit:
+            return f"kept its best Train score below zero over {idle} Gym evaluations since {since}"
+    cycles = dormant_count(fam)
+    if dormant > 0 and cycles >= dormant and not awaiting_validation(fam):
+        return f"made no new Gym evaluation in its last {cycles} cycles (only stored results and holds)"
     return None
 
 
@@ -600,6 +687,12 @@ class Researcher:
                      "trades or weaken the evidence requirements.")
         if gate:
             parts.append(f"The gate's last answer: {gate}.")
+        if state.get("gate_hold") and state.get("gate_ready"):
+            parts.append("Your validated version is held by the operator before the gate: it is looked at once the hold is "
+                         "cleared.")
+        dormant = dormant_count(fam)
+        if dormant:
+            parts.append(f"Cycles in a row without a new Gym evaluation (only stored results and holds): {dormant}.")
         if notes:
             parts.append("Your notebook (latest):\n" + "\n".join(f"- {diagnostics.scrub(n['text'])[:300]}" for n in notes))
         may_retire = self.can_retire(fam)
@@ -608,19 +701,20 @@ class Researcher:
             parts.append(f"Your family {dead}. If its mechanism is dead, call retire with your reason when the tool is offered "
                          "rather than re-running a placeholder: its slot goes to a new idea.")
         retire_hint = " If you abandon the entire mechanism, call retire with your reason." if may_retire else ""
+        hold_hint = " With nothing new to run, call gym_run with hold=true and say why in its note."
         fit = min(self.sweep_room(), self.max_variants)
         if self.sweeps and fit >= 2:
             parts.append("Now: if a run just came back, read it (submit it if it is your best) and queue your next gym_run or "
                          "gym_sweep; otherwise revise and call gym_run or gym_sweep, with what you learned in its note. A sweep of "
-                         f"up to {fit} variants fits in the Gym now." + retire_hint)
+                         f"up to {fit} variants fits in the Gym now." + hold_hint + retire_hint)
         elif self.sweeps:
             parts.append("Now: if a run just came back, read it (submit it if it is your best) and queue your next gym_run or "
                          "gym_sweep; otherwise revise and call gym_run, with what you learned in its note. The Gym is full of other "
-                         "families' sweeps now: a gym_sweep this cycle would be refused." + retire_hint)
+                         "families' sweeps now: a gym_sweep this cycle would be refused." + hold_hint + retire_hint)
         else:
             parts.append("Now: if a run just came back, read it (submit it if it is your best) and queue your next gym_run; "
                          "otherwise revise and call gym_run, with what you learned in its note. gym_sweep is switched off now."
-                         + retire_hint)
+                         + hold_hint + retire_hint)
         return "\n".join(parts)
 
     # ------------------------------------------------------------------ the tools a turn offers
@@ -628,6 +722,45 @@ class Researcher:
     def sweeps(self) -> bool:
         """`gym_sweep` is offered (and accepted) only while `researcher.sweep_enabled` is true (the default)."""
         return bool(self.cfg.get("sweep_enabled", True))
+
+    @property
+    def reuse(self) -> bool:
+        """A run the family already evaluated is answered from the store (NO DUPLICATE RUNS) unless
+        `researcher.reuse_results` is false."""
+        return self.cfg.get("reuse_results", True) is not False
+
+    def _gym_identity(self) -> tuple[Any, Any]:
+        """(the Gym image, its engine bundle) the pool runs now; (None, None) for a pool that does not say."""
+        image = bundle = None
+        try:
+            image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
+            bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
+        except Exception:  # noqa: BLE001 - no image or engine known: the content alone
+            pass
+        return image, bundle
+
+    def eval_key(self, code: str, params: Mapping[str, Any] | None, *, stress: float, window: str, roots: Any,
+                 image: Any = None, bundle: Any = None, current: bool = True) -> str:
+        """One evaluation's identity (NO DUPLICATE RUNS): the code, its MERGED params (`merged_key`: `{}` and a default
+        spelled out are one program), the stress, window and roots, the Gym's image and engine (the pool's now when
+        `current`, else `image` and `bundle`: the ones a result was stamped with) and the Train split and capital (the
+        run's settings the Gym hashes too)."""
+        if current:
+            image, bundle = self._gym_identity()
+        gym = self.settings.get("gym", {})
+        body = {"code": hashlib.sha256(str(code).encode("utf-8")).hexdigest(),
+                "params": merged_key(params_of(str(code)) or {}, dict(params or {})), "stress": float(stress),
+                "window": str(window), "roots": [str(r).upper() for r in roots or ()], "image": image, "bundle": bundle,
+                "split": gym.get("train_split", gym.get("split", 8)) if window == "train" else gym.get("validation_split", 1),
+                "capital": gym.get("capital", 10000.0)}
+        return hashlib.sha256(json.dumps(body, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:32]
+
+    def _result_key(self, job: GymJob, result: Mapping[str, Any]) -> str:
+        """The key a landed result is recorded under: its job's evaluation on the image and engine the pool stamped it
+        with (`gym_image`, `gym_bundle`), else the pool's now."""
+        image, bundle = self._gym_identity()
+        return self.eval_key(job.code, job.params, stress=job.stress, window=job.window, roots=job.roots, current=False,
+                             image=result.get("gym_image", image), bundle=result.get("gym_bundle", bundle))
 
     @property
     def max_variants(self) -> int:
@@ -740,6 +873,8 @@ class Researcher:
     def _gym_run(self, fam: Mapping[str, Any], args: Mapping[str, Any], out: dict[str, Any], *, author: str) -> dict[str, Any]:
         if self._terminal(fam["id"], out):
             return {"status": "retired", "reason": "the family is retired; no run started"}
+        if holding(args):
+            return self._hold(fam, args, out)
         code = args.get("code")
         if not code:
             latest = self.store.latest_version(fam["id"])
@@ -763,6 +898,9 @@ class Researcher:
         refused, roots, change = self._admit(fam, code, out)
         if refused is not None:
             return refused
+        # NO DUPLICATE RUNS: the evaluation this run would be, on the roots it would run on.
+        key = self.eval_key(code, params, stress=stress, window="train", roots=roots if change else fam["roots"])
+        stored = None
         with self.store.atomic():
             if self._terminal(fam["id"], out):
                 return {"status": "retired", "reason": "the family is retired; no run started"}
@@ -771,7 +909,11 @@ class Researcher:
                 self.store.note(fam["id"], f"Roots changed from {', '.join(fam['roots'])} to {', '.join(roots)}.")
                 out["roots"] = roots
                 fam = {**fam, "roots": roots}
-            version = self.store.add_version(fam["id"], code, params, author=author, note=str(args.get("why") or "")[:300])
+            stored = self.store.evaluated(fam["id"], key) if self.reuse else None
+            if stored is None:
+                version = self.store.add_version(fam["id"], code, params, author=author, note=str(args.get("why") or "")[:300])
+        if stored is not None:
+            return self._stored_run(fam, stored, out, code=code, stress=stress)
         job = GymJob(family=fam["id"], version=version["n"], code=code, params=params, window="train", roots=tuple(fam["roots"]),
                      stress=stress, purpose="train", priority=float(fam.get("weight") or 0.0))
         began = self.clock()
@@ -779,7 +921,7 @@ class Researcher:
             def late(result: Mapping[str, Any], fid: str = fam["id"], n: int = version["n"], stress: float = stress) -> None:
                 days = float((result.get("summary") or {}).get("days") or 0)
                 self.store.add_run(fid, n, result, window="train", stress=stress, purpose="train",
-                                   program_years=days / 252.0 * max(1, len(fam["roots"])))
+                                   program_years=days / 252.0 * max(1, len(fam["roots"])), key=self._result_key(job, result))
 
             if self._terminal(fam["id"], out):
                 return {"status": "retired", "reason": "the family is retired; no run started"}
@@ -795,38 +937,97 @@ class Researcher:
         if robust is not None and isinstance(result.get("summary"), Mapping):  # the run's row keeps its score (`submit` reads it)
             recorded = {**result, "summary": {**result["summary"], "train_score": robust["score"], "train_eligible": robust["eligible"]}}
         run = self.store.add_run(fam["id"], version["n"], recorded, window="train", stress=stress, purpose="train",
-                                 program_years=years)
+                                 program_years=years, key=self._result_key(job, result))
         out["run_id"] = run["run_id"]
         out["trials"] = out.get("trials", 0) + int(run["trials"])
         view = diagnostics.train_view(result, lineage_trials=self.store.lineage_trials(fam["id"]))
         view["version"] = version["n"]
         view["run_id"] = run["run_id"]
-        score = robust["score"] if robust is not None and robust["eligible"] else None
-        best = False
+        score = self._scored(fam, version["n"], run["run_id"], robust, view, out, code=code, params=params)
+        out["score"] = None if score is None else round(score, 3)
+        return view
+
+    def _scored(self, fam: Mapping[str, Any], n: int, run_id: str, robust: Mapping[str, Any] | None, view: dict[str, Any],
+                out: dict[str, Any], *, code: str, params: Mapping[str, Any]) -> float | None:
+        """A Train run's score into the family's candidates and best (a new best queues its robustness runs) and into its
+        view; returns the score when it is eligible (None otherwise). Idempotent: a stored result read again changes
+        nothing its run already changed."""
+        score = robust["score"] if robust is not None and robust["eligible"] and robust["score"] is not None else None
+        best = failed = False
         with self.store.atomic():
             current = self.store.family(fam["id"]) or {}
             state = current.get("state") or {}
-            failed = version["n"] in (state.get("robust_failed") or [])
+            failed = n in (state.get("robust_failed") or [])
             if not current.get("retired_at") and score is not None and not failed:
-                self.store.set_state(fam["id"], train_candidates=candidates_with(state.get("train_candidates"), score, version["n"],
-                                                                                 run["run_id"]))
+                candidates = candidates_with(state.get("train_candidates"), score, n, run_id)
+                if candidates != state.get("train_candidates"):
+                    self.store.set_state(fam["id"], train_candidates=candidates)
                 if current.get("best_train") is None or score > float(current["best_train"]):
                     self.store.update_family(fam["id"], best_train=score, stall=0)
-                    self.store.set_state(fam["id"], best_train_run=run["run_id"], best_train_version=version["n"])
+                    self.store.set_state(fam["id"], best_train_run=run_id, best_train_version=n)
                     view["new_best_train_score"] = round(score, 3)
                     out["improved"] = True
                     best = True
         if robust is not None:
-            view["train_score"] = {"score": robust["score"], "eligible": robust["eligible"] and not failed,
-                                   "worst_year": robust["worst_year"], "quarters_positive": robust["quarters"], "by_year": robust["years"]}
+            view["train_score"] = {"score": robust["score"], "eligible": bool(robust["eligible"]) and not failed,
+                                   "worst_year": robust.get("worst_year"), "quarters_positive": robust.get("quarters"),
+                                   "by_year": robust.get("years")}
             if not robust["eligible"]:
-                view["train_score"]["why_not_eligible"] = robust["why"]
+                view["train_score"]["why_not_eligible"] = robust.get("why") or ("not eligible under the Train score (40 trades "
+                                                                                 "on 20 days in every Train year)")
             elif failed:
                 view["train_score"]["why_not_eligible"] = "this version lost money on Train at 1.5x the half-spread"
-        out["score"] = None if score is None else round(score, 3)
         if best:
-            self.queue_robustness(fam["id"], version["n"], code, params, needs_roots(code, fam["roots"]))
+            self.queue_robustness(fam["id"], n, code, params, needs_roots(code, fam["roots"]))
+        return score
+
+    def _stored_run(self, fam: Mapping[str, Any], run: Mapping[str, Any], out: dict[str, Any], *, code: str,
+                    stress: float) -> dict[str, Any]:
+        """NO DUPLICATE RUNS: a run the family already evaluated, answered from the store: the same compact view (from its
+        full result while it is kept, else from its row's summary), marked `already_run`, with no Gym job, no trial, no
+        version and no revision. Its score goes into the family's candidates and best as any run's (it changes nothing a
+        run already changed; a run that landed after the Gym gave up on it was never scored)."""
+        fid, n = fam["id"], int(run["version"])
+        full = self.store.run_result(run["run_id"])
+        summary = run.get("summary") or {}
+        if full is not None:
+            view = diagnostics.train_view(full, lineage_trials=self.store.lineage_trials(fid))
+            robust = evidence.train_score(full) if stress == 1.0 else None
+        else:
+            view = {"run_id": run["run_id"], "status": run.get("status"), "window": "train", "stress": run.get("stress"),
+                    "summary": {k: summary[k] for k in diagnostics.SUMMARY_KEYS if k in summary},
+                    "lineage_trials": self.store.lineage_trials(fid),
+                    "kept": "its full result is no longer kept (your newest six runs and your best are): its summary only"}
+            robust = None
+            if stress == 1.0 and summary.get("train_score") is not None:
+                robust = {"score": summary["train_score"], "eligible": bool(summary.get("train_eligible")), "why": None}
+        view["version"] = n
+        view["run_id"] = run["run_id"]
+        view["already_run"] = ALREADY_RUN
+        view["next"] = ("this program and params already ran on this window, stress, roots and Gym: no new run, no trial. "
+                        "Change the program or its params, or call gym_run with hold=true if you have nothing new")
+        out["stored"] = out.get("stored", 0) + 1
+        params = (self.store.version(fid, n) or {}).get("params") or {}
+        self._scored(fam, n, run["run_id"], robust, view, out, code=code, params=params)
         return view
+
+    def _hold(self, fam: Mapping[str, Any], args: Mapping[str, Any], out: dict[str, Any]) -> dict[str, Any]:
+        """HOLD (NO DUPLICATE RUNS): an honest skip of the cycle: no Gym job, no trial, no version; a line in the notebook.
+        The loop ends the cycle, which is dormant unless it also made a new evaluation (DORMANCY)."""
+        if args.get("code") or args.get("params"):
+            return {"status": "refused", "reason": "hold takes no code and no params: to run a program, call gym_run without hold",
+                    "hint": "hold alone (why in its note), or run something new"}
+        why = str(args.get("note") or args.get("why") or "").strip()
+        with self.store.atomic():
+            if self._terminal(fam["id"], out):
+                return {"status": "retired", "reason": "the family is retired; nothing to hold"}
+            self.store.note(fam["id"], f"Held a cycle (no run): {why or 'nothing new to run'}")
+        if why:
+            out["note"] = why
+        out["hold"] = True
+        return {"status": "held", "note": "no run this cycle: no Gym job, no trial, no revision; your reason is in your notebook. "
+                                          "Cycles in a row of holds and stored results count against your family under the "
+                                          "idle rule: run something new when you have it."}
 
     def _record_variant(self, job: GymJob, result: Mapping[str, Any], robust: Mapping[str, Any] | None = None, *,
                         sweep: str, prune: bool = True) -> dict[str, Any]:
@@ -840,7 +1041,8 @@ class Researcher:
                                    "params": dict(job.params or {}), "sweep": sweep}
         days = float((result.get("summary") or {}).get("days") or 0)
         return self.store.add_run(job.family, job.version, recorded, window="train", stress=1.0, purpose="train",
-                                  program_years=days / 252.0 * max(1, len(job.roots)), prune=prune)
+                                  program_years=days / 252.0 * max(1, len(job.roots)), prune=prune,
+                                  key=self._result_key(job, result))
 
     @staticmethod
     def _variant_row(job: GymJob, run_id: str, status: Any, summary: Mapping[str, Any], *, robust: Mapping[str, Any] | None,
@@ -858,13 +1060,8 @@ class Researcher:
 
     def _sweep_group(self, fid: str, code: str, variants: list[dict[str, Any]], roots: Any) -> str:
         """A sweep's group id is its content (the family, the code, the variants, the roots, the Gym's image and engine): the
-        same sweep asked again (a queued sweep's quiet retry after the Gym gave up) finds the variants that landed late."""
-        image = bundle = None
-        try:
-            image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
-            bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
-        except Exception:  # noqa: BLE001 - no image or engine known: the content alone
-            pass
+        same sweep asked again (a queued sweep's quiet retry after the Gym gave up) shares its group."""
+        image, bundle = self._gym_identity()
         body = json.dumps({"code": code, "variants": variants, "roots": list(roots), "image": image, "bundle": bundle},
                           sort_keys=True, default=str)
         return f"{fid}:sweep:{hashlib.sha256(body.encode('utf-8')).hexdigest()[:16]}"
@@ -892,7 +1089,17 @@ class Researcher:
         if why:
             return {"status": "refused", "reason": why[:600], "hint": "fix the variants (each key in your PARAMS, of its type) and "
                                                                      "sweep again"}
-        if not self._reserve_sweep(fid, len(variants)):  # the pool's room for sweeps (SWEEP LOAD): a plain refusal, no backoff
+        # NO DUPLICATE RUNS: a variant the family already evaluated (any earlier run or sweep, or this very sweep's variant
+        # that landed after the Gym gave up on it) is read back from the store, never run again, and needs no room.
+        run_roots = roots if change else fam["roots"]
+        stored: dict[int, dict[str, Any]] = {}
+        if self.reuse:
+            for i, params in enumerate(variants):
+                run = self.store.evaluated(fid, self.eval_key(code, params, stress=1.0, window="train", roots=run_roots))
+                if run is not None:
+                    stored[i] = run
+        fresh = len(variants) - len(stored)
+        if fresh and not self._reserve_sweep(fid, fresh):  # the pool's room for sweeps (SWEEP LOAD): a plain refusal, no backoff
             room = self.sweep_room()
             out["sweep_busy"] = True
             return {"status": "refused", "reason": "the Gym is full of other families' sweeps now"
@@ -905,14 +1112,16 @@ class Researcher:
                 self.store.note(fid, note)
                 out["note"] = note
             return self._run_sweep(fam, args, out, code=code, base=base, variants=variants, dropped=dropped, roots=roots,
-                                   change=change, author=author)
+                                   change=change, author=author, stored=stored)
         finally:
-            self._release_sweep(fid, len(variants))
+            if fresh:
+                self._release_sweep(fid, fresh)
 
     def _run_sweep(self, fam: Mapping[str, Any], args: Mapping[str, Any], out: dict[str, Any], *, code: str,
                    base: Mapping[str, Any], variants: list[dict[str, Any]], dropped: int, roots: list[str], change: bool,
-                   author: str) -> dict[str, Any]:
+                   author: str, stored: Mapping[int, Mapping[str, Any]]) -> dict[str, Any]:
         fid = fam["id"]
+        fresh = [p for i, p in enumerate(variants) if i not in stored]
         with self.store.atomic():
             if self._terminal(fid, out):
                 return {"status": "retired", "reason": "the family is retired; no run started"}
@@ -921,11 +1130,12 @@ class Researcher:
                 self.store.note(fid, f"Roots changed from {', '.join(fam['roots'])} to {', '.join(roots)}.")
                 out["roots"] = roots
                 fam = {**fam, "roots": roots}
-            versions = self.store.add_versions(fid, code, variants, author=author, note=str(args.get("why") or "")[:300])
+            # Only the variants that run are added: a sweep read wholly from the store adds no version and no revision.
+            versions = self.store.add_versions(fid, code, fresh, author=author, note=str(args.get("why") or "")[:300]) if fresh else []
         group = self._sweep_group(fid, code, variants, fam["roots"])
-        jobs = [GymJob(family=fid, version=int(v["n"]), code=code, params=dict(p), window="train", roots=tuple(fam["roots"]),
+        todo = [GymJob(family=fid, version=int(v["n"]), code=code, params=dict(p), window="train", roots=tuple(fam["roots"]),
                        stress=1.0, purpose="train", priority=float(fam.get("weight") or 0.0), group=group)
-                for p, v in zip(variants, versions)]
+                for p, v in zip(fresh, versions)]
         timeout = float(self.settings.get("gym", {}).get("run_timeout_seconds", 900)) + 120
 
         def late(job: GymJob) -> Callable[[Mapping[str, Any]], None]:
@@ -935,18 +1145,9 @@ class Researcher:
             return {"status": "retired", "reason": "the family is retired; no run started"}
         rows: list[dict[str, Any]] = []
         failed: list[tuple[GymJob, str]] = []
-        # The same sweep asked again (its group is its content): a variant that already landed (late, after the Gym gave
-        # up on it last time) is read back, never run twice. It was a trial when it landed.
-        earlier: dict[int, dict[str, Any]] = {}
-        for run in self.store.runs(fid, window="train", limit=200):
-            if (run.get("summary") or {}).get("sweep") == group and run.get("status") == "ok" and run.get("version") is not None:
-                earlier.setdefault(int(run["version"]), run)
-        todo: list[GymJob] = []
-        for job in jobs:
-            run = earlier.get(int(job.version or 0))
-            if run is None:
-                todo.append(job)
-                continue
+        for i, run in sorted(stored.items()):  # read back: each was a trial when it ran
+            job = GymJob(family=fid, version=int(run["version"]), code=code, params=dict(variants[i]), window="train",
+                         roots=tuple(fam["roots"]), stress=1.0, purpose="train", group=group)
             full = self.store.run_result(run["run_id"])
             if full is not None:
                 rows.append(self._variant_row(job, run["run_id"], full.get("status"), full.get("summary") or {},
@@ -1042,23 +1243,29 @@ class Researcher:
             if r["status"] != "ok":
                 row["reason"] = str(r["reason"] or "")[:200]
             if r["reused"]:
-                row["ran_before"] = True  # this very sweep's variant landed after the Gym gave up on it last time
+                row["already_run"] = ALREADY_RUN  # evaluated before (NO DUPLICATE RUNS): read back, no new trial
             table.append(row)
         top = rows[0]
         top_score = next((float(r["score"]) for r in rows if counts(r)), None)
         reused = sum(1 for r in rows if r["reused"])
-        out["run_id"] = top["run_id"]
-        out["score"] = None if top_score is None else round(top_score, 3)
-        out["sweep"] = {"variants": len(jobs), "completed": sum(1 for r in rows if r["status"] == "ok"), "eligible": eligible,
+        if todo:  # a sweep read wholly from the store is no run: the cycle's REVISE goes on (NO DUPLICATE RUNS)
+            out["run_id"] = top["run_id"]
+            out["score"] = None if top_score is None else round(top_score, 3)
+        out["sweep"] = {"variants": len(variants), "completed": sum(1 for r in rows if r["status"] == "ok"), "eligible": eligible,
                         "failed": len(failed)}
         if reused:
             out["sweep"]["reused"] = reused
+            out["stored"] = out.get("stored", 0) + reused
         view: dict[str, Any] = {
             "status": "ok" if any(r["status"] == "ok" for r in rows) else str(top["status"] or "failed"),
             "run_id": top["run_id"], "version": top["job"].version, "base_params": dict(base),
-            "variants": len(jobs), "completed": out["sweep"]["completed"], "eligible": eligible, "positive_score": positive,
+            "variants": len(variants), "completed": out["sweep"]["completed"], "eligible": eligible, "positive_score": positive,
             "table": table, "lineage_trials": self.store.lineage_trials(fid),
             "next": "submit the best ROBUST row's run_id (a plateau of positive neighbours beats a lone peak), or read_run it"}
+        if not todo:
+            view["already_run"] = ALREADY_RUN
+            view["next"] = ("every variant already ran on this window, roots and Gym: no new run, no trial. Submit a row, sweep "
+                            "other variants, or call gym_run with hold=true if you have nothing new")
         if dropped:
             view["repeats_dropped"] = dropped
         if failed:
@@ -1080,7 +1287,8 @@ class Researcher:
                     out["retire_refused"] = True
                     return {"status": "refused", "reason": "retire is not available to your family now (it needs at least two "
                                                            "validations and a population above its start, or many Gym "
-                                                           "evaluations without an eligible Train version): keep researching"}
+                                                           "evaluations without an eligible Train version, or many cycles "
+                                                           "of only holds and stored results): keep researching"}
                 # The store checks the population atomically: a researcher's retirement never takes it to its start or
                 # below, a dead family's (`idle_dead`) never to its floor or below.
                 result = self.store.retire_gym(fam["id"], args.get("reason"), floor=self.retire_floor(current),
@@ -1201,7 +1409,9 @@ class Researcher:
                 continue
             job = GymJob(family=fid, version=int(n), code=code, params=dict(params or {}), window="train", roots=tuple(roots),
                          stress=stress, purpose="robustness", priority=ROBUSTNESS_PRIORITY)
-            job.late = lambda result, label=label, stress=stress: self.robust_landed(fid, int(n), label, stress, result)
+            # Keyed like a researcher's run (NO DUPLICATE RUNS): a gym_run of this version at 1.5x reads it back.
+            job.late = lambda result, label=label, stress=stress, job=job: self.robust_landed(
+                fid, int(n), label, stress, result, key=self._result_key(job, result))
             job.late_fail = lambda why, label=label: self.robust_landed(fid, int(n), label, None, {"status": "failed", "reason": why})
             submit(job)
         return True
@@ -1223,9 +1433,11 @@ class Researcher:
                 self.queue_robustness(fam["id"], int(n), version["code"], version.get("params") or {},
                                       needs_roots(version["code"], fam["roots"]))
 
-    def robust_landed(self, fid: str, n: int, label: str, stress: float | None, result: Mapping[str, Any]) -> None:
-        """A robustness run's result (on the pool's dispatcher thread): recorded as a trial, its compact figures kept,
-        and a loss at 1.5x the half-spread takes the version out of the family's best (the next candidate takes its place)."""
+    def robust_landed(self, fid: str, n: int, label: str, stress: float | None, result: Mapping[str, Any], *,
+                      key: str | None = None) -> None:
+        """A robustness run's result (on the pool's dispatcher thread): recorded as a trial (under its evaluation `key`),
+        its compact figures kept, and a loss at 1.5x the half-spread takes the version out of the family's best (the next
+        candidate takes its place)."""
         try:
             fam = self.store.family(fid)
             if fam is None:
@@ -1234,7 +1446,8 @@ class Researcher:
             ran = stress is not None or not any(word in reason for word in NOT_RUN)
             if stress is not None:
                 years = float((result.get("summary") or {}).get("days") or 0) / 252.0 * max(1, len(fam["roots"]))
-                self.store.add_run(fid, n, result, window="train", stress=stress, purpose="robustness", program_years=years)
+                self.store.add_run(fid, n, result, window="train", stress=stress, purpose="robustness", program_years=years,
+                                   key=key)
             view = evidence.robustness_view(result) if stress is not None else {"status": "failed", "reason": reason[:200]}
             ok = result.get("status") == "ok"
             self._robust.discard((fid, int(n), label))  # landed or failed: a failure is queued again later, up to the attempts
@@ -1331,9 +1544,30 @@ class Researcher:
             out["error"] = f"{type(exc).__name__}: {getattr(exc, 'code', '') or str(exc)[:300]}"
         out["seconds"] = round(self.clock() - began, 2)
         self.store.bump(fid, cycles=1)
+        self._count_dormancy(fid, out)
         self.store.event("swarm.cycle", fid, out)
         self._public_note(fid, out)
         return out
+
+    def _count_dormancy(self, fid: str, out: dict[str, Any]) -> None:
+        """DORMANCY: a cycle with a new Gym evaluation (a trial) sets the family's `dormant_cycles` to zero; one with stored
+        results or holds and no new evaluation adds one, unless it also asked the Gym for a new run the Gym could not make
+        (a Gym error, a sweep refused for room: not the researcher's doing); any other cycle leaves it."""
+        evaluated = int(out.get("trials") or 0) > 0
+        tried = "gym_error" in out or bool(out.get("sweep_busy"))
+        idle = bool(out.get("stored") or out.get("hold")) and not tried
+        if not evaluated and not idle:
+            return
+        with self.store.atomic():
+            fam = self.store.family(fid)
+            if fam is None or fam.get("retired_at"):
+                return
+            count = dormant_count(fam)
+            new = 0 if evaluated else count + 1
+            if new != count:
+                self.store.set_state(fid, dormant_cycles=new)
+        if not evaluated:
+            out["dormant_cycles"] = new
 
     def _first_cycle(self, fam: Mapping[str, Any], out: dict[str, Any]) -> None:
         code, params = self.starter({**(fam.get("spec") or {}), "id": fam["id"], "mechanism": fam["mechanism"],  # type: ignore[misc]
@@ -1378,7 +1612,7 @@ class Researcher:
                                                        f"rewrote your program:\n```python\n{ready['code']}\n```\nIts Train diagnostic:\n"
                                                        f"{json.dumps(view, default=str)[:9000]}"})
             out["rewrite"] = ready.get("profile")
-            gym_done = completed_run(view)
+            gym_done = new_run(view)
             pending = None  # the rewrite supersedes the queued input, including when the rewrite needs repair
             fam = self.store.family(fid) or fam
         if pending and not gym_done:  # the run asked for at the end of the last cycle (its call was answered "queued" then)
@@ -1399,6 +1633,10 @@ class Researcher:
                 # The Gym will not run it (or failed it three times): the model hears why and revises.
                 current.append({"role": "user", "content": f"The {tool} you queued last cycle could not run: "
                                                            f"{str(result.get('error') or '')[:600]}. {result.get('hint') or ''}"})
+            elif result.get("already_run"):  # NO DUPLICATE RUNS: no new run, so this cycle's REVISE turn follows
+                current.append({"role": "user", "content": f"The {tool} you queued last cycle had already run: its stored "
+                                                           f"result (no new Gym run, no trial):\n"
+                                                           f"{json.dumps(result, default=str)[:12000]}"})
             elif completed_run(result):
                 current.append({"role": "user", "content": f"The {tool} you queued last cycle ran:\n"
                                                            f"{json.dumps(result, default=str)[:12000]}"})
@@ -1452,8 +1690,8 @@ class Researcher:
                                     "output": json.dumps({"status": "refused", "reason": "the family is retired; no further tools run"})})
                     stop = True
                     continue
-                if call.name in RUNS and (out.get("run_id") or "gym_error" in out or
-                                          self.clock() > deadline - 30 or out["tool_calls"] >= max_tools) \
+                if call.name in RUNS and not holding(call.arguments) and (out.get("run_id") or "gym_error" in out or
+                                                                          self.clock() > deadline - 30 or out["tool_calls"] >= max_tools) \
                         and pending is None and not call.error:
                     # One run (or one sweep) a cycle: this one opens the next cycle. Its call is answered now (every call keeps
                     # its output beside it in the history); its result arrives as a message when it has run.
@@ -1478,10 +1716,13 @@ class Researcher:
                     result = self._execute(fam, call.name, call.arguments, out, author=profile)
                     out["tool_calls"] += 1
                     if call.name in RUNS:
-                        gym_done = completed_run(result)
+                        # A stored result is no new run: the REVISE turn goes on (NO DUPLICATE RUNS).
+                        gym_done = gym_done or new_run(result)
                         if isinstance(result, dict) and result.get("status") == "gym_error":
                             out["error"] = f"gym: {str(result.get('error') or '')[:200]}"  # no further model call this cycle
                             stop = True
+                        if isinstance(result, dict) and result.get("status") == "held":
+                            stop = True  # a hold ends the cycle: nothing new to run
                 current.append({"type": "function_call_output", "call_id": call.call_id,
                                 "output": json.dumps(result, default=str)[:12000]})
                 fam = self.store.family(fid) or fam
@@ -1684,4 +1925,5 @@ def migrate_objective(store: SwarmStore, *, beat: Callable[[], None] | None = No
 __all__ = ["Researcher", "TOOLS", "TOOLS_READ", "TOOLS_REVISE", "RUNS", "needs_of", "needs_roots", "with_roots", "check_code",
            "sanitize", "date_like", "candidates_with", "migrate_objective", "OBJECTIVE", "params_of", "check_params",
            "sweep_variants", "sweep_tool", "merged_key", "MAX_SWEEP_VARIANTS", "MAX_SWEEP_JOBS_IN_FLIGHT", "idle_dead",
-           "idle_evaluations", "idle_limit", "RETIRE_IDLE_EVALUATIONS", "NEGATIVE_FACTOR"]
+           "idle_evaluations", "idle_limit", "RETIRE_IDLE_EVALUATIONS", "NEGATIVE_FACTOR", "DORMANT_CYCLES", "ALREADY_RUN",
+           "dormant_limit", "dormant_count", "awaiting_validation", "holding", "new_run"]
