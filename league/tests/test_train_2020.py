@@ -27,10 +27,11 @@ from league.gym import events as EV  # noqa: E402 - standard library only
 from league.swarm import evidence  # noqa: E402
 from league.swarm import settings as S  # noqa: E402
 from league.swarm.pool import ROBUSTNESS_PRIORITY  # noqa: E402
-from league.swarm.researcher import (CORE_SPAN, OBJECTIVE, idle_dead, idle_evaluations, migrate_objective,  # noqa: E402
-                                     objective_for, span_of)
-from league.tests.swarm_fakes import FakeDriver  # noqa: E402
-from league.tests.test_swarm_pool import PoolCase, job  # noqa: E402
+from league.swarm.researcher import (CORE_SPAN, OBJECTIVE, drift_verdict, idle_dead, idle_evaluations,  # noqa: E402
+                                     migrate_objective, objective_for, span_of, version_drift)
+from league.tests.swarm_fakes import FakeDriver, drift_block  # noqa: E402
+from league.swarm.pool import GymPool  # noqa: E402
+from league.tests.test_swarm_pool import PoolCase, job, settings as pool_settings  # noqa: E402
 from league.tests.test_swarm_researcher import ResearcherCase  # noqa: E402
 from league.tests.test_swarm_rounds import RoundCase  # noqa: E402
 from league.tests.test_swarm_search import QueueingPool, yearly  # noqa: E402
@@ -174,6 +175,14 @@ class EarlyStages(unittest.TestCase):
         self.assertEqual(sl.stage_of("SPY", D(2022, 6, 1)), 3)
         tasks = sl.plan(early_calendar(), stages=(9,), first=[("QQQ", D(2020, 3, 16))])
         self.assertEqual(tasks[0].id, "day:QQQ:2020-03-16")
+
+    def test_stage_of_and_first_honour_early_roots(self):
+        self.assertIsNone(sl.stage_of("XSP", D(2020, 3, 16), early=["SPY", "QQQ"]))
+        self.assertEqual(sl.stage_of("SPY", D(2020, 3, 16), early=["SPY", "QQQ"]), 9)
+        self.assertEqual(sl.stage_of("XSP", D(2024, 3, 13), early=["SPY"]), 1, "2022 on: the early roots change nothing")
+        tasks = sl.plan(early_calendar(), stages=(9,), early=["SPY"], first=[("XSP", D(2020, 3, 16)), ("SPY", D(2020, 3, 17))])
+        self.assertEqual(tasks[0].id, "day:SPY:2020-03-17")
+        self.assertNotIn("XSP", {t.root for t in tasks})
 
 
 @unittest.skipIf(pl is None, "polars/pyarrow are not installed here (they are on the data box)")
@@ -437,7 +446,7 @@ class GymRuns(unittest.TestCase):
 
         self.dir = tempfile.mkdtemp(prefix="train2020-")
         synth.generate(self.dir, roots=("SPY", "QQQ"), days=list(self.DAYS), strikes_each_side=2, max_dte=2)
-        for day in self.DAYS[:4]:  # QQQ has no 2021 chains here (a root outside the early fetch, or a name)
+        for day in self.DAYS[1:4]:  # QQQ has one 2021 chain of four here (a root with stray early sessions, or a name)
             (Path(self.dir) / "nbbo" / "QQQ" / f"{day.isoformat()}.parquet").unlink()
 
     def tearDown(self):
@@ -467,19 +476,37 @@ class GymRuns(unittest.TestCase):
         self.assertEqual(sorted(evidence.train_score(whole["results"][0], first_year=2022)["years"]), ["2022"])
         self.assertEqual(sorted(evidence.train_score(whole["results"][0])["years"]), ["2021", "2022"])
 
-    def test_a_year_counts_only_when_every_root_had_data_in_it(self):
+    def test_a_year_counts_only_when_every_root_had_data_on_half_its_days(self):
         pooled = self.run_batch(self.POOLED, ["SPY", "QQQ"], split=2)["results"][0]
-        self.assertEqual(pooled["by_year"]["2021"]["roots"], ["SPY"])
+        self.assertEqual(pooled["by_year"]["2021"]["root_days"], {"QQQ": 1, "SPY": 4})
+        self.assertEqual(pooled["by_year"]["2021"]["roots"], ["SPY"], "one stray session of four is not a 2021 root")
         self.assertEqual(pooled["by_year"]["2022"]["roots"], ["QQQ", "SPY"])
+        whole = self.run_batch(self.POOLED, ["SPY", "QQQ"], split=1)["results"][0]
+        self.assertEqual(whole["by_year"]["2021"]["root_days"], pooled["by_year"]["2021"]["root_days"], "a split run merges exactly")
         self.assertEqual(sorted(evidence.train_score(pooled)["years"]), ["2022"], "2021 would score SPY alone")
         alone = self.run_batch(self.SPY, ["SPY", "QQQ"])["results"][0]
         self.assertEqual(sorted(evidence.train_score(alone)["years"]), ["2021", "2022"], "SPY had every year")
 
+    def test_the_drift_block_carries_its_roots_their_days_and_its_sums(self):
+        split = self.run_batch(self.POOLED, ["SPY", "QQQ"], split=2)["results"][0]["drift"]
+        whole = self.run_batch(self.POOLED, ["SPY", "QQQ"], split=1)["results"][0]["drift"]
+        self.assertEqual(split["roots"], ["QQQ", "SPY"])
+        for block in (split, whole):
+            # A day's return needs the prior close: QQQ's one 2021 session (the first day) has none.
+            self.assertEqual((block["years"]["2021"]["days"], block["years"]["2021"]["root_days"]), (3, {"SPY": 3}))
+            self.assertEqual(block["years"]["2022"]["root_days"], {"QQQ": 3, "SPY": 3})
+            self.assertTrue(all({"sum_sq", "sum_pp"} <= set(row) for row in block["years"].values()))
+        self.assertEqual(split["years"], whole["years"], "a split run merges exactly")
+        numbers = evidence.drift_numbers(split)
+        self.assertEqual((numbers["roots"], numbers["years"]["2021"]["root_days"]), (["QQQ", "SPY"], {"SPY": 3}))
+        kept, left = evidence.drift_years(numbers, 2020)
+        self.assertEqual((sorted(kept), left), (["2022"], ["2021"]))
+
 
 # ------------------------------------------------------------------------------------------------ the swarm's switch
 class Switch(unittest.TestCase):
-    def test_the_default_is_2022_a_start_is_taken_a_near_miss_snaps_and_the_rest_is_named(self):
-        self.assertEqual(S.DEFAULTS["gym"]["train_from"], "2022-01-03")
+    def test_unset_is_2022_a_start_is_taken_a_near_miss_snaps_and_the_rest_is_named(self):
+        self.assertIsNone(S.DEFAULTS["gym"]["train_from"], "unset: the running span stays")
         self.assertEqual((S.train_from(S.DEFAULTS), S.train_from_note(S.DEFAULTS)), (D(2022, 1, 3), None))
         self.assertEqual((S.train_from(with_switch(ON)), S.train_from_note(with_switch(ON))), (D(2020, 1, 2), None))
         self.assertEqual(S.train_from(with_switch("2020-01-01")), D(2020, 1, 2))
@@ -488,6 +515,15 @@ class Switch(unittest.TestCase):
             self.assertEqual(S.train_from(with_switch(bad)), D(2022, 1, 3), bad)
             self.assertIn("ignored", S.train_from_note(with_switch(bad)), bad)
         self.assertEqual(S.train_from(None), D(2022, 1, 3))
+
+    def test_a_typo_or_a_deleted_key_while_on_keeps_the_running_span(self):
+        on = D(2020, 1, 2)
+        for bad in ("2020-1-2", "2022-01-04", "yes"):
+            self.assertEqual(S.train_from(with_switch(bad), on), on, bad)
+            self.assertIn("keeps Train from 2020-01-02", S.train_from_note(with_switch(bad), on))
+        self.assertEqual((S.train_from(S.DEFAULTS, on), S.train_from_note(S.DEFAULTS, on)[:26]), (on, "gym.train_from is not set:"))
+        self.assertEqual((S.train_from(with_switch("2022-01-03"), on), S.train_from_note(with_switch("2022-01-03"), on)),
+                         (D(2022, 1, 3), None), "switching back is written out")
         self.assertEqual(S.train_years(S.DEFAULTS), (2022, 2023, 2024))
         self.assertEqual(S.train_years(with_switch(ON)), (2020, 2021, 2022, 2023, 2024))
 
@@ -498,6 +534,8 @@ class Switch(unittest.TestCase):
         self.assertEqual(S.objective_span(f"{OBJECTIVE}@2020-06-01"), D(2022, 1, 3), "never a span the Gym has no image for")
         self.assertEqual(objective_for(S.DEFAULTS), OBJECTIVE)
         self.assertEqual(objective_for(with_switch(ON)), ON_OBJECTIVE)
+        self.assertEqual(objective_for(with_switch("typo"), D(2020, 1, 2)), ON_OBJECTIVE, "a typo while on keeps the span")
+        self.assertEqual(objective_for(S.DEFAULTS, D(2020, 1, 2)), ON_OBJECTIVE, "a deleted key while on keeps the span")
         self.assertEqual((span_of({}), span_of(None), span_of({"train_from": ON})), (CORE_SPAN, CORE_SPAN, ON))
 
     def test_the_split_and_time_limit_follow_the_span_unless_the_operator_sets_them(self):
@@ -512,6 +550,8 @@ class Switch(unittest.TestCase):
             self.assertEqual(S.train_from(S.load(tmp, config={})), D(2022, 1, 3))
             (Path(tmp) / "swarm.json").write_text(json.dumps({"gym": {"train_from": ON}}))
             self.assertEqual(S.train_from(S.load(tmp, config={})), D(2020, 1, 2))
+            (Path(tmp) / "swarm.json").write_text(json.dumps({"gym": {}}))  # the key deleted
+            self.assertEqual(S.train_from(S.load(tmp, config={}), D(2020, 1, 2)), D(2020, 1, 2))
 
     def test_the_prompts_name_the_span_and_are_the_same_string_while_2022(self):
         from league.swarm.architect import SYSTEM as ARCHITECT
@@ -529,26 +569,64 @@ class Switch(unittest.TestCase):
 
 
 class Notice(unittest.TestCase):
-    def test_the_loop_names_a_pending_switch_and_a_bad_value_once(self):
-        from league.swarm.loop import Swarm
+    def swarm(self, tmp):
         from league.swarm.store import SwarmStore
 
+        store = SwarmStore(Path(tmp))
+        self.addCleanup(store.close)
+        clock = types.SimpleNamespace(t=1_000_000.0)
+        return types.SimpleNamespace(store=store, settings=copy.deepcopy(S.DEFAULTS), clock=lambda: clock.t, span_alert=None), clock
+
+    def notice(self, swarm):
+        from league.swarm.loop import Swarm
+
+        return Swarm.train_span_notice(swarm)
+
+    def test_the_loop_names_a_pending_switch_and_repeats_until_it_is_resolved(self):
+        from league.swarm.loop import TRAIN_SPAN_NOTICE_EVERY
+
         with tempfile.TemporaryDirectory() as tmp:
-            store = SwarmStore(Path(tmp))
-            self.addCleanup(store.close)
-            swarm = types.SimpleNamespace(store=store, settings=copy.deepcopy(S.DEFAULTS))
-            self.assertIsNone(Swarm.train_span_notice(swarm), "off, and nothing asked: silent")
+            swarm, clock = self.swarm(tmp)
+            self.assertIsNone(self.notice(swarm), "off, and nothing asked: silent")
+            self.assertIsNone(swarm.span_alert)
             swarm.settings["gym"]["train_from"] = ON
-            first = Swarm.train_span_notice(swarm)
+            first = self.notice(swarm)
             self.assertEqual((first["action"], first["wanted"], first["running"], first["alert"]),
                              ("train_span_pending", ON, "2022-01-03", True))
-            self.assertIsNone(Swarm.train_span_notice(swarm), "once")
-            migrated(store, ON)
-            self.assertIsNone(Swarm.train_span_notice(swarm), "migrated: nothing pending")
+            self.assertIsNone(self.notice(swarm), "not every loop as an event")
+            self.assertEqual(swarm.span_alert["action"], "train_span_pending", "but in every loop's heartbeat")
+            clock.t += TRAIN_SPAN_NOTICE_EVERY
+            self.assertIsNotNone(self.notice(swarm), "and again while it stands")
+            migrated(swarm.store, ON)
+            self.assertIsNone(self.notice(swarm), "migrated: nothing pending")
+            self.assertIsNone(swarm.span_alert)
+
+    def test_a_typo_or_a_deleted_key_while_on_alerts_and_keeps_the_span(self):
+        from league.swarm.loop import TRAIN_SPAN_NOTICE_EVERY
+
+        with tempfile.TemporaryDirectory() as tmp:
+            swarm, clock = self.swarm(tmp)
+            migrated(swarm.store, ON)
+            swarm.settings["gym"]["train_from"] = "2020-1-2"
+            bad = self.notice(swarm)
+            self.assertEqual((bad["action"], bad["wanted"], bad["running"]), ("train_from_setting", ON, ON))
+            self.assertIn("keeps Train from 2020-01-02", bad["text"])
+            clock.t += TRAIN_SPAN_NOTICE_EVERY
+            self.assertIsNotNone(self.notice(swarm), "it keeps alerting")
+            swarm.settings["gym"].pop("train_from")
+            gone = self.notice(swarm)
+            self.assertIn("is not set", gone["text"])
+            self.assertEqual(migrate_objective(swarm.store, settings=swarm.settings), {"migrated": 0, "with_best": 0, "failed": 0},
+                             "a restart with the key deleted migrates nothing")
+            self.assertEqual(swarm.store.get("train_objective"), ON_OBJECTIVE)
+
+    def test_off_a_typo_is_harmless_but_named(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            swarm, _ = self.swarm(tmp)
             swarm.settings["gym"]["train_from"] = "2020-06-01"
-            bad = Swarm.train_span_notice(swarm)
+            bad = self.notice(swarm)
             self.assertIn("ignored", bad["text"])
-            self.assertEqual(bad["wanted"], "2022-01-03")
+            self.assertEqual((bad["wanted"], bad["running"]), ("2022-01-03", "2022-01-03"))
 
 
 # ------------------------------------------------------------------------------------------------ the score
@@ -787,7 +865,8 @@ class Migration(ResearcherCase):
         self.assertEqual(len(self.store.notebook(fid)), notes + 1)
         self.assertIn("2020-01-02", self.store.notebook(fid, limit=1)[-1]["text"])
         self.assertEqual(migrate_objective(self.store, settings=with_switch(ON))["migrated"], 0, "once per span")
-        back = migrate_objective(self.store, settings=S.DEFAULTS)
+        self.assertEqual(migrate_objective(self.store, settings=S.DEFAULTS)["migrated"], 0, "the key deleted: the span stays")
+        back = migrate_objective(self.store, settings=with_switch("2022-01-03"))
         self.assertEqual(back["migrated"], 1)
         fam = self.store.family(fid)
         self.assertEqual((fam["best_version"], fam["best_train"]), (v1["n"], 3.0), "the rollback scores the 3-year runs again")
@@ -848,6 +927,166 @@ class FlipRetirement(RoundCase):
         [row] = Tournament(self.store, self.pool, self.settings).retirements(self.store.families(alive=True))
         self.assertEqual(row["family"], "a")
         self.assertIn("150 Gym evaluations since Train's span changed", row["why"])
+
+
+# ------------------------------------------------------------------------------------------------ the drift screen
+def early_block(alpha=(-40.0, 60.0, 60.0, 60.0, 60.0), roots=("SPY",), root_days=None, sums=True) -> dict:
+    """An invented 2020-2024 drift block with the extension's extents (every year 250 days)."""
+    block = drift_block(t=2.0, alpha_usd=60.0, years=("2020", "2021", "2022", "2023", "2024"))
+    for i, year in enumerate(sorted(block["years"])):
+        row = block["years"][year]
+        row["alpha_usd"] = alpha[i]
+        row["root_days"] = dict((root_days or {}).get(year) or {r: 250 for r in roots})
+        if sums:
+            row["sum_sq"], row["sum_pp"] = 250 * 40.0, 250 * 60.0
+    block["roots"] = list(roots)
+    return block
+
+
+class DriftSpan(unittest.TestCase):
+    def test_the_screen_counts_the_spans_years_and_all_but_one_of_them(self):
+        numbers = evidence.drift_numbers(early_block())
+        full = evidence.drift_screen(numbers, first_year=2020)
+        self.assertEqual((full["years"], full["positive"], full["need"], full["passed"]), (5, 4, 4, True),
+                         "2020's negative alpha is the one year allowed")
+        core = evidence.drift_screen(numbers, first_year=2022)
+        self.assertEqual((core["years"], core["need"], core["left_out"]), (3, 2, ["2020", "2021"]))
+        from league.gym.results import _t_of
+        self.assertAlmostEqual(core["t"], _t_of(180.0, 750 * 40.0, 750, 750 * 60.0), msg="the pooled t refitted over 2022-2024")
+        self.assertNotAlmostEqual(core["t"], numbers["pooled"]["t"])
+
+    def test_a_year_a_root_lacked_data_in_is_left_out_as_the_train_score_does(self):
+        days = {"2020": {"SPY": 250, "AAPL": 0}, "2021": {"SPY": 250, "AAPL": 100}}
+        numbers = evidence.drift_numbers(early_block(alpha=(-40.0, -40.0, 60.0, 60.0, 60.0), roots=("SPY", "AAPL"), root_days=days))
+        verdict = evidence.drift_screen(numbers, first_year=2020)
+        self.assertEqual((verdict["years"], verdict["left_out"], verdict["positive"], verdict["passed"]), (3, ["2020", "2021"], 3, True),
+                         "scored on SPY alone in 2020-21 it would fail two of five")
+        both = evidence.drift_numbers(early_block(alpha=(-40.0, -40.0, 60.0, 60.0, 60.0)))
+        self.assertFalse(evidence.drift_screen(both, first_year=2020)["passed"], "a SPY-only program fails 2 of 5")
+
+    def test_figures_that_cannot_be_refitted_are_not_known_and_a_three_year_block_is_as_before(self):
+        old = evidence.drift_numbers(early_block(sums=False))
+        self.assertFalse(evidence.drift_screen(old, first_year=2022)["known"], "years to leave out, no sums to refit with")
+        self.assertTrue(evidence.drift_screen(old, first_year=2020)["known"], "nothing left out: the stored pooled t stands")
+        three = evidence.drift_numbers(drift_block())
+        self.assertEqual(evidence.drift_screen(three, first_year=2022), evidence.drift_screen(three))
+
+
+class DriftSpanResearcher(ResearcherCase):
+    def row(self, n, block, span=None):
+        r = yearly(f"v{n}")
+        r["drift"] = block
+        if span:
+            r["train_from"] = span
+        recorded, _ = self.researcher()._with_score(r, 1.0)
+        return self.store.add_run(self.fam["id"], n, recorded, window="train", stress=1.0, purpose="train")
+
+    def test_version_drift_reads_the_running_spans_rows_only(self):
+        fid = self.fam["id"]
+        v = self.store.add_version(fid, "# v\nNEEDS = {'roots': ['SPY']}\n", {}, author="t")
+        self.row(v["n"], drift_block())                                   # a 2022-2024 run: passes
+        fam = self.store.family(fid)
+        self.assertIsNotNone(version_drift(self.store, fam, v["n"]))
+        self.assertTrue(drift_verdict(self.store, fam, v["n"], self.settings)["passed"])
+        migrated(self.store, ON)
+        self.assertIsNone(version_drift(self.store, fam, v["n"]), "a 3-year run never screens a version over 2020-2024")
+        self.assertFalse(drift_verdict(self.store, fam, v["n"], self.settings)["known"])
+        self.row(v["n"], early_block(alpha=(-40.0, -40.0, 60.0, 60.0, 60.0)), span=ON)
+        verdict = drift_verdict(self.store, self.store.family(fid), v["n"], self.settings)
+        self.assertEqual((verdict["known"], verdict["years"], verdict["passed"]), (True, 5, False), "2 of 5 negative: fails")
+
+    def test_the_migration_clears_the_submitted_run(self):
+        fid = self.fam["id"]
+        self.store.put("train_objective", OBJECTIVE)
+        self.store.set_state(fid, submitted_run="run-old", submitted_note="mine")
+        migrate_objective(self.store, settings=with_switch(ON))
+        state = self.store.family(fid)["state"]
+        self.assertEqual((state.get("submitted_run"), state.get("submitted_note")), (None, None))
+
+
+# ------------------------------------------------------------------------------------------------ the verifier's pool probe
+class OffStartPath(PoolCase):
+    """The verifier's probe of #399 (daaf14ea), switch OFF, through the pool's real start, adopt and dispatch paths."""
+
+    def mk(self, train_first, **gym):
+        return GymPool(self.store, self.sail, pool_settings(**gym), clock=self.clock, threaded=False, allowed=lambda k: self.allowed[k],
+                       driver_factory=lambda client, box: FakeDriver(client, box, calls=self.calls, fail=lambda: self.failure,
+                                                                    train_first=train_first))
+
+    def drive(self, pool):
+        t = pool.submit(job("t"))
+        r = job("r", stress=1.5, priority=ROBUSTNESS_PRIORITY)
+        r.purpose = "robustness"
+        r = pool.submit(r)
+        v = pool.submit(job("v", window="validation"))
+        h = pool.submit(job("h", window="holdout", gate="holdout look h v1"))
+        f = pool.submit(job("f", window="forward", gate="forward f v1"))
+        pool.manage()
+        for step in (20, 1300):  # the second pass ages the robustness run (one box: it waits for the inner loop first)
+            self.clock.advance(step)
+            for _ in range(8):
+                for box in list(pool.boxes.values()):
+                    if box.state in ("ready", "asleep"):
+                        batch = pool._take(box)
+                        if batch:
+                            pool.run_batch(box, batch)
+        return t, r, v, h, f
+
+    def check(self, jobs, label):
+        t, r, v, h, f = jobs
+        for j in jobs:
+            self.assertIsNone(j.error, f"{label}: {j.family} refused: {j.error}")
+            self.assertIsNotNone(j.result, f"{label}: {j.family} no result")
+        self.assertEqual((t.start, t.span, r.start, v.start, h.start, f.start),
+                         ("2022-01-03", "2022-01-03", "2022-01-03", None, None, None))
+        self.assertEqual(t.result["train_from"], "2022-01-03")
+        train_calls = [c for c in self.calls if c["window"] == "train"]
+        self.assertTrue(train_calls and all((c["start"], c["split"], c["timeout"]) == ("2022-01-03", 8, 900) for c in train_calls))
+        other = [c for c in self.calls if c["window"] != "train"]
+        self.assertTrue(other and all((c["start"], c["timeout"]) == (None, 900) for c in other))
+        alerts = [e for e in self.store.events_after(0)
+                  if e["payload"].get("action") in ("train_span_mismatch", "train_span_pending", "train_from_setting")]
+        self.assertEqual(alerts, [])
+
+    def test_off_store_migrated_on_main_the_adopted_image_reports_2022_01_03(self):
+        self.store.put("train_objective", OBJECTIVE)  # production: main's Sept 26 pass
+        self.assertEqual(migrate_objective(self.store, settings=S.DEFAULTS), {"migrated": 0, "with_best": 0, "failed": 0})
+        pool = self.mk("2022-01-03", start_boxes=1)
+        jobs = self.drive(pool)
+        gym = [b for b in pool.boxes.values() if b.kind == "gym"]
+        self.assertTrue(gym and all(b.train_first == "2022-01-03" for b in gym))
+        self.assertEqual([(row.get("detail") or {}).get("train_first") for row in self.store.boxes() if row["kind"] == "gym"],
+                         ["2022-01-03"])
+        self.check(jobs, "adopted image")
+
+    def test_off_a_box_that_does_not_report_train_first(self):
+        self.store.put("train_objective", OBJECTIVE)
+        self.check(self.drive(self.mk(None, start_boxes=1)), "no report")
+
+    def test_off_store_never_migrated(self):
+        self.check(self.drive(self.mk("2022-01-03", start_boxes=1)), "unmigrated")
+
+    def test_off_adopted_box_without_recorded_train_first(self):
+        self.store.put("train_objective", OBJECTIVE)
+        self.store.upsert_box("sb_00000001-0000-0000-0000-000000000000", kind="gym", version="sbcp_11111111-aaaa", state="asleep",
+                              detail={"roots": ["SPY", "QQQ", "IWM", "XSP", "SPXW"], "name": "x"})
+        pool = self.mk("2022-01-03")
+        self.assertEqual(pool.adopt(), 1)
+        box = pool.boxes["sb_00000001-0000-0000-0000-000000000000"]
+        self.assertIsNone(box.train_first)
+        t = pool.submit(job("t"))
+        self.clock.advance(20)
+        pool.run_batch(box, pool._take(box))
+        self.assertIsNone(t.error)
+        self.assertEqual((t.result["train_from"], box.train_first), ("2022-01-03", "2022-01-03"))
+
+    def test_explicit_operator_split_and_timeout_are_kept(self):
+        self.store.put("train_objective", OBJECTIVE)
+        self.check(self.drive(self.mk("2022-01-03", start_boxes=1, train_split=8, run_timeout_seconds=900)), "explicit")
+
+    def test_legacy_split_key_and_string_values(self):
+        self.store.put("train_objective", OBJECTIVE)
+        self.check(self.drive(self.mk("2022-01-03", start_boxes=1, train_split="8", run_timeout_seconds="900")), "strings")
 
 
 if __name__ == "__main__":

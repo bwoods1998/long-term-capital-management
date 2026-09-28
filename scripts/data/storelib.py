@@ -333,7 +333,7 @@ def plan(
                 for root in BACK_MONTH_ROOTS:
                     add(Task(8, "back", root, day))
     for root, day in first:
-        stage = stage_of(root, day, core)
+        stage = stage_of(root, day, core, early)
         if stage in stages and calendar.is_trading(day):
             add(Task(stage, "day", root, day))
     head = len(out)  # the checks and the sample stay at the front, whatever the stage order
@@ -391,13 +391,14 @@ def plan(
     return front + rest
 
 
-def stage_of(root: str, day: dt.date, core: Sequence[str] = CORE_FIVE) -> int | None:
-    """Which stage fetches this root-day's NBBO (None: no stage does)."""
+def stage_of(root: str, day: dt.date, core: Sequence[str] = CORE_FIVE, early: Sequence[str] | None = None) -> int | None:
+    """Which stage fetches this root-day's NBBO (None: no stage does). A 2020-21 day is stage 9's only for a root the
+    operator's `--early-roots` (`early`) keeps."""
     window = window_of(day)
     if root not in core:
         return 4 if window in ("train", "validation", "holdout") else None
     if EARLY[0] <= day <= EARLY[1]:
-        return 9
+        return 9 if root in early_roots(early, core) else None
     if window == "holdout":
         return 2
     if window == "train" and day.year == 2022:

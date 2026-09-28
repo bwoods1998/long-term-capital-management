@@ -43,7 +43,9 @@ timing added beyond that, after costs. A version is validated only when its pool
 a version that fails is never the family's best again (`researcher.py`), and the gate refuses a look at one. It only ADDS
 a brake: it is a setting, `tournament.drift_screen`, because it is the operator's tightening, not a line of the plan. A
 run from before the figures is not screened (`known` False): it is never validated until its Train run is made again
-(`researcher.py`, the robustness label "drift").
+(`researcher.py`, the robustness label "drift"). Over the Train extension (Sept 27) it counts the running span's years only
+(`first_year`), and a year before 2022 only when every root of the program had data on half its days (as the Train score
+does); "all but one" is over the years it counts, and the pooled t is refitted over them.
 
 THE HOLDOUT LINE (one look per program version, at most three per lineage; the gate's box only):
   - P&L after fees above zero;
@@ -280,26 +282,76 @@ DRIFT_MIN_T = 1.0
 
 
 def drift_numbers(block: Any) -> dict[str, Any] | None:
-    """A Gym Train result's `drift` block without its statistics: {"pooled": {...}, "years": {year: {...}}}, what a run
-    row's summary and a family's state keep. None when there is no block (a run from before the figures) or it is
+    """A Gym Train result's `drift` block without its statistics: {"pooled": {...}, "years": {year: {...}}, "roots"}, what
+    a run row's summary and a family's state keep. None when there is no block (a run from before the figures) or it is
     malformed."""
     if not isinstance(block, Mapping) or not isinstance(block.get("years"), Mapping) or not isinstance(block.get("pooled"), Mapping):
         return None
-    return {"pooled": {k: v for k, v in block["pooled"].items() if k not in ("stats", "moments")},
-            "years": {str(y): {k: v for k, v in row.items() if k not in ("stats", "moments")} for y, row in sorted(block["years"].items())
-                      if isinstance(row, Mapping)}}
+    out = {"pooled": {k: v for k, v in block["pooled"].items() if k not in ("stats", "moments")},
+           "years": {str(y): {k: v for k, v in row.items() if k not in ("stats", "moments")} for y, row in sorted(block["years"].items())
+                     if isinstance(row, Mapping)}}
+    if isinstance(block.get("roots"), (list, tuple)):
+        out["roots"] = [str(r) for r in block["roots"]]
+    return out
 
 
-def drift_screen(numbers: Mapping[str, Any] | None, *, min_t: float = DRIFT_MIN_T, years_positive: int | None = None) -> dict[str, Any]:
+def drift_years(numbers: Mapping[str, Any], first_year: int | None = None) -> tuple[dict[str, Mapping[str, Any]], list[str]]:
+    """(the years the screen counts, the years it left out): from `first_year` (the running Train span's) on, and a year
+    before `PARTIAL_YEARS_BEFORE` only when every root of the program (the block's `roots`) had data on
+    `ROOT_YEAR_SHARE` of its days (the row's `root_days`): as the Train score counts them."""
+    from ..gym.results import roots_in_year  # standard library only, like this module
+
+    roots = {str(r) for r in numbers.get("roots") or ()}
+    kept: dict[str, Mapping[str, Any]] = {}
+    left: list[str] = []
+    for year, row in sorted((numbers.get("years") or {}).items()):
+        if not isinstance(row, Mapping):
+            continue
+        early = year[:4].isdigit() and int(year[:4]) < PARTIAL_YEARS_BEFORE
+        if first_year is not None and year[:4].isdigit() and int(year[:4]) < int(first_year):
+            left.append(year)
+        elif early and roots and isinstance(row.get("root_days"), Mapping) \
+                and roots - set(roots_in_year(row["root_days"], int(row.get("days") or 0))):
+            left.append(year)
+        else:
+            kept[year] = row
+    return kept, left
+
+
+def pooled_drift_t(years: Mapping[str, Mapping[str, Any]]) -> tuple[bool, float | None]:
+    """(could, t): the pooled t of the drift-adjusted daily P&L over these years alone, from each year's sums (the Gym's
+    `sum_sq`, `sum_pp`, `alpha_usd`, `days`); `could` is False when a year lacks them (figures from before the extension)."""
+    from ..gym.results import _t_of  # standard library only, like this module
+
+    total = sq = pp = 0.0
+    n = 0
+    for row in years.values():
+        values = [_num(row.get(k)) for k in ("alpha_usd", "sum_sq", "sum_pp")]
+        if any(v is None for v in values) or not isinstance(row.get("days"), int):
+            return False, None
+        total, sq, pp, n = total + values[0], sq + values[1], pp + values[2], n + int(row["days"])
+    return True, _t_of(total, sq, n, pp)
+
+
+def drift_screen(numbers: Mapping[str, Any] | None, *, min_t: float = DRIFT_MIN_T, years_positive: int | None = None,
+                 first_year: int | None = None) -> dict[str, Any]:
     """THE DRIFT SCREEN (the module docstring) on a version's drift figures (`drift_numbers`): {known, passed, t, positive,
     years, need, why}. `known` is False when there are no figures (a run from before them); a year's alpha is positive
-    when its alpha dollars are; `need` is `years_positive`, or every year but one (at least one) when None."""
+    when its alpha dollars are; `need` is `years_positive`, or every year but one (at least one) when None. The years are
+    those `drift_years` counts (from `first_year`, the running Train span's); when it leaves one out, the pooled t is
+    refitted over the rest (`pooled_drift_t`), and figures that cannot be refitted are not `known`."""
     out: dict[str, Any] = {"known": False, "passed": False, "t": None, "positive": 0, "years": 0, "need": None, "why": None}
     if not isinstance(numbers, Mapping) or not isinstance(numbers.get("years"), Mapping):
         out["why"] = "its Train run predates the drift figures: it is run again before it is screened"
         return out
-    years = {y: r for y, r in numbers["years"].items() if isinstance(r, Mapping)}
+    years, left = drift_years(numbers, first_year)
     t = _num((numbers.get("pooled") or {}).get("t"))
+    if left:
+        could, t = pooled_drift_t(years)
+        out["left_out"] = left
+        if not could:
+            out["why"] = "its drift figures predate the per-year sums the Train extension needs: it is run again before it is screened"
+            return out
     positive = sum(1 for r in years.values() if (_num(r.get("alpha_usd")) or 0.0) > 0)
     need = max(1, len(years) - 1) if years_positive is None else min(max(0, int(years_positive)), len(years))
     out.update(known=True, t=t, positive=positive, years=len(years), need=need)

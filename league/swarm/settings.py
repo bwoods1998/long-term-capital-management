@@ -14,7 +14,8 @@ running swarm keeps scoring, stamping and running Train over the span its store 
 also needs a Gym image that holds those years (`images.py build gym --train-from 2020-01-02`, adopted as
 `gym.image_checkpoint` in the same edit): the pool refuses a Train run on an image whose first Train day is not the
 span's (both ways). A date in the first days of January snaps to that year's first session (2020-01-01 is 2020-01-02);
-any other value is the default, and the loop raises an alert naming it. With the switch on, `train_split` and
+any other value, and a missing one while Train is not 2022-2024, keeps the running span (a typo never switches Train back
+to 2022), and the loop keeps raising an alert naming it until it is fixed. With the switch on, `train_split` and
 `run_timeout_seconds` follow the span unless the operator sets them (`train_split`, `run_timeout`: 16 and 1500 s over
 five years, 8 and 900 s over three).
 """
@@ -149,8 +150,9 @@ DEFAULTS: dict[str, Any] = {
         "python": "/opt/data-venv/bin/python",  # the Gym image is a fork of the data box: its venv has numpy and pyarrow
         "capital": 10000.0,
         "roots": ["SPY", "QQQ", "IWM", "XSP", "SPXW"],
-        # Train's first day (the module docstring's 2020-21 switch): "2020-01-02" with a Gym image that holds 2020-21.
-        "train_from": "2022-01-03",
+        # Train's first day (the module docstring's 2020-21 switch): "2020-01-02" with a Gym image that holds 2020-21;
+        # "2022-01-03" to switch back. Unset: the running span stays (2022-01-03 on a store never switched).
+        "train_from": None,
     },
     # A robustness run waiting this long (its 1.5x run; the mid run twice as long) takes a Train job's priority (aging).
     "pool": {"robust_age_seconds": 600},
@@ -275,12 +277,18 @@ def _merge(base: dict[str, Any], over: Mapping[str, Any]) -> dict[str, Any]:
     return out
 
 
-def parse_train_from(raw: Any) -> tuple[dt.date, str | None]:
-    """(Train's first day, a note for the operator or None) from a `gym.train_from` value: one of `TRAIN_STARTS`; a date
-    in the first days of January before that year's first session snaps to it (with a note); anything else is the default
-    2022-01-03, with a note saying the value was ignored."""
-    if raw is None or raw == TRAIN_CORE_START.isoformat():
-        return TRAIN_CORE_START, None
+def parse_train_from(raw: Any, running: dt.date | None = None) -> tuple[dt.date, str | None]:
+    """(Train's first day, a note for the operator or None) from a `gym.train_from` value, given the running swarm's span
+    (`running`, its store's migrated objective; 2022-01-03 when None): one of `TRAIN_STARTS` is taken; a date in the first
+    days of January before that year's first session snaps to it (with a note). Anything else, or no value at all while
+    the running span is not 2022-01-03, KEEPS the running span, with a note: a typo or a deleted key never switches Train
+    back to 2022 (switching back is `"2022-01-03"`, written out). With the switch off an ignored value is harmless."""
+    running = running or TRAIN_CORE_START
+    if raw is None:
+        if running == TRAIN_CORE_START:
+            return TRAIN_CORE_START, None
+        return running, (f"gym.train_from is not set: the swarm keeps Train from {running} (set it to \"{TRAIN_CORE_START}\" "
+                         "to switch back)")
     day: dt.date | None = None
     if isinstance(raw, dt.date):
         day = raw
@@ -295,18 +303,23 @@ def parse_train_from(raw: Any) -> tuple[dt.date, str | None]:
         start = TRAIN_STARTS[day.year]
         note = None if day == start else f"gym.train_from {raw!r} is before {day.year}'s first session: Train starts {start}"
         return start, note
-    return TRAIN_CORE_START, (f"gym.train_from {raw!r} is not a Train start ({', '.join(d.isoformat() for d in TRAIN_STARTS.values())}): "
-                              f"ignored, Train starts {TRAIN_CORE_START}")
+    return running, (f"gym.train_from {raw!r} is not a Train start ({', '.join(d.isoformat() for d in TRAIN_STARTS.values())}): "
+                     f"ignored, the swarm keeps Train from {running}")
 
 
-def train_from(settings: Mapping[str, Any] | None) -> dt.date:
-    """The first Train day `gym.train_from` asks for (`parse_train_from`): what the swarm's next start migrates to."""
-    return parse_train_from(((settings or {}).get("gym") or {}).get("train_from"))[0]
+def _raw(settings: Mapping[str, Any] | None) -> Any:
+    return ((settings or {}).get("gym") or {}).get("train_from")
 
 
-def train_from_note(settings: Mapping[str, Any] | None) -> str | None:
+def train_from(settings: Mapping[str, Any] | None, running: dt.date | None = None) -> dt.date:
+    """The first Train day `gym.train_from` asks for (`parse_train_from`, given the running span): what the swarm's next
+    start migrates to."""
+    return parse_train_from(_raw(settings), running)[0]
+
+
+def train_from_note(settings: Mapping[str, Any] | None, running: dt.date | None = None) -> str | None:
     """Why `gym.train_from` was snapped or ignored (None: it was taken as written)."""
-    return parse_train_from(((settings or {}).get("gym") or {}).get("train_from"))[1]
+    return parse_train_from(_raw(settings), running)[1]
 
 
 def objective_span(objective: Any) -> dt.date:

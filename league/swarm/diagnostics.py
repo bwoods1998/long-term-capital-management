@@ -81,10 +81,11 @@ def _tval(value: Any) -> str:
     return "n/a" if x is None else f"{x:.2f}"
 
 
-def drift_view(block: Any, *, screen: tuple[float, int | None] | None = None) -> dict[str, Any] | None:
+def drift_view(block: Any, *, screen: tuple[float, int | None] | None = None, first_year: int | None = None) -> dict[str, Any] | None:
     """THE DRIFT LINES of a Train result's `drift` block (or its compact figures): per year and over Train, "drift-adjusted
     alpha $X (t Y), drift $Z, beta $B per 1% move, held H of D days", the note (`DRIFT_NOTE`), and with `screen` (min t,
-    years positive: the researcher's `drift_settings`) the screen's verdict. None when the run predates the figures."""
+    years positive: the researcher's `drift_settings`) the screen's verdict over the years it counts from `first_year` (the
+    run's Train span's, `evidence.drift_years`). None when the run predates the figures."""
     numbers = evidence.drift_numbers(block)
     if numbers is None:
         return None
@@ -98,7 +99,7 @@ def drift_view(block: Any, *, screen: tuple[float, int | None] | None = None) ->
     out: dict[str, Any] = {year: line(row) for year, row in numbers["years"].items()}
     out["train"] = line(numbers["pooled"])
     if screen is not None:
-        verdict = evidence.drift_screen(numbers, min_t=screen[0], years_positive=screen[1])
+        verdict = evidence.drift_screen(numbers, min_t=screen[0], years_positive=screen[1], first_year=first_year)
         out["screen"] = (f"passes (Validation needs t >= {screen[0]:g} over Train and alpha positive in {verdict['need']} of "
                          f"{verdict['years']} years)" if verdict["passed"] else f"fails: {verdict['why']}")
     out["note"] = DRIFT_NOTE
@@ -135,7 +136,7 @@ def train_view(result: Mapping[str, Any], *, lineage_trials: int | None = None,
             view["by"].pop(name, None)
             if len(json.dumps(view, default=str)) <= MAX_CHARS:
                 break
-    drift = drift_view(result.get("drift"), screen=screen)
+    drift = drift_view(result.get("drift"), screen=screen, first_year=int(str(result.get("train_from") or "2022-01-03")[:4]))
     if drift is not None:  # outside the cap: a few hundred characters that never cost the researcher a table
         view["drift"] = drift
     return view
