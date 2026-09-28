@@ -1917,6 +1917,19 @@ looks like beta. Validation 2025 and the holdout judge both.
   - The bridge, the screen and the judge run now on sealed sweep boxes (at most 4). The completion supervisor is
     resumed.
 
+- **11:44-11:52Z The screen's bridge check, and why it was accepted.**
+  - On the new 2020-24 image, the three proof versions over 2022-24 differed from their stored rows. The straddle:
+    same 187 trades, P&L -$169. The put vertical: +4 trades. The overnight call: +4 trades, score 0.81 to 0.64.
+  - The pre-registration allows differences only from the new early-2022 history, so the screen stayed blocked while
+    three controlled runs isolated the cause:
+    - **(A)** the old image with the released code reproduced the stored rows to the cent, so the R4 and R5 engine
+      changes changed no result;
+    - **(B)** the old image and **(C)** the new image, both started 2022-04-01, were identical on all three versions,
+      so the data from April 2022 on is identical.
+  - Conclusion: the difference comes only from Q1 2022, the new 2021 history, carried forward through equity path
+    dependence. That is the effect the pre-registration anticipated. The bridge was accepted with that evidence
+    recorded, and the screen started at about 11:52Z.
+
 ### Sprint scoreboard, T0 + 53 h (11:30Z Sept 28)
 
 | # | Metric | Value |
