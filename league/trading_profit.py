@@ -4,27 +4,36 @@ Profit (the site's headline, `trading {as_of, pnl_usd}`) is the complete real-op
 `performance.start_at`, and the site's positions table (the owner, Sept 28, 2026) lists what it is made of, so that the
 lines add up to it to the cent:
 
-- **One row per position** of the live book (`<state>/live.sqlite`), open or closed, an agent's or the House's: its
-  cash (every entry and exit cashflow, less the book's fee estimate) and, while it is open, its remaining quantity's
-  marked value. Each row is rounded to the cent (half up) and Profit adds the rounded rows, so the rows add up exactly.
-  Every historical position is counted, even after its family leaves the public roster.
+- **One row per position** of the live book (`<state>/live.sqlite`) opened since the reset, open or closed, an agent's
+  or the House's: its cash (every entry and exit cashflow, less its fees) and, while it is open, its remaining
+  quantity's marked value. Its fees are the book's estimate until the broker posts the real ones for all of an order's
+  legs; then the broker's charged fees replace the estimate in that position's own row (`account_activity.classify`
+  `fees_by_pid`). Each row is rounded to the cent (half up) and Profit adds the rounded rows, so the rows add up
+  exactly. Every historical position is counted, even after its family leaves the public roster.
 - **Other account activity** (`league/account_activity.py`): what the account's own activity record holds outside the
-  book's positions: the broker's charged option fees less the book's estimates, crypto fees, interest and other returns.
+  book's positions: fees no position carries (the broker's pass-through charges, a liquidation's fee true-up, a fee on
+  an order the book does not hold), crypto fees, interest and other returns. The leftover crypto dust is not counted.
 - **Unreconciled**: anything the account shows that the book cannot account for (a fill on an order the book does not
-  hold, fills that differ from the book's, an activity of a kind nobody classified). Shown as its own line and alerted,
-  never hidden, never left out.
+  hold, fills that differ from the book's, the difference between the broker's cash for an assignment, an exercise or a
+  cash settlement and the book's own value for it, an activity of a kind nobody classified). Shown as its own line and
+  alerted, never hidden, never left out.
 
-Missing marks, unresolved inventory, an uncertain order, a frozen reconciliation or no fresh reading of the account's
-activity produce an unknown Profit, never an invented zero.
+Missing marks, unresolved inventory, an uncertain order, a frozen reconciliation, an account event the book has not
+settled yet (shares an assignment left, a broker fill on a contract the book still holds) or no fresh reading of the
+account's activity produce an unknown Profit, never an invented zero.
 
 The D3 calibration round trips (`league/live/calibration.py`, family `house:calibration`) ARE Profit, since Sept 28,
 2026: they are real money on the owner's account, and the positions table has to add up to the headline. They are
 labelled "House calibration" (a row's `source`), never an agent's. They stay what they were everywhere else: never an
 agent's structure on the site, never a forward record, never a compute line (`league/live/step.py`). The docstring of
-`league/live/calibration.py` still says Profit leaves them out; that file is the owner's to change.
+`league/live/calibration.py` and a comment in `league/live/step.py` still say Profit leaves them out: `league/live/` is
+`league/ci.py`'s FORBIDDEN, so even a comment there makes a release the owner's deploy, and they wait for one.
 
-Nothing here publishes a price: a row carries what the position is (root, structure kind, right, legs, quantity, expiry,
-times) and its dollar P&L, never a strike, a fill price, a mark or a leg's code.
+No field published here is a price: a row carries what the position is (root, structure kind, right, legs, quantity,
+expiry, times to the minute) and its dollar P&L, never a strike, a fill price, a mark or a leg's code. An open row's
+P&L is at the House's current value of the position, so read with its maximum loss (published in `structures` and on
+the tape since before the table) it implies that value per contract. The table's rules allow a position's dollar P&L
+(Sept 28, 2026); valuing open rows from a quote at least fifteen minutes old instead is the owner's decision.
 """
 from __future__ import annotations
 
@@ -172,11 +181,27 @@ def source_of(family: Any) -> str:
     return 'house' if family.startswith('house:') else 'agent'
 
 
+def _expiry_close(day: str | None) -> float | None:
+    """16:00 New York time on `day`: when a contract left at its expiry ends (an unpriced close keeps no close time)."""
+    try:
+        return dt.datetime.combine(dt.date.fromisoformat(str(day)), dt.time(16), tzinfo=ZoneInfo('America/New_York')).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def _minute(epoch: float | None) -> float | None:
+    """Down to the minute: the table shows minutes, and a broker's fill time to the millisecond is a lookup key into the
+    public time and sales (the review of #408)."""
+    return None if epoch is None else float(int(epoch // 60) * 60)
+
+
 def position_rows(positions: Sequence[Mapping[str, Any]], orders: Sequence[Mapping[str, Any]],
                   marks: Mapping[int, Any]) -> list[dict[str, Any]]:
     """Each position as the table's row, before the publisher's allowlist: what it is, whose, when, its P&L. The
     opening and closing times are the broker's fill times where the book kept them (`answer.filled_at`), else the
-    book's own. The legs' contracts and strikes stay here: only their count and their right leave."""
+    book's own, down to the minute; a close the broker made at expiry with no fill the book priced (`unpriced_close`)
+    closed at 16:00 New York time on its expiry. The legs' contracts and strikes stay here: only their count and their
+    right leave."""
     by_oid = {int(o['oid']): o for o in orders if o.get('oid') is not None}
     by_pid: dict[int, list[Mapping[str, Any]]] = {}
     for order in orders:
@@ -202,11 +227,14 @@ def position_rows(positions: Sequence[Mapping[str, Any]], orders: Sequence[Mappi
         opened = opened if opened is not None else _epoch(row.get('opened_at'))
         status = str(row.get('status') or '')
         closed = None
+        expiries = [str(leg.get('expiry') or '') for leg in legs if isinstance(leg, Mapping)]
+        expiry = min(expiries) if expiries and all(expiries) else None
         if status in ('closed', 'unpriced_close'):
             closes = [t for t in (_venue_fill_time(o) for o in mine if o.get('action') in ('close', 'close_leg')) if t is not None]
             closed = max(closes) if closes else _epoch(row.get('closed_at'))
+            if closed is None:
+                closed = _expiry_close(max(expiries) if expiries and all(expiries) else None)
         value = row_value(row, marks)
-        expiries = [str(leg.get('expiry') or '') for leg in legs if isinstance(leg, Mapping)]
         out.append({
             'pid': pid, 'family': str(row.get('family') or ''), 'source': source_of(row.get('family')),
             'underlying': str(row.get('root') or ''), 'structure': str(row.get('type') or ''), 'right': _right(legs),
@@ -214,8 +242,8 @@ def position_rows(positions: Sequence[Mapping[str, Any]], orders: Sequence[Mappi
             'open_quantity': int(row.get('qty') or 0) if status in ('open', 'awaiting_expiry') else 0,
             # Awaiting the broker's expiry, it still holds its contracts; an unpriced close holds none.
             'status': 'open' if status in ('open', 'awaiting_expiry') else 'closed',
-            'expiry': min(expiries) if expiries and all(expiries) else None,
-            'opened_at': _iso(opened), 'closed_at': _iso(closed),
+            'expiry': expiry,
+            'opened_at': _iso(_minute(opened)), 'closed_at': _iso(_minute(closed)),
             'pnl_usd': usd(value) if value is not None else None,
         })
     return out
@@ -286,28 +314,48 @@ def snapshot(root: str | Path, live: Any, *, at: str, never_traded: bool = False
 def complete(book: Mapping[str, Any] | None, other: Mapping[str, Any] | None, *,
              at: str) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """(trading, positions): Profit, and the table's inputs, from the book's `ledger` and the account's activity reading
-    (`league.account_activity`: {as_of, fees_usd, crypto_usd, interest_usd, misc_usd, unreconciled_usd}, or None when
-    there is no fresh one).
+    (`league.account_activity`: {as_of, fees_usd, crypto_usd, interest_usd, misc_usd, unreconciled_usd, fees_by_pid,
+    blocking}, or None when there is no fresh one).
 
-    Profit = the book's rows + Other + Unreconciled, each already exact to the cent, so the table adds up to Profit
-    exactly. Unknown when the book's part is unknown or there is no fresh reading of the account (Profit is only
-    "complete" with it). The positions input is None only when the book could not be read at all."""
+    The broker's posted fee corrections (`fees_by_pid`) go into their positions' rows; one for a position the table
+    does not hold, or whose row has no P&L, stays in Other's fees, so nothing is lost. Profit = the rows + Other +
+    Unreconciled, each already exact to the cent, so the table adds up to Profit exactly. Unknown when the book's part
+    is unknown, there is no fresh reading of the account (Profit is only "complete" with it), or the reading names an
+    event the book has not settled yet (`blocking`). The positions input is None only when the book could not be read
+    at all."""
     if not book or book.get('rows') is None:
         return {'as_of': (book or {}).get('as_of') or at, 'pnl_usd': None}, None
     as_of = book.get('as_of') or at
     parts: dict[str, Decimal] | None = None
     unreconciled: Decimal | None = None
+    corrections: dict[int, Decimal] = {}
+    blocking: list[str] = []
     if other is not None:
         try:
             parts = {part: cents(other[part]) for part in OTHER_PARTS}
             unreconciled = cents(other['unreconciled_usd'])
-        except (KeyError, TypeError, ValueError, InvalidOperation):
+            corrections = {int(pid): cents(value) for pid, value in (other.get('fees_by_pid') or {}).items()}
+            blocking = [str(reason) for reason in other.get('blocking') or []]
+        except (KeyError, TypeError, ValueError, InvalidOperation, AttributeError):
             parts = unreconciled = None
+            corrections, blocking = {}, []
+    rows = []
+    for row in book['rows']:
+        fix = corrections.pop(int(row['pid']), None) if row.get('pid') is not None else None
+        if fix is not None and row.get('pnl_usd') is not None:
+            row = {**row, 'pnl_usd': usd(Decimal(str(row['pnl_usd'])) + fix)}
+        elif fix is not None and parts is not None:
+            parts['fees_usd'] += fix  # its row has no P&L to carry it: Other carries it, never lost
+        rows.append(row)
+    if parts is not None:
+        for fix in corrections.values():  # a position outside the table (opened before the reset): Other's fees
+            parts['fees_usd'] += fix
     pnl = None
-    if book.get('pnl_usd') is not None and parts is not None and unreconciled is not None:
-        pnl = usd(Decimal(str(book['pnl_usd'])) + sum(parts.values(), Decimal(0)) + unreconciled)
+    if book.get('pnl_usd') is not None and parts is not None and unreconciled is not None and not blocking:
+        total_rows = sum((Decimal(str(row['pnl_usd'])) for row in rows), Decimal(0))
+        pnl = usd(total_rows + sum(parts.values(), Decimal(0)) + unreconciled)
     positions = {
-        'as_of': as_of, 'rows': list(book['rows']),
+        'as_of': as_of, 'rows': rows,
         'other': None if parts is None else {'as_of': other.get('as_of'), **{k: usd(v) for k, v in parts.items()}},
         'unreconciled_usd': usd(unreconciled),
     }

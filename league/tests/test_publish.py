@@ -380,7 +380,8 @@ class BuildTest(unittest.TestCase):
         keys_ok(self, body)
         block = body["positions"]
         self.assertEqual(body["trading"], {"as_of": "2026-09-28T14:57:00.000Z", "pnl_usd": "10.90"})
-        self.assertEqual((block["sum_usd"], block["profit_usd"], block["difference_usd"]), ("10.90", "10.90", "0.00"))
+        self.assertEqual(set(block), {"as_of", "rows", "earlier", "other", "unreconciled_usd"}, "the site's exact block")
+        self.assertEqual((block["earlier"], block["unreconciled_usd"]), (None, "0.00"))
         self.assertEqual([row["id"] for row in block["rows"]], ["real:13", "real:14", "real:12", "real:10", "real:11", "real:9"],
                          "open first, newest first; then the most recently closed")
         self.assertEqual((block["rows"][3]["source"], block["rows"][3]["agent"]), ("calibration", None))

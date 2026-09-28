@@ -322,7 +322,7 @@
         "open_quantity": 2,
         "status": "open",
         "expiry": "2026-10-02",
-        "opened_at": "2026-09-28T14:40:05.000Z",
+        "opened_at": "2026-09-28T14:40:00.000Z",
         "closed_at": null,
         "pnl_usd": "-8.00"
       },
@@ -338,7 +338,7 @@
         "open_quantity": 1,
         "status": "open",
         "expiry": "2026-09-28",
-        "opened_at": "2026-09-28T14:02:40.000Z",
+        "opened_at": "2026-09-28T14:02:00.000Z",
         "closed_at": null,
         "pnl_usd": "12.50"
       },
@@ -370,8 +370,8 @@
         "open_quantity": 0,
         "status": "closed",
         "expiry": "2026-10-02",
-        "opened_at": "2026-09-28T13:40:01.000Z",
-        "closed_at": "2026-09-28T14:10:11.000Z",
+        "opened_at": "2026-09-28T13:40:00.000Z",
+        "closed_at": "2026-09-28T14:10:00.000Z",
         "pnl_usd": "-2.20"
       },
       {
@@ -407,7 +407,7 @@
         "pnl_usd": "-4.10"
       }
     ],
-    "folded": null,
+    "earlier": null,
     "other": {
       "as_of": "2026-09-28T14:55:02.000Z",
       "fees_usd": "0.08",
@@ -415,8 +415,6 @@
       "interest_usd": "0.00",
       "misc_usd": "0.00"
     },
-    "sum_usd": "10.90",
-    "profit_usd": "10.90",
-    "difference_usd": "0.00"
+    "unreconciled_usd": "0.00"
   }
 }

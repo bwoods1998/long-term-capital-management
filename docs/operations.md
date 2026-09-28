@@ -156,8 +156,9 @@ deploy`. Deploy the gateway before a House release that needs its change. After 
 (its `DEPLOYMENT.md` has the details). When the publisher's schema or a bound changes, the site
 deploys first: it refuses a whole checkpoint for one field it does not allow. The one exception is the
 positions table (`positions`, Sept 28, 2026): refused, the publisher posts the checkpoint again without it
-and offers it again half an hour later (one warning, "positions table: the site refused ..."), so the House
-may go first.
+and offers it again half an hour later (a warning per distinct reply of the site, "positions table: the site
+refused the positions table (old site, or a row it rejects) ... (the site said: ...)"), so either may go
+first. The planned order for this first release: the House, then the site.
 
 **Checkpoint the House box before risky work:** `python3 scripts/floor_box.py checkpoint --name why
 --ttl-days 30` (`checkpoints` lists them). A checkpoint holds the box's `.env`. Sail's checkpoint
@@ -457,9 +458,14 @@ with `real_money` true (a new money digest); `python3 scripts/live_trading.py --
   account's own activity (`league/account_activity.py`). Each reason the table does not reconcile is said
   once: a fill or a fee on an order the live book does not hold (an owner's trade by hand, a lost answer),
   a finished order whose fills at the broker differ from the book's, an option event on a contract the book
-  never held, an activity of an unknown type; and "differs from Profit by an unreconciled X", the line the
-  page shows beside the rows. Nothing is hidden: fix the book or classify the type, and the line goes back
-  to 0.00. "could not be read": Profit shows a dash ten minutes after the last good reading.
+  never held, a cash event the book never counts, the broker's cash for an assignment, an exercise or an
+  index expiry the book settled against the book's own value, an activity of an unknown type; and "the
+  table carries an unreconciled X", the line the page shows beside the rows. Nothing is hidden: fix the book
+  or classify the type, and the line goes back to 0.00. Profit shows a dash (said once) while shares an
+  assignment left are held, while the book has not taken an assignment, and while a broker fill on a
+  contract the book still holds is unmatched. "position real:N cannot be described" or "open position
+  real:N is not listed": the row is counted in the page's not-listed line. "could not be read": Profit
+  shows a dash ten minutes after the last good reading (a restart keeps the last reading).
 - **Sail's checkpoint API is down.** The House's backup fails as a marked vendor error (one error,
   then warnings at 30 min, 1 h, 2 h, 4 h, then every 6 h) and never rolls a release back. The images
   have two checkpoints each and `images.py` rebuilds them.

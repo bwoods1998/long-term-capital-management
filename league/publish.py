@@ -38,17 +38,18 @@ with any of these keys, and anything not yet available as None or an empty list.
                    max_loss_usd, pnl_usd}]
 
 **Profit and the positions table** (the owner, Sept 28, 2026). `trading {as_of, pnl_usd}` is the complete
-real-options P&L of the Brokerage Account since `performance.start_at`, and `positions` lists what it is made
-of: one row per real position of the live book, open or closed, the agents' and the House's calibration round
-trips alike (`league/trading_profit.py`), an "Other account activity" line from the account's own activity record
-(`league/account_activity.py`: the broker's charged fees less the book's estimates, crypto fees, interest, other
-returns), and `difference_usd`, what the account shows that the book cannot account for (alerted, never
-hidden). The lines add up to Profit to the cent: `sum_usd` is the rows, the folded rows and Other; `profit_usd`
-repeats Profit; `difference_usd` is Profit less `sum_usd`, "0.00" when the book and the broker agree. A row says
-what a position is (root, structure kind, call/put, legs, contracts, expiry, when it opened and closed) and its
-dollar P&L after fees, never a strike, a fill price or a mark. A site that predates the block refuses a
-checkpoint carrying it (its schema is exact): the publisher then sends the checkpoint without it and tries
-again half an hour later, so the House may deploy before the site.
+real-options P&L of the Brokerage Account since `performance.start_at`, and `positions {as_of, rows, earlier, other,
+unreconciled_usd}` lists what it is made of: one row per real position of the live book, open or closed, the agents'
+and the House's calibration round trips alike (`league/trading_profit.py`); `earlier`, the positions not listed (the
+oldest closed past the table's length, and any row the table's fields cannot describe, alerted) as one line; an
+"Other account activity" line from the account's own activity record (`league/account_activity.py`: fees no position
+carries, crypto fees, interest, other returns); and `unreconciled_usd`, what the account shows that the book cannot
+account for (alerted, never hidden). The lines add up to Profit to the cent; `unreconciled_usd` is "0.00" when the book
+and the broker agree. A row says what a position is (root, structure kind, call/put, legs, contracts, expiry, when it
+opened and closed, to the minute) and its dollar P&L after fees, never a strike, a fill price or a mark. A site that
+refuses a checkpoint carrying the block (an older site, or a row it rejects) gets it again without the block, and is
+offered it again half an hour later, with a warning that quotes the site's reply; so the House may deploy before the
+site.
 
 The tape is made from ledger rows (`to_events`): `agent.thought` (and a research summary) is an agent's
 note; a `book.fill` of an option or a structure held as one instrument is a trade (a buy opens it, a sale
@@ -87,6 +88,12 @@ MAX_STRUCTURES = 100
 MAX_POSITIONS = 300
 POSITION_SOURCES = ("agent", "calibration", "house")
 RIGHTS = ("call", "put", "both")
+#: Which side each structure can be on (the site's `STRUCTURE_RIGHTS`, `capital/schema.js`): a vertical, a butterfly,
+#: a calendar or a diagonal is all calls or all puts; a condor, an iron butterfly, a straddle and a strangle are both.
+STRUCTURE_RIGHTS = {"long_call": ("call",), "long_put": ("put",), "debit_vertical": ("call", "put"), "credit_vertical": ("call", "put"),
+                    "iron_condor": ("both",), "iron_butterfly": ("both",), "long_butterfly": ("call", "put"),
+                    "long_straddle": ("both",), "long_strangle": ("both",), "calendar": ("call", "put"), "diagonal": ("call", "put")}
+OTHER_KEYS = ("fees_usd", "crypto_usd", "interest_usd", "misc_usd")
 #: A site that refused the positions table is asked again after this long (`Publisher.publish`).
 POSITIONS_RETRY_SECONDS = 1800
 MAX_CHECKPOINT_BYTES = 512 * 1024
@@ -398,10 +405,18 @@ def _usd(total_cents: int) -> str:
     return money(Decimal(total_cents) / 100, 2, signed=True)
 
 
+def _minute(at: str | None) -> str | None:
+    """A published instant down to the minute (the table shows minutes; a fill time to the millisecond is a lookup key
+    into the public time and sales)."""
+    return None if at is None else at[:16] + ":00.000Z"
+
+
 def site_position(value: Any, published_at: str) -> dict[str, Any] | None:
-    """One row of the positions table, exactly the site's fourteen fields: which position (`real:<pid>`), whose
-    (`source`, and the agent's id when an agent's), what it is, how many, when, and its P&L after fees. None when it
-    cannot be described in them (it then folds into the table's `folded` line, so the sum still holds)."""
+    """One row of the positions table, exactly the site's fourteen fields and the site's own rules for them
+    (`validPosition`, `capital/schema.js`): which position (`real:<pid>`), whose (`source`, and the agent's id when an
+    agent's), what it is (its right fits its structure), how many (an open one holds at least one contract), when (to
+    the minute; a closed one closed no earlier than it opened), and its P&L after fees. None when it cannot be described
+    in them (it then folds into the table's `earlier` line, alerted, so the sum still holds and nothing is hidden)."""
     if not isinstance(value, Mapping):
         return None
     source, agent = value.get("source"), str(value.get("family") or value.get("agent") or "")
@@ -409,32 +424,44 @@ def site_position(value: Any, published_at: str) -> dict[str, Any] | None:
     legs, quantity = _count(value.get("legs")), _count(value.get("quantity"))
     held = _count(value.get("open_quantity"))
     status, expiry = value.get("status"), _day(value.get("expiry"))
-    opened, closed = site_instant(value.get("opened_at")), site_instant(value.get("closed_at"))
+    opened, closed = _minute(site_instant(value.get("opened_at"))), _minute(site_instant(value.get("closed_at")))
     pid = _count(value.get("pid"))
+    pnl = value.get("pnl_usd")
+    pnl = None if pnl is None else _money(pnl, signed=True)
     if (source not in POSITION_SOURCES or (source == "agent" and not _SLUG.match(agent)) or kind not in STRUCTURE_TYPES
-            or right not in RIGHTS or not _UNDERLYING.match(under) or legs is None or not 1 <= legs <= 4 or quantity is None
-            or not 1 <= quantity <= 10_000 or held is None or held > quantity or status not in ("open", "closed") or expiry is None
-            or pid is None or opened is None or not _not_after(opened, published_at)):
+            or right not in STRUCTURE_RIGHTS.get(kind, ()) or not _UNDERLYING.match(under) or legs is None or not 1 <= legs <= 4
+            or quantity is None or not 1 <= quantity <= 10_000 or held is None or held > quantity or status not in ("open", "closed")
+            or expiry is None or pid is None or opened is None or not _not_after(opened, published_at)
+            or (value.get("pnl_usd") is not None and pnl is None)):
         return None
     if status == "closed":
-        if held or closed is None or not _not_after(closed, published_at):
+        if held or closed is None or not _not_after(closed, published_at) or closed < opened:
             return None
     else:
+        if held < 1:
+            return None
         closed = None
     return {"id": f"real:{pid}", "source": source, "agent": agent if source == "agent" else None, "underlying": under,
             "structure": kind, "right": right, "legs": legs, "quantity": quantity, "open_quantity": held, "status": status,
-            "expiry": expiry, "opened_at": opened, "closed_at": closed, "pnl_usd": _money(value.get("pnl_usd"), signed=True)}
+            "expiry": expiry, "opened_at": opened, "closed_at": closed, "pnl_usd": pnl}
+
+
+def _row_id(value: Any) -> str | None:
+    pid = _count(value.get("pid")) if isinstance(value, Mapping) else None
+    return None if pid is None else f"real:{pid}"
 
 
 def site_positions(value: Any, trading: Mapping[str, Any] | None, published_at: str) -> dict[str, Any] | None:
-    """{as_of, rows, folded, other, sum_usd, profit_usd, difference_usd}: the positions table, beside `trading` only.
+    """{as_of, rows, earlier, other, unreconciled_usd} (the site's `validPositions`): the positions table, beside
+    `trading` only.
 
     Rows: open positions first (newest first), then closed ones (the most recently closed first), at most
-    `MAX_POSITIONS`; the oldest closed rows beyond them, and any row the schema cannot describe, fold into `folded`
-    {positions, pnl_usd}. `other` is the "Other account activity" line. `sum_usd` = rows + folded + other (None
-    while any of them is unknown); `profit_usd` = `trading.pnl_usd`; `difference_usd` = Profit - `sum_usd` (None while
-    Profit is unknown): the unreconciled line, "0.00" when the book and the broker agree. Every amount is a whole
-    number of cents, so the sum is exact."""
+    `MAX_POSITIONS`. The oldest closed rows beyond them, and any row the schema cannot describe (of any status: the
+    publisher alerts on those), fold into `earlier` {positions, pnl_usd}; only when more positions are open than the
+    table holds does an open one fold (alerted too). `other` is the "Other account activity" line. `unreconciled_usd`:
+    while Profit is known, Profit less every other line (the account's unreconciled figure when the book and the
+    reading agree, which they do by construction), so the lines always add up; while it is unknown, the reading's own
+    figure, or None. Every amount is a whole number of cents, so the sum is exact."""
     if not isinstance(value, Mapping) or not isinstance(trading, Mapping) or not isinstance(value.get("rows"), (list, tuple)):
         return None
     shown, folded, ids = [], [], set()
@@ -445,44 +472,51 @@ def site_positions(value: Any, trading: Mapping[str, Any] | None, published_at: 
             continue
         ids.add(row["id"])
         shown.append(row)
-    live = sorted((r for r in shown if r["status"] == "open"), key=lambda r: (r["opened_at"], r["id"]), reverse=True)
-    done = sorted((r for r in shown if r["status"] == "closed"), key=lambda r: (r["closed_at"], r["id"]), reverse=True)
+    live = sorted((r for r in shown if r["status"] == "open"), key=lambda r: (r["opened_at"], _pid_of(r)), reverse=True)
+    done = sorted((r for r in shown if r["status"] == "closed"), key=lambda r: (r["closed_at"], r["opened_at"], _pid_of(r)), reverse=True)
     rows = live + done
     while len(rows) > MAX_POSITIONS and rows[-1]["status"] == "closed":
         folded.append(rows.pop()["pnl_usd"])
-    if len(rows) > MAX_POSITIONS:  # more open positions than the table holds: the newest show, the rest fold
+    if len(rows) > MAX_POSITIONS:  # more open positions than the table holds: the newest show, the rest fold (alerted)
         folded += [row["pnl_usd"] for row in rows[MAX_POSITIONS:]]
         rows = rows[:MAX_POSITIONS]
     other = value.get("other")
     if isinstance(other, Mapping):
         at = site_instant(other.get("as_of"))
-        parts = {part: _money(other.get(part), signed=True) for part in ("fees_usd", "crypto_usd", "interest_usd", "misc_usd")}
+        parts = {part: _money(other.get(part), signed=True) for part in OTHER_KEYS}
         other = ({"as_of": at, **parts} if at is not None and _not_after(at, published_at) and None not in parts.values() else None)
     else:
         other = None
-    block = {"as_of": trading["as_of"], "rows": rows,
-             "folded": None, "other": other, "sum_usd": None, "profit_usd": trading.get("pnl_usd"), "difference_usd": None}
-    _fold(block, folded)
-    if block["profit_usd"] is not None and block["difference_usd"] is None:
+    reading = value.get("unreconciled_usd")
+    block = {"as_of": trading["as_of"], "rows": rows, "earlier": None, "other": other,
+             "unreconciled_usd": None if reading is None else _money(reading, signed=True)}
+    _fold(block, folded, trading.get("pnl_usd"))
+    if trading.get("pnl_usd") is not None and block["unreconciled_usd"] is None:
         return None  # a Profit the lines cannot be set beside (never expected): no table, rather than one the site refuses
     return block
 
 
-def _fold(block: dict[str, Any], amounts: list[str | None]) -> None:
-    """Add rows' P&L (money strings, or None when unpriced) to `folded`, and make the sums again."""
+def _pid_of(row: Mapping[str, Any]) -> int:
+    return int(str(row["id"]).split(":", 1)[1])
+
+
+def _fold(block: dict[str, Any], amounts: list[str | None], profit: str | None) -> None:
+    """Add rows' P&L (money strings, or None when unpriced) to `earlier`, and set `unreconciled_usd` again: while Profit
+    is known, Profit less every other line (None if a line is unknown, which a known Profit rules out)."""
     if amounts:
-        before = block["folded"] or {"positions": 0, "pnl_usd": "0.00"}
+        before = block["earlier"] or {"positions": 0, "pnl_usd": "0.00"}
         known = before["pnl_usd"] is not None and None not in amounts
-        block["folded"] = {"positions": before["positions"] + len(amounts),
-                           "pnl_usd": _usd(_cents(before["pnl_usd"]) + sum(_cents(a) for a in amounts)) if known else None}
-    lines = [row["pnl_usd"] for row in block["rows"]] + ([block["folded"]["pnl_usd"]] if block["folded"] else [])
+        block["earlier"] = {"positions": before["positions"] + len(amounts),
+                            "pnl_usd": _usd(_cents(before["pnl_usd"]) + sum(_cents(a) for a in amounts)) if known else None}
+    if profit is None:
+        return
+    lines = [row["pnl_usd"] for row in block["rows"]] + ([block["earlier"]["pnl_usd"]] if block["earlier"] else [])
     other = block["other"]
-    if other is not None:
-        lines += [other[part] for part in ("fees_usd", "crypto_usd", "interest_usd", "misc_usd")]
-    total = None if other is None or None in lines else sum(_cents(line) for line in lines)
-    block["sum_usd"] = None if total is None else _usd(total)
-    profit = block["profit_usd"]
-    block["difference_usd"] = None if total is None or profit is None else _usd(_cents(profit) - total)
+    if other is None or None in lines:
+        block["unreconciled_usd"] = None
+        return
+    lines += [other[part] for part in OTHER_KEYS]
+    block["unreconciled_usd"] = _usd(_cents(profit) - sum(_cents(line) for line in lines))
 
 
 def site_gym(value: Any, published_at: str) -> dict[str, Any] | None:
@@ -609,8 +643,8 @@ def build_checkpoint(inputs: "SiteInputs | Mapping[str, Any]", published_at: str
 def fit(body: dict[str, Any]) -> dict[str, Any]:
     """The body inside the site's byte limit: the oldest retired agents, then the lowest band's, then the
     shadow book's smallest structures leave first, then the positions table's oldest rows fold into its
-    `folded` line (a row never simply leaves: the table must still add up to Profit). The totals the page
-    shows are the House's, not a count."""
+    `earlier` line, the oldest closed first (a row never simply leaves: the table must still add up to Profit;
+    the publisher alerts on an open one folded). The totals the page shows are the House's, not a count."""
     size = lambda: len(canonical(body).encode("utf-8"))  # noqa: E731
     positions = body.get("positions")
     while size() > MAX_CHECKPOINT_BYTES and (body["agents"] or body["structures"] or (positions and positions["rows"])):
@@ -619,7 +653,8 @@ def fit(body: dict[str, Any]) -> dict[str, Any]:
         elif body["structures"]:
             body["structures"].pop()
         else:
-            _fold(positions, [positions["rows"].pop()["pnl_usd"] for _ in range(min(10, len(positions["rows"])))])
+            _fold(positions, [positions["rows"].pop()["pnl_usd"] for _ in range(min(10, len(positions["rows"])))],
+                  (body.get("trading") or {}).get("pnl_usd"))
     return body
 
 
@@ -878,8 +913,13 @@ class Publisher:
         from .account_activity import ActivityLedger
 
         self.activity = ActivityLedger(self.broker, start, self.state_path.parent, clock=clock) if self.broker is not None and start else None
+        self._activity_saved: float | None = None
+        if self.activity is not None and self._state.get("activity") and self.activity.restore(self._state["activity"]):
+            self._activity_saved = self.activity.read_at  # a restart keeps Profit: the last reading, while it is fresh
         self._positions_refused: float | None = None
+        self._positions_refusal: str | None = None
         self._activity_error: str | None = None
+        self._inputs_positions: Mapping[str, Any] | None = None
 
     def _load(self) -> dict[str, Any]:
         try:
@@ -950,17 +990,19 @@ class Publisher:
             body = {key: value for key, value in body.items() if key != "positions"}
         status, reply = self.post("/checkpoint", body)
         if status == 400 and "positions" in body:
-            # A site that predates the positions table refuses the whole checkpoint (its schema is exact): the rest of
-            # the checkpoint still goes, and the table is offered again in half an hour.
+            # The site refused the checkpoint with the table (an older site's exact schema, or a row or a sum it rejects):
+            # the rest of the checkpoint still goes, and the table is offered again in half an hour. The warning quotes
+            # the site's reply, and is said again whenever the reply changes.
             plain = {key: value for key, value in body.items() if key != "positions"}
             retried, again = self.post("/checkpoint", plain)
             if retried in (200, 409):
-                if self._positions_refused is None:
-                    self._alert(house, "the site refused the positions table (its schema predates it): the checkpoint went "
-                                       "without it; deploy the site's positions table")
-                self._positions_refused, status, reply = self.clock(), retried, again
+                why = " ".join(str(reply).split())[:200]
+                if why != self._positions_refusal:
+                    self._alert(house, f"the site refused the positions table (old site, or a row it rejects): the checkpoint "
+                                       f"went without it and the table is offered again in half an hour (the site said: {why})")
+                self._positions_refused, self._positions_refusal, status, reply = self.clock(), why, retried, again
         elif status in (200, 409) and "positions" in body:
-            self._positions_refused = None
+            self._positions_refused = self._positions_refusal = None
         if status not in (200, 409):
             raise PublishError(f"the site refused the checkpoint: HTTP {status} {reply}", status=status)
         self._alert_positions(house, checkpoint)
@@ -975,26 +1017,54 @@ class Publisher:
                 pass
 
     def _alert_positions(self, house: Any, body: Mapping[str, Any]) -> None:
-        """Each new reason the positions table does not reconcile, once (remembered in publish.json): the account's
-        activity problems (`ActivityLedger.problems`) and each new unreconciled difference between the table and
-        Profit. A failed read of the account is said when it starts or changes (Profit is unknown until it reads)."""
+        """Each new reason the positions table does not reconcile or Profit is unknown, once (remembered in
+        publish.json): the account's activity problems and what keeps Profit unknown (`ActivityLedger.problems`), each
+        new unreconciled line, and each position the table does not list for a reason other than its age (a row its
+        fields cannot describe, or an open one past the table's length or its byte limit). A failed read of the account
+        is said when it starts or changes (Profit is unknown once the last reading ages out). The last reading is kept
+        in publish.json, so a restart keeps Profit."""
         if self.activity is None:
             return
         problems = self.activity.problems()
-        difference = (body.get("positions") or {}).get("difference_usd")
+        block = body.get("positions") or {}
+        difference = block.get("unreconciled_usd")
         if difference not in (None, "0.00"):
-            problems.append(f"the table differs from Profit by an unreconciled {difference}")
+            problems.append(f"the table carries an unreconciled {difference} beside the positions")
+        problems += self._unlisted(block, body.get("published_at"))
         said = list(self._state.get("positions_alerted") or [])
         fresh = [problem for problem in dict.fromkeys(problems) if problem not in said]
         for problem in fresh:
             self._alert(house, problem)
         if fresh:
             self._state["positions_alerted"] = (said + fresh)[-500:]
+        saved = self.activity.saved()
+        renewed = saved is not None and saved["read_at"] != self._activity_saved
+        if renewed:
+            self._state["activity"], self._activity_saved = saved, saved["read_at"]
+        if fresh or renewed:
             self._save()
         error = self.activity.error
         if error and error != self._activity_error:
             self._alert(house, f"the account's activity could not be read, so Profit is unknown once the last reading ages out ({error})")
         self._activity_error = error
+
+    def _unlisted(self, block: Mapping[str, Any], published_at: Any) -> list[str]:
+        """The positions the table folded into its `earlier` line for a reason other than being old and closed."""
+        given = self._inputs_positions
+        if not block or not given or not isinstance(given.get("rows"), (list, tuple)) or not published_at:
+            return []  # no table published at all: nothing was folded
+        listed = {row.get("id") for row in block.get("rows") or []}
+        out = []
+        for raw in given["rows"]:
+            row_id = _row_id(raw) or "a position with no id"
+            if row_id in listed:
+                continue
+            if site_position(raw, str(published_at)) is None:
+                out.append(f"position {row_id} cannot be described in the table's fields: it is counted in the "
+                           "not-listed line")
+            elif isinstance(raw, Mapping) and raw.get("status") == "open":
+                out.append(f"open position {row_id} is not listed (the table is full): it is counted in the not-listed line")
+        return out
 
     # -------------------------------------------------------------- the account
     def account(self, house: Any = None) -> dict[str, Any] | None:
@@ -1050,6 +1120,7 @@ class Publisher:
             start_at=self.performance.get("start_at")), None)
         reading = self._guard(self.activity.read, None) if self.activity is not None else None
         trading, positions = self._guard(lambda: complete(record, reading, at=now), ({"as_of": now, "pnl_usd": None}, None))
+        self._inputs_positions = positions
 
         inputs = SiteInputs(
             started_at=given["started_at"] if "started_at" in given else self._guard(lambda: self._started(house), None),
