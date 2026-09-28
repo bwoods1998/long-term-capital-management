@@ -83,7 +83,29 @@ RATES: tuple[tuple[dt.date, float], ...] = tuple((D(day), (upper - 0.10) / 100.0
 ))
 _RATE_DAYS = [d for d, _ in RATES]
 
-EVENT_NAMES = ("fomc", "cpi", "jobs", "monthly_opex", "quarter_end", "half_day")
+#: Stock splits of the Gym's roots: (root, ex-date, factor), the ex-date being the first session the shares trade split
+#: and the factor new shares per old (3.0 for a 3-for-1, 0.1 for a 1-for-10 reverse split). Public: each was announced
+#: weeks before, so a trader knew it on the eve, as the macro calendars above. The ENGINE uses it (`engine.split_eves`:
+#: a root's positions close on the eve, since the OCC's adjusted contracts are not in the chain under the old keys); a
+#: program never sees it. Only this table closes anything: the price cross-check (`engine.split_check`, the prior
+#: session's last price over the next session's first near a whole factor) only raises an alert, because read on its
+#: own it would take an overnight crash of about half for a 2-for-1 split, a look into the next session. The eight
+#: below were found by that cross-check in the Gym image's underlying for all 25 roots, 2022-01-03..2025-12-31, and
+#: confirmed against the issuers' announcements (the review of #406, Sept 28, 2026). The Train extension's 2020-21
+#: splits are NOT here: add them, checked the same way, before a run covers those years (the cross-check flags a
+#: split-like gap with no entry in the result).
+SPLITS: tuple[tuple[str, dt.date, float], ...] = (
+    ("TQQQ", D("2022-01-13"), 2.0),
+    ("AMZN", D("2022-06-06"), 20.0),
+    ("GOOGL", D("2022-07-18"), 20.0),
+    ("TSLA", D("2022-08-25"), 3.0),
+    ("SMH", D("2023-05-05"), 2.0),
+    ("NVDA", D("2024-06-10"), 10.0),
+    ("SMCI", D("2024-10-01"), 10.0),
+    ("TQQQ", D("2025-11-20"), 2.0),
+)
+
+EVENT_NAMES =("fomc", "cpi", "jobs", "monthly_opex", "quarter_end", "half_day")
 
 
 def rate_on(day: dt.date) -> float:

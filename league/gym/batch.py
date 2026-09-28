@@ -3,7 +3,7 @@
     python -m league.gym.batch --programs DIR --window train --roots SPY,QQQ --out FILE
         [--store /data/store] [--workers 8] [--split 1] [--stress 1.0] [--capital 10000]
         [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--fill-model PATH] [--detail full|summary]
-        [--gate REASON] [--check]
+        [--gate REASON] [--check] [--split-check]
 
 DIR holds programs as `*.py`; a `<name>.json` beside one holds its parameter overrides, one dict or
 a list of dicts (each a separate run: a trial). Each worker takes a share of the programs and runs
@@ -36,6 +36,11 @@ twin, or `--stress` above 1) widens every half-spread by the factor, charges pas
 half-spread, and HALVES every passive fill hazard (`fills.STRESS_HAZARD`): "positive at 1.5x" also
 means positive when patient orders fill half as often, since the package rate is an upper bound.
 
+`--split-check` runs no program: it cross-checks the stock-split table (`events.SPLITS`, the only thing that closes
+positions on a split's eve) against the window's underlying prices for the roots (`engine.split_check`), prints each
+disagreement and exits 5 when there is one: a split-like overnight ratio with no table entry, or a table split the prices
+do not show. Run it when a window's data grows (a new year, the forward days) and before a new root joins.
+
 Each unit (a worker's share of programs over one segment) runs in its own process with a deadline
 (`--unit-timeout`, default 30 s a program-day and at least 30 minutes): past it the process is killed
 and its programs come back as errors, so a program stuck in C code cannot hang a Gym box.
@@ -64,7 +69,7 @@ from typing import Any, Sequence
 
 from . import ENGINE_VERSION
 
-EXIT_OK, EXIT_USAGE, EXIT_MISSING, EXIT_SEALED = 0, 2, 3, 4
+EXIT_OK, EXIT_USAGE, EXIT_MISSING, EXIT_SEALED, EXIT_SPLITS = 0, 2, 3, 4, 5
 #: Trading days a later segment of a split run replays first, without trading (a week).
 WARMUP_DAYS = 5
 
@@ -315,6 +320,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--gate", help="the gate's reason for opening sealed days (the store must carry its mark)")
     parser.add_argument("--unit-timeout", type=float, default=None, help="seconds before a worker's unit is killed")
     parser.add_argument("--check", action="store_true", help="only report what the store holds")
+    parser.add_argument("--split-check", action="store_true",
+                        help="only cross-check the stock-split table against the window's prices (exit 5 on a disagreement)")
     args = parser.parse_args(argv)
     roots = [r.strip().upper() for r in args.roots.split(",") if r.strip()]
     try:
@@ -328,6 +335,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(f"the box is missing data: no {args.window} days for {', '.join(missing)} in {args.store}", file=sys.stderr)
                 return EXIT_MISSING
             return EXIT_OK
+        if args.split_check:
+            from .engine import split_check
+
+            days = store.days(args.window, [], start=_date(args.start), end=_date(args.end), kind="underlying")
+            alerts = split_check(store, roots, days)
+            print(json.dumps({"window": args.window, "roots": roots, "days": len(days), "alerts": alerts}, sort_keys=True))
+            return EXIT_SPLITS if alerts else EXIT_OK
         if not args.programs or not args.out:
             parser.error("--programs and --out are required (or --check)")
         jobs = find_programs(args.programs)

@@ -31,8 +31,9 @@ instance is never real, never tuition, never a band move, never a forward row, n
 family retires or leaves the Gym band. Its programs run in their OWN decider child, asked after every real decision of
 the minute has been sent, so no observe program can delay, starve or reset a real one.
 
-THE CALIBRATION ROUND TRIPS (D3; `league/live/calibration.py`): the House's own 1-lot SPY and QQQ debit verticals, sent
-through the same order path, only while real opens may go and the paper proof has passed; never evidence.
+THE CALIBRATION ROUND TRIPS (D3; `league/live/calibration.py`): the House's own 1-lot SPY, QQQ and IWM debit verticals,
+hourly from 10:00 to 15:00 ET (a patient 25-minute mid at 12:00 and 14:00), sent through the same order path, only while
+real opens may go and the paper proof has passed; never evidence.
 
 Real opens need every one of: `config.json` `real_money`; the grant `options-swarm-20260928` active on the money digest
 in force (`House.grant`); the gateway's kill switch off; no stop tripped (`money.Stops`); reconciliation clean; the

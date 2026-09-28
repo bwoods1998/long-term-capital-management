@@ -3,7 +3,9 @@
 same trades as the Gym's own `engine.Account.step`. And the live chain's contract identities are the store's."""
 
 import datetime as dt
+import math
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 try:
@@ -19,6 +21,11 @@ if HAVE:
     from league.live.decider import InlineDecider
     from league.live.shadow import ShadowAccount, needs_of
     from league.tests.live_fakes import MONDAY, Clock, Market, at
+    from league.gym import legs as L
+    from league.gym import venue as V
+    from league.gym.ctx import Snapshot
+    from league.live.real import RLeg, RPosition
+    from league.live.step import OptionsLive
 
 PROGRAM = '''
 NEEDS = {"roots": ["SPY"], "dte": [0, 3], "band": 0.02, "cadence": 2, "history": 3, "start": 571, "end": 958}
@@ -193,6 +200,88 @@ class QuoteRevision(unittest.TestCase):
         self.assertEqual(chain.quote_revision, 4)
         self.assertFalse(chain.record(0, {}, open_epoch=0))
         self.assertEqual(chain.quote_revision, 6)
+
+
+@unittest.skipUnless(HAVE, "numpy not installed")
+class LiveCloseFloor(unittest.TestCase):
+    """The Gym's close floor is the live path's. The engine fills a close whose natural is below the package's least at
+    that least (`engine.Account._in_bounds`): honest only because a real close is never sent below it. The live close
+    limit is floored in `league/live/step.py` `OptionsLive._send_close` ("A close's limit stays one the gateway takes":
+    0 for a debit structure, -(collateral - 0.01) for a credit one, a tick for a long call or put). That file is a money
+    file: this test runs its code, never edits it. For each structure type with a bounded range, a close is sent into a
+    blown-out quote (every leg bid 0.00 and asked 99.00: a natural far below the least), as the House's forced close and
+    as a program's close at the natural; the limit sent is at or above `legs.value_bounds`'s least."""
+
+    DAY, EXPIRY = dt.date(2026, 9, 28), "2026-09-29"
+    #: (type, [(side, ratio, is_call, strike)]): every bounded type the Gym admits (calendars and diagonals have no bound).
+    STRUCTURES = [
+        ("long_call", [(1, 1, True, 600.0)]),
+        ("long_put", [(1, 1, False, 600.0)]),
+        ("debit_vertical", [(1, 1, True, 600.0), (-1, 1, True, 605.0)]),
+        ("debit_vertical", [(1, 1, False, 605.0), (-1, 1, False, 600.0)]),
+        ("credit_vertical", [(-1, 1, False, 600.0), (1, 1, False, 595.0)]),
+        ("credit_vertical", [(-1, 1, True, 600.0), (1, 1, True, 605.0)]),
+        ("iron_condor", [(1, 1, False, 590.0), (-1, 1, False, 595.0), (-1, 1, True, 605.0), (1, 1, True, 612.0)]),
+        ("iron_butterfly", [(1, 1, False, 595.0), (-1, 1, False, 600.0), (-1, 1, True, 600.0), (1, 1, True, 605.0)]),
+        ("long_butterfly", [(1, 1, True, 595.0), (-1, 2, True, 600.0), (1, 1, True, 605.0)]),
+        ("long_straddle", [(1, 1, True, 600.0), (1, 1, False, 600.0)]),
+        ("long_strangle", [(1, 1, False, 595.0), (1, 1, True, 605.0)]),
+    ]
+
+    def send_close(self, type_, shape, *, forced):
+        rules = V.rules_for("SPY", open_minute=570, close_minute=960)
+        n = len(shape)
+        snap = Snapshot("SPY", 600, 600.0, dte=[1] * n, strike=[k for _, _, _, k in shape], is_call=[c for _, _, c, _ in shape],
+                        bid=[0.0] * n, ask=[99.0] * n, keys=list(range(n)))
+        legs = [L.LegFill(i, i, side, ratio, 1, k, call) for i, (side, ratio, call, k) in enumerate(shape)]
+        collateral, _ = L.classify(type_, "SPY", legs, rules)
+        pos = RPosition(pid=1, instance="k", family="probe", type=type_, root="SPY",
+                        legs=[RLeg(f"SPY-{i}", side, ratio, call, k, self.EXPIRY, i) for i, (side, ratio, call, k) in enumerate(shape)],
+                        qty=1, opened_qty=1, entry=1.0, max_loss_share=1.0, collateral=collateral)
+        sent = []
+
+        class Book:
+            def path_refusal(self, *args, **kwargs):
+                return None
+
+            def new_order(self, **kwargs):
+                sent.append(kwargs)
+                return SimpleNamespace(oid=1, dispatched=True, status="working", answer={})
+
+            def send(self, order):
+                pass
+
+            def _save_position(self, pos):
+                pass
+
+        live = SimpleNamespace(book=Book(), pending_exits={}, clock=lambda: 0.0, _yield_contracts=lambda *a, **k: False,
+                               _save_pending=lambda: None, _killed=lambda: False, _instance_spent=lambda *a, **k: None)
+        day = SimpleNamespace(rules={"SPY": rules}, chains={"SPY": SimpleNamespace(index_of=lambda keys: keys)},
+                              snapshot=lambda root, mi: snap, day=self.DAY, open_min=570)
+        refused = OptionsLive._send_close(live, pos, day, 30, forced=forced, why="probe", out={})
+        self.assertIsNone(refused, f"{type_}: {refused}")
+        [order] = sent
+        natural, _ = L.natural_value(snap, legs, "close")
+        return order["limit_value"], natural, L.value_bounds(legs, [self.EXPIRY] * n)
+
+    def test_the_live_close_floor_is_at_or_above_the_gyms_least(self):
+        for type_, shape in self.STRUCTURES:
+            for forced in (False, True):
+                with self.subTest(type=type_, legs=shape, forced=forced):
+                    limit, natural, (lo, hi) = self.send_close(type_, shape, forced=forced)
+                    self.assertTrue(math.isfinite(lo), "a bounded type")
+                    if any(side < 0 for side, _, _, _ in shape):
+                        self.assertLess(natural, lo, "the quote is below the least: the floor is what is tested")
+                    else:
+                        # All long legs: bids are never negative, so the natural is never below the least (0); a forced
+                        # close's concession (0.01 a try under the natural) is what the floor holds here.
+                        self.assertEqual((natural, lo), (0.0, 0.0))
+                    self.assertGreaterEqual(limit, lo - 1e-9)
+                    self.assertLessEqual(limit, hi + 1e-9)
+
+    def test_calendars_and_diagonals_have_no_bound(self):
+        legs = [L.LegFill(0, 0, -1, 1, 0, 600.0, True), L.LegFill(1, 1, 1, 1, 0, 600.0, True)]
+        self.assertEqual(L.value_bounds(legs, ["2026-09-29", "2026-10-02"]), (-math.inf, math.inf))
 
 
 if __name__ == "__main__":

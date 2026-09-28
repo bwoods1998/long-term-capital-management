@@ -151,6 +151,16 @@ An order meets the quotes of the minute AFTER your decision, and every chance in
   prints there traded through the whole displayed queue ahead of you. A limit behind the touch
   fills only when the market comes through it.
 
+A package never trades outside what it can be worth at expiry (a debit vertical 0 to its width, a credit
+vertical or condor minus its widest wing to 0): when a leg's quote blows out (an index leg in the money
+quoted with no bid and a far ask, an FOMC minute, the last minutes of an expiry) and the legs' touches add up to a price
+outside that range, that minute is no market: an open at or below the package's least (a vertical for 0.00) or above
+its most, or a close that would receive more than its most, fills nothing that minute whatever its limit (it keeps
+working; arriving then, it is judged by the natural it was decided on), and a close that would receive less than its
+least fills at that least, so a close never loses more than the maximum loss (an equity-root expiry close held back to
+the cutoff is exercised into shares instead, and an overnight gap can exceed it). The account's mark is the last mid
+inside the range; an exit at a stale mark, or a window end over the most, leaves at the last natural the package
+traded at, with fees. Calendars and diagonals have no such bound.
 A long wing with no bid is closed at zero. Fees: OCC, ORF, CAT on every contract, TAF and the SEC fee
 ($20.60 a million of premium) on sells, $0.50 plus exchange fees on index options. Buying power: an open reserves (maximum loss + fees) x 1.1; a credit position holds its
 collateral. A debit at or over a bounded structure's width is refused. The gate also runs you at 1.5x
@@ -173,7 +183,13 @@ at the close at intrinsic value (the recorded settlement where the store has one
 index level), never liquidated; hold them to expiry if you like; no calendars there. An expiry on a
 day the run did not replay settles all the same. At the end of a run everything open is closed at
 the natural; at an inner boundary of a split Train run it is valued at the mid with no fee
-(`split_mark`). Validation, holdout and forward runs are never split.
+(`split_mark`). Validation, holdout and forward runs are never split. A stock split is another
+matter: a name's listed contracts change at a split, so on its eve (from the Gym's table of public
+splits, never from prices) everything open on that name is closed at the natural of the session's last
+quoted minute (`stock_split`; leg by leg, at a leg's last quote or else its intrinsic value, when no
+minute quotes them all: `stock_split_legs`), and an opening order on it that would be held across the
+split (a leg expiring after the eve) is not placed. The underlying's history is the price as traded,
+not split-adjusted: a split shows in it as a gap.
 
 ## What a run tells you
 

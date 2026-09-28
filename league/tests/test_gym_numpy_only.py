@@ -40,6 +40,7 @@ ask = np.full((M, 2), np.nan)
 bid[1:, 0], ask[1:, 0] = 2.00, 2.10
 bid[1:, 1], ask[1:, 1] = 1.40, 1.50
 bid[130:, 0], ask[130:, 0] = 3.00, 3.10
+bid[130:, 1], ask[130:, 1] = 1.90, 2.00   # the close's natural 3.00 - 2.00 = 1.00: a 1-wide vertical at its most
 sizes = np.full((M, 2), 50, dtype=np.int32)
 chain = DayChain(root="SPY", day=D1, open_min=570, close_min=960, expiration=exp, dte=np.ones(2, dtype=np.int16),
                  strike=strikes, is_call=calls, bid=bid, ask=ask, bid_size=sizes, ask_size=sizes,
@@ -82,7 +83,9 @@ class NumpyOnly(unittest.TestCase):
     def test_an_account_opens_and_closes_without_pyarrow(self):
         done = subprocess.run([sys.executable, "-c", SCRIPT], capture_output=True, text=True, cwd=REPO, timeout=120)
         self.assertEqual(done.returncode, 0, done.stderr[-2000:])
-        self.assertEqual(done.stdout.split(), ["ok", "0.7", "1.5", "program", "2023-03-06"])
+        # (Until Sept 28 the short leg stayed at 1.40/1.50 and the vertical closed at 1.50, more than its 1.00 width:
+        # the engine now never trades a package outside what it can be worth, test_gym_package_bounds.py.)
+        self.assertEqual(done.stdout.split(), ["ok", "0.7", "1.0", "program", "2023-03-06"])
 
 
 if __name__ == "__main__":

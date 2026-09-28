@@ -27,18 +27,36 @@ a leg has no quote). A segment of a split run (`RunConfig.split_mark`) ends diff
 still open is valued at the mid with no fee (an accounting split, not a trade), and a later segment's
 programs first replay `RunConfig.warmup` prior days without trading (`batch.py`).
 
+A STOCK SPLIT is a different thing: the OCC adjusts a name's listed options (strikes, deliverable,
+often the symbol), so a contract held into the split session is not in that session's chain under its
+old key and can be neither marked nor closed; left alone it would expire against the post-split price
+(a call spread worthless, a put spread at its width). The splits come from a public table
+(`events.SPLITS`: root, ex-date, factor; announced weeks ahead, as the macro calendars are), never from
+the prices: on the EVE (the root's last replayed session before the ex-date, `split_eves`) every
+position on that root still open at the close is closed at the natural of the session's last minute
+that quotes every leg, with its fees (exit reason `stock_split`; where no minute of the last half hour
+quotes them all, leg by leg at each leg's last quoted natural there, else its intrinsic value at the
+eve's level, with fees: `stock_split_legs`), assigned shares of that root are marked at the eve's
+settlement level, and an opening order on it that would be held across the split (a leg expiring
+after the eve) is not placed. That refusal is counted in the result's reject reasons but never said to
+the program (`ctx.rejects`). The price cross-check (`split_alert`: the prior session's last price over
+the session's first near a whole factor) only raises an alert, recorded in the result's `stock_splits`
+block: read on its own it would take an overnight crash of about half for a 2-for-1 split, a look
+ahead. A run with no split in the table for its roots and days, and no alert, runs exactly as before.
+
 Deterministic: the same programs, parameters, store files, fill model and window give the same
 result (`results.py` hashes it). numpy only here; the store reader brings pyarrow.
 """
 
 from __future__ import annotations
 
+import bisect
 import copy
 import datetime as dt
 import math
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Sequence
+from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 import numpy as np
 
@@ -63,6 +81,119 @@ def settlement_level(u: Any) -> float:
             if known.size:
                 return float(known[-1])
     return float("nan")
+
+
+#: The price cross-check (`split_factor`): the prior session's last price over the next session's first within this share
+#: of an integer k (2..SPLIT_MAX_FACTOR), or of 1/k. On the Gym image's 25 roots, 2022-2025 (Sept 28, 2026), the eight
+#: splits of `events.SPLITS` sit within 0.06 of theirs and the largest overnight move that was not a split (a 29% gap
+#: down) is 0.29 short of 2. It never closes anything: only the table does (the module docstring).
+SPLIT_TOLERANCE = 0.15
+SPLIT_MAX_FACTOR = 100
+
+
+def split_factor(before: float, after: float) -> float | None:
+    """The split the prices suggest between two sessions of one root, from the prior session's last price (`before`)
+    and the next session's first (`after`): k for a k-for-1 split, 1/k for a 1-for-k reverse split, None for none."""
+    try:
+        before, after = float(before), float(after)
+    except (TypeError, ValueError):
+        return None
+    if not (math.isfinite(before) and math.isfinite(after) and before > 0 and after > 0):
+        return None
+    ratio = before / after
+    k = round(ratio if ratio >= 1.0 else 1.0 / ratio)
+    if not 2 <= k <= SPLIT_MAX_FACTOR:
+        return None
+    off = ratio / k - 1.0 if ratio >= 1.0 else ratio * k - 1.0
+    if abs(off) > SPLIT_TOLERANCE:
+        return None
+    return float(k) if ratio >= 1.0 else 1.0 / k
+
+
+def split_label(factor: float) -> str:
+    """'3-for-1' (a split), '1-for-10' (a reverse split)."""
+    return f"{factor:g}-for-1" if factor >= 1.0 else f"1-for-{1.0 / factor:g}"
+
+
+def _splits(table: Any = None) -> tuple[tuple[str, dt.date, float], ...]:
+    from . import events as EV
+
+    return tuple(EV.SPLITS if table is None else table)
+
+
+def split_eves(store: Any, roots: Sequence[str], days: Sequence[dt.date], table: Any = None) -> list[dict[str, Any]]:
+    """The table's splits (`events.SPLITS`) that fall on the run: for each split of a root in `roots`, its eve is the
+    root's last replayed session before the ex-date (a day of `days` whose chain the engine loads: NBBO and underlying),
+    when the run replays the root on or after the ex-date or that session is the calendar's last one before it (a run or
+    segment ending on the eve closes at the natural too, as the whole run does). Reads the calendar and the files'
+    presence only, never a price. [{"root", "ex_date", "factor", "eve"}], by eve."""
+    splits = [s for s in _splits(table) if s[0] in set(roots)]
+    if not splits or not days:
+        return []
+    calendar = sorted(store.trading_days())
+    out = []
+    for root, ex, factor in splits:
+        mine = [d for d in days if store.has("nbbo", root, d) and store.has("underlying", root, d)]
+        before = [d for d in mine if d < ex]
+        if not before:
+            continue
+        eve = before[-1]
+        i = bisect.bisect_right(calendar, eve)
+        if any(d >= ex for d in mine) or (i < len(calendar) and calendar[i] >= ex):
+            out.append({"root": root, "ex_date": ex.isoformat(), "factor": float(factor), "eve": eve})
+    return sorted(out, key=lambda s: (s["eve"], s["root"]))
+
+
+def split_alert(root: str, prior_day: dt.date | None, prior_close: float, day: dt.date, first: float,
+                table: Any = None) -> dict[str, Any] | None:
+    """The price cross-check of one root's overnight from `prior_day` (its last session, closing at `prior_close`) to
+    `day` (opening at `first`), against the table: an alert when the prices show a split-like ratio the table has no
+    split for in (prior_day, day], or the table has one the prices do not show; None when they agree. An alert is
+    recorded in the result, never acted on."""
+    if prior_day is None:
+        return None
+    listed = [float(f) for r, ex, f in _splits(table) if r == root and prior_day < ex <= day]
+    want = math.prod(listed) if listed else None
+    seen = split_factor(prior_close, first)
+    if want is None and seen is None:
+        return None
+    if want is not None and seen is not None and abs(seen / want - 1.0) < 1e-9:
+        return None
+    ratio = float(prior_close) / float(first) if (math.isfinite(prior_close) and math.isfinite(first) and first > 0) else None
+    return {"root": root, "day": day.isoformat(), "prior_day": prior_day.isoformat(),
+            "ratio": None if ratio is None else round(ratio, 4), "table": want, "prices": seen}
+
+
+def split_check(store: Any, roots: Sequence[str], days: Sequence[dt.date], table: Any = None) -> list[dict[str, Any]]:
+    """The cross-check over a store's days (`batch.py --split-check`): every alert (`split_alert`) between consecutive
+    days of `days` on which each root has an underlying file."""
+    out = []
+    for root in roots:
+        prior: tuple[dt.date, float] | None = None
+        for day in days:
+            if not store.has("underlying", root, day):
+                continue
+            first, last = _price_ends(store, root, day)
+            if prior is not None:
+                alert = split_alert(root, prior[0], prior[1], day, first, table)
+                if alert is not None:
+                    out.append(alert)
+            if math.isfinite(last):
+                prior = (day, last)
+    return out
+
+
+def _price_ends(store: Any, root: str, day: dt.date) -> tuple[float, float]:
+    ends = getattr(store, "price_ends", None)
+    if callable(ends):
+        return ends(root, day)
+    price = np.asarray(store.underlying(root, day).price, dtype=np.float64)
+    known = price[np.isfinite(price) & (price > 0)]
+    return (float(known[0]), float(known[-1])) if known.size else (math.nan, math.nan)
+
+
+class Unsaid(L.Refused):
+    """A refusal counted in the result's reject reasons but never said to the program (`ctx.rejects`)."""
 
 
 @dataclass
@@ -105,13 +236,15 @@ class History:
         self.depth = max(0, int(depth))
         self.rows: dict[str, list[tuple[float, float, float, float]]] = {}
 
-    def add(self, root: str, prices: np.ndarray) -> None:
+    def add(self, root: str, prices: np.ndarray) -> bool:
+        """Add one session (True when it had a price to add)."""
         p = prices[np.isfinite(prices)]
         if p.size == 0 or self.depth == 0:
-            return
+            return False
         rows = self.rows.setdefault(root, [])
         rows.append((float(p[0]), float(p.max()), float(p.min()), float(p[-1])))
         del rows[:-self.depth]
+        return True
 
     def arrays(self, root: str, n: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         rows = self.rows.get(root, [])[-n:] if n > 0 else []
@@ -195,10 +328,12 @@ class DayData:
     """One trading day: each root's chain once, and one shared snapshot per root and minute."""
 
     def __init__(self, store: "Store", day: dt.date, roots: Sequence[str], events: EventCalendar, history: History,
-                 ordinal: int):
+                 ordinal: int, *, split_eve: Mapping[str, float] | None = None):
         self.day = day
         self.store = store
         self.ordinal = ordinal
+        #: {root: factor} for each root whose next replayed session is a stock split (`split_eves`): today is its eve.
+        self.split_eve: dict[str, float] = dict(split_eve or {})
         self.weekday = day.weekday()
         self.open_min, self.close_min = store.session(day)
         self.minutes = self.close_min - self.open_min + 1
@@ -358,10 +493,17 @@ class Position:
     idx: np.ndarray | None = None  # today's snapshot index of each leg (-1: not in today's chain)
     last_mark: float = math.nan
     closing: int = 0              # working close order id (0: none)
+    range_: tuple[float, float] | None = field(default=None, repr=False, compare=False)   # `bounds()`, once
 
     @property
     def credit(self) -> bool:
         return self.type in L.CREDIT
+
+    def bounds(self) -> tuple[float, float]:
+        """What the package can be worth a share at expiry (`legs.value_bounds`), from its legs' own expirations."""
+        if self.range_ is None:
+            self.range_ = L.value_bounds(self.legs, [int(e) for e in self.expirations])
+        return self.range_
 
     def legs_today(self) -> tuple[L.LegFill, ...]:
         return tuple(L.LegFill(int(i), leg.key, leg.side, leg.ratio, leg.dte, leg.strike, leg.is_call)
@@ -382,6 +524,7 @@ class Working:
     filled: int = 0
     seen: bool = False            # met a two-sided quote at least once
     aggressive: bool = False      # marketable when it first met one: its remainder keeps taking the natural
+    range_: tuple[float, float] | None = field(default=None, repr=False, compare=False)   # an open's package bounds, once
 
 
 #: A forced close's order note -> the trade's exit reason (the note survives the shadow book's saved state).
@@ -407,8 +550,12 @@ class Account:
         self.trades: list[dict] = []
         self.daily: list[tuple[str, float, float]] = []
         self.fill_rows: list[tuple[str, float, float, bool]] = []  # (action, slip a share, slip in half-spreads, at natural)
+        #: bounded_close: closes (a program's, the House's, the window's end) filled at the package's least because the
+        #: legs' touches added up to less (`_in_bounds`); blocked_out_of_range: order-minutes held back because the
+        #: legs' touches added up to a price the package can never trade at (`_tradeable`).
         self.counts = {"orders": 0, "opens": 0, "closes": 0, "filled": 0, "partial_fills": 0, "cancelled": 0, "expired": 0,
-                       "rejected": 0, "liquidated": 0, "settled": 0, "exercised": 0, "fills": 0}
+                       "rejected": 0, "liquidated": 0, "settled": 0, "exercised": 0, "fills": 0, "bounded_close": 0,
+                       "blocked_out_of_range": 0}
         self.reject_reasons: dict[str, int] = {}
         self.pending_shares: list[tuple[Position, str, float, float]] = []  # (trade, root, shares, reference price)
         self.closed_since: list[dict] = []
@@ -430,11 +577,11 @@ class Account:
         self.next_id += 1
         return self.next_id - 1
 
-    def _reject(self, why: str) -> None:
+    def _reject(self, why: str, *, tell: bool = True) -> None:
         self.counts["rejected"] += 1
         key = why.split(":")[0][:80]
         self.reject_reasons[key] = self.reject_reasons.get(key, 0) + 1
-        if len(self.rejects_since) < 20:
+        if tell and len(self.rejects_since) < 20:
             self.rejects_since.append(why[:200])
 
     def buying_power(self) -> float:
@@ -557,14 +704,35 @@ class Account:
             legs = pos.legs_today()
             if any(leg.idx < 0 for leg in legs):
                 return
+            lo, hi = pos.bounds()
         else:
             legs = order.legs
+            # An open works the day it was decided (`end_day` drops every order), so its legs' dte are today's.
+            if work.range_ is None:
+                work.range_ = L.value_bounds(legs, [day.ordinal + int(leg.dte) for leg in legs])
+            lo, hi = work.range_
         stress = self.cfg.stress
         natural, cap = L.natural_value(snap, legs, order.action, stress=stress)
         if not math.isfinite(natural):
             return
         mid = L.mid_value(snap, legs)
         opening = order.action == "open"
+        # The UNSTRESSED natural: stress changes what a fill costs, never which limits can fill (a limit behind the
+        # touch stays behind it) or which minutes are a market at all.
+        plain = natural if stress == 1.0 else L.natural_value(snap, legs, order.action)[0]
+        if not self._tradeable(plain, lo, hi, opening):
+            # The legs' touches add up to a price the package can never trade at: nothing fills this minute, and the
+            # order keeps working. When this is its first look, the minute tells nothing about the market, so the
+            # order is judged against the natural it was decided on: one marketable there is a taker (it takes the
+            # next real natural, as on a normal arrival), a patient one rests at its own limit. A blocked minute
+            # never turns a patient order into a taker, nor a taker into an order that sells at a limit far through
+            # the market.
+            self.counts["blocked_out_of_range"] += 1
+            if not work.seen:
+                decided = order.natural
+                taker = math.isfinite(decided) and (decided <= order.limit + 1e-9 if opening else decided >= order.limit - 1e-9)
+                work.seen, work.aggressive = True, taker
+            return
         if work.forced:
             price, qty = natural, work.remaining
         else:
@@ -578,9 +746,6 @@ class Account:
                 # its own limit.
                 price = natural if work.aggressive else order.limit
             else:
-                # q is measured against the UNSTRESSED quotes: stress changes what a fill costs, never
-                # which limits can fill (a limit behind the touch stays behind it).
-                plain = natural if stress == 1.0 else L.natural_value(snap, legs, order.action)[0]
                 span = plain - mid
                 q = (order.limit - mid) / span if abs(span) > 1e-12 else 1.0
                 shape = [(int(snap.dte[leg.idx]), leg.strike / snap.spot - 1.0 if np.isfinite(snap.spot) else math.nan)
@@ -605,6 +770,13 @@ class Account:
                     # spread (stress below 1, the robustness run at the mid) never fills a limit better than itself.
                     extra = (stress - 1.0) * abs(plain - mid)
                     price = price + extra if opening else price - extra
+        bounded = self._in_bounds(price, lo, hi, opening)
+        if bounded is None:
+            self.counts["blocked_out_of_range"] += 1
+            return
+        floored = bounded != price
+        price = bounded
+        if not work.forced:
             qty = min(work.remaining, cap) if room is None else min(work.remaining, cap, room)
             if qty <= 0:
                 return
@@ -616,9 +788,15 @@ class Account:
             buying = (leg.side > 0) == opening
             leg_prices.append(float(snap.ask[leg.idx] if buying else snap.bid[leg.idx]))
         fees = L.order_fees(order.root, legs, leg_prices, qty, order.action)
-        half = abs(natural - mid)
-        slip = (price - mid) if opening else (mid - price)
-        self.fill_rows.append((order.action, slip, slip / half if half > 1e-12 else 0.0, abs(price - natural) < 1e-9))
+        if floored:
+            # A close held at the package's least has no market price to measure slippage against (its mid is the
+            # blown-out quote's): it is counted here and flagged on its trade, never as price improvement over the mid.
+            self.counts["bounded_close"] += 1
+            self.positions[work.pid].info["bounded"] = True
+        else:
+            half = abs(natural - mid)
+            slip = (price - mid) if opening else (mid - price)
+            self.fill_rows.append((order.action, slip, slip / half if half > 1e-12 else 0.0, abs(price - natural) < 1e-9))
         self.counts["fills"] += 1
         if opening:
             self._open_fill(day, mi, work, price, qty, fees)
@@ -634,6 +812,37 @@ class Account:
             self._drop(work, None)
         elif work.filled == qty:
             self.counts["partial_fills"] += 1
+
+    @staticmethod
+    def _tradeable(natural: float, lo: float, hi: float, opening: bool) -> bool:
+        """Whether this minute's natural is a price the package [lo, hi] (`legs.value_bounds`) can trade at: an open's
+        inside the range (above the least, strictly: a vertical bought for 0.00 would be free), a close's at or below
+        the most (below the least it still trades, at the least: `_in_bounds`). Outside, nothing fills that minute."""
+        if natural > hi + 1e-9:
+            return False
+        return not opening or natural > lo + 1e-9
+
+    @staticmethod
+    def _in_bounds(price: float, lo: float, hi: float, opening: bool) -> float | None:
+        """A package trades only inside what it can be worth at expiry, [lo, hi] (`legs.value_bounds`). Its legs'
+        touches can add up to a price outside that range when a leg's quote blows out (an index leg in the money quoted
+        with no bid and a far ask, the minute of an FOMC release, the last minutes of an expiry): the natural close
+        of a 5-wide debit vertical can then be -30, a loss many times the most the vertical can lose. No one sells a
+        package for less than it can ever be worth or buys it for more (complex-order price checks exist to refuse it), so:
+        an open at or below the package's least (a free package) or above its most, or a close that would RECEIVE more
+        than its most, does not fill this minute (it keeps working); a close that would receive LESS than the package's
+        least fills at that least, so a close never loses more than the maximum loss. None: no fill.
+
+        The floor is honest because it is the live path's own: `league/live/step.py` `OptionsLive._send_close` (the
+        lines after "A close's limit stays one the gateway takes") never sends a close below 0 for a debit structure,
+        below -(collateral - 0.01) for a credit one, or below a tick for a long call or put. Each of those is at or
+        above this least, so a real close never sells for less than the Gym's floor, and one that does not fill keeps a
+        package worth at least that least (`test_live_parity.LiveCloseFloor` pins it for each bounded structure type)."""
+        if price > hi + 1e-9:
+            return None
+        if opening:
+            return price if price > lo + 1e-9 else None
+        return max(price, lo)
 
     @staticmethod
     def _adverse(day: DayData, mi: int, root: str, legs: Sequence[L.LegFill], mid: float, buying: bool) -> bool:
@@ -731,6 +940,10 @@ class Account:
             "max_loss": round(max_loss, 2), "fees": round(pos.fees, 2), "pnl": round(pos.cash, 2),
             "return_on_max_loss": round(pos.cash / max_loss, 4) if max_loss > 0 else None,
             "exit_reason": pos.reason, "context": pos.info.get("context", {}), "note": pos.note,
+            # Its exit was set by the package's range, not by this minute's market: a close filled at the package's
+            # least, or an exit at the last price the package traded at because the latest quote left its range
+            # (`_in_bounds`, `_fallback_close`).
+            "bounded": bool(pos.info.get("bounded")),
         }
 
     def _drop(self, work: Working, why: str | None) -> None:
@@ -814,7 +1027,9 @@ class Account:
                 mark = L.mid_value(snap, legs)
                 natural = L.natural_value(snap, legs, "close")[0]
                 if math.isfinite(mark):
-                    pos.last_mark = mark
+                    # The account's mark (equity, a mark exit) is a mid inside the package's range (`_set_mark`); the
+                    # program's row keeps the raw mid and natural, as the live path's rows do.
+                    self._set_mark(pos, mark)
             leg_rows = [{"id": int(leg.idx), "dte": int(exp - day.ordinal), "strike": leg.strike, "is_call": leg.is_call,
                          "side": "long" if leg.side > 0 else "short", "ratio": leg.ratio}
                         for leg, exp in zip(legs, pos.expirations)]
@@ -857,7 +1072,7 @@ class Account:
             try:
                 self._intent(day, mi, intent)
             except L.Refused as exc:
-                self._reject(str(exc))
+                self._reject(str(exc), tell=not isinstance(exc, Unsaid))
 
     def _intent(self, day: DayData, mi: int, intent: dict) -> None:
         arrival = mi + 1
@@ -903,6 +1118,10 @@ class Account:
         order = L.resolve_open(intent, snap, rules, buying_power=self.buying_power(), stress=self.cfg.stress)
         if any(leg.dte == 0 for leg in order.legs) and minute >= rules.open_cutoff:
             raise L.Refused(f"expiry cutoff: no new opening order on an expiring contract from {rules.open_cutoff // 60}:{rules.open_cutoff % 60:02d} ET")
+        split = (getattr(day, "split_eve", None) or {}).get(root)
+        if split is not None and any(leg.dte > 0 for leg in order.legs):
+            # Counted in the result, never said to the program: the eve's close already keeps nothing across the split.
+            raise Unsaid(f"stock split: an opening order held across {root}'s {split_label(split)} split")
         order.extra = {"minute": day.open_min + mi, "open_min": day.open_min, "context": self._context(day, snap, order)}
         work = Working(self._id(), order, order.qty, mi, arrival, self._expiry(order, arrival), order.reserve)
         self.orders[work.oid] = work
@@ -942,6 +1161,9 @@ class Account:
                 self._expire(day, pos)
         for pos in list(self.positions.values()):
             self._mark(day, pos, close_mi)
+        splitting = getattr(day, "split_eve", None)
+        if splitting:
+            self._split_eve(day, splitting)
         if last:
             for pos in list(self.positions.values()):
                 if self.cfg.split_mark:
@@ -966,10 +1188,11 @@ class Account:
         level = settlement_level(chain.underlying) if chain is not None else math.nan
         if not math.isfinite(level):
             # No underlying today (a hole in the store): the position leaves at its last mark, and says so.
-            value = pos.last_mark if math.isfinite(pos.last_mark) else pos.entry
-            cash = value * venue.MULTIPLIER * pos.qty
+            value, fees = self._mark_exit(day, pos, day.minutes - 1)
+            cash = value * venue.MULTIPLIER * pos.qty - fees
             self.cash += cash
             pos.cash += cash
+            pos.fees += fees
             pos.exit_value_qty += value * pos.qty
             pos.exit_day, pos.exit_mi, pos.reason, pos.qty = day.ordinal, day.minutes - 1, "expired_without_data", 0
             self._finish(pos, day)
@@ -992,10 +1215,11 @@ class Account:
             level, hole = (float(known[0]), True) if known.size else (math.nan, True)
         if not math.isfinite(level):
             pos.reason = "expired_without_data"
-            value = pos.last_mark if math.isfinite(pos.last_mark) else pos.entry
-            cash = value * venue.MULTIPLIER * pos.qty
+            value, fees = self._mark_exit(day, pos, None)   # its expiry was an earlier day: never today's chain
+            cash = value * venue.MULTIPLIER * pos.qty - fees
             self.cash += cash
             pos.cash += cash
+            pos.fees += fees
             pos.exit_value_qty += value * pos.qty
             pos.exit_day, pos.exit_mi, pos.qty = day.ordinal, 0, 0
             self._finish(pos, day)
@@ -1082,35 +1306,209 @@ class Account:
             ask = chain.ask[m, pos.idx]
             if np.isfinite(bid).all() and np.isfinite(ask).all():
                 sides = np.array([leg.side * leg.ratio for leg in pos.legs], dtype=np.float64)
-                pos.last_mark = float(np.sum(sides * 0.5 * (bid + ask)))
-                return
+                self._set_mark(pos, float(np.sum(sides * 0.5 * (bid + ask))))
+                break
+        # The day's last price the package traded at, for an exit at a mark on a later day (`_fallback_close`).
+        found = self._last_close(day, pos, mi)
+        if found is not None:
+            pos.info["close_at"] = [found[0], found[1], int(day.ordinal), int(found[2])]
+
+    @staticmethod
+    def _set_mark(pos: Position, value: float) -> None:
+        """The position's mark: a mid inside what the package can be worth at expiry. A mid outside it (a blown-out
+        leg's) is no price: the mark stays at the last one inside, and `mark_out` in the position's info (saved with
+        it) says so until a mid inside comes back. Never clamped to a bound: a quote blown out in the position's favour
+        would mark it at the package's most."""
+        lo, hi = pos.bounds()
+        if lo - 1e-9 <= value <= hi + 1e-9:
+            pos.last_mark = value
+            pos.info.pop("mark_out", None)
+        else:
+            pos.info["mark_out"] = True
+
+    def _last_close(self, day: DayData, pos: Position, mi: int | None) -> tuple[float, list[float], int] | None:
+        """The latest minute at or before `mi` of today's chain whose close natural (at the run's stress) is a price
+        the package trades at (`_tradeable`): (that natural, its legs' close prices for the fees, the minute). None when
+        today has none, or no chain holds the position's legs."""
+        chain = day.chains.get(pos.root)
+        if mi is None or chain is None or pos.idx is None or (pos.idx < 0).any():
+            return None
+        lo, hi = pos.bounds()
+        stress = self.cfg.stress
+        for m in range(min(int(mi), day.minutes - 1), -1, -1):
+            bid, ask = chain.bid[m, pos.idx], chain.ask[m, pos.idx]
+            if not (np.isfinite(bid).all() and np.isfinite(ask).all()):
+                continue
+            value, prices = 0.0, []
+            for leg, b, a in zip(pos.legs, bid.tolist(), ask.tolist()):
+                prices.append(b if leg.side > 0 else a)
+                if stress != 1.0:   # `legs.natural_value`'s stress: every half-spread widened
+                    mid, half = 0.5 * (b + a), 0.5 * (a - b) * stress
+                    b, a = max(0.0, mid - half), mid + half
+                value += leg.side * leg.ratio * (b if leg.side > 0 else a)
+            if self._tradeable(value, lo, hi, False):
+                return value, prices, m
+        return None
+
+    def _fallback_close(self, day: DayData, pos: Position, mi: int | None) -> tuple[float, float]:
+        """(value a share, fees) of the honest exit when the latest quote is no price for the package: the last price it
+        traded at, the latest tradeable close natural at or before `mi` today (`_last_close`), else the one a day's
+        close recorded before (`_mark`), with its fees, held at the package's least like any close. With neither, its
+        last mark (else its entry) and no fee. The trade is flagged `bounded`."""
+        pos.info["bounded"] = True
+        lo, hi = pos.bounds()
+        found = self._last_close(day, pos, mi)
+        if found is None:
+            stored = pos.info.get("close_at")
+            if stored and (int(stored[2]) < day.ordinal or (mi is not None and int(stored[3]) <= mi)):
+                found = (float(stored[0]), [float(x) for x in stored[1]], int(stored[3]))
+        if found is None:
+            raw = pos.last_mark if math.isfinite(pos.last_mark) else pos.entry
+            return min(max(raw, lo), hi), 0.0
+        value, prices, _ = found
+        if value < lo:
+            self.counts["bounded_close"] += 1
+            value = lo
+        return value, L.order_fees(pos.root, pos.legs, prices, pos.qty, "close")
+
+    def _mark_exit(self, day: DayData, pos: Position, mi: int | None) -> tuple[float, float]:
+        """(value a share, fees) of an exit at the position's mark (a split, a window end with no quote, a data hole):
+        its mark with no fee, an accounting value as the day's equity counts it; but when the latest mid was outside the
+        package's range (`mark_out`), the mark is stale and the exit is `_fallback_close`'s."""
+        if pos.info.get("mark_out"):
+            return self._fallback_close(day, pos, mi)
+        lo, hi = pos.bounds()
+        raw = pos.last_mark if math.isfinite(pos.last_mark) else pos.entry
+        value = min(max(raw, lo), hi)   # inside by construction; a state saved before the rule may hold one outside
+        if value != raw:
+            pos.info["bounded"] = True
+        return value, 0.0
 
     def _split_mark(self, day: DayData, pos: Position) -> None:
         """The end of a segment another segment continues: the position is valued at its mid (the close's
         mark, as the day's equity already counts it) with no fee. An accounting split, not a trade: the
-        segment's daily P&L is the unsplit run's, and the next segment starts without it."""
-        value = pos.last_mark if math.isfinite(pos.last_mark) else pos.entry
-        cash = value * venue.MULTIPLIER * pos.qty
+        segment's daily P&L is the unsplit run's, and the next segment starts without it. When the close's mid was
+        outside the package's range, the last price it traded at, with its fees (`_mark_exit`)."""
+        value, fees = self._mark_exit(day, pos, day.minutes - 1)
+        cash = value * venue.MULTIPLIER * pos.qty - fees
         self.cash += cash
         pos.cash += cash
+        pos.fees += fees
         pos.exit_value_qty += value * pos.qty
         pos.qty = 0
         pos.exit_day, pos.exit_mi, pos.reason = day.ordinal, day.minutes - 1, "split_mark"
         self._finish(pos, day)
+
+    def _split_eve(self, day: DayData, splitting: Mapping[str, float]) -> None:
+        """The close of a split's eve (the module docstring): every position on a splitting root still open is closed
+        at the natural of the session's last quoted minute (`_split_close`); shares an expiry on it left pending are
+        marked at today's settlement level (no gap), as at a window's end: nothing on the root is held across."""
+        for pos in list(self.positions.values()):
+            if pos.root in splitting:
+                self._split_close(day, pos)
+        keep = []
+        for pos, root, shares, ref in self.pending_shares:
+            if root in splitting:
+                pos.info["share_gap"] = 0.0
+                self._finish(pos, day)
+            else:
+                keep.append((pos, root, shares, ref))
+        self.pending_shares = keep
+
+    def _split_close(self, day: DayData, pos: Position, back: int = 30) -> None:
+        """Close one position on a split's eve at the natural of the session's last minute that quotes every leg (the
+        last stepped minute, or up to `back` minutes before it), stress applied, with its fees (`stock_split`). Where no
+        such minute exists, leg by leg (`stock_split_legs`): each leg at its own last quoted natural in those minutes,
+        stress applied, else at its intrinsic value at the eve's level, with each leg's fee."""
+        legs = pos.legs_today()
+        chain = day.chains.get(pos.root)
+        value, fees, at, reason = math.nan, 0.0, day.minutes - 2, "stock_split"
+        lo, hi = pos.bounds()
+        if chain is not None and all(leg.idx >= 0 for leg in legs):
+            for mi in range(day.minutes - 2, max(0, day.minutes - 2 - back), -1):
+                snap = day.snapshot(pos.root, mi)
+                if snap is None:
+                    break
+                natural, _ = L.natural_value(snap, legs, "close", stress=self.cfg.stress)
+                if not math.isfinite(natural):
+                    continue
+                plain = natural if self.cfg.stress == 1.0 else L.natural_value(snap, legs, "close")[0]
+                if not self._tradeable(plain, lo, hi, False):
+                    self.counts["blocked_out_of_range"] += 1   # over the package's most: no market this minute
+                    continue
+                bounded = self._in_bounds(natural, lo, hi, False)
+                if bounded != natural:
+                    self.counts["bounded_close"] += 1
+                    pos.info["bounded"] = True
+                prices = [float(snap.bid[leg.idx] if leg.side > 0 else snap.ask[leg.idx]) for leg in legs]
+                value, fees, at = bounded, L.order_fees(pos.root, legs, prices, pos.qty, "close"), mi
+                break
+        if not math.isfinite(value):
+            level = settlement_level(chain.underlying) if chain is not None else math.nan
+            value, fees, reason = 0.0, 0.0, "stock_split_legs"
+            for leg in legs:
+                price = self._leg_natural(day, pos.root, leg, back)
+                if not math.isfinite(price):
+                    intrinsic = (level - leg.strike) if leg.is_call else (leg.strike - level)
+                    price = max(0.0, intrinsic) if math.isfinite(intrinsic) else 0.0
+                value += leg.side * leg.ratio * price
+                fees += venue.leg_fee(pos.root, leg.ratio * pos.qty, price, sell=leg.side > 0)
+            fees = round(fees, 2)
+            if not lo - 1e-9 <= value <= hi + 1e-9:
+                pos.info["bounded"] = True
+                value = min(max(value, lo), hi)
+        cash = value * venue.MULTIPLIER * pos.qty - fees
+        self.cash += cash
+        pos.cash += cash
+        pos.fees += fees
+        pos.exit_value_qty += value * pos.qty
+        pos.qty = 0
+        pos.exit_day, pos.exit_mi, pos.reason = day.ordinal, at, reason
+        self._finish(pos, day)
+
+    def _leg_natural(self, day: DayData, root: str, leg: L.LegFill, back: int) -> float:
+        """What closing one leg gets at its natural in the session's last `back` stepped minutes (a long leg sold at its
+        bid, a short one bought at its ask; stress widens the half-spread); NaN when it has no quote there."""
+        chain = day.chains.get(root)
+        if chain is None or leg.idx < 0:
+            return math.nan
+        for mi in range(day.minutes - 2, max(0, day.minutes - 2 - back), -1):
+            bid, ask = float(chain.bid[mi, leg.idx]), float(chain.ask[mi, leg.idx])
+            if math.isfinite(bid) and math.isfinite(ask):
+                if self.cfg.stress != 1.0:
+                    mid, half = 0.5 * (bid + ask), 0.5 * (ask - bid) * self.cfg.stress
+                    bid, ask = max(0.0, mid - half), mid + half
+                return bid if leg.side > 0 else ask
+        return math.nan
 
     def _window_end(self, day: DayData, pos: Position) -> None:
         snap = day.snapshot(pos.root, day.minutes - 2) if pos.root in day.chains else None
         legs = pos.legs_today()
         value = math.nan
         fees = 0.0
+        blocked = False
         if snap is not None and all(leg.idx >= 0 for leg in legs):
             value, _ = L.natural_value(snap, legs, "close", stress=self.cfg.stress)
             if math.isfinite(value):
+                # The close's own rule (`_in_bounds`): never below the package's least; above its most, no close.
+                lo, hi = pos.bounds()
+                bounded = self._in_bounds(value, lo, hi, False)
+                if bounded is None:
+                    # Over the package's most: no close there. It leaves at the last price the package traded at
+                    # today, with its fees, never at a mark the blown-out quote moved.
+                    self.counts["blocked_out_of_range"] += 1
+                    value, fees = self._fallback_close(day, pos, day.minutes - 2)
+                    blocked = True
+                elif bounded != value:
+                    self.counts["bounded_close"] += 1
+                    pos.info["bounded"] = True
+                    value = bounded
+            if math.isfinite(value) and not blocked:
                 prices = [float(snap.bid[leg.idx] if leg.side > 0 else snap.ask[leg.idx]) for leg in legs]
                 fees = L.order_fees(pos.root, legs, prices, pos.qty, "close")
         reason = "window_end"
         if not math.isfinite(value):
-            value = pos.last_mark if math.isfinite(pos.last_mark) else pos.entry
+            value, fees = self._mark_exit(day, pos, day.minutes - 2)
             reason = "window_end_mark"
         cash = value * venue.MULTIPLIER * pos.qty - fees
         self.cash += cash
@@ -1145,7 +1543,7 @@ def code_digest() -> str:
 
 
 def tables_digest() -> str:
-    """A hash of the tables a run depends on beyond the store: events, rates, fees, ticks, the fill seed."""
+    """A hash of the tables a run depends on beyond the store: events, rates, stock splits, fees, ticks, the fill seed."""
     import hashlib
     import json
 
@@ -1155,17 +1553,35 @@ def tables_digest() -> str:
             "jobs": sorted(d.isoformat() for d in EV.JOBS), "rates": [[d.isoformat(), r] for d, r in EV.RATES],
             "fees": [venue.OCC_FEE, venue.ORF_FEE, venue.CAT_FEE, venue.TAF_FEE, venue.SEC_RATE, venue.INDEX_FEE,
                      sorted(venue.EXCHANGE_FEE.items()), venue.XSP_LARGE_ORDER_FEE],
-            "ticks": [sorted(venue.PENNY_ALL), sorted(venue.NICKEL), venue.NET_TICK], "seed": F.SEED}
+            "ticks": [sorted(venue.PENNY_ALL), sorted(venue.NICKEL), venue.NET_TICK], "seed": F.SEED,
+            "splits": [[root, day.isoformat(), factor] for root, day, factor in EV.SPLITS]}
     return hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()[:16]
 
 
 # --------------------------------------------------------------------------- the run
-def _close_day(data: DayData, history: History) -> None:
-    """The end of a replayed day: its underlying joins the history, then the day is closed (`DayData.close`).
-    A function of its own so no loop variable of `run` keeps one of the day's chains alive into the next."""
+def _close_day(data: DayData, history: History, seen: dict[str, dt.date] | None = None) -> None:
+    """The end of a replayed day: its underlying joins the history (`seen`: each root's last session in it), then the
+    day is closed (`DayData.close`). A function of its own so no loop variable of `run` keeps one of the day's chains
+    alive into the next."""
     for root, chain in data.chains.items():
-        history.add(root, chain.underlying.price)
+        if history.add(root, chain.underlying.price) and seen is not None:
+            seen[root] = data.day
     data.close()
+
+
+def _split_alerts(data: DayData, history: History, seen: Mapping[str, dt.date]) -> list[dict[str, Any]]:
+    """Today's price cross-check (`split_alert`) of each root with a chain, from what the replay already holds: the
+    history's last close and today's first price. Nothing is read ahead."""
+    out = []
+    for root, chain in data.chains.items():
+        closes = history.arrays(root, 1)[3]
+        price = chain.underlying.price
+        known = price[np.isfinite(price)]
+        if closes.size and known.size:
+            alert = split_alert(root, seen.get(root), float(closes[-1]), data.day, float(known[0]))
+            if alert is not None:
+                out.append(alert)
+    return out
 
 
 def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Sequence[dt.date] | None = None,
@@ -1196,14 +1612,22 @@ def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Se
         store.check(day)
     depth = max([a.needs.history for a in accounts] + [11])
     history = History(depth)
+    seen: dict[str, dt.date] = {}   # each root's last session in the history (the split cross-check)
     if days:
         for prior in store.history_days((warm or days)[0], depth):
             for root in all_roots:
                 if store.has("underlying", root, prior):
-                    history.add(root, store.underlying(root, prior).price)
+                    if history.add(root, store.underlying(root, prior).price):
+                        seen[root] = prior
     events = EventCalendar(store.trading_days(), store.session)
     regimes: dict[str, dict[str, dict[str, float]]] = {}
     from .day import ordinal as to_ordinal
+
+    applied = split_eves(store, all_roots, days) if days else []
+    eves: dict[dt.date, dict[str, float]] = {}
+    for split in applied:
+        eves.setdefault(split["eve"], {})[split["root"]] = split["factor"]
+    alerts: list[dict[str, Any]] = []
 
     for day in warm:
         data = DayData(store, day, all_roots, events, history, to_ordinal(day))
@@ -1221,10 +1645,11 @@ def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Se
         for account in live:
             account.warming = False
             account.closed_since, account.rejects_since = [], []
-        _close_day(data, history)
+        _close_day(data, history, seen)
 
     for n, day in enumerate(days):
-        data = DayData(store, day, all_roots, events, history, to_ordinal(day))
+        data = DayData(store, day, all_roots, events, history, to_ordinal(day), split_eve=eves.get(day))
+        alerts += _split_alerts(data, history, seen)
         live = [a for a in accounts if a.roots]
         for account in live:
             account.begin_day(data)
@@ -1249,9 +1674,15 @@ def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Se
                     account.step(data, mi, wants)
         for account in live:
             account.end_day(data, last=n == len(days) - 1)
-        _close_day(data, history)
+        _close_day(data, history, seen)
         if progress is not None:
             progress(n + 1, len(days), day)
+    for account in accounts:
+        # The result's `stock_splits` block, only when a split of the table fell on the account's roots in the run, or the
+        # price cross-check raised an alert on one of them: a run with neither returns exactly what it did before.
+        mine = {"applied": [{**s, "eve": s["eve"].isoformat()} for s in applied if s["root"] in account.roots],
+                "alerts": [a for a in alerts if a["root"] in account.roots]}
+        account.stock_splits = {k: v for k, v in mine.items() if v}
     elapsed = time.perf_counter() - began
     data_version = store.data_version(all_roots, warm + days) if days else "no-days"
     code, tables = code_digest(), tables_digest()
@@ -1259,4 +1690,5 @@ def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Se
             for a in accounts]
 
 
-__all__ = ["RunConfig", "run", "Account", "DayData", "DayClosed", "History"]
+__all__ = ["RunConfig", "run", "Account", "DayData", "DayClosed", "History", "Unsaid", "split_factor", "split_eves", "split_alert",
+           "split_check", "split_label"]

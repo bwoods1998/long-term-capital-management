@@ -69,7 +69,7 @@ class TradingProfitTest(unittest.TestCase):
             db.commit(); db.close()
             self.assertIsNone(snapshot(directory, None, at=AT)['pnl_usd'])
 
-    def test_concurrent_fill_invalidates_aggregate_and_old_mark_keeps_its_timestamp(self):
+    def test_concurrent_fill_is_read_again_whole_and_old_mark_keeps_its_timestamp(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'live.sqlite'
             db = sqlite3.connect(path)
@@ -81,12 +81,20 @@ class TradingProfitTest(unittest.TestCase):
             older = '2026-09-28T14:30:00.000Z'
             with patch('league.trading_profit.marked_value', return_value=(220, older)):
                 self.assertEqual(snapshot(directory, live, at=AT), {'as_of': older, 'pnl_usd': '18.00'})
+            seen = []
             def concurrent(row, day):
-                self.assertEqual(row['qty'], 2)
-                db.execute('UPDATE positions SET qty=1,cash=-83'); db.commit()
-                return 220, AT
+                seen.append(row['qty'])
+                if len(seen) == 1:  # a fill lands while the first read copies the marks: that read is thrown away
+                    db.execute('UPDATE positions SET qty=1,cash=-83'); db.commit()
+                return 110 * row['qty'], AT
             with patch('league.trading_profit.marked_value', side_effect=concurrent):
-                self.assertIsNone(snapshot(directory, live, at=AT)['pnl_usd'])
+                self.assertEqual(snapshot(directory, live, at=AT)['pnl_usd'], '27.00', 'the second read, whole: never old quantity with new cash')
+            self.assertEqual(seen, [2, 1])
+            def always(row, day):
+                db.execute('UPDATE positions SET cash=cash-1'); db.commit()
+                return 110, AT
+            with patch('league.trading_profit.marked_value', side_effect=always):
+                self.assertIsNone(snapshot(directory, live, at=AT)['pnl_usd'], 'a book that changes under every read is unknown')
             db.close()
 
     @unittest.skipIf(np is None, 'the live quote grid requires numpy')
@@ -123,6 +131,13 @@ class TradingProfitTest(unittest.TestCase):
         chain.bid = old_bids
         chain.quote_revision = 5  # the writer has begun, but has not finished this row
         self.assertIsNone(marked_value(row, day))
+
+    def test_the_brokers_fill_times_are_read_to_the_microsecond_whatever_their_precision(self):
+        from league.trading_profit import _epoch
+
+        self.assertEqual(_epoch('2026-09-28T14:10:01.312Z'), _epoch('2026-09-28T14:10:01.312000000Z'))
+        self.assertAlmostEqual(_epoch('2026-09-28T14:07:11.776268123Z') - _epoch('2026-09-28T14:07:11Z'), 0.776268, places=6)
+        self.assertIsNone(_epoch('2026-09-28T14:07:11'), 'a time without a zone is no time')
 
     def test_existing_corrupt_state_is_unknown(self):
         with tempfile.TemporaryDirectory() as directory:

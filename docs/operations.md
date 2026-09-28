@@ -154,7 +154,11 @@ deploy`. Deploy the gateway before a House release that needs its change. After 
 
 **The site.** In `~/Work/personal-site`: `npm test`, then `npm run build && npx wrangler deploy`
 (its `DEPLOYMENT.md` has the details). When the publisher's schema or a bound changes, the site
-deploys first: it refuses a whole checkpoint for one field it does not allow.
+deploys first: it refuses a whole checkpoint for one field it does not allow. The one exception is the
+positions table (`positions`, Sept 28, 2026): refused, the publisher posts the checkpoint again without it
+and offers it again half an hour later (a warning per distinct reply of the site, "positions table: the site
+refused the positions table (old site, or a row it rejects) ... (the site said: ...)"), so either may go
+first. The planned order for this first release: the House, then the site.
 
 **Checkpoint the House box before risky work:** `python3 scripts/floor_box.py checkpoint --name why
 --ttl-days 30` (`checkpoints` lists them). A checkpoint holds the box's `.env`. Sail's checkpoint
@@ -372,18 +376,31 @@ forward row, never on the site. Its programs load and decide after every real de
 their own decider child (1 GB); its chains are read after the real path, under the minute's data budget.
 Its trades are kept in `/workspace/state/observe.sqlite` (0600) for the post-mortem only.
 
-**The D3 calibration round trips**: 1-lot SPY and QQQ call verticals one dollar wide nearest the money,
-at 10:00, 12:30 and 14:30 ET; open at the mid, then once at the mid plus a tick; close at the mid, a tick
-under, then the natural (at most six close attempts a position a day, backing off after a refusal). One
-round trip at a time, within a strict $50 bound on the day's possible loss: a new open goes only while
-today's realized calibration loss (net, floored at zero) plus what is still held or working plus its own
-maximum loss stays within $50; a closed round trip frees its maximum loss. Only with real money on, the
-grant active, real entries open and the paper proof passed; family
-`house:calibration`, never evidence and never Profit (the equity-based figure after compute carries it). Samples:
-`/workspace/state/calibration.sqlite` (0600), read with
-`python3 -m league.live --root /workspace/state --calibration` (per cell: attempts, outcomes, fill rate,
-mean fill against the mid in ticks, median seconds to fill). Off by default: `swarm.json`
-`{"live": {"calibration": true}}` turns it on.
+**The D3 calibration round trips**: 1-lot SPY, QQQ and IWM call verticals one dollar wide nearest the
+money, hourly at 10:00, 11:00, 12:00, 13:00, 14:00 and 15:00 ET (none starts from 15:15); open at the mid
+for 5 minutes -- at 12:00 and 14:00 the patient cell `mid25`, the mid for 25 minutes -- then once at the mid
+plus a tick (its own cell `mid25+1` after the patient open), only after an open its time in force ended;
+close at the mid, a tick under, then the natural (at most six close attempts a position a day, backing off
+after a refusal; every ladder, at its slowest, is sent before the 15:45 last resort). One round trip at a
+time, within a strict $50 bound on the day's possible loss: a new open goes only while today's realized
+calibration loss (net, floored at zero) plus what is still held or working plus its own maximum loss stays
+within $50; a closed round trip frees its maximum loss. What it leaves the families: every calibration open
+leaves two Probe floors ($200) of the account-wide day cap (1.0 x sizing equity, which every dispatched open
+fills by its whole maximum loss, cancelled ones too); no round trip starts once its own legs today (orders
+and cancels) reach 80 of the day's 250 (a round trip is 4 legs when both mids fill, about 30 at its
+slowest, so at most about 110 before the House's backstop); and a working open whose contracts a family's
+real open was refused on is cancelled at once, its round trip ended (recorded `interrupted`). An attempt
+cancelled before its time in force ran out (a real-entry block, the House's cancel, that yield) is
+`interrupted`: never a sample, never in a fill rate. Only with real money on, the grant active, real
+entries open and the paper proof passed; family `house:calibration`, never evidence; in Profit since Sept 28, 2026, as the positions table's "House
+calibration" rows (`league/trading_profit.py`; the table must add up to Profit). The owner's written D3 terms (`league/constitution.py`'s
+comments) say 1-lot SPY and QQQ; IWM and the six slots' volume (about $430-540 of maximum loss dispatched
+on a heavy day, against about $270 before) are the operator's decision inside D3's $50 net bound (Sept 28,
+2026), the money table unchanged. Samples: `/workspace/state/calibration.sqlite` (0600; each row its
+order's time in force and cancel reason), read with `python3 -m league.live --root /workspace/state
+--calibration` (the plan, then every cell, `mid25`, `mid25+1` and the unsampled included: working minutes,
+attempts, outcomes, fill rate, mean fill against the mid in ticks, median seconds to fill). Off by default:
+`swarm.json` `{"live": {"calibration": true}}` turns it on.
 
 **Turning real money on** (M4b; the sprint's R2): the gateway deployed first (`OPTION_STRUCTURES_REAL`
 `debit_vertical,long_butterfly,long_call,long_put`, `MAX_ORDER_EQUITY_SHARE` 0.25); then the owner deploy
@@ -449,6 +466,18 @@ with `real_money` true (a new money digest); `python3 scripts/live_trading.py --
   the body the House would post from `/workspace/state` (read-only) and run the site's validators
   (`capital/schema.js`) over it to find the field. Widen a bound on the site first and deploy the
   site before the House.
+- **"positions table: ..." warnings.** The positions table and Profit are read from the live book and the
+  account's own activity (`league/account_activity.py`). Each reason the table does not reconcile is said
+  once: a fill or a fee on an order the live book does not hold (an owner's trade by hand, a lost answer),
+  a finished order whose fills at the broker differ from the book's, an option event on a contract the book
+  never held, a cash event the book never counts, the broker's cash for an assignment, an exercise or an
+  index expiry the book settled against the book's own value, an activity of an unknown type; and "the
+  table carries an unreconciled X", the line the page shows beside the rows. Nothing is hidden: fix the book
+  or classify the type, and the line goes back to 0.00. Profit shows a dash (said once) while shares an
+  assignment left are held, while the book has not taken an assignment, and while a broker fill on a
+  contract the book still holds is unmatched. "position real:N cannot be described" or "open position
+  real:N is not listed": the row is counted in the page's not-listed line. "could not be read": Profit
+  shows a dash ten minutes after the last good reading (a restart keeps the last reading).
 - **Sail's checkpoint API is down.** The House's backup fails as a marked vendor error (one error,
   then warnings at 30 min, 1 h, 2 h, 4 h, then every 6 h) and never rolls a release back. The images
   have two checkpoints each and `images.py` rebuilds them.
@@ -476,7 +505,7 @@ with `real_money` true (a new money digest); `python3 scripts/live_trading.py --
 | `MAX_ORDER_MAX_LOSS_USD`, `MAX_ORDER_EQUITY_SHARE`, `MAX_DAY_EQUITY_SHARE`, `MAX_DAY_ORDERS`, `MAX_DAY_OPEN_ORDERS` | `gateway/wrangler.jsonc` | $1,000, 0.25, 1.0, 300, 250 | the real account's caps by maximum loss; equal to the constitution's `options_money.gateway` | gateway deploy with the matching House deploy |
 | `OPTION_STRUCTURES_REAL` | `gateway/wrangler.jsonc` | `debit_vertical,long_butterfly,long_call,long_put` | the types real money may open; must equal the constitution's `options_money.real_types` (`league.ci`) | gateway deploy with the matching House deploy and a ratify |
 | `live.observe`, `live.observe_max` | `swarm.json` on the box | true, 48 | the observe band and its cap; read each minute, no deploy (a swarm.json that is not a JSON object turns it off) | edit `swarm.json` |
-| `live.calibration`, `live.calibration_samples` | `swarm.json` on the box | false, 30 | the D3 round trips (still only with real money on, the grant and the paper proof); samples a symbol's open-at-mid cell stops at | edit `swarm.json` |
+| `live.calibration`, `live.calibration_samples` | `swarm.json` on the box | false, 30 | the D3 round trips (still only with real money on, the grant and the paper proof); samples a symbol's open cell (the mid, or the patient mid at 12:00 and 14:00) stops at | edit `swarm.json` |
 | `FRONTIER_MONTH_USD`, `FRONTIER_MONTH_MAX_USD`, `FRONTIER_FUNDED_MONTH` | `gateway/wrangler.jsonc` | $707, September 2026 only | the OpenAI month; expires before an unfunded month can renew it | gateway deploy |
 | The money rules | `league/constitution.py` | the sprint's D4 table (money `ad9bd54c`) | what real money may do | owner deploy, then `--ratify` |
 
