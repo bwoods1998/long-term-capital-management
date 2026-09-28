@@ -1423,16 +1423,26 @@ class Account:
         legs = pos.legs_today()
         chain = day.chains.get(pos.root)
         value, fees, at, reason = math.nan, 0.0, day.minutes - 2, "stock_split"
+        lo, hi = pos.bounds()
         if chain is not None and all(leg.idx >= 0 for leg in legs):
             for mi in range(day.minutes - 2, max(0, day.minutes - 2 - back), -1):
                 snap = day.snapshot(pos.root, mi)
                 if snap is None:
                     break
                 natural, _ = L.natural_value(snap, legs, "close", stress=self.cfg.stress)
-                if math.isfinite(natural):
-                    prices = [float(snap.bid[leg.idx] if leg.side > 0 else snap.ask[leg.idx]) for leg in legs]
-                    value, fees, at = natural, L.order_fees(pos.root, legs, prices, pos.qty, "close"), mi
-                    break
+                if not math.isfinite(natural):
+                    continue
+                plain = natural if self.cfg.stress == 1.0 else L.natural_value(snap, legs, "close")[0]
+                if not self._tradeable(plain, lo, hi, False):
+                    self.counts["blocked_out_of_range"] += 1   # over the package's most: no market this minute
+                    continue
+                bounded = self._in_bounds(natural, lo, hi, False)
+                if bounded != natural:
+                    self.counts["bounded_close"] += 1
+                    pos.info["bounded"] = True
+                prices = [float(snap.bid[leg.idx] if leg.side > 0 else snap.ask[leg.idx]) for leg in legs]
+                value, fees, at = bounded, L.order_fees(pos.root, legs, prices, pos.qty, "close"), mi
+                break
         if not math.isfinite(value):
             level = settlement_level(chain.underlying) if chain is not None else math.nan
             value, fees, reason = 0.0, 0.0, "stock_split_legs"
@@ -1444,6 +1454,9 @@ class Account:
                 value += leg.side * leg.ratio * price
                 fees += venue.leg_fee(pos.root, leg.ratio * pos.qty, price, sell=leg.side > 0)
             fees = round(fees, 2)
+            if not lo - 1e-9 <= value <= hi + 1e-9:
+                pos.info["bounded"] = True
+                value = min(max(value, lo), hi)
         cash = value * venue.MULTIPLIER * pos.qty - fees
         self.cash += cash
         pos.cash += cash

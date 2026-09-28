@@ -324,7 +324,7 @@ class ACrashIsNotASplit(unittest.TestCase):
         sell, probe = E.run([seller, snoop("CRSH", 100)], self.store, cfg)
         # The short put spread rides the crash: closed by the House on its expiry day at the natural, as on main.
         self.assertEqual([(t["exit_reason"], t["exit_day"], t["pnl"]) for t in sell["trades"]],
-                         [("expiry_close", "2023-03-10", -445.28)])
+                         [("expiry_close", "2023-03-10", -405.28)])   # #404: the -5.40 buy-back closes at the width, -5.00
         # The probe opens every session it can (3 days out: D0 and D1 only), the eve included; no text reaches the program.
         self.assertEqual([(t["tag"], t["day"], t["exit_reason"]) for t in probe["trades"] if t["root"] == "CRSH"],
                          [("probe", "2023-03-06", "expired"), ("probe", "2023-03-07", "expired")])
