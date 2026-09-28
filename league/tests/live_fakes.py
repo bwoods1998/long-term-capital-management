@@ -42,7 +42,11 @@ class Clock:
 
 class Market:
     """Option chains for SPY (and XSP, SPX/10) from Black-Scholes on a spot the test moves; $1 strikes, a 2-cent
-    spread (wider away from the money), sizes 50/60."""
+    spread (wider away from the money), sizes 50/60. IWM trades at `IWM_SHARE` of that spot (281.28 at 600: between two
+    strikes, as the calibration's nearest-the-money choice needs), on $1 strikes unless `steps` gives a root another
+    (IWM's half-dollar grid: `steps["IWM"] = 0.5`)."""
+
+    IWM_SHARE = 0.4688
 
     def __init__(self, clock: Clock, *, spot: float = 600.0, vol: float = 0.18, day: dt.date = MONDAY,
                  expiries: Iterable[int] = (0, 1, 2, 3, 4, 7), width: int = 30):
@@ -56,17 +60,24 @@ class Market:
         self.minute_calls = Rate(100000)
         self.dead: set[str] = set()      # roots whose chain read fails
         self.overrides: dict[str, tuple[float, float, int, int]] = {}
+        self.steps: dict[str, float] = {}
+
+    @classmethod
+    def share(cls, root: str) -> float:
+        """The root's level as a multiple of the spot."""
+        index = (10.0 if root in ("SPXW", "SPX") else 1.0) * (1.001 if root == "XSP" else 1.0)
+        return index * (cls.IWM_SHARE if root == "IWM" else 1.0)
 
     def level(self, root: str) -> float:
-        return self.spot * (10.0 if root in ("SPXW", "SPX") else 1.0) * (1.001 if root == "XSP" else 1.0)
+        return self.spot * self.share(root)
 
     def rows(self, root: str) -> dict[str, dict]:
         t = self.clock()
         local = dt.datetime.fromtimestamp(t, NY)
         minute = local.hour * 60 + local.minute
         level = self.level(root)
-        step = 5.0 if root in ("SPXW", "SPX") else 1.0
-        listed = self.center * (10.0 if root in ("SPXW", "SPX") else 1.0) * (1.001 if root == "XSP" else 1.0)
+        step = self.steps.get(root, 5.0 if root in ("SPXW", "SPX") else 1.0)
+        listed = self.center * self.share(root)
         base = round(listed / step) * step
         out = {}
         for d in self.expiries:
@@ -127,9 +138,16 @@ class Market:
     def stocks(self, symbols: Iterable[str]) -> dict:
         self.calls += 1
         t = self.clock()
-        # QQQ's chain is drawn around the same spot as SPY's (`rows`), so it trades there too; other stocks read 400.
-        return {s: {"latestTrade": {"p": self.spot if s in ("SPY", "QQQ") else 400.0, "t": iso(t - 2)},
-                    "latestQuote": {"bp": self.spot - 0.01, "ap": self.spot + 0.01, "t": iso(t - 1)}} for s in symbols}
+        # QQQ's chain is drawn around the same spot as SPY's (`rows`), so it trades there too; IWM at its own level;
+        # other stocks read 400.
+        def trade(s: str) -> float:
+            return self.spot if s in ("SPY", "QQQ") else self.level("IWM") if s == "IWM" else 400.0
+
+        def quote(s: str) -> float:
+            return self.level("IWM") if s == "IWM" else self.spot
+
+        return {s: {"latestTrade": {"p": trade(s), "t": iso(t - 2)},
+                    "latestQuote": {"bp": quote(s) - 0.01, "ap": quote(s) + 0.01, "t": iso(t - 1)}} for s in symbols}
 
     def bars(self, symbols: Iterable[str], *, timeframe: str, start: str, end: str | None = None) -> dict:
         return {s: [{"o": 590.0 + i, "h": 595.0 + i, "l": 588.0 + i, "c": 592.0 + i, "t": f"2026-09-{i + 1:02d}T04:00:00Z"}

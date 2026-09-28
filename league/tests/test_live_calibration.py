@@ -1,8 +1,9 @@
-"""The D3 real-fill calibration round trips (`league/live/calibration.py`; the sprint, Sept 26, 2026): 1-lot SPY debit
-verticals the House sends at the mid, then one tick worse, and closes at the mid, one tick under, then the natural; only
-with real money on, the grant active and the paper proof passed; at most the constitution's $50 of maximum loss a day;
-through the real book's order path; recorded in their own file; never evidence, never on the site. With the fakes of
-`live_fakes` (the venue's shapes, invented numbers)."""
+"""The D3 real-fill calibration round trips (`league/live/calibration.py`; the sprint, Sept 26, 2026): 1-lot SPY, QQQ
+and IWM debit verticals the House sends at the mid (at 12:00 and 14:00 ET the patient mid of 25 minutes), then one tick
+worse, and closes at the mid, one tick under, then the natural; six hourly slots, 10:00 through 15:00 ET; only with real
+money on, the grant active and the paper proof passed; at most the constitution's $50 of maximum loss a day; through the
+real book's order path; recorded in their own file; never evidence, never on the site. With the fakes of `live_fakes`
+(the venue's shapes, invented numbers)."""
 
 import io
 import json
@@ -11,6 +12,7 @@ import sqlite3
 import unittest
 from contextlib import redirect_stdout
 from decimal import Decimal as D
+from unittest import mock
 
 from league.tests.test_live_step import HAVE, LiveCase
 
@@ -20,7 +22,7 @@ if HAVE:
     from league.live.__main__ import main as live_main
     from league.live.step import OptionsLive
     from league.live.decider import InlineDecider
-    from league.tests.live_fakes import MONDAY, VERTICAL, at, family
+    from league.tests.live_fakes import MONDAY, NY, VERTICAL, at, family
 
 HOLD_600C = '''
 NEEDS = {"roots": ["SPY"], "dte": [0, 3], "band": 0.03, "cadence": 1, "history": 0, "start": 571, "end": 958}
@@ -62,6 +64,16 @@ class CalibrationCase(LiveCase):
             return [dict(r) for r in db.execute("SELECT * FROM samples ORDER BY oid")]
         finally:
             db.close()
+
+    def opens(self):
+        return [b for b in self.mine() if b.get("legs") and b["legs"][0]["position_intent"] == "buy_to_open"]
+
+    def minute_of(self, t: float) -> int:
+        """The New York minute of a clock time."""
+        import datetime as dt
+
+        local = dt.datetime.fromtimestamp(t, NY)
+        return local.hour * 60 + local.minute
 
     def mid_of(self, body):
         value = 0.0
@@ -281,23 +293,28 @@ class TheReview(CalibrationCase):
 
 
 class Limits(CalibrationCase):
-    def opens(self):
-        return [b for b in self.mine() if b["legs"][0]["position_intent"] == "buy_to_open"]
-
     def test_cheap_round_trips_repeat_through_the_day_under_the_bound(self):
         # Filled at the mid both ways, a round trip loses only its fees: each closed one frees its maximum loss, so
-        # every slot of the day sends one.
+        # every one of the six hourly slots sends one -- the 15:00 slot too -- rotating to the symbol with the fewest
+        # samples of the slot's cell, the patient mid at 12:00 and 14:00.
         self.venue.fill = "limit"
         live = self.start(real_money=True)
         today = MONDAY.isoformat()
-        for hh, mm in ((10, 2), (12, 32), (14, 32)):
-            if (hh, mm) != (10, 2):
-                self.clock.set(at(MONDAY, hh, mm - 3))
-            self.run_to(hh, mm)
-            self.assertEqual(live.book.positions, {}, f"closed by {hh}:{mm:02d}")
-            self.assertLess(live.calibration.day_possible_loss(today), D("2"), "only the fees are realized")
-        self.assertEqual(len(self.opens()), 3, "three round trips, one a slot")
-        self.assertEqual(live.state.get("calibration")["slots"], {"day": today, "fired": [600, 750, 870]})
+        for slot in C.SLOTS:
+            hh, mm = divmod(slot, 60)
+            if slot != C.SLOTS[0]:
+                self.clock.set(at(MONDAY, hh, mm) - 3 * 60)
+            self.run_to(hh, mm + 2)
+            self.assertEqual(live.book.positions, {}, f"closed by {hh}:{mm + 2:02d}")
+            self.assertLess(live.calibration.day_possible_loss(today), D("3"), "only the fees are realized")
+        self.assertEqual(len(self.opens()), 6, "six round trips, one a slot")
+        self.assertEqual(live.state.get("calibration")["slots"], {"day": today, "fired": [600, 660, 720, 780, 840, 900]})
+        rows = [r for r in self.samples() if r["action"] == "open"]
+        self.assertEqual([r["cell"] for r in rows], ["SPY:open:mid", "QQQ:open:mid", "SPY:open:mid25", "IWM:open:mid",
+                                                     "QQQ:open:mid25", "SPY:open:mid"])
+        self.assertEqual([self.minute_of(r["submitted_at"]) for r in rows], list(C.SLOTS), "each at its slot's minute")
+        self.assertEqual(live.state.rows("SELECT tif FROM orders WHERE family=? AND action='open' ORDER BY oid",
+                                         (C.FAMILY,)), [{"tif": t} for t in (4, 4, 24, 4, 24, 4)])
 
     def test_the_next_open_is_refused_once_realized_loss_and_what_is_open_would_pass_fifty(self):
         closes = []
@@ -326,12 +343,23 @@ class Limits(CalibrationCase):
         self.assertAlmostEqual(float(realized), (entry - 0.10) * 100 + 0.5, delta=1.0)
         # While the position was held, the bound counted its maximum loss; now the realized loss stands in for it.
         del self.market.overrides[long_leg.symbol], self.market.overrides[short_leg.symbol]
-        self.clock.set(at(MONDAY, 12, 29))
-        self.run_to(12, 35)
+        self.clock.set(at(MONDAY, 10, 59))
+        self.run_to(11, 5)
         self.assertEqual(len(self.opens()), 1, "a second round trip would put more than $50 of the day at risk")
         why = live.state.get("calibration")["why"]
         self.assertIn("the day's calibration bound", why)
-        self.assertEqual(live.state.get("calibration")["slots"]["fired"], [600, 750])
+        self.assertEqual(live.state.get("calibration")["slots"]["fired"], [600, 660])
+        # The patient cell at 12:00 is bounded the same way: its maximum loss would pass the day's room, so it never
+        # goes.
+        live.state.put("calibration", {**live.state.get("calibration"), "why": None})
+        self.clock.set(at(MONDAY, 11, 59))
+        self.run_to(12, 5)
+        self.assertEqual(len(self.opens()), 1)
+        self.assertIn("the day's calibration bound", live.state.get("calibration")["why"])
+        self.assertIn("SPY pair 1", live.state.get("calibration")["why"])
+        self.assertEqual(live.state.get("calibration")["slots"]["fired"], [600, 660, 720])
+        self.assertLessEqual(live.calibration.day_possible_loss(today), D("50"))
+        self.assertFalse([r for r in self.samples() if r["cell"].endswith("mid25")])
 
     def test_one_round_trip_at_a_time(self):
         self.venue.fill = "limit"
@@ -344,11 +372,11 @@ class Limits(CalibrationCase):
         live = self.start(real_money=True)
         self.run_to(10, 2)
         self.assertEqual(len(live.book.positions), 1)
-        self.clock.set(at(MONDAY, 12, 29))
-        self.run_to(12, 40)
-        self.assertEqual(len(self.opens()), 1, "the 12:30 slot waits while a calibration position is held")
+        self.clock.set(at(MONDAY, 10, 59))
+        self.run_to(11, 40)
+        self.assertEqual(len(self.opens()), 1, "the 11:00 slot waits while a calibration position is held")
         self.assertEqual(len(live.book.positions), 1)
-        self.assertNotIn(750, live.state.get("calibration")["slots"]["fired"])
+        self.assertNotIn(660, live.state.get("calibration")["slots"]["fired"])
 
     def test_nothing_goes_before_the_paper_proof_and_the_slot_waits_for_it(self):
         self.venue.fill = "limit"
@@ -392,6 +420,220 @@ class Limits(CalibrationCase):
         self.assertEqual(len(held), 1)
         [opened] = [b for b in self.mine() if b.get("legs") and b["legs"][0]["position_intent"] == "buy_to_open"]
         self.assertFalse({leg["symbol"] for leg in opened["legs"]} & held)
+
+
+class Timing(CalibrationCase):
+    """Sept 28, 2026: six hourly slots, 10:00 through 15:00 ET; the patient cell at 12:00 and 14:00; every round trip's
+    ladder, at its slowest, sent before the last resort (15:45 ET)."""
+
+    def ladder_at_its_slowest(self):
+        """Every open rests unfilled until its re-price's LAST minute; every close rests until the natural."""
+        closes = []
+
+        def hook(body):
+            if body["legs"][0]["position_intent"] == "buy_to_open":
+                self.venue.fill = "none"
+            else:
+                closes.append(body)
+                self.venue.fill = "none" if len(closes) < 3 else "natural"
+
+        self.venue.fill = "none"
+        self.venue.on_submit = hook
+
+    def sent_minutes(self):
+        return [(r["cell"].split(":", 1)[1], self.minute_of(r["submitted_at"])) for r in self.samples()]
+
+    def test_the_arithmetic(self):
+        self.assertEqual(C.SLOTS, (600, 660, 720, 780, 840, 900))
+        self.assertEqual(C.SYMBOLS, ("SPY", "QQQ", "IWM"))
+        self.assertEqual((C.ladder_minutes(C.WAIT_MINUTES), C.ladder_minutes(C.PATIENT_MINUTES)), (23, 43))
+        self.assertEqual((C.OPEN_TIF["mid25"], C.OPEN_TIF["mid"], C.OPEN_TIF["mid+1"]), (24, 4, 4))
+        for close in (960, 780):                                          # a full day and a half day
+            last = close - C.NO_NEW_MINUTES - 1                           # the last minute a round trip may start
+            self.assertTrue(C.fits(last, close, C.ladder_minutes(C.WAIT_MINUTES)), "the plain ladder always fits")
+            self.assertTrue(C.fits(last + C.WAIT_MINUTES + 1, close, C.REPRICE_REST), "and so does its re-price")
+        # The 15:00 slot starts (it is 60 minutes before the close, and NO_NEW_MINUTES is 45) until 15:14.
+        self.assertLess(900, 960 - C.NO_NEW_MINUTES)
+        self.assertEqual(960 - C.NO_NEW_MINUTES, 915)
+        # The patient cell: its slowest ladder from 15:00 sends the natural at 15:43, inside the slack before 15:45, so
+        # it is never at 15:00; at 12:00 and 14:00 it fits to the end of the slot's window.
+        self.assertEqual(900 + C.ladder_minutes(C.PATIENT_MINUTES), 943)
+        self.assertFalse(C.fits(900, 960, C.ladder_minutes(C.PATIENT_MINUTES)))
+        self.assertNotIn(900, C.PATIENT_SLOTS)
+        for slot in C.PATIENT_SLOTS:
+            self.assertTrue(C.fits(slot + C.SLOT_WINDOW - 1, 960, C.ladder_minutes(C.PATIENT_MINUTES)), slot)
+        self.assertEqual([C.open_cell(s, s, 960) for s in C.SLOTS], ["mid", "mid", "mid25", "mid", "mid25", "mid"])
+        self.assertEqual(C.open_cell(840, 884, 960), "mid25")
+        self.assertEqual(C.open_cell(720, 720, 780), "mid", "a half day (13:00 close): the plain mid")
+
+    def test_the_15_00_slot_starts_at_15_14_and_its_ladder_at_its_slowest_ends_before_the_last_resort(self):
+        self.ladder_at_its_slowest()
+        live = self.start(real_money=True, hh=15, mm=14)
+        self.run_to(15, 24)
+        self.venue.fill = "limit"                                         # the re-price fills in its last minute
+        self.run_to(15, 44)
+        self.assertEqual(self.sent_minutes(), [("open:mid", 914), ("open:mid+1", 920), ("close:mid", 925),
+                                               ("close:mid-1", 931), ("close:natural", 937)])
+        self.assertEqual(937, 914 + C.ladder_minutes(C.WAIT_MINUTES), "the arithmetic is the order path's")
+        self.assertLess(937 + C.LADDER_SLACK, 960 - C.LAST_RESORT_MINUTES)
+        self.assertEqual(live.book.positions, {})
+
+    def test_no_round_trip_starts_at_15_15(self):
+        self.venue.fill = "limit"
+        live = self.start(real_money=True, hh=15, mm=15)
+        self.run_to(15, 30)
+        self.assertEqual(self.mine(), [])
+        self.assertEqual(live.calibration.roots(self.clock()), {}, "nor are chains read for a slot that cannot start")
+
+    def test_the_patient_open_works_25_minutes_at_the_mid_then_reprices_once(self):
+        self.venue.fill = "none"
+        live = self.start(real_money=True, hh=11, mm=58)
+        self.run_to(12, 0)
+        [first] = self.mine()
+        [row] = self.samples()
+        self.assertEqual((row["cell"], row["offset"], row["ticks"]), ("SPY:open:mid25", "mid25", 0))
+        self.assertAlmostEqual(row["limit_value"], V.round_price(row["mid"], 0.01, up=False), places=6, msg="at the mid")
+        self.assertAlmostEqual(float(first["limit_price"]), row["limit_value"], places=6)
+        self.assertEqual(live.state.get("calibration")["trip"]["attempt"], "mid25")
+        self.assertEqual(live.calibration.roots(self.clock()), {"SPY": (1, 7, 0.01)}, "only its own root while it works")
+        self.run_to(12, 24)
+        self.assertEqual((len(self.mine()), self.venue.cancels), (1, []), "it still works at 12:24")
+        self.run_to(12, 25)
+        self.assertEqual(len(self.venue.cancels), 1, "time in force 24: the market's minutes 12:01 through 12:25")
+        self.run_to(12, 26)
+        first_, second = self.mine()
+        self.assertEqual(second["legs"], first["legs"], "the same contracts")
+        self.run_to(12, 45)
+        self.assertEqual(len(self.mine()), 2, "once, then nothing more this slot")
+        self.assertEqual([(r["cell"], r["outcome"], r["ticks"]) for r in self.samples()],
+                         [("SPY:open:mid25", "cancelled", 0), ("SPY:open:mid+1", "cancelled", 1)])
+        self.assertEqual(self.sent_minutes(), [("open:mid25", 720), ("open:mid+1", 746)])
+        self.assertEqual({r["trip"] for r in self.samples()}, {"20260928-720-SPY"})
+        self.assertEqual(live.state.rows("SELECT tif FROM orders WHERE family=? ORDER BY oid", (C.FAMILY,)),
+                         [{"tif": 24}, {"tif": 4}])
+        self.assertIsNone(live.state.get("calibration")["trip"])
+        self.assertEqual(live.book.positions, {})
+
+    def test_the_patient_ladder_at_its_slowest_ends_before_the_last_resort(self):
+        self.ladder_at_its_slowest()
+        live = self.start(real_money=True, hh=13, mm=58)
+        self.run_to(14, 30)
+        self.venue.fill = "limit"                                         # the re-price fills in its last minute
+        self.run_to(14, 50)
+        self.assertEqual(self.sent_minutes(), [("open:mid25", 840), ("open:mid+1", 866), ("close:mid", 871),
+                                               ("close:mid-1", 877), ("close:natural", 883)])
+        self.assertEqual(883, 840 + C.ladder_minutes(C.PATIENT_MINUTES), "the arithmetic is the order path's")
+        self.assertEqual(live.book.positions, {})
+        # From the end of the 14:00 slot's window it would still end with the slack in hand before 15:45.
+        self.assertLess(884 + C.ladder_minutes(C.PATIENT_MINUTES) + C.LADDER_SLACK, 960 - C.LAST_RESORT_MINUTES)
+
+    def test_a_patient_slot_whose_symbols_all_have_the_patient_target_opens_at_the_mid(self):
+        (self.root / "swarm.json").write_text(json.dumps({"live": {"calibration": True, "observe": False,
+                                                                   "calibration_samples": 1}}))
+        recorder = C.Recorder(self.root)
+        for oid, symbol in enumerate(C.SYMBOLS, 900):
+            self.assertTrue(recorder.submitted({
+                "oid": oid, "client_id": f"c{oid}", "trip": "t", "day": "2026-09-25", "symbol": symbol, "legs": "[]",
+                "action": "open", "offset": "mid25", "ticks": 0, "cell": C.cell_of(symbol, "open", "mid25"),
+                "limit_price": "0.40", "limit_value": 0.4, "qty": 1, "quote": "{}", "submitted_at": 0.0}))
+            recorder.finished(oid, {"outcome": "filled", "status": "filled", "filled_qty": 1})
+        recorder.close()
+        self.venue.fill = "limit"
+        self.start(real_money=True, hh=11, mm=58)
+        self.run_to(12, 1)
+        opened = [r["cell"] for r in self.samples() if r["oid"] < 900 and r["action"] == "open"]
+        self.assertEqual(opened, ["SPY:open:mid"], "every symbol has the patient target: the plain mid instead")
+
+
+class OneAtATime(CalibrationCase):
+    def test_at_most_one_round_trip_at_any_minute_of_the_day(self):
+        n = {"open": 0, "close": 0}
+
+        def hook(body):
+            if body["legs"][0]["position_intent"] == "buy_to_open":
+                n["open"] += 1
+                self.venue.fill = "limit" if n["open"] % 2 == 0 else "none"   # every other open rests unfilled
+            else:
+                n["close"] += 1
+                self.venue.fill = "natural" if n["close"] % 3 == 0 else "none"  # a close fills at its natural rung
+
+        self.venue.on_submit = hook
+        live = self.start(real_money=True)
+        seen = set()
+        while self.minute_of(self.clock()) <= 15 * 60 + 50:
+            live.minute()
+            opens = [o for o in live.book.orders.values() if o.working and o.family == C.FAMILY and o.action == "open"]
+            held = live.calibration.positions()
+            self.assertLessEqual(len(opens) + len(held), 1, f"one round trip at a time ({self.minute_of(self.clock())})")
+            seen |= {p.root for p in held}
+            self.clock.set(self.clock() + 60)
+        self.assertGreaterEqual(len({r["trip"] for r in self.samples()}), 4)
+        self.assertEqual(seen, {"SPY", "QQQ", "IWM"}, "every symbol held once in the day")
+
+
+class Iwm(CalibrationCase):
+    def iwm_trip(self):
+        self.venue.fill = "limit"
+        with mock.patch.object(C, "SYMBOLS", ("IWM",)):
+            live = self.start(real_money=True)
+            self.run_to(10, 2)
+        opened, closed = self.mine()[:2]
+        strikes = [int(leg["symbol"][-8:]) / 1000 for leg in opened["legs"]]
+        return live, opened, closed, strikes
+
+    def test_its_verticals_are_one_dollar_wide_nearest_the_money(self):
+        live, opened, closed, strikes = self.iwm_trip()
+        spot = self.market.level("IWM")                                  # 281.28: between the 281 and 282 strikes
+        self.assertTrue(all(leg["symbol"].startswith("IWM") for leg in opened["legs"]))
+        self.assertEqual(strikes, [281.0, 282.0], "the pair whose centre is nearest the underlying")
+        self.assertLess(abs(sum(strikes) / 2 - spot), 0.5)
+        self.assertLessEqual(float(opened["limit_price"]) * 100, 50.0)
+        self.assertEqual([r["cell"] for r in self.samples()], ["IWM:open:mid", "IWM:close:mid"])
+        self.assertEqual(live.book.positions, {})
+
+    def test_a_pair_whose_one_lot_and_fees_would_pass_the_days_room_yields_to_the_next_nearest(self):
+        # IWM at 281.46: the nearest pair (281/282) costs about $0.50 at the mid, $50 of maximum loss before its fees,
+        # over the day's $50 room once they are counted; the next nearest that fits goes, never it.
+        self.market.spot = 281.46 / self.market.IWM_SHARE
+        live, opened, closed, strikes = self.iwm_trip()
+        nearest = [self.market.quote(f"IWM260929C00{k}000") for k in (281, 282)]
+        debit = sum(b + a for b, a in nearest[:1]) / 2 - sum(b + a for b, a in nearest[1:]) / 2
+        self.assertGreaterEqual(debit * 100, 49.9, "the nearest pair is at the edge of the bound")
+        self.assertEqual(strikes, [282.0, 283.0])
+        self.assertLess(float(opened["limit_price"]) * 100 + 2 * 0.1, 50.0)
+        self.assertLessEqual(float(live.state.get("calibration")["day_possible_loss_usd"]["usd"]), 50.0)
+
+    def test_on_a_half_dollar_grid_a_pair_half_a_dollar_off_the_whole_strikes(self):
+        self.market.steps["IWM"] = 0.5
+        self.market.spot = 280.85 / self.market.IWM_SHARE                # IWM 280.85: 280.5/281.5 is centred at 281.0
+        live, opened, closed, strikes = self.iwm_trip()
+        self.assertEqual(strikes, [280.5, 281.5])
+        self.assertEqual([leg["symbol"][-9:] for leg in opened["legs"]], ["C00280500", "C00281500"])
+        self.assertEqual(live.book.positions, {})
+
+
+class Report(CalibrationCase):
+    def test_the_report_shows_the_plan_and_every_cell_the_patient_cell_among_them(self):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            report = live_main(["--root", str(self.root), "--calibration"])
+        self.assertEqual(report["plan"]["slots_et"], ["10:00", "11:00", "12:00", "13:00", "14:00", "15:00"])
+        self.assertEqual(report["plan"]["patient_slots_et"], ["12:00", "14:00"])
+        self.assertEqual(report["plan"]["symbols"], ["SPY", "QQQ", "IWM"])
+        self.assertEqual(report["plan"]["works_minutes"]["open"], {"mid": 5, "mid+1": 5, "mid25": 25})
+        self.assertEqual(len(report["cells"]), 18, "3 symbols x (3 open + 3 close cells)")
+        for symbol in C.SYMBOLS:
+            cell = report["cells"][f"{symbol}:open:mid25"]
+            self.assertEqual((cell["works_minutes"], cell["attempts"], cell["fill_rate"]), (25, 0, None))
+        self.assertIn("IWM:open:mid25", json.loads(out.getvalue())["cells"])
+        # Once sampled, the patient cell counts its own.
+        self.venue.fill = "limit"
+        self.start(real_money=True, hh=11, mm=58)
+        self.run_to(12, 2)
+        report = C.report(self.root)
+        patient = report["cells"]["SPY:open:mid25"]
+        self.assertEqual((patient["attempts"], patient["filled"], patient["fill_rate"]), (1, 1, 1.0))
+        self.assertEqual(report["cells"]["SPY:open:mid"]["attempts"], 0)
 
 
 class Recorder(CalibrationCase):

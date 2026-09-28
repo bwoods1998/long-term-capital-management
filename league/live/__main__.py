@@ -6,8 +6,10 @@
     python3 -m league.live --root /workspace/state --calibration          # the D3 calibration samples, read-only
 
 Nothing here sends an order or reads a venue: it reads and writes the live state (`<root>/live.sqlite`). `--calibration`
-only reads `<root>/calibration.sqlite` (per cell: attempts, outcomes, fill rate, mean fill against the mid in ticks); it
-prints quotes-derived numbers to the owner's terminal, never anywhere public.
+only reads `<root>/calibration.sqlite`: the plan (symbols, the six slots, the patient slots) and every cell, the patient
+"mid25" and those not yet sampled included (per cell: working minutes, attempts, outcomes, fill rate, mean fill against
+the mid in ticks, median seconds to fill); it prints quotes-derived numbers to the owner's terminal, never anywhere
+public.
 """
 
 from __future__ import annotations

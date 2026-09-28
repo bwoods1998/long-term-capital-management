@@ -1,27 +1,39 @@
-"""The D3 real-fill calibration round trips: the House's own 1-lot SPY and QQQ debit verticals, only to measure fills.
+"""The D3 real-fill calibration round trips: the House's own 1-lot SPY, QQQ and IWM debit verticals, only to measure
+fills.
 
 The owner's decision D3 (the sprint, Sept 26, 2026, `docs/goals/LTCM_SWARM_SPRINT.md`): without real fills the Gym's
 execution cost is a guess, and it is the biggest single term in every family's result. So the House -- not an agent --
-sends 1-lot SPY and QQQ debit verticals, opens and closes them, every session until `live.calibration_samples` samples
-per cell, within a strict bound on the day's possible loss: a new open goes only while today's realized calibration loss
-(net, floored at zero), plus the maximum loss of any calibration position still held or open still working, plus its own
-maximum loss (fees included) stays within the constitution's `options_money.calibration.day_usd` ($50). The day can
-never lose more than that, and a closed round trip frees its maximum loss. These are the only orders no agent's intent produced besides the paper route proof. They are never
-evidence for any family.
+sends 1-lot SPY, QQQ and IWM debit verticals, opens and closes them, every session until `live.calibration_samples`
+samples per cell, within a strict bound on the day's possible loss: a new open goes only while today's realized
+calibration loss (net, floored at zero), plus the maximum loss of any calibration position still held or open still
+working, plus its own maximum loss (fees included) stays within the constitution's `options_money.calibration.day_usd`
+($50). The day can never lose more than that, and a closed round trip frees its maximum loss. These are the only orders
+no agent's intent produced besides the paper route proof. They are never evidence for any family.
 
 WHAT IT SENDS (`Calibration.step`, once a session minute, from `OptionsLive._session_minute` after the families' real
 orders of the minute, so it takes only what they left):
 
-- At each slot (10:00, 12:30 and 14:30 ET: 14:00Z, 16:30Z and 18:30Z in daylight time), at most one round trip, never
-  two at once: the symbol with the fewest open-at-mid samples still under the target whose vertical fits every cap. The
-  vertical: calls one strike ($1) wide, nearest the money (its centre nearest the underlying, the cheaper at a tie; the
-  next nearest of `CANDIDATES` pairs when those contracts are held or worked or it does not fit a cap), on the nearest
-  expiry at least a day out, on contracts no book position or working order holds and no waiting exit needs; those
-  whose mid debit keeps one lot within the day's bound first. One round trip at a time: a slot waits while a
-  calibration position is held or a calibration order works.
+- At each slot (hourly, 10:00 through 15:00 ET: 14:00Z through 19:00Z in daylight time; Sept 28, 2026, twice the
+  three slots of the sprint), at most one round trip, never two at once: the symbol with the fewest samples of the
+  slot's open cell still under the target whose vertical fits every cap. The vertical: calls one strike ($1) wide,
+  nearest the money (its centre nearest the underlying, the cheaper at a tie; the next nearest of `CANDIDATES` pairs
+  when those contracts are held or worked or it does not fit a cap), on the nearest expiry at least a day out, on
+  contracts no book position or working order holds and no waiting exit needs; those whose mid debit keeps one lot
+  within the day's bound first. Any grid with two strikes a dollar apart serves (IWM's as SPY's and QQQ's; a half-dollar
+  grid gives pairs such as 280.5/281.5). One round trip at a time: a slot waits while a calibration position is held or
+  a calibration order works. A slot starts nothing from `NO_NEW_MINUTES` before the close, so a round trip's whole
+  ladder, at its slowest, is sent before the last resort (`ladder_minutes`, `fits`); the 15:00 slot may start until
+  15:14.
 - The open: a limit at the mid (the Gym's `limit_value("mid")`: the $0.01 net tick, rounded passively). It works
   `WAIT_MINUTES` (its time in force, cancelled by the order path), then goes ONCE more at the mid plus one tick, then
-  nothing.
+  nothing. THE PATIENT CELL ("mid25"; Sept 28, 2026): at the `PATIENT_SLOTS` (12:00 and 14:00 ET) the open works at the
+  mid for `PATIENT_MINUTES` (25; time in force 24, the Gym's convention) before that single re-price -- the entry the
+  swarm's best mechanism uses (an index rebound bought with a patient mid limit), so the samples say whether the Gym
+  overcharges patient fills. It is its own cell ("SPY:open:mid25"); its re-price is the ordinary "mid+1" cell (the
+  same order: the then mid plus a tick for `WAIT_MINUTES`; its trip's rows show which open it followed). Not at 15:00:
+  from 15:00 its slowest ladder (25 + 1 + 5 + 12 minutes) would send its natural at 15:43, two minutes before the last
+  resort, with no room for a late cancel; a patient slot whose ladder does not fit with `LADDER_SLACK` to spare (a half
+  day) opens at the plain mid instead, as does one whose symbols all have the patient cell's target.
 - The close, once filled: at the mid, then at the mid less one tick, then at the natural, each for `WAIT_MINUTES`; at
   the natural at once from `LAST_RESORT_MINUTES` before the session's close. Charged to the day's order budget like a
   program's close (only that last resort may use the room kept for the House's own exits); at most `CLOSE_ATTEMPTS_DAY`
@@ -48,8 +60,9 @@ offset x open/close), limit price and tick offset; each leg's NBBO and the struc
 submit, fill and cancel times; the fill price and filled quantity; the fees (the book's venue-table estimate: the
 venue's own are not read here); and the outcome (filled, partial, cancelled or rejected). A failure to record never
 blocks or delays an order: it is caught, logged and alerted once. Never published (the repository is public; these are
-quotes). `python -m league.live --root <state> --calibration` reads it: counts per cell, fill rate, mean fill against
-the mid in ticks.
+quotes). `python -m league.live --root <state> --calibration` reads it: the plan (symbols, slots, the patient slots) and
+every cell, those not yet sampled included, with its working minutes, counts, fill rate, mean fill against the mid in
+ticks and median seconds to fill.
 """
 
 from __future__ import annotations
@@ -72,18 +85,34 @@ from .venue import occ_parts
 #: The calibration's orders and positions: never a swarm family (their ids are slugs, `[a-z0-9-]`).
 FAMILY = "house:calibration"
 INSTANCE = "house:calibration@0:c"
-SYMBOLS = ("SPY", "QQQ")
-#: New York minutes a round trip may start (10:00, 12:30, 14:30 ET), each within `SLOT_WINDOW` minutes of its time.
-SLOTS = (600, 750, 870)
+#: The roots sampled (Sept 28, 2026: IWM added; its $1 grid near the money serves as SPY's and QQQ's does, and the
+#: swarm's families trade all three).
+SYMBOLS = ("SPY", "QQQ", "IWM")
+#: New York minutes a round trip may start (hourly, 10:00 through 15:00 ET), each within `SLOT_WINDOW` minutes of its
+#: time and never from `NO_NEW_MINUTES` before the close (the 15:00 slot: until 15:14).
+SLOTS = (600, 660, 720, 780, 840, 900)
 SLOT_WINDOW = 45
 #: Minutes each attempt works before the next: its time in force is one less (the order path, as the Gym, gives an order
-#: of time in force k the market's minutes m + 1 through m + 1 + k; `OptionsLive._venue_rules`).
+#: of time in force k the market's minutes m + 1 through m + 1 + k; `OptionsLive._venue_rules`, which cancels it at the
+#: pass of minute m + 1 + k, so the next attempt goes at m + 2 + k).
 WAIT_MINUTES = 5
 TIF = WAIT_MINUTES - 1
+#: The patient open cell "mid25": at these slots (12:00 and 14:00 ET) the open works at the mid for `PATIENT_MINUTES`
+#: (time in force one less, by the same convention) before its single re-price. Not 15:00: its slowest ladder would send
+#: its natural two minutes before the last resort (`ladder_minutes`), inside `LADDER_SLACK`.
+PATIENT_SLOTS = (720, 840)
+PATIENT_MINUTES = 25
+PATIENT_TIF = PATIENT_MINUTES - 1
+PATIENT = "mid25"
 #: Minutes before the session's close from which an open position closes at the natural at once.
 LAST_RESORT_MINUTES = 15
-#: No new round trip starts within this many minutes of the close.
-NO_NEW_MINUTES = 60
+#: Minutes a round trip's slowest ladder keeps in hand before the last resort: a cancel the venue confirms late, or an
+#: attempt that slips a minute, still leaves its natural rung before `LAST_RESORT_MINUTES`.
+LADDER_SLACK = 5
+#: No new round trip starts within this many minutes of the close (15:15 ET on a full day): at least the last resort,
+#: the plain ladder at its slowest and the slack (15 + 23 + 5 = 43; `fits`), so a round trip begun at 15:14 sends its
+#: whole ladder by 15:37. Sept 28, 2026: 60 had shut the 15:00 slot out (a start at minute 900 >= 960 - 60).
+NO_NEW_MINUTES = 45
 #: The nearest pairs tried, in order, when the nearest one's contracts are held or worked or it does not fit a cap.
 CANDIDATES = 4
 #: A position's close attempts a day (the mid, a tick under, then the natural), and the back-off after a refused one.
@@ -94,10 +123,43 @@ TICK = V.NET_TICK
 FILE = "calibration.sqlite"
 #: One row per attempt; the recorder stops writing (and the program starts no round trip) past this many.
 MAX_ROWS = 20000
-#: The cells' offsets: open at the mid and one tick over; close at the mid, one tick under, and the natural.
-OPEN_OFFSETS = {"mid": ("mid", 0), "mid+1": ({"mid": 1}, 1)}
+#: The cells' offsets (the Gym's limit rule and its ticks from the mid): open at the mid (for `WAIT_MINUTES`, or the
+#: patient cell's `PATIENT_MINUTES`) and one tick over; close at the mid, one tick under, and the natural.
+OPEN_OFFSETS = {"mid": ("mid", 0), "mid+1": ({"mid": 1}, 1), PATIENT: ("mid", 0)}
 CLOSE_OFFSETS = {"mid": ("mid", 0), "mid-1": ({"mid": 1}, 1), "natural": ("natural", None)}
+#: Each cell's time in force (the natural close: 0, one minute).
+OPEN_TIF = {"mid": TIF, "mid+1": TIF, PATIENT: PATIENT_TIF}
+CLOSE_TIF = {"mid": TIF, "mid-1": TIF, "natural": 0}
 COUNTED = ("filled", "partial", "cancelled")
+#: Minutes from the close's first rung (the mid) to its natural rung: the mid and a tick under, each sent, worked
+#: `WAIT_MINUTES` and cancelled, the next going the minute after.
+CLOSE_LADDER = 2 * (WAIT_MINUTES + 1)
+
+
+def ladder_minutes(open_minutes: int) -> int:
+    """At its slowest, the minutes from a round trip's first open to its close's natural rung: the open works
+    `open_minutes` and its re-price goes the minute after its cancel; the re-price works `WAIT_MINUTES` and fills in its
+    last minute; the close goes that minute at the mid, then a tick under, then the natural (`CLOSE_LADDER`). The plain
+    cell's is 23; the patient cell's 43 (the tests step it through the order path)."""
+    return int(open_minutes) + 1 + WAIT_MINUTES + CLOSE_LADDER
+
+
+#: At its slowest, the minutes from the re-price to the close's natural rung.
+REPRICE_REST = WAIT_MINUTES + CLOSE_LADDER
+
+
+def fits(minute: int, close_min: int, rest: int) -> bool:
+    """Whether what is left of a round trip, `rest` minutes at its slowest from New York minute `minute`, sends its
+    natural rung with `LADDER_SLACK` in hand before the last resort (`LAST_RESORT_MINUTES` before `close_min`)."""
+    return int(minute) + int(rest) + LADDER_SLACK < int(close_min) - LAST_RESORT_MINUTES
+
+
+def open_cell(slot: int, minute: int, close_min: int) -> str:
+    """The open cell a round trip starting at `minute` in `slot` samples first: the patient cell at `PATIENT_SLOTS`
+    while its slowest ladder fits (`fits`), the plain mid otherwise (a half day's early close)."""
+    if slot in PATIENT_SLOTS and fits(minute, close_min, ladder_minutes(PATIENT_MINUTES)):
+        return PATIENT
+    return "mid"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS samples (
@@ -260,14 +322,18 @@ class Calibration:
         """The chains the program needs read now: while a round trip works, or around a slot it may still start."""
         from .step import ny
 
-        if self._st().get("trip"):
-            return {s: (1, 7, 0.01) for s in SYMBOLS}
+        trip = self._st().get("trip")
+        if trip:                                            # its re-price needs its own root's chain only
+            return {s: (1, 7, 0.01) for s in SYMBOLS if s == trip.get("symbol")} or {s: (1, 7, 0.01) for s in SYMBOLS}
         if not self.live.switches()["calibration"] or self.live.real_block(opening=True):
             return {}
         local = ny(now)
         minute = local.hour * 60 + local.minute
         fired = self._fired(local.date().isoformat())
-        if any(slot - 2 <= minute < slot + SLOT_WINDOW and slot not in fired for slot in SLOTS):
+        day = getattr(self.live, "day", None)
+        close_min = day.close_min if day is not None and day.day == local.date() else 960
+        last = close_min - NO_NEW_MINUTES                   # no slot starts from here: nothing to read for one
+        if any(slot - 2 <= minute < min(slot + SLOT_WINDOW, last) and slot not in fired for slot in SLOTS):
             return {s: (1, 7, 0.01) for s in SYMBOLS}
         return {}
 
@@ -320,8 +386,8 @@ class Calibration:
             order = ROrder.of(found[0]) if found else None
             if order is not None and order.working:
                 return
-            if (order is None or order.filled_qty >= 1 or trip.get("attempt") != "mid" or trip.get("day") != today
-                    or order.status not in ("cancelled", "expired")):
+            if (order is None or order.filled_qty >= 1 or trip.get("attempt") not in ("mid", PATIENT)
+                    or trip.get("day") != today or order.status not in ("cancelled", "expired")):
                 if order is not None and order.filled_qty >= 1 and order.pid in book.positions:
                     pos = book.positions[order.pid]         # filled: the close ladder takes it, under this trip's name
                     if pos.info.get("cal_trip") != trip["id"]:
@@ -330,9 +396,10 @@ class Calibration:
                 st["trip"] = None                           # filled, its attempts spent, or its session over
                 self._put(st)
                 return
-            # The mid went unfilled: once more at the mid plus one tick, on the same contracts, if it still may.
+            # The mid (or the patient mid) went unfilled: once more at the mid plus one tick, on the same contracts, if
+            # it still may (its own ladder, not the slots' `NO_NEW_MINUTES`, bounds it by the close).
             legs = [RLeg.of(x) for x in trip["legs"]]
-            why = self._may_open(day, minute)
+            why = self._may_open(day, minute, rest=REPRICE_REST)
             sent = None if why else self._send_open(day, mi, trip["symbol"], legs, "mid+1", trip["id"], out)
             st = self._st()
             if isinstance(sent, ROrder):
@@ -353,8 +420,14 @@ class Calibration:
         if counts is None:
             return  # an unreadable recorder starts nothing (its closes go on)
         target = int(live.switches()["calibration_samples"])
-        due = sorted((s for s in SYMBOLS if counts.get(cell_of(s, "open", "mid"), 0) < target),
-                     key=lambda s: (counts.get(cell_of(s, "open", "mid"), 0), SYMBOLS.index(s)))
+        # The slot's open cell: the patient mid at a patient slot while its ladder fits and a symbol still wants it,
+        # else the plain mid.
+        cell, due = "mid", []
+        for cell in dict.fromkeys((open_cell(slot, minute, day.close_min), "mid")):
+            due = sorted((s for s in SYMBOLS if counts.get(cell_of(s, "open", cell), 0) < target),
+                         key=lambda s, cell=cell: (counts.get(cell_of(s, "open", cell), 0), SYMBOLS.index(s)))
+            if due:
+                break
         if not due:
             self._fire(st, today, slot, f"{today}: every symbol has {target} samples at the mid")
             return
@@ -378,10 +451,10 @@ class Calibration:
                 continue
             trip_id = f"{today.replace('-', '')}-{slot}-{symbol}"
             for n, pick in enumerate(picks, 1):             # the nearest the money first; the first that fits every cap
-                sent = self._send_open(day, mi, symbol, pick, "mid", trip_id, out)
+                sent = self._send_open(day, mi, symbol, pick, cell, trip_id, out)
                 if isinstance(sent, ROrder):
                     st = self._st()
-                    st["trip"] = {"id": trip_id, "day": today, "slot": slot, "symbol": symbol, "attempt": "mid",
+                    st["trip"] = {"id": trip_id, "day": today, "slot": slot, "symbol": symbol, "attempt": cell,
                                   "oid": sent.oid, "legs": [leg.row() for leg in pick]}
                     self._fire(st, today, slot, None)
                     return
@@ -401,7 +474,10 @@ class Calibration:
             self.live.record("live.calibration", {"slot": slot, "day": today, "held": why})
         self._put(st)
 
-    def _may_open(self, day: Any, minute: int) -> str | None:
+    def _may_open(self, day: Any, minute: int, *, rest: int | None = None) -> str | None:
+        """Why no calibration open may go now, or None. A new round trip: not from `NO_NEW_MINUTES` before the close.
+        A re-price (`rest`, what is left of its ladder at its slowest): only while that still `fits` before the last
+        resort."""
         live = self.live
         if not live.switches()["calibration"]:
             return "live.calibration is off"
@@ -414,7 +490,10 @@ class Calibration:
             return "the paper proof has not passed"
         if live.sizing_equity() is None:
             return "no sizing equity (the grant or the account)"
-        if minute >= day.close_min - NO_NEW_MINUTES:
+        if rest is not None:
+            if not fits(minute, day.close_min, rest):
+                return "too near the close"
+        elif minute >= day.close_min - NO_NEW_MINUTES:
             return "too near the close"
         return None
 
@@ -547,7 +626,7 @@ class Calibration:
         if refusal:
             return refusal
         sent = book.new_order(instance=INSTANCE, family=FAMILY, action="open", type_="debit_vertical", root=symbol,
-                              legs=list(legs), qty=1, limit_value=limit, tif=TIF, day=today, minute=mi,
+                              legs=list(legs), qty=1, limit_value=limit, tif=OPEN_TIF[offset], day=today, minute=mi,
                               reserve=reserve, max_loss=max_loss, fees_est=fees, why=f"calibration: open at {offset}")
         self._record(sent, trip, symbol, legs, "open", offset, quote, mid)
         book.send(sent)
@@ -618,7 +697,7 @@ class Calibration:
             return
         sent = book.new_order(instance=INSTANCE, family=FAMILY, action="close", type_=pos.type, root=pos.root,
                               legs=list(pos.legs), qty=order.qty, limit_value=value,
-                              tif=TIF if offset != "natural" else 0, day=today, minute=mi, pid=pos.pid,
+                              tif=CLOSE_TIF[offset], day=today, minute=mi, pid=pos.pid,
                               fees_est=order.fees, why=f"calibration: close at {offset}")
         pos.info["cal_close"] = (tried + [offset])[-20:]
         tally["n"] = int(tally["n"]) + 1
@@ -696,22 +775,44 @@ def _int(value: Any) -> int | None:
         return None
 
 
+def plan() -> dict:
+    """What the program samples: its symbols, slots (New York time), the patient slots, and each cell's working
+    minutes (on a full day; `open_cell` and `fits` move them for an early close)."""
+    def hm(minute: int) -> str:
+        return f"{minute // 60}:{minute % 60:02d}"
+
+    return {"symbols": list(SYMBOLS), "slots_et": [hm(s) for s in SLOTS],
+            "patient_slots_et": [hm(s) for s in PATIENT_SLOTS], "no_new_trip_from_et": hm(960 - NO_NEW_MINUTES),
+            "last_resort_from_et": hm(960 - LAST_RESORT_MINUTES),
+            "works_minutes": {"open": {k: v + 1 for k, v in OPEN_TIF.items()},
+                              "close": {k: v + 1 for k, v in CLOSE_TIF.items()}}}
+
+
+def _blank(action: str, offset: str) -> dict:
+    tif = (OPEN_TIF if action == "open" else CLOSE_TIF).get(offset)
+    return {"works_minutes": tif + 1 if tif is not None else None, "attempts": 0, "ended": 0, "filled": 0, "partial": 0,
+            "cancelled": 0, "rejected": 0, "open": 0, "_ticks": [], "_seconds": []}
+
+
 def report(root: str | Path) -> dict:
-    """The read-only report (`python -m league.live --root <state> --calibration`): per cell the attempts, fills, fill
-    rate and mean fill against the mid in ticks (positive: worse than the mid). Opens the file read-only."""
+    """The read-only report (`python -m league.live --root <state> --calibration`): the plan, then per cell -- every
+    cell the plan samples, those without a sample yet included (the patient "mid25" among them) -- its working minutes,
+    attempts, fills, fill rate, mean fill against the mid in ticks (positive: worse than the mid) and median seconds to
+    fill. Opens the file read-only."""
     path = Path(root) / FILE
-    if not path.exists():
-        return {"file": str(path), "cells": {}, "note": "no calibration samples yet"}
-    db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1.0)
-    db.row_factory = sqlite3.Row
-    try:
-        rows = [dict(r) for r in db.execute("SELECT * FROM samples ORDER BY oid")]
-    finally:
-        db.close()
-    cells: dict[str, dict] = {}
+    cells: dict[str, dict] = {cell_of(s, action, offset): _blank(action, offset)
+                              for s in SYMBOLS for action, offsets in (("open", OPEN_OFFSETS), ("close", CLOSE_OFFSETS))
+                              for offset in offsets}
+    rows: list[dict] = []
+    if path.exists():
+        db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1.0)
+        db.row_factory = sqlite3.Row
+        try:
+            rows = [dict(r) for r in db.execute("SELECT * FROM samples ORDER BY oid")]
+        finally:
+            db.close()
     for r in rows:
-        c = cells.setdefault(r["cell"], {"attempts": 0, "ended": 0, "filled": 0, "partial": 0, "cancelled": 0, "rejected": 0,
-                                         "open": 0, "_ticks": [], "_seconds": []})
+        c = cells.setdefault(r["cell"], _blank(r["action"], r["offset"]))
         c["attempts"] += 1
         outcome = r["outcome"]
         if outcome is None:
@@ -733,7 +834,10 @@ def report(root: str | Path) -> dict:
         c["mean_fill_vs_mid_ticks"] = round(sum(ticks) / len(ticks), 3) if ticks else None
         c["median_seconds_to_fill"] = round(sorted(seconds)[len(seconds) // 2], 1) if seconds else None
         out[cell] = c
-    return {"file": str(path), "rows": len(rows), "cells": out}
+    answer = {"file": str(path), "plan": plan(), "rows": len(rows), "cells": out}
+    if not path.exists():
+        answer["note"] = "no calibration samples yet"
+    return answer
 
 
 def _stamp(text: Any) -> float | None:
@@ -745,4 +849,5 @@ def _stamp(text: Any) -> float | None:
         return None
 
 
-__all__ = ["Calibration", "Recorder", "report", "FAMILY", "INSTANCE", "SYMBOLS", "SLOTS", "FILE", "cell_of", "outcome_of"]
+__all__ = ["Calibration", "Recorder", "report", "plan", "FAMILY", "INSTANCE", "SYMBOLS", "SLOTS", "PATIENT_SLOTS",
+           "FILE", "cell_of", "outcome_of", "ladder_minutes", "fits", "open_cell"]
