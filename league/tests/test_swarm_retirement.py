@@ -6,13 +6,13 @@ from concurrent.futures import ThreadPoolExecutor
 
 from league.swarm.architect import Architect
 from league.swarm.gate import Gate
-from league.swarm.researcher import Researcher, idle_dead, idle_revisions
+from league.swarm.researcher import RETIRE_IDLE_EVALUATIONS, Researcher, idle_dead, idle_evaluations, idle_limit
 from league.swarm.seeds import family_spec
 from league.swarm.store import SwarmStore
 from league.swarm.tournament import IDLE_CAUSE, Tournament
 from league.tests.swarm_fakes import result
 from league.tests.test_swarm_researcher import ResearcherCase
-from league.tests.test_swarm_rounds import RoundCase, strong
+from league.tests.test_swarm_rounds import RoundCase, strong, weak
 from league.tests.test_swarm_store import StoreCase, SPEC
 from league.tests.test_swarm_pool import PoolCase, job as pool_job
 
@@ -263,9 +263,10 @@ class ResearcherRetirement(ResearcherCase):
 
 
 class ResearcherIdleRetirement(ResearcherCase):
-    """THE IDLE RULE (R3, Sept 27): a dead family (`retire_idle_revisions` revisions since its last validation without an
-    eligible Train version, or with a best Train score below zero) may retire with the population AT its start; only
-    `population.floor` holds it. Every Train run here is ineligible (10 trades a year) unless a case says otherwise."""
+    """THE IDLE RULE (R3, Sept 27): a dead family (`retire_idle_evaluations` Gym evaluations since its birth or last
+    validation without an eligible Train version, or three times as many with a best Train score below zero; never while
+    a validated version awaits the gate) may retire with the population AT its start; only `population.floor` holds it.
+    Every Train run here is ineligible (10 trades a year) unless a case says otherwise."""
 
     def setUp(self):
         super().setUp()
@@ -274,11 +275,11 @@ class ResearcherIdleRetirement(ResearcherCase):
         self.cancelled = []
         self.pool.cancel_family = self.cancelled.append
 
-    def idle(self, revisions=40, fid=None):
-        self.store.update_family(fid or self.fam["id"], since_val_revisions=revisions)
+    def idle(self, evaluations=RETIRE_IDLE_EVALUATIONS, fid=None):
+        self.store.update_family(fid or self.fam["id"], since_val_trials=evaluations)
 
     def read_turn(self, *calls, researcher=None, params=None):
-        """One cycle: a REVISE (a new version: one more revision), then a READ turn making `calls`."""
+        """One cycle: a REVISE (a new version: one more evaluation), then a READ turn making `calls`."""
         self.read_body = len(self.sail.bodies) + 1
         self.steps = [{"calls": [("gym_run", {"params": params or {"vrp_min": 1.3}})]}, {"calls": list(calls)}, {"text": "ok"}]
         return (researcher or self.researcher()).cycle(self.fam["id"])
@@ -287,20 +288,25 @@ class ResearcherIdleRetirement(ResearcherCase):
         return "retire" in [t["name"] for t in self.sail.bodies[self.read_body]["tools"]]
 
     def status(self):
-        """The cycle's status (written before its REVISE turn: the idle count before the new version)."""
+        """The cycle's status (written before its REVISE turn: the idle count before the new evaluation)."""
         return next(i["content"] for i in reversed(self.sail.bodies[self.read_body]["input"])
                     if i.get("role") == "user" and "Now: if a run just came back" in str(i.get("content")))
+
+    def test_the_default_counts_evaluations(self):
+        self.assertEqual(self.settings["researcher"]["retire_idle_evaluations"], RETIRE_IDLE_EVALUATIONS)
+        self.assertEqual(RETIRE_IDLE_EVALUATIONS, 150)
+        self.assertNotIn("retire_idle_revisions", self.settings["researcher"])
 
     def test_a_dead_family_retires_at_the_start_and_its_lesson_is_written(self):
         self.researcher().cycle(self.fam["id"])
         fam = self.store.family(self.fam["id"])
         self.assertIsNone(fam["best_train"], "no eligible Train version")
         self.assertEqual(fam["validations"], 0, "the old rule (two validations, above the start) would refuse")
-        self.idle(40)
+        self.idle(150)
         reason = "The mechanism made 10 trades a year at best. Condors on this root are dead."
         out = self.read_turn(("retire", {"reason": reason}))
         self.assertTrue(self.offered(), "READ offers retire to a dead family at the start")
-        self.assertIn("made no eligible Train version in 40 revisions since its last validation", self.status())
+        self.assertIn("made no eligible Train version in 150 Gym evaluations since its birth", self.status())
         self.assertTrue(out["retired"])
         self.assertNotIn("error", out)
         self.assertEqual(self.store.family(self.fam["id"])["band"], "retired")
@@ -314,17 +320,41 @@ class ResearcherIdleRetirement(ResearcherCase):
 
     def test_below_the_idle_count_the_old_rule_still_applies(self):
         self.researcher().cycle(self.fam["id"])
-        self.idle(38)  # the REVISE turn's new version makes 39
+        self.idle(148)  # the REVISE turn's new evaluation makes 149
         out = self.read_turn(("retire", {"reason": "Costs defeated the mechanism."}))
+        self.assertEqual(self.store.family(self.fam["id"])["since_val_trials"], 149)
         self.assertFalse(self.offered())
         self.assertNotIn("eligible Train version in", self.status())
         self.assertTrue(out["retire_refused"])
         self.assertIsNone(self.store.family(self.fam["id"])["retired_at"])
 
+    def test_a_family_that_loops_one_placeholder_is_counted_by_its_evaluations(self):
+        """The case the rule is for (live: hundreds of cycles on a dozen versions): an unchanged program re-run makes no
+        new version (the store returns the existing one), but every evaluation is a trial and counts. The Gym answers an
+        identical re-run with the same run_id: the store keeps one row and still counts the trial."""
+        self.settings["researcher"]["retire_idle_evaluations"] = 12
+        self.pool.answer = lambda job: {**result(job.name, roots=job.roots, trades=0), "run_id": "one-placeholder"}
+        self.researcher().cycle(self.fam["id"])  # the starter: version 1
+        for _ in range(12):  # twelve cycles re-running the latest version unchanged (no `code`, the same params)
+            self.steps = [{"calls": [("gym_run", {"params": {}})]}, {"text": "holding dormant"}]
+            self.researcher().cycle(self.fam["id"])
+        fam = self.store.family(self.fam["id"])
+        self.assertLessEqual(fam["revisions"], 2, "re-runs make no new version")
+        self.assertEqual(fam["trials"], 13)
+        self.assertEqual(len(self.store.runs(self.fam["id"], window="train", limit=50)), 1, "one row, every trial counted")
+        self.assertEqual(idle_evaluations(fam), 13)
+        self.assertEqual(idle_dead(fam, self.settings), "made no eligible Train version in 13 Gym evaluations since its birth")
+        self.assertTrue(self.researcher().can_retire(fam))
+        # A researcher that never calls retire: the tournament's fallback retires it by the same rule.
+        [row] = Tournament(self.store, self.pool, self.settings).retirements(self.store.families(alive=True))
+        self.assertEqual(row["family"], self.fam["id"])
+        self.assertEqual(self.store.family(self.fam["id"])["band"], "retired")
+        self.assertEqual(self.cancelled, [self.fam["id"]])
+
     def test_a_family_with_an_eligible_version_cannot_retire_under_the_idle_rule(self):
         self.pool.answer = lambda job: result(job.name, roots=job.roots)  # eligible: a positive best Train score
         self.researcher().cycle(self.fam["id"])
-        self.idle(60)
+        self.idle(1000)
         out = self.read_turn(("retire", {"reason": "Costs defeated the mechanism."}))
         fam = self.store.family(self.fam["id"])
         self.assertGreater(fam["best_train"], 0)
@@ -335,28 +365,61 @@ class ResearcherIdleRetirement(ResearcherCase):
         self.assertIsNone(fam["retired_at"])
         self.assertEqual(self.store.graveyard(), [])
 
-    def test_a_best_train_score_below_zero_counts_as_dead_and_zero_does_not(self):
-        fam = {**self.store.family(self.fam["id"]), "since_val_revisions": 40}
-        self.assertIn("below zero over 40 revisions", idle_dead({**fam, "best_train": -0.4}, self.settings))
-        self.assertIsNone(idle_dead({**fam, "best_train": 0.0}, self.settings))
-        self.assertIn("no eligible Train version", idle_dead({**fam, "best_train": None}, self.settings))
+    def test_a_best_train_score_below_zero_counts_only_after_three_times_the_limit(self):
+        """A negative best only says every eligible version so far lost in its worst Train year: a normal stage of a
+        family's ramp, so it gets three times as long as a family with no eligible version at all."""
+        fam = {**self.store.family(self.fam["id"]), "since_val_trials": 150}
+        self.assertIn("no eligible Train version in 150 Gym evaluations", idle_dead({**fam, "best_train": None}, self.settings))
+        self.assertIsNone(idle_dead({**fam, "best_train": -0.4}, self.settings), "negative at the limit: still ramping")
+        self.assertIsNone(idle_dead({**fam, "best_train": -0.4, "since_val_trials": 3 * 150 - 1}, self.settings))
+        self.assertEqual(idle_dead({**fam, "best_train": -0.4, "since_val_trials": 450}, self.settings),
+                         "kept its best Train score below zero over 450 Gym evaluations since its birth")
+        self.assertIsNone(idle_dead({**fam, "best_train": 0.0, "since_val_trials": 10 ** 6}, self.settings))
         self.assertIsNone(idle_dead({**fam, "best_train": None, "band": "candidate"}, self.settings))
-        for off in (0, None):
-            self.settings["researcher"]["retire_idle_revisions"] = off
-            self.assertIsNone(idle_dead({**fam, "best_train": None}, self.settings), "0 or null turns the rule off")
+
+    def test_off_and_misread_limits_turn_the_rule_off(self):
+        fam = {**self.store.family(self.fam["id"]), "best_train": None, "since_val_trials": 10 ** 6}
+        for off in (0, None, -5, True, False, "many", [150], float("nan"), float("inf")):
+            self.settings["researcher"]["retire_idle_evaluations"] = off
+            self.assertEqual(idle_limit(self.settings), 0, repr(off))
+            self.assertIsNone(idle_dead(fam, self.settings), f"{off!r} turns the rule off (true is not a limit of one)")
+        self.settings["researcher"]["retire_idle_evaluations"] = 200.0
+        self.assertEqual(idle_limit(self.settings), 200)
+        del self.settings["researcher"]["retire_idle_evaluations"]
+        self.assertEqual(idle_limit(self.settings), RETIRE_IDLE_EVALUATIONS, "absent: the default")
 
     def test_the_idle_count_starts_again_at_each_validation(self):
-        fam = {**self.store.family(self.fam["id"]), "best_train": None, "revisions": 70, "since_val_revisions": 70}
-        self.assertEqual(idle_revisions(fam), 70, "no validation mark (a family validated before R3): since_val_revisions")
-        marked = {**fam, "state": {"validated_revisions": 40}}
-        self.assertEqual(idle_revisions(marked), 30)
+        fam = {**self.store.family(self.fam["id"]), "best_train": None, "trials": 170, "since_val_trials": 170, "validations": 1}
+        self.assertEqual(idle_evaluations(fam), 170, "no validation mark (a family validated before R3): since_val_trials")
+        marked = {**fam, "state": {"validated_trials": 40}}
+        self.assertEqual(idle_evaluations(marked), 130)
         self.assertIsNone(idle_dead(marked, self.settings))
-        self.assertIsNotNone(idle_dead({**marked, "revisions": 80, "since_val_revisions": 80}, self.settings))
+        self.assertEqual(idle_dead({**marked, "trials": 190}, self.settings),
+                         "made no eligible Train version in 150 Gym evaluations since its last validation")
+        self.assertEqual(idle_evaluations({**marked, "state": {"validated_trials": True}}), 170, "a boolean is no mark")
+
+    def test_a_family_whose_validated_version_awaits_the_gate_is_never_dead(self):
+        """A validation can pass on a version whose best Train score is below zero (the 1.5x gate checks P&L): while
+        its audit or holdout look is owed or out, the gate decides, not the clock."""
+        self.researcher().cycle(self.fam["id"])
+        self.store.update_family(self.fam["id"], best_train=-0.5, validations=1)
+        self.idle(460)  # past three times the limit, short of the tournament's own evaluation rule
+        self.store.set_state(self.fam["id"], gate_ready=True)
+        self.assertIsNone(idle_dead(self.store.family(self.fam["id"]), self.settings))
+        out = self.read_turn(("retire", {"reason": "Dead."}))
+        self.assertFalse(self.offered())
+        self.assertNotIn("Gym evaluations since", self.status())
+        self.assertTrue(out["retire_refused"])
+        self.assertEqual(Tournament(self.store, self.pool, self.settings).retirements(self.store.families(alive=True)), [])
+        self.store.set_state(self.fam["id"], gate_ready=False, look_inflight={"sha": "a-look", "n": 1, "token": "t"})
+        self.assertIsNone(idle_dead(self.store.family(self.fam["id"]), self.settings), "a holdout look is out")
+        self.store.set_state(self.fam["id"], look_inflight=None)
+        self.assertIn("below zero", idle_dead(self.store.family(self.fam["id"]), self.settings), "the gate refused it: dead")
 
     def test_the_floor_still_holds_for_a_dead_family(self):
         self.settings["population"]["floor"] = 1
         self.researcher().cycle(self.fam["id"])
-        self.idle(40)
+        self.idle(150)
         out = self.read_turn(("retire", {"reason": "The mechanism is dead."}))
         self.assertFalse(self.offered(), "at the floor: not offered")
         self.assertTrue(out["retire_refused"])
@@ -375,8 +438,8 @@ class ResearcherIdleRetirement(ResearcherCase):
         other = self.store.add_family({**family_spec(self.spec), "id": "other-dead"}, origin="seed")
         self.settings["population"].update(start=2, floor=1)
         self.researcher().cycle(self.fam["id"])
-        self.idle(40)
-        self.idle(40, fid=other["id"])
+        self.idle(150)
+        self.idle(150, fid=other["id"])
         self.assertTrue(self.researcher().can_retire(self.store.family(other["id"])))
         out = self.read_turn(("retire", {"reason": "The mechanism is dead."}))
         self.assertTrue(out["retired"])
@@ -389,48 +452,84 @@ class TournamentIdleRetirement(RoundCase):
 
     def setUp(self):
         super().setUp()
-        # The operator's running swarm.json keeps the old revision rule far out; the idle rule acts on its own.
+        # The operator's running swarm.json keeps the old rules far out; the idle rule acts on its own.
         self.settings["tournament"].update(retire_revisions=200, retire_evaluations=10 ** 6)
 
-    def test_dead_families_retire_at_the_start_down_to_the_floor_and_eligible_ones_stay(self):
-        for i in range(6):
+    def test_dead_families_retire_at_the_start_down_to_the_floor_and_the_rest_stay(self):
+        for i in range(7):
             self.family(f"f{i}")
-        self.settings["population"].update(start=6, floor=3)
-        for fid in ("f0", "f1", "f2", "f3", "f4"):
-            self.store.update_family(fid, since_val_revisions=40)
-        self.store.update_family("f1", best_train=-0.3)         # dead: a best Train score below zero
-        self.store.update_family("f3", best_train=1.2)          # an eligible version with a positive score: alive
-        self.store.update_family("f5", since_val_revisions=39)  # one revision short
+        self.settings["population"].update(start=7, floor=4)
+        for fid in ("f0", "f2", "f3", "f4", "f6"):
+            self.store.update_family(fid, since_val_trials=150)
+        self.store.update_family("f1", since_val_trials=450, best_train=-0.3)  # dead: below zero for three times the limit
+        self.store.update_family("f3", best_train=1.2)                          # an eligible version with a positive score
+        self.store.update_family("f5", since_val_trials=149)                    # one evaluation short
+        self.store.update_family("f6", best_train=-0.3)                         # below zero, still ramping
         self.store.note("f0", "the placeholder never trades")
         t = Tournament(self.store, self.pool, self.settings)
         out = t.retirements(self.store.families(alive=True))
         self.assertEqual([r["family"] for r in out], ["f0", "f1", "f2"])
-        self.assertEqual(sorted(f["id"] for f in self.store.families(alive=True)), ["f3", "f4", "f5"])
-        self.assertEqual(out[0]["why"], f"It made no eligible Train version in 40 revisions since its last validation. {IDLE_CAUSE}")
-        self.assertIn("kept its best Train score below zero", out[1]["why"])
+        self.assertEqual(sorted(f["id"] for f in self.store.families(alive=True)), ["f3", "f4", "f5", "f6"])
+        self.assertEqual(out[0]["why"], f"It made no eligible Train version in 150 Gym evaluations since its birth. {IDLE_CAUSE}")
+        self.assertIn("kept its best Train score below zero over 450 Gym evaluations", out[1]["why"])
         self.assertIn("f0", self.pool.cancelled)
         lesson = self.store.graveyard("placeholder")[0]
         self.assertEqual(lesson["family"], "f0")
-        self.assertIn("made no eligible Train version in 40 revisions", lesson["lesson"])
+        self.assertIn("made no eligible Train version in 150 Gym evaluations", lesson["lesson"])
+        self.assertIn("Retired by the idle rule", lesson["lesson"])
+        self.assertIn("not a finding that the mechanism has no edge", lesson["lesson"], "a clock, not a refutation")
+        self.assertNotIn("found no Train edge", lesson["lesson"])
         causes = [e["payload"]["cause"] for e in self.store.events_after(0) if e["kind"] == "swarm.retired"]
         self.assertEqual(causes, [IDLE_CAUSE] * 3, "the public cause carries no figure")
-        # f4 is dead too, but the floor (3) holds it.
+        # f4 is dead too, but the floor (4) holds it.
         self.assertIsNotNone(idle_dead(self.store.family("f4"), self.settings))
         self.assertEqual(t.retirements(self.store.families(alive=True)), [])
-        self.assertEqual(len(self.store.families(alive=True)), 3)
+        self.assertEqual(len(self.store.families(alive=True)), 4)
 
     def test_a_counted_validation_restarts_the_idle_count(self):
+        self.answer = weak  # the line fails: nothing awaits the gate
         self.family("a")
         self.settings["population"].update(start=1, floor=0)
-        self.store.update_family("a", revisions=5)
         Tournament(self.store, self.pool, self.settings).validate(self.store.families(alive=True))
         fam = self.store.family("a")
-        self.assertEqual((fam["validations"], fam["state"]["validated_revisions"]), (1, 5))
-        self.store.update_family("a", revisions=44, since_val_revisions=90)
-        self.assertEqual(idle_revisions(self.store.family("a")), 39)
+        self.assertFalse(fam["state"]["gate_ready"])
+        self.assertEqual((fam["validations"], fam["trials"], fam["state"]["validated_trials"]), (1, 2, 2),
+                         "the mark is taken after the validation's own two trials")
+        self.assertNotIn("validated_revisions", fam["state"])
+        self.store.update_family("a", trials=2 + 149, since_val_trials=900)
+        self.assertEqual(idle_evaluations(self.store.family("a")), 149)
         self.assertEqual(Tournament(self.store, self.pool, self.settings).retirements(self.store.families(alive=True)), [])
-        self.store.update_family("a", revisions=45)
-        self.assertEqual(len(Tournament(self.store, self.pool, self.settings).retirements(self.store.families(alive=True))), 1)
+        self.store.bump("a", trials=1, since_val_trials=1)
+        [row] = Tournament(self.store, self.pool, self.settings).retirements(self.store.families(alive=True))
+        self.assertIn("150 Gym evaluations since its last validation", row["why"])
+
+    def test_a_rejudged_recorded_validation_leaves_the_mark(self):
+        """`record=False` (a recorded validation judged again: no new trial) is no new validation for the idle rule."""
+        self.answer = weak
+        self.family("a")
+        t = Tournament(self.store, self.pool, self.settings)
+        t.validate(self.store.families(alive=True))
+        self.store.bump("a", trials=30, since_val_trials=30)
+        recorded = t.recorded_validation("a", 1)
+        self.assertIsNotNone(recorded)
+        self.assertIsNotNone(t.judge("a", 1, recorded, record=False))
+        fam = self.store.family("a")
+        self.assertEqual((fam["validations"], fam["trials"], fam["state"]["validated_trials"]), (1, 32, 2))
+        self.assertEqual(idle_evaluations(fam), 30)
+
+    def test_a_passed_validation_with_a_negative_best_is_not_retired_while_it_awaits_the_gate(self):
+        self.family("a")  # the strong answer passes the line: gate_ready
+        self.family("b")
+        self.settings["population"].update(start=2, floor=0)
+        t = Tournament(self.store, self.pool, self.settings)
+        t.validate(self.store.families(alive=True))
+        self.assertTrue(self.store.family("a")["state"]["gate_ready"])
+        for fid in ("a", "b"):
+            self.store.update_family(fid, best_train=-0.5)
+            self.store.bump(fid, trials=450, since_val_trials=450)
+        self.store.set_state("b", gate_ready=False)  # the gate refused b's version
+        self.assertEqual([r["family"] for r in t.retirements(self.store.families(alive=True))], ["b"])
+        self.assertIsNone(self.store.family("a")["retired_at"])
 
 
 class RoundRetirement(RoundCase):

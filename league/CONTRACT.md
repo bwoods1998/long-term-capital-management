@@ -249,8 +249,9 @@ Retirement is final for that family; its program history, trial count and holdou
   validates your best every hour.
 - `retire(reason)`: abandon the entire Gym family, not merely one bad version. It is offered on READ
   turns only while the population is above its start and your family has had at least two validations,
-  or once your family has spent many revisions since its last validation without an eligible Train
-  version (or with a best Train score below zero): a dead mechanism frees its slot for a new idea.
+  or once your family has spent many Gym evaluations (an unchanged program re-run counts too) since its
+  birth or last validation without an eligible Train version (or far more with a best Train score below
+  zero): a dead mechanism frees its slot for a new idea.
   A retirement stops further research while preserving the evidence and lessons.
 
 ## How to work

@@ -16,10 +16,11 @@ RETIRE (Sept 26: an unguarded `retire` on the REVISE turn took the population fr
 turn offers `gym_run` alone: a REVISE always revises. A READ turn offers `retire` only while more families live than
 `population.start` and the family has had at least two validations, or, by THE IDLE RULE (R3, Sept 27: with the
 population held at its start, dead families never qualified and looped on placeholder runs), while more live than
-`population.floor` and the family is dead (`idle_dead`: `researcher.retire_idle_revisions` revisions since its last
-validation without an eligible Train version, or with its best Train score below zero) (`can_retire`). A retire that
-is refused anyway is a plain refusal, never a cycle error (an error backs the family off for up to 30 minutes). The
-tournament retires a dead family that never calls retire by the same rule; the architect refills below the start.
+`population.floor` and the family is dead (`idle_dead`: `researcher.retire_idle_evaluations` Gym evaluations since its
+birth or last validation without an eligible Train version, or three times as many with its best Train score below
+zero; never while a validated version awaits the gate) (`can_retire`). A retire that is refused anyway is a plain
+refusal, never a cycle error (an error backs the family off for up to 30 minutes). The tournament retires a dead family
+that never calls retire by the same rule; the architect refills below the start.
 
 WHAT IT SEES. Train in full; of Validation only pass or fail and how many of the line's checks passed (the owner's
 decision D2a, `diagnostics.validation_view`); of the holdout only the gate's pass or fail. Never a date in ctx (the
@@ -101,8 +102,8 @@ TOOLS: list[dict[str, Any]] = [
                                      "its latest version. This is final: best programs, evidence and trial counts remain; "
                                      "no further runs or tools start. Offered only while the population is above its start "
                                      "and your family has had at least two validations, or once your family has spent many "
-                                     "revisions since its last validation without an eligible Train version (or with a best "
-                                     "Train score below zero).",
+                                     "Gym evaluations since its birth or last validation without an eligible Train version "
+                                     "(or far more with a best Train score below zero).",
      "parameters": {"type": "object", "properties": {"reason": {"type": "string", "description": "Why the entire mechanism "
                     "is abandoned; retained in the private notebook and graveyard."}}, "required": ["reason"]}},
 ]
@@ -126,10 +127,11 @@ the half-spread (the Gym re-runs each new best at 1.5x and at the mid; the resul
 mechanism that earns in every year, not a filter that shines in one.
 Your family trades one to five of the Gym's roots; to change them, name the new roots in your program's NEEDS.
 The retire tool appears only while the population is above its start and your family has had at least two
-validations, or once your family has spent many revisions since its last validation without an eligible Train version
-(or with a best Train score below zero). Call it only when you abandon the entire mechanism, not one rejected version;
-a dead mechanism is better retired than kept on placeholder runs, since its slot goes to a new idea. Retirement is
-final for the family and preserves its best program and all evidence.
+validations, or once your family has spent many Gym evaluations (an unchanged program re-run counts too) since its birth
+or last validation without an eligible Train version (or far more with a best Train score below zero). Call it only
+when you abandon the entire mechanism, not one rejected version; a dead mechanism is better retired than kept on
+placeholder runs, since its slot goes to a new idea. Retirement is final for the family and preserves its best program
+and all evidence.
 Your notes (the notebook and gym_run's note) are PUBLIC: they may appear on the public site. Write the mechanism and your
 reasoning there, never a threshold, level, delta, ratio, date or any other fitted value, in digits or in words; the
 numbers belong in your program and in the diagnostics, which stay private.
@@ -304,44 +306,67 @@ def completed_run(result: Mapping[str, Any]) -> bool:
     return result.get("status") == "ok" and bool(result.get("run_id"))
 
 
-#: The idle rule's default (`researcher.retire_idle_revisions`).
-RETIRE_IDLE_REVISIONS = 40
+#: The idle rule's default (`researcher.retire_idle_evaluations`): Gym evaluations (trials, `add_run`) since a family's birth
+#: or last validation without an eligible Train version. Calibrated on the run's history (Sept 27): every family that
+#: ever made an eligible version made its first within about a hundred Train runs of its birth, and a family makes
+#: about seventeen runs an hour, so a newborn gets about nine hours.
+RETIRE_IDLE_EVALUATIONS = 150
+
+#: A best Train score below zero only says every eligible version so far lost in its worst Train year: a normal stage of
+#: a family's ramp (Sept 27: families that later validated with the run's best results spent up to about 170 Train runs
+#: there first). It counts as dead only after this many times the limit.
+NEGATIVE_FACTOR = 3
 
 
-def idle_revisions(fam: Mapping[str, Any]) -> int:
-    """Revisions since the family's last validation: its revisions less those it had at its last counted validation
-    (`validated_revisions`, which the tournament's verdict records from R3 on), and never more than `since_val_revisions`
-    (revisions since its validation last improved, or since its birth when it never validated: the only count a
-    family validated before R3 has)."""
-    since = int(fam.get("since_val_revisions") or 0)
-    mark = (fam.get("state") or {}).get("validated_revisions")
+def idle_limit(settings: Mapping[str, Any]) -> int:
+    """`researcher.retire_idle_evaluations`; 0 (off) when it is 0, null, negative, a boolean or not a number (a misread
+    setting never retires anyone)."""
+    raw = (settings.get("researcher") or {}).get("retire_idle_evaluations", RETIRE_IDLE_EVALUATIONS)
+    if raw is None or isinstance(raw, bool):
+        return 0
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
+def idle_evaluations(fam: Mapping[str, Any]) -> int:
+    """Gym evaluations since the family's birth or last validation: its trials less those it had at its last counted
+    validation (`validated_trials`, which the tournament's verdict records from R3 on), and never more than
+    `since_val_trials` (evaluations since its validation last improved, or since its birth when it never validated: the
+    only count a family validated before R3 has). Every evaluation counts, an unchanged program re-run included (the
+    store keeps one version for identical code and parameters, so revisions miss a family that loops a placeholder)."""
+    since = int(fam.get("since_val_trials") or 0)
+    mark = (fam.get("state") or {}).get("validated_trials")
     if isinstance(mark, int) and not isinstance(mark, bool):
-        return max(0, min(since, int(fam.get("revisions") or 0) - mark))
+        return max(0, min(since, int(fam.get("trials") or 0) - mark))
     return since
 
 
 def idle_dead(fam: Mapping[str, Any], settings: Mapping[str, Any]) -> str | None:
-    """THE IDLE RULE (R3, Sept 27). A living Gym family is dead when it has spent `researcher.retire_idle_revisions`
-    revisions since its last validation (`idle_revisions`) without an eligible Train version (no `best_train`: none met
-    40 trades on 20 days in every Train year, or every one lost at 1.5x) or with its best Train score below zero. Returns
-    a clause saying which ("made no eligible Train version in 57 revisions since its last validation"), or None. A dead
-    family may retire at `population.start` (only `population.floor` holds it); the tournament retires one that does
-    not. Train figures only: nothing Validation or the holdout measured (D2)."""
-    limit = (settings.get("researcher") or {}).get("retire_idle_revisions", RETIRE_IDLE_REVISIONS)
-    try:
-        limit = int(limit or 0)
-    except (TypeError, ValueError):
-        return None
+    """THE IDLE RULE (R3, Sept 27). A living Gym family is dead when it has spent `researcher.retire_idle_evaluations`
+    Gym evaluations since its birth or last validation (`idle_evaluations`) without an eligible Train version (no
+    `best_train`: none met 40 trades on 20 days in every Train year, or every one lost at 1.5x), or `NEGATIVE_FACTOR`
+    times as many with its best Train score below zero. Never while a validated version awaits the gate (`gate_ready`)
+    or a holdout look is out (`look_inflight`). Returns a clause saying which ("made no eligible Train version in 157 Gym
+    evaluations since its birth"), or None. A dead family may retire at `population.start` (only `population.floor`
+    holds it); the tournament retires one that does not. Train figures only: nothing Validation or the holdout measured
+    (D2). It is a time limit, not a finding that the mechanism has no edge."""
+    limit = idle_limit(settings)
     if limit <= 0 or fam.get("band") != "gym" or fam.get("retired_at"):
         return None
-    idle = idle_revisions(fam)
-    if idle < limit:
+    state = fam.get("state") or {}
+    if state.get("gate_ready") or state.get("look_inflight"):
         return None
+    idle = idle_evaluations(fam)
+    since = "its last validation" if int(fam.get("validations") or 0) else "its birth"
     best = fam.get("best_train")
     if best is None:
-        return f"made no eligible Train version in {idle} revisions since its last validation"
-    if float(best) < 0:
-        return f"kept its best Train score below zero over {idle} revisions since its last validation"
+        if idle >= limit:
+            return f"made no eligible Train version in {idle} Gym evaluations since {since}"
+        return None
+    if float(best) < 0 and idle >= NEGATIVE_FACTOR * limit:
+        return f"kept its best Train score below zero over {idle} Gym evaluations since {since}"
     return None
 
 
@@ -585,8 +610,8 @@ class Researcher:
                 if not self.can_retire(current):
                     out["retire_refused"] = True
                     return {"status": "refused", "reason": "retire is not available to your family now (it needs at least two "
-                                                           "validations and a population above its start, or many revisions "
-                                                           "without an eligible Train version): keep researching"}
+                                                           "validations and a population above its start, or many Gym "
+                                                           "evaluations without an eligible Train version): keep researching"}
                 # The store checks the population atomically: a researcher's retirement never takes it to its start or
                 # below, a dead family's (`idle_dead`) never to its floor or below.
                 result = self.store.retire_gym(fam["id"], args.get("reason"), floor=self.retire_floor(current),
@@ -1183,5 +1208,5 @@ def migrate_objective(store: SwarmStore, *, beat: Callable[[], None] | None = No
 
 
 __all__ = ["Researcher", "TOOLS", "TOOLS_READ", "TOOLS_REVISE", "needs_of", "needs_roots", "with_roots", "check_code", "sanitize",
-           "date_like", "candidates_with", "migrate_objective", "OBJECTIVE", "idle_dead", "idle_revisions",
-           "RETIRE_IDLE_REVISIONS"]
+           "date_like", "candidates_with", "migrate_objective", "OBJECTIVE", "idle_dead", "idle_evaluations",
+           "idle_limit", "RETIRE_IDLE_EVALUATIONS", "NEGATIVE_FACTOR"]

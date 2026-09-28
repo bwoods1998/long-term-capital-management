@@ -18,10 +18,12 @@
 5. RETIREMENTS: no validation improvement in 30 revisions or 2,000 Gym evaluations, or trial-adjusted
    evidence below the line (the deflated Sharpe probability under `retire_dsr_below` after
    `retire_min_validations` validations), or, as the fallback for a dead family that never calls retire, THE IDLE
-   RULE (`researcher.idle_dead`, R3: `researcher.retire_idle_revisions` revisions since its last validation without
-   an eligible Train version, or with its best Train score below zero); never below the population floor. Each
-   retiree's lesson goes to the graveyard (its mechanism, what it tried, its best numbers, its last notebook lines).
-   Each counted verdict records the family's revisions (`validated_revisions`), from which the idle rule counts.
+   RULE (`researcher.idle_dead`, R3: `researcher.retire_idle_evaluations` Gym evaluations since its birth or last
+   validation without an eligible Train version, or three times as many with its best Train score below zero; never
+   while a validated version awaits the gate); never below the population floor. Each retiree's lesson goes to the
+   graveyard (its mechanism, what it tried, its best numbers, its last notebook lines); an idle-rule lesson says it
+   was a time limit, not a refutation. Each counted verdict records the family's trials (`validated_trials`), from
+   which the idle rule counts.
 6. THE LEADERBOARD: one `swarm.tournament` event (the House mirrors it to its ledger) with every family's
    rank, share, validation summary, trials and band, and the totals.
 
@@ -43,8 +45,11 @@ UNIVERSE_ROTATION = ("SPY", "QQQ", "IWM", "SPXW")
 INDEX = ("XSP", "SPXW")
 #: Never added by a fork (the sprint, Sept 26): XSP's $0.50 a contract makes narrow XSP structures uneconomic.
 NOT_ROTATED = ("XSP",)
-#: The public sentence of an idle-rule retirement (the store publishes only a reason's sentences without a figure).
-IDLE_CAUSE = "The family found no Train edge and its slot goes to a new idea"
+#: The public sentence of an idle-rule retirement (the store publishes only a reason's sentences without a figure), and
+#: the graveyard's reading of it: the architect and researchers read the graveyard as refutations, and the idle rule is
+#: a clock, so it must not bias births away from a mechanism that was only young.
+IDLE_CAUSE = ("Retired by the idle rule, a limit on how long a family may research without an eligible Train version or "
+              "a positive Train score; it is a time limit, not a finding that the mechanism has no edge")
 
 
 class Tournament:
@@ -176,8 +181,9 @@ class Tournament:
         self.store.update_family(fid, **fields)
         if counted:  # a re-judged recorded result is no new validation for the bandit (nor for the idle rule)
             self.store.bump(fid, validations=1)
-            # The idle rule counts the revisions since the last validation from here (`researcher.idle_revisions`).
-            self.store.set_state(fid, validated_revisions=int(fam.get("revisions") or 0))
+            # The idle rule counts the Gym evaluations since the last validation from here (`researcher.idle_evaluations`);
+            # `fam` was read after this validation's own trials were recorded.
+            self.store.set_state(fid, validated_trials=int(fam.get("trials") or 0))
         state = fam.get("state") or {}
         typical = dict(state.get("typical_by_version") or {})
         if state.get("validation_version") is not None and state.get("typical_max_loss_usd") is not None:
