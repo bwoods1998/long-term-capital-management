@@ -21,6 +21,20 @@ on branch `run/options-swarm-2026-09-26`) has the detail.
 
 ## 2026-09-29
 
+**06:58Z, operator change** (no deploy): the strategist switched on.
+- `architect.agenda_locked` is the operator's preamble: agenda v14 without its WHERE TO LOOK directions, plus two
+  new binding lessons, that widening does not create edge and that the rebound's 2024 survives every regime gate.
+- `claude.roles` adds `strategist`; `claude.role_usd_day` sets architect $25 and strategist $4; `strategist.enabled`.
+- Backup `swarm.json.before-strategist-20260929T065848Z`.
+
+**06:48Z, R10: House release `20260929T064727Z-c607a8aa390e`** (main `a700c3ba`; #419).
+- The architect reads the whole graveyard as a digest in its Claude context.
+- The strategist writes the WHERE TO LOOK section under the locked preamble, with a validator that refuses rule,
+  money, threshold, 2025 and override talk.
+- 2025 Validation figures are filtered out of every graveyard view shown to models (82 of 809 lessons still carried
+  them).
+- The money digest is unchanged (`a3e2aa7c`). Backup `state/backups/pre-r10`.
+
 **06:02Z, operator change** (no deploy): `claude.roles` adds `researcher`, so the bandit's top 12 families run
 their research cycles on `claude-sonnet-5-5` (medium effort; line `claude.role_usd_day.researcher` $100; the
 breaker and every failure fall back to the family's Sail profile). First Claude cycles at 06:02:43Z ($0.07) and
