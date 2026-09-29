@@ -625,7 +625,8 @@ class Reads(HookCase):
                          (True, True, "candidate"))
         self.assertEqual((rows["tuition"]["holdout_passed"], rows["tuition"]["validation_passed"]), (False, True))
         self.assertEqual(set(rows["tuition"]), {"family", "band", "structure", "roots", "holdout_passed", "validation_passed", "version",
-                                                "code", "params", "run_sha", "typical_max_loss_usd", "seed_era", "forward"})
+                                                "code", "params", "run_sha", "typical_max_loss_usd", "seed_era", "forward",
+                                                "version_created_at"})
         self.assertIn("# tuition", rows["tuition"]["code"])
         self.assertEqual((rows["tuition"]["typical_max_loss_usd"], rows["tuition"]["seed_era"]), (45.0, True))
         bands._bundle_cache = None  # a process caches the bundle's version (`bands.BUNDLE_TTL`); new code is a new process
