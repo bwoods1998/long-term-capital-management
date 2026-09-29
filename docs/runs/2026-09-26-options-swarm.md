@@ -2582,4 +2582,23 @@ looks like beta. Validation 2025 and the holdout judge both.
       hash BEFORE the 2017-19 core-five data lands (the backfill starts that block at 08:15Z). That makes 2017-19 a
       genuine out-of-sample test before any Validation look.
 
+
+- **05:51-06:05Z R9: the top families research on Claude Sonnet 5.5.**
+  - PR #417 was merged (main `31853932`) after two adversarial reviews (spend and gateway safety; research-loop
+    correctness), each finding fixed with a test:
+    - a breaker pauses the Claude band for an hour on unknown bills or an overrun;
+    - the price rows carry `geo {us: 1.1}` and the hold ceilings match;
+    - $25 of funded room is kept for the other roles;
+    - `claude_hold_every` 3: a family in a run of holds goes to Claude every third cycle, keeping about 57% of cycles
+      on Claude.
+  - Gateway `ac2779ac` (05:51Z) admits the House's custom tools and tool-loop turns. House release
+    `20260929T055159Z-40163c0de3e9`, promoted 05:52:44Z. The money digest is unchanged. Backup `pre-r9`.
+  - At 06:02Z `claude.roles` added `researcher`: the top 12 families at medium effort, a $100/day line, and the
+    estimate about $59/day.
+  - First Claude cycles:
+    - 06:02:43Z, $0.07: an honest hold ("both long and short expressions of this signal fail on Train");
+    - 06:03:00Z, $0.04: it diagnosed a program error the Sail model had left (a view read the wrong way) and re-ran.
+  - preopen 9/9 (its gateway check now reads the release worktree). Sail $248.42 after the owner's top-up.
+  - CHANGELOG #422.
+
 ## Report
