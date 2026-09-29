@@ -670,6 +670,11 @@ entries still require the paper route proofs' witnessed round trips.
 | `researcher.retire_idle_evaluations`, `dormant_cycles`; `tournament.retire_revisions`, `retire_evaluations` | `swarm.json` on the box | 500, 12; 200, 4000 | the idle rule and its dormancy clause; the tournament's retirement (defaults 150, 40; 30, 2000) | edit `swarm.json` |
 | `guard.burst_cap_usd`, `burst_until` | `swarm.json` on the box | $900, 2026-10-05 | the swarm's Sail spend for the research burst (the owner's 24/7 research, Sept 27); the $32 line is unchanged (defaults $350 until Monday Sept 28's open) | edit `swarm.json` |
 | `diagnostician.usd_day`, `per_round`, `family_hours`, `min_validations`, `near_miss_checks` | `swarm.json` on the box | $60, 6, 3, 1, 5 | the diagnostician's Claude spend a day, families a round, how often a family, who is eligible (defaults $15, 2, 6, 2, 6) | edit `swarm.json` |
+| `claude.role_effort` | `swarm.json` on the box | absent until R11b; then `{"architect": "medium"}` is the operator's step | a role's own Claude effort when the caller names none (R11b; default `{}`: `claude.effort` for every role, so the gate keeps "high") | edit `swarm.json` |
+| `architect.max_alive_per_class` | `swarm.json` on the box | default 12 (R11b) | the most living families of one mechanism class (structure x root group); `admit` refuses births past it; 0 or null off | edit `swarm.json` |
+| `researcher.retire_hold_cycles`, `retire_hold_trials`, `extension_hold_checks` | `swarm.json` on the box | defaults 3, 10, 6 (R11b) | the hold offer (retire after that many holds in a row with an eligible Train run or that many trials); the extension hold (a validation with that many checks met is exempt from the dormancy clause until cleared); 0 turns each off | edit `swarm.json` |
+| `researcher.probe_year`, `probe_timeout_seconds` | `swarm.json` on the box | default null (off), 300 (R11b) | the Gym's zero-trade probe: 2022 switches it on | edit `swarm.json` |
+| `tournament.exploit_per_positive` | `swarm.json` on the box | default 0.15 (R11b) | the bandit's exploit share a positive old family earns; null: `explore_share` alone, as before | edit `swarm.json` |
 | The money rules | `league/constitution.py` | the sprint's D4 table and the House live test's bounds (money `a3e2aa7c`) | what real money may do | owner deploy, then `--ratify` |
 
 In `swarm.json`, `researcher.sail_usd_per_hour`, when set, is the researcher pace: the Sail models' spend over
@@ -692,8 +697,10 @@ parameters, so a family re-running one placeholder makes trials but no revisions
 awaits the gate (`gate_ready`) or whose holdout look is out is never dead. With the population held at its start, dead
 families never qualified before and looped on placeholder runs (the operator retired 48 by hand on Sept 27). The
 tournament retires a dead family that never calls retire by the same rule, down to `population.floor`; the architect
-refills below `population.start`. The graveyard lesson and the public cause say the idle rule retired it (a time
-limit, not a refutation); the family's own last notebook lines carry its verdict.
+refills below `population.start`. The graveyard lesson and the public cause say the idle rule retired it; since R11b
+the lesson carries the verdict of its Train record (DRIFT, STRESS, THIN or EXHAUSTED, tested findings), and only a
+family that never traded on Train is "a time limit, not a refutation" (IDLE). The family's own last notebook lines carry
+its researcher's verdict.
 
 No duplicate runs (R3; the harness audit of Sept 28 found 44% of cycles wasted and 45% of trials identical
 re-runs). A `gym_run` or `gym_sweep` variant a family already ran to completion (the same code, merged params,
@@ -762,6 +769,72 @@ back with a profit. The robust Train objective, its robustness runs (1.5x and mi
 never starting or keeping a box awake) and the D2 validation line are code, not settings. The objective's one-time
 migration beats the heartbeat while it runs, skips a family it already moved and empties (never keeps) the best of a
 family it cannot rescore.
+
+## R11b: honest verdicts, corrections that land, effort where it pays (Sept 29)
+
+The ROI audit and plan of Sept 29 (the operator's `scratch/roi/PLAN.md`, section (b)) found the swarm's inputs untrue in
+places: 99% of the dormancy deaths filed as "a time limit, not a finding" had been screened on Train, the strategist read
+them as untested, and its 13:10Z correction was voided by a family id. R11b is research-side only: no file under
+`league/live`, the gateway or the constitution changed, and the money digest stays `a3e2aa7c`. Train figures only (D2).
+
+- **The idle rule's verdict (R11-1).** An idle-rule death is filed under what its Train record shows
+  (`researcher.train_record`, from the family's `best_train`, `drift_failed`, `robust_failed`, `robust_why` and its Train
+  rows' `train_eligible` and `trades`): DRIFT (its eligible versions failed the drift screen), STRESS (they lost at 1.5x
+  the half-spread), THIN (it traded, never 40 trades on 20 days in every Train year), EXHAUSTED (it reached a Train
+  score, then ran dry). Only a family that never traded on Train keeps IDLE and the old words. The public cause of a
+  tested death is "Retired by the idle rule after its Train record was screened." The digest (format 3, one reseal)
+  tags each row by its verdict and says in its header that they are tested findings; the ladder shortens DRIFT, STRESS
+  and THIN rows with no Train score exactly as it shortened those IDLE rows, and its id lists name each verdict. The
+  strategist's evidence carries `screen` (scored, drift, stress, thin, untested) per family in place of
+  `eligible_train_version`, and its SYSTEM text says DRIFT, STRESS, THIN and EXHAUSTED are tested.
+- **The hold offer (R11-1).** A Gym family that held `researcher.retire_hold_cycles` (3) cycles in a row with an eligible
+  Train run, or `researcher.retire_hold_trials` (10) trials, behind it is offered `retire` on its REVISE turn too, down to
+  `population.floor` (the floor rule is unchanged). Every retirement a researcher calls is SELF-REFUTED in the graveyard
+  ("Self-refuted by its researcher: " and its reason; its last notes follow as before).
+- **The migration (R11-1, once, the operator's).** `scripts/graveyard_verdicts.py` re-heads the rows already buried from
+  the same function. Run it on the box right after the release is promoted and before the next architect pass, so the
+  digest reseals once:
+  `/workspace/.venv/bin/python /workspace/current/scripts/graveyard_verdicts.py --state /workspace/state` (a dry run:
+  counts by verdict and clause, examples, the digest's ladder before and after), then the same with `--apply` (a backup
+  of every changed row in `state/backups/graveyard-before-verdicts-<UTC>.json`, mode 600; compare-and-set in one
+  transaction; the seal emptied; the tags counted after). `--rollback <backup> --apply` restores. On the Sept 29 03:51Z
+  graveyard (809 rows) enriched with the ROI extracts, 473 of 474 IDLE rows re-head (305 DRIFT, 92 THIN, 50 EXHAUSTED,
+  26 STRESS) and the ladder stays at level 0.
+- **The strategist's corrections land (R11-2).** Every known graveyard or family id in a section is masked before the
+  content rules read it (an id is a name). The prompt asks for about 85% of `strategist.max_chars` ("at most 1,600
+  characters; about 1,350 is right"); the validator still checks the cap, and a section refused for its length alone and
+  at most 15% over is cut at its last sentence end inside the cap and validated again (the event's `trimmed`), instead
+  of paying for a repair turn.
+- **The class cap (R11-2).** `architect.max_alive_per_class` (12) living families of one mechanism class (structure x
+  root group, the strategist's `mechanism_class`); `admit` refuses births past it whatever the agenda says, the request
+  names the full classes, and the pass's event counts the refusals (`class_capped`).
+- **Per-role effort and truncation salvage (R11-3).** `claude.role_effort` {role: effort} applies when the caller names
+  no effort; `claude.effort` stays the default (the gate keeps "high"). After the deploy, set
+  `claude.role_effort.architect` to "medium" in `swarm.json`; roll back by removing the entry. An architect answer cut
+  at max_tokens keeps its complete families; fewer than 3 buys one retry on Claude alone at medium effort. A cut never
+  falls to a Kimi-K3 refill: a retry Claude has no room or line for leaves the pass, and the next pass routes as usual.
+  The event's `truncated` says what was salvaged and retried.
+- **The bandit exploits only positive evidence (R11-5).** Only an old family whose latest validation mean is positive is
+  in the exploit pool, each earning at most `tournament.exploit_per_positive` (0.15) of the share; the explore pool (new
+  families, and old ones at zero or below drawing from their own posterior) takes the rest, never less than
+  `explore_share`. It replaces the A4 stopgap (`explore_share` 0.75): with it, return `explore_share` to 0.25.
+- **The zero-trade probe (R11-6).** Off by default: `researcher.probe_year` 2022 in `swarm.json` switches it on. A new
+  version's first Train run at the normal spread is then preceded by a run over 2022 on the family's first root; a probe
+  with no trade is the answer ("disqualified: no trades in the probe year", one trial, a `probe` run row that no Train
+  score, best or drift screen reads), and the five-year run is skipped; the same program asked again is answered from
+  that row. A probe that trades, fails or does not answer in `researcher.probe_timeout_seconds` (300) says nothing and
+  the full run follows unrecorded. `gym_run` full=true skips it; sweeps and 1.5x runs are never probed. The risk is a
+  false negative (a program that trades only in other years or roots): watch `probe` in the cycle events.
+- **The extension hold (R11-4's swarm rule).** A validation that meets `researcher.extension_hold_checks` (6) of the
+  line's checks sets the family's `extension_hold`, and the family is exempt from the dormancy clause while it stands
+  (for the version its latest validation judged). The operator clears it once the 2017-19 extension result lands:
+  `scripts/extension_hold.py --state /workspace/state` lists the holds and the alive families that met the checks before
+  the rule shipped; `--seed --apply` holds those; `--clear FID ... --apply` ends a hold (the version is never held again;
+  the state keeps `extension_cleared`).
+
+Checks after R11b ships (with the plan's 4-hour check): the share of new graveyard rows tagged IDLE (expect under 5%),
+strategist acceptance (2 of 3 runs or better) and the largest mechanism class's share of births (expect under 25%),
+architect truncations and births per Claude pass, and `probe` outcomes once it is on.
 
 ## Models and Claude
 

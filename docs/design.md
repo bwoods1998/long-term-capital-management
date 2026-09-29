@@ -228,11 +228,18 @@ Agent count and simulated years measure activity; passing unseen evidence measur
   term-structure and skew mean reversion, post-event volatility crush, weekly-expiry dynamics).
 - **Population:** by default 48 researchers at the start, a ceiling of 96 and a floor of 16; the
   live settings (Sept 29) start at 96, the ceiling, with a floor of 12. Families compete for Gym time
-  and model calls through a bandit over their validation evidence (Thompson sampling, 25% exploration
-  for new families). A family retires when its best program has not improved on validation in 30
+  and model calls through a bandit over their validation evidence (Thompson sampling). Since R11b only
+  an old family whose latest validation mean is positive is exploited, each earning at most 15% of the
+  share; new families and old ones at zero or below share the rest, never less than 25%. A family
+  retires when its best program has not improved on validation in 30
   revisions or 2,000 evaluations by default (200 and 4,000 live), or its trial-adjusted evidence falls
   below the line, or by the idle rule: evaluations without an eligible Train version (150 by default,
-  500 live) or cycles with no new evaluation (40 by default, 12 live), checked every five minutes. Its
+  500 live) or cycles with no new evaluation (40 by default, 12 live), checked every five minutes. An
+  idle-rule death is filed under the verdict of its Train record (R11b): DRIFT, STRESS, THIN or
+  EXHAUSTED are tested findings, and only a family that never traded on Train is IDLE, a time limit.
+  A family that holds three cycles in a row with a Train record behind it is offered `retire`, and its
+  researcher's own retirement is SELF-REFUTED. A family whose latest validation met six of the eight
+  checks is exempt from the dormancy clause until its 2017-19 extension result lands. Its
   lessons go to the graveyard, which every new family's researcher reads first. The graveyard is ranked
   by BM25, a new family is born with three distinct lessons, and it also holds the operator's own
   experiments as `op-` lessons.
@@ -243,7 +250,7 @@ Agent count and simulated years measure activity; passing unseen evidence measur
 |---|---|---|---|---|
 | Inner | seconds to minutes | each researcher | revise the program, run it on Train, read the diagnostics, revise again | a better program or a lesson |
 | Tournament | hourly | the House | validation runs of each family's best versions, the bandit's reallocation, forks and retirements, the leaderboard | Gym time and model calls follow evidence |
-| Architect | every 4 hours by default, refilling hourly below the start; every 10 minutes live, refilling every 20 | Claude (Claude-only live: `architect.openai_model` null); Kimi-K3 on Sail as the fallback | reads the leaderboard, the graveyard and the gaps; writes families with a mechanism, a structure and a rejection test | 3-6 new families by default; the gap to the start, up to 24 a pass live |
+| Architect | every 4 hours by default, refilling hourly below the start; every 10 minutes live, refilling every 20 | Claude (Claude-only live: `architect.openai_model` null); Kimi-K3 on Sail as the fallback when Claude has no room or line (never after a cut answer: R11b salvages its complete families and retries once on Claude at medium effort) | reads the leaderboard, the graveyard and the gaps; writes families with a mechanism, a structure and a rejection test; at most 12 living families a mechanism class (R11b) | 3-6 new families by default; the gap to the start, up to 24 a pass live |
 | Diagnostician | every 5 minutes | Claude | reads a stuck or nearly-there family's Train diagnostics (never Validation's numbers); rewrites its mechanism or writes its lesson; live: 6 a round, a family every 3 hours, $60 a day | a new mechanism, or a lesson and a retirement |
 | Gate | when a family meets the validation line | review: Claude when "review" is in `claude.roles` (live: Sonnet 5.5), else GPT-6 Sol while the OpenAI month has room and `gate.review_openai_model` names it (null live), else DeepSeek-V4-Pro on Sail; audit: Claude (live: Opus 5.5, `claude.role_model`), then GPT-6 Astra on the same terms (null live), then a second Sail model; the gate box | review for lookahead, leakage and fill abuse; the audit; one holdout look | a Candidate, or a recorded refusal |
 | Nightly forward | after 01:45 ET each trading night | the data box, the gate box | the new day goes to the gate image only; every Candidate is re-run on it | one unseen day a night for every Candidate |

@@ -45,6 +45,21 @@ on branch `run/options-swarm-2026-09-26`) has the detail.
     `observe_reads_skipped` stays 0; `observe.sqlite` `practice` rows appear from 13:31Z; no `:o` in `live.sqlite` or
     the swarm's `forward`; the tournament event's `practice_bonus` values are at most 0.25.
 
+- **R11b: honest verdicts, corrections that land, effort where it pays** (this pull request; not yet released). The ROI
+  plan's R11 code items (Sept 29, section (b)); research-side only, the money digest stays `a3e2aa7c`, Train figures
+  only (D2). R11-1: an idle-rule death is filed under its Train record's verdict (DRIFT, STRESS, THIN, EXHAUSTED; IDLE
+  only for the untested), the digest (format 3: one reseal) and the strategist (`screen` per family) read the verdicts,
+  a family holding three cycles with an eligible run or ten trials is offered `retire`, and a researcher's retirement is
+  SELF-REFUTED; `scripts/graveyard_verdicts.py` re-heads the rows already buried (the operator's, dry run by default).
+  R11-2: known ids are masked before the strategist's content rules, the prompt aims at 85% of the cap, a length-only
+  overflow up to 15% is trimmed at a sentence end, and `architect.max_alive_per_class` (12) caps births per mechanism
+  class. R11-3: `claude.role_effort`, and a cut architect answer keeps its complete families with one medium retry on
+  Claude, never a Kimi-K3 refill. R11-5: the bandit exploits only old families with a positive validation mean, 15% each
+  at most. R11-6: the Gym's zero-trade probe (off until `researcher.probe_year` is set). R11-4's rule: a validation that
+  met six checks holds its family out of the dormancy clause until the operator clears it (`scripts/extension_hold.py`).
+  Operator steps after the release: the migration's dry run then `--apply`; `claude.role_effort.architect` "medium";
+  `extension_hold.py --seed`; `tournament.explore_share` back to 0.25 if A4 was applied; `researcher.probe_year` 2022
+  when wanted. Details in [docs/operations.md](docs/operations.md) ("R11b").
 - **Train from 2017** (#424; not yet released). Train's window, `storelib.TRAIN_EARLIEST` and
   `gym.train_from` reach 2017-01-03 (a third start beside 2020-01-02 and 2022-01-03; over eight years the derived
   split is 24 and the time limit 2400 s). Stage 9's `EARLY` stays the literal 2020-01-02..2021-12-31. New public
