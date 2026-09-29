@@ -21,6 +21,29 @@ on branch `run/options-swarm-2026-09-26`) has the detail.
 
 ## Not yet deployed
 
+- **The live practice league** (#430; not yet released; it changes `league/live`, so it is not a research release
+  under the amended D8). Every alive Gym-band family with a validated version, or an eligible Train
+  version (the tournament's candidate, not demoted), trades live quotes in the shadow book under the Gym's fill rules,
+  on a $10,000 practice account; never real, never tuition, never a forward row, never a band move.
+  - Admission: validated by validation t, then Train by Train score, under `live.observe_max` (48) and the new
+    `live.observe_roots_max` (24 distinct roots, the binding resource measured on the House Sept 29);
+    `live.observe_train` and `live.observe_read_calls` in `swarm.json`.
+  - Sustained pressure (3 pressed minutes of 10) sheds the lowest-priority quarter of the Train pins for the session;
+    validated pins never.
+  - The practice ledger (`observe.sqlite`): per family and version from its first live minute, kept after retirement:
+    realized P&L after fees (the headline), forced wind-down closes apart, open positions at the engine's mark, realized
+    and marked drawdown, coverage. `practice_summary` is read-only.
+  - Research feedback (`league/swarm/practice.py`, `practice.feedback`): the strategist's PRACTICE table, the
+    architect's PRACTICE BY CLASS lines, and the bandit's bonus (at most +25% of a family's share, at most 10% of all
+    share moved; it changes the weight only, which nothing on the way to real money reads).
+  - The forward embargo: a Sized move also needs the forward record after its version was written (a tightening;
+    nothing is Sized today).
+  - The site's `practice` block (needs a personal-site PR: `league/tests/fixtures/site_contract.md`,
+    `site_checkpoint_practice.json`; until then the House posts without it and warns once).
+  - The money digest stays `a3e2aa7c`; D2 is unchanged.
+  - After the deploy: `options_live.observe` shows `tiers`, `roots_used`, `effective_cap` and no `shed`;
+    `observe_reads_skipped` stays 0; `observe.sqlite` `practice` rows appear from 13:31Z; no `:o` in `live.sqlite` or
+    the swarm's `forward`; the tournament event's `practice_bonus` values are at most 0.25.
 - **Train from 2017** (#424; not yet released). Train's window, `storelib.TRAIN_EARLIEST` and
   `gym.train_from` reach 2017-01-03 (a third start beside 2020-01-02 and 2022-01-03; over eight years the derived
   split is 24 and the time limit 2400 s). Stage 9's `EARLY` stays the literal 2020-01-02..2021-12-31. New public
