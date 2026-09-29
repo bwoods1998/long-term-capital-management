@@ -2686,4 +2686,17 @@ looks like beta. Validation 2025 and the holdout judge both.
   - The first nightly succeeded (gate checkpoint at 06:04Z).
   - Next: PR B (Train from 2017), then the image build, bridge and pool-style check before any flip.
 
+
+### Sprint scoreboard, T0 + 74 h (08:20Z Sept 29, R10: Sonnet 5.5 across the harness)
+
+| # | Metric | Value |
+|---|---|---|
+| 1 | Population | 92 alive, 898 retired; 81 born and 78 retired in 2 h |
+| 2 | Throughput | 1,374 cycles/h (a new high), median 92 s; 3 provider 502s |
+| 3 | Search | 71,222 trials, 386,824 program-years. The architect now reads the whole graveyard: 903 rows, a 255,910-character digest, 8 real rows cited a pass. Births build on the operator lessons (rare single-option holds, drift-neutral pairs). The strategist's first section was over its cap (1,828 and 1,649 characters, cap 1,600, so it was kept out); the cap is now 2,000 |
+| 4 | Evidence | Validation passes alive 0; holdout looks 2, passes 0. Closest: `down-day-relative-strength-call-r` 5/8 |
+| 5 | Real fills (D3) | Monday replayed through the Gym: 7/7 agree |
+| 6 | Money | Equity $1,473.11; 0 positions; the live test is armed |
+| 7 | Compute | Sail $242.90. Claude $95.54 of $200: $12.21 in 2 h (researcher $5.23, rewrite $4.07, architect $2.02, strategist $0.47, diagnostician $0.48). The lines were paced so the funded room lasts through tonight: researcher $50, diagnostician $30, architect $25, rewrite $15, review $5, strategist $4. The data box fetch runs at 2,012 tasks/h |
+
 ## Report
