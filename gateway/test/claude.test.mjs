@@ -62,8 +62,8 @@ test('the deployed price table is exactly Opus 5.5, Sonnet 5 and Sonnet 5.5 at t
   assert.ok(inUs >= 104500n && inUs <= 104501n, String(inUs));
   const worst = worstCase(table['claude-sonnet-5-5'], 10000, 16000), plain = BigInt(Math.ceil((10000 + 4096) * 2.5 + 16000 * 10));
   assert.ok(worst >= plain * 11n / 10n && worst <= plain * 11n / 10n + 1n, `the worst case assumes the dearest geography: ${worst}`);
-  assert.equal(variable('CLAUDE_USD'), '100');
-  assert.equal(capMicro({ CLAUDE_USD: variable('CLAUDE_USD') }), 100000000n);
+  assert.equal(variable('CLAUDE_USD'), '200');
+  assert.equal(capMicro({ CLAUDE_USD: variable('CLAUDE_USD') }), 200000000n);
   assert.equal(capMicro({}), 0n, 'unset is no budget');
 });
 

@@ -1,11 +1,12 @@
 # Running the House
 
-The House (`python3 -m league run`) runs on one Sailbox, `ltcm-floor` (size s: 1 vCPU, 32 GiB disk),
-in Sail's cloud. The owner's laptop is the console: it holds the credentials and decides, and it can
-be closed without the House missing a tick. One script drives the box, from the repository root:
-`python3 scripts/floor_box.py --help`. Day-to-day operation (pause, deploy, roll back, inspect,
-recover) is in [docs/operations.md](../docs/operations.md); this page is the box itself. The old,
-long version is [archive/docs/deploy-README-pre-options.md](../archive/docs/deploy-README-pre-options.md).
+The House (`python3 -m league run`) runs on one Sailbox, `ltcm-house` (size s: 1 vCPU, 32 GiB disk;
+`floor_box.py`'s default name for a new box is `ltcm-floor`), in Sail's cloud. The owner's laptop is
+the console: it holds the credentials and decides, and it can be closed without the House missing a
+tick. One script drives the box, from the repository root: `python3 scripts/floor_box.py --help`.
+Day-to-day operation (pause, deploy, roll back, inspect, recover) is in
+[docs/operations.md](../docs/operations.md); this page is the box itself. The old, long version is
+[archive/docs/deploy-README-pre-options.md](../archive/docs/deploy-README-pre-options.md).
 
 Box state (ids, the allowlist in effect, releases sent and their verdicts, checkpoints) lives in
 `.data/ltcm/box.json`: owner-only, gitignored, no credential.
@@ -41,8 +42,8 @@ python3 scripts/floor_box.py status
 - **`create`** makes the box with automatic sleep off, attaches the egress allowlist, builds the
   venv and writes `run.sh` and `restart.sh`. It uploads no code and leaves the loop stopped.
 - **`secrets`** is the one command that touches a credential. The box gets exactly three:
-  `SAIL_API_KEY` (Sail inference and boxes), `GATEWAY_TOKEN` (the account and OpenAI, through the
-  gateway) and `CAPITAL_PUBLISH_TOKEN` (the public site). They are read from the local `.env` and
+  `SAIL_API_KEY` (Sail inference and boxes), `GATEWAY_TOKEN` (the account, OpenAI and Claude, through
+  the gateway) and `CAPITAL_PUBLISH_TOKEN` (the public site). They are read from the local `.env` and
   uploaded as bytes; the command prints names and sizes only. **No venue key and no ThetaData key
   ever goes to this box.**
 - **`deploy`** packs `league/`, `ltcm/`, `scripts/`, `deploy/` and `playbooks/` into a deterministic
@@ -76,19 +77,19 @@ House from whatever `current` is.
 ## Egress
 
 The box can reach only its allowlist; Sail resolves the names itself. The options House needs the
-gateway's exact `*.workers.dev` name (every account and OpenAI call), `api.sailresearch.com` (models),
-`sailbox-api.sailresearch.com` (Gym and gate boxes), `blakewoods.us` (the site), and `pypi.org` with
-`files.pythonhosted.org` for the venv's packages (the box's Python 3.11 has no numpy, which the Gym's
-live-path pieces need). `LEAGUE_HOSTS` in `scripts/floor_box.py` still lists the old league's data
-hosts until the prune (Wave 2b) trims it.
+gateway's exact `*.workers.dev` name (every account, OpenAI and Claude call), `api.sailresearch.com`
+(models), `sailbox-api.sailresearch.com` (Gym and gate boxes), `blakewoods.us` (the site), and
+`pypi.org` with `files.pythonhosted.org` for the venv's packages (the box's Python 3.11 has no
+numpy, which the Gym's live-path pieces need). `LEAGUE_HOSTS` in `scripts/floor_box.py` still lists
+the old league's data hosts until the prune (Wave 2b) trims it.
 `floor_box.py hosts` prints the list and what is missing; `hosts --add` widens it and records it.
 
 ## Real money
 
-Every book is practice until `"real_money": true` in `league/config.json` (false today) and an active
-grant (`options-swarm-20260928`, `scripts/live_trading.py`). Behind both stands the gateway's kill
-switch, which nothing on Sail can release. `floor_box.py stop` stops the House; it does not engage the
-kill switch.
+Every book is practice unless `"real_money": true` in `league/config.json` (true since Sept 27,
+2026) and the grant (`options-swarm-20260928`, `scripts/live_trading.py`) is active on the running
+money digest. Behind both stands the gateway's kill switch, which nothing on Sail can release.
+`floor_box.py stop` stops the House; it does not engage the kill switch.
 
 ## On a developer's machine
 

@@ -21,7 +21,8 @@
    root of the rotation, same mechanism and structure; it inherits the lineage's trial count and holdout looks),
    while the population is under its ceiling. XSP is out of the rotation: its $0.50 a contract makes a narrow
    structure uneconomic.
-5. RETIREMENTS: no validation improvement in 30 revisions or 2,000 Gym evaluations, or trial-adjusted
+5. RETIREMENTS: no validation improvement in `retire_revisions` (30) or `retire_evaluations` (2,000; the defaults,
+   swarm.json may set others) Gym evaluations, or trial-adjusted
    evidence below the line (the deflated Sharpe probability under `retire_dsr_below` after
    `retire_min_validations` validations), or, as the fallback for a dead family that never calls retire, THE IDLE
    RULE (`researcher.idle_dead`, R3: `researcher.retire_idle_evaluations` Gym evaluations since its birth or last

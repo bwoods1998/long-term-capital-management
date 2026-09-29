@@ -1,5 +1,10 @@
 # The league
 
+> **Legacy page (Sept 29, 2026).** This describes the league before the options overhaul of Sept 26,
+> 2026, and several documents it links to are not on main. For the options House read
+> [the repository README](../README.md), [docs/design.md](../docs/design.md) and
+> [docs/operations.md](../docs/operations.md). The prune (#375) will retire this page.
+
 `league/` is the House: the one trusted process of the rebuilt floor. It keeps the ledger, wakes the
 agents, nets and sends their orders, scores them on a four-rung ladder, sizes their real capital by
 their evidence (the allocator, since Sept 23, 2026), pays them compute credits, retires them, and

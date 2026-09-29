@@ -139,10 +139,12 @@
     // 5-minute write (1.25x input; the one-hour cache is refused), `cache_read` a hit (0.05x on Opus 5.5, 0.1x on
     // Sonnet 5 and Sonnet 5.5), `output` output and thinking. No long-context premium on any of them. Sept 29, 2026:
     // Claude Sonnet 5.5 (`claude-sonnet-5-5`, released Sept 28) added at the same page's list prices, which are Sonnet
-    // 5's: $2 input, $2.50 5-minute write, $0.20 hit, $10 output. Each row carries `geo: {"us": 1.1}`: Claude 4.6 and
-    // later bill US-only inference at 1.1x every rate ("Data residency pricing"), and a workspace whose default inference
-    // geography is "us" is billed so without asking; the worst case assumes it and a call that reports it settles at it.
-    "CLAUDE_USD": "100",
+    // 5's: $2 input, $2.50 5-minute write, $0.20 hit, $10 output. Sept 29, 2026 (about 05:25Z): the owner added $100 to
+    // the Anthropic account (its balance then read $140.54), so the funded total is raised by exactly that: $200. Each
+    // row carries `geo: {"us": 1.1}`: Claude 4.6 and later bill US-only inference at 1.1x every rate ("Data residency
+    // pricing"), and a workspace whose default inference geography is "us" is billed so without asking; the worst case
+    // assumes it and a call that reports it settles at it.
+    "CLAUDE_USD": "200",
     "CLAUDE_MODELS": "{\"claude-opus-5-5\":{\"input\":4,\"cache_write\":5,\"cache_read\":0.2,\"output\":20,\"geo\":{\"us\":1.1}},\"claude-sonnet-5\":{\"input\":2,\"cache_write\":2.5,\"cache_read\":0.2,\"output\":10,\"geo\":{\"us\":1.1}},\"claude-sonnet-5-5\":{\"input\":2,\"cache_write\":2.5,\"cache_read\":0.2,\"output\":10,\"geo\":{\"us\":1.1}}}",
     // Where the frontier model's proposals become pull requests, and how many may open in one
     // UTC day. The token that opens them is the secret GITHUB_TOKEN; without it the route is a

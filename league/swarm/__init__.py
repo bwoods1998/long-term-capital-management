@@ -32,7 +32,8 @@ THE PIECES.
                 conversation adapter, the input checks and the append-only session; a Sail fallback;
 - `tournament`  the hourly tournament: validation runs, the bandit, forks, retirements, the leaderboard;
 - `gate`        the program review, the holdout look, the Candidate band or a recorded refusal;
-- `architect`   every four hours, 3-6 new families from the leaderboard, the graveyard and the gaps;
+- `architect`   every `architect.every_seconds` (four hours by default), new families from the leaderboard, the
+                graveyard and the gaps;
 - `diagnostician` Claude on a stuck or nearly-there family: a rewritten mechanism, or its lesson;
 - `bands`       what the House reads (`bands.read(root)`): each family's band and program;
 - `sitefeed`    the site's inputs (schema 2: agents, the Gym's pace) and the tape's words;
