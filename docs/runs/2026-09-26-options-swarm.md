@@ -2765,4 +2765,22 @@ looks like beta. Validation 2025 and the holdout judge both.
   - R11 after 20:05Z: #424 (Train from 2017), `long_single`, and #413 as its runbook directs. Then image T (2017-24)
     once the fetch's stages 11, 13 and 12 are in.
 
+
+- **13:30-13:45Z The owner: give the agents data and research access, incentives like a trading firm, practice
+  trading; build now, watch, iterate. Three harness builds started for R11 (after the 20:05Z close):**
+  - **The research library.** Agents (architect, strategist, top researchers) can search and read literature, but
+    only material dated before 2025-01-01, enforced in the gateway from source metadata (arXiv first). Open web
+    access would let them select on the Validation year and the holdout. Two reviews: look-ahead honesty and gateway
+    security.
+  - **Two-sided single-option families (`long_single`)** (started 13:20Z).
+  - **The live practice league.**
+    - The observe band (live shadow trading, never real money) widens from validated families only (4 today) to
+      Train-eligible ones. `live.observe_max` 8 → 48 at 13:36Z; the wider eligibility needs the build.
+    - Each family's live paper P&L goes back to the strategist, the architect and a bounded bandit bonus, as a
+      research signal only. D2 and promotion are unchanged.
+  - **A verifier-honesty finding.** The models behind the architect, strategist and researchers were trained through
+    June 2026, so the "sealed" 2026 holdout is not fully sealed against the agents' own memory. The only period no
+    model has seen is live trading from now on. The practice league's live record, and real trading after today, are
+    the clean judges. The research library's honesty review is asked to assess what that implies for D2's holdout.
+
 ## Report
