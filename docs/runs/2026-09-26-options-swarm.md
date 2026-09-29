@@ -2409,4 +2409,33 @@ looks like beta. Validation 2025 and the holdout judge both.
     $7 a trade (rare, large moves) or cheaper execution (single long options, 2 fills), while passing the drift
     screen alone.
 
+
+### Sprint scoreboard, T0 + 68 h (02:18Z Sept 29), and a birth stall
+
+| # | Metric | Value |
+|---|---|---|
+| 1 | Population | 12 alive (the floor), 750 retired; 0 born and 28 retired in 2 h |
+| 2 | Throughput | 162 cycles/h, median 6 s; Gym runs fell from 300-670/h to 38 (01Z) and 12 (02Z) |
+| 3 | Search | 66,423 trials, 325,060 program-years. Closest alive: three families at 3/8 |
+| 4 | Evidence | Validation passes alive 0; holdout looks 2, passes 0 |
+| 5 | Real fills (D3) | none overnight |
+| 6 | Money | Equity $1,473.11; 0 positions, 0 orders |
+| 7 | Compute | Sail $60.72. Claude $75.87 of $100. OpenAI $644.33 + $11.40 in flight of $707. The swarm spent $6.64 in 2 h |
+
+- **What happened:**
+  - The families' own researchers judged their mechanisms refuted and held rather than grind parameters. In one's
+    words: "any run now would be false-positive parameter grinding on a dead idea, wasting lineage trials".
+  - The idle rule (12 cycles without a new Gym evaluation) then retired them. That included
+    `market-distraction-release-call` (7/8 in Validation at 23:29Z, t 1.95), whose researcher declined to tune on
+    Validation feedback. That is the honest choice, and the operator did not intervene.
+  - At the same time the architect proposed 0 families in four calls. Agendas v12 and v13 demanded proof at birth (a
+    mid edge of at least $7 a trade, passing the drift screen) that no proposer can have before the Gym tests it.
+- **The fix at 02:30Z, agenda v14** (steering only; D2 and every kill test unchanged):
+  - "always propose; the Gym measures, you do not need proof at birth";
+  - three open directions, on SPY/QQQ/IWM:
+    - single long options, 2 fills, held 2-10 sessions and taken on both sides by rule, triggered by rare
+      large-move states;
+    - drift-neutral cross-root pairs;
+    - long call plus long put only where implied vol sits below forecast realized vol.
+
 ## Report
