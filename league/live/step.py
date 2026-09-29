@@ -143,9 +143,8 @@ class Instance:
         # An observe instance is exactly a shadow instance under an observe key that was made one (the money path's
         # guard, Sept 29, 2026): a truthy non-bool, a real or tuition instance or any other key is never one. A restored
         # real instance once came back with its saved mode in this field (a positional shift) and ran as an observe
-        # instance: its program loaded in the observe child and its chains were never read for it.
-        if _is_observe(self.key) and self.kind != "shadow":
-            raise ValueError(f"an observe key is only ever a shadow instance's: {self.key} ({self.kind})")
+        # instance: its program loaded in the observe child and its chains were never read for it. Coerced, never raised:
+        # a bad row must not stop the House from building its live step (the order path's belt refuses it anyway).
         self.observe = self.observe is True and _is_observe(self.key) and self.kind == "shadow" and not self.tuition
 
 
@@ -486,14 +485,11 @@ class OptionsLive:
     # ------------------------------------------------------------------ families and instances
     def _restore_real_instances(self) -> None:
         for r in self.state.rows("SELECT * FROM instances WHERE retired_at IS NULL"):
-            if _is_observe(r["id"]):
-                # Never written (only real instances are persisted); never restored as a real one either.
-                self.alert("error", f"live: the live state holds an observe key as a real instance ({r['id']}): not restored")
-                continue
-            # By keyword: `observe` sits between `tuition` and `mode`, and the saved mode taken for it made every restored
-            # real instance an observe one (the House live test after each restart, Sept 29, 2026).
+            # Keywords, never positions: the tenth field is `observe`, and a mode string there made every restored real
+            # instance an observe one (truthy) and dropped its saved mode (Sept 29, 2026).
             inst = Instance(r["id"], r["family"], int(r["version"] or 0), "real", r["code"], dict(json_or(r["params"], {})),
-                            r["run_sha"] or "", r["band"] or "", bool(r["tuition"]), mode=r["mode"] or "live")
+                            run_sha=r["run_sha"] or "", band=r["band"] or "", tuition=bool(r["tuition"]),
+                            observe=False, mode=r["mode"] or "live")
             if str(r.get("why") or "").startswith(("disqualified:", "the program does not load:", "its decider could not recover")):
                 inst.error, inst.fatal, inst.mode = r["why"], True, "exit_only"
                 self.instances[inst.key] = inst

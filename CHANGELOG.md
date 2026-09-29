@@ -24,9 +24,10 @@ on branch `run/options-swarm-2026-09-26`) has the detail.
 - **A restored real instance is a real instance** (#427; not yet released; money path). After every House restart
   `_restore_real_instances` put the saved mode into `Instance.observe` (a positional shift), so the House live test
   (`house:rebound-live@0:h`, `"observe": "live"` in `health.json` since the 06:48Z and 13:44Z restarts Sept 29) loaded in
-  the observe child and decided nothing; a restored Probe or Sized family's real opens would have been refused. Now
-  `mode=` by keyword, `Instance.observe` strictly True only for a shadow `:o` instance (a `:o` key on any other kind
-  raises), and `_real_intent` refuses, alerted, any instance that is not real. Regression tests in
+  the observe child and decided nothing; a restored Probe or Sized family's real opens would have been refused. The
+  restore by keyword is #429's line exactly (#429 is the minimal fix for a mid-session deploy); this adds
+  `Instance.observe` strictly True only for a shadow, non-tuition `:o` instance (coerced, never raised) and a belt in
+  `_real_intent` that refuses, alerted, any instance that is not real. Regression tests in
   `league/tests/test_live_restore.py`. The money digest stays `a3e2aa7c`. After the deploy: `options_live.instances`
   shows `house:rebound-live@0:h` with `"observe": false`, and two decider children run.
 

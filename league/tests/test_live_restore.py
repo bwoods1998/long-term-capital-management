@@ -66,8 +66,8 @@ class RestoredRealInstances(LiveCase):
         self.assertEqual(len([b for b in self.venue.sent]), 2, "one open before the restart, one close after; no new open")
 
     def test_an_observe_key_is_only_ever_a_shadow_instance(self):
-        with self.assertRaises(ValueError):
-            Instance("obs@1:o", "obs", 1, "real", VERTICAL, {})
+        self.assertIs(Instance("obs@1:o", "obs", 1, "real", VERTICAL, {}, observe=True).observe, False,
+                      "a real instance is never an observe one, whatever its key")
         for flag in ("live", "exit_only", 1, "observe"):
             self.assertIs(Instance("obs@1:o", "obs", 1, "shadow", VERTICAL, {}, observe=flag).observe, False, flag)
         self.assertIs(Instance("obs@1:o", "obs", 1, "shadow", VERTICAL, {}, observe=True).observe, True)
