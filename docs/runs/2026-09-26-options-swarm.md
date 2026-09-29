@@ -2647,4 +2647,23 @@ looks like beta. Validation 2025 and the holdout judge both.
 | 6 | Money | Equity $1,473.11; 0 positions, 0 orders; the live test is armed |
 | 7 | Compute | Sail $246.95 (after the owner's top-up). Claude $84.70 of $200 ($6.49 in 2 h with Sonnet researchers, architect, diagnostician, rewrites and reviews). OpenAI is no longer used |
 
+
+- **06:47-06:59Z R10: the architect reads the whole graveyard; the strategist writes WHERE TO LOOK.**
+  - PR #419 merged (main `a700c3ba`) after review; all eight findings were fixed. The full suite passed (5,480
+    tests), and CI is green.
+  - An honesty fix rides with it: 82 of 809 graveyard lessons still carried 2025 Validation figures past the old scrub.
+    Every model-facing view (the architect's digest, its 20-newest view, the birth lessons) now filters them out.
+  - Release `20260929T064727Z-c607a8aa390e`, promoted 06:48:09Z. The money digest is unchanged. The backfill
+    controller survived. Backup `pre-r10`.
+  - Operator settings at 06:58Z:
+    - `architect.agenda_locked`, the operator's preamble: the verifier, the refuted list, drift and costs, kill tests,
+      expression, data. It now also binds the width result and the rebound's 2024;
+    - `claude.roles` adds strategist;
+    - daily lines: architect $25 (beyond it the architect falls back to Kimi on Sail), strategist $4.
+  - The strategist's section passes a validator that refuses any rule, money, threshold, 2025 or override talk; a
+    failure keeps the last agenda.
+  - CHANGELOG #423.
+  - Also: an investigation of the churn. All 88 families retired today had Gym runs; most never produced an eligible
+    Train version. That is fast refutation, not wasted births.
+
 ## Report
