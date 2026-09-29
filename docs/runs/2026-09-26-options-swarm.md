@@ -2783,4 +2783,17 @@ looks like beta. Validation 2025 and the holdout judge both.
     model has seen is live trading from now on. The practice league's live record, and real trading after today, are
     the clean judges. The research library's honesty review is asked to assess what that implies for D2's holdout.
 
+
+- **13:44Z R11a (#424, Train from 2017) deployed during the session, the first under the owner's amended D8.**
+  - The owner approved at about 13:50Z (answering at the start of the deploy): research-side releases may ship
+    13:25-20:05Z when nothing in the money path changes, with review, CI and on-box verification. Gateway and
+    money-path releases stay frozen in session.
+  - No file under `league/live`, the gateway or the constitution changed; the digest is unchanged. There were 0 real
+    positions and 0 working orders at deploy, before the 14:00Z calibration slot.
+  - Release `20260929T134303Z-8366493c614c`, promoted 13:44:02Z. On the box: 0 `train_span_mismatch` events; 171 cycles
+    and 63 Gym runs (54 ok) in the first minutes; the backfill controller alive; the observe band at 7 families (was
+    4).
+  - preopen 9/9 after its expectations were updated. CHANGELOG #426.
+  - `gym.train_from` stays 2020-01-02 until image T is built, bridged and pool-checked tonight.
+
 ## Report
