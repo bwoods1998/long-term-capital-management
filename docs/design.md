@@ -160,8 +160,9 @@ Agent count and simulated years measure activity; passing unseen evidence measur
 
   The Gym serves only the expiries that existed on each day (SPY and QQQ daily expiries from
   mid-Nov 2022; IWM's Tuesday and Thursday expiries from 2024). Train's first day is the switch
-  `gym.train_from` ("2020-01-02" or "2022-01-03"), adopted together with a Gym image that holds those
-  years; the swarm's live settings have used 2020 since Sept 28.
+  `gym.train_from` ("2017-01-03", "2020-01-02" or "2022-01-03"), adopted together with a Gym image that holds
+  those years; the swarm's live settings have used 2020 since Sept 28. A 2017 image (Train from 2017) is built
+  with each root fetched only from 2020 at its own first day (`images.py --root-first`).
 
 ## The Gym
 

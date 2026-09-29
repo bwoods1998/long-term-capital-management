@@ -14,13 +14,16 @@ from typing import Any
 import numpy as np
 
 EPOCH = dt.date(1970, 1, 1)
-#: Train's reach. Its first day is 2020-01-02 (the 2020-21 extension, Sept 27, 2026); what a run covers is the image's
-#: data from the swarm's `gym.train_from` on (league/swarm/settings.py), and until the owner switches it on no Gym
-#: image holds a day before `TRAIN_CORE_START` and every Train run starts there. Ordinals count from EPOCH, never
-#: from a window, so extending a window moves none of them.
+#: Train's reach. Its first day is 2017-01-03 (Train from 2017, Sept 29, 2026: 2017's calm, the February 2018 volatility
+#: shock and the fourth-quarter 2018 selloff, 2019; before it the 2020-21 extension of Sept 27 reached 2020-01-02).
+#: What a run covers is the image's data from the swarm's `gym.train_from` on (league/swarm/settings.py): an image
+#: holds a Train day only from the first Train day it was built with (`Store.train_first`: the first Train day with a
+#: chain, so an image built from 2020 keeps its 2019 history sessions out of Train), and every image built before this
+#: change starts at 2020-01-02 or `TRAIN_CORE_START`. Ordinals count from EPOCH, never from a window, so extending a
+#: window moves none of them.
 TRAIN_CORE_START = dt.date(2022, 1, 3)
 WINDOWS: dict[str, tuple[dt.date, dt.date | None]] = {
-    "train": (dt.date(2020, 1, 2), dt.date(2024, 12, 31)),
+    "train": (dt.date(2017, 1, 3), dt.date(2024, 12, 31)),
     "validation": (dt.date(2025, 1, 2), dt.date(2025, 12, 31)),
     "holdout": (dt.date(2026, 1, 2), dt.date(2026, 9, 25)),
     "forward": (dt.date(2026, 9, 26), None),

@@ -19,6 +19,20 @@ Operator changes that are not deploys (`swarm.json`, image adoptions, grant rati
 beside the deploys of their day, marked "no deploy". The run record (`docs/runs/2026-09-26-options-swarm.md`
 on branch `run/options-swarm-2026-09-26`) has the detail.
 
+## Not yet deployed
+
+- **Train from 2017** (branch `gym/train-from-2017`, open). Train's window, `storelib.TRAIN_EARLIEST` and
+  `gym.train_from` reach 2017-01-03 (a third start beside 2020-01-02 and 2022-01-03; over eight years the derived
+  split is 24 and the time limit 2400 s). Stage 9's `EARLY` stays the literal 2020-01-02..2021-12-31. New public
+  tables: the 2017-2019 scheduled FOMC days, CPI and Employment Situation release days (Federal Reserve meeting
+  pages, BLS release archives) and the rate steps back to 2015-12-17 (the Fed's target-range changes, upper bound
+  less 0.10, as before). A Gym store's first Train day is its first chain, so a 2020 image's 2019 history sessions
+  stay out of Train. `images.py build gym --root-first ROOT=DATE,...` gives a root its own later first Train day,
+  recorded in images.json and checked from inside; the fork prunes with the build's own data tools. Nothing moves
+  until an image is built with `--train-from 2017-01-03` and `swarm.json` names it with `train_from`. On release the
+  Gym bundle and tables digests change, so every program re-runs once as a new trial and each family is re-validated
+  once, as with #399; the money digest stays `a3e2aa7c`.
+
 ## 2026-09-29
 
 **06:58Z, operator change** (no deploy): the strategist switched on.
