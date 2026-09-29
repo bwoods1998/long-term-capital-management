@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
 
-from league.swarm.store import SwarmStore
+from league.swarm.store import SwarmStore, graveyard_words
 from league.tests.swarm_fakes import Clock, result
 
 SPEC = {"id": "condor-vrp", "mechanism": "Index options price more movement than follows: sell a condor.", "structure": "iron_condor",
@@ -175,6 +176,81 @@ class EventsAndSpend(StoreCase):
         self.assertEqual(len(ro.families()), 1)
         with self.assertRaises(sqlite3.OperationalError):
             ro.event("swarm.status", None, {})
+
+
+class GraveyardRanking(StoreCase):
+    """`graveyard(query)` ranks by relevance that does not grow with a lesson's length (`rank_graveyard`)."""
+
+    def bury(self, fid: str, mechanism: str, lesson: str, *, structure: str = "debit_vertical", roots=("SPY",),
+             advance: float = 60) -> None:
+        self.store.add_family({"id": fid, "mechanism": mechanism, "structure": structure, "roots": list(roots), "dte": [0, 5]},
+                              origin="seed")
+        self.store.bury(fid, lesson)
+        self.clock.advance(advance)
+
+    def ids(self, query: str, limit: int = 8) -> list[str]:
+        return [g["family"] for g in self.store.graveyard(query, limit=limit)]
+
+    def test_a_long_repetitive_lesson_no_longer_beats_a_short_exact_match(self):
+        self.bury("exact", "Buy a QQQ straddle into earnings: the overnight gap is underpriced convexity.",
+                  "Earnings gaps on QQQ were priced fairly; the straddle lost its premium.",
+                  structure="long_straddle", roots=["QQQ"])
+        notes = "Note: the gap filter fired on earnings day again and the signal decayed before the open. " * 30
+        self.bury("verbose", "Sell index premium on quiet days when implied volatility is rich.", notes,
+                  structure="iron_condor", roots=["SPY"])
+        for i in range(4):
+            self.bury(f"filler-{i}", f"Buy calls after a trend day on SPY, variant {i}, following momentum.",
+                      "Trend days did not persist past the close.", structure="long_call")
+        query = "long_straddle QQQ Buy a straddle into earnings because the overnight gap is underpriced convexity."
+        # The old score (raw occurrences) put the repetitive lesson first by a wide margin.
+        raw = {g["family"]: sum(f"{g['mechanism']} {g['structure']} {g['roots']} {g['lesson']}".lower().count(w)
+                                for w in re.findall(r"[a-z0-9]+", query.lower()) if len(w) > 2)
+               for g in self.store.graveyard(limit=20)}
+        self.assertGreater(raw["verbose"], 3 * raw["exact"])
+        self.assertEqual(self.ids(query, limit=3)[0], "exact")
+
+    def test_a_rare_word_outweighs_a_common_one(self):
+        for i in range(5):
+            self.bury(f"spy-{i}", f"SPY opening drive number {i} continues into the afternoon.", "SPY SPY SPY drifted; SPY faded.")
+        self.bury("vix", "When the VIX term structure inverts, index puts are overpriced.", "The inversion signal was too rare.",
+                  roots=["XSP"])
+        self.assertEqual(self.ids("SPY VIX")[0], "vix")
+
+    def test_a_structure_name_counts_as_one_word(self):
+        self.bury("put", "After a flush the rebound is underpriced convexity.", "A call would have done better than this put.",
+                  structure="long_put")
+        self.bury("call", "After a flush the rebound is underpriced convexity.", "The rebound came too late for weeklies.",
+                  structure="long_call")
+        self.assertEqual(self.ids("long_call SPY flush rebound convexity"), ["call", "put"])
+        self.assertEqual(graveyard_words("long_call SPY"), ["call", "long", "long_call", "spy"])
+        self.assertEqual(graveyard_words("iv_rv on SPX"), ["spx"])
+
+    def test_the_filter_is_unchanged_a_row_needs_some_query_word(self):
+        self.bury("condors", "Index options price more movement than follows: sell condors.", "Condors died on event days.",
+                  structure="iron_condor")
+        self.bury("calls", "Buy calls after a trend day on SPY: momentum carries.", "Trend days did not persist.",
+                  structure="long_call")
+        self.assertEqual(self.ids("condor"), ["condors"])   # a query word as a substring, as before
+        self.assertEqual(self.ids("zzz qqq"), [])
+
+    def test_ordering_is_deterministic_ties_go_to_the_newer_row_then_the_id(self):
+        mech, lesson = "Buy a butterfly at the pin strike into expiry on SPY.", "The pin did not hold."
+        self.bury("tie-b", mech, lesson, advance=0)
+        self.bury("tie-a", mech, lesson)
+        self.bury("tie-c", mech, lesson)
+        first = self.ids("pin strike butterfly expiry")
+        self.assertEqual(first, ["tie-c", "tie-a", "tie-b"])
+        for _ in range(3):
+            self.assertEqual(self.ids("pin strike butterfly expiry"), first)
+
+    def test_the_empty_query_returns_the_newest_first(self):
+        for fid in ("oldest", "middle", "newest"):
+            self.bury(fid, f"A mechanism for the {fid} family that says why it should pay.", f"The {fid} lesson.")
+        self.assertEqual(self.ids(""), ["newest", "middle", "oldest"])
+        self.assertEqual(self.ids("a of"), ["newest", "middle", "oldest"])   # no word longer than two letters
+        self.assertEqual(self.ids("", limit=2), ["newest", "middle"])
+        [row] = self.store.graveyard("newest", limit=1)
+        self.assertEqual((row["family"], row["roots"], row["best"]), ("newest", ["SPY"], {}))
 
 
 if __name__ == "__main__":
