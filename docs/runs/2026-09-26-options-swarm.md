@@ -2735,4 +2735,17 @@ looks like beta. Validation 2025 and the holdout judge both.
   - Operator note: a straddle is not a real-money type, and non-core roots fill at the natural. The locked preamble's
     real types and costs bind the architect.
 
+
+### Sprint scoreboard, T0 + 78 h (12:20Z Sept 29, before the open)
+
+| # | Metric | Value |
+|---|---|---|
+| 1 | Population | 81 alive |
+| 2 | Throughput | 1,277 cycles/h |
+| 3 | Search | 74,762 trials. Closest alive: `leveraged-flow-nextday-fade-put` (the strategist's direction b) and a low-price-ETF volume-surge family, both 3/8 |
+| 4 | Evidence | Validation passes alive 0; holdout looks 2, passes 0 |
+| 5 | Real fills (D3) | calibration from the 10:00 ET slot |
+| 6 | Money | Equity $1,473.03, options buying power $1,473.00; 0 positions. preopen 9/9: release R10, the grant active, not blocked, 4 observe rows, the live test instance loaded |
+| 7 | Compute | Sail $230.36. Claude $119.93 of $200 ($9.82 in 2 h). The fetch has finished 9,707 tasks this run |
+
 ## Report
