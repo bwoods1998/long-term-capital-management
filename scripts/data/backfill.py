@@ -3,7 +3,12 @@
 
     backfill.py probe                          authenticate, one small request, print shapes (no key)
     backfill.py run [--stages 1,2,...] [--first SPY:2024-03-13,...] [--names-file F]
-                                               work the plan's queue until it is empty; resumable
+                    [--blocks /data/work/blocks.json] [--nightly-quiet]
+                                               work the plan's queue until it is empty; resumable. Stages
+                                               11 and up are blocks from the private file (storelib); with
+                                               --nightly-quiet the run stops before the nightly job's quiet
+                                               window and never logs in inside it (exit 75)
+    backfill.py blocks --blocks F              check a blocks file and count its tasks (no login)
     backfill.py status                         the queue by stage, underlying-days, rate and ETAs
     backfill.py compile                        VERSION, calendar, expiries and manifest from the journal
     backfill.py prune --keep train,validation [--drop-key] [--drop-work] [--train-from 2020-01-02]
@@ -48,6 +53,32 @@ import storelib as sl  # noqa: E402
 log = logging.getLogger("backfill")
 
 RETRYABLE = ("UNAVAILABLE", "RESOURCE_EXHAUSTED", "DEADLINE_EXCEEDED", "INTERNAL", "UNKNOWN", "ABORTED", "CANCELLED")
+
+
+class UnderlyingMissing(RuntimeError):
+    """A day with quotes but no underlying series. In a block (stage 11 and up) nothing of the day is kept."""
+
+
+class QuietWindow(RuntimeError):
+    """A ThetaData login refused inside the nightly job's quiet window (`--nightly-quiet`)."""
+
+
+#: What a block day becomes when the vendor has quotes but never an underlying for it (after `Runner.max_failures`
+#: attempts in a pass): journaled `empty`, with nothing stored. Missing, never synthesized.
+ABSENT_WHY = "absent: quotes but no underlying series from the vendor on any attempt; nothing stored"
+
+
+def quiet_guard(factory: Callable[[], Any], margin_seconds: float,
+                clock: Callable[[], dt.datetime] = lambda: dt.datetime.now(dt.timezone.utc)) -> Callable[[], Any]:
+    """A client factory that refuses to log in inside the quiet window (or `margin_seconds` before it), so a
+    re-authentication can never take the account's one session from the nightly job."""
+
+    def guarded() -> Any:
+        if sl.in_quiet(clock(), margin_seconds):
+            raise QuietWindow("inside the nightly job's quiet window: no ThetaData login")
+        return factory()
+
+    return guarded
 
 
 # ------------------------------------------------------------------------------ the key and the client
@@ -265,6 +296,56 @@ class Store:
         self.root = Path(root)
         self.work = Path(work)
         self.journal = sl.Journal(self.work / "journal.jsonl")
+        # What the journal holds, read once per process and kept current by `append_file` and `note_task`; only
+        # block tasks (stage 11 and up) read it. One runner at a time writes the journal (the session lock).
+        self._index_lock = threading.Lock()
+        self._files: dict[str, dict[str, Any]] | None = None
+        self._days: dict[tuple[str, str], dict[str, str]] | None = None
+
+    def _index(self) -> None:
+        with self._index_lock:
+            if self._files is not None:
+                return
+            files = self.journal.files()
+            days: dict[tuple[str, str], dict[str, str]] = {}
+            for key, row in self.journal.done().items():
+                stage, _, rest = key.partition(":")
+                job, root, day = rest.split(":")
+                if job == "day":
+                    days.setdefault((root, day), {})[stage] = str(row.get("status"))
+            self._files, self._days = files, days
+
+    def journaled_underlying(self, root: str, day: dt.date) -> bool:
+        """Whether the journal already holds this root-day's underlying (and the file is there)."""
+        self._index()
+        rel = sl.rel_path("underlying", root, day)
+        return rel in (self._files or {}) and (self.root / rel).exists()
+
+    def append_file(self, record: Mapping[str, Any]) -> None:
+        self.journal.append(record)
+        with self._index_lock:
+            if self._files is not None:
+                self._files[str(record["path"])] = dict(record)
+
+    def note_task(self, stage: int, task_id: str, status: str) -> None:
+        job, root, day = task_id.split(":")
+        if job != "day":
+            return
+        with self._index_lock:
+            if self._days is None:
+                return
+            if status in ("ok", "empty"):
+                self._days.setdefault((root, day), {})[str(stage)] = status
+            elif status == "invalidated":
+                self._days.get((root, day), {}).pop(str(stage), None)
+
+    def day_status(self, root: str, day: dt.date) -> str | None:
+        """The root-day's chain task: "ok" (in some stage), "empty" (every stage that ran it found nothing), or None."""
+        self._index()
+        statuses = set((self._days or {}).get((root, day.isoformat()), {}).values())
+        if "ok" in statuses:
+            return "ok"
+        return "empty" if statuses and statuses <= {"empty"} else None
 
     def path(self, kind: str, root: str, day: dt.date) -> Path:
         return self.root / sl.rel_path(kind, root, day)
@@ -370,9 +451,15 @@ LISTINGS: Listings | None = None
 
 
 def run_task(task: sl.Task, theta: Theta, store: Store, calendar: sl.Calendar) -> dict[str, Any]:
-    """Do one task; journal its files; return the task record (not yet journaled)."""
+    """Do one task; journal its files; return the task record (not yet journaled). A block task (stage 11 and up) is
+    checked first (`sl.check_block_task`), keeps an underlying the journal already holds, stores nothing of a day whose
+    underlying is missing, and adds back months only to a day whose chain task is journaled ok."""
     import frames as fr  # polars, on the box
 
+    block = task.stage >= sl.FIRST_BLOCK_STAGE
+    if block:
+        sl.check_block_task(task)
+    journal_file = store.append_file if block else store.journal.append
     hours = calendar.hours(task.day)
     if hours is None:
         return {"status": "empty", "why": "not a trading day"}
@@ -429,7 +516,10 @@ def run_task(task: sl.Task, theta: Theta, store: Store, calendar: sl.Calendar) -
                 written.append(sl.file_record("nbbo", task.root, task.day, rows=built["rows"], sha256=built["sha256"],
                                               size=built["bytes"], fetched_at=fetched, source=source))
         under = None
-        for expiry in [e for e in expiries if e >= task.day][:3]:
+        # A block keeps the underlying the journal holds (a history session another stage fetched): no request, no
+        # rewrite, so the history under an adopted image never moves.
+        kept = block and store.journaled_underlying(task.root, task.day)
+        for expiry in ([] if kept else [e for e in expiries if e >= task.day][:3]):
             # Calls only: the same underlying series at half the request time (measured Sept 26).
             greeks = theta.call("option_history_greeks_first_order", symbol, expiry, interval="1m",
                                 date=task.day, strike_range=1, right="call", **window)
@@ -443,13 +533,23 @@ def run_task(task: sl.Task, theta: Theta, store: Store, calendar: sl.Calendar) -
             oi_frame = fr.open_interest(oi, task.day, max_dte=sl.MAX_DTE)
             if oi_frame.height:
                 put("oi", oi_frame, f"thetadata option_history_open_interest exp=* max_dte={sl.MAX_DTE} strike_range={rng}{via}")
-        for record in written:
-            store.journal.append(record)
         kinds = [r["kind"] for r in written]
-        if "nbbo" in kinds and "underlying" not in kinds:
+        if block and "nbbo" in kinds and "underlying" not in kinds and not kept:
+            # Nothing of the day is kept or journaled: a back-month task can never merge into a day without its
+            # underlying, and a retry starts clean.
+            for record in written:
+                (store.root / record["path"]).unlink(missing_ok=True)
+            store.expiries_path(task.root, task.day).unlink(missing_ok=True)
+            raise UnderlyingMissing("NBBO exists but the underlying series is missing; nothing of the day was kept")
+        for record in written:
+            journal_file(record)
+        if "nbbo" in kinds and "underlying" not in kinds and not kept:
             raise RuntimeError("NBBO exists but the underlying series is missing; retry the complete day")
-        return {"status": "ok" if "nbbo" in kinds else "empty", "files": kinds, "expiries": len(expiries),
-                "nbbo": stats, "why": None if "nbbo" in kinds else "no NBBO rows"}
+        result = {"status": "ok" if "nbbo" in kinds else "empty", "files": kinds, "expiries": len(expiries),
+                  "nbbo": stats, "why": None if "nbbo" in kinds else "no NBBO rows"}
+        if kept:
+            result["kept_underlying"] = True
+        return result
 
     if task.job == "chk":
         # The agreement check's contracts: the day's NBBO into a side directory, never the store.
@@ -503,6 +603,8 @@ def run_task(task: sl.Task, theta: Theta, store: Store, calendar: sl.Calendar) -
 
     if task.job == "under":
         # The underlying alone (a history session before Train's first day: stage 9): no chain, no OI, no expiry list.
+        if block and store.journaled_underlying(task.root, task.day):
+            return {"status": "ok", "files": [], "kept_underlying": True, "why": "the journal already holds it"}
         expiries = (LISTINGS or Listings()).expiries(task, theta, sl.EXPIRY_LIST_DTE)
         for expiry in [e for e in expiries if e >= task.day][:3]:
             greeks = theta.call("option_history_greeks_first_order", symbol, expiry, interval="1m",
@@ -514,14 +616,23 @@ def run_task(task: sl.Task, theta: Theta, store: Store, calendar: sl.Calendar) -
                                              f"strike_range=1 calls{via} (history)")
                     break
         for record in written:
-            store.journal.append(record)
+            journal_file(record)
         return {"status": "ok" if written else "empty", "files": [r["kind"] for r in written],
                 "why": None if written else "no underlying price that day"}
 
     if task.job == "back":
         target = store.path("nbbo", task.root, task.day)
         expiries = store.load_expiries(task.root, task.day)
-        if expiries is None or not target.exists():
+        if block:
+            # Only onto a day whose chain task is journaled ok: a failed day's file is never merged into.
+            status = store.day_status(task.root, task.day)
+            if status == "empty":
+                return {"status": "empty", "why": "the day's chain task found no NBBO: no back months to add"}
+            if status != "ok":
+                raise RuntimeError("the day's chain task is not journaled ok yet; its back months wait for it")
+            if expiries is None or not target.exists():
+                raise RuntimeError("the day's chain task is journaled ok but its NBBO or expiry list is missing")
+        elif expiries is None or not target.exists():
             if day_found_nothing(store, task):
                 return {"status": "empty", "why": "the day's chain task found no NBBO: no back months to add"}
             raise RuntimeError("the day's NBBO is not in the store yet (stage 1-3 first)")
@@ -545,7 +656,7 @@ def run_task(task: sl.Task, theta: Theta, store: Store, calendar: sl.Calendar) -
             if oi_frame.height:
                 put("oi", oi_frame, f"thetadata option_history_open_interest exp=* max_dte={sl.BACK_MONTH_DTE} strike_range={rng}")
         for record in written:
-            store.journal.append(record)
+            journal_file(record)
         return {"status": "ok", "files": [r["kind"] for r in written], "back_expiries": len(far)}
 
     raise ValueError(f"unknown job {task.job}")
@@ -563,7 +674,8 @@ def day_found_nothing(store: Store, task: sl.Task) -> bool:
 class Runner:
     def __init__(self, tasks: Sequence[sl.Task], theta: Theta, store: Store, calendar: sl.Calendar, *,
                  threads: int = 4, max_failures: int = 3, progress_every: float = 20.0,
-                 task_fn: Callable[..., dict[str, Any]] = run_task):
+                 task_fn: Callable[..., dict[str, Any]] = run_task, stop_at: float | None = None,
+                 clock: Callable[[], float] = time.time):
         self.tasks = list(tasks)
         self.theta = theta
         self.store = store
@@ -579,11 +691,20 @@ class Runner:
         self.last_error: str | None = None
         self.lock = threading.Lock()
         self.stop = threading.Event()
+        #: `--nightly-quiet`: no task starts from this time on (epoch seconds); `quiet` says the run stopped for it.
+        self.stop_at = stop_at
+        self.clock = clock
+        self.quiet = False
 
     def _work(self, jobs: "queue.Queue[sl.Task | None]", retry: list[sl.Task]) -> None:
         while not self.stop.is_set():
             task = jobs.get()
             if task is None:
+                return
+            if self.stop_at is not None and self.clock() >= self.stop_at:
+                with self.lock:
+                    self.quiet = True
+                self.stop.set()
                 return
             key = f"{task.stage}:{task.id}"
             with self.lock:
@@ -597,12 +718,23 @@ class Runner:
                 with self.lock:
                     self.failures[key] = self.failures.get(key, 0) + 1
                     self.last_error = f"{key} {record['error']}"
-                    if self.failures[key] < self.max_failures:
+                    # A block day the vendor keeps serving without an underlying is final after the pass's attempts.
+                    absent = (task.stage >= sl.FIRST_BLOCK_STAGE and isinstance(error, UnderlyingMissing)
+                              and self.failures[key] >= self.max_failures)
+                    if self.failures[key] < self.max_failures and not absent:
                         retry.append(task)
                 log.error("task %s failed: %s\n%s", key, record["error"], traceback.format_exc(limit=3))
+                if absent:
+                    self.store.journal.append({"type": "task", "stage": task.stage, "task": task.id, "status": "error",
+                                               "window": task.window, "seconds": round(time.time() - began, 2),
+                                               "at": sl.utc_now(), **record})
+                    status, record = "empty", {"why": ABSENT_WHY, "absent": True}
             self.store.journal.append({"type": "task", "stage": task.stage, "task": task.id, "status": status,
                                        "window": task.window, "seconds": round(time.time() - began, 2),
                                        "at": sl.utc_now(), **{k: v for k, v in record.items() if k != "status"}})
+            note = getattr(self.store, "note_task", None)
+            if note is not None:
+                note(task.stage, task.id, status)
             with self.lock:
                 self.in_flight.pop(key, None)
                 self.finished.append((time.time(), task, status))
@@ -636,6 +768,9 @@ class Runner:
             "by_method": {m: {"n": int(v[0]), "mean_s": round(v[1] / max(1, v[0]), 2)} for m, v in self.theta.by_method.items()},
             "in_flight": in_flight, "last_error": self.last_error,
             "stages": summary["stages"], "eta": etas, "underlying_days": summary["underlying_days"],
+            "quiet_stop_at": (dt.datetime.fromtimestamp(self.stop_at, dt.timezone.utc).isoformat()
+                              if self.stop_at is not None else None),
+            "stopped_for_quiet_window": self.quiet,
         }
 
     def write_progress(self) -> None:
@@ -675,6 +810,11 @@ class Runner:
             todo = sorted(retry, key=lambda t: (t.stage, self.tasks.index(t)))
             if todo:
                 log.info("round %d done; %d tasks to retry", rounds, len(todo))
+        if self.quiet:
+            # Stopped for the nightly job: no manifest compile racing its pull (the next run compiles).
+            self.write_progress()
+            log.info("stopped before the quiet window after %d rounds", rounds)
+            return sl.QUIET_EXIT
         compile_store(self.store, self.calendar)
         self.write_progress()
         left = sl.pending(self.tasks, self.store.journal)
@@ -989,6 +1129,31 @@ def _first(text: str | None) -> list[tuple[Any, ...]]:
     return out
 
 
+def _blocks(path: str | None, names: Sequence[str]) -> dict[int, sl.Block]:
+    """The private blocks file (on the data box only), checked (`sl.parse_blocks`)."""
+    if not path:
+        return {}
+    return sl.parse_blocks(json.loads(Path(path).read_text()), names=names)
+
+
+def _watchdog(hard_at: float, clock: Callable[[], float] = time.time) -> threading.Thread:
+    """`--nightly-quiet`'s last resort: whatever is still in flight, the process is gone before the quiet window."""
+
+    def watch() -> None:
+        while True:
+            left = hard_at - clock()
+            if left <= 0:
+                log.warning("quiet window: exiting now, before the nightly job (in-flight tasks are redone next run)")
+                for handler in log.handlers:
+                    handler.flush()
+                os._exit(sl.QUIET_EXIT)
+            time.sleep(min(left, 30.0))
+
+    thread = threading.Thread(target=watch, name="quiet-watchdog", daemon=True)
+    thread.start()
+    return thread
+
+
 def _setup_logging(work: Path) -> None:
     work.mkdir(parents=True, exist_ok=True)
     handler = logging.FileHandler(work / "backfill.log")
@@ -1017,6 +1182,14 @@ def _main(argv: Sequence[str] | None = None) -> int:
     run.add_argument("--passes", type=int, default=12, help="passes over the queue before giving up on failing tasks")
     run.add_argument("--pause", type=int, default=600, help="seconds between passes")
     run.add_argument("--slots", type=int, default=None, help="write this to the slots file first")
+    run.add_argument("--blocks", default="", help="stages 11 and up: the private blocks file on this box")
+    run.add_argument("--nightly-quiet", action="store_true",
+                     help="stop before the nightly job's quiet window and never log in inside it (exit 75)")
+    run.add_argument("--quiet-margin", type=int, default=600,
+                     help="with --nightly-quiet: no new task and no login this many seconds before the window")
+    bk = sub.add_parser("blocks", help="check a blocks file and count its tasks per stage (no login)")
+    bk.add_argument("--blocks", required=True)
+    bk.add_argument("--names-file", default=None)
     sub.add_parser("status")
     sub.add_parser("compile")
     pr = sub.add_parser("prune")
@@ -1067,6 +1240,20 @@ def _main(argv: Sequence[str] | None = None) -> int:
         _setup_logging(store.work)
         if args.passes < 1:
             parser.error("--passes must be positive")
+        stop_at = None
+        factory: Callable[[], Any] = open_client
+        if args.nightly_quiet:
+            now = dt.datetime.now(dt.timezone.utc)
+            if sl.in_quiet(now, args.quiet_margin):
+                log.info("run: inside the nightly job's quiet window (or %d s before it): not starting", args.quiet_margin)
+                print("deferred: the nightly job's quiet window", flush=True)
+                return sl.QUIET_EXIT
+            window_start, _ = sl.next_quiet(now)
+            stop_at = window_start.timestamp() - args.quiet_margin
+            _watchdog(window_start.timestamp() - 120)
+            factory = quiet_guard(open_client, args.quiet_margin)
+            log.info("run: stops dispatching at %s, before the quiet window from %s",
+                     dt.datetime.fromtimestamp(stop_at, dt.timezone.utc).isoformat(), window_start.isoformat())
         slots_file = str(store.work / "slots")
         if args.slots is not None:
             Path(slots_file).write_text(str(args.slots))
@@ -1076,18 +1263,21 @@ def _main(argv: Sequence[str] | None = None) -> int:
         # The kernel lock, not a recyclable/stale pid, owns the account's one ThetaData session.
         pid_file.write_text(str(os.getpid()))
         try:
-            limiter = Limiter(4, slots_file)
-            theta = Theta(open_client, limiter)
             stages = [int(s) for s in args.stages.split(",") if s.strip()]
-            calendar = store.calendar(theta, years=sl.calendar_years(stages))
             names_file = args.names_file or (str(store.work / "universe.json") if (store.work / "universe.json").exists() else None)
+            blocks = _blocks(args.blocks, _names(names_file))  # checked before any login
+            limiter = Limiter(4, slots_file)
+            theta = Theta(factory, limiter)
+            calendar = store.calendar(theta, years=sl.calendar_years(stages, blocks))
             forward = [dt.date.fromisoformat(d) for d in args.forward_days.split(",") if d.strip()]
             order = [int(x) for x in args.order.split(",") if x.strip()]
             early = [r.strip() for r in args.early_roots.split(",") if r.strip()] or None
             tasks = sl.plan(calendar, stages=stages, names=_names(names_file), first=_first(args.first),
-                            checks=_first(args.checks), forward=forward, order=order, early=early)
+                            checks=_first(args.checks), forward=forward, order=order, early=early, blocks=blocks)
             (store.work / "plan.json").write_text(json.dumps({"stages": stages, "tasks": len(tasks), "first": args.first,
-                                                              "names": _names(names_file), "at": sl.utc_now()}))
+                                                              "names": _names(names_file), "at": sl.utc_now(),
+                                                              "blocks": {str(k): v.what for k, v in blocks.items()},
+                                                              "quiet_stop_at": stop_at}))
             log.info("run: stages %s, %d tasks, threads %d, decoders %d", stages, len(tasks), args.threads, args.decoders)
             import multiprocessing
             from concurrent.futures import ProcessPoolExecutor
@@ -1103,12 +1293,18 @@ def _main(argv: Sequence[str] | None = None) -> int:
                 # Passes until the queue is empty: a task that failed three times in a pass (a vendor
                 # outage, a bad hour) is tried again in the next pass, ten minutes later.
                 for passes in range(1, args.passes + 1):
-                    Runner(tasks, theta, store, calendar, threads=args.threads).run()
+                    runner = Runner(tasks, theta, store, calendar, threads=args.threads, stop_at=stop_at)
+                    runner.run()
+                    if runner.quiet:
+                        return sl.QUIET_EXIT
                     left = sl.pending(tasks, store.journal)
                     if not left:
                         break
                     log.warning("pass %d ended with %d tasks not done", passes, len(left))
                     if passes < args.passes:
+                        if stop_at is not None and time.time() + args.pause >= stop_at:
+                            log.info("the next pass would start inside the quiet window's margin: stopping")
+                            return sl.QUIET_EXIT
                         time.sleep(args.pause)
                 return 1 if left else 0
             finally:
@@ -1119,9 +1315,38 @@ def _main(argv: Sequence[str] | None = None) -> int:
             except OSError:
                 pass
 
+    if args.cmd == "blocks":
+        names_file = args.names_file or (str(store.work / "universe.json") if (store.work / "universe.json").exists() else None)
+        blocks = _blocks(args.blocks, _names(names_file))
+        out: dict[str, Any] = {"blocks": {}}
+        try:
+            calendar = store.calendar(None)
+        except SystemExit:
+            calendar = None
+        for stage, block in sorted(blocks.items()):
+            row: dict[str, Any] = {"what": block.what, "job": block.job, "roots": len(block.roots),
+                                   "first": block.first.isoformat(), "last": block.last.isoformat(),
+                                   "years": block.years()}
+            if calendar is not None and all(calendar.covers(y) for y in block.years()):
+                tasks = sl.plan(calendar, stages=[stage] + ([block.after] if block.after else []), blocks=blocks,
+                                order=[block.after, stage] if block.after else [stage])
+                mine = [t for t in tasks if t.stage == stage]
+                row.update({"tasks": len(mine), "under": sum(t.job == "under" for t in mine),
+                            "pending": len(sl.pending(mine, store.journal))})
+            else:
+                row["tasks"] = "the calendar cache lacks a year; the run fetches it"
+            out["blocks"][str(stage)] = row
+        print(json.dumps(out, indent=1))
+        return 0
+
     if args.cmd == "one":
         job, root, day = args.task.split(":")
         task = sl.Task(args.stage, job, root, dt.date.fromisoformat(day))
+        if task.stage >= sl.FIRST_BLOCK_STAGE:
+            sl.check_block_task(task)
+            if sl.in_quiet(dt.datetime.now(dt.timezone.utc), 600):
+                print("deferred: the nightly job's quiet window", flush=True)
+                return sl.QUIET_EXIT
         theta = Theta(open_client, Limiter(1))
         calendar = store.calendar(theta, years=sorted(set(sl.CALENDAR_YEARS) | {task.day.year}))
         started = time.monotonic()

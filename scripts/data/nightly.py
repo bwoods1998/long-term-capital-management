@@ -51,6 +51,7 @@ import storelib as sl  # noqa: E402
 
 FIRST_FORWARD_DAY = dt.date(2026, 9, 28)
 READY_ET_MINUTES = 105  # 01:45 ET
+QUIET_EXIT = sl.QUIET_EXIT  # a `--nightly-quiet` backfill that the quiet window deferred
 
 BACKFILL_IDENTITY = r'''
 import os, pathlib
@@ -343,7 +344,9 @@ if identity(pid) is not None:
 """
         self.api.exec(self.box_id, ["/opt/data-venv/bin/python", "-c", code], timeout=90).check()
 
-    def start_backfill(self, args: str) -> None:
+    def start_backfill(self, args: str) -> str:
+        """Start `backfill.py run ARGS` detached; returns the path of its exit-status receipt. A run that exits 0 (an
+        empty queue) or 75 (`--nightly-quiet` inside the quiet window: deferred, no login) is not an error."""
         import boxlib as bl
 
         if self.backfill_running():
@@ -356,14 +359,23 @@ if identity(pid) is not None:
         self.api.exec(self.box_id, command, timeout=60, background=True).check()
         for _ in range(20):
             if self.backfill_running():
-                return
-            result = self.api.exec(self.box_id, ["bash", "-c", f"cat {shlex.quote(receipt)} 2>/dev/null || true"], timeout=60)
-            if result.stdout.strip():
-                if result.stdout.strip() == "0":
-                    return  # the resumable queue was already empty and finished cleanly
-                raise RuntimeError(f"the backfill restart exited with {result.stdout.strip()}")
+                return receipt
+            code = self.receipt(receipt)
+            if code is not None:
+                if code in (0, QUIET_EXIT):
+                    return receipt  # the resumable queue was already empty, or the quiet window defers it
+                raise RuntimeError(f"the backfill restart exited with {code}")
             time.sleep(0.5)
         raise RuntimeError("the restarted backfill never confirmed its running identity or a clean completion")
+
+    def receipt(self, path: str) -> int | None:
+        """A started backfill's exit status (None while it runs, or if it left none)."""
+        result = self.api.exec(self.box_id, ["bash", "-c", f"cat {shlex.quote(path)} 2>/dev/null || true"], timeout=60)
+        text = result.stdout.strip()
+        try:
+            return int(text) if text else None
+        except ValueError:
+            return None
 
 
 def real_job(*, rehearsal_gate: str | None = None, api: Any = None,
@@ -508,6 +520,16 @@ class Controller:
         return {"phase": "complete", "day": day.isoformat(), "gate_checkpoint": ready["gate_checkpoint"]}
 
 
+def window_hook(state: Path) -> str | None:
+    """One tick of the history fetch's controller when it is enabled and no standalone controller holds it."""
+    try:
+        from window import daemon_tick
+
+        return daemon_tick(state)
+    except (Exception, SystemExit) as error:  # noqa: BLE001 - the nightly comes first
+        return f"error {type(error).__name__}: {str(error)[:200]}"
+
+
 def daemon(state: Path, ready_file: Path, *, poll: float = 30.0) -> int:
     import boxlib as bl
     from locking import process_lock
@@ -550,6 +572,11 @@ def daemon(state: Path, ready_file: Path, *, poll: float = 30.0) -> int:
                 result = controller.tick()
                 status.clear()
                 status.update(result)
+                # The long history fetch (window.py): paused for the quiet window, resumed only after the night's
+                # checkpoint. Same thread as the nightly, so the two never overlap; it never raises into this loop.
+                window = window_hook(state)
+                if window:
+                    status["history_fetch"] = window
                 if (not stop.is_set() and not (state / "nightly.stop").exists()
                         and bl.read_json(state / "completion-config.json").get("enabled") is True):
                     from complete import Completion
