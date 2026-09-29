@@ -39,6 +39,18 @@ on branch `run/options-swarm-2026-09-26`) has the detail.
 
 ## 2026-09-29
 
+**13:44Z, R11a: House release `20260929T134303Z-8366493c614c`** (main `2f6d5109`; #424, Train from 2017).
+- The first research-side release under the owner's amended D8: research releases may ship during the session when
+  nothing in the money path changes.
+- No file under `league/live`, the gateway or the constitution changed. The money digest is unchanged (`a3e2aa7c`).
+  0 real positions and 0 working orders at deploy.
+- On the box: 0 `train_span_mismatch` events, the swarm cycling (171 cycles and 63 runs in the first minutes), the
+  backfill controller alive.
+- `gym.train_from` stays 2020-01-02 until image T (2017-24) is built, bridged and pool-checked.
+
+**13:36Z, operator change:** `live.observe_max` 8 → 48. **13:20Z:** `architect.max_refill` 24 → 12,
+`architect.every_seconds` 600 → 900.
+
 **06:58Z, operator change** (no deploy): the strategist switched on.
 - `architect.agenda_locked` is the operator's preamble: agenda v14 without its WHERE TO LOOK directions, plus two
   new binding lessons, that widening does not create edge and that the rebound's 2024 survives every regime gate.
