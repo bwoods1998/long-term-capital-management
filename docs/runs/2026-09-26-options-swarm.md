@@ -2454,4 +2454,24 @@ looks like beta. Validation 2025 and the holdout judge both.
     research-side release.
   - The architect now runs every 900 s (was 1,800).
 
+
+- **03:45-04:00Z The owner: "remove any limits that would inhibit this goal … take every bold swing". What changed,
+  and what did not.**
+  - Research throttles lifted, up to funded money:
+    - researcher Sail pace $4.50 → $12/h, model pace $2.25 → $5/h;
+    - Gym boxes 10 → 16;
+    - population start 72 → 96 (the ceiling);
+    - the architect 12 families every 30 min → 24 every 10 min;
+    - the strong research profile for the top 12 families (was 6).
+    The Sail guard's $32 line stays: it keeps the House alive with real positions open.
+  - The two nearest Validation misses were revived as lineage continuations (`revive.py`, origin "operator-revive"):
+    `market-distraction-release-call-r` (its parent was 7/8, t 1.95) and `down-day-relative-strength-call-r` (6/8).
+    - They inherit their lineage's trials and holdout looks, so the deflated Sharpe counts every version and the
+      sealed holdout judges anything that clears.
+    - The selection used Validation check counts, disclosed here.
+  - The width-lever experiment is running (pre-registered): frozen mechanisms with edge at the mid are re-run at $1-5
+    widths to test whether a larger envelope turns cost-bound edges net-positive. Any money-table change it supports
+    goes to the owner.
+  - Unchanged: D2, the sealed holdout, no forced trades, the money table.
+
 ## Report
