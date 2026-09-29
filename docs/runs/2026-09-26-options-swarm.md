@@ -2634,4 +2634,17 @@ looks like beta. Validation 2025 and the holdout judge both.
   - Far too few to recalibrate; the protocol's test sessions start today. But the first direct evidence is that the
     Gym's execution model matches reality on the House's own orders.
 
+
+### Sprint scoreboard, T0 + 72 h (06:35Z Sept 29, R9 with Sonnet 5.5 researchers)
+
+| # | Metric | Value |
+|---|---|---|
+| 1 | Population | 89 alive, 833 retired; 56 born and 59 retired in 2 h |
+| 2 | Throughput | 1,256 cycles/h (the most yet), median 124 s; Sail provider 503s 52, unconfirmed transports 11, 502s 3 in 2 h (fallbacks absorb them) |
+| 3 | Search | 69,730 trials, 369,069 program-years. Closest in Validation: the revived `market-distraction-release-call-r` at 7/8 (fails t only) |
+| 4 | Evidence | Validation passes alive 0; holdout looks 2, passes 0 |
+| 5 | Real fills (D3) | Monday replayed through the Gym: 7/7 attempts agree, real fills at the mid as the Gym charges |
+| 6 | Money | Equity $1,473.11; 0 positions, 0 orders; the live test is armed |
+| 7 | Compute | Sail $246.95 (after the owner's top-up). Claude $84.70 of $200 ($6.49 in 2 h with Sonnet researchers, architect, diagnostician, rewrites and reviews). OpenAI is no longer used |
+
 ## Report
