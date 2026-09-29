@@ -1,10 +1,10 @@
 # The gateway
 
 A Cloudflare Worker (`ltcm-gateway`) that holds every credential that can move money or spend it:
-the Brokerage Account's keys (real and paper), OpenAI's key, the GitHub token and Sail's key for its
-watchdog. The House's Sailbox holds one bearer token and can only ask: it cannot sign an order, pass
-a cap, spend past the OpenAI month or release the kill switch, because none of that lives on the
-box. Caps and switches change only by editing `wrangler.jsonc` and deploying, which is the owner's
+the Brokerage Account's keys (real and paper), OpenAI's key, Anthropic's key, the GitHub token and
+Sail's key for its watchdog. The House's Sailbox holds one bearer token and can only ask: it cannot
+sign an order, pass a cap, spend past the OpenAI month or the Claude funded total, or release the
+kill switch, because none of that lives on the box. Caps and switches change only by editing `wrangler.jsonc` and deploying, which is the owner's
 act. The old, long version of this page is
 [archive/docs/gateway-README-pre-options.md](../archive/docs/gateway-README-pre-options.md).
 
@@ -14,8 +14,9 @@ the House (Sailbox)        this Worker                                  outside
                            ALPACA_PAPER_KEY_ID / _SECRET_KEY      ->    paper-api.alpaca.markets
                            (either pair, market data)             ->    data.alpaca.markets
                            OPENAI_SECRET_KEY                      ->    api.openai.com
+                           CLAUDE_API_KEY                         ->    api.anthropic.com
                            GITHUB_TOKEN                           ->    api.github.com
-                           caps, the OpenAI month, the kill switch (one Durable Object)
+                           caps, the OpenAI month, the Claude funded total, the kill switch (one Durable Object)
                            the watchdog cron (SAIL_API_KEY)       ->    Sail, the site, mail to the owner
 ```
 
@@ -26,11 +27,13 @@ owner's `GATEWAY_ADMIN_TOKEN`.
 
 | Route | What it does |
 |---|---|
-| `GET /v1/health` | the kill switch, caps and today's counters, the OpenAI month, Sail's balance and the House box's state; never reads a venue itself |
+| `GET /v1/health` | the kill switch, caps and today's counters, the OpenAI month, the Claude meter (`claude`: funded total, spent, in flight, remaining, `by_role`, `by_agent`, stop reasons), Sail's balance and the House box's state; never reads a venue itself |
 | `POST /v1/kill`, `POST /v1/unkill` | engage the kill switch (any token), release it (owner only) |
 | `/v1/alpaca/<path>` | the Brokerage Account (orders to `api.alpaca.markets`, market data to `data.alpaca.markets`) |
 | `/v1/alpaca-paper/<path>` | the paper account: never metered, not stopped by the kill switch, held to the same defined-risk shapes |
 | `POST /v1/frontier/responses`, `GET /v1/frontier/models` | one metered OpenAI Responses call; the models the key reaches |
+| `POST /v1/claude/messages` | one Claude Messages call, reserved and settled against the funded total; streamed when `stream: true`; stopped by the kill switch |
+| `GET /v1/claude/models`, `GET /v1/claude/request/<id>` | the Claude models the key reaches and which are priced; what became of the House's call `<id>` (its `X-LTCM-Request`): held, settled, unknown, released or absent |
 | `POST /v1/github/pr`, `GET /v1/github/pr/<n>[/failures]` | open a pull request from a proposal; read its state and CI |
 
 Still in the code until the prune removes them (Wave 2b), and unused by the options House:
@@ -101,6 +104,42 @@ and ceiling.
 - **Output ceilings**: 16,000 tokens by default; `X-LTCM-Role: <role>` takes that role's ceiling from
   `FRONTIER_ROLE_MAX_OUTPUT` (`{"postmortem": 64000}`), and the reservation is sized from it.
 
+## The Claude funded total
+
+`/v1/claude/messages` forwards one call to Anthropic's Messages API (`lib/claude.mjs`) within
+`CLAUDE_USD`, the owner's FUNDED TOTAL on the Anthropic account ($100 deployed). It is not a month:
+nothing resets it, so it is raised only by what the owner adds, and raising it is a gateway deploy.
+`CLAUDE_MODELS` is the price table and the allowlist, dollars per million tokens: Claude Opus 5.5
+($4 input, $5 five-minute write, $0.20 hit, $20 output), Claude Sonnet 5 and Claude Sonnet 5.5 ($2,
+$2.50, $0.20, $10). A model not in it is a `403`.
+
+- **Reserved at the worst case** before the call leaves: every byte of the request body plus 4,096
+  framing tokens at the five-minute cache-write rate, and every `max_tokens` output token (16,000
+  unstreamed, 32,000 streamed; thinking is output). A call that does not fit what is left is
+  `402 {cap: "claude_funded"}`; the kill switch is `423 {cap: "kill_switch"}`; no key is
+  `503 {cap: "setup"}`.
+- **Settled at Anthropic's usage**: uncached input, cache writes, cache reads and output each at its
+  own rate. A refusal (`stop_reason: "refusal"`) and a cut answer are billed at their usage; a 4xx
+  settles at zero. An answer that broke after its headers keeps its whole hold (unknown is not free);
+  a hold nothing settled is swept to zero after 30 minutes. The reply carries `X-LTCM-Cost-USD`; a
+  streamed reply ends with one `ltcm.cost` event (`{cost_usd, known, stop}`).
+- **What is admitted**: text turns, adaptive thinking (never disabled, never `budget_tokens`; display
+  omitted or summarized), `output_config` with an effort (low to max) and a JSON-schema format, up to
+  four five-minute cache markers, and (Sept 29, 2026) the House's OWN tools and its tool loop: custom
+  tools with a name, a description, an object `input_schema`, a marker and `eager_input_streaming`;
+  `tool_choice` auto or none; `tool_use` blocks (`caller` direct only), `tool_result` blocks with text
+  content, and the model's `thinking` (with its signature) and `redacted_thinking` blocks passed back.
+  A custom tool runs in the House, so it bills nothing beyond the body, and the tools and every turn
+  are bytes of the body the worst case already counts.
+- **What is refused** (`400`): anything that runs or bills beyond the body (server and
+  Anthropic-defined tools such as web search, code execution, bash, computer and MCP; `strict`,
+  `defer_loading`, `allowed_callers`), forced tool choice (`any`, `tool`: a 400 upstream on Sonnet 5.5
+  and Opus 5.5), images, documents, sampling parameters, fast mode, `inference_geo`, the one-hour
+  cache and an assistant turn last.
+- **Who spent it**: `X-LTCM-Role` and `X-LTCM-Agent` file each settled cost under `by_role` and
+  `by_agent` in `/v1/health`. The House's roles: `architect`, `audit`, `diagnostician`, `rewrite`,
+  `review` and `researcher` (the top band's research cycles, Sept 29, 2026).
+
 ## The watchdog
 
 A cron every five minutes reads the site's production checkpoint, Sail's balance and the House box's
@@ -125,6 +164,7 @@ npx wrangler secret put ALPACA_SECRET_KEY
 npx wrangler secret put ALPACA_PAPER_KEY_ID      # the paper account
 npx wrangler secret put ALPACA_PAPER_SECRET_KEY
 npx wrangler secret put OPENAI_SECRET_KEY
+npx wrangler secret put CLAUDE_API_KEY           # the Anthropic account CLAUDE_USD meters
 npx wrangler secret put SAIL_API_KEY             # the watchdog
 npx wrangler secret put GITHUB_TOKEN             # fine-grained: this repository, contents and pull requests only
 python3 ../scripts/gateway_admin.py provision    # GATEWAY_ADMIN_TOKEN, kept mode 600 under .data/ltcm/keys/

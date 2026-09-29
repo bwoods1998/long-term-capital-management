@@ -10,8 +10,8 @@ desks on Kalshi and Coinbase, a league of strategy programs) is in [archive/](ar
 ## The goal
 
 A swarm of AI agents trading anything available with level-3 options on the owner's Alpaca account
-(the "Brokerage Account" on the public page), profitably: **options returns greater than every
-input cost** (Sail, OpenAI, ThetaData and the market-data subscription). The money in the account
+(the "Brokerage Account" on the public page), profitably: **options returns greater than every input
+cost** (Sail, Claude, OpenAI, ThetaData and the market-data subscription). The money in the account
 may all be lost; the evidence must stay honest.
 
 The owner's September 26 update makes breadth explicit: simple calls and puts, covered calls,
@@ -108,17 +108,19 @@ The full design is [docs/design.md](docs/design.md); the run that is building it
 | Piece | What | Where |
 |---|---|---|
 | The House | the loop, the ledger, the books, the tournament, the gate, the live tick, the publisher | one Sailbox (size s) |
-| The gateway | the account's and OpenAI's keys, caps by order, the OpenAI month, the kill switch, an outside watchdog | a Cloudflare Worker |
+| The gateway | the account's, OpenAI's and Anthropic's keys, caps by order, the OpenAI month, the Claude funded total, the kill switch, an outside watchdog | a Cloudflare Worker |
 | The data box | ThetaData downloads into the Gym store; the nightly forward day | one Sailbox (size l), asleep when idle |
 | The Gym | sealed forks of the Gym image (Train and Validation only), 4-8 at a time | Sailboxes (size l) |
 | The gate | a sealed fork with the holdout and forward days | one Sailbox, used by the gate only |
 | The site | the public page | `personal-site`, a Cloudflare Worker |
 
-Vendors: **Alpaca** (the account, level 3; live OPRA quotes and SIP bars through Algo Trader Plus;
-a paper account for the multi-leg route), **ThetaData** Options Standard (historical option quotes),
-**Sail** (the boxes, and open models for the researchers: DeepSeek, Kimi), **OpenAI** through the
-gateway (GPT-6 Sol reviews programs; GPT-6 Astra is the architect, the gate's auditor and the
-post-mortem).
+Vendors: **Alpaca** (the account, level 3; live OPRA quotes and SIP bars through Algo Trader Plus; a
+paper account for the multi-leg route), **ThetaData** Options Standard (historical option quotes),
+**Sail** (the boxes, and open models for the researchers: DeepSeek, Kimi), **Anthropic** through the
+gateway (Claude Sonnet 5.5 runs the top families' research cycles, Sept 29, 2026; Claude answers the
+architect, the gate's audit and the diagnostician first), **OpenAI** through the gateway (GPT-6 Sol
+reviews programs; GPT-6 Astra is the architect's other pass, the audit's fallback and the post-mortem)
+while its funded month lasts. From Sept 29 only Sail and Claude are topped up.
 
 ## The repository
 

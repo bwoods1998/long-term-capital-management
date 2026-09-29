@@ -426,6 +426,7 @@ class Fallbacks(ClaudeCase):
         for kind, arrange in cases.items():
             with self.subTest(kind):
                 self.setUp()
+                self.settings["claude"]["usd_cap"] = 1000.0  # only the line under test binds
                 arrange()
                 before = self.store.spent(["claude"])
                 self.sail_revises()

@@ -228,18 +228,26 @@ Agent count and simulated years measure activity; passing unseen evidence measur
 |---|---|---|---|---|
 | Inner | seconds to minutes | each researcher | revise the program, run it on Train, read the diagnostics, revise again | a better program or a lesson |
 | Tournament | hourly | the House | validation runs of each family's best versions, the bandit's reallocation, forks and retirements, the leaderboard | Gym time and model calls follow evidence |
-| Architect | every 4 hours | GPT-6 Astra | reads the leaderboard, the graveyard and the gaps; writes families with a mechanism, a structure and a rejection test | 3-6 new families |
-| Gate | when a family meets the validation line | GPT-6 Sol, Astra, the gate box | review for lookahead, leakage and fill abuse; the audit; one holdout look | a Candidate, or a recorded refusal |
+| Architect | every 4 hours | Claude, GPT-6 Astra | reads the leaderboard, the graveyard and the gaps; writes families with a mechanism, a structure and a rejection test | 3-6 new families |
+| Gate | when a family meets the validation line | GPT-6 Sol, Claude, the gate box | review for lookahead, leakage and fill abuse; the audit; one holdout look | a Candidate, or a recorded refusal |
 | Nightly forward | after 01:45 ET each trading night | the data box, the gate box | the new day goes to the gate image only; every Candidate is re-run on it | one unseen day a night for every Candidate |
 | Live | 09:30-16:00 ET | the House | Candidates in live shadow; general agent paper execution is being built; production requires its own verified/enabled path | separate paper, shadow and actual real records |
 | Post-mortem | after each close; weekly | the House, Astra | compare captured executions with the Gym; diagnose gaps and propose repairs; scheduler unfinished | private reports; calibration only from eligible actual observations |
 
-**Models.** The inner loop runs on Sail's DeepSeek-V4-Flash (V4.1-Flash where long cached histories
-make it cheaper), with a cache key per agent and the shared contract cached once a day. A researcher
-that stalls for 5 revisions escalates one rewrite to DeepSeek-V4-Pro (Kimi-K3 for the top ten
-families). Bulk overnight variants go through Sail's Batch API. Through the gateway, GPT-6 Sol
-reviews every program before live shadow, and GPT-6 Astra is the architect, the gate's auditor and
-the weekly post-mortem, on OpenAI's half-price flex tier wherever latency does not matter.
+**Models** (Sept 29, 2026; only Sail and Claude are topped up from now on). Most researchers run on
+Sail's DeepSeek-V4-Flash, with a cache key per agent and the shared contract as the cached prefix. The
+bandit's top families by weight (`researcher.claude_top`, 12) run their research cycles on **Claude
+Sonnet 5.5** at medium effort through the gateway: the same loop, tools and limits, so the families
+closest to passing get the strongest reasoning. Every Claude failure (a refusal, a cut answer, the
+funded total or a daily line reached, a timeout, an input that does not validate) finishes that turn
+on the family's own Sail profile (DeepSeek-V4-Pro for the top band), never a cycle error
+(league/swarm/claude_research.py). A researcher that stalls for 5 revisions escalates one rewrite to
+DeepSeek-V4-Pro (Kimi-K3 for the top ten families), or to Claude once the operator adds "rewrite" to
+`claude.roles`. Through the gateway, Claude (`claude.model`) answers the architect, the gate's audit
+and the diagnostician first; GPT-6 Astra (the architect's other pass, the audit's fallback and the
+post-mortem) and GPT-6 Sol (the program review) run only while OpenAI's funded month lasts, on its
+half-price flex tier wherever latency does not matter; Sail is every role's last fallback. Each Claude
+role has its own daily line (`claude.role_usd_day`) inside the owner's funded total.
 
 ## Evidence
 

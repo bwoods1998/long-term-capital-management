@@ -13,7 +13,7 @@ from decimal import Decimal
 
 from league.claude import (MAX_TOKENS, MAX_TOKENS_STREAM, Claude, ClaudeError, ClaudeRefusal, ClaudeTruncated, ToolUse,
                            reservation_ceiling, tool_request_body)
-from league.tests.test_claude import SECRET, FakeStream, http_error
+from league.tests.test_claude import ERRORS, SECRET, FakeStream, http_error
 from league.tests.test_frontier import GATEWAY, FakeOpener, FakeResponse
 
 MODEL = "claude-sonnet-5-5"
@@ -74,6 +74,11 @@ def tool_events(blocks=FINAL, *, stop="tool_use", cost="0.086800", known=True, f
     if cost is not None:
         out.append({"type": "ltcm.cost", "cost_usd": cost, "known": known, "stop": stop})
     return "".join(f"event: {e['type']}\ndata: {json.dumps(e)}\n\n" for e in out)
+
+
+def tearDownModule():
+    for error in ERRORS:
+        error.close()
 
 
 def client(opener, **kw):

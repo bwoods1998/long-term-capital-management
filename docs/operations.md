@@ -208,8 +208,14 @@ cd /workspace/previous && /workspace/.venv/bin/python -m league.watchdog rollbac
 - **The grant:** `python3 scripts/live_trading.py` (no flag) reports it and what enabling would
   record now.
 - **The gateway:** `python3 scripts/gateway_admin.py status`: the kill switch, today's order
-  counters, the OpenAI month (spent, settled, in flight, the cap), the Sail balance and the House
-  box's state.
+  counters, the OpenAI month (spent, settled, in flight, the cap), the Claude meter (the funded total,
+  spent, in flight, remaining, the priced models, spend by role such as `researcher`), the Sail balance
+  and the House box's state.
+- **Claude's top band** (Sept 29, 2026): each `swarm.cycle` event of a family on Claude carries `route:
+  "claude"`, `claude_calls`, `claude_usd`, `claude_usage` (input, cache write, cache read and output
+  tokens summed over the cycle) and, when a turn fell back to Sail, `claude_fallback` (`<kind>: <why>`).
+  The swarm's own `spend` rows (kind `claude`, `detail.role` "researcher") hold the holds and their
+  settlements; `kv claude_unsettled` lists holds whose bill is not yet known.
 - **The public page:** `curl -s https://blakewoods.us/api/capital/checkpoint`: 404 until the House's
   first checkpoint after the reset, then its `published_at`.
 - **The data:** `python3 scripts/data/box.py status` (the box, its egress, the backfill's progress);
@@ -546,6 +552,8 @@ with `real_money` true (a new money digest); `python3 scripts/live_trading.py --
 | `live.house_test` | `swarm.json` on the box | false | the House live test (still only with real money on, the grant, the paper proof and its private program verified); off: exits only | edit `swarm.json` |
 | The House live test's program | `/workspace/state/house-test/rebound-live/` on the box | absent | the frozen program and its params, hash-checked against `league/live/house_test.py` `FROZEN` | the operator's private upload script, `--apply` |
 | `FRONTIER_MONTH_USD`, `FRONTIER_MONTH_MAX_USD`, `FRONTIER_FUNDED_MONTH` | `gateway/wrangler.jsonc` | $707, September 2026 only | the OpenAI month; expires before an unfunded month can renew it | gateway deploy |
+| `CLAUDE_USD`, `CLAUDE_MODELS` | `gateway/wrangler.jsonc` | $100; Opus 5.5, Sonnet 5, Sonnet 5.5 | the Anthropic account's funded total (never resets) and the priced models (the allowlist) | gateway deploy after the owner adds funds |
+| `claude.usd_cap`, `claude.role_usd_day`, `claude.roles` | `swarm.json` on the box | 100, `{"researcher": 100}`, architect, audit, diagnostician, researcher | the swarm's own lifetime Claude line, each role's line a UTC day, and who asks Claude first | edit `swarm.json` |
 | The money rules | `league/constitution.py` | the sprint's D4 table and the House live test's bounds (money `a3e2aa7c`) | what real money may do | owner deploy, then `--ratify` |
 
 In `swarm.json`, `researcher.usd_per_hour` keeps the combined Sail-model and OpenAI trailing-hour pace.
@@ -634,3 +642,26 @@ never tried while the population is below its start and the architect is not due
 objective, its robustness runs (1.5x and mid, at the pool's lowest priority, never starting or keeping a box awake) and
 the D2 validation line are code, not settings. The objective's one-time migration beats the heartbeat while it runs,
 skips a family it already moved and empties (never keeps) the best of a family it cannot rescore.
+
+The top band on Claude (Sept 29, 2026, the owner's decision to use Claude Sonnet 5.5 boldly; only Sail and Claude are
+topped up from now on), all in `swarm.json` without a deploy: `researcher.claude_top` (default 12; 0 turns it off)
+puts the bandit's top families by weight on `researcher.claude_model` (`claude-sonnet-5-5`) at
+`researcher.claude_effort` (`medium`), with `researcher.claude_max_tokens` (16000, streamed; it sizes each call's
+hold) and `researcher.claude_timeout_seconds` (180), while "researcher" is in `claude.roles` (removing it turns the
+band off). Four fuses bound the spend: `claude.role_usd_day.researcher` (default $100 a UTC day, holds included),
+`researcher.claude_family_usd_day` ($15 a family a UTC day), `researcher.claude_min_room_usd` ($25 of the funded
+room the researcher never takes, left to the architect, the audit and the diagnostician) and the gateway's
+`CLAUDE_USD`; the swarm's lifetime `claude.usd_cap` counts the researcher's spend too. Any Claude failure (a refusal, a
+cut answer, a 402 at the funded total, 403 for an unpriced model, 423, 429 or 5xx, a line, a fuse or the reserve, a
+stream timeout, an input that does not parse or validate) finishes that turn on the family's own Sail profile
+(`top_profile` for the top band) and keeps the rest of the cycle there; it is never a cycle error. The expected cost
+at medium effort (a dry estimate on a real House cycle, Sept 29) is about $0.05 a cycle with a typical history and
+$0.09 with a long one: about $60 a day at N=12 (capped at the $100 line) and $30 at N=6. Read the first day's
+`claude_usage` and `claude_usd` from the cycle events after about 50 Claude cycles: above about $0.08 a cycle, drop to
+`low` or `claude_top` 6; below about $0.04, consider `high` for the top six.
+
+Before the band spends anything, the owner (none of this is done by the code): deploys the gateway with Sonnet 5.5
+priced (#415) and this change's tool admission (a House call before that is a 403 or a 400 and falls back to Sail);
+adds funds to the Anthropic account and raises `CLAUDE_USD` by what was added (a gateway deploy: with $22.77 left on
+Sept 29, below `claude_min_room_usd` plus a hold, the band stays on Sail); raises `claude.usd_cap` in `swarm.json`
+(98 on the box, $78.82 spent lifetime); and deploys the House release.

@@ -371,7 +371,8 @@ def _cost(headers: Any) -> Decimal | None:
 
 
 class Claude:
-    """One model through the gateway. `ask` is one question; `converse` takes text turns (the last the user's)."""
+    """One model through the gateway. `ask` is one question; `converse` takes text turns (the last the user's);
+    `messages` is one turn of a tool loop (TOOL CALLS in the module docstring)."""
 
     def __init__(self, gateway_url: str, token_source: Callable[[], str], *, model: str = MODEL, opener: Any = None,
                  timeout: float = 600.0, read_timeout: float = READ_TIMEOUT, clock: Callable[[], float] | None = None):

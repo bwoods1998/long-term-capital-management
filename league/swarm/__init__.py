@@ -27,7 +27,9 @@ THE PIECES.
 - `pool`        the Gym box pool (forks of the Gym image, sealed; batches day-major via the Gym's
                 driver) and the gate's boxes;
 - `guard`       the Sail guard (scale to zero before the House is at risk; the burst caps);
-- `researcher`  the inner loop (revise -> run -> read -> revise) with its five tools;
+- `researcher`  the inner loop (revise -> run -> read -> revise) with its seven tools;
+- `claude_research` the top band's research cycles on Claude Sonnet 5.5 (Sept 29, 2026): the tool and
+                conversation adapter, the input checks and the append-only session; a Sail fallback;
 - `tournament`  the hourly tournament: validation runs, the bandit, forks, retirements, the leaderboard;
 - `gate`        the program review, the holdout look, the Candidate band or a recorded refusal;
 - `architect`   every four hours, 3-6 new families from the leaderboard, the graveyard and the gaps;
