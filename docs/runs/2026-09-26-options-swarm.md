@@ -2568,4 +2568,18 @@ looks like beta. Validation 2025 and the holdout judge both.
     - `config.json` notes;
     - Claude top-ups as gateway deploys.
 
+
+- **05:25-05:35Z The owner topped up Sail by $200 and Claude by $100 (Anthropic balance $140.54).**
+  - Gateway #420 was deployed (`8d80d2f7`): `CLAUDE_USD` $100 → $200, raised by exactly what was added (D7). The
+    meter had $80.33 spent, which leaves $119.67, below the real balance.
+  - The swarm's `claude.usd_cap` is now 198. Docs #421 records it.
+  - The owner's words: "its extremely important we reach profitability given our larger brokerage balance and how
+    much were spending on sail and claude". Measured burn is about $5/h of Sail and $2/h of Claude, about $170 a day
+    against a $1,473 account.
+  - Response: the rebound-stability pre-registration.
+    - The rebound is the one mechanism with net edge, and it fails only on weak years.
+    - Regime-conditioned variants (at most 12, each with an economic reason) are chosen on 2020-24 only and frozen by
+      hash BEFORE the 2017-19 core-five data lands (the backfill starts that block at 08:15Z). That makes 2017-19 a
+      genuine out-of-sample test before any Validation look.
+
 ## Report
