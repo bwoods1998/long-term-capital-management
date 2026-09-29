@@ -41,6 +41,10 @@ decision coverage go to the private practice ledger (`league/live/observe.py`), 
 summary as a research signal (`league/swarm/practice.py`) and the site shows its aggregates (`site_inputs`), never a
 forward row and never evidence.
 
+THE FORWARD EMBARGO (Sept 29, 2026): practice feeds research, so forward-window days select among Gym programs. A Sized
+move (`_move_band`) therefore also needs the forward record of the sessions AFTER the banded version was written to
+meet Sized; the whole record still decides everything else (negative, Candidate, Probe). It only makes Sized harder.
+
 THE CALIBRATION ROUND TRIPS (D3; `league/live/calibration.py`): the House's own 1-lot SPY, QQQ and IWM debit verticals,
 hourly from 10:00 to 15:00 ET (a patient 25-minute mid at 12:00 and 14:00), sent through the same order path, only while
 real opens may go and the paper proof has passed; never evidence.
@@ -917,6 +921,11 @@ class OptionsLive:
             # would only be undone, and a Probe trades from the session after its move (`_real_eligible`).
             return band
         new, why = M.band_for(self.table, row, equity, fwd, probe_sessions=self._probe_sessions(fid, band))
+        embargoed = False
+        if new == "sized":
+            held = self._embargoed(row, forward)
+            if held:
+                new, why, embargoed = "probe", held, True
         try:
             confirmed = self.families.confirm_band(row, new, why, forward, at=self.clock())
         except Exception as exc:  # noqa: BLE001 - no real eligibility on an unconfirmed snapshot
@@ -935,8 +944,9 @@ class OptionsLive:
             except Exception as exc:  # noqa: BLE001 - the band stays; tried again at the next refresh
                 self.alert("warning", f"live: {fid}'s band could not be moved to {new} ({type(exc).__name__})")
                 return band
-        elif why and new == "candidate":
-            # Held shadow-only: the reason is recorded once a day (the plan: "else shadow-only, with the reason recorded").
+        elif why and (new == "candidate" or embargoed):
+            # Held shadow-only (or held at Probe by the forward embargo): the reason is recorded once a day (the plan:
+            # "else shadow-only, with the reason recorded").
             told = dict(self.state.get("held_told", {}) or {})
             today = ny(self.clock()).date().isoformat()
             if told.get(fid) != today:
@@ -944,6 +954,22 @@ class OptionsLive:
                 self.state.put("held_told", told)
                 self.record("live.band", {"family": fid, "from": band, "to": band, "held": True, "why": why}, agent=fid)
         return new
+
+    def _embargoed(self, row: Mapping[str, Any], forward: Iterable[Mapping[str, Any]]) -> str | None:
+        """THE FORWARD EMBARGO (the module docstring): why a Sized answer is held at Probe, or None. Sized also needs the
+        forward record of the sessions strictly after the New York day its banded version was written to meet Sized on
+        its own (`money.sized_ok`): the practice league feeds research, so a version written after practice days could
+        have been shaped by them; days after it was written cannot have shaped it. Fail-closed: a version whose writing
+        day is unknown is held. It only ever holds a family at Probe; everything else reads the whole record."""
+        created = _new_york_day(row.get("version_created_at"))
+        if created is None:
+            return "the day its version was written is unknown: held at Probe (the forward embargo)"
+        after = [r for r in forward if str(r.get("day") or "") > created]
+        fwd = M.forward_stats(after, self.table.sized_confidence, version=row.get("version"))
+        if M.sized_ok(self.table, fwd):
+            return None
+        return (f"its forward record after its version was written ({created}) does not yet meet Sized on its own "
+                f"({fwd.n} trades): held at Probe (the forward embargo)")
 
     def _probe_sessions(self, fid: str, band: str) -> int:
         """Whole sessions a Probe family has spent at Probe (opened after its move there and closed since): the Probe
@@ -2527,6 +2553,17 @@ class OptionsLive:
                 "budget_spent": dict(self.budget_spent),
                 "calibration": self.calibration.status() if self.calibration is not None else None,
                 "house_test": self.house_test.status() if self.house_test is not None else None}
+
+
+def _new_york_day(value: Any) -> str | None:
+    """The New York session day (ISO) of a UTC ISO time, or None when it cannot be read."""
+    try:
+        at = dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if at.tzinfo is None:
+        return None
+    return at.astimezone(NEW_YORK).date().isoformat()
 
 
 def _row_roots(row: Mapping[str, Any] | None) -> list[str]:
