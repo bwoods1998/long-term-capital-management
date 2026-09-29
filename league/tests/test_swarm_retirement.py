@@ -6,7 +6,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 from league.swarm.architect import Architect
 from league.swarm.gate import Gate
-from league.swarm.researcher import RETIRE_IDLE_EVALUATIONS, Researcher, idle_dead, idle_evaluations, idle_limit
+from league.swarm.researcher import (RETIRE_IDLE_EVALUATIONS, SCREENED, SELF_REFUTED, Researcher, idle_cause, idle_dead,
+                                     idle_evaluations, idle_limit)
 from league.swarm.seeds import family_spec
 from league.swarm.store import SwarmStore
 from league.swarm.tournament import IDLE_CAUSE, Tournament
@@ -314,7 +315,8 @@ class ResearcherIdleRetirement(ResearcherCase):
         [lesson] = self.store.graveyard()
         self.assertIn(reason, lesson["lesson"])
         self.assertIn("Tried 2 versions", lesson["lesson"])
-        self.assertIn(f"Retired by researcher: {reason}", self.store.notebook(self.fam["id"])[-1]["text"])
+        self.assertIn(f"Retired by researcher: {SELF_REFUTED}: {reason}", self.store.notebook(self.fam["id"])[-1]["text"],
+                      "its own researcher's retirement is SELF-REFUTED in the graveyard (R11-1)")
         [event] = [e for e in self.store.events_after(0) if e["kind"] == "swarm.retired"]
         self.assertEqual(event["payload"]["cause"], "Condors on this root are dead.", "a figure never reaches the public cause")
 
@@ -478,7 +480,8 @@ class TournamentIdleRetirement(RoundCase):
         self.assertEqual([r["family"] for r in out], ["f0", "f1", "f2"])
         self.assertEqual(sorted(f["id"] for f in self.store.families(alive=True)), ["f3", "f4", "f5", "f6"])
         self.assertEqual(out[0]["why"], f"It made no eligible Train version in 150 Gym evaluations since its birth. {IDLE_CAUSE}")
-        self.assertIn("kept its best Train score below zero over 450 Gym evaluations", out[1]["why"])
+        self.assertEqual(out[1]["why"], "It kept its best Train score below zero over 450 Gym evaluations since its birth. "
+                                        f"{idle_cause('scored')}", "a Train score: a tested verdict (R11-1)")
         self.assertIn("f0", self.pool.cancelled)
         lesson = self.store.graveyard("placeholder")[0]
         self.assertEqual(lesson["family"], "f0")
@@ -487,7 +490,7 @@ class TournamentIdleRetirement(RoundCase):
         self.assertIn("not a finding that the mechanism has no edge", lesson["lesson"], "a clock, not a refutation")
         self.assertNotIn("found no Train edge", lesson["lesson"])
         causes = [e["payload"]["cause"] for e in self.store.events_after(0) if e["kind"] == "swarm.retired"]
-        self.assertEqual(causes, [IDLE_CAUSE] * 3, "the public cause carries no figure")
+        self.assertEqual(causes, [IDLE_CAUSE, f"{SCREENED}.", IDLE_CAUSE], "the public cause carries no figure")
         # f4 is dead too, but the floor (4) holds it.
         self.assertIsNotNone(idle_dead(self.store.family("f4"), self.settings))
         self.assertEqual(t.retirements(self.store.families(alive=True)), [])

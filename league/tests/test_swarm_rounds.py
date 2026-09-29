@@ -714,6 +714,7 @@ class ArchitectTests(RoundCase):
 
     def test_below_the_start_population_the_architect_refills_hourly_up_to_the_gap(self):
         self.populate(40)
+        self.settings["architect"]["max_alive_per_class"] = 0  # one class throughout: the cadence, not R11-2's class cap
         arch = Architect(self.store, self.router, self.settings, clock=self.clock)
         self.store.put("architect_at", self.clock())
         self.clock.advance(3600)
@@ -725,6 +726,7 @@ class ArchitectTests(RoundCase):
 
     def test_at_the_start_population_it_grows_every_four_hours_three_to_six_at_a_time(self):
         self.populate(50)
+        self.settings["architect"]["max_alive_per_class"] = 0  # one class throughout: the cadence, not R11-2's class cap
         arch = Architect(self.store, self.router, self.settings, clock=self.clock)
         self.store.put("architect_at", self.clock())
         self.clock.advance(3600)

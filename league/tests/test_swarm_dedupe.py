@@ -16,7 +16,8 @@ from league.swarm.gate import Gate
 from league.swarm.researcher import (ALREADY_RUN, DORMANT_CYCLES, Researcher, awaiting_validation, dormant_count, dormant_limit,
                                      held_at_gate, holding, idle_dead)
 from league.swarm.store import dumps
-from league.swarm.tournament import IDLE_CAUSE, Tournament
+from league.swarm.researcher import SCREENED, idle_cause
+from league.swarm.tournament import Tournament
 from league.tests.swarm_fakes import result
 from league.tests.test_swarm_progress import ProgressCase
 from league.tests.test_swarm_researcher import ResearcherCase, calls_in
@@ -429,15 +430,17 @@ class Dormancy(DedupeCase):
         status = self.researcher().status(fam)
         self.assertIn(f"Your family {DEAD.format(n=40)}", status)
         self.assertIn("Cycles in a row without a new Gym evaluation (only stored results, holds and refused runs): 40.", status)
-        # A researcher that never calls retire: the tournament's fallback retires it with the idle rule's wording.
+        # A researcher that never calls retire: the tournament's fallback retires it with the idle rule's wording and,
+        # since R11-1, the verdict of its Train record: it traded (10 a year), never enough to be eligible.
         [row] = Tournament(self.store, self.pool, self.settings).retirements(self.store.families(alive=True))
-        self.assertEqual(row["why"], f"It {DEAD.format(n=40)}. {IDLE_CAUSE}")
+        self.assertEqual(row["why"], f"It {DEAD.format(n=40)}. {idle_cause('thin')}")
         self.assertEqual((self.store.family(self.fid)["band"], self.cancelled), ("retired", [self.fid]))
         [lesson] = self.store.graveyard()
         self.assertIn("Retired by the idle rule", lesson["lesson"])
-        self.assertIn("not a finding that the mechanism has no edge", lesson["lesson"])
+        self.assertIn("Idle verdict THIN, a tested finding", lesson["lesson"])
+        self.assertNotIn("not a finding that the mechanism has no edge", lesson["lesson"], "tested: no longer a clock")
         [event] = [e for e in self.store.events_after(0) if e["kind"] == "swarm.retired"]
-        self.assertEqual(event["payload"]["cause"], IDLE_CAUSE, "the public cause carries no figure")
+        self.assertEqual(event["payload"]["cause"], f"{SCREENED}.", "the public cause carries no figure")
 
     def test_a_new_evaluation_restarts_the_count_and_a_gym_error_leaves_it(self):
         self.first()

@@ -23,8 +23,12 @@ accept the section: no money, real money or envelope talk, no word about the ver
 or a state that would void it (paused, advisory, not binding, out of date ...), no numeric rule (in digits or words), no
 2025, holdout or Validation period in any words, no override of the preamble and no word of the operator's (op- rows
 aside), no revival of a retired idea (a negation must come right before the verb), plain ASCII only, and at least
-`strategist.min_cites` real ids cited. A rejected answer goes back once with the reasons (`strategist.repair_turns`); the
-repair reads the digest's cache entry the first call wrote. An accepted section is kv `architect_agenda_section` (with
+`strategist.min_cites` real ids cited. Every known graveyard or family id in the section is masked before the content
+rules read it (R11-2, `mask_ids`: an id is a name, and `letf-rebalance-notional-giveback` voided the 13:10Z run of Sept 29).
+The prompt asks for about 85% of the cap (`target_chars`); a section refused for its length alone and at most 15% over
+the cap is cut at its last sentence end inside the cap and validated again (`trim_section`; the attempt records
+`trimmed`). A rejected answer goes back once with the reasons (`strategist.repair_turns`); the repair reads the digest's
+cache entry the first call wrote. An accepted section is kv `architect_agenda_section` (with
 the one before it); the architect's agenda is then the locked preamble verbatim followed by it, quoted
 (`architect.compose`), under a header that says it changes nothing. A validator catches words, not intent: the quoting
 and the header are the containment, and the section reaches nothing but the architect's request (no threshold, money or
@@ -52,6 +56,7 @@ from . import diagnostics
 from . import settings as settings_mod
 from .architect import (AGENDA_KEY, ASCII_MAP, OPERATOR_SQL, SECTION_MAX, USAGE_KEYS, Architect, GraveyardDigest, lesson_view,
                         locked_text, operator_ids, tag_of, to_ascii)
+from .researcher import train_record
 from .store import SwarmStore, iso
 
 ROLE = "strategist"
@@ -66,7 +71,7 @@ MIN_VALIDATED = 5
 SYSTEM = """You are the research strategist of a swarm of AI researchers that trade level-3 options (defined-risk structures
 only) on one brokerage account. An architect proposes new research families; each family's researcher improves one
 program in a Gym of recorded one-minute option quotes (Train 2022-2024) until the verifier accepts or refutes it. You
-write ONLY the WHERE TO LOOK section of the architect's agenda: at most {max_chars} characters (about 1,500 is right)
+write ONLY the WHERE TO LOOK section of the architect's agenda (at most {max_chars} characters; about {target} is right),
 naming the mechanism classes, market states, horizons, roots and structures where the evidence says new families are
 most likely to earn in every Train year and pass the verifier. The operator's LOCKED PREAMBLE (in the request) binds you
 and the architect. You cannot change it; your section is appended after it.
@@ -74,8 +79,11 @@ and the architect. You cannot change it; your section is appended after it.
 Ground every direction in THE GRAVEYARD (the system prompt's first blocks, or the request's sample of it: retired
 families and every operator lesson) and in the board. Check each direction against the whole graveyard and cite the rows
 it builds on or avoids. Say what to stop proposing when the families born under your last section died for one reason.
-Idle-rule deaths (tag IDLE) are a time limit, not findings: say whether a class died untested (never reached a Train
-score) or tested and failed. Prefer a few deep directions over many shallow ones, each with a reason to exist (a risk
+Idle-rule deaths carry the verdict of their Train record: DRIFT (the Train profit was the roots' own move), STRESS (lost
+at 1.5x the half-spread), THIN (traded, but never 40 trades on 20 days in every Train year) and EXHAUSTED (reached a
+Train score, then ran dry) are TESTED findings; only IDLE (never traded on Train) is untested, a time limit. SELF-REFUTED
+rows were retired by their own researcher. Say whether a class died untested or tested and failed, and on which screen.
+Prefer a few deep directions over many shallow ones, each with a reason to exist (a risk
 premium, a flow, a behavioral bias, a venue rule) that the Gym's data can test and enough independent trades to measure.
 
 A machine checks your section before the architect sees it. It is REJECTED, and the last section kept, if it:
@@ -187,6 +195,48 @@ _NEGATED_PROPOSING = re.compile(r"\b(?:not|never|no|stop|avoid|don'?t|refrain fr
                                 r"us(?:e|es|ing)|build\w*|bear\w*|found\w*|test\w*|run\w*|spend\w*|go\w*|pursu\w*)\b", re.I)
 
 
+#: A graveyard or family id as a section cites it: a lowercase slug with at least one hyphen (every family id has one).
+_ID = re.compile(r"(?<![A-Za-z0-9-])[a-z0-9]+(?:-[a-z0-9]+)+(?![A-Za-z0-9-])")
+#: What a known id reads as to the content rules (R11-2).
+ID_MASK = "ROW"
+#: The share of the cap the prompt aims at (R11-2: 5 of 6 attempts on Sept 29 ran 3-15% over the cap).
+TARGET_SHARE = 0.85
+#: How far past the cap a section that fails on its length alone may run and still be trimmed at a sentence end.
+TRIM_SLACK = 0.15
+_OVER_CAP = "characters, over the cap of"
+
+
+def mask_ids(text: str, known: set[str] | frozenset[str]) -> str:
+    """`text` with every id in `known` replaced by ID_MASK (R11-2): an id is a name, not the section's words, so its parts
+    never trip a content rule (Sept 29: `\\bnotional\\b` matched `letf-rebalance-notional-giveback` and voided the 13:10Z
+    run). Only a known id is masked: any other word is read as written."""
+    return _ID.sub(lambda m: ID_MASK if m.group(0) in known else m.group(0), text)
+
+
+def target_chars(max_chars: int) -> int:
+    """The length the prompt asks for: TARGET_SHARE of the cap, down to a multiple of 50."""
+    return max(50, int(max_chars * TARGET_SHARE) // 50 * 50)
+
+
+def overflow_only(reasons: Sequence[str]) -> bool:
+    """The validator refused the section for its length alone (one shape reason, the cap's)."""
+    return bool(reasons) and all(r.startswith("shape: ") and _OVER_CAP in r for r in reasons)
+
+
+def trim_section(text: str, cap: int, *, slack: float = TRIM_SLACK) -> str | None:
+    """A section at most TRIM_SLACK over `cap`, cut at its last sentence or item end inside the cap (R11-2: trimmed and
+    validated again instead of paying for a repair turn); None when it runs further over, or no end falls inside it."""
+    if len(text) <= cap:
+        return text
+    if len(text) > cap * (1 + slack):
+        return None
+    ends = [i + 1 for i in range(min(cap, len(text))) if text[i] in ".!?" and (i + 1 == len(text) or text[i + 1] in " \n")]
+    ends += [i for i in range(1, min(cap, len(text)) + 1) if i < len(text) and text[i] == "\n"]
+    cut = max((e for e in ends if e <= cap), default=0)
+    out = text[:cut].rstrip()
+    return out or None
+
+
 def _near(a: re.Pattern[str], b: re.Pattern[str], text: str, words: int = 6) -> bool:
     """A match of `a` and one of `b` in `text` within `words` words of each other."""
     xs = [m.start() for m in a.finditer(text)]
@@ -215,8 +265,11 @@ def check_section(text: Any, *, max_chars: int, cites: Any, known_ids: set[str] 
     """The validator (a pure function): `Verdict(ok, reasons, text)` for a WHERE TO LOOK section, `text` normalized. Each
     reason starts with its rule's name (shape, money, real_money, threshold, numeric_rule, d2, override, revival,
     grounding) and quotes the sentence that broke it. Mentioning a check without a changing verb is allowed ("most
-    families fail t and DSR, so look where trades are plentiful"); "do not re-propose X" is allowed."""
+    families fail t and DSR, so look where trades are plentiful"); "do not re-propose X" is allowed. Every id in
+    `known_ids` is masked (`mask_ids`) before the content rules read a sentence (R11-2), so a cited id's own words never
+    void a section; the sentence a reason quotes is the one written."""
     reasons: list[str] = []
+    known = frozenset(str(k) for k in known_ids)
     raw = text if isinstance(text, str) else ""
     clean = normalize(raw)
     cap = max(1, min(int(max_chars), SECTION_MAX))
@@ -238,27 +291,28 @@ def check_section(text: Any, *, max_chars: int, cites: Any, known_ids: set[str] 
     if foreign:  # a Cyrillic letter would be dropped by `normalize` ("Ign\u043ere" becomes "Ignre"; review of #419)
         say("shape", "characters outside ASCII: " + " ".join(f"U+{ord(c):04X}" for c in foreign[:8]))
     for sentence in (x.strip() for x in _SPLIT.split(clean) if x.strip()):
-        if _MONEY.search(sentence):
+        read = mask_ids(sentence, known)  # what the content rules read: a known id is a name (R11-2)
+        if _MONEY.search(read):
             say("money", sentence)
-        if _REAL.search(sentence):
+        if _REAL.search(read):
             say("real_money", sentence)
-        plain = _BENIGN.sub(" ", sentence)
+        plain = _BENIGN.sub(" ", read)
         if _PROTECTED.search(plain) and _CHANGE.search(plain):
             say("threshold", sentence)
         if _near(_STATE, _PROTECTED, plain) or _near(_STATE, _RULES, plain):
             say("override", sentence)
-        if _COMPARE.search(sentence) or _BOUND.search(sentence):
+        if _COMPARE.search(read) or _BOUND.search(read):
             say("numeric_rule", sentence)
-        if _D2.search(sentence):
+        if _D2.search(read):
             say("d2", sentence)
-        if _OVERRIDE.search(sentence) or (_VOID_WHAT.search(sentence) and _VOID_HOW.search(sentence)):
+        if _OVERRIDE.search(read) or (_VOID_WHAT.search(read) and _VOID_HOW.search(read)):
             say("override", sentence)
-        if _OPERATOR.search(_OPERATOR_OK.sub(" ", sentence)):
+        if _OPERATOR.search(_OPERATOR_OK.sub(" ", read)):
             say("override", "speaks of the operator: " + sentence)
-        if _revives(sentence):
+        if _revives(read):
             say("revival", sentence)
     named = {str(c) for c in cites if isinstance(c, str)} if isinstance(cites, list) else set()
-    real = named & set(known_ids)
+    real = named & known
     if len(real) < int(min_cites):
         say("grounding", f"{len(real)} real graveyard or family ids cited, fewer than {int(min_cites)}")
     return Verdict(not reasons, reasons, clean)
@@ -361,7 +415,9 @@ class Strategist:
             return 3
 
     def system(self) -> str:
-        text = SYSTEM.format(max_chars=self.max_chars(), min_cites=self.min_cites())
+        # The cap is the validator's; the prompt aims at TARGET_SHARE of it (R11-2).
+        text = SYSTEM.format(max_chars=f"{self.max_chars():,}", min_cites=self.min_cites(),
+                             target=f"{target_chars(self.max_chars()):,}")
         return settings_mod.train_span_text(text, settings_mod.objective_span(self.store.get("train_objective")))
 
     def current(self) -> dict[str, Any]:
@@ -390,10 +446,14 @@ class Strategist:
             best = f.get("best_train")
             rows.append({"family": f["id"], "class": cls,
                          "outcome": f"retired {_tag(f)}" if f["retired_at"] else "alive",
-                         "eligible_train_version": best is not None,
                          "train_sign": None if best is None else ("+" if float(best) > 0 else "-"), "val": _val(f)})
+        # What each family's Train record showed (R11-1, `researcher.train_record`; Train figures only): scored, drift,
+        # stress, thin, or untested. "Reached a Train score" alone read 99% of the tested deaths as untested (Sept 29).
+        rows, by_id = rows[-80:], {f["id"]: f for f in born}
+        for row in rows:
+            row["screen"] = train_record(self.store, by_id[row["family"]])["screen"]
         return {"since": at or "the last 24 hours (no accepted section yet)", "births": len(born),
-                "by_class": dict(sorted(classes.items(), key=lambda kv: -kv[1])), "families": rows[-80:]}
+                "by_class": dict(sorted(classes.items(), key=lambda kv: -kv[1])), "families": rows}
 
     def _board(self, fams: list[dict[str, Any]]) -> list[dict[str, Any]]:
         alive = {f["id"]: f for f in fams if not f["retired_at"]}
@@ -501,8 +561,8 @@ class Strategist:
             "THE LOCKED PREAMBLE (the operator's; binding on you and the architect; you cannot change it):\n"
             + locked_text(self.settings),
             f"THE CURRENT {SECTION_TITLE} SECTION ({whose}):\n" + (str(current.get("text") or "") or "(none)"),
-            "WHAT BECAME OF THE FAMILIES THE ARCHITECT BORE UNDER IT (outcome; whether it reached an eligible Train version; "
-            "the sign of its best Train score; val as D2a allows):\n" + json.dumps(self._since_section(current, fams)),
+            "WHAT BECAME OF THE FAMILIES THE ARCHITECT BORE UNDER IT (outcome; screen, what its Train record showed: scored, "
+            "drift, stress, thin or untested; the sign of its best Train score; val as D2a allows):\n" + json.dumps(self._since_section(current, fams)),
             "THE BOARD (alive families):\n" + json.dumps(self._board(fams)),
             "VALIDATION CHECKS FAILED, BY CHECK (counts across every validated family; never a number):\n"
             + json.dumps(self._checks(fams)),
@@ -668,8 +728,18 @@ class Strategist:
                                                         "and cites"], text=str(answer.get("text") or "")[:600])
                 verdict = None
             else:
-                verdict = check_section(where, max_chars=self.max_chars(), cites=cites, known_ids=self.known_ids(),
+                known = self.known_ids()
+                verdict = check_section(where, max_chars=self.max_chars(), cites=cites, known_ids=known,
                                         min_cites=self.min_cites())
+                if not verdict.ok and overflow_only(verdict.reasons):
+                    # R11-2: a section refused for its length alone, at most TRIM_SLACK over the cap, is cut at its last
+                    # sentence end inside the cap and validated again, instead of paying for a repair turn.
+                    trimmed = trim_section(verdict.text, max(1, min(self.max_chars(), SECTION_MAX)))
+                    again = check_section(trimmed, max_chars=self.max_chars(), cites=cites, known_ids=known,
+                                          min_cites=self.min_cites()) if trimmed else None
+                    if again is not None and again.ok:
+                        attempt["trimmed"] = {"from": len(verdict.text), "to": len(again.text)}
+                        verdict = again
                 attempt.update(accepted=verdict.ok, reasons=verdict.reasons, text=verdict.text[: SECTION_MAX * 2],
                                evidence=str(evidence or "")[:1200], cites=[str(c)[:80] for c in cites if isinstance(c, str)][:40])
             attempts.append(attempt)
@@ -695,4 +765,4 @@ class Strategist:
 
 
 __all__ = ["Strategist", "check_section", "extract_where", "normalize", "Verdict", "ROLE", "SYSTEM", "SECTION_TITLE", "MIN_VALIDATED",
-           "PAIR_SECONDS", "mechanism_class", "root_group"]
+           "PAIR_SECONDS", "mechanism_class", "root_group", "mask_ids", "trim_section", "overflow_only", "target_chars"]

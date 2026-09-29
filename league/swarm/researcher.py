@@ -56,7 +56,15 @@ Gym did not make (a Gym error; a run, or every new variant of a sweep, that did 
 other cycle (a sweep refused for room alone, a model error). Outside the Gym band the count is zero, and a family sent
 back to the Gym starts afresh. A family whose last `researcher.dormant_cycles` (40) cycles were dormant is dead for the
 idle rule (`idle_dead`: the same floor, gate exemption and graveyard wording), unless its best awaits validation
-(`awaiting_validation`: holding while the tournament validates it is honest).
+(`awaiting_validation`: holding while the tournament validates it is honest) or it is under THE EXTENSION HOLD (R11-4's
+swarm rule, `extension_held`: its latest validation met `researcher.extension_hold_checks` (6) of the line's checks, so
+it waits for its 2017-19 extension result until the operator clears the flag).
+
+THE IDLE RULE'S VERDICT (R11-1, Sept 29: 99% of the dormancy deaths filed as "a time limit, not a finding" had been
+screened on Train). An idle-rule death is filed under what its Train record shows (`train_record`, Train figures only):
+DRIFT (its eligible versions failed the drift screen), STRESS (they lost at 1.5x the half-spread), THIN (it traded, but
+never 40 trades on 20 days in every Train year), EXHAUSTED (it reached a Train score, then ran dry); only a family that
+never traded on Train is untested and keeps IDLE (`idle_cause`). A family's own `retire` is SELF-REFUTED.
 
 RETIRE (Sept 26: an unguarded `retire` on the REVISE turn took the population from 49 to 16 in 24 minutes). A REVISE
 turn offers `gym_run` and `gym_sweep` alone (a REVISE always revises), and `retire` beside them only to a dead family
@@ -67,8 +75,10 @@ families live than `population.start` and the family has had at least two valida
 live than `population.floor` and the family is dead (`idle_dead`: `researcher.retire_idle_evaluations` Gym evaluations
 since its birth or last validation without an eligible Train version, or three times as many with its best Train score
 below zero, or `researcher.dormant_cycles` dormant cycles in a row; never while a validated version awaits the gate)
-(`can_retire`). Never while the operator holds its validated version at the gate (`held_at_gate`): no rule retires
-such a family. A retire that is refused anyway is a plain refusal, never a cycle error (an error backs the family off
+(`can_retire`). THE HOLD OFFER (R11-1, `hold_offer`): a family that held its last `researcher.retire_hold_cycles` (3)
+cycles in a row with an eligible Train run or `researcher.retire_hold_trials` (10) trials behind it is offered `retire`
+on its REVISE turn too, down to `population.floor`. Never while the operator holds its validated version at the gate
+(`held_at_gate`): no rule retires such a family. A retire that is refused anyway is a plain refusal, never a cycle error (an error backs the family off
 for up to 30 minutes). The tournament retires a dead family that never calls retire by the same rule; the architect
 refills below the start.
 
@@ -94,6 +104,13 @@ only a version whose figures pass (`drift_verdict`). A version whose Train run p
 more as a robustness run labelled "drift" (`robust_labels`; its row's purpose is "drift"): the screen binds from its first
 day instead of waving the old bests through, the run costs one trial, and a version whose drift run fails three times is
 demoted.
+
+THE ZERO-TRADE PROBE (R11-6, `researcher.probe_year`, off by default; 2022 switches it on). A new version's first Train
+run at the normal spread is preceded by a run of it over that one year on the family's first root (`_probe`). A probe
+with no trade is the answer ("disqualified: no trades in the probe year", one trial, a "probe" row the Train score never
+reads) and the five-year run is skipped; the same program asked again is answered from that row. A probe that trades,
+fails or times out says nothing and the full run follows. `gym_run` with full=true skips it (a program that trades only in
+other years or on other roots); sweeps are never probed.
 
 ROOTS. A family holds one to five roots of the admitted list (`gym.roots`). A program whose NEEDS names other
 admitted roots changes the family's roots (a Gym family only); its validation and holdout runs use the version's own
@@ -215,6 +232,10 @@ TOOLS: list[dict[str, Any]] = [
          "stress": {"type": "number", "description": "half-spread multiplier, 1.0 (default) or 1.5 (the gate's stress)"},
          "hold": {"type": "boolean", "description": "true, with no code and no params: skip this cycle honestly because you "
                                                     "have nothing new to run (say why in `note`)"},
+         "full": {"type": "boolean", "description": "true runs the whole of Train at once. When the probe is on, a new "
+                                                    "version's first run is preceded by a one-year, one-root probe, and a "
+                                                    "probe with no trade skips the full run: pass full=true for a program "
+                                                    "that trades only in other years or on other roots"},
          "why": {"type": "string", "description": "one sentence: what this version changes and why it should help"},
          "note": {"type": "string", "description": "optional: what you learned from your last run, appended to your notebook. "
                                                    "PUBLIC: it may appear on the public site, so describe the mechanism and "
@@ -247,7 +268,8 @@ TOOLS: list[dict[str, Any]] = [
                                      "and your family has had at least two validations, or once your family has spent many "
                                      "Gym evaluations since its birth or last validation without an eligible Train version "
                                      "(or far more with a best Train score below zero), or many cycles in a row with only "
-                                     "holds and stored results.",
+                                     "holds and stored results, or a few holds in a row once your family has an eligible "
+                                     "Train run or enough trials behind it.",
      "parameters": {"type": "object", "properties": {"reason": {"type": "string", "description": "Why the entire mechanism "
                     "is abandoned; retained in the private notebook and graveyard."}}, "required": ["reason"]}},
 ]
@@ -287,7 +309,8 @@ Your family trades one to five of the Gym's roots; to change them, name the new 
 The retire tool appears only while the population is above its start and your family has had at least two
 validations, or once your family has spent many Gym evaluations since its birth or last validation without an eligible
 Train version (or far more with a best Train score below zero), or many cycles in a row with only holds and stored
-results. Call it only when you abandon the entire mechanism, not one rejected version; a dead mechanism is better
+results, or a few holds in a row once your family has an eligible Train run or enough trials behind it. Call it only
+when you abandon the entire mechanism, not one rejected version; a dead mechanism is better
 retired than kept on holds, since its slot goes to a new idea. Retirement is final for the family and preserves its best
 program and all evidence.
 Your notes (the notebook and gym_run's note) are PUBLIC: they may appear on the public site. Write the mechanism and your
@@ -561,6 +584,18 @@ def new_run(result: Any) -> bool:
     return isinstance(result, Mapping) and completed_run(result) and not result.get("already_run")
 
 
+#: THE ZERO-TRADE PROBE (R11-6): `researcher.probe_year` (null: off; 2022, the year where most triggers fire, to switch it
+#: on) and how long a probe is waited for (`researcher.probe_timeout_seconds`). Sept 29: 601 of 3,198 Train runs in four
+#: hours were disqualified, most of them with no trade at all, each a five-year, 16-split run.
+PROBE_TIMEOUT_SECONDS = 300.0
+
+
+def full_run(args: Any) -> bool:
+    """A `gym_run` call that asks for the whole of Train at once (`full` true: no probe)."""
+    value = args.get("full") if isinstance(args, Mapping) else None
+    return value is True or (isinstance(value, str) and value.strip().lower() == "true")
+
+
 #: The idle rule's default (`researcher.retire_idle_evaluations`): Gym evaluations (trials, `add_run`) since a family's birth
 #: or last validation without an eligible Train version. Calibrated on the run's history (Sept 27): every family that
 #: ever made an eligible version made its first within about a hundred Train runs of its birth, and a family makes
@@ -730,9 +765,147 @@ def idle_dead(fam: Mapping[str, Any], settings: Mapping[str, Any], *, current: t
         if best is not None and float(best) < 0 and idle >= NEGATIVE_FACTOR * limit:
             return f"kept its best Train score below zero over {idle} Gym evaluations since {since}"
     cycles = dormant_count(fam)
-    if dormant > 0 and cycles >= dormant and not awaiting_validation(fam):
+    if dormant > 0 and cycles >= dormant and not awaiting_validation(fam) and not extension_held(fam):
         return f"made no new Gym evaluation in its last {cycles} cycles (only stored results, holds and refused runs)"
     return None
+
+
+# ------------------------------------------------------------------------------------------ THE IDLE RULE'S VERDICT (R11-1)
+#: The screens a family's Train record can show (`train_record`), and the tag each gives an idle-rule death: only a family
+#: that never traded on Train (or never ran) is untested and keeps IDLE. Sept 29: 99% of the dormancy deaths filed as "a
+#: time limit, not a finding" had been screened on Train, and the strategist read them as untested.
+SCREENS = ("drift", "stress", "thin", "scored", "untested")
+IDLE_VERDICTS = {"drift": "DRIFT", "stress": "STRESS", "thin": "THIN", "scored": "EXHAUSTED", "untested": "IDLE"}
+#: The words of an untested idle-rule death (the store publishes only a reason's sentences without a figure, and this one
+#: has none). The architect and researchers read the graveyard as refutations; an untested family's death is a clock.
+IDLE_CAUSE = ("Retired by the idle rule, a limit on how long a family may research without an eligible Train version, "
+              "a positive Train score or a new Gym evaluation; it is a time limit, not a finding that the mechanism has no edge")
+#: A tested idle-rule death: its public sentence (no figure, no colon: `public.note_text` keeps it), then its verdict.
+SCREENED = "Retired by the idle rule after its Train record was screened"
+VERDICT_WORDS = {
+    "drift": ("Idle verdict DRIFT, a tested finding: its eligible Train versions failed the drift screen, so their Train profit "
+              "was the roots' own move and not the signal's"),
+    "stress": "Idle verdict STRESS, a tested finding: its eligible Train versions lost money at 1.5x the half-spread",
+    "thin": ("Idle verdict THIN, a tested finding: it traded on Train, but no version made 40 trades on 20 days in every "
+             "Train year"),
+    "scored": ("Idle verdict EXHAUSTED, a tested finding: it reached a Train score, then its research ran dry (no new "
+               "evaluation, or a best that stayed below zero)"),
+}
+#: The verdict's mark in a retirement reason or lesson (`architect.tag_of` reads it).
+VERDICT_TAG = re.compile(r"\bIdle verdict (DRIFT|STRESS|THIN|EXHAUSTED)\b")
+#: A retirement its own researcher called (`retire`): the reason's head, so the graveyard tags it SELF-REFUTED.
+SELF_REFUTED = "Self-refuted by its researcher"
+
+
+def idle_cause(screen: str) -> str:
+    """The idle rule's words for a death whose Train record shows `screen` (`train_record`): IDLE_CAUSE for an untested
+    family, else SCREENED and the verdict."""
+    return f"{SCREENED}. {VERDICT_WORDS[screen]}" if screen in VERDICT_WORDS else IDLE_CAUSE
+
+
+def _run_record(store: SwarmStore, fid: str) -> tuple[bool, bool]:
+    """(an eligible Train run, a Train run that traded) among the family's Train rows (their summaries: Train figures only)."""
+    eligible = traded = False
+    for row in store._all("SELECT summary FROM runs WHERE family=? AND window='train'", (fid,)):
+        try:
+            summary = json.loads(row["summary"] or "{}") or {}
+        except ValueError:
+            continue
+        if not isinstance(summary, Mapping):
+            continue
+        eligible = eligible or summary.get("train_eligible") is True
+        trades = summary.get("trades")
+        traded = traded or (isinstance(trades, (int, float)) and not isinstance(trades, bool) and trades > 0)
+        if eligible and traded:
+            break
+    return eligible, traded
+
+
+def train_record(store: SwarmStore, fam: Mapping[str, Any]) -> dict[str, Any]:
+    """THE TRAIN RECORD (R11-1): what a family's Train runs showed, Train figures only (D2). `screen`:
+    - "scored": it has a best Train score (EXHAUSTED when the idle rule retires it);
+    - "drift": its eligible versions were demoted by the drift screen (`drift_failed`, or a `robust_why` that says so);
+    - "stress": they lost at 1.5x the half-spread (`robust_failed` for any other reason), when those outnumber the drift
+      demotions;
+    - "thin": no eligible version stands, but a Train run traded (never 40 trades on 20 days in every Train year of the
+      running span);
+    - "untested": no Train run traded, or none ran.
+    `eligible`: it ever made an eligible Train version (a best, a candidate, a demotion, or a row the Train score found
+    eligible). The runs are read only when the family's state does not already say."""
+    state = fam.get("state") or {}
+    marks = state.get("drift_failed")
+    whys = state.get("robust_why") if isinstance(state.get("robust_why"), Mapping) else {}
+    drift = {str(k) for k in marks} if isinstance(marks, Mapping) else set()
+    failed = [v for v in (state.get("robust_failed") or []) if isinstance(v, int) and not isinstance(v, bool)]
+    drift |= {str(v) for v in failed if str(whys.get(str(v)) or "").startswith("fails the drift screen")}
+    stress = [v for v in failed if str(v) not in drift]
+    known = fam.get("best_train") is not None or bool(drift or stress) or bool(state.get("train_candidates"))
+    if fam.get("best_train") is not None:
+        screen = "scored"
+    elif drift or stress:
+        screen = "drift" if len(drift) >= len(stress) else "stress"
+    else:
+        eligible, traded = _run_record(store, str(fam["id"]))
+        return {"screen": "thin" if traded else "untested", "eligible": known or eligible}
+    return {"screen": screen, "eligible": known}
+
+
+#: THE HOLD OFFER's defaults (R11-1): `researcher.retire_hold_cycles` holds in a row, with an eligible Train run behind the
+#: family or `researcher.retire_hold_trials` trials. Sept 29: in 834 of 835 dormancy deaths the last notes said "refuted",
+#: "exhausted" or "waiting for the retire tool", a hold streak of 58 minutes (median) before the clock retired them.
+RETIRE_HOLD_CYCLES = 3
+RETIRE_HOLD_TRIALS = 10
+
+
+# ------------------------------------------------------------------------------------ THE EXTENSION HOLD (R11-4's swarm rule)
+#: `researcher.extension_hold_checks`: a family whose latest validation met at least this many of the line's checks is
+#: exempt from the dormancy clause until its 2017-19 extension result lands (the operator clears the flag).
+EXTENSION_HOLD_CHECKS = 6
+
+
+def extension_checks(settings: Mapping[str, Any]) -> int:
+    """`researcher.extension_hold_checks` (6); 0 (off) when it is 0, null, negative, a boolean or not a number."""
+    return _count_setting(settings, "extension_hold_checks", EXTENSION_HOLD_CHECKS)
+
+
+def checks_met(line: Any) -> tuple[int, int]:
+    """(checks passed, checks) of a validation line (D2a's own count); (0, 0) when there is none."""
+    checks = line.get("checks") if isinstance(line, Mapping) else None
+    if not isinstance(checks, Mapping):
+        return 0, 0
+    return sum(1 for ok in checks.values() if ok is True), len(checks)
+
+
+def extension_held(fam: Mapping[str, Any]) -> bool:
+    """THE EXTENSION HOLD (R11-4's swarm rule): the family's state carries `extension_hold` (set by the tournament when a
+    validation of version n met `researcher.extension_hold_checks` of the line's checks) for the version its latest
+    validation judged. It is exempt from the dormancy clause until the operator clears the flag (its 2017-19 extension
+    result landed: `scripts/extension_hold.py --clear`); a later validation of another version ends it."""
+    state = fam.get("state") or {}
+    hold = state.get("extension_hold")
+    if not isinstance(hold, Mapping) or fam.get("band") != "gym":
+        return False
+    version = hold.get("version")
+    return isinstance(version, int) and not isinstance(version, bool) and version == state.get("validation_version")
+
+
+def mark_extension(store: SwarmStore, fid: str, n: int, line: Any, settings: Mapping[str, Any], *,
+                   clock: Callable[[], float] = time.time) -> bool:
+    """Set the family's extension hold for version `n` when its validation `line` met `researcher.extension_hold_checks`
+    checks and the version was never held (`extension_versions`: a hold the operator cleared is never set again for the
+    same version). Under the caller's transaction. True when it set one."""
+    need = extension_checks(settings)
+    met, total = checks_met(line)
+    if need <= 0 or met < need:
+        return False
+    fam = store.family(fid) or {}
+    seen = [v for v in ((fam.get("state") or {}).get("extension_versions") or []) if isinstance(v, int)]
+    if int(n) in seen:
+        return False
+    at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(clock()))
+    store.set_state(fid, extension_hold={"version": int(n), "checks": f"{met}/{total}", "at": at},
+                    extension_versions=(seen + [int(n)])[-20:])
+    return True
 
 
 def drift_settings(settings: Mapping[str, Any]) -> tuple[float, int | None] | None:
@@ -1031,6 +1204,10 @@ class Researcher:
         if dead:
             parts.append(f"Your family {dead}. If its mechanism is dead, call retire with your reason when the tool is offered "
                          "rather than re-running a placeholder: its slot goes to a new idea.")
+        elif may_retire and self.hold_offer(fam):
+            parts.append(f"Your family has held {hold_streak(fam)} cycles in a row with a Train record behind it. If your notes "
+                         "say its mechanism is refuted or exhausted, call retire with your reason (it is offered now) rather "
+                         "than holding again: its slot goes to a new idea.")
         retire_hint = " If you abandon the entire mechanism, call retire with your reason." if may_retire else ""
         hold_hint = " With nothing new to run, call gym_run with hold=true and say why in its note."
         fit = min(self.sweep_room(), self.max_variants)
@@ -1229,25 +1406,41 @@ class Researcher:
         """`idle_dead` against the Gym the pool runs now (a passing validation owed again is never dead)."""
         return idle_dead(fam, self.settings, current=self._gym_identity())
 
+    def hold_offer(self, fam: Mapping[str, Any]) -> bool:
+        """THE HOLD OFFER (R11-1): a Gym family that held its last `researcher.retire_hold_cycles` (3) cycles in a row
+        (`hold_streak`) with an eligible Train run behind it (`train_record`) or `researcher.retire_hold_trials` (10) trials
+        of its own. Its researcher has usually declared the mechanism refuted and waits for a retire it was never offered
+        (Sept 29: a median 58-minute hold streak before the dormancy clause retired it). 0 cycles turns it off; 0 trials
+        leaves the eligible run alone. Never for a family under the extension hold (`extension_held`): its near-miss waits
+        for its 2017-19 extension result, which its own holds must not pre-empt."""
+        need = _count_setting(self.settings, "retire_hold_cycles", RETIRE_HOLD_CYCLES)
+        if need <= 0 or fam.get("band") != "gym" or hold_streak(fam) < need or extension_held(fam):
+            return False
+        trials = _count_setting(self.settings, "retire_hold_trials", RETIRE_HOLD_TRIALS)
+        if trials > 0 and int(fam.get("trials") or 0) >= trials:
+            return True
+        return bool(train_record(self.store, fam)["eligible"])
+
     def can_retire(self, fam: Mapping[str, Any]) -> bool:
         """`retire` is offered (and accepted) for a Gym family with at least two validations while more families live
-        than `population.start` (the sprint, Sept 26), and for a dead family (`idle_dead`, R3) while more live than
-        `population.floor`, whatever the start. Never while the operator holds its validated version at the gate
-        (`held_at_gate`: `SwarmStore.retire_gym` refuses it too)."""
+        than `population.start` (the sprint, Sept 26), and for a dead family (`idle_dead`, R3) or one the hold offer
+        covers (`hold_offer`, R11-1) while more live than `population.floor`, whatever the start. Never while the operator
+        holds its validated version at the gate (`held_at_gate`: `SwarmStore.retire_gym` refuses it too)."""
         if fam.get("band") != "gym" or held_at_gate(fam):
             return False
         pop = self.settings.get("population", {})
         alive = len(self.store.families(alive=True))
-        if self.dead(fam) and alive > int(pop.get("floor", 16)):
+        if alive > int(pop.get("floor", 16)) and (self.dead(fam) or self.hold_offer(fam)):
             return True
         return int(fam.get("validations") or 0) >= 2 and alive > int(pop.get("start", 48))
 
     def retire_floor(self, fam: Mapping[str, Any]) -> int:
         """The population a researcher's retirement may not take the swarm to (`retire_gym` checks it atomically):
-        `population.floor` for a dead family (`idle_dead`), else the start (never below the floor)."""
+        `population.floor` for a dead family (`idle_dead`) or one the hold offer covers (`hold_offer`), else the start
+        (never below the floor)."""
         pop = self.settings.get("population", {})
         floor = int(pop.get("floor", 16))
-        return floor if self.dead(fam) else max(floor, int(pop.get("start", 48)))
+        return floor if self.dead(fam) or self.hold_offer(fam) else max(floor, int(pop.get("start", 48)))
 
     def is_top(self, fam: Mapping[str, Any], *, top: int) -> bool:
         """Among the bandit's `top` families by weight (a weight of zero or none never is)."""
@@ -1492,6 +1685,9 @@ class Researcher:
                 version = self.store.add_version(fam["id"], code, params, author=author, note=str(args.get("why") or "")[:300])
         if stored is not None:
             return self._stored_run(fam, stored, out, code=code, stress=stress)
+        probed = self._probe(fam, version["n"], code, params, stress=stress, full=full_run(args), out=out)
+        if probed is not None:
+            return probed  # THE ZERO-TRADE PROBE: no trade in the probe year, so the full Train run was skipped
         job = GymJob(family=fam["id"], version=version["n"], code=code, params=params, window="train", roots=tuple(fam["roots"]),
                      stress=stress, purpose="train", priority=float(fam.get("weight") or 0.0))
         began = self.clock()
@@ -1527,6 +1723,101 @@ class Researcher:
         score = self._scored(fam, version["n"], run["run_id"], robust, view, out, code=code, params=params, span=span_of(result))
         out["score"] = None if score is None else round(score, 3)
         return view
+
+    # ------------------------------------------------------------------ THE ZERO-TRADE PROBE (R11-6)
+    def probe_year(self) -> int | None:
+        """`researcher.probe_year` when it is a Train year of the running span (2022 is in every span), else None (off:
+        the default, and any value that is not such a year)."""
+        raw = self.cfg.get("probe_year")
+        if raw is None or isinstance(raw, bool):
+            return None
+        try:
+            year = int(raw)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return year if int(self.train_span()[:4]) <= year <= settings_mod.TRAIN_END.year else None
+
+    def _stored_probe(self, fid: str, key: str) -> dict[str, Any] | None:
+        """The family's recorded probe of this evaluation (its key), the latest, or None."""
+        for row in self.store._all("SELECT * FROM runs WHERE family=? AND window='probe' AND summary LIKE ? "
+                                   "ORDER BY at DESC, rowid DESC", (fid, f'%"eval_key":"{key}"%')):
+            summary = json.loads(row["summary"] or "{}") or {}
+            if summary.get("eval_key") == key:
+                return {**row, "summary": summary}
+        return None
+
+    def _probe_view(self, run: Mapping[str, Any], n: int, year: int, root: str, *, stored: bool = False) -> dict[str, Any]:
+        """The answer to a run whose probe made no trade: disqualified, the full Train run skipped (its runtime messages
+        when the program erred)."""
+        view: dict[str, Any] = {"status": "disqualified", "reason": f"disqualified: no trades in the probe year ({year} on {root})",
+                                "version": n, "run_id": run["run_id"], "window": "train",
+                                "probe": {"year": year, "root": root, "trades": 0},
+                                "next": "the full Train run was skipped. Revise the program so it trades, or call gym_run with "
+                                        "full=true to run the whole of Train anyway (a program that trades only in other years "
+                                        "or on other roots)"}
+        full = self.store.run_result(run["run_id"])
+        messages = ((full or {}).get("runtime") or {}).get("messages") or []
+        if messages:
+            view["probe"]["runtime_messages"] = [str(m)[:200] for m in messages[:4]]
+        if stored:
+            view["already_run"] = ALREADY_RUN
+            view["next"] = ("this program and params already made no trade in the probe year: no new run, no trial. Change "
+                            "something, or call gym_run with full=true to run the whole of Train")
+        return view
+
+    def _probe(self, fam: Mapping[str, Any], n: int, code: str, params: Mapping[str, Any], *, stress: float, full: bool,
+               out: dict[str, Any]) -> dict[str, Any] | None:
+        """THE ZERO-TRADE PROBE (R11-6), while `researcher.probe_year` is on: a version's first Train run at the normal
+        spread is preceded by a run of it over that one year on the family's first root. A probe that makes no trade is the
+        answer (disqualified, recorded as one trial in a "probe" row, never a Train row, so no score, no best and no drift
+        figure is ever read from it), and the full run is skipped; the same program asked again is answered from that row
+        (NO DUPLICATE RUNS). A probe that trades, fails or does not answer in `researcher.probe_timeout_seconds` says
+        nothing: the full run goes ahead and the probe is not recorded (the full run's sample holds its). `full` (the
+        researcher's `full=true`), a 1.5x run, and a version that already ran are never probed. None: run the full job."""
+        year = self.probe_year()
+        if year is None or stress != 1.0:
+            return None
+        if full:
+            out["probe"] = {"skipped": "full=true"}
+            return None
+        fid, root = fam["id"], str(fam["roots"][0])
+        key = self.eval_key(code, params, stress=1.0, window=f"probe:{year}", roots=(root,))
+        stored = self._stored_probe(fid, key) if self.reuse else None
+        if stored is not None:
+            out["stored"] = out.get("stored", 0) + 1
+            return self._probe_view(stored, n, year, root, stored=True)
+        if self.store._one("SELECT 1 AS ran FROM runs WHERE family=? AND version=? LIMIT 1", (fid, int(n))):
+            return None  # not a new version's first run
+        job = GymJob(family=fid, version=n, code=code, params=dict(params or {}), window="train", roots=(root,), stress=1.0,
+                     purpose="probe", priority=float(fam.get("weight") or 0.0), start=f"{year}-01-01", end=f"{year}-12-31")
+        began = self.clock()
+        out["gym_asked"] = True
+        try:
+            timeout = float(self.cfg.get("probe_timeout_seconds") or PROBE_TIMEOUT_SECONDS)
+            result = self.pool.run(job, timeout=timeout)
+        except PoolError as exc:
+            out["probe"] = {"year": year, "root": root, "error": str(exc)[:200]}
+            return None
+        summary = result.get("summary") or {}
+        trades = summary.get("trades")
+        seconds = round(self.clock() - began, 2)
+        if result.get("status") not in ("ok", "disqualified") or not isinstance(trades, (int, float)) or isinstance(trades, bool) \
+                or trades > 0:
+            out["probe"] = {"year": year, "root": root, "trades": trades, "status": result.get("status"), "seconds": seconds}
+            return None
+        days = float(summary.get("days") or 0)
+        with self.store.atomic():
+            if self._terminal(fid, out):
+                return {"status": "retired", "reason": "the family is retired; the probe is not recorded"}
+            run = self.store.add_run(fid, n, {**result, "summary": {**summary, "probe_year": year, "probe_root": root}},
+                                     window="probe", stress=1.0, purpose="probe", program_years=days / 252.0, key=key)
+        self._restart_dormancy(fid, result)
+        out["run_id"] = run["run_id"]
+        out["trials"] = out.get("trials", 0) + int(result.get("trials", 0) or 0)
+        out["gym_seconds"] = seconds
+        out["probe"] = {"year": year, "root": root, "trades": 0, "status": result.get("status"), "seconds": seconds,
+                        "skipped_full": True}
+        return self._probe_view(run, n, year, root)
 
     def _scored(self, fam: Mapping[str, Any], n: int, run_id: str, robust: Mapping[str, Any] | None, view: dict[str, Any],
                 out: dict[str, Any], *, code: str, params: Mapping[str, Any], span: str | None = None) -> float | None:
@@ -1924,11 +2215,15 @@ class Researcher:
                     return {"status": "refused", "reason": "retire is not available to your family now (it needs at least two "
                                                            "validations and a population above its start, or many Gym "
                                                            "evaluations without an eligible Train version, or many cycles "
-                                                           "of only holds and stored results): keep researching"}
+                                                           "of only holds and stored results, or a few holds in a row with "
+                                                           "a Train record behind them): keep researching"}
                 # The store checks the population atomically: a researcher's retirement never takes it to its start or
-                # below, a dead family's (`idle_dead`) never to its floor or below.
-                result = self.store.retire_gym(fam["id"], args.get("reason"), floor=self.retire_floor(current),
-                                               source="researcher")
+                # below, a dead family's (`idle_dead`) or one the hold offer covers never to its floor or below. Its own
+                # researcher's verdict: the graveyard tags it SELF-REFUTED (R11-1), its reason and last notes after.
+                reason = args.get("reason")
+                if isinstance(reason, str) and reason.strip():
+                    reason = f"{SELF_REFUTED}: {reason.strip()}"
+                result = self.store.retire_gym(fam["id"], reason, floor=self.retire_floor(current), source="researcher")
             if result["status"] == "retired":
                 out["retired"] = True
                 try:
@@ -2346,6 +2641,9 @@ class Researcher:
                 current.append({"role": "user", "content": f"The {tool} you queued last cycle ran:\n"
                                                            f"{json.dumps(result, default=str)[:12000]}"})
                 gym_done = True
+            elif result.get("probe"):  # THE ZERO-TRADE PROBE: no trade in the probe year, the full run skipped
+                current.append({"role": "user", "content": f"The {tool} you queued last cycle made no trade in its probe year, so "
+                                                           f"its full Train run was skipped:\n{json.dumps(result, default=str)[:12000]}"})
             else:
                 current.append({"role": "user", "content": f"The {tool} you queued last cycle did not complete a Gym run:\n"
                                                            f"{json.dumps(result, default=str)[:12000]}"})
@@ -2381,7 +2679,9 @@ class Researcher:
             # family may retire (`can_retire`). A DEAD family's REVISE offers retire too (R4, Sept 28: researchers that
             # found their mechanism refuted held every cycle, "retire tool not offered", since a hold never reaches READ).
             revise = not gym_done
-            tools = self.tools(revise=revise, retire=self.can_retire(fam) and (not revise or bool(self.dead(fam))))
+            # A family that holds never reaches READ: the hold offer's family (R11-1) sees retire on its REVISE turn too.
+            tools = self.tools(revise=revise, retire=self.can_retire(fam) and (not revise or bool(self.dead(fam))
+                                                                               or self.hold_offer(fam)))
             response: Any = None
             via = "sail"
             if claude:

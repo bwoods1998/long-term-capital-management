@@ -15,8 +15,10 @@
    days with N = the lineage's validated versions (`SwarmStore.lineage_validated`). A family that meets it goes to
    the gate's queue.
 3. THE BANDIT (`evidence.thompson`): each family's share of researcher cycles and Gym priority from its
-   validation evidence, with 25% for new families; a validated version that failed the drift screen earns nothing by its
-   validation (the family counts as unvalidated). THE PRACTICE BONUS (Sept 29, 2026; `practice.apply_bonus`): a family
+   validation evidence, with at least 25% for the explore pool; a validated version that failed the drift screen earns
+   nothing by its validation (the family counts as unvalidated). R11-5: only an old family whose latest validation mean
+   is positive is exploited, each earning at most `exploit_per_positive` (0.15) of the share; an old family at zero or
+   below competes in the explore pool with the new ones. THE PRACTICE BONUS (`practice.apply_bonus`): a family
    with a positive practice record on live quotes gains at most `practice.bonus` (25%) of its share, and the bonus moves
    at most `practice.bonus_total` (10%) of all share; it changes research attention only, never what is validated, the
    gate, the bands or money. The round's event records it (`practice_bonus`, private).
@@ -34,7 +36,10 @@
    not await validation; never while a validated version awaits the gate); never below the population floor, and by
    no rule while the operator holds its validated version at the gate (`researcher.held_at_gate`). Each retiree's
    lesson goes to the graveyard (its mechanism, what it tried, its best numbers, its last notebook lines); an idle-rule
-   lesson says it was a time limit, not a refutation. Each counted verdict records the family's trials
+   lesson carries the verdict of its Train record (R11-1, `researcher.train_record`: DRIFT, STRESS, THIN or EXHAUSTED,
+   tested findings), and only an untested family's (it never traded on Train) says it was a time limit, not a
+   refutation. A validation that meets `researcher.extension_hold_checks` (6) of the line's checks sets the family's
+   extension hold (R11-4's swarm rule, `researcher.mark_extension`). Each counted verdict records the family's trials
    (`validated_trials`), from which the idle rule counts, and restarts its dormant cycles. THE IDLE PASS (R4,
    `idle_pass`) retires by the idle rule alone every `tournament.retire_every_seconds` (300) between the rounds.
 6. THE LEADERBOARD: one `swarm.tournament` event (the House mirrors it to its ledger) with every family's
@@ -51,19 +56,16 @@ from typing import Any, Callable, Mapping
 
 from . import diagnostics, evidence, practice
 from .pool import GymJob, PoolError
-from .researcher import (MAX_ROOTS, drift_verdict, held_at_gate, idle_dead, needs_roots, robust_at_stress, screen_best,
-                         validation_drift_failed, with_roots)
+from .researcher import (IDLE_CAUSE, MAX_ROOTS, drift_verdict, held_at_gate, idle_cause, idle_dead, mark_extension, needs_roots,
+                         robust_at_stress, screen_best, train_record, validation_drift_failed, with_roots)
 from .store import CLOSEABLE, SwarmStore
 
 UNIVERSE_ROTATION = ("SPY", "QQQ", "IWM", "SPXW")
 INDEX = ("XSP", "SPXW")
 #: Never added by a fork (the sprint, Sept 26): XSP's $0.50 a contract makes narrow XSP structures uneconomic.
 NOT_ROTATED = ("XSP",)
-#: The public sentence of an idle-rule retirement (the store publishes only a reason's sentences without a figure), and
-#: the graveyard's reading of it: the architect and researchers read the graveyard as refutations, and the idle rule is
-#: a clock, so it must not bias births away from a mechanism that was only young.
-IDLE_CAUSE = ("Retired by the idle rule, a limit on how long a family may research without an eligible Train version, "
-              "a positive Train score or a new Gym evaluation; it is a time limit, not a finding that the mechanism has no edge")
+#: `IDLE_CAUSE` (researcher.py, re-exported here) is the words of an UNTESTED idle-rule death; a tested one carries its
+#: verdict (R11-1, `researcher.idle_cause`).
 
 
 class Tournament:
@@ -227,7 +229,12 @@ class Tournament:
                              validation_numbers={"mean": mean, "t": t, "sharpe_daily": summary.get("sharpe_daily"),
                                                  "quarters": summary.get("quarters_positive")},
                              gate_ready=bool(line["passed"]) and not self.gate_spent(fid, n, state))
-        return {"version": n, "passed": line["passed"], "mean": mean, "t": t}
+        out = {"version": n, "passed": line["passed"], "mean": mean, "t": t}
+        # THE EXTENSION HOLD (R11-4's swarm rule): a version that met `researcher.extension_hold_checks` of the line's checks
+        # waits for its 2017-19 extension result, exempt from the dormancy clause, until the operator clears the flag.
+        if mark_extension(self.store, fid, n, line, self.settings, clock=self.clock):
+            out["extension_hold"] = True
+        return out
 
     def gate_spent(self, fid: str, n: int, state: Mapping[str, Any]) -> bool:
         """The gate is done with version `n` (R4, the verification of PR #402): its holdout look was made or the gate refused
@@ -248,8 +255,13 @@ class Tournament:
             # A validated version that failed the drift screen earns no share by its validation: it counts as unvalidated.
             nums = {} if validation_drift_failed(fam) else (fam.get("state") or {}).get("validation_numbers") or {}
             rows.append({"id": fam["id"], "validations": fam.get("validations") or 0, "mean": nums.get("mean"), "t": nums.get("t")})
+        # R11-5: the exploit pool is the old families with a positive validation mean; each earns at most
+        # `tournament.exploit_per_positive` (0.15) of the share, the rest is the explore pool's (null: `explore_share` alone).
+        per = self.cfg.get("exploit_per_positive", evidence.EXPLOIT_PER_POSITIVE)
+        per = float(per) if isinstance(per, (int, float)) and not isinstance(per, bool) else None
         shares = evidence.thompson(rows, explore_share=float(self.cfg.get("explore_share", 0.25)),
-                                   new_validations=int(self.cfg.get("new_family_validations", 2)), rng=self.rng)
+                                   new_validations=int(self.cfg.get("new_family_validations", 2)), rng=self.rng,
+                                   exploit_per_positive=per)
         # THE PRACTICE BONUS (league/swarm/practice.py): a small, capped share for positive practice on live quotes. It
         # moves research attention only; the weight never reaches validation, the gate, the bands or money.
         shares, self.practice_bonus = practice.apply_bonus(shares, self.store, self.settings)
@@ -376,7 +388,11 @@ class Tournament:
         if fam.get("band") != "gym" or fam.get("retired_at") or held_at_gate(fam):
             return None
         dead = idle_dead(fam, self.settings, current=current if current is not None else self.identity())
-        return f"It {dead}. {IDLE_CAUSE}" if dead else None
+        if not dead:
+            return None
+        # THE IDLE RULE'S VERDICT (R11-1): the death is filed under what its Train record shows; only an untested family
+        # (it never traded on Train) is "a time limit, not a finding". Train figures only (D2).
+        return f"It {dead}. {idle_cause(train_record(self.store, fam)['screen'])}"
 
     def _retire_if(self, fid: str, judge: Callable[[Mapping[str, Any]], str | None]) -> str | None:
         """Read the family, judge it and retire it in ONE store transaction (R4, the review of PR #402): a result landing
@@ -502,4 +518,4 @@ def json_safe(value: Any) -> str:
         return str(value)[:400]
 
 
-__all__ = ["Tournament"]
+__all__ = ["Tournament", "IDLE_CAUSE"]

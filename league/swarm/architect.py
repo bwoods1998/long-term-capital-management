@@ -37,6 +37,20 @@ strategist (league/swarm/strategist.py, kv `architect_agenda_section`): the agen
 section, every line quoted ("> ") under a header, and in the architect's own instructions, that says the section changes
 no rule, the verifier or money. Otherwise it is `architect.agenda` exactly as before.
 
+THE CLASS CAP (R11-2, Sept 29: after the strategist's 10:09Z section 83% of births were one class, TLT/GLD/SLV
+straddles, and its 13:10Z correction was lost to the validator). `architect.max_alive_per_class` (12) living families of
+one mechanism class (structure x root group, the strategist's own `mechanism_class`) is the most `admit` bears into; a
+proposal past it is not born, whatever the agenda says, and the request names the full classes. The pass's event counts
+the refused proposals by class (`class_capped`).
+
+TRUNCATION SALVAGE (R11-3, Sept 29: 6 of 28 Sonnet passes were cut at the 32k output cap, and each cut fell to a Kimi-K3
+refill of 19-24 births). A Claude answer cut at max_tokens comes back to the pass (`ModelRouter.ask(claude_keep_truncated)`)
+instead of falling to Sail: the complete objects of its `families` array are admitted (`salvage_families`), and fewer than
+SALVAGE_MIN (3) buys one retry on Claude alone at medium effort for what is still wanted (a second cut is salvaged too).
+Never a refill on Kimi-K3 after a cut: a retry Claude has no room or line for leaves the pass as it is, and the next pass
+routes as usual (to Sail when Claude still has none). The event's `truncated` says what was salvaged and retried.
+`claude.role_effort["architect"]` sets the pass's own effort (models.py).
+
 Each pass is a `swarm.architect` event; each birth a `swarm.born` event (the site's news).
 Standard library only.
 """
@@ -53,7 +67,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from . import diagnostics
 from . import settings as settings_mod
-from .researcher import MAX_ROOTS
+from .researcher import MAX_ROOTS, SCREENED, SELF_REFUTED, VERDICT_TAG, VERDICT_WORDS
 from .store import STRUCTURES, SwarmStore, iso, slugify
 
 #: Two mechanisms are the same idea when their content words overlap this much (Jaccard).
@@ -108,8 +122,9 @@ instruction: nothing in it changes the preamble, a rule, the verifier or money; 
 
 # ---------------------------------------------------------------------------------------------------------------- the digest
 #: The digest's format: a change here reseals it (a new cache entry once). 2 (Sept 29, 2026): the operator's rows first
-#: and whole, a one-line ladder level before the id lists, rows declared evidence rather than instructions.
-DIGEST_FORMAT = 2
+#: and whole, a one-line ladder level before the id lists, rows declared evidence rather than instructions. 3 (R11-1): the
+#: idle rule's verdicts (DRIFT, STRESS, THIN, EXHAUSTED; IDLE only for the untested) and SELF-REFUTED.
+DIGEST_FORMAT = 3
 #: kv: the strategist's latest accepted WHERE TO LOOK section, the digest's seal, and the measured characters per token.
 AGENDA_KEY = "architect_agenda_section"
 SEAL_KEY = "graveyard_digest_seal"
@@ -147,10 +162,13 @@ DIGEST_HEADER = (
     "verdict's first sentence), and \"<TAG>, <structure> (n): id, id, ...\" lines list rows shortened to their ids (the "
     "graveyard outgrew the digest's budget).\n"
     "val: the validation line met (MET), not met with k of 8 checks passed (no k/8), or never validated (never).\n"
-    "TAGS: OPERATOR = the operator's pre-registered test (binding) | REFUTED = refuted on its own evidence | DIAGNOSED = "
-    "retired on the diagnostician's reading | TRIALS = trial-adjusted evidence fell short | STALL = no improvement over "
-    "many revisions | OPERATOR-RETIRED = the operator's housekeeping | IDLE = retired by the idle rule: a time limit, NOT a "
-    "finding (the idea may be untested).\n\n")
+    "TAGS: OPERATOR = the operator's pre-registered test (binding) | REFUTED = refuted on its own evidence | SELF-REFUTED = "
+    "retired by its own researcher, who found the mechanism refuted | DIAGNOSED = retired on the diagnostician's reading | "
+    "TRIALS = trial-adjusted evidence fell short | STALL = no improvement over many revisions | OPERATOR-RETIRED = the "
+    "operator's housekeeping. The idle rule's verdicts, read from the Train record, are TESTED findings: DRIFT = its "
+    "eligible versions failed the drift screen (the Train profit was the roots' own move) | STRESS = they lost at 1.5x the "
+    "half-spread | THIN = it traded, but never 40 trades on 20 days in every Train year | EXHAUSTED = it reached a Train "
+    "score, then ran dry. Only IDLE = never traded on Train: untested, a time limit and NOT a finding.\n\n")
 TAIL_HEADER = "ROWS BURIED SINCE THE SEAL ({rows} rows; {total} in the graveyard in all), oldest first:\n"
 
 #: Every sentence a model reads of a lesson that names Validation, the holdout, out-of-sample results, 2025, the deflated
@@ -170,7 +188,8 @@ ASCII_MAP = dict(_ASCII)
 #: Train score X; best validation: V. Last notes: a | b | c".
 _HEAD = re.compile(r"^[a-z_]+ on [A-Z0-9., ]{1,120}: ")
 _STATS = re.compile(r"Tried (\S+) versions? over (\S+) lineage trials?; best Train score ([^;]+); best validation: (.*?)\.(?=\s|$)")
-_IDLE = re.compile(r"It (?:made|kept)\b.*?not a finding that the mechanism has no edge\.?", re.S)
+_IDLE = re.compile(r"It (?:made|kept)\b.*?(?:not a finding that the mechanism has no edge|"
+                   + re.escape(SCREENED) + r"\.\s*(?:" + "|".join(re.escape(w) for w in VERDICT_WORDS.values()) + r"))\.?", re.S)
 #: The tournament's own retirement reasons: the tag already says them (STALL, TRIALS).
 _RULE = re.compile(r"^(?:no validation improvement in \d+ (?:revisions|Gym evaluations)|its trial-adjusted evidence fell below "
                    r"the line(?: \(the deflated Sharpe probability\))?)\.?$", re.I)
@@ -180,10 +199,16 @@ _HOLD = re.compile(r"^(?:Held a cycle \(no run\):\s*)?(?:(?:First|Second|Third|F
 _KEY = re.compile(r"(do not re-propose|never re-propose|refuted|did not replicate|no edge|no capturable|fails?|failed|lottery|"
                   r"drift)", re.I)
 #: Tags in the order the id lists print them.
-TAGS = ("OPERATOR", "REFUTED", "DIAGNOSED", "TRIALS", "STALL", "OPERATOR-RETIRED", "IDLE")
+TAGS = ("OPERATOR", "REFUTED", "SELF-REFUTED", "DIAGNOSED", "TRIALS", "STALL", "EXHAUSTED", "OPERATOR-RETIRED", "DRIFT", "STRESS",
+        "THIN", "IDLE")
+#: The idle rule's verdicts a row with no Train score may carry (R11-1): the ladder shortens them first, as it did every
+#: idle row before them, and its id lists name each by its verdict.
+COLLAPSIBLE = {"DRIFT": "DRIFT, failed the drift screen on Train", "STRESS": "STRESS, lost at 1.5x the half-spread on Train",
+               "THIN": "THIN, too few trades in a Train year", "IDLE": "IDLE, never an eligible Train version"}
 #: Characters of mechanism and lesson a row gets at scale 1.0, by tier ("VAL": a Train-scored or validated row).
-TIER_CHARS = {"OPERATOR": (420, 900), "VAL": (300, 520), "DIAGNOSED": (260, 420), "REFUTED": (240, 380), "TRIALS": (240, 360),
-              "STALL": (240, 360), "OPERATOR-RETIRED": (200, 260), "IDLE": (180, 220)}
+TIER_CHARS = {"OPERATOR": (420, 900), "VAL": (300, 520), "DIAGNOSED": (260, 420), "REFUTED": (240, 380),
+              "SELF-REFUTED": (240, 380), "TRIALS": (240, 360), "STALL": (240, 360), "OPERATOR-RETIRED": (200, 260),
+              "EXHAUSTED": (180, 220), "DRIFT": (180, 220), "STRESS": (180, 220), "THIN": (180, 220), "IDLE": (180, 220)}
 FOLLOWER_CHARS = 160
 #: The collapse ladder (`_render`), for every row but the operator's: 0 every row at its tier; 1 idle rows never
 #: Train-scored to one line; 2 those to id lists; 3 every row but the refuted, the diagnosed and the Train-scored or
@@ -274,14 +299,20 @@ def operator_ids(store: SwarmStore) -> set[str]:
 
 def tag_of(row: Mapping[str, Any], family: Mapping[str, Any] | None) -> str:
     """A row's tag, from its family's retirement reason (the lesson's own when the family is gone). OPERATOR only for
-    `is_operator` rows."""
+    `is_operator` rows. An idle-rule death carries the verdict of its Train record (R11-1: DRIFT, STRESS, THIN, EXHAUSTED;
+    IDLE only for an untested one), and a family its own researcher retired is SELF-REFUTED."""
     fid = str(row.get("family") or "")
     lesson = str(row.get("lesson") or "")
     reason = str((family or {}).get("retire_reason") or (_HEAD.sub("", lesson) if not family else ""))
     if is_operator(fid, family):
         return "OPERATOR"
+    verdict = VERDICT_TAG.search(reason)
+    if verdict:
+        return verdict.group(1)
     if IDLE_MARK in reason or IDLE_MARK in lesson:
         return "IDLE"
+    if reason.startswith(SELF_REFUTED):
+        return "SELF-REFUTED"
     if reason.startswith("the diagnostician"):
         return "DIAGNOSED"
     if "trial-adjusted" in reason:
@@ -361,11 +392,13 @@ def _label(p: Mapping[str, Any]) -> str:
 
 
 def _idle_untested(p: Mapping[str, Any]) -> bool:
-    return p["tag"] == "IDLE" and p.get("train") is None
+    """An idle-rule row with no Train score (IDLE, or since R11-1 its verdict DRIFT, STRESS or THIN): the ladder's first to
+    shorten, as every such row was before the verdicts."""
+    return p["tag"] in COLLAPSIBLE and p.get("train") is None
 
 
 def _kept_at_3(p: Mapping[str, Any]) -> bool:
-    return p["tag"] in ("OPERATOR", "REFUTED", "DIAGNOSED") or bool(p.get("scored"))
+    return p["tag"] in ("OPERATOR", "REFUTED", "SELF-REFUTED", "DIAGNOSED") or bool(p.get("scored"))
 
 
 def _full(p: Mapping[str, Any], scale: float) -> str:
@@ -404,7 +437,7 @@ def _lists(rows: Sequence[Mapping[str, Any]], *, idle_only: bool) -> str:
         groups.setdefault((TAGS.index(p["tag"]), p["structure"]), []).append(p["id"])
     out = []
     for (tag, structure), ids in sorted(groups.items()):
-        name = "IDLE, never an eligible Train version" if idle_only else TAGS[tag]
+        name = COLLAPSIBLE.get(TAGS[tag], TAGS[tag]) if idle_only else TAGS[tag]
         out.append(f"{name}, {structure} ({len(ids)}): {', '.join(ids)}\n")
     return "".join(out)
 
@@ -450,7 +483,8 @@ def operator_scale(rows: Sequence[Mapping[str, Any]], budget: int) -> float | No
 
 #: Level 4's order when not every kept row fits on a line: the diagnostician's readings, the refuted, then the rest by
 #: tag; newest first within each.
-_PRIORITY = {"DIAGNOSED": 0, "REFUTED": 1, "TRIALS": 2, "STALL": 3, "OPERATOR-RETIRED": 4, "IDLE": 5}
+_PRIORITY = {"DIAGNOSED": 0, "REFUTED": 1, "SELF-REFUTED": 1, "TRIALS": 2, "STALL": 3, "EXHAUSTED": 3, "OPERATOR-RETIRED": 4,
+             "DRIFT": 5, "STRESS": 5, "THIN": 5, "IDLE": 6}
 
 
 def _priority(rows: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
@@ -745,6 +779,35 @@ class GraveyardDigest:
         return value
 
 
+#: R11-3: fewer families than this salvaged from a cut answer buys one retry on Claude at medium effort.
+SALVAGE_MIN = 3
+_FAMILIES = re.compile(r'"families"\s*:\s*\[')
+
+
+def salvage_families(text: Any) -> list[dict[str, Any]]:
+    """The complete family objects of a cut answer's `families` array, in order (R11-3: a truncated architect answer keeps
+    what it finished); [] when the array never opened or no object in it completed."""
+    text = str(text or "")
+    found = _FAMILIES.search(text)
+    if not found:
+        return []
+    decoder = json.JSONDecoder()
+    out: list[dict[str, Any]] = []
+    i = found.end()
+    while True:
+        while i < len(text) and text[i] in " \t\r\n,":
+            i += 1
+        if i >= len(text) or text[i] != "{":
+            break
+        try:
+            value, i = decoder.raw_decode(text, i)
+        except ValueError:
+            break  # the object the cut ended in
+        if isinstance(value, dict):
+            out.append(value)
+    return out
+
+
 def locked_text(settings: Mapping[str, Any]) -> str:
     """The operator's locked preamble (`architect.agenda_locked`), as the agenda carries it: stripped, at most
     AGENDA_LOCKED_MAX characters. No code path writes it: it is read from the settings on every pass."""
@@ -874,6 +937,33 @@ class Architect:
     def graveyard_ids(self) -> set[str]:
         return {r["family"] for r in self.store._all("SELECT family FROM graveyard")}
 
+    def class_cap(self) -> int:
+        """`architect.max_alive_per_class` (12): the most living families of one mechanism class (R11-2); 0 (off) when it
+        is 0, null, negative, a boolean or not a number."""
+        raw = self.cfg.get("max_alive_per_class", 12)
+        if raw is None or isinstance(raw, bool):
+            return 0
+        try:
+            return max(0, int(raw))
+        except (TypeError, ValueError, OverflowError):
+            return 0
+
+    def classes(self) -> dict[str, int]:
+        """Living families by mechanism class, counted with the strategist's own `mechanism_class` (structure by root
+        group). A local import: the strategist imports this module."""
+        from .strategist import mechanism_class
+
+        counts: dict[str, int] = {}
+        for f in self.store.families(alive=True):
+            cls = mechanism_class(f["structure"], f["roots"])
+            counts[cls] = counts.get(cls, 0) + 1
+        return counts
+
+    def full_classes(self) -> dict[str, int]:
+        """The mechanism classes at `class_cap` living families (none while the cap is off)."""
+        cap = self.class_cap()
+        return {cls: n for cls, n in sorted(self.classes().items()) if cap and n >= cap}
+
     @staticmethod
     def differs(row: Any, known: set[str]) -> list[dict[str, str]]:
         """The graveyard rows a proposal says it differs from, and how: only rows that exist, at most three."""
@@ -913,21 +1003,29 @@ class Architect:
         number = str(want) if self.refilling() and want > 0 else f"{min(max(int(self.cfg.get('min_new', 3)), 1), max(want, 1))} to {max(want, 1)}"
         title, agenda = self.agenda()
         practice = self.practice_block()
+        full = self.full_classes()
+        # R11-2: a class at `architect.max_alive_per_class` living families bears nothing more (`admit`); say which.
+        full_text = ("\n\nFULL MECHANISM CLASSES (structure x root group: index, etf, names; each already has the most living "
+                     "families one class may have, so a proposal in one is not born):\n" + json.dumps(full)) if full else ""
         return (f"Propose {number} new families, on these roots only (the Gym "
                 f"holds their data): {roots}.\n\nLIVING FAMILIES "
                 f"(leaderboard):\n{json.dumps(living)}\n\n{graveyard}\n\n"
                 f"RESEARCH COVERAGE (effort, not profitability; validated means evaluated, not passed):\n{coverage}\n\n{practice}"
-                f"GAPS (uncovered structure types by root; [] means all covered):\n{gaps}"
+                f"GAPS (uncovered structure types by root; [] means all covered):\n{gaps}" + full_text
                 + (f"\n\n{title}:\n{agenda}" if agenda else ""))
 
     def admit(self, rows: Any, *, digest: bool = False) -> list[str]:
         """Birth the well-formed proposals (the module docstring). Each birth's `differs_from` rows (the digest route's
         answer) go into its notebook; with `digest` and `architect.require_differs`, a proposal that names no real
         graveyard row is refused."""
+        from .strategist import mechanism_class  # a local import: the strategist imports this module
+
         cap = self.want()
         known = self.graveyard_ids()
         strict = digest and self.cfg.get("require_differs") is True
         living = {(f["mechanism"].lower()[:80], tuple(f["roots"]), f["structure"]) for f in self.store.families(alive=True)}
+        per_class, classes = self.class_cap(), self.classes()
+        self.capped: dict[str, int] = {}
         allowed_roots = set(self.settings.get("gym", {}).get("roots", ["SPY", "QQQ", "IWM", "XSP", "SPXW"]))
         born = []
         for row in rows if isinstance(rows, list) else []:
@@ -943,6 +1041,12 @@ class Architect:
             if any(r in ("XSP", "SPXW") for r in roots) and structure in ("calendar", "diagonal"):
                 continue
             if (mechanism.lower()[:80], tuple(roots), structure) in living:
+                continue
+            # THE CLASS CAP (R11-2): past `architect.max_alive_per_class` living families of its mechanism class, a proposal
+            # is not born, whatever the agenda's section says (a backstop for a correction the validator lost).
+            cls = mechanism_class(structure, roots)
+            if per_class and classes.get(cls, 0) >= per_class:
+                self.capped[cls] = self.capped.get(cls, 0) + 1
                 continue
             cited = self.differs(row, known)
             if strict and not cited:
@@ -971,6 +1075,7 @@ class Architect:
                     break
                 fam = self.store.add_family(spec, origin="architect", parent=parent, prior_lineage=prior)
                 living.add((mechanism.lower()[:80], tuple(roots), structure))
+                classes[cls] = classes.get(cls, 0) + 1
             if spec["sketch"]:
                 self.store.note(fam["id"], f"The architect's sketch: {spec['sketch']}")
             for item in cited:
@@ -1000,6 +1105,32 @@ class Architect:
         return {"claude_prefix": blocks, "claude_system": system + FULL_GRAVEYARD_RULE,
                 "claude_user": self.prompt(full_graveyard=True)}, info
 
+    def _salvage_retry(self, system: str, paired: bool, began: float) -> dict[str, Any]:
+        """R11-3's one retry after a cut answer: the same question (now counting the salvaged births) on Claude alone at
+        medium effort; a second cut is salvaged too, and nothing retries after it. Its `born_ids`, route, cost and why it
+        made nothing, if so (`kind`: "line" or "no_room" when Claude had no room for it)."""
+        from .models import ModelError
+
+        extra, info = self._digest_call(system, paired)
+        called = self.clock()
+        try:
+            answer = self.router.ask(role="architect", system=system, user=self.prompt(), family=None,
+                                     key=f"swarm:architect:{int(began)}:salvage", openai_model=None, sail_profile=None,
+                                     max_output=int(self.cfg.get("max_output_tokens", 12000)), effort="high", need_usd=2.0,
+                                     claude=True, claude_effort="medium", claude_keep_truncated=True, **extra)
+        except ModelError as exc:
+            return {"born_ids": [], "effort": "medium", "error": str(exc)[:300], "kind": exc.kind, "billed": exc.billed}
+        except Exception as exc:  # noqa: BLE001 - the pass keeps what it salvaged
+            return {"born_ids": [], "effort": "medium", "error": f"{type(exc).__name__}: {str(exc)[:300]}"}
+        cut = bool(answer.get("truncated"))
+        rows = salvage_families(answer.get("text")) if cut else (answer.get("json") or {}).get("families")
+        on_digest = bool(extra) and answer.get("route") == "claude"
+        born = self.admit(rows, digest=on_digest)
+        if on_digest and self.digest is not None and info is not None:
+            self.digest.record_call(info["sha"], info["ttl"], called)
+        return {"born_ids": born, "born": len(born), "proposed": len(rows) if isinstance(rows, list) else 0, "effort": "medium",
+                "route": answer.get("route"), "cost_usd": answer.get("cost_usd"), "truncated": cut}
+
     def run(self, *, paired: bool = False) -> dict[str, Any]:
         """One pass. `paired`: the strategist's Claude call just sent (and marked) the same sealed digest, so this call
         marks it too and reads it from the cache (`digest_ttl`)."""
@@ -1015,20 +1146,24 @@ class Architect:
             # SYSTEM itself while Train is 2022-2024; else the running swarm's span (its store's migrated objective)
             system = settings_mod.train_span_text(SYSTEM, settings_mod.objective_span(self.store.get("train_objective")))
             extra, info = self._digest_call(system, paired)
+            # A cut Claude answer comes back to be salvaged (R11-3), never falling to a full refill on Sail.
             answer = self.router.ask(role="architect", system=system, user=self.prompt(), family=None,
                                      key=f"swarm:architect:{int(began)}", openai_model=self.cfg.get("openai_model"),
                                      sail_profile=str(self.cfg.get("sail_profile", "k3_balanced")),
                                      max_output=int(self.cfg.get("max_output_tokens", 12000)), effort="high", need_usd=2.0,
-                                     claude=True, rotate=True, **extra)  # Claude first; Astra every other pass if openai_model
+                                     claude=True, rotate=True, claude_keep_truncated=True,
+                                     **extra)  # Claude first; Astra every other pass if openai_model
         except Exception as exc:  # noqa: BLE001
             out = {"born": [], "error": str(exc)[:300]}
             if info is not None:
                 out["digest"] = info
             self.store.event("swarm.architect", None, out)
             return out
-        rows = (answer.get("json") or {}).get("families")
+        truncated = bool(answer.get("truncated"))
+        rows = salvage_families(answer.get("text")) if truncated else (answer.get("json") or {}).get("families")
         on_digest = bool(extra) and answer.get("route") == "claude"
         born = self.admit(rows, digest=on_digest)
+        capped = dict(getattr(self, "capped", {}) or {})
         out = {"born": born, "proposed": len(rows) if isinstance(rows, list) else 0, "route": answer.get("route"),
                "model": answer.get("model"), "cost_usd": answer.get("cost_usd"), "seconds": round(self.clock() - began, 1)}
         if answer.get("route") == "claude":
@@ -1045,11 +1180,26 @@ class Architect:
             self.digest.calibrate(usage, sent)
             known = self.graveyard_ids()
             out["cited"] = sum(1 for r in rows if self.differs(r, known)) if isinstance(rows, list) else 0
+        if truncated:
+            # TRUNCATION SALVAGE (R11-3): the complete families of the cut answer were admitted above; fewer than SALVAGE_MIN
+            # buys ONE retry on Claude at medium effort, Claude only (no OpenAI, no Sail), for what is still wanted. A retry
+            # Claude cannot make (no room, no line) leaves the pass as it is: the next pass routes as usual.
+            out["truncated"] = {"salvaged": len(rows), "born": len(born)}
+            if len(rows) < SALVAGE_MIN and self.want() > 0:
+                retry = self._salvage_retry(system, paired, began)
+                out["born"] = born + retry.pop("born_ids")
+                for cls, n in (getattr(self, "capped", {}) or {}).items():
+                    capped[cls] = capped.get(cls, 0) + n
+                out["truncated"]["retry"] = retry
+                out["seconds"] = round(self.clock() - began, 1)
+        if capped:
+            out["class_capped"] = capped  # proposals refused by the class cap, by class
         self.store.event("swarm.architect", None, out)
         return out
 
 
-__all__ = ["Architect", "SYSTEM", "GraveyardDigest", "Digest", "lesson_view", "parse_lesson", "tag_of", "compose",
+__all__ = ["Architect", "SYSTEM", "GraveyardDigest", "Digest", "lesson_view", "parse_lesson", "tag_of", "compose", "salvage_families",
+           "SALVAGE_MIN",
            "locked_text", "fit", "AGENDA_KEY", "SEAL_KEY", "CPT_KEY", "LAST_KEY", "DIGEST_HEADER", "FULL_GRAVEYARD_RULE",
            "GRAVEYARD_POINTER", "SECTION_MAX", "AGENDA_LOCKED_MAX", "MAX_DIGEST_BYTES", "COMPOSED_AGENDA_TITLE",
            "LEGACY_AGENDA_TITLE", "USAGE_KEYS", "ASCII_MAP", "is_operator", "operator_ids", "operator_scale", "LEVELS",

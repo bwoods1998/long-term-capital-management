@@ -200,15 +200,16 @@ class Forward(unittest.TestCase):
 
 
 class Bandit(unittest.TestCase):
-    def test_shares_sum_to_one_and_new_families_get_a_quarter(self):
+    def test_shares_sum_to_one_and_the_explore_pool_gets_a_quarter(self):
         fams = [{"id": f"old{i}", "validations": 3, "mean": 0.01 * i, "t": 1.0 + i} for i in range(6)]
         fams += [{"id": f"new{i}", "validations": 0, "mean": None, "t": None} for i in range(3)]
         shares = E.thompson(fams, rng=random.Random(1))
         self.assertAlmostEqual(sum(shares.values()), 1.0)
-        self.assertAlmostEqual(sum(v for k, v in shares.items() if k.startswith("new")), 0.25)
+        # R11-5: old0's mean is 0, so it explores with the new families; five positive old families leave the floor at 25%.
+        self.assertAlmostEqual(sum(v for k, v in shares.items() if k.startswith("new") or k == "old0"), 0.25)
 
     def test_better_evidence_wins_more_often(self):
-        fams = [{"id": "strong", "validations": 5, "mean": 0.08, "t": 4.0}, {"id": "weak", "validations": 5, "mean": -0.02, "t": -1.0}]
+        fams = [{"id": "strong", "validations": 5, "mean": 0.08, "t": 4.0}, {"id": "weak", "validations": 5, "mean": 0.005, "t": 0.3}]
         wins = sum(E.thompson(fams, rng=random.Random(s))["strong"] > 0.5 for s in range(200))
         self.assertGreater(wins, 190)
 

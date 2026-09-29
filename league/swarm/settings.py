@@ -147,6 +147,21 @@ DEFAULTS: dict[str, Any] = {
         # The idle rule's dormancy clause: a family whose last this-many cycles made no new Gym evaluation (only stored
         # results and holds) is dead, unless its best awaits validation; 0 or null turns the clause off.
         "dormant_cycles": 40,
+        # THE HOLD OFFER (R11-1, Sept 29): a family that held this many cycles in a row with an eligible Train run behind it,
+        # or `retire_hold_trials` trials, is offered `retire` on its REVISE turn too (down to `population.floor`); its
+        # lesson is SELF-REFUTED. 0 cycles turns it off; 0 trials leaves the eligible run alone.
+        "retire_hold_cycles": 3,
+        "retire_hold_trials": 10,
+        # THE EXTENSION HOLD (R11-4's swarm rule): a family whose latest validation met this many of the line's checks is
+        # exempt from the dormancy clause until the operator clears its flag (its 2017-19 extension result landed:
+        # scripts/extension_hold.py). 0 or null turns the rule off.
+        "extension_hold_checks": 6,
+        # THE ZERO-TRADE PROBE (R11-6): a Train year (2022, where most triggers fire) switches it on: a new version's first
+        # Train run is preceded by a run over that year on the family's first root, and a probe with no trade is the
+        # answer (disqualified, one trial) instead of the five-year run; `gym_run` full=true skips it. Null: off (the
+        # operator switches it on in swarm.json). `probe_timeout_seconds`: a probe not back by then says nothing.
+        "probe_year": None,
+        "probe_timeout_seconds": 300,
     },
     "gym": {
         "enabled": False,
@@ -184,6 +199,10 @@ DEFAULTS: dict[str, Any] = {
         # leaves within minutes (the operator retired 60 by hand after R3). 0 or null: the hourly round only.
         "retire_every_seconds": 300,
         "explore_share": 0.25,
+        # THE EXPLOIT POOL (R11-5): only old families with a positive latest validation mean are exploited, each earning
+        # at most this share; the explore pool (new families and old ones at zero or below) takes the rest, never less than
+        # `explore_share`. Null: `explore_share` alone.
+        "exploit_per_positive": 0.15,
         "new_family_validations": 2,    # a family is "new" to the bandit until this many validation looks
         "retire_revisions": 30,
         "retire_evaluations": 2000,
@@ -231,6 +250,10 @@ DEFAULTS: dict[str, Any] = {
         "graveyard_digest_ttl": "5m",
         # Refuse a digest-route proposal that names no real graveyard row it differs from (off until the cited rate is known).
         "require_differs": False,
+        # THE CLASS CAP (R11-2, Sept 29: 83% of births in an hour were one class, TLT/GLD/SLV straddles): at most this many
+        # living families of one mechanism class (structure x root group, the strategist's `mechanism_class`); `admit`
+        # refuses births past it and the request names the full classes. 0 or null turns it off.
+        "max_alive_per_class": 12,
     },
     # THE STRATEGIST (Sept 29, 2026; league/swarm/strategist.py): Claude reads the whole graveyard digest, the board, the
     # Validation check-failure counts and the day's births and retirements, and writes only the agenda's WHERE TO LOOK
@@ -341,6 +364,10 @@ DEFAULTS: dict[str, Any] = {
         # The 1-hour cache marker (Sept 29, 2026): true only once the gateway admits `ttl: "1h"` (today it refuses it
         # with a 400, which would drop the call to its next route). Off, no call ever sends one.
         "cache_1h": False,
+        # A role's own Claude effort (R11-3) {role: low | medium | high | xhigh | max}, used when the caller names none;
+        # `effort` stays every other role's (the gate's reads keep "high"). E.g. {"architect": "medium"}: its output ran
+        # 20-29k tokens a pass whatever it bore, and 6 of 28 Sonnet passes were cut at the 32k cap on Sept 29.
+        "role_effort": {},
     },
     # The diagnostician (league/swarm/diagnostician.py): Claude reads a family that is stuck or nearly there and rewrites
     # its mechanism or writes its lesson. Eligible: `min_validations` validations without passing, or the latest

@@ -427,6 +427,9 @@ class ReviewProbes(RoundCase):
         super().setUp()
         self.pool = BundlePool(lambda job: {**self.answer(job), "gym_bundle": self.pool.current})
         self.settings["population"].update(start=48, floor=0)
+        # These probes test the gate's and a deploy's exemptions from the dormancy clause; the extension hold (R11-4's rule)
+        # would exempt a validation that met six of the checks on its own (test_swarm_verdicts.py covers it).
+        self.settings["researcher"]["extension_hold_checks"] = 0
 
     def validated_at_gate(self, fid="a"):
         self.family(fid)
