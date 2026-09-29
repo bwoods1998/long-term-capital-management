@@ -2666,4 +2666,24 @@ looks like beta. Validation 2025 and the holdout judge both.
   - Also: an investigation of the churn. All 88 families retired today had Gym runs; most never produced an eligible
     Train version. That is fast refutation, not wasted births.
 
+
+- **07:37Z The full-history fetch is running on the data box (PR #413's code, pushed copies; the PR itself is not
+  released).**
+  - The entitlement: ThetaData Standard serves options history from 2016-01-01 (earlier needs Professional). The
+    builder's underlying series starts 2017-01-03 for SPY, IWM, XSP and SPXW, so 2016 for those needs a separate
+    phase.
+  - Blocks: 11 (core five 2017-19), 13 (the 20 names 2020-21), 12 (SPY/QQQ back months 2017-19), 16 (names 2016-19);
+    71,119 tasks, 34,460 pending.
+    - At 07:55Z: 790 of stage 11's 4,070 done, 0 failing, about 1,640 day-tasks/h.
+    - Expected done: 11 at about 10:40Z, 13 at 16:30-19:00Z, 12 at 20:00-22:45Z, 16 on Sept 30 at 10:00-15:00Z.
+    - It pauses itself for the nightly job (05:20-07:30Z).
+  - The review blocked two defects before any fetch:
+    - a controller that would have ignored its own fetch;
+    - an unvalidated blocks file that could have overwritten live 2022-26 files.
+    Both fixed with tests.
+  - A controller defect found tonight: it mistook the nightly's own pull for a leftover backfill. The lock refused, so
+    nothing was stopped. It is fixed (`ab1a0347`). The 06:05Z "loop stopped" was that fix, not R9.
+  - The first nightly succeeded (gate checkpoint at 06:04Z).
+  - Next: PR B (Train from 2017), then the image build, bridge and pool-style check before any flip.
+
 ## Report
