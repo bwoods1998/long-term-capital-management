@@ -7,14 +7,16 @@ from __future__ import annotations
 import http.client
 import io
 import json
+import re
 import socket
 import unittest
 import urllib.error
 from decimal import Decimal
+from pathlib import Path
 
-from league.claude import (AGENT_HEADER, COST_HEADER, MAX_TOKENS, MAX_TOKENS_STREAM, MODEL, REQUEST_HEADER, ROLE_HEADER, Claude,
-                           ClaudeError, ClaudeMeter, ClaudeRefusal, ClaudeTruncated, extract_json, request_body,
-                           reservation_ceiling)
+from league.claude import (AGENT_HEADER, COST_HEADER, MAX_TOKENS, MAX_TOKENS_STREAM, MODEL, MODEL_CEILINGS, REQUEST_HEADER,
+                           ROLE_HEADER, Claude, ClaudeError, ClaudeMeter, ClaudeRefusal, ClaudeTruncated, extract_json,
+                           request_body, reservation_ceiling)
 from league.tests.test_frontier import FakeOpener, FakeResponse
 
 GATEWAY = "https://gateway.example.test"
@@ -101,6 +103,11 @@ class RequestShape(unittest.TestCase):
         self.assertLess(reservation_ceiling(body) - gateway, Decimal("0.00001"))
         sonnet = request_body("claude-sonnet-5", "s", [{"role": "user", "content": "q"}], max_tokens=1000)
         self.assertGreaterEqual(reservation_ceiling(sonnet), (Decimal(len(json.dumps(sonnet)) + 4096) * Decimal("2.5") + 1000 * 10) / 10 ** 6)
+        # Claude Sonnet 5.5 (Sept 29, 2026): Sonnet 5's prices, streamed at the 32,000-token ceiling.
+        sonnet55 = request_body("claude-sonnet-5-5", "s", [{"role": "user", "content": "q"}], max_tokens=32000, stream=True)
+        worst = (Decimal(len(json.dumps(sonnet55).encode("utf-8")) + 4096) * Decimal("2.5") + 32000 * 10) / 10 ** 6
+        self.assertGreaterEqual(reservation_ceiling(sonnet55), worst)
+        self.assertLess(reservation_ceiling(sonnet55) - worst, Decimal("0.00001"))
         with self.assertRaises(ClaudeError):
             reservation_ceiling({**body, "model": "claude-opus-5"})
 
@@ -119,6 +126,13 @@ class Answers(unittest.TestCase):
         self.assertIsNone(unverified.cost_usd)
         other = client(FakeOpener(message("hello", model="claude-sonnet-5"))).ask("s", "q", agent="a")
         self.assertFalse(other.cost_verified, "an answer from another model is not this call's verified cost")
+        # Sept 29, 2026: `claude-sonnet-5` is a prefix of `claude-sonnet-5-5`, so the match is the id (or a dated snapshot).
+        for asked, answered, same in (("claude-sonnet-5", "claude-sonnet-5-5", False), ("claude-sonnet-5-5", "claude-sonnet-5", False),
+                                      ("claude-sonnet-5-5", "claude-sonnet-5-5", True), ("claude-sonnet-5", "claude-sonnet-5", True),
+                                      ("claude-sonnet-5-5", "claude-sonnet-5-5-20260928", True)):
+            with self.subTest(asked=asked, answered=answered):
+                answer = client(FakeOpener(message("hello", model=answered)), model=asked).ask("s", "q", agent="a")
+                self.assertEqual(answer.cost_verified, same)
 
     def test_a_schema_answer_is_parsed_and_one_without_json_is_an_error_that_carries_its_bill(self):
         schema = {"type": "object"}
@@ -331,6 +345,37 @@ class Meter(unittest.TestCase):
                       FakeResponse(raw=b"not json")):
             meter = ClaudeMeter(GATEWAY, lambda: SECRET, opener=FakeOpener(reply), ttl=0)
             self.assertIsNone(meter.remaining())
+
+
+class GatewayPrices(unittest.TestCase):
+    """The House's hold ceilings and the gateway's price table (the allowlist) name the same Claude models (Sept 29, 2026,
+    when Sonnet 5.5 joined both), and no hold is below the gateway's reservation."""
+
+    @staticmethod
+    def gateway_prices() -> dict:
+        text = (Path(__file__).resolve().parents[2] / "gateway" / "wrangler.jsonc").read_text(encoding="utf-8")
+        match = re.search(r'"CLAUDE_MODELS":\s*("(?:[^"\\]|\\.)*")', text)
+        return json.loads(json.loads(match.group(1)))
+
+    def test_the_two_tables_name_the_same_models_and_every_ceiling_covers_the_gateways_worst_case(self):
+        prices = self.gateway_prices()
+        self.assertEqual(set(prices), set(MODEL_CEILINGS))
+        self.assertTrue({"claude-opus-5-5", "claude-sonnet-5", "claude-sonnet-5-5"} <= set(prices))
+        for model, (input_rate, output_rate) in MODEL_CEILINGS.items():
+            with self.subTest(model=model):
+                row = prices[model]
+                self.assertGreaterEqual(input_rate, Decimal(str(max(row["input"], row["cache_write"]))))
+                self.assertGreaterEqual(output_rate, Decimal(str(row["output"])))
+        self.assertEqual(MODEL_CEILINGS["claude-sonnet-5-5"], (Decimal("2.50"), Decimal("10")))
+        self.assertEqual(prices["claude-sonnet-5-5"], {"input": 2, "cache_write": 2.5, "cache_read": 0.2, "output": 10})
+
+    def test_the_swarms_model_and_the_house_default_are_priced_in_both(self):
+        from league.swarm.settings import DEFAULTS
+
+        for model in (MODEL, DEFAULTS["claude"]["model"]):
+            with self.subTest(model=model):
+                self.assertIn(model, MODEL_CEILINGS)
+                self.assertIn(model, self.gateway_prices())
 
 
 if __name__ == "__main__":

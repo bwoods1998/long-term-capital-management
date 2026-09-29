@@ -9,8 +9,10 @@ every call while the kill switch is engaged (423).
 The request is Anthropic's Messages API, not OpenAI's Responses API: thinking cannot be disabled on
 Claude Opus 5.5 (it is adaptive; `output_config.effort` is the control, and its default is `medium`, so
 it is always sent), there is no sampling parameter, no forced tool choice and no assistant prefill, and
-the answer's `stop_reason` is read before its content. The stable system prefix carries a 5-minute
-`cache_control` marker, so a second call within minutes reads it at a twentieth of the input rate.
+the answer's `stop_reason` is read before its content. The same shape serves Claude Sonnet 5.5 (Sept 29,
+2026): adaptive thinking, all five efforts (its default is `high`), no forced tool choice, no sampling. The
+stable system prefix carries a 5-minute `cache_control` marker, so a second call within minutes reads it at
+a twentieth of the input rate on Opus 5.5 (a tenth on Sonnet 5 and Sonnet 5.5).
 
 STREAMING (Sept 27, 2026). A high-effort answer can take minutes, and Cloudflare in front of
 api.anthropic.com gives up on a silent origin after 100 seconds (HTTP 524). A call with `stream=True` asks
@@ -53,10 +55,12 @@ READ_TIMEOUT = 120.0
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 #: Dollars per million tokens: the dearest input rate (a 5-minute cache write) and the output rate, from
 #: platform.claude.com/docs/en/about-claude/pricing (Sept 26, 2026), as gateway/wrangler.jsonc CLAUDE_MODELS prices
-#: them. Kept here so the caller's hold is never below the gateway's own reservation.
+#: them. Kept here so the caller's hold is never below the gateway's own reservation. Claude Sonnet 5.5 (Sept 29, 2026,
+#: released Sept 28) is listed on the same page at Sonnet 5's prices: $2 input, $2.50 a 5-minute write, $10 output.
 MODEL_CEILINGS = {
     "claude-opus-5-5": (Decimal("5"), Decimal("20")),
     "claude-sonnet-5": (Decimal("2.50"), Decimal("10")),
+    "claude-sonnet-5-5": (Decimal("2.50"), Decimal("10")),
 }
 _SLUG = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 _REQUEST_ID = re.compile(r"[A-Za-z0-9:._-]{1,160}")
@@ -168,6 +172,13 @@ def reservation_ceiling(body: Mapping[str, Any]) -> Decimal:
     return value.quantize(Decimal("0.000001"), rounding="ROUND_CEILING") + Decimal("0.000001")
 
 
+def _same_model(answered: str, asked: str) -> bool:
+    """The answer came from the model asked for: the same id, or that id with a dated snapshot suffix. Not a bare prefix:
+    `claude-sonnet-5` is a prefix of `claude-sonnet-5-5` (Sept 29, 2026), and the gateway priced the call at the asked
+    model's rates."""
+    return answered == asked or re.fullmatch(re.escape(asked) + r"-\d{8}", answered) is not None
+
+
 def _cost(headers: Any) -> Decimal | None:
     try:
         raw = headers.get(COST_HEADER) if headers is not None else None
@@ -248,7 +259,7 @@ class Claude:
         usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
         model = str(payload.get("model") or "")
         verified = (cost is not None and known and type(usage.get("input_tokens")) is int
-                    and type(usage.get("output_tokens")) is int and model.startswith(self.model))
+                    and type(usage.get("output_tokens")) is int and _same_model(model, self.model))
         # Only text blocks are the answer; thinking blocks arrive with empty text by default and are never read.
         text = "".join(block.get("text") or "" for block in payload.get("content") or []
                        if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str))
