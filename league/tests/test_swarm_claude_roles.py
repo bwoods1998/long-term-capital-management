@@ -2,13 +2,17 @@
 call asks for Claude, so `claude.roles` alone decides who gets it: the defaults change nothing, "rewrite" or "review" in
 `claude.roles` routes the researcher's stall rewrite or the gate's review to Claude, a role's own daily line
 (`claude.role_usd_day`) sends it to its next route once reached, and the architect without an OpenAI model is Claude's
-alone while Claude is up and Sail's when Claude is down or capped. The real router, the real Claude and Frontier clients
-over fake openers, the real Researcher, Gate, Architect and Diagnostician."""
+alone while Claude is up and Sail's when Claude is down or capped. A call counts against a line on the day its hold was
+booked (a call across midnight, or a hold trued up a day later, gives nothing back to the next day), a role may have its
+own Claude model (`claude.role_model`), and a review Claude answered is the plan's reviewer (no false warning) unless
+the audit was the same model. The real router, the real Claude and Frontier clients over fake openers, the real
+Researcher, Gate, Tournament, Architect and Diagnostician."""
 
 from __future__ import annotations
 
 import copy
 import io
+import json
 import tempfile
 import unittest
 import urllib.error
@@ -25,10 +29,12 @@ from league.swarm.settings import DEFAULTS
 from league.swarm.store import SwarmStore
 from league.tests.swarm_fakes import Clock, FakeMonth
 from league.tests.test_claude import message
-from league.tests.test_frontier import GATEWAY, FakeOpener, ok
+from league.swarm.tournament import Tournament
+from league.tests.test_frontier import GATEWAY, FakeOpener, FakeResponse, ok
 from league.tests.test_swarm_claude_routing import FakeClaudeMeter
 from league.tests.test_swarm_diagnostician import DiagnosticianCase
 from league.tests.test_swarm_researcher import ResearcherCase
+from league.tests.test_swarm_rounds import RoundCase
 
 FAMILY = {"id": "condor", "mechanism": "sell the variance premium", "structure": "iron_condor", "roots": ["SPY"]}
 VERSION = {"n": 3, "code": "NEEDS = {}\nPARAMS = {}\n\ndef decide(ctx):\n    return []\n", "params": {}}
@@ -84,6 +90,7 @@ class Defaults(RouterCase):
         # Sept 29, 2026 (swarm/sonnet-researchers): the top band's research cycles joined the roles, on a $100 daily line.
         self.assertEqual(DEFAULTS["claude"]["roles"], ["architect", "audit", "diagnostician", "researcher"])
         self.assertEqual(DEFAULTS["claude"]["role_usd_day"], {"researcher": 100.0})
+        self.assertEqual(DEFAULTS["claude"]["role_model"], {"researcher": "claude-sonnet-5-5"})
         router = self.router()
         for role in ("architect", "audit", "diagnostician", "rewrite", "review"):
             self.assertIsNone(router.claude_role_line(role), role)
@@ -278,6 +285,166 @@ class DiagnosticianLine(DiagnosticianCase):
         out = self.diagnostician().run()
         self.assertIn("claude.role_usd_day", out["skipped"])
         self.assertEqual(self.claude.calls, [])
+
+
+DAY = 86400
+
+
+class CountedOnTheHoldsDay(RouterCase):
+    """A call is counted against a line on the day its hold was booked: the row that settles it lands when the bill does,
+    and a bill that lands after 00:00 UTC (or a hold trued up a day later) is the earlier day's, not a credit to today."""
+
+    def setUp(self):
+        super().setUp()
+        self.settings["claude"]["roles"].append("rewrite")
+        self.settings["claude"]["role_usd_day"] = {"rewrite": 1.0}
+
+    def today(self):
+        return self.clock.t - self.clock.t % DAY
+
+    def admitted_at_worst_case(self, ceiling):
+        """Calls billed at their full worst case until the line refuses one: how many it admitted."""
+        n = 0
+        while True:
+            self.claude = lambda request, timeout=None: message("```python\nPARAMS = {}\n```", cost=f"{ceiling:.6f}")
+            if self.ask(self.router(), key=f"today-{n}")["route"] != "claude":
+                return n
+            n += 1
+
+    def test_a_call_across_midnight_gives_the_next_day_no_room(self):
+        self.clock.t = self.today() + DAY - 30  # 23:59:30 UTC
+        clock = self.clock
+        ceiling = self.router().claude_request("THE RULES", "the packet")[1]
+
+        def slow(request, timeout=None):
+            clock.advance(120)  # the answer lands at 00:01:30, a cent against its worst-case hold
+            return message("```python\nPARAMS = {}\n```", cost="0.010000")
+
+        self.claude = slow
+        self.assertEqual(self.ask(self.router(), key="late")["route"], "claude")
+        start = self.today()
+        release = self.store._all("SELECT usd, epoch FROM spend WHERE kind='claude' ORDER BY seq")[-1]
+        self.assertGreaterEqual(release["epoch"], start, "the release is booked after midnight")
+        self.assertLess(release["usd"], 0)
+        self.assertEqual(self.router().claude_role_room("rewrite"), 1.0, "the late call is yesterday's: no credit today")
+        n = self.admitted_at_worst_case(ceiling)
+        self.assertEqual(n, int(1.0 // ceiling), "today admits what fits in its own line, no more")
+        rows = [(r["usd"], json.loads(r["detail"])) for r in self.store._all(
+            "SELECT usd, detail FROM spend WHERE kind='claude' AND epoch>=?", (start,))]
+        today = {d["request"] for _, d in rows if "hold" in d}
+        real = sum(usd for usd, d in rows if (d.get("settles_hold") or d.get("request")) in today)
+        self.assertLessEqual(real, 1.0 + 1e-9, "today's calls stay inside today's line")
+
+    def test_a_hold_trued_up_a_day_later_gives_nothing_back_to_today(self):
+        self.claude = FakeOpener(refused(502, "bad gateway"))  # the bill is unknown: the worst case stays held
+        self.assertEqual(self.ask(self.router(), key="lost")["route"], "sail")
+        [request_id] = self.store.get("claude_unsettled")
+        self.clock.t = self.today() + DAY + 3600  # 01:00 UTC the next day
+        self.claude = FakeOpener(message("```python\nPARAMS = {}\n```", cost="0.300000"))
+        self.assertEqual(self.ask(self.router(), key="today")["route"], "claude")
+        self.assertAlmostEqual(self.router().claude_role_room("rewrite"), 0.70, places=6)
+        self.claude = FakeOpener(FakeResponse({"state": "released", "cost_usd": "0.000000"}))
+        self.assertEqual(self.router().settle_claude_holds(), 1, "yesterday's hold is released today")
+        self.assertNotIn(request_id, self.store.get("claude_unsettled") or {})
+        self.assertAlmostEqual(self.router().claude_role_room("rewrite"), 0.70, places=6,
+                               msg="yesterday's release is not a credit against today's calls")
+        self.assertAlmostEqual(self.router().claude_spent(role="rewrite"), 0.30, places=6, msg="the lifetime total is exact")
+
+    def test_the_diagnosticians_rolling_day_counts_a_call_at_its_hold(self):
+        # The diagnostician's own `usd_day` reads a rolling 24 hours (`claude_spent(since=now - 86400)`).
+        self.claude = FakeOpener(refused(502, "bad gateway"))
+        self.ask(self.router(), role="diagnostician", key="lost", sail_profile="pro_asap")
+        self.clock.advance(DAY + 3600)
+        self.claude = FakeOpener(message('{"decision": "retire"}', cost="0.400000"))
+        self.assertEqual(self.ask(self.router(), role="diagnostician", key="today")["route"], "claude")
+        self.claude = FakeOpener(FakeResponse({"state": "released", "cost_usd": "0.000000"}))
+        self.assertEqual(self.router().settle_claude_holds(), 1)
+        self.assertAlmostEqual(self.router().claude_spent(role="diagnostician", since=self.clock.t - DAY), 0.40, places=6,
+                               msg="the release of a hold booked 25 hours ago is not in the window")
+
+    def test_a_call_settled_the_same_day_counts_at_its_cost(self):
+        self.claude = FakeOpener(message("```python\nPARAMS = {}\n```", cost="0.120000"))
+        self.assertEqual(self.ask(self.router())["route"], "claude")
+        self.clock.advance(60)
+        self.assertAlmostEqual(self.router().claude_role_room("rewrite"), 0.88, places=6)
+
+
+class RoleModel(RouterCase):
+    def test_no_entry_is_the_claude_model(self):
+        router = self.router()
+        for value in ({}, None, {"review": None}, {"review": ""}, {"review": 5}, ["review"]):
+            with self.subTest(role_model=value):
+                self.settings["claude"]["role_model"] = value
+                self.assertEqual(router.claude_model("review"), "claude-opus-5-5")
+        self.assertEqual(router.claude_model(), "claude-opus-5-5")
+
+    def test_a_roles_model_asks_and_is_held_at_that_models_price(self):
+        self.settings["claude"]["roles"].append("rewrite")
+        self.settings["claude"]["role_model"] = {"rewrite": "claude-sonnet-5"}
+        router = self.router()
+        _, opus = router.claude_request("THE RULES", "the packet", role="architect")
+        _, sonnet = router.claude_request("THE RULES", "the packet", role="rewrite")
+        self.assertLess(sonnet, opus, "Sonnet's worst case is below Opus's")
+        self.claude.script = [message("```python\nPARAMS = {}\n```", model="claude-sonnet-5", cost="0.040000")]
+        result = self.ask(router)
+        self.assertEqual((result["route"], result["model"], result["cost_usd"]), ("claude", "claude-sonnet-5", 0.04))
+        self.assertEqual(self.claude.body()["model"], "claude-sonnet-5")
+        hold = json.loads(self.store._all("SELECT detail FROM spend WHERE kind='claude' ORDER BY seq")[0]["detail"])
+        self.assertEqual(hold["model"], "claude-sonnet-5")
+        self.assertAlmostEqual(self.store._all("SELECT usd FROM spend WHERE kind='claude' ORDER BY seq")[0]["usd"], sonnet, places=6)
+
+    def test_an_unpriced_roles_model_is_never_sent(self):
+        self.settings["claude"]["roles"].append("rewrite")
+        self.settings["claude"]["role_model"] = {"rewrite": "claude-unpriced-9"}
+        result = self.ask(self.router())
+        self.assertEqual((result["route"], self.sail_calls), ("sail", ["pro_asap"]))
+        self.assertIn("no verified price", "; ".join(result["fallback_reasons"]))
+        self.assertEqual((self.claude.calls, self.store.spent(["claude"])), ([], 0))
+
+
+class GateRoundWithTheReviewOnClaude(RoundCase):
+    """A whole gate round with "review" in `claude.roles`: the review is Claude's, the audit (a default role) too."""
+
+    def setUp(self):
+        super().setUp()
+        self.claude = FakeOpener()
+        self.router.claude_factory = lambda model: Claude(GATEWAY, lambda: "synthetic", model=model, opener=self.claude)
+        self.router.claude_meter = FakeClaudeMeter(100)
+        self.settings["claude"]["roles"].append("review")
+
+    def round(self, review_model="claude-opus-5-5"):
+        self.family("a")
+        Tournament(self.store, self.pool, self.settings).validate(self.store.families(alive=True))
+        passed = json.dumps({"verdict": "pass", "reasons": []})
+        self.claude.script = [message(passed, model=review_model, cost="0.050000"), message(passed, cost="0.050000")]
+        Gate(self.store, self.pool, self.router, self.settings).run()
+        events = [e for e in self.store.events_after(0)]
+        alerts = [e["payload"] for e in events if e["kind"] == "swarm.status" and e["payload"].get("action") == "not_the_plans_reviewer"]
+        flags = [e["payload"].get("not_the_plans_reviewer") for e in events
+                 if e["kind"] == "swarm.gate" and e["payload"].get("action") == "review"]
+        return self.store.family("a")["state"]["review"], alerts, flags
+
+    def test_a_review_claude_answered_on_its_own_model_is_the_plans_and_no_warning_is_sent(self):
+        self.settings["claude"]["role_model"] = {"review": "claude-sonnet-5"}
+        review, alerts, flags = self.round(review_model="claude-sonnet-5")
+        self.assertEqual((review["route"], review["model"]), ("claude", "claude-sonnet-5"))
+        self.assertEqual((review["audit"]["route"], review["audit"]["model"]), ("claude", "claude-opus-5-5"))
+        self.assertEqual([json.loads(r.data)["model"] for r, _ in self.claude.calls], ["claude-sonnet-5", "claude-opus-5-5"])
+        self.assertEqual(alerts, [], "Claude is one of the plan's reviewers: no Sail stood in")
+        self.assertEqual(flags, [False])
+        self.assertEqual(len(self.store.looks()), 1, "two different readers passed it: the look is taken")
+        self.assertEqual(self.sail.bodies, [])
+
+    def test_one_claude_model_reading_twice_is_told_as_that_not_as_sail(self):
+        review, alerts, flags = self.round()
+        self.assertEqual((review["route"], review["audit"]["route"]), ("claude", "claude"))
+        self.assertEqual(review["model"], review["audit"]["model"])
+        [alert] = alerts
+        self.assertTrue(alert["alert"])
+        self.assertTrue(alert["same_reader"])
+        self.assertIn("both claude-opus-5-5: one model read the program twice", alert["text"])
+        self.assertNotIn("Sail", alert["text"])
+        self.assertEqual(flags, [False], "the review itself is the plan's")
 
 
 def tearDownModule():

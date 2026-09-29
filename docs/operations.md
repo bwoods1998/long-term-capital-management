@@ -553,7 +553,7 @@ with `real_money` true (a new money digest); `python3 scripts/live_trading.py --
 | The House live test's program | `/workspace/state/house-test/rebound-live/` on the box | absent | the frozen program and its params, hash-checked against `league/live/house_test.py` `FROZEN` | the operator's private upload script, `--apply` |
 | `FRONTIER_MONTH_USD`, `FRONTIER_MONTH_MAX_USD`, `FRONTIER_FUNDED_MONTH` | `gateway/wrangler.jsonc` | $707, September 2026 only | the OpenAI month; expires before an unfunded month can renew it | gateway deploy |
 | `CLAUDE_USD`, `CLAUDE_MODELS` | `gateway/wrangler.jsonc` | $100; Opus 5.5, Sonnet 5, Sonnet 5.5 | the Anthropic account's funded total (never resets) and the priced models (the allowlist) | gateway deploy after the owner adds funds |
-| `claude.usd_cap`, `claude.role_usd_day`, `claude.roles` | `swarm.json` on the box | 100, `{"researcher": 100}`, architect, audit, diagnostician, researcher | the swarm's own lifetime Claude line, each role's line a UTC day, and who asks Claude first | edit `swarm.json` |
+| `claude.usd_cap`, `claude.role_usd_day`, `claude.roles`, `claude.role_model` | `swarm.json` on the box | 100, `{"researcher": 100}`, architect, audit, diagnostician, researcher, `{"researcher": "claude-sonnet-5-5"}` | the swarm's own lifetime Claude line, each role's line a UTC day (a call counts on its hold's day), who asks Claude first, and a role's own model (else `claude.model`) | edit `swarm.json` |
 | The money rules | `league/constitution.py` | the sprint's D4 table and the House live test's bounds (money `a3e2aa7c`) | what real money may do | owner deploy, then `--ratify` |
 
 In `swarm.json`, `researcher.usd_per_hour` keeps the combined Sail-model and OpenAI trailing-hour pace.
@@ -645,7 +645,7 @@ skips a family it already moved and empties (never keeps) the best of a family i
 
 The top band on Claude (Sept 29, 2026, the owner's decision to use Claude Sonnet 5.5 boldly; only Sail and Claude are
 topped up from now on), all in `swarm.json` without a deploy: `researcher.claude_top` (default 12; 0 turns it off)
-puts the bandit's top families by weight on `researcher.claude_model` (`claude-sonnet-5-5`) at
+puts the bandit's top families by weight on `claude.role_model.researcher` (`claude-sonnet-5-5`) at
 `researcher.claude_effort` (`medium`), with `researcher.claude_max_tokens` (16000, streamed; it sizes each call's
 hold) and `researcher.claude_timeout_seconds` (180), while "researcher" is in `claude.roles` (removing it turns the
 band off). Four fuses bound the spend: `claude.role_usd_day.researcher` (default $100 a UTC day, holds included),

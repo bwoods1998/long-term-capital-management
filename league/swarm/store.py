@@ -36,6 +36,7 @@ import gzip
 from contextlib import contextmanager
 import hashlib
 import json
+import math
 import re
 import sqlite3
 import threading
@@ -238,6 +239,50 @@ def loads(text: Any, default: Any = None) -> Any:
         return json.loads(text)
     except (TypeError, ValueError):
         return default
+
+
+# BM25's standard constants for ranking the graveyard. K1: how fast repeats of a word saturate (a word said many
+# times counts at most 2.2 times one mention). B: how much a row's length against the average discounts it (0 none,
+# 1 in full proportion). The raw occurrence count they replace let the longest quarter of the graveyard take 447 of
+# the architect's 450 top-3 slots in the Sept 28 replay.
+GRAVEYARD_K1, GRAVEYARD_B = 1.2, 0.75
+
+
+def graveyard_words(query: str) -> list[str]:
+    """A graveyard query's distinct words longer than two letters, plus each underscore compound whole (`long_call`
+    as itself as well as `long` and `call`), so a structure's name counts as one specific word. A compound is kept
+    only beside a part long enough to count, so it never admits a row its parts would not."""
+    q = str(query or "").lower()
+    compounds = [c.strip("_") for c in re.findall(r"[a-z0-9_]+", q)]
+    compounds = [c for c in compounds if "_" in c and any(len(p) > 2 for p in c.split("_"))]
+    return sorted({w for w in re.findall(r"[a-z0-9]+", q) + compounds if len(w) > 2})
+
+
+def rank_graveyard(rows: Sequence[dict[str, Any]], query: str) -> list[dict[str, Any]]:
+    """Graveyard rows (newest first) ranked by relevance to `query`; with no query words, all of them as given.
+
+    A row's text is its mechanism, structure, roots and lesson; a query word is in it as a substring. Relevance is
+    BM25: each query word the row contains is weighted by its inverse document frequency across the graveyard (a word
+    nearly every row has adds almost nothing); its repeats saturate (`GRAVEYARD_K1`), faster in a row longer than the
+    average (`GRAVEYARD_B`), so a long, repetitive lesson does not outrank a short one about the query. Exact ties
+    keep the order given. A row with no query word is left out (the same rows as before, only in a new order).
+    Standard library only.
+    """
+    words = graveyard_words(query)
+    if not words or not rows:
+        return list(rows)
+    texts = [f"{r['mechanism']} {r['structure']} {r['roots']} {r['lesson']}".lower() for r in rows]
+    counts = [{w: n for w in words if (n := t.count(w))} for t in texts]
+    total = len(rows)
+    df = {w: sum(1 for c in counts if w in c) for w in words}
+    idf = {w: math.log(1 + (total - df[w] + 0.5) / (df[w] + 0.5)) for w in words}
+    average = sum(len(t) for t in texts) / total
+    ranked = []
+    for i, (t, c) in enumerate(zip(texts, counts)):
+        if c:
+            k = GRAVEYARD_K1 * (1 - GRAVEYARD_B + GRAVEYARD_B * len(t) / average)
+            ranked.append((-sum(idf[w] * n * (GRAVEYARD_K1 + 1) / (n + k) for w, n in c.items()), i))
+    return [rows[i] for _, i in sorted(ranked)]
 
 
 def code_sha(code: str) -> str:
@@ -898,13 +943,8 @@ class SwarmStore:
                    (fid, self.now(), fam["mechanism"], fam["structure"], dumps(fam["roots"]), str(lesson)[:3000], dumps(best or {})))
 
     def graveyard(self, query: str = "", *, limit: int = 8) -> list[dict[str, Any]]:
-        rows = self._all("SELECT * FROM graveyard ORDER BY at DESC")
-        words = [w for w in re.findall(r"[a-z0-9]+", str(query or "").lower()) if len(w) > 2]
-        if words:
-            def score(r: dict[str, Any]) -> int:
-                text = f"{r['mechanism']} {r['structure']} {r['roots']} {r['lesson']}".lower()
-                return sum(text.count(w) for w in words)
-            rows = [r for r in sorted(rows, key=score, reverse=True) if score(r) > 0]
+        """The lessons most relevant to `query` (`rank_graveyard`), or with no query the newest first (ties by id)."""
+        rows = rank_graveyard(self._all("SELECT * FROM graveyard ORDER BY at DESC, family"), query)
         out = []
         for r in rows[:limit]:
             r["roots"] = loads(r["roots"], [])

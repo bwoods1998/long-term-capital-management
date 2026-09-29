@@ -103,9 +103,10 @@ THE TOP TEN. The bandit's top `top_families` by weight run their cycles on `top_
 `top_reasoning_effort` (low); the others on `profile`. The swarm's hourly pace governs every cycle alike.
 
 THE TOP BAND ON CLAUDE (Sept 29, 2026, the owner's decision: be bold with Claude Sonnet 5.5). The bandit's top
-`claude_top` families by weight (12) run their cycles on `claude_model` (Claude Sonnet 5.5) at `claude_effort` (medium,
-Anthropic's advice for multistep tool use), streamed through the gateway (`ModelRouter.claude_turn`), while "researcher"
-is in `claude.roles`; the families closest to passing get the strongest reasoning. The loop is the same loop: the same
+`claude_top` families by weight (12) run their cycles on the role's Claude model (`claude.role_model.researcher`, Claude
+Sonnet 5.5) at `claude_effort` (medium, Anthropic's advice for multistep tool use), streamed through the gateway
+(`ModelRouter.claude_turn`), while "researcher" is in `claude.roles`; the families closest to passing get the strongest
+reasoning. The loop is the same loop: the same
 tools with the same semantics, the same limits (`max_model_calls`, `max_tool_calls`, `cycle_seconds`, one run or one
 sweep a cycle), the same prompt, brief, history and status. Claude sees every tool every turn (the tool list is part of
 its cached prefix, and its thinking blocks are bound to it); the turn's offer is a note at the end of the turn and is
@@ -1282,8 +1283,7 @@ class Researcher:
             messages = session.request(current, self.offer_note(tools, revise))
             timeout = min(float(cfg.get("claude_timeout_seconds", 180)), max(60.0, deadline - self.clock() + 30))
             reply = self.router.claude_turn(
-                role="researcher", family=fam["id"], key=key, model=str(cfg.get("claude_model") or "claude-sonnet-5-5"),
-                system=session.system, tools=session.tools, messages=messages, effort=str(cfg.get("claude_effort") or "medium"),
+                role="researcher", family=fam["id"], key=key, system=session.system, tools=session.tools, messages=messages, effort=str(cfg.get("claude_effort") or "medium"),
                 max_tokens=int(cfg.get("claude_max_tokens", 16000)), timeout=timeout,
                 family_usd_day=cfg.get("claude_family_usd_day", 15.0), keep_usd=cfg.get("claude_min_room_usd", 25.0))
         except ModelError as exc:

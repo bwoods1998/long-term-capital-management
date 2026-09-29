@@ -566,6 +566,18 @@ class Router(ClaudeCase):
             self.turn()
         self.assertEqual(off.exception.kind, "off")
 
+    def test_the_researcher_asks_on_its_role_model_and_an_unpriced_one_is_never_sent(self):
+        self.assertEqual(self.router.claude_model("researcher"), SONNET, "claude.role_model.researcher")
+        self.claude_script[:] = [answer(call("gym_run", {"hold": True}))]
+        self.turn(model=None)
+        self.assertEqual(self.requests[-1]["body"]["model"], SONNET)
+        self.settings["claude"]["role_model"] = {"researcher": "claude-unpriced-9"}
+        with self.assertRaises(ModelError) as unpriced:
+            self.turn(model=None)
+        self.assertEqual(unpriced.exception.kind, "admission")
+        self.assertIn("no verified price", str(unpriced.exception))
+        self.assertEqual(len(self.requests), 1, "never sent")
+
     def test_a_typo_in_a_line_never_lifts_it(self):
         for value in ("lots", -1, float("nan"), True):
             with self.subTest(family_usd_day=value), self.assertRaises(ModelError) as caught:
