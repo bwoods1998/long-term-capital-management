@@ -2474,4 +2474,28 @@ looks like beta. Validation 2025 and the holdout judge both.
     goes to the owner.
   - Unchanged: D2, the sealed holdout, no forced trades, the money table.
 
+
+- **03:40-04:00Z The owner: use Claude Sonnet 5.5 throughout; from now on only Sail and Claude are topped up.**
+  - Model evidence behind it:
+    - architect calls since Sept 26 20:00Z, per family born: GPT-6 Astra about 4.7¢, 17% reached Validation, 8% positive
+      Train (359 births); Claude Opus 5.5 about 4.6¢, 16% and 10% (193 births). Equal quality per dollar; an earlier
+      "Astra reaches higher Validation scores" was a sample-size artifact and was retracted.
+    - Claude Sonnet 5.5 (`claude-sonnet-5-5`, released Sept 28) costs $2/$10 per million tokens, half of Opus 5.5.
+  - Done:
+    - the architect is Claude-only (`architect.openai_model` null; Sail models as the fallback);
+    - `claude.model` is Sonnet 5 until the House knows Sonnet 5.5;
+    - diagnostician: $60 a day, 6 a round, every 3 hours per family.
+  - PR #415 (Sonnet 5.5 in the gateway's price table and the House's hold ceilings) was merged, main `707077ec`. The
+    review said SHIP; the US-region 1.1x risk does not apply (all 338 calls were global).
+  - The gateway was deployed at 03:59Z (version `7eaede72`) and lists `claude-sonnet-5-5`. The funded Claude cap is
+    unchanged ($100).
+  - Being built for R8/R9:
+    - Claude on the rewrite and review roles, with per-role daily lines;
+    - the top families' research cycles on Sonnet 5.5 (tool use through the gateway, fallback to Sail);
+    - the architect reading the full graveyard (1M context, cached);
+    - a strategist that rewrites the agenda's "where to look" section from all evidence, under a locked operator
+      preamble;
+    - the length-fair graveyard search.
+  - The docs will be reconciled before the release is called done.
+
 ## Report
