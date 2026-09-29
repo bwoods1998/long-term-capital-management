@@ -36,6 +36,15 @@ with any of these keys, and anything not yet available as None or an empty list.
                    trials, revisions, forward: {trades, wins, pnl_usd} | None, real: {...} | None}]
     structures   [{id, agent, underlying, structure, legs, expiry, quantity, real, opened_at,
                    max_loss_usd, pnl_usd}]
+    practice     {as_of, sessions, capital_usd, rows: [{family, lineage, structure, tier, sessions, trades, wins,
+                   pnl_usd, return_on_risk, last_day, live}]}      the practice league (the live path's; `site_practice`)
+
+**The practice league** (Sept 29, 2026). `practice {as_of, sessions, capital_usd, totals, rows}`: every family that
+practised on live quotes in the shadow book under the Gym's fill rules (never real money), one row each: its tier
+(validated or Train), sessions, closed trades, wins, realized P&L and return on maximum loss. It is never part of
+`trading`, `positions`, `performance` or Profit, and never carries a price, strike, leg, expiry, minute, trade date,
+version or code. A site that refuses a checkpoint carrying it (the site accepts exact shapes: an older site) gets the
+checkpoint again without it and is offered it again half an hour later, with a warning that quotes the site's reply.
 
 **Profit and the positions table** (the owner, Sept 28, 2026). `trading {as_of, pnl_usd}` is the complete
 real-options P&L of the Brokerage Account since `performance.start_at`, and `positions {as_of, rows, earlier, other,
@@ -94,8 +103,11 @@ STRUCTURE_RIGHTS = {"long_call": ("call",), "long_put": ("put",), "debit_vertica
                     "iron_condor": ("both",), "iron_butterfly": ("both",), "long_butterfly": ("call", "put"),
                     "long_straddle": ("both",), "long_strangle": ("both",), "calendar": ("call", "put"), "diagonal": ("call", "put")}
 OTHER_KEYS = ("fees_usd", "crypto_usd", "interest_usd", "misc_usd")
-#: A site that refused the positions table is asked again after this long (`Publisher.publish`).
+#: A site that refused the positions table (or the practice block) is asked again after this long (`Publisher.publish`).
 POSITIONS_RETRY_SECONDS = 1800
+PRACTICE_RETRY_SECONDS = POSITIONS_RETRY_SECONDS
+#: The practice league's rows on the page (`site_practice`).
+MAX_PRACTICE_ROWS = 48
 MAX_CHECKPOINT_BYTES = 512 * 1024
 #: A profit is only as good as its funding check: the site shows none on a check older than ten minutes.
 FLOWS_EVERY_SECONDS = 300
@@ -343,6 +355,7 @@ class SiteInputs:
     structures: list[Mapping[str, Any]] = field(default_factory=list)
     trading: Mapping[str, Any] | None = None
     positions: Mapping[str, Any] | None = None
+    practice: Mapping[str, Any] | None = None
 
     @classmethod
     def of(cls, value: "SiteInputs | Mapping[str, Any]") -> "SiteInputs":
@@ -598,6 +611,58 @@ def site_structure(value: Any, published_at: str) -> dict[str, Any] | None:
             "pnl_usd": _money(value.get("pnl_usd"), signed=True)}
 
 
+PRACTICE_TIERS = ("validated", "train")
+
+
+def site_practice(value: Any, agents: list[Mapping[str, Any]], published_at: str) -> dict[str, Any] | None:
+    """{as_of, sessions, capital_usd, totals {families, trades, wins, pnl_usd}, rows}: THE PRACTICE LEAGUE (Sept 29, 2026),
+    shadow trades on live quotes under the Gym's fill rules, never real money: never Profit, never `trading`,
+    `positions` or `performance`, never a forward record. One row per family, exactly: agent, family (its lineage), structure
+    (a site type or null), tier ("validated" | "train"), status ("alive" while the agent is alive on the page, else
+    "retired"), sessions, trades, wins, pnl_usd (realized, cents) and return_on_risk (P&L over maximum loss, 2 places, or
+    null). Never a price, strike, leg, expiry, minute, trade date, version, code, parameter, Validation figure or mechanism
+    (the mechanism is the agent's). At most `MAX_PRACTICE_ROWS` rows: the alive first by trades, then the retired by their
+    last session; the totals are over every row. None when there is nothing to show honestly."""
+    if not isinstance(value, Mapping):
+        return None
+    at = site_instant(value.get("as_of"))
+    if at is None or not _not_after(at, published_at):
+        return None
+    alive = {a["id"] for a in agents if a.get("band") != "retired"}
+    rows, seen = [], set()
+    for raw in value.get("rows") or []:
+        if not isinstance(raw, Mapping):
+            continue
+        agent = str(raw.get("family") or "")
+        tier = raw.get("tier")
+        trades, wins, sessions = _count(raw.get("trades")), _count(raw.get("wins")), _count(raw.get("sessions"), 10_000)
+        pnl = _money(raw.get("pnl_usd"), signed=True)
+        if (not _SLUG.match(agent) or agent in seen or tier not in PRACTICE_TIERS or trades is None or wins is None
+                or sessions is None or pnl is None):
+            continue
+        seen.add(agent)
+        ror = _number(raw.get("return_on_risk"))
+        last = _day(raw.get("last_day")) or ""
+        rows.append((agent in alive, last, {
+            "agent": agent, "family": slug(raw.get("lineage")) or agent,
+            "structure": raw.get("structure") if raw.get("structure") in STRUCTURE_TYPES else None,
+            "tier": tier, "status": "alive" if agent in alive else "retired", "sessions": sessions, "trades": trades,
+            "wins": min(wins, trades), "pnl_usd": pnl,
+            "return_on_risk": money(ror, 2, signed=True) if ror is not None and abs(ror) < 1000 else None}))
+    if not rows:
+        return None
+    living = sorted((r for ok, _, r in rows if ok), key=lambda r: (-r["trades"], r["agent"]))
+    retired = sorted(((last, r) for ok, last, r in rows if not ok), key=lambda x: (x[0], x[1]["agent"]), reverse=True)
+    shown = (living + [r for _, r in retired])[:MAX_PRACTICE_ROWS]
+    every = [r for _, _, r in rows]
+    capital = _money(value.get("capital_usd"))
+    return {"as_of": at, "sessions": _count(value.get("sessions"), 10_000) or 0, "capital_usd": capital or "10000.00",
+            "totals": {"families": len(every), "trades": sum(r["trades"] for r in every),
+                       "wins": sum(r["wins"] for r in every),
+                       "pnl_usd": _usd(sum(_cents(r["pnl_usd"]) for r in every))},
+            "rows": shown}
+
+
 def build_checkpoint(inputs: "SiteInputs | Mapping[str, Any]", published_at: str) -> dict[str, Any]:
     """The checkpoint the site takes (schema 2), from explicit inputs, every block allowlisted. The agents
     are ordered for the page (Sized, Probe, Candidate, Gym, then the newest retired), at most 160 with at
@@ -637,6 +702,9 @@ def build_checkpoint(inputs: "SiteInputs | Mapping[str, Any]", published_at: str
         positions = site_positions(given.positions, body["trading"], published_at) if given.positions is not None else None
         if positions is not None:
             body["positions"] = positions
+    practice = site_practice(given.practice, shown, published_at) if given.practice is not None else None
+    if practice is not None:
+        body["practice"] = practice
     return fit(body)
 
 
@@ -918,6 +986,8 @@ class Publisher:
             self._activity_saved = self.activity.read_at  # a restart keeps Profit: the last reading, while it is fresh
         self._positions_refused: float | None = None
         self._positions_refusal: str | None = None
+        self._practice_refused: float | None = None
+        self._practice_refusal: str | None = None
         self._activity_error: str | None = None
         self._inputs_positions: Mapping[str, Any] | None = None
 
@@ -985,10 +1055,28 @@ class Publisher:
             self._state["cursor"] = batch[-1].seq
             self._save()
         body = checkpoint = self.checkpoint(house)
+        # The practice block first (the newest): a site that refuses the checkpoint with it gets it again without it, and
+        # is offered it again in half an hour, like the positions table below; either side may ship first.
+        refused = self._practice_refused
+        if "practice" in body and refused is not None and self.clock() - refused < PRACTICE_RETRY_SECONDS:
+            body = {key: value for key, value in body.items() if key != "practice"}
         refused = self._positions_refused
         if "positions" in body and refused is not None and self.clock() - refused < POSITIONS_RETRY_SECONDS:
             body = {key: value for key, value in body.items() if key != "positions"}
         status, reply = self.post("/checkpoint", body)
+        if status == 400 and "practice" in body:
+            plain = {key: value for key, value in body.items() if key != "practice"}
+            retried, again = self.post("/checkpoint", plain)
+            if retried in (200, 409) or (retried == 400 and "positions" in plain):
+                why = " ".join(str(reply).split())[:200]
+                if why != self._practice_refusal:
+                    self._warn(house, f"the site refused the practice league block (old site, or a row it rejects): the "
+                                      f"checkpoint went without it and the block is offered again in half an hour (the site "
+                                      f"said: {why})")
+                self._practice_refused, self._practice_refusal = self.clock(), why
+                body, status, reply = plain, retried, again
+        elif status in (200, 409) and "practice" in body:
+            self._practice_refused = self._practice_refusal = None
         if status == 400 and "positions" in body:
             # The site refused the checkpoint with the table (an older site's exact schema, or a row or a sum it rejects):
             # the rest of the checkpoint still goes, and the table is offered again in half an hour. The warning quotes
@@ -1007,6 +1095,14 @@ class Publisher:
             raise PublishError(f"the site refused the checkpoint: HTTP {status} {reply}", status=status)
         self._alert_positions(house, checkpoint)
         return {"events": sent, "checkpoint": status}
+
+    def _warn(self, house: Any, text: str) -> None:
+        alert = getattr(house, "alert", None)
+        if callable(alert):
+            try:
+                alert("warning", text)
+            except Exception:  # noqa: BLE001 - an alert that cannot be written never stops a publish
+                pass
 
     def _alert(self, house: Any, text: str) -> None:
         alert = getattr(house, "alert", None)
@@ -1130,7 +1226,7 @@ class Publisher:
             gym=given.get("gym"),
             agents=list(given["agents"]) if "agents" in given else self._guard(lambda: self._agents(house, folds), []),
             structures=list(given["structures"]) if "structures" in given else self._guard(lambda: self._structures(house), []),
-            trading=trading, positions=positions,
+            trading=trading, positions=positions, practice=given.get("practice"),
         )
         swarm = getattr(house, "swarm", None)
         if getattr(swarm, "root", None) is not None:

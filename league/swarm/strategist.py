@@ -11,8 +11,10 @@ both: the strategist's call writes it and the architect's call right after reads
 locked preamble (`architect.agenda_locked`, binding), the current WHERE TO LOOK section and what became of the families
 born under it, the board (alive families, their mechanisms, Train figures and D2a view of Validation), how many families
 fail each Validation check (counts by check name only: never a family's checks, never a number measured in 2025), the
-last 24 hours' births and retirements by mechanism class, the drift note and the operator lessons on drift and costs, and
-the coverage and gaps. On the Sail fallback (no Claude) the packet carries the 20 newest graveyard rows and every
+last 24 hours' births and retirements by mechanism class, THE PRACTICE LEAGUE (league/swarm/practice.py: shadow trades on
+live quotes under the Gym's fill rules, by class and by family: sessions, trades, the sign of realized P&L and a t; a
+research signal, never evidence; none while practice feedback is off), the drift note and the operator lessons on drift
+and costs, and the coverage and gaps. On the Sail fallback (no Claude) the packet carries the 20 newest graveyard rows and every
 operator row instead of the digest.
 
 WHAT IT WRITES. One JSON object: `where_to_look` (at most `strategist.max_chars`, 1,600; the code's ceiling is 2,000),
@@ -460,6 +462,17 @@ class Strategist:
                 "median_life_hours_of_the_retired": round(statistics.median(lives), 2) if lives else None,
                 "retired_with_a_train_score": sum(1 for f in gone if f.get("best_train") is not None)}
 
+    def _practice(self) -> list[str]:
+        """THE PRACTICE LEAGUE's part (league/swarm/practice.py), or none: by class and by family, sessions, trades, the
+        sign of realized P&L and a t; never dollars, dates, versions, code or Validation numbers. A research signal."""
+        from . import practice
+
+        try:
+            table = practice.table(self.store, self.settings)
+        except Exception:  # noqa: BLE001 - the packet goes without it
+            return []
+        return [practice.header(self.settings) + "\n" + json.dumps(table)] if table else []
+
     def _drift_and_costs(self) -> dict[str, Any]:
         ops = [r for r in self.store._all(f"SELECT family, lesson FROM graveyard WHERE {OPERATOR_SQL} ORDER BY at, family")
                if re.search(r"\b(?:drift|costs?|fees?|spreads?|natural|mid)\b", str(r["lesson"]), re.I)]
@@ -494,6 +507,7 @@ class Strategist:
             "VALIDATION CHECKS FAILED, BY CHECK (counts across every validated family; never a number):\n"
             + json.dumps(self._checks(fams)),
             "THE LAST 24 HOURS (mechanism class = structure x root group: index, etf, names):\n" + json.dumps(self._day(fams)),
+            *self._practice(),
             "DRIFT AND COSTS (the drift note every researcher reads; the operator rows about drift and costs are in the "
             "graveyard):\n" + json.dumps(self._drift_and_costs()),
             "RESEARCH COVERAGE (effort, not profitability):\n" + json.dumps(self.architect.coverage(), separators=(",", ":")),

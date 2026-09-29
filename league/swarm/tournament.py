@@ -16,7 +16,10 @@
    the gate's queue.
 3. THE BANDIT (`evidence.thompson`): each family's share of researcher cycles and Gym priority from its
    validation evidence, with 25% for new families; a validated version that failed the drift screen earns nothing by its
-   validation (the family counts as unvalidated).
+   validation (the family counts as unvalidated). THE PRACTICE BONUS (Sept 29, 2026; `practice.apply_bonus`): a family
+   with a positive practice record on live quotes gains at most `practice.bonus` (25%) of its share, and the bonus moves
+   at most `practice.bonus_total` (10%) of all share; it changes research attention only, never what is validated, the
+   gate, the bands or money. The round's event records it (`practice_bonus`, private).
 4. FORKS: the top families with a positive validation t fork (never one whose validated version failed the drift screen) (a new family on the parent's roots plus one more
    root of the rotation, same mechanism and structure; it inherits the lineage's trial count and holdout looks),
    while the population is under its ceiling. XSP is out of the rotation: its $0.50 a contract makes a narrow
@@ -46,7 +49,7 @@ import random
 import time
 from typing import Any, Callable, Mapping
 
-from . import diagnostics, evidence
+from . import diagnostics, evidence, practice
 from .pool import GymJob, PoolError
 from .researcher import (MAX_ROOTS, drift_verdict, held_at_gate, idle_dead, needs_roots, robust_at_stress, screen_best,
                          validation_drift_failed, with_roots)
@@ -72,6 +75,7 @@ class Tournament:
         self.clock = clock
         self.rng = rng or random.Random()
         self.idle_at = float("-inf")  # the last idle pass (`idle_due`); in memory: a restarted swarm runs one at once
+        self.practice_bonus: dict[str, float] = {}  # the last allocation's practice bonus by family (`allocate`)
 
     @property
     def cfg(self) -> Mapping[str, Any]:
@@ -246,6 +250,9 @@ class Tournament:
             rows.append({"id": fam["id"], "validations": fam.get("validations") or 0, "mean": nums.get("mean"), "t": nums.get("t")})
         shares = evidence.thompson(rows, explore_share=float(self.cfg.get("explore_share", 0.25)),
                                    new_validations=int(self.cfg.get("new_family_validations", 2)), rng=self.rng)
+        # THE PRACTICE BONUS (league/swarm/practice.py): a small, capped share for positive practice on live quotes. It
+        # moves research attention only; the weight never reaches validation, the gate, the bands or money.
+        shares, self.practice_bonus = practice.apply_bonus(shares, self.store, self.settings)
         for fid, share in shares.items():
             self.store.update_family(fid, weight=share)
         return shares
@@ -462,7 +469,7 @@ class Tournament:
         last_hour = {"cycles": int(cycles["n"] or 0), "cycle_errors": int(cycles["errors"] or 0),
                      "usd": {k: round(self.store.spent([k], since=began - 3600), 4) for k in ("sail_model", "gym_box", "openai")}}
         row = {"at": began, "seconds": round(self.clock() - began, 1), "validation": validation, "retired": retired, "born": born,
-               "board": board, "totals": totals, "last_hour": last_hour}
+               "board": board, "totals": totals, "last_hour": last_hour, "practice_bonus": dict(self.practice_bonus)}
         self.store.event("swarm.tournament", None, row)
         self.store.put("leaderboard", {"at": began, "board": board, "totals": totals})
         return row

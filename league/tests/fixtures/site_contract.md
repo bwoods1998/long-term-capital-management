@@ -162,6 +162,41 @@ the same checkpoint again without it, and is offered the table again half an hou
 distinct reply of the site, quoting it. So either repository may deploy first. Old pages validate strictly too: the
 Worker omits `positions` from checkpoint reads unless asked for it with `?progress=1&positions=1`.
 
+## The practice league (optional; Sept 29, 2026)
+
+Every alive family with a validated or an eligible Train version practises on live quotes in the House's shadow book,
+under the Gym's own fill rules, on a $10,000 practice account: **never real money**. The block is never part of
+`trading`, `positions`, `performance` or Profit, and the page labels it "Practice league: shadow trades on live quotes,
+never real money". `site_checkpoint_practice.json` beside this file is `site_checkpoint.json` plus `practice`
+(`build_checkpoint`, pinned by `test_publish.py`); the site needs its own PR to accept it (`validCheckpoint`'s variants, a
+`validPractice`, a panel).
+
+```
+practice: {
+  as_of: instant,                       // not after published_at (+60 s)
+  sessions: counter,                    // the session days the block covers
+  capital_usd: cents,                   // each practice account's starting capital ("10000.00")
+  totals: {families: counter, trades: counter, wins: counter, pnl_usd: cents},   // over every family, shown or not
+  rows: [{                              // <= 48, agents unique; alive first (most trades first), then retired (latest
+                                        // last session first)
+    agent: slug,                        // the family's id (its agent's)
+    family: slug,                       // its lineage
+    structure: one of the eleven types | null,
+    tier: "validated" | "train",        // it practised a validated version, or an eligible Train version
+    status: "alive" | "retired",        // alive while the agent is alive on the page
+    sessions: counter, trades: counter, // closed practice trades, forced (wind-down) closes included
+    wins: counter,                      // <= trades: program-closed trades with a profit
+    pnl_usd: cents,                     // realized, after fees; open practice positions never count
+    return_on_risk: signed decimal (2 places) | null   // pnl over the trades' maximum loss
+  }]
+}
+```
+
+The block has no prose and no field that is a price, a strike, a leg, an expiry, a minute, a trade's date, a version,
+code, a parameter or a Validation figure. A site that refuses a checkpoint carrying it gets the same checkpoint again
+without it, and is offered it again half an hour later; the House warns once per distinct reply of the site. So either
+repository may deploy first.
+
 The account chart separately shows recorded Brokerage Account balances, which include funding flows.
 The chart has its own start: it may begin after an owner's deposit, so its first point need not be the
 account's starting balance, and a later deposit or withdrawal moves the line. **Profit** never moves

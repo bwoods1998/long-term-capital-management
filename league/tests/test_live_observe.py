@@ -559,6 +559,89 @@ class Capacity(ObserveCase):
         self.assertLess(seconds[0], 25.0, seconds)
         self.assertLess(max(seconds[1:]), 15.0, seconds)
 
+    def test_the_practice_league_at_its_caps_thirty_two_validated_and_sixteen_train_over_twenty_four_roots(self):
+        """The practice league (Sept 29, 2026) at the default caps: 48 instances and 24 distinct roots, every root read
+        every minute. The 25th root's family is held back by the roots cap and a later family on a root already read
+        still joins; the 49th family is held back by the instance cap. Every minute well inside its budget."""
+        from league.swarm import bands
+        from league.swarm.store import SwarmStore
+        from league.live.venue import Rate
+        from league.tests.live_fakes import Market, iso
+        from league.tests.swarm_fakes import Clock as SwarmClock
+        import league.gym.driver as driver
+
+        class Wide(Market):
+            """Every root trades at its chain's level (the fake's other stocks read 400); its minute's data calls are
+            counted on the test's clock (twelve minutes run in seconds here)."""
+
+            def __init__(self, clock):
+                super().__init__(clock)
+                self.minute_calls = Rate(100000, clock=clock)
+
+            def stocks(self, symbols):
+                t = self.clock()
+                return {s: {"latestTrade": {"p": self.level(s), "t": iso(t - 2)},
+                            "latestQuote": {"bp": self.level(s) - 0.01, "ap": self.level(s) + 0.01, "t": iso(t - 1)}}
+                        for s in symbols}
+
+        self.market = Wide(self.clock)
+        roots = [f"Z{chr(65 + i // 26)}{chr(65 + i % 26)}" for i in range(25)]
+        store = SwarmStore(self.root, clock=SwarmClock())
+        self.addCleanup(store.close)
+
+        def add(fid, root, **state):
+            store.add_family({"id": fid, "mechanism": "An invented mechanism.", "structure": "debit_vertical", "roots": [root],
+                              "dte": [0, 2]}, origin="test")
+            store.add_version(fid, f"# {fid}\n" + VERTICAL.replace('"SPY"', f'"{root}"'), {"hold": 5, "opens": 3}, author="test")
+            store.set_state(fid, **state)
+
+        for i in range(32):                                                 # validated, on the first 16 roots
+            add(f"v{i:02d}", roots[i // 2], validation_version=1, validation_numbers={"t": 100.0 - i})
+        for j in range(15):                                                 # Train, on the next 8: 24 roots in all
+            add(f"t{j:02d}", roots[16 + j // 2], best_train_version=1)
+            store.update_family(f"t{j:02d}", best_train=50.0 - j)
+        for fid, root, best in (("x-new-root", roots[24], 35.0), ("y-read-root", roots[0], 34.0), ("z-over-cap", roots[1], 33.0)):
+            add(fid, root, best_train_version=1)
+            store.update_family(fid, best_train=best)
+        self.live = self.make([], real_money=False)
+        self.families = self.live.families = SwarmFamilies(self.root)
+        self.addCleanup(lambda: self.families._store.close() if self.families._store is not None else None)
+        built = []
+        real_build = driver.build_bundle
+
+        def counted(*args, **kwargs):
+            built.append(1)
+            return real_build(*args, **kwargs)
+
+        bands._bundle_cache = None
+        seconds, calls = [], []
+        with patch("league.gym.driver.build_bundle", counted):
+            for _ in range(12):
+                began = time.monotonic()
+                out = self.live.minute()
+                seconds.append(time.monotonic() - began)
+                calls.append(out.get("data_calls"))
+                self.clock.set(self.clock() + 60)
+        bands._bundle_cache = None
+        observing = sorted(i.family for i in self.live.instances.values() if i.observe and i.mode == "live")
+        self.assertEqual(len(observing), 48)
+        self.assertNotIn("x-new-root", observing, "the 25th root is held back by the roots cap")
+        self.assertIn("y-read-root", observing, "a later family on a root already read still joins")
+        self.assertNotIn("z-over-cap", observing, "the 49th family is held back by the instance cap")
+        held = {p["why"]: p["capped"] for p, _ in self.ledger.of("live.observe")}
+        self.assertEqual(held, {"cap": ["z-over-cap"], "roots": ["x-new-root"]})
+        self.assertEqual(self.live.health()["observe"]["roots_used"], 24)
+        self.assertEqual(self.live.state.get("observe_pins")["tiers"]["t00"], "train")
+        self.assertEqual({r for r, _ in self.market.chain_reads} - {"SPY"}, set(roots[:24]),
+                         "every root read, the 25th never (SPY: the paper proof's own read)")
+        traded = sum(1 for acc in self.live.shadow.accounts.values() if acc.trades or acc.positions)
+        self.assertEqual(traded, 48, "every one of them traded the shadow book")
+        self.assertLessEqual(len(built), 1, "the Gym bundle is built once, not per instance per minute")
+        self.assertLessEqual(max(c or 0 for c in calls[1:]), 40, calls)
+        self.assertFalse(self.live.state.get("observe_shed"), "no pressure at the caps: nothing shed")
+        self.assertLess(seconds[0], 30.0, seconds)
+        self.assertLess(max(seconds[1:]), 20.0, seconds)
+
 
 if __name__ == "__main__":
     unittest.main()

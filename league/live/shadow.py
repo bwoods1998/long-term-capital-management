@@ -73,6 +73,9 @@ class ShadowAccount(E.Account):
         self.began_day: int | None = None
         self.ended_day: int | None = None
         self.last_mi = -1          # the last minute of today this account was stepped through
+        #: Positions the House closed winding the instance down (`wind_down`), not the program: the practice league's
+        #: record keeps their P&L and leaves them out of its statistics (`league/live/observe.py`, `forced`).
+        self.wound: set[int] = set()
 
     # ------------------------------------------------------------------ the minute, in two halves
     def pre(self, day: LiveDay, mi: int) -> None:
@@ -120,6 +123,7 @@ class ShadowAccount(E.Account):
         for pos in list(self.positions.values()):
             if pos.closing:
                 continue
+            self.wound.add(int(pos.pid))
             try:
                 self._intent(day, mi, {"close": pos.pid, "limit": "natural", "tag": "wind-down"})
             except L.Refused as exc:
@@ -146,6 +150,7 @@ class ShadowAccount(E.Account):
             "trades": self.trades[self.exported:], "daily": self.daily[-30:], "fill_rows": self.fill_rows[-200:],
             "closed_since": self.closed_since, "rejects_since": self.rejects_since, "winding_down": self.winding_down,
             "began_day": self.began_day, "ended_day": self.ended_day, "last_mi": self.last_mi, "nonce": self.nonce,
+            "wound": sorted(self.wound),
         }
 
     @classmethod
@@ -169,6 +174,7 @@ class ShadowAccount(E.Account):
         acc.began_day, acc.ended_day = row.get("began_day"), row.get("ended_day")
         acc.last_mi = int(row.get("last_mi", -1))
         acc.nonce = str(row.get("nonce") or acc.nonce)
+        acc.wound = {int(x) for x in row.get("wound") or [] if isinstance(x, int) and not isinstance(x, bool)}
         return acc
 
 
