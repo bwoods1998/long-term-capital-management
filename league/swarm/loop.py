@@ -8,7 +8,8 @@ One process beside the House loop, niced. Its threads:
 - THE GYM POOL's dispatchers (one per box) and forks (`pool.py`);
 - ROUNDS on their own threads so none blocks another: the tournament (hourly), the idle pass between its rounds (every
   five minutes, the idle rule's retirements alone: `Tournament.idle_pass`), the gate (every few
-  minutes), the nightly forward (once a day), the architect (every four hours), the diagnostician (every few
+  minutes), the nightly forward (once a day), the architect (`architect.every_seconds`, four hours by default), the
+  diagnostician (every few
   minutes, Claude on the stuck and the nearly-there families);
 - RESEEDS (the sprint, Sept 26): below `population.start` while the architect is not due, the seeds' mechanisms are
   founded again on admitted roots they never tried (`reseed`, at most `population.reseed_max` a pass);

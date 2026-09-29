@@ -99,11 +99,12 @@ ROOTS. A family holds one to five roots of the admitted list (`gym.roots`). A pr
 admitted roots changes the family's roots (a Gym family only); its validation and holdout runs use the version's own
 NEEDS roots (`needs_roots`).
 
-THE TOP TEN. The bandit's top `top_families` by weight run their cycles on `top_profile` (V4-Pro asap) at
-`top_reasoning_effort` (low); the others on `profile`. The swarm's hourly pace governs every cycle alike.
+THE TOP TEN. The bandit's top `top_families` (10 by default) by weight run their cycles on `top_profile` (V4-Pro asap)
+at `top_reasoning_effort` (low); the others on `profile`. The swarm's hourly pace governs every cycle alike.
 
 STALLS. Five revisions without a better Train score (`evidence.train_score`) buy ONE rewrite from a stronger
-model (DeepSeek-V4-Pro balanced; Kimi-K3 balanced for the top ten families by the bandit's share), asked
+model (`rewrite_profile`, DeepSeek-V4-Pro asap; Kimi-K3 balanced for the top ten families by the bandit's share;
+Claude first once "rewrite" is in `claude.roles`, Sept 29), asked
 in the background (a cycle never waits for it) and run as the family's next cycle's Gym run; at most
 `rewrites_per_day` a family, `rewrite_min_hours` apart; then the counter starts again.
 

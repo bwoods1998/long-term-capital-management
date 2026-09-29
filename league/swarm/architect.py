@@ -1,19 +1,22 @@
-"""The architect: every four hours, 3-6 new families from the leaderboard, the graveyard and the gaps.
+"""The architect: every `every_seconds` (four hours by default), 3-6 new families from the leaderboard, the graveyard
+and the gaps.
 
-The population (plan: 48 at the start, a ceiling of 96, a floor of 16): while fewer families live than the
-start (retirements drained it), it REFILLS: every `refill_seconds` (an hour), up to the gap to the start
-(at most `max_refill` a pass). At or above the start it grows toward the ceiling at the plan's pace, and
-the loop runs that growth only while the swarm's hourly spend is under its pace (money allows). A birth
-spends nothing by itself: the hourly pace caps every researcher's cycles together.
+The population (plan: 48 at the start, a ceiling of 96, a floor of 16; `population` in swarm.json may set others): while
+fewer families live than the start (retirements drained it), it REFILLS: every `refill_seconds` (an hour by default), up
+to the gap to the start (at most `max_refill` a pass). At or above the start it grows toward the ceiling at the plan's
+pace, and the loop runs that growth only while the swarm's hourly spend is under its pace (money allows). A birth spends
+nothing by itself: the hourly pace caps every researcher's cycles together.
 
-GPT-6 Astra through the gateway when the OpenAI month has room (and the swarm's OpenAI cap allows), else
-Kimi-K3 balanced on Sail. It reads the leaderboard (families, bands, shares, and of Validation only whether the line
-was met and how many of its checks passed: the owner's decision D2a), the graveyard's lessons, and the GAPS (roots x
-structure types no living family covers), and answers with new families: a mechanism (why it should make money), a
-structure, a universe slice (one to five pooled roots of the admitted list, days to expiry) and a rejection test. The
-swarm admits those that are well-formed, distinct from the living families and inside the population ceiling; each
-new family's researcher writes its first program (no starter). The operator steers it without a deploy through
-`architect.agenda` (swarm.json): a non-empty agenda closes the request as "THE OPERATOR'S RESEARCH AGENDA".
+Claude first (`claude.model`, or `claude.role_model["architect"]`; "architect" is a default `claude.roles` entry) while
+its funded total has room; every other pass asks GPT-6 Astra first only while `architect.openai_model` names it (null
+makes the architect Claude-only); else Kimi-K3 balanced on Sail. It reads the leaderboard (families, bands, shares, and
+of Validation only whether the line was met and how many of its checks passed: the owner's decision D2a), the
+graveyard's lessons, and the GAPS (roots x structure types no living family covers), and answers with new families: a
+mechanism (why it should make money), a structure, a universe slice (one to five pooled roots of the admitted list, days
+to expiry) and a rejection test. The swarm admits those that are well-formed, distinct from the living families and
+inside the population ceiling; each new family's researcher writes its first program (no starter). The operator steers
+it without a deploy through `architect.agenda` (swarm.json): a non-empty agenda closes the request as "THE OPERATOR'S
+RESEARCH AGENDA".
 
 Each pass is a `swarm.architect` event; each birth a `swarm.born` event (the site's news).
 Standard library only.
@@ -233,7 +236,7 @@ class Architect:
                                      key=f"swarm:architect:{int(began)}", openai_model=self.cfg.get("openai_model"),
                                      sail_profile=str(self.cfg.get("sail_profile", "k3_balanced")),
                                      max_output=int(self.cfg.get("max_output_tokens", 12000)), effort="high", need_usd=2.0,
-                                     claude=True, rotate=True)  # Claude Opus 5.5 first; every other pass Astra first
+                                     claude=True, rotate=True)  # Claude first; Astra every other pass if openai_model
         except Exception as exc:  # noqa: BLE001
             out = {"born": [], "error": str(exc)[:300]}
             self.store.event("swarm.architect", None, out)

@@ -1,11 +1,13 @@
-"""The diagnostician: Claude Opus 5.5 reads a family that is stuck or nearly there, and rewrites its mechanism or
-writes its lesson (the swarm sprint, Sept 26, 2026; docs/goals/LTCM_SWARM_SPRINT.md, "The loops").
+"""The diagnostician: Claude (`claude.model`, or `claude.role_model["diagnostician"]`) reads a family that is stuck or
+nearly there, and rewrites its mechanism or writes its lesson (the swarm sprint, Sept 26, 2026;
+docs/goals/LTCM_SWARM_SPRINT.md, "The loops").
 
 WHEN. A living Gym family is ELIGIBLE when its latest validation did not pass the line and either it has had at least
 `min_validations` (2) validations, or that validation met at least `near_miss_checks` (6) of the line's checks. At most
-once a family every `family_hours` (6), and again only after a new validation (new evidence); within `usd_day` ($15)
-of the diagnostician's Claude spend over the last 24 hours; only while Claude has room above its reserve. Near-misses
-go first (most checks met), then the most validated; `per_round` families a round.
+once a family every `family_hours` (6), and again only after a new validation (new evidence); within `usd_day` ($15) of
+the diagnostician's Claude spend over the last 24 hours, and within the role's `claude.role_usd_day` line when one is
+set; only while Claude has room above its reserve. (The numbers are the defaults; swarm.json may set others.)
+Near-misses go first (most checks met), then the most validated; `per_round` families a round.
 
 WHAT IT SEES. The family's mechanism, structure, roots, days to expiry, rejection test and sketch; its best program
 and parameters; the full Train diagnostic of that program (every breakdown, the P&L by Train year from the daily

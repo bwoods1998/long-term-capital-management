@@ -139,6 +139,59 @@ Three independent code reviews on Sept 26 found seven causes. Most can be fixed 
 | D6 | Sail top-up | Optional, about $100. A 48-96 family swarm plus 8-12 busy Gym boxes may use $80-120 through Monday. The guard stops the swarm before the House at $32 |
 | D7 | The Claude API | $100 funded, key in the gateway as `CLAUDE_API_KEY`. The gateway caps Claude at the funded amount |
 
+## Amendments and status (Sept 27-29)
+
+The tables below stay as the plan the owner approved; this section records what changed after it and
+where each item stands. The run record (`docs/runs/2026-09-26-options-swarm.md` on
+`run/options-swarm-2026-09-26`) has the detail.
+
+- **D5 landed.** The owner deposited $1,000 (Sept 27). Once it reached options buying power, the grant
+  was re-ratified at $1,473.11 (22:20Z Sept 28); credit types still need $2,000 (#393, the owner's
+  decision).
+- **24/7 research** (the owner, about 19:45Z Sept 27): the swarm's Sail burst runs to Oct 5 with a $900
+  cap (`guard.burst_cap_usd`, `burst_until`). The $32 line is unchanged.
+- **The owner's delegation** (15:50Z Sept 28: "decide yourself how best to proceed"): the operator acts,
+  then reports. D2, the money table, money movement and secrets stay the owner's.
+- **The House live test** (the owner's "proceed as you see best fit", 20:30Z Sept 28; the money-table
+  change approved 22:55Z): one frozen, pre-registered program runs as the House's own real instance at
+  tuition size, never evidence and never a band. It shipped in R7 (money digest `a3e2aa7c`, the grant
+  re-ratified 23:56:41Z) and `live.house_test` was switched on at 00:17:28Z Sept 29, after its analysis
+  script was pinned.
+- **Calibration.** `live.calibration_samples` is 100 (the owner, Sept 28). Real fills change the Gym's
+  fill model only through the frozen recalibration protocol PROTOCOL-v2 (even sessions fit, odd
+  sessions test, at most four looks), and the owner committed in advance to its adoption rule. The Wave
+  5 line "the fill model recalibrated from real fills" and the post-close row of the loops table above
+  are read through it: after Monday's three round trips the model was deliberately not refitted.
+- **Models** (the owner, 03:40-04:00Z Sept 29): Claude Sonnet 5.5 throughout; from now on only Sail and
+  Claude are topped up, not OpenAI. The architect is Claude-only (`architect.openai_model` null), so
+  it has no alternate Astra pass; the swarm's `claude.model` is Sonnet 5 until the operator switches it
+  to Sonnet 5.5, which R8 (#415) prices in the House. The Opus 5.5 budgets and the OpenAI Astra and Sol budgets in
+  **Compute and models** are superseded. Sonnet 5.5 (`claude-sonnet-5-5`) lists at $2 input, $2.50 a
+  five-minute cache write, $0.20 a cache hit and $10 output per million tokens; its default effort is
+  `high`, unlike Opus 5.5's `medium`, and the House always sends one.
+- **Limits lifted** (the owner, 03:45Z Sept 29: "remove any limits that would inhibit this goal ...
+  take every bold swing"): population start 96 (the ceiling), Gym boxes up to 16, the architect up to
+  24 families every 10 minutes, the strong research profile for the top 12 families, the researcher
+  Sail pace $12 an hour. Unchanged: D2, the sealed holdout, no forced trades, the money table.
+- **R8** (#414, #415, #416), promoted 04:42Z Sept 29 (watch passed). In progress, not merged: longer history (#413),
+  the top families' research on Sonnet 5.5, and an architect that reads the whole graveyard plus a
+  strategist.
+
+The Done list, where it stands (Sept 29, 04:50Z):
+
+1. The observe shadow ran (at most 8 families, the likeliest first); no family passed the holdout, so
+   no Probe traded; the paper proofs (multi-leg and single-leg) passed and the calibration round trips
+   ran on Sept 28.
+2. Waves 0-2 shipped in R1 and R2 (Claude metered, the observe band, long calls and puts as real types,
+   D2, the gate on its image pair). The population was 92 at 04:33Z Sept 29 (start 96), after a birth
+   stall took it to the floor of 12 at 02:18Z.
+3. The mid-fill diagnostic said execution-bound (Sept 26); 2 holdout looks, 0 passes, are in the
+   scoreboard.
+4. Monday's post-mortem is in the run record; the fill model was deliberately not refitted (above).
+5. Tuesday's nightly forward job is pending (06:00Z Sept 29); the prune #375 is still a draft; #385 is
+   not rebased or deployed.
+6. The swarm runs 24/7; the report is not yet written.
+
 ## Money on Monday
 
 | Rule | Sprint setting (D4) |

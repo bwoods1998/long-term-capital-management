@@ -11,8 +11,8 @@ desks on Kalshi and Coinbase, a league of strategy programs) is in [archive/](ar
 
 A swarm of AI agents trading anything available with level-3 options on the owner's Alpaca account
 (the "Brokerage Account" on the public page), profitably: **options returns greater than every
-input cost** (Sail, OpenAI, ThetaData and the market-data subscription). The money in the account
-may all be lost; the evidence must stay honest.
+input cost** (Sail, Claude, OpenAI while its funded September lasts, ThetaData and the market-data
+subscription). The money in the account may all be lost; the evidence must stay honest.
 
 The owner's September 26 update makes breadth explicit: simple calls and puts, covered calls,
 cash-secured puts and supported multi-leg strategies should all have a path through research and
@@ -22,45 +22,56 @@ strategy, security and expiry range needs suitable historical data, accurate acc
 handling and paper execution support before it is called ready.
 
 The engineering job is the game and its feedback loop: parallel hypotheses, short replay/review/
-revision cycles, persistent lessons, and compute following credible evidence. Monday September 28
-at 13:30Z is the target first market session. Profitable production trading is the goal, not an
+revision cycles, persistent lessons, and compute following credible evidence. The first market
+session was Monday September 28 (13:30Z); no family had passed the holdout, so its only real options
+orders were the House's own calibration round trips. Profitable production trading is the goal, not an
 outcome established by more agents, more trials, or a successful backtest.
 
-## Current state — September 26, 20:04Z
+## Current state — September 29, 04:50Z
 
-- The House and research swarm are running. Real money is off, no live grant is enabled, and no
-  new options trades have been placed on the production account.
-- At 20:01Z: 16 active families, 57 retired, 17,631 recorded trials, **zero validation passes and
-  zero holdout looks**. Fifteen active families use multi-leg strategies; one uses a single put.
-- The active Gym covers SPY, QQQ, IWM, XSP and SPXW. The 25-root data expansion is still downloading;
-  its final images are not adopted and the gate is disabled. Alpaca's asset lookup returned 6,177
-  tradable optionable equity/ETF assets: discovery is much broader than training readiness.
-- The simulator supports 11 types, including single long calls and puts. Covered calls and
-  cash-secured puts still need inventory/collateral support. The current Alpaca paper path proves
-  one SPY vertical round trip; a general agent paper book remains to be built.
-- The live site has genuine agent thoughts and clickable dots whose progress follows each
-  agent's promotion evidence. Trading Profit is $0; project Net is negative because inputs cost
-  money. Exact all-input costs are still being reconciled.
+- **Real money is on** (since Sept 27): the grant `options-swarm-20260928` is active on money digest
+  `a3e2aa7c` with capital $1,473.11 after the owner's deposit. No family has passed the holdout, so no
+  family trades real money yet. The real trades so far are the House's D3 calibration round trips:
+  three on Sept 28, 5 of 6 orders filled at the mid, Profit -$8.67 (market moves and the broker's
+  fees). The House live test (one frozen, pre-registered program at tuition size, never evidence) was
+  armed at 00:17Z Sept 29 and has not traded yet. Both paper route proofs passed on Sept 28.
+- At 04:33Z: 92 families alive, 774 retired, 67,882 recorded trials, **2 holdout looks and 0
+  passes**, no living family over the validation line. The swarm trains on 25 roots with Train
+  2020-2024 (2022-2024 for the 20 added names), and the gate is on. Alpaca's asset lookup returned
+  6,177 tradable optionable equity/ETF assets: discovery is much broader than training readiness.
+- Real money opens four debit types under $2,000 of equity. The simulator supports 11 types; covered
+  calls and cash-secured puts still need inventory/collateral support, and there is no general agent
+  paper book (the paper proofs check the route).
+- Models: Claude is the architect (only), the gate's auditor and the diagnostician. The owner decided
+  on Sept 29 to use Claude Sonnet 5.5 throughout and to top up only Sail and Claude from now on.
+- The House runs R8 (#414 graveyard ranking, #415 Sonnet 5.5 prices, #416 Claude on the rewrite and
+  review roles), promoted 04:42Z Sept 29 with its watch passed. In progress, not merged: longer history (#413), the top
+  families' research on Sonnet 5.5, and an architect that reads the whole graveyard plus a strategist.
+- The live site shows the agents' own thoughts, clickable dots with each agent's evidence-based
+  progress, and a positions table that adds up exactly to Profit (the "House calibration" and "House
+  live test" rows are labelled). Project Net is negative: the inputs cost money.
 
-The [goal](docs/goals/LTCM_OPTIONS_SWARM.md) records the updated direction and remaining work;
-[operations](docs/operations.md) distinguishes merged code from deployed behavior.
+The [goal](docs/goals/LTCM_OPTIONS_SWARM.md) and [the sprint that amends it](docs/goals/LTCM_SWARM_SPRINT.md)
+record the direction and remaining work; [operations](docs/operations.md) distinguishes merged code from
+deployed behavior.
 
 ## The one number
 
 **Net = the options book's realized P&L after every fee, minus every input cost.** Deposits and
 withdrawals are never profit. The scoreboard reports Net daily, weekly and since the reset
-(Sept 26, 2026, 06:25:30Z, equity $481.65). At the steady-state budgets the inputs cost about
-$565-740 a month, so the bar falls as the account grows, and compute drops to its floor whenever
-the forward record does not pay for it. A change that cannot say how it raises Net does not ship.
+(Sept 26, 2026, 06:25:30Z, equity $481.65). The plan put the inputs at about $565-740 a month at
+its steady-state budgets, an estimate made before Claude replaced OpenAI on Sept 29 and not yet
+re-derived ([design.md](docs/design.md)). The bar falls as the account grows, and compute drops to
+its floor whenever the forward record does not pay for it. A change that cannot say how it raises Net does not ship.
 
 ## The game
 
 The full design is [docs/design.md](docs/design.md); the run that is building it is
 [docs/goals/LTCM_OPTIONS_SWARM.md](docs/goals/LTCM_OPTIONS_SWARM.md).
 
-- **The Gym.** One-minute NBBO for the option contracts near the money, 0-14 days to expiry, across
-  the first data batches (five core roots, then 20 liquid single names and ETFs), from
-  ThetaData, stored as Parquet on sealed Sailboxes. A vectorized engine replays agent programs over
+- **The Gym.** One-minute NBBO for the option contracts near the money, 0-14 days to expiry (15-45
+  for SPY and QQQ back months), across the first data batches (five core roots from 2020, then 20
+  liquid single names and ETFs from 2022), from ThetaData, stored as Parquet on sealed Sailboxes. A vectorized engine replays agent programs over
   it at roughly 100,000 times real time per core, fills each leg against the recorded quote on the
   minute after the decision (the natural price by default), and applies the venue's rules: expiry
   cutoffs, liquidation, exercise, assignment, fees, buying power.
@@ -76,66 +87,81 @@ The full design is [docs/design.md](docs/design.md); the run that is building it
   the sealed holdout cannot be recognized. Programs live in the House's state, never in git.
 - **The loops.** Inner (a researcher revises and reruns on Train, in minutes); tournament (hourly:
   validation runs, a bandit that moves Gym time and model calls to evidence, forks and retirements);
-  architect (every four hours, new families from the leaderboard and the graveyard); gate (review,
-  audit and one holdout look when a family meets the validation line); nightly forward (each new
-  trading day, for Candidates only); live (market hours: every Candidate in shadow, Probes and Sized
-  families on real money when execution is separately enabled); post-mortem (after each close).
-  General agent paper trading and automatic post-close reporting are unfinished; the current
-  SPY paper proof checks the route only.
-- **Evidence.** Train 2022-2024, Validation 2025, a sealed holdout from Jan 2 to Sept 25, 2026, and
-  every day after that forward. Every Gym evaluation counts as a trial. A family passes validation
-  with at least 50 trades on 25 days, a t of 2 on P&L per dollar of maximum loss, a deflated Sharpe
+  architect (Claude; every ten minutes on the live settings, every four hours by default: new families
+  from the leaderboard and the graveyard); diagnostician (Claude on the stuck and nearly-there
+  families); gate (review, audit and one holdout look when a family meets the validation line);
+  nightly forward (each new trading day, for Candidates only); live (market hours: every alive
+  family's validated version in observe shadow, every Candidate in shadow, Probes and Sized families on
+  real money, and the House's own calibration round trips and live test); post-mortem (after each
+  close; the operator's for now, no scheduled one is built). General agent paper trading is
+  unfinished; the paper proofs check the route only.
+- **Evidence.** Train 2020-2024 (2022-2024 for the added names; 2022-2024 is the code's default),
+  Validation 2025, a sealed holdout from Jan 2 to Sept 25, 2026, and every day after that forward.
+  Every Gym evaluation counts as a trial. A version reaches Validation only after its 1.5x Train
+  robustness run made a profit and it passed the drift screen. A family passes validation with at
+  least 50 trades on 25 days, a t of 2 on P&L per dollar of maximum loss, a deflated Sharpe
   probability of 0.95 on traded days for its lineage's validated versions, 3 of 4 quarters positive and
   a profit at 1.5x the half-spread (the owner's decision D2, Sept 26, 2026); then one holdout look per version, corrected for every look the swarm has made, and
   researchers hear only pass or fail. The forward record sizes money.
 - **Bands.** Gym, Candidate (live shadow only), Probe (real, small), Sized (real, by evidence),
-  Retired.
-- **Money rules, in a paragraph.** Everything is sized by maximum loss, never by premium: a Probe
-  risks 3% of equity a structure (one contract when its maximum loss is at most $60), three open
-  structures and 12% per family; a Sized family risks by quarter-Kelly on its forward record's lower
-  bound, up to 10% a structure and 30% a family; the whole book at most 70% of equity. No new entries
-  after a 25% day; real money pauses at a 50% drawdown from the peak. The current real adapter is
-  restricted to five spread types, and credit types require $2,000 of equity. Those implementation
-  limits are not a description of everything Alpaca level 3 supports; broadening the research and
-  paper harness does not silently change the money rules.
+  Retired. (Every alive Gym family's validated version also trades an observe shadow, never real: at
+  most `live.observe_max`, 8 on the box.)
+- **Money rules, in a paragraph** (the owner's decision D4, Sept 26). Everything is sized by maximum
+  loss, never by premium: a Probe risks 5% of equity a structure (one contract when its maximum loss is
+  at most $100), three open structures and 15% per family; a Sized family risks by quarter-Kelly on its
+  forward record's lower bound, up to 10% a structure and 30% a family; the whole book at most 90% of
+  equity. No new entries after a 35% day; real money pauses at a 60% drawdown from the peak. Under
+  $2,000 of equity real money opens exactly four debit types (debit verticals, long butterflies, long
+  calls, long puts); credit types come back only in one deploy with the gateway's list and a re-ratified
+  grant (#393, the owner's decision). Execution tuition is at most $200 a day; the House's D3
+  calibration round trips at most $50 of possible loss a day; the House live test one structure of at
+  most $100, three open and no new open once it has lost $150. Those implementation limits are not a
+  description of everything Alpaca level 3 supports; broadening the research and paper harness does
+  not silently change the money rules.
   The House nets every agent's intents into one order stream, never crosses itself, stays under 250
   orders a day and closes expiring structures before the venue's cutoffs. Real money flows only
   under the owner's grant `options-swarm-20260928`, pinned to the money rules, behind the gateway's
-  caps and kill switch.
+  caps (an order at most the lower of $1,000 and 25% of equity) and kill switch.
 
 ## Where it runs
 
 | Piece | What | Where |
 |---|---|---|
 | The House | the loop, the ledger, the books, the tournament, the gate, the live tick, the publisher | one Sailbox (size s) |
-| The gateway | the account's and OpenAI's keys, caps by order, the OpenAI month, the kill switch, an outside watchdog | a Cloudflare Worker |
+| The gateway | the account's, OpenAI's and Anthropic's keys, caps by order, the OpenAI month, Claude's funded total, the kill switch, an outside watchdog | a Cloudflare Worker |
 | The data box | ThetaData downloads into the Gym store; the nightly forward day | one Sailbox (size l), asleep when idle |
-| The Gym | sealed forks of the Gym image (Train and Validation only), 4-8 at a time | Sailboxes (size l) |
+| The Gym | sealed forks of the Gym image (Train and Validation only), 4-8 at a time by default (up to 16 on the live settings) | Sailboxes (size l) |
 | The gate | a sealed fork with the holdout and forward days | one Sailbox, used by the gate only |
 | The site | the public page | `personal-site`, a Cloudflare Worker |
 
 Vendors: **Alpaca** (the account, level 3; live OPRA quotes and SIP bars through Algo Trader Plus;
 a paper account for the multi-leg route), **ThetaData** Options Standard (historical option quotes),
-**Sail** (the boxes, and open models for the researchers: DeepSeek, Kimi), **OpenAI** through the
-gateway (GPT-6 Sol reviews programs; GPT-6 Astra is the architect, the gate's auditor and the
-post-mortem).
+**Sail** (the boxes, and open models for the researchers and every fallback: DeepSeek, Kimi),
+**Anthropic** through the gateway (Claude is the architect, the gate's auditor and the diagnostician;
+the stall rewrite and the program review too once the operator adds them to `claude.roles`; the swarm's
+`claude.model` is `claude-sonnet-5`, and the owner's direction is Sonnet 5.5, `claude-sonnet-5-5`, which R8
+prices), **OpenAI**
+through the gateway while its funded September lasts (GPT-6 Sol reviews programs; GPT-6 Astra is the
+audit's fallback). From Sept 29 only Sail and Claude are topped up; the gateway's OpenAI cap is $0 from
+Oct 1.
 
 ## The repository
 
-As it will stand after the prune (Wave 2b, after Monday Sept 28's close); until then the legacy
-`ltcm/` package, `playbooks/` and the old league's modules are still here.
+As it will stand after the prune (#375, still a draft); until it merges the legacy `ltcm/` package,
+`playbooks/` and the old league's modules are still here.
 
 | Path | What it is |
 |---|---|
-| `league/` | the House: `house.py` (the tick), `ledger.py`, `book.py`, `allocator.py`, `constitution.py` (the money rules and their digest), `live_trading.py` (the grant), `publish.py`, `service.py`, `watchdog.py`, `stats.py`, `config.json` |
+| `league/` | the House: `house.py` (the tick), `ledger.py`, `book.py`, `allocator.py`, `constitution.py` (the money rules and their digest), `live_trading.py` (the grant), `publish.py`, `trading_profit.py` and `account_activity.py` (Profit and the positions table), `claude.py` and `frontier.py` (the Claude and OpenAI clients, through the gateway), `service.py`, `watchdog.py`, `stats.py`, `config.json` |
+| `league/live/` | the live path: the shadow and observe books, the real book, the paper route proofs, the D3 calibration round trips, the House live test |
 | `league/gym/` | the Gym: the store reader, the engine, fills, the venue's rules, greeks, the batch runner, the sealed-box driver; the program contract in `PROGRAM.md` |
-| `league/swarm/` | the swarm: researchers, the tournament and bandit, the architect, the gate, the Sail guard, the Gym pool |
+| `league/swarm/` | the swarm: researchers, the tournament and bandit, the architect, the diagnostician, the gate, the model router, the Sail guard, the Gym pool |
 | `league/CONTRACT.md` | the options strategy contract every researcher reads (under 20 KB) |
 | `league/tests/` | the tests |
 | `gateway/` | the Worker ([its README](gateway/README.md)) |
 | `scripts/` | `floor_box.py` (the House's box), `gateway_admin.py` (the kill switch), `live_trading.py` (the grant), `scripts/data/` (the data box, the backfill, the images, the nightly job, the store checks) |
 | `deploy/` | [how the House runs on its box](deploy/README.md) |
-| `docs/` | [design.md](docs/design.md), [operations.md](docs/operations.md), `goals/` (the run's plan), `runs/` (run records) |
+| `docs/` | [design.md](docs/design.md), [operations.md](docs/operations.md), `goals/` (the run's plan and the sprint that amends it); the run record is `docs/runs/` on branch `run/options-swarm-2026-09-26`, not on main |
 | `archive/` | the history and the documents of earlier generations |
 | `CHANGELOG.md` | one entry per deploy |
 
@@ -153,8 +179,8 @@ python3 -m league.ci --no-tests                     # content checks: strategies
 
 CI (`.github/workflows/checks.yml`) runs all of it on every pull request and is the source of truth.
 On the owner's laptop (8 cores, 7 GiB shared with other work) run one test process at a time, only
-the modules a change touches, with `TMPDIR` on the tmpfs (`TMPDIR=$(mktemp -d /tmp/t.XXXX)`) and
-delete it afterwards.
+the modules a change touches, with `TMPDIR` on a scratch directory on disk rather than the small
+`/tmp` tmpfs (agents filled it on Sept 26-27 and every shell failed), and delete it afterwards.
 
 ## Operating it
 

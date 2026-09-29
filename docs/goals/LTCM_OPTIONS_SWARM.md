@@ -9,6 +9,11 @@ earlier goal file; those move to the archive.
 
 ## Current direction and state — September 26, 2026, 20:04Z
 
+*Superseded (Sept 29, 2026): for the state and the models, read the sprint file's "Amendments and
+status" ([LTCM_SWARM_SPRINT.md](LTCM_SWARM_SPRINT.md)), the README's current state and the run record.
+The sprint's money table (D4) replaces this plan's. The plan itself stands where the sprint does not
+amend it.*
+
 This update records the owner's Saturday feedback and takes precedence over narrower initial
 scope descriptions below. The production-profitability goal is unchanged. Monday September 28
 13:30Z is the target first session, not a promised profit or a reason to skip evidence.
