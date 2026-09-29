@@ -97,6 +97,10 @@ class Gate:
 
     # ------------------------------------------------------------------ the review
     def review(self, fam: Mapping[str, Any], version: Mapping[str, Any]) -> dict[str, Any]:
+        """The program review: GPT-6 Sol while the OpenAI month has room, else `review_sail_profile` (DeepSeek-V4-Pro).
+        Claude answers it first only once the operator adds "review" to `claude.roles` (Sept 29, 2026). With "audit" there
+        too, one model answers both reads of a program and the audit is no longer a second, different model: choose the
+        two together."""
         user = (f"Family {fam['id']}: {fam['mechanism']}\nStructure {fam['structure']}, roots {', '.join(fam['roots'])}.\n\n"
                 f"```python\n{version['code']}\n```\nPARAMS overrides: {json.dumps(version.get('params') or {})}")
         answer = self.router.ask(role="review", system=REVIEW, user=user, family=fam["id"],
@@ -104,7 +108,7 @@ class Gate:
                                  openai_model=self.cfg.get("review_openai_model"), sail_profile=str(self.cfg.get("review_sail_profile",
                                                                                                                    "pro_balanced")),
                                  max_output=int(self.cfg.get("review_max_output_tokens", 6000)), effort="medium", need_usd=0.5,
-                                 desk=f"{fam['id']}:review", cap_usd_day=float(self.cfg.get("review_usd_day", 1.0)))
+                                 desk=f"{fam['id']}:review", cap_usd_day=float(self.cfg.get("review_usd_day", 1.0)), claude=True)
         verdict = (answer.get("json") or {}).get("verdict")
         return {"verdict": verdict if verdict in ("pass", "fail") else "unclear",
                 "reasons": [str(r)[:300] for r in ((answer.get("json") or {}).get("reasons") or [])][:6],

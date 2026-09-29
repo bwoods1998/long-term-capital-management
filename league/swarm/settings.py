@@ -238,7 +238,12 @@ DEFAULTS: dict[str, Any] = {
     },
     # Claude through the gateway (Sept 26, 2026, the swarm sprint; league/claude.py). The gateway's CLAUDE_USD ($100, the
     # owner's funded total) is the hard line; `usd_cap` is the swarm's own Claude line inside it and `reserve_usd` is never
-    # spent (the House's post-mortem). `roles` are the calls Claude answers first; removing one routes it as before.
+    # spent (the House's post-mortem). `roles` are the calls Claude answers first; removing one routes it as before. Every
+    # role asks (Sept 29, 2026), so adding "rewrite" (the researcher's stall rewrite, else its Sail profile) or "review"
+    # (the gate's program review, else GPT-6 Sol, else Sail) in swarm.json routes it to Claude with no deploy.
+    # `role_usd_day` {role: usd} is a role's own Claude line a UTC day, holds included: a call that would pass it skips
+    # Claude for the role's next route (OpenAI when it has one, else Sail). No entry is no extra line; e.g.
+    # {"rewrite": 10} keeps rewrites from draining the funded total.
     "claude": {
         "model": "claude-opus-5-5",
         "effort": "high",
@@ -247,6 +252,7 @@ DEFAULTS: dict[str, Any] = {
         "max_tokens": 16000,            # thinking and the answer together (up to 32,000 streamed; 16,000 not)
         "stream": True,                 # server-sent events through the gateway: no hop waits 100 s in silence (HTTP 524)
         "roles": ["architect", "audit", "diagnostician"],
+        "role_usd_day": {},
     },
     # The diagnostician (league/swarm/diagnostician.py): Claude reads a family that is stuck or nearly there and rewrites
     # its mechanism or writes its lesson. Eligible: `min_validations` validations without passing, or the latest

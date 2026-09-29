@@ -12,7 +12,11 @@
   (`league.claude.Claude`) for the roles in `claude.roles` (the architect, the gate's audit, the diagnostician), first
   among the paid routes while the gateway's funded total has room above `claude.reserve_usd` and the swarm's own Claude
   spend is under `claude.usd_cap`. The architect rotates: every other pass asks GPT-6 Astra first. Claude capped, erring
-  or unconfigured falls to OpenAI, then Sail, exactly as before.
+  or unconfigured falls to OpenAI, then Sail, exactly as before. Every role's call asks for Claude (Sept 29, 2026: the
+  researcher's stall rewrite and the gate's review too), so `claude.roles` alone decides who gets it: adding "rewrite" or
+  "review" there is the operator's opt-in, with no deploy. A role may also have its own daily line,
+  `claude.role_usd_day` {role: usd} (a UTC day, holds included): a call that would take the role's Claude spend today
+  past it skips Claude and falls to the role's next route. No entry is no extra line.
 - Every settled cost is a `spend` row (kind `sail_model`, `openai` or `claude`, by family).
 
 Standard library only.
@@ -294,6 +298,34 @@ class ModelRouter:
                 total += float(row["usd"])
         return total
 
+    def claude_role_line(self, role: str) -> float | None:
+        """The role's own daily Claude line in dollars (`claude.role_usd_day` {role: usd}), or None when it has none (no
+        entry, or null). A line that is not a finite, non-negative number, or a `role_usd_day` that is not an object, is
+        a line of 0: a typo never lifts a guard the operator meant to set."""
+        lines = self._claude_cfg().get("role_usd_day")
+        if lines is None:
+            return None
+        if not isinstance(lines, Mapping):
+            return 0.0
+        if lines.get(role) is None:
+            return None
+        value = lines[role]
+        try:
+            line = Decimal(str(value)) if not isinstance(value, bool) else Decimal("NaN")
+        except ArithmeticError:
+            return 0.0
+        return float(line) if line.is_finite() and line >= 0 else 0.0
+
+    def claude_role_room(self, role: str) -> float | None:
+        """Dollars left on the role's own Claude line this UTC day (its holds count until they settle), or None when the
+        role has no line (`claude_role_line`)."""
+        line = self.claude_role_line(role)
+        if line is None:
+            return None
+        now = float(self.store.clock())
+        spent = max(0.0, self.claude_spent(role=role, since=now - now % 86400))
+        return max(0.0, line - spent)
+
     def _ask_claude(self, *, role: str, system: str, user: str, family: str | None, key: str, need_usd: float,
                     schema: Mapping[str, Any] | None, errors: list[str], billed: list[dict[str, Any]],
                     effort: str | None = None) -> dict[str, Any] | None:
@@ -318,12 +350,22 @@ class ModelRouter:
                 raise ValueError("invalid Claude minimum reservation")
             body, ceiling = self.claude_request(system, user, schema=schema, effort=effort)
             required = float(max(need, Decimal(str(ceiling))))
+            line = self.claude_role_room(role)  # the role's own line today (`claude.role_usd_day`), before the meter's read
+            if line is not None and line < required:
+                errors.append(f"claude: the {role} line for today has no room (${line:.2f} left of claude.role_usd_day; "
+                              f"this call may cost ${required:.2f})")
+                return None
             room = self.claude_room()  # the meter's network read happens outside the write transaction
             if room < required:
                 errors.append(f"claude: no room (${room:.2f} left above the reserve; this call may cost ${required:.2f})")
                 return None
             admitted = False
             with self.store.atomic():
+                # Both lines are read again inside the write transaction: a concurrent call's committed hold counts.
+                line = self.claude_role_room(role)
+                if line is not None and line < required:
+                    errors.append(f"claude: the {role} line for today has no room")
+                    return None
                 if min(room, self._claude_cap_room()) >= required:
                     self.store.add_spend("claude", required, family=family,
                                          detail={"role": role, "hold": key[:120], "request": request_id, "model": model,
@@ -467,14 +509,15 @@ class ModelRouter:
         """A one-shot question for a role (the architect, the reviewer, the auditor, a rewrite, the diagnostician).
 
         The paid routes in order, then Sail: CLAUDE first when `claude` and the role is one of `claude.roles` and the
-        funded total has room above its reserve (`_ask_claude`); OPENAI when it has room for both `need_usd` and the
-        actual request's standard-service maximum (`_ask_openai`). `rotate` alternates the two paid routes' order every
-        other call for the role (the architect's diversity: Astra's pass, when OpenAI has room, else Claude's). A paid
-        route that refuses, errs or has no room falls to the next; `sail_profile` None means no Sail fallback (a
-        ModelError instead). `desk` and `cap_usd_day` are the Provider's fuse for the Sail call. Admission and the
-        durable hold are atomic across store connections; verified cost settles it, a 4xx refusal releases it, and an
-        unknown bill retains it. Unknown cost is reported as None with held_usd, never as a free answer. A ModelError's
-        `billed` lists the paid attempts that were billed without an answer (`claude_effort` overrides `claude.effort`)."""
+        funded total has room above its reserve and the role's own line today has room (`claude.role_usd_day`,
+        `_ask_claude`); OPENAI when it has room for both `need_usd` and the actual request's standard-service maximum
+        (`_ask_openai`). `rotate` alternates the two paid routes' order every other call for the role (the architect's
+        diversity: Astra's pass, when OpenAI has room, else Claude's). A paid route that refuses, errs or has no room
+        falls to the next; `sail_profile` None means no Sail fallback (a ModelError instead). `desk` and `cap_usd_day`
+        are the Provider's fuse for the Sail call. Admission and the durable hold are atomic across store connections;
+        verified cost settles it, a 4xx refusal releases it, and an unknown bill retains it. Unknown cost is reported as
+        None with held_usd, never as a free answer. A ModelError's `billed` lists the paid attempts that were billed
+        without an answer (`claude_effort` overrides `claude.effort`)."""
         self._require_committed_store()
         errors: list[str] = []
         billed: list[dict[str, Any]] = []
