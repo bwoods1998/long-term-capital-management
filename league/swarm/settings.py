@@ -70,6 +70,16 @@ DEFAULTS: dict[str, Any] = {
         "top_reasoning_effort": "low",
         "top_families": 10,
         "top_max_output_tokens": 12000,  # low effort's reasoning (1,800-3,800 tokens measured) and a whole program
+        # THE TOP BAND ON CLAUDE (Sept 29, 2026, the owner's decision: be bold with Claude Sonnet 5.5; researcher.py and
+        # claude_research.py). The bandit's top `claude_top` by weight run their cycles on Claude while "researcher" is in
+        # `claude.roles`; 0 turns it off. Every Claude failure finishes the turn on the family's Sail profile above.
+        "claude_top": 12,
+        "claude_model": "claude-sonnet-5-5",
+        "claude_effort": "medium",       # low | medium | high | xhigh | max (Anthropic: medium for multistep tool use)
+        "claude_max_tokens": 16000,      # thinking and the answer together, streamed (the gateway allows 32,000); sizes the hold
+        "claude_timeout_seconds": 180,   # one call's overall limit (120 s is allowed between events)
+        "claude_family_usd_day": 15.0,   # one family's Claude spend a UTC day (holds included): a fuse
+        "claude_min_room_usd": 25.0,     # funded Claude room the researcher never takes: the architect, audit and diagnostician's
         "stall_revisions": 5,
         "rewrites_per_day": 4,
         "rewrite_min_hours": 1.0,
@@ -243,7 +253,8 @@ DEFAULTS: dict[str, Any] = {
     # (the gate's program review, else GPT-6 Sol, else Sail) in swarm.json routes it to Claude with no deploy.
     # `role_usd_day` {role: usd} is a role's own Claude line a UTC day, holds included: a call that would pass it skips
     # Claude for the role's next route (OpenAI when it has one, else Sail). No entry is no extra line; e.g.
-    # {"rewrite": 10} keeps rewrites from draining the funded total.
+    # {"rewrite": 10} keeps rewrites from draining the funded total. "researcher" (Sept 29, 2026) is the top band's
+    # research cycles on Claude (`researcher.claude_*`): its line is $100 a UTC day; removing the role turns the band off.
     "claude": {
         "model": "claude-opus-5-5",
         "effort": "high",
@@ -251,8 +262,8 @@ DEFAULTS: dict[str, Any] = {
         "reserve_usd": 5.0,
         "max_tokens": 16000,            # thinking and the answer together (up to 32,000 streamed; 16,000 not)
         "stream": True,                 # server-sent events through the gateway: no hop waits 100 s in silence (HTTP 524)
-        "roles": ["architect", "audit", "diagnostician"],
-        "role_usd_day": {},
+        "roles": ["architect", "audit", "diagnostician", "researcher"],
+        "role_usd_day": {"researcher": 100.0},
     },
     # The diagnostician (league/swarm/diagnostician.py): Claude reads a family that is stuck or nearly there and rewrites
     # its mechanism or writes its lesson. Eligible: `min_validations` validations without passing, or the latest

@@ -80,13 +80,15 @@ class RouterCase(unittest.TestCase):
 
 
 class Defaults(RouterCase):
-    def test_the_default_roles_are_unchanged_and_no_role_has_a_line(self):
-        self.assertEqual(DEFAULTS["claude"]["roles"], ["architect", "audit", "diagnostician"])
-        self.assertEqual(DEFAULTS["claude"]["role_usd_day"], {})
+    def test_the_default_roles_and_lines(self):
+        # Sept 29, 2026 (swarm/sonnet-researchers): the top band's research cycles joined the roles, on a $100 daily line.
+        self.assertEqual(DEFAULTS["claude"]["roles"], ["architect", "audit", "diagnostician", "researcher"])
+        self.assertEqual(DEFAULTS["claude"]["role_usd_day"], {"researcher": 100.0})
         router = self.router()
         for role in ("architect", "audit", "diagnostician", "rewrite", "review"):
             self.assertIsNone(router.claude_role_line(role), role)
             self.assertIsNone(router.claude_role_room(role), role)
+        self.assertEqual(router.claude_role_line("researcher"), 100.0)
 
     def test_with_the_defaults_the_rewrite_stays_on_sail_and_the_review_on_openai(self):
         router = self.router()

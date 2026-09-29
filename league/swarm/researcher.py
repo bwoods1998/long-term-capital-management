@@ -102,6 +102,24 @@ NEEDS roots (`needs_roots`).
 THE TOP TEN. The bandit's top `top_families` by weight run their cycles on `top_profile` (V4-Pro asap) at
 `top_reasoning_effort` (low); the others on `profile`. The swarm's hourly pace governs every cycle alike.
 
+THE TOP BAND ON CLAUDE (Sept 29, 2026, the owner's decision: be bold with Claude Sonnet 5.5). The bandit's top
+`claude_top` families by weight (12) run their cycles on `claude_model` (Claude Sonnet 5.5) at `claude_effort` (medium,
+Anthropic's advice for multistep tool use), streamed through the gateway (`ModelRouter.claude_turn`), while "researcher"
+is in `claude.roles`; the families closest to passing get the strongest reasoning. The loop is the same loop: the same
+tools with the same semantics, the same limits (`max_model_calls`, `max_tool_calls`, `cycle_seconds`, one run or one
+sweep a cycle), the same prompt, brief, history and status. Claude sees every tool every turn (the tool list is part of
+its cached prefix, and its thinking blocks are bound to it); the turn's offer is a note at the end of the turn and is
+enforced here: a call to a tool not offered is refused, never run (league/swarm/claude_research.py has the adapter, the
+append-only session, the input checks and the caching). ANY Claude failure (a refusal, a cut answer, the gateway's 402 at
+the funded total, 403, 423, 429 or 5xx, the researcher's line `claude.role_usd_day.researcher` or the family's own
+`claude_family_usd_day` reached, less room than `claude_min_room_usd` above the hold, a stream that stalls or runs past
+`claude_timeout_seconds`, an answer that cannot be read) finishes THAT turn on the family's Sail profile from the same
+transcript, and the rest of the cycle stays on Sail; it is never a cycle error. So does a REVISE turn Claude answers with
+no call (retried on Sail, where a call is required) and a call whose input does not parse or validate (answered as an
+error, never run; the answer's valid calls run). A failed attempt costs no model call; its bill is booked. The cycle
+event records `route`, `claude_calls`, `claude_usd`, `claude_usage` (input, cache write, cache read and output tokens)
+and `claude_fallback` (the kind and why), what the first day's measurement reads.
+
 STALLS. Five revisions without a better Train score (`evidence.train_score`) buy ONE rewrite from a stronger
 model (DeepSeek-V4-Pro balanced; Kimi-K3 balanced for the top ten families by the bandit's share), asked
 in the background (a cycle never waits for it) and run as the family's next cycle's Gym run; at most
@@ -126,6 +144,7 @@ from typing import Any, Callable, Mapping
 
 from . import diagnostics, evidence, public
 from . import settings as settings_mod
+from .claude_research import ClaudeSession, ClaudeTurn, anthropic_tools, sail_items, tool_calls
 from .pool import ROBUSTNESS_PRIORITY, GymJob, PoolError
 from .store import SwarmStore
 
@@ -1216,6 +1235,81 @@ class Researcher:
         weight_rank = sorted((f.get("weight") or 0.0 for f in self.store.families(alive=True)), reverse=True)
         return bool(weight_rank) and top > 0 and (fam.get("weight") or 0.0) >= weight_rank[min(top, len(weight_rank)) - 1] > 0
 
+    # ------------------------------------------------------------------ the top band on Claude
+    def claude_route(self, fam: Mapping[str, Any]) -> bool:
+        """This family's cycle runs on Claude (THE TOP BAND ON CLAUDE): `claude_top` above zero, Claude configured for the
+        "researcher" role (`claude.roles`, a client and the gateway's meter) and the family among the bandit's top
+        `claude_top` by weight. Room and lines are the router's to judge on each call (a turn without them is Sail's)."""
+        try:
+            n = int(self.cfg.get("claude_top", 0) or 0)
+        except (TypeError, ValueError):
+            return False
+        enabled = getattr(self.router, "claude_enabled", None)
+        return n > 0 and callable(enabled) and bool(enabled("researcher")) and self.is_top(fam, top=n)
+
+    def claude_tools(self) -> list[dict[str, Any]]:
+        """Every tool, always, in `TOOLS` order and `gym_sweep` at the configured limit: the constant list Claude is given
+        (its prompt cache and its thinking blocks are bound to it), as Anthropic's tools."""
+        return anthropic_tools([sweep_tool(self.max_variants) if t["name"] == "gym_sweep" else t for t in TOOLS])
+
+    @staticmethod
+    def offer_note(tools: list[dict[str, Any]], revise: bool) -> str:
+        """The turn's offer, said at the end of Claude's turn (its tool list is constant; the loop enforces the offer)."""
+        names = ", ".join(t["name"] for t in tools)
+        if revise:
+            return (f"This turn is a REVISE: call gym_run or gym_sweep (gym_run with hold=true when you have nothing new to run, "
+                    f"saying why in its note). Tools offered now: {names}. Reply with tool calls.")
+        return f"Tools offered now: {names}. A call to any other tool is refused this turn."
+
+    def _claude_failed(self, out: dict[str, Any], kind: str, why: str, cost: float) -> None:
+        """A Claude attempt that fell back to Sail: its bill is booked in the cycle (no model call is counted)."""
+        out["claude_fallback"] = f"{kind}: {why}"[:200]
+        if cost:
+            out["cost_usd"] = round(out["cost_usd"] + cost, 6)
+            out["claude_usd"] = round(float(out.get("claude_usd") or 0) + cost, 6)
+
+    def _claude_turn(self, fam: Mapping[str, Any], session: ClaudeSession, *, items: list[dict[str, Any]],
+                     current: list[dict[str, Any]], revise: bool, tools: list[dict[str, Any]], key: str, deadline: float,
+                     out: dict[str, Any]) -> ClaudeTurn | None:
+        """One turn on Claude (THE TOP BAND ON CLAUDE): the answer as the loop reads a Sail response, or None when Claude
+        failed or answered a REVISE turn with no call (the turn is then Sail's; `claude_fallback` says why)."""
+        from .models import ModelError
+
+        cfg = self.cfg
+        try:
+            if not session.started:
+                session.start(self.brief(fam), items, len(current))
+            messages = session.request(current, self.offer_note(tools, revise))
+            timeout = min(float(cfg.get("claude_timeout_seconds", 180)), max(60.0, deadline - self.clock() + 30))
+            reply = self.router.claude_turn(
+                role="researcher", family=fam["id"], key=key, model=str(cfg.get("claude_model") or "claude-sonnet-5-5"),
+                system=session.system, tools=session.tools, messages=messages, effort=str(cfg.get("claude_effort") or "medium"),
+                max_tokens=int(cfg.get("claude_max_tokens", 16000)), timeout=timeout,
+                family_usd_day=cfg.get("claude_family_usd_day", 15.0), keep_usd=cfg.get("claude_min_room_usd", 25.0))
+        except ModelError as exc:
+            billed = sum(float(b.get("cost_usd") or 0) for b in exc.billed) + float(exc.held_usd or 0)
+            self._claude_failed(out, exc.kind, str(exc), billed)
+            return None
+        except Exception as exc:  # noqa: BLE001 - the adapter or the session: the turn is Sail's, never a cycle error
+            self._claude_failed(out, "unknown", f"{type(exc).__name__}: {str(exc)[:160]}", 0.0)
+            return None
+        answer = reply.answer
+        cost = reply.cost_usd if reply.cost_usd is not None else reply.held_usd
+        usage = out.setdefault("claude_usage", {"input": 0, "cache_write": 0, "cache_read": 0, "output": 0})
+        for name, field in (("input", "input_tokens"), ("cache_write", "cache_creation_input_tokens"),
+                            ("cache_read", "cache_read_input_tokens"), ("output", "output_tokens")):
+            value = answer.usage.get(field)
+            usage[name] += value if type(value) is int else 0
+        calls = tool_calls(answer.tool_uses, session.schemas)
+        if revise and not calls:
+            self._claude_failed(out, "no_call", "a REVISE turn answered without a tool call", cost)
+            return None
+        out["claude_calls"] = int(out.get("claude_calls") or 0) + 1
+        out["claude_usd"] = round(float(out.get("claude_usd") or 0) + cost, 6)
+        return ClaudeTurn(cost_usd=cost, output_items=sail_items(answer.content, calls), function_calls=calls,
+                          output_text=answer.text, content=list(answer.content), usage=dict(answer.usage),
+                          stop_reason=answer.stop_reason, model=reply.model)
+
     # ------------------------------------------------------------------ tools
     @staticmethod
     def _refusal(out: dict[str, Any], answer: dict[str, Any]) -> dict[str, Any]:
@@ -2144,6 +2238,11 @@ class Researcher:
         # A model call that writes a program took 60-80 s on Sept 26 (DeepSeek-V4-Flash asap): after the first, a call
         # starts only with `min_call_seconds` of the cycle's budget left, so a cycle stays under three minutes.
         min_call = float(self.cfg.get("min_call_seconds", 75))
+        # THE TOP BAND ON CLAUDE: this cycle's turns go to Claude until one fails (then the rest of the cycle is Sail's).
+        claude = self.claude_route(fam)
+        session: ClaudeSession | None = None
+        if claude:
+            out["route"] = "claude"
         while out["model_calls"] < max_calls and (out["model_calls"] == 0 or deadline - self.clock() >= min_call):
             if self._terminal(fid, out):
                 break
@@ -2158,14 +2257,29 @@ class Researcher:
             # found their mechanism refuted held every cycle, "retire tool not offered", since a hold never reaches READ).
             revise = not gym_done
             tools = self.tools(revise=revise, retire=self.can_retire(fam) and (not revise or bool(self.dead(fam))))
-            response = self.router.sail(profile, items, family=fid, key=key, tools=tools, effort=effort, max_output=most,
-                                        cache_key=f"swarm-{fid}", cap_usd_day=float(self.cfg.get("family_usd_day", 2.0)),
-                                        tool_choice="required" if revise else "auto")
+            response: Any = None
+            via = "sail"
+            if claude:
+                session = session or ClaudeSession(self.prompt(), self.claude_tools())
+                response = self._claude_turn(fam, session, items=items[2:], current=current, revise=revise, tools=tools, key=key,
+                                             deadline=deadline, out=out)
+                if response is None:  # the turn is Sail's, and so is the rest of the cycle
+                    claude = False
+                else:
+                    via = "claude"
+            if response is None:
+                response = self.router.sail(profile, items, family=fid, key=key, tools=tools, effort=effort, max_output=most,
+                                            cache_key=f"swarm-{fid}", cap_usd_day=float(self.cfg.get("family_usd_day", 2.0)),
+                                            tool_choice="required" if revise else "auto")
+            author = response.model if via == "claude" else profile
             out["model_calls"] += 1
             out["cost_usd"] = round(out["cost_usd"] + float(response.cost_usd or 0), 6)
-            out["profile"] = profile
+            out["profile"] = author
             produced = [i for i in (response.output_items or []) if i.get("type") in ("message", "function_call")]
             current.extend(produced)
+            if via == "claude" and session is not None:
+                session.record(response.content, len(current))
+            offered = {t["name"] for t in tools}
             calls = list(response.function_calls or [])
             if not calls:
                 if response.output_text:
@@ -2181,6 +2295,13 @@ class Researcher:
                                     "output": json.dumps({"status": "refused", "reason": "the family is retired; no further tools run"})})
                     stop = True
                     continue
+                if via == "claude" and call.name not in offered and call.name != "retire":
+                    # Claude sees every tool every turn (its cached prefix); the turn's offer binds all the same.
+                    current.append({"type": "function_call_output", "call_id": call.call_id,
+                                    "output": json.dumps({"status": "refused", "reason": f"{call.name} is not offered on this turn "
+                                                          f"(offered: {', '.join(sorted(offered))})"})})
+                    out["claude_refused_calls"] = int(out.get("claude_refused_calls") or 0) + 1
+                    continue
                 hold = call.name == "gym_run" and holding(call.arguments)
                 if call.name in RUNS and out.get("hold"):
                     # A hold ends the cycle: a run call after it in the same answer is neither run nor queued.
@@ -2193,7 +2314,7 @@ class Researcher:
                         and pending is None and not call.error:
                     # One run (or one sweep) a cycle: this one opens the next cycle. Its call is answered now (every call keeps
                     # its output beside it in the history); its result arrives as a message when it has run.
-                    pending = {"call_id": call.call_id, "name": call.name, "arguments": call.arguments, "author": profile}
+                    pending = {"call_id": call.call_id, "name": call.name, "arguments": call.arguments, "author": author}
                     stop = True
                     current.append({"type": "function_call_output", "call_id": call.call_id,
                                     "output": json.dumps({"status": "queued", "note": "this run opens your next cycle; its result "
@@ -2211,7 +2332,7 @@ class Researcher:
                 elif call.error:
                     result = {"error": call.error}
                 else:
-                    result = self._execute(fam, call.name, call.arguments, out, author=profile)
+                    result = self._execute(fam, call.name, call.arguments, out, author=author)
                     out["tool_calls"] += 1
                     if call.name in RUNS:
                         # A stored result is no new run: the REVISE turn goes on (NO DUPLICATE RUNS).
@@ -2226,6 +2347,10 @@ class Researcher:
                 fam = self.store.family(fid) or fam
                 if self._terminal(fid, out):
                     stop = True
+            invalid = [c.error for c in calls if c.error] if via == "claude" else []
+            if invalid:  # answered as errors, never run: the rest of the cycle is Sail's
+                claude = False
+                out["claude_fallback"] = f"invalid: {invalid[0]}"[:200]
             if stop or pending:
                 break
         if self._terminal(fid, out):
