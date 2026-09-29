@@ -35,7 +35,8 @@ def at(text: str) -> dt.datetime:
 
 class FakeOps:
     def __init__(self):
-        self.awake_, self.running_ = True, False
+        self.awake_, self.running_, self.other = True, False, False
+        self.box_calls = 0
         self.receipts, self.progress_ = {}, None
         self.started, self.stopped, self.woken, self.leases = [], 0, 0, 0
         self.ready = (True, "caught up")
@@ -50,8 +51,9 @@ class FakeOps:
         self.woken += 1
         self.awake_ = True
 
-    def running(self):
-        return self.running_
+    def backfill(self):
+        self.box_calls += 1
+        return "ours" if self.running_ else ("other" if self.other else None)
 
     def stop(self):
         self.stopped += 1
@@ -151,6 +153,20 @@ class Controller(unittest.TestCase):
         self.assertEqual(self.ops.woken, 0)  # never woken inside the window
         record = self.tick("2026-09-30T07:31")
         self.assertEqual((record["phase"], record["stalls"], len(self.ops.started), self.ops.woken), ("running", 0, 2, 1))
+
+    def test_the_nightlys_own_pull_is_never_stopped_or_counted_as_the_fetch(self):
+        self.enable(not_before=None)
+        self.ops.other = True  # the nightly's `backfill.py run --stages 7` is a backfill process too
+        record = self.tick("2026-09-29T05:28")
+        self.assertEqual((record["phase"], self.ops.stopped, self.ops.leases), ("quiet", 0, 0))
+        calls = self.ops.box_calls
+        self.assertEqual(self.tick("2026-09-29T06:05")["phase"], "quiet")
+        self.assertEqual(self.ops.box_calls, calls)  # later in the window the data box is left alone
+        record = self.tick("2026-09-29T09:00")  # a late catch-up pull outside the window
+        self.assertEqual((record["phase"], self.ops.started), ("waiting", []))
+        self.assertIn("another backfill runs", record["why"])
+        self.ops.other = False
+        self.assertEqual(self.tick("2026-09-29T09:01")["phase"], "running")
 
     def test_a_run_the_window_deferred_is_not_a_stall(self):
         self.enable(not_before=None)

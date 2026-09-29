@@ -14,8 +14,10 @@ pull and the resume are strictly sequential. Until then (or instead) a standalon
 daemon leaves the ticks to it.
 
 Each tick, never raising:
-  - inside the quiet window (from `BACKSTOP_SECONDS` before it): stop a running backfill under the data-operation
-    lease. A backstop: the runner, started with `--nightly-quiet`, has already stopped before the window;
+  - inside the quiet window (from `BACKSTOP_SECONDS` before it until `QUIET_CHECK_SECONDS` after it opens): stop
+    this fetch's runner, if it still runs, under the data-operation lease. A backstop: the runner, started with
+    `--nightly-quiet`, has already stopped. Any other backfill process (the nightly's own pull is one) is never
+    touched, and later in the window the data box is left alone;
   - outside it, waking the data box only when it must: when no backfill runs, judge the last run this controller
     started from its exit receipt: 0 is complete; 75 was deferred by the window; anything else counts toward a stall
     when the run finished no new block task, and after `STALL_RUNS` such runs in a row the phase is `stalled` and
@@ -48,6 +50,9 @@ DIR_NAME = "backfill-window"
 REMOTE_BLOCKS = "/data/work/blocks.json"
 #: The controller's own stop, this long before the quiet window (the runner stops 10 minutes before it).
 BACKSTOP_SECONDS = 180
+#: It looks for a straggler only until this long after the window opens; after that it leaves the data box alone
+#: (the nightly job itself stops a backfill it finds, and its own pull is a backfill process too).
+QUIET_CHECK_SECONDS = 600
 #: No run starts this close to the quiet window (it would stop at once).
 START_LEAD_SECONDS = 1200
 #: Runs in a row that end without finishing a new block task before the fetch is `stalled`.
@@ -134,8 +139,26 @@ class Ops:
     def wake(self) -> None:
         self.data.wake()
 
-    def running(self) -> bool:
-        return self.data.backfill_running()
+    def backfill(self) -> str | None:
+        """Which backfill runs: "ours" (this fetch: --nightly-quiet with the uploaded blocks), "other" (the nightly's
+        pull, an image build's restart, a manual run), or None."""
+        from nightly import BACKFILL_IDENTITY
+
+        code = BACKFILL_IDENTITY + f"""
+try:
+    pid = int(pathlib.Path('/data/work/backfill.pid').read_text())
+except (OSError, ValueError):
+    pid = None
+if pid is None or identity(pid) is None:
+    print('none')
+else:
+    argv = (pathlib.Path('/proc') / str(pid) / 'cmdline').read_bytes().decode().split('\\0')
+    print('ours' if '--nightly-quiet' in argv and {REMOTE_BLOCKS!r} in argv else 'other')
+"""
+        out = self.api.exec(self.box, ["/opt/data-venv/bin/python", "-c", code], timeout=60)
+        if not out.ok or out.stdout.strip() not in ("ours", "other", "none"):
+            raise RuntimeError("could not read the backfill process state")
+        return None if out.stdout.strip() == "none" else out.stdout.strip()
 
     def stop(self) -> None:
         self.data.stop_backfill()
@@ -232,6 +255,14 @@ class Window:
             self.log(f"phase={record.get('phase')} why={record.get('why')} error={record.get('error')}")
         return record
 
+    @staticmethod
+    def _busy(record: dict[str, Any], running: str | None) -> bool:
+        if running == "ours":
+            record.update(phase="running", why=None)
+        elif running == "other":
+            record.update(phase="waiting", why="another backfill runs (the nightly's pull, an image build or a manual run)")
+        return running is not None
+
     def _tick(self, record: dict[str, Any], now: dt.datetime) -> None:
         ops = self.ops_factory()
         start, end = sl.next_quiet(now)
@@ -239,9 +270,11 @@ class Window:
         last = starts[-1] if starts else None
         if start - dt.timedelta(seconds=BACKSTOP_SECONDS) <= now < end:
             record["resume_after"] = iso(end)
-            if ops.awake() and ops.running():
+            # Only this fetch's own runner, and only around the window's start: never the nightly's pull.
+            if (now < start + dt.timedelta(seconds=QUIET_CHECK_SECONDS) and ops.awake()
+                    and ops.backfill() == "ours"):
                 with ops.lease():
-                    if ops.running():
+                    if ops.backfill() == "ours":
                         ops.stop()
                         record["paused_at"] = iso(now)
                         if last is not None:
@@ -251,16 +284,14 @@ class Window:
                 record.update(phase="quiet", why="the nightly job's quiet window")
             return
         awake = ops.awake()
-        if awake and ops.running():
-            record.update(phase="running", why=None)
+        if awake and self._busy(record, ops.backfill()):
             return
         stages = [int(s) for s in record.get("stages") or []]
         if last is not None and last.get("ended_at") is None:
             if not awake:  # a sleeping box runs nothing; its receipt is on its disk
                 ops.wake()
                 awake = True
-                if ops.running():
-                    record.update(phase="running", why=None)
+                if self._busy(record, ops.backfill()):
                     return
             code = ops.receipt(str(last.get("receipt")))
             done = block_done(ops.progress(), stages)
@@ -301,8 +332,7 @@ class Window:
         if not awake:  # woken only to start (the nightly puts it to sleep after each night)
             ops.wake()
         with ops.lease():
-            if ops.running():
-                record.update(phase="running", why=None)
+            if self._busy(record, ops.backfill()):
                 return
             done = block_done(ops.progress(), stages)
             if done is None and last is not None:
@@ -357,9 +387,9 @@ def disable(state: Path, *, stop: bool = False, ops: Callable[[], Any] | None = 
     window.write(record)
     if stop:
         handle = window.ops_factory()
-        if handle.awake() and handle.running():
+        if handle.awake() and handle.backfill() == "ours":
             with handle.lease():
-                if handle.running():
+                if handle.backfill() == "ours":
                     handle.stop()
                     record["stopped_at"] = iso(utcnow())
         window.write(record)
