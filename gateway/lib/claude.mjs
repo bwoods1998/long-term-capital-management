@@ -17,8 +17,20 @@
 // `cache_read_input_tokens`); a refusal is an HTTP 200 with `stop_reason: "refusal"` and is billed at
 // its usage; thinking cannot be disabled on Claude Opus 5.5 or Claude Sonnet 5.5 (Sept 29, 2026: Sonnet
 // 5.5's lowest setting, `between_tools`, is not admitted here) and is controlled by
-// `output_config.effort`. Fast mode (`speed`), US-only inference (`inference_geo`), tools and every
-// other surface that bills beyond what this body shows are refused rather than trusted.
+// `output_config.effort`. Fast mode (`speed`), US-only inference (`inference_geo`), server and
+// Anthropic-defined tools and every other surface that bills beyond what this body shows are refused
+// rather than trusted.
+//
+// TOOL CALLS (Sept 29, 2026: the swarm's top researchers run their tool loop on Claude Sonnet 5.5). The
+// House's OWN tools are admitted: custom tools that carry only a name, a description, an object
+// `input_schema`, a five-minute cache marker and `eager_input_streaming`; `tool_choice` auto or none
+// (forced choice is a 400 on Sonnet 5.5 and Opus 5.5); and the loop's turns, which hold `tool_use`
+// blocks (the model's calls, `caller` direct only), `tool_result` blocks (the House's answers, text only)
+// and the model's own `thinking` and `redacted_thinking` blocks passed back unchanged. A custom tool runs in
+// the House, not at Anthropic, so it bills nothing beyond the body: its definition and every turn of the
+// loop are bytes of the body and are counted in the worst case below. Anything with a `type` (web search,
+// code execution, bash, computer, MCP), `strict`, `defer_loading`, `allowed_callers`, images and documents
+// are still refused.
 
 import { parseUsdMicro } from './money.mjs';
 
@@ -48,6 +60,13 @@ export const STALE_HOLD_MS = 30 * 60 * 1000;
 export const RECENT_REQUESTS = 256;
 //: Anthropic accepts at most four cache breakpoints a request.
 const MAX_BREAKPOINTS = 4;
+//: A custom tool's name, as Anthropic requires it, and a tool call's id as this gateway admits it.
+const TOOL_NAME = /^[a-zA-Z0-9_-]{1,128}$/;
+const TOOL_ID = /^[A-Za-z0-9_-]{1,128}$/;
+//: The most tools a request may declare, and the most content blocks one turn may hold (a tool loop's turn holds
+//: its thinking, its text and its calls, or every call's result and a note).
+export const MAX_TOOLS = 16;
+export const MAX_BLOCKS = 64;
 
 /** A House request id as the meter keeps it, or null. */
 export function requestId(value) {
@@ -96,7 +115,18 @@ const micro = dollars => BigInt(Math.ceil(dollars * 1e6));
 /** The dearest geography multiplier a row names (1 without one): the worst case assumes it. */
 const dearestGeo = price => Math.max(1, ...Object.values(price.geo || {}));
 
-/** The most this call can cost, in micro-dollars: a byte per possible input token plus framing, all written to the cache. */
+/**
+ * The most this call can cost, in micro-dollars: a byte per possible input token plus framing, all written to the cache.
+ *
+ * Why it bounds a tool loop too (Sept 29, 2026). Every input token is a byte-level token that covers at least one byte of
+ * the text Anthropic renders, and that text is a subset of this body's JSON: the tool definitions, the system prompt and
+ * every turn (each call's input, each result, each note) are bytes of the body. The tool-use system prompt Anthropic adds
+ * when tools are present (286 tokens on Sonnet 5.5) is inside the 4,096-token framing. A thinking block passed back is
+ * billed as its full thinking, which it carries encrypted in its `signature`: base64 of the encrypted text, so more bytes
+ * of the body than the thinking has tokens. Output, thinking included, is at most `max_tokens`, and every input token is
+ * priced at the dearest input rate (a five-minute cache write). No admitted tool runs at Anthropic, so nothing bills
+ * beyond the body.
+ */
 export function worstCase(price, bodyBytes, maxTokens) {
   const inputTokens = bodyBytes + 4096;
   return micro(dearestGeo(price) * (inputTokens * price.cache_write + maxTokens * price.output) / 1e6);
@@ -148,6 +178,90 @@ function textBlocks(content, { allowString = true } = {}) {
   return marks;
 }
 
+const plain = value => !!value && typeof value === 'object' && !Array.isArray(value);
+const only = (value, keys) => Object.keys(value).every(key => keys.includes(key));
+
+/**
+ * The House's own tools (Sept 29, 2026): 1 to MAX_TOOLS custom tools, each only a name (unique), an optional description,
+ * an object `input_schema`, an optional five-minute cache marker and an optional `eager_input_streaming`. The number of
+ * markers, or null. A tool with a `type` is Anthropic's or a server's (web search, code execution, bash, computer, MCP):
+ * it runs, and may bill, beyond the body, so it is refused; so are `strict`, `defer_loading`, `allowed_callers` and
+ * `input_examples`.
+ */
+function toolDefs(tools) {
+  if (!Array.isArray(tools) || tools.length < 1 || tools.length > MAX_TOOLS) return null;
+  const names = new Set();
+  let marks = 0;
+  for (const tool of tools) {
+    if (!plain(tool) || !only(tool, ['name', 'description', 'input_schema', 'cache_control', 'eager_input_streaming'])) return null;
+    if (typeof tool.name !== 'string' || !TOOL_NAME.test(tool.name) || names.has(tool.name)) return null;
+    names.add(tool.name);
+    if (tool.description !== undefined && typeof tool.description !== 'string') return null;
+    if (!plain(tool.input_schema) || tool.input_schema.type !== 'object') return null;
+    if (tool.eager_input_streaming !== undefined && typeof tool.eager_input_streaming !== 'boolean') return null;
+    const mark = cacheMark(tool.cache_control);
+    if (mark === null) return null;
+    marks += mark;
+  }
+  return marks;
+}
+
+/** `tool_choice`: absent, or auto or none (forced `any`/`tool` is a 400 on Sonnet 5.5 and Opus 5.5), and only with tools. */
+function toolChoiceValid(choice, hasTools) {
+  if (choice === undefined) return true;
+  if (!hasTools || !plain(choice) || !['auto', 'none'].includes(choice.type) || !only(choice, ['type', 'disable_parallel_tool_use'])) return false;
+  return choice.disable_parallel_tool_use === undefined || typeof choice.disable_parallel_tool_use === 'boolean';
+}
+
+/** A `tool_result`'s content: a string, or 1-16 plain text blocks. */
+function resultContent(content) {
+  if (content === undefined || typeof content === 'string') return true;
+  return Array.isArray(content) && content.length >= 1 && content.length <= 16
+    && content.every(block => plain(block) && block.type === 'text' && typeof block.text === 'string' && only(block, ['type', 'text']));
+}
+
+/**
+ * One turn's content: a string, or 1 to MAX_BLOCKS blocks; the number of cache markers, or null. Both roles: text (an
+ * assistant's may carry `citations: null`, as Anthropic returns it). A user turn: the House's `tool_result` blocks (text
+ * content only). An assistant turn: the model's `tool_use` blocks (an object input; `caller` only direct: a call made from
+ * code execution would bill beyond the body), and its `thinking` (with its signature, which cannot be empty; no marker,
+ * which Anthropic forbids on thinking) and `redacted_thinking` blocks passed back unchanged. Anything else (an image, a
+ * document, a search result, a server tool's block) is refused.
+ */
+function turnBlocks(role, content) {
+  if (typeof content === 'string') return 0;
+  if (!Array.isArray(content) || content.length < 1 || content.length > MAX_BLOCKS) return null;
+  let marks = 0;
+  for (const block of content) {
+    if (!plain(block)) return null;
+    let ok;
+    if (block.type === 'text') {
+      ok = typeof block.text === 'string' && only(block, ['type', 'text', 'cache_control', ...(role === 'assistant' ? ['citations'] : [])])
+        && (block.citations === undefined || block.citations === null);
+    } else if (block.type === 'tool_result' && role === 'user') {
+      ok = only(block, ['type', 'tool_use_id', 'content', 'is_error', 'cache_control']) && typeof block.tool_use_id === 'string'
+        && TOOL_ID.test(block.tool_use_id) && resultContent(block.content)
+        && (block.is_error === undefined || typeof block.is_error === 'boolean');
+    } else if (block.type === 'tool_use' && role === 'assistant') {
+      ok = only(block, ['type', 'id', 'name', 'input', 'caller', 'cache_control']) && typeof block.id === 'string' && TOOL_ID.test(block.id)
+        && typeof block.name === 'string' && TOOL_NAME.test(block.name) && plain(block.input)
+        && (block.caller === undefined || (plain(block.caller) && block.caller.type === 'direct' && only(block.caller, ['type'])));
+    } else if (block.type === 'thinking' && role === 'assistant') {
+      ok = only(block, ['type', 'thinking', 'signature']) && typeof block.thinking === 'string'
+        && typeof block.signature === 'string' && block.signature.length > 0;
+    } else if (block.type === 'redacted_thinking' && role === 'assistant') {
+      ok = only(block, ['type', 'data']) && typeof block.data === 'string' && block.data.length > 0;
+    } else {
+      ok = false;
+    }
+    if (!ok) return null;
+    const mark = cacheMark(block.cache_control);
+    if (mark === null) return null;
+    marks += mark;
+  }
+  return marks;
+}
+
 function outputConfigValid(config) {
   if (config === undefined) return true;
   if (!config || typeof config !== 'object' || Array.isArray(config) || Object.keys(config).some(key => !['effort', 'format'].includes(key))) return false;
@@ -163,7 +277,9 @@ function outputConfigValid(config) {
  * Check a request body before it is sent: `{ model, price, maxTokens, stream }` or `{ error, status }`. Only inline
  * text, adaptive thinking, an effort and a JSON-schema answer format are admitted, and an assistant turn last is
  * refused (Anthropic refuses a prefill). `stream: true` (Sept 27, 2026) is metered from the event stream itself
- * (`StreamMeter`) and may ask for up to MAX_TOKENS_STREAM.
+ * (`StreamMeter`) and may ask for up to MAX_TOKENS_STREAM. The House's own tools and its tool loop's turns (Sept 29,
+ * 2026: `toolDefs`, `toolChoiceValid`, `turnBlocks`) are admitted too; the cache markers of the system prompt, the tools
+ * and every turn together are at most four.
  */
 export function admit(body, env = {}) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return { error: 'The request must be a JSON object.', status: 400 };
@@ -173,16 +289,27 @@ export function admit(body, env = {}) {
   if (!row) return { error: `No price is configured for model "${model}"; an unpriced call is refused.`, status: 403 };
   if (body.stream !== undefined && typeof body.stream !== 'boolean') return { error: 'stream is true or false.', status: 400 };
   const stream = body.stream === true;
-  const allowed = new Set(['model', 'max_tokens', 'system', 'messages', 'thinking', 'output_config', 'stream']);
+  const allowed = new Set(['model', 'max_tokens', 'system', 'messages', 'thinking', 'output_config', 'stream', 'tools', 'tool_choice']);
   const extra = Object.keys(body).filter(key => !allowed.has(key));
   if (extra.length) {
-    return { error: `Only inline text with adaptive thinking is priced by this gateway; refused: ${extra.slice(0, 4).join(', ')}.`, status: 400 };
+    return { error: `Only inline text, the House's own tools and adaptive thinking are priced by this gateway; refused: ${extra.slice(0, 4).join(', ')}.`, status: 400 };
   }
   let marks = 0;
   if (body.system !== undefined) {
     const found = textBlocks(body.system);
     if (found === null) return { error: 'The system prompt must be a string or text blocks.', status: 400 };
     marks += found;
+  }
+  if (body.tools !== undefined) {
+    const found = toolDefs(body.tools);
+    if (found === null) {
+      return { error: `tools are 1 to ${MAX_TOOLS} of the House's own: a unique name, a description, an object input_schema, `
+        + 'a five-minute cache marker and eager_input_streaming, nothing else (no server or Anthropic-defined tool).', status: 400 };
+    }
+    marks += found;
+  }
+  if (!toolChoiceValid(body.tool_choice, body.tools !== undefined)) {
+    return { error: 'tool_choice is auto or none, and only with tools (forced tool choice is refused by Sonnet 5.5 and Opus 5.5).', status: 400 };
   }
   const messages = body.messages;
   if (!Array.isArray(messages) || messages.length < 1 || messages.length > 64) {
@@ -191,10 +318,10 @@ export function admit(body, env = {}) {
   for (const turn of messages) {
     if (!turn || typeof turn !== 'object' || Array.isArray(turn) || !['user', 'assistant'].includes(turn.role)
         || Object.keys(turn).some(key => !['role', 'content'].includes(key))) {
-      return { error: 'Each turn is a user or assistant role with text content.', status: 400 };
+      return { error: 'Each turn is a user or assistant role with text, tool or thinking content.', status: 400 };
     }
-    const found = textBlocks(turn.content);
-    if (found === null) return { error: 'Each turn is a user or assistant role with text content.', status: 400 };
+    const found = turnBlocks(turn.role, turn.content);
+    if (found === null) return { error: 'Each turn is a user or assistant role with text, tool or thinking content.', status: 400 };
     marks += found;
   }
   if (messages.at(-1).role !== 'user') return { error: 'The last turn must be the user\'s: an assistant prefill is refused.', status: 400 };
