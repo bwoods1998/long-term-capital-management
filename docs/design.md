@@ -210,13 +210,17 @@ Agent count and simulated years measure activity; passing unseen evidence measur
 - **An agent is one family**: a mechanism (why the trade should make money), a structure type and a
   universe slice, owned by a researcher model with a notebook, a lineage of program versions and a
   record. Two agents never share a family; forks start new families.
-- **A two-sided single is one family** (`long_single`, not yet released): one program whose every open
-  is one long call or one long put, the side chosen by its rule, stated with why it is drift-neutral. It
-  replaces the call/put twins, which each carried the market's drift and doubled the births where 600
-  of 674 births had died untested under the idle rule (the strategist, Sept 29). It is a declared
+- **A two-sided single is one family** (`long_single`, not yet released): one program that opens one
+  long call or one long put at a time, the side chosen by its rule, stated with why its calls and puts
+  balance. It is only as drift-neutral as that rule: the drift screen charges whatever net exposure it
+  holds, as for any family. It replaces the call/put twins, which each carried the market's drift and
+  doubled the births where 600 of 674 births had died untested under the idle rule (the strategist,
+  Sept 29); a twin beside a living `long_single` or the other side of the same idea is refused, and a
+  `long_single` that merges a twin pair carries both twins' trials and looks. It is a declared
   structure, never an order type: each order is a `long_call` or a `long_put`, checked, sized and
-  published as one, and the family is real only while both are real types. The money table, its
-  digest, the gateway, the verifier and the Gym are unchanged.
+  published as one, and the family is real only while both are real types. The live path refuses a
+  real open of any other type from it; the Gym and the shadow book judge each order by its own type,
+  as for every family. The money table, its digest, the gateway, the verifier and the Gym are unchanged.
 - **The program** is one Python file with `NEEDS`, `PARAMS` and `decide(ctx)`, run at a cadence it
   declares (1 to 30 minutes). `ctx` gives the time of day, weekday, days to each expiry, event flags
   (FOMC, CPI, jobs, earnings, monthly expiry, index rebalances), recent underlying bars, the chain

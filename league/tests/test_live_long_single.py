@@ -1,7 +1,8 @@
 """`long_single` on the live path (Sept 29, 2026): a family DECLARED two-sided, whose program's every open is one long call or
 one long put. Its real eligibility (tuition, Probe, Sized) needs BOTH singles among the money table's real types; the table,
 its digest and the gateway still name order types only; every real order carries its own type (`long_call` or `long_put`)
-and is checked and sized by it. The venue's shapes come from `live_fakes` with invented numbers."""
+and is checked and sized by it, and a real open of any other type from it is refused (review of #425, F3; a one-sided
+family is unchanged). The venue's shapes come from `live_fakes` with invented numbers."""
 
 import copy
 import unittest
@@ -14,7 +15,7 @@ from league.tests.test_live_step import HAVE, LiveCase
 
 if HAVE:
     from league.live.real import SINGLE_TYPES
-    from league.tests.live_fakes import CONDOR, family
+    from league.tests.live_fakes import CONDOR, VERTICAL, family
 
 REPO = Path(__file__).resolve().parents[2]
 #: The money digest the grant is pinned to (R10, Sept 29, 2026): `long_single` is no money rule and must not move it.
@@ -213,14 +214,39 @@ class OnTheLivePath(LiveCase):
         self.assertEqual(sorted(live.instances), [], "a long_single needs long_call and long_put real for tuition")
         self.assertEqual(self.venue.sent, [])
 
-    def test_each_real_order_is_still_checked_by_its_own_type(self):
-        # A long_single family whose program sends a credit structure: its declared type grants nothing, the order is refused
-        # by its own type (a credit type under $2,000 of equity is not real).
+    def test_a_long_single_family_opens_no_other_type_for_real(self):
+        # Review of #425 (F3): its declared type is enforced on real opens. A debit vertical is a real type, and a
+        # debit_vertical family sends it (`test_live_step`); from a long_single family it is refused before any check.
+        live = self.make([family("stray", VERTICAL, band="probe", structure="long_single", typical=60.0)])
+        self.run_to(9, 33)
+        self.assertIn("stray@1:r", live.instances)
+        self.assertEqual(live.instances["stray@1:r"].structure, "long_single", "the instance carries the declared structure")
+        self.assertEqual([b for b in self.venue.sent if b.get("position_intent") == "buy_to_open"], [])
+        self.assertIn("a long_single family opens only long_call or long_put for real, never debit_vertical", self.refusals())
+
+    def test_a_credit_structure_from_it_is_refused_by_the_declared_type_first(self):
         live = self.make([family("stray", CONDOR, band="probe", structure="long_single", typical=60.0)])
         self.run_to(9, 33)
         self.assertIn("stray@1:r", live.instances)
         self.assertEqual([b for b in self.venue.sent if b.get("position_intent") == "buy_to_open"], [])
+        self.assertIn("a long_single family opens only long_call or long_put for real, never iron_condor", self.refusals())
+
+    def test_each_real_order_is_still_checked_by_its_own_type(self):
+        # Every other family is judged by each order's own type, as before: a debit_vertical family's condor is refused as a
+        # credit structure under $2,000 of equity, never by a declared type.
+        live = self.make([family("condor", CONDOR, band="probe", structure="debit_vertical", typical=60.0)])
+        self.run_to(9, 33)
+        self.assertEqual([b for b in self.venue.sent if b.get("position_intent") == "buy_to_open"], [])
         self.assertTrue(any("iron_condor" in w and "credit structure" in w for w in self.refusals()), self.refusals())
+        self.assertFalse(any("opens only" in w for w in self.refusals()))
+
+    def test_a_one_sided_single_family_is_left_as_it_was(self):
+        # A long_call family's program may open a long_put (the long_call starter does): each is judged by its own type.
+        live = self.make([family("calls", TWO_SIDED, band="probe", structure="long_call", typical=60.0)])
+        self.run_to(9, 33)
+        opens = [b for b in self.venue.sent if b.get("position_intent") == "buy_to_open"]
+        self.assertEqual([b["symbol"][-9] for b in opens], ["C", "P"])
+        self.assertEqual(sorted(p.type for p in live.book.positions.values()), ["long_call", "long_put"])
 
 
 if __name__ == "__main__":

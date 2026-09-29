@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from . import DB_NAME, evidence, public
-from .store import loads
+from .store import loads, priors_of
 
 
 def _iso(t: float) -> str:
@@ -54,16 +54,16 @@ def site_inputs(root: str | Path, *, retired_shown: int = 24) -> dict[str, Any]:
     # A family's trials are its lineage's (`SwarmStore.lineage_trials`: every member, and any lineage its root was born
     # on the slice of), the count its evidence is deflated by.
     by_line: dict[str, int] = {}
-    prior: dict[str, str] = {}
+    prior: dict[str, list[str]] = {}
     connected: dict[str, set[str]] = {}
     for a, b in links:
         connected.setdefault(a, set()).add(b)
         connected.setdefault(b, set()).add(a)
     for f in fams:
         by_line[f["lineage"]] = by_line.get(f["lineage"], 0) + int(f["trials"] or 0)
-        before = (loads(f["spec"], {}) or {}).get("prior_lineage")
+        before = priors_of(loads(f["spec"], {}) or {})  # `prior_lineage`, and a singles' slice's `prior_lineages`
         if f["id"] == f["lineage"] and before:
-            prior[f["id"]] = str(before)
+            prior[f["id"]] = before
 
     def lineage_trials(line: str) -> int:
         seen, pending = set(), [line]
@@ -73,7 +73,7 @@ def site_inputs(root: str | Path, *, retired_shown: int = 24) -> dict[str, Any]:
                 continue
             seen.add(line)
             pending.extend(connected.get(line, set()) - seen)
-            pending.append(prior.get(line, ""))
+            pending.extend(prior.get(line, ()))
         return sum(by_line.get(x, 0) for x in seen)
 
     alive = [f for f in fams if not f["retired_at"]]

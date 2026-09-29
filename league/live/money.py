@@ -98,8 +98,10 @@ def cents(value: Decimal) -> Decimal:
 
 #: A family's DECLARED structure that is not itself an order type, and the order types its orders may be (Sept 29, 2026).
 #: `long_single`: one program whose every open is ONE long call or ONE long put (one leg, long), the side chosen by its
-#: rule, so it is drift-neutral where a call/put twin pair was two one-sided families. Every other declared structure is
-#: its own one order type. The money table and the gateway name order types only; none of these is ever one.
+#: rule, in place of a call/put twin pair (two one-sided families). Every other declared structure is its own one order
+#: type. The money table and the gateway name order types only; none of these is ever one. The live path refuses a real
+#: open of any other type from a family that declared one of these (`OptionsLive._real_intent`); the Gym and the shadow
+#: book judge each order by its own type, as for every family.
 DECLARED_TYPES: dict[str, tuple[str, ...]] = {"long_single": ("long_call", "long_put")}
 
 

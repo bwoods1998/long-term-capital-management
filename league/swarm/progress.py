@@ -21,7 +21,7 @@ from zoneinfo import ZoneInfo
 from ..live import money as M
 from . import DB_NAME, evidence, settings
 from .gate import run_sha
-from .store import loads
+from .store import loads, priors_of
 
 TARGET_KEYS = {
     "candidate": ("validation_run", "validation_trades", "validation_days", "validation_mean", "validation_t",
@@ -84,7 +84,8 @@ def _lines(fam: Mapping, families: Mapping[str, Mapping], links: Sequence, *, pr
         seen.add(line)
         pending.extend(graph.get(line, set()) - seen)
         if prior:
-            pending.append((families.get(line, {}).get("spec") or {}).get("prior_lineage"))
+            # Every prior lineage (`store.priors_of`: `prior_lineage`, and a singles' slice's `prior_lineages`).
+            pending.extend(priors_of(families.get(line, {}).get("spec") or {}))
     return seen
 
 

@@ -17,7 +17,8 @@ from league.swarm.architect import SYSTEM, Architect
 from league.swarm.gate import Gate
 from league.swarm.researcher import Researcher
 from league.swarm.seeds import BUILDS, BUILD_PARAMS, program_for
-from league.swarm.store import (LONG_SINGLE, SINGLE_SIDES, STRUCTURES, same_slice, structure_query, structure_text)
+from league.swarm.store import (LONG_SINGLE, SINGLE_SIDES, STRUCTURES, priors_of, same_slice, slice_priors, structure_query,
+                                 structure_text)
 from league.tests.test_swarm_progress import ProgressCase
 from league.tests.test_swarm_rounds import RoundCase
 
@@ -68,8 +69,11 @@ class TheArchitect(RoundCase):
     def test_the_prompt_describes_it_and_asks_for_no_twins(self):
         self.assertIn("long_single", SYSTEM)
         self.assertIn("long_single is one program\nthat buys calls or puts by its rule", SYSTEM)
-        self.assertIn("state the side rule in\nthe sketch and why it is drift-neutral", SYSTEM)
+        self.assertIn("state the side rule in\nthe sketch and why its calls and puts balance (the drift screen charges whatever net "
+                      "exposure it holds)", SYSTEM)
+        self.assertNotIn("drift-neutral", SYSTEM, "only as neutral as its side rule (review of #425)")
         self.assertIn("never a long_call and long_put twin pair", SYSTEM)
+        self.assertIn("a long_single that revises a call/put twin pair inherits both twins'", SYSTEM)
 
     def test_a_single_options_gap_is_long_single_and_never_a_one_sided_twin(self):
         arch = self.arch()
@@ -132,10 +136,156 @@ class TheArchitect(RoundCase):
         self.assertEqual(structure_query("debit_vertical"), "debit_vertical", "every other family's query is unchanged")
 
 
+CALLS = "After a large overnight gap up the first hour keeps going; buy calls on the side of the gap."
+PUTS = "After a large overnight gap down the first hour keeps going; buy puts on the side of the gap."
+
+
+class TwinsAndLineages(RoundCase):
+    """The review of #425: a long_single that merges a twin pair counts BOTH twins (trials, looks, validated versions); a
+    new lineage on a singles' slice counts the newest dead lineage of each type there; and a one-sided twin is refused
+    beside a living long_single or the other side of the same idea."""
+
+    def arch(self):
+        return Architect(self.store, self.router, self.settings, clock=self.clock)
+
+    def twin(self, fid, structure, mechanism, *, trials, looks=0, retire=True):
+        self.store.add_family(spec(fid, structure=structure, mechanism=mechanism), origin="architect")
+        version = self.store.add_version(fid, f"# {fid}\nNEEDS = {{'roots': ['SPY']}}\nPARAMS = {{}}\ndef decide(ctx):\n    return []\n",
+                                         {}, author="test")
+        self.store.add_run(fid, version["n"], {"run_id": f"validation-{fid}", "status": "ok", "trials": 1,
+                                               "summary": {"t_daily": 2.0, "days_traded": 40}},
+                           window="validation", stress=1.0, purpose="validation")
+        self.store.update_family(fid, trials=trials)
+        for n in range(looks):
+            self.store.add_look(fid, version["n"], f"{fid}-look-{n}", passed=False, p_value=None, detail={})
+        if retire:
+            self.clock.advance(60)
+            self.store.retire(fid, "idle rule: untested")
+        return version
+
+    def dead_pair(self):
+        # Review 2's probe: the call twin 40 trials and no looks, the put twin 30 trials and 3 looks; the call retired last.
+        self.twin("aftershock-put", "long_put", PUTS, trials=30, looks=3)
+        self.twin("aftershock-call", "long_call", CALLS, trials=40)
+        self.assertEqual([f["id"] for f in self.store.families(alive=False)], ["aftershock-put", "aftershock-call"])
+
+    def test_a_long_single_that_merges_a_dead_twin_pair_counts_both_twins(self):
+        self.dead_pair()
+        born = self.arch().admit([{"slug": "aftershock", "structure": "long_single", "roots": ["SPY"], "dte": [0, 2],
+                                   "mechanism": MECHANISM}])
+        self.assertEqual(born, ["aftershock"])
+        fam = self.store.family("aftershock")
+        self.assertEqual(fam["parent"], "aftershock-call", "the newest dead twin is its parent")
+        self.assertIn("aftershock-put", self.store._connected_lineages(fam["lineage"]), "and the other twin is joined")
+        self.assertEqual(self.store.lineage_trials("aftershock"), 70, "40 + 30, never the one twin's 40")
+        self.assertEqual(self.store.lineage_looks("aftershock"), 3, "the put twin's three looks: no fresh ration")
+        self.assertEqual(self.store.lineage_validated("aftershock")[0], 2, "D2's N: both twins' validated versions")
+        self.assertEqual((fam["inherited_trials"], fam["inherited_looks"]), (70, 3), "recorded at birth too")
+        # The site's copies of the lineage walk read the link as the store does.
+        [agent] = [a for a in sitefeed.site_inputs(self.root)["agents"] if a["id"] == "aftershock"]
+        self.assertEqual(agent["record"]["trials"], 70)
+
+    def test_naming_one_twin_as_parent_joins_the_other_too(self):
+        self.dead_pair()
+        born = self.arch().admit([{"slug": "aftershock-both", "structure": "long_single", "roots": ["SPY"], "dte": [0, 2],
+                                   "mechanism": "Overnight gaps continue into the open; pick the gap's side with one option.",
+                                   "parent": "aftershock-put"}])
+        self.assertEqual(born, ["aftershock-both"])
+        self.assertEqual(self.store.family("aftershock-both")["parent"], "aftershock-put")
+        self.assertEqual((self.store.lineage_trials("aftershock-both"), self.store.lineage_looks("aftershock-both")), (70, 3))
+
+    def test_a_long_single_continues_a_living_twin_and_joins_the_other(self):
+        self.twin("gap-call", "long_call", CALLS, trials=12, looks=1, retire=False)
+        self.twin("gap-put", "long_put", PUTS, trials=8, looks=2, retire=False)
+        born = self.arch().admit([{"slug": "gap-both", "structure": "long_single", "roots": ["SPY"], "dte": [0, 2],
+                                   "mechanism": MECHANISM}])
+        self.assertEqual(born, ["gap-both"])
+        fam = self.store.family("gap-both")
+        self.assertEqual(fam["parent"], "gap-put", "the newest living twin's lineage continues")
+        self.assertEqual((self.store.lineage_trials("gap-both"), self.store.lineage_looks("gap-both")), (20, 3))
+        self.assertIsNone(fam["spec"].get("prior_lineage"))
+
+    def test_a_one_sided_twin_is_refused_beside_a_living_long_single_or_the_other_side(self):
+        arch = self.arch()
+        self.assertEqual(arch.admit([{"slug": "gap-both", "structure": "long_single", "roots": ["SPY"], "dte": [0, 2],
+                                      "mechanism": MECHANISM}]), ["gap-both"])
+        # Review 2's probe: both sides of the same idea on the same roots, beside the living long_single.
+        refused = [{"slug": "aftershock-call", "structure": "long_call", "roots": ["SPY"], "dte": [0, 2], "mechanism": CALLS},
+                   {"slug": "aftershock-put", "structure": "long_put", "roots": ["SPY"], "dte": [0, 2], "mechanism": PUTS}]
+        self.assertEqual(arch.admit(refused), [])
+        # On other roots, or another idea, a one-sided single is still admitted (the singles are first-class choices).
+        self.assertEqual(arch.admit([{"slug": "qqq-call", "structure": "long_call", "roots": ["QQQ"], "dte": [0, 2],
+                                      "mechanism": CALLS},
+                                     {"slug": "pin-put", "structure": "long_put", "roots": ["SPY"], "dte": [0, 2],
+                                      "mechanism": "Dealers pin the close near large open interest strikes; buy the put away from the pin."}]),
+                         ["qqq-call", "pin-put"])
+
+    def test_a_twin_pair_proposed_in_one_pass_births_one_side(self):
+        born = self.arch().admit([
+            {"slug": "gap-call", "structure": "long_call", "roots": ["SPY", "QQQ"], "dte": [0, 2], "mechanism": CALLS},
+            {"slug": "gap-put", "structure": "long_put", "roots": ["QQQ", "SPY"], "dte": [0, 2], "mechanism": PUTS}])
+        self.assertEqual(born, ["gap-call"], "the put is the living call's twin (roots in any order)")
+
+    def test_a_new_one_sided_idea_after_a_dead_long_single_keeps_its_own_slices_history(self):
+        # Review 2's probe: dead c1 (long_call), dead p1 (long_put), then a long_single s1 of another idea born and died.
+        self.twin("c1", "long_call", CALLS, trials=10)
+        self.twin("p1", "long_put", PUTS, trials=20)
+        other = "Index rebalancing flows move the close; buy the side the rebalance pushes with one option."
+        self.assertEqual(self.arch().admit([{"slug": "s1", "structure": "long_single", "roots": ["SPY"], "dte": [0, 2],
+                                             "mechanism": other}]), ["s1"])
+        s1 = self.store.family("s1")
+        self.assertEqual((s1["spec"]["prior_lineage"], s1["spec"]["prior_lineages"]), ("p1", ["p1", "c1"]),
+                         "a long_single counts the newest dead lineage of each single on its slice, newest first")
+        self.assertEqual(self.store.lineage_trials("s1"), 30)
+        self.store.update_family("s1", trials=5)
+        self.clock.advance(60)
+        self.store.retire("s1", "idle rule: untested")
+        born = self.arch().admit([{"slug": "c2", "structure": "long_call", "roots": ["SPY"], "dte": [0, 2],
+                                   "mechanism": "Earnings drift in the index heavyweights lifts the open; buy calls early."}])
+        self.assertEqual(born, ["c2"])
+        c2 = self.store.family("c2")
+        self.assertEqual((c2["spec"]["prior_lineage"], c2["spec"]["prior_lineages"]), ("c1", ["c1", "s1"]), "own type first")
+        self.assertEqual(self.store.lineage_trials("c2"), 35, "c1's 10 (missed before), s1's 5 and, through s1, p1's 20")
+        self.assertEqual(c2["inherited_trials"], 35)
+        self.assertEqual(self.store.lineage_looks("c2"), 0, "a prior lineage's looks never count")
+        # The site's two copies of the chain walk agree with the store.
+        [agent] = [a for a in sitefeed.site_inputs(self.root)["agents"] if a["id"] == "c2"]
+        self.assertEqual(agent["record"]["trials"], 35)
+        families = {f["id"]: f for f in self.store.families()}
+        links = [(r["a"], r["b"]) for r in self.store._all("SELECT a,b FROM lineage_links")]
+        self.assertEqual(progress._lines(families["c2"], families, links, prior=True), {"c2", "c1", "s1", "p1"})
+        self.assertEqual(progress._lines(families["c2"], families, links, prior=False), {"c2"})
+
+    def test_every_other_structure_keeps_its_one_prior_lineage(self):
+        dead = [{"structure": "debit_vertical", "lineage": "v1"}, {"structure": "debit_vertical", "lineage": "v2"}]
+        self.assertEqual(slice_priors(dead, "debit_vertical"), ["v2"], "the newest dead lineage, exactly as before")
+        self.assertEqual(slice_priors([], "long_single"), [])
+        self.twin("v1", "debit_vertical", MECHANISM + " Verticals.", trials=6)
+        born = self.arch().admit([{"slug": "v2", "structure": "debit_vertical", "roots": ["SPY"], "dte": [0, 2],
+                                   "mechanism": "Dealers pin the close near large open interest strikes; a vertical away from it."}])
+        self.assertEqual(born, ["v2"])
+        v2 = self.store.family("v2")
+        self.assertEqual(v2["spec"]["prior_lineage"], "v1")
+        self.assertNotIn("prior_lineages", v2["spec"], "one prior: the spec a store before #425 wrote")
+        self.assertEqual(priors_of({"prior_lineage": "v1"}), ["v1"])
+        self.assertEqual(priors_of({"prior_lineage": "a", "prior_lineages": ["a", "b"]}), ["a", "b"])
+        self.assertEqual(priors_of(None), [])
+
+    def test_link_lineages_joins_only_two_real_distinct_lineages(self):
+        self.twin("c1", "long_call", CALLS, trials=1, retire=False)
+        self.twin("p1", "long_put", PUTS, trials=2, retire=False)
+        self.assertFalse(self.store.link_lineages("c1", "c1"))
+        self.assertFalse(self.store.link_lineages("c1", "nobody"))
+        self.assertTrue(self.store.link_lineages("p1", "c1"))
+        self.assertFalse(self.store.link_lineages("c1", "p1"), "once")
+        self.assertEqual(self.store.lineage_trials("c1"), 3)
+
+
 class TheWords(RoundCase):
     def test_the_researcher_reviewer_and_diagnostician_are_told_what_its_orders_are(self):
         text = structure_text("long_single")
-        for words in ("one long_call or one long_put", "never \"long_single\"", "side rule", "drift-neutral"):
+        for words in ("one long_call or one long_put", "never \"long_single\"", "side rule", "why its calls and puts balance",
+                      "the drift screen charges whatever net exposure it holds"):
             self.assertIn(words, text)
         self.assertEqual(structure_text("iron_condor"), "iron_condor", "no other family's prompt changes")
         fam = self.store.add_family(spec("two-sided"), origin="architect")

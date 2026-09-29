@@ -45,7 +45,7 @@ from .guard import SailGuard, provider_reader
 from .pool import GymPool
 from .researcher import Researcher, dormant_count, dormant_limit, migrate_objective
 from .seeds import SEEDS, family_spec, program_for
-from .store import SwarmStore
+from .store import SwarmStore, same_slice, slice_priors
 from .strategist import PAIR_SECONDS, Strategist
 from .tournament import INDEX, NOT_ROTATED, Tournament
 
@@ -354,12 +354,15 @@ class Swarm:
                 spec.update({"id": seed["id"] if roots == own else f"{seed['id']}-{roots[0].lower()}", "roots": roots,
                              "needs": {**spec["needs"], "roots": roots}, "seed": seed["id"]})
                 founder = next((f for f in kin if f["origin"] in ("seed", "reseed")), None)
-                dead = [f for f in families if f["retired_at"] and f["structure"] == seed["structure"] and sorted(f["roots"]) == roots]
+                # The slice's dead lineages (a single's slice holds long_single too: `same_slice`, `slice_priors`; for
+                # every other structure this is the newest dead family's lineage, as before).
+                dead = [f for f in families if f["retired_at"] and same_slice(f["structure"], seed["structure"])
+                        and sorted(f["roots"]) == roots]
                 with self.store.atomic():
                     if len(self.store.families(alive=True)) >= int(pop.get("start", 48)):
                         return born
                     fam = self.store.add_family(spec, origin="reseed", parent=founder["id"] if founder else None,
-                                                prior_lineage=dead[-1]["lineage"] if dead and not founder else None)
+                                                prior_lineage=slice_priors(dead, seed["structure"]) if dead and not founder else None)
                 self.store.event("swarm.born", fam["id"], {"parent": founder["id"] if founder else None, "mechanism": fam["mechanism"],
                                                             "structure": fam["structure"], "roots": fam["roots"], "origin": "reseed",
                                                             "founder": seed.get("founder")})

@@ -893,8 +893,11 @@ class ArchitectTests(RoundCase):
         self.assertIn("Propose 12 new families", prompt, "refill asks for the bounded gap, not a minimum of three")
 
     def test_simple_call_and_put_proposals_are_admitted_without_a_promotion_shortcut(self):
-        proposals = [{"slug": kind, "structure": kind, "roots": ["SPY"], "dte": [0, 2],
-                      "mechanism": "A synthetic directional research hypothesis with a single option and capped premium."}
+        # Two different mechanisms: the same idea on both sides is one long_single family, and its twin is refused
+        # (review of #425; `test_swarm_long_single`).
+        mechanisms = {"long_call": "A synthetic upside research hypothesis: buy a single call after a breakout with capped premium.",
+                      "long_put": "Dealer hedging flows lag an intraday selloff; a single put captures the continuation at capped cost."}
+        proposals = [{"slug": kind, "structure": kind, "roots": ["SPY"], "dte": [0, 2], "mechanism": mechanisms[kind]}
                      for kind in ("long_call", "long_put")]
         arch = Architect(self.store, self.router, self.settings, clock=self.clock)
         born = arch.admit(proposals)
