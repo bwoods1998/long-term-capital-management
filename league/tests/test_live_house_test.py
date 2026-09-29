@@ -499,6 +499,30 @@ class TheProgram(HouseCase):
         self.assertEqual(len(self.opens()), 1)
         del close
 
+    def test_a_restored_real_instance_is_real_and_keeps_its_saved_mode(self):
+        """Sept 29, 2026: `_restore_real_instances` passed the saved mode in `observe`'s place, so every restored real
+        instance came back an observe one (truthy) and in mode "live" whatever was saved."""
+        self.install(hold=600)
+        live = self.start()
+        self.run_to(9, 31)
+        self.assertIn(HT.INSTANCE, live.instances)
+        live.state.execute("UPDATE instances SET mode='exit_only' WHERE id=?", (HT.INSTANCE,))
+        self.restart()
+        inst = self.live.instances[HT.INSTANCE]
+        self.assertIs(inst.observe, False)
+        self.assertEqual(inst.kind, "real")
+        self.assertEqual(inst.mode, "exit_only")
+
+    def test_a_restored_live_instance_still_trades_real(self):
+        self.install(hold=600)
+        live = self.start()
+        self.run_to(9, 31)
+        self.assertEqual(len(live.book.positions), 1)
+        self.restart()
+        inst = self.live.instances[HT.INSTANCE]
+        self.assertIs(inst.observe, False)
+        self.assertEqual(inst.mode, "live")
+
 
 class Gates(HouseCase):
     def test_nothing_with_real_money_off(self):
