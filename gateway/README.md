@@ -110,7 +110,7 @@ later month would need its remaining credit reconciled and its funded month and 
 ## The Claude funded total
 
 `/v1/claude/messages` forwards one call to Anthropic's Messages API (`lib/claude.mjs`) within
-`CLAUDE_USD`, the owner's FUNDED TOTAL on the Anthropic account ($100 deployed). It is not a month:
+`CLAUDE_USD`, the owner's FUNDED TOTAL on the Anthropic account ($200 deployed since Sept 29). It is not a month:
 nothing resets it, so it is raised only by what the owner adds, and raising it is a gateway deploy.
 `CLAUDE_MODELS` is the price table and the allowlist, dollars per million tokens: Claude Opus 5.5
 ($4 input, $5 five-minute write, $0.20 hit, $20 output), Claude Sonnet 5 and Claude Sonnet 5.5 ($2,

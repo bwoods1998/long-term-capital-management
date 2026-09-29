@@ -21,6 +21,11 @@ on branch `run/options-swarm-2026-09-26`) has the detail.
 
 ## 2026-09-29
 
+**05:29Z, gateway `8d80d2f7`** (#420): the owner added $100 to the Anthropic account (its balance then read
+$140.54), so `CLAUDE_USD`, the funded total, is $200. The meter had $80.33 spent, which leaves $119.67 of room,
+below the account's real balance. Operator change at the same time: `claude.usd_cap` 98 → 198 (the swarm's line
+inside it, keeping $2 for the House's own calls). The owner also added $200 to Sail.
+
 **04:53Z, operator change** (no deploy): every paid role on Claude, after R8. `claude.model`
 `claude-sonnet-5-5`; `claude.roles` architect, audit, diagnostician, rewrite and review;
 `claude.role_usd_day` rewrite $15 and review $5; `claude.role_model` the audit on `claude-opus-5-5`, so
