@@ -144,8 +144,8 @@ def early_roots(roots: Sequence[str] | None, core: Sequence[str] = CORE_FIVE) ->
 def parse_root_first(value: str | Mapping[str, Any] | None, train_from: dt.date | None) -> dict[str, dt.date]:
     """Each root's own first Train day in a Gym image (`--root-first ROOT=DATE,...`, Train from 2017): a root listed
     here keeps no chain dated before its day, and the underlying of the `HISTORY_SESSIONS` sessions before it as its
-    history, so one root's thin early years (XSP's 2017-19) go without dropping its later ones, and roots fetched only
-    from 2020 (the names) start there whatever the image's `train_from`. Refused: a root that is not a symbol, a root
+    history, so one root's early years (XSP's 2017-19, if thin) go without dropping its later ones, and roots fetched
+    only from 2020 (the names) start there whatever the image's `train_from`. Refused: a root that is not a symbol, a root
     named twice, a day before the image's `train_from` or after Train's core start (2022-01-03), and any day without
     `train_from`."""
     if not value:

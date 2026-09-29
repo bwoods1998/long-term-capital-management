@@ -20,6 +20,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 DATA = Path(__file__).resolve().parents[2] / "scripts" / "data"
 if str(DATA) not in sys.path:
@@ -388,7 +389,8 @@ class ImagesPrune(unittest.TestCase):
     a name's underlying before 2020 and a stray earlier chain of it), pruned as image N (from 2020) and image T (from
     2017)."""
 
-    CHAINS = {"SPY": (D(2017, 3, 1), D(2019, 6, 3), D(2019, 12, 16), D(2020, 3, 16), D(2021, 6, 1), D(2024, 3, 13), D(2025, 6, 11)),
+    CHAINS = {"SPY": (D(2017, 1, 3), D(2017, 3, 1), D(2019, 6, 3), D(2019, 12, 16), D(2020, 3, 16), D(2021, 6, 1), D(2024, 3, 13),
+                      D(2025, 6, 11)),
               "XSP": (D(2017, 3, 1), D(2019, 6, 3), D(2019, 12, 16), D(2020, 3, 16), D(2021, 6, 1), D(2024, 3, 13), D(2025, 6, 11)),
               "AAPL": (D(2019, 6, 3), D(2020, 3, 16), D(2021, 6, 1), D(2024, 3, 13), D(2025, 6, 11))}
     UNDER_ONLY = {"SPY": (D(2016, 6, 1), D(2016, 12, 15)), "XSP": (D(2016, 12, 15),), "AAPL": (D(2019, 12, 16),)}
@@ -428,6 +430,17 @@ class ImagesPrune(unittest.TestCase):
         m = pl.read_parquet(store.root / "manifest.parquet")
         return sorted((r["kind"], r["root"], str(r["date"]), r["window"]) for r in m.iter_rows(named=True))
 
+    def inside(self, store):
+        """The inside check's facts of a pruned store, from the same store code the sealed box runs (the network, key
+        and process facts as a clean box reports them)."""
+        import pathlib
+        import images
+
+        out = {}
+        exec(images.STORE_FACTS, {"store": pathlib.Path(store.root), "out": out})
+        return {"network": ["NETWORK-CLOSED x OSError"], "key_file": False, "key_mentions": [], "store_non_parquet": [],
+                "processes": "", "work_exists": False, **out}
+
     def test_image_n_from_a_box_that_holds_2017_19_is_what_the_2020_rules_keep(self):
         with tempfile.TemporaryDirectory() as tmp:
             bf, store, cal = self.build(tmp)
@@ -460,19 +473,54 @@ class ImagesPrune(unittest.TestCase):
             self.assertEqual({r[0] for r in rows if r[3] == "history"}, {"underlying"})
             expiries = pl.read_parquet(store.root / "expiries.parquet")
             self.assertEqual(expiries.filter(pl.col("root") == "XSP")["date"].min(), D(2020, 3, 16))
-            self.assertEqual(expiries.filter(pl.col("root") == "SPY")["date"].min(), D(2017, 3, 1))
+            self.assertEqual(expiries.filter(pl.col("root") == "SPY")["date"].min(), D(2017, 1, 3))
             calendar = pl.read_parquet(store.root / "calendar.parquet")["date"].to_list()
             self.assertEqual(calendar[0], D(2016, 12, 15))
             self.assertIn(D(2019, 12, 16), calendar)
             self.assertNotIn(D(2018, 12, 5), calendar, "no session that day")
 
     def test_without_root_first_a_partial_early_name_would_enter_train(self):
-        """Why the build lists every root fetched only from 2020 at 2020-01-02: pruning keeps files by date, not by stage."""
+        """Why the build lists every root fetched only from 2020 at 2020-01-02: pruning keeps files by date, not by stage.
+        So the build refuses such an image before it forks (`test_a_build_from_2017_holds_every_name_to_2020`), and the
+        inside check refuses it if one is made anyway: every name outside --early-names is held to 2020-01-02."""
+        import images
+
         with tempfile.TemporaryDirectory() as tmp:
             bf, store, cal = self.build(tmp)
             bf.prune(store, ["train", "validation"], drop_key=False, drop_work=False, calendar=cal, train_from=D(2017, 1, 3))
             self.assertIn("AAPL/2019-06-03", self.names(store))
             self.assertIn(("underlying", "AAPL", "2019-12-16", "train"), self.manifest(store))
+            facts = self.inside(store)
+            problems = images.problems_of(facts, "gym", train_from=T2017)
+            why = " (a name enters Train before 2020-01-02 only with its split rows and --early-names)"
+            self.assertEqual(problems, ["the first nbbo file of AAPL 2019-06-03 is before 2020-01-02" + why,
+                                        "the first underlying file of AAPL 2019-06-03 is before 2019-09-24" + why])
+            self.assertEqual(images.problems_of(facts, "gym", train_from=T2017, early_names=["AAPL"]), [],
+                             "the operator's leave, once AAPL's split rows are in")
+            self.assertTrue(images.problems_of(facts, "gym", train_from=T2017, root_first={"AAPL": "2019-01-02"}),
+                            "a first day before 2020 is no leave for a name")
+
+    def test_the_inside_check_passes_image_t_and_refuses_one_whose_first_chain_is_not_its_train_from(self):
+        import images
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bf, store, cal = self.build(tmp)
+            own = {"XSP": T2020, "AAPL": T2020}
+            bf.prune(store, ["train", "validation"], drop_key=False, drop_work=False, calendar=cal, train_from=D(2017, 1, 3),
+                     root_first=own)
+            facts = self.inside(store)
+            self.assertEqual(facts["first_by_kind"]["nbbo"], T2017)
+            self.assertEqual(images.problems_of(facts, "gym", train_from=T2017, root_first=own), [])
+            # The same box without a chain on 2017-01-03 (a day the vendor left empty, say): the Gym would read Train's
+            # first day as 2017-03-01 and the pool would refuse every Train run from 2017-01-03.
+            for kind in ("nbbo", "underlying"):
+                store.path(kind, "SPY", D(2017, 1, 3)).unlink()
+            short = self.inside(store)
+            self.assertEqual(short["first_by_kind"]["nbbo"], "2017-03-01")
+            self.assertEqual(images.problems_of(short, "gym", train_from=T2017, root_first=own),
+                             ["the first chain (nbbo) is 2017-03-01, not the image's first Train day 2017-01-03: the Gym "
+                              "would read 2017-03-01 as its first Train day and the pool would refuse every Train run "
+                              "from 2017-01-03"])
 
     def test_root_first_and_early_roots_never_mix_and_need_train_from(self):
         import backfill as bf
@@ -482,6 +530,9 @@ class ImagesPrune(unittest.TestCase):
             bf.ImageView(nyse_calendar(), D(2020, 1, 2), ["SPY"], {"XSP": "2021-01-04"})
         with self.assertRaises(ValueError):
             bf.ImageView(nyse_calendar(), None, None, {"XSP": "2021-01-04"})
+        with self.assertRaises(ValueError, msg="--early-roots from 2017 would give a left-out root 2016's history only"):
+            bf.ImageView(nyse_calendar(), D(2017, 1, 3), ["SPY"])
+        bf.ImageView(nyse_calendar(), D(2020, 1, 2), ["SPY"])  # as it was for the images built from 2020
         for kwargs in ({"root_first": {"XSP": "2020-01-02"}},
                        {"train_from": D(2017, 1, 3), "early_roots": ("SPY",), "root_first": {"XSP": "2020-01-02"}},
                        {"train_from": D(2017, 1, 3), "root_first": {"XSP": "2016-12-30"}},
@@ -490,6 +541,61 @@ class ImagesPrune(unittest.TestCase):
                 images.build("gym", version="t", force=True, **kwargs)
         with self.assertRaises(SystemExit):
             images.build("gate", version="t", force=True, train_from=D(2017, 1, 3))
+
+    def test_a_build_from_2017_holds_every_name_to_2020(self):
+        """Refused before any Sail call (no client, no fork): a name without a first day on or after 2020-01-02 and
+        without --early-names, a build without --roots, --early-roots from 2017, --early-names from 2020 or naming a core
+        root or a root the build does not keep."""
+        import boxlib as bl
+        import images
+
+        roots = ("SPY", "XSP", "AAPL", "TQQQ")
+        both = {"AAPL": T2020, "TQQQ": T2020}
+        refused = ({"train_from": D(2017, 1, 3), "roots": roots},
+                   {"train_from": D(2017, 1, 3), "roots": roots, "root_first": {"AAPL": T2020}},
+                   {"train_from": D(2017, 1, 3), "roots": roots, "root_first": {"AAPL": T2020, "TQQQ": "2018-01-02"}},
+                   {"train_from": D(2017, 1, 3), "root_first": both},
+                   {"train_from": D(2017, 1, 3), "roots": roots, "root_first": {"AAPL": T2020}, "early_names": "TQQQ,MU"},
+                   {"train_from": D(2017, 1, 3), "roots": roots, "root_first": both, "early_names": "SPY"},
+                   {"train_from": D(2017, 1, 3), "roots": roots, "early_roots": ("SPY",)},
+                   {"train_from": D(2020, 1, 2), "roots": roots, "early_names": "AAPL"})
+        for kwargs in refused:
+            with self.subTest(kwargs=kwargs), self.assertRaises(SystemExit):
+                images.build("gym", version="t", force=True, **kwargs)
+        self.assertEqual(images.names_without_a_first_day(roots, {"AAPL": D(2020, 1, 2)}), ["TQQQ"])
+        self.assertEqual(images.names_without_a_first_day(roots, {"AAPL": D(2021, 1, 4), "TQQQ": D(2019, 12, 31)},
+                                                          ["TQQQ"]), [])
+        with self.assertRaises(ValueError):
+            images.parse_names("AAPL,aapl")
+
+        class Reached(Exception):
+            pass
+
+        accepted = ({"train_from": D(2017, 1, 3), "roots": roots, "root_first": both},
+                    {"train_from": D(2017, 1, 3), "roots": roots, "root_first": {"AAPL": T2020, "XSP": T2020},
+                     "early_names": "TQQQ"},
+                    {"train_from": D(2020, 1, 2), "roots": roots},
+                    {"train_from": D(2020, 1, 2), "early_roots": ("SPY",)})
+        for kwargs in accepted:
+            with self.subTest(kwargs=kwargs), tempfile.TemporaryDirectory() as tmp, bl.using_state(Path(tmp)), \
+                    mock.patch.object(bl, "client", side_effect=Reached), self.assertRaises(Reached):
+                images.build("gym", version="t", force=True, **kwargs)
+
+    def test_verify_reads_the_recorded_first_day_for_its_root_first(self):
+        import images
+
+        entry = {"train_from": T2017, "root_first": {"XSP": T2020}, "early_names": None}
+        self.assertEqual(images.verify_arguments(entry), {"train_from": T2017, "root_first": {"XSP": T2020},
+                                                          "early_names": None})
+        self.assertEqual(images.verify_arguments(entry, root_first="XSP=2020-01-02,AAPL=2020-01-02", early_names="TQQQ"),
+                         {"train_from": T2017, "root_first": {"AAPL": T2020, "XSP": T2020}, "early_names": ["TQQQ"]},
+                         "--root-first without --train-from, read against the recorded 2017-01-03")
+        self.assertEqual(images.verify_arguments({}, train_from=T2020)["root_first"], None)
+        for entry_, kwargs in (({}, {"root_first": "XSP=2020-01-02"}),
+                               ({"train_from": T2020}, {"root_first": "XSP=2019-01-02"}),
+                               (entry, {"early_names": "SPY"})):
+            with self.subTest(kwargs=kwargs), self.assertRaises(SystemExit):
+                images.verify_arguments(entry_, **kwargs)
 
     def test_the_prune_arguments_and_the_cli(self):
         import images
@@ -532,6 +638,20 @@ class ImagesPrune(unittest.TestCase):
         self.assertTrue(any("underlying file of AAPL" in p for p in images.problems_of(far, "gym", train_from=T2017, root_first=own)))
         blind = {k: v for k, v in facts.items() if k != "first_by_root"}
         self.assertTrue(any("first_by_root" in p for p in images.problems_of(blind, "gym", train_from=T2017, root_first=own)))
+        self.assertTrue(any("first_by_root" in p for p in images.problems_of(blind, "gym", train_from=T2017)),
+                        "from 2017 the names are checked root by root even without --root-first")
+        early_name = copy.deepcopy(facts)
+        early_name["first_by_root"]["nbbo"]["TQQQ"] = "2017-01-03"
+        early_name["first_by_root"]["underlying"]["TQQQ"] = "2016-10-06"
+        found = images.problems_of(early_name, "gym", train_from=T2017, root_first=own)
+        self.assertEqual(len(found), 2, found)
+        self.assertTrue(all("TQQQ" in p and "--early-names" in p for p in found))
+        self.assertIn("the first underlying file of TQQQ 2016-10-06 is before 2019-09-24", found[1])
+        self.assertEqual(images.problems_of(early_name, "gym", train_from=T2017, root_first=own, early_names=["TQQQ"]), [])
+        late_chain = {**facts, "first_by_kind": {**facts["first_by_kind"], "nbbo": "2019-11-01", "oi": "2019-11-01"}}
+        self.assertTrue(any("first chain (nbbo) is 2019-11-01" in p
+                            for p in images.problems_of(late_chain, "gym", train_from=T2017, root_first=own)),
+                        "the reviewer's image: built from 2017, first chain in November 2019")
         too_far = {**facts, "first_by_kind": {**facts["first_by_kind"], "underlying": "2016-09-01"}}
         self.assertTrue(images.problems_of(too_far, "gym", train_from=T2017), "more than 100 days before 2017-01-03")
         self.assertIn("first_by_root", images.INSIDE_CHECK)

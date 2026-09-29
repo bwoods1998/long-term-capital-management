@@ -695,13 +695,17 @@ class ImageView:
     `root_first` (Train from 2017, Sept 29; `storelib.parse_root_first`) gives a root its own first Train day, on or
     after `train_from`: nothing of that root dated before it is Train, and its history is the underlying of the
     sessions before ITS day (so XSP from 2020-01-02 in a 2017 image keeps its 2020-21 and its Q4-2019 history, and
-    loses its 2017-19). It replaces `early_roots`, which stays as it was for the images built with it; the two never
-    mix."""
+    loses its 2017-19). It replaces `early_roots`, which stays as it was for the images built from 2020 with it; the two
+    never mix, and `early_roots` is refused from before 2020 (a root it left out would still take the history before
+    `train_from` but no Train day before 2022-01-03)."""
 
     def __init__(self, calendar: sl.Calendar, train_from: dt.date | None = None,
                  early_roots: Sequence[str] | None = None, root_first: Any = None):
         if early_roots and root_first:
             raise ValueError("--early-roots and --root-first do not mix (--root-first replaces --early-roots)")
+        if early_roots and train_from is not None and train_from < sl.EARLY[0]:
+            raise ValueError(f"--early-roots is for an image from {sl.EARLY[0]} (a root it leaves out starts at "
+                             f"{sl.TRAIN[0]}); from {train_from} give each root its own day with --root-first")
         self.train_from = train_from
         self.early = {str(r).upper() for r in early_roots} if early_roots else None
         self.history = set(sl.history_days(calendar, train_from)) if train_from is not None else set()

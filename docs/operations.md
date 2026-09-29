@@ -36,9 +36,10 @@ researcher Sail pace $12 an hour, the swarm's Sail burst to Oct 5 at $900, Claud
 the gateway (the swarm's own line `claude.usd_cap` 98), OpenAI $707 for September only. The planned
 larger deposits are not confirmed funding.
 
-In progress, not merged: longer history as private blocks (#413); Train from 2017 (#424: the 2017-19 windows, event
-and rate tables and per-root first Train days for images; no swarm change until an image is built and adopted); the top
-families' research cycles
+Train from 2017 (#424: the 2017-19 windows, event and rate tables and per-root first Train days for images) is not yet
+released; nothing in the swarm changes until an image is built from 2017 and adopted.
+
+In progress, not merged: longer history as private blocks (#413); the top families' research cycles
 on Sonnet 5.5 (#417); an architect that reads the whole graveyard, plus a strategist (not yet a pull
 request). Open: #393 (credit types at $2,000, the owner's
 decision), #381, #384, #385; drafts #375 (the prune) and #400. Re-read main, open PRs and the running
@@ -280,12 +281,17 @@ python3 scripts/data/box.py run -- ARGS         # run backfill.py ARGS (or check
   the 60 sessions before as history; without it Train starts 2022-01-03. `--root-first ROOT=DATE,...` gives a root
   its own later first Train day (its history is then the 60 sessions before that day): a 2017 image lists every root
   fetched only from 2020 at 2020-01-02 (the 20 names, until their earlier years and split rows are adopted), and XSP
-  too if its 2017-19 is thin. Without it, pruning keeps files by date, so a partly fetched early year of a name
-  would enter Train. The fork prunes with the build's own data tools (pushed to it first; the data box may run a
-  fetch's code). images.json records `train_from` and `root_first`, and `images.py verify` checks each listed root
-  against its own day. The Gym reads a store's first Train day from its first chain (`train_first`), so a 2020
-  image's 2019 history sessions stay out of Train, and the pool refuses a Gym box whose first Train day is not the
-  swarm's span, both ways. The swarm moves only when `gym.train_from` and `gym.image_checkpoint` change together.
+  too if its 2017-19 is thin. Pruning keeps files by date, so a partly fetched early year of a name would enter Train
+  without it; a build from 2017 therefore takes `--roots` and refuses unless every name there has a `--root-first` on
+  or after 2020-01-02 or is named in `--early-names` (only once its split rows are in `league/gym/events.py` and its
+  years are complete). It refuses `--early-roots`. The fork prunes with the build's own data tools (pushed to it
+  first; the data box may run a fetch's code). images.json records `train_from`, `root_first` and `early_names`.
+  The inside check (`images.py verify`, and every build) holds each listed root to its own day, every other name to
+  2020-01-02 in an image from 2017, and the image's first chain to its `train_from` exactly; `verify --root-first`
+  reads the recorded `train_from`. The Gym reads a store's first Train day from its first chain (`train_first`), so
+  a 2020 image's 2019 history sessions stay out of Train, and the pool refuses a Gym box whose first Train day is not
+  the swarm's span, both ways. After the release, `batch --check --window train` on the running image reports its
+  first Train day (2020-01-02). The swarm moves only when `gym.train_from` and `gym.image_checkpoint` change together.
 - **The nightly forward job.** `python3 scripts/data/nightly.py run [--day YYYY-MM-DD] [--dry-run]`
   pulls the last trading day (from 01:45 ET) into the data box's store and the gate image only,
   stopping and restarting the backfill around it, re-checkpoints the gate and puts both boxes to
