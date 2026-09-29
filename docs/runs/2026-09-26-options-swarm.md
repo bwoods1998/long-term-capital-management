@@ -2387,4 +2387,26 @@ looks like beta. Validation 2025 and the holdout judge both.
 | 6 | Money | Equity $1,473.11; Profit -$8.67; options buying power $1,473.08; grant capital $1,473.11 on `a3e2aa7c`; 0 positions, 0 orders |
 | 7 | Compute | Sail $63.56 (the owner is topping up). Claude $73.93 of $100. OpenAI $643.08 + $11.40 in flight of $707. The swarm spent $10.44 in 2 h |
 
+
+- **00:05-01:15Z Drift-free component hunt: 0 of 10 (the bar was fixed before any run, including the House's own
+  drift screen).**
+  - Ten intraday index components on SPY, QQQ and IWM, each balanced by side (about 50/50 calls and puts): opening
+    drive continuation, small-cap lag, gap continuation into the afternoon, afternoon 0DTE gamma, intraday fear-spike
+    relief, daily fear-jump fade, skew innovation, drive carried overnight, small-cap afternoon catch-up, and the
+    closing reversal of the open.
+  - Each was a $1-wide 0-3 DTE vertical within $95. Train 2020-24 on sealed boxes; all 21 boxes were terminated.
+  - All ten failed C1 (year-stable t at the mid) and C5 (the drift screen alone).
+    - The best at the mid was the opening drive: t 1.58, 2.11, 1.03, 0.34, 0.35. Its sign was a post-hoc inversion,
+      and it was disclosed as one.
+    - At 1.0x every component was negative pooled, with drift-adjusted alpha t between -1.9 and -15.
+  - The combiner re-derived every number from the raw runs (0 mismatches over 1,258 days) with the House's code:
+    - drift was removed (charges of tens of dollars), but no alpha remained after costs;
+    - round trips cost $4-7 against mid edges of -$0.9 to +$2.4 a trade;
+    - even free execution gave no book a worst-year t above 0.44;
+    - the components were nearly uncorrelated (median pairwise ρ 0.014).
+  - Diversification is not the bottleneck; edge per trade is.
+  - Agenda v13 at 01:20Z: intraday index timing as $1 verticals is refuted. A family must show a mid edge of at least
+    $7 a trade (rare, large moves) or cheaper execution (single long options, 2 fills), while passing the drift
+    screen alone.
+
 ## Report
