@@ -87,9 +87,10 @@ class RouterCase(unittest.TestCase):
 
 class Defaults(RouterCase):
     def test_the_default_roles_and_lines(self):
-        # Sept 29, 2026 (swarm/sonnet-researchers): the top band's research cycles joined the roles, on a $100 daily line.
-        self.assertEqual(DEFAULTS["claude"]["roles"], ["architect", "audit", "diagnostician", "researcher"])
-        self.assertEqual(DEFAULTS["claude"]["role_usd_day"], {"researcher": 100.0})
+        # Sept 29, 2026 (swarm/sonnet-researchers): the top band's research cycles joined the roles, on a $100 daily line;
+        # the strategist (league/swarm/strategist.py) joined with its own $4 line.
+        self.assertEqual(DEFAULTS["claude"]["roles"], ["architect", "audit", "diagnostician", "researcher", "strategist"])
+        self.assertEqual(DEFAULTS["claude"]["role_usd_day"], {"researcher": 100.0, "strategist": 4.0})
         self.assertEqual(DEFAULTS["claude"]["role_model"], {"researcher": "claude-sonnet-5-5"})
         router = self.router()
         for role in ("architect", "audit", "diagnostician", "rewrite", "review"):

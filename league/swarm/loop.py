@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from . import HEARTBEAT, LOCK_FILE, LOG_FILE, PID_FILE, settings as settings_mod
-from .architect import Architect
+from .architect import Architect, GraveyardDigest
 from .diagnostician import Diagnostician
 from .gate import Gate
 from .guard import SailGuard, provider_reader
@@ -46,6 +46,7 @@ from .pool import GymPool
 from .researcher import Researcher, dormant_count, dormant_limit, migrate_objective
 from .seeds import SEEDS, family_spec, program_for
 from .store import SwarmStore
+from .strategist import PAIR_SECONDS, Strategist
 from .tournament import INDEX, NOT_ROTATED, Tournament
 
 CODE_DIR = Path(__file__).resolve().parents[2]
@@ -293,7 +294,12 @@ class Swarm:
         self.researcher.pace = self.over_pace
         self.tournament = Tournament(self.store, self.pool, self.settings, clock=clock)
         self.gate = Gate(self.store, self.pool, self.router, self.settings, clock=clock)
-        self.architect = Architect(self.store, self.router, self.settings, clock=clock)
+        # The whole graveyard as one sealed digest, shared by the architect and the strategist (Sept 29, 2026): one pass's
+        # two Claude calls send the same bytes, so the second reads the first's cache entry.
+        self.digest = GraveyardDigest(self.store, self.settings, clock=clock)
+        self.architect = Architect(self.store, self.router, self.settings, clock=clock, digest=self.digest)
+        self.strategist = Strategist(self.store, self.router, self.settings, digest=self.digest, clock=clock,
+                                     architect=self.architect)
         self.diagnostician = Diagnostician(self.store, self.router, self.settings, pool=self.pool, researcher=self.researcher,
                                            clock=clock)
         self.stop = threading.Event()
@@ -466,6 +472,28 @@ class Swarm:
                 except Exception:  # noqa: BLE001 - release never strands the family (it leaves `running` first)
                     log(f"release {fid} failed: {traceback.format_exc()[-800:]}")
 
+    def architect_pass(self) -> dict[str, Any]:
+        """The architect's round: the strategist first when it is due and this pass may add families (only the architect
+        reads its section, so it never writes one nobody reads), then the architect. The architect's call marks the
+        sealed digest for the five-minute cache only when the strategist's last Claude call just marked it and started
+        less than PAIR_SECONDS ago (the entry lives five minutes from the start of the call that wrote or last read it). A strategist that
+        fails or raises leaves the agenda as it was and never stops the architect."""
+        out: dict[str, Any] = {}
+        began = self.clock()
+        try:
+            if self.architect.want() > 0 and self.strategist.due():
+                out["strategist"] = self.strategist.run()
+        except Exception as exc:  # noqa: BLE001 - run() never raises; this is the belt to its braces
+            out["strategist"] = {"error": f"{type(exc).__name__}: {str(exc)[:200]}"}
+        ran = out.get("strategist") or {}
+        # From the start of the strategist's last Claude call that marked the digest (a repair turn's read refreshes the
+        # entry), else from the pass's start.
+        primed_at = ran.get("primed_at")
+        since = float(primed_at) if isinstance(primed_at, (int, float)) and not isinstance(primed_at, bool) else began
+        paired = bool(ran.get("primed")) and self.clock() - since < PAIR_SECONDS
+        return {**self.architect.run(paired=paired), **({"strategist": {k: ran.get(k) for k in (
+            "accepted", "route", "cost_usd", "reasons", "skipped", "error", "primed", "turns", "note")}} if ran else {})}
+
     def round_alive(self, name: str) -> bool:
         thread = self.rounds.get(name)
         return thread is not None and thread.is_alive()
@@ -555,7 +583,7 @@ class Swarm:
             # Refilling to the start population always (a birth spends nothing by itself: the pace caps all cycles);
             # growing past it toward the ceiling only while the hourly spend is under the pace.
             if self.architect.due() and self.store.get("tournament_at") and (self.architect.refilling() or not self.over_pace()):
-                self._round("architect", self.architect.run)
+                self._round("architect", self.architect_pass)
             elif self.architect.refilling() and not self.architect.due() and self.store.get("tournament_at"):
                 born = self.reseed()
                 if born:
