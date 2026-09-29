@@ -99,8 +99,9 @@ class Gate:
     def review(self, fam: Mapping[str, Any], version: Mapping[str, Any]) -> dict[str, Any]:
         """The program review: GPT-6 Sol while the OpenAI month has room, else `review_sail_profile` (DeepSeek-V4-Pro).
         Claude answers it first only once the operator adds "review" to `claude.roles` (Sept 29, 2026). With "audit" there
-        too, one model answers both reads of a program and the audit is no longer a second, different model: choose the
-        two together."""
+        too (a default role), both reads of a program would be `claude.model` and the audit no longer a second, different
+        model: give the review its own model in `claude.role_model` (e.g. {"review": "claude-sonnet-5-5"}). A program
+        one model read twice is reported to the owner (`not_the_plans_reviewer`, `same_reader`)."""
         user = (f"Family {fam['id']}: {fam['mechanism']}\nStructure {fam['structure']}, roots {', '.join(fam['roots'])}.\n\n"
                 f"```python\n{version['code']}\n```\nPARAMS overrides: {json.dumps(version.get('params') or {})}")
         answer = self.router.ask(role="review", system=REVIEW, user=user, family=fam["id"],
@@ -220,7 +221,7 @@ class Gate:
                     self.store.event("swarm.gate", fam["id"], {"action": "review_error", "version": n, "error": str(exc)[:300]})
                     continue
                 self.store.event("swarm.gate", fam["id"], {"action": "review", "version": n, **review,
-                                                           "not_the_plans_reviewer": review.get("route") != "openai"})
+                                                           "not_the_plans_reviewer": review.get("route") not in ("openai", "claude")})
                 if review["verdict"] == "unclear":
                     attempts = int(self.store.get("review_attempt:" + fam["id"], 0)) + 1
                     self.store.put("review_attempt:" + fam["id"], attempts)
@@ -249,11 +250,17 @@ class Gate:
                 if audit["verdict"] != "pass":
                     review = {**review, "verdict": "fail", "stage": "audit",
                               "reasons": audit.get("reasons") or ["the audit could not reach a verdict"]}
-                if review.get("route") != "openai" or audit.get("route") not in ("claude", "openai"):
+                # The plan: two different paid models read the program (GPT-6 Sol or Claude reviews, Claude or GPT-6 Astra
+                # audits). Either read on Sail, or one model reading it twice (the review and the audit on the same Claude
+                # model once "review" is in `claude.roles`; `claude.role_model` gives them different ones), is the owner's.
+                same = review.get("model") is not None and review.get("model") == audit.get("model")
+                if same or review.get("route") not in ("openai", "claude") or audit.get("route") not in ("claude", "openai"):
                     self.store.event("swarm.status", fam["id"], {
-                        "action": "not_the_plans_reviewer", "alert": True, "version": n,
+                        "action": "not_the_plans_reviewer", "alert": True, "version": n, "same_reader": same,
                         "review": review.get("model"), "audit": audit.get("model"),
-                        "text": "a holdout look was reviewed without the plan's models (GPT-6 Sol reviews; Claude Opus 5.5 or "
+                        "text": (f"the review and the audit were both {audit.get('model')}: one model read the program "
+                                 "twice (claude.role_model can give the review its own Claude model)") if same else
+                                "a holdout look was reviewed without the plan's models (GPT-6 Sol or Claude reviews; Claude or "
                                 "GPT-6 Astra audits): their budgets had no room, so Sail models stood in"})
                 if not self.store.compare_and_set_state(fam["id"], {"validation_version": n}, review=review):
                     continue
