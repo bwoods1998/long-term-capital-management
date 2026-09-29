@@ -44,11 +44,17 @@ async function call(payload, answer, { env = settings(), gate = null, headers = 
   return { response, seen, gate, meter: gate.claudeStatus(), bytes: new TextEncoder().encode(JSON.stringify(payload)).length };
 }
 
-test('the deployed price table is exactly Opus 5.5 and Sonnet 5 at the list prices, and the funded total is $100', () => {
+test('the deployed price table is exactly Opus 5.5, Sonnet 5 and Sonnet 5.5 at the list prices, and the funded total is $100', () => {
   const config = readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
   const variable = name => JSON.parse(new RegExp(`"${name}":\\s*("(?:[^"\\\\]|\\\\.)*")`).exec(config)[1]);
   const table = priceTable({ CLAUDE_MODELS: variable('CLAUDE_MODELS') });
-  assert.deepEqual(table, { 'claude-opus-5-5': OPUS, 'claude-sonnet-5': SONNET });
+  // Sonnet 5.5 (Sept 29, 2026): platform.claude.com/docs/en/about-claude/pricing lists it at Sonnet 5's prices.
+  assert.deepEqual(table, { 'claude-opus-5-5': OPUS, 'claude-sonnet-5': SONNET, 'claude-sonnet-5-5': SONNET });
+  const deployed = settings({ CLAUDE_MODELS: variable('CLAUDE_MODELS') });
+  assert.deepEqual(admit(body({ model: 'claude-sonnet-5-5' }), deployed), { model: 'claude-sonnet-5-5', price: SONNET, maxTokens: 16000, stream: false });
+  // 2,000 x $2 + 10,000 x $2.50 + 30,000 x $0.20 + 6,000 x $10, per million: 0.004 + 0.025 + 0.006 + 0.06 = $0.095.
+  assert.equal(actualCost(table['claude-sonnet-5-5'], USAGE), 95000n);
+  assert.equal(worstCase(table['claude-sonnet-5-5'], 10000, 16000), BigInt(Math.ceil((10000 + 4096) * 2.5 + 16000 * 10)));
   assert.equal(variable('CLAUDE_USD'), '100');
   assert.equal(capMicro({ CLAUDE_USD: variable('CLAUDE_USD') }), 100000000n);
   assert.equal(capMicro({}), 0n, 'unset is no budget');
