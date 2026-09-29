@@ -12,7 +12,12 @@
   (`league.claude.Claude`) for the roles in `claude.roles` (the architect, the gate's audit, the diagnostician), first
   among the paid routes while the gateway's funded total has room above `claude.reserve_usd` and the swarm's own Claude
   spend is under `claude.usd_cap`. The architect rotates: every other pass asks GPT-6 Astra first. Claude capped, erring
-  or unconfigured falls to OpenAI, then Sail, exactly as before.
+  or unconfigured falls to OpenAI, then Sail, exactly as before. Every role's call asks for Claude (Sept 29, 2026: the
+  researcher's stall rewrite and the gate's review too), so `claude.roles` alone decides who gets it: adding "rewrite" or
+  "review" there is the operator's opt-in, with no deploy. A role may also have its own daily line,
+  `claude.role_usd_day` {role: usd} (a UTC day, holds included, each call on the day its hold was booked): a call that
+  would take the role's Claude spend today past it skips Claude and falls to the role's next route. No entry is no extra
+  line. `claude.role_model` {role: model id} answers a role on its own Claude model (no entry: `claude.model`).
 - Every settled cost is a `spend` row (kind `sail_model`, `openai` or `claude`, by family).
 
 Standard library only.
@@ -236,6 +241,15 @@ class ModelRouter:
         cfg = self.settings.get("claude")
         return cfg if isinstance(cfg, Mapping) else {}
 
+    def claude_model(self, role: str | None = None) -> str:
+        """The Claude model that answers `role`: its entry in `claude.role_model` {role: model id} when that is a non-empty
+        string, else `claude.model`. A model with no verified price (`league.claude.MODEL_CEILINGS`) is never sent: its
+        hold cannot be priced, so the role's call falls to its next route."""
+        cfg = self._claude_cfg()
+        models = cfg.get("role_model")
+        chosen = models.get(role) if role is not None and isinstance(models, Mapping) else None
+        return chosen.strip() if isinstance(chosen, str) and chosen.strip() else str(cfg.get("model"))
+
     def claude_enabled(self, role: str) -> bool:
         """Claude is configured (a client and the gateway's meter), names a model, and serves `role` (`claude.roles`)."""
         cfg = self._claude_cfg()
@@ -268,31 +282,74 @@ class ModelRouter:
         return max(0.0, min(float(remaining - reserve), self._claude_cap_room()))
 
     def claude_request(self, system: str, user: str, *, schema: Mapping[str, Any] | None = None,
-                       effort: str | None = None) -> tuple[dict[str, Any], float]:
-        """The exact Claude request a role's question becomes, and the hold it needs (the gateway's worst case). `effort`
-        overrides `claude.effort` for this call."""
+                       effort: str | None = None, role: str | None = None) -> tuple[dict[str, Any], float]:
+        """The exact Claude request a role's question becomes, and the hold it needs (the gateway's worst case), on the
+        role's model (`claude_model`). `effort` overrides `claude.effort` for this call."""
         from ..claude import EFFORTS, MAX_TOKENS, reservation_ceiling, request_body
 
         cfg = self._claude_cfg()
         effort = str(effort or cfg.get("effort") or "high")
         # Streamed (`claude.stream`, the default since Sept 27, 2026): a high-effort answer outlasts Cloudflare's
         # 100-second wait for a silent origin (HTTP 524) unless its events flow as they are made.
-        body = request_body(str(cfg.get("model")), system, [{"role": "user", "content": user}],
+        body = request_body(self.claude_model(role), system, [{"role": "user", "content": user}],
                             max_tokens=int(cfg.get("max_tokens", MAX_TOKENS)), effort=effort if effort in EFFORTS else "high",
                             schema=schema, cache=True, stream=cfg.get("stream", True) is True)
         return body, float(reservation_ceiling(body))
 
     def claude_spent(self, *, role: str | None = None, since: float | None = None) -> float:
-        """The swarm's Claude spend (holds included), for one role when named, since an epoch when given."""
+        """The swarm's Claude spend (holds included), for one role when named, since an epoch when given.
+
+        With `since`, a call counts from when its hold was booked, at its settled cost: the row that trues up a hold (the
+        call's own `settles` row, or `settle_claude_holds`'s `settles_hold`) is booked when the bill lands, which may be
+        after `since` for a hold booked before it (a call across 00:00 UTC, or a hold trued up after a gateway outage).
+        Counting that row would put yesterday's release into today and lift today's line; it belongs to the hold's day."""
         sql, params = "SELECT usd, detail FROM spend WHERE kind='claude'", []
         if since is not None:
             sql += " AND epoch>=?"
             params.append(float(since))
-        total = 0.0
+        rows = []
         for row in self.store._all(sql, params):
-            if role is None or (json.loads(row["detail"] or "{}") or {}).get("role") == role:
-                total += float(row["usd"])
+            detail = json.loads(row["detail"] or "{}") or {}
+            if role is None or detail.get("role") == role:
+                rows.append((float(row["usd"]), detail))
+        if since is None:
+            return sum(usd for usd, _ in rows)
+        booked = {d["request"] for _, d in rows if "hold" in d and d.get("request")}  # the calls held since `since`
+        total = 0.0
+        for usd, detail in rows:
+            if "settles_hold" in detail or "settles" in detail:
+                if (detail.get("settles_hold") or detail.get("request")) not in booked:
+                    continue  # it settles a hold booked before `since`: that call is counted on its own day
+            total += usd
         return total
+
+    def claude_role_line(self, role: str) -> float | None:
+        """The role's own daily Claude line in dollars (`claude.role_usd_day` {role: usd}), or None when it has none (no
+        entry, or null). A line that is not a finite, non-negative number, or a `role_usd_day` that is not an object, is
+        a line of 0: a typo never lifts a guard the operator meant to set."""
+        lines = self._claude_cfg().get("role_usd_day")
+        if lines is None:
+            return None
+        if not isinstance(lines, Mapping):
+            return 0.0
+        if lines.get(role) is None:
+            return None
+        value = lines[role]
+        try:
+            line = Decimal(str(value)) if not isinstance(value, bool) else Decimal("NaN")
+        except ArithmeticError:
+            return 0.0
+        return float(line) if line.is_finite() and line >= 0 else 0.0
+
+    def claude_role_room(self, role: str) -> float | None:
+        """Dollars left on the role's own Claude line this UTC day (its holds count until they settle; a call counts on the
+        day its hold was booked, `claude_spent`), or None when the role has no line (`claude_role_line`)."""
+        line = self.claude_role_line(role)
+        if line is None:
+            return None
+        now = float(self.store.clock())
+        spent = max(0.0, self.claude_spent(role=role, since=now - now % 86400))
+        return max(0.0, line - spent)
 
     def _ask_claude(self, *, role: str, system: str, user: str, family: str | None, key: str, need_usd: float,
                     schema: Mapping[str, Any] | None, errors: list[str], billed: list[dict[str, Any]],
@@ -308,22 +365,31 @@ class ModelRouter:
         refused or erred (the reason is in `errors`)."""
         from ..claude import ClaudeError
 
-        cfg = self._claude_cfg()
-        model = str(cfg.get("model"))
+        model = self.claude_model(role)
         request_id = re.sub(r"[^A-Za-z0-9:._-]+", "-", key)[:150] + ":" + secrets.token_hex(4)
         hold = None
         try:
             need = Decimal(str(need_usd))
             if not need.is_finite() or need < 0:
                 raise ValueError("invalid Claude minimum reservation")
-            body, ceiling = self.claude_request(system, user, schema=schema, effort=effort)
+            body, ceiling = self.claude_request(system, user, schema=schema, effort=effort, role=role)
             required = float(max(need, Decimal(str(ceiling))))
+            line = self.claude_role_room(role)  # the role's own line today (`claude.role_usd_day`), before the meter's read
+            if line is not None and line < required:
+                errors.append(f"claude: the {role} line for today has no room (${line:.2f} left of claude.role_usd_day; "
+                              f"this call may cost ${required:.2f})")
+                return None
             room = self.claude_room()  # the meter's network read happens outside the write transaction
             if room < required:
                 errors.append(f"claude: no room (${room:.2f} left above the reserve; this call may cost ${required:.2f})")
                 return None
             admitted = False
             with self.store.atomic():
+                # Both lines are read again inside the write transaction: a concurrent call's committed hold counts.
+                line = self.claude_role_room(role)
+                if line is not None and line < required:
+                    errors.append(f"claude: the {role} line for today has no room")
+                    return None
                 if min(room, self._claude_cap_room()) >= required:
                     self.store.add_spend("claude", required, family=family,
                                          detail={"role": role, "hold": key[:120], "request": request_id, "model": model,
@@ -467,14 +533,15 @@ class ModelRouter:
         """A one-shot question for a role (the architect, the reviewer, the auditor, a rewrite, the diagnostician).
 
         The paid routes in order, then Sail: CLAUDE first when `claude` and the role is one of `claude.roles` and the
-        funded total has room above its reserve (`_ask_claude`); OPENAI when it has room for both `need_usd` and the
-        actual request's standard-service maximum (`_ask_openai`). `rotate` alternates the two paid routes' order every
-        other call for the role (the architect's diversity: Astra's pass, when OpenAI has room, else Claude's). A paid
-        route that refuses, errs or has no room falls to the next; `sail_profile` None means no Sail fallback (a
-        ModelError instead). `desk` and `cap_usd_day` are the Provider's fuse for the Sail call. Admission and the
-        durable hold are atomic across store connections; verified cost settles it, a 4xx refusal releases it, and an
-        unknown bill retains it. Unknown cost is reported as None with held_usd, never as a free answer. A ModelError's
-        `billed` lists the paid attempts that were billed without an answer (`claude_effort` overrides `claude.effort`)."""
+        funded total has room above its reserve and the role's own line today has room (`claude.role_usd_day`,
+        `_ask_claude`); OPENAI when it has room for both `need_usd` and the actual request's standard-service maximum
+        (`_ask_openai`). `rotate` alternates the two paid routes' order every other call for the role (the architect's
+        diversity: Astra's pass, when OpenAI has room, else Claude's). A paid route that refuses, errs or has no room
+        falls to the next; `sail_profile` None means no Sail fallback (a ModelError instead). `desk` and `cap_usd_day`
+        are the Provider's fuse for the Sail call. Admission and the durable hold are atomic across store connections;
+        verified cost settles it, a 4xx refusal releases it, and an unknown bill retains it. Unknown cost is reported as
+        None with held_usd, never as a free answer. A ModelError's `billed` lists the paid attempts that were billed
+        without an answer (`claude_effort` overrides `claude.effort`)."""
         self._require_committed_store()
         errors: list[str] = []
         billed: list[dict[str, Any]] = []

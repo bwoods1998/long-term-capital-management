@@ -2301,12 +2301,16 @@ class Researcher:
             try:
                 if (self.store.family(fid) or {}).get("retired_at"):
                     return
+                # Claude first once the operator adds "rewrite" to `claude.roles` (and within `claude.role_usd_day`), else
+                # the Sail profile as before. Its hold is the gateway's worst case alone (no OpenAI route: no minimum).
                 answer = self.router.ask(role="rewrite", system=self.prompt(), user=user, family=fid, key=key, openai_model=None,
                                          sail_profile=profile, max_output=12000, effort="medium", desk=f"{fid}:rewrite",
-                                         cap_usd_day=float(self.cfg.get("rewrite_usd_day", 1.0)))
+                                         cap_usd_day=float(self.cfg.get("rewrite_usd_day", 1.0)), need_usd=0.0, claude=True)
                 match = CODE_BLOCK.search(answer.get("text") or "")
                 if match:
-                    value = {"code": match.group(1), "profile": profile, "at": self.clock()}
+                    # The author is who wrote it: the Sail profile, or the paid model that answered first.
+                    by = profile if answer.get("route") in (None, "sail") else str(answer.get("model") or answer["route"])
+                    value = {"code": match.group(1), "profile": by, "at": self.clock()}
                     with self.store.atomic():
                         if (self.store.family(fid) or {}).get("retired_at"):
                             self.store.set_state(fid, rewrite_after_retirement=value)

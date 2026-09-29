@@ -397,12 +397,18 @@ class Diagnostician:
         """Why a call with this packet cannot be made now (the day's budget, Claude's room), or None."""
         try:
             _, ceiling = self.router.claude_request(settings_mod.train_span_text(self.system, settings_mod.objective_span(self.store.get("train_objective"))), user, schema=self.schema,
-                                                    effort=effort)
+                                                    effort=effort, role=ROLE)
         except Exception as exc:  # noqa: BLE001
             return f"the request could not be priced: {exc}"[:300]
+        # A call counts at the hour its hold was booked (`claude_spent`): a hold booked 25 hours ago and trued up an hour
+        # ago gives back nothing to this window.
         spent = self.router.claude_spent(role=ROLE, since=self.clock() - 86400)
         if spent + ceiling > float(self.cfg.get("usd_day", 15.0)):
             return f"the day's diagnostician budget: ${spent:.2f} spent, the next call may cost ${ceiling:.2f}"
+        line = getattr(self.router, "claude_role_room", lambda role: None)(ROLE)
+        if line is not None and line < ceiling:
+            return (f"the diagnostician's Claude line for today (claude.role_usd_day): ${line:.2f} left, the next call may "
+                    f"cost ${ceiling:.2f}")
         if self.router.claude_room() < ceiling:
             return "Claude has no room above its reserve"
         return None
