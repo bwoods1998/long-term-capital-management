@@ -30,6 +30,9 @@ THE PIECES.
 - `researcher`  the inner loop (revise -> run -> read -> revise) with its seven tools;
 - `claude_research` the top band's research cycles on Claude Sonnet 5.5 (Sept 29, 2026): the tool and
                 conversation adapter, the input checks and the append-only session; a Sail fallback;
+- `library`     THE RESEARCH LIBRARY (Sept 29, 2026): arXiv papers posted by the end of 2024, through the
+                gateway's `/v1/research/*` (which enforces the date rule; the House checks every answer again): the
+                Claude researchers' `literature` tool and the architect's and strategist's retrieved block;
 - `tournament`  the hourly tournament: validation runs, the bandit, forks, retirements, the leaderboard;
 - `gate`        the program review, the holdout look, the Candidate band or a recorded refusal;
 - `architect`   every `architect.every_seconds` (four hours by default), new families from the leaderboard, the

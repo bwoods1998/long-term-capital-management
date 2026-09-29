@@ -236,6 +236,23 @@ Agent count and simulated years measure activity; passing unseen evidence measur
   lessons go to the graveyard, which every new family's researcher reads first. The graveyard is ranked
   by BM25, a new family is born with three distinct lessons, and it also holds the operator's own
   experiments as `op-` lessons.
+- **The research library** (Sept 29, not yet released; off until `research.enabled`): the agents read the
+  literature as a firm's analysts do, but only literature posted before 2025. Open web access would let a
+  model read about the Validation year (2025) and the sealed holdout (2026) and select on them, which fakes
+  the verifier, so the swarm gets a LIBRARY instead of the web: arXiv's quantitative finance, econometrics,
+  statistics and machine learning on markets, served by the gateway (`GET /v1/research/search`, `/read`;
+  [gateway/lib/library.mjs](../gateway/lib/library.mjs)). The date rule is enforced there, in code: an item is
+  served only if its first-posted date and the date of the version served are both before 2025-01-01 (arXiv's
+  own `published` and `updated`), a paper revised after 2024 is served as its pinned v1 (in a search only when
+  v1's own words match), anything without a reliable date is refused, every text is scanned for dates after
+  2024 (replaced in version-pinned text, withheld whole in text not pinned to a version), and nothing unpinned
+  is ever served. The House checks every answer again ([league/swarm/library.py](../league/swarm/library.py)).
+  The Claude researchers get a `literature` tool (search, read), Sail's profiles never see it; the architect
+  and the strategist get a retrieved block of abstracts before their calls, and the strategist names the next
+  searches. Every agent cites the ids it relied on. A paper's finding is a hypothesis: whatever is built from
+  it faces the Train score, the 1.5x stress, the drift screen, the verifier and the holdout exactly as any
+  idea. arXiv's terms bind the pace (one request every 3 s, one connection at a time; arxiv.org's crawl delay
+  of 15 s), and three lines bound the use: 300 calls a day, 12 a family, 2 a research cycle.
 
 ## The loops
 

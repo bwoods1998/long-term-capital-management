@@ -37,6 +37,14 @@ strategist (league/swarm/strategist.py, kv `architect_agenda_section`): the agen
 section, every line quoted ("> ") under a header, and in the architect's own instructions, that says the section changes
 no rule, the verifier or money. Otherwise it is `architect.agenda` exactly as before.
 
+THE LIBRARY (Sept 29, 2026; league/swarm/library.py). While `research.enabled`, the pass retrieves a block of pre-2025
+literature first (`loop.Swarm.architect_pass`: the strategist's accepted `library_queries`, else the seed searches) and
+the request carries it after the GAPS, in the user turn (after the sealed digest's cached prefix, so it never touches the
+digest's cache entry). Each proposal may name in "literature" at most three ids from the block that the idea builds on;
+`admit` keeps only ids in the block and stores them in the family's spec (its brief says them), its notebook and its
+private `swarm.born` payload. A paper's finding is a hypothesis: the verifier judges every family alike. The pass's
+event gains `library` (the searches, the ids and how many proposals cited one).
+
 Each pass is a `swarm.architect` event; each birth a `swarm.born` event (the site's news).
 Standard library only.
 """
@@ -770,6 +778,14 @@ difference; name its parent instead. If no row is close, say [] and why in the f
 
 GRAVEYARD_POINTER = "THE GRAVEYARD: every row is in the system prompt's graveyard blocks above; check every proposal against it."
 
+#: THE LIBRARY's addition to the system prompt, sent only with a retrieved block (Sept 29, 2026).
+LIBRARY_RULE = """
+
+THE LIBRARY in the request is research posted by the end of 2024. For each family add "literature": ["arXiv:<id>v<N>"],
+the ids from THE LIBRARY the idea builds on, at most three, [] for none. A paper's finding is a hypothesis for the Gym to
+test, never evidence: the verifier judges an idea from the literature exactly as any other, and published effects often
+shrink after publication or vanish after costs."""
+
 
 class Architect:
     def __init__(self, store: SwarmStore, router: Any, settings: Mapping[str, Any], *, clock: Callable[[], float] = time.time,
@@ -873,9 +889,10 @@ class Architect:
                 out.append({"row": str(item["row"]), "how": " ".join(str(item.get("how") or "").split())[:300]})
         return out[:3]
 
-    def prompt(self, *, full_graveyard: bool = False) -> str:
+    def prompt(self, *, full_graveyard: bool = False, library: Any = None) -> str:
         """The request. `full_graveyard` (the Claude route with the digest): THE GRAVEYARD is a pointer to the digest in
-        the system prompt; else the 20 newest rows, each lesson as `lesson_view` gives it."""
+        the system prompt; else the 20 newest rows, each lesson as `lesson_view` gives it. `library` (a
+        `library.LibraryBlock`): THE LIBRARY, after the GAPS and before the agenda."""
         alive = self.store.families(alive=True)
         living_ids = {f["id"] for f in alive}
         board = (self.store.get("leaderboard") or {}).get("board") or []
@@ -906,12 +923,14 @@ class Architect:
                 f"(leaderboard):\n{json.dumps(living)}\n\n{graveyard}\n\n"
                 f"RESEARCH COVERAGE (effort, not profitability; validated means evaluated, not passed):\n{coverage}\n\n"
                 f"GAPS (uncovered structure types by root; [] means all covered):\n{gaps}"
+                + (f"\n\n{library.text}" if library is not None and getattr(library, "text", "") else "")
                 + (f"\n\n{title}:\n{agenda}" if agenda else ""))
 
-    def admit(self, rows: Any, *, digest: bool = False) -> list[str]:
+    def admit(self, rows: Any, *, digest: bool = False, library: Any = None) -> list[str]:
         """Birth the well-formed proposals (the module docstring). Each birth's `differs_from` rows (the digest route's
         answer) go into its notebook; with `digest` and `architect.require_differs`, a proposal that names no real
-        graveyard row is refused."""
+        graveyard row is refused. Its "literature" ids that are in `library` (THE LIBRARY's block) go into its spec, its
+        notebook and its `swarm.born` payload; other ids are dropped."""
         cap = self.want()
         known = self.graveyard_ids()
         strict = digest and self.cfg.get("require_differs") is True
@@ -946,6 +965,9 @@ class Architect:
             spec = {"id": family_slug(row.get("slug") or mechanism), "mechanism": mechanism, "structure": structure, "roots": roots, "dte": [lo, hi],
                     "rejection": str(row.get("rejection") or "")[:400], "sketch": str(row.get("sketch") or "")[:800],
                     "lessons": lessons}
+            literature = library.resolve(row.get("literature"))[0] if library is not None else []
+            if literature:
+                spec["literature"] = literature
             # A slice a retired family searched (same structure and roots): the same idea again continues its lineage
             # (its trials and holdout looks, so re-proposing never resets the count its evidence is deflated by); another
             # idea is a new lineage that still counts the slice's trials (`prior_lineage`) but not its look ration.
@@ -963,12 +985,15 @@ class Architect:
                 self.store.note(fam["id"], f"The architect's sketch: {spec['sketch']}")
             for item in cited:
                 self.store.note(fam["id"], f"The architect: differs from {item['row']}: {item['how']}")
+            if literature:
+                self.store.note(fam["id"], "The architect built this on: " + "; ".join(f"{x['id']} {x['title']}" for x in literature))
             self.store.event("swarm.born", fam["id"], {"parent": parent, "mechanism": mechanism, "structure": structure,
-                                                        "roots": roots, "origin": "architect"})
+                                                        "roots": roots, "origin": "architect",
+                                                        **({"literature": [x["id"] for x in literature]} if literature else {})})
             born.append(fam["id"])
         return born
 
-    def _digest_call(self, system: str, paired: bool) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    def _digest_call(self, system: str, paired: bool, library: Any = None) -> tuple[dict[str, Any], dict[str, Any] | None]:
         """The Claude-only arguments of a digest-route call (`claude_prefix`, `claude_system`, `claude_user`) and what the
         pass's event says of the digest; ({}, None) off the digest route. A digest that cannot be built is reported and the
         call goes without it (the 20 newest rows, as before)."""
@@ -986,11 +1011,11 @@ class Architect:
                 "ttl": ttl, "ttl_mode": str(self.cfg.get("graveyard_digest_ttl") or "5m"), "paired": paired,
                 "chars": len(snap.sealed) + len(snap.tail), "resealed": snap.resealed}
         return {"claude_prefix": blocks, "claude_system": system + FULL_GRAVEYARD_RULE,
-                "claude_user": self.prompt(full_graveyard=True)}, info
+                "claude_user": self.prompt(full_graveyard=True, library=library)}, info
 
-    def run(self, *, paired: bool = False) -> dict[str, Any]:
+    def run(self, *, paired: bool = False, library: Any = None) -> dict[str, Any]:
         """One pass. `paired`: the strategist's Claude call just sent (and marked) the same sealed digest, so this call
-        marks it too and reads it from the cache (`digest_ttl`)."""
+        marks it too and reads it from the cache (`digest_ttl`). `library`: THE LIBRARY's block for the request."""
         began = self.clock()
         self.store.put("architect_at", began)
         room = int(self.settings.get("population", {}).get("ceiling", 96)) - len(self.store.families(alive=True))
@@ -1002,8 +1027,9 @@ class Architect:
         try:
             # SYSTEM itself while Train is 2022-2024; else the running swarm's span (its store's migrated objective)
             system = settings_mod.train_span_text(SYSTEM, settings_mod.objective_span(self.store.get("train_objective")))
-            extra, info = self._digest_call(system, paired)
-            answer = self.router.ask(role="architect", system=system, user=self.prompt(), family=None,
+            system += LIBRARY_RULE if library is not None else ""
+            extra, info = self._digest_call(system, paired, library)
+            answer = self.router.ask(role="architect", system=system, user=self.prompt(library=library), family=None,
                                      key=f"swarm:architect:{int(began)}", openai_model=self.cfg.get("openai_model"),
                                      sail_profile=str(self.cfg.get("sail_profile", "k3_balanced")),
                                      max_output=int(self.cfg.get("max_output_tokens", 12000)), effort="high", need_usd=2.0,
@@ -1016,9 +1042,13 @@ class Architect:
             return out
         rows = (answer.get("json") or {}).get("families")
         on_digest = bool(extra) and answer.get("route") == "claude"
-        born = self.admit(rows, digest=on_digest)
+        born = self.admit(rows, digest=on_digest, library=library)
         out = {"born": born, "proposed": len(rows) if isinstance(rows, list) else 0, "route": answer.get("route"),
                "model": answer.get("model"), "cost_usd": answer.get("cost_usd"), "seconds": round(self.clock() - began, 1)}
+        if library is not None:
+            cited = [library.resolve(r.get("literature"))[0] for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+            out["library"] = {"queries": list(library.queries), "ids": list(library.ids), "cited": sum(1 for c in cited if c),
+                              "cited_ids": sorted({x["id"] for c in cited for x in c})}
         if answer.get("route") == "claude":
             usage = answer.get("usage") or {}
             out["usage"] = {k: usage[k] for k in USAGE_KEYS if k in usage}
@@ -1041,4 +1071,4 @@ __all__ = ["Architect", "SYSTEM", "GraveyardDigest", "Digest", "lesson_view", "p
            "locked_text", "fit", "AGENDA_KEY", "SEAL_KEY", "CPT_KEY", "LAST_KEY", "DIGEST_HEADER", "FULL_GRAVEYARD_RULE",
            "GRAVEYARD_POINTER", "SECTION_MAX", "AGENDA_LOCKED_MAX", "MAX_DIGEST_BYTES", "COMPOSED_AGENDA_TITLE",
            "LEGACY_AGENDA_TITLE", "USAGE_KEYS", "ASCII_MAP", "is_operator", "operator_ids", "operator_scale", "LEVELS",
-           "LIST_LEVEL", "WHERE_HEADER", "DIGEST_FORMAT"]
+           "LIST_LEVEL", "WHERE_HEADER", "DIGEST_FORMAT", "LIBRARY_RULE"]

@@ -21,6 +21,21 @@ on branch `run/options-swarm-2026-09-26`) has the detail.
 
 ## Not yet deployed
 
+- **The research library** (branch `research/library`; not yet released; off by default). The agents read research
+  posted before 2025, and nothing later, through the gateway: `GET /v1/research/search`, `/read` and `/health`
+  (gateway/lib/library.mjs) serve arXiv's quantitative finance, econometrics, statistics and machine learning on
+  markets, with the date rule enforced in code (both the first-posted date and the served version's date before
+  2025-01-01; a paper revised after 2024 served as its pinned v1; no reliable date, no item; a post-2024 date in text
+  replaced, or the unpinned text withheld), exactly three hosts (the API, `arxiv.org/html/<id>v<N>`, ar5iv), arXiv's
+  pace (one request at a time, 3 s apart on the API, 15 s on arxiv.org, a backoff after 429 or 503) and
+  `LIBRARY_DAY_UPSTREAM` (600) a day, kept by the existing Gate object (no new Durable Object class), cached in a new
+  KV namespace `LIBRARY`. The House (league/swarm/library.py) checks every answer again; the Claude band's
+  researchers get a `literature` tool (Sail never does), the architect and the strategist a retrieved block of
+  abstracts, and every agent cites the ids it relied on; `research.requests_day` (300), `family_requests_day` (12)
+  and `cycle_calls` (2) bound it; each call is a private `swarm.research` event. Deploy order: the gateway first
+  (create the KV namespace, bind it, deploy; verify a search and a read), then the House release, then
+  `research.enabled` true in `swarm.json` (docs/operations.md "Deploy"). The money digest does not move.
+
 - **Train from 2017** (#424; not yet released). Train's window, `storelib.TRAIN_EARLIEST` and
   `gym.train_from` reach 2017-01-03 (a third start beside 2020-01-02 and 2022-01-03; over eight years the derived
   split is 24 and the time limit 2400 s). Stage 9's `EARLY` stays the literal 2020-01-02..2021-12-31. New public

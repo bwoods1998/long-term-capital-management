@@ -639,3 +639,29 @@ class Helpers(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LiteratureHistory(unittest.TestCase):
+    """THE LIBRARY (Sept 29, 2026): a `literature` call is Claude's alone, so every history `sanitize` builds turns it and its
+    answer into one user message after its turn's outputs: no model is ever sent a call to a function it was not given."""
+
+    def test_a_literature_call_and_its_answer_become_one_user_message_after_the_turns_outputs(self):
+        items = [
+            {"role": "user", "content": "go"},
+            {"type": "function_call", "call_id": "c1", "name": "literature", "arguments": '{"action": "search", "query": "vrp"}'},
+            {"type": "function_call", "call_id": "c2", "name": "gym_run", "arguments": '{"hold": true}'},
+            {"type": "function_call_output", "call_id": "c1", "output": json.dumps({"status": "ok", "items": [], "pad": "x" * 9000})},
+            {"type": "function_call_output", "call_id": "c2", "output": '{"status": "held"}'},
+            {"role": "user", "content": "next"},
+            {"type": "function_call", "call_id": "c3", "name": "literature", "arguments": '{"action": "read", "id": "1602.00865"}'},
+            {"type": "function_call_output", "call_id": "c3", "output": {"status": "ok", "id": "arXiv:1602.00865v1"}},
+        ]
+        out = sanitize(items)
+        self.assertEqual([i.get("type") or i.get("role") for i in out], ["user", "function_call", "function_call_output", "user", "user", "user"])
+        self.assertEqual([i["name"] for i in out if i.get("type") == "function_call"], ["gym_run"])
+        said = out[3]["content"]
+        self.assertTrue(said.startswith('(You called the research library (literature) with {"action": "search", "query": "vrp"}; it answered: '))
+        self.assertLess(len(said), 4200, "the answer is cut to 4,000 characters")
+        self.assertEqual(out[4]["content"], "next")
+        self.assertIn('"arXiv:1602.00865v1"', out[5]["content"], "a call at the end of the history is said too")
+        self.assertEqual(sanitize(items[:1] + items[2:3] + items[4:6]), [items[0], items[2], items[4], items[5]], "no literature: unchanged")

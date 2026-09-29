@@ -165,6 +165,17 @@ prints it).
 deploy`. Deploy the gateway before a House release that needs its change. After a deploy, read
 `python3 scripts/gateway_admin.py status`. Caps and `OPTION_STRUCTURES_REAL` change only this way.
 
+**The research library's first deploy** (not yet released; outside US market hours, never during a freeze): the
+gateway first. In `gateway/`: `npx wrangler kv namespace create LIBRARY` (not a secret), put the id it prints in
+`wrangler.jsonc` as `"kv_namespaces": [{ "binding": "LIBRARY", "id": "<id>" }]` (the comment by `LIBRARY_DAY_UPSTREAM`
+shows where), `npm run check && npm test`, `npx wrangler deploy`. `wrangler rollback` stays available: no Durable
+Object class is added. Never delete the namespace once a version has bound it (that would block rolling back to those
+versions). Then verify from the laptop, through the gateway, one search and one read (`curl -s -H "Authorization:
+Bearer $GATEWAY_TOKEN" "$GATEWAY/v1/research/search?q=variance+risk+premium&max=3"`, then `/v1/research/read?id=<an id
+it returned>`): `X-LTCM-Library: miss`, then `hit` for the same search; `/v1/research/health` counts 2-3 upstream
+requests. That is the first proof that arXiv answers Cloudflare's shared egress. Then the House release, and only then
+`{"research": {"enabled": true}}` in `swarm.json` (no deploy).
+
 **The site.** In `~/Work/personal-site`: `npm test`, then `npm run build && npx wrangler deploy`
 (its `DEPLOYMENT.md` has the details). When the publisher's schema or a bound changes, the site
 deploys first: it refuses a whole checkpoint for one field it does not allow. The one exception is the
@@ -232,6 +243,16 @@ cd /workspace/previous && /workspace/.venv/bin/python -m league.watchdog rollbac
   `claude_paused` (this cycle's trouble paused the band) and `claude_overrun`. The swarm's `spend` rows (kind
   `claude`, `detail.role` "researcher") hold the holds and their settlements; `kv claude_unsettled` lists holds whose
   bill is not yet known; `kv claude_band` is the breaker (`trouble`, `paused_until`, `why`).
+- **The research library** (not yet released): `curl -s -H "Authorization: Bearer $GATEWAY_TOKEN"
+  "$GATEWAY/v1/research/health"` (the same `library` block as `/v1/health`: today's upstream requests by host and by
+  role against `LIBRARY_DAY_UPSTREAM`, the lease in flight, a backoff after arXiv's 429 or 503). On the box, the
+  swarm's private `swarm.research` events (one a call: role, family, action, query or id, the ids served, cached,
+  the gateway's withheld counts, status, whether it counted; never an abstract or a text):
+  `sqlite3 'file:/workspace/state/swarm.sqlite?mode=ro' "SELECT at, family, payload FROM events WHERE kind='swarm.research'
+  ORDER BY seq DESC LIMIT 20"`. A `swarm.cycle` event that used it carries `literature_calls`, `literature_ids`,
+  `literature_refused` and `literature_revise`; a `swarm.architect` event `library` (the searches, the ids, how many
+  proposals cited one); a `swarm.strategist` event `library_queries` and `literature`. The heartbeat's
+  `status.library` has today's calls against `research.requests_day`.
 - **The public page:** `curl -s https://blakewoods.us/api/capital/checkpoint` (its `published_at`);
   `curl -s 'https://blakewoods.us/api/capital/checkpoint?progress=1&positions=1'` adds the positions
   table, which the default read omits.
@@ -621,6 +642,9 @@ entries still require the paper route proofs' witnessed round trips.
 | `claude.roles`, `claude.role_usd_day`, `claude.role_model` | `swarm.json` on the box | architect, audit, diagnostician, rewrite, review; rewrite $15 and review $5; audit on `claude-opus-5-5` (since 04:53Z Sept 29) | who asks Claude first; a role's own Claude line a UTC day; a role's own Claude model (defaults since PR #417: architect, audit, diagnostician, researcher; the researcher $100; the researcher on `claude-sonnet-5-5`; the box's `roles` list replaces the default, so the box's research band is off until "researcher" is added to it) | edit `swarm.json` |
 | `researcher.claude_top`, `claude_effort`, `claude_max_tokens`, `claude_hold_every` | `swarm.json` on the box | defaults: 12, `medium`, 12000, 3 | the top band on Claude (PR #417): how many of the bandit's top families, at what effort, each call's output ceiling (it sizes the hold), and how often Claude looks during a hold streak (1: every cycle) | edit `swarm.json` |
 | `researcher.claude_family_usd_day`, `claude_min_room_usd`, `claude_timeout_seconds`, `claude_breaker_failures`, `claude_breaker_window_seconds`, `claude_breaker_pause_seconds` | `swarm.json` on the box | defaults: $15, $25, 180, 3, 3600, 3600 | the band's fuses: one family's Claude a UTC day, the funded room left to the other roles, one call's limit, and the breaker (unknown bills in the window that pause the band, and for how long) | edit `swarm.json` |
+| `research.enabled` | `swarm.json` on the box | false (default; not yet released) | THE RESEARCH LIBRARY: the Claude band's `literature` tool and the architect's and strategist's retrieved block (below, "The research library") | edit `swarm.json`, only after the gateway that carries `/v1/research/*` and the House release are both deployed |
+| `research.requests_day`, `family_requests_day`, `cycle_calls`, `min_seconds_left`, `search_max`, `search_abstract_chars`, `read_chars`, `timeout_seconds`, `retrieval`, `seed_queries` | `swarm.json` on the box | defaults: 300, 12, 2, 45, 5, 900, 8000, 60, {queries 4, per_query 4, items 8, abstract_chars 900, seconds 60, ttl_seconds 10800}, eight seed searches | the library's lines (calls a UTC day for the floor, a family, a research cycle), what a call may show the model, the architect's retrieval and its seed rotation | edit `swarm.json` |
+| `LIBRARY_DAY_UPSTREAM`, the `LIBRARY` KV binding | `gateway/wrangler.jsonc` | 600; the binding added at the library's first gateway deploy | requests to arXiv a UTC day, the whole floor (paced to arXiv's terms by the Gate); the library's cache (without it, uncached) | gateway deploy |
 | `gate.review_openai_model`, `gate.audit_openai_model` | `swarm.json` on the box | null, null (since 04:53Z Sept 29) | the review's and the audit's OpenAI route; null skips it (defaults `gpt-6-sol`, `gpt-6-astra`) | edit `swarm.json` |
 | `architect.openai_model`, `every_seconds`, `refill_seconds`, `max_refill`, `max_output_tokens` | `swarm.json` on the box | null, 600, 1200, 24, 32000 | the architect: null leaves it Claude-only (Sail as the fallback); its cadence, its refill below `population.start` and each pass's births (defaults `gpt-6-astra`, 14400, 3600, 12, 12000) | edit `swarm.json` |
 | `population.start`, `ceiling`, `floor` | `swarm.json` on the box | 96, 96, 12 | the refill target, the most alive, the fewest retirement may leave (defaults 48, 96, 16) | edit `swarm.json` |
@@ -721,6 +745,41 @@ back with a profit. The robust Train objective, its robustness runs (1.5x and mi
 never starting or keeping a box awake) and the D2 validation line are code, not settings. The objective's one-time
 migration beats the heartbeat while it runs, skips a family it already moved and empties (never keeps) the best of a
 family it cannot rescore.
+
+## The research library
+
+Not yet released (branch `research/library`); off until `research.enabled`. What it is and why is in
+[docs/design.md](design.md) ("The agent") and [gateway/README.md](../gateway/README.md) ("The research library").
+Operating it:
+
+- **The rule is the gateway's.** Nothing in `swarm.json` loosens the date rule: the cutoff (2025-01-01) is a constant
+  in `gateway/lib/library.mjs` and `league/swarm/library.py`, tested on both sides. The swarm has no other research
+  path (nothing in `league/swarm/` names `/v1/web/fetch`; a test holds it).
+- **Who reads it.** The Claude band's researchers (`researcher.claude_top`, while "researcher" is in `claude.roles`)
+  get `literature` as the last of their tools and a paragraph in their system prompt; Sail's profiles never do (a
+  literature call in a history reaches Sail as a user message). A Claude turn offers it while the lines have room; a
+  REVISE turn only while another model call and the time for it remain, once a cycle. The architect's pass retrieves a
+  block first (the strategist's accepted `library_queries`, else four `seed_queries` in rotation), kept three hours in
+  kv `library_block`, and hands the same block to the strategist and the architect.
+- **The lines.** `research.requests_day` (300) is the floor's line, every role together; `family_requests_day` (12) and
+  `cycle_calls` (2) bound the researchers. A busy queue or a refusal (4xx) counts as no call; a 5xx or a timeout does.
+  The gateway's own day is `LIBRARY_DAY_UPSTREAM` (600 requests to arXiv; cache hits are free).
+- **Cost.** A literature call bundled with others in one Claude answer adds about $0.01-0.02; one that takes its own
+  turn about $0.06 (Sonnet 5.5, US inference). The band's worst case is about $9 a day (typically about $3), inside the
+  researcher's $100 line; the architect's and strategist's blocks add under $0.40 a day. arXiv is free.
+- **What to watch in the first hour.** `swarm.research` events (calls, the cache share, refusals, busy); the cycles'
+  `literature_calls`; the Claude band's cost a cycle against the day before (target: under +15%); the architect's
+  `library.cited`; births whose spec has `literature`. Busy or budget refusals should be a few a day at most; many
+  mean the pace or the lines are too tight, or arXiv throttles Cloudflare's shared egress (the gateway backs off on
+  its 429 and 503: `library.backoff_until` in health).
+- **Judging it.** The share of Claude cycles with a literature call and of reads among calls; the cache share (above
+  half by day 2); the Train-score change of versions whose `why` cites an id against the same families' uncited
+  versions; births with literature against births without (an eligible Train version and a validation within 48 h);
+  the architect's cited rate. Raise `cycle_calls` or `family_requests_day` when the effect is positive and the line
+  has room; point the retrieval at what the strategist actually cites.
+- **Off.** `{"research": {"enabled": false}}` in `swarm.json` (no deploy): the tool leaves Claude's list at the next
+  cycle (one cache rewrite), and the architect's request is today's again. `LIBRARY_DAY_UPSTREAM` "0" closes the
+  gateway's routes (a gateway deploy).
 
 ## Models and Claude
 
