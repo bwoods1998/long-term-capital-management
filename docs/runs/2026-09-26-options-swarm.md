@@ -2520,4 +2520,17 @@ looks like beta. Validation 2025 and the holdout judge both.
     nothing.
   - Next: the rebound's year-to-year stability as a new, separately pre-registered hypothesis.
 
+
+### Sprint scoreboard, T0 + 70 h (04:23Z Sept 29, the swarm refilled)
+
+| # | Metric | Value |
+|---|---|---|
+| 1 | Population | 94 alive, 770 retired; 102 born and 20 retired in 2 h (agenda v14; research limits lifted at 03:50Z) |
+| 2 | Throughput | 932 cycles/h (was 162 at 02:18Z), median 176 s while the pool grows toward 16 boxes; 2 provider 502s |
+| 3 | Search | 67,739 trials, 344,986 program-years; the new families have not reached Validation yet. The revived near-misses are training |
+| 4 | Evidence | Validation passes alive 0; holdout looks 2, passes 0 |
+| 5 | Real fills (D3) | none overnight |
+| 6 | Money | Equity $1,473.11; 0 positions, 0 orders |
+| 7 | Compute | Sail $54.44. Claude $77.49 of $100. OpenAI $645.01 + $11.40 in flight of $707 (no more top-ups, by the owner's decision). The swarm spent $9.44 in 2 h |
+
 ## Report
