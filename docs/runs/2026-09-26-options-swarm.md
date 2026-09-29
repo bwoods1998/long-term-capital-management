@@ -2829,4 +2829,28 @@ looks like beta. Validation 2025 and the holdout judge both.
   - Today's first calibration trip (IWM, the root's first) filled open and close at the mid: 7 of 8 real orders at the
     mid over two sessions.
 
+
+- **14:45-15:00Z Tournament round 4 (the strategist's three directions, pre-registered, sealed Train boxes): 0 of 6.**
+  - (b) Leveraged-ETF next-morning fade: mid t 1.68/-0.87/-0.26, and it lost to random up days. Held to expiry the
+    profit was 2022's bear market.
+  - (c) QQQ breadth and concentration: narrow leadership continued; the flush arm continued (mid t -4.73).
+  - (d) TLT/GLD/SLV cheap-premium pairs: no every-year mid edge; the unconditional placebo loses at the natural.
+  - All three directions are closed. Three op- lessons are in the graveyard (1,229 rows), so the strategist and the
+    architect see them. All ten boxes were terminated.
+- **About 15:00Z The owner's explicit decisions** (after "im fine losing everything in my brokerage account … dont shy
+  away from risk"):
+  - **Approved: a mid-session money-path hotfix (PR #429).**
+    - `_restore_real_instances` passed the saved mode in `Instance`'s `observe` slot. After every House restart
+      (R8-R11a), real instances came back observe-flagged (the House live test showed `observe: "live"` on the box)
+      and lost their saved mode.
+    - No real position was open. Two regression tests fail before and pass after.
+    - It deploys once CI and an adversarial review are green, between calibration trades.
+  - **Approved: a real-money incubator, a new shadow-to-real route.**
+    - Families that pass Train, pass the drift screen alone, and show positive live paper practice trade tuition size:
+      1 contract, <= $50 max loss each, <= 4 at once, a $150/week total loss cap.
+    - Its expected value is negative until one has a real edge. It is never verifier evidence and never a promotion;
+      D2 remains the only route to Probe and Sized.
+    - Being built on the practice league, with two money-path reviews, for release after the close with grant
+      re-ratification.
+
 ## Report
