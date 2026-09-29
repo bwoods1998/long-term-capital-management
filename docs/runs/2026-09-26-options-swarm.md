@@ -2498,4 +2498,26 @@ looks like beta. Validation 2025 and the holdout judge both.
     - the length-fair graveyard search.
   - The docs will be reconciled before the release is called done.
 
+
+- **03:44-04:20Z The width lever (pre-registered, sha256 `c3813ae6…`): 0 of 32 mechanism x width rows pass. No
+  money-table request follows.**
+  - The question: would a larger envelope turn cost-bound edges net-positive?
+  - Eight frozen mechanisms were re-run at $1, $2, $3 and $5 widths (guards $95-480), only the width changed, on Train
+    2020-24: the two rebounds, the opening drive, small-cap lag, skew innovation, diffusive continuation, a
+    volatility-state trade, and reversal plus calm carry.
+  - Cost did behave as hypothesized. A round trip costs about $5-6 at every width, so from $1 to $5 the cost per $1 of
+    mid edge fell about 4.5x, and 6 of 8 mechanisms turn net-positive at 1.0x at $5.
+  - But width fixes cost, not the ceiling.
+    - For the six cost-bound mechanisms, the mid edge stays about 4% of max loss at every width.
+    - The $5 residual is market drift (drift-adjusted t <= 0.40), and it is concentrated in single quarters (58-137%
+      of P&L).
+  - The rebounds were never cost-bound. They make $8.57-9.15 a structure at $1 and 1.0x, and fail on weak years
+    (2020, 2024).
+    - Width scales every year alike: REB14's 2024 t is 0.46-0.67 at every width.
+    - The best row, REB14 at $3, has a pooled t of 3.48 but fails the every-year bar, drop-5, and the 40 structures a
+      year.
+  - The judge recomputed all 96 runs from the raw batches (0 mismatches). All 8 boxes were terminated. Holm rejects
+    nothing.
+  - Next: the rebound's year-to-year stability as a new, separately pre-registered hypothesis.
+
 ## Report
