@@ -835,6 +835,17 @@ class Architect:
             row["validated_families"] += int(int(family.get("validations") or 0) > 0)
         return rows
 
+    def practice_block(self) -> str:
+        """THE PRACTICE LEAGUE by mechanism class (league/swarm/practice.py), one line a class, at most 12, then a blank
+        line; "" when practice feedback is off or there is no record. A research signal, never evidence."""
+        from . import practice
+
+        try:
+            lines = practice.class_lines(self.store, self.settings)
+        except Exception:  # noqa: BLE001 - the prompt goes without it
+            return ""
+        return (practice.header(self.settings, architect=True) + "\n" + "\n".join(lines) + "\n\n") if lines else ""
+
     def agenda(self) -> tuple[str, str]:
         """(its title, the agenda): the operator's locked preamble then the strategist's latest accepted WHERE TO LOOK
         section (`compose`) when both exist; else `architect.agenda` exactly as before ("" when there is none)."""
@@ -901,24 +912,13 @@ class Architect:
         # population losing families faster than three births per hour. The admission and spending caps still bind.
         number = str(want) if self.refilling() and want > 0 else f"{min(max(int(self.cfg.get('min_new', 3)), 1), max(want, 1))} to {max(want, 1)}"
         title, agenda = self.agenda()
+        practice = self.practice_block()
         return (f"Propose {number} new families, on these roots only (the Gym "
                 f"holds their data): {roots}.\n\nLIVING FAMILIES "
                 f"(leaderboard):\n{json.dumps(living)}\n\n{graveyard}\n\n"
-                f"RESEARCH COVERAGE (effort, not profitability; validated means evaluated, not passed):\n{coverage}\n\n"
-                + self._practice_block()
-                + f"GAPS (uncovered structure types by root; [] means all covered):\n{gaps}"
+                f"RESEARCH COVERAGE (effort, not profitability; validated means evaluated, not passed):\n{coverage}\n\n{practice}"
+                f"GAPS (uncovered structure types by root; [] means all covered):\n{gaps}"
                 + (f"\n\n{title}:\n{agenda}" if agenda else ""))
-
-    def _practice_block(self) -> str:
-        """THE PRACTICE LEAGUE by mechanism class (league/swarm/practice.py), one line a class, at most 12, then a blank
-        line; "" when practice feedback is off or there is no record. A research signal, never evidence."""
-        from . import practice
-
-        try:
-            lines = practice.class_lines(self.store, self.settings)
-        except Exception:  # noqa: BLE001 - the prompt goes without it
-            return ""
-        return (practice.header(self.settings, architect=True) + "\n" + "\n".join(lines) + "\n\n") if lines else ""
 
     def admit(self, rows: Any, *, digest: bool = False) -> list[str]:
         """Birth the well-formed proposals (the module docstring). Each birth's `differs_from` rows (the digest route's
