@@ -1327,7 +1327,8 @@ def _main(argv: Sequence[str] | None = None) -> int:
             row: dict[str, Any] = {"what": block.what, "job": block.job, "roots": len(block.roots),
                                    "first": block.first.isoformat(), "last": block.last.isoformat(),
                                    "years": block.years()}
-            if calendar is not None and all(calendar.covers(y) for y in block.years()):
+            needed = set(block.years()) | (set(blocks[block.after].years()) if block.after in blocks else set())
+            if calendar is not None and all(calendar.covers(y) for y in needed):
                 tasks = sl.plan(calendar, stages=[stage] + ([block.after] if block.after else []), blocks=blocks,
                                 order=[block.after, stage] if block.after else [stage])
                 mine = [t for t in tasks if t.stage == stage]
