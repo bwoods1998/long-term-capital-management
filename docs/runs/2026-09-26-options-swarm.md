@@ -2533,4 +2533,21 @@ looks like beta. Validation 2025 and the holdout judge both.
 | 6 | Money | Equity $1,473.11; 0 positions, 0 orders |
 | 7 | Compute | Sail $54.44. Claude $77.49 of $100. OpenAI $645.01 + $11.40 in flight of $707 (no more top-ups, by the owner's decision). The swarm spent $9.44 in 2 h |
 
+
+- **04:41-04:53Z R8 deployed; the swarm switched to Claude Sonnet 5.5.**
+  - Contents: #414 (the graveyard ranked by BM25, and distinct lessons at birth), #415 (Sonnet 5.5 prices), and #416
+    (Claude on the rewrite and review roles; per-role daily lines; per-role models; spend counted on the day of the
+    hold). Main `8074e262`; 678 local tests and main's CI green.
+  - Money digest unchanged (`a3e2aa7c`), so no re-ratify. Backup `state/backups/pre-r8`.
+  - Release `20260929T044127Z-2c265b03bc04`, promoted 04:42:07Z.
+  - preopen 7/9, both expected: the gateway expectation was stale (now `7eaede72`, updated), and the Sail projection
+    fails until the owner tops up.
+  - swarm.json at 04:53Z:
+    - `claude.model` claude-sonnet-5-5;
+    - `claude.roles` architect, audit, diagnostician, rewrite, review;
+    - `claude.role_usd_day` rewrite $15 and review $5;
+    - `claude.role_model` audit on claude-opus-5-5, so the gate's two reads stay two different models;
+    - `gate.review_openai_model` and `gate.audit_openai_model` null. The architect's OpenAI route was already off,
+      so OpenAI is no longer used.
+
 ## Report
