@@ -191,7 +191,10 @@ class Architect:
                 lo, hi = sorted((max(0, min(45, int(dte[0]))), max(0, min(45, int(dte[1])))))
             except (TypeError, ValueError):
                 lo, hi = 0, 5
-            lessons = [diagnostics.scrub(g["lesson"])[:300] for g in self.store.graveyard(f"{structure} {' '.join(roots)} {mechanism}", limit=3)]
+            # Three distinct lessons: many open with the same wording (the idle rule's), and 300 characters is all a
+            # family is born with, so a repeat would only crowd out another lesson.
+            lessons = list(dict.fromkeys(diagnostics.scrub(g["lesson"])[:300]
+                                         for g in self.store.graveyard(f"{structure} {' '.join(roots)} {mechanism}", limit=12)))[:3]
             spec = {"id": row.get("slug") or mechanism, "mechanism": mechanism, "structure": structure, "roots": roots, "dte": [lo, hi],
                     "rejection": str(row.get("rejection") or "")[:400], "sketch": str(row.get("sketch") or "")[:800],
                     "lessons": lessons}
