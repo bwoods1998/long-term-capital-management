@@ -53,7 +53,8 @@ PUBLIC_KINDS = ("swarm.born", "swarm.retired", "swarm.band", "swarm.note")
 #: the boxes), and the House ledger is append-only on a small disk. The hourly `swarm.tournament` row carries their totals.
 #: The diagnostician's calls and the robustness demotions (R1, Sept 26, 2026) are private diagnostics: route, cost,
 #: stop reason and a version's evidence, which the swarm's store keeps.
-SKIPPED_KINDS = ("swarm.cycle", "swarm.pool", "swarm.diagnostician", "swarm.robustness")
+#: The strategist's runs (Sept 29, 2026) carry its section, evidence and cost: private, like the diagnostician's.
+SKIPPED_KINDS = ("swarm.cycle", "swarm.pool", "swarm.diagnostician", "swarm.robustness", "swarm.strategist")
 MIRROR_CURSOR = "swarm-mirror.json"
 #: The run of failed mirrors in a row (its folded error, since when, how many, whether the House heard it). Kept on disk so
 #: a restart (a deploy) neither forgets a run nor dates it from the new process: the alert's `began_at` is the run's first

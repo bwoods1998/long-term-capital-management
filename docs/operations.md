@@ -782,3 +782,20 @@ Operator lessons (Sept 29, 2026): the operator's own experiments are in the grav
 are compiled from private results, reviewed as public-safe, and inserted by the operator's private tool with a backup.
 Operator revivals are lineage continuations (origin `operator-revive`): a fork that inherits its lineage's trials and
 holdout looks, so the deflated Sharpe and the holdout ration count every version.
+
+The full graveyard and the strategist (Sept 29, 2026; `league/swarm/architect.py`, `league/swarm/strategist.py`), all in
+`swarm.json`. On the Claude route the architect reads every graveyard row as one sealed, cached digest ahead of its own
+instructions (`architect.full_graveyard`, default true; `architect.graveyard_digest_tokens`, 100000;
+`architect.graveyard_digest_tail_share`, 0.15; `architect.graveyard_digest_ttl`: "5m" marks the digest only when the
+strategist's call just wrote it, "1h" marks every call and needs `claude.cache_1h: true`, which is set only after the
+gateway admits the 1-hour cache, "off" never marks it). OpenAI and Sail keep the 20 newest rows. Every lesson a model
+reads loses any sentence about Validation, the holdout, out-of-sample results or 2025 (`lesson_view`). Each
+`swarm.architect` event carries `digest` (rows, level, sha, ttl, `cache_miss`), `usage` and `cited` (proposals naming a
+real graveyard row). The agenda splits in two: `architect.agenda_locked` is the operator's preamble, which no model edits;
+while it is non-empty the strategist runs before an architect pass that has room (at most every
+`strategist.every_seconds`, 10800) and writes only the WHERE TO LOOK section after it (kv `architect_agenda_section`,
+the previous one kept inside it). A validator rejects money, real-money or envelope talk, a verifier word beside a
+changing verb, numeric rules, 2025 or the holdout, overrides and revivals, and fewer than `strategist.min_cites` real
+ids; a rejection or any failure keeps the last section. Its Claude line is `claude.role_usd_day["strategist"]` (4.0 a
+UTC day by default), and "strategist" must be in `claude.roles` (the default).
+Each run is a private `swarm.strategist` event. Emptying `architect.agenda_locked` returns to `architect.agenda` as before.

@@ -1975,9 +1975,11 @@ class Researcher:
                 return {"ok": True}
             return {"notebook": [diagnostics.scrub(n["text"]) for n in self.store.notebook(fam["id"], limit=12)]}
         if name == "graveyard":
+            from .architect import lesson_view  # D2a: no sentence about Validation, the holdout or 2025 (Sept 29, 2026)
+
             rows = self.store.graveyard(str(args.get("query") or ""), limit=5)
             return {"lessons": [{"family": r["family"], "mechanism": r["mechanism"][:200], "structure": r["structure"],
-                                 "roots": r["roots"], "lesson": diagnostics.scrub(r["lesson"])[:600]} for r in rows]}
+                                 "roots": r["roots"], "lesson": lesson_view(r["lesson"])[:600]} for r in rows]}
         if name == "submit":
             run = self.store.run(str(args.get("run_id") or ""))
             if run is None or run["family"] != fam["id"] or run["window"] != "train" or run["version"] is None:

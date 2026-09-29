@@ -207,6 +207,39 @@ DEFAULTS: dict[str, Any] = {
         # The operator's research agenda (swarm.json, no deploy): when non-empty, the last section of every architect
         # request (at most 4,000 characters).
         "agenda": "",
+        # THE LOCKED PREAMBLE (Sept 29, 2026): the operator's part of the agenda that no model edits (the verifier, the
+        # refuted list, the drift rule, the envelope, the data limits; at most 4,000 characters). Non-empty, the agenda is
+        # this text verbatim followed by the strategist's latest accepted WHERE TO LOOK section (league/swarm/strategist.py);
+        # empty, or before the strategist's first accepted section, it is `agenda` exactly as before.
+        "agenda_locked": "",
+        # THE FULL GRAVEYARD (Sept 29, 2026): on the Claude route the architect reads every graveyard row as a digest,
+        # the first system block, cached; OpenAI and Sail keep the 20 newest rows (their contexts are small).
+        "full_graveyard": True,
+        "graveyard_digest_tokens": 100000,   # the digest's budget (809 rows fit whole at 100k; a ladder collapses rows past it)
+        "graveyard_digest_tail_share": 0.15, # rows buried since the seal ride uncached after it; past this share it is resealed
+        # "5m": the sealed digest is marked for the 5-minute cache only when the strategist's call just wrote it (a lone
+        # architect call every 20 minutes would pay the write premium for nothing); "1h": every digest call marks it for
+        # the hour (only with `claude.cache_1h`, else as "5m"); "off": never marked.
+        "graveyard_digest_ttl": "5m",
+        # Refuse a digest-route proposal that names no real graveyard row it differs from (off until the cited rate is known).
+        "require_differs": False,
+    },
+    # THE STRATEGIST (Sept 29, 2026; league/swarm/strategist.py): Claude reads the whole graveyard digest, the board, the
+    # Validation check-failure counts and the day's births and retirements, and writes only the agenda's WHERE TO LOOK
+    # section (the locked preamble is `architect.agenda_locked`, never edited by a model). It runs just before an
+    # architect pass that has room to add families, at most every `every_seconds`, and only while `agenda_locked` is set.
+    # A validator rejects any section that talks of money, real money, the envelope, changing a threshold, a numeric
+    # rule, 2025 or the holdout, overriding the preamble or reviving a refuted idea; a rejection or any failure keeps the
+    # last accepted section. Its Claude line is `claude.role_usd_day["strategist"]`; Sail (`sail_profile`,
+    # `sail_usd_day`) answers when Claude cannot.
+    "strategist": {
+        "enabled": True,
+        "every_seconds": 10800,
+        "max_chars": 1600,              # the section's cap ("about 1,500"); the code's ceiling is 2,000
+        "min_cites": 3,                 # graveyard or family ids the answer must cite
+        "sail_profile": "k3_balanced",
+        "sail_usd_day": 1.0,
+        "max_output_tokens": 12000,     # Sail only; Claude uses claude.max_tokens
     },
     "gate": {
         "review_openai_model": "gpt-6-sol",
@@ -270,9 +303,13 @@ DEFAULTS: dict[str, Any] = {
         "reserve_usd": 5.0,
         "max_tokens": 16000,            # thinking and the answer together (up to 32,000 streamed; 16,000 not)
         "stream": True,                 # server-sent events through the gateway: no hop waits 100 s in silence (HTTP 524)
-        "roles": ["architect", "audit", "diagnostician", "researcher"],
-        "role_usd_day": {"researcher": 100.0},
+        "roles": ["architect", "audit", "diagnostician", "researcher", "strategist"],
+        # The strategist's own line (Sept 29, 2026): its run is skipped, with no call, when the next call could pass it.
+        "role_usd_day": {"researcher": 100.0, "strategist": 4.0},
         "role_model": {"researcher": "claude-sonnet-5-5"},
+        # The 1-hour cache marker (Sept 29, 2026): true only once the gateway admits `ttl: "1h"` (today it refuses it
+        # with a 400, which would drop the call to its next route). Off, no call ever sends one.
+        "cache_1h": False,
     },
     # The diagnostician (league/swarm/diagnostician.py): Claude reads a family that is stuck or nearly there and rewrites
     # its mechanism or writes its lesson. Eligible: `min_validations` validations without passing, or the latest

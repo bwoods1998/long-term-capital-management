@@ -376,19 +376,33 @@ class ModelRouter:
             return 0.0
         return max(0.0, min(float(remaining - reserve), self._claude_cap_room()))
 
+    @staticmethod
+    def claude_system_blocks(system: str, prefix: Sequence[Mapping[str, Any]] | None = None) -> Any:
+        """The `system` a Claude call sends: the role's text as it always was, or (Sept 29, 2026) the role's `prefix`
+        blocks (the graveyard digest, each with its own cache marker) followed by the role's text, unmarked."""
+        if not prefix:
+            return system
+        return [*({"text": b.get("text"), "cache": b.get("cache")} for b in prefix), {"text": system, "cache": None}]
+
+    def _claude_hour(self) -> bool:
+        """The 1-hour cache is sent only once the operator says the gateway admits it (`claude.cache_1h`)."""
+        return self._claude_cfg().get("cache_1h") is True
+
     def claude_request(self, system: str, user: str, *, schema: Mapping[str, Any] | None = None,
-                       effort: str | None = None, role: str | None = None) -> tuple[dict[str, Any], float]:
+                       effort: str | None = None, role: str | None = None,
+                       prefix: Sequence[Mapping[str, Any]] | None = None) -> tuple[dict[str, Any], float]:
         """The exact Claude request a role's question becomes, and the hold it needs (the gateway's worst case), on the
-        role's model (`claude_model`). `effort` overrides `claude.effort` for this call."""
+        role's model (`claude_model`). `effort` overrides `claude.effort` for this call; `prefix` puts system blocks
+        ahead of `system` (`claude_system_blocks`)."""
         from ..claude import EFFORTS, MAX_TOKENS, reservation_ceiling, request_body
 
         cfg = self._claude_cfg()
         effort = str(effort or cfg.get("effort") or "high")
         # Streamed (`claude.stream`, the default since Sept 27, 2026): a high-effort answer outlasts Cloudflare's
         # 100-second wait for a silent origin (HTTP 524) unless its events flow as they are made.
-        body = request_body(self.claude_model(role), system, [{"role": "user", "content": user}],
+        body = request_body(self.claude_model(role), self.claude_system_blocks(system, prefix), [{"role": "user", "content": user}],
                             max_tokens=int(cfg.get("max_tokens", MAX_TOKENS)), effort=effort if effort in EFFORTS else "high",
-                            schema=schema, cache=True, stream=cfg.get("stream", True) is True)
+                            schema=schema, cache=True, stream=cfg.get("stream", True) is True, allow_hour=self._claude_hour())
         return body, float(reservation_ceiling(body))
 
     def claude_spent(self, *, role: str | None = None, since: float | None = None, family: str | None = None) -> float:
@@ -524,7 +538,7 @@ class ModelRouter:
 
     def _ask_claude(self, *, role: str, system: str, user: str, family: str | None, key: str, need_usd: float,
                     schema: Mapping[str, Any] | None, errors: list[str], billed: list[dict[str, Any]],
-                    effort: str | None = None) -> dict[str, Any] | None:
+                    effort: str | None = None, prefix: Sequence[Mapping[str, Any]] | None = None) -> dict[str, Any] | None:
         """The Claude route: the hold is booked (spend kind `claude`) and filed under the call's X-LTCM-Request id (kv
         `claude_unsettled`) in one transaction committed before the gateway hears of the call, so neither a crash nor a
         restart mid-call loses it: `settle_claude_holds` trues up whatever is still filed from the gateway's own record.
@@ -541,7 +555,7 @@ class ModelRouter:
             need = Decimal(str(need_usd))
             if not need.is_finite() or need < 0:
                 raise ValueError("invalid Claude minimum reservation")
-            body, ceiling = self.claude_request(system, user, schema=schema, effort=effort, role=role)
+            body, ceiling = self.claude_request(system, user, schema=schema, effort=effort, role=role, prefix=prefix)
             required = float(max(need, Decimal(str(ceiling))))
             request_id, _ = self._claude_admit(role=role, family=family, key=key, model=model, body=body, required=required,
                                                errors=errors)
@@ -553,9 +567,10 @@ class ModelRouter:
         hold = _ClaudeHold(self.store, request_id=request_id, usd=required, role=role, family=family, model=model, key=key)
         try:
             client = self.claude_factory(model)  # type: ignore[misc]
-            answer = client.ask(system, user, agent=f"swarm-{role}", role=role, max_tokens=body["max_tokens"],
-                                effort=body["output_config"]["effort"], schema=schema, cache=True, request_id=request_id,
-                                stream=body.get("stream") is True)
+            hour = {"allow_hour": True} if self._claude_hour() else {}
+            answer = client.ask(self.claude_system_blocks(system, prefix), user, agent=f"swarm-{role}", role=role,
+                                max_tokens=body["max_tokens"], effort=body["output_config"]["effort"], schema=schema, cache=True,
+                                request_id=request_id, stream=body.get("stream") is True, **hour)
         except ClaudeError as exc:
             hold.failed(exc, billed)
             errors.append(f"claude: {type(exc).__name__}: {str(exc)[:160]}")
@@ -698,7 +713,9 @@ class ModelRouter:
     def ask(self, *, role: str, system: str, user: str, family: str | None, key: str, openai_model: str | None,
             sail_profile: str | None, max_output: int = 8000, effort: str = "medium", need_usd: float = 1.0,
             desk: str | None = None, cap_usd_day: float | None = None, claude: bool = False, rotate: bool = False,
-            schema: Mapping[str, Any] | None = None, claude_effort: str | None = None) -> dict[str, Any]:
+            schema: Mapping[str, Any] | None = None, claude_effort: str | None = None,
+            claude_prefix: Sequence[Mapping[str, Any]] | None = None, claude_system: str | None = None,
+            claude_user: str | None = None) -> dict[str, Any]:
         """A one-shot question for a role (the architect, the reviewer, the auditor, a rewrite, the diagnostician).
 
         The paid routes in order, then Sail: CLAUDE first when `claude` and the role is one of `claude.roles` and the
@@ -710,7 +727,11 @@ class ModelRouter:
         are the Provider's fuse for the Sail call. Admission and the durable hold are atomic across store connections;
         verified cost settles it, a 4xx refusal releases it, and an unknown bill retains it. Unknown cost is reported as
         None with held_usd, never as a free answer. A ModelError's `billed` lists the paid attempts that were billed
-        without an answer (`claude_effort` overrides `claude.effort`)."""
+        without an answer (`claude_effort` overrides `claude.effort`).
+
+        The Claude route alone may ask a different question (Sept 29, 2026): `claude_prefix` (system blocks ahead of the
+        role's text, e.g. the whole graveyard as a cached digest), `claude_system` and `claude_user` replace `system` and
+        `user` there only. OpenAI and Sail always get `system` and `user` (their contexts are small)."""
         self._require_committed_store()
         errors: list[str] = []
         billed: list[dict[str, Any]] = []
@@ -719,8 +740,10 @@ class ModelRouter:
             routes.reverse()
         for route in routes:
             if route == "claude":
-                result = self._ask_claude(role=role, system=system, user=user, family=family, key=key, need_usd=need_usd,
-                                          schema=schema, errors=errors, billed=billed, effort=claude_effort)
+                result = self._ask_claude(role=role, system=claude_system if claude_system is not None else system,
+                                          user=claude_user if claude_user is not None else user, family=family, key=key,
+                                          need_usd=need_usd, schema=schema, errors=errors, billed=billed, effort=claude_effort,
+                                          prefix=claude_prefix)
             else:
                 result = self._ask_openai(role=role, system=system, user=user, family=family, key=key, openai_model=openai_model,
                                           max_output=max_output, effort=effort, need_usd=need_usd, errors=errors)

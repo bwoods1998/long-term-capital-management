@@ -90,6 +90,15 @@ MAX_TOOLS = 16
 MAX_BLOCKS = 64
 MAX_TURNS = 64
 MAX_BREAKPOINTS = 4
+#: The gateway's limit on a system prompt's text blocks (claude.mjs `textBlocks`).
+MAX_SYSTEM_BLOCKS = 16
+#: A one-hour cache write against the five-minute write `MODEL_CEILINGS` holds: the pricing page lists a 5-minute write at
+#: 1.25x base input and a 1-hour write at 2x (Sonnet 5.5: $2.50 and $4 a million), so 2 / 1.25 = 1.6 (Sept 29, 2026).
+HOUR_WRITE_FACTOR = Decimal("1.6")
+#: What a caller's system block may say of the cache (`system_blocks`): no marker, the 5-minute cache or the 1-hour cache.
+CACHE_TTLS = (None, "5m", "1h")
+#: System blocks as a caller hands them in: each `{"text": str, "cache": None | "5m" | "1h"}` (`system_blocks`).
+SystemBlocks = Sequence[Mapping[str, Any]]
 #: The stop reasons of a tool-loop answer; a cut one is `ClaudeTruncated`.
 TOOL_STOPS = ("tool_use", "end_turn", "stop_sequence")
 CUT_STOPS = ("max_tokens", "model_context_window_exceeded")
@@ -174,12 +183,50 @@ def extract_json(text: str) -> Any:
     return None
 
 
-def request_body(model: str, system: str, messages: Sequence[Mapping[str, Any]], *, max_tokens: int = MAX_TOKENS,
-                 effort: str = "high", schema: Mapping[str, Any] | None = None, cache: bool = True,
-                 stream: bool = False) -> dict[str, Any]:
+def system_blocks(system: "str | SystemBlocks", *, cache: bool = True, allow_hour: bool = False) -> list[dict[str, Any]]:
+    """The request's `system` blocks. A string is exactly the one block it has always been: marked for the 5-minute cache
+    when `cache`, and no block at all when it is empty. A sequence of caller blocks `{"text", "cache"}` (Sept 29, 2026: the
+    architect's and the strategist's graveyard digest ahead of their own instructions) keeps its order and each block's
+    own marker (none when not `cache`), and is then checked by the same rules as a tool loop's system prompt
+    (`_check_system`: the gateway's text blocks and markers, a 1-hour marker only with `allow_hour` and never after a
+    5-minute one) and MAX_BREAKPOINTS."""
+    if isinstance(system, str) or system is None:
+        text = str(system or "")
+        if not text:
+            return []
+        block: dict[str, Any] = {"type": "text", "text": text}
+        if cache:
+            block["cache_control"] = {"type": "ephemeral"}
+        return [block]
+    if isinstance(system, Mapping) or not isinstance(system, Sequence):
+        raise ClaudeError("the system prompt is a string or a list of blocks")
+    blocks: list[dict[str, Any]] = []
+    for given in system:
+        if not isinstance(given, Mapping) or set(given) - {"text", "cache"}:
+            raise ClaudeError('each system block is {"text": str, "cache": None | "5m" | "1h"}')
+        text, ttl = given.get("text"), given.get("cache")
+        if not isinstance(text, str) or not text:
+            raise ClaudeError("each system block has text")
+        if ttl not in CACHE_TTLS:
+            raise ClaudeError(f"invalid cache marker {ttl!r}")
+        block = {"type": "text", "text": text}
+        if ttl is not None and cache:
+            block["cache_control"] = {"type": "ephemeral", "ttl": "1h"} if ttl == "1h" else {"type": "ephemeral"}
+        blocks.append(block)
+    blocks, marks = _check_system(blocks, allow_hour=allow_hour)
+    if marks > MAX_BREAKPOINTS:
+        raise ClaudeError(f"at most {MAX_BREAKPOINTS} cache markers")
+    return blocks
+
+
+def request_body(model: str, system: "str | SystemBlocks", messages: Sequence[Mapping[str, Any]], *,
+                 max_tokens: int = MAX_TOKENS, effort: str = "high", schema: Mapping[str, Any] | None = None,
+                 cache: bool = True, stream: bool = False, allow_hour: bool = False) -> dict[str, Any]:
     """The one request shape the gateway admits: the system prompt as a text block (marked for the 5-minute cache when
     `cache`), text turns ending with the user's, adaptive thinking, an explicit effort, and a JSON-schema answer format
-    when `schema` is given. `stream` asks for server-sent events (up to MAX_TOKENS_STREAM), with summarized thinking."""
+    when `schema` is given. `stream` asks for server-sent events (up to MAX_TOKENS_STREAM), with summarized thinking.
+    `system` may also be a list of blocks with their own cache markers (`system_blocks`, Sept 29, 2026); a string gives
+    exactly the body it always has."""
     if effort not in EFFORTS:
         raise ClaudeError(f"invalid effort {effort!r}")
     turns = []
@@ -190,30 +237,55 @@ def request_body(model: str, system: str, messages: Sequence[Mapping[str, Any]],
         turns.append({"role": role, "content": content})
     if not turns or turns[-1]["role"] != "user":
         raise ClaudeError("the last turn must be the user's (no assistant prefill)")
-    block: dict[str, Any] = {"type": "text", "text": str(system or "")}
-    if cache:
-        block["cache_control"] = {"type": "ephemeral"}
+    blocks = system_blocks(system, cache=cache, allow_hour=allow_hour)
     output: dict[str, Any] = {"effort": effort}
     if schema is not None:
         output["format"] = {"type": "json_schema", "schema": dict(schema)}
     body: dict[str, Any] = {"model": model, "max_tokens": max(1, min(int(max_tokens), MAX_TOKENS_STREAM if stream else MAX_TOKENS))}
     if stream:
         body["stream"] = True
-    if block["text"]:
-        body["system"] = [block]
+    if blocks:
+        body["system"] = blocks
     thinking = {"type": "adaptive", "display": "summarized"} if stream else {"type": "adaptive"}
     body.update({"messages": turns, "thinking": thinking, "output_config": output})
     return body
 
 
-def _mark(block: Mapping[str, Any]) -> int:
-    """1 for a five-minute cache marker, 0 for none; a ClaudeError for any other (the gateway admits no other)."""
+def _mark(block: Mapping[str, Any], *, allow_hour: bool = False) -> int:
+    """1 for a five-minute cache marker, 0 for none; a ClaudeError for any other (the gateway admits no other). A 1-hour
+    marker counts only with `allow_hour` (`claude.cache_1h`, once the gateway admits it; Sept 29, 2026)."""
     mark = block.get("cache_control")
     if mark is None and "cache_control" not in block:
         return 0
-    if not isinstance(mark, Mapping) or mark.get("type") != "ephemeral" or set(mark) - {"type", "ttl"} or mark.get("ttl", "5m") != "5m":
+    ttls = ("5m", "1h") if allow_hour else ("5m",)
+    if not isinstance(mark, Mapping) or mark.get("type") != "ephemeral" or set(mark) - {"type", "ttl"} or mark.get("ttl", "5m") not in ttls:
         raise ClaudeError("a cache marker is ephemeral and five minutes")
     return 1
+
+
+def _check_system(system: Any, *, allow_hour: bool = False) -> tuple[list[dict[str, Any]], int]:
+    """A system prompt by the gateway's rules (gateway/lib/claude.mjs `textBlocks`), and its cache marker count: a string
+    (one unmarked block, none when empty) or 1 to MAX_SYSTEM_BLOCKS text blocks, each marker by `_mark`, and a 1-hour
+    marker never after a 5-minute one (Anthropic: "a 1-hour cache entry must appear before any 5-minute cache entries").
+    The one check for both request shapes (`tool_request_body`, and `system_blocks` for `request_body`)."""
+    if isinstance(system, str):
+        return ([{"type": "text", "text": system}] if system else []), 0
+    if not (isinstance(system, Sequence) and not isinstance(system, (bytes, Mapping)) and 1 <= len(system) <= MAX_SYSTEM_BLOCKS):
+        raise ClaudeError(f"the system prompt is a string or 1 to {MAX_SYSTEM_BLOCKS} text blocks")
+    blocks: list[dict[str, Any]] = []
+    marks, five = 0, False
+    for block in system:
+        if not isinstance(block, Mapping) or block.get("type") != "text" or not isinstance(block.get("text"), str) \
+                or not _only(block, {"type", "text", "cache_control"}):
+            raise ClaudeError("the system prompt is text blocks")
+        marked = _mark(block, allow_hour=allow_hour)
+        hour = bool(marked) and block["cache_control"].get("ttl") == "1h"
+        if hour and five:
+            raise ClaudeError("a 1-hour cache marker must come before every 5-minute one")
+        five = five or (bool(marked) and not hour)
+        marks += marked
+        blocks.append(dict(block))
+    return blocks, marks
 
 
 def _only(block: Mapping[str, Any], keys: set[str]) -> bool:
@@ -288,19 +360,7 @@ def tool_request_body(model: str, system: Any, messages: Sequence[Mapping[str, A
     adaptive thinking (summarized on a stream, so its deltas keep the bytes flowing) and `effort`, never `budget_tokens`."""
     if effort not in EFFORTS:
         raise ClaudeError(f"invalid effort {effort!r}")
-    marks = 0
-    if isinstance(system, str):
-        system_blocks = [{"type": "text", "text": system}] if system else []
-    elif isinstance(system, Sequence) and 1 <= len(system) <= 16:
-        system_blocks = []
-        for block in system:
-            if not isinstance(block, Mapping) or block.get("type") != "text" or not isinstance(block.get("text"), str) \
-                    or not _only(block, {"type", "text", "cache_control"}):
-                raise ClaudeError("the system prompt is text blocks")
-            marks += _mark(block)
-            system_blocks.append(dict(block))
-    else:
-        raise ClaudeError("the system prompt is a string or 1 to 16 text blocks")
+    system_blocks, marks = _check_system(system)
     marks += _check_tools(tools)
     choice = {"type": tool_choice} if isinstance(tool_choice, str) else dict(tool_choice or {})
     if choice.get("type") not in ("auto", "none") or not _only(choice, {"type", "disable_parallel_tool_use"}) \
@@ -338,11 +398,14 @@ def tool_request_body(model: str, system: Any, messages: Sequence[Mapping[str, A
 
 def reservation_ceiling(body: Mapping[str, Any]) -> Decimal:
     """The gateway's worst case for this exact body, never below it: every byte a token written to the cache, plus the
-    gateway's framing, and every `max_tokens` output token."""
+    gateway's framing, and every `max_tokens` output token. A body with a 1-hour marker prices every input byte as a
+    1-hour write (`HOUR_WRITE_FACTOR` times the 5-minute write)."""
     model = body.get("model")
     if model not in MODEL_CEILINGS:
         raise ClaudeError("no verified price for this Claude model")
     input_rate, output_rate = MODEL_CEILINGS[model]
+    if any(isinstance(b, Mapping) and (b.get("cache_control") or {}).get("ttl") == "1h" for b in body.get("system") or []):
+        input_rate = input_rate * HOUR_WRITE_FACTOR
     size = len(json.dumps(body).encode("utf-8"))
     value = (Decimal(size + 4096) * input_rate + Decimal(int(body["max_tokens"])) * output_rate) / 1000000
     return value.quantize(Decimal("0.000001"), rounding="ROUND_CEILING") + Decimal("0.000001")
@@ -387,21 +450,24 @@ class Claude:
         self.read_timeout = read_timeout
         self.clock = clock or time.monotonic
 
-    def ask(self, system: str, user: str, *, agent: str, role: str | None = None, max_tokens: int = MAX_TOKENS,
-            effort: str = "high", schema: Mapping[str, Any] | None = None, cache: bool = True,
-            request_id: str | None = None, stream: bool = False) -> Answer:
+    def ask(self, system: "str | SystemBlocks", user: str, *, agent: str, role: str | None = None,
+            max_tokens: int = MAX_TOKENS, effort: str = "high", schema: Mapping[str, Any] | None = None, cache: bool = True,
+            request_id: str | None = None, stream: bool = False, allow_hour: bool = False) -> Answer:
         return self.converse(system, [{"role": "user", "content": user}], agent=agent, role=role, max_tokens=max_tokens,
-                             effort=effort, schema=schema, cache=cache, request_id=request_id, stream=stream)
+                             effort=effort, schema=schema, cache=cache, request_id=request_id, stream=stream,
+                             allow_hour=allow_hour)
 
-    def converse(self, system: str, messages: Sequence[Mapping[str, Any]], *, agent: str, role: str | None = None,
-                 max_tokens: int = MAX_TOKENS, effort: str = "high", schema: Mapping[str, Any] | None = None,
-                 cache: bool = True, request_id: str | None = None, stream: bool = False) -> Answer:
+    def converse(self, system: "str | SystemBlocks", messages: Sequence[Mapping[str, Any]], *, agent: str,
+                 role: str | None = None, max_tokens: int = MAX_TOKENS, effort: str = "high",
+                 schema: Mapping[str, Any] | None = None, cache: bool = True, request_id: str | None = None,
+                 stream: bool = False, allow_hour: bool = False) -> Answer:
         """One call. `request_id` (`[A-Za-z0-9:._-]{1,160}`) is the id the gateway files the call's outcome under, so a
         caller that never saw the answer can ask what it cost (`settlement`). `stream` reads the answer as server-sent
-        events (the module docstring)."""
+        events (the module docstring). `system` is a string or blocks (`system_blocks`; `allow_hour` admits a 1-hour
+        marker)."""
         headers = self._headers(agent, role, request_id)
         body = request_body(self.model, system, messages, max_tokens=max_tokens, effort=effort, schema=schema, cache=cache,
-                            stream=stream)
+                            stream=stream, allow_hour=allow_hour)
         answer = self._answer(*self._send(body, headers, stream=stream, limit=self.timeout))
         stop = answer.stop_reason
         if stop == "refusal":
@@ -697,4 +763,5 @@ class ClaudeMeter:
 
 __all__ = ["Claude", "ClaudeMeter", "ClaudeError", "ClaudeRefusal", "ClaudeTruncated", "Answer", "ToolUse", "MODEL", "MAX_TOKENS",
            "MAX_TOKENS_STREAM", "READ_TIMEOUT", "REQUEST_HEADER",
-           "request_body", "tool_request_body", "reservation_ceiling", "extract_json", "attribution"]
+           "request_body", "tool_request_body", "reservation_ceiling", "extract_json", "attribution", "system_blocks",
+           "SystemBlocks", "HOUR_WRITE_FACTOR", "CACHE_TTLS", "MAX_BREAKPOINTS", "MAX_SYSTEM_BLOCKS"]
