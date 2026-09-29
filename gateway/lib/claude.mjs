@@ -15,7 +15,8 @@
 // (platform.claude.com/docs, read Sept 26, 2026): `usage.input_tokens` is the UNCACHED remainder only,
 // and the cache's tokens are reported beside it (`cache_creation_input_tokens`,
 // `cache_read_input_tokens`); a refusal is an HTTP 200 with `stop_reason: "refusal"` and is billed at
-// its usage; thinking cannot be disabled on Claude Opus 5.5 and is controlled by
+// its usage; thinking cannot be disabled on Claude Opus 5.5 or Claude Sonnet 5.5 (Sept 29, 2026: Sonnet
+// 5.5's lowest setting, `between_tools`, is not admitted here) and is controlled by
 // `output_config.effort`. Fast mode (`speed`), US-only inference (`inference_geo`), tools and every
 // other surface that bills beyond what this body shows are refused rather than trusted.
 
@@ -202,7 +203,7 @@ export function admit(body, env = {}) {
   if (thinking !== undefined && (!thinking || typeof thinking !== 'object' || Array.isArray(thinking) || thinking.type !== 'adaptive'
       || Object.keys(thinking).some(key => !['type', 'display'].includes(key))
       || (thinking.display !== undefined && !['omitted', 'summarized'].includes(thinking.display)))) {
-    return { error: 'thinking must be absent or adaptive: Claude Opus 5.5 cannot disable it, and effort is the control.', status: 400 };
+    return { error: 'thinking must be absent or adaptive: Claude Opus 5.5 and Sonnet 5.5 cannot disable it, and effort is the control.', status: 400 };
   }
   if (!outputConfigValid(body.output_config)) {
     return { error: `output_config takes an effort (${EFFORTS.join(', ')}) and a json_schema format, nothing else.`, status: 400 };
