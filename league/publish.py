@@ -560,6 +560,9 @@ def site_agent(value: Any, published_at: str) -> dict[str, Any] | None:
     if not _SLUG.match(agent_id) or band not in BANDS:
         return None
     family = slug(value.get("family")) or agent_id
+    # Only the site's eleven order types (its schema's STRUCTURE_TYPES). A family's DECLARED `long_single` (one program
+    # that sends long calls and long puts, Sept 29, 2026) is none of them: it publishes as null until the site's schema
+    # names it, and each of its positions and trades still shows its own type (`long_call` or `long_put`).
     structure = value.get("structure") if value.get("structure") in STRUCTURE_TYPES else None
     born, retired = site_instant(value.get("born_at")), site_instant(value.get("retired_at"))
     record = value.get("record") if isinstance(value.get("record"), Mapping) else value

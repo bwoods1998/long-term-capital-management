@@ -364,6 +364,12 @@ BUILDS: dict[str, str] = {
     "long_put": '''    if direction > 0:
         return "long_call", [{"side": "long", "right": "C", "dte": dte, "delta": p["long_delta"]}]
     return "long_put", [{"side": "long", "right": "P", "dte": dte, "delta": p["long_delta"]}]''',
+    # The two-sided single (Sept 29, 2026): the signal's sign picks the side, and no signal sends nothing.
+    "long_single": '''    if direction == 0:
+        return None
+    if direction > 0:
+        return "long_call", [{"side": "long", "right": "C", "dte": dte, "delta": p["long_delta"]}]
+    return "long_put", [{"side": "long", "right": "P", "dte": dte, "delta": p["long_delta"]}]''',
     "long_straddle": '''    return "long_straddle", [{"side": "long", "right": "C", "dte": dte, "atm": 0},
                              {"side": "long", "right": "P", "rel": 0, "offset": 0.0}]''',
     "long_strangle": '''    return "long_strangle", [{"side": "long", "right": "C", "dte": dte, "delta": p["wing_delta"]},
@@ -390,6 +396,7 @@ BUILDS: dict[str, str] = {
 BUILD_PARAMS: dict[str, dict[str, Any]] = {
     "iron_condor": {"short_delta": 0.15}, "iron_butterfly": {}, "credit_vertical": {"short_delta": 0.25},
     "debit_vertical": {"long_delta": 0.5}, "long_call": {"long_delta": 0.5}, "long_put": {"long_delta": 0.5},
+    "long_single": {"long_delta": 0.5},
     "long_straddle": {}, "long_strangle": {"wing_delta": 0.3}, "long_butterfly": {"body_moneyness": 0.003},
     "calendar": {"back_dte": 7}, "diagonal": {"short_delta": 0.3, "back_dte": 7},
 }

@@ -19,7 +19,8 @@ owner's decision D2 (Sept 26) the deflated Sharpe's N is that set's VALIDATED ve
 Holdout LOOKS are a ration, counted live across the whole connected lineage (`lineage_looks`), including
 ancestors, siblings and descendants on every root, before or after a fork. Reusing identical program code
 on the same structure and roots connects lineages permanently; changing a label or parameters cannot buy
-new looks. Each look once. Nothing ever lowers a count.
+new looks (a `long_single` and the `long_call` or `long_put` it sends are one structure here: `same_slice`, so
+relabeling a single-option program two-sided buys none either). Each look once. Nothing ever lowers a count.
 
 EVENTS. `event(kind, family, payload)` appends a row the House mirrors into its ledger (`hook.py`),
 all of kind `swarm.*`: the public ones the site's tape reads (`swarm.born`, `swarm.retired`, `swarm.band`,
@@ -211,8 +212,15 @@ CREATE TABLE IF NOT EXISTS kv (
 
 ALIVE = ("gym", "candidate", "probe", "sized")
 BANDS = ("gym", "candidate", "probe", "sized", "retired")
-STRUCTURES = ("long_call", "long_put", "debit_vertical", "credit_vertical", "iron_condor", "iron_butterfly",
+STRUCTURES = ("long_call", "long_put", "long_single", "debit_vertical", "credit_vertical", "iron_condor", "iron_butterfly",
               "long_butterfly", "long_straddle", "long_strangle", "calendar", "diagonal")
+#: The two-sided single-option family (Sept 29, 2026): ONE program whose every open is one long call or one long put (one
+#: leg, long), the side chosen by its rule, so it is drift-neutral where a call/put twin pair was two one-sided families
+#: that each carried the market's drift and doubled the births. It is a family's DECLARED structure only: each of its
+#: orders carries its own type (`league.live.money.order_types`), and the money table, the real book and the gateway
+#: check that type as for any other family.
+LONG_SINGLE = "long_single"
+SINGLE_SIDES = ("long_call", "long_put")
 #: The five types that close in one order (the venue refuses one-order closes of the others).
 CLOSEABLE = ("debit_vertical", "credit_vertical", "iron_condor", "iron_butterfly", "long_butterfly")
 _SLUG = re.compile(r"^[a-z0-9-]{1,40}$")
@@ -220,6 +228,26 @@ _SLUG = re.compile(r"^[a-z0-9-]{1,40}$")
 
 def iso(t: float) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
+
+
+def same_slice(a: Any, b: Any) -> bool:
+    """Whether families that declared structures `a` and `b` search the same slice: the same type, or a `long_single` and
+    a single it sends (its programs cover theirs, so its lineage matching and trial counts must see them)."""
+    return a == b or (LONG_SINGLE in (a, b) and {a, b} <= {LONG_SINGLE, *SINGLE_SIDES})
+
+
+def structure_text(structure: Any) -> str:
+    """A declared structure in a model's words: its name, and for `long_single` what its orders are. Every other type is
+    its name exactly (so no other family's prompt changes)."""
+    if structure == LONG_SINGLE:
+        return ("long_single (ONE program that buys calls or puts by its rule: every open is one long_call or one long_put, "
+                "one leg, long, and names that type, never \"long_single\"; state the side rule and why it is drift-neutral)")
+    return str(structure)
+
+
+def structure_query(structure: Any) -> str:
+    """A graveyard query's structure words: a `long_single` reads the lessons of the singles it sends too."""
+    return " ".join((LONG_SINGLE, *SINGLE_SIDES)) if structure == LONG_SINGLE else str(structure)
 
 
 def slugify(text: Any, *, limit: int = 36) -> str:
@@ -715,7 +743,7 @@ class SwarmStore:
             return
         for other in self._all("SELECT DISTINCT f.lineage,f.structure,f.roots FROM versions v JOIN families f "
                                "ON f.id=v.family WHERE v.sha=? AND f.lineage!=?", (sha, fam["lineage"])):
-            if other["structure"] == fam["structure"] and sorted(loads(other["roots"], [])) == sorted(fam["roots"]):
+            if same_slice(other["structure"], fam["structure"]) and sorted(loads(other["roots"], [])) == sorted(fam["roots"]):
                 a, b = sorted((fam["lineage"], other["lineage"]))
                 self._exec("INSERT OR IGNORE INTO lineage_links(a,b) VALUES(?,?)", (a, b))
 
@@ -1079,4 +1107,5 @@ class SwarmStore:
                        (fid, dumps(items), dumps(pending) if pending is not None else None, self.now()))
 
 
-__all__ = ["SwarmStore", "ALIVE", "BANDS", "STRUCTURES", "CLOSEABLE", "slugify", "code_sha", "dumps", "loads", "iso"]
+__all__ = ["SwarmStore", "ALIVE", "BANDS", "STRUCTURES", "LONG_SINGLE", "SINGLE_SIDES", "same_slice", "structure_text",
+           "structure_query", "CLOSEABLE", "slugify", "code_sha", "dumps", "loads", "iso"]

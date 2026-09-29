@@ -36,6 +36,16 @@ on branch `run/options-swarm-2026-09-26`) has the detail.
   until an image is built with `--train-from 2017-01-03` and `swarm.json` names it with `train_from`. On release the
   Gym bundle and tables digests change, so every program re-runs once as a new trial and each family is re-validated
   once, as with #399; the money digest stays `a3e2aa7c`.
+- **Two-sided singles: the `long_single` structure** (#PR; not yet released). A family may declare `long_single`:
+  one program whose every open is one `long_call` or one `long_put` (one leg, long), the side chosen by its rule, in
+  place of a call/put twin pair. The architect's prompt describes it and asks for no twins; in GAPS a single option's one
+  gap is `long_single` (the one-sided singles are no longer gaps, though still admitted); coverage has its row; the
+  researcher, reviewer, auditor and diagnostician read what its orders are. It shares its singles' slice for lineage
+  matching and identical-code links. Real eligibility (tuition, Probe, Sized, the site's `real_structure`) needs BOTH
+  `long_call` and `long_put` among `options_money.real_types`; every order keeps its own type, is checked by it at the
+  real book and the gateway, and is sized by its own unit. The site shows the agent's structure as null (its schema has
+  the eleven order types) and each position as its own type. No Gym, verifier, D2, drift-screen, gateway or money-table
+  change: the money digest stays `a3e2aa7c` and the Gym bundle version does not move, so nothing is re-validated.
 
 ## 2026-09-29
 

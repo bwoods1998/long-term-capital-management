@@ -604,7 +604,9 @@ class OptionsLive:
                 if band in ("probe", "sized") and self._real_on() and self._real_eligible(fid):
                     wanted[f"{fid}@{version}:r"] = (dict(row, band=band), "real", False)
             elif (band == "gym" and row.get("validation_passed") and not row.get("holdout_passed") and self._real_on()
-                  and self.table.tuition_day > 0 and row.get("structure") in self.table.real_types):
+                  and self.table.tuition_day > 0 and self.table.family_real(str(row.get("structure") or ""))):
+                # Tuition only for a family whose every order type is real: a `long_single` needs both `long_call` and
+                # `long_put` among the real types (`Table.family_real`); each of its orders is still checked by its type.
                 wanted[f"{fid}@{version}:t"] = (row, "real", True)
         if self.house_test is not None:
             # The House live test (`league/live/house_test.py`): its own real instance while its switch, real money, its

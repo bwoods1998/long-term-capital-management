@@ -11,9 +11,11 @@ Claude first (`claude.model`, or `claude.role_model["architect"]`; "architect" i
 its funded total has room; every other pass asks GPT-6 Astra first only while `architect.openai_model` names it (null
 makes the architect Claude-only); else Kimi-K3 balanced on Sail. It reads the leaderboard (families, bands, shares, and
 of Validation only whether the line was met and how many of its checks passed: the owner's decision D2a), the
-graveyard's lessons, and the GAPS (roots x structure types no living family covers), and answers with new families: a
-mechanism (why it should make money), a structure, a universe slice (one to five pooled roots of the admitted list, days
-to expiry) and a rejection test. The swarm admits those that are well-formed, distinct from the living families and
+graveyard's lessons, and the GAPS (roots x structure types no living family covers; a single option's one gap is
+`long_single`), and answers with new families: a mechanism (why it should make money), a structure, a universe slice (one
+to five pooled roots of the admitted list, days to expiry) and a rejection test. `long_single` (Sept 29, 2026) is one
+program that buys calls or puts by its rule, in place of a call/put twin pair; each of its orders is still a `long_call`
+or a `long_put`. The swarm admits those that are well-formed, distinct from the living families and
 inside the population ceiling; each new family's researcher writes its first program (no starter). The operator steers
 it without a deploy through `architect.agenda` (swarm.json): a non-empty agenda closes the request as "THE OPERATOR'S
 RESEARCH AGENDA".
@@ -54,7 +56,7 @@ from typing import Any, Callable, Mapping, Sequence
 from . import diagnostics
 from . import settings as settings_mod
 from .researcher import MAX_ROOTS
-from .store import STRUCTURES, SwarmStore, iso, slugify
+from .store import SINGLE_SIDES, STRUCTURES, SwarmStore, iso, same_slice, slugify, structure_query
 
 #: Two mechanisms are the same idea when their content words overlap this much (Jaccard).
 SAME_IDEA = 0.5
@@ -88,8 +90,12 @@ family may pool one to five of them: the same mechanism on several roots trades 
 (days traded on several roots count once a day, so pool roots that trade on different days).
 XSP and SPXW are cash-settled index options with no calendars or diagonals. XSP costs $0.50 a contract, which makes a
 narrow XSP structure uneconomic: use XSP only for structures wide enough to carry that fee. The other available roots
-are physically settled equity or ETF options. Structure types: long_call, long_put, debit_vertical, credit_vertical, iron_condor, iron_butterfly,
-long_butterfly, long_straddle, long_strangle, calendar, diagonal. All listed types compete on the same evidence:
+are physically settled equity or ETF options. Structure types: long_call, long_put, long_single, debit_vertical, credit_vertical,
+iron_condor, iron_butterfly, long_butterfly, long_straddle, long_strangle, calendar, diagonal. long_single is one program
+that buys calls or puts by its rule (every open is one long_call or one long_put, one leg, long): state the side rule in
+the sketch and why it is drift-neutral. A mechanism that buys single options on either side is ONE long_single family,
+never a long_call and long_put twin pair (each twin carries the market's drift and the pair doubles the births). All
+listed types compete on the same evidence:
 complexity earns no preference. Single calls and puts are first-class research choices. Consider the simplest
 expression of each mechanism before adding legs; use additional legs when they serve the hypothesis. Use the coverage
 counts and gaps to explore neglected types and roots, while retaining the lessons and trial history of failed ideas.
@@ -802,6 +808,10 @@ class Architect:
         return max(0, min(n, ceiling - alive))
 
     def _gaps_by_root(self) -> dict[str, list[str]]:
+        """Each root's uncovered structure types. A single option's gap is ONE entry, `long_single` (Sept 29, 2026: the
+        strategist's "stop call/put twin births"), covered only by a living `long_single` family on the root: the
+        one-sided `long_call` and `long_put` are never gaps (they carry the market's drift and invited twin pairs), though
+        a proposal of either is still admitted."""
         roots = list(self.settings.get("gym", {}).get("roots", ["SPY", "QQQ", "IWM", "XSP", "SPXW"]))
         covered = {(r, f["structure"]) for f in self.store.families(alive=True) for r in f["roots"]}
         out = {}
@@ -809,6 +819,8 @@ class Architect:
             out[root] = []
             for structure in STRUCTURES:
                 if root in ("XSP", "SPXW") and structure in ("calendar", "diagonal"):
+                    continue
+                if structure in SINGLE_SIDES:
                     continue
                 if (root, structure) not in covered:
                     out[root].append(structure)
@@ -942,17 +954,21 @@ class Architect:
             # Three distinct lessons: many open with the same wording (the idle rule's), and 300 characters is all a
             # family is born with, so a repeat would only crowd out another lesson. Each as `lesson_view` gives it (D2a).
             lessons = list(dict.fromkeys(lesson_view(g["lesson"])[:300]
-                                         for g in self.store.graveyard(f"{structure} {' '.join(roots)} {mechanism}", limit=12)))[:3]
+                                         for g in self.store.graveyard(f"{structure_query(structure)} {' '.join(roots)} {mechanism}",
+                                                                       limit=12)))[:3]
             spec = {"id": family_slug(row.get("slug") or mechanism), "mechanism": mechanism, "structure": structure, "roots": roots, "dte": [lo, hi],
                     "rejection": str(row.get("rejection") or "")[:400], "sketch": str(row.get("sketch") or "")[:800],
                     "lessons": lessons}
             # A slice a retired family searched (same structure and roots): the same idea again continues its lineage
             # (its trials and holdout looks, so re-proposing never resets the count its evidence is deflated by); another
-            # idea is a new lineage that still counts the slice's trials (`prior_lineage`) but not its look ration.
-            dead = [f for f in self.store.families(alive=False) if f["structure"] == structure and sorted(f["roots"]) == sorted(roots)]
+            # idea is a new lineage that still counts the slice's trials (`prior_lineage`) but not its look ration. A
+            # `long_single` searches its singles' slices too (`same_slice`): a dead call or put twin's idea continues.
+            dead = [f for f in self.store.families(alive=False)
+                    if same_slice(f["structure"], structure) and sorted(f["roots"]) == sorted(roots)]
             same = [f for f in dead if f["id"] in (row.get("parent"), row.get("slug")) or same_idea(f["mechanism"], mechanism)]
             declared = self.store.family(str(row.get("parent"))) if row.get("parent") else None
-            parent = declared["id"] if declared and declared["structure"] == structure else (same[-1]["id"] if same else None)
+            parent = (declared["id"] if declared and same_slice(declared["structure"], structure)
+                      else (same[-1]["id"] if same else None))
             prior = dead[-1]["lineage"] if dead and not parent else None
             with self.store.lock:
                 if len(self.store.families(alive=True)) >= int(self.settings.get("population", {}).get("ceiling", 96)):

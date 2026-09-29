@@ -48,7 +48,7 @@ from . import evidence
 from . import settings as settings_mod
 from .pool import GymJob, PoolError
 from .researcher import drift_verdict, needs_roots
-from .store import SwarmStore, dumps
+from .store import SwarmStore, dumps, structure_text
 
 REVIEW = """You review option-trading programs before they meet sealed data. A program is one Python file (NEEDS, PARAMS,
 decide(ctx)) that runs in a replay of recorded one-minute option quotes and then, unchanged, on live quotes and real
@@ -105,7 +105,7 @@ class Gate:
         too (a default role), both reads of a program would be `claude.model` and the audit no longer a second, different
         model: give the review its own model in `claude.role_model` (e.g. {"review": "claude-sonnet-5-5"}). A program
         one model read twice is reported to the owner (`not_the_plans_reviewer`, `same_reader`)."""
-        user = (f"Family {fam['id']}: {fam['mechanism']}\nStructure {fam['structure']}, roots {', '.join(fam['roots'])}.\n\n"
+        user = (f"Family {fam['id']}: {fam['mechanism']}\nStructure {structure_text(fam['structure'])}, roots {', '.join(fam['roots'])}.\n\n"
                 f"```python\n{version['code']}\n```\nPARAMS overrides: {json.dumps(version.get('params') or {})}")
         answer = self.router.ask(role="review", system=REVIEW, user=user, family=fam["id"],
                                  key=f"swarm:{fam['id']}:review:{version['n']}:{self.store.get('review_attempt:' + fam['id'], 0)}",
@@ -127,7 +127,8 @@ class Gate:
         model = self.cfg.get("audit_openai_model", "gpt-6-astra")
         need = float(self.cfg.get("audit_need_usd", 1.0))
         use_openai = bool(model) and self.router.openai_room() >= need
-        user = (f"AUDIT. Family {fam['id']}: {fam['mechanism']}\nStructure {fam['structure']}, roots {', '.join(fam['roots'])}.\n\n"
+        user = (f"AUDIT. Family {fam['id']}: {fam['mechanism']}\nStructure {structure_text(fam['structure'])}, roots "
+                f"{', '.join(fam['roots'])}.\n\n"
                 f"```python\n{version['code']}\n```\nPARAMS overrides: {json.dumps(version.get('params') or {})}")
         answer = self.router.ask(role="audit", system=REVIEW, user=user, family=fam["id"],
                                  key=f"swarm:{fam['id']}:audit:{version['n']}:{attempt}", openai_model=model if use_openai else None,

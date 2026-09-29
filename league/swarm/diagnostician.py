@@ -44,7 +44,7 @@ from typing import Any, Callable, Mapping
 from . import diagnostics
 from . import settings as settings_mod
 from .researcher import CODE_BLOCK, CONTRACT, check_code, needs_of
-from .store import SwarmStore
+from .store import SwarmStore, structure_query, structure_text
 
 ROLE = "diagnostician"
 
@@ -246,12 +246,13 @@ class Diagnostician:
         robustness = (fam.get("state") or {}).get("robustness")
         lessons = [{"mechanism": withheld(g["mechanism"])[:300], "structure": g["structure"], "roots": g["roots"],
                     "lesson": withheld(g["lesson"])[:700]}
-                   for g in self.store.graveyard(f"{fam['structure']} {' '.join(fam['roots'])} {fam['mechanism']}", limit=6)
+                   for g in self.store.graveyard(f"{structure_query(fam['structure'])} {' '.join(fam['roots'])} {fam['mechanism']}",
+                                                 limit=6)
                    if g["family"] != fid]
         dte = spec.get("dte") or ["?", "?"]
         parts = [
             f"FAMILY {fid} ({fam.get('origin')}). Mechanism: {withheld(fam['mechanism'])}",
-            f"Structure {fam['structure']}; roots {', '.join(fam['roots'])}; days to expiry {dte[0]}-{dte[-1]}.",
+            f"Structure {structure_text(fam['structure'])}; roots {', '.join(fam['roots'])}; days to expiry {dte[0]}-{dte[-1]}.",
             f"Rejection test: {withheld(spec.get('rejection')) or '(none stated)'}",
         ]
         if spec.get("sketch"):

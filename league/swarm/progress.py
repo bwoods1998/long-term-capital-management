@@ -204,8 +204,10 @@ def _live(fam: Mapping, version: Mapping, looks: Sequence, forward: Sequence, ta
     equity, sizing = context.get("equity"), context.get("sizing")
     enabled, grant = context.get("enabled") is True, context.get("grant") is True
     ready = enabled and grant and equity is not None and sizing is not None
-    permitted = fam["structure"] in table.real_types
-    credit = fam["structure"] not in table.credit_types or (sizing is not None and sizing >= table.credit_min_equity)
+    # The family's DECLARED structure: a `long_single` is real only while both `long_call` and `long_put` are (the money
+    # table's `family_real`, the live path's own rule), and never a credit type.
+    permitted = table.family_real(str(fam["structure"] or ""))
+    credit = not table.family_credit(str(fam["structure"] or "")) or (sizing is not None and sizing >= table.credit_min_equity)
     typical = (state.get("typical_by_version") or {}).get(str(n),
         state.get("typical_max_loss_usd") if state.get("validation_version") == n else None)
     try:

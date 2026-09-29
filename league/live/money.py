@@ -13,7 +13,10 @@ BANDS (the live path owns candidate <-> probe <-> sized; the swarm owns gym <-> 
 - PROBE: a Candidate that passed the holdout, whose structure is one of the real types (credit types only while credit
   opens are allowed), and whose typical maximum loss (one structure, with its round-trip fees) fits the Probe's cap at
   `E`: `probe.max_loss_share x E`, or `probe.floor_usd` for one contract. Otherwise it stays a Candidate, shadow only,
-  with the reason recorded.
+  with the reason recorded. A family's structure is what it DECLARED; `long_single` (Sept 29, 2026: one program whose
+  every open is a `long_call` or a `long_put`, the side chosen by its rule) is real only while BOTH are real types
+  (`order_types`, `Table.family_allowed`). The table's `real_types` stay concrete types, and every real order is still
+  checked by its own type (`Table.type_allowed`), at the real book and at the gateway.
 - SIZED: a PROBE (never a Candidate at once) whose forward record has at least `sized.min_trades` trades with a mean
   return on maximum loss above zero and its one-sided `sized.confidence` lower bound above zero. The record
   (`one_record`) is the program version's own, one source a market day (real, else shadow, else nightly).
@@ -23,7 +26,8 @@ BANDS (the live path owns candidate <-> probe <-> sized; the swarm owns gym <-> 
   20 trades and a mean below zero) loses its band: back to Candidate, its real instance on exits only.
 
 SIZING a real open (`plan_open`), by maximum loss, never premium. `unit` is one structure's maximum loss at its limit
-plus its open and close fees:
+plus its open and close fees, from the ORDER's own type and legs (a `long_single` family's call and put are each sized
+by their own unit):
 
 - Probe: the per-structure cap is `probe.max_loss_share x E`; quantity = floor(cap / unit); a structure that fits none
   but whose unit is at most `probe.floor_usd` trades ONE (the floor). At most `probe.open_per_family` open structures,
@@ -90,6 +94,18 @@ def D(value: Any) -> Decimal:
 
 def cents(value: Decimal) -> Decimal:
     return value.quantize(CENT, rounding=ROUND_DOWN)
+
+
+#: A family's DECLARED structure that is not itself an order type, and the order types its orders may be (Sept 29, 2026).
+#: `long_single`: one program whose every open is ONE long call or ONE long put (one leg, long), the side chosen by its
+#: rule, so it is drift-neutral where a call/put twin pair was two one-sided families. Every other declared structure is
+#: its own one order type. The money table and the gateway name order types only; none of these is ever one.
+DECLARED_TYPES: dict[str, tuple[str, ...]] = {"long_single": ("long_call", "long_put")}
+
+
+def order_types(structure: str) -> tuple[str, ...]:
+    """The order types a family that declared `structure` may send: its own type, or the declared set."""
+    return DECLARED_TYPES.get(structure, (structure,))
 
 
 @dataclass(frozen=True)
@@ -184,6 +200,25 @@ class Table:
         if type_ in self.credit_types and not self.credit_allowed(equity):
             return (f"a {type_} is a credit structure: real credit opens wait until the account reads "
                     f"${self.credit_min_equity} of equity (it reads ${cents(equity)}; debit structures only until then)")
+        return None
+
+    def family_real(self, structure: str) -> bool:
+        """Whether a family that declared `structure` trades real types only: every order type it may send
+        (`order_types`) is one of `real_types`. `long_single` is real only while both `long_call` and `long_put` are."""
+        return bool(structure) and all(t in self.real_types for t in order_types(structure))
+
+    def family_credit(self, structure: str) -> bool:
+        """Whether any order type a family that declared `structure` may send is a credit type."""
+        return any(t in self.credit_types for t in order_types(structure))
+
+    def family_allowed(self, structure: str, equity: Decimal) -> str | None:
+        """Why real money may not trade a family that declared `structure` now, or None: `type_allowed` of EVERY order type
+        it may send (a declared type's own; each of a `long_single`'s two). Its orders are still checked one by one."""
+        types = order_types(structure)
+        for type_ in types:
+            why = self.type_allowed(type_, equity)
+            if why:
+                return why if types == (structure,) else f"a {structure} family sends {' and '.join(types)} orders: {why}"
         return None
 
 
@@ -300,7 +335,7 @@ def band_for(table: Table, row: Mapping[str, Any], equity: Decimal, fwd: Forward
         return "candidate", "has not passed the holdout"
     if fwd.negative:
         return "candidate", f"its forward record turned negative ({fwd.n} trades, ${fwd.pnl:.2f})"
-    why = table.type_allowed(str(row.get("structure") or ""), equity)
+    why = table.family_allowed(str(row.get("structure") or ""), equity)
     if why:
         return "candidate", why
     typical = row.get("typical_max_loss_usd")
@@ -667,5 +702,5 @@ class FlowBook:
         return before[-1] if before else None
 
 
-__all__ = ["Table", "Forward", "forward_stats", "one_record", "kelly_cap", "sizing_band", "REAL_MIN_TRADES", "band_for", "fits_probe", "probe_cap", "structure_cap", "family_cap",
+__all__ = ["Table", "DECLARED_TYPES", "order_types", "Forward", "forward_stats", "one_record", "kelly_cap", "sizing_band", "REAL_MIN_TRADES", "band_for", "fits_probe", "probe_cap", "structure_cap", "family_cap",
            "Exposure", "Plan", "plan_open", "Stops", "FlowBook", "D", "cents", "sized_ok"]

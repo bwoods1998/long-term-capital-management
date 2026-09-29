@@ -421,6 +421,19 @@ applies), 100% of equity opened a day, 250 of 300 orders open.
 1-lot SPY call about 1-2% out of the money (nearest expiry at least a day out, at the natural, held two
 minutes) with single-leg orders. Real long calls and puts open only after it (`paper_proof_single`).
 
+**Two-sided single families (`long_single`, not yet released)**: a family may declare `long_single`, one
+program whose every open is one `long_call` or one `long_put` (one leg, long), the side chosen by its rule,
+in place of a call/put twin pair. It is a declared structure, never an order type: the money table's
+`real_types`, the money digest (`a3e2aa7c`) and the gateway's `OPTION_STRUCTURES_REAL` are unchanged, and
+none of them may name it. The live path maps it to real (tuition, Probe, Sized, the site's `real_structure`
+check) only while BOTH `long_call` and `long_put` are real types (`money.order_types`, `Table.family_real`,
+`Table.family_allowed`); drop either and the family is held at Candidate with the reason recorded. Every
+order it sends still carries its own type and is checked (`type_allowed`, the single-leg paper proof, the
+gateway) and sized by its own unit, exactly as a one-sided family's. Its forward record, D2 and the drift
+screen are any family's. The site shows the agent's structure as null (the site's schema has only the
+eleven order types) and each of its positions as `long_call` or `long_put`. The Gym is unchanged: it never
+reads a family's structure, so its bundle version does not move.
+
 **The observe band**: every alive Gym-band family's validated version trades the shadow book as
 `<family>@<version>:o`, its version pinned for the session (pins in `live.sqlite`), never real, never a
 forward row, never on the site. Its programs load and decide after every real decision of the minute, in
@@ -826,3 +839,14 @@ by default), and "strategist" must be in `claude.roles` (the default; the box's 
 it there, or the strategist runs on Sail's small packet and its event says so). The architect has no daily Claude line
 of its own unless `claude.role_usd_day["architect"]` is set: with the digest each call carries ~85k more input tokens.
 Each run is a private `swarm.strategist` event. Emptying `architect.agenda_locked` returns to `architect.agenda` as before.
+
+Two-sided singles (not yet released; `league/swarm/store.py`, `architect.py`). The architect's structure types include
+`long_single` (one program that buys calls or puts by its rule; a proposal states the side rule and why it is
+drift-neutral), and its prompt asks for one `long_single` family where it would have proposed a call/put twin pair. In
+GAPS a single option's one gap is `long_single`, covered only by a living `long_single` family on the root; the one-sided
+`long_call` and `long_put` are never gaps (still admitted when proposed), and the coverage table has a `long_single` row.
+A `long_single` and the singles it sends are one slice for lineage matching (`same_slice`): the same idea as a dead call
+or put twin on the same roots continues its lineage, another idea on the slice counts its trials, and identical code
+links their lineages, so relabeling a program two-sided buys no trials or looks. Its graveyard reads include its singles'
+lessons. The researcher, the reviewer, the auditor and the diagnostician read what its orders are (`structure_text`);
+every other family's prompts are byte-identical.

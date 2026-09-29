@@ -873,7 +873,7 @@ class ArchitectTests(RoundCase):
         self.assertEqual(coverage["long_put"]["trials"], 7, "an unloaded root is outside this image's effort")
         self.assertEqual(coverage["debit_vertical"]["validated_families"], 1)
         self.assertEqual(sum(row["trials"] for row in coverage.values()), 40)
-        self.assertEqual(len(coverage), 11, "unexplored types are visible as zero effort")
+        self.assertEqual(len(coverage), 12, "unexplored types are visible as zero effort (long_single among them)")
         self.assertEqual(self.store.families(), before, "coverage does not mutate evidence or retirement")
         self.settings["gym"]["roots"].append("SOXL")
         self.assertEqual(arch.coverage()["long_put"]["trials"], 907)
@@ -921,17 +921,20 @@ class ArchitectTests(RoundCase):
         for root in ("XSP", "SPXW"):
             self.assertFalse({"calendar", "diagonal"} & set(gaps[root]))
         for root in self.FINAL_ROOTS[5:]:
-            self.assertEqual(len(gaps[root]), 11, root)
-            self.assertTrue({"calendar", "diagonal", "debit_vertical"} <= set(gaps[root]), root)
+            # Twelve types less the two one-sided singles: a single option's gap is `long_single` alone (Sept 29, 2026).
+            self.assertEqual(len(gaps[root]), 10, root)
+            self.assertTrue({"calendar", "diagonal", "debit_vertical", "long_single"} <= set(gaps[root]), root)
+            self.assertFalse({"long_call", "long_put"} & set(gaps[root]), root)
         return gaps
 
     def test_empty_expanded_universe_prompt_exposes_every_gap_including_the_last_root(self):
         gaps = self.expanded_prompt(seeded=False)
-        self.assertEqual(sum(map(len, gaps.values())), 271)
+        self.assertEqual(sum(map(len, gaps.values())), 246)  # 23 equity roots x 10, and XSP, SPXW x 8 (no calendars)
 
     def test_seeded_expanded_universe_prompt_preserves_all_new_roots_and_existing_coverage(self):
         gaps = self.expanded_prompt(seeded=True)
-        self.assertEqual(sum(map(len, gaps.values())), 241)
+        # The 48 seeds cover 30 (root, type) slices; 3 are one-sided singles, which are no gaps: 246 - 27.
+        self.assertEqual(sum(map(len, gaps.values())), 219)
         self.assertNotIn("iron_condor", gaps["SPY"])
 
 
