@@ -36,7 +36,7 @@ on branch `run/options-swarm-2026-09-26`) has the detail.
   until an image is built with `--train-from 2017-01-03` and `swarm.json` names it with `train_from`. On release the
   Gym bundle and tables digests change, so every program re-runs once as a new trial and each family is re-validated
   once, as with #399; the money digest stays `a3e2aa7c`.
-- **Two-sided singles: the `long_single` structure** (#PR; not yet released). A family may declare `long_single`:
+- **Two-sided singles: the `long_single` structure** (#425; not yet released). A family may declare `long_single`:
   one program whose every open is one `long_call` or one `long_put` (one leg, long), the side chosen by its rule, in
   place of a call/put twin pair. The architect's prompt describes it and asks for no twins; in GAPS a single option's one
   gap is `long_single` (the one-sided singles are no longer gaps, though still admitted); coverage has its row; the
