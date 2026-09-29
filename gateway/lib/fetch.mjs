@@ -336,13 +336,13 @@ function collapse(text) {
 }
 
 /** At most `limit` UTF-16 units, never ending in half a surrogate pair. */
-function cut(text, limit) {
+export function cut(text, limit) {
   if (text.length <= limit) return text;
   const code = text.charCodeAt(limit - 1);
   return text.slice(0, code >= 0xd800 && code <= 0xdbff ? limit - 1 : limit);
 }
 
-function decode(bytes, header) {
+export function decode(bytes, header) {
   const charset = /;\s*charset\s*=\s*"?([^";\s]+)/i.exec(String(header || ''))?.[1];
   try {
     return new TextDecoder(charset || 'utf-8').decode(bytes);
@@ -352,7 +352,7 @@ function decode(bytes, header) {
 }
 
 /** The body, at most `limit` bytes: `{ bytes, size, cut }`. Reading stops at the limit or the deadline. */
-async function readCapped(response, limit, signal) {
+export async function readCapped(response, limit, signal) {
   if (!response.body) return { bytes: new Uint8Array(0), size: 0, cut: false };
   const reader = response.body.getReader();
   const aborted = new Promise((_, reject) => {
@@ -388,7 +388,7 @@ async function readCapped(response, limit, signal) {
   return { bytes, size, cut: over };
 }
 
-const discard = response => response.body?.cancel().catch(() => {});
+export const discard = response => response.body?.cancel().catch(() => {});
 
 // --- the route ----------------------------------------------------------------------------------
 

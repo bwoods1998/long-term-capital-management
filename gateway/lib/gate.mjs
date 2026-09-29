@@ -16,6 +16,7 @@ import { formatUsd, formatUsdMicro } from './money.mjs';
 import { iso } from './http.mjs';
 import * as typesafe from './typesafe.mjs';
 import { DAY_CAP as webFetchDayCap } from './fetch.mjs';
+import * as library from './library.mjs';
 
 /** The one Gate instance. A single object is what makes a cap a cap and not a per-isolate guess. */
 export const GATE_OBJECT = 'gate-v1';
@@ -32,6 +33,8 @@ export const FRONTIER_PREVIOUS_KEY = 'frontier-previous';
 export const PULLS_KEY = 'pulls';
 export const TYPESAFE_KEY = 'typesafe-pilot-v1';
 export const WEB_FETCH_KEY = 'web-fetch';
+//: The research library's pace, lease and day (Sept 29, 2026; lib/library.mjs).
+export const LIBRARY_KEY = 'library-v1';
 //: Claude's funded meter (Sept 26, 2026, the swarm sprint): every call's cost or hold since the key was placed. Never reset.
 export const CLAUDE_KEY = 'claude-funded-v1';
 
@@ -633,6 +636,90 @@ export function createGate({ store, env = {}, now = Date.now }) {
       return { ok: true, day: row.day, count: row.count + 1 };
     },
 
+    /**
+     * The research library's upstream pace (Sept 29, 2026; lib/library.mjs): arXiv's terms allow one request every three
+     * seconds and one connection at a time, across every machine we control, and arxiv.org's robots.txt a crawl delay of
+     * 15 s. One row holds the day's upstream count (a UTC day, by host and by role), each host's last start, the one lease
+     * in flight and the backoff after a 429 or 503. The lease, the starts and the backoff outlive the day.
+     */
+    libraryRow(at = now()) {
+      const day = iso(at).slice(0, 10);
+      const row = read(store, LIBRARY_KEY, {});
+      const plain = value => (value && typeof value === 'object' && !Array.isArray(value) ? value : {});
+      const today = row.day === day;
+      return {
+        day,
+        upstream: today ? Number(row.upstream) || 0 : 0,
+        by_host: today ? plain(row.by_host) : {},
+        by_role: today ? plain(row.by_role) : {},
+        last: plain(row.last),
+        inflight: row.inflight && typeof row.inflight === 'object' && Number(row.inflight.expires) > at ? row.inflight : null,
+        backoff_until: Number(row.backoff_until) || 0,
+        backoff_why: typeof row.backoff_why === 'string' ? row.backoff_why : null,
+        seq: Number(row.seq) || 0,
+      };
+    },
+
+    /**
+     * A turn for one upstream request to `host`, decided and booked in the same step: `{ go: true, id }` when no library
+     * request is in flight on any host, the host's last start is SPACING_MS ago, no backoff runs and the day's count is
+     * under its cap (LIBRARY_DAY_UPSTREAM); else `{ go: false, wait_ms }` with nothing booked, or the day's cap. A lease
+     * never released expires at its start plus the host's fetch timeout plus LEASE_SLACK_MS.
+     */
+    libraryAcquire({ host, role = null } = {}) {
+      const at = now();
+      if (!library.HOSTS.includes(host)) return { go: false, refused: 'host' };
+      const row = this.libraryRow(at);
+      if (row.inflight) return { go: false, wait_ms: Math.max(250, Math.min(1000, Number(row.inflight.expires) - at)) };
+      if (row.backoff_until > at) return { go: false, wait_ms: row.backoff_until - at, backoff: true };
+      const since = at - (Number(row.last[host]) || 0);
+      if (since < library.SPACING_MS[host]) return { go: false, wait_ms: library.SPACING_MS[host] - since };
+      const cap = library.dayCap(env);
+      if (row.upstream >= cap) {
+        return { go: false, status: 429, cap: 'library_day', error: `Today's cap of ${cap} library requests to arXiv is already reached.` };
+      }
+      const id = row.seq + 1;
+      const name = typeof role === 'string' && /^[a-z0-9][a-z0-9_-]{0,31}$/.test(role) ? role : 'unattributed';
+      const byRole = { ...row.by_role };
+      const roleKey = Object.hasOwn(byRole, name) || Object.keys(byRole).length < 20 ? name : 'other';
+      byRole[roleKey] = (Number(byRole[roleKey]) || 0) + 1;
+      write(store, LIBRARY_KEY, {
+        day: row.day, seq: id, upstream: row.upstream + 1, by_host: { ...row.by_host, [host]: (Number(row.by_host[host]) || 0) + 1 },
+        by_role: byRole, last: { ...row.last, [host]: at },
+        inflight: { id, host, at, expires: at + library.FETCH_TIMEOUT_MS[host] + library.LEASE_SLACK_MS },
+        backoff_until: row.backoff_until, backoff_why: row.backoff_why,
+      });
+      return { go: true, id, upstream: row.upstream + 1 };
+    },
+
+    /** The lease `id` given back; a 429 or 503 from arXiv starts a backoff of at least BACKOFF_MS (its Retry-After when longer). */
+    libraryRelease({ id, status = 0, retry_after_ms = null } = {}) {
+      const at = now();
+      const row = this.libraryRow(at);
+      const stored = read(store, LIBRARY_KEY, {});
+      const mine = Boolean(stored.inflight) && stored.inflight.id === id;
+      const next = { ...stored, inflight: mine ? null : stored.inflight };
+      if (status === 429 || status === 503) {
+        const pause = Math.max(Number(retry_after_ms) || 0, library.BACKOFF_MS);
+        next.backoff_until = Math.max(row.backoff_until, at + pause);
+        next.backoff_why = `arXiv answered ${status} at ${iso(at)}`;
+      }
+      write(store, LIBRARY_KEY, next);
+      return { ok: mine };
+    },
+
+    /** The `library` block of /v1/health and /v1/research/health. */
+    libraryStatus(at = now()) {
+      const row = this.libraryRow(at);
+      return {
+        day: row.day, upstream: row.upstream, cap: library.dayCap(env), by_host: row.by_host, by_role: row.by_role,
+        in_flight: row.inflight ? { host: row.inflight.host, since: iso(Number(row.inflight.at)) } : null,
+        backoff_until: row.backoff_until > at ? iso(row.backoff_until) : null, backoff_why: row.backoff_until > at ? row.backoff_why : null,
+        spacing_ms: library.SPACING_MS, served_through: library.LAST_DAY,
+        terms: 'arXiv API: at most one request every 3 s and one connection at a time, across all our machines; arxiv.org robots.txt: Crawl-delay 15',
+      };
+    },
+
     watchdog: () => read(store, WATCHDOG_KEY, { last_check_at: null, last_action: null, last_action_at: null }),
 
     recordWatchdog(patch) {
@@ -735,6 +822,8 @@ export function createGate({ store, env = {}, now = Date.now }) {
           const row = this.webFetchDay(at);
           return { day: row.day, fetches: row.count, cap: webFetchDayCap, by_agent: row.by_agent };
         })(),
+        // The research library's pace and day (Sept 29, 2026): read from this object's own row, no upstream call.
+        library: this.libraryStatus(at),
         watchdog: {
           last_check_at: watch.last_check_at ?? null,
           last_action: watch.last_action ?? null,
