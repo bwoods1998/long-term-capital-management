@@ -139,6 +139,15 @@ class Instance:
     error_since: float | None = None
     retried_at: float = float("-inf")
 
+    def __post_init__(self) -> None:
+        # An observe instance is exactly a shadow instance under an observe key that was made one (the money path's
+        # guard, Sept 29, 2026): a truthy non-bool, a real or tuition instance or any other key is never one. A restored
+        # real instance once came back with its saved mode in this field (a positional shift) and ran as an observe
+        # instance: its program loaded in the observe child and its chains were never read for it.
+        if _is_observe(self.key) and self.kind != "shadow":
+            raise ValueError(f"an observe key is only ever a shadow instance's: {self.key} ({self.kind})")
+        self.observe = self.observe is True and _is_observe(self.key) and self.kind == "shadow" and not self.tuition
+
 
 def ny(t: float) -> dt.datetime:
     return dt.datetime.fromtimestamp(t, NEW_YORK)
@@ -477,8 +486,14 @@ class OptionsLive:
     # ------------------------------------------------------------------ families and instances
     def _restore_real_instances(self) -> None:
         for r in self.state.rows("SELECT * FROM instances WHERE retired_at IS NULL"):
+            if _is_observe(r["id"]):
+                # Never written (only real instances are persisted); never restored as a real one either.
+                self.alert("error", f"live: the live state holds an observe key as a real instance ({r['id']}): not restored")
+                continue
+            # By keyword: `observe` sits between `tuition` and `mode`, and the saved mode taken for it made every restored
+            # real instance an observe one (the House live test after each restart, Sept 29, 2026).
             inst = Instance(r["id"], r["family"], int(r["version"] or 0), "real", r["code"], dict(json_or(r["params"], {})),
-                            r["run_sha"] or "", r["band"] or "", bool(r["tuition"]), r["mode"] or "live")
+                            r["run_sha"] or "", r["band"] or "", bool(r["tuition"]), mode=r["mode"] or "live")
             if str(r.get("why") or "").startswith(("disqualified:", "the program does not load:", "its decider could not recover")):
                 inst.error, inst.fatal, inst.mode = r["why"], True, "exit_only"
                 self.instances[inst.key] = inst
@@ -1960,6 +1975,12 @@ class OptionsLive:
     def _real_intent(self, inst: Instance, day: LiveDay, mi: int, intent: dict, out: dict) -> str | None:
         book = self.book
         assert book is not None
+        if _is_observe(inst.key) or inst.observe is not False or inst.kind != "real":
+            # The belt (Sept 29, 2026): only a real instance's answer ever reaches the order path. `real_due` holds real
+            # instances only and an observe instance is always a shadow one (`Instance.__post_init__`); this refuses,
+            # alerted, whatever would break either.
+            self.alert("error", f"live: {inst.key} is not a real instance and asked for a real order: refused")
+            return "this instance is not a real one: it never sends a real order"
         today = day.day.isoformat()
         minute = day.open_min + mi + 1
         if "cancel" in intent:
