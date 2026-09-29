@@ -21,6 +21,12 @@ on branch `run/options-swarm-2026-09-26`) has the detail.
 
 ## 2026-09-29
 
+**04:53Z, operator change** (no deploy): every paid role on Claude, after R8. `claude.model`
+`claude-sonnet-5-5`; `claude.roles` architect, audit, diagnostician, rewrite and review;
+`claude.role_usd_day` rewrite $15 and review $5; `claude.role_model` the audit on `claude-opus-5-5`, so
+the gate's two reads stay two different models; `gate.review_openai_model` and `gate.audit_openai_model`
+null. With `architect.openai_model` already null, no role calls OpenAI.
+
 **04:42Z, R8: House release `20260929T044127Z-2c265b03bc04`** (main `8074e262`; #414, #415, #416)
 
 - #414: the graveyard is ranked by BM25 (a word's repeats saturate and long rows are discounted, so long
@@ -36,17 +42,20 @@ on branch `run/options-swarm-2026-09-26`) has the detail.
 list prices ($2 input, $2.50 five-minute cache write, $0.20 cache hit, $10 output per million tokens).
 `CLAUDE_USD` unchanged at $100.
 
-**00:17-03:50Z, operator changes** (no deploy)
+**00:17-04:00Z, operator changes** (no deploy)
 
 - 00:17:28Z `live.house_test` on, after the test's analysis script was pinned. Its files read verified;
   no trade yet.
 - 02:30Z agenda v14 (steering only: D2 and every kill test unchanged; the text stays private).
 - 03:35Z operator lessons (`op-` ids) inserted into the graveyard, with a backup: 45 by 04:33Z.
-- 03:40-03:50Z the owner's decisions (Claude Sonnet 5.5 throughout; only Sail and Claude topped up from
+- 03:40-04:00Z the owner's decisions (Claude Sonnet 5.5 throughout; only Sail and Claude topped up from
   now on; "remove any limits that would inhibit this goal"): `architect.openai_model` null (the architect
   is Claude-only), `architect.every_seconds` 600 with `max_refill` 24, `population.start` 96,
   `gym.max_boxes` 16, `researcher.sail_usd_per_hour` 12, `researcher.top_families` 12, the
   diagnostician at $60 a day, 6 a round, every 3 hours a family. The Sail guard's $32 line is unchanged.
+
+**00:06Z, the site** (personal-site #16; version `dcd61fbc`): the positions table labels the House live
+test's rows "House live test".
 
 ## 2026-09-28
 
@@ -133,8 +142,8 @@ meter, `CLAUDE_USD` 100. A probe call settled at $0.001.
 architect's refill, retirement at 200 revisions or 4,000 evaluations), a calibrated Gym image and the
 gate on its paired gate image.
 
-**20:57Z, the gateway** (version `cd0588b5`): in Cloudflare's deployment list but not in the run record;
-main had no gateway change since the 16:49Z deploy.
+**20:57Z, the gateway** (version `cd0588b5`): a secret change, no code (Cloudflare's source "Secret
+Change"): `CLAUDE_API_KEY` was added, the owner's D7. Not in the run record.
 
 **18:18Z, House release `20260926T181814Z-b4bc25619f84`** (main `60b34dd9`; #377, the publisher's agent
 progress). The site's #11 (18:05Z, `7959f35b`) and #12 (18:16Z, `e473bcbc`) went first.

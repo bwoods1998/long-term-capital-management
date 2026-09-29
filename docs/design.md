@@ -6,20 +6,21 @@ order of work and the authority; this page holds the design alone. Where this pa
 disagree, the code is right and this page is fixed. How to operate it is in
 [operations.md](operations.md).
 
-## Where each part stands (Sept 29, 2026, 04:50Z)
+## Where each part stands (Sept 29, 2026, 04:55Z)
 
 | Part | Code | State |
 |---|---|---|
 | The House, options only | `league/` | running R8, release `20260929T044127Z-2c265b03bc04` (main `8074e262`, promoted 04:42Z Sept 29); real money on since Sept 27; the grant active on money digest `a3e2aa7c`, capital $1,473.11 |
 | The data store and images | `scripts/data/` | the core five from 2020 (the 2020-21 fetch completed Sept 28) and the 20 added names from 2022, 0-14 days to expiry, SPY/QQQ back months to 45; ThetaData Options Standard's history reaches 2016; a longer-history fetch as private blocks is in progress (#413) |
 | The Gym | `league/gym/` | 25 roots, Train 2020-2024 on a sealed image adopted Sept 28 (2022-2024 for the added names); 11 types including long calls and puts; the honest fill model from Train samples |
-| The swarm | `league/swarm/`, `league/CONTRACT.md` | at 04:33Z Sept 29: 92 alive, 774 retired, 67,882 trials; 2 holdout looks, 0 passes; the gate on; Claude the architect, the auditor and the diagnostician |
+| The swarm | `league/swarm/`, `league/CONTRACT.md` | at 04:33Z Sept 29: 92 alive, 774 retired, 67,882 trials; 2 holdout looks, 0 passes; the gate on; Claude on every paid role since 04:53Z (Sonnet 5.5; Opus 5.5 for the audit), OpenAI unused |
 | Paper and production paths | `league/live/`, `gateway/` | real money opens four debit types; both paper route proofs passed Sept 28; the D3 calibration ran three real round trips Sept 28; the House live test armed Sept 29, no trade yet; no general agent paper book; covered strategies absent |
-| The public page | blakewoods.us/capital | deployed: genuine thoughts first, Profit/Running, clickable agent dots with evidence-based progress, a positions table that adds up to Profit (an opt-in read); Profit -$8.67, all of it the House's calibration and fees |
+| The public page | blakewoods.us/capital | deployed: genuine thoughts first, Profit/Running, clickable agent dots with evidence-based progress, a positions table that adds up to Profit (an opt-in read); Profit -$8.68, all of it the House's calibration round trips and the broker's fees |
 
 This is observed state, not completion of the design below. Broad universe discovery, covered
 strategies and the general paper environment are still to build; longer history (#413), the top
-families' research on Claude Sonnet 5.5 and an architect that reads the whole graveyard are in progress.
+families' research on Claude Sonnet 5.5 (#417) and an architect that reads the whole graveyard are in
+progress.
 
 ## The goal and the one number
 
@@ -243,7 +244,7 @@ Agent count and simulated years measure activity; passing unseen evidence measur
 | Tournament | hourly | the House | validation runs of each family's best versions, the bandit's reallocation, forks and retirements, the leaderboard | Gym time and model calls follow evidence |
 | Architect | every 4 hours by default, refilling hourly below the start; every 10 minutes live, refilling every 20 | Claude (Claude-only live: `architect.openai_model` null); Kimi-K3 on Sail as the fallback | reads the leaderboard, the graveyard and the gaps; writes families with a mechanism, a structure and a rejection test | 3-6 new families by default; the gap to the start, up to 24 a pass live |
 | Diagnostician | every 5 minutes | Claude | reads a stuck or nearly-there family's Train diagnostics (never Validation's numbers); rewrites its mechanism or writes its lesson; live: 6 a round, a family every 3 hours, $60 a day | a new mechanism, or a lesson and a retirement |
-| Gate | when a family meets the validation line | review: GPT-6 Sol while the OpenAI month has room, else DeepSeek-V4-Pro on Sail, Claude when "review" is in `claude.roles`; audit: Claude, then GPT-6 Astra, then a second Sail model; the gate box | review for lookahead, leakage and fill abuse; the audit; one holdout look | a Candidate, or a recorded refusal |
+| Gate | when a family meets the validation line | review: Claude when "review" is in `claude.roles` (live: Sonnet 5.5), else GPT-6 Sol while the OpenAI month has room and `gate.review_openai_model` names it (null live), else DeepSeek-V4-Pro on Sail; audit: Claude (live: Opus 5.5, `claude.role_model`), then GPT-6 Astra on the same terms (null live), then a second Sail model; the gate box | review for lookahead, leakage and fill abuse; the audit; one holdout look | a Candidate, or a recorded refusal |
 | Nightly forward | after 01:45 ET each trading night | the data box, the gate box | the new day goes to the gate image only; every Candidate is re-run on it | one unseen day a night for every Candidate |
 | Live | 09:30-16:00 ET | the House | every alive family's validated version in observe shadow; Candidates in live shadow; Probes and Sized on real money; the House's D3 calibration round trips and its live test; no general agent paper book yet | separate paper, shadow and real records |
 | Post-mortem | after each close; weekly | the operator for now (no scheduled post-mortem is built; it would run on Claude, whose `reserve_usd` is kept for it) | compare captured executions with the Gym; diagnose gaps and propose repairs | private reports; calibration only through the recalibration protocol |
@@ -252,13 +253,17 @@ Agent count and simulated years measure activity; passing unseen evidence measur
 Sail's DeepSeek-V4-Flash (V4.1-Flash where long cached histories make it cheaper), with a cache key per
 agent and the shared contract cached once a day; the bandit's top `researcher.top_families` (10 by
 default, 12 live) run on DeepSeek-V4-Pro at low effort. A researcher that stalls for 5 revisions
-escalates one rewrite to DeepSeek-V4-Pro asap (Kimi-K3 for the top ten families), or to Claude once the
-operator adds "rewrite" to `claude.roles`. Bulk overnight variants go through Sail's Batch API. Through
-the gateway, Claude (`claude.model`: Sonnet 5 live, Sonnet 5.5 by the owner's direction; Opus 5.5 by
-default) answers the architect, the gate's audit and the diagnostician first, each role within its own
-optional daily line (`claude.role_usd_day`) and model (`claude.role_model`). GPT-6 Sol reviews programs
-and GPT-6 Astra stands behind the audit while OpenAI's funded month lasts (to Sept 30), on its
-half-price flex tier wherever latency does not matter; Sail is every role's last fallback.
+escalates one rewrite to DeepSeek-V4-Pro asap (Kimi-K3 for the top ten families), or to Claude when
+"rewrite" is in `claude.roles`. Bulk overnight variants go through Sail's Batch API. Through the gateway,
+Claude answers first for the roles in `claude.roles` (by default the architect, the gate's audit and the
+diagnostician), each role within its own optional daily line (`claude.role_usd_day`) and model
+(`claude.role_model`), on `claude.model` (Opus 5.5 by default). Since 04:53Z Sept 29 the live settings
+put all five roles on Claude: Sonnet 5.5 for the architect, the diagnostician, the rewrite ($15 a day)
+and the review ($5 a day), and Opus 5.5 for the audit, so a program's two reads stay two different
+models. By default GPT-6 Sol reviews programs and GPT-6 Astra stands behind the audit while OpenAI's
+funded month lasts (to Sept 30), on its half-price flex tier wherever latency does not matter; the live
+settings switch both off, so OpenAI is unused. Sail is the last fallback of every role but the
+diagnostician.
 
 ## Evidence
 
@@ -336,11 +341,11 @@ half-price flex tier wherever latency does not matter; Sail is every role's last
 |---|---|---|---|
 | Researchers' inner loop | Sail | DeepSeek-V4-Flash asap (V4.1-Flash for long cached histories); cached contract | the researcher Sail pace, $12 an hour live |
 | The bandit's top families | Sail | DeepSeek-V4-Pro asap at low effort (10 families by default, 12 live) | inside the same pace |
-| Rewrites on a stall | Sail, or Claude | DeepSeek-V4-Pro asap; Kimi-K3 balanced for the top ten; Claude when "rewrite" is in `claude.roles` | capped per family per day |
+| Rewrites on a stall | Claude, or Sail | Claude when "rewrite" is in `claude.roles` (live: Sonnet 5.5); else DeepSeek-V4-Pro asap, Kimi-K3 balanced for the top ten | capped per family per day; Claude's $15 a day live (`claude.role_usd_day`) |
 | Bulk overnight variants | Sail Batch | V4-Pro flex | capped per night |
-| Program review before live shadow | OpenAI via the gateway, or Claude | GPT-6 Sol, flex, while the September month has room (else DeepSeek-V4-Pro on Sail); Claude when "review" is in `claude.roles` | about $0.03 a program on Sol |
+| Program review before live shadow | Claude or OpenAI via the gateway | Claude when "review" is in `claude.roles` (live: Sonnet 5.5); by default GPT-6 Sol, flex, while the September month has room (off live); else DeepSeek-V4-Pro on Sail | Claude's $5 a day live; about $0.03 a program on Sol |
 | Architect | Claude via the gateway | `claude.model` (Sonnet 5.5 at $2 input, $10 output per million tokens; Opus 5.5 at $4 / $20), Claude-only live; Kimi-K3 on Sail as the fallback | inside Claude's funded total |
-| Gate audit | Claude via the gateway | `claude.model`; GPT-6 Astra while the September month has room, then a second Sail model, as fallbacks | inside Claude's funded total |
+| Gate audit | Claude via the gateway | `claude.role_model["audit"]` or `claude.model` (live: Opus 5.5); GPT-6 Astra while the September month has room (off live), then a second Sail model, as fallbacks | inside Claude's funded total |
 | Diagnostician | Claude via the gateway | `claude.model` | `diagnostician.usd_day`, $60 a day live |
 | Weekly post-mortem | - | not built; the operator writes the post-mortem | - |
 | Gym | Sail boxes | 4-8 sealed size-l boxes by default, up to 16 live | $0.10-0.40 an hour each while busy; asleep when idle |

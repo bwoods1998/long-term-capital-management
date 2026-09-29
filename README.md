@@ -27,12 +27,12 @@ session was Monday September 28 (13:30Z); no family had passed the holdout, so i
 orders were the House's own calibration round trips. Profitable production trading is the goal, not an
 outcome established by more agents, more trials, or a successful backtest.
 
-## Current state — September 29, 04:50Z
+## Current state — September 29, 04:55Z
 
 - **Real money is on** (since Sept 27): the grant `options-swarm-20260928` is active on money digest
   `a3e2aa7c` with capital $1,473.11 after the owner's deposit. No family has passed the holdout, so no
   family trades real money yet. The real trades so far are the House's D3 calibration round trips:
-  three on Sept 28, 5 of 6 orders filled at the mid, Profit -$8.67 (market moves and the broker's
+  three on Sept 28, 5 of 6 orders filled at the mid, Profit -$8.68 (market moves and the broker's
   fees). The House live test (one frozen, pre-registered program at tuition size, never evidence) was
   armed at 00:17Z Sept 29 and has not traded yet. Both paper route proofs passed on Sept 28.
 - At 04:33Z: 92 families alive, 774 retired, 67,882 recorded trials, **2 holdout looks and 0
@@ -42,11 +42,15 @@ outcome established by more agents, more trials, or a successful backtest.
 - Real money opens four debit types under $2,000 of equity. The simulator supports 11 types; covered
   calls and cash-secured puts still need inventory/collateral support, and there is no general agent
   paper book (the paper proofs check the route).
-- Models: Claude is the architect (only), the gate's auditor and the diagnostician. The owner decided
-  on Sept 29 to use Claude Sonnet 5.5 throughout and to top up only Sail and Claude from now on.
+- Models: the owner decided on Sept 29 to use Claude Sonnet 5.5 throughout and to top up only Sail and
+  Claude from now on. Since 04:53Z Sept 29 Claude takes every paid role: Sonnet 5.5 is the architect
+  (with no OpenAI pass), the diagnostician, the stall rewrite and the program review, and Opus 5.5 the gate's audit, so
+  a program's two reads stay two different models. OpenAI is no longer used; Sail models remain the
+  inner loop and the fallback of every role but the diagnostician.
 - The House runs R8 (#414 graveyard ranking, #415 Sonnet 5.5 prices, #416 Claude on the rewrite and
-  review roles), promoted 04:42Z Sept 29 with its watch passed. In progress, not merged: longer history (#413), the top
-  families' research on Sonnet 5.5, and an architect that reads the whole graveyard plus a strategist.
+  review roles), promoted 04:42Z Sept 29 with its watch passed. In progress, not merged: longer history
+  (#413), the top families' research on Sonnet 5.5 (#417), and an architect that reads the whole
+  graveyard plus a strategist.
 - The live site shows the agents' own thoughts, clickable dots with each agent's evidence-based
   progress, and a positions table that adds up exactly to Profit (the "House calibration" and "House
   live test" rows are labelled). Project Net is negative: the inputs cost money.
@@ -136,14 +140,12 @@ The full design is [docs/design.md](docs/design.md); the run that is building it
 
 Vendors: **Alpaca** (the account, level 3; live OPRA quotes and SIP bars through Algo Trader Plus;
 a paper account for the multi-leg route), **ThetaData** Options Standard (historical option quotes),
-**Sail** (the boxes, and open models for the researchers and every fallback: DeepSeek, Kimi),
-**Anthropic** through the gateway (Claude is the architect, the gate's auditor and the diagnostician;
-the stall rewrite and the program review too once the operator adds them to `claude.roles`; the swarm's
-`claude.model` is `claude-sonnet-5`, and the owner's direction is Sonnet 5.5, `claude-sonnet-5-5`, which R8
-prices), **OpenAI**
-through the gateway while its funded September lasts (GPT-6 Sol reviews programs; GPT-6 Astra is the
-audit's fallback). From Sept 29 only Sail and Claude are topped up; the gateway's OpenAI cap is $0 from
-Oct 1.
+**Sail** (the boxes, and open models for the researchers and the roles' fallbacks: DeepSeek, Kimi),
+**Anthropic** through the gateway (Claude answers every paid role on the live settings: Sonnet 5.5,
+`claude-sonnet-5-5`, is the architect, the diagnostician, the stall rewrite and the program review; Opus
+5.5 is the gate's audit), **OpenAI** through the gateway (GPT-6 Sol and Astra, the code's defaults for
+the review and the audit's fallback, are switched off in the live settings since Sept 29). From Sept 29
+only Sail and Claude are topped up; the gateway's OpenAI cap is $0 from Oct 1.
 
 ## The repository
 

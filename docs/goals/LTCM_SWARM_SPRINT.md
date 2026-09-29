@@ -164,20 +164,23 @@ where each item stands. The run record (`docs/runs/2026-09-26-options-swarm.md` 
   are read through it: after Monday's three round trips the model was deliberately not refitted.
 - **Models** (the owner, 03:40-04:00Z Sept 29): Claude Sonnet 5.5 throughout; from now on only Sail and
   Claude are topped up, not OpenAI. The architect is Claude-only (`architect.openai_model` null), so
-  it has no alternate Astra pass; the swarm's `claude.model` is Sonnet 5 until the operator switches it
-  to Sonnet 5.5, which R8 (#415) prices in the House. The Opus 5.5 budgets and the OpenAI Astra and Sol budgets in
-  **Compute and models** are superseded. Sonnet 5.5 (`claude-sonnet-5-5`) lists at $2 input, $2.50 a
+  it has no alternate Astra pass. After R8 (#415 prices Sonnet 5.5 in the House), at 04:53Z, the
+  operator put every paid role on Claude: `claude.model` Sonnet 5.5 for the architect, the
+  diagnostician, the stall rewrite and the program review (daily lines $15 and $5 for the last two),
+  Opus 5.5 for the gate's audit (`claude.role_model`, so a program's two reads stay two different
+  models), and the gate's OpenAI models null, so OpenAI is no longer used. The Opus 5.5 budgets and the
+  OpenAI Astra and Sol budgets in **Compute and models** are superseded. Sonnet 5.5 (`claude-sonnet-5-5`) lists at $2 input, $2.50 a
   five-minute cache write, $0.20 a cache hit and $10 output per million tokens; its default effort is
   `high`, unlike Opus 5.5's `medium`, and the House always sends one.
 - **Limits lifted** (the owner, 03:45Z Sept 29: "remove any limits that would inhibit this goal ...
   take every bold swing"): population start 96 (the ceiling), Gym boxes up to 16, the architect up to
   24 families every 10 minutes, the strong research profile for the top 12 families, the researcher
   Sail pace $12 an hour. Unchanged: D2, the sealed holdout, no forced trades, the money table.
-- **R8** (#414, #415, #416), promoted 04:42Z Sept 29 (watch passed). In progress, not merged: longer history (#413),
-  the top families' research on Sonnet 5.5, and an architect that reads the whole graveyard plus a
-  strategist.
+- **R8** (#414, #415, #416), promoted 04:42Z Sept 29 (watch passed). In progress, not merged: longer
+  history (#413), the top families' research on Sonnet 5.5 (#417), and an architect that reads the whole
+  graveyard plus a strategist.
 
-The Done list, where it stands (Sept 29, 04:50Z):
+The Done list, where it stands (Sept 29, 04:55Z):
 
 1. The observe shadow ran (at most 8 families, the likeliest first); no family passed the holdout, so
    no Probe traded; the paper proofs (multi-leg and single-leg) passed and the calibration round trips

@@ -7,22 +7,25 @@ the swarm or live path describe their implementation, not evidence that producti
 enabled. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
-## Current operation and next work — September 29, 04:50Z
+## Current operation and next work — September 29, 04:55Z
 
 The House runs R8, release `20260929T044127Z-2c265b03bc04` (main `8074e262`, promoted 04:42:07Z Sept 29,
 its watch passed at 04:52Z:
 #414 the BM25 graveyard ranking, #415 Sonnet 5.5 priced, #416 Claude on the rewrite and review roles with
 per-role lines and models). Real money is on (since R2, Sept 27): the grant `options-swarm-20260928` is
 active on money digest `a3e2aa7c`, capital $1,473.11. No family has passed the holdout, so the only real
-orders so far are the House's own: three D3 calibration round trips on Sept 28 (Profit -$8.67). The
+orders so far are the House's own: three D3 calibration round trips on Sept 28 (Profit -$8.68). The
 House live test is armed (`live.house_test` on since 00:17:28Z Sept 29, its files verified) and has not
 traded. The swarm trains on 25 roots with Train 2020-2024 and the gate on; at 04:33Z it had 92 families
 alive, 67,882 trials, 2 holdout looks and 0 passes. These are observations, not a readiness promise.
 
 The owner's decisions of Sept 29: Claude Sonnet 5.5 throughout, and from now on only Sail and Claude are
-topped up (no more OpenAI). The architect is Claude-only (`architect.openai_model` null). The OpenAI
-month ($707, September 2026 only) is not renewed, so from Oct 1 00:00Z the gateway's OpenAI cap is $0
-and the roles that used it fall to Claude or Sail (**Models and Claude**, below). The research limits
+topped up (no more OpenAI). Since 04:53Z Sept 29 (after R8) `swarm.json` puts every paid role on Claude:
+`claude.model` Sonnet 5.5 for the architect, the diagnostician, the stall rewrite and the program review,
+and Opus 5.5 for the gate's audit (`claude.role_model`), with daily lines for the rewrite ($15) and the
+review ($5); `architect.openai_model`, `gate.review_openai_model` and `gate.audit_openai_model` are null,
+so no role calls OpenAI (**Models and Claude**, below). The OpenAI month ($707, September 2026 only) is not
+renewed: from Oct 1 00:00Z the gateway's OpenAI cap is $0. The research limits
 were lifted at 03:45-03:50Z on the owner's word ("remove any limits that would inhibit this goal"):
 population start 96 (the ceiling), Gym boxes up to 16, the architect every 600 s with up to 24 a pass,
 the strong Sail profile for the top 12 families, the researcher Sail pace $12 an hour. Unchanged: D2,
@@ -34,8 +37,8 @@ the gateway (the swarm's own line `claude.usd_cap` 98), OpenAI $707 for Septembe
 larger deposits are not confirmed funding.
 
 In progress, not merged: longer history as private blocks (#413); the top families' research cycles
-on Sonnet 5.5 (branch `swarm/sonnet-researchers`); an architect that reads the whole graveyard, plus a
-strategist (branch `swarm/sonnet-architect-strategist`). Open: #393 (credit types at $2,000, the owner's
+on Sonnet 5.5 (#417); an architect that reads the whole graveyard, plus a strategist (not yet a pull
+request). Open: #393 (credit types at $2,000, the owner's
 decision), #381, #384, #385; drafts #375 (the prune) and #400. Re-read main, open PRs and the running
 release before acting; a document timestamp is not a fresh health check.
 
@@ -587,8 +590,9 @@ entries still require the paper route proofs' witnessed round trips.
 | The House live test's program | `/workspace/state/house-test/rebound-live/` on the box | present, verified | the frozen program and its params, hash-checked against `league/live/house_test.py` `FROZEN` | the operator's private upload script, `--apply` |
 | `FRONTIER_MONTH_USD`, `FRONTIER_MONTH_MAX_USD`, `FRONTIER_FUNDED_MONTH` | `gateway/wrangler.jsonc` | $707, September 2026 only; not topped up again (the owner, Sept 29), so $0 from Oct 1 | the OpenAI month; expires before an unfunded month can renew it | gateway deploy |
 | `CLAUDE_USD`, `CLAUDE_MODELS` | `gateway/wrangler.jsonc` | $100; Opus 5.5, Sonnet 5, Sonnet 5.5 | the Anthropic account's funded total (never resets) and the priced models (the allowlist) | gateway deploy after the owner adds funds |
-| `claude.model`, `claude.usd_cap`, `claude.max_tokens` | `swarm.json` on the box | `claude-sonnet-5`, 98, 32000 | the swarm's Claude model, its own lifetime Claude line inside `CLAUDE_USD`, a call's output ceiling (defaults `claude-opus-5-5`, 100, 16000) | edit `swarm.json` |
-| `claude.roles`, `claude.role_usd_day`, `claude.role_model` | `swarm.json` on the box | unset: the defaults (architect, audit, diagnostician; no role line; no role model) | who asks Claude first; a role's own Claude line a UTC day; a role's own Claude model | edit `swarm.json` |
+| `claude.model`, `claude.usd_cap`, `claude.max_tokens` | `swarm.json` on the box | `claude-sonnet-5-5` (since 04:53Z Sept 29), 98, 32000 | the swarm's Claude model, its own lifetime Claude line inside `CLAUDE_USD`, a call's output ceiling (defaults `claude-opus-5-5`, 100, 16000) | edit `swarm.json` |
+| `claude.roles`, `claude.role_usd_day`, `claude.role_model` | `swarm.json` on the box | architect, audit, diagnostician, rewrite, review; rewrite $15 and review $5; audit on `claude-opus-5-5` (since 04:53Z Sept 29) | who asks Claude first; a role's own Claude line a UTC day; a role's own Claude model (defaults architect, audit, diagnostician; no role line; no role model) | edit `swarm.json` |
+| `gate.review_openai_model`, `gate.audit_openai_model` | `swarm.json` on the box | null, null (since 04:53Z Sept 29) | the review's and the audit's OpenAI route; null skips it (defaults `gpt-6-sol`, `gpt-6-astra`) | edit `swarm.json` |
 | `architect.openai_model`, `every_seconds`, `refill_seconds`, `max_refill`, `max_output_tokens` | `swarm.json` on the box | null, 600, 1200, 24, 32000 | the architect: null leaves it Claude-only (Sail as the fallback); its cadence, its refill below `population.start` and each pass's births (defaults `gpt-6-astra`, 14400, 3600, 12, 12000) | edit `swarm.json` |
 | `population.start`, `ceiling`, `floor` | `swarm.json` on the box | 96, 96, 12 | the refill target, the most alive, the fewest retirement may leave (defaults 48, 96, 16) | edit `swarm.json` |
 | `gym.start_boxes`, `max_boxes`, `train_from`, `image_checkpoint`, `gate_checkpoint` | `swarm.json` on the box | 6, 16, "2020-01-02", the sealed 2020-24 image, its gate partner | the Gym pool, Train's first day and the images (defaults 4, 8, unset, none, none: the gate is off without a gate image) | edit `swarm.json`; `train_from` and a new image together |
@@ -693,31 +697,33 @@ family it cannot rescore.
 
 Every paid model call goes through the gateway: Claude against the owner's funded total (`CLAUDE_USD`, $100; it
 never resets), OpenAI against the funded month (September 2026 only; $0 from Oct 1). Sail models (DeepSeek, Kimi)
-are the inner loop and every role's last fallback. `league/swarm/models.py` routes a role's call:
+are the inner loop and every role's last fallback but the diagnostician's (it has none). `league/swarm/models.py`
+routes a role's call:
 
-- **Claude first** for the roles in `claude.roles`: by default the architect, the gate's audit and the diagnostician
-  (none is set on the box, so the defaults hold). Since R8 the researcher's stall rewrite and the gate's program review
-  ask for Claude too, so adding "rewrite" or "review" to `claude.roles` in `swarm.json` routes them to Claude with no
-  deploy. Claude answers while the gateway's total has room above `claude.reserve_usd` (5) and the swarm's own Claude
+- **Claude first** for the roles in `claude.roles`: by default the architect, the gate's audit and the diagnostician.
+  Since R8 the researcher's stall rewrite and the gate's program review ask for Claude too, so adding "rewrite" or
+  "review" to `claude.roles` in `swarm.json` routes them to Claude with no deploy; the box has all five since 04:53Z
+  Sept 29. Claude answers while the gateway's total has room above `claude.reserve_usd` (5) and the swarm's own Claude
   spend is under `claude.usd_cap` (98 on the box).
-- **The model** is `claude.model` (`claude-sonnet-5` on the box; the default is `claude-opus-5-5`; the owner's
-  direction is Sonnet 5.5, `claude-sonnet-5-5`, which R8 prices in the House), or a role's own model in
-  `claude.role_model` {role: model id}. A role model must be priced both in `league/claude.py` `MODEL_CEILINGS` and in
+- **The model** is `claude.model` (`claude-sonnet-5-5` on the box since 04:53Z Sept 29, the owner's Sonnet 5.5; the
+  default is `claude-opus-5-5`), or a role's own model in `claude.role_model` {role: model id} (the box: the audit on
+  `claude-opus-5-5`). A role model must be priced both in `league/claude.py` `MODEL_CEILINGS` and in
   the gateway's `CLAUDE_MODELS`, else the role falls to its next route. Sonnet 5.5's list prices: $2 input, $2.50 a
   five-minute cache write, $0.20 a cache hit, $10 output per million tokens (Opus 5.5: $4, $5, $0.20, $20). Sonnet 5.5's
   default effort is `high` (Opus's is `medium`); the House always sends an effort.
 - **A role's daily line**: `claude.role_usd_day` {role: usd}, a UTC day with holds included; a call counts on the day
   its hold was booked, even when it settles after midnight. A call that would pass the line skips Claude for the
-  role's next route. No entry is no extra line. The diagnostician also keeps its own `diagnostician.usd_day`.
-- **The next routes**: the architect is Claude-only on the box (`architect.openai_model` null), with Kimi-K3 on Sail as
-  the fallback; with a model named there, every other pass would ask GPT-6 Astra first. The audit falls to GPT-6 Astra
-  while the OpenAI month has room, then to a second, different Sail model. The review is GPT-6 Sol while the month has
-  room, else DeepSeek-V4-Pro on Sail; the stall rewrite, its Sail profile. From Oct 1 Sol and Astra have no room, so the
-  review runs on Sail unless "review" is in `claude.roles`.
+  role's next route. No entry is no extra line (the box: the rewrite $15, the review $5). The diagnostician also keeps
+  its own `diagnostician.usd_day`.
+- **The next routes**: the architect falls to Kimi-K3 on Sail; with a model named in `architect.openai_model` (null on
+  the box), every other pass would ask GPT-6 Astra first. The audit falls to GPT-6 Astra while the OpenAI month has room
+  and `gate.audit_openai_model` names it, then to a second, different Sail model; the review to GPT-6 Sol on the same
+  terms (`gate.review_openai_model`), else DeepSeek-V4-Pro on Sail; the stall rewrite to its Sail profile. Both gate
+  OpenAI models are null on the box, so no role calls OpenAI; from Oct 1 the gateway's month would refuse it anyway.
 - **Two readers**: the plan wants two different paid models to read a program before its holdout look. A review or
   an audit on Sail, or one Claude model reading both (with "review" and "audit" both in `claude.roles`), raises the
   gate's `not_the_plans_reviewer` alert (`same_reader` true for the second); the cure is a different
-  `claude.role_model` for the review.
+  `claude.role_model` for one of them (the box gives the audit Opus 5.5).
 - **The meters**: `python3 scripts/gateway_admin.py status` (`claude`: the funded total, spent, in flight, remaining,
   holds, the priced models, `by_role`); the swarm's `spend` rows (kind `claude`, by family and role); the
   diagnostician's refusals name the line that stopped it.

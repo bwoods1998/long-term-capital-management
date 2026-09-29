@@ -94,9 +94,10 @@ reply carries `X-LTCM-Cost-USD` to the microdollar. The cap never goes above fun
 is a gateway deploy. The owner confirmed a $100 addition on September 26, increasing the aggregate
 ceiling from $607 to $707. `FRONTIER_FUNDED_MONTH=2026-09` expires that allowance at October 1
 00:00 UTC: from then the month's cap is $0 (`lib/frontier.mjs` `monthCapMicro`; profit indexing
-creates no month) and `/v1/frontier/responses` answers `403` ("No frontier budget is configured"). The owner decided on September 29 that OpenAI is no longer
-topped up, so no October month is planned; the House's roles fall to Claude or Sail. A later month
-would need its remaining credit reconciled and its funded month and ceiling deployed.
+creates no month) and `/v1/frontier/responses` answers `403` ("No frontier budget is configured"). The
+owner decided on September 29 that OpenAI is no longer topped up, so no October month is planned; since
+then the House's settings send every paid role to Claude and none to OpenAI (Sail stays the fallback). A
+later month would need its remaining credit reconciled and its funded month and ceiling deployed.
 
 - **Flex** (Sept 26, 2026): a request may carry `service_tier: "flex"` for a model whose
   `FRONTIER_MODELS` row has a `flex` rate (half the standard one for GPT-6 Astra, Sol and Luna). It is

@@ -5,11 +5,12 @@ THE GATE (when a family's validated best meets the validation line):
    inherits its parent's looks); the leakage alarm (>= 10 looks, > 30% passing) stops the gate. THE DRIFT SCREEN
    (Sept 27, `evidence.drift_screen`) again, in depth: a version whose Train drift-adjusted alpha fails it is refused
    (stage "drift screen": no review is paid, no look is spent); one whose figures are owed waits.
-2. THE REVIEW: GPT-6 Sol through the gateway when OpenAI has room, else DeepSeek-V4-Pro balanced on Sail (Claude
-   first once "review" is in `claude.roles`, Sept 29), reads the program for lookahead, leakage (calendar recognition,
-   hard-coded regimes) and fill abuse. A failed review is a recorded refusal and costs no look. An unclear answer is
-   asked again next round. THE AUDIT then reads it again on a second model: Claude (a default role), else GPT-6 Astra
-   while the OpenAI month has room, else a different Sail model; a failed audit is a refusal too.
+2. THE REVIEW: GPT-6 Sol through the gateway when OpenAI has room (`review_openai_model`; null skips it), else
+   DeepSeek-V4-Pro balanced on Sail (Claude first once "review" is in `claude.roles`, Sept 29), reads the program for
+   lookahead, leakage (calendar recognition, hard-coded regimes) and fill abuse. A failed review is a recorded refusal
+   and costs no look. An unclear answer is asked again next round. THE AUDIT then reads it again on a second model:
+   Claude (a default role), else GPT-6 Astra while the OpenAI month has room (`audit_openai_model`; null skips it), else
+   a different Sail model; a failed audit is a refusal too.
 3. ONE HOLDOUT LOOK on a gate box (a fork of the gate image; the Gym image has no holdout days), judged by
    the plan's holdout line (`evidence.holdout_line`, with Holm-Bonferroni across every look the swarm has
    made). The researcher is told PASS or FAIL, never a number.
