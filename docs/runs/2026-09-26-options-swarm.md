@@ -2796,4 +2796,37 @@ looks like beta. Validation 2025 and the holdout judge both.
   - preopen 9/9 after its expectations were updated. CHANGELOG #426.
   - `gym.train_from` stays 2020-01-02 until image T is built, bridged and pool-checked tonight.
 
+
+- **14:28Z The spend audit (48 h, read-only, adversarially reviewed): breadth beats depth. The research spend was
+  reallocated.**
+  - Train score barely predicts the Validation t: Spearman 0.099, n=219, 90% CI -0.015 to 0.215.
+  - The 220 Validation t's look like no skill: median -0.33, 1.8% at t >= 2, the chance rate.
+  - Every Validation at t >= 1.4 came from a young family (0.3-1.9 h old, v1-v31), almost all written by the cheapest
+    Sail model. Heavily reworked versions (v114-v236) validate weaker, which is Train overfitting.
+  - Premium research bought no measurable progress:
+    - the Claude Sonnet researcher band cost about 19x a flash family-hour, with no better new-best or Validation rate;
+      0 of 2 of its Validations were positive, against 5 of 20 for flash;
+    - 281 rewrites in 4 h gave 0 new positive bests;
+    - the diagnostician's rewrites moved the next Validation by -0.25 checks (44 cases).
+  - The graveyard's labels were wrong. 834 of 835 dormancy deaths had already been refuted by their own researcher
+    (63% failed the drift screen), yet all were filed "a time limit, not a finding". The strategist read that as
+    "untested" and 40% of births went to a TLT/GLD/SLV straddle class.
+  - Applied at 14:28Z (research-side; one-line rollbacks in `scratch/roi/PLAN.md`):
+    - both premium research bands off (`researcher.claude_top` 0, `top_families` 0, the researcher Claude line 0);
+    - rewrites fewer and Sail-only (`stall_revisions` 12, `rewrites_per_day` 1, `rewrite_min_hours` 6, the rewrite
+      Claude line 0);
+    - the diagnostician line $6 with `min_validations` 2; the strategist line $6.
+    - Sonnet keeps the architect and strategist: ideas, not grinding.
+    - Projected: total spend about $8.90/h → about $4.20/h. Claude runway about 17 h → about 2.2 days. Sail to the
+      guard line about 2.1 → about 3.8 days.
+  - Building for a mid-session research release (R11b):
+    - honest retirement verdicts plus the graveyard migration;
+    - strategist corrections that land, and a per-class birth cap;
+    - architect medium effort and truncation salvage;
+    - the bandit exploits only positive Validation evidence;
+    - a Gym zero-trade probe;
+    - a dormancy exemption for 6/8+ near-misses until tonight's 2017-19 extension check.
+  - Today's first calibration trip (IWM, the root's first) filled open and close at the mid: 7 of 8 real orders at the
+    mid over two sessions.
+
 ## Report
