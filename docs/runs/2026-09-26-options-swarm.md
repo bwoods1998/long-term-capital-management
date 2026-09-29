@@ -2345,4 +2345,24 @@ looks like beta. Validation 2025 and the holdout judge both.
       return does not explain, and fit $95 natively. Under the cap, L and T had traded further-out strikes than the
       contracts that replicated.
 
+
+- **23:38Z-00:07Z R7: the House live test and the 2020-21 splits, deployed; the grant re-ratified on the new money
+  table (the owner approved the money-table change at 22:55Z).**
+  - Contents: PR #410 (five 2020-21 splits in `events.SPLITS`; stale "never Profit" comments) and PR #412 (the House
+    live test, one squashed commit after two adversarial money-code reviews; #411 closed unmerged).
+  - Merged to main `6c2de074`. 599 money-path tests passed locally on the merged tree, and main's CI is green (3.11,
+    3.14, gateway).
+  - The money digest moved `ad9bd54c` → `a3e2aa7c` (full `4f4edaf5` → `fcf8d735`). The only change is the test's own
+    six bounds in `options_money.house_test`; no family limit changed.
+  - Backup `state/backups/pre-r7` (swarm, ledger, live, live-grant, calibration, swarm.json); `pre-r6` removed.
+  - Release `20260928T235447Z-6005f971ffc5`, promoted 23:55:35Z. The grant was re-ratified at 23:56:41Z: active on
+    `a3e2aa7c`, capital $1,473.11, 14 agents.
+  - The frozen program is uploaded privately to `<state>/house-test/rebound-live/` (directory 700, files 600).
+    `health.options_live.house_test.files` = verified, and the code, params and run hashes match the
+    pre-registration.
+  - The switch `live.house_test` stays off until the pre-registered analysis script is pinned.
+  - preopen: 8/9 (the fail is the Sail projection; the owner is topping up).
+  - The site's "House live test" label (personal-site #16) is deployed, version `dcd61fbc`. The positions table still
+    reconciles: rows plus other = -$8.67 = Profit, which now includes more of the broker's posted fees.
+
 ## Report
