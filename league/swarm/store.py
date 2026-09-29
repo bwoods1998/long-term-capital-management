@@ -241,10 +241,11 @@ def loads(text: Any, default: Any = None) -> Any:
         return default
 
 
-# How much a graveyard row's length discounts its relevance (BM25's b: 0 none, 1 in full proportion). A long lesson
-# contains more of any query's words by its length alone; at 0 the longest quarter of the graveyard still took half
-# of the architect's top-3 slots in the Sept 28 replay, at 0.3 each length quarter took about its share.
-GRAVEYARD_LENGTH_B = 0.3
+# BM25's standard constants for ranking the graveyard. K1: how fast repeats of a word saturate (a word said many
+# times counts at most 2.2 times one mention). B: how much a row's length against the average discounts it (0 none,
+# 1 in full proportion). The raw occurrence count they replace let the longest quarter of the graveyard take 447 of
+# the architect's 450 top-3 slots in the Sept 28 replay.
+GRAVEYARD_K1, GRAVEYARD_B = 1.2, 0.75
 
 
 def graveyard_words(query: str) -> list[str]:
@@ -260,11 +261,12 @@ def graveyard_words(query: str) -> list[str]:
 def rank_graveyard(rows: Sequence[dict[str, Any]], query: str) -> list[dict[str, Any]]:
     """Graveyard rows (newest first) ranked by relevance to `query`; with no query words, all of them as given.
 
-    A row's text is its mechanism, structure, roots and lesson; a query word is in it as a substring. Relevance counts
-    each query word present once, however often it repeats, weighted by its inverse document frequency across the
-    graveyard (BM25's idf: a word nearly every row has adds almost nothing), and discounted by the row's length
-    against the average (`GRAVEYARD_LENGTH_B`). Ties go to more occurrences per 1,000 characters, then the order given.
-    A row with no query word is left out (the same rows as before, only in a new order). Standard library only.
+    A row's text is its mechanism, structure, roots and lesson; a query word is in it as a substring. Relevance is
+    BM25: each query word the row contains is weighted by its inverse document frequency across the graveyard (a word
+    nearly every row has adds almost nothing); its repeats saturate (`GRAVEYARD_K1`), faster in a row longer than the
+    average (`GRAVEYARD_B`), so a long, repetitive lesson does not outrank a short one about the query. Exact ties
+    keep the order given. A row with no query word is left out (the same rows as before, only in a new order).
+    Standard library only.
     """
     words = graveyard_words(query)
     if not words or not rows:
@@ -278,9 +280,9 @@ def rank_graveyard(rows: Sequence[dict[str, Any]], query: str) -> list[dict[str,
     ranked = []
     for i, (t, c) in enumerate(zip(texts, counts)):
         if c:
-            length = 1 - GRAVEYARD_LENGTH_B + GRAVEYARD_LENGTH_B * len(t) / average
-            ranked.append((-sum(idf[w] for w in c) / length, -1000.0 * sum(c.values()) / len(t), i))
-    return [rows[i] for _, _, i in sorted(ranked)]
+            k = GRAVEYARD_K1 * (1 - GRAVEYARD_B + GRAVEYARD_B * len(t) / average)
+            ranked.append((-sum(idf[w] * n * (GRAVEYARD_K1 + 1) / (n + k) for w, n in c.items()), i))
+    return [rows[i] for _, i in sorted(ranked)]
 
 
 def code_sha(code: str) -> str:

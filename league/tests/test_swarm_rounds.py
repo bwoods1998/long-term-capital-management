@@ -740,6 +740,29 @@ class ArchitectTests(RoundCase):
         self.assertIn("sketch", self.store.notebook("gamma-scalp-spy")[0]["text"])
         self.assertEqual(self.sail.bodies[0]["model"], "moonshotai/Kimi-K3")
 
+    def test_a_family_is_born_with_distinct_lessons_when_many_open_with_the_same_wording(self):
+        idle = ("long_straddle on SPY: It made no new Gym evaluation in its last twelve cycles (only stored results, holds and "
+                "refused runs). Retired by the idle rule, a limit on how long a family may research without an eligible Train "
+                "version, a positive Train score or a new Gym evaluation; it is a time limit, not a finding about the idea. ")
+        self.assertGreater(len(idle), 300)
+        for i in range(4):
+            self.family(f"idle-{i}", structure="long_straddle", roots=["SPY"],
+                        mechanism=f"When dealers are short gamma they amplify afternoon moves on SPY, so buy a straddle, variant {i}.")
+            self.store.bury(f"idle-{i}", idle + f"Its last note was about variant {i}.")
+        self.family("theta", structure="long_straddle", roots=["SPY"], mechanism="Buy a straddle on SPY before the afternoon.")
+        self.store.bury("theta", "Straddles on SPY bled theta on quiet afternoons.")
+        self.family("events", structure="long_straddle", roots=["SPY"], mechanism="Dealers short gamma on event days.")
+        self.store.bury("events", "The straddle paid only on event days; dealers were long gamma most afternoons.")
+        query = "long_straddle SPY " + self.PROPOSAL["families"][0]["mechanism"]
+        self.assertEqual({g["family"] for g in self.store.graveyard(query, limit=3)} & {"theta", "events"}, set(),
+                         "the four idle-rule lessons rank first")
+        self.replies = [{"text": json.dumps(self.PROPOSAL)}]
+        Architect(self.store, self.router, self.settings).run()
+        lessons = self.store.family("gamma-scalp-spy")["spec"]["lessons"]
+        self.assertEqual(len(lessons), 3)
+        self.assertEqual(len(set(lessons)), 3, "a repeated 300-character lesson crowds out another")
+        self.assertEqual(sum(lesson.startswith("long_straddle on SPY: It made no new Gym evaluation") for lesson in lessons), 1)
+
     def test_astra_when_openai_has_room_and_sail_when_it_refuses(self):
         self.month.value = 50
         self.frontier_text = json.dumps(self.PROPOSAL)

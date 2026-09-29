@@ -209,6 +209,23 @@ class GraveyardRanking(StoreCase):
         self.assertGreater(raw["verbose"], 3 * raw["exact"])
         self.assertEqual(self.ids(query, limit=3)[0], "exact")
 
+    def test_a_one_word_query_prefers_the_row_about_the_word_over_a_shorter_passing_mention(self):
+        # A length discount alone ranked "shortest row containing the substring" first; repeats of the word count too,
+        # saturating (BM25), so the row about the pin beats a short one that only matches inside "keeping".
+        self.bury("about-pin", "Sell a butterfly at the pin strike: dealer gamma pins SPY to the largest open-interest strike into the close.",
+                  "The pin held on quiet days but the pin strike moved intraday; pinning broke on trend days.")
+        self.bury("passing", "Buy calls after a gap up on SPY.", "Keeping the position overnight lost the premium.")
+        self.assertEqual(self.ids("pin"), ["about-pin", "passing"])
+
+    def test_repeats_saturate_so_saying_a_word_ten_times_is_not_ten_mentions(self):
+        self.bury("once", "Sell a condor on calm days.", "Condors lost on event days.", structure="iron_condor")
+        self.bury("drone", "Sell a condor on calm days.", "Condor condor condor condor condor condor condor condor condor.",
+                  structure="iron_condor")
+        self.bury("both", "Sell a condor after the VIX term structure inverts.", "The inversion was too rare for the condor.",
+                  structure="iron_condor")
+        # Two distinct query words beat one word however often it repeats.
+        self.assertEqual(self.ids("condor vix inversion")[0], "both")
+
     def test_a_rare_word_outweighs_a_common_one(self):
         for i in range(5):
             self.bury(f"spy-{i}", f"SPY opening drive number {i} continues into the afternoon.", "SPY SPY SPY drifted; SPY faded.")
