@@ -8,13 +8,14 @@
   gateway's month has room above the reserve (`FrontierMonth.remaining`) AND the swarm's own OpenAI
   spend is under its cap (plan: $150 for the burst). A refusal, an error or no room falls back to the
   role's Sail profile. Nonurgent roles request Flex; the latency-sensitive audit requests standard.
-- CLAUDE (`ModelRouter.ask(claude=True)`, Sept 26, 2026, the swarm sprint): Claude Opus 5.5 through the gateway
-  (`league.claude.Claude`) for the roles in `claude.roles` (the architect, the gate's audit, the diagnostician), first
-  among the paid routes while the gateway's funded total has room above `claude.reserve_usd` and the swarm's own Claude
-  spend is under `claude.usd_cap`. The architect rotates: every other pass asks GPT-6 Astra first. Claude capped, erring
-  or unconfigured falls to OpenAI, then Sail, exactly as before. Every role's call asks for Claude (Sept 29, 2026: the
-  researcher's stall rewrite and the gate's review too), so `claude.roles` alone decides who gets it: adding "rewrite" or
-  "review" there is the operator's opt-in, with no deploy. A role may also have its own daily line,
+- CLAUDE (`ModelRouter.ask(claude=True)`, Sept 26, 2026, the swarm sprint): `claude.model` (Opus 5.5 by default) or the
+  role's `claude.role_model` through the gateway (`league.claude.Claude`) for the roles in `claude.roles` (by default
+  the architect, the gate's audit, the diagnostician), first among the paid routes while the gateway's funded total has
+  room above `claude.reserve_usd` and the swarm's own Claude spend is under `claude.usd_cap`. The architect rotates only
+  while `architect.openai_model` names a model: then every other pass asks GPT-6 Astra first. Claude capped, erring or
+  unconfigured falls to OpenAI, then Sail, exactly as before. Every role's call asks for Claude (Sept 29, 2026: the
+  researcher's stall rewrite and the gate's review too), so `claude.roles` alone decides who gets it: adding "rewrite"
+  or "review" there is the operator's opt-in, with no deploy. A role may also have its own daily line,
   `claude.role_usd_day` {role: usd} (a UTC day, holds included, each call on the day its hold was booked): a call that
   would take the role's Claude spend today past it skips Claude and falls to the role's next route. No entry is no extra
   line. `claude.role_model` {role: model id} answers a role on its own Claude model (no entry: `claude.model`).

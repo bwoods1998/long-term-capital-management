@@ -8,7 +8,8 @@ researchers to zero, when:
   plus $30"). The non-swarm burn is Sail's own 24-hour spend less what the swarm itself booked in those
   24 hours, and never less than `house_burn_usd_day`: it covers the House box, its model calls, and any
   other box (the data box) that eats the same credits;
-- the swarm's Sail spend since the burst began reached `burst_cap_usd` ($350 until Monday's open);
+- the swarm's Sail spend since the burst began reached `burst_cap_usd` (by default $350 until Monday Sept 28's open;
+  swarm.json sets the burst's cap and end, `burst_until`);
 - after the burst: the swarm's Sail spend today (UTC) reached `after_burst_usd_day` less the House's burn,
   or Sail's own meter today (every fall of the balance since midnight, the whole account) reached
   `after_burst_usd_day`;

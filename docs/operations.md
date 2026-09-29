@@ -7,48 +7,55 @@ the swarm or live path describe their implementation, not evidence that producti
 enabled. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
-## Current operation and next work — September 26, 20:10Z
+## Current operation and next work — September 29, 04:55Z
 
-The House is healthy on release `20260926T181814Z-b4bc25619f84` (`60b34dd9`), with real money off,
-no enabled live grant and no production options orders/positions. Training is running on five
-roots. At 20:01Z there were 16 active families, 17,631 trials, no validation passes and no holdout
-looks. The gate is disabled pending final data/image adoption. These are observations, not a
-readiness promise for Monday.
+The House runs R8, release `20260929T044127Z-2c265b03bc04` (main `8074e262`, promoted 04:42:07Z Sept 29,
+its watch passed at 04:52Z:
+#414 the BM25 graveyard ranking, #415 Sonnet 5.5 priced, #416 Claude on the rewrite and review roles with
+per-role lines and models). Real money is on (since R2, Sept 27): the grant `options-swarm-20260928` is
+active on money digest `a3e2aa7c`, capital $1,473.11. No family has passed the holdout, so the only real
+orders so far are the House's own: three D3 calibration round trips on Sept 28 (Profit -$8.68). The
+House live test is armed (`live.house_test` on since 00:17:28Z Sept 29, its files verified) and has not
+traded. The swarm trains on 25 roots with Train 2020-2024 and the gate on; at 04:33Z it had 92 families
+alive, 67,882 trials, 2 holdout looks and 0 passes. These are observations, not a readiness promise.
 
-The owner's new priority is broad, rapid options research: simple and complex strategies, all
-Alpaca-supported securities discoverable, data readiness recorded by root and expiry, and a real
-agent paper-testing environment. Current limits are five actively trained roots, 11 simulator
-types, no covered-call/cash-secured-put inventory, and a single SPY paper connectivity proof.
-Changing a prompt, symbol list or allowlist does not implement the missing mechanics.
+The owner's decisions of Sept 29: Claude Sonnet 5.5 throughout, and from now on only Sail and Claude are
+topped up (no more OpenAI). Since 04:53Z Sept 29 (after R8) `swarm.json` puts every paid role on Claude:
+`claude.model` Sonnet 5.5 for the architect, the diagnostician, the stall rewrite and the program review,
+and Opus 5.5 for the gate's audit (`claude.role_model`), with daily lines for the rewrite ($15) and the
+review ($5); `architect.openai_model`, `gate.review_openai_model` and `gate.audit_openai_model` are null,
+so no role calls OpenAI (**Models and Claude**, below). The OpenAI month ($707, September 2026 only) is not
+renewed: from Oct 1 00:00Z the gateway's OpenAI cap is $0. The research limits
+were lifted at 03:45-03:50Z on the owner's word ("remove any limits that would inhibit this goal"):
+population start 96 (the ceiling), Gym boxes up to 16, the architect every 600 s with up to 24 a pass,
+the strong Sail profile for the top 12 families, the researcher Sail pace $12 an hour. Unchanged: D2,
+the sealed holdout, no forced trades, the money table and the Sail guard's line.
 
-In order: finish and verify the 25-root data batch; adopt only the final sealed/restored images;
-broaden strategy exploration and the paper order/accounting path; finish execution receipts and
-reports plus the funded post-burst budget; verify the Monday paper/shadow session. Keep paper,
-shadow and real outcomes separate. No new real-money activation occurs in this engineering
-continuation. Existing instructions below for grants describe the mechanism, not current state.
+Funded caps: the Sail guard's $32 line (it keeps the House alive with real positions open), the
+researcher Sail pace $12 an hour, the swarm's Sail burst to Oct 5 at $900, Claude's funded total $100 at
+the gateway (the swarm's own line `claude.usd_cap` 98), OpenAI $707 for September only. The planned
+larger deposits are not confirmed funding.
 
-At this checkpoint #378 (complete universe context), #379 (shadow restart flags) and #380
-(role/Flex routing and durable spend reservations) are merged, not deployed. Main is `e73e7740`;
-#380 merged at 20:05Z after full CI, independent review and 221 actual-House tests. Execution
-reporting (#381) and lifecycle changes are still under review. Re-read main,
-open PRs and the running release before acting; a document timestamp is not a fresh health check.
+In progress, not merged: longer history as private blocks (#413); the top families' research cycles
+on Sonnet 5.5 (#417); an architect that reads the whole graveyard, plus a strategist (not yet a pull
+request). Open: #393 (credit types at $2,000, the owner's
+decision), #381, #384, #385; drafts #375 (the prune) and #400. Re-read main, open PRs and the running
+release before acting; a document timestamp is not a fresh health check.
 
 The existing ThetaData collector owns the only account session; preserve it while it downloads.
 Do not log in again or launch a duplicate collector to widen the universe. New discovery belongs
-in a data backlog until coverage and capacity are verified. Retain funded caps: Sail reserve $32,
-Sail researcher-model pace $2.25/hour, OpenAI September cap $707, no October allowance. The planned
-larger deposits are not confirmed funding.
+in a data backlog until coverage and capacity are verified.
 
-No trading-day deploy 13:25–20:05Z except rollback. The full prune remains after Monday September
-28 at 20:05Z, with fresh integration/review of these additions. First actual nightly forward job:
-Tuesday September 29 at 06:00Z; the Saturday rehearsal does not satisfy it.
+No trading-day deploy 13:25–20:05Z except rollback. The prune (#375) is still a draft, to be
+re-integrated with fresh review. First actual nightly forward job: Tuesday September 29 at 06:00Z;
+the Saturday rehearsal does not satisfy it.
 
 ## What runs where
 
 | Piece | Where | Driven by | Local record (gitignored) |
 |---|---|---|---|
-| The House (`python3 -m league run`) | Sailbox `ltcm-floor`, size s, `/workspace` | `scripts/floor_box.py` | `.data/ltcm/box.json` |
-| The gateway (venue, OpenAI and GitHub keys, caps, kill switch, outside watchdog) | Cloudflare Worker `ltcm-gateway` | `gateway/`, `scripts/gateway_admin.py` | `.data/ltcm/keys/gateway-admin.token` (owner only) |
+| The House (`python3 -m league run`) | Sailbox `ltcm-house` (`sb_1d99c4a7`; `floor_box.py`'s default name for a new box is `ltcm-floor`), size s, `/workspace` | `scripts/floor_box.py` | `.data/ltcm/box.json` |
+| The gateway (venue, OpenAI, Anthropic and GitHub keys, caps, the OpenAI month, Claude's funded total, kill switch, outside watchdog) | Cloudflare Worker `ltcm-gateway` | `gateway/`, `scripts/gateway_admin.py` | `.data/ltcm/keys/gateway-admin.token` (owner only) |
 | The data box (ThetaData downloads, the store) | Sailbox `ltcm-data`, size l, `/data` | `scripts/data/box.py`, `nightly.py` | `.data/gym/data_box.json`, `universe.json` |
 | The Gym and gate images | Sail checkpoints (two each, one-year TTL) | `scripts/data/images.py` | `.data/gym/images.json` |
 | Gym boxes and the gate box | sealed forks of the images | the swarm's pool (`league/swarm/pool.py`) | the House's state |
@@ -86,7 +93,10 @@ python3 scripts/floor_box.py maintenance off                 # resume on the nex
 - **What stops:** paid model work, replays, births, promotions and every new entry.
 - **What goes on:** reconciliation, marks and publishing; agents holding a position are still
   woken, and their exits and cancels reach the books; work in flight defers at its next paid turn.
-- **The swarm and the Gym under a pause:** (to be completed when the swarm lands).
+- **The swarm and the Gym under a pause:** a paused House starts no swarm process (and no nightly
+  job), but a swarm already running goes on, and the Gym trains through a pause. To stop the swarm,
+  write `/workspace/state/swarm.stop`; the House starts it again once the file is gone and the House
+  is not paused.
 
 `python3 scripts/floor_box.py stop --reason "why"` writes both stop files (`/workspace/STOP`, the
 supervisor's, and `/workspace/state/STOP`, the House's), sends TERM, waits up to 120 s for the tick
@@ -158,7 +168,7 @@ deploys first: it refuses a whole checkpoint for one field it does not allow. Th
 positions table (`positions`, Sept 28, 2026): refused, the publisher posts the checkpoint again without it
 and offers it again half an hour later (a warning per distinct reply of the site, "positions table: the site
 refused the positions table (old site, or a row it rejects) ... (the site said: ...)"), so either may go
-first. The planned order for this first release: the House, then the site.
+first. The first release of the table went site first (#15, 16:59Z Sept 28), then the House (R6, 20:08Z).
 
 **Checkpoint the House box before risky work:** `python3 scripts/floor_box.py checkpoint --name why
 --ttl-days 30` (`checkpoints` lists them). A checkpoint holds the box's `.env`. Sail's checkpoint
@@ -208,18 +218,28 @@ cd /workspace/previous && /workspace/.venv/bin/python -m league.watchdog rollbac
 - **The grant:** `python3 scripts/live_trading.py` (no flag) reports it and what enabling would
   record now.
 - **The gateway:** `python3 scripts/gateway_admin.py status`: the kill switch, today's order
-  counters, the OpenAI month (spent, settled, in flight, the cap), the Sail balance and the House
-  box's state.
-- **The public page:** `curl -s https://blakewoods.us/api/capital/checkpoint`: 404 until the House's
-  first checkpoint after the reset, then its `published_at`.
+  counters, the OpenAI month (spent, settled, in flight, the cap), Claude's funded meter (`claude`: the
+  cap, spent, in flight, remaining, holds, the priced models, spend by role and agent), the Sail balance
+  and the House box's state.
+- **The public page:** `curl -s https://blakewoods.us/api/capital/checkpoint` (its `published_at`);
+  `curl -s 'https://blakewoods.us/api/capital/checkpoint?progress=1&positions=1'` adds the positions
+  table, which the default read omits.
 - **The data:** `python3 scripts/data/box.py status` (the box, its egress, the backfill's progress);
   `python3 scripts/data/box.py run -- check.py report` (underlying-days by window and root, the
   queue, the rate); `python3 scripts/data/images.py status`; `python3 scripts/data/nightly.py status`.
   Numbers derived from the data stay on the boxes and in `.data/`.
 - **The swarm and the scoreboard** (families, trials, validation passes, holdout looks, Gym
-  throughput, compute against the budgets): (to be completed when the swarm lands).
-  `scripts/floor_watch.py` is being rewritten for the options scoreboard; until then use `status`,
-  `health.json` and the ledger.
+  throughput, compute against the budgets), on the box:
+  - `cd /workspace/current && /workspace/.venv/bin/python -m league.swarm status --root /workspace/state`:
+    the heartbeat, the totals (trials, holdout looks and passes), families by band, the live rows and the
+    families held at the gate;
+  - `python3 scripts/verify_swarm.py --root /workspace/state`: process, population, cycles, the Gym,
+    the tournament, each PASS, FAIL or WAIT;
+  - `/workspace/state/swarm.heartbeat` (JSON): families, cycles and spend in the last hour by kind, the
+    guard, the pool, `status.researcher_pace`;
+  - `health.json` `options_live`: the observe band, the calibration, the House live test, the stops;
+  - Claude and OpenAI spend: `gateway_admin.py status` (above). `scripts/floor_watch.py` is not
+    rewritten for the options scoreboard.
 
 ## The data box, the images and the Gym boxes
 
@@ -252,14 +272,16 @@ python3 scripts/data/box.py run -- ARGS         # run backfill.py ARGS (or check
   rerun it after any failure. It refuses the Gym image's box as a target.
 - **Gym boxes** are forks of the Gym image checkpoint, sealed, driven through Sail's file and exec
   APIs (`league/gym/driver.py`, `python -m league.gym.batch` on the box). The swarm's pool starts
-  four when there is work, grows to eight, sleeps a box after ten idle minutes, and the Sail guard
-  brakes it to zero before the House is at risk. Operating them: (to be completed when the swarm
-  lands).
+  `gym.start_boxes` when there is work (4 by default, 6 on the box), grows to `gym.max_boxes` (8 by
+  default, 16 on the box since Sept 29), sleeps a box after ten idle minutes, terminates a box whose
+  image is no longer the configured one, and the Sail guard brakes it to zero before the House is at
+  risk. They need no operator step: `swarm.json` sizes the pool, and adopting an image is one edit of
+  `gym.image_checkpoint` (with `gym.gate_checkpoint` for its gate partner).
 
 ## Real money
 
-Real money is off until the live path lands: `real_money` is false in `league/config.json`, and the
-House sends no real opening order without an active grant.
+Real money has been on since R2 (00:30Z Sept 27): `real_money` is true in `league/config.json`. The
+House opens real only under the active grant, with the kill switch off and the gates below.
 
 **The grant** `options-swarm-20260928`, the Brokerage Account only, lives on the box in
 `/workspace/state/live-grant.sqlite`. The House reads it at every check, so nothing restarts.
@@ -352,19 +374,21 @@ contracts already attributed to another family. Missing fill values leave an exp
 `unpriced_close` row, release stale exposure and block new entries until venue fills or expiry events
 resolve the accounting; estimated intrinsic values never become forward evidence.
 
-The checked-in deployment remains in paper readiness: `real_money: false`, no enabled grant, and
-the gateway's `OPTION_STRUCTURES_REAL: off`. The gateway still admits paper structures and verified
-closes of held real positions. A disabled gateway is a permitted stricter setting in `league.ci`.
-The paper route proof runs from 09:35 ET during this readiness stage, even with no real-account
-client, grant or eligible family. It keeps an unfinished attempt's identity and owned contracts
-through restarts. Passing records paper execution evidence; the real-money flags remain off.
+The checked-in deployment has `real_money: true`, the grant is active on `a3e2aa7c`, and the gateway's
+`OPTION_STRUCTURES_REAL` names the four debit types. The gateway still admits paper structures and
+verified closes of held real positions; `off` is still a permitted stricter setting in `league.ci`. The
+paper route proof runs from 09:35 ET until it has passed, even with no real-account client, grant or
+eligible family, and keeps an unfinished attempt's identity and owned contracts through restarts. Both
+proofs (the multi-leg vertical and the single-leg call) passed on Sept 28; a passed proof is not run
+again. Passing records paper execution evidence, never a family's evidence.
 
 **The money table (the sprint, owner decision D4, Sept 26, 2026)**: real types under $2,000 of equity are
 exactly `debit_vertical`, `long_butterfly`, `long_call`, `long_put` (the credit types come back only with a
 deposit to $2,000, in one deploy with the gateway, and a re-ratified grant); Probe 5% of equity a structure
 with a $100 one-contract floor, 3 open, 15% the family; the book 90%; daily stop 35%, drawdown stop 60%;
 tuition $200 a day; the D3 calibration's day bounded at $50 of possible loss. The gateway's per-order cap is the lower of
-$1,000 and 25% of equity (a $100 Probe fits at $481.63), 100% of equity opened a day, 250 of 300 orders open.
+$1,000 and 25% of equity (at $1,473.11 of sizing equity: $368.27; 5% is $73.65, so a Probe's $100 floor
+applies), 100% of equity opened a day, 250 of 300 orders open.
 
 **The single-leg paper proof**: once the vertical's has passed, the practice account opens and closes a
 1-lot SPY call about 1-2% out of the money (nearest expiry at least a day out, at the natural, held two
@@ -400,7 +424,17 @@ on a heavy day, against about $270 before) are the operator's decision inside D3
 order's time in force and cancel reason), read with `python3 -m league.live --root /workspace/state
 --calibration` (the plan, then every cell, `mid25`, `mid25+1` and the unsampled included: working minutes,
 attempts, outcomes, fill rate, mean fill against the mid in ticks, median seconds to fill). Off by default:
-`swarm.json` `{"live": {"calibration": true}}` turns it on.
+`swarm.json` `{"live": {"calibration": true}}` turns it on (on since 00:31Z Sept 27).
+
+How samples may change the Gym (Sept 28, 2026): only through the frozen recalibration protocol, PROTOCOL-v2
+(private; sha256 `10f78877…`). Real calibration fills move the Gym's patient-fill table only through a
+pre-registered, held-out test: even sessions fit, odd sessions test, at most four looks, sessions as the unit.
+Adoption needs significance, no root or patient cell getting worse, and the Gym never more optimistic than real
+fills on price. The owner committed in advance to adopt on a passing look without first seeing any strategy's
+results under the new table (sha256 `befe90dc…`). The first test session is Tuesday Sept 29. The tool is private.
+`live.calibration_samples` is 100 (the owner, Sept 28): the same $50 a day bound, months of sampling, a 1.5x
+error in a cell's fill rate caught about half the time (at 30 samples only a 2x error is caught), false adoption
+0-1%.
 
 **The House live test** (the owner, Sept 28, 2026; `league/live/house_test.py`; a new shadow-to-real route,
 pre-registered in a private file whose sha256 is `c73e2d262b8d2e9493b53c427400ba7adc37490db8c981ddd96644fdb6977954`):
@@ -433,24 +467,27 @@ real fills and P&L. Never a band, a promotion, evidence or a forward record; D2 
   session's close is a full-window sample; any other end is "interrupted").
 - Off by default: `swarm.json` `{"live": {"house_test": true}}` turns it on (only after the analysis script's sha256
   is pinned in the private addendum); off again sends it to exits only and cancels its working open within a minute.
+- State: on since 00:17:28Z Sept 29, switched on after its analysis script was pinned; `options_live.house_test`
+  shows `files` verified and `wanted` yes, no start and no trade yet.
 - While it runs: no House deploy or restart inside the decision window the private pre-registration names (each load
   of its program is a `live.instance` "house test program loaded (fresh memory)" row; one inside that window, a
   decider-child restart or a skipped minute there is a deviation of the test, logged in the private addendum). Before a rollback
   past the release that carries it: switch it off and wait until it is flat (an older release would run it as an
   ordinary instance, export its trades as forward rows and show its positions as an agent's).
 
-**Turning real money on** (M4b; the sprint's R2): the gateway deployed first (`OPTION_STRUCTURES_REAL`
-`debit_vertical,long_butterfly,long_call,long_put`, `MAX_ORDER_EQUITY_SHARE` 0.25); then the owner deploy
-with `real_money` true (a new money digest); `python3 scripts/live_trading.py --enable` (first time), then
-`--ratify` within a minute. Then the House promotes Candidates that qualify to Probe within five minutes
-(`live.band` rows). Real entries still require the paper route proofs' witnessed round trips.
+**Turning real money on** (M4b; the sprint's R2; done: the grant was enabled at 00:30:15Z Sept 27, re-ratified at
+$1,473.11 after the deposit and on `a3e2aa7c` at R7): the gateway deployed first (`OPTION_STRUCTURES_REAL`
+`debit_vertical,long_butterfly,long_call,long_put`, `MAX_ORDER_EQUITY_SHARE` 0.25); then the owner deploy with
+`real_money` true (a new money digest); `python3 scripts/live_trading.py --enable` (first time), then `--ratify`
+within a minute. Then the House promotes Candidates that qualify to Probe within five minutes (`live.band` rows). Real
+entries still require the paper route proofs' witnessed round trips.
 
-### Monday's pre-open (12:00-13:25Z Sept 28)
+### Pre-open (each trading day, 12:00-13:25Z; first run Sept 28)
 
 1. **The box** (`python3 scripts/floor_box.py status`, then on the box): the loop and supervisor up;
    `health.json` `options_live.summary.state` is "before the open", `options_live.instances` lists every
    Candidate's shadow instance and every Probe's real one with no `error`; `/workspace/.venv/bin/python -c
-   "import numpy"` works; `live-decider.log` has no traceback; `release` is the M4b release.
+   "import numpy"` works; `live-decider.log` has no traceback; `release` is the release you expect.
 2. **The account** (through the gateway, reads only): equity, `last_equity`, `options_buying_power`,
    options level 3, multiplier; no open order; positions only the LTC dust (0.000373062); whether the
    deposit has landed (a `CSD` activity).
@@ -469,14 +506,15 @@ with `real_money` true (a new money digest); `python3 scripts/live_trading.py --
    `options_live.observe.switches` shows observe on and calibration as intended; `swarm.json` reads as a
    JSON object; after 13:30Z `options_live.observe.pins` lists the session's families; after the proofs,
    `paper_proof_single` passed; after 14:00Z `options_live.calibration.slots` and
-   `python3 -m league.live --root /workspace/state --calibration`.
-6. **The Probe list**: `live.band` rows since Sunday (who became Probe or Sized and why; who stayed a
-   Candidate and why: not through the holdout, a type real money does not open, a credit type under $2,000,
-   a typical structure over the Probe's cap or unknown). It must match M4's list in the run record. Bands
-   move only while real money is on and the grant active, and a family moved onto real money trades from
-   the NEXT session: only families promoted before Monday's open trade Monday.
-7. **The day**: Sept 28 is a full session (not a half day), no FOMC, CPI or jobs release; 0DTE expiries on
-   SPY, QQQ, IWM, XSP and SPXW. No deploy from 13:25Z to 20:05Z except a rollback.
+   `python3 -m league.live --root /workspace/state --calibration`; `options_live.house_test`: `files`
+   verified, `wanted` as intended, and no stop or end you did not expect.
+6. **The Probe list**: `live.band` rows since the last session (who became Probe or Sized and why; who
+   stayed a Candidate and why: not through the holdout, a type real money does not open, a credit type
+   under $2,000, a typical structure over the Probe's cap or unknown). It must match the run record's list.
+   Bands move only while real money is on and the grant active, and a family moved onto real money trades
+   from the NEXT session: only families promoted before the open trade that session.
+7. **The day**: a full session or a half day; any FOMC, CPI or jobs release; which admitted roots have
+   0DTE expiries. No deploy from 13:25Z to 20:05Z except a rollback.
 8. **At the open** (13:30-13:45Z): the paper proof (`live.paper_proof` "passed" in the ledger by about
    13:40Z; if "failed", read `paper_proof` in the live state and the proof's events before anything else);
    then the first real orders (`live.order`), the refusals (`live.refusal`: each says which rule), the day's
@@ -522,52 +560,70 @@ with `real_money` true (a new money digest); `python3 scripts/live_trading.py --
   start`: it resumes from its journal. A night's forward pull that failed: `nightly.py run` again.
 - **A structure is left on the real account.** The gateway admits a close of any defined-risk type
   once the account holds every leg, whatever `OPTION_STRUCTURES_REAL` says; close it with one
-  multi-leg order. Legging out is a last resort. An assigned short leg becomes shares: (to be
-  completed when the live path lands).
+  multi-leg order. Legging out is a last resort. An assigned short leg becomes shares: an OPASN or
+  OPEXC activity latches `assignment_latch`, which freezes real entries, and the owner is told. The
+  House closes the shares at once (the gateway admits stock orders only to close assigned shares) and
+  closes the structure's other legs alone. The latch lifts by itself once no broken structure and no
+  shares remain and reconciliation is clean; `python3 -m league.live --root /workspace/state
+  --clear-assignment` lifts it by hand.
 
 ## Switches
 
 | Switch | Where | Now | What it does | How it changes |
 |---|---|---|---|---|
-| `real_money` | `league/config.json` | false | real orders at all | owner deploy (Wave 5) |
+| `real_money` | `league/config.json` | true (since R2, Sept 27) | real orders at all | owner deploy |
 | `auto_update` | `league/config.json` | false | the in-box updater; a missing key means off | owner deploy |
 | `live_trading.ceiling_usd` | `league/config.json` | 5500 | the grant's capital ceiling | owner deploy, then `--ratify` |
 | `performance.start_at`, `start_equity` | `league/config.json` | 06:25:30Z Sept 26, $481.65 | the profit baseline; equals the site's `PERFORMANCE_START_AT` | only with a site reset |
-| `gym.enabled`, `swarm.enabled` | `league/config.json` | false | the Gym and the swarm in the House's tick | (to be completed when the swarm lands) |
-| `swarm.json` | `/workspace/state/` on the box | absent | the swarm's throughput and budget settings, re-read every loop, no deploy; never the evidence lines | (to be completed when the swarm lands) |
+| `gym.enabled`, `swarm.enabled` | `league/config.json`, overlaid by `swarm.json` | false in `config.json`; true in `swarm.json` | the Gym and the swarm in the House's tick | edit `swarm.json`; a change of `enabled` takes a House restart (`config.json` `swarm._about`) |
+| `swarm.json` | `/workspace/state/` on the box | present, mode 600 | the swarm's throughput and budget settings and the live switches, re-read every loop (the live path each minute), no deploy; never the evidence lines | edit it on the box, keeping a before-copy |
 | `options_structures.book`, `practice_account` | `league/config.json` | options-shadow, false | which book structures practise on | owner deploy of a release changing only that key |
 | `PAUSE` | `/workspace/state/` | absent | the maintenance pause | `floor_box.py maintenance` |
 | `STOP`, `state/STOP` | `/workspace/` | absent | the loop ends | `floor_box.py stop` / `start` |
+| `swarm.stop` | `/workspace/state/` | absent | the swarm process leaves and is not restarted | create / delete it |
 | Kill switch | the gateway | off | every real order-creating call refused | `gateway_admin.py kill` / `unkill` |
 | `MAX_ORDER_MAX_LOSS_USD`, `MAX_ORDER_EQUITY_SHARE`, `MAX_DAY_EQUITY_SHARE`, `MAX_DAY_ORDERS`, `MAX_DAY_OPEN_ORDERS` | `gateway/wrangler.jsonc` | $1,000, 0.25, 1.0, 300, 250 | the real account's caps by maximum loss; equal to the constitution's `options_money.gateway` | gateway deploy with the matching House deploy |
 | `OPTION_STRUCTURES_REAL` | `gateway/wrangler.jsonc` | `debit_vertical,long_butterfly,long_call,long_put` | the types real money may open; must equal the constitution's `options_money.real_types` (`league.ci`) | gateway deploy with the matching House deploy and a ratify |
-| `live.observe`, `live.observe_max` | `swarm.json` on the box | true, 48 | the observe band and its cap; read each minute, no deploy (a swarm.json that is not a JSON object turns it off) | edit `swarm.json` |
-| `live.calibration`, `live.calibration_samples` | `swarm.json` on the box | false, 30 | the D3 round trips (still only with real money on, the grant and the paper proof); samples a symbol's open cell (the mid, or the patient mid at 12:00 and 14:00) stops at | edit `swarm.json` |
-| `live.house_test` | `swarm.json` on the box | false | the House live test (still only with real money on, the grant, the paper proof and its private program verified); off: exits only | edit `swarm.json` |
-| The House live test's program | `/workspace/state/house-test/rebound-live/` on the box | absent | the frozen program and its params, hash-checked against `league/live/house_test.py` `FROZEN` | the operator's private upload script, `--apply` |
-| `FRONTIER_MONTH_USD`, `FRONTIER_MONTH_MAX_USD`, `FRONTIER_FUNDED_MONTH` | `gateway/wrangler.jsonc` | $707, September 2026 only | the OpenAI month; expires before an unfunded month can renew it | gateway deploy |
+| `live.observe`, `live.observe_max` | `swarm.json` on the box | true, 8 | the observe band and its cap (default 48); read each minute, no deploy (a swarm.json that is not a JSON object turns it off) | edit `swarm.json` |
+| `live.calibration`, `live.calibration_samples` | `swarm.json` on the box | true, 100 | the D3 round trips (still only with real money on, the grant and the paper proof); samples a symbol's open cell (the mid, or the patient mid at 12:00 and 14:00) stops at (defaults false, 30) | edit `swarm.json` |
+| `live.house_test` | `swarm.json` on the box | true (since 00:17:28Z Sept 29) | the House live test (still only with real money on, the grant, the paper proof and its private program verified); off: exits only | edit `swarm.json` |
+| The House live test's program | `/workspace/state/house-test/rebound-live/` on the box | present, verified | the frozen program and its params, hash-checked against `league/live/house_test.py` `FROZEN` | the operator's private upload script, `--apply` |
+| `FRONTIER_MONTH_USD`, `FRONTIER_MONTH_MAX_USD`, `FRONTIER_FUNDED_MONTH` | `gateway/wrangler.jsonc` | $707, September 2026 only; not topped up again (the owner, Sept 29), so $0 from Oct 1 | the OpenAI month; expires before an unfunded month can renew it | gateway deploy |
+| `CLAUDE_USD`, `CLAUDE_MODELS` | `gateway/wrangler.jsonc` | $100; Opus 5.5, Sonnet 5, Sonnet 5.5 | the Anthropic account's funded total (never resets) and the priced models (the allowlist) | gateway deploy after the owner adds funds |
+| `claude.model`, `claude.usd_cap`, `claude.max_tokens` | `swarm.json` on the box | `claude-sonnet-5-5` (since 04:53Z Sept 29), 98, 32000 | the swarm's Claude model, its own lifetime Claude line inside `CLAUDE_USD`, a call's output ceiling (defaults `claude-opus-5-5`, 100, 16000) | edit `swarm.json` |
+| `claude.roles`, `claude.role_usd_day`, `claude.role_model` | `swarm.json` on the box | architect, audit, diagnostician, rewrite, review; rewrite $15 and review $5; audit on `claude-opus-5-5` (since 04:53Z Sept 29) | who asks Claude first; a role's own Claude line a UTC day; a role's own Claude model (defaults architect, audit, diagnostician; no role line; no role model) | edit `swarm.json` |
+| `gate.review_openai_model`, `gate.audit_openai_model` | `swarm.json` on the box | null, null (since 04:53Z Sept 29) | the review's and the audit's OpenAI route; null skips it (defaults `gpt-6-sol`, `gpt-6-astra`) | edit `swarm.json` |
+| `architect.openai_model`, `every_seconds`, `refill_seconds`, `max_refill`, `max_output_tokens` | `swarm.json` on the box | null, 600, 1200, 24, 32000 | the architect: null leaves it Claude-only (Sail as the fallback); its cadence, its refill below `population.start` and each pass's births (defaults `gpt-6-astra`, 14400, 3600, 12, 12000) | edit `swarm.json` |
+| `population.start`, `ceiling`, `floor` | `swarm.json` on the box | 96, 96, 12 | the refill target, the most alive, the fewest retirement may leave (defaults 48, 96, 16) | edit `swarm.json` |
+| `gym.start_boxes`, `max_boxes`, `train_from`, `image_checkpoint`, `gate_checkpoint` | `swarm.json` on the box | 6, 16, "2020-01-02", the sealed 2020-24 image, its gate partner | the Gym pool, Train's first day and the images (defaults 4, 8, unset, none, none: the gate is off without a gate image) | edit `swarm.json`; `train_from` and a new image together |
+| `researcher.sail_usd_per_hour`, `usd_per_hour`, `top_families` | `swarm.json` on the box | 12, 5 (not read while the Sail pace is set), 12 | the researcher pace (below) and the bandit's top band (defaults null, 4.0, 10) | edit `swarm.json` |
+| `researcher.retire_idle_evaluations`, `dormant_cycles`; `tournament.retire_revisions`, `retire_evaluations` | `swarm.json` on the box | 500, 12; 200, 4000 | the idle rule and its dormancy clause; the tournament's retirement (defaults 150, 40; 30, 2000) | edit `swarm.json` |
+| `guard.burst_cap_usd`, `burst_until` | `swarm.json` on the box | $900, 2026-10-05 | the swarm's Sail spend for the research burst (the owner's 24/7 research, Sept 27); the $32 line is unchanged (defaults $350 until Monday Sept 28's open) | edit `swarm.json` |
+| `diagnostician.usd_day`, `per_round`, `family_hours`, `min_validations`, `near_miss_checks` | `swarm.json` on the box | $60, 6, 3, 1, 5 | the diagnostician's Claude spend a day, families a round, how often a family, who is eligible (defaults $15, 2, 6, 2, 6) | edit `swarm.json` |
 | The money rules | `league/constitution.py` | the sprint's D4 table and the House live test's bounds (money `a3e2aa7c`) | what real money may do | owner deploy, then `--ratify` |
 
-In `swarm.json`, `researcher.usd_per_hour` keeps the combined Sail-model and OpenAI trailing-hour pace.
-Set the optional `researcher.sail_usd_per_hour` to the funded Sail rate to pace Sail models separately;
-absent or null keeps the combined behavior. OpenAI holds still count against its own burst cap and funded
-gateway month. Invalid, nonfinite or negative limits pause research. The heartbeat's
+In `swarm.json`, `researcher.sail_usd_per_hour`, when set, is the researcher pace: the Sail models' spend over
+the trailing hour (12 on the box since Sept 29), and `researcher.usd_per_hour` is then NOT read (the box's 5 is
+inert). Absent or null, `usd_per_hour` paces Sail models and OpenAI together. OpenAI holds still count against its
+own burst cap and funded gateway month. Claude is outside the research pace: it has its own lines (`claude.usd_cap`,
+`claude.role_usd_day`, `diagnostician.usd_day`) inside the gateway's funded total. Invalid, nonfinite or negative
+limits pause research. The heartbeat's
 `status.researcher_pace` reports the scope, limit, spend and pause reason, so a quiet research loop can be
 distinguished from a publication delay.
 
-A Gym researcher can call `retire(reason)` to abandon its whole family, but only on a READ turn while more
-families live than `population.start` and the family has had at least two validations (Sept 26: an unguarded
-retire on the REVISE turn took the population from 49 to 16), or while more live than `population.floor` and the
-family is dead by the idle rule (R3, Sept 27; `researcher.idle_dead`): `researcher.retire_idle_evaluations` (default
-150; 0 or null turns the rule off, in `swarm.json` without a deploy; a boolean or a non-number also reads as off) Gym
-evaluations since its birth or last validation without an eligible Train version, or three times as many with its
-best Train score below zero. It counts evaluations, not versions: the store keeps one version for identical code and
+A Gym researcher can call `retire(reason)` to abandon its whole family, but only on a READ turn while more families
+live than `population.start` and the family has had at least two validations (Sept 26: an unguarded retire on the
+REVISE turn took the population from 49 to 16), or while more live than `population.floor` and the family is dead by
+the idle rule (R3, Sept 27; `researcher.idle_dead`): `researcher.retire_idle_evaluations` (default 150, 500 on the
+box; 0 or null turns the rule off, in `swarm.json` without a deploy; a boolean or a non-number also reads as off) Gym
+evaluations since its birth or last validation without an eligible Train version, or three times as many with its best
+Train score below zero. It counts evaluations, not versions: the store keeps one version for identical code and
 parameters, so a family re-running one placeholder makes trials but no revisions. A family whose validated version
-awaits the gate (`gate_ready`) or whose holdout look is out is never dead. With the population held at its start,
-dead families never qualified before and looped on placeholder runs (the operator retired 48 by hand on Sept 27). The
-tournament retires a dead family that never calls retire by the same rule, down to `population.floor`; the
-architect refills below `population.start`. The graveyard lesson and the public cause say the idle rule retired it
-(a time limit, not a refutation); the family's own last notebook lines carry its verdict.
+awaits the gate (`gate_ready`) or whose holdout look is out is never dead. With the population held at its start, dead
+families never qualified before and looped on placeholder runs (the operator retired 48 by hand on Sept 27). The
+tournament retires a dead family that never calls retire by the same rule, down to `population.floor`; the architect
+refills below `population.start`. The graveyard lesson and the public cause say the idle rule retired it (a time
+limit, not a refutation); the family's own last notebook lines carry its verdict.
 
 No duplicate runs (R3; the harness audit of Sept 28 found 44% of cycles wasted and 45% of trials identical
 re-runs). A `gym_run` or `gym_sweep` variant a family already ran to completion (the same code, merged params,
@@ -586,17 +642,17 @@ row recorded before R3 has no key: the next identical run is one more trial (the
 writes the key, and from then on it answers.
 
 Because stored results and holds add no evaluations, the idle rule has a dormancy clause: a Gym family whose last
-`researcher.dormant_cycles` (default 40; 0 or null turns it off) cycles made no new Gym evaluation, only stored
-results, holds and runs refused for its own doing (its program, NEEDS, params or variants), is dead (the same floor,
-gate exemption and graveyard wording), unless its best awaits validation (not yet validated and not lost at 1.5x).
-A new evaluation of its own restarts the count as soon as it is recorded (in the cycle, or when a run lands after
-the wait), and so does a counted validation. A cycle that asked the Gym for a new evaluation the Gym did not make (a
-Gym error; a run, or every new variant of a sweep, that did not land) leaves it, and a sweep whose new variants all
-failed is a Gym error even when some of its variants were read back from the store. A sweep refused for room leaves
-it too, unless the cycle also held, got a stored result or had a run refused. The count is zero outside the Gym band,
-and a Candidate sent back to the Gym starts afresh. A holding cycle is one model call, so 40 of them can pass in
-well under an hour of a family's cycles; the count is the family's state `dormant_cycles`, and each dormant cycle's
-`swarm.cycle` event carries it.
+`researcher.dormant_cycles` (default 40, 12 on the box; 0 or null turns it off) cycles made no new Gym evaluation,
+only stored results, holds and runs refused for its own doing (its program, NEEDS, params or variants), is dead (the
+same floor, gate exemption and graveyard wording), unless its best awaits validation (not yet validated and not lost
+at 1.5x). A new evaluation of its own restarts the count as soon as it is recorded (in the cycle, or when a run lands
+after the wait), and so does a counted validation. A cycle that asked the Gym for a new evaluation the Gym did not
+make (a Gym error; a run, or every new variant of a sweep, that did not land) leaves it, and a sweep whose new
+variants all failed is a Gym error even when some of its variants were read back from the store. A sweep refused for
+room leaves it too, unless the cycle also held, got a stored result or had a run refused. The count is zero outside
+the Gym band, and a Candidate sent back to the Gym starts afresh. A holding cycle is one model call, so 40 of them can
+pass in well under an hour of a family's cycles; the count is the family's state `dormant_cycles`, and each dormant
+cycle's `swarm.cycle` event carries it.
 
 The operator's gate hold (R3): `python -m league.swarm hold-gate --root /workspace/state --family <id> --reason
 "..."` (or `SwarmStore.hold_gate(fid)` from a shell on the box; a second connection is safe beside the running
@@ -625,12 +681,62 @@ tool answer: no cycle error and no cooldown; it does not retire the family. The 
 notebook and graveyard; the public event carries only filtered prose.
 
 The sprint's search settings (Sept 26), all in `swarm.json` without a deploy: `researcher.top_profile` (default
-`pro_asap`, null turns it off), `researcher.top_reasoning_effort` (`low`), `researcher.top_families` (10) and
-`researcher.top_max_output_tokens` (12000) put the bandit's top ten on the stronger Sail profile inside the same
-hourly pace; `architect.agenda` (default empty) closes every architect request as the operator's research agenda
-(at most 4,000 characters); `population.reseed_max` (default 0, off) founds the seeds' mechanisms again on roots they
-never tried while the population is below its start and the architect is not due; `tournament.require_robustness`
-(default true) validates a version only after its 1.5x Train robustness run came back with a profit. The robust Train
-objective, its robustness runs (1.5x and mid, at the pool's lowest priority, never starting or keeping a box awake) and
-the D2 validation line are code, not settings. The objective's one-time migration beats the heartbeat while it runs,
-skips a family it already moved and empties (never keeps) the best of a family it cannot rescore.
+`pro_asap`, null turns it off), `researcher.top_reasoning_effort` (`low`), `researcher.top_families` (10; 12 on the
+box since Sept 29) and `researcher.top_max_output_tokens` (12000) put the bandit's top families on the stronger Sail
+profile inside the same hourly pace; `architect.agenda` (default empty) closes every architect request as the
+operator's research agenda (at most 4,000 characters; the box's agenda, v14 since 02:30Z Sept 29, steers where to look
+and changes no evidence line or kill test; its text stays private); `population.reseed_max` (default 0, off) founds
+the seeds' mechanisms again on roots they never tried while the population is below its start and the architect is not
+due; `tournament.require_robustness` (default true) validates a version only after its 1.5x Train robustness run came
+back with a profit. The robust Train objective, its robustness runs (1.5x and mid, at the pool's lowest priority,
+never starting or keeping a box awake) and the D2 validation line are code, not settings. The objective's one-time
+migration beats the heartbeat while it runs, skips a family it already moved and empties (never keeps) the best of a
+family it cannot rescore.
+
+## Models and Claude
+
+Every paid model call goes through the gateway: Claude against the owner's funded total (`CLAUDE_USD`, $100; it
+never resets), OpenAI against the funded month (September 2026 only; $0 from Oct 1). Sail models (DeepSeek, Kimi)
+are the inner loop and every role's last fallback but the diagnostician's (it has none). `league/swarm/models.py`
+routes a role's call:
+
+- **Claude first** for the roles in `claude.roles`: by default the architect, the gate's audit and the diagnostician.
+  Since R8 the researcher's stall rewrite and the gate's program review ask for Claude too, so adding "rewrite" or
+  "review" to `claude.roles` in `swarm.json` routes them to Claude with no deploy; the box has all five since 04:53Z
+  Sept 29. Claude answers while the gateway's total has room above `claude.reserve_usd` (5) and the swarm's own Claude
+  spend is under `claude.usd_cap` (98 on the box).
+- **The model** is `claude.model` (`claude-sonnet-5-5` on the box since 04:53Z Sept 29, the owner's Sonnet 5.5; the
+  default is `claude-opus-5-5`), or a role's own model in `claude.role_model` {role: model id} (the box: the audit on
+  `claude-opus-5-5`). A role model must be priced both in `league/claude.py` `MODEL_CEILINGS` and in
+  the gateway's `CLAUDE_MODELS`, else the role falls to its next route. Sonnet 5.5's list prices: $2 input, $2.50 a
+  five-minute cache write, $0.20 a cache hit, $10 output per million tokens (Opus 5.5: $4, $5, $0.20, $20). Sonnet 5.5's
+  default effort is `high` (Opus's is `medium`); the House always sends an effort.
+- **A role's daily line**: `claude.role_usd_day` {role: usd}, a UTC day with holds included; a call counts on the day
+  its hold was booked, even when it settles after midnight. A call that would pass the line skips Claude for the
+  role's next route. No entry is no extra line (the box: the rewrite $15, the review $5). The diagnostician also keeps
+  its own `diagnostician.usd_day`.
+- **The next routes**: the architect falls to Kimi-K3 on Sail; with a model named in `architect.openai_model` (null on
+  the box), every other pass would ask GPT-6 Astra first. The audit falls to GPT-6 Astra while the OpenAI month has room
+  and `gate.audit_openai_model` names it, then to a second, different Sail model; the review to GPT-6 Sol on the same
+  terms (`gate.review_openai_model`), else DeepSeek-V4-Pro on Sail; the stall rewrite to its Sail profile. Both gate
+  OpenAI models are null on the box, so no role calls OpenAI; from Oct 1 the gateway's month would refuse it anyway.
+- **Two readers**: the plan wants two different paid models to read a program before its holdout look. A review or
+  an audit on Sail, or one Claude model reading both (with "review" and "audit" both in `claude.roles`), raises the
+  gate's `not_the_plans_reviewer` alert (`same_reader` true for the second); the cure is a different
+  `claude.role_model` for one of them (the box gives the audit Opus 5.5).
+- **The meters**: `python3 scripts/gateway_admin.py status` (`claude`: the funded total, spent, in flight, remaining,
+  holds, the priced models, `by_role`); the swarm's `spend` rows (kind `claude`, by family and role); the
+  diagnostician's refusals name the line that stopped it.
+
+## The graveyard
+
+A retired family's lesson (its mechanism, what it tried, its best numbers, its last notebook lines) goes to the
+graveyard in `swarm.sqlite`, which researchers search and every architect request and new family reads. Since R8 the
+search ranks rows by BM25 (a word's repeats saturate and a long row is discounted, so a long lesson no longer outranks
+a short one about the query), and a new family is born with three distinct lessons.
+
+Operator lessons (Sept 29, 2026): the operator's own experiments are in the graveyard as rows with `op-` ids (45 at
+04:33Z Sept 29), each dated when its experiment concluded and ending with a "do not re-propose unless ..." line. They
+are compiled from private results, reviewed as public-safe, and inserted by the operator's private tool with a backup.
+Operator revivals are lineage continuations (origin `operator-revive`): a fork that inherits its lineage's trials and
+holdout looks, so the deflated Sharpe and the holdout ration count every version.

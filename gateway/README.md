@@ -1,11 +1,11 @@
 # The gateway
 
 A Cloudflare Worker (`ltcm-gateway`) that holds every credential that can move money or spend it:
-the Brokerage Account's keys (real and paper), OpenAI's key, the GitHub token and Sail's key for its
-watchdog. The House's Sailbox holds one bearer token and can only ask: it cannot sign an order, pass
-a cap, spend past the OpenAI month or release the kill switch, because none of that lives on the
-box. Caps and switches change only by editing `wrangler.jsonc` and deploying, which is the owner's
-act. The old, long version of this page is
+the Brokerage Account's keys (real and paper), OpenAI's key, Anthropic's key, the GitHub token and
+Sail's key for its watchdog. The House's Sailbox holds one bearer token and can only ask: it cannot
+sign an order, pass a cap, spend past the OpenAI month or the Claude funded total, or release the
+kill switch, because none of that lives on the box. Caps and switches change only by editing
+`wrangler.jsonc` and deploying, which is the owner's act. The old, long version of this page is
 [archive/docs/gateway-README-pre-options.md](../archive/docs/gateway-README-pre-options.md).
 
 ```
@@ -14,8 +14,9 @@ the House (Sailbox)        this Worker                                  outside
                            ALPACA_PAPER_KEY_ID / _SECRET_KEY      ->    paper-api.alpaca.markets
                            (either pair, market data)             ->    data.alpaca.markets
                            OPENAI_SECRET_KEY                      ->    api.openai.com
+                           CLAUDE_API_KEY                         ->    api.anthropic.com
                            GITHUB_TOKEN                           ->    api.github.com
-                           caps, the OpenAI month, the kill switch (one Durable Object)
+                           caps, the OpenAI month, the Claude funded total, the kill switch (one Durable Object)
                            the watchdog cron (SAIL_API_KEY)       ->    Sail, the site, mail to the owner
 ```
 
@@ -26,11 +27,13 @@ owner's `GATEWAY_ADMIN_TOKEN`.
 
 | Route | What it does |
 |---|---|
-| `GET /v1/health` | the kill switch, caps and today's counters, the OpenAI month, Sail's balance and the House box's state; never reads a venue itself |
+| `GET /v1/health` | the kill switch, caps and today's counters, the OpenAI month, the Claude meter (`claude`: funded total, spent, in flight, remaining, holds, the priced models, `by_role`, `by_agent`, stop reasons), Sail's balance and the House box's state; never reads a venue itself |
 | `POST /v1/kill`, `POST /v1/unkill` | engage the kill switch (any token), release it (owner only) |
 | `/v1/alpaca/<path>` | the Brokerage Account (orders to `api.alpaca.markets`, market data to `data.alpaca.markets`) |
 | `/v1/alpaca-paper/<path>` | the paper account: never metered, not stopped by the kill switch, held to the same defined-risk shapes |
 | `POST /v1/frontier/responses`, `GET /v1/frontier/models` | one metered OpenAI Responses call; the models the key reaches |
+| `POST /v1/claude/messages` | one Claude Messages call, reserved and settled against the funded total; streamed when `stream: true`; stopped by the kill switch |
+| `GET /v1/claude/models`, `GET /v1/claude/request/<id>` | the Claude models the key reaches and which are priced; what became of the House's call `<id>` (its `X-LTCM-Request`): held, settled, unknown, released or absent |
 | `POST /v1/github/pr`, `GET /v1/github/pr/<n>[/failures]` | open a pull request from a proposal; read its state and CI |
 
 Still in the code until the prune removes them (Wave 2b), and unused by the options House:
@@ -41,18 +44,18 @@ mails the owner a `live_stop` notice when a real-money stop trips (Sept 26, 2026
 ## The caps
 
 Enforced atomically before an order is signed, and only on calls that create an order on the real
-account. **Reads and cancels always pass.** Deployed values (`wrangler.jsonc`, Sept 26, 2026, the live
-path, Wave 5):
+account. **Reads and cancels always pass.** Deployed values (`wrangler.jsonc`, deployed 23:18Z Sept 26,
+2026, version `9634002d`, for the sprint's real money; unchanged since):
 
 | Var | Deployed | Meaning |
 |---|---|---|
-| `MAX_ORDER_MAX_LOSS_USD`, `MAX_ORDER_EQUITY_SHARE` | 1000, 0.15 | one OPENING order's maximum loss is at most the lower of $1,000 and 15% of the account's equity |
+| `MAX_ORDER_MAX_LOSS_USD`, `MAX_ORDER_EQUITY_SHARE` | 1000, 0.25 | one OPENING order's maximum loss is at most the lower of $1,000 and 25% of the account's equity |
 | `MAX_DAY_EQUITY_SHARE`, `MAX_DAY_USD_ALPACA` | 1.0, 10000 | today's opening maximum loss, this order included, at most 100% of equity and never above $10,000 |
 | `MAX_DAY_ORDERS` | 300 | the trading day's order count, exits included (under the venue's 390 a day) |
 | `MAX_DAY_OPEN_ORDERS` | 250 | no order OPENS once the day's orders (exits included) reach it: the last 50 are kept for exits (`403 {cap: "day_open_orders"}`) |
 | `CREDIT_MIN_EQUITY_USD` | 2000 | a credit structure (credit vertical, iron condor, iron butterfly) opens only at this equity or more |
 | `EQUITY_CAP_MAX_AGE_MS` | 120000 | the oldest equity reading an opening order is sized against |
-| `OPTION_STRUCTURES_REAL` | off | No real option opens. Paper structures and closes of already held real positions remain available. |
+| `OPTION_STRUCTURES_REAL` | `debit_vertical,long_butterfly,long_call,long_put` | the types a real OPEN may be: exactly the constitution's `options_money.real_types` under $2,000 of equity; `off` opens none. Paper structures and closes of already held real positions go whatever it says |
 | `CAP_TIMEZONE` | America/New_York | the calendar the day rolls on |
 | `MAX_ORDER_USD`, `MAX_ORDER_USD_KALSHI`, `MAX_DAY_USD` | 75, 75, 4000 | Kalshi only (dead until the prune removes it); the real account's orders never spend Kalshi's day |
 
@@ -77,7 +80,7 @@ path, Wave 5):
   defined-risk types. Any naked short, uncovered ratio, legging in or out, mixed roots or a
   `limit_price` of the wrong sign (positive is a debit, negative a credit) is a `400` on both accounts.
   If enabled, `OPTION_STRUCTURES_REAL` must equal the constitution's `options_money.real_types`; `league.ci`
-  also accepts `off`, the stricter deployment setting used while real money is disabled.
+  also accepts `off`, the stricter setting.
 - `/v1/health` reports `max_loss`: the equity reading and its age, the per-order cap now, today's
   opening maximum loss and its cap, `max_day_usd_alpaca`, whether opens and credit opens are admitted,
   orders today of `max_day_open_orders` and `max_day_orders`.
@@ -90,8 +93,11 @@ before it leaves, settled at the usage OpenAI reports, and a call that does not 
 reply carries `X-LTCM-Cost-USD` to the microdollar. The cap never goes above funded money; raising it
 is a gateway deploy. The owner confirmed a $100 addition on September 26, increasing the aggregate
 ceiling from $607 to $707. `FRONTIER_FUNDED_MONTH=2026-09` expires that allowance at October 1
-00:00 UTC; the next month requires reconciling remaining credit and deploying its funded month
-and ceiling.
+00:00 UTC: from then the month's cap is $0 (`lib/frontier.mjs` `monthCapMicro`; profit indexing
+creates no month) and `/v1/frontier/responses` answers `403` ("No frontier budget is configured"). The
+owner decided on September 29 that OpenAI is no longer topped up, so no October month is planned; since
+then the House's settings send every paid role to Claude and none to OpenAI (Sail stays the fallback). A
+later month would need its remaining credit reconciled and its funded month and ceiling deployed.
 
 - **Flex** (Sept 26, 2026): a request may carry `service_tier: "flex"` for a model whose
   `FRONTIER_MODELS` row has a `flex` rate (half the standard one for GPT-6 Astra, Sol and Luna). It is
@@ -100,6 +106,31 @@ and ceiling.
   settles at zero.
 - **Output ceilings**: 16,000 tokens by default; `X-LTCM-Role: <role>` takes that role's ceiling from
   `FRONTIER_ROLE_MAX_OUTPUT` (`{"postmortem": 64000}`), and the reservation is sized from it.
+
+## The Claude funded total
+
+`/v1/claude/messages` forwards one call to Anthropic's Messages API (`lib/claude.mjs`) within
+`CLAUDE_USD`, the owner's FUNDED TOTAL on the Anthropic account ($100 deployed). It is not a month:
+nothing resets it, so it is raised only by what the owner adds, and raising it is a gateway deploy.
+`CLAUDE_MODELS` is the price table and the allowlist, dollars per million tokens: Claude Opus 5.5
+($4 input, $5 five-minute write, $0.20 hit, $20 output), Claude Sonnet 5 and Claude Sonnet 5.5 ($2,
+$2.50, $0.20, $10; Sonnet 5.5 added 03:59Z Sept 29, 2026, version `7eaede72`). A model not in it is a
+`403`.
+
+- **Reserved at the worst case** before the call leaves: every byte of the request body plus 4,096
+  framing tokens, each an input token at the five-minute cache-write rate, and every `max_tokens`
+  output token (16,000 unstreamed, 32,000 streamed; thinking is output). A call that does not fit
+  what is left is a `402`; the kill switch is a `423`.
+- **Settled at Anthropic's usage**: uncached input, cache writes, cache reads and output each at its
+  own rate. A refusal (`stop_reason: "refusal"`) is billed at its usage. A hold nothing settled is
+  swept to zero after 30 minutes. The reply carries `X-LTCM-Cost-USD`; a streamed reply ends with one
+  `ltcm.cost` event; `GET /v1/claude/request/<id>` says what became of a call.
+- **Admitted**: text turns, adaptive thinking (never disabled), `output_config` with an effort and a
+  JSON-schema format, up to four five-minute cache markers. **Refused** (`400`): tools, forced tool
+  choice, sampling parameters, fast mode, `inference_geo`, the one-hour cache and an assistant turn
+  last: anything that bills beyond what the body shows.
+- **Who spent it**: `X-LTCM-Role` and `X-LTCM-Agent` file each settled cost under `by_role` and
+  `by_agent` in `/v1/health`.
 
 ## The watchdog
 
@@ -125,6 +156,7 @@ npx wrangler secret put ALPACA_SECRET_KEY
 npx wrangler secret put ALPACA_PAPER_KEY_ID      # the paper account
 npx wrangler secret put ALPACA_PAPER_SECRET_KEY
 npx wrangler secret put OPENAI_SECRET_KEY
+npx wrangler secret put CLAUDE_API_KEY           # the Anthropic account (funded total: CLAUDE_USD)
 npx wrangler secret put SAIL_API_KEY             # the watchdog
 npx wrangler secret put GITHUB_TOKEN             # fine-grained: this repository, contents and pull requests only
 python3 ../scripts/gateway_admin.py provision    # GATEWAY_ADMIN_TOKEN, kept mode 600 under .data/ltcm/keys/

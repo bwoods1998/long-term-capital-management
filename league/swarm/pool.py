@@ -1,12 +1,12 @@
 """The Gym pool: sealed size-l boxes forked from the Gym image, driven in batches, asleep when idle.
 
 - BOXES. A Gym box is a fork of the Gym image checkpoint (`gym.image_checkpoint`; W1 records it in
-  `.data/gym/images.json`), sealed (`no_network`, kept from the image), size l. The pool starts
-  `start_boxes` (4) when there is work, grows to `max_boxes` (8) while the queue is long and the guard
-  allows, puts a box to sleep after `idle_sleep_seconds` without work (a sleeping box costs nothing),
-  and terminates a box whose image is no longer the configured one (a version change). Gate boxes are
-  forks of the GATE image (holdout and forward days), one at a time, used only by the gate and the
-  nightly forward replays; a Gym box never opens a sealed window (the Gym's own capability check).
+  `.data/gym/images.json`), sealed (`no_network`, kept from the image), size l. The pool starts `start_boxes` (4 by
+  default) when there is work, grows to `max_boxes` (8 by default) while the queue is long and the guard allows, puts a
+  box to sleep after `idle_sleep_seconds` without work (a sleeping box costs nothing), and terminates a box whose image
+  is no longer the configured one (a version change). Gate boxes are forks of the GATE image (holdout and forward days),
+  one at a time, used only by the gate and the nightly forward replays; a Gym box never opens a sealed window (the Gym's
+  own capability check).
 - BATCHES. Jobs (one program version, one window) queue here; a box's dispatcher takes up to
   `batch_programs` jobs with the same settings and runs them together, day-major (the Gym's
   `driver.run`: each day's chain is loaded once for the whole batch). The highest priority first (the
