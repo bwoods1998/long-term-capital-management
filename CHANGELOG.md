@@ -21,6 +21,18 @@ on branch `run/options-swarm-2026-09-26`) has the detail.
 
 ## 2026-09-29
 
+**06:02Z, operator change** (no deploy): `claude.roles` adds `researcher`, so the bandit's top 12 families run
+their research cycles on `claude-sonnet-5-5` (medium effort; line `claude.role_usd_day.researcher` $100; the
+breaker and every failure fall back to the family's Sail profile). First Claude cycles at 06:02:43Z ($0.07) and
+06:03:00Z ($0.04).
+
+**05:52Z, R9: House release `20260929T055159Z-40163c0de3e9`** (main `31853932`; #417). The money digest is unchanged
+(`a3e2aa7c`). Backup `state/backups/pre-r9`.
+
+**05:51Z, gateway `ac2779ac`** (#417): the Claude route admits the House's custom tools and tool-loop turns (no
+server tools, no forced tool choice); the price rows carry `geo {us: 1.1}`; overruns are counted in `/v1/health`.
+`CLAUDE_USD` is still $200.
+
 **05:29Z, gateway `8d80d2f7`** (#420): the owner added $100 to the Anthropic account (its balance then read
 $140.54), so `CLAUDE_USD`, the funded total, is $200. The meter had $80.33 spent, which leaves $119.67 of room,
 below the account's real balance. Operator change at the same time: `claude.usd_cap` 98 → 198 (the swarm's line
