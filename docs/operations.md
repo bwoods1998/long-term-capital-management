@@ -589,8 +589,8 @@ entries still require the paper route proofs' witnessed round trips.
 | `live.house_test` | `swarm.json` on the box | true (since 00:17:28Z Sept 29) | the House live test (still only with real money on, the grant, the paper proof and its private program verified); off: exits only | edit `swarm.json` |
 | The House live test's program | `/workspace/state/house-test/rebound-live/` on the box | present, verified | the frozen program and its params, hash-checked against `league/live/house_test.py` `FROZEN` | the operator's private upload script, `--apply` |
 | `FRONTIER_MONTH_USD`, `FRONTIER_MONTH_MAX_USD`, `FRONTIER_FUNDED_MONTH` | `gateway/wrangler.jsonc` | $707, September 2026 only; not topped up again (the owner, Sept 29), so $0 from Oct 1 | the OpenAI month; expires before an unfunded month can renew it | gateway deploy |
-| `CLAUDE_USD`, `CLAUDE_MODELS` | `gateway/wrangler.jsonc` | $100; Opus 5.5, Sonnet 5, Sonnet 5.5 | the Anthropic account's funded total (never resets) and the priced models (the allowlist) | gateway deploy after the owner adds funds |
-| `claude.model`, `claude.usd_cap`, `claude.max_tokens` | `swarm.json` on the box | `claude-sonnet-5-5` (since 04:53Z Sept 29), 98, 32000 | the swarm's Claude model, its own lifetime Claude line inside `CLAUDE_USD`, a call's output ceiling (defaults `claude-opus-5-5`, 100, 16000) | edit `swarm.json` |
+| `CLAUDE_USD`, `CLAUDE_MODELS` | `gateway/wrangler.jsonc` | $200 (since 05:29Z Sept 29); Opus 5.5, Sonnet 5, Sonnet 5.5 | the Anthropic account's funded total (never resets) and the priced models (the allowlist) | gateway deploy after the owner adds funds |
+| `claude.model`, `claude.usd_cap`, `claude.max_tokens` | `swarm.json` on the box | `claude-sonnet-5-5` (since 04:53Z Sept 29), 198 (since 05:29Z Sept 29), 32000 | the swarm's Claude model, its own lifetime Claude line inside `CLAUDE_USD`, a call's output ceiling (defaults `claude-opus-5-5`, 100, 16000) | edit `swarm.json` |
 | `claude.roles`, `claude.role_usd_day`, `claude.role_model` | `swarm.json` on the box | architect, audit, diagnostician, rewrite, review; rewrite $15 and review $5; audit on `claude-opus-5-5` (since 04:53Z Sept 29) | who asks Claude first; a role's own Claude line a UTC day; a role's own Claude model (defaults architect, audit, diagnostician; no role line; no role model) | edit `swarm.json` |
 | `gate.review_openai_model`, `gate.audit_openai_model` | `swarm.json` on the box | null, null (since 04:53Z Sept 29) | the review's and the audit's OpenAI route; null skips it (defaults `gpt-6-sol`, `gpt-6-astra`) | edit `swarm.json` |
 | `architect.openai_model`, `every_seconds`, `refill_seconds`, `max_refill`, `max_output_tokens` | `swarm.json` on the box | null, 600, 1200, 24, 32000 | the architect: null leaves it Claude-only (Sail as the fallback); its cadence, its refill below `population.start` and each pass's births (defaults `gpt-6-astra`, 14400, 3600, 12, 12000) | edit `swarm.json` |
@@ -695,7 +695,7 @@ family it cannot rescore.
 
 ## Models and Claude
 
-Every paid model call goes through the gateway: Claude against the owner's funded total (`CLAUDE_USD`, $100; it
+Every paid model call goes through the gateway: Claude against the owner's funded total (`CLAUDE_USD`, $200; it
 never resets), OpenAI against the funded month (September 2026 only; $0 from Oct 1). Sail models (DeepSeek, Kimi)
 are the inner loop and every role's last fallback but the diagnostician's (it has none). `league/swarm/models.py`
 routes a role's call:
