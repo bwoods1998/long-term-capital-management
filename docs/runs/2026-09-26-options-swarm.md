@@ -2748,4 +2748,21 @@ looks like beta. Validation 2025 and the holdout judge both.
 | 6 | Money | Equity $1,473.03, options buying power $1,473.00; 0 positions. preopen 9/9: release R10, the grant active, not blocked, 4 observe rows, the live test instance loaded |
 | 7 | Compute | Sail $230.36. Claude $119.93 of $200 ($9.82 in 2 h). The fetch has finished 9,707 tasks this run |
 
+
+- **13:20Z Session-day harness work (the owner: "push hard here through the day to create the harness for these
+  agents to trade"; "trade profitably").** Deploys are frozen 13:25-20:05Z, so builds happen during the session and
+  R11 goes out after the close.
+  - Birth flood tuned (research-side, no deploy): `architect.max_refill` 24 → 12 and `every_seconds` 600 → 900. The
+    strategist's evidence: 600 of 674 births died to the idle rule untested. Fewer, better births leave Claude and Gym
+    time for the families that live.
+  - Being built for R11: `long_single`, a two-sided single-option family structure (each order a long call or a long
+    put).
+    - It lets the evidence-backed direction (single options, 2 fills, taken on both sides by rule, so drift-neutral)
+      be one family instead of call/put twins, each carrying drift.
+    - Live eligibility requires both types real; each real order keeps its concrete type. The money table and its
+      digest do not change.
+    - Two adversarial reviews: the money path, and research honesty.
+  - R11 after 20:05Z: #424 (Train from 2017), `long_single`, and #413 as its runbook directs. Then image T (2017-24)
+    once the fetch's stages 11, 13 and 12 are in.
+
 ## Report
