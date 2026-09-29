@@ -2550,4 +2550,22 @@ looks like beta. Validation 2025 and the holdout judge both.
     - `gate.review_openai_model` and `gate.audit_openai_model` null. The architect's OpenAI route was already off,
       so OpenAI is no longer used.
 
+
+- **04:53-05:10Z Sonnet 5.5 confirmed live; the repo docs reconciled (R8 done).**
+  - The first Sonnet 5.5 calls came at 04:53Z: two stalled-family rewrites. Each held about $0.44 and settled at
+    about $0.03-0.07.
+  - Docs PR #418 was merged (main `238f61e1`).
+    - An audit against the code and the live House found 97 stale or missing items. The docs said real money was off
+      and GPT-6 Astra was the architect, never mentioned Claude, and the CHANGELOG had no deploy since Sept 26.
+    - All 97 were fixed across README, `docs/operations.md`, `docs/design.md`, the sprint goal file, the gateway and
+      deploy READMEs, the CHANGELOG (17 House releases, site #10-#16, and the gateway versions, with `cd0588b5`
+      explained as the owner's `CLAUDE_API_KEY` secret change), and swarm docstrings.
+    - A reviewer verified each claim. No agenda text, decision times or data ids were published.
+  - Left for the next docs pass:
+    - the Sonnet researchers (#417) and the strategist when they merge;
+    - the code default `claude.model`;
+    - money-code comments;
+    - `config.json` notes;
+    - Claude top-ups as gateway deploys.
+
 ## Report
