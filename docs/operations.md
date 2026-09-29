@@ -172,6 +172,9 @@ positions table (`positions`, Sept 28, 2026): refused, the publisher posts the c
 and offers it again half an hour later (a warning per distinct reply of the site, "positions table: the site
 refused the positions table (old site, or a row it rejects) ... (the site said: ...)"), so either may go
 first. The first release of the table went site first (#15, 16:59Z Sept 28), then the House (R6, 20:08Z).
+The practice league's block (`practice`, Sept 29, 2026) is the second exception, handled the same way and first
+(a warning per distinct reply: "the site refused the practice league block (old site, or a row it rejects) ...");
+the site needs its own PR to take it (`league/tests/fixtures/site_contract.md`, `site_checkpoint_practice.json`).
 
 **Checkpoint the House box before risky work:** `python3 scripts/floor_box.py checkpoint --name why
 --ttl-days 30` (`checkpoints` lists them). A checkpoint holds the box's `.env`. Sail's checkpoint
@@ -421,11 +424,44 @@ applies), 100% of equity opened a day, 250 of 300 orders open.
 1-lot SPY call about 1-2% out of the money (nearest expiry at least a day out, at the natural, held two
 minutes) with single-leg orders. Real long calls and puts open only after it (`paper_proof_single`).
 
-**The observe band**: every alive Gym-band family's validated version trades the shadow book as
-`<family>@<version>:o`, its version pinned for the session (pins in `live.sqlite`), never real, never a
-forward row, never on the site. Its programs load and decide after every real decision of the minute, in
-their own decider child (1 GB); its chains are read after the real path, under the minute's data budget.
-Its trades are kept in `/workspace/state/observe.sqlite` (0600) for the post-mortem only.
+**The practice league** (the observe band; the league since Sept 29, 2026): every alive Gym-band family with a
+validated version, or with an eligible Train version (the version the tournament validates next, not demoted),
+trades the shadow book on live quotes as `<family>@<version>:o`, on a $10,000 practice account, its version pinned for
+the session (pins in `live.sqlite`: `observe_pins` {day, order, versions, tiers, roots}). It is never real, never
+tuition, never a forward row and never a band move. Its programs load and decide after every real decision of the
+minute, in their own decider child (1 GB); its chains are read after the real path, under the minute's data budget.
+
+- **Tiers and order.** The validated tier by validation t, then the Train tier by Train score (highest first, unknown
+  last), then by id (`bands.priority`). `live.observe_train` false leaves the Train tier out and winds its pins down at
+  the next families pass.
+- **Two caps.** `live.observe_max` instances (48) and `live.observe_roots_max` distinct roots (24). Roots bind first:
+  every root is read every minute at about 1.1-1.5 data calls, and holds a full-day grid in the House (about 3 MB, at
+  most 28 MB). A family whose roots would pass the roots cap is skipped, not stopped at: a later family on roots already
+  read may still join. A cap lowered at runtime keeps the first families pinned. The held-back families are said once a
+  day (`live.observe` {capped, why: "cap" | "roots"}).
+- **Measured** (the House, read-only, 13:33-13:50Z Sept 29): 1 vCPU, 4,284 MB, 3,510 MB available; the House 135-141 MB,
+  the swarm 470-513 MB, the observe child 36 MB; a minute of 1 real and 7-8 observe instances took 2.4-3.5 s end to end,
+  a decision under 50 ms; 11-16 data calls a minute for about 11 roots against the observe phase's 40. 24 roots is about
+  30-36 observe calls a minute. Expect 7-20 instances, not 48: eligibility is hard and families live hours.
+- **Degradation.** As before: at most 16 loads a minute above a 10 s floor; observe reads stop at
+  `live.observe_read_calls` (40; raise it with the roots cap, about 1.5 calls a root) and at 3 pages and 5 s a root;
+  a `BudgetSpent` batch waits a minute. New: when 3 of the last 10 session minutes were **pressed** (the observe batch
+  skipped or failed, or an observe read skipped), the lowest-priority quarter (at least one) of the Train-tier pins is
+  shed for the rest of the session, at most once every 10 minutes, and no new family joins past what is left
+  (`observe_shed` in the live state, so a restart keeps it; one `live.observe` {shed, effective_cap, why} and one
+  alert). Validated pins are never shed. The next session pins afresh at the full caps.
+- **The record.** `/workspace/state/observe.sqlite` (0600): `trades` (one row a closed practice trade: its session,
+  exit reason and `forced` when the House closed it winding down) and `practice` (one row per family and version from
+  its first live minute, kept after the family retires: tier, lineage, structure, roots, sessions, minutes, decisions
+  due / made / missed for want of quotes / missed for want of the budget, the per-minute marked P&L's peak and drawdown,
+  open positions at the engine's mark). Realized P&L is the headline; open positions are apart, at the mark.
+- **Who reads it.** Nothing that feeds evidence or money (the gate, the verifier, the bands, the money table, tuition,
+  Profit). The swarm reads its summary as a research signal (`league/swarm/practice.py`: the strategist's PRACTICE table,
+  the architect's PRACTICE BY CLASS lines, the bandit's bonus: at most +25% of a family's share and at most 10% of all
+  share moved; `practice.feedback` false turns all three off). The site shows its aggregates (`practice`, below).
+- **The forward embargo.** Because practice feeds research, a Sized move also needs the forward record of the sessions
+  after its version was written to meet Sized on its own (`OptionsLive._move_band`; held moves are `live.band` {held}
+  rows). The whole record still decides negative, Candidate and Probe.
 
 **The D3 calibration round trips**: 1-lot SPY, QQQ and IWM call verticals one dollar wide nearest the
 money, hourly at 10:00, 11:00, 12:00, 13:00, 14:00 and 15:00 ET (none starts from 15:15); open at the mid
@@ -531,7 +567,10 @@ entries still require the paper route proofs' witnessed round trips.
 5b. **The sprint's checks**: `health.json` `options_live.fill_model` names the refitted model (its `source`
    and `version`; `GYM_FILL_MODEL` or `/data/calibration/fill_model.json`, loaded once at the House's start);
    `options_live.observe.switches` shows observe on and calibration as intended; `swarm.json` reads as a
-   JSON object; after 13:30Z `options_live.observe.pins` lists the session's families; after the proofs,
+   JSON object; after 13:30Z `options_live.observe.pins` lists the session's families with their `tiers` and
+   `roots`, and `options_live.observe` shows `roots_used` under `roots_max` and `effective_cap` (no `shed`);
+   `observe_reads_skipped` stays 0 and `budget_spent` {}; `observe.sqlite` `practice` has a row per pinned family and
+   version; `live.sqlite` has no `:o` order, position or instance and `swarm.sqlite` `forward` no `:o` id; after the proofs,
    `paper_proof_single` passed; after 14:00Z `options_live.calibration.slots` and
    `python3 -m league.live --root /workspace/state --calibration`; `options_live.house_test`: `files`
    verified, `wanted` as intended, and no stop or end you did not expect.
@@ -611,7 +650,9 @@ entries still require the paper route proofs' witnessed round trips.
 | Kill switch | the gateway | off | every real order-creating call refused | `gateway_admin.py kill` / `unkill` |
 | `MAX_ORDER_MAX_LOSS_USD`, `MAX_ORDER_EQUITY_SHARE`, `MAX_DAY_EQUITY_SHARE`, `MAX_DAY_ORDERS`, `MAX_DAY_OPEN_ORDERS` | `gateway/wrangler.jsonc` | $1,000, 0.25, 1.0, 300, 250 | the real account's caps by maximum loss; equal to the constitution's `options_money.gateway` | gateway deploy with the matching House deploy |
 | `OPTION_STRUCTURES_REAL` | `gateway/wrangler.jsonc` | `debit_vertical,long_butterfly,long_call,long_put` | the types real money may open; must equal the constitution's `options_money.real_types` (`league.ci`) | gateway deploy with the matching House deploy and a ratify |
-| `live.observe`, `live.observe_max` | `swarm.json` on the box | true, 8 | the observe band and its cap (default 48); read each minute, no deploy (a swarm.json that is not a JSON object turns it off) | edit `swarm.json` |
+| `live.observe`, `live.observe_max` | `swarm.json` on the box | true, 48 (since 13:36Z Sept 29) | the practice league (the observe band) and its instance cap (default 48); read each minute, no deploy (a swarm.json that is not a JSON object turns it off) | edit `swarm.json` |
+| `live.observe_train`, `live.observe_roots_max`, `live.observe_read_calls` | `swarm.json` on the box | defaults: true, 24, 40 (once the practice league is released) | the Train tier; the distinct roots the league may read (1-128); the minute's data calls before observe reads stop (10-200; unset: the step's own 40) | edit `swarm.json` |
+| `practice.feedback`, `sessions`, `bonus`, `bonus_total`, `min_trades` | `swarm.json` on the box | defaults: true, 10, 0.25, 0.10, 3 (once released) | the practice league's research feedback: the strategist's table, the architect's lines, the bandit's bonus (code ceilings 0.5 and 0.2); off: none of the three | edit `swarm.json` |
 | `live.calibration`, `live.calibration_samples` | `swarm.json` on the box | true, 100 | the D3 round trips (still only with real money on, the grant and the paper proof); samples a symbol's open cell (the mid, or the patient mid at 12:00 and 14:00) stops at (defaults false, 30) | edit `swarm.json` |
 | `live.house_test` | `swarm.json` on the box | true (since 00:17:28Z Sept 29) | the House live test (still only with real money on, the grant, the paper proof and its private program verified); off: exits only | edit `swarm.json` |
 | The House live test's program | `/workspace/state/house-test/rebound-live/` on the box | present, verified | the frozen program and its params, hash-checked against `league/live/house_test.py` `FROZEN` | the operator's private upload script, `--apply` |

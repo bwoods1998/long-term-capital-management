@@ -247,7 +247,7 @@ Agent count and simulated years measure activity; passing unseen evidence measur
 | Diagnostician | every 5 minutes | Claude | reads a stuck or nearly-there family's Train diagnostics (never Validation's numbers); rewrites its mechanism or writes its lesson; live: 6 a round, a family every 3 hours, $60 a day | a new mechanism, or a lesson and a retirement |
 | Gate | when a family meets the validation line | review: Claude when "review" is in `claude.roles` (live: Sonnet 5.5), else GPT-6 Sol while the OpenAI month has room and `gate.review_openai_model` names it (null live), else DeepSeek-V4-Pro on Sail; audit: Claude (live: Opus 5.5, `claude.role_model`), then GPT-6 Astra on the same terms (null live), then a second Sail model; the gate box | review for lookahead, leakage and fill abuse; the audit; one holdout look | a Candidate, or a recorded refusal |
 | Nightly forward | after 01:45 ET each trading night | the data box, the gate box | the new day goes to the gate image only; every Candidate is re-run on it | one unseen day a night for every Candidate |
-| Live | 09:30-16:00 ET | the House | every alive family's validated version in observe shadow; Candidates in live shadow; Probes and Sized on real money; the House's D3 calibration round trips and its live test; no general agent paper book yet | separate paper, shadow and real records |
+| Live | 09:30-16:00 ET | the House | the practice league: every alive family's validated or eligible Train version in observe shadow (two caps: 48 instances, 24 roots); Candidates in live shadow; Probes and Sized on real money; the House's D3 calibration round trips and its live test; no general agent paper book yet | separate paper, shadow, practice and real records |
 | Post-mortem | after each close; weekly | the operator for now (no scheduled post-mortem is built; it would run on Claude, whose `reserve_usd` is kept for it) | compare captured executions with the Gym; diagnose gaps and propose repairs | private reports; calibration only through the recalibration protocol |
 
 **Models** (Sept 29, 2026; only Sail and Claude are topped up from now on). The inner loop runs on
@@ -297,6 +297,21 @@ diagnostician.
 - **The forward record** (nightly replays, live shadow and real trades) is what sizes money. A
   Candidate whose forward record turns negative over 20 trades loses its band. Families whose code
   was written with knowledge of 2024-2026 need a forward record before they are Sized.
+- **Practice is a research signal, never evidence** (the practice league, Sept 29, 2026). Every alive
+  Gym-band family with a validated or eligible Train version trades live quotes in the House's shadow book
+  under the Gym's own fill rules: live days from Sept 29 on are the one period no model behind the
+  researchers has seen. Its record (`observe.sqlite`, private) is never a forward row and never reaches the
+  verifier, the gate, the holdout, the bands or the money table. Research reads it: the strategist a
+  PRACTICE table (by mechanism class and family: sessions, trades, the sign of realized P&L, a t; never
+  dollars, dates, versions or code), the architect PRACTICE BY CLASS lines, and the bandit a capped bonus
+  (a family gains at most 25% of its share, all bonuses move at most 10% of share; the weight only orders
+  research, Train jobs, retirements and the Claude band). Promotion to real money is D2 exactly:
+  Validation, the holdout, then the money table.
+- **The forward embargo.** Because practice now lets forward-window days select among Gym programs, a Sized
+  move also needs the forward record of the sessions after the banded version was written to meet Sized on
+  its own; demotion and every other rule still read the whole record. This only makes Sized harder; the
+  Validation and holdout periods end before any practice day and are untouched, and the money digest does
+  not move.
 - **The leakage alarm:** once there are at least 10 holdout looks, if more than 30% pass, the gate
   stops until leakage is ruled out.
 - The lines may be tightened on evidence; loosening one is the owner's decision.
