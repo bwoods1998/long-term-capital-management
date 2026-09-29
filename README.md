@@ -143,9 +143,11 @@ a paper account for the multi-leg route), **ThetaData** Options Standard (histor
 **Sail** (the boxes, and open models for the researchers and the roles' fallbacks: DeepSeek, Kimi),
 **Anthropic** through the gateway (Claude answers every paid role on the live settings: Sonnet 5.5,
 `claude-sonnet-5-5`, is the architect, the diagnostician, the stall rewrite and the program review; Opus
-5.5 is the gate's audit), **OpenAI** through the gateway (GPT-6 Sol and Astra, the code's defaults for
-the review and the audit's fallback, are switched off in the live settings since Sept 29). From Sept 29
-only Sail and Claude are topped up; the gateway's OpenAI cap is $0 from Oct 1.
+5.5 is the gate's audit; and, from the release after PR #417, Sonnet 5.5 runs the research cycles of the
+bandit's top 12 families, with every failed turn finished on Sail), **OpenAI** through the gateway (GPT-6
+Sol and Astra, the code's defaults for the review and the audit's fallback, are switched off in the live
+settings since Sept 29). From Sept 29 only Sail and Claude are topped up; the gateway's OpenAI cap is $0
+from Oct 1.
 
 ## The repository
 

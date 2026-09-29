@@ -220,7 +220,15 @@ cd /workspace/previous && /workspace/.venv/bin/python -m league.watchdog rollbac
 - **The gateway:** `python3 scripts/gateway_admin.py status`: the kill switch, today's order
   counters, the OpenAI month (spent, settled, in flight, the cap), Claude's funded meter (`claude`: the
   cap, spent, in flight, remaining, holds, the priced models, spend by role and agent), the Sail balance
-  and the House box's state.
+  and the House box's state. Since PR #417 it also has `overruns` and `overrun_usd`: calls whose settled cost ran
+  past their hold (never expected; the House pauses its Claude research band on one).
+- **Claude's top band** (PR #417): a `swarm.cycle` event of a top family carries `route: "claude"` once a Claude
+  turn was answered, `claude_calls`, `claude_usd`, `claude_usage` (input, cache write, cache read and output tokens
+  summed over the cycle, refused and cut answers included), and when it applies `claude_fallback` (`<kind>: <why>`,
+  the turn that went to Sail), `claude_skipped` (`hold_streak: ...` or `paused: ...`: the cycle stayed on Sail),
+  `claude_paused` (this cycle's trouble paused the band) and `claude_overrun`. The swarm's `spend` rows (kind
+  `claude`, `detail.role` "researcher") hold the holds and their settlements; `kv claude_unsettled` lists holds whose
+  bill is not yet known; `kv claude_band` is the breaker (`trouble`, `paused_until`, `why`).
 - **The public page:** `curl -s https://blakewoods.us/api/capital/checkpoint` (its `published_at`);
   `curl -s 'https://blakewoods.us/api/capital/checkpoint?progress=1&positions=1'` adds the positions
   table, which the default read omits.
@@ -591,7 +599,9 @@ entries still require the paper route proofs' witnessed round trips.
 | `FRONTIER_MONTH_USD`, `FRONTIER_MONTH_MAX_USD`, `FRONTIER_FUNDED_MONTH` | `gateway/wrangler.jsonc` | $707, September 2026 only; not topped up again (the owner, Sept 29), so $0 from Oct 1 | the OpenAI month; expires before an unfunded month can renew it | gateway deploy |
 | `CLAUDE_USD`, `CLAUDE_MODELS` | `gateway/wrangler.jsonc` | $200 (since 05:29Z Sept 29); Opus 5.5, Sonnet 5, Sonnet 5.5 | the Anthropic account's funded total (never resets) and the priced models (the allowlist) | gateway deploy after the owner adds funds |
 | `claude.model`, `claude.usd_cap`, `claude.max_tokens` | `swarm.json` on the box | `claude-sonnet-5-5` (since 04:53Z Sept 29), 198 (since 05:29Z Sept 29), 32000 | the swarm's Claude model, its own lifetime Claude line inside `CLAUDE_USD`, a call's output ceiling (defaults `claude-opus-5-5`, 100, 16000) | edit `swarm.json` |
-| `claude.roles`, `claude.role_usd_day`, `claude.role_model` | `swarm.json` on the box | architect, audit, diagnostician, rewrite, review; rewrite $15 and review $5; audit on `claude-opus-5-5` (since 04:53Z Sept 29) | who asks Claude first; a role's own Claude line a UTC day; a role's own Claude model (defaults architect, audit, diagnostician; no role line; no role model) | edit `swarm.json` |
+| `claude.roles`, `claude.role_usd_day`, `claude.role_model` | `swarm.json` on the box | architect, audit, diagnostician, rewrite, review; rewrite $15 and review $5; audit on `claude-opus-5-5` (since 04:53Z Sept 29) | who asks Claude first; a role's own Claude line a UTC day; a role's own Claude model (defaults since PR #417: architect, audit, diagnostician, researcher; the researcher $100; the researcher on `claude-sonnet-5-5`; the box's `roles` list replaces the default, so the box's research band is off until "researcher" is added to it) | edit `swarm.json` |
+| `researcher.claude_top`, `claude_effort`, `claude_max_tokens`, `claude_hold_every` | `swarm.json` on the box | defaults: 12, `medium`, 12000, 3 | the top band on Claude (PR #417): how many of the bandit's top families, at what effort, each call's output ceiling (it sizes the hold), and how often Claude looks during a hold streak (1: every cycle) | edit `swarm.json` |
+| `researcher.claude_family_usd_day`, `claude_min_room_usd`, `claude_timeout_seconds`, `claude_breaker_failures`, `claude_breaker_window_seconds`, `claude_breaker_pause_seconds` | `swarm.json` on the box | defaults: $15, $25, 180, 3, 3600, 3600 | the band's fuses: one family's Claude a UTC day, the funded room left to the other roles, one call's limit, and the breaker (unknown bills in the window that pause the band, and for how long) | edit `swarm.json` |
 | `gate.review_openai_model`, `gate.audit_openai_model` | `swarm.json` on the box | null, null (since 04:53Z Sept 29) | the review's and the audit's OpenAI route; null skips it (defaults `gpt-6-sol`, `gpt-6-astra`) | edit `swarm.json` |
 | `architect.openai_model`, `every_seconds`, `refill_seconds`, `max_refill`, `max_output_tokens` | `swarm.json` on the box | null, 600, 1200, 24, 32000 | the architect: null leaves it Claude-only (Sail as the fallback); its cadence, its refill below `population.start` and each pass's births (defaults `gpt-6-astra`, 14400, 3600, 12, 12000) | edit `swarm.json` |
 | `population.start`, `ceiling`, `floor` | `swarm.json` on the box | 96, 96, 12 | the refill target, the most alive, the fewest retirement may leave (defaults 48, 96, 16) | edit `swarm.json` |
@@ -700,11 +710,12 @@ never resets), OpenAI against the funded month (September 2026 only; $0 from Oct
 are the inner loop and every role's last fallback but the diagnostician's (it has none). `league/swarm/models.py`
 routes a role's call:
 
-- **Claude first** for the roles in `claude.roles`: by default the architect, the gate's audit and the diagnostician.
+- **Claude first** for the roles in `claude.roles`: by default the architect, the gate's audit, the diagnostician and
+  (since PR #417) the researcher's top band.
   Since R8 the researcher's stall rewrite and the gate's program review ask for Claude too, so adding "rewrite" or
   "review" to `claude.roles` in `swarm.json` routes them to Claude with no deploy; the box has all five since 04:53Z
   Sept 29. Claude answers while the gateway's total has room above `claude.reserve_usd` (5) and the swarm's own Claude
-  spend is under `claude.usd_cap` (98 on the box).
+  spend is under `claude.usd_cap` (198 on the box since 05:29Z Sept 29).
 - **The model** is `claude.model` (`claude-sonnet-5-5` on the box since 04:53Z Sept 29, the owner's Sonnet 5.5; the
   default is `claude-opus-5-5`), or a role's own model in `claude.role_model` {role: model id} (the box: the audit on
   `claude-opus-5-5`). A role model must be priced both in `league/claude.py` `MODEL_CEILINGS` and in
@@ -724,6 +735,37 @@ routes a role's call:
   an audit on Sail, or one Claude model reading both (with "review" and "audit" both in `claude.roles`), raises the
   gate's `not_the_plans_reviewer` alert (`same_reader` true for the second); the cure is a different
   `claude.role_model` for one of them (the box gives the audit Opus 5.5).
+- **The top band on Claude** (PR #417, the owner's Sept 29 decision to use Claude Sonnet 5.5 boldly): the bandit's
+  top `researcher.claude_top` families by weight (12) run their research cycles on `claude.role_model.researcher`
+  (`claude-sonnet-5-5`) at `researcher.claude_effort` (`medium`), streamed, with `researcher.claude_max_tokens`
+  (12000; a call's hold is about $0.31 on a median body) and `claude_timeout_seconds` (180), while "researcher" is in
+  `claude.roles`. The loop, the tools, their limits and their semantics are the Sail loop's
+  (league/swarm/claude_research.py adapts the tools and the history, checks every input against its schema before it
+  runs, and caches the tools, the system prompt and the conversation's tail). A cycle is Claude's when a queued run or
+  a rewrite landed in it, when the family's last cycle did not hold, and on every `claude_hold_every`-th cycle (3) of
+  a hold streak; the rest of a streak runs on the family's Sail profile. Any Claude failure (a refusal, a cut answer,
+  a 402, 403, 423, 429 or 5xx, the researcher's line, the family's `claude_family_usd_day` ($15), the
+  `claude_min_room_usd` ($25) left to the other roles, a stream timeout, an input that does not parse or validate, a
+  REVISE answer without an offered run, an answer that cannot be read) finishes that turn on the family's Sail
+  profile, never a cycle error. THE BREAKER: `claude_breaker_failures` (3) calls whose bill stayed unknown (their
+  whole hold booked: a cut stream, a 5xx, a 429) inside `claude_breaker_window_seconds` (3600), or one bill above its
+  hold, pause the band for `claude_breaker_pause_seconds` (3600); `kv claude_band` says why and until when (the
+  operator can end a pause early by setting its `paused_until` to 0).
+- **The band's cost** (a dry estimate, Sept 29: the median top-band request of the last 3 h through this adapter, and
+  the top band's measured pace of 914 cycles in 12 h, 1.01 calls a cycle): about $0.051 a call at medium (14,500
+  tokens of tools and system read from the cache at $0.20, 9,300 of the family's own written at $2.50, 2,500 output
+  at $10), and about 1,050 Claude cycles a day with the hold rule (1,830 without it): about $59 a day at medium
+  ($48 at low; $103 without the hold rule, where the $100 line binds), 10% more if the Anthropic workspace bills
+  US-only inference (`/v1/health` `claude.geos` shows "us"). The top band's Sail spend falls by about $12 a day.
+  After about 50 Claude cycles, read `claude_usage` and `claude_usd` from the cycle events: above about $0.08 a
+  cycle, drop to `low` or `claude_top` 6; below about $0.04, consider `high` for the top six or `claude_hold_every` 1.
+- **Switching the band on** (the owner's or operator's steps, none done by the code; the runbook is in the PR): deploy
+  the gateway (PR #417's tool admission, the US multiplier on every row, the checked body forwarded, overruns counted;
+  until then a House tool call is a 400 and falls back to Sail), then the House release; then add "researcher" to
+  `claude.roles` in `swarm.json` and raise `claude.usd_cap` by the day's expected Claude spend (the researcher's line
+  counts against it; 198 on the box at 05:29Z Sept 29, $82 spent lifetime), and keep `CLAUDE_USD` funded above
+  everything else plus `claude_min_room_usd`, `claude.reserve_usd` and one hold. Remove "researcher" from
+  `claude.roles`, or set `researcher.claude_top` to 0, to turn the band off.
 - **The meters**: `python3 scripts/gateway_admin.py status` (`claude`: the funded total, spent, in flight, remaining,
   holds, the priced models, `by_role`); the swarm's `spend` rows (kind `claude`, by family and role); the
   diagnostician's refusals name the line that stopped it.

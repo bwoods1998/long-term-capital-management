@@ -70,6 +70,19 @@ DEFAULTS: dict[str, Any] = {
         "top_reasoning_effort": "low",
         "top_families": 10,
         "top_max_output_tokens": 12000,  # low effort's reasoning (1,800-3,800 tokens measured) and a whole program
+        # THE TOP BAND ON CLAUDE (Sept 29, 2026, the owner's decision: be bold with Claude Sonnet 5.5; researcher.py and
+        # claude_research.py). The bandit's top `claude_top` by weight run their cycles on Claude while "researcher" is in
+        # `claude.roles`; 0 turns it off. Every Claude failure finishes the turn on the family's Sail profile above.
+        "claude_top": 12,                # on `claude.role_model.researcher` (Claude Sonnet 5.5)
+        "claude_effort": "medium",       # low | medium | high | xhigh | max (Anthropic: medium for multistep tool use)
+        "claude_max_tokens": 12000,      # thinking and the answer together, streamed; sizes the hold (~$0.33 on a mean body)
+        "claude_timeout_seconds": 180,   # one call's overall limit (120 s is allowed between events)
+        "claude_family_usd_day": 15.0,   # one family's Claude spend a UTC day (holds included): a fuse
+        "claude_min_room_usd": 25.0,     # funded Claude room the researcher never takes: the architect, audit and diagnostician's
+        "claude_hold_every": 3,          # in a hold streak with nothing new, Claude answers every 3rd cycle, Sail the rest (1: all)
+        "claude_breaker_failures": 3,    # unknown-bill failures (a cut stream, a 5xx, a 429) in the window that pause the band
+        "claude_breaker_window_seconds": 3600,
+        "claude_breaker_pause_seconds": 3600,  # the band's cycles run on Sail while paused (kv `claude_band`); one overrun pauses it
         "stall_revisions": 5,
         "rewrites_per_day": 4,
         "rewrite_min_hours": 1.0,
@@ -247,7 +260,9 @@ DEFAULTS: dict[str, Any] = {
     # draining the funded total. `role_model` {role: model id} answers a role on its own Claude model instead of `model`
     # (it must be priced in league/claude.py MODEL_CEILINGS and the gateway's CLAUDE_MODELS, else the role falls to its
     # next route): with "review" and "audit" both in `roles`, e.g. {"review": "claude-sonnet-5-5"} keeps the gate's two
-    # reads on two different models. No entry is `model`.
+    # reads on two different models. No entry is `model`. "researcher" (Sept 29, 2026) is the top band's research cycles
+    # on Claude (`researcher.claude_*`): on Claude Sonnet 5.5 (its `role_model`), within $100 a UTC day (its
+    # `role_usd_day`); removing the role from `roles` turns the band off.
     "claude": {
         "model": "claude-opus-5-5",
         "effort": "high",
@@ -255,9 +270,9 @@ DEFAULTS: dict[str, Any] = {
         "reserve_usd": 5.0,
         "max_tokens": 16000,            # thinking and the answer together (up to 32,000 streamed; 16,000 not)
         "stream": True,                 # server-sent events through the gateway: no hop waits 100 s in silence (HTTP 524)
-        "roles": ["architect", "audit", "diagnostician"],
-        "role_usd_day": {},
-        "role_model": {},
+        "roles": ["architect", "audit", "diagnostician", "researcher"],
+        "role_usd_day": {"researcher": 100.0},
+        "role_model": {"researcher": "claude-sonnet-5-5"},
     },
     # The diagnostician (league/swarm/diagnostician.py): Claude reads a family that is stuck or nearly there and rewrites
     # its mechanism or writes its lesson. Eligible: `min_validations` validations without passing, or the latest

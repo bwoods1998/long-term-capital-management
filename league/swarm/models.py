@@ -19,6 +19,15 @@
   `claude.role_usd_day` {role: usd} (a UTC day, holds included, each call on the day its hold was booked): a call that
   would take the role's Claude spend today past it skips Claude and falls to the role's next route. No entry is no extra
   line. `claude.role_model` {role: model id} answers a role on its own Claude model (no entry: `claude.model`).
+- CLAUDE'S TOOL TURNS (`ModelRouter.claude_turn`, Sept 29, 2026: the bandit's top researchers run their tool loop on
+  Claude Sonnet 5.5, `claude.role_model.researcher`; league/swarm/claude_research.py). One turn of a tool loop, held,
+  dispatched and settled exactly as `ask`'s Claude route (one admission, one durable hold, one settlement;
+  `_claude_admit`, `_ClaudeHold`), behind four fuses: the role's line (`claude.role_usd_day`, "researcher"), the family's
+  own line a UTC day (`family_usd_day`), the funded room it leaves to the one-shot roles (`keep_usd`: the researcher never
+  takes the last dollars the architect, the audit and the diagnostician need), and the gateway's funded total. It never
+  falls through to Sail itself: every failure is a `ModelError` naming its `kind` (no_room, line, family_fuse, refusal,
+  truncated, http, stream, answer, admission, off, unknown), and the caller finishes its turn on its Sail profile from the
+  same transcript.
 - Every settled cost is a `spend` row (kind `sail_model`, `openai` or `claude`, by family).
 
 Standard library only.
@@ -27,10 +36,12 @@ Standard library only.
 from __future__ import annotations
 
 import json
+import math
 import re
 import secrets
 import threading
 import time
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Callable, Mapping, Sequence
 
@@ -39,11 +50,94 @@ from .store import SwarmStore
 
 class ModelError(RuntimeError):
     """A model call could not be completed (the message says why). `billed` lists the paid attempts billed anyway (a
-    refusal, a truncation, an empty answer): each `{"route", "stop_reason", "cost_usd"}`."""
+    refusal, a truncation, an empty answer): each `{"route", "stop_reason", "cost_usd"}`. `kind` names the failure for a
+    caller that falls back on its own (`claude_turn`); `held_usd` is a paid attempt's hold that stays booked because its
+    bill is unknown (the true-up settles it)."""
 
-    def __init__(self, message: str, *, billed: list[dict[str, Any]] | None = None):
+    def __init__(self, message: str, *, billed: list[dict[str, Any]] | None = None, kind: str = "error", held_usd: float = 0.0,
+                 status: int | None = None, usage: Mapping[str, Any] | None = None, overrun_usd: float = 0.0):
         super().__init__(message)
         self.billed = list(billed or [])
+        self.kind = kind
+        self.held_usd = float(held_usd)
+        #: The gateway's HTTP status when it answered with one; the usage of a billed answer (a refusal, a cut turn), so
+        #: its tokens are measured beside its bill; how far its settled cost ran past its hold (never expected: a breaker).
+        self.status = status
+        self.usage = dict(usage or {})
+        self.overrun_usd = float(overrun_usd)
+
+
+@dataclass(frozen=True)
+class ClaudeReply:
+    """One Claude tool turn's answer (`claude_turn`): the client's `Answer` (its blocks, calls, usage and stop reason), the
+    model, the settled cost (None when it is not verified: `held_usd` then stays booked until the true-up) and the
+    gateway's request id."""
+
+    answer: Any
+    model: str
+    cost_usd: float | None
+    held_usd: float
+    request_id: str
+    #: Dollars the settled cost ran past the hold (0: the worst case held, as it always should).
+    overrun_usd: float = 0.0
+
+
+class _ClaudeHold:
+    """One booked Claude hold (`ModelRouter._claude_admit`), settled once: the gateway's settled cost replaces it, a refusal
+    the gateway made before reserving releases it, and an unknown bill leaves it filed (kv `claude_unsettled`) for
+    `settle_claude_holds`. Settling takes the filing out in the same transaction that books the cost, and only while it is
+    still there, so a true-up and the call's own answer never both book it."""
+
+    def __init__(self, store: SwarmStore, *, request_id: str, usd: float, role: str, family: str | None, model: str, key: str):
+        self.store, self.request_id, self.usd = store, request_id, usd
+        self.role, self.family, self.model, self.key = role, family, model, key
+
+    def resolve(self, amount: float, detail: Mapping[str, Any]) -> bool:
+        """Book `amount` in place of the hold, once: only while the hold is still filed (a true-up may have)."""
+        with self.store.atomic():
+            filed = dict(self.store.get("claude_unsettled") or {})
+            if self.request_id not in filed:
+                return False
+            filed.pop(self.request_id)
+            self.store.put("claude_unsettled", filed)
+            self.store.add_spend("claude", amount - self.usd, family=self.family,
+                                 detail={"role": self.role, "model": self.model, "settles": self.key[:120], "request": self.request_id,
+                                         **detail})
+            return True
+
+    def settle(self, cost: Any, detail: Mapping[str, Any]) -> float | None:
+        try:
+            amount = Decimal(str(cost)) if cost is not None else None
+        except ArithmeticError:
+            amount = None
+        if amount is None or not amount.is_finite() or amount < 0:
+            return None
+        self.resolve(float(amount), detail)
+        return float(amount)
+
+    def unknown(self, reason: str) -> None:
+        with self.store.atomic():
+            filed = dict(self.store.get("claude_unsettled") or {})
+            if self.request_id in filed:
+                filed[self.request_id] = {**filed[self.request_id], "reason": reason[:120]}
+                self.store.put("claude_unsettled", filed)
+
+    def failed(self, exc: Any, billed: list[dict[str, Any]]) -> tuple[float | None, float]:
+        """A ClaudeError's bill: (its settled cost or None, the hold left booked). A refusal, a truncation or an empty
+        answer is billed at its usage and listed in `billed`; a refusal the gateway made before reserving (a 4xx, or one
+        naming its `cap`) releases the hold; anything else unknown keeps it."""
+        status = exc.status
+        stop = getattr(exc.answer, "stop_reason", None) or type(exc).__name__
+        cost = self.settle(exc.cost_usd, {"error": type(exc).__name__, "status": status, "stop_reason": stop})
+        if cost is None:
+            if exc.cap or (isinstance(status, int) and 400 <= status < 500):
+                self.resolve(0.0, {"refused": status, "cap": exc.cap})
+                return None, 0.0
+            self.unknown(f"{type(exc).__name__}: {status}")
+            return None, self.usd
+        if cost > 0:
+            billed.append({"route": "claude", "stop_reason": stop, "cost_usd": cost})
+        return cost, 0.0
 
 
 def extract_json(text: str) -> dict[str, Any] | None:
@@ -297,8 +391,9 @@ class ModelRouter:
                             schema=schema, cache=True, stream=cfg.get("stream", True) is True)
         return body, float(reservation_ceiling(body))
 
-    def claude_spent(self, *, role: str | None = None, since: float | None = None) -> float:
-        """The swarm's Claude spend (holds included), for one role when named, since an epoch when given.
+    def claude_spent(self, *, role: str | None = None, since: float | None = None, family: str | None = None) -> float:
+        """The swarm's Claude spend (holds included), for one role when named, one family when named, since an epoch when
+        given.
 
         With `since`, a call counts from when its hold was booked, at its settled cost: the row that trues up a hold (the
         call's own `settles` row, or `settle_claude_holds`'s `settles_hold`) is booked when the bill lands, which may be
@@ -308,6 +403,9 @@ class ModelRouter:
         if since is not None:
             sql += " AND epoch>=?"
             params.append(float(since))
+        if family is not None:
+            sql += " AND family=?"
+            params.append(str(family))
         rows = []
         for row in self.store._all(sql, params):
             detail = json.loads(row["detail"] or "{}") or {}
@@ -342,6 +440,20 @@ class ModelRouter:
             return 0.0
         return float(line) if line.is_finite() and line >= 0 else 0.0
 
+    #: A hold booked this long before the meter's read may not have reached the gateway when it was read: counted anyway.
+    METER_MARGIN_SECONDS = 10.0
+
+    def _claude_since_read(self) -> float:
+        """The swarm's own Claude spend (holds included, each call at its settled cost) booked since the gateway's meter was
+        last read (`ClaudeMeter.read_at`, less a margin), which that reading cannot show yet; 0 for a meter that does not
+        say when it read."""
+        read_at = getattr(self.claude_meter, "read_at", None)
+        try:
+            since = float(read_at) - self.METER_MARGIN_SECONDS
+        except (TypeError, ValueError):
+            return 0.0
+        return max(0.0, self.claude_spent(since=since)) if math.isfinite(since) else 0.0
+
     def claude_role_room(self, role: str) -> float | None:
         """Dollars left on the role's own Claude line this UTC day (its holds count until they settle; a call counts on the
         day its hold was booked, `claude_spent`), or None when the role has no line (`claude_role_line`)."""
@@ -351,6 +463,64 @@ class ModelRouter:
         now = float(self.store.clock())
         spent = max(0.0, self.claude_spent(role=role, since=now - now % 86400))
         return max(0.0, line - spent)
+
+    def claude_family_room(self, role: str, family: str | None, line: float) -> float:
+        """Dollars left on one family's own Claude line for `role` this UTC day (its holds count until they settle)."""
+        now = float(self.store.clock())
+        return max(0.0, float(line) - max(0.0, self.claude_spent(role=role, family=family, since=now - now % 86400)))
+
+    def _claude_admit(self, *, role: str, family: str | None, key: str, model: str, body: Mapping[str, Any], required: float,
+                      errors: list[str], family_line: float | None = None, keep_usd: float = 0.0) -> tuple[str | None, str | None]:
+        """Admit one Claude call and book its hold: (its X-LTCM-Request id, None) once the hold (spend kind `claude`) and its
+        filing (kv `claude_unsettled`) are committed in one transaction, before the gateway hears of the call, so neither a
+        crash nor a restart mid-call loses it; else (None, the kind: "line", "family_fuse" or "no_room") with the reason in
+        `errors`. The lines are read before the meter's network read and again inside the write transaction (a concurrent
+        call's committed hold counts): the role's own line today (`claude.role_usd_day`), the family's own line today when
+        `family_line` is given, and the room above `claude.reserve_usd` and `claude.usd_cap`, less `keep_usd` (room this
+        caller leaves to the other roles)."""
+        request_id = re.sub(r"[^A-Za-z0-9:._-]+", "-", key)[:150] + ":" + secrets.token_hex(4)
+        line = self.claude_role_room(role)  # the role's own line today (`claude.role_usd_day`), before the meter's read
+        if line is not None and line < required:
+            errors.append(f"claude: the {role} line for today has no room (${line:.2f} left of claude.role_usd_day; "
+                          f"this call may cost ${required:.2f})")
+            return None, "line"
+        if family_line is not None:
+            left = self.claude_family_room(role, family, family_line)
+            if left < required:
+                errors.append(f"claude: {family}'s own {role} line for today has no room (${left:.2f} left of "
+                              f"${family_line:.2f}; this call may cost ${required:.2f})")
+                return None, "family_fuse"
+        room = self.claude_room()  # the meter's network read happens outside the write transaction
+        if room - keep_usd < required:
+            kept = f", ${keep_usd:.2f} of it kept for the other roles" if keep_usd else ""
+            errors.append(f"claude: no room (${room:.2f} left above the reserve{kept}; this call may cost ${required:.2f})")
+            return None, "no_room"
+        admitted = False
+        with self.store.atomic():
+            # Every line is read again inside the write transaction: a concurrent call's committed hold counts.
+            line = self.claude_role_room(role)
+            if line is not None and line < required:
+                errors.append(f"claude: the {role} line for today has no room")
+                return None, "line"
+            if family_line is not None and self.claude_family_room(role, family, family_line) < required:
+                errors.append(f"claude: {family}'s own {role} line for today has no room")
+                return None, "family_fuse"
+            # The meter's reading is up to a minute old (its cache): the swarm's own Claude calls booked since it was
+            # read are not in it yet, so they are taken off the gateway's room here (a concurrent admission's hold
+            # counts, and the room kept for the other roles is never eroded by calls admitted in the same minute).
+            if min(room - self._claude_since_read(), self._claude_cap_room()) - keep_usd >= required:
+                self.store.add_spend("claude", required, family=family,
+                                     detail={"role": role, "hold": key[:120], "request": request_id, "model": model,
+                                             "max_tokens": body["max_tokens"], "effort": body["output_config"]["effort"]})
+                filed = dict(self.store.get("claude_unsettled") or {})
+                filed[request_id] = {"usd": required, "family": family, "role": role, "model": model,
+                                     "at": self.store.clock(), "reason": "in flight"}
+                self.store.put("claude_unsettled", filed)
+                admitted = True
+        if not admitted:  # only after the outer transaction's commit succeeds is it admitted
+            errors.append("claude: the swarm's own Claude line has no room")
+            return None, "no_room"
+        return request_id, None
 
     def _ask_claude(self, *, role: str, system: str, user: str, family: str | None, key: str, need_usd: float,
                     schema: Mapping[str, Any] | None, errors: list[str], billed: list[dict[str, Any]],
@@ -367,101 +537,36 @@ class ModelRouter:
         from ..claude import ClaudeError
 
         model = self.claude_model(role)
-        request_id = re.sub(r"[^A-Za-z0-9:._-]+", "-", key)[:150] + ":" + secrets.token_hex(4)
-        hold = None
         try:
             need = Decimal(str(need_usd))
             if not need.is_finite() or need < 0:
                 raise ValueError("invalid Claude minimum reservation")
             body, ceiling = self.claude_request(system, user, schema=schema, effort=effort, role=role)
             required = float(max(need, Decimal(str(ceiling))))
-            line = self.claude_role_room(role)  # the role's own line today (`claude.role_usd_day`), before the meter's read
-            if line is not None and line < required:
-                errors.append(f"claude: the {role} line for today has no room (${line:.2f} left of claude.role_usd_day; "
-                              f"this call may cost ${required:.2f})")
-                return None
-            room = self.claude_room()  # the meter's network read happens outside the write transaction
-            if room < required:
-                errors.append(f"claude: no room (${room:.2f} left above the reserve; this call may cost ${required:.2f})")
-                return None
-            admitted = False
-            with self.store.atomic():
-                # Both lines are read again inside the write transaction: a concurrent call's committed hold counts.
-                line = self.claude_role_room(role)
-                if line is not None and line < required:
-                    errors.append(f"claude: the {role} line for today has no room")
-                    return None
-                if min(room, self._claude_cap_room()) >= required:
-                    self.store.add_spend("claude", required, family=family,
-                                         detail={"role": role, "hold": key[:120], "request": request_id, "model": model,
-                                                 "max_tokens": body["max_tokens"], "effort": body["output_config"]["effort"]})
-                    filed = dict(self.store.get("claude_unsettled") or {})
-                    filed[request_id] = {"usd": required, "family": family, "role": role, "model": model,
-                                         "at": self.store.clock(), "reason": "in flight"}
-                    self.store.put("claude_unsettled", filed)
-                    admitted = True
-            if admitted:  # only after the outer transaction's commit succeeds
-                hold = required
-            else:
-                errors.append("claude: the swarm's own Claude line has no room")
+            request_id, _ = self._claude_admit(role=role, family=family, key=key, model=model, body=body, required=required,
+                                               errors=errors)
+            if request_id is None:
                 return None
         except Exception as exc:  # noqa: BLE001 - invalid/unknown admission falls through without dispatch
             errors.append(f"claude admission: {type(exc).__name__}: {str(exc)[:160]}")
             return None
-
-        def resolve(amount: float, detail: Mapping[str, Any]) -> None:
-            """Book `amount` in place of the hold, once: only while the hold is still filed (a true-up may have)."""
-            with self.store.atomic():
-                filed = dict(self.store.get("claude_unsettled") or {})
-                if request_id not in filed:
-                    return
-                filed.pop(request_id)
-                self.store.put("claude_unsettled", filed)
-                self.store.add_spend("claude", amount - hold, family=family,
-                                     detail={"role": role, "model": model, "settles": key[:120], "request": request_id, **detail})
-
-        def settle(cost: Any, detail: Mapping[str, Any]) -> float | None:
-            try:
-                amount = Decimal(str(cost)) if cost is not None else None
-            except ArithmeticError:
-                amount = None
-            if amount is None or not amount.is_finite() or amount < 0:
-                return None
-            resolve(float(amount), detail)
-            return float(amount)
-
-        def unknown(reason: str) -> None:
-            with self.store.atomic():
-                filed = dict(self.store.get("claude_unsettled") or {})
-                if request_id in filed:
-                    filed[request_id] = {**filed[request_id], "reason": reason[:120]}
-                    self.store.put("claude_unsettled", filed)
-
+        hold = _ClaudeHold(self.store, request_id=request_id, usd=required, role=role, family=family, model=model, key=key)
         try:
             client = self.claude_factory(model)  # type: ignore[misc]
             answer = client.ask(system, user, agent=f"swarm-{role}", role=role, max_tokens=body["max_tokens"],
                                 effort=body["output_config"]["effort"], schema=schema, cache=True, request_id=request_id,
                                 stream=body.get("stream") is True)
         except ClaudeError as exc:
-            status = exc.status
-            stop = getattr(exc.answer, "stop_reason", None) or type(exc).__name__
-            cost = settle(exc.cost_usd, {"error": type(exc).__name__, "status": status, "stop_reason": stop})
-            if cost is None:
-                if exc.cap or (isinstance(status, int) and 400 <= status < 500):
-                    resolve(0.0, {"refused": status, "cap": exc.cap})
-                else:
-                    unknown(f"{type(exc).__name__}: {status}")
-            elif cost > 0:
-                billed.append({"route": "claude", "stop_reason": stop, "cost_usd": cost})
+            hold.failed(exc, billed)
             errors.append(f"claude: {type(exc).__name__}: {str(exc)[:160]}")
             return None
         except Exception as exc:  # noqa: BLE001 - an unknown failure keeps the hold and falls through
-            unknown(type(exc).__name__)
+            hold.unknown(type(exc).__name__)
             errors.append(f"claude: {type(exc).__name__}: {str(exc)[:160]}")
             return None
-        cost = settle(answer.cost_usd, {"stop_reason": answer.stop_reason}) if answer.cost_verified else None
+        cost = hold.settle(answer.cost_usd, {"stop_reason": answer.stop_reason}) if answer.cost_verified else None
         if cost is None:
-            unknown("the answer's cost was not verified")
+            hold.unknown("the answer's cost was not verified")
         if not answer.text.strip():
             if cost:
                 billed.append({"route": "claude", "stop_reason": "empty", "cost_usd": cost})
@@ -469,8 +574,71 @@ class ModelRouter:
             return None
         data = answer.data if schema is not None else extract_json(answer.text)
         return {"text": answer.text, "json": data, "route": "claude", "model": model, "cost_usd": cost,
-                "cost_verified": cost is not None, "held_usd": 0.0 if cost is not None else hold,
+                "cost_verified": cost is not None, "held_usd": 0.0 if cost is not None else required,
                 "stop_reason": answer.stop_reason, "usage": dict(answer.usage)}
+
+    def claude_turn(self, *, role: str, family: str | None, key: str, system: Any, tools: Sequence[Mapping[str, Any]],
+                    messages: Sequence[Mapping[str, Any]], effort: str = "medium", max_tokens: int = 16000,
+                    timeout: float | None = None, family_usd_day: float | None = None, keep_usd: float = 0.0,
+                    tool_choice: Any = "auto", model: str | None = None) -> ClaudeReply:
+        """One turn of a role's tool loop on Claude (the module docstring's CLAUDE'S TOOL TURNS): the exact body
+        (`league.claude.tool_request_body`) on the role's model (`model`, else `claude_model(role)`: `claude.role_model`,
+        else `claude.model`; an unpriced one is never sent) and its hold (the gateway's worst case), admitted within the role's line, the
+        family's line (`family_usd_day`, a UTC day) and the funded room less `keep_usd`, then dispatched streamed and
+        settled as `ask`'s Claude route. A `ClaudeReply` on an answer (`tool_use`, `end_turn`); otherwise a `ModelError`
+        whose `kind` says why (a refusal and a truncation are billed at their usage and listed in `billed`; an unknown bill
+        leaves `held_usd` booked). It never falls through to Sail: the caller does, so its turn keeps one transcript."""
+        from ..claude import ClaudeError, ClaudeRefusal, ClaudeTruncated, reservation_ceiling, tool_request_body
+
+        self._require_committed_store()
+        if not self.claude_enabled(role):
+            raise ModelError(f"claude: not configured for the {role} role", kind="off")
+        errors: list[str] = []
+        billed: list[dict[str, Any]] = []
+        stream = self._claude_cfg().get("stream", True) is True
+        model = model or self.claude_model(role)
+        try:
+            body = tool_request_body(model, system, messages, tools, tool_choice=tool_choice, max_tokens=max_tokens, effort=effort,
+                                     stream=stream)
+            required = float(reservation_ceiling(body))
+            line = None if family_usd_day is None else _line(family_usd_day)
+            keep = _line(keep_usd, invalid=math.inf)  # room kept for the other roles: a typo keeps it all
+            request_id, kind = self._claude_admit(role=role, family=family, key=key, model=model, body=body, required=required,
+                                                  errors=errors, family_line=line, keep_usd=keep)
+        except Exception as exc:  # noqa: BLE001 - a body or an admission that does not read is no call
+            raise ModelError(f"claude admission: {type(exc).__name__}: {str(exc)[:160]}", kind="admission") from None
+        if request_id is None:
+            raise ModelError("; ".join(errors), kind=kind or "no_room")
+        hold = _ClaudeHold(self.store, request_id=request_id, usd=required, role=role, family=family, model=model, key=key)
+        try:
+            client = self.claude_factory(model)  # type: ignore[misc]
+            answer = client.messages(system, messages, tools, agent=f"swarm-{role}", role=role, max_tokens=body["max_tokens"],
+                                     effort=effort, tool_choice=tool_choice, request_id=request_id, stream=stream, timeout=timeout)
+        except ClaudeError as exc:
+            cost, held = hold.failed(exc, billed)
+            if isinstance(exc, ClaudeRefusal):
+                kind = "refusal"
+            elif isinstance(exc, ClaudeTruncated):
+                kind = "truncated"
+            elif exc.status is not None or exc.cap:
+                kind = "http"
+            elif exc.answer is not None:
+                kind = "answer"  # an answer that stopped for another reason (pause_turn)
+            else:
+                kind = "stream"
+            usage = getattr(exc.answer, "usage", None)
+            raise ModelError(f"claude: {type(exc).__name__}: {str(exc)[:160]}", kind=kind, billed=billed, held_usd=held,
+                             status=exc.status if isinstance(exc.status, int) else None,
+                             usage=usage if isinstance(usage, Mapping) else None,
+                             overrun_usd=max(0.0, (cost or 0.0) - required)) from None
+        except Exception as exc:  # noqa: BLE001 - an unknown failure keeps the hold
+            hold.unknown(type(exc).__name__)
+            raise ModelError(f"claude: {type(exc).__name__}: {str(exc)[:160]}", kind="unknown", held_usd=required) from None
+        cost = hold.settle(answer.cost_usd, {"stop_reason": answer.stop_reason}) if answer.cost_verified else None
+        if cost is None:
+            hold.unknown("the answer's cost was not verified")
+        return ClaudeReply(answer=answer, model=model, cost_usd=cost, held_usd=0.0 if cost is not None else required,
+                           request_id=request_id, overrun_usd=max(0.0, (cost or 0.0) - required))
 
     def settle_claude_holds(self, *, min_age: float = 60.0, absent_after: float = 1800.0, budget_seconds: float = 30.0) -> int:
         """True up the Claude holds whose bill the House never saw (the call's answer was lost, or the swarm restarted
@@ -632,6 +800,16 @@ class ModelRouter:
         return None
 
 
+def _line(value: Any, *, invalid: float = 0.0) -> float:
+    """A dollar amount from settings: a finite, non-negative number, else `invalid` (0 for a line, everything for a room
+    kept back: a typo never lifts a guard)."""
+    try:
+        line = float(value) if not isinstance(value, bool) else math.nan
+    except (TypeError, ValueError):
+        return invalid
+    return line if math.isfinite(line) and line >= 0 else invalid
+
+
 def build_router(root: Any, store: SwarmStore, settings: Mapping[str, Any], *, config: Mapping[str, Any] | None = None) -> ModelRouter:
     """The real router on the box: a Provider on `<root>/swarm-provider.sqlite`; OpenAI and Claude through the
     gateway when the config names one and a gateway token is in the environment."""
@@ -662,4 +840,4 @@ def build_router(root: Any, store: SwarmStore, settings: Mapping[str, Any], *, c
                        claude_factory=claude_factory, claude_meter=claude_meter)
 
 
-__all__ = ["ModelRouter", "ModelError", "build_router", "extract_json"]
+__all__ = ["ModelRouter", "ModelError", "ClaudeReply", "build_router", "extract_json"]

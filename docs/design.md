@@ -252,13 +252,22 @@ Agent count and simulated years measure activity; passing unseen evidence measur
 **Models** (Sept 29, 2026; only Sail and Claude are topped up from now on). The inner loop runs on
 Sail's DeepSeek-V4-Flash (V4.1-Flash where long cached histories make it cheaper), with a cache key per
 agent and the shared contract cached once a day; the bandit's top `researcher.top_families` (10 by
-default, 12 live) run on DeepSeek-V4-Pro at low effort. A researcher that stalls for 5 revisions
-escalates one rewrite to DeepSeek-V4-Pro asap (Kimi-K3 for the top ten families), or to Claude when
-"rewrite" is in `claude.roles`. Bulk overnight variants go through Sail's Batch API. Through the gateway,
-Claude answers first for the roles in `claude.roles` (by default the architect, the gate's audit and the
-diagnostician), each role within its own optional daily line (`claude.role_usd_day`) and model
-(`claude.role_model`), on `claude.model` (Opus 5.5 by default). Since 04:53Z Sept 29 the live settings
-put all five roles on Claude: Sonnet 5.5 for the architect, the diagnostician, the rewrite ($15 a day)
+default, 12 live) run on DeepSeek-V4-Pro at low effort. **The top band on Claude** (PR #417): the
+bandit's top `researcher.claude_top` families by weight (12) run their research cycles on Claude Sonnet
+5.5 at medium effort through the gateway, with the same loop, tools and limits, so the families closest
+to passing get the strongest reasoning. A cycle is Claude's when it has fresh evidence (a queued run or
+a rewrite landed), after a cycle that did not hold, and on every third cycle of a hold streak; the rest
+of a streak is the family's Sail profile's. Every Claude failure (a refusal, a cut answer, the funded
+total or a daily line reached, a timeout, an input that does not validate, an answer that cannot be
+read) finishes that turn on the family's own Sail profile, never a cycle error, and a breaker pauses
+the band after repeated unknown bills (league/swarm/claude_research.py). A researcher that stalls for 5
+revisions escalates one rewrite to DeepSeek-V4-Pro asap (Kimi-K3 for the top ten families), or to Claude
+when "rewrite" is in `claude.roles`. Bulk overnight variants go through Sail's Batch API. Through the
+gateway, Claude answers first for the roles in `claude.roles` (by default the architect, the gate's
+audit, the diagnostician and the researcher's top band), each role within its own optional daily line
+(`claude.role_usd_day`; the researcher's is $100) and model (`claude.role_model`; the researcher's is
+Sonnet 5.5), on `claude.model` (Opus 5.5 by default). Since 04:53Z Sept 29 the live settings put all
+five one-shot roles on Claude: Sonnet 5.5 for the architect, the diagnostician, the rewrite ($15 a day)
 and the review ($5 a day), and Opus 5.5 for the audit, so a program's two reads stay two different
 models. By default GPT-6 Sol reviews programs and GPT-6 Astra stands behind the audit while OpenAI's
 funded month lasts (to Sept 30), on its half-price flex tier wherever latency does not matter; the live

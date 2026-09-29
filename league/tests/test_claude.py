@@ -98,14 +98,15 @@ class RequestShape(unittest.TestCase):
     def test_the_ceiling_is_never_below_the_gateways_worst_case(self):
         body = request_body(MODEL, "rules " * 3000, [{"role": "user", "content": "packet " * 5000}])
         size = len(json.dumps(body).encode("utf-8"))
-        gateway = (Decimal(size + 4096) * 5 + Decimal(16000) * 20) / 1000000  # gateway/lib/claude.mjs worstCase
+        # gateway/lib/claude.mjs worstCase, at the row's dearest geography (US-only inference, 1.1x every rate)
+        gateway = Decimal("1.1") * (Decimal(size + 4096) * 5 + Decimal(16000) * 20) / 1000000
         self.assertGreaterEqual(reservation_ceiling(body), gateway)
         self.assertLess(reservation_ceiling(body) - gateway, Decimal("0.00001"))
         sonnet = request_body("claude-sonnet-5", "s", [{"role": "user", "content": "q"}], max_tokens=1000)
         self.assertGreaterEqual(reservation_ceiling(sonnet), (Decimal(len(json.dumps(sonnet)) + 4096) * Decimal("2.5") + 1000 * 10) / 10 ** 6)
         # Claude Sonnet 5.5 (Sept 29, 2026): Sonnet 5's prices, streamed at the 32,000-token ceiling.
         sonnet55 = request_body("claude-sonnet-5-5", "s", [{"role": "user", "content": "q"}], max_tokens=32000, stream=True)
-        worst = (Decimal(len(json.dumps(sonnet55).encode("utf-8")) + 4096) * Decimal("2.5") + 32000 * 10) / 10 ** 6
+        worst = Decimal("1.1") * (Decimal(len(json.dumps(sonnet55).encode("utf-8")) + 4096) * Decimal("2.5") + 32000 * 10) / 10 ** 6
         self.assertGreaterEqual(reservation_ceiling(sonnet55), worst)
         self.assertLess(reservation_ceiling(sonnet55) - worst, Decimal("0.00001"))
         with self.assertRaises(ClaudeError):
@@ -364,10 +365,14 @@ class GatewayPrices(unittest.TestCase):
         for model, (input_rate, output_rate) in MODEL_CEILINGS.items():
             with self.subTest(model=model):
                 row = prices[model]
-                self.assertGreaterEqual(input_rate, Decimal(str(max(row["input"], row["cache_write"]))))
-                self.assertGreaterEqual(output_rate, Decimal(str(row["output"])))
-        self.assertEqual(MODEL_CEILINGS["claude-sonnet-5-5"], (Decimal("2.50"), Decimal("10")))
-        self.assertEqual(prices["claude-sonnet-5-5"], {"input": 2, "cache_write": 2.5, "cache_read": 0.2, "output": 10})
+                # The gateway's worst case assumes the dearest geography its row names (gateway/lib/claude.mjs dearestGeo).
+                geo = Decimal(str(max([1, *(row.get("geo") or {}).values()])))
+                self.assertGreaterEqual(input_rate, geo * Decimal(str(max(row["input"], row["cache_write"]))))
+                self.assertGreaterEqual(output_rate, geo * Decimal(str(row["output"])))
+                # Claude 4.6 and later bill US-only inference at 1.1x ("Data residency pricing", Sept 29, 2026).
+                self.assertEqual(row.get("geo"), {"us": 1.1})
+        self.assertEqual(MODEL_CEILINGS["claude-sonnet-5-5"], (Decimal("2.75"), Decimal("11")))
+        self.assertEqual(prices["claude-sonnet-5-5"], {"input": 2, "cache_write": 2.5, "cache_read": 0.2, "output": 10, "geo": {"us": 1.1}})
 
     def test_the_swarms_model_and_the_house_default_are_priced_in_both(self):
         from league.swarm.settings import DEFAULTS

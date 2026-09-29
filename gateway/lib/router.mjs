@@ -638,7 +638,12 @@ async function claudeCall(request, env, { gate, fetcher, now, waitUntil = null }
   }
   const admitted = claude.admit(parsed, env);
   if (admitted.error) return fail(admitted.error, admitted.status);
-  const bytes = new TextEncoder().encode(body.text).length;
+  // What leaves is the body that was checked (Sept 29, 2026): the parse `admit` read, serialized again. Forwarding the
+  // raw text would let a body with a key given twice pass the check on its last value (JSON.parse keeps the last) and
+  // reach Anthropic with its first. The worst case is sized from these bytes too; compact JSON is never longer than
+  // the House's own `json.dumps`, so the House's hold stays at or above this one.
+  const forwarded = JSON.stringify(parsed);
+  const bytes = new TextEncoder().encode(forwarded).length;
   const tag = claude.requestId(request.headers.get(claude.REQUEST_HEADER));
   const hold = await gate.claudeReserve({ micro: String(claude.worstCase(admitted.price, bytes, admitted.maxTokens)), request: tag, at: now() });
   if (!hold.ok) return json({ error: hold.error, ...(hold.cap ? { cap: hold.cap } : {}) }, hold.status);
@@ -649,7 +654,7 @@ async function claudeCall(request, env, { gate, fetcher, now, waitUntil = null }
   let upstream, text;
   try {
     upstream = await fetcher(claude.HOST + claude.PATH, {
-      method: 'POST', headers: claudeHeaders(env, { stream: admitted.stream }), body: body.text, redirect: 'manual',
+      method: 'POST', headers: claudeHeaders(env, { stream: admitted.stream }), body: forwarded, redirect: 'manual',
       // Just under the House's own 600-second read, as the frontier's; a stream just over it (the House gives up first).
       signal: AbortSignal.timeout(admitted.stream ? claude.STREAM_TIMEOUT_MS : 570000),
     });

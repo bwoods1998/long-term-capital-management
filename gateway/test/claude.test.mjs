@@ -48,13 +48,20 @@ test('the deployed price table is exactly Opus 5.5, Sonnet 5 and Sonnet 5.5 at t
   const config = readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
   const variable = name => JSON.parse(new RegExp(`"${name}":\\s*("(?:[^"\\\\]|\\\\.)*")`).exec(config)[1]);
   const table = priceTable({ CLAUDE_MODELS: variable('CLAUDE_MODELS') });
-  // Sonnet 5.5 (Sept 29, 2026): platform.claude.com/docs/en/about-claude/pricing lists it at Sonnet 5's prices.
-  assert.deepEqual(table, { 'claude-opus-5-5': OPUS, 'claude-sonnet-5': SONNET, 'claude-sonnet-5-5': SONNET });
+  // Sonnet 5.5 (Sept 29, 2026): platform.claude.com/docs/en/about-claude/pricing lists it at Sonnet 5's prices. Every
+  // row carries the US-only inference multiplier (1.1x on every rate for Claude 4.6 and later, "Data residency pricing").
+  const us = { geo: { us: 1.1 } };
+  assert.deepEqual(table, { 'claude-opus-5-5': { ...OPUS, ...us }, 'claude-sonnet-5': { ...SONNET, ...us }, 'claude-sonnet-5-5': { ...SONNET, ...us } });
   const deployed = settings({ CLAUDE_MODELS: variable('CLAUDE_MODELS') });
-  assert.deepEqual(admit(body({ model: 'claude-sonnet-5-5' }), deployed), { model: 'claude-sonnet-5-5', price: SONNET, maxTokens: 16000, stream: false });
-  // 2,000 x $2 + 10,000 x $2.50 + 30,000 x $0.20 + 6,000 x $10, per million: 0.004 + 0.025 + 0.006 + 0.06 = $0.095.
+  assert.deepEqual(admit(body({ model: 'claude-sonnet-5-5' }), deployed),
+    { model: 'claude-sonnet-5-5', price: { ...SONNET, ...us }, maxTokens: 16000, stream: false });
+  // 2,000 x $2 + 10,000 x $2.50 + 30,000 x $0.20 + 6,000 x $10, per million: 0.004 + 0.025 + 0.006 + 0.06 = $0.095;
+  // at 1.1x when Anthropic reports the call ran in the US ($0.1045, and a micro-dollar up: the meter rounds a cost up).
   assert.equal(actualCost(table['claude-sonnet-5-5'], USAGE), 95000n);
-  assert.equal(worstCase(table['claude-sonnet-5-5'], 10000, 16000), BigInt(Math.ceil((10000 + 4096) * 2.5 + 16000 * 10)));
+  const inUs = actualCost(table['claude-sonnet-5-5'], { ...USAGE, inference_geo: 'us' });
+  assert.ok(inUs >= 104500n && inUs <= 104501n, String(inUs));
+  const worst = worstCase(table['claude-sonnet-5-5'], 10000, 16000), plain = BigInt(Math.ceil((10000 + 4096) * 2.5 + 16000 * 10));
+  assert.ok(worst >= plain * 11n / 10n && worst <= plain * 11n / 10n + 1n, `the worst case assumes the dearest geography: ${worst}`);
   assert.equal(variable('CLAUDE_USD'), '200');
   assert.equal(capMicro({ CLAUDE_USD: variable('CLAUDE_USD') }), 200000000n);
   assert.equal(capMicro({}), 0n, 'unset is no budget');
@@ -242,7 +249,8 @@ test('/v1/health reports Claude\'s funded meter, and /v1/claude/models what the 
   const health = await (await route(ask(null, {}, '/v1/health', 'GET'), env, { gate, now: () => NOW })).json();
   assert.deepEqual(health.claude, {
     funded: true, cap_usd: '100.00', spent_usd: '0.184000', settled_usd: '0.184000', inflight_usd: '0.000000', remaining_usd: '99.816000',
-    calls: 1, holds: 0, stale_holds: 0, swept: 0, swept_usd: '0.000000', models: ['claude-opus-5-5', 'claude-sonnet-5'], configured: true,
+    calls: 1, holds: 0, stale_holds: 0, swept: 0, swept_usd: '0.000000', overruns: 0, overrun_usd: '0.000000',
+    models: ['claude-opus-5-5', 'claude-sonnet-5'], configured: true,
     by_role: { diagnostician: '0.184000' }, by_agent: { unattributed: '0.184000' }, stops: { end_turn: 1 }, geos: {},
   });
   assert.ok(!JSON.stringify(health).includes(KEY));

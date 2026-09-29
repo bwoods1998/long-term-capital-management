@@ -27,7 +27,7 @@ owner's `GATEWAY_ADMIN_TOKEN`.
 
 | Route | What it does |
 |---|---|
-| `GET /v1/health` | the kill switch, caps and today's counters, the OpenAI month, the Claude meter (`claude`: funded total, spent, in flight, remaining, holds, the priced models, `by_role`, `by_agent`, stop reasons), Sail's balance and the House box's state; never reads a venue itself |
+| `GET /v1/health` | the kill switch, caps and today's counters, the OpenAI month, the Claude meter (`claude`: funded total, spent, in flight, remaining, holds, overruns, the priced models, `by_role`, `by_agent`, stop reasons, geographies), Sail's balance and the House box's state; never reads a venue itself |
 | `POST /v1/kill`, `POST /v1/unkill` | engage the kill switch (any token), release it (owner only) |
 | `/v1/alpaca/<path>` | the Brokerage Account (orders to `api.alpaca.markets`, market data to `data.alpaca.markets`) |
 | `/v1/alpaca-paper/<path>` | the paper account: never metered, not stopped by the kill switch, held to the same defined-risk shapes |
@@ -114,23 +114,41 @@ later month would need its remaining credit reconciled and its funded month and 
 nothing resets it, so it is raised only by what the owner adds, and raising it is a gateway deploy.
 `CLAUDE_MODELS` is the price table and the allowlist, dollars per million tokens: Claude Opus 5.5
 ($4 input, $5 five-minute write, $0.20 hit, $20 output), Claude Sonnet 5 and Claude Sonnet 5.5 ($2,
-$2.50, $0.20, $10; Sonnet 5.5 added 03:59Z Sept 29, 2026, version `7eaede72`). A model not in it is a
-`403`.
+$2.50, $0.20, $10; Sonnet 5.5 added 03:59Z Sept 29, 2026, version `7eaede72`). Since PR #417 every row
+carries `geo: {"us": 1.1}`: Claude 4.6 and later bill US-only inference at 1.1x every rate, and a
+workspace whose default inference geography is "us" is billed so without asking for it. A model not in
+the table is a `403`.
 
 - **Reserved at the worst case** before the call leaves: every byte of the request body plus 4,096
   framing tokens, each an input token at the five-minute cache-write rate, and every `max_tokens`
-  output token (16,000 unstreamed, 32,000 streamed; thinking is output). A call that does not fit
-  what is left is a `402`; the kill switch is a `423`.
+  output token (16,000 unstreamed, 32,000 streamed; thinking is output), at the row's dearest
+  geography. A call that does not fit what is left is `402 {cap: "claude_funded"}`; the kill switch is
+  `423 {cap: "kill_switch"}`; no key is `503 {cap: "setup"}`. What leaves for Anthropic is the body the
+  checks read, serialized again (PR #417: a key given twice cannot pass the checks on one value and
+  reach Anthropic with another), and the worst case is sized from those bytes.
 - **Settled at Anthropic's usage**: uncached input, cache writes, cache reads and output each at its
-  own rate. A refusal (`stop_reason: "refusal"`) is billed at its usage. A hold nothing settled is
-  swept to zero after 30 minutes. The reply carries `X-LTCM-Cost-USD`; a streamed reply ends with one
-  `ltcm.cost` event; `GET /v1/claude/request/<id>` says what became of a call.
-- **Admitted**: text turns, adaptive thinking (never disabled), `output_config` with an effort and a
-  JSON-schema format, up to four five-minute cache markers. **Refused** (`400`): tools, forced tool
-  choice, sampling parameters, fast mode, `inference_geo`, the one-hour cache and an assistant turn
-  last: anything that bills beyond what the body shows.
+  own rate, times the geography's multiplier when the usage names one. A refusal (`stop_reason:
+  "refusal"`) and a cut answer are billed at their usage; a 4xx settles at zero. An answer that broke
+  after its headers keeps its whole hold (unknown is not free); a hold nothing settled is swept to zero
+  after 30 minutes. A cost above its own hold is booked in full and counted as an overrun (`overruns`,
+  `overrun_usd`). The reply carries `X-LTCM-Cost-USD`; a streamed reply ends with one `ltcm.cost` event
+  (`{cost_usd, known, stop}`); `GET /v1/claude/request/<id>` says what became of a call.
+- **What is admitted**: text turns, adaptive thinking (never disabled, never `budget_tokens`; display
+  omitted or summarized), `output_config` with an effort (low to max) and a JSON-schema format, up to
+  four five-minute cache markers, and (PR #417) the House's OWN tools and its tool loop: custom tools
+  with a name, a description, an object `input_schema`, a marker and `eager_input_streaming`;
+  `tool_choice` auto or none; `tool_use` blocks (`caller` direct only), `tool_result` blocks with text
+  content, and the model's `thinking` (with its signature) and `redacted_thinking` blocks passed back.
+  A custom tool runs in the House, so it bills nothing beyond the body, and the tools and every turn
+  are bytes of the body the worst case already counts.
+- **What is refused** (`400`): anything that runs or bills beyond the body (server and
+  Anthropic-defined tools such as web search, code execution, bash, computer and MCP; `strict`,
+  `defer_loading`, `allowed_callers`), forced tool choice (`any`, `tool`: a 400 upstream on Sonnet 5.5
+  and Opus 5.5), images, documents, sampling parameters, fast mode, `inference_geo`, the one-hour
+  cache and an assistant turn last.
 - **Who spent it**: `X-LTCM-Role` and `X-LTCM-Agent` file each settled cost under `by_role` and
-  `by_agent` in `/v1/health`.
+  `by_agent` in `/v1/health`. The House's roles: `architect`, `audit`, `diagnostician`, `rewrite`,
+  `review` and `researcher` (the top band's research cycles, PR #417).
 
 ## The watchdog
 
