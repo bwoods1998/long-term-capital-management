@@ -21,6 +21,15 @@ on branch `run/options-swarm-2026-09-26`) has the detail.
 
 ## Not yet deployed
 
+- **A restored real instance is a real instance** (#427; not yet released; money path). After every House restart
+  `_restore_real_instances` put the saved mode into `Instance.observe` (a positional shift), so the House live test
+  (`house:rebound-live@0:h`, `"observe": "live"` in `health.json` since the 06:48Z and 13:44Z restarts Sept 29) loaded in
+  the observe child and decided nothing; a restored Probe or Sized family's real opens would have been refused. Now
+  `mode=` by keyword, `Instance.observe` strictly True only for a shadow `:o` instance (a `:o` key on any other kind
+  raises), and `_real_intent` refuses, alerted, any instance that is not real. Regression tests in
+  `league/tests/test_live_restore.py`. The money digest stays `a3e2aa7c`. After the deploy: `options_live.instances`
+  shows `house:rebound-live@0:h` with `"observe": false`, and two decider children run.
+
 - **Train from 2017** (#424; not yet released). Train's window, `storelib.TRAIN_EARLIEST` and
   `gym.train_from` reach 2017-01-03 (a third start beside 2020-01-02 and 2022-01-03; over eight years the derived
   split is 24 and the time limit 2400 s). Stage 9's `EARLY` stays the literal 2020-01-02..2021-12-31. New public
