@@ -2365,4 +2365,26 @@ looks like beta. Validation 2025 and the holdout judge both.
   - The site's "House live test" label (personal-site #16) is deployed, version `dcd61fbc`. The positions table still
     reconciles: rows plus other = -$8.67 = Profit, which now includes more of the broker's posted fees.
 
+
+- **00:16-00:22Z The House live test armed.**
+  - Its analysis script was written and pinned before the switch (sha256 `a5eaf7a3…`, self-test 88/88; the House had
+    no test rows).
+  - The start fill model was kept privately (`3de9e2a6…`, `fm-c4a0c70c`).
+  - `live.house_test` on at 00:17:28Z. By 00:22Z the House reported wanted "yes" and files "verified", and instance
+    `house:rebound-live@0:h` was registered with the pre-registered run hash `0771b441`.
+  - Its first possible decision is Tuesday's 15:35 ET. Expected pace from the Gym: about 3 trades in 20 sessions, so
+    the verdict will rest mainly on fill behaviour, as pre-registered.
+
+### Sprint scoreboard, T0 + 66 h (00:18Z Sept 29, R7 live)
+
+| # | Metric | Value |
+|---|---|---|
+| 1 | Population | 40 alive, 722 retired; 36 born and 48 retired in 2 h (agenda v12 since 00:05Z) |
+| 2 | Throughput | 559 cycles/h, median 11 s; 1 provider 503 |
+| 3 | Search | 66,112 trials, 321,463 program-years. Closest in Validation 2025: `market-distraction-release-call` v11 (long calls on BABA, TSM, MU, MSFT and QQQ) at 7/8. It fails only t: 1.95 at 1.0x (1.88 at 1.5x), 158 trades on 65 days, traded-day skew 1.94. Next closest: `down-day-relative-strength-call` and `idiosyncratic-gap-confirmation-call` at 6/8. The drift-free component hunt is running |
+| 4 | Evidence | Validation passes alive 0; holdout looks 2, passes 0 |
+| 5 | Real fills (D3) | none since the close; calibration's target is 100 a cell from Tuesday |
+| 6 | Money | Equity $1,473.11; Profit -$8.67; options buying power $1,473.08; grant capital $1,473.11 on `a3e2aa7c`; 0 positions, 0 orders |
+| 7 | Compute | Sail $63.56 (the owner is topping up). Claude $73.93 of $100. OpenAI $643.08 + $11.40 in flight of $707. The swarm spent $10.44 in 2 h |
+
 ## Report
