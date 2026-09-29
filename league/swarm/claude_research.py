@@ -27,8 +27,12 @@ the tools, their limits and their semantics are the researcher's own and do not 
 - THE INPUTS (`tool_calls`, `validate`): every call's input is checked against its tool's schema BEFORE it runs: types
   (a boolean is not a number), required keys, enums, arrays' items and no unknown key (Sonnet 5.5 now and then renames
   a parameter). An optional key sent as null is dropped, and a tool name miscased is taken when it names exactly one
-  tool (both unambiguous; Anthropic's guidance for Sonnet 5.5). An input that did not parse or does not validate is an
-  error on its call, answered as an error and never run; the researcher then finishes its cycle on Sail.
+  tool (both unambiguous; "accept the call when the match is unambiguous, even if the letter case is wrong" is the first
+  of Anthropic's two ways in "Tolerant tool-call handling", prompting Claude Sonnet 5.5). The loop runs and stores the
+  declared name; the answer itself goes back to Claude byte for byte as it came (preserved thinking binds its blocks to
+  every earlier turn, so no block is ever rewritten). A number must be finite as a float (a 400-digit integer is not). An
+  input that did not parse or does not validate is an error on its call, answered as an error and never run; the
+  researcher then finishes its cycle on Sail.
 
 Standard library only.
 """
@@ -85,6 +89,15 @@ def resolve_name(name: str, names: Sequence[str]) -> str | None:
     return matches[0] if len(matches) == 1 else None
 
 
+def _finite(value: int | float) -> bool:
+    """A number a tool can use: a finite float, or an integer a float can hold (a 400-digit JSON integer cannot: float()
+    raises OverflowError, which must never escape the input check)."""
+    try:
+        return math.isfinite(float(value))
+    except (OverflowError, ValueError):
+        return False
+
+
 def _type_error(schema: Mapping[str, Any], value: Any, where: str) -> str | None:
     kind = schema.get("type")
     if kind == "string" and not isinstance(value, str):
@@ -93,7 +106,9 @@ def _type_error(schema: Mapping[str, Any], value: Any, where: str) -> str | None
         return f"{where} must be true or false"
     if kind == "integer" and (isinstance(value, bool) or not (isinstance(value, int) or isinstance(value, float) and value.is_integer())):
         return f"{where} must be an integer"
-    if kind == "number" and (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)):
+    if kind in ("integer", "number") and not isinstance(value, bool) and isinstance(value, (int, float)) and not _finite(value):
+        return f"{where} must be a finite number"
+    if kind == "number" and (isinstance(value, bool) or not isinstance(value, (int, float))):
         return f"{where} must be a number"
     if kind == "object" and not isinstance(value, dict):
         return f"{where} must be an object"
@@ -155,22 +170,30 @@ def tool_calls(tool_uses: Sequence[Any], schemas: Mapping[str, Mapping[str, Any]
 
 # --------------------------------------------------------------------------------------------------- the conversation
 class _Ids:
-    """Call ids made Anthropic's shape (`[A-Za-z0-9_-]{1,128}`), one-to-one: a collision gets a stable suffix."""
+    """Call ids made Anthropic's shape (`[A-Za-z0-9_-]{1,128}`), one-to-one: a collision gets a stable suffix. A source id
+    that a SECOND call reuses (`fresh`) gets a new id from then on, so no two `tool_use` blocks share one (Anthropic refuses
+    that) and each result pairs with the latest call of its id, as the history reads."""
 
     def __init__(self) -> None:
         self.map: dict[str, str] = {}
         self.used: set[str] = set()
 
+    def _new(self, key: str) -> str:
+        base = _BAD_ID.sub("_", key)[:120] or "call"
+        out, n = base, 1
+        while out in self.used:
+            out, n = f"{base}_{n}", n + 1
+        self.map[key] = out
+        self.used.add(out)
+        return out
+
     def __call__(self, call_id: Any) -> str:
         key = str(call_id)
-        if key not in self.map:
-            base = _BAD_ID.sub("_", key)[:120] or "call"
-            out, n = base, 1
-            while out in self.used:
-                out, n = f"{base}_{n}", n + 1
-            self.map[key] = out
-            self.used.add(out)
-        return self.map[key]
+        return self.map[key] if key in self.map else self._new(key)
+
+    def fresh(self, call_id: Any) -> str:
+        """A new id for a call whose source id an earlier call already had."""
+        return self._new(str(call_id))
 
 
 def _text(content: Any) -> str:
@@ -197,6 +220,7 @@ def anthropic_messages(items: Sequence[Mapping[str, Any]], names: Sequence[str],
     declared = set(names)
     turns: list[dict[str, Any]] = []
     named: dict[str, str] = {}
+    emitted: set[str] = set()
 
     def add(role: str, block: dict[str, Any]) -> None:
         if turns and turns[-1]["role"] == role:
@@ -212,8 +236,12 @@ def anthropic_messages(items: Sequence[Mapping[str, Any]], names: Sequence[str],
             name, raw = str(item.get("name") or ""), str(item.get("arguments") or "")
             if name in declared:
                 args = _object(raw)
-                named[ids(item.get("call_id"))] = name
-                add("assistant", {"type": "tool_use", "id": ids(item.get("call_id")), "name": name,
+                tool_id = ids(item.get("call_id"))
+                if tool_id in emitted:  # a reused source id: this call gets its own
+                    tool_id = ids.fresh(item.get("call_id"))
+                emitted.add(tool_id)
+                named[tool_id] = name
+                add("assistant", {"type": "tool_use", "id": tool_id, "name": name,
                                   "input": args if args is not None else {"INVALID_JSON": raw[:RAW_CHARS]}})
             else:
                 add("assistant", {"type": "text", "text": f"(I called {name or 'a tool'} with {raw[:RAW_CHARS]})"})

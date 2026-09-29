@@ -210,3 +210,36 @@ test('a streamed tool_use answer passes through and settles at its usage, as an 
   assert.deepEqual([meter.spent_usd, meter.inflight_usd, meter.stops, meter.by_role], ['0.086800', '0.000000', { tool_use: 1 }, { researcher: '0.086800' }]);
   assert.deepEqual(out.gate.claudeRequest('swarm:condor:c5:m0:ab'), { request: 'swarm:condor:c5:m0:ab', state: 'settled', cost_usd: '0.086800' });
 });
+
+test('what leaves is the body that was checked: a key given twice reaches Anthropic with the value admission read', async () => {
+  // JSON.parse keeps a repeated key's LAST value; a parser that kept the first would run the dearer model at 128K output
+  // while the gateway priced Sonnet 5.5 at 16,000. The gateway forwards its own serialization of the checked parse.
+  const raw = JSON.stringify(body()).replace('{"model":"claude-sonnet-5-5","max_tokens":16000,',
+    '{"model":"claude-opus-5-5","max_tokens":128000,"model":"claude-sonnet-5-5","max_tokens":16000,');
+  assert.ok(raw.includes('"max_tokens":128000'));
+  const env = settings();
+  const gate = createGate({ store: memoryStore(), env, now: () => NOW });
+  const seen = [];
+  const fetcher = async (url, init) => {
+    seen.push({ init, held: gate.claudeStatus().inflight_usd });
+    return new Response('{}', { status: 400 });
+  };
+  const request = new Request('https://gw/v1/claude/messages', { method: 'POST', body: raw, headers: { Authorization: `Bearer ${TOKEN}` } });
+  await route(request, env, { gate, fetcher, now: () => NOW });
+  const sent = seen[0].init.body;
+  assert.equal(sent, JSON.stringify(JSON.parse(raw)), 'the checked parse, serialized');
+  assert.ok(!sent.includes('claude-opus-5-5') && !sent.includes('128000'), 'the first values never leave');
+  assert.equal(seen[0].held, formatUsdMicro(worstCase(SONNET, new TextEncoder().encode(sent).length, 16000)), 'held for the bytes sent');
+});
+
+test('a cost above its own hold is an overrun: booked in full and counted in the health report', () => {
+  const env = settings();
+  const gate = createGate({ store: memoryStore(), env, now: () => NOW });
+  const held = gate.claudeReserve({ micro: '400000', request: 'swarm:condor:c6:m0:ab', at: NOW });
+  assert.equal(held.ok, true);
+  gate.claudeSettle({ id: held.id, reserved: held.micro, actual: '450000', role: 'researcher', stop: 'tool_use', at: NOW });
+  const within = gate.claudeReserve({ micro: '400000', at: NOW });
+  gate.claudeSettle({ id: within.id, reserved: within.micro, actual: '90000', role: 'researcher', stop: 'tool_use', at: NOW });
+  const status = gate.claudeStatus(NOW);
+  assert.deepEqual([status.overruns, status.overrun_usd, status.spent_usd], [1, '0.050000', '0.540000']);
+});

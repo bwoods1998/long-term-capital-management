@@ -149,8 +149,9 @@ class Body(unittest.TestCase):
                                                           {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01A",
                                                                                         "content": "y" * 12000}]}], TOOLS, max_tokens=16000)
         size = len(json.dumps(body).encode("utf-8"))
-        # gateway/lib/claude.mjs worstCase: ceil(((bytes + 4096) x $2.50 + max_tokens x $10) per million), in micro-dollars.
-        worst = Decimal(math.ceil((size + 4096) * 2.5 + 16000 * 10)) / 1000000
+        # gateway/lib/claude.mjs worstCase: ceil((1.1 x ((bytes + 4096) x $2.50 + max_tokens x $10)) per million), in
+        # micro-dollars (the row's dearest geography, US-only inference at 1.1x, is assumed).
+        worst = Decimal(math.ceil(Decimal("1.1") * (Decimal(size + 4096) * Decimal("2.5") + 16000 * 10))) / 1000000
         ceiling = reservation_ceiling(body)
         self.assertGreaterEqual(ceiling, worst)
         self.assertLess(ceiling - worst, Decimal("0.00001"))

@@ -75,10 +75,14 @@ DEFAULTS: dict[str, Any] = {
         # `claude.roles`; 0 turns it off. Every Claude failure finishes the turn on the family's Sail profile above.
         "claude_top": 12,                # on `claude.role_model.researcher` (Claude Sonnet 5.5)
         "claude_effort": "medium",       # low | medium | high | xhigh | max (Anthropic: medium for multistep tool use)
-        "claude_max_tokens": 16000,      # thinking and the answer together, streamed (the gateway allows 32,000); sizes the hold
+        "claude_max_tokens": 12000,      # thinking and the answer together, streamed; sizes the hold (~$0.33 on a mean body)
         "claude_timeout_seconds": 180,   # one call's overall limit (120 s is allowed between events)
         "claude_family_usd_day": 15.0,   # one family's Claude spend a UTC day (holds included): a fuse
         "claude_min_room_usd": 25.0,     # funded Claude room the researcher never takes: the architect, audit and diagnostician's
+        "claude_hold_every": 3,          # in a hold streak with nothing new, Claude answers every 3rd cycle, Sail the rest (1: all)
+        "claude_breaker_failures": 3,    # unknown-bill failures (a cut stream, a 5xx, a 429) in the window that pause the band
+        "claude_breaker_window_seconds": 3600,
+        "claude_breaker_pause_seconds": 3600,  # the band's cycles run on Sail while paused (kv `claude_band`); one overrun pauses it
         "stall_revisions": 5,
         "rewrites_per_day": 4,
         "rewrite_min_hours": 1.0,

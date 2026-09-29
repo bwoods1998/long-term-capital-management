@@ -187,6 +187,20 @@ class Adapter(unittest.TestCase):
         self.assertEqual(len(set(ids)), 2, ids)
         self.assertEqual([(r["tool_use_id"], r["is_error"]) for r in turns[2]["content"]], [(ids[0], True), (ids[1], True)])
 
+    def test_a_source_id_reused_by_a_second_call_gets_its_own_tool_use_id_and_its_result_pairs_with_it(self):
+        items = [{"role": "user", "content": "go"},
+                 {"type": "function_call", "call_id": "call_7", "name": "notebook", "arguments": '{"action": "read"}'},
+                 {"type": "function_call_output", "call_id": "call_7", "output": "first"},
+                 {"type": "function_call", "call_id": "call_7", "name": "graveyard", "arguments": '{"query": "vol"}'},
+                 {"type": "function_call_output", "call_id": "call_7", "output": "second"},
+                 {"role": "user", "content": "next"}]
+        turns = CR.anthropic_messages(items, self.NAMES)
+        uses = [b for t in turns for b in t["content"] if b["type"] == "tool_use"]
+        results = [b for t in turns for b in t["content"] if b["type"] == "tool_result"]
+        self.assertEqual(len({u["id"] for u in uses}), 2, "no two tool_use blocks share an id (Anthropic refuses that)")
+        self.assertEqual([(r["tool_use_id"], r["content"]) for r in results], [(uses[0]["id"], "first"), (uses[1]["id"], "second")])
+        tool_request_body(SONNET, "s", turns, CR.anthropic_tools(TOOLS))
+
     def test_a_claude_answer_is_stored_as_sail_items_and_reads_back_as_the_same_pairs_without_thinking(self):
         first, second = call("notebook", {"action": "append", "text": "Wider."}), call("submit", {"run_id": "run-1"})
         content = [thinking("Plan."), thinking(""), text("Two calls."), first, second]
@@ -229,6 +243,9 @@ class Inputs(unittest.TestCase):
             "a variant that is not an object": ("gym_sweep", {"variants": [{}, 3]}, "variants[1] must be an object"),
             "a hold that is not a boolean": ("gym_run", {"hold": "yes"}, "hold must be true or false"),
             "an unknown tool": ("pause_entries", {}, "unknown tool"),
+            "a number no float can hold": ("gym_run", {"stress": 10 ** 400}, "stress must be a finite number"),
+            "an integer no float can hold": ("read_run", {"run_id": "r", "section": "summary", "page": 10 ** 400},
+                                             "page must be a finite number"),
         }
         for why, (name, args, message) in cases.items():
             with self.subTest(why):
@@ -484,6 +501,213 @@ class Fallbacks(ClaudeCase):
         self.assertEqual((out["claude_calls"], out["model_calls"], len(self.sail.bodies)), (1, 2, 1))
         self.assertEqual(self.sail.bodies[0]["tool_choice"], "auto")
         self.assertEqual(out["profile"], "pro_asap", "the family's own Sail profile (the top band's)")
+
+
+class ReviewFixes(Fallbacks):
+    """Sept 29, 2026: the two reviews of PR #417, each finding a case."""
+
+    def test_retire_on_a_revise_turn_is_refused_for_a_family_that_is_not_dead(self):
+        # Review 1, F1: Claude sees every tool every turn; `can_retire` alone must never retire a family on REVISE.
+        with mock.patch.object(Researcher, "can_retire", return_value=True), mock.patch.object(Researcher, "dead", return_value=None):
+            self.claude_script[:] = [answer(call("retire", {"reason": "refuted"}), self.revise_call()),
+                                     answer(text("Read it."), stop="end_turn")]
+            out = self.cycle()
+        self.assertNotIn("error", out)
+        self.assertIsNone(self.store.family(self.fid).get("retired_at"), "the family is alive")
+        self.assertTrue(out.get("retire_refused"))
+        self.assertEqual(out["claude_refused_calls"], 1)
+        self.assertIn("retire is not offered on this turn", last_results(self.bodies()[1])[0]["content"])
+        self.assertEqual(out["tool_calls"], 1, "the run ran")
+        # A REVISE answered with retire alone is no run: retried on Sail, and the family is still alive.
+        self.setUp()
+        with mock.patch.object(Researcher, "can_retire", return_value=True), mock.patch.object(Researcher, "dead", return_value=None):
+            self.claude_script[:] = [answer(call("retire", {"reason": "refuted"}), cost="0.020000")]
+            self.sail_revises()
+            self.check_fallback("no_run", billed=0.02)
+        self.assertIsNone(self.store.family(self.fid).get("retired_at"))
+
+    def test_a_revise_turn_answered_only_with_tools_it_does_not_offer_is_retried_on_sail(self):
+        # Review 2, F1: Sail's REVISE requires a run; Claude's must too, or nothing runs and model calls burn.
+        self.claude_script[:] = [answer(call("notebook", {"action": "read"}), call("graveyard", {"query": "vol"}), cost="0.050000")]
+        self.sail_revises()
+        out = self.check_fallback("no_run", billed=0.05)
+        self.assertEqual(len(self.requests), 1, "Claude was asked once")
+        self.assertNotIn("claude_refused_calls", out, "its calls were never answered: the turn is Sail's")
+        self.assertNotIn("route", out, "a cycle that ran on Sail is Sail's (review 1, F7)")
+
+    def test_a_revise_turn_answered_with_a_sweep_while_sweeps_are_off_is_retried_on_sail(self):
+        self.settings["researcher"]["sweep_enabled"] = False
+        self.assertNotIn("gym_sweep", [t["name"] for t in self.researcher().claude_tools()], "Claude is not given a sweep")
+        self.claude_script[:] = [answer(call("gym_sweep", {"variants": [{}, {"vrp_min": 1.5}]}), cost="0.040000")]
+        self.steps = [{"calls": [("gym_run", {"code": self.code, "params": {"vrp_min": 1.3}, "why": "sail"})]}]
+        out = self.cycle()
+        self.assertNotIn("error", out)
+        self.assertTrue(out["claude_fallback"].startswith("no_run:"), out["claude_fallback"])
+        self.assertEqual([t["name"] for t in self.sail.bodies[0]["tools"]], ["gym_run"])
+        self.assertEqual([v["params"] for v in self.store.versions(self.fid)][-1], {"vrp_min": 1.3}, "Sail's run ran")
+        self.assertNotIn("gym_sweep", [t["name"] for t in self.bodies()[0]["tools"]])
+
+    def test_an_answer_that_cannot_be_read_is_sails_turn_with_its_bill_booked(self):
+        # Review 2, F2: reading the answer is Claude's part; a 400-digit number, or any error there, is never a cycle error.
+        self.claude_script[:] = [answer(call("gym_run", {"code": self.code, "stress": 10 ** 400}), cost="0.030000")]
+        self.sail_revises()
+        out = self.check_fallback("no_run", billed=0.03)
+        self.assertEqual(out["claude_usage"]["output"], USAGE["output_tokens"])
+        self.setUp()
+        self.claude_script[:] = [answer(self.revise_call({"vrp_min": 9.9}), cost="0.030000")]
+        self.sail_revises()
+        with mock.patch("league.swarm.researcher.tool_calls", side_effect=OverflowError("int too large to convert to float")):
+            out = self.check_fallback("answer", billed=0.03)
+        self.assertIn("OverflowError", out["claude_fallback"])
+        self.assertGreaterEqual(out["cost_usd"], 0.03, "the settled Claude bill is in the cycle's cost")
+
+    def test_a_late_failure_never_starts_sail_past_the_deadline(self):
+        # Review 2, F3: turn 1 took 90 s, turn 2 on Claude failed 45 s later: 35 s are left, under `min_call_seconds`.
+        def slow(result):
+            def step(body):
+                self.clock.advance(45 if isinstance(result, BaseException) else 90)
+                return result
+            return step
+
+        self.claude_script[:] = [slow(answer(self.revise_call())), slow(ClaudeError("the Claude stream broke"))]
+        out = self.cycle()
+        self.assertNotIn("error", out)
+        self.assertEqual(self.sail.bodies, [], "no Sail call started with too little of the cycle left")
+        self.assertEqual((out["model_calls"], out["claude_calls"]), (1, 1))
+        self.assertTrue(out["claude_fallback"].startswith("stream:"))
+        self.assertEqual(out["route"], "claude")
+        # The first turn keeps its fallback whatever the clock says.
+        self.setUp()
+        self.claude_script[:] = [slow(ClaudeError("the Claude stream broke"))]
+        self.sail_revises()
+        out = self.cycle()
+        self.assertEqual((out["model_calls"], len(self.sail.bodies)), (2, 2), "Sail's REVISE, then its READ")
+
+    def test_a_refused_turns_tokens_are_measured_beside_its_bill(self):
+        # Review 2, F5.
+        self.claude_script[:] = [self.refused_turn(ClaudeRefusal, "refusal")]
+        self.sail_revises()
+        out = self.check_fallback("refusal", billed=0.012)
+        self.assertEqual(out["claude_usage"], {"input": 900, "cache_write": 23000, "cache_read": 14500, "output": 2400})
+
+
+class HoldsAndBreaker(Fallbacks):
+    """THE HOLDS rule and THE BREAKER (researcher.py HOLDS AND THE BREAKER)."""
+
+    def hold(self, note="nothing new"):
+        return answer(call("gym_run", {"hold": True, "note": note}), cost="0.020000")
+
+    def test_a_hold_streak_goes_to_sail_except_every_nth_cycle_and_fresh_evidence(self):
+        self.claude_script[:] = [self.hold()]
+        out = self.cycle()
+        self.assertEqual((out.get("route"), out.get("hold")), ("claude", True))
+        self.assertEqual(self.store.family(self.fid)["state"]["hold_streak"], 1)
+        # Streak 1 and 2: nothing new, so Sail decides (it holds too).
+        for streak in (1, 2):
+            self.steps = [{"calls": [("gym_run", {"hold": True, "note": "still nothing"})]}]
+            out = self.cycle()
+            self.assertEqual(out["claude_skipped"], f"hold_streak: {streak} holds in a row (Claude looks every 3)")
+            self.assertNotIn("route", out)
+            self.assertEqual(len(self.requests), 1, "Claude was not asked")
+        # Streak 3: Claude looks again, and this time runs something.
+        self.claude_script[:] = [answer(self.revise_call()), answer(text("Read it."), stop="end_turn")]
+        out = self.cycle()
+        self.assertEqual(out["route"], "claude")
+        self.assertEqual(self.store.family(self.fid)["state"]["hold_streak"], 0, "a cycle that ran resets the streak")
+        # 1 puts every cycle on Claude.
+        self.settings["researcher"]["claude_hold_every"] = 1
+        self.store.set_state(self.fid, hold_streak=5)
+        self.claude_script[:] = [self.hold()]
+        self.assertEqual(self.cycle().get("route"), "claude")
+
+    def test_fresh_evidence_goes_to_claude_whatever_the_streak(self):
+        # A run queued last cycle lands this cycle: Claude reads it even in a hold streak.
+        self.claude_script[:] = [answer(self.revise_call()), answer(text("Queue the next."), self.revise_call({"vrp_min": 1.6}))]
+        self.cycle()
+        self.assertTrue(self.store.convo(self.fid)[1], "a run is queued for the next cycle")
+        self.store.set_state(self.fid, hold_streak=4)
+        self.claude_script[:] = [answer(text("It came back."), stop="end_turn")]
+        out = self.cycle()
+        self.assertNotIn("claude_skipped", out)
+        self.assertEqual(out["route"], "claude")
+
+    def test_unknown_bills_pause_the_band_and_the_pause_ends(self):
+        for n in range(3):
+            self.claude_script[:] = [ClaudeError("the Claude stream broke")]
+            self.sail_revises()
+            out = self.cycle()
+            self.assertTrue(out["claude_fallback"].startswith("stream:"))
+            self.assertEqual(out.get("claude_paused"), True if n == 2 else None)
+        band = self.store.get("claude_band")
+        self.assertGreater(band["paused_until"], self.clock.t)
+        self.assertIn("stream", band["why"])
+        self.assertEqual(band["trouble"], [], "the count starts again after a pause")
+        asked = len(self.requests)
+        self.steps = [{"calls": [("gym_run", {"hold": True, "note": "nothing new"})]}]
+        out = self.cycle()
+        self.assertTrue(out["claude_skipped"].startswith("paused: stream"))
+        self.assertEqual(len(self.requests), asked, "no Claude call while paused")
+        self.clock.advance(3601)
+        self.store.set_state(self.fid, hold_streak=0)
+        self.claude_script[:] = [self.hold()]
+        self.assertEqual(self.cycle().get("route"), "claude", "the pause ended")
+
+    def test_what_counts_as_trouble(self):
+        r = self.researcher()
+        for exc, trouble in ((ModelError("x", kind="http", status=402), False), (ModelError("x", kind="refusal"), False),
+                             (ModelError("x", kind="http", status=529), True), (ModelError("x", kind="http", status=429), True),
+                             (ModelError("x", kind="truncated"), False), (ModelError("x", kind="answer", held_usd=0.3), True)):
+            with self.subTest(kind=exc.kind, status=exc.status):
+                self.store.put("claude_band", {})
+                r._claude_trouble({}, exc)
+                self.assertEqual(len(self.store.get("claude_band").get("trouble") or []), int(trouble))
+        self.settings["researcher"]["claude_breaker_failures"] = 0  # off: only an overrun pauses
+        for _ in range(5):
+            r._claude_trouble({}, ModelError("x", kind="stream"))
+        self.assertNotIn("paused_until", self.store.get("claude_band"))
+
+    def test_a_bill_above_its_hold_pauses_the_band_at_once(self):
+        self.claude_script[:] = [answer(call("gym_run", {"hold": True, "note": "nothing new"}), cost="5.000000")]
+        out = self.cycle()
+        self.assertEqual(out.get("route"), "claude", "the answer is used: it is paid for")
+        self.assertGreater(out["claude_overrun"], 4)
+        self.assertTrue(out["claude_paused"])
+        self.assertIn("overrun", self.store.get("claude_band")["why"])
+
+
+class KeptRoom(ClaudeCase):
+    """Review 1, F6: the gateway's meter is read at most once a minute; the swarm's own Claude calls booked since then are
+    taken off its reading, so concurrent admissions never eat the room kept for the other roles."""
+
+    def turn(self):
+        return self.router.claude_turn(role="researcher", family=self.fid, key=f"swarm:{self.fid}:c2:m0:1", model=SONNET,
+                                       system="s", tools=CR.anthropic_tools(TOOLS), messages=[{"role": "user", "content": "go"}],
+                                       family_usd_day=15.0, keep_usd=25.0, max_tokens=12000)
+
+    def test_spend_booked_since_the_meters_read_counts_against_its_room(self):
+        self.settings["claude"]["usd_cap"] = 1000.0
+        self.meter.value = 30.5  # $25.50 above the $5 reserve: $0.50 above the $25 kept
+        self.meter.read_at = self.clock.t - 30
+        self.store.add_spend("claude", 0.40, family="elsewhere", detail={"role": "architect", "hold": "k", "request": "r1"})
+        with self.assertRaises(ModelError) as caught:
+            self.turn()
+        self.assertEqual(caught.exception.kind, "no_room")
+        self.assertEqual(self.requests, [])
+        self.clock.advance(60)
+        self.meter.read_at = self.clock.t  # read a minute after that hold: the gateway's number includes it
+        self.claude_script[:] = [answer(call("gym_run", {"hold": True}), cost="0.020000")]
+        self.assertEqual(self.turn().cost_usd, 0.02)
+
+    def test_the_meter_says_when_it_read(self):
+        from league.claude import ClaudeMeter
+        from league.tests.test_frontier import FakeResponse
+
+        clock = swarm_fakes.Clock()
+        meter = ClaudeMeter(GATEWAY, lambda: "t", opener=FakeOpener(FakeResponse({"claude": {"cap_usd": "100", "spent_usd": "1"}})),
+                            clock=clock)
+        self.assertIsNone(meter.read_at)
+        self.assertEqual(meter.remaining(), Decimal("99"))
+        self.assertEqual(meter.read_at, clock.t)
 
 
 class Selection(ClaudeCase):

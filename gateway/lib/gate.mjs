@@ -413,14 +413,16 @@ export function createGate({ store, env = {}, now = Date.now }) {
       const table = value => (value && typeof value === 'object' && !Array.isArray(value) ? value : {});
       return { spent: big(row.spent), inflight: big(row.inflight), calls: Number(row.calls) || 0, seq: Number(row.seq) || 0,
         agents: table(row.agents), roles: table(row.roles), stops: table(row.stops), geos: table(row.geos), holds: table(row.holds),
-        recent: table(row.recent), swept: Number(row.swept) || 0, swept_micro: big(row.swept_micro) };
+        recent: table(row.recent), swept: Number(row.swept) || 0, swept_micro: big(row.swept_micro),
+        overruns: Number(row.overruns) || 0, overrun_micro: big(row.overrun_micro) };
     },
 
     _claudeWrite(row) {
       const recent = Object.entries(row.recent).sort((a, b) => (Number(b[1]?.at) || 0) - (Number(a[1]?.at) || 0)).slice(0, claude.RECENT_REQUESTS);
       write(store, CLAUDE_KEY, { spent: String(row.spent > 0n ? row.spent : 0n), inflight: String(row.inflight > 0n ? row.inflight : 0n),
         calls: row.calls, seq: row.seq, agents: row.agents, roles: row.roles, stops: row.stops, geos: row.geos, holds: row.holds,
-        recent: Object.fromEntries(recent), swept: row.swept, swept_micro: String(row.swept_micro) });
+        recent: Object.fromEntries(recent), swept: row.swept, swept_micro: String(row.swept_micro),
+        overruns: row.overruns, overrun_micro: String(row.overrun_micro) });
     },
 
     /** Release every hold older than `claude.STALE_HOLD_MS` that no settlement replaced. Returns how many. */
@@ -471,7 +473,9 @@ export function createGate({ store, env = {}, now = Date.now }) {
 
     /**
      * Replace hold `id` with what the call cost (`actual`, micro-dollars); null keeps the whole hold as spent: unknown is
-     * not free. A hold the sweep already released books only the settlement's cost (its worst case when unknown).
+     * not free. A hold the sweep already released books only the settlement's cost (its worst case when unknown). A cost
+     * above its own hold is an OVERRUN (Sept 29, 2026): the worst case failed to bound the call. It is booked in full and
+     * counted (`overruns`, `overrun_usd` in `/v1/health`), and the House pauses its Claude research band on one.
      */
     claudeSettle({ id = null, reserved, actual, agent = null, role = null, stop = null, geo = null, at = now() }) {
       const row = this.claudeMeter();
@@ -479,6 +483,10 @@ export function createGate({ store, env = {}, now = Date.now }) {
       const held = hold ? BigInt(hold.micro) : 0n;
       const cost = actual === null || actual === undefined ? BigInt(reserved) : BigInt(actual);
       if (hold) delete row.holds[id];
+      if (hold && cost > held) {
+        row.overruns += 1;
+        row.overrun_micro += cost - held;
+      }
       row.spent = row.spent - held + cost;
       row.inflight -= held;
       row.calls += 1;
@@ -521,6 +529,7 @@ export function createGate({ store, env = {}, now = Date.now }) {
         remaining_usd: formatUsdMicro(cap > row.spent ? cap - row.spent : 0n), calls: row.calls,
         holds: holds.length, stale_holds: holds.filter(hold => at - Number(hold?.at) > claude.STALE_HOLD_MS).length,
         swept: row.swept, swept_usd: formatUsdMicro(row.swept_micro),
+        overruns: row.overruns, overrun_usd: formatUsdMicro(row.overrun_micro),
         models: Object.keys(claude.priceTable(env)), configured: typeof env.CLAUDE_API_KEY === 'string' && env.CLAUDE_API_KEY.length > 0,
         by_role: usd(row.roles), by_agent: usd(row.agents), stops: row.stops, geos: row.geos,
       };

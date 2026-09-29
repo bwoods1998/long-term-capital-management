@@ -72,10 +72,13 @@ EFFORTS = ("low", "medium", "high", "xhigh", "max")
 #: platform.claude.com/docs/en/about-claude/pricing (Sept 26, 2026), as gateway/wrangler.jsonc CLAUDE_MODELS prices
 #: them. Kept here so the caller's hold is never below the gateway's own reservation. Claude Sonnet 5.5 (Sept 29, 2026,
 #: released Sept 28) is listed on the same page at Sonnet 5's prices: $2 input, $2.50 a 5-minute write, $10 output.
+#: Each includes the US-only inference multiplier (x1.1 on every rate for Claude 4.6 and later: "Data residency
+#: pricing", read Sept 29, 2026), which a workspace whose default inference geography is "us" is billed at and which the
+#: gateway's worst case assumes for these rows (`geo: {"us": 1.1}`): the House's hold stays at or above the gateway's.
 MODEL_CEILINGS = {
-    "claude-opus-5-5": (Decimal("5"), Decimal("20")),
-    "claude-sonnet-5": (Decimal("2.50"), Decimal("10")),
-    "claude-sonnet-5-5": (Decimal("2.50"), Decimal("10")),
+    "claude-opus-5-5": (Decimal("5.50"), Decimal("22")),
+    "claude-sonnet-5": (Decimal("2.75"), Decimal("11")),
+    "claude-sonnet-5-5": (Decimal("2.75"), Decimal("11")),
 }
 _SLUG = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 _REQUEST_ID = re.compile(r"[A-Za-z0-9:._-]{1,160}")
@@ -665,6 +668,13 @@ class ClaudeMeter:
         self._value: Decimal | None = None
         self.last: dict[str, Any] = {}
         self._lock = threading.Lock()
+
+    @property
+    def read_at(self) -> float | None:
+        """When the gateway was last asked (this meter's clock), or None before the first read: the router takes the
+        swarm's own Claude spend booked since then off the reading (`ModelRouter._claude_since_read`)."""
+        at = self._at
+        return at if at != float("-inf") else None
 
     def remaining(self) -> Decimal | None:
         with self._lock:

@@ -115,11 +115,22 @@ append-only session, the input checks and the caching). ANY Claude failure (a re
 the funded total, 403, 423, 429 or 5xx, the researcher's line `claude.role_usd_day.researcher` or the family's own
 `claude_family_usd_day` reached, less room than `claude_min_room_usd` above the hold, a stream that stalls or runs past
 `claude_timeout_seconds`, an answer that cannot be read) finishes THAT turn on the family's Sail profile from the same
-transcript, and the rest of the cycle stays on Sail; it is never a cycle error. So does a REVISE turn Claude answers with
-no call (retried on Sail, where a call is required) and a call whose input does not parse or validate (answered as an
+transcript, and the rest of the cycle stays on Sail; it is never a cycle error (and a failure after the first turn with
+less than `min_call_seconds` left ends the cycle, as on Sail). So does a REVISE turn Claude answers without an offered,
+valid run (retried on Sail, where a call is required) and a call whose input does not parse or validate (answered as an
 error, never run; the answer's valid calls run). A failed attempt costs no model call; its bill is booked. The cycle
-event records `route`, `claude_calls`, `claude_usd`, `claude_usage` (input, cache write, cache read and output tokens)
-and `claude_fallback` (the kind and why), what the first day's measurement reads.
+event records `route` ("claude" once a Claude turn was answered), `claude_calls`, `claude_usd`, `claude_usage` (input,
+cache write, cache read and output tokens, refused and cut answers included), `claude_fallback` (the kind and why) and
+`claude_skipped`, what the first day's measurement reads.
+
+HOLDS AND THE BREAKER (Sept 29, 2026, the reviews). Two thirds of the top band's cycles held on Sept 28 (nothing new to
+run), and a Claude call that decides a hold costs about as much as one that writes a program. So a top family's cycle is
+Claude's when it has fresh evidence (a queued run or a rewrite landed), when the family's last cycle did not hold, and
+on every `claude_hold_every`-th cycle of a hold streak (`hold_streak`); the rest of a streak runs on its Sail profile.
+And a Claude call whose bill stays unknown (its whole hold booked: a cut stream, a 5xx, a 429) is trouble:
+`claude_breaker_failures` of them in `claude_breaker_window_seconds`, or one bill above its hold, pause the band for
+`claude_breaker_pause_seconds` (kv `claude_band`; the cycle that tripped it says `claude_paused`, and each paused cycle
+`claude_skipped`), so a slow day cannot spend the line on phantom holds.
 
 STALLS. Five revisions without a better Train score (`evidence.train_score`) buy ONE rewrite from a stronger
 model (DeepSeek-V4-Pro balanced; Kimi-K3 balanced for the top ten families by the bandit's share), asked
@@ -596,6 +607,12 @@ def dormant_limit(settings: Mapping[str, Any]) -> int:
 def dormant_count(fam: Mapping[str, Any]) -> int:
     """The family's dormant cycles in a row (its state's `dormant_cycles`; 0 when absent or not a count)."""
     raw = (fam.get("state") or {}).get("dormant_cycles")
+    return max(0, int(raw)) if isinstance(raw, int) and not isinstance(raw, bool) else 0
+
+
+def hold_streak(fam: Mapping[str, Any]) -> int:
+    """The family's cycles in a row that held (its state's `hold_streak`; 0 when absent or not a count)."""
+    raw = (fam.get("state") or {}).get("hold_streak")
     return max(0, int(raw)) if isinstance(raw, int) and not isinstance(raw, bool) else 0
 
 
@@ -1248,17 +1265,40 @@ class Researcher:
         enabled = getattr(self.router, "claude_enabled", None)
         return n > 0 and callable(enabled) and bool(enabled("researcher")) and self.is_top(fam, top=n)
 
+    def claude_skip(self, fam: Mapping[str, Any], *, fresh: bool) -> str | None:
+        """Why a cycle `claude_route` chose stays on Sail after all, or None (THE TOP BAND ON CLAUDE):
+        - the band is paused (THE BREAKER: kv `claude_band.paused_until`);
+        - HOLDS: the family held its last cycles (`hold_streak`) and nothing new came back this cycle (`fresh`: no queued
+          run or rewrite landed). Claude answers a cycle with fresh evidence, the first cycle after one that did not hold,
+          and every `claude_hold_every`-th cycle of a hold streak (a look for a new idea); the other cycles of a streak are
+          the family's Sail profile's, which holds as well for a hundredth of the price. 1 puts every cycle on Claude."""
+        band = self.store.get("claude_band") or {}
+        until = band.get("paused_until") if isinstance(band, Mapping) else None
+        if isinstance(until, (int, float)) and not isinstance(until, bool) and until > self.clock():
+            return f"paused: {str(band.get('why') or 'the breaker')[:120]}"
+        try:
+            every = max(1, int(self.cfg.get("claude_hold_every", 3)))
+        except (TypeError, ValueError):
+            every = 1
+        streak = hold_streak(fam)
+        if not fresh and streak % every:
+            return f"hold_streak: {streak} holds in a row (Claude looks every {every})"
+        return None
+
     def claude_tools(self) -> list[dict[str, Any]]:
-        """Every tool, always, in `TOOLS` order and `gym_sweep` at the configured limit: the constant list Claude is given
-        (its prompt cache and its thinking blocks are bound to it), as Anthropic's tools."""
-        return anthropic_tools([sweep_tool(self.max_variants) if t["name"] == "gym_sweep" else t for t in TOOLS])
+        """Every tool in `TOOLS` order (`gym_sweep` at the configured limit, and only while sweeps are on): the list Claude
+        is given on every turn of every cycle (its prompt cache and its thinking blocks are bound to it), as Anthropic's
+        tools. It changes only when the operator turns sweeps on or off."""
+        return anthropic_tools([sweep_tool(self.max_variants) if t["name"] == "gym_sweep" else t for t in TOOLS
+                                if self.sweeps or t["name"] != "gym_sweep"])
 
     @staticmethod
     def offer_note(tools: list[dict[str, Any]], revise: bool) -> str:
         """The turn's offer, said at the end of Claude's turn (its tool list is constant; the loop enforces the offer)."""
         names = ", ".join(t["name"] for t in tools)
         if revise:
-            return (f"This turn is a REVISE: call gym_run or gym_sweep (gym_run with hold=true when you have nothing new to run, "
+            runs = " or ".join(t["name"] for t in tools if t["name"] in RUNS) or "gym_run"
+            return (f"This turn is a REVISE: call {runs} (gym_run with hold=true when you have nothing new to run, "
                     f"saying why in its note). Tools offered now: {names}. Reply with tool calls.")
         return f"Tools offered now: {names}. A call to any other tool is refused this turn."
 
@@ -1268,6 +1308,54 @@ class Researcher:
         if cost:
             out["cost_usd"] = round(out["cost_usd"] + cost, 6)
             out["claude_usd"] = round(float(out.get("claude_usd") or 0) + cost, 6)
+
+    @staticmethod
+    def _claude_usage(out: dict[str, Any], usage: Any) -> None:
+        """Add one Claude answer's tokens to the cycle's `claude_usage` (a refused or cut answer's too: it was billed)."""
+        if not isinstance(usage, Mapping) or not usage:
+            return
+        into = out.setdefault("claude_usage", {"input": 0, "cache_write": 0, "cache_read": 0, "output": 0})
+        for name, field in (("input", "input_tokens"), ("cache_write", "cache_creation_input_tokens"),
+                            ("cache_read", "cache_read_input_tokens"), ("output", "output_tokens")):
+            value = usage.get(field)
+            into[name] += value if type(value) is int and value >= 0 else 0
+
+    def claude_trouble(self, why: str, *, trip: bool = False) -> bool:
+        """THE BREAKER (Sept 29, 2026): a Claude call whose bill is unknown (its whole hold stays booked: a stream cut or
+        stalled, an answer that broke, a 5xx, a 429) is trouble. `claude_breaker_failures` of them inside
+        `claude_breaker_window_seconds`, or one OVERRUN (`trip`: a bill above its hold, the worst case failed), pause the
+        whole band for `claude_breaker_pause_seconds` (kv `claude_band`): its cycles run on Sail, and a slow or overloaded
+        day cannot spend the researcher's line on phantom holds. True when this trouble paused the band."""
+        try:
+            limit = int(self.cfg.get("claude_breaker_failures", 3))
+            window = float(self.cfg.get("claude_breaker_window_seconds", 3600))
+            pause = float(self.cfg.get("claude_breaker_pause_seconds", 3600))
+        except (TypeError, ValueError):
+            limit, window, pause = 3, 3600.0, 3600.0
+        now = float(self.clock())
+        with self.store.atomic():
+            band = self.store.get("claude_band") or {}
+            band = dict(band) if isinstance(band, Mapping) else {}
+            recent = [t for t in band.get("trouble") or [] if isinstance(t, (int, float)) and 0 <= now - t < window] + [now]
+            tripped = trip or 0 < limit <= len(recent)
+            band.update(trouble=[] if tripped else recent[-50:], last=why[:200], last_at=now)
+            if tripped:
+                band.update(paused_until=now + max(0.0, pause), why=why[:200], paused_at=now)
+            self.store.put("claude_band", band)
+        return tripped
+
+    def _claude_trouble(self, out: dict[str, Any], exc: Any) -> None:
+        """A failed Claude call's part in THE BREAKER (`claude_trouble`)."""
+        status = getattr(exc, "status", None)
+        unknown = float(getattr(exc, "held_usd", 0) or 0) > 0 or getattr(exc, "kind", "") in ("stream", "unknown") \
+            or (getattr(exc, "kind", "") == "http" and isinstance(status, int) and (status == 429 or status >= 500))
+        over = float(getattr(exc, "overrun_usd", 0) or 0)
+        if over > 0:
+            out["claude_overrun"] = round(over, 6)
+        if over > 0 or unknown:
+            reason = f"overrun ${over:.4f} above the hold" if over > 0 else f"{getattr(exc, 'kind', 'error')}: {str(exc)[:120]}"
+            if self.claude_trouble(reason, trip=over > 0):
+                out["claude_paused"] = True
 
     def _claude_turn(self, fam: Mapping[str, Any], session: ClaudeSession, *, items: list[dict[str, Any]],
                      current: list[dict[str, Any]], revise: bool, tools: list[dict[str, Any]], key: str, deadline: float,
@@ -1288,27 +1376,41 @@ class Researcher:
                 family_usd_day=cfg.get("claude_family_usd_day", 15.0), keep_usd=cfg.get("claude_min_room_usd", 25.0))
         except ModelError as exc:
             billed = sum(float(b.get("cost_usd") or 0) for b in exc.billed) + float(exc.held_usd or 0)
+            self._claude_usage(out, exc.usage)
             self._claude_failed(out, exc.kind, str(exc), billed)
+            self._claude_trouble(out, exc)
             return None
         except Exception as exc:  # noqa: BLE001 - the adapter or the session: the turn is Sail's, never a cycle error
             self._claude_failed(out, "unknown", f"{type(exc).__name__}: {str(exc)[:160]}", 0.0)
             return None
-        answer = reply.answer
-        cost = reply.cost_usd if reply.cost_usd is not None else reply.held_usd
-        usage = out.setdefault("claude_usage", {"input": 0, "cache_write": 0, "cache_read": 0, "output": 0})
-        for name, field in (("input", "input_tokens"), ("cache_write", "cache_creation_input_tokens"),
-                            ("cache_read", "cache_read_input_tokens"), ("output", "output_tokens")):
-            value = answer.usage.get(field)
-            usage[name] += value if type(value) is int else 0
-        calls = tool_calls(answer.tool_uses, session.schemas)
-        if revise and not calls:
-            self._claude_failed(out, "no_call", "a REVISE turn answered without a tool call", cost)
+        cost = float(reply.cost_usd if reply.cost_usd is not None else reply.held_usd)
+        try:
+            # Reading the answer is Claude's part too: anything here that breaks finishes the turn on Sail (the bill is
+            # already settled, and booked in the cycle), never a cycle error.
+            answer = reply.answer
+            self._claude_usage(out, answer.usage)
+            if reply.overrun_usd > 0 or reply.cost_usd is None:
+                self._claude_trouble(out, ModelError("the answer's bill is not known", kind="unknown", held_usd=reply.held_usd,
+                                                     overrun_usd=reply.overrun_usd))
+            calls = tool_calls(answer.tool_uses, session.schemas)
+            offered = {t["name"] for t in tools}
+            if revise and not any(c.ok and c.name in offered for c in calls):
+                # A REVISE turn must run (Sail's is sent with a call required): an answer with no call, or with none that is
+                # offered and valid, is retried on Sail, where it is.
+                self._claude_failed(out, "no_run" if calls else "no_call",
+                                    "a REVISE turn answered without an offered, valid run" if calls else
+                                    "a REVISE turn answered without a tool call", cost)
+                return None
+            turn = ClaudeTurn(cost_usd=cost, output_items=sail_items(answer.content, calls), function_calls=calls,
+                              output_text=answer.text, content=list(answer.content), usage=dict(answer.usage),
+                              stop_reason=answer.stop_reason, model=reply.model)
+        except Exception as exc:  # noqa: BLE001 - an answer that cannot be read is Sail's turn
+            self._claude_failed(out, "answer", f"{type(exc).__name__}: {str(exc)[:160]}", cost)
             return None
         out["claude_calls"] = int(out.get("claude_calls") or 0) + 1
         out["claude_usd"] = round(float(out.get("claude_usd") or 0) + cost, 6)
-        return ClaudeTurn(cost_usd=cost, output_items=sail_items(answer.content, calls), function_calls=calls,
-                          output_text=answer.text, content=list(answer.content), usage=dict(answer.usage),
-                          stop_reason=answer.stop_reason, model=reply.model)
+        out["route"] = "claude"  # set once a Claude turn is answered: a cycle that ran wholly on Sail is Sail's
+        return turn
 
     # ------------------------------------------------------------------ tools
     @staticmethod
@@ -2122,6 +2224,7 @@ class Researcher:
         out["seconds"] = round(self.clock() - began, 2)
         self.store.bump(fid, cycles=1)
         self._count_dormancy(fid, out)
+        self._count_holds(fid, out)
         self.store.event("swarm.cycle", fid, out)
         self._public_note(fid, out)
         return out
@@ -2152,6 +2255,21 @@ class Researcher:
                 self.store.set_state(fid, dormant_cycles=new)
         if new:
             out["dormant_cycles"] = new
+
+    def _count_holds(self, fid: str, out: dict[str, Any]) -> None:
+        """The family's HOLD STREAK (`hold_streak` in its state; `claude_skip` reads it): one more for a cycle that held, zero
+        for a cycle whose model did anything else; a cycle with no model call (the starter, a busy Gym, an error before
+        the model) leaves it."""
+        if not out.get("model_calls"):
+            return
+        with self.store.atomic():
+            fam = self.store.family(fid)
+            if fam is None or fam.get("retired_at"):
+                return
+            count = hold_streak(fam)
+            new = count + 1 if out.get("hold") else 0
+            if new != count:
+                self.store.set_state(fid, hold_streak=new)
 
     def _first_cycle(self, fam: Mapping[str, Any], out: dict[str, Any]) -> None:
         code, params = self.starter({**(fam.get("spec") or {}), "id": fam["id"], "mechanism": fam["mechanism"],  # type: ignore[misc]
@@ -2238,11 +2356,15 @@ class Researcher:
         # A model call that writes a program took 60-80 s on Sept 26 (DeepSeek-V4-Flash asap): after the first, a call
         # starts only with `min_call_seconds` of the cycle's budget left, so a cycle stays under three minutes.
         min_call = float(self.cfg.get("min_call_seconds", 75))
-        # THE TOP BAND ON CLAUDE: this cycle's turns go to Claude until one fails (then the rest of the cycle is Sail's).
+        # THE TOP BAND ON CLAUDE: this cycle's turns go to Claude until one fails (then the rest of the cycle is Sail's),
+        # unless the band is paused or the family is in a hold streak with nothing new this cycle (`claude_skip`).
         claude = self.claude_route(fam)
         session: ClaudeSession | None = None
         if claude:
-            out["route"] = "claude"
+            skip = self.claude_skip(fam, fresh=gym_done)
+            if skip:
+                out["claude_skipped"] = skip
+                claude = False
         while out["model_calls"] < max_calls and (out["model_calls"] == 0 or deadline - self.clock() >= min_call):
             if self._terminal(fid, out):
                 break
@@ -2265,6 +2387,8 @@ class Researcher:
                                              deadline=deadline, out=out)
                 if response is None:  # the turn is Sail's, and so is the rest of the cycle
                     claude = False
+                    if out["model_calls"] > 0 and deadline - self.clock() < min_call:
+                        break  # as on Sail alone: after the first, no call starts without `min_call_seconds` left
                 else:
                     via = "claude"
             if response is None:
@@ -2295,12 +2419,15 @@ class Researcher:
                                     "output": json.dumps({"status": "refused", "reason": "the family is retired; no further tools run"})})
                     stop = True
                     continue
-                if via == "claude" and call.name not in offered and call.name != "retire":
-                    # Claude sees every tool every turn (its cached prefix); the turn's offer binds all the same.
+                if via == "claude" and call.name not in offered:
+                    # Claude sees every tool every turn (its cached prefix); the turn's offer binds all the same, `retire`
+                    # included (a REVISE turn offers it only to a dead family; `can_retire` alone never retires one).
                     current.append({"type": "function_call_output", "call_id": call.call_id,
                                     "output": json.dumps({"status": "refused", "reason": f"{call.name} is not offered on this turn "
                                                           f"(offered: {', '.join(sorted(offered))})"})})
                     out["claude_refused_calls"] = int(out.get("claude_refused_calls") or 0) + 1
+                    if call.name == "retire":
+                        out["retire_refused"] = True  # a plain refusal, never a cycle error (no backoff), as on Sail
                     continue
                 hold = call.name == "gym_run" and holding(call.arguments)
                 if call.name in RUNS and out.get("hold"):

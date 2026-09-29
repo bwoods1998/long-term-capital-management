@@ -53,11 +53,17 @@ class ModelError(RuntimeError):
     caller that falls back on its own (`claude_turn`); `held_usd` is a paid attempt's hold that stays booked because its
     bill is unknown (the true-up settles it)."""
 
-    def __init__(self, message: str, *, billed: list[dict[str, Any]] | None = None, kind: str = "error", held_usd: float = 0.0):
+    def __init__(self, message: str, *, billed: list[dict[str, Any]] | None = None, kind: str = "error", held_usd: float = 0.0,
+                 status: int | None = None, usage: Mapping[str, Any] | None = None, overrun_usd: float = 0.0):
         super().__init__(message)
         self.billed = list(billed or [])
         self.kind = kind
         self.held_usd = float(held_usd)
+        #: The gateway's HTTP status when it answered with one; the usage of a billed answer (a refusal, a cut turn), so
+        #: its tokens are measured beside its bill; how far its settled cost ran past its hold (never expected: a breaker).
+        self.status = status
+        self.usage = dict(usage or {})
+        self.overrun_usd = float(overrun_usd)
 
 
 @dataclass(frozen=True)
@@ -71,6 +77,8 @@ class ClaudeReply:
     cost_usd: float | None
     held_usd: float
     request_id: str
+    #: Dollars the settled cost ran past the hold (0: the worst case held, as it always should).
+    overrun_usd: float = 0.0
 
 
 class _ClaudeHold:
@@ -431,6 +439,20 @@ class ModelRouter:
             return 0.0
         return float(line) if line.is_finite() and line >= 0 else 0.0
 
+    #: A hold booked this long before the meter's read may not have reached the gateway when it was read: counted anyway.
+    METER_MARGIN_SECONDS = 10.0
+
+    def _claude_since_read(self) -> float:
+        """The swarm's own Claude spend (holds included, each call at its settled cost) booked since the gateway's meter was
+        last read (`ClaudeMeter.read_at`, less a margin), which that reading cannot show yet; 0 for a meter that does not
+        say when it read."""
+        read_at = getattr(self.claude_meter, "read_at", None)
+        try:
+            since = float(read_at) - self.METER_MARGIN_SECONDS
+        except (TypeError, ValueError):
+            return 0.0
+        return max(0.0, self.claude_spent(since=since)) if math.isfinite(since) else 0.0
+
     def claude_role_room(self, role: str) -> float | None:
         """Dollars left on the role's own Claude line this UTC day (its holds count until they settle; a call counts on the
         day its hold was booked, `claude_spent`), or None when the role has no line (`claude_role_line`)."""
@@ -482,7 +504,10 @@ class ModelRouter:
             if family_line is not None and self.claude_family_room(role, family, family_line) < required:
                 errors.append(f"claude: {family}'s own {role} line for today has no room")
                 return None, "family_fuse"
-            if min(room, self._claude_cap_room()) - keep_usd >= required:
+            # The meter's reading is up to a minute old (its cache): the swarm's own Claude calls booked since it was
+            # read are not in it yet, so they are taken off the gateway's room here (a concurrent admission's hold
+            # counts, and the room kept for the other roles is never eroded by calls admitted in the same minute).
+            if min(room - self._claude_since_read(), self._claude_cap_room()) - keep_usd >= required:
                 self.store.add_spend("claude", required, family=family,
                                      detail={"role": role, "hold": key[:120], "request": request_id, "model": model,
                                              "max_tokens": body["max_tokens"], "effort": body["output_config"]["effort"]})
@@ -589,7 +614,7 @@ class ModelRouter:
             answer = client.messages(system, messages, tools, agent=f"swarm-{role}", role=role, max_tokens=body["max_tokens"],
                                      effort=effort, tool_choice=tool_choice, request_id=request_id, stream=stream, timeout=timeout)
         except ClaudeError as exc:
-            _, held = hold.failed(exc, billed)
+            cost, held = hold.failed(exc, billed)
             if isinstance(exc, ClaudeRefusal):
                 kind = "refusal"
             elif isinstance(exc, ClaudeTruncated):
@@ -600,7 +625,11 @@ class ModelRouter:
                 kind = "answer"  # an answer that stopped for another reason (pause_turn)
             else:
                 kind = "stream"
-            raise ModelError(f"claude: {type(exc).__name__}: {str(exc)[:160]}", kind=kind, billed=billed, held_usd=held) from None
+            usage = getattr(exc.answer, "usage", None)
+            raise ModelError(f"claude: {type(exc).__name__}: {str(exc)[:160]}", kind=kind, billed=billed, held_usd=held,
+                             status=exc.status if isinstance(exc.status, int) else None,
+                             usage=usage if isinstance(usage, Mapping) else None,
+                             overrun_usd=max(0.0, (cost or 0.0) - required)) from None
         except Exception as exc:  # noqa: BLE001 - an unknown failure keeps the hold
             hold.unknown(type(exc).__name__)
             raise ModelError(f"claude: {type(exc).__name__}: {str(exc)[:160]}", kind="unknown", held_usd=required) from None
@@ -608,7 +637,7 @@ class ModelRouter:
         if cost is None:
             hold.unknown("the answer's cost was not verified")
         return ClaudeReply(answer=answer, model=model, cost_usd=cost, held_usd=0.0 if cost is not None else required,
-                           request_id=request_id)
+                           request_id=request_id, overrun_usd=max(0.0, (cost or 0.0) - required))
 
     def settle_claude_holds(self, *, min_age: float = 60.0, absent_after: float = 1800.0, budget_seconds: float = 30.0) -> int:
         """True up the Claude holds whose bill the House never saw (the call's answer was lost, or the swarm restarted
