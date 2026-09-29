@@ -2601,4 +2601,26 @@ looks like beta. Validation 2025 and the holdout judge both.
   - preopen 9/9 (its gateway check now reads the release worktree). Sail $248.42 after the owner's top-up.
   - CHANGELOG #422.
 
+
+- **05:30-06:05Z The rebound-stability pre-registration: no finalist (design sha256 `55df2ff4…`, locked 05:47:50Z
+  before any run; Train 2020-24 only).**
+  - The rebound is not a drift artifact. At $1 and 1.0x, calls made +$798 and puts +$967; drift explains $283 of
+    $1,766; drift-adjusted alpha t is 1.60, positive in 4 of 5 years.
+  - Its weak years are side-specific: puts lost in 2020 and 2024, calls in 2022.
+  - REB14 cannot meet 40 structures a year in 2020-21, so the base B* lowers the entry threshold (0.75 → 0.5).
+  - Six economically motivated gates, two thresholds each, were tested: shock recency, breadth, trend, the variance
+    premium, depth against 60-day vol, and today's move.
+    - The best pooled rows were breadth K=2 (t 3.07 at 1.0x, 1.50 at 1.5x) and shock N=5 (3.02 / 1.35). Each fixes
+      one weak year and breaks another.
+  - 2024 fails every row: the best 2024 t is 0.73, and drop-5 2024 is negative in all 15 rows. No gate singles out
+    2024; each kept 60-94% of its entries.
+  - The trend placebo lost $4,707, so the rebound's edge is not trend timing.
+  - The REB14 bridge reproduced the width study to the cent. 13 new trials go to the lineage. Both boxes were
+    terminated.
+  - The 2017-19 years remain unspent (checked absent at 05:44:33Z) for a future pre-registration.
+  - The power note: a true per-entry-day edge of this size clears t >= 1.0 in all five years only 8-29% of the time,
+    and that estimate is itself optimistic. So the every-year bar is hard for any weak edge, but it was not loosened.
+- **06:05-06:13Z The backfill controller died with R9's House restart ("loop stopped") and was restarted per its
+  runbook** (not re-enabled). It is waiting for 08:15Z. Every House deploy now needs this check.
+
 ## Report
