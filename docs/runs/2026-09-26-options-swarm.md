@@ -2699,4 +2699,16 @@ looks like beta. Validation 2025 and the holdout judge both.
 | 6 | Money | Equity $1,473.11; 0 positions; the live test is armed |
 | 7 | Compute | Sail $242.90. Claude $95.54 of $200: $12.21 in 2 h (researcher $5.23, rewrite $4.07, architect $2.02, strategist $0.47, diagnostician $0.48). The lines were paced so the funded room lasts through tonight: researcher $50, diagnostician $30, architect $25, rewrite $15, review $5, strategist $4. The data box fetch runs at 2,012 tasks/h |
 
+
+- **09:27Z PR #424 (PR B, Train from 2017) is ready; its release waits for the close.**
+  - The review's fixes are in (CI green):
+    - a 2017 image refuses names before 2020 unless their split rows exist;
+    - an image whose first chain is not its `train_from` fails its own check.
+  - The 2017-19 event and rate tables were checked against public sources (FOMC, BLS CPI and jobs, the Fed target
+    range).
+  - A Train run from 2020 is byte-identical whether or not the image also holds 2017-19.
+  - Image T needs stages 11, 13 and 12 complete (expected 20:00-22:45Z), so the release (R11) goes right after the
+    20:05Z close rather than before the session. That avoids a pre-session re-run burst on the live test's first day.
+  - Then: build image T, the bridge (2020-24 unchanged), the pool-style check, and the flip decision.
+
 ## Report
