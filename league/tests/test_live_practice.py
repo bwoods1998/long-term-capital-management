@@ -1,7 +1,8 @@
 """The live practice league (Sept 29, 2026): every alive Gym-band family with a validated version, or an eligible Train
 version, trades live shadow under two caps (instances and distinct roots), sheds its Train tail under sustained pressure,
 keeps an honest private record of its practice (realized P&L, forced closes apart, open positions at the mark, drawdown,
-coverage), never sends a real order and never writes a forward row. With the fakes of `live_fakes` (the venue's shapes,
+coverage), never sends a real order and never writes a forward row; and the forward embargo holds a Sized move until the
+forward record after the version was written meets Sized on its own. With the fakes of `live_fakes` (the venue's shapes,
 invented numbers), the in-process decider and, where it says so, the swarm's real store."""
 
 import datetime as dt
@@ -504,6 +505,54 @@ class Accounting(PracticeCase):
         finally:
             lock.execute("ROLLBACK")
             lock.close()
+
+
+# -------------------------------------------------------------------------------------------------------- embargo
+class Embargo(LiveCase):
+    """The forward embargo: a Sized move also needs the forward record of sessions after the version was written."""
+
+    RETURNS = [0.30, 0.10, 0.20, -0.10, 0.25] * 5
+
+    def probe(self, created, *, returns=None, real=True):
+        live = self.make([dict(family("vert", VERTICAL, band="probe"), version_created_at=created)])
+        self.families.add_forward("vert", "shadow", [{"id": f"s{i}", "day": f"2026-09-{i % 25 + 1:02d}", "pnl": r * 100.0,
+                                                       "max_loss": 100.0} for i, r in enumerate(returns or self.RETURNS)])
+        if real:
+            self.families.add_forward("vert", "real", [{"id": f"r{i}", "day": f"2026-08-{i + 1:02d}", "pnl": 6.0,
+                                                        "max_loss": 50.0} for i in range(5)])
+        live.state.put("band_moves", {"vert": {"band": "probe", "at": at(MONDAY, 9, 0) - 7 * 86400}})
+        return live
+
+    def test_sized_needs_the_record_after_the_version_was_written_too(self):
+        self.probe("2026-08-31T12:00:00Z")                                   # 25 shadow trades after it: Sized
+        self.run_to(9, 31)
+        self.assertEqual(self.families.rows["vert"]["band"], "sized")
+
+    def test_days_before_the_version_was_written_never_count_toward_sized(self):
+        self.probe("2026-09-26T00:00:00Z")                                   # New York: Sept 25; every row is on or before
+        self.run_to(9, 31)
+        self.assertEqual(self.families.rows["vert"]["band"], "probe")
+        held = [p for p, _ in self.ledger.of("live.band") if p.get("held")]
+        self.assertEqual(len(held), 1)
+        self.assertIn("forward embargo", held[0]["why"])
+        self.run_to(9, 45)
+        self.assertEqual(len([p for p, _ in self.ledger.of("live.band") if p.get("held")]), 1, "said once a day")
+
+    def test_the_same_rows_still_count_toward_negative(self):
+        self.probe("2026-09-26T00:00:00Z", returns=[-0.2, 0.1, -0.3, -0.1] * 6)
+        self.run_to(9, 31)
+        self.assertEqual(self.families.rows["vert"]["band"], "candidate", "demoted on the whole record")
+
+    def test_a_candidates_move_to_probe_is_unchanged(self):
+        self.make([dict(family("cand", VERTICAL, band="candidate"), version_created_at="2026-10-05T00:00:00Z")])
+        self.run_to(9, 31)
+        self.assertEqual(self.families.rows["cand"]["band"], "probe", "Candidate to Probe reads nothing new")
+
+    def test_an_unknown_writing_day_holds_at_probe(self):
+        self.probe("2026-08-31T12:00:00Z")
+        del self.families.rows["vert"]["version_created_at"]
+        self.run_to(9, 31)
+        self.assertEqual(self.families.rows["vert"]["band"], "probe", "fail-closed")
 
 
 if __name__ == "__main__":

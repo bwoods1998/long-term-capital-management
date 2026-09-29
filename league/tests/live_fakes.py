@@ -411,4 +411,6 @@ def family(name: str, code: str, *, band: str = "probe", structure: str = "debit
             "validation_passed": validation, "version": version, "code": code, "params": dict(params or {}),
             "run_sha": f"sha-{name}-{version}", "typical_max_loss_usd": typical, "seed_era": True,
             "real_promoted_at": at(MONDAY - dt.timedelta(days=7), 9, 0) if band in ("probe", "sized") else None,
-            "forward": {"trades": 0, "negative": False}}
+            "forward": {"trades": 0, "negative": False},
+            # Written well before any forward day the tests record: the forward embargo counts their whole record.
+            "version_created_at": "2026-07-01T12:00:00Z"}
