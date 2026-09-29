@@ -2282,8 +2282,8 @@ looks like beta. Validation 2025 and the holdout judge both.
     - an idiosyncratic-variance discount;
     - lottery-demand cheap puts;
     - displayed-depth informed demand.
-  - All six failed K0, the ceiling at the mid. Worst-year mid t per mechanism: 0.65, -0.18, -0.83, -0.28, -1.46,
-    -0.79. Only the bellwether spillover's mid edge beat the cost gap (1.59x), and all of that edge was 2024.
+  - All six failed K0, the ceiling at the mid. Worst-year mid t per mechanism: -0.18 (bellwether spillover), 0.65
+    (unresolved-print persistence), -0.83, -0.28, -1.46, -0.79. (Corrected 03:40Z: the first two were swapped.) Only the bellwether spillover's mid edge beat the cost gap (1.59x), and all of that edge was 2024.
   - All six were lottery-shaped even at zero cost: each year went negative after dropping its five best trades,
     which D2's deflated Sharpe refuses.
   - Event mechanisms produce only 10-35 structures a year under the $95 cap. By 2024 the cap makes most names
@@ -2398,7 +2398,8 @@ looks like beta. Validation 2025 and the holdout judge both.
   - All ten failed C1 (year-stable t at the mid) and C5 (the drift screen alone).
     - The best at the mid was the opening drive: t 1.58, 2.11, 1.03, 0.34, 0.35. Its sign was a post-hoc inversion,
       and it was disclosed as one.
-    - At 1.0x every component was negative pooled, with drift-adjusted alpha t between -1.9 and -15.
+    - At 1.0x every component was negative pooled, with drift-adjusted alpha t between -2.62 and -14.93. (Corrected
+      03:40Z: -1.87 was the opening drive's pooled 1.0x t, not an alpha t.)
   - The combiner re-derived every number from the raw runs (0 mismatches over 1,258 days) with the House's code:
     - drift was removed (charges of tens of dollars), but no alpha remained after costs;
     - round trips cost $4-7 against mid edges of -$0.9 to +$2.4 a trade;
@@ -2437,5 +2438,20 @@ looks like beta. Validation 2025 and the holdout judge both.
       large-move states;
     - drift-neutral cross-root pairs;
     - long call plus long put only where implied vol sits below forecast realized vol.
+
+
+- **03:35Z The operator's experiments are now in the swarm's memory.**
+  - 44 graveyard lessons were compiled from the private results (every number re-read from source), reviewed
+    adversarially as public-safe and accurate, and inserted.
+  - They cover tournament rounds 1-3, the drift-free hunt, the new-roots screen, the book, news, order flow and the
+    2020-21 screen's non-replicating classes.
+  - Each row has an `op-` id, is dated when its experiment concluded, and gives the numbers plus a "do not re-propose
+    unless…" line.
+  - The graveyard went from 762 to 806 rows; a backup exists; all 44 read back identical. Researcher searches find
+    them first (for example "buyback", "VIX roll", "news direction").
+  - Found in review: the graveyard search counts raw word occurrences, so long lessons crowd out short ones. Replaying
+    the last 150 births, the new lessons won 0 of 450 top-3 slots. A length-fair ranking is being built as a small
+    research-side release.
+  - The architect now runs every 900 s (was 1,800).
 
 ## Report
