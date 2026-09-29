@@ -2711,4 +2711,28 @@ looks like beta. Validation 2025 and the holdout judge both.
     20:05Z close rather than before the session. That avoids a pre-session re-run burst on the live test's first day.
   - Then: build image T, the bridge (2020-24 unchanged), the pool-style check, and the flip decision.
 
+
+### Sprint scoreboard, T0 + 76 h (10:20Z Sept 29)
+
+| # | Metric | Value |
+|---|---|---|
+| 1 | Population | 83 alive, 978 retired; 71 born and 80 retired in 2 h |
+| 2 | Throughput | 1,368 cycles/h, median 131 s; 4 provider 502s |
+| 3 | Search | 73,104 trials, 410,851 program-years. The strategist's first section was accepted at 10:09:56Z (second attempt, 14 citations, $0.53) |
+| 4 | Evidence | Validation passes alive 0; holdout looks 2, passes 0. Closest alive: 3/8 |
+| 5 | Real fills (D3) | none yet today; calibration starts at the 10:00 ET slot |
+| 6 | Money | Equity $1,473.11; 0 positions; the live test is armed |
+| 7 | Compute | Sail $237.22. Claude $110.38 of $200 ($14.58 in 2 h; within the daily lines the funded room reaches about midnight UTC, so the owner's daily Claude top-up is about $100-130 at full Sonnet use). The data fetch runs at 3,614 tasks/h |
+
+- The strategist's section (summarized; the agenda text stays private):
+  - (a) Fewer, two-sided families, and no twin or relabelled births. Its evidence: of 674 births, 600 retirements
+    were the idle rule (untested, not findings) and only 53 reached a Train score.
+  - (b) Deepen the one class with a positive eligible Train version: a next-morning fade after large leveraged-ETF up
+    days. It checked that this differs from the operator's refuted same-day test.
+  - (c) A QQQ-only breadth mechanism, also eligible and positive.
+  - (d) Vol-state trades on TLT/GLD/SLV only where implied sits below forecast realized. That class mostly died
+    untested.
+  - Operator note: a straddle is not a real-money type, and non-core roots fill at the natural. The locked preamble's
+    real types and costs bind the architect.
+
 ## Report
