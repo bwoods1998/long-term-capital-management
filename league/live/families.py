@@ -12,11 +12,13 @@ The options-swarm run, Wave 5 (Sept 26, 2026), the interface agreed with Wave 4 
 - `SwarmStore(root).set_band(family, band, reason=...)`: the live path alone moves candidate <-> probe <-> sized (the
   money table is its; the swarm moves gym <-> candidate and retires families).
 
-- `league.swarm.bands.observe(root)` -> the OBSERVE band (the sprint, B4, Sept 26, 2026): one shadow-only row per alive
-  Gym-band family with a validated version (`observe: True`). The live path runs each as a shadow instance
-  `<family>@<version>:o`, its version pinned for the session. An observe row is admitted for SHADOW opens only, while the
-  family is alive, still in the Gym band, and the pinned version's code and parameters are what the instance runs; it is
-  never real, never tuition, never a forward row, and an observe row never stands in for any other band's row.
+- `league.swarm.bands.observe(root)` -> the OBSERVE band, the PRACTICE LEAGUE (the sprint, B4, Sept 26, 2026; the Train
+  tier Sept 29, 2026): one shadow-only row per alive Gym-band family with a validated version (tier "validated") or,
+  without one, an eligible Train version (tier "train"), in the league's admission order (`bands.priority`). The live
+  path runs each as a shadow instance `<family>@<version>:o`, its version pinned for the session. An observe row is
+  admitted for SHADOW opens only, while the family is alive, still in the Gym band, and the pinned version's code and
+  parameters are what the instance runs; it is never real, never tuition, never a forward row, and an observe row never
+  stands in for any other band's row.
 
 `MemoryFamilies` is the same API in memory, for tests and for a House without the swarm.
 """
@@ -158,11 +160,13 @@ class MemoryFamilies:
 
     def __init__(self, rows: Iterable[Mapping[str, Any]] = (), observed: Iterable[Mapping[str, Any]] = ()):
         self.rows = {str(r["family"]): dict(r) for r in rows}
-        #: The observe band: {family: {version: row}} (a row as `bands.observe` gives it); `observe()` returns each
-        #: family's highest version (its current validated one); a family popped from here is retired or promoted.
+        #: The observe band: {family: {version: row}} (a row as `bands.observe` gives it; `tier` "validated" unless the
+        #: row says "train"); `observe()` returns each family's highest version (its current one); a family popped from
+        #: here is retired or promoted.
         self.observed: dict[str, dict[int, dict]] = {}
         for r in observed:
-            self.observed.setdefault(str(r["family"]), {})[int(r["version"])] = dict(r, observe=True, band="gym")
+            self.observed.setdefault(str(r["family"]), {})[int(r["version"])] = dict(
+                r, observe=True, band="gym", tier=r.get("tier") or "validated")
         self.forward: dict[str, dict[tuple[str, str], dict]] = {}
         self.moves: list[tuple[str, str, str]] = []
         self.promotions: dict[str, float] = {}
@@ -182,8 +186,11 @@ class MemoryFamilies:
                 row = versions.get(int(version)) if version is not None else versions[max(versions)]
                 if row is not None:
                     out.append(copy.deepcopy(row))
-            # As `bands.observe`: the likeliest first (validation t), then by id.
-            out.sort(key=lambda r: (r.get("validation_t") is None, -(r.get("validation_t") or 0.0), r["family"]))
+            from ..swarm.bands import priority
+
+            for row in out:
+                row.setdefault("tier", "validated")
+            out.sort(key=priority)  # as `bands.observe`: validated by validation t, then Train by Train score, then id
             return out
 
     def forward_rows(self, family: str) -> list[dict]:

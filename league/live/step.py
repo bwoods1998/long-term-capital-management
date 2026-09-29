@@ -22,14 +22,24 @@ half day), so a slow House tick never delays a fill and a slow minute never dela
    real orders (sized by the money table, through the order path, `league/live/real.py`).
 6. Forward records: closed shadow trades (`shadow`) and real trades (`real`; tuition never) to the swarm.
 
-THE OBSERVE BAND (the sprint, B4, Sept 26, 2026): every alive Gym-band family with a validated version runs a SHADOW
-instance `<family>@<version>:o` (`league.swarm.bands.observe`), switched by `live.observe` and capped by
-`live.observe_max` in `<state>/swarm.json` (read at runtime: no deploy). Its version is pinned for the whole session:
-the pins are taken at the first session minute (the likeliest families first, by validation t) and kept in the live
-state, so a restart keeps them; a family validated for the first time joins with its version pinned from then. An observe
-instance is never real, never tuition, never a band move, never a forward row, never on the site; it winds down when its
-family retires or leaves the Gym band. Its programs run in their OWN decider child, asked after every real decision of
-the minute has been sent, so no observe program can delay, starve or reset a real one.
+THE PRACTICE LEAGUE (the observe band: the sprint, B4, Sept 26, 2026; the league, Sept 29, 2026): every alive Gym-band
+family with a validated version, or an eligible Train version, runs a SHADOW instance `<family>@<version>:o`
+(`league.swarm.bands.observe`), switched by `live.observe` in `<state>/swarm.json` (read at runtime: no deploy). Its
+version is pinned for the whole session: the pins are taken at the first session minute and kept in the live state, so
+a restart keeps them; a family that gets a version mid-session joins with it pinned from then. ADMISSION walks the rows
+in the league's order (validated by validation t, then Train by Train score, then id) under two caps: `live.observe_max`
+instances and `live.observe_roots_max` distinct roots (the binding one: every root is read every minute); a family whose
+roots would pass the roots cap is skipped and a later one on roots already read may still join. `live.observe_train`
+false keeps (and winds down) the Train tier. SUSTAINED PRESSURE: when 3 of the last 10 session minutes were pressed (the
+observe batch skipped or failed, or an observe read skipped), the lowest-priority quarter (at least one) of the Train-tier
+pins is shed for the rest of the session (at most once every 10 minutes; never a validated one), and no new family joins
+past what is left. An observe instance is never real, never tuition, never a band move, never a forward row; it winds
+down when its family retires, leaves the Gym band or no longer has a version to practise. Its programs run in their OWN
+decider child, asked after every real decision of the minute has been sent, so no observe program can delay, starve or
+reset a real one. THE RECORD: every minute, each practice account's equity (at the engine's mark), open positions and
+decision coverage go to the private practice ledger (`league/live/observe.py`), its closed trades too; the swarm reads its
+summary as a research signal (`league/swarm/practice.py`) and the site shows its aggregates (`site_inputs`), never a
+forward row and never evidence.
 
 THE CALIBRATION ROUND TRIPS (D3; `league/live/calibration.py`): the House's own 1-lot SPY, QQQ and IWM debit verticals,
 hourly from 10:00 to 15:00 ET (a patient 25-minute mid at 12:00 and 14:00), sent through the same order path, only while
@@ -50,6 +60,7 @@ tuition) and the instance live. Exits need only the kill switch off.
 
 from __future__ import annotations
 
+import collections
 import datetime as dt
 import math
 import threading
@@ -94,6 +105,13 @@ BROKEN_RESEND_MINUTES = 3    # a broken structure's leg is sent alone at most th
 EXIT_PREEMPT_SECONDS = 120.0
 DECIDER_ORPHAN_SECONDS = 300.0
 MINUTE_OFFSET = 3.0          # seconds into each minute the live step runs
+#: The practice league's shedding rule: `PRESSED_MINUTES` pressed session minutes of the last `PRESSURE_MINUTES` shed the
+#: lowest-priority quarter of the Train tier's pins, at most once every `SHED_EVERY` seconds.
+PRESSURE_MINUTES = 10
+PRESSED_MINUTES = 3
+SHED_EVERY = 600.0
+#: The session days the site's practice block covers (`site_inputs`).
+SITE_PRACTICE_SESSIONS = 20
 CALIBRATION_BACKSTOP = 10    # minutes before the close from which the House itself closes a calibration position left open
 DEFAULTS = {
     "enabled": True,
@@ -195,6 +213,13 @@ class OptionsLive:
         self._switches: dict[str, Any] | None = None
         self._switches_told = False
         self.observe_store = ObserveStore(self.root, alert=self.alert, clock=clock)
+        #: The practice league: each observe instance's pinned row's {tier, lineage, structure, roots} (its record's
+        #: first pin); the last session minutes' pressure (the shedding rule); the last shed; what `health` shows.
+        self._observe_meta: dict[str, dict[str, Any]] = {}
+        self._pressure: collections.deque[bool] = collections.deque(maxlen=PRESSURE_MINUTES)
+        self._pressure_day: str | None = None
+        self._shed_at = float("-inf")
+        self._observe_status: dict[str, Any] = {}
         #: Decider batches skipped because the minute's budget was spent, by child ("decider", "observe_decider").
         self.budget_spent: dict[str, int] = {}
         self.state = LiveState(self.root / STATE_FILE, clock=clock)
@@ -301,7 +326,9 @@ class OptionsLive:
             return self._switches
         import json
 
-        off = {"observe": False, "observe_max": 0, "calibration": False, "calibration_samples": 0, "house_test": False}
+        off = {"observe": False, "observe_max": 0, "observe_train": False, "observe_roots_max": 0,
+               "observe_read_calls": int(self.settings["observe_read_calls"]), "calibration": False,
+               "calibration_samples": 0, "house_test": False}
         try:
             from ..swarm import settings as swarm_settings
 
@@ -330,8 +357,15 @@ class OptionsLive:
                 return int(defaults[key])
             return int(value)
 
+        # The observe band's read budget: swarm.json's when it names a valid one, else the step's own (config.json).
+        calls = raw.get("observe_read_calls")
+        calls = (int(calls) if isinstance(calls, int) and not isinstance(calls, bool) and 10 <= calls <= 200
+                 else int(self.settings["observe_read_calls"]))
         self._switches = {"observe": raw.get("observe", defaults["observe"]) is True,
                           "observe_max": count("observe_max", 0, 256),
+                          "observe_train": raw.get("observe_train", defaults.get("observe_train", True)) is True,
+                          "observe_roots_max": count("observe_roots_max", 1, 128),
+                          "observe_read_calls": calls,
                           "calibration": raw.get("calibration", defaults["calibration"]) is True,
                           "calibration_samples": count("calibration_samples", 0, 1000),
                           "house_test": raw.get("house_test", defaults.get("house_test", False)) is True}
@@ -692,13 +726,15 @@ class OptionsLive:
         return (self.state.get("observe_pins", {}) or {}).get("day") != ny(now).date().isoformat()
 
     def _observe_wanted(self, now: float) -> dict[str, dict] | None:
-        """{instance key: row} of the observe band (the module docstring), or None when the band cannot be read (its
-        instances then stay as they are). Pins `{day, order, versions}` in the live state: taken afresh at the first
-        session minute of each session day; outside the session the last session's pins stand (their instances idle)
-        and no family joins. A family leaves (its instance winds down) when it is retired, leaves the Gym band or is no
-        longer observable; the cap (`live.observe_max`) holds the first families pinned."""
+        """{instance key: row} of the practice league (the module docstring), or None when the band cannot be read (its
+        instances then stay as they are). Pins `{day, order, versions, tiers, roots}` in the live state: taken afresh at the
+        first session minute of each session day; outside the session the last session's pins stand (their instances
+        idle) and no family joins. A family leaves (its instance winds down) when it is retired, leaves the Gym band, no
+        longer has a version to practise, is Train-tier while `live.observe_train` is off, or was shed; the caps hold the
+        first families pinned (`live.observe_max` instances, `live.observe_roots_max` distinct roots)."""
         sw = self.switches()
         if not sw["observe"]:
+            self._observe_status = {"max": 0, "roots_max": 0, "roots_used": 0, "effective_cap": 0, "shed": None}
             return {}
         observe = getattr(self.families, "observe", None)
         if observe is None:
@@ -709,39 +745,85 @@ class OptionsLive:
             self.alert("warning", f"live: the observe band could not be read ({type(exc).__name__}: {str(exc)[:160]})")
             return None
         by_family = {str(r["family"]): r for r in current if r.get("observe") is True and r.get("band") == "gym"}
+        if not sw["observe_train"]:
+            by_family = {f: r for f, r in by_family.items() if (r.get("tier") or "validated") != "train"}
         today = ny(now).date().isoformat()
         in_session = self._in_session(now)
         pins = dict(self.state.get("observe_pins", {}) or {})
         day = pins.get("day")
         order = [str(f) for f in pins.get("order") or []]
         versions = {str(k): int(v) for k, v in (pins.get("versions") or {}).items()}
+        tiers = {str(k): str(v) for k, v in (pins.get("tiers") or {}).items()}   # pins before the league: validated
+        roots = {str(k): [str(r) for r in v] for k, v in (pins.get("roots") or {}).items() if isinstance(v, list)}
         if in_session and day != today:
-            day, order, versions = today, [], {}          # a new session: every version pinned afresh
-        order = [f for f in order if f in by_family and f in versions]
+            day, order, versions, tiers, roots = today, [], {}, {}, {}   # a new session: every version pinned afresh
+        shed = dict(self.state.get("observe_shed", {}) or {})
+        shed = shed if shed.get("day") == day else {}
         cap = int(sw["observe_max"])
-        order = order[:cap]
-        capped: list[str] = []
+        if shed:
+            cap = min(cap, int(shed.get("effective_cap") or 0))
+        roots_max = int(sw["observe_roots_max"])
+        for fid in order:
+            row = by_family.get(fid)
+            if row is not None and int(row["version"]) == versions.get(fid) and row.get("tier"):
+                tiers[fid] = "validated" if "validated" in (row["tier"], tiers.get(fid)) else str(row["tier"])
+            if fid not in roots:
+                roots[fid] = _row_roots(row) if row is not None else []
+        # The pinned stay, in their order, while both caps hold (a cap lowered at runtime keeps the first pinned).
+        kept, used = [], set()
+        for fid in order:
+            if fid not in by_family or fid not in versions:
+                continue
+            if not sw["observe_train"] and tiers.get(fid, "validated") == "train":
+                continue
+            need = set(roots.get(fid) or [])
+            if len(kept) >= cap or len(used | need) > roots_max:
+                continue
+            kept.append(fid)
+            used |= need
+        order = kept
+        capped: dict[str, list[str]] = {"cap": [], "roots": []}
         if in_session:
-            for fid, row in by_family.items():             # the likeliest first (`bands.observe`'s order)
-                if fid in order:
+            for fid, row in by_family.items():             # the league's order (`bands.observe`)
+                if fid in order or fid in (shed.get("families") or []):
                     continue
+                need = set(_row_roots(row))
                 if len(order) >= cap:
-                    capped.append(fid)
+                    capped["cap"].append(fid)
+                    continue
+                if len(used | need) > roots_max:
+                    capped["roots"].append(fid)            # skipped, not stopped at: a later family may fit
                     continue
                 order.append(fid)
                 versions[fid] = int(row["version"])
+                tiers[fid] = str(row.get("tier") or "validated")
+                roots[fid] = sorted(need)
+                used |= need
         versions = {f: versions[f] for f in order}
-        new_pins = {"day": day, "order": order, "versions": versions}
-        if new_pins != {"day": pins.get("day"), "order": pins.get("order") or [], "versions": pins.get("versions") or {}}:
+        tiers = {f: tiers.get(f, "validated") for f in order}
+        roots = {f: roots.get(f) or [] for f in order}
+        new_pins = {"day": day, "order": order, "versions": versions, "tiers": tiers, "roots": roots}
+        if new_pins != {"day": pins.get("day"), "order": pins.get("order") or [], "versions": pins.get("versions") or {},
+                        "tiers": pins.get("tiers") or {}, "roots": pins.get("roots") or {}}:
             self.state.put("observe_pins", new_pins)
-        if capped:
+        self._observe_status = {"max": int(sw["observe_max"]), "roots_max": roots_max, "roots_used": len(used),
+                                "effective_cap": cap, "shed": shed or None,
+                                "tiers": {t: sum(1 for f in order if tiers[f] == t) for t in ("validated", "train")}}
+        if capped["cap"] or capped["roots"]:
             told = dict(self.state.get("observe_capped", {}) or {})
-            fresh = sorted(set(capped) - set(told.get("families", []) if told.get("day") == today else []))
-            if fresh:
-                self.state.put("observe_capped", {"day": today, "families": sorted(set(capped) | set(
-                    told.get("families", []) if told.get("day") == today else []))})
-                self.record("live.observe", {"capped": fresh, "cap": cap,
-                                             "why": f"live.observe_max {cap}: the observe band runs at most {cap} instances"})
+            before = set(told.get("families", []) if told.get("day") == today else [])
+            fresh = {why: sorted(set(fids) - before) for why, fids in capped.items()}
+            if fresh["cap"] or fresh["roots"]:
+                self.state.put("observe_capped", {"day": today, "families": sorted(before | set(capped["cap"])
+                                                                                   | set(capped["roots"]))})
+                if fresh["cap"]:
+                    self.record("live.observe", {"capped": fresh["cap"], "cap": cap, "why": "cap",
+                                                 "text": f"live.observe_max {cap}: the practice league runs at most {cap} "
+                                                         "instances"})
+                if fresh["roots"]:
+                    self.record("live.observe", {"capped": fresh["roots"], "roots_max": roots_max, "why": "roots",
+                                                 "text": f"live.observe_roots_max {roots_max}: the practice league reads at "
+                                                         f"most {roots_max} roots"})
         out: dict[str, dict] = {}
         for fid in order:
             n = versions[fid]
@@ -756,7 +838,54 @@ class OptionsLive:
                     row = None
             if row is not None and row.get("observe") is True and int(row.get("version") or 0) == n:
                 out[key] = dict(row)
+                meta = self._observe_meta.setdefault(key, {})
+                meta["tier"] = "validated" if "validated" in (tiers[fid], meta.get("tier")) else tiers[fid]
+                meta["roots"] = roots[fid] or meta.get("roots") or []
+                for field_ in ("lineage", "structure"):
+                    if row.get(field_) is not None:
+                        meta[field_] = row[field_]
         return out
+
+    def _observe_shed(self, now: float, out: dict) -> None:
+        """THE SHEDDING RULE (the module docstring): this session minute's pressure counted; at `PRESSED_MINUTES` of the
+        last `PRESSURE_MINUTES`, the lowest-priority quarter (at least one) of the Train tier's pins is shed for the rest of
+        the session, at most once every `SHED_EVERY` seconds. Validated pins are never shed here: their degradation is the
+        per-minute budget."""
+        today = ny(now).date().isoformat()
+        if self._pressure_day != today:
+            self._pressure_day = today
+            self._pressure.clear()
+        self._pressure.append(bool(out.get("observe_decider")) or int(out.get("observe_reads_skipped") or 0) > 0)
+        if sum(self._pressure) < PRESSED_MINUTES or now - self._shed_at < SHED_EVERY:
+            return
+        pins = dict(self.state.get("observe_pins", {}) or {})
+        if pins.get("day") != today:
+            return
+        tiers = pins.get("tiers") or {}
+        order = [str(f) for f in pins.get("order") or []]
+        train = [f for f in order if tiers.get(f) == "train"]
+        if not train:
+            return
+        shed = train[-max(1, len(train) // 4):]
+        order = [f for f in order if f not in shed]
+        before = dict(self.state.get("observe_shed", {}) or {})
+        families = sorted(set(before.get("families") or []) | set(shed)) if before.get("day") == today else sorted(shed)
+        state = {"day": today, "effective_cap": len(order), "families": families, "at": now}
+        self.state.put("observe_pins", {**pins, "order": order,
+                                        **{k: {f: v for f, v in (pins.get(k) or {}).items() if f not in shed}
+                                           for k in ("versions", "tiers", "roots")}})
+        self.state.put("observe_shed", state)
+        for fid in shed:
+            inst = self.instances.get(f"{fid}@{(pins.get('versions') or {}).get(fid)}:o")
+            if inst is not None and inst.mode == "live":
+                inst.mode = "wind_down"
+        self._shed_at = now
+        self._pressure.clear()
+        why = (f"{PRESSED_MINUTES} of the last {PRESSURE_MINUTES} session minutes were pressed (the observe batch skipped "
+               f"or failed, or an observe read skipped): {len(shed)} Train-tier practice instance(s) shed for the session; "
+               f"at most {len(order)} run until the next session")
+        self.record("live.observe", {"shed": shed, "effective_cap": len(order), "why": why})
+        self.alert("warning", f"live: the practice league is under pressure: {why}")
 
     def _cancel_inactive_opens(self) -> None:
         if self.book is None:
@@ -892,6 +1021,7 @@ class OptionsLive:
                     self.shadow.accounts.pop(key, None)
                     self._decider_of(inst).drop(key, budget_seconds=self._decision_budget())
                     self.instances.pop(key, None)
+                    self._observe_meta.pop(key, None)
             elif inst.kind == "real" and inst.mode == "exit_only" and self.book is not None:
                 if not self.book.instance_positions(key) and not self.book.instance_orders(key):
                     self.state.execute("UPDATE instances SET retired_at=? WHERE id=?", (self.clock(), key))
@@ -976,7 +1106,7 @@ class OptionsLive:
         pages = ({"max_pages": int(self.settings["observe_read_pages"]),
                   "timeout": float(self.settings["observe_read_timeout_seconds"])} if observe else {})
         for root, (lo, hi, band) in roots.items():
-            if observe and (self.market.minute_calls.used() >= int(self.settings["observe_read_calls"])
+            if observe and (self.market.minute_calls.used() >= int(self.switches()["observe_read_calls"])
                             or self._decision_budget() < float(self.settings["observe_load_floor_seconds"])):
                 out["observe_reads_skipped"] = out.get("observe_reads_skipped", 0) + 1
                 continue  # the minute's data or time budget is spent: the observe band reads this root next minute
@@ -1122,9 +1252,48 @@ class OptionsLive:
         if load:
             self._observe_loads(out)
         jobs: list[dict] = []
-        due = self._shadow_jobs(day, mi - 1, jobs, phase="observe")
-        self._observe_decide(day, mi - 1, jobs, due, out)
+        missed: dict[str, str] = {}
+        due = self._shadow_jobs(day, mi - 1, jobs, phase="observe", missed=missed)
+        results = self._observe_decide(day, mi - 1, jobs, due, out)
+        # Honest coverage (the practice record says how complete it is): each account due to decide this minute was
+        # answered, had no chain for its roots, or lost its decision to the minute's budget or its child.
+        failed = bool(jobs) and bool(out.get("observe_decider"))
+        coverage = dict(missed)
+        for key in due:
+            answer = results.get(key)
+            coverage[key] = "missed_budget" if failed or answer is None or answer.get("missing") else "made"
+        self._practice_minute(day, mi - 1, coverage)
+        if load:
+            self._observe_shed(self.clock(), out)
         return len(due)
+
+    def _practice_minute(self, day: LiveDay, smi: int, coverage: Mapping[str, str]) -> None:
+        """The practice ledger's minute (`league/live/observe.py`): one upsert per practice account stepped through `smi`,
+        in one transaction: its equity and open positions at the engine's mark, and its decision coverage. A failure is
+        alerted once and never stops the minute (the next minute's upsert repairs it)."""
+        if smi < 0:
+            return
+        now = self.clock()
+        rows = []
+        for key, acc in list(self.shadow.accounts.items()):
+            version = _version_of(key)
+            if not _is_observe(key) or version is None or acc.began_day != day.ordinal or acc.last_mi != smi:
+                continue  # not a practice account, or not stepped through this minute
+            inst = self.instances.get(key)
+            meta = self._observe_meta.get(key) or {}
+            mark = sum(((p.last_mark if math.isfinite(p.last_mark) else p.entry) - p.entry) * V.MULTIPLIER * p.qty
+                       for p in acc.positions.values())
+            why = coverage.get(key)
+            rows.append({"family": acc.family, "version": version, "tier": meta.get("tier") or "validated",
+                         "lineage": meta.get("lineage"), "structure": meta.get("structure"),
+                         "roots": meta.get("roots") or list(acc.roots), "capital": float(acc.cfg.capital),
+                         "account": getattr(acc, "nonce", ""), "at": now, "day": day.day.isoformat(),
+                         "equity": acc.equity(), "open_positions": len(acc.positions), "open_mark_pnl": mark,
+                         "due": why is not None, "made": why == "made", "missed_quotes": why == "missed_quotes",
+                         "missed_budget": why == "missed_budget",
+                         "status": "live" if inst is not None and inst.mode == "live" and not acc.winding_down else "wound_down"})
+        if rows:
+            self.observe_store.practice(rows)
 
     def _observe_loads(self, out: dict) -> None:
         """Observe programs offered to their child AFTER the minute's real decisions: at most `observe_loads_minute` a
@@ -1148,10 +1317,12 @@ class OptionsLive:
                                               "observe": True, "state": "started" if ok else "failed",
                                               "error": inst.error or None}, agent=inst.family)
 
-    def _observe_decide(self, day: LiveDay, smi: int, jobs: list[dict], due: Mapping[str, ShadowAccount], out: dict) -> None:
-        """The observe band's decisions (the module docstring): its own child, the minute's remaining budget."""
+    def _observe_decide(self, day: LiveDay, smi: int, jobs: list[dict], due: Mapping[str, ShadowAccount],
+                        out: dict) -> dict[str, dict]:
+        """The observe band's decisions (the module docstring): its own child, the minute's remaining budget. Returns
+        the answers by instance key ({} when the batch was skipped or failed)."""
         if not jobs:
-            return
+            return {}
         results = self._batch(self.observe_decider, "observe_decider", day, jobs, out)
         for job in jobs:
             key = job["key"]
@@ -1161,13 +1332,16 @@ class OptionsLive:
             answer = results.get(key) or {}
             self._isolated(key, lambda key=key, acc=acc, answer=answer: (
                 self._stats(key, answer), self._shadow_intents(key, acc, day, smi, answer.get("intents") or [])))
+        return results
 
-    def _shadow_jobs(self, day: LiveDay, smi: int, jobs: list[dict], *, phase: str = "main") -> dict[str, ShadowAccount]:
+    def _shadow_jobs(self, day: LiveDay, smi: int, jobs: list[dict], *, phase: str = "main",
+                     missed: dict[str, str] | None = None) -> dict[str, ShadowAccount]:
         """The shadow book steps ONE MINUTE BEHIND the wall clock: at wall minute m it steps minute m - 1, so the Gym's
         engine, which reads the minute after a decision to judge a passive fill (adverse selection), finds that row
         recorded, exactly as it does in a replay of a stored day. Returns the accounts deciding at `smi`. `phase` "main":
         every account but the observe band's (asked with the real programs); "observe": the observe band's only (stepped
-        after the real path, asked in its own child)."""
+        after the real path, asked in its own child). `missed` collects the accounts due to decide that are not asked:
+        "missed_quotes" (no chain for their roots now), "missed_budget" (their program is unavailable: a decider failure)."""
         due: dict[str, ShadowAccount] = {}
         if smi < 0:
             return due
@@ -1201,12 +1375,16 @@ class OptionsLive:
                     acc.wind_down(day, smi)
                 continue
             if inst.error or smi not in acc.decision_minutes(day):
+                if missed is not None and inst.error and not inst.fatal and smi in acc.decision_minutes(day):
+                    missed[key] = "missed_budget"
                 continue
             job = acc.job(day, smi)
             if job is not None:
                 job["key"], job["mi"] = key, smi
                 jobs.append(job)
                 due[key] = acc
+            elif missed is not None:
+                missed[key] = "missed_quotes"
         return due
 
     @staticmethod
@@ -2103,9 +2281,11 @@ class OptionsLive:
         if not trades:
             return
         if _is_observe(acc.instance):
-            # Never a forward row: the private post-mortem store only (`league/live/observe.py`). Offered again next
-            # minute if it cannot be written.
-            if not self.observe_store.add(acc.instance, acc.family, _version_of(acc.instance), trades,
+            # Never a forward row: the private practice record only (`league/live/observe.py`), each trade marked `forced`
+            # when the House closed it winding the instance down. Offered again next minute if it cannot be written.
+            wound = getattr(acc, "wound", set())
+            marked = [dict(t, forced=t.get("id") in wound) for t in trades]
+            if not self.observe_store.add(acc.instance, acc.family, _version_of(acc.instance), marked,
                                           account=getattr(acc, "nonce", "")):
                 acc.exported -= len(trades)
             return
@@ -2282,7 +2462,49 @@ class OptionsLive:
         # The calibration round trips are never an agent's structure here and never a compute line: the site's figure
         # after compute is the equity's change less compute, and equity already carries their result. Profit counts them
         # since Sept 28, 2026, as the positions table's "House calibration" rows (`league/trading_profit.py`).
-        return {"structures": rows}
+        out: dict[str, Any] = {"structures": rows}
+        practice = self._site_practice()
+        if practice is not None:
+            out["practice"] = practice
+        return out
+
+    def _site_practice(self) -> dict | None:
+        """The practice league for the site (the publisher's `site_practice` allowlists it): per family, over the last
+        `SITE_PRACTICE_SESSIONS` session days, its tier, sessions, closed trades, program wins, realized P&L and return on
+        maximum loss; `live` while it practises now. Never Profit, never a forward row, never a price, strike, leg, expiry,
+        minute, trade date, version or code (`last_day` orders the rows and never leaves the publisher). None when there
+        is no record or it cannot be read."""
+        from .observe import practice_summary
+
+        try:
+            summary = practice_summary(self.root, sessions=SITE_PRACTICE_SESSIONS)
+        except Exception:  # noqa: BLE001 - the site goes without it
+            return None
+        by_family: dict[str, dict[str, Any]] = {}
+        for r in summary.get("rows") or []:
+            fam = by_family.setdefault(str(r["family"]), {
+                "family": str(r["family"]), "lineage": r.get("lineage"), "structure": r.get("structure"), "tier": "train",
+                "sessions": 0, "trades": 0, "wins": 0, "pnl_usd": 0.0, "max_loss_usd": 0.0, "last_day": "", "live": False})
+            fam["tier"] = "validated" if "validated" in (fam["tier"], r.get("tier")) else "train"
+            fam["lineage"] = fam["lineage"] or r.get("lineage")
+            fam["structure"] = fam["structure"] or r.get("structure")
+            fam["sessions"] = max(fam["sessions"], int(r.get("sessions") or 0))
+            fam["trades"] += int(r.get("trades") or 0)
+            fam["wins"] += int((r.get("program") or {}).get("wins") or 0)
+            fam["pnl_usd"] += float(r.get("pnl_usd") or 0.0)
+            fam["max_loss_usd"] += float(r.get("max_loss_usd") or 0.0)
+            fam["last_day"] = max(fam["last_day"], str(r.get("last_day") or ""))
+            fam["live"] = fam["live"] or r.get("status") == "live"
+        if not by_family:
+            return None
+        rows = []
+        for fam in by_family.values():
+            loss = fam.pop("max_loss_usd")
+            rows.append({**fam, "pnl_usd": round(fam["pnl_usd"], 2),
+                         "return_on_risk": round(fam["pnl_usd"] / loss, 4) if loss > 0 else None})
+        return {"as_of": dt.datetime.fromtimestamp(self.clock(), dt.timezone.utc).isoformat(timespec="seconds"),
+                "sessions": int(summary.get("sessions") or 0), "capital_usd": float(self.settings["shadow_capital"]),
+                "rows": rows}
 
     def health(self) -> dict:
         with self._lock:
@@ -2300,10 +2522,17 @@ class OptionsLive:
                                   "tuition": i.tuition, "observe": i.observe} for k, i in self.instances.items()},
                 # Read from the House's thread: the live state (its own lock) and the last minute's switches only; the
                 # calibration's samples file belongs to the minute thread (`python -m league.live --calibration` reads it).
-                "observe": {"switches": dict(self._switches or {}), "pins": self.state.get("observe_pins")},
+                "observe": {"switches": dict(self._switches or {}), "pins": self.state.get("observe_pins"),
+                            **dict(self._observe_status or {})},
                 "budget_spent": dict(self.budget_spent),
                 "calibration": self.calibration.status() if self.calibration is not None else None,
                 "house_test": self.house_test.status() if self.house_test is not None else None}
+
+
+def _row_roots(row: Mapping[str, Any] | None) -> list[str]:
+    """The roots a practice row's program reads (its NEEDS roots, else the family's)."""
+    roots = (row or {}).get("needs_roots") or (row or {}).get("roots") or []
+    return sorted({str(r).upper() for r in roots if str(r).strip()})
 
 
 def _is_observe(instance: str) -> bool:

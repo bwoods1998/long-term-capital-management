@@ -286,13 +286,32 @@ DEFAULTS: dict[str, Any] = {
     # turns observe, calibration and the House live test off. They switch work off or bound it; no money rule lives here
     # (the constitution's).
     "live": {
-        "observe": True,                # every alive Gym-band family with a validated version trades shadow (never real)
-        "observe_max": 48,              # at most this many observe instances (the likeliest by validation t first)
+        # THE PRACTICE LEAGUE (the observe band; Sept 29, 2026): every alive Gym-band family with a validated version, or
+        # an eligible Train version (`observe_train`), trades shadow (never real) on live quotes, validated first (by
+        # validation t), then Train (by Train score). Two caps: instances and the distinct roots they read (every root is
+        # read every minute, about 1.1-1.5 data calls each; measured on the House Sept 29).
+        "observe": True,
+        "observe_max": 48,              # at most this many observe instances
+        "observe_train": True,          # admit families with an eligible Train version and no validated one
+        "observe_roots_max": 24,        # at most this many distinct roots across the observe instances (1-128)
+        "observe_read_calls": 40,       # the minute's data calls before observe reads stop (about 1.5 a root; 10-200)
         "calibration": False,           # the D3 real-fill round trips: ON only by swarm.json {"live": {"calibration": true}}
         "calibration_samples": 30,      # a symbol's round trips stop once its open-at-mid cell has this many samples
         # The House live test (league/live/house_test.py): ON only by swarm.json {"live": {"house_test": true}}, and then
         # only with real money on, the grant, the paper proof and its private program verified. Off: exits only.
         "house_test": False,
+    },
+    # THE PRACTICE LEAGUE'S FEEDBACK (Sept 29, 2026; league/swarm/practice.py): the practice record (shadow trades on live
+    # quotes under the Gym's fill rules, the House's private observe.sqlite) as a RESEARCH signal, never evidence: the
+    # strategist's PRACTICE table, the architect's PRACTICE BY CLASS lines and the bandit's capped bonus. `feedback` false
+    # turns all three off (no deploy). The bonus moves only research attention (the bandit's weight); it never reaches
+    # validation, the gate, the holdout, the bands, the live path or the money table.
+    "practice": {
+        "feedback": True,
+        "sessions": 10,                 # the session days the feedback reads (1-60)
+        "bonus": 0.25,                  # a family's largest relative share bonus (0-0.5; 0 turns the bonus off)
+        "bonus_total": 0.10,            # the most share the bonus moves in all (0-0.2)
+        "min_trades": 3,                # program-closed practice trades before any bonus (1-50)
     },
     # Claude through the gateway (Sept 26, 2026, the swarm sprint; league/claude.py). The gateway's CLAUDE_USD ($100, the
     # owner's funded total) is the hard line; `usd_cap` is the swarm's own Claude line inside it and `reserve_usd` is never
