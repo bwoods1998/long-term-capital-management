@@ -44,6 +44,7 @@ on branch `run/options-swarm-2026-09-26`) has the detail.
   - After the deploy: `options_live.observe` shows `tiers`, `roots_used`, `effective_cap` and no `shed`;
     `observe_reads_skipped` stays 0; `observe.sqlite` `practice` rows appear from 13:31Z; no `:o` in `live.sqlite` or
     the swarm's `forward`; the tournament event's `practice_bonus` values are at most 0.25.
+
 - **Train from 2017** (#424; not yet released). Train's window, `storelib.TRAIN_EARLIEST` and
   `gym.train_from` reach 2017-01-03 (a third start beside 2020-01-02 and 2022-01-03; over eight years the derived
   split is 24 and the time limit 2400 s). Stage 9's `EARLY` stays the literal 2020-01-02..2021-12-31. New public
