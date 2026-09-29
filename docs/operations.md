@@ -788,14 +788,22 @@ The full graveyard and the strategist (Sept 29, 2026; `league/swarm/architect.py
 instructions (`architect.full_graveyard`, default true; `architect.graveyard_digest_tokens`, 100000;
 `architect.graveyard_digest_tail_share`, 0.15; `architect.graveyard_digest_ttl`: "5m" marks the digest only when the
 strategist's call just wrote it, "1h" marks every call and needs `claude.cache_1h: true`, which is set only after the
-gateway admits the 1-hour cache, "off" never marks it). OpenAI and Sail keep the 20 newest rows. Every lesson a model
-reads loses any sentence about Validation, the holdout, out-of-sample results or 2025 (`lesson_view`). Each
-`swarm.architect` event carries `digest` (rows, level, sha, ttl, `cache_miss`), `usage` and `cited` (proposals naming a
-real graveyard row). The agenda splits in two: `architect.agenda_locked` is the operator's preamble, which no model edits;
-while it is non-empty the strategist runs before an architect pass that has room (at most every
-`strategist.every_seconds`, 10800) and writes only the WHERE TO LOOK section after it (kv `architect_agenda_section`,
-the previous one kept inside it). A validator rejects money, real-money or envelope talk, a verifier word beside a
-changing verb, numeric rules, 2025 or the holdout, overrides and revivals, and fewer than `strategist.min_cites` real
-ids; a rejection or any failure keeps the last section. Its Claude line is `claude.role_usd_day["strategist"]` (4.0 a
-UTC day by default), and "strategist" must be in `claude.roles` (the default).
+gateway admits the 1-hour cache, "off" never marks it). The operator's rows (`op-` ids with no family row; no proposed
+family is born with an `op-` id) come first and whole; the other rows shorten on a ladder as the graveyard grows (at the
+default budget: every row in full to ~900 rows, idle rows shortened to ~1,600, one line per refuted, diagnosed or scored
+row from ~1,800 and fewer such lines from ~3,000, id lists from ~6,500; past ~7,000 the idle ids are cut, with the count
+stated). OpenAI and Sail keep the 20 newest rows. Every lesson a model reads loses any sentence about Validation, the
+holdout, out-of-sample results or 2025 (`lesson_view`). Each `swarm.architect` event carries `digest` (rows, level, sha,
+ttl, `cache_miss`), `usage` and `cited` (proposals naming a real graveyard row). The agenda splits in two:
+`architect.agenda_locked` is the operator's preamble, which no model edits; while it is non-empty the strategist runs
+before an architect pass that has room (at most every `strategist.every_seconds`, 10800) and writes only the WHERE TO
+LOOK section after it (kv `architect_agenda_section`, the previous one kept inside it), every line quoted under a header
+that says it changes no rule, the verifier or money. A validator rejects money, real-money or envelope talk, a verifier
+word beside a changing verb or a voiding state (paused, advisory, not binding ...), numeric rules, 2025, the holdout or
+the Validation period in any words, the operator's voice, overrides and revivals, non-ASCII, and fewer than
+`strategist.min_cites` real ids; a rejection goes back once with its reasons (`strategist.repair_turns`, 1), and a final
+rejection or any failure keeps the last section. Its Claude line is `claude.role_usd_day["strategist"]` (4.0 a UTC day
+by default), and "strategist" must be in `claude.roles` (the default; the box's `swarm.json` overrides the list, so add
+it there, or the strategist runs on Sail's small packet and its event says so). The architect has no daily Claude line
+of its own unless `claude.role_usd_day["architect"]` is set: with the digest each call carries ~85k more input tokens.
 Each run is a private `swarm.strategist` event. Emptying `architect.agenda_locked` returns to `architect.agenda` as before.

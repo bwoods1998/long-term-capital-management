@@ -47,7 +47,8 @@ class StringSystemIsUnchanged(unittest.TestCase):
     def test_the_ceiling_of_a_string_body_is_unchanged(self):
         body = request_body("claude-sonnet-5-5", "rules " * 3000, TURN, max_tokens=32000, stream=True)
         size = len(json.dumps(body).encode("utf-8"))
-        worst = (Decimal(size + 4096) * Decimal("2.50") + 32000 * Decimal("10")) / 10 ** 6
+        write, output = MODEL_CEILINGS["claude-sonnet-5-5"]
+        worst = (Decimal(size + 4096) * write + 32000 * output) / 10 ** 6
         self.assertGreaterEqual(reservation_ceiling(body), worst)
         self.assertLess(reservation_ceiling(body) - worst, Decimal("0.00001"))
 
@@ -81,6 +82,24 @@ class Blocks(unittest.TestCase):
                 system_blocks(given, allow_hour=hour)
         self.assertEqual(len(system_blocks([{"text": str(i), "cache": "5m"} for i in range(4)])), 4, "four markers are allowed")
 
+    def test_one_check_serves_both_request_shapes(self):
+        # Review of #419: #417 landed first with the tool loop's system-block check; this PR reuses it (`_check_system`).
+        from league.claude import _check_system, tool_request_body
+
+        tools = [{"name": "look", "input_schema": {"type": "object"}}]
+        five = {"type": "text", "text": "a", "cache_control": {"type": "ephemeral"}}
+        hour = {"type": "text", "text": "b", "cache_control": {"type": "ephemeral", "ttl": "1h"}}
+        with self.assertRaisesRegex(ClaudeError, "1-hour cache marker must come before"):
+            _check_system([five, hour], allow_hour=True)
+        with self.assertRaisesRegex(ClaudeError, "1-hour cache marker must come before"):
+            system_blocks([{"text": "a", "cache": "5m"}, {"text": "b", "cache": "1h"}], allow_hour=True)
+        with self.assertRaisesRegex(ClaudeError, "ephemeral and five minutes"):
+            tool_request_body("claude-sonnet-5-5", [hour], TURN, tools)
+        with self.assertRaisesRegex(ClaudeError, "ephemeral and five minutes"):
+            system_blocks([{"text": "b", "cache": "1h"}])
+        self.assertEqual(tool_request_body("claude-sonnet-5-5", [five, {"type": "text", "text": "c"}], TURN, tools)["system"],
+                         [five, {"type": "text", "text": "c"}], "the tool loop's system blocks as before")
+
     def test_a_one_hour_body_is_held_at_the_one_hour_write_rate(self):
         self.assertEqual(HOUR_WRITE_FACTOR, Decimal("2") / Decimal("1.25"), "2x base input over 1.25x (the pricing page)")
         system = [{"text": "digest " * 4000, "cache": "1h"}, {"text": "rules"}]
@@ -91,7 +110,8 @@ class Blocks(unittest.TestCase):
         worst = (Decimal(size + 4096) * write * HOUR_WRITE_FACTOR + 1000 * output) / 10 ** 6
         self.assertGreaterEqual(reservation_ceiling(hour), worst)
         self.assertLess(reservation_ceiling(hour) - worst, Decimal("0.00001"))
-        self.assertEqual(write * HOUR_WRITE_FACTOR, Decimal("4.000"), "Sonnet 5.5's 1-hour write: $4 a million")
+        self.assertEqual(write * HOUR_WRITE_FACTOR, Decimal("4.000") * Decimal("1.1"),
+                         "Sonnet 5.5's 1-hour write: $4 a million, with the US-only x1.1 the ceilings carry")
         self.assertLess(reservation_ceiling(five), reservation_ceiling(hour))
 
     def test_the_client_sends_the_blocks_and_refuses_an_hour_it_was_not_allowed(self):

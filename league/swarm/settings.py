@@ -228,9 +228,11 @@ DEFAULTS: dict[str, Any] = {
     # Validation check-failure counts and the day's births and retirements, and writes only the agenda's WHERE TO LOOK
     # section (the locked preamble is `architect.agenda_locked`, never edited by a model). It runs just before an
     # architect pass that has room to add families, at most every `every_seconds`, and only while `agenda_locked` is set.
-    # A validator rejects any section that talks of money, real money, the envelope, changing a threshold, a numeric
-    # rule, 2025 or the holdout, overriding the preamble or reviving a refuted idea; a rejection or any failure keeps the
-    # last accepted section. Its Claude line is `claude.role_usd_day["strategist"]`; Sail (`sail_profile`,
+    # A validator rejects any section that talks of money, real money, the envelope, changing a threshold or giving a
+    # rule a new state (paused, advisory ...), a numeric rule, 2025, the holdout or the Validation period in any words,
+    # the operator, overriding the preamble, reviving a refuted idea, or carries non-ASCII; a rejection goes back once
+    # with its reasons (`repair_turns`), and a final rejection or any failure keeps the last accepted section. The
+    # architect reads the section quoted under a header that says it changes nothing. Its Claude line is `claude.role_usd_day["strategist"]`; Sail (`sail_profile`,
     # `sail_usd_day`) answers when Claude cannot.
     "strategist": {
         "enabled": True,
@@ -240,6 +242,8 @@ DEFAULTS: dict[str, Any] = {
         "sail_profile": "k3_balanced",
         "sail_usd_day": 1.0,
         "max_output_tokens": 12000,     # Sail only; Claude uses claude.max_tokens
+        # A rejected answer goes back once with the validator's reasons (at most 2); the repair reads the digest's cache entry.
+        "repair_turns": 1,
     },
     "gate": {
         "review_openai_model": "gpt-6-sol",

@@ -475,8 +475,8 @@ class Swarm:
     def architect_pass(self) -> dict[str, Any]:
         """The architect's round: the strategist first when it is due and this pass may add families (only the architect
         reads its section, so it never writes one nobody reads), then the architect. The architect's call marks the
-        sealed digest for the five-minute cache only when the strategist's Claude call just marked it and started less
-        than PAIR_SECONDS ago (the entry lives five minutes from the start of the call that wrote it). A strategist that
+        sealed digest for the five-minute cache only when the strategist's last Claude call just marked it and started
+        less than PAIR_SECONDS ago (the entry lives five minutes from the start of the call that wrote or last read it). A strategist that
         fails or raises leaves the agenda as it was and never stops the architect."""
         out: dict[str, Any] = {}
         began = self.clock()
@@ -486,9 +486,13 @@ class Swarm:
         except Exception as exc:  # noqa: BLE001 - run() never raises; this is the belt to its braces
             out["strategist"] = {"error": f"{type(exc).__name__}: {str(exc)[:200]}"}
         ran = out.get("strategist") or {}
-        paired = bool(ran.get("primed")) and self.clock() - began < PAIR_SECONDS
+        # From the start of the strategist's last Claude call that marked the digest (a repair turn's read refreshes the
+        # entry), else from the pass's start.
+        primed_at = ran.get("primed_at")
+        since = float(primed_at) if isinstance(primed_at, (int, float)) and not isinstance(primed_at, bool) else began
+        paired = bool(ran.get("primed")) and self.clock() - since < PAIR_SECONDS
         return {**self.architect.run(paired=paired), **({"strategist": {k: ran.get(k) for k in (
-            "accepted", "route", "cost_usd", "reasons", "skipped", "error", "primed")}} if ran else {})}
+            "accepted", "route", "cost_usd", "reasons", "skipped", "error", "primed", "turns", "note")}} if ran else {})}
 
     def round_alive(self, name: str) -> bool:
         thread = self.rounds.get(name)

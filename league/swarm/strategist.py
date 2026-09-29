@@ -17,12 +17,17 @@ operator row instead of the digest.
 
 WHAT IT WRITES. One JSON object: `where_to_look` (at most `strategist.max_chars`, 1,600; the code's ceiling is 2,000),
 `evidence` (for the operator, never sent to the architect) and `cites` (graveyard or family ids). `check_section` must
-accept the section: no money, real money or envelope talk, no word about the verifier beside a verb that would change it,
-no numeric rule, no 2025 or holdout, no override of the preamble, no revival of a retired idea, and at least
-`strategist.min_cites` real ids cited. An accepted section is kv `architect_agenda_section` (with the one before it); the
-architect's agenda is then the locked preamble verbatim followed by it (`architect.compose`). A rejected answer, a failed
-call, a skipped or disabled run leave the last accepted section in place. Nothing here writes swarm.json or the locked
-preamble.
+accept the section: no money, real money or envelope talk, no word about the verifier beside a verb that would change it
+or a state that would void it (paused, advisory, not binding, out of date ...), no numeric rule (in digits or words), no
+2025, holdout or Validation period in any words, no override of the preamble and no word of the operator's (op- rows
+aside), no revival of a retired idea (a negation must come right before the verb), plain ASCII only, and at least
+`strategist.min_cites` real ids cited. A rejected answer goes back once with the reasons (`strategist.repair_turns`); the
+repair reads the digest's cache entry the first call wrote. An accepted section is kv `architect_agenda_section` (with
+the one before it); the architect's agenda is then the locked preamble verbatim followed by it, quoted
+(`architect.compose`), under a header that says it changes nothing. A validator catches words, not intent: the quoting
+and the header are the containment, and the section reaches nothing but the architect's request (no threshold, money or
+D2 path reads it). A final rejection, a failed call, a skipped or disabled run leave the last accepted section in place.
+Nothing here writes swarm.json or the locked preamble.
 
 WHEN. Just before an architect pass that has room to add families (`loop.Swarm.architect_pass`), at most every
 `strategist.every_seconds` (3 h), only while `architect.agenda_locked` is set and `strategist.enabled`. Its Claude line
@@ -43,8 +48,8 @@ from typing import Any, Callable, Mapping, NamedTuple, Sequence
 
 from . import diagnostics
 from . import settings as settings_mod
-from .architect import (AGENDA_KEY, SECTION_MAX, USAGE_KEYS, Architect, GraveyardDigest, lesson_view, locked_text, tag_of,
-                        to_ascii)
+from .architect import (AGENDA_KEY, ASCII_MAP, OPERATOR_SQL, SECTION_MAX, USAGE_KEYS, Architect, GraveyardDigest, lesson_view,
+                        locked_text, operator_ids, tag_of, to_ascii)
 from .store import SwarmStore, iso
 
 ROLE = "strategist"
@@ -53,6 +58,8 @@ KV_AT = "strategist_at"
 #: A Claude call's five-minute entry lives 300 s from the start of the call that wrote it; the architect's call must
 #: start inside it to read it (`loop.Swarm.architect_pass`).
 PAIR_SECONDS = 270.0
+#: The check-failure counts by name need this many validated families (`Strategist._checks`).
+MIN_VALIDATED = 5
 
 SYSTEM = """You are the research strategist of a swarm of AI researchers that trade level-3 options (defined-risk structures
 only) on one brokerage account. An architect proposes new research families; each family's researcher improves one
@@ -70,18 +77,26 @@ score) or tested and failed. Prefer a few deep directions over many shallow ones
 premium, a flow, a behavioral bias, a venue rule) that the Gym's data can test and enough independent trades to measure.
 
 A machine checks your section before the architect sees it. It is REJECTED, and the last section kept, if it:
-- talks of money: dollars, cents, capital, budget, notional, margin, sizing, contracts per, allocation;
-- talks of real money, live trading, the grant, the constitution, the envelope, the broker, the kill switch or bands;
-- puts a word about the verifier (the line, a threshold, a bar, a check, a gate, a screen, DSR, Sharpe, quarters, the
-  stress test, trials, looks, caps, limits, floors) in one sentence with a verb that would change it (loosen, relax,
-  lower the, raise, reduce, increase, drop, remove, waive, skip, ignore, adjust, change, modify, revise, replace ...);
-- states a numeric rule (a comparison sign next to a number, or "at least", "at most", "minimum" or "maximum" and a
-  number): numeric rules live in the preamble; ranges of days to expiry or sessions ("1-7 DTE") are fine;
-- mentions 2025, 2026, the holdout, sealed data or out-of-sample results;
-- tells anyone to ignore, disregard, override or supersede anything, or speaks for the operator;
-- advises re-proposing, reviving, revisiting, retrying or trying again a retired idea ("do not re-propose X" is fine);
-- contains braces, code fences, URLs, markdown headings or numbered headings in capitals;
+- talks of money: dollars, cents, capital, budget, notional, margin, sizing, contracts per, allocation, the account;
+- talks of real money, live trading, promotion, the grant, the constitution, the envelope, the broker, the kill switch or
+  bands;
+- puts a word about the verifier (the line, a threshold, a bar, a check, a gate, a screen, DSR, Sharpe, the quarters
+  check, the stress test, trials, looks, caps, limits, floors) in one sentence with a verb that would change it (loosen,
+  relax, lower the, raise, reduce, increase, drop, remove, waive, skip, ignore, adjust, change, modify, revise ...);
+- gives a rule, the preamble, the refuted list or the verifier a state (paused, suspended, advisory, optional, not
+  binding, set aside, out of date, withdrawn, sufficient, good enough, lighter, lenient ...);
+- states a numeric rule (a comparison sign or "at least", "at most", "above", "below", "N or more" next to a number, in
+  digits or words): numeric rules live in the preamble; spans of days to expiry or sessions ("1-7 DTE") are fine;
+- mentions 2025 or later years, the holdout, sealed data, out-of-sample results, or the period after Train in any words
+  (unseen, after Train, the test or forward window, the recent year);
+- tells anyone to ignore, disregard, override, set aside or supersede anything, or speaks of the operator at all
+  (naming op- rows, "operator rows" or "operator lessons" is fine);
+- advises re-proposing, reviving, revisiting, reconsidering, returning to, retrying or giving another look to a retired
+  idea ("do not re-propose X" and "never revisit X" are fine; the negation must come right before the verb);
+- contains braces, code fences, URLs, markdown headings, numbered headings in capitals, or any character outside plain
+  ASCII (write plain ASCII: straight quotes and "-");
 - cites fewer than {min_cites} real graveyard or family ids in "cites".
+If it is rejected you may get one chance to fix it, with the machine's reasons.
 
 Reply with ONE JSON object and nothing else: {{"where_to_look": "<the section: plain prose, or lettered items (a), (b),
 ... one per line>", "evidence": "<at most 1,200 characters for the operator, never sent to the architect: the evidence
@@ -99,31 +114,93 @@ _SPLIT = re.compile(r"(?<=[.!?;])\s+|\n+")
 _URL = re.compile(r"https?://|www\.", re.I)
 _HEADING = re.compile(r"^\s*(?:\d+\.\s+[A-Z]{3,}|#{1,6}\s)", re.M)
 _MONEY = re.compile(r"\$|\b(?:usd|dollars?|cents?|notional|capital|budget\w*|buying power|margins?|position[- ]siz\w*|sizing|"
-                    r"size up|contracts per|allocat\w*)\b", re.I)
+                    r"size up|contracts per|allocat\w*|bankroll|stakes?|(?:the|an?|our|its|brokerage|trading|cash) accounts?|"
+                    r"(?:actual|real|live|more|most of the) (?:funds?|cash))\b", re.I)
 _REAL = re.compile(r"\b(?:real[- ]money|live (?:trading|money|accounts?|orders?|path|book|tests?|grant)|grant\w*|constitution\w*|"
-                   r"envelope|kill[- ]?switch\w*|broker\w*|(?:probe|sized|candidate) bands?)\b", re.I)
+                   r"envelope|kill[- ]?switch\w*|broker\w*|(?:probe|sized|candidate) bands?|promot\w*|go(?:es|ing)? live|"
+                   r"paper[- ]trad\w*)\b", re.I)
 #: Everyday phrases that only look like the verifier's words (small caps, limit orders, minute bars, quarter-end flows).
 _BENIGN = re.compile(r"\b(?:(?:small|large|mid|micro|mega)[- ]caps?|limit (?:orders?|prices?)|(?:one-|five-|\d+-)?minute bars?|"
                      r"daily bars?|quarter[- ](?:end|start)s?|quarterly|end of (?:the |a )?quarter|market stress|stress(?:ed)? "
                      r"(?:markets?|regimes?|days?|periods?|events?|sessions?))\b", re.I)
+#: The verifier's words. "quarter" and "stress" count only beside a rule word ("the quarters check", "the stress test"):
+#: alone they are research words ("trades per quarter", "exit before the stress window"; review of #419).
 _PROTECTED = re.compile(r"\b(?:d2\w*|verifier\w*|validation|thresholds?|lines?|bars?|checks?|gates?|screens?|drift (?:rules?|"
-                        r"screens?|tests?)|kill tests?|deflat\w*|dsr|sharpe\w*|t-stat\w*|p-values?|significan\w*|quarters?|"
-                        r"stress\w*|half-spread|caps?|limits?|ceilings?|floors?|ration\w*|looks|trials?)\b|\b1\.5x\b", re.I)
+                        r"screens?|tests?)|kill tests?|deflat\w*|dsr|sharpe\w*|t-stat\w*|p-values?|significan\w*|"
+                        r"(?:quarters?|quarterly|stress(?:ed)?)[- ](?:checks?|lines?|tests?|rules?|screens?|gates?|requirements?|"
+                        r"criteri\w*|needed|required)|stress[- ]tests?|requirements?|criteri(?:a|on)|hurdles?|half-spread|caps?|"
+                        r"limits?|ceilings?|floors?|ration\w*|looks|trials?)\b|\b1\.5x\b", re.I)
+#: A protected rule's STATE, however it is phrased: paused, advisory, not binding, set aside, out of date ... (review of
+#: #419: 22 of 24 paraphrases passed the verb rule alone). Within six words of a verifier word or of one of `_RULES` it is
+#: an override ("the drift rule is paused", "six of eight checks now suffice", "the refuted list is out of date").
+_RULES = re.compile(r"\b(?:preamble|rules?|refuted (?:list|ideas?|families|classes|rows)|items? \d+|envelope|polic(?:y|ies)|"
+                    r"instructions?|agenda|verdicts?)\b", re.I)
+_STATE = re.compile(r"\b(?:paus\w*|suspend\w*|advisory|optional|(?:not|no longer|non-?) ?binding|set aside|pay no attention|"
+                    r"out of date|outdated|obsolete|withdra\w*|retract\w*|rescind\w*|revok\w*|lift(?:s|ed|ing)?|"
+                    r"suffic\w*|good enough|close enough|lighter|lenient\w*|looser|softer|forgiving|negotiable|amend\w*|"
+                    r"void\w*|moot|superseded|no longer (?:holds?|applies|apply|stands?|counts?)|on hold)\b", re.I)
 _CHANGE = re.compile(r"\b(?:loosen\w*|relax\w*|lower(?:s|ed|ing)?\s+(?:the|its|their|a|an|our|this|that|these|those)\b|"
                      r"reduc\w*|rais(?:e|es|ed|ing)|increas\w*|drop\w*|remov\w*|waiv\w*|skip\w*|bypass\w*|exempt\w*|"
                      r"ignor\w*|overrid\w*|disabl\w*|turn(?:s|ed|ing)? off|suspend\w*|soften\w*|eas(?:e|es|ed|ing)|weaken\w*|"
                      r"chang\w*|adjust\w*|modif\w*|revis(?:e|es|ed|ing)|redefin\w*|replac\w*)\b", re.I)
 _COMPARE = re.compile(r"(?:>=|<=|=>|=<|[<>])\s*[-+]?\$?\.?\d|\d\s*(?:>=|<=|[<>])")
+#: A number in digits (possessive: "10" never backtracks to "1" to slip past the horizon exception) or in words.
+_NUMBER = (r"(?:[-+]?\$?\.?\d[\d.,]*+%?|(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|"
+           r"thirty|forty|fifty|hundred|half|a (?:dozen|third|quarter|half))\b)")
+#: A numeric rule: a bound and a number (digits or words), "N or more", "k of 8 checks". After "above", "below", "under",
+#: "over" or "exceed", a span of days, sessions or strikes ("under 7 DTE", "over 20 sessions") is a horizon, not a rule;
+#: after "at least", "at most", "minimum" or "maximum" it is a rule ("at least 25 days" is the verifier's).
 _BOUND = re.compile(r"\b(?:at least|at most|no more than|no fewer than|no less than|(?:a )?minimum(?: of)?|(?:a )?maximum(?: of)?)"
-                    r"\s+[-+]?\$?\d", re.I)
-_D2 = re.compile(r"\b(?:2025|2026|hold[- ]?outs?|sealed|out[- ]of[- ]sample|oos)\b", re.I)
+                    r"\s+" + _NUMBER + r"|\b(?:above|below|exceed\w*|under|over)\s+" + _NUMBER + r"(?!\s*-?\s*(?:dte|days?|"
+                    r"sessions?|minutes?|hours?|weeks?|months?|expir\w*|delta|wide|points?|strikes?)\b)|\b" + _NUMBER
+                    + r"\s+or\s+(?:more|fewer|less|better|higher|lower|above|below|over|under)\b|\b" + _NUMBER
+                    + r"\s+(?:of|in)\s+(?:eight|8|four|4|the)\s+(?:checks?|quarters?)\b", re.I)
+#: 2025 and the holdout by name, and the Validation year by any other ("the unseen year", "the window after Train"; review
+#: of #419).
+_D2 = re.compile(r"\b(?:202[5-9]|hold[- ]?outs?|sealed|out[- ]of[- ]sample|oos|unseen|held[- ](?:back|out)|(?:after|beyond|past) "
+                 r"(?:the )?train\w*|post-?train\w*|(?:test|forward|validation|recent|later|evaluation|scoring) (?:window|period|"
+                 r"year|set|data|months?)|(?:most )?recent years?|latest year|last year|this year|next year|forward[- ]test\w*)\b",
+                 re.I)
 _OVERRIDE = re.compile(r"\b(?:ignor\w*|disregard\w*|supersed\w*|overrid\w*|new rules?|system prompt|you are now|as the operator|"
-                       r"operator (?:says|said|wants|wanted|decided|decides|asks|asked|approved|allows))\b", re.I)
+                       r"operator (?:says|said|wants|wanted|decided|decides|asks|asked|approved|allows)|set aside|pay no attention|"
+                       r"never mind|forget|exempt\w*|carve[- ]outs?|exception to)\b", re.I)
+#: The operator speaks only through the locked preamble: the section may name an operator row ("op-..." ids, "operator
+#: rows", "operator lessons") and nothing else of the operator (review of #419: "Per the operator, ...").
+_OPERATOR = re.compile(r"\boperator\w*", re.I)
+_OPERATOR_OK = re.compile(r"\bop-[a-z0-9-]+|\boperator(?:'s)? (?:rows?|lessons?)\b", re.I)
 _VOID_WHAT = re.compile(r"\bthe (?:preamble|rules?|graveyard|locked \w+)\b", re.I)
 _VOID_HOW = re.compile(r"\b(?:no longer|does not apply|do not apply|doesn'?t apply|don'?t apply|is wrong|are wrong|is outdated|"
                        r"is stale)\b", re.I)
-_REVIVE = re.compile(r"\b(?:re-?propos\w*|reviv\w*|resurrect\w*|reopen\w*|revisit\w*|retr(?:y|ies|ied|ying)|again)\b", re.I)
-_NEGATION = re.compile(r"\b(?:not|never|no|nor|avoid\w*|stop\w*|don'?t|without)\b", re.I)
+_REVIVE = re.compile(r"\b(?:re-?propos\w*|reviv\w*|resurrect\w*|reopen\w*|revisit\w*|retr(?:y|ies|ied|ying)|again|reconsider\w*|"
+                     r"afresh|anew|re-?examin\w*|re-?introduc\w*|bring(?:s|ing)? back|(?:another|a second|second|a fresh|fresh) "
+                     r"(?:chance|look|try|shot|attempt|round)|return(?:s|ed|ing)? to (?:the |an? |its |their )?(?:refuted|retired|"
+                     r"dead|failed|buried|old|older|earlier|previous|abandoned|graveyard|same))\b", re.I)
+#: A revival is allowed only under a negation within the three words before it ("do not re-propose X", "never revisit"),
+#: or, for "again", a negated proposing verb before it ("stop proposing X again", "never try X again"). A negation
+#: elsewhere in the sentence does not count ("revive X without its hedge leg"; review of #419).
+_NEGATION = re.compile(r"(?:not|never|no|nor|neither|avoid\w*|stop\w*|don'?t|doesn'?t|shouldn'?t|cannot|can'?t|without|against|"
+                       r"refrain\w*|instead)", re.I)
+_WORD = re.compile(r"[A-Za-z']+")
+_NEGATED_PROPOSING = re.compile(r"\b(?:not|never|no|stop|avoid|don'?t|refrain from)\s+(?:\w+\s+)?(?:propos\w*|tr(?:y|ies|ying)|"
+                                r"us(?:e|es|ing)|build\w*|bear\w*|found\w*|test\w*|run\w*|spend\w*|go\w*|pursu\w*)\b", re.I)
+
+
+def _near(a: re.Pattern[str], b: re.Pattern[str], text: str, words: int = 6) -> bool:
+    """A match of `a` and one of `b` in `text` within `words` words of each other."""
+    xs = [m.start() for m in a.finditer(text)]
+    ys = [m.start() for m in b.finditer(text)]
+    return any(len(_WORD.findall(text[min(x, y):max(x, y)])) <= words for x in xs for y in ys)
+
+
+def _revives(sentence: str) -> bool:
+    """A revival verb in `sentence` with no negation just before it (`_NEGATION`)."""
+    for found in _REVIVE.finditer(sentence):
+        if found.group(0).lower() == "again" and _NEGATED_PROPOSING.search(sentence[:found.start()]):
+            continue
+        before = _WORD.findall(sentence[:found.start()])[-3:]
+        if not any(_NEGATION.fullmatch(w) for w in before):
+            return True
+    return False
 
 
 def normalize(text: Any) -> str:
@@ -155,6 +232,9 @@ def check_section(text: Any, *, max_chars: int, cites: Any, known_ids: set[str] 
         say("shape", "a URL")
     if _HEADING.search(raw):
         say("shape", "a heading that could pass for an item of the locked preamble")
+    foreign = sorted({c for c in raw if ord(c) > 127 and c not in ASCII_MAP})
+    if foreign:  # a Cyrillic letter would be dropped by `normalize` ("Ign\u043ere" becomes "Ignre"; review of #419)
+        say("shape", "characters outside ASCII: " + " ".join(f"U+{ord(c):04X}" for c in foreign[:8]))
     for sentence in (x.strip() for x in _SPLIT.split(clean) if x.strip()):
         if _MONEY.search(sentence):
             say("money", sentence)
@@ -163,13 +243,17 @@ def check_section(text: Any, *, max_chars: int, cites: Any, known_ids: set[str] 
         plain = _BENIGN.sub(" ", sentence)
         if _PROTECTED.search(plain) and _CHANGE.search(plain):
             say("threshold", sentence)
+        if _near(_STATE, _PROTECTED, plain) or _near(_STATE, _RULES, plain):
+            say("override", sentence)
         if _COMPARE.search(sentence) or _BOUND.search(sentence):
             say("numeric_rule", sentence)
         if _D2.search(sentence):
             say("d2", sentence)
         if _OVERRIDE.search(sentence) or (_VOID_WHAT.search(sentence) and _VOID_HOW.search(sentence)):
             say("override", sentence)
-        if _REVIVE.search(sentence) and not _NEGATION.search(sentence):
+        if _OPERATOR.search(_OPERATOR_OK.sub(" ", sentence)):
+            say("override", "speaks of the operator: " + sentence)
+        if _revives(sentence):
             say("revival", sentence)
     named = {str(c) for c in cites if isinstance(c, str)} if isinstance(cites, list) else set()
     real = named & set(known_ids)
@@ -325,7 +409,9 @@ class Strategist:
     @staticmethod
     def _checks(fams: list[dict[str, Any]]) -> dict[str, Any]:
         """Across every family with a validation line: how many fail each check (by name), how many were validated and
-        passed, and how many checks they passed (a histogram). Counts only."""
+        passed, and how many checks they passed (a histogram). Counts only. Below MIN_VALIDATED families the counts by
+        name are left out: beside the board's per-family "no k/8" they could say which checks one family failed, which
+        D2a withholds (review of #419)."""
         failing: dict[str, int] = {}
         passed_hist: dict[str, int] = {}
         validated = passed = 0
@@ -341,9 +427,13 @@ class Strategist:
                     failing[str(name)] = failing.get(str(name), 0) + 1
             k = f"{sum(1 for ok in checks.values() if ok)}/{len(checks)}"
             passed_hist[k] = passed_hist.get(k, 0) + 1
-        return {"families_validated": validated, "families_passed": passed,
-                "failing_by_check": dict(sorted(failing.items(), key=lambda kv: -kv[1])),
-                "checks_passed_histogram": dict(sorted(passed_hist.items(), key=lambda kv: kv[0], reverse=True))}
+        out: dict[str, Any] = {"families_validated": validated, "families_passed": passed}
+        if validated >= MIN_VALIDATED:
+            out["failing_by_check"] = dict(sorted(failing.items(), key=lambda kv: -kv[1]))
+        else:
+            out["failing_by_check"] = f"withheld below {MIN_VALIDATED} validated families"
+        out["checks_passed_histogram"] = dict(sorted(passed_hist.items(), key=lambda kv: kv[0], reverse=True))
+        return out
 
     def _day(self, fams: list[dict[str, Any]]) -> dict[str, Any]:
         since = iso(self.clock() - 86400)
@@ -371,7 +461,7 @@ class Strategist:
                 "retired_with_a_train_score": sum(1 for f in gone if f.get("best_train") is not None)}
 
     def _drift_and_costs(self) -> dict[str, Any]:
-        ops = [r for r in self.store._all("SELECT family, lesson FROM graveyard WHERE family LIKE 'op-%' ORDER BY at, family")
+        ops = [r for r in self.store._all(f"SELECT family, lesson FROM graveyard WHERE {OPERATOR_SQL} ORDER BY at, family")
                if re.search(r"\b(?:drift|costs?|fees?|spreads?|natural|mid)\b", str(r["lesson"]), re.I)]
         return {"drift_note": diagnostics.DRIFT_NOTE, "operator_rows_on_drift_and_costs": [r["family"] for r in ops]}
 
@@ -379,7 +469,8 @@ class Strategist:
         """The graveyard for a call without the digest: the 20 newest rows and every operator row, through `lesson_view`."""
         rows = self.store.graveyard(limit=20)
         seen = {r["family"] for r in rows}
-        rows += [r for r in self.store.graveyard(limit=10 ** 9) if r["family"].startswith("op-") and r["family"] not in seen]
+        ops = operator_ids(self.store)
+        rows += [r for r in self.store.graveyard(limit=10 ** 9) if r["family"] in ops and r["family"] not in seen]
         return [{"family": r["family"], "structure": r["structure"], "roots": r["roots"], "lesson": lesson_view(r["lesson"])[:700]}
                 for r in rows]
 
@@ -455,17 +546,45 @@ class Strategist:
         self.store.event("swarm.strategist", None, out)
         return out
 
+    def repair_turns(self) -> int:
+        """How many times a rejected answer goes back with the validator's reasons (`strategist.repair_turns`, 1; at most
+        2). A repair reads the digest's five-minute entry the first call just wrote, so it costs its packet and its answer
+        (review of #419: a rejection otherwise wasted the three-hour slot)."""
+        try:
+            return max(0, min(int(self.cfg.get("repair_turns", 1)), 2))
+        except (TypeError, ValueError):
+            return 1
+
+    @staticmethod
+    def repair_note(text: str, reasons: Sequence[str]) -> str:
+        return ("\n\nYOUR LAST ANSWER WAS REJECTED by the machine check, for these reasons:\n"
+                + "\n".join(f"- {r}" for r in reasons)
+                + "\nYour where_to_look was:\n" + (text or "(none)")
+                + f"\nWrite the {SECTION_TITLE} section again, changing only what the reasons name: ONE JSON object with "
+                  "where_to_look, evidence and cites.")
+
+    def _claude_note(self) -> str | None:
+        """Why the strategist asks Sail, when "strategist" is missing from `claude.roles` (the box's settings file overrides
+        the list; review of #419): the run is then on Sail's small packet, which the event says."""
+        roles = (self.settings.get("claude") or {}).get("roles")
+        if not isinstance(roles, (list, tuple)) or ROLE not in roles:
+            return "\"strategist\" is not in claude.roles: Sail answers with the 20-newest sample (add it to claude.roles)"
+        return None
+
     def _run(self, began: float) -> dict[str, Any]:
         if not locked_text(self.settings):
             return {"accepted": False, "skipped": "architect.agenda_locked is empty: the agenda is the operator's own"}
         current = self.current()
         system = self.system()
         compact = self.packet(current, sample=True)
-        extra: dict[str, Any] = {}
+        user = compact
+        prefix: list[dict[str, Any]] = []
         info: dict[str, Any] | None = None
         claude = bool(getattr(self.router, "claude_enabled", lambda role: False)(ROLE))
+        out: dict[str, Any] = {}
+        if not claude and self._claude_note():
+            out["note"] = self._claude_note()
         if claude:
-            prefix: list[dict[str, Any]] = []
             full = (self.settings.get("architect") or {}).get("full_graveyard", True) is True
             if self.digest is not None and full:
                 try:
@@ -477,53 +596,89 @@ class Strategist:
                 except Exception as exc:  # noqa: BLE001 - asked without the digest (the sample, as on Sail)
                     prefix, info = [], {"error": f"{type(exc).__name__}: {str(exc)[:200]}"}
             user = self.packet(current) if prefix else compact
-            why = self.affordable(system, user, prefix or None)
-            if why:
-                return {"accepted": False, "skipped": why}
-            extra = {"claude_prefix": prefix or None, "claude_system": system, "claude_user": user}
-        answer = self.router.ask(role=ROLE, system=system, user=compact, family=None, key=f"swarm:strategist:{int(began)}",
-                                 openai_model=None, sail_profile=str(self.cfg.get("sail_profile") or "") or None,
-                                 max_output=int(self.cfg.get("max_output_tokens", 12000)), effort="high", need_usd=0.0,
-                                 desk="strategist", cap_usd_day=float(self.cfg.get("sail_usd_day", 1.0)), claude=True, **extra)
-        route = answer.get("route")
-        out: dict[str, Any] = {"route": route, "model": answer.get("model"), "cost_usd": answer.get("cost_usd"),
-                               "previous": {"text": current.get("text"), "at": current.get("at"), "run": current.get("run")}}
-        if answer.get("fallback_reasons"):
-            out["fallback_reasons"] = [str(r)[:200] for r in answer["fallback_reasons"]][:4]
-        if route == "claude":
-            usage = answer.get("usage") or {}
-            out["usage"] = {k: usage[k] for k in USAGE_KEYS if k in usage}
-        on_digest = route == "claude" and bool(extra.get("claude_prefix")) and info is not None and "sha" in info
+        out["previous"] = {"text": current.get("text"), "at": current.get("at"), "run": current.get("run")}
         if info is not None:
-            out["digest"] = {**info, "used": on_digest}
-        if on_digest and self.digest is not None:
-            usage = answer.get("usage") or {}
-            self.digest.record_call(info["sha"], info["ttl"], began)
-            sent = sum(len(b["text"]) for b in extra["claude_prefix"]) + len(extra["claude_system"]) + len(extra["claude_user"])
-            self.digest.calibrate(usage, sent)
-        # Primed: the architect's call right after this one reads the sealed digest this call just marked (caches are per
-        # model: `claude.role_model` giving the two roles different models would leave nothing to read).
+            out["digest"] = {**info, "used": False}
         same = getattr(self.router, "claude_model", None)
-        same_model = not callable(same) or answer.get("model") == same("architect")
-        out["primed"] = bool(on_digest and info.get("ttl") and same_model)
-        data = answer.get("json")
-        where = data.get("where_to_look") if isinstance(data, dict) else None
-        cites = data.get("cites") if isinstance(data, dict) else None
-        evidence = data.get("evidence") if isinstance(data, dict) else None
-        if not isinstance(where, str) or not isinstance(cites, list) or (evidence is not None and not isinstance(evidence, str)):
-            out.update(accepted=False, reasons=["shape: the answer was not one JSON object with where_to_look, evidence and cites"],
-                       text=str(answer.get("text") or "")[:600])
-            return out
-        verdict = check_section(where, max_chars=self.max_chars(), cites=cites, known_ids=self.known_ids(),
-                                min_cites=self.min_cites())
-        out.update(accepted=verdict.ok, reasons=verdict.reasons, text=verdict.text[: SECTION_MAX * 2],
-                   evidence=str(evidence or "")[:1200], cites=[str(c)[:80] for c in cites if isinstance(c, str)][:40])
-        if verdict.ok:
-            self.store.put(AGENDA_KEY, {"text": verdict.text, "at": iso(began), "run": int(began), "route": route,
-                                        "model": answer.get("model"), "cost_usd": answer.get("cost_usd"),
-                                        "cites": out["cites"], "previous": out["previous"]})
+        attempts: list[dict[str, Any]] = []
+        primed_at: float | None = None
+        ask_user, ask_compact = user, compact
+        for turn in range(1 + self.repair_turns()):
+            extra: dict[str, Any] = {}
+            if claude:
+                why = self.affordable(system, ask_user, prefix or None)
+                if why:
+                    if not attempts:
+                        return {"accepted": False, "skipped": why}
+                    out["repair_skipped"] = why
+                    break
+                extra = {"claude_prefix": prefix or None, "claude_system": system, "claude_user": ask_user}
+            called = self.clock()
+            try:
+                answer = self.router.ask(role=ROLE, system=system, user=ask_compact, family=None,
+                                         key=f"swarm:strategist:{int(began)}" + (f":repair{turn}" if turn else ""),
+                                         openai_model=None, sail_profile=str(self.cfg.get("sail_profile") or "") or None,
+                                         max_output=int(self.cfg.get("max_output_tokens", 12000)), effort="high", need_usd=0.0,
+                                         desk="strategist", cap_usd_day=float(self.cfg.get("sail_usd_day", 1.0)), claude=True,
+                                         **extra)
+            except Exception as exc:  # noqa: BLE001 - a failed repair keeps the first answer's record
+                if not attempts:
+                    raise
+                out["repair_error"] = f"{type(exc).__name__}: {str(exc)[:300]}"
+                out["repair_billed"] = list(getattr(exc, "billed", []) or [])
+                break
+            route = answer.get("route")
+            attempt: dict[str, Any] = {"route": route, "model": answer.get("model"), "cost_usd": answer.get("cost_usd")}
+            if answer.get("fallback_reasons"):
+                attempt["fallback_reasons"] = [str(r)[:200] for r in answer["fallback_reasons"]][:4]
+            usage = answer.get("usage") or {}
+            if route == "claude":
+                attempt["usage"] = {k: usage[k] for k in USAGE_KEYS if k in usage}
+            on_digest = route == "claude" and bool(extra.get("claude_prefix")) and info is not None and "sha" in info
+            if on_digest and self.digest is not None:
+                out["digest"]["used"] = True
+                self.digest.record_call(info["sha"], info["ttl"], called)  # type: ignore[index]
+                sent = sum(len(b["text"]) for b in extra["claude_prefix"]) + len(extra["claude_system"]) + len(extra["claude_user"])
+                self.digest.calibrate(usage, sent)
+                # Primed: the architect's call right after reads the sealed digest this call just marked, within the
+                # entry's life from this call's start (a read refreshes it). Caches are per model: `claude.role_model`
+                # giving the two roles different models would leave nothing to read.
+                if info.get("ttl") and (not callable(same) or answer.get("model") == same("architect")):  # type: ignore[union-attr]
+                    primed_at = called
+            data = answer.get("json")
+            where = data.get("where_to_look") if isinstance(data, dict) else None
+            cites = data.get("cites") if isinstance(data, dict) else None
+            evidence = data.get("evidence") if isinstance(data, dict) else None
+            if not isinstance(where, str) or not isinstance(cites, list) or (evidence is not None and not isinstance(evidence, str)):
+                attempt.update(accepted=False, reasons=["shape: the answer was not one JSON object with where_to_look, evidence "
+                                                        "and cites"], text=str(answer.get("text") or "")[:600])
+                verdict = None
+            else:
+                verdict = check_section(where, max_chars=self.max_chars(), cites=cites, known_ids=self.known_ids(),
+                                        min_cites=self.min_cites())
+                attempt.update(accepted=verdict.ok, reasons=verdict.reasons, text=verdict.text[: SECTION_MAX * 2],
+                               evidence=str(evidence or "")[:1200], cites=[str(c)[:80] for c in cites if isinstance(c, str)][:40])
+            attempts.append(attempt)
+            if verdict is not None and verdict.ok:
+                break
+            note = self.repair_note(str(attempt.get("text") or ""), attempt["reasons"])
+            ask_user, ask_compact = user + note, compact + note
+        last = attempts[-1]
+        costs = [a.get("cost_usd") for a in attempts]
+        out.update({k: v for k, v in last.items() if k != "cost_usd"})
+        out["cost_usd"] = None if any(c is None for c in costs) else round(sum(float(c) for c in costs), 6)
+        out["turns"] = len(attempts)
+        if len(attempts) > 1:
+            out["attempts"] = [{k: a.get(k) for k in ("route", "cost_usd", "accepted", "reasons", "usage")} for a in attempts]
+        out["primed"] = primed_at is not None
+        if primed_at is not None:
+            out["primed_at"] = primed_at
+        if last.get("accepted"):
+            self.store.put(AGENDA_KEY, {"text": last["text"], "at": iso(began), "run": int(began), "route": last["route"],
+                                        "model": last.get("model"), "cost_usd": out["cost_usd"], "cites": last.get("cites"),
+                                        "previous": out["previous"]})
         return out
 
 
-__all__ = ["Strategist", "check_section", "extract_where", "normalize", "Verdict", "ROLE", "SYSTEM", "SECTION_TITLE",
+__all__ = ["Strategist", "check_section", "extract_where", "normalize", "Verdict", "ROLE", "SYSTEM", "SECTION_TITLE", "MIN_VALIDATED",
            "PAIR_SECONDS", "mechanism_class", "root_group"]
