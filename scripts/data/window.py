@@ -16,11 +16,11 @@ daemon leaves the ticks to it.
 Each tick, never raising:
   - inside the quiet window (from `BACKSTOP_SECONDS` before it): stop a running backfill under the data-operation
     lease. A backstop: the runner, started with `--nightly-quiet`, has already stopped before the window;
-  - outside it: wake the data box. When no backfill runs, judge the last run this controller started from its exit
-    receipt: 0 is complete; 75 was deferred by the window; anything else counts toward a stall when the run finished
-    no new block task, and after `STALL_RUNS` such runs in a row the phase is `stalled` and nothing restarts. Then, once
-    the nightly has no due day unfinished, is not busy and has a fresh heartbeat, push this code, upload the blocks file
-    and start the recorded arguments under the lease.
+  - outside it, waking the data box only when it must: when no backfill runs, judge the last run this controller
+    started from its exit receipt: 0 is complete; 75 was deferred by the window; anything else counts toward a stall
+    when the run finished no new block task, and after `STALL_RUNS` such runs in a row the phase is `stalled` and
+    nothing restarts. Then, once the nightly has no due day unfinished, is not busy and has a fresh heartbeat, push
+    this code, upload the blocks file and start the recorded arguments under the lease.
 Only runs this controller started are judged. The House's own recorded backfill arguments (`data_box.json` runs) are
 never read or written, so the nightly and the completion supervisor never restart this run with other code.
 """
@@ -250,13 +250,18 @@ class Window:
             else:
                 record.update(phase="quiet", why="the nightly job's quiet window")
             return
-        if not ops.awake():
-            ops.wake()
-        if ops.running():
+        awake = ops.awake()
+        if awake and ops.running():
             record.update(phase="running", why=None)
             return
         stages = [int(s) for s in record.get("stages") or []]
         if last is not None and last.get("ended_at") is None:
+            if not awake:  # a sleeping box runs nothing; its receipt is on its disk
+                ops.wake()
+                awake = True
+                if ops.running():
+                    record.update(phase="running", why=None)
+                    return
             code = ops.receipt(str(last.get("receipt")))
             done = block_done(ops.progress(), stages)
             last.update(ended_at=iso(now), exit=code, done_after=done if done is not None else last.get("done_before"))
@@ -293,6 +298,8 @@ class Window:
         blocks = self.blocks_path.read_bytes()
         if hashlib.sha256(blocks).hexdigest() != record.get("blocks_sha256"):
             raise RuntimeError("the blocks file changed since `enable`; enable again")
+        if not awake:  # woken only to start (the nightly puts it to sleep after each night)
+            ops.wake()
         with ops.lease():
             if ops.running():
                 record.update(phase="running", why=None)

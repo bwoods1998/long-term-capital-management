@@ -201,6 +201,14 @@ class Controller(unittest.TestCase):
         self.assertEqual(self.tick("2026-09-29T07:45")["phase"], "running")
         self.assertEqual(self.ops.woken, 1)
 
+    def test_a_sleeping_box_is_not_woken_while_waiting(self):
+        self.enable()
+        self.ops.awake_ = False
+        self.assertEqual(self.tick("2026-09-29T04:00")["phase"], "waiting")
+        self.ops.ready = (False, "the nightly has not finished 2026-09-28")
+        self.assertEqual(self.tick("2026-09-29T07:45")["phase"], "waiting-nightly")
+        self.assertEqual(self.ops.woken, 0)
+
     def test_a_tick_never_raises(self):
         self.enable(not_before=None)
         self.ops.fail = RuntimeError("the Sail API is down")
