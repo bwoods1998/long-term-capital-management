@@ -2623,4 +2623,15 @@ looks like beta. Validation 2025 and the holdout judge both.
 - **06:05-06:13Z The backfill controller died with R9's House restart ("loop stopped") and was restarted per its
   runbook** (not re-enabled). It is waiting for 08:15Z. Every House deploy now needs this check.
 
+
+- **06:35Z Monday's post-mortem completed: the real D3 fills replayed through the Gym on the recorded minute tape
+  (`fillcheck.py --replay`).**
+  - Monday's session was on the data box (SPY and QQQ rows; hashes match the manifest).
+  - The Gym's own keyed draw against the real outcome on the 7 replayed attempts:
+    - both filled 6, only real 0, only Gym 0, neither 1: agreement on every attempt;
+    - resting passive fills 5/6 real (83%, 95% CI 44-97%) against the Gym replay's 84% (5.0 expected; exact p = 1);
+    - price: real fills averaged +0.00 ticks from the mid, and the Gym would have charged +0.00 on the same fills.
+  - Far too few to recalibrate; the protocol's test sessions start today. But the first direct evidence is that the
+    Gym's execution model matches reality on the House's own orders.
+
 ## Report
