@@ -261,30 +261,31 @@ def practice_summary(root: str | Path, *, sessions: int | None = 10) -> dict[str
 
 def _summary(db: sqlite3.Connection, sessions: int | None) -> dict[str, Any]:
     db.row_factory = sqlite3.Row
-    live = [dict(r) for r in db.execute("SELECT * FROM practice")]
-    trades = [dict(r) for r in db.execute("SELECT seq, family, version, pnl, max_loss, exit_day, day, reason, forced, body "
-                                          "FROM trades ORDER BY seq")]
-    for t in trades:
-        t["close_day"] = t.get("exit_day") or _day_of(_body(t).get("exit_day")) or t.get("day") or ""
-    days = sorted({str(r["last_day"]) for r in live} | {str(r["first_day"]) for r in live}
-                  | {t["close_day"] for t in trades if t["close_day"]})
+    live = {(str(r["family"]), int(r["version"])): dict(r) for r in db.execute("SELECT * FROM practice")}
+    # A trade's session is its exit day (every trade since the practice table has one; the migration filled the rest);
+    # its entry day only when neither says. The trades' bodies are read only for a (family, version) with no practice row.
+    close = "COALESCE(exit_day, day, '')"
+    days = sorted({str(r["last_day"]) for r in live.values()} | {str(r["first_day"]) for r in live.values()}
+                  | {str(r[0]) for r in db.execute(f"SELECT DISTINCT {close} FROM trades") if r[0]})
     if sessions is not None and int(sessions) > 0 and len(days) > int(sessions):
         since = days[-int(sessions)]
     else:
         since = days[0] if days else ""
     keyed: dict[tuple[str, int], dict[str, Any]] = {}
-    for r in live:
-        if str(r["last_day"]) < since:
-            continue
-        keyed[(str(r["family"]), int(r["version"]))] = {"live": r, "trades": []}
-    for t in trades:
-        if t["close_day"] < since:
-            continue
+    for key, r in live.items():
+        if str(r["last_day"]) >= since:
+            keyed[key] = {"live": r, "trades": []}
+    for t in db.execute(f"SELECT seq, family, version, pnl, max_loss, forced, {close} AS close_day FROM trades "
+                        f"WHERE {close} >= ? ORDER BY seq", (since,)):
+        t = dict(t)
         key = (str(t["family"]), int(t["version"] or 0))
         if key not in keyed:
-            row = next((r for r in live if (str(r["family"]), int(r["version"])) == key), None)
-            keyed[key] = {"live": row, "trades": []}
+            keyed[key] = {"live": live.get(key), "trades": []}
         keyed[key]["trades"].append(t)
+    for key, part in keyed.items():
+        if part["live"] is None:
+            part["bodies"] = [_body(dict(r)) for r in db.execute(
+                "SELECT body FROM trades WHERE family=? AND version IS ? ORDER BY seq", (key[0], key[1] or None))]
     rows = [_row(key, part) for key, part in keyed.items()]
     rows.sort(key=lambda r: (-r["trades"], r["family"], r["version"]))
     return {"sessions": len([d for d in days if d >= since]), "since": since or None, "rows": rows}
@@ -293,7 +294,8 @@ def _summary(db: sqlite3.Connection, sessions: int | None) -> dict[str, Any]:
 def _row(key: tuple[str, int], part: Mapping[str, Any]) -> dict[str, Any]:
     fam, version = key
     live, trades = part["live"], part["trades"]
-    body0 = _body(trades[0]) if trades else {}
+    bodies = part.get("bodies") or []
+    body0 = bodies[0] if bodies else {}
     closes = sorted(trades, key=lambda t: (t["close_day"], t["seq"]))
     pnl = [float(t["pnl"] or 0.0) for t in closes]
     losses = [float(t["max_loss"] or 0.0) for t in closes]
@@ -315,7 +317,7 @@ def _row(key: tuple[str, int], part: Mapping[str, Any]) -> dict[str, Any]:
         "family": fam, "version": version,
         "tier": (live or {}).get("tier") or "validated", "lineage": (live or {}).get("lineage"),
         "structure": (live or {}).get("structure") or body0.get("type"),
-        "roots": _roots(live) if live else sorted({str(_body(t).get("root") or "") for t in trades} - {""}),
+        "roots": _roots(live) if live else sorted({str(b.get("root") or "") for b in bodies} - {""}),
         "status": (live or {}).get("status") or "wound_down",
         "first_day": (live or {}).get("first_day") or (closes[0]["close_day"] if closes else None),
         "last_day": max([str((live or {}).get("last_day") or "")] + [t["close_day"] for t in closes]) or None,
