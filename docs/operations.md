@@ -36,6 +36,9 @@ researcher Sail pace $12 an hour, the swarm's Sail burst to Oct 5 at $900, Claud
 the gateway (the swarm's own line `claude.usd_cap` 98), OpenAI $707 for September only. The planned
 larger deposits are not confirmed funding.
 
+Train from 2017 (#424: the 2017-19 windows, event and rate tables and per-root first Train days for images) is not yet
+released; nothing in the swarm changes until an image is built from 2017 and adopted.
+
 In progress, not merged: longer history as private blocks (#413); the top families' research cycles
 on Sonnet 5.5 (#417); an architect that reads the whole graveyard, plus a strategist (not yet a pull
 request). Open: #393 (credit types at $2,000, the owner's
@@ -273,6 +276,22 @@ python3 scripts/data/box.py run -- ARGS         # run backfill.py ARGS (or check
   The Gym image has no key, no holdout and no forward days; the gate image has no key but has both,
   and carries the `GATE` mark. `images.py verify gym|gate` re-checks one. Either image can be rebuilt
   from the data box at any time.
+- **Train's span in a Gym image.** `images.py build gym --train-from 2020-01-02` (the running image) or
+  `--train-from 2017-01-03` (Train from 2017, from its release on) keeps those years as Train and the underlying of
+  the 60 sessions before as history; without it Train starts 2022-01-03. `--root-first ROOT=DATE,...` gives a root
+  its own later first Train day (its history is then the 60 sessions before that day): a 2017 image lists every root
+  fetched only from 2020 at 2020-01-02 (the 20 names, until their earlier years and split rows are adopted), and XSP
+  too if its 2017-19 is thin. Pruning keeps files by date, so a partly fetched early year of a name would enter Train
+  without it; a build from 2017 therefore takes `--roots` and refuses unless every name there has a `--root-first` on
+  or after 2020-01-02 or is named in `--early-names` (only once its split rows are in `league/gym/events.py` and its
+  years are complete). It refuses `--early-roots`. The fork prunes with the build's own data tools (pushed to it
+  first; the data box may run a fetch's code). images.json records `train_from`, `root_first` and `early_names`.
+  The inside check (`images.py verify`, and every build) holds each listed root to its own day, every other name to
+  2020-01-02 in an image from 2017, and the image's first chain to its `train_from` exactly; `verify --root-first`
+  reads the recorded `train_from`. The Gym reads a store's first Train day from its first chain (`train_first`), so
+  a 2020 image's 2019 history sessions stay out of Train, and the pool refuses a Gym box whose first Train day is not
+  the swarm's span, both ways. After the release, `batch --check --window train` on the running image reports its
+  first Train day (2020-01-02). The swarm moves only when `gym.train_from` and `gym.image_checkpoint` change together.
 - **The nightly forward job.** `python3 scripts/data/nightly.py run [--day YYYY-MM-DD] [--dry-run]`
   pulls the last trading day (from 01:45 ET) into the data box's store and the gate image only,
   stopping and restarting the backfill around it, re-checkpoints the gate and puts both boxes to
@@ -605,7 +624,7 @@ entries still require the paper route proofs' witnessed round trips.
 | `gate.review_openai_model`, `gate.audit_openai_model` | `swarm.json` on the box | null, null (since 04:53Z Sept 29) | the review's and the audit's OpenAI route; null skips it (defaults `gpt-6-sol`, `gpt-6-astra`) | edit `swarm.json` |
 | `architect.openai_model`, `every_seconds`, `refill_seconds`, `max_refill`, `max_output_tokens` | `swarm.json` on the box | null, 600, 1200, 24, 32000 | the architect: null leaves it Claude-only (Sail as the fallback); its cadence, its refill below `population.start` and each pass's births (defaults `gpt-6-astra`, 14400, 3600, 12, 12000) | edit `swarm.json` |
 | `population.start`, `ceiling`, `floor` | `swarm.json` on the box | 96, 96, 12 | the refill target, the most alive, the fewest retirement may leave (defaults 48, 96, 16) | edit `swarm.json` |
-| `gym.start_boxes`, `max_boxes`, `train_from`, `image_checkpoint`, `gate_checkpoint` | `swarm.json` on the box | 6, 16, "2020-01-02", the sealed 2020-24 image, its gate partner | the Gym pool, Train's first day and the images (defaults 4, 8, unset, none, none: the gate is off without a gate image) | edit `swarm.json`; `train_from` and a new image together |
+| `gym.start_boxes`, `max_boxes`, `train_from`, `image_checkpoint`, `gate_checkpoint` | `swarm.json` on the box | 6, 16, "2020-01-02", the sealed 2020-24 image, its gate partner | the Gym pool, Train's first day and the images (defaults 4, 8, unset, none, none: the gate is off without a gate image). `train_from` takes "2022-01-03", "2020-01-02" or, once Train from 2017 is released, "2017-01-03"; the derived split and time limit are 8 and 900 s, 16 and 1500 s, 24 and 2400 s | edit `swarm.json`; `train_from` and a new image together |
 | `researcher.sail_usd_per_hour`, `usd_per_hour`, `top_families` | `swarm.json` on the box | 12, 5 (not read while the Sail pace is set), 12 | the researcher pace (below) and the bandit's top band (defaults null, 4.0, 10) | edit `swarm.json` |
 | `researcher.retire_idle_evaluations`, `dormant_cycles`; `tournament.retire_revisions`, `retire_evaluations` | `swarm.json` on the box | 500, 12; 200, 4000 | the idle rule and its dormancy clause; the tournament's retirement (defaults 150, 40; 30, 2000) | edit `swarm.json` |
 | `guard.burst_cap_usd`, `burst_until` | `swarm.json` on the box | $900, 2026-10-05 | the swarm's Sail spend for the research burst (the owner's 24/7 research, Sept 27); the $32 line is unchanged (defaults $350 until Monday Sept 28's open) | edit `swarm.json` |

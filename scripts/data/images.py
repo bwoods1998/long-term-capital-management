@@ -2,8 +2,9 @@
 """The Gym image and the gate image: sealed forks of the data box, checkpointed for a year.
 
     python3 scripts/data/images.py build gym [--version v1] [--force] [--train-from 2020-01-02]
+                                             [--roots R,...] [--root-first XSP=2020-01-02,...] [--early-names R,...]
     python3 scripts/data/images.py build gate [--version v1] [--force]
-    python3 scripts/data/images.py verify gym|gate [--checkpoint ID]
+    python3 scripts/data/images.py verify gym|gate [--checkpoint ID] [--train-from D] [--root-first R=D,...]
     python3 scripts/data/images.py status
 
 `build` (run from the owner's machine with the Sail key):
@@ -29,6 +30,25 @@ THE 2020-21 EXTENSION (Sept 27, 2026). `--train-from 2020-01-02` (Gym only) keep
 the Gym image; without it (the default) they are "pre" and pruned, so an image built after the fetch holds exactly what
 one built before it held. The gate never takes them (it runs the holdout and forward days only). The choice is recorded
 in images.json (`train_from`) and checked from inside: no file dated before Train's first day.
+
+TRAIN FROM 2017 (Sept 29, 2026). `--train-from 2017-01-03` keeps 2017-19 as Train too, with the underlying of the 60
+sessions before 2017-01-03 as history (`HISTORY_REACH_DAYS` covers them). `--root-first ROOT=DATE,...` gives a root
+its own later first Train day (`storelib.parse_root_first`): nothing of that root before it stays but the underlying of
+the 60 sessions before it, as history. So `XSP=2020-01-02` drops XSP's 2017-19, if thin, and keeps its 2020-21. It
+replaces `--early-roots` (kept, unchanged, for the images built from 2020 with it; the two never mix, and a build from
+before 2020 refuses `--early-roots`), is recorded in images.json (`root_first`) and checked from inside, root by root.
+
+The names (every root outside the core five) enter Train before 2020-01-02 only on purpose (`NAMES_FIRST`): an
+engine that lacks a name's split rows reads a split as a crash, and pruning keeps files by date, so a name's partly
+fetched earlier years would enter too. A build from before 2020 therefore lists its roots (`--roots`), and every name
+has a `--root-first` of 2020-01-02 or later unless `--early-names` names it (once its split rows are in
+`league/gym/events.py` and its years are complete). The inside check holds every name that is not in `--early-names`
+to 2020-01-02 (its history to the 100 days before), whatever the build was told, and holds the image's first chain to
+its `train_from` exactly: the Gym reads a store's first Train day from its first chain, and the pool refuses a Train
+run whose span is not that day. `--early-names` is recorded in images.json (`early_names`).
+
+The fork prunes with the data tools of the build that asked for it (`boxlib.push_code` before the prune): the data
+box may be running other code (a fetch pushes its own), which would not know `--root-first`.
 """
 
 from __future__ import annotations
@@ -39,7 +59,7 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -66,27 +86,23 @@ for host, port in (("mdds-01.thetadata.us", 443), ("nexus-api.thetadata.us", 443
         print("NETWORK-CLOSED", host, type(exc).__name__)
 """
 
-INSIDE_CHECK = r"""
-import json, os, pathlib, subprocess
-out = {}
-out["key_file"] = os.path.exists("/data/secrets/thetadata.env") or os.path.exists("/data/secrets")
-# A key LINE (the name assigned a value), not source code that merely names the variable.
-# Parquet in the store is columnar data we wrote ourselves; every other file is searched.
-hits = subprocess.run(["grep", "-rIlE", "--exclude=*.parquet", r"THETADATA_API_KEY[[:space:]]*=[[:space:]]*[A-Za-z0-9_-]{8,}",
-                       "/data", "/root", "/tmp", "/home", "/etc", "/var/tmp"], capture_output=True, text=True).stdout.split()
-out["key_mentions"] = hits
-out["store_non_parquet"] = sorted(str(p) for p in pathlib.Path("/data/store").rglob("*")
-                                  if p.is_file() and p.suffix != ".parquet" and p.name not in ("VERSION", "GATE"))
-store = pathlib.Path("/data/store")
+#: The store's own facts, inside the check below (`store` and `out` are the check's): split out so the tests read a
+#: synthetic image with exactly the code the sealed box runs.
+STORE_FACTS = r"""
 dates = sorted(p.stem for p in store.glob("*/*/*.parquet"))
 out["files"] = len(dates)
 out["first_date"] = dates[0] if dates else None
 first_by_kind = {}
+first_by_root = {}
 for p in store.glob("*/*/*.parquet"):
-    kind = p.parent.parent.name
+    kind, root = p.parent.parent.name, p.parent.name
     if kind not in first_by_kind or p.stem < first_by_kind[kind]:
         first_by_kind[kind] = p.stem
+    row = first_by_root.setdefault(kind, {})
+    if root not in row or p.stem < row[root]:
+        row[root] = p.stem
 out["first_by_kind"] = first_by_kind
+out["first_by_root"] = first_by_root
 out["last_date"] = dates[-1] if dates else None
 out["dated_after_validation"] = sum(1 for d in dates if d > "2025-12-31")
 import polars as pl
@@ -103,7 +119,20 @@ e = pl.read_parquet(store / "expiries.parquet")
 out["expiries_last_date"] = str(e["date"].max()) if e.height else None
 out["version"] = (store / "VERSION").read_text().strip()
 out["gate_mark"] = (store / "GATE").is_file()
-out["work_exists"] = os.path.exists("/data/work")
+"""
+
+INSIDE_CHECK = r"""
+import json, os, pathlib, subprocess
+out = {}
+out["key_file"] = os.path.exists("/data/secrets/thetadata.env") or os.path.exists("/data/secrets")
+# A key LINE (the name assigned a value), not source code that merely names the variable.
+# Parquet in the store is columnar data we wrote ourselves; every other file is searched.
+hits = subprocess.run(["grep", "-rIlE", "--exclude=*.parquet", r"THETADATA_API_KEY[[:space:]]*=[[:space:]]*[A-Za-z0-9_-]{8,}",
+                       "/data", "/root", "/tmp", "/home", "/etc", "/var/tmp"], capture_output=True, text=True).stdout.split()
+out["key_mentions"] = hits
+out["store_non_parquet"] = sorted(str(p) for p in pathlib.Path("/data/store").rglob("*")
+                                  if p.is_file() and p.suffix != ".parquet" and p.name not in ("VERSION", "GATE"))
+store = pathlib.Path("/data/store")""" + STORE_FACTS + r"""out["work_exists"] = os.path.exists("/data/work")
 out["processes"] = subprocess.run(["pgrep", "-fa", "[b]ackfill.py (run|one)|[u]niverse.py|[m]ultiprocessing.spawn|[l]eague.gym.calibrate"],
                                   capture_output=True, text=True).stdout.strip()
 print(json.dumps(out))
@@ -163,7 +192,8 @@ def stage_done(journal_lines: list[dict[str, Any]], stages: tuple[int, ...], pla
 
 
 def verify_inside(api: Any, box: str, kind: str, *, sleep: Callable[[float], None] = time.sleep,
-                  train_from: str | None = None) -> dict[str, Any]:
+                  train_from: str | None = None, root_first: Mapping[str, str] | None = None,
+                  early_names: Sequence[str] | None = None) -> dict[str, Any]:
     net = api.exec(box, ["/opt/data-venv/bin/python", "-c", NETWORK_PROBE], timeout=120)
     # Detached and polled: on a store of 20,000 files the check outlived one exec stream (Sept 26 14:31Z).
     api.upload(box, "/root/inside_check.py", INSIDE_CHECK.encode(), mode=0o600)
@@ -184,20 +214,60 @@ def verify_inside(api: Any, box: str, kind: str, *, sleep: Callable[[float], Non
         raise SystemExit(f"the inside check did not finish on {box}: {err[-1500:]}")
     lines = net.stdout.strip().splitlines()
     facts["network"] = lines
-    facts["problems"] = problems_of(facts, kind, train_from=train_from)
+    facts["problems"] = problems_of(facts, kind, train_from=train_from, root_first=root_first, early_names=early_names)
     facts["passed"] = not facts["problems"]
     return facts
 
 
 #: How far before Train's first day the history sessions' underlying may reach (60 sessions is about 87 calendar days).
 HISTORY_REACH_DAYS = 100
+#: The first day a name (a root outside the core five) may have in a Gym image that starts before it, unless the build
+#: names it in `--early-names` (the module docstring): the names' own fetch began at 2020-01-02 (`storelib.EARLY`), and
+#: their earlier years need their split rows in the Gym's events table first.
+NAMES_FIRST = sl.EARLY[0]
 
 
-def problems_of(facts: Mapping[str, Any], kind: str, *, train_from: str | None = None) -> list[str]:
+def parse_names(value: Any) -> tuple[str, ...]:
+    """`--early-names ROOT,...` (or a sequence) as upper-case roots, in order; refused: a root that is not a symbol or
+    is one of the core five (they need no leave), and one named twice."""
+    if not value:
+        return ()
+    parts = value.split(",") if isinstance(value, str) else [str(v) for v in value]
+    out: list[str] = []
+    for part in parts:
+        root = part.strip().upper()
+        if not root:
+            continue
+        if not root.isalnum():
+            raise ValueError(f"--early-names: not a root: {root!r}")
+        if root in sl.CORE_FIVE:
+            raise ValueError(f"--early-names: {root} is a core root; only the names need it")
+        if root in out:
+            raise ValueError(f"--early-names names {root} twice")
+        out.append(root)
+    return tuple(out)
+
+
+def names_without_a_first_day(roots: Sequence[str], root_first: Mapping[str, dt.date] | None,
+                              early_names: Sequence[str] = ()) -> list[str]:
+    """The names of `roots` that a build starting before `NAMES_FIRST` would let into Train before it: neither in
+    `early_names` nor given a `root_first` day on or after `NAMES_FIRST`."""
+    own = {str(r).upper(): d for r, d in (root_first or {}).items()}
+    allowed = {str(r).upper() for r in early_names}
+    return [r for r in roots if str(r).upper() not in sl.CORE_FIVE and str(r).upper() not in allowed
+            and not (own.get(str(r).upper()) is not None and own[str(r).upper()] >= NAMES_FIRST)]
+
+
+def problems_of(facts: Mapping[str, Any], kind: str, *, train_from: str | None = None,
+                root_first: Mapping[str, str] | None = None, early_names: Sequence[str] | None = None) -> list[str]:
     """What is wrong with an image from its inside facts (empty: it passes). `train_from` is the Gym image's first Train
     day (None: 2022-01-03, every image before the 2020-21 extension): no chain (nbbo, oi, trade_quote) is dated before
-    it; with it, the underlying and the calendar may reach back to the history sessions (at most `HISTORY_REACH_DAYS`)
-    and the manifest's "history" rows are underlying only. Without it, nothing is dated before 2022-01-03."""
+    it, and its first chain (nbbo) is dated exactly then (the Gym's `train_first`, which the pool holds to the swarm's
+    span); with it, the underlying and the calendar may reach back to the history sessions (at most
+    `HISTORY_REACH_DAYS`) and the manifest's "history" rows are underlying only. Without it, nothing is dated before
+    2022-01-03. `root_first` ({root: ISO day}, Train from 2017) holds each listed root to its own day the same way
+    (`first_by_root`); from a `train_from` before `NAMES_FIRST`, every name outside `early_names` is held to
+    `NAMES_FIRST` too. An image built with either and checked without its per-root facts is refused."""
     lines = facts.get("network") or []
     problems = []
     if not lines or any(not line.startswith("NETWORK-CLOSED") for line in lines):
@@ -218,9 +288,37 @@ def problems_of(facts: Mapping[str, Any], kind: str, *, train_from: str | None =
             floor = reach if name == "underlying" else first
             if day and str(day) < floor:
                 problems.append(f"the first {name} file {day} is before {floor}")
+        if train_from and str(by_kind.get("nbbo")) != first:
+            problems.append(f"the first chain (nbbo) is {by_kind.get('nbbo')}, not the image's first Train day {first}: "
+                            f"the Gym would read {by_kind.get('nbbo')} as its first Train day and the pool would refuse "
+                            f"every Train run from {first}")
         for key in ("first_date", "manifest_first", "calendar_first"):
             if facts.get(key) and str(facts[key]) < reach:
                 problems.append(f"{key} {facts[key]} is before {reach}")
+        # Each root's own first day: the build's `root_first`, and NAMES_FIRST for every name it did not leave early.
+        own_days = {str(r): (str(d), "") for r, d in (root_first or {}).items()}
+        names_held = bool(train_from) and first < NAMES_FIRST.isoformat()
+        by_root = facts.get("first_by_root")
+        if (own_days or names_held) and not isinstance(by_root, Mapping):
+            problems.append("no first_by_root facts: the image's own first Train day per root cannot be checked")
+        by_root = by_root if isinstance(by_root, Mapping) else {}
+        if names_held:
+            allowed = {str(r).upper() for r in (early_names or ())}
+            seen = {str(root) for row in by_root.values() if isinstance(row, Mapping) for root in row}
+            for root in sorted(seen):
+                if root.upper() in sl.CORE_FIVE or root.upper() in allowed:
+                    continue
+                day, _ = own_days.get(root, ("", ""))
+                if day < NAMES_FIRST.isoformat():
+                    own_days[root] = (NAMES_FIRST.isoformat(), " (a name enters Train before "
+                                      f"{NAMES_FIRST} only with its split rows and --early-names)")
+        for root, (own, why) in sorted(own_days.items()):
+            own_reach = (dt.date.fromisoformat(own) - dt.timedelta(days=HISTORY_REACH_DAYS)).isoformat()
+            for name, row in sorted(by_root.items()):
+                day = row.get(root) if isinstance(row, Mapping) else None
+                floor = own_reach if name == "underlying" else own
+                if day and str(day) < floor:
+                    problems.append(f"the first {name} file of {root} {day} is before {floor}{why}")
         allowed = {"train", "validation"} | ({"history"} if train_from else set())
         if set(facts["manifest_windows"]) - allowed:
             problems.append(f"manifest windows {facts['manifest_windows']}")
@@ -240,6 +338,22 @@ def problems_of(facts: Mapping[str, Any], kind: str, *, train_from: str | None =
             if facts.get(key) and str(facts[key]) < sl.TRAIN[0].isoformat():
                 problems.append(f"{key} {facts[key]}: the gate never carries the 2020-21 extension")
     return problems
+
+
+def _iso(root_first: Mapping[str, Any] | None) -> dict[str, str] | None:
+    """{root: ISO day} for images.json and the inside check (None when there is none)."""
+    return {str(r): (d.isoformat() if isinstance(d, dt.date) else str(d)) for r, d in sorted(root_first.items())} \
+        if root_first else None
+
+
+def prune_arguments(spec: Mapping[str, Any], *, roots: tuple[str, ...] | None = None, train_from: dt.date | None = None,
+                    early_roots: tuple[str, ...] | None = None,
+                    root_first: Mapping[str, dt.date] | None = None) -> str:
+    """The fork's `backfill.py prune` arguments: the kind's own, then the roots, Train's first day and each root's."""
+    own = ",".join(f"{r}={d}" for r, d in sorted((_iso(root_first) or {}).items()))
+    return spec["prune"] + (f" --roots {','.join(roots)}" if roots else "") + (
+        f" --train-from {train_from.isoformat()}" if train_from else "") + (
+        f" --early-roots {','.join(early_roots)}" if early_roots else "") + (f" --root-first {own}" if own else "")
 
 
 def checkpoint_with_retry(api: Any, box: str, *, name: str, ttl_seconds: int, attempts: int = 6,
@@ -293,18 +407,50 @@ def wait_until_complete(kind: str, *, poll: float = 120.0, api: Any = None, slee
 def build(kind: str, *, version: str, force: bool, api: Any = None, sleep: Callable[[float], None] = time.sleep,
           ttl_days: int = 365, rehearsal: bool = False, keep: bool = False,
           needs: tuple[int, ...] | None = None, roots: tuple[str, ...] | None = None,
-          train_from: dt.date | None = None, early_roots: tuple[str, ...] | None = None) -> dict[str, Any]:
+          train_from: dt.date | None = None, early_roots: tuple[str, ...] | None = None,
+          root_first: Mapping[str, Any] | str | None = None,
+          early_names: Sequence[str] | str | None = None) -> dict[str, Any]:
     """Build one image. `rehearsal` runs every step on whatever the store holds now, then
     terminates the fork and records the result under `rehearsals` (never as the current image).
     One build at a time: each stops and restarts the data box's backfill around its checkpoint.
-    `train_from` (the Gym only; 2020-01-02 switches the 2020-21 extension on) is Train's first day in the image, and
-    `early_roots` the roots whose 2020-21 days it keeps (all fetched ones by default)."""
+    `train_from` (the Gym only; 2020-01-02 switches the 2020-21 extension on, 2017-01-03 Train from 2017) is Train's
+    first day in the image, `root_first` ({root: day}) a root's own later first Train day, and `early_roots` (the older
+    form, core roots only, from 2020 only) the roots whose 2020-21 days it keeps (all fetched ones by default). From
+    before `NAMES_FIRST` the build lists its `roots`, and each name there has a `root_first` on or after `NAMES_FIRST`
+    or is in `early_names` (the module docstring)."""
     if early_roots and train_from is None:
         raise SystemExit("--early-roots goes with --train-from")
+    if root_first and train_from is None:
+        raise SystemExit("--root-first goes with --train-from")
+    if early_roots and root_first:
+        raise SystemExit("--early-roots and --root-first do not mix (--root-first replaces --early-roots)")
     if train_from is not None and kind != "gym":
-        raise SystemExit("--train-from is for the Gym image: the gate never carries the 2020-21 extension")
+        raise SystemExit("--train-from is for the Gym image: the gate never carries Train's earlier years")
     if train_from is not None:
-        sl.window_of(train_from, train_from)  # refuses a first day outside 2020-01-02..2022-01-03
+        sl.window_of(train_from, train_from)  # refuses a first day outside 2017-01-03..2022-01-03
+    try:
+        root_first = sl.parse_root_first(root_first, train_from) or None
+        early_names = parse_names(early_names) or None
+    except ValueError as error:
+        raise SystemExit(str(error)) from None
+    before_names = train_from is not None and train_from < NAMES_FIRST
+    if early_roots and before_names:
+        raise SystemExit(f"--early-roots is for an image from {NAMES_FIRST} (a root it leaves out starts at "
+                         f"{sl.TRAIN[0]}); from {train_from} give each root its own day with --root-first")
+    if early_names and not before_names:
+        raise SystemExit(f"--early-names goes with a --train-from before {NAMES_FIRST}")
+    if before_names:
+        if not roots:
+            raise SystemExit(f"an image from before {NAMES_FIRST} lists its roots (--roots), so that each name's first "
+                             f"Train day is checked before the fork")
+        stray = sorted(set(early_names or ()) - {str(r).upper() for r in roots})
+        if stray:
+            raise SystemExit(f"--early-names {','.join(stray)}: not among --roots")
+        loose = names_without_a_first_day(roots, root_first, early_names or ())
+        if loose:
+            raise SystemExit(f"from {train_from}, these names would enter Train before {NAMES_FIRST}: "
+                             f"{','.join(loose)}. List each in --root-first at {NAMES_FIRST} or later, or, once its split "
+                             f"rows are in league/gym/events.py and its years are complete, in --early-names")
     import fcntl
 
     bl.STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -316,14 +462,17 @@ def build(kind: str, *, version: str, force: bool, api: Any = None, sleep: Calla
         with bl.RemoteLease(api, data_box) as lease:
             return _build(kind, version=version, force=force, api=api, sleep=sleep, ttl_days=ttl_days,
                           rehearsal=rehearsal, keep=keep, needs=needs, roots=roots, check_lease=lease.check,
-                          train_from=train_from, early_roots=early_roots)
+                          train_from=train_from, early_roots=early_roots, root_first=root_first,
+                          early_names=early_names)
 
 
 def _build(kind: str, *, version: str, force: bool, api: Any, sleep: Callable[[float], None],
            ttl_days: int, rehearsal: bool, keep: bool, needs: tuple[int, ...] | None = None,
            roots: tuple[str, ...] | None = None,
            check_lease: Callable[[], None] = lambda: None, train_from: dt.date | None = None,
-           early_roots: tuple[str, ...] | None = None) -> dict[str, Any]:
+           early_roots: tuple[str, ...] | None = None,
+           root_first: Mapping[str, dt.date] | None = None,
+           early_names: tuple[str, ...] | None = None) -> dict[str, Any]:
     api = api or bl.client()
     spec = dict(KINDS[kind])
     if needs:
@@ -372,11 +521,11 @@ def _build(kind: str, *, version: str, force: bool, api: Any, sleep: Callable[[f
     seal(api, box)
     api.exec(box, ["bash", "-c", "pkill -f '[b]ackfill.py|[u]niverse.py|[m]ultiprocessing|[l]ocking.py serve' ; "
                                   "rm -f /data/work/backfill.pid; true"], timeout=60)
-    # 4. prune
+    # 4. prune, with this build's own data tools: the data box may run other code (a fetch pushes its own)
     check_lease()
-    prune_args = spec["prune"] + (f" --roots {','.join(roots)}" if roots else "") + (
-        f" --train-from {train_from.isoformat()}" if train_from else "") + (
-        f" --early-roots {','.join(early_roots)}" if early_roots else "")
+    bl.push_code(api, box)
+    prune_args = prune_arguments(spec, roots=roots, train_from=train_from, early_roots=early_roots,
+                                 root_first=root_first)
     pruned = bl.run_py(api, box, f"backfill.py prune {prune_args}", timeout=3600).check()
     say(f"  pruned: {pruned.stdout.strip().splitlines()[-1]}")
     if kind == "gate":
@@ -388,7 +537,8 @@ def _build(kind: str, *, version: str, force: bool, api: Any, sleep: Callable[[f
     say(f"  memory: {scrub.stdout.strip() or scrub.output[-300:]}")
     # 5. verify
     check_lease()
-    facts = verify_inside(api, box, kind, train_from=train_from.isoformat() if train_from else None)
+    facts = verify_inside(api, box, kind, train_from=train_from.isoformat() if train_from else None,
+                          root_first=_iso(root_first), early_names=early_names)
     say(f"  inside: {json.dumps({k: facts[k] for k in ('passed', 'problems', 'files', 'first_date', 'last_date', 'manifest_windows', 'network')})}")
     if not facts["passed"]:
         api.sleep(box)
@@ -410,6 +560,8 @@ def _build(kind: str, *, version: str, force: bool, api: Any, sleep: Callable[[f
             api.terminate(box)
         record.setdefault("rehearsals", []).append({"kind": kind, "version": version, "box_id": box, "terminated": not keep,
                                                     "train_from": train_from.isoformat() if train_from else None,
+                                                    "root_first": _iso(root_first),
+                                                    "early_names": list(early_names) if early_names else None,
                                                     "checkpoints": checkpoints, "ttl_days": ttl_days, "at": bl.now(),
                                                     "passed": facts["passed"], "files": facts["files"],
                                                     "checkpoint_errors": errors})
@@ -422,6 +574,8 @@ def _build(kind: str, *, version: str, force: bool, api: Any, sleep: Callable[[f
         "built_at": bl.now(), "ttl_days": ttl_days, "sealed": {"no_network": True}, "windows": list(spec["keep"]),
         "train_from": train_from.isoformat() if train_from else None,
         "early_roots": list(early_roots) if early_roots else None,
+        "root_first": _iso(root_first),
+        "early_names": list(early_names) if early_names else None,
         "stages_at_build": have, "roots": list(roots) if roots else "all", "checkpoint_errors": errors, "gate_mark": facts["gate_mark"], "verified": {k: facts[k] for k in ("files", "first_date", "last_date", "manifest_rows",
                                                                     "manifest_windows", "network", "version")},
     }
@@ -450,7 +604,10 @@ def finish(kind: str, box: str, *, version: str, source_checkpoint: str, ttl_day
         api.upload(box, "/data/store/GATE", f"gate image {version} built {bl.now()}\n".encode(), mode=0o444)
     recorded = (bl.read_json(bl.IMAGES).get(kind) or {}).get("current") or {}
     train_from = recorded.get("train_from") if recorded.get("box_id") == box else None
-    facts = verify_inside(api, box, kind, sleep=sleep, train_from=train_from)
+    root_first = recorded.get("root_first") if recorded.get("box_id") == box else None
+    early_names = recorded.get("early_names") if recorded.get("box_id") == box else None
+    facts = verify_inside(api, box, kind, sleep=sleep, train_from=train_from, root_first=root_first,
+                          early_names=early_names)
     say(f"  inside: {json.dumps({k: facts[k] for k in ('passed', 'problems', 'files', 'first_date', 'last_date', 'manifest_windows')})}")
     if not facts["passed"]:
         api.sleep(box)
@@ -479,23 +636,42 @@ def finish(kind: str, box: str, *, version: str, source_checkpoint: str, ttl_day
     return entry
 
 
-def verify(kind: str, checkpoint: str | None = None, train_from: str | None = None) -> dict[str, Any]:
+def verify_arguments(entry: Mapping[str, Any], train_from: str | None = None, root_first: Any = None,
+                     early_names: Any = None) -> dict[str, Any]:
+    """The first Train day and each root's that `verify` checks an image against: the ones given, else the ones
+    images.json recorded for it (`entry`). A `--root-first` is read against the image's own first Train day, so it needs
+    no `--train-from` when images.json records one."""
+    first = train_from or entry.get("train_from")
+    try:
+        own = _iso(sl.parse_root_first(root_first, dt.date.fromisoformat(str(first)) if first else None)) \
+            if root_first else entry.get("root_first")
+        names = list(parse_names(early_names)) if early_names else entry.get("early_names")
+    except ValueError as error:
+        raise SystemExit(str(error)) from None
+    return {"train_from": first, "root_first": own or None, "early_names": names or None}
+
+
+def verify(kind: str, checkpoint: str | None = None, train_from: str | None = None,
+           root_first: Any = None, early_names: Any = None) -> dict[str, Any]:
     """Wake the recorded image box (or fork a new one from a checkpoint) and check it again, against the first Train day
-    that image was built with (`train_from` names it for a checkpoint images.json does not know)."""
-    api = bl.client()
+    that image was built with (`train_from` names it for a checkpoint images.json does not know), and each root's own
+    (`root_first` and `early_names`, likewise; `verify_arguments`)."""
     record = bl.read_json(bl.IMAGES).get(kind) or {}
     entry = record.get("current") or {}
     if checkpoint:
         # The checkpoint's own image: its train_from, not the current one's (an older or newer build may differ).
         entry = next((e for e in [entry, *reversed(record.get("history") or [])]
                       if checkpoint in (e.get("checkpoints") or []) or checkpoint == e.get("source_checkpoint")), {})
+    against = verify_arguments(entry, train_from, root_first, early_names)  # refused before any box is woken
+    api = bl.client()
+    if checkpoint:
         box = api.from_checkpoint(checkpoint, name=f"ltcm-{kind}-verify", timeout=1800)["sailbox_id"]
         created = True
     else:
         box, created = entry["box_id"], False
         bl.ensure_running(api, box)
     try:
-        return verify_inside(api, box, kind, train_from=train_from or entry.get("train_from"))
+        return verify_inside(api, box, kind, **against)
     finally:
         api.terminate(box) if created else api.sleep(box)
 
@@ -515,12 +691,22 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--needs", default="", help="the stages that must be complete (default gym 1, gate 1,2); "
                                                 "Gym v2: 1,3,5 (2022 and the trade_quote samples)")
     b.add_argument("--train-from", default="", help="the Gym image's first Train day: 2020-01-02 keeps the 2020-21 "
-                                                     "extension (stages 9, 10); default 2022-01-03")
-    b.add_argument("--early-roots", default="", help="with --train-from: only these roots keep their 2020-21 days")
+                                                     "extension (stages 9, 10), 2017-01-03 2017-19 too; default "
+                                                     "2022-01-03")
+    b.add_argument("--root-first", default="", help="with --train-from: ROOT=YYYY-MM-DD,... a root's own later first "
+                                                     "Train day (e.g. XSP=2020-01-02); from before 2020-01-02 every "
+                                                     "name in --roots needs one on or after 2020-01-02")
+    b.add_argument("--early-names", default="", help="from before 2020-01-02: the names that keep their earlier years "
+                                                      "(only once their split rows are in league/gym/events.py)")
+    b.add_argument("--early-roots", default="", help="with --train-from: only these core roots keep their 2020-21 days "
+                                                      "(the older form; --root-first replaces it)")
     v = sub.add_parser("verify")
     v.add_argument("kind", choices=sorted(KINDS))
     v.add_argument("--checkpoint", default=None)
     v.add_argument("--train-from", default=None, help="the first Train day of a checkpoint images.json does not record")
+    v.add_argument("--root-first", default="", help="its roots' own first Train days (ROOT=YYYY-MM-DD,...; default "
+                                                     "images.json's)")
+    v.add_argument("--early-names", default="", help="the names it keeps before 2020-01-02 (default images.json's)")
     f = sub.add_parser("finish", help="verify, checkpoint and record a fork a build already pruned")
     f.add_argument("kind", choices=sorted(KINDS))
     f.add_argument("--box", required=True)
@@ -538,12 +724,14 @@ def main(argv: list[str] | None = None) -> int:
         early = tuple(r.strip().upper() for r in args.early_roots.split(",") if r.strip()) or None
         print(json.dumps(build(args.kind, version=args.version, force=args.force or args.rehearsal,
                                ttl_days=args.ttl_days, rehearsal=args.rehearsal, keep=args.keep, needs=needs,
-                               roots=roots, train_from=train_from, early_roots=early), indent=1))
+                               roots=roots, train_from=train_from, early_roots=early,
+                               root_first=args.root_first or None, early_names=args.early_names or None), indent=1))
     elif args.cmd == "finish":
         print(json.dumps(finish(args.kind, args.box, version=args.version, source_checkpoint=args.source_checkpoint,
                                 ttl_days=args.ttl_days), indent=1))
     elif args.cmd == "verify":
-        print(json.dumps(verify(args.kind, args.checkpoint, args.train_from), indent=1))
+        print(json.dumps(verify(args.kind, args.checkpoint, args.train_from, args.root_first or None,
+                                args.early_names or None), indent=1))
     else:
         print(json.dumps(bl.read_json(bl.IMAGES), indent=1))
     return 0

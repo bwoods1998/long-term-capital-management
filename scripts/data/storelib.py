@@ -8,7 +8,7 @@ and the ThetaData calls in `backfill.py`; both run on the data box.
 
 Nothing here reads a key, a quote or a price. Dates appear only in paths and in the manifest.
 
-THE 2020-21 EXTENSION (stages 9 and 10, Sept 27, 2026). Train can reach back to `TRAIN_EARLIEST` (2020-01-02: the
+THE 2020-21 EXTENSION (stages 9 and 10, Sept 27, 2026). Train can reach back to 2020-01-02 (`EARLY`; the
 COVID crash and rebound, then 2021's low-volatility bull), but only once the owner's switch says so: the swarm's
 `gym.train_from` (league/swarm/settings.py) and a Gym image built with `images.py build gym --train-from 2020-01-02`.
 Until then `window_of` calls those days "pre", exactly as before: stages 9 and 10 fetch them onto the data box, the
@@ -43,9 +43,13 @@ CORE_FIVE: tuple[str, ...] = ("SPY", "QQQ", "IWM", "XSP", "SPXW")
 TRAIN = (dt.date(2022, 1, 3), dt.date(2024, 12, 31))
 VALIDATION = (dt.date(2025, 1, 2), dt.date(2025, 12, 31))
 HOLDOUT = (dt.date(2026, 1, 2), dt.date(2026, 9, 25))
-#: The earliest day Train may reach (the 2020-21 extension; the module docstring) and the stretch stages 9 and 10 fetch.
-TRAIN_EARLIEST = dt.date(2020, 1, 2)
-EARLY = (TRAIN_EARLIEST, dt.date(2021, 12, 31))
+#: The earliest day Train may reach: 2017-01-03 since Train from 2017 (Sept 29, 2026: 2017's calm, the February 2018
+#: volatility shock and the fourth-quarter 2018 selloff, 2019); an image takes those years only when built with
+#: `--train-from 2017-01-03`, and every day before an image's own first Train day is "pre" to it (`window_of`).
+TRAIN_EARLIEST = dt.date(2017, 1, 3)
+#: The stretch stages 9 and 10 fetch (the 2020-21 extension; the module docstring). A literal, never derived from
+#: `TRAIN_EARLIEST`: stage 9's task list is planned from it and must not move when Train reaches further back.
+EARLY = (dt.date(2020, 1, 2), dt.date(2021, 12, 31))
 #: The sessions of underlying alone before Train's first day that give a program its history (NEEDS `history` is at most
 #: 60 sessions): stage 9 fetches them before 2020-01-02, and an image with `--train-from` keeps them as "history".
 HISTORY_SESSIONS = 60
@@ -78,7 +82,8 @@ KINDS = ("nbbo", "underlying", "oi", "trade_quote")
 
 def window_of(day: dt.date, train_from: dt.date | None = None) -> str:
     """The day's window. `train_from` is where Train starts (default `TRAIN[0]`, 2022-01-03: what every stage, journal
-    record and image has used); an image built with `--train-from 2020-01-02` passes it, so 2020-21 count as Train there."""
+    record and image has used); an image built with `--train-from 2020-01-02` (or `2017-01-03`) passes it, so 2020-21
+    (and 2017-19) count as Train there."""
     first = TRAIN[0] if train_from is None else train_from
     if not TRAIN_EARLIEST <= first <= TRAIN[0]:
         raise ValueError(f"Train starts between {TRAIN_EARLIEST} and {TRAIN[0]}, not {first}")
@@ -134,6 +139,46 @@ def early_roots(roots: Sequence[str] | None, core: Sequence[str] = CORE_FIVE) ->
     if unknown:
         raise ValueError(f"--early-roots takes core roots only ({', '.join(core)}), not {', '.join(sorted(unknown))}")
     return [r for r in core if r in wanted]
+
+
+def parse_root_first(value: str | Mapping[str, Any] | None, train_from: dt.date | None) -> dict[str, dt.date]:
+    """Each root's own first Train day in a Gym image (`--root-first ROOT=DATE,...`, Train from 2017): a root listed
+    here keeps no chain dated before its day, and the underlying of the `HISTORY_SESSIONS` sessions before it as its
+    history, so one root's early years (XSP's 2017-19, if thin) go without dropping its later ones, and roots fetched
+    only from 2020 (the names) start there whatever the image's `train_from`. Refused: a root that is not a symbol, a root
+    named twice, a day before the image's `train_from` or after Train's core start (2022-01-03), and any day without
+    `train_from`."""
+    if not value:
+        return {}
+    pairs: list[tuple[str, str]] = []
+    if isinstance(value, Mapping):
+        pairs = [(str(k), str(v)) for k, v in value.items()]
+    else:
+        for part in str(value).split(","):
+            if not part.strip():
+                continue
+            root, sep, day = part.partition("=")
+            if not sep:
+                raise ValueError(f"--root-first takes ROOT=YYYY-MM-DD, not {part.strip()!r}")
+            pairs.append((root, day))
+    if train_from is None:
+        raise ValueError("--root-first goes with --train-from (a root's own day is inside an image's Train)")
+    out: dict[str, dt.date] = {}
+    for root, text in pairs:
+        root = root.strip().upper()
+        if not root.isalnum():
+            raise ValueError(f"--root-first: not a root: {root!r}")
+        if root in out:
+            raise ValueError(f"--root-first names {root} twice")
+        try:
+            day = dt.date.fromisoformat(text.strip())
+        except ValueError as error:
+            raise ValueError(f"--root-first {root}: not a date: {text.strip()!r}") from error
+        if not train_from <= day <= TRAIN[0]:
+            raise ValueError(f"--root-first {root}: {day} is not between the image's first Train day {train_from} and "
+                             f"{TRAIN[0]}")
+        out[root] = day
+    return out
 
 
 # ------------------------------------------------------------------------------ calendar

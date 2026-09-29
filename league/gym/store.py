@@ -6,14 +6,16 @@ under `<root>/nbbo/<ROOT>/<YYYY-MM-DD>.parquet` (one-minute NBBO), `underlying/`
 Dates appear only in paths and in the manifest; the engine turns them into day ordinals and days to
 expiry, and a program never sees one.
 
-THE WINDOWS. Every date belongs to one window: train 2020-01-02..2024-12-31, validation
+THE WINDOWS. Every date belongs to one window: train 2017-01-03..2024-12-31, validation
 2025-01-02..2025-12-31, holdout 2026-01-02..2026-09-25 (the last full trading day before T0), forward
-every trading day after that. Train's 2020-21 years (the extension of Sept 27) are in a Gym image only when it was
-built with them (`images.py build gym --train-from 2020-01-02`), and a Train run covers them only from the swarm's
-`gym.train_from`; until the owner's switch every image starts at 2022-01-03, as before. An image built with them also
-holds the underlying alone for the 60 sessions before 2020-01-02 (window "pre": a program's history going into the
-March 2020 crash, never a day a run trades). `train_first` is the first Train day an image holds: the swarm refuses a
-Train run whose span is not the image's. A holdout or forward day opens only for a `Store` built with a
+every trading day after that. Train's earlier years (2020-21, the extension of Sept 27; 2017-19, Train from 2017 of
+Sept 29) are in a Gym image only when it was built with them (`images.py build gym --train-from 2020-01-02` or
+`2017-01-03`), and a Train run covers them only from the swarm's `gym.train_from`. An image built with them also
+holds the underlying alone for the 60 sessions before its first Train day (a program's history going into it, never a
+day a run trades). `train_first` is the first Train day an image holds a chain on: the swarm refuses a Train run whose
+span is not the image's, and a calendar day before it is never a Train day of that store (`days`), so the history
+sessions of an image built from 2020 (2019's last 60, inside Train's window since Sept 29) stay out of Train exactly as
+before. A holdout or forward day opens only for a `Store` built with a
 `GateCapability`, and one is minted only on a store that carries the gate image's `GATE` mark (the
 Gym image has neither the mark nor the days). It is an object the gate's code holds, not a flag: a
 program runs inside `decide(ctx)`, imports only numpy and math, and never reaches the store at all.
@@ -118,6 +120,7 @@ class Store:
         self._trading = sorted(self._calendar)
         self._ordinals = np.array([ordinal(d) for d in self._trading], dtype=np.int64)
         self._manifest: dict[tuple[str, str, int], str] | None = None
+        self._train_first: tuple[dt.date | None] | None = None   # (the day,) once read
 
     # ------------------------------------------------------------------ calendar and windows
     def _read_calendar(self) -> dict[dt.date, tuple[int, int]]:
@@ -146,9 +149,17 @@ class Store:
         return list(self._trading)
 
     def train_first(self) -> dt.date | None:
-        """The first Train day this store's calendar holds (2022-01-03 on every image before the 2020-21 extension,
-        2020-01-02 on one built with it): the span a Train run here covers, which the swarm checks against its own."""
-        return next((d for d in self._trading if window_of(d) == "train"), None)
+        """The first Train-window day this store holds a chain on (2022-01-03 on every image before the 2020-21
+        extension, 2020-01-02 on one built from 2020, 2017-01-03 on one built from 2017): the span a Train run here
+        covers, which the swarm checks against its own. A chain, not a calendar day: an image's calendar also lists its
+        history sessions (the underlying alone), and since Train's window reaches 2017 the 60 sessions before
+        2020-01-02 of an image built from 2020 are Train by date."""
+        if self._train_first is None:
+            base = self.root / "nbbo"
+            roots = sorted(p.name for p in base.iterdir() if p.is_dir()) if base.is_dir() else []
+            self._train_first = (next((d for d in self._trading if window_of(d) == "train"
+                                       and any(self.has("nbbo", r, d) for r in roots)), None),)
+        return self._train_first[0]
 
     def next_trading_day(self, day: dt.date) -> dt.date | None:
         i = int(np.searchsorted(self._ordinals, ordinal(day), side="right"))
@@ -176,9 +187,11 @@ class Store:
             raise StoreRefused(f"no window {window!r}; one of {', '.join(WINDOWS)}")
         if window in SEALED and self._gate is None:
             raise StoreRefused(f"the {window} window opens only for the gate")
+        # Train starts at the store's first Train day: history sessions before it are no Train days (`train_first`).
+        first = self.train_first() if window == "train" else None
         out = []
         for day in self._trading:
-            if window_of(day) != window or (start and day < start) or (end and day > end):
+            if window_of(day) != window or (start and day < start) or (end and day > end) or (first and day < first):
                 continue
             if all(self.has(kind, r, day) for r in roots):
                 out.append(day)

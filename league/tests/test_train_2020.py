@@ -102,7 +102,7 @@ class Windows(unittest.TestCase):
         self.assertEqual(sl.window_of(D(2019, 12, 31), D(2020, 1, 2)), "pre")
         self.assertEqual(sl.window_of(D(2025, 6, 2), D(2020, 1, 2)), "validation")
         self.assertEqual(sl.window_of(D(2026, 3, 2), D(2020, 1, 2)), "holdout", "the holdout stays sealed whatever Train's start")
-        for bad in (D(2019, 12, 31), D(2022, 1, 4)):
+        for bad in (D(2016, 12, 30), D(2022, 1, 4)):  # Train's earliest is 2017-01-03 since Train from 2017 (Sept 29)
             with self.assertRaises(ValueError):
                 sl.window_of(D(2023, 1, 3), bad)
 
@@ -374,10 +374,13 @@ class ImagesPrune(unittest.TestCase):
 @unittest.skipUnless(HAVE_GYM, "numpy/pyarrow not installed (requirements-gym.txt)")
 class GymWindows(unittest.TestCase):
     def test_train_reaches_2020_and_nothing_else_moves(self):
+        """Since Train from 2017 (Sept 29) the window reaches 2017-01-03 (test_train_2017); a store built from 2020
+        still starts Train at 2020-01-02 (`Store.train_first`, test_train_2017.Bridge)."""
         from league.gym import day as G
 
-        self.assertEqual(G.WINDOWS["train"], (D(2020, 1, 2), D(2024, 12, 31)))
-        for day, window in ((D(2019, 12, 31), "pre"), (D(2020, 1, 1), "pre"), (D(2020, 1, 2), "train"), (D(2021, 12, 31), "train"),
+        self.assertEqual(G.WINDOWS["train"], (D(2017, 1, 3), D(2024, 12, 31)))
+        for day, window in ((D(2016, 12, 30), "pre"), (D(2019, 12, 31), "train"), (D(2020, 1, 2), "train"),
+                            (D(2021, 12, 31), "train"),
                             (D(2022, 1, 3), "train"), (D(2025, 1, 1), "gap"), (D(2025, 1, 2), "validation"),
                             (D(2026, 1, 2), "holdout"), (D(2026, 9, 25), "holdout"), (D(2026, 9, 26), "forward")):
             self.assertEqual(G.window_of(day), window, day)
@@ -402,8 +405,8 @@ class GymWindows(unittest.TestCase):
         self.assertEqual(S.TRAIN_END, G.WINDOWS["train"][1])
         self.assertEqual(S.TRAIN_CORE_START, G.TRAIN_CORE_START)
         self.assertEqual((sl.TRAIN_EARLIEST, sl.TRAIN[0], sl.TRAIN[1]), (S.TRAIN_EARLIEST, S.TRAIN_CORE_START, S.TRAIN_END))
-        self.assertEqual(sorted(S.TRAIN_STARTS.values()), [sl.TRAIN_EARLIEST, sl.TRAIN[0]])
-        day = D(2019, 9, 20)
+        self.assertEqual(sorted(S.TRAIN_STARTS.values()), [sl.TRAIN_EARLIEST, sl.EARLY[0], sl.TRAIN[0]])
+        day = D(2016, 9, 20)
         while day <= D(2026, 10, 5):
             self.assertEqual(sl.window_of(day, sl.TRAIN_EARLIEST), G.window_of(day), day)
             day += dt.timedelta(days=1)

@@ -7,9 +7,11 @@
     backfill.py status                         the queue by stage, underlying-days, rate and ETAs
     backfill.py compile                        VERSION, calendar, expiries and manifest from the journal
     backfill.py prune --keep train,validation [--drop-key] [--drop-work] [--train-from 2020-01-02]
+                      [--root-first XSP=2020-01-02,...]
                                                delete other windows' files (a Gym image fork); Train
                                                starts at --train-from (default 2022-01-03: the 2020-21
-                                               extension's days are "pre" and pruned)
+                                               extension's days are "pre" and pruned; 2017-01-03 takes
+                                               2017-19 too), a listed root at its own first day
     backfill.py adopt --records F              take files a nightly copy put in place (gate image)
     backfill.py verify                         every file's sha256 against the journal
 
@@ -688,16 +690,36 @@ class ImageView:
     exactly as before the 2020-21 extension, so stages 9 and 10's files are "pre" and no image takes them. With
     `train_from` (an image built with the extension on): the window its date has when Train starts there; the underlying
     of the `HISTORY_SESSIONS` sessions before it is "history" (a program's history, never a Train day); and a root outside
-    `early_roots` (the operator's list, e.g. without XSP) has no Train day before 2022-01-03."""
+    `early_roots` (the operator's list, e.g. without XSP) has no Train day before 2022-01-03.
 
-    def __init__(self, calendar: sl.Calendar, train_from: dt.date | None = None, early_roots: Sequence[str] | None = None):
+    `root_first` (Train from 2017, Sept 29; `storelib.parse_root_first`) gives a root its own first Train day, on or
+    after `train_from`: nothing of that root dated before it is Train, and its history is the underlying of the
+    sessions before ITS day (so XSP from 2020-01-02 in a 2017 image keeps its 2020-21 and its Q4-2019 history, and
+    loses its 2017-19). It replaces `early_roots`, which stays as it was for the images built from 2020 with it; the two
+    never mix, and `early_roots` is refused from before 2020 (a root it left out would still take the history before
+    `train_from` but no Train day before 2022-01-03)."""
+
+    def __init__(self, calendar: sl.Calendar, train_from: dt.date | None = None,
+                 early_roots: Sequence[str] | None = None, root_first: Any = None):
+        if early_roots and root_first:
+            raise ValueError("--early-roots and --root-first do not mix (--root-first replaces --early-roots)")
+        if early_roots and train_from is not None and train_from < sl.EARLY[0]:
+            raise ValueError(f"--early-roots is for an image from {sl.EARLY[0]} (a root it leaves out starts at "
+                             f"{sl.TRAIN[0]}); from {train_from} give each root its own day with --root-first")
         self.train_from = train_from
         self.early = {str(r).upper() for r in early_roots} if early_roots else None
         self.history = set(sl.history_days(calendar, train_from)) if train_from is not None else set()
+        self.root_first = sl.parse_root_first(root_first, train_from) if root_first else {}
+        self.root_history = {root: set(sl.history_days(calendar, day)) for root, day in self.root_first.items()}
+        #: Every history session some root of the image has (the calendar keeps them all).
+        self.sessions = self.history.union(*self.root_history.values())
 
     def window(self, kind: str, root: str, day: dt.date, label: str | None = None) -> str:
         if self.train_from is None:
             return label if label is not None else sl.window_of(day)
+        first = self.root_first.get(str(root).upper())
+        if first is not None and day < first:
+            return "history" if kind == "underlying" and day in self.root_history[str(root).upper()] else "pre"
         window = sl.window_of(day, self.train_from)
         if window == "pre" and kind == "underlying" and day in self.history:
             return "history"
@@ -716,13 +738,13 @@ class ImageView:
 
 def compile_store(store: Store, calendar: sl.Calendar, *, windows: Sequence[str] | None = None,
                   roots: Sequence[str] | None = None, train_from: dt.date | None = None,
-                  early_roots: Sequence[str] | None = None) -> dict[str, int]:
+                  early_roots: Sequence[str] | None = None, root_first: Any = None) -> dict[str, int]:
     """VERSION, calendar.parquet, expiries.parquet and manifest.parquet, from the journal. `train_from` (an image
     built with the 2020-21 extension switched on) moves Train's first day, keeps the history sessions' calendar days and
-    relabels the manifest to match (`ImageView`)."""
+    relabels the manifest to match (`ImageView`, with each root's own first day from `root_first`)."""
     import frames as fr
 
-    view = ImageView(calendar, train_from, early_roots)
+    view = ImageView(calendar, train_from, early_roots, root_first)
     keep = view.keep(windows) if windows is not None else None
     store.root.mkdir(parents=True, exist_ok=True)
     (store.root / "VERSION").write_text(sl.STORE_VERSION + "\n")
@@ -733,7 +755,7 @@ def compile_store(store: Store, calendar: sl.Calendar, *, windows: Sequence[str]
     cal_rows = []
     if days:
         for day in calendar.days(min(sl.TRAIN[0], days[0]), days[-1]):
-            if windows is None or sl.window_of(day, train_from) in windows or day in view.history:
+            if windows is None or sl.window_of(day, train_from) in windows or day in view.sessions:
                 hours = calendar.hours(day)
                 cal_rows.append((day, hours[0], hours[1]))
     fr.write(fr.calendar_frame(cal_rows), store.root / "calendar.parquet")
@@ -789,13 +811,14 @@ GATE_WORK_KEEP = ("journal.jsonl", "expiries", "calendar.json")
 
 def prune(store: Store, keep: Sequence[str], *, drop_key: bool, drop_work: bool, calendar: sl.Calendar,
           keep_journal: bool = False, roots: Sequence[str] | None = None, train_from: dt.date | None = None,
-          early_roots: Sequence[str] | None = None) -> dict[str, Any]:
+          early_roots: Sequence[str] | None = None, root_first: Any = None) -> dict[str, Any]:
     """Delete every store file outside `keep` (by the date in its path) and every file the journal
     does not know (a rename a killed run never journaled), recompile, then optionally delete the
     key and the working area. Used on a fork that becomes the Gym image or the gate image. Train starts at
     `train_from` (None: 2022-01-03, so the 2020-21 extension's days are "pre" and go; with it, the history sessions'
-    underlying stays too) and `early_roots` limits the roots whose 2020-21 days stay (`ImageView`)."""
-    view = ImageView(calendar, train_from, early_roots)
+    underlying stays too), `early_roots` limits the roots whose 2020-21 days stay, and `root_first` gives a root its own
+    later first Train day (`ImageView`)."""
+    view = ImageView(calendar, train_from, early_roots, root_first)
     kept = view.keep(keep)
     removed, orphans = 0, 0
     known = set(store.journal.files())
@@ -814,7 +837,8 @@ def prune(store: Store, keep: Sequence[str], *, drop_key: bool, drop_work: bool,
             elif rel not in known:
                 path.unlink()
                 orphans += 1
-    report = compile_store(store, calendar, windows=keep, roots=roots, train_from=train_from, early_roots=early_roots)
+    report = compile_store(store, calendar, windows=keep, roots=roots, train_from=train_from, early_roots=early_roots,
+                           root_first=root_first)
     if drop_work:
         shutil.rmtree(store.work, ignore_errors=True)
         shutil.rmtree("/data/run", ignore_errors=True)
@@ -1028,6 +1052,8 @@ def _main(argv: Sequence[str] | None = None) -> int:
     pr.add_argument("--train-from", default="", help="Train's first day (2020-01-02 keeps the 2020-21 extension; "
                                                       "default 2022-01-03)")
     pr.add_argument("--early-roots", default="", help="with --train-from: only these roots keep their 2020-21 days")
+    pr.add_argument("--root-first", default="", help="with --train-from: ROOT=YYYY-MM-DD,... each root's own first "
+                                                     "Train day (its history is the 60 sessions before it)")
     rc = sub.add_parser("records", help="one day's file records (JSON lines) for a nightly copy")
     rc.add_argument("--date", required=True)
     ad = sub.add_parser("adopt")
@@ -1155,8 +1181,10 @@ def _main(argv: Sequence[str] | None = None) -> int:
         roots = [r.strip() for r in args.roots.split(",") if r.strip()] or None
         train_from = dt.date.fromisoformat(args.train_from) if args.train_from else None
         early = [r.strip().upper() for r in args.early_roots.split(",") if r.strip()] or None
+        root_first = sl.parse_root_first(args.root_first, train_from) or None  # refused before anything is deleted
         print(json.dumps(prune(store, keep, drop_key=args.drop_key, drop_work=args.drop_work, calendar=calendar,
-                               keep_journal=args.keep_journal, roots=roots, train_from=train_from, early_roots=early)))
+                               keep_journal=args.keep_journal, roots=roots, train_from=train_from, early_roots=early,
+                               root_first=root_first)))
     elif args.cmd == "records":
         for record in day_records(store, dt.date.fromisoformat(args.date)):
             print(json.dumps(record, sort_keys=True, default=str))

@@ -18,6 +18,12 @@ any other value, and a missing one while Train is not 2022-2024, keeps the runni
 to 2022), and the loop keeps raising an alert naming it until it is fixed. With the switch on, `train_split` and
 `run_timeout_seconds` follow the span unless the operator sets them (`train_split`, `run_timeout`: 16 and 1500 s over
 five years, 8 and 900 s over three).
+
+TRAIN FROM 2017 (Sept 29, 2026). A third start, "2017-01-03" (Train is 2017-2024: 2017's calm, the February 2018
+volatility shock and the fourth-quarter 2018 selloff, 2019, then 2020-2024), with its own Gym image
+(`images.py build gym --train-from 2017-01-03`); everything above holds unchanged for it (the snap: 2017-01-01 and
+2017-01-02 are 2017-01-03; the derived split 24 and time limit 2400 s over eight years). Nothing moves until the
+operator writes it with the matching image; "2020-01-02" and "2022-01-03" mean what they meant.
 """
 
 from __future__ import annotations
@@ -35,10 +41,11 @@ REPO = Path(__file__).resolve().parents[2]
 #: Train's first day by default and at its earliest, and its last day (league/gym/day.py's windows; a test holds them
 #: equal). The swarm is standard library only, so they are repeated here rather than imported from the Gym.
 TRAIN_CORE_START = dt.date(2022, 1, 3)
-TRAIN_EARLIEST = dt.date(2020, 1, 2)
+TRAIN_EARLIEST = dt.date(2017, 1, 3)
 TRAIN_END = dt.date(2024, 12, 31)
-#: The first session of each year Train may start in: the only values `gym.train_from` takes.
-TRAIN_STARTS = {2020: TRAIN_EARLIEST, 2022: TRAIN_CORE_START}
+#: The first session of each year Train may start in: the only values `gym.train_from` takes (2017 since Sept 29, 2020
+#: since Sept 27, 2022 as ever).
+TRAIN_STARTS = {2017: TRAIN_EARLIEST, 2020: dt.date(2020, 1, 2), 2022: TRAIN_CORE_START}
 #: The Train split and run timeout over three years (the defaults before the switch); `train_split` and `run_timeout`
 #: scale them with the span unless the operator sets `gym.train_split` or `gym.run_timeout_seconds`.
 BASE_TRAIN_SPLIT = 8
@@ -163,8 +170,9 @@ DEFAULTS: dict[str, Any] = {
         "python": "/opt/data-venv/bin/python",  # the Gym image is a fork of the data box: its venv has numpy and pyarrow
         "capital": 10000.0,
         "roots": ["SPY", "QQQ", "IWM", "XSP", "SPXW"],
-        # Train's first day (the module docstring's 2020-21 switch): "2020-01-02" with a Gym image that holds 2020-21;
-        # "2022-01-03" to switch back. Unset: the running span stays (2022-01-03 on a store never switched).
+        # Train's first day (the module docstring's switch): "2020-01-02" or "2017-01-03" with a Gym image that holds
+        # those years; "2022-01-03" to switch back. Unset: the running span stays (2022-01-03 on a store never
+        # switched).
         "train_from": None,
     },
     # A robustness run waiting this long (its 1.5x run; the mid run twice as long) takes a Train job's priority (aging).
@@ -410,7 +418,8 @@ def span_years(span: dt.date | None) -> tuple[int, ...]:
 
 
 def train_years(settings: Mapping[str, Any] | None) -> tuple[int, ...]:
-    """The calendar years Train covers under `gym.train_from`: (2022, 2023, 2024) by default, 2020-2024 with it on."""
+    """The calendar years Train covers under `gym.train_from`: (2022, 2023, 2024) by default, 2020-2024 or 2017-2024
+    with it on."""
     return span_years(train_from(settings))
 
 
@@ -426,7 +435,7 @@ def _explicit(settings: Mapping[str, Any] | None, name: str) -> float | None:
 
 def train_split(settings: Mapping[str, Any] | None, span: dt.date | None = None) -> int:
     """The Train split: `gym.train_split` when the operator set it, else 8 per three years of Train rounded up (8 over
-    2022-2024; 16 over 2020-2024: two full waves on 8 workers, segments shorter than today's)."""
+    2022-2024; 16 over 2020-2024: two full waves on 8 workers, segments shorter than today's; 24 over 2017-2024)."""
     explicit = _explicit(settings, "train_split")
     if explicit is not None:
         return max(1, int(explicit))
@@ -435,7 +444,7 @@ def train_split(settings: Mapping[str, Any] | None, span: dt.date | None = None)
 
 def run_timeout(settings: Mapping[str, Any] | None, span: dt.date | None = None) -> float:
     """A Gym batch's time limit in seconds: `gym.run_timeout_seconds` when the operator set it, else 900 s scaled by the
-    Train years a Train batch covers (`span`; None: any other window, 900): 1500 over five years."""
+    Train years a Train batch covers (`span`; None: any other window, 900): 1500 over five years, 2400 over eight."""
     explicit = _explicit(settings, "run_timeout_seconds")
     if explicit is not None:
         return explicit
