@@ -21,7 +21,7 @@ on branch `run/options-swarm-2026-09-26`) has the detail.
 
 ## Not yet deployed
 
-- **Train from 2017** (branch `gym/train-from-2017`, open). Train's window, `storelib.TRAIN_EARLIEST` and
+- **Train from 2017** (#424, branch `gym/train-from-2017`, open). Train's window, `storelib.TRAIN_EARLIEST` and
   `gym.train_from` reach 2017-01-03 (a third start beside 2020-01-02 and 2022-01-03; over eight years the derived
   split is 24 and the time limit 2400 s). Stage 9's `EARLY` stays the literal 2020-01-02..2021-12-31. New public
   tables: the 2017-2019 scheduled FOMC days, CPI and Employment Situation release days (Federal Reserve meeting

@@ -36,8 +36,8 @@ researcher Sail pace $12 an hour, the swarm's Sail burst to Oct 5 at $900, Claud
 the gateway (the swarm's own line `claude.usd_cap` 98), OpenAI $707 for September only. The planned
 larger deposits are not confirmed funding.
 
-In progress, not merged: longer history as private blocks (#413); Train from 2017 (the 2017-19 windows, event and
-rate tables and per-root first Train days for images; no swarm change until an image is built and adopted); the top
+In progress, not merged: longer history as private blocks (#413); Train from 2017 (#424: the 2017-19 windows, event
+and rate tables and per-root first Train days for images; no swarm change until an image is built and adopted); the top
 families' research cycles
 on Sonnet 5.5 (#417); an architect that reads the whole graveyard, plus a strategist (not yet a pull
 request). Open: #393 (credit types at $2,000, the owner's
