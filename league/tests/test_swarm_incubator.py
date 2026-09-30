@@ -179,23 +179,30 @@ class Mark(Case):
         self.assertEqual(self.state("a")["train_passed"][str(n)], mark)
 
     def test_each_condition_removed_alone_writes_no_mark(self):
-        cases = {
-            "no eligible Train run": lambda f, n: self.train(f, n, eligible=False),
-            "a Train run of another evaluator": lambda f, n: self.train(f, n, identity={**EVALUATOR, "bundle": "gym-engine-4-old"}),
-            "its 1.5x run has not landed": lambda f, n: (self.train(f, n), self.robust(f, n, status="failed")),
-            "its 1.5x run lost": lambda f, n: (self.train(f, n), self.robust(f, n, pnl=-3.0)),
-            "its 1.5x run broke even": lambda f, n: (self.train(f, n), self.robust(f, n, pnl=0.0)),
-            "demoted at 1.5x": lambda f, n: (self.train(f, n), self.store.set_state(f, robust_failed=[n])),
-            "demoted by the drift screen": lambda f, n: (self.train(f, n), self.store.set_state(f, drift_failed={str(n): "x"})),
-            "drift figures owed": lambda f, n: self.train(f, n, drift=None),
-            "a failed drift screen": lambda f, n: self.train(f, n, drift=FAILING),
+        cases = {  # why: (arrange, the refusal's words, final)
+            "no eligible Train run": (lambda f, n: self.train(f, n, eligible=False), "no eligible Train run", False),
+            "a Train run of another evaluator": (lambda f, n: self.train(f, n, identity={**EVALUATOR, "bundle": "gym-engine-4-old"}),
+                                                 "no eligible Train run", False),
+            "its 1.5x run has not landed": (lambda f, n: (self.train(f, n), self.robust(f, n, status="failed")), "not landed", False),
+            "its 1.5x run lost": (lambda f, n: (self.train(f, n), self.robust(f, n, pnl=-3.0)), "lost money", True),
+            "its 1.5x run broke even": (lambda f, n: (self.train(f, n), self.robust(f, n, pnl=0.0)), "lost money", True),
+            "demoted at 1.5x": (lambda f, n: (self.train(f, n), self.store.set_state(f, robust_failed=[n])), "demoted", True),
+            "demoted by the drift screen": (lambda f, n: (self.train(f, n), self.store.set_state(f, drift_failed={str(n): "x"})),
+                                            "demoted", True),
+            "drift figures owed": (lambda f, n: self.train(f, n, drift=None), "owed", False),
+            "a failed drift screen": (lambda f, n: self.train(f, n, drift=FAILING), "fails the drift screen", True),
         }
-        for why, arrange in cases.items():
+        for why, (arrange, words, final) in cases.items():
             fid = re.sub(r"[^a-z0-9]+", "-", why)
             n = self.family(fid)
             self.robust(fid, n)
             arrange(fid, n)
             self.cohort(fid, n)
+            mark, reason, is_final = I.mark_of(self.store, self.store.family(fid), n, self.settings, evaluator=EVALUATOR,
+                                               objective=OBJECTIVE, clock=self.clock)
+            self.assertIsNone(mark, why)
+            self.assertIn(words, reason, why)
+            self.assertEqual(is_final, final, why)
         out = self.facts()
         self.assertEqual(out["cohorts"], len(cases))
         self.assertEqual(out["written"], [])
