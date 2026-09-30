@@ -124,6 +124,10 @@ DEFAULTS: dict[str, Any] = {
         "family_usd_day": 3.0,          # each family's daily model budget (the Provider's desk cap): a fuse
         "floor_usd_day": 150.0,         # every model call of the swarm together, a day (the Provider's floor cap): a fuse
         "idle_seconds": 5,              # between a family's cycles
+        # Holds survive restarts and resume only on new evidence, guidance, data or a harness release. False restores
+        # the legacy timer below. A researcher may retire an exhausted mechanism before choosing to wait.
+        "hold_until_news": True,
+        "retire_min_trials": 10,         # evidence-backed abandonment before a first hold, down to population.floor
         # HOLD BACKOFF (R4, Sept 28: 2,223 of 2,364 cycles in ten minutes were holds, a holding family back every ~12 s,
         # ~$6.6/h of holds against a $4.5/h pace). A family whose cycle ended in a hold with no new evaluation (and no run
         # queued) waits `hold_idle_seconds` before its next turn; news lifts the wait at once (a result of its own landed,
@@ -147,6 +151,21 @@ DEFAULTS: dict[str, Any] = {
         # The idle rule's dormancy clause: a family whose last this-many cycles made no new Gym evaluation (only stored
         # results and holds) is dead, unless its best awaits validation; 0 or null turns the clause off.
         "dormant_cycles": 40,
+        # THE HOLD OFFER (R11-1, Sept 29): a family that held this many cycles in a row with an eligible Train run behind it,
+        # or `retire_hold_trials` trials, is offered `retire` on its REVISE turn too (down to `population.floor`); its
+        # lesson is SELF-REFUTED. 0 cycles turns it off; 0 trials leaves the eligible run alone.
+        "retire_hold_cycles": 3,
+        "retire_hold_trials": 10,
+        # THE EXTENSION HOLD (R11-4's swarm rule): a family whose latest validation met this many of the line's checks is
+        # exempt from the dormancy clause until the operator clears its flag (its 2017-19 extension result landed:
+        # scripts/extension_hold.py). 0 or null turns the rule off.
+        "extension_hold_checks": 6,
+        # THE ZERO-TRADE PROBE (R11-6): a Train year (2022, where most triggers fire) switches it on: a new version's first
+        # Train run is preceded by a run over that year on the family's first root, and a probe with no trade is the
+        # answer (disqualified, one trial) instead of the five-year run; `gym_run` full=true skips it. Null: off (the
+        # operator switches it on in swarm.json). `probe_timeout_seconds`: a probe not back by then says nothing.
+        "probe_year": None,
+        "probe_timeout_seconds": 300,
     },
     "gym": {
         "enabled": False,
@@ -184,6 +203,10 @@ DEFAULTS: dict[str, Any] = {
         # leaves within minutes (the operator retired 60 by hand after R3). 0 or null: the hourly round only.
         "retire_every_seconds": 300,
         "explore_share": 0.25,
+        # THE EXPLOIT POOL (R11-5): only old families with a positive latest validation mean are exploited, each earning
+        # at most this share; the explore pool (new families and old ones at zero or below) takes the rest, never less than
+        # `explore_share`. Null: `explore_share` alone.
+        "exploit_per_positive": 0.15,
         "new_family_validations": 2,    # a family is "new" to the bandit until this many validation looks
         "retire_revisions": 30,
         "retire_evaluations": 2000,
@@ -231,6 +254,10 @@ DEFAULTS: dict[str, Any] = {
         "graveyard_digest_ttl": "5m",
         # Refuse a digest-route proposal that names no real graveyard row it differs from (off until the cited rate is known).
         "require_differs": False,
+        # THE CLASS CAP (R11-2, Sept 29: 83% of births in an hour were one class, TLT/GLD/SLV straddles): at most this many
+        # living families of one mechanism class (structure x root group, the strategist's `mechanism_class`); `admit`
+        # refuses births past it and the request names the full classes. 0 or null turns it off.
+        "max_alive_per_class": 12,
     },
     # THE STRATEGIST (Sept 29, 2026; league/swarm/strategist.py): Claude reads the whole graveyard digest, the board, the
     # Validation check-failure counts and the day's births and retirements, and writes only the agenda's WHERE TO LOOK
@@ -286,13 +313,32 @@ DEFAULTS: dict[str, Any] = {
     # turns observe, calibration and the House live test off. They switch work off or bound it; no money rule lives here
     # (the constitution's).
     "live": {
-        "observe": True,                # every alive Gym-band family with a validated version trades shadow (never real)
-        "observe_max": 48,              # at most this many observe instances (the likeliest by validation t first)
+        # THE PRACTICE LEAGUE (the observe band; Sept 29, 2026): every alive Gym-band family with a validated version, or
+        # an eligible Train version (`observe_train`), trades shadow (never real) on live quotes, validated first (by
+        # validation t), then Train (by Train score). Two caps: instances and the distinct roots they read (every root is
+        # read every minute, about 1.1-1.5 data calls each; measured on the House Sept 29).
+        "observe": True,
+        "observe_max": 48,              # at most this many observe instances
+        "observe_train": True,          # admit families with an eligible Train version and no validated one
+        "observe_roots_max": 24,        # at most this many distinct roots across the observe instances (1-128)
+        "observe_read_calls": 40,       # the minute's data calls before observe reads stop (about 1.5 a root; 10-200)
         "calibration": False,           # the D3 real-fill round trips: ON only by swarm.json {"live": {"calibration": true}}
         "calibration_samples": 30,      # a symbol's round trips stop once its open-at-mid cell has this many samples
         # The House live test (league/live/house_test.py): ON only by swarm.json {"live": {"house_test": true}}, and then
         # only with real money on, the grant, the paper proof and its private program verified. Off: exits only.
         "house_test": False,
+    },
+    # THE PRACTICE LEAGUE'S FEEDBACK (Sept 29, 2026; league/swarm/practice.py): the practice record (shadow trades on live
+    # quotes under the Gym's fill rules, the House's private observe.sqlite) as a RESEARCH signal, never evidence: the
+    # strategist's PRACTICE table, the architect's PRACTICE BY CLASS lines and the bandit's capped bonus. `feedback` false
+    # turns all three off (no deploy). The bonus moves only research attention (the bandit's weight); it never reaches
+    # validation, the gate, the holdout, the bands, the live path or the money table.
+    "practice": {
+        "feedback": True,
+        "sessions": 10,                 # the session days the feedback reads (1-60)
+        "bonus": 0.25,                  # a family's largest relative share bonus (0-0.5; 0 turns the bonus off)
+        "bonus_total": 0.10,            # the most share the bonus moves in all (0-0.2)
+        "min_trades": 3,                # program-closed practice trades before any bonus (1-50)
     },
     # Claude through the gateway (Sept 26, 2026, the swarm sprint; league/claude.py). The gateway's CLAUDE_USD ($100, the
     # owner's funded total) is the hard line; `usd_cap` is the swarm's own Claude line inside it and `reserve_usd` is never
@@ -322,6 +368,10 @@ DEFAULTS: dict[str, Any] = {
         # The 1-hour cache marker (Sept 29, 2026): true only once the gateway admits `ttl: "1h"` (today it refuses it
         # with a 400, which would drop the call to its next route). Off, no call ever sends one.
         "cache_1h": False,
+        # A role's own Claude effort (R11-3) {role: low | medium | high | xhigh | max}, used when the caller names none;
+        # `effort` stays every other role's (the gate's reads keep "high"). E.g. {"architect": "medium"}: its output ran
+        # 20-29k tokens a pass whatever it bore, and 6 of 28 Sonnet passes were cut at the 32k cap on Sept 29.
+        "role_effort": {},
     },
     # The diagnostician (league/swarm/diagnostician.py): Claude reads a family that is stuck or nearly there and rewrites
     # its mechanism or writes its lesson. Eligible: `min_validations` validations without passing, or the latest

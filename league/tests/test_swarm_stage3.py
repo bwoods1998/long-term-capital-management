@@ -187,7 +187,8 @@ class GateOwnershipTests(R.RoundCase):
         gate.run()
         job, late = self.pool.landing[0]
         self.pool.slow.clear()
-        self.store.add_version("a", "# newer synthetic program", {}, author="test")
+        self.store.add_version("a", "# newer synthetic program\nNEEDS = {'roots': ['SPY']}\nPARAMS = {}\ndef decide(ctx):\n    return []\n",
+                               {}, author="test")
         self.store.update_family("a", best_version=2)
         Tournament(self.store, self.pool, self.settings, clock=self.clock).validate(self.store.families(alive=True))
         self.clock.advance(2200)
@@ -203,7 +204,8 @@ class GateOwnershipTests(R.RoundCase):
         for i in range(2):
             self.store.add_look("a", i + 100, "old-" + str(i), passed=False, p_value=0.5, detail={})
         child = self.store.add_family({**R.SPEC, "id": "child"}, origin="fork", parent="a")
-        self.store.add_version(child["id"], "# child synthetic program", {}, author="test")
+        self.store.add_version(child["id"], "# child synthetic program\nNEEDS = {'roots': ['SPY']}\nPARAMS = {}\ndef decide(ctx):\n    return []\n",
+                               {}, author="test")
         self.store.update_family(child["id"], best_version=1)
         Tournament(self.store, self.pool, self.settings, clock=self.clock).validate(self.store.families(alive=True))
         self.pool.slow.add("a")
@@ -475,9 +477,11 @@ class ReadyForwardTests(R.RoundCase):
         return {"day": day, "checkpoint": checkpoint}
 
     def banded(self, fid="a"):
+        from league.tests.evaluator_fakes import band_proof
+
         self.family(fid)
         self.store.set_band(fid, "candidate", reason="synthetic test")
-        self.store.set_state(fid, banded_version=1)
+        self.store.set_state(fid, banded_version=1, banded_evaluator=band_proof(self.store.version(fid, 1)))
 
     def good(self, job):
         target = self.gate.forward_target()

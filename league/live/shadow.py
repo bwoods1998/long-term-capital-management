@@ -73,12 +73,87 @@ class ShadowAccount(E.Account):
         self.began_day: int | None = None
         self.ended_day: int | None = None
         self.last_mi = -1          # the last minute of today this account was stepped through
+        #: Positions the House closed winding the instance down (`wind_down`), not the program: the practice league's
+        #: record keeps their P&L and leaves them out of its statistics (`league/live/observe.py`, `forced`).
+        self.wound: set[int] = set()
+        self.practice_events: list[dict] = []
+        self.practice_next_event = 0
+        self.practice_dropped_events = 0
+        self.practice_evaluator: str | None = None
+        self._practice_stamp: tuple[str | None, int | None] = (None, None)
+
+    def practice_event(self, kind: str, body: Mapping[str, Any], *, day: LiveDay | None = None,
+                       mi: int | None = None) -> None:
+        """Private receipts only for practice accounts, retained in the saved shadow account until SQLite accepts them.
+        The bound applies only during a prolonged ledger outage; discarded receipt count is explicit."""
+        if not self.instance.endswith(":o"):
+            return
+        if day is not None:
+            self._practice_stamp = (day.day.isoformat(), mi)
+        self.practice_next_event += 1
+        if len(self.practice_events) >= 10000:
+            self.practice_dropped_events += 1
+            return
+        self.practice_events.append({"id": self.practice_next_event, "day": self._practice_stamp[0],
+                                     "minute": self._practice_stamp[1], "kind": kind, **dict(body),
+                                     "dropped_before": self.practice_dropped_events})
+
+    def _reject(self, why: str, *, tell: bool = True) -> None:
+        super()._reject(why, tell=tell)
+        self.practice_event("rejected", {"reason": str(why)[:1000]})
+
+    def _intent(self, day: LiveDay, mi: int, intent: Mapping[str, Any]) -> None:
+        if not self.instance.endswith(":o"):
+            return super()._intent(day, mi, intent)
+        before = set(self.orders)
+        self.practice_event("intent", {"intent": dict(intent)}, day=day, mi=mi)
+        super()._intent(day, mi, intent)
+        for oid in set(self.orders) - before:
+            work = self.orders[oid]
+            self.practice_event("order", {"order": _working_state(work), "quotes": self._quotes(day, mi, work)},
+                                day=day, mi=mi)
+
+    @staticmethod
+    def _quotes(day: LiveDay, mi: int, work: E.Working) -> list[dict]:
+        chain = day.chains.get(work.order.root)
+        if chain is None or not 0 <= mi < day.minutes:
+            return []
+        try:
+            return [{"key": int(leg.key), "side": int(leg.side), "ratio": int(leg.ratio),
+                     "bid": _num(float(chain.bid[mi, leg.idx])), "ask": _num(float(chain.ask[mi, leg.idx]))}
+                    for leg in work.order.legs]
+        except (IndexError, TypeError, ValueError):
+            return []  # missing receipt quotes never change a fill already booked by the engine
+
+    def _open_fill(self, day: LiveDay, mi: int, work: E.Working, price: float, qty: int, fees: float) -> None:
+        super()._open_fill(day, mi, work, price, qty, fees)
+        self._practice_fill(day, mi, work, price, qty, fees, "open")
+
+    def _close_fill(self, day: LiveDay, mi: int, work: E.Working, price: float, qty: int, fees: float, reason: str) -> None:
+        super()._close_fill(day, mi, work, price, qty, fees, reason)
+        self._practice_fill(day, mi, work, price, qty, fees, reason)
+
+    def _practice_fill(self, day: LiveDay, mi: int, work: E.Working, price: float, qty: int, fees: float, reason: str) -> None:
+        if not self.instance.endswith(":o"):
+            return
+        mid = _num(work.order.mid)
+        self.practice_event("fill", {"order_id": work.oid, "position": work.pid, "action": work.order.action,
+            "price": price, "quantity": qty, "fees": fees, "reason": reason,
+            "decision_mid": mid, "decision_natural": _num(work.order.natural),
+            "slippage_to_decision_mid_usd": None if mid is None else
+                (price - mid) * (1 if work.order.action == "open" else -1) * qty * V.MULTIPLIER,
+            "quotes": self._quotes(day, mi, work)}, day=day, mi=mi)
+
+    def _drop(self, work: E.Working, why: str) -> None:
+        super()._drop(work, why)
+        self.practice_event("order_end", {"order_id": work.oid, "reason": why, "filled": work.filled})
 
     # ------------------------------------------------------------------ the minute, in two halves
     def pre(self, day: LiveDay, mi: int) -> None:
         """The engine's step before the decision: working orders meet this minute's quotes, then the venue acts. The
         engine steps every minute; a live minute the House missed (a slow minute) still gets the venue's rules (the
         cutoffs act at their exact minute), with no quotes to fill against."""
+        self._practice_stamp = (day.day.isoformat(), mi)
         last = getattr(self, "last_mi", -1)
         for skipped in range(max(0, last + 1), mi):
             self._venue(day, skipped)
@@ -120,6 +195,7 @@ class ShadowAccount(E.Account):
         for pos in list(self.positions.values()):
             if pos.closing:
                 continue
+            self.wound.add(int(pos.pid))
             try:
                 self._intent(day, mi, {"close": pos.pid, "limit": "natural", "tag": "wind-down"})
             except L.Refused as exc:
@@ -146,6 +222,10 @@ class ShadowAccount(E.Account):
             "trades": self.trades[self.exported:], "daily": self.daily[-30:], "fill_rows": self.fill_rows[-200:],
             "closed_since": self.closed_since, "rejects_since": self.rejects_since, "winding_down": self.winding_down,
             "began_day": self.began_day, "ended_day": self.ended_day, "last_mi": self.last_mi, "nonce": self.nonce,
+            "wound": sorted(self.wound),
+            "practice_events": self.practice_events, "practice_next_event": self.practice_next_event,
+            "practice_dropped_events": self.practice_dropped_events,
+            "practice_evaluator": self.practice_evaluator,
         }
 
     @classmethod
@@ -169,6 +249,11 @@ class ShadowAccount(E.Account):
         acc.began_day, acc.ended_day = row.get("began_day"), row.get("ended_day")
         acc.last_mi = int(row.get("last_mi", -1))
         acc.nonce = str(row.get("nonce") or acc.nonce)
+        acc.wound = {int(x) for x in row.get("wound") or [] if isinstance(x, int) and not isinstance(x, bool)}
+        acc.practice_events = list(row.get("practice_events") or [])
+        acc.practice_next_event = int(row.get("practice_next_event") or 0)
+        acc.practice_dropped_events = int(row.get("practice_dropped_events") or 0)
+        acc.practice_evaluator = row.get("practice_evaluator")
         return acc
 
 

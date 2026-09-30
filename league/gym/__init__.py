@@ -24,7 +24,8 @@ numpy and pyarrow are needed by the engine (`requirements-gym.txt`); this file i
 `league.gym` can be imported (and its tests skipped) where they are absent.
 """
 
-#: Bumped whenever the engine's arithmetic changes what a run returns: it is part of every run's hash.
-ENGINE_VERSION = "gym-engine-3"
+#: Bumped whenever arithmetic or runtime semantics change what a run returns: part of every run's hash.
+#: v4 binds parameter overrides at declaration (global aliases/default captures used defaults in v3).
+ENGINE_VERSION = "gym-engine-4"
 #: The store layout this engine reads.
 STORE_VERSION = "store-v1"

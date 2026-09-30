@@ -3,7 +3,7 @@
 
     check.py report                  underlying-days by window and root, the queue, rate and ETAs
                                      (standard library; reads the journal and progress file)
-    check.py quality [--sample N] [--root R] [--window W]
+    check.py quality [--sample N] [--root R] [--window W] [--years 2017,2018]
                                      per-day file checks (polars): contracts and rows per contract
                                      within the session's minutes, no crossed/negative/no-offer quote
                                      kept, minutes inside the calendar's hours, the NBBO's expiries all
@@ -96,14 +96,22 @@ def print_report(data: dict[str, Any]) -> None:
 
 
 # ------------------------------------------------------------------------------ quality
+def quality_rows(journal: sl.Journal, *, root: str | None = None, window: str | None = None,
+                 years: Sequence[int] | None = None) -> list[dict[str, Any]]:
+    """The NBBO file records `quality` checks: by root, window label and calendar year."""
+    wanted = {int(y) for y in years} if years else None
+    return [r for r in journal.files().values() if r["kind"] == "nbbo"
+            and (root is None or r["root"] == root) and (window is None or r["window"] == window)
+            and (wanted is None or int(str(r["date"])[:4]) in wanted)]
+
+
 def quality(store_root: Path, work: Path, *, sample: int | None = None, root: str | None = None,
-            window: str | None = None, seed: int = 7) -> dict[str, Any]:
+            window: str | None = None, seed: int = 7, years: Sequence[int] | None = None) -> dict[str, Any]:
     import polars as pl
 
     calendar = sl.Calendar.from_json(json.loads((work / "calendar.json").read_text())["exceptions"])
     journal = sl.Journal(work / "journal.jsonl")
-    rows = [r for r in journal.files().values() if r["kind"] == "nbbo"
-            and (root is None or r["root"] == root) and (window is None or r["window"] == window)]
+    rows = quality_rows(journal, root=root, window=window, years=years)
     rows.sort(key=lambda r: (r["root"], r["date"]))
     if sample and len(rows) > sample:
         rows = random.Random(seed).sample(rows, sample)
@@ -311,6 +319,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     q.add_argument("--sample", type=int, default=None)
     q.add_argument("--root", default=None)
     q.add_argument("--window", default=None)
+    q.add_argument("--years", default="", help="only these calendar years, e.g. 2017,2018,2019")
     a = sub.add_parser("alpaca")
     a.add_argument("--quotes", required=True)
     a.add_argument("--extra", action="append", default=[], help="another store-layout root to look in")
@@ -328,7 +337,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             print_report(data)
     elif args.cmd == "quality":
-        result = quality(store, work, sample=args.sample, root=args.root, window=args.window)
+        years = [int(y) for y in args.years.split(",") if y.strip()] or None
+        result = quality(store, work, sample=args.sample, root=args.root, window=args.window, years=years)
         (work / "checks-quality.json").write_text(json.dumps(result, indent=1, default=str))
         print(json.dumps(result, indent=1, default=str))
     elif args.cmd == "alpaca":

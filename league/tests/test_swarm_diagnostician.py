@@ -256,7 +256,7 @@ class BilledFailures(DiagnosticianCase):
 
 
 class Retirement(DiagnosticianCase):
-    def test_a_retirement_is_honored_only_above_the_start_population(self):
+    def test_a_retirement_is_honored_above_the_floor_even_below_start(self):
         lesson = "Selling short-dated wings pays the spread twice for a premium the fills eat."
         self.claude.script = [reply("retire", lesson=lesson)]
         self.diagnostician().run()
@@ -264,8 +264,7 @@ class Retirement(DiagnosticianCase):
         self.assertEqual(self.events()[-1]["outcome"], "retire_noted")
         self.assertIn(lesson, self.store.notebook(self.fid)[-1]["text"])
 
-        self.settings["population"].update(start=1, floor=0)
-        self.store.add_family({**self.fam["spec"], "id": "sibling"}, origin="seed")
+        self.settings["population"].update(start=96, ceiling=96, floor=0)
         self.store.update_family(self.fid, validations=3)
         self.clock.advance(6 * 3600 + 1)
         self.claude.script = [reply("retire", lesson=lesson)]

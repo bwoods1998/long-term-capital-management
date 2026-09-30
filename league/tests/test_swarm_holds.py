@@ -41,6 +41,7 @@ class HoldBackoff(unittest.TestCase):
         self.store = SwarmStore(Path(self.dir.name), clock=self.clock)
         self.addCleanup(self.store.close)
         self.settings = copy.deepcopy(S.DEFAULTS)
+        self.settings["researcher"]["hold_until_news"] = False  # retain the optional legacy timer's coverage
         self.fid = self.store.add_family(family_spec(SEEDS[0]), origin="seed")["id"]
         self.sched = Scheduler(self.store, clock=self.clock, settings=self.settings)
 
@@ -239,6 +240,7 @@ class HoldCycles(ResearcherCase):
         return out
 
     def test_a_hold_backs_its_family_off_and_a_new_run_or_a_queued_run_does_not(self):
+        self.settings["researcher"]["hold_until_news"] = False  # optional legacy timing; event behavior has its own tests
         sched = Scheduler(self.store, clock=self.clock, settings=self.settings)
         r = self.researcher()
         self.assertTrue(self.turn(sched, r)["starter"])
@@ -427,6 +429,9 @@ class ReviewProbes(RoundCase):
         super().setUp()
         self.pool = BundlePool(lambda job: {**self.answer(job), "gym_bundle": self.pool.current})
         self.settings["population"].update(start=48, floor=0)
+        # These probes test the gate's and a deploy's exemptions from the dormancy clause; the extension hold (R11-4's rule)
+        # would exempt a validation that met six of the checks on its own (test_swarm_verdicts.py covers it).
+        self.settings["researcher"]["extension_hold_checks"] = 0
 
     def validated_at_gate(self, fid="a"):
         self.family(fid)

@@ -17,6 +17,7 @@ from league.swarm import bands, sitefeed
 from league.swarm.hook import SKIPPED_KINDS, SwarmStep, attach
 from league.swarm.store import SwarmStore
 from league.tests.swarm_fakes import Clock, result
+from league.tests.evaluator_fakes import band_proof, reviewed
 from league.tests.test_options_house import BuildCase
 
 SPEC = {"id": "condor-vrp", "mechanism": "Index options price more movement than follows: sell an iron condor.",
@@ -611,13 +612,14 @@ class Reads(HookCase):
         c = store.add_family({**SPEC, "id": "plain"}, origin="seed")
         for fam in (a, b, c):
             store.add_version(fam["id"], f"# {fam['id']}\nNEEDS = {{}}\n", {"k": 1}, author="seed")
-        store.set_state(a["id"], banded_version=1, validation_version=1, validation_line={"passed": True}, typical_max_loss_usd=60.0)
+        store.set_state(a["id"], banded_version=1, banded_evaluator=band_proof(store.version(a["id"], 1)),
+                        validation_version=1, validation_line={"passed": True}, typical_max_loss_usd=60.0)
         store.set_band(a["id"], "candidate", reason="passed")
         from league.swarm.gate import run_sha
 
         store.set_state(b["id"], validation_version=1, validation_image="synthetic-image", validation_bundle=self.bundle,
                         validation_line={"passed": True}, typical_max_loss_usd=45.0,
-                        review={"sha": run_sha(store.version(b["id"], 1)), "verdict": "pass", "audit": {"verdict": "pass"}})
+                        review=reviewed(run_sha(store.version(b["id"], 1))))
         store.close()
         rows = {r["family"]: r for r in bands.read(self.root)}
         self.assertEqual(set(rows), {"condor-vrp", "tuition"})
@@ -625,7 +627,8 @@ class Reads(HookCase):
                          (True, True, "candidate"))
         self.assertEqual((rows["tuition"]["holdout_passed"], rows["tuition"]["validation_passed"]), (False, True))
         self.assertEqual(set(rows["tuition"]), {"family", "band", "structure", "roots", "holdout_passed", "validation_passed", "version",
-                                                "code", "params", "run_sha", "typical_max_loss_usd", "seed_era", "forward"})
+                                                "code", "params", "run_sha", "typical_max_loss_usd", "seed_era", "forward",
+                                                "version_created_at", "version_selected_at"})
         self.assertIn("# tuition", rows["tuition"]["code"])
         self.assertEqual((rows["tuition"]["typical_max_loss_usd"], rows["tuition"]["seed_era"]), (45.0, True))
         bands._bundle_cache = None  # a process caches the bundle's version (`bands.BUNDLE_TTL`); new code is a new process
@@ -648,16 +651,16 @@ class Reads(HookCase):
             store.set_state(fid, validation_version=v["n"], validation_image="synthetic-image", validation_bundle=self.bundle,
                             validation_line={"passed": True})
             cases[fid] = run_sha(v)
-        store.set_state("reviewed", review={"sha": cases["reviewed"], "verdict": "pass", "audit": {"verdict": "pass"}})
+        store.set_state("reviewed", review=reviewed(cases["reviewed"]))
         fam = store.add_family({**SPEC, "id": "unaudited"}, origin="seed")
         v = store.add_version("unaudited", "# unaudited\nNEEDS = {}\n", {}, author="seed")
         store.set_state("unaudited", validation_version=v["n"], validation_image="synthetic-image", validation_bundle=self.bundle,
                         validation_line={"passed": True},
                         review={"sha": run_sha(v), "verdict": "pass"})
         store.set_state("refused", review={"sha": cases["refused"], "verdict": "fail"}, gate_outcome={"sha": cases["refused"], "result": "refused"})
-        store.set_state("looked-failed", review={"sha": cases["looked-failed"], "verdict": "pass", "audit": {"verdict": "pass"}},
+        store.set_state("looked-failed", review=reviewed(cases["looked-failed"]),
                         gate_outcome={"sha": cases["looked-failed"], "result": "failed"})
-        store.set_state("demoted", review={"sha": cases["demoted"], "verdict": "pass", "audit": {"verdict": "pass"}},
+        store.set_state("demoted", review=reviewed(cases["demoted"]),
                         gate_outcome={"sha": cases["demoted"], "result": "demoted"})
         store.close()
         self.assertEqual([r["family"] for r in bands.read(self.root)], ["reviewed"])
@@ -705,6 +708,20 @@ class Reads(HookCase):
         self.assertEqual(record["real"], {"trades": 1, "wins": 1, "pnl_usd": 5.0}, "real money is real whatever the version")
         self.assertEqual(record["forward"], {"trades": 1, "wins": 0, "pnl_usd": -2.0}, "the banded version's record")
         self.assertEqual((record["trials"], agents["condor-on-qqq"]["record"]["trials"]), (4, 4))
+
+    def test_published_compute_keeps_claude_and_historical_provider_costs(self):
+        """A provider switch cannot make historical costs disappear or omit the current provider from Net."""
+        store = SwarmStore(self.root, clock=self.clock)
+        for kind, usd in (("sail_model", 1.25), ("gym_box", 2.75), ("openai", 3.0), ("claude", 4.0)):
+            store.add_spend(kind, usd)
+        store.close()
+        inputs = sitefeed.site_inputs(self.root)
+        checkpoint = publish.build_checkpoint({**inputs, "started_at": None}, "2026-09-26T12:00:00Z")
+        compute = checkpoint["compute"]
+        self.assertEqual(compute["sail_usd"], "4.00")
+        self.assertEqual(compute["openai_usd"], "3.00")
+        self.assertEqual(compute["other_usd"], "4.00")
+        self.assertEqual(sum(float(compute[k]) for k in ("sail_usd", "openai_usd", "other_usd")), 11.0)
 
 
 class SwarmHouse(BuildCase):

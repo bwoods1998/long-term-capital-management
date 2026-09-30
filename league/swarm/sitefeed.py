@@ -3,7 +3,7 @@
     agents  [{id, family, mechanism, structure, band, born_at, retired_at,
               record: {trials, revisions, forward: {trades, wins, pnl_usd} | None, real: {...} | None}}]
     gym     {as_of, trials, market_years, families_alive, families_retired}
-    compute {as_of, sail_usd, openai_usd}: the swarm's own spend (the House adds its own)
+    compute {as_of, sail_usd, openai_usd, other_usd}: the swarm's own spend (Claude in other_usd)
 
 An agent is a family (its id); `family` is its lineage (the founder a fork descends from). Never a program,
 a parameter, a quote, a spread, an implied vol or a result of the Gym beyond counts: the publisher's own
@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from . import DB_NAME, evidence, public
-from .store import loads
+from .store import loads, priors_of
 
 
 def _iso(t: float) -> str:
@@ -54,16 +54,16 @@ def site_inputs(root: str | Path, *, retired_shown: int = 24) -> dict[str, Any]:
     # A family's trials are its lineage's (`SwarmStore.lineage_trials`: every member, and any lineage its root was born
     # on the slice of), the count its evidence is deflated by.
     by_line: dict[str, int] = {}
-    prior: dict[str, str] = {}
+    prior: dict[str, list[str]] = {}
     connected: dict[str, set[str]] = {}
     for a, b in links:
         connected.setdefault(a, set()).add(b)
         connected.setdefault(b, set()).add(a)
     for f in fams:
         by_line[f["lineage"]] = by_line.get(f["lineage"], 0) + int(f["trials"] or 0)
-        before = (loads(f["spec"], {}) or {}).get("prior_lineage")
+        before = priors_of(loads(f["spec"], {}) or {})  # `prior_lineage`, and a singles' slice's `prior_lineages`
         if f["id"] == f["lineage"] and before:
-            prior[f["id"]] = str(before)
+            prior[f["id"]] = before
 
     def lineage_trials(line: str) -> int:
         seen, pending = set(), [line]
@@ -73,7 +73,7 @@ def site_inputs(root: str | Path, *, retired_shown: int = 24) -> dict[str, Any]:
                 continue
             seen.add(line)
             pending.extend(connected.get(line, set()) - seen)
-            pending.append(prior.get(line, ""))
+            pending.extend(prior.get(line, ()))
         return sum(by_line.get(x, 0) for x in seen)
 
     alive = [f for f in fams if not f["retired_at"]]
@@ -97,10 +97,12 @@ def site_inputs(root: str | Path, *, retired_shown: int = 24) -> dict[str, Any]:
                                   "forward": fwd, "real": real}})
     gym = {"as_of": _iso(time.time()), "trials": int(totals["trials"]), "market_years": round(float(totals["years"]), 1),
            "families_alive": len(alive), "families_retired": len(fams) - len(alive)}
-    # The swarm's OWN spend since it began (its model calls and its Gym boxes; OpenAI through the gateway): the House's
-    # `site_inputs()` adds the House's own before the page shows compute.
+    # The swarm's OWN spend since it began. Claude's gateway-settled charges (and conservative in-flight holds)
+    # already live in this ledger under "claude". The site's existing schema calls them other_usd; leaving them out
+    # overstated project Net after the research roles moved to Claude. Keep OpenAI's historical charges separately.
+    # The House's `site_inputs()` adds the House's own before the page shows compute.
     compute = {"as_of": gym["as_of"], "sail_usd": round(spend.get("sail_model", 0.0) + spend.get("gym_box", 0.0), 2),
-               "openai_usd": round(spend.get("openai", 0.0), 2)}
+               "openai_usd": round(spend.get("openai", 0.0), 2), "other_usd": round(spend.get("claude", 0.0), 2)}
     return {"gym": gym, "agents": agents, "compute": compute}
 
 

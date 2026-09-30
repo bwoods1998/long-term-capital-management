@@ -4,7 +4,7 @@ One process beside the House loop, niced. Its threads:
 
 - RESEARCHERS: `researcher.concurrency` workers, each taking the next family (the bandit's share first,
   then the longest-waiting) and running one cycle, while the guard allows; a family that held waits out its hold
-  (`Scheduler`'s HOLD BACKOFF);
+  (`Scheduler`'s durable event-driven holds);
 - THE GYM POOL's dispatchers (one per box) and forks (`pool.py`);
 - ROUNDS on their own threads so none blocks another: the tournament (hourly), the idle pass between its rounds (every
   five minutes, the idle rule's retirements alone: `Tournament.idle_pass`), the gate (every few
@@ -26,6 +26,7 @@ Standard library only (the Gym's driver is imported when a box starts).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -45,7 +46,7 @@ from .guard import SailGuard, provider_reader
 from .pool import GymPool
 from .researcher import Researcher, dormant_count, dormant_limit, migrate_objective
 from .seeds import SEEDS, family_spec, program_for
-from .store import SwarmStore
+from .store import SwarmStore, same_slice, slice_priors
 from .strategist import PAIR_SECONDS, Strategist
 from .tournament import INDEX, NOT_ROTATED, Tournament
 
@@ -108,14 +109,11 @@ def hold_wait(settings: Mapping[str, Any], dormant: int) -> float:
 class Scheduler:
     """Which family runs next: the bandit's share first, then the longest wait; one cycle per family at a time.
 
-    HOLD BACKOFF (R4, Sept 28): a family whose cycle ended in a hold with no new evaluation and no run queued for its next
-    cycle is not taken again for `hold_wait` seconds (`researcher.hold_idle_seconds`), unless news comes first (`news`):
-    its trials rose since its cycle began (a result of its own landed: a Train run, a sweep variant, a robustness run, a
-    validation), its gate place or band changed since then, its dormant count went down since the cycle ended (a counted
-    validation, a gate verdict, a return to the Gym) or a stronger model's rewrite is ready. Any cycle that is not such a
-    hold ends the wait (a new evaluation, a queued run, a retirement), and so does the clock going back past the hold (no
-    wait outlasts its own length). Kept in memory: a restarted swarm takes every family once, and its next hold waits
-    again by its stored dormant count."""
+    By default a hold is persisted in family state and resumes only when its evidence/context key changes.
+    Time, weight changes and process restarts never buy another model call. Trials, gate state, rewrites,
+    notebook guidance, the agenda, data and the harness release can wake it. Pending work stays runnable.
+    ``researcher.hold_until_news=false`` restores the optional legacy timer (`hold_wait`); those waits
+    are kept in memory and also end when news arrives. Only local evidence inspection is periodic."""
 
     #: A worker with nothing to take sleeps until the next family could be ready (its hold's end, its idle seconds, its
     #: cooldown), at least `MIN_PAUSE` and at most `MAX_PAUSE` (news is noticed within it), so idle workers do not all
@@ -138,6 +136,34 @@ class Scheduler:
         self.held: dict[str, tuple[float, float, int, bool, Any, int]] = {}
         self.soon = float("-inf")  # when the last `take` that found nothing saw the next family ready (`pause`)
 
+    @property
+    def event_holds(self) -> bool:
+        """Waiting is free: a held researcher resumes on new evidence, never merely on a timer."""
+        return (self.settings.get("researcher") or {}).get("hold_until_news", True) is not False
+
+    def evidence_key(self, fam: Mapping[str, Any]) -> str:
+        """Only actionable context invalidates a durable hold, not weights, spend, or wall-clock time.
+
+        Notebook additions include operator/diagnostician guidance. A changed agenda, admitted data image,
+        release, or explicit ``research_wake`` token also gives a parked family something new to work with.
+        No validation numbers or holdout observations are exposed to the model by this scheduling key.
+        """
+        state, gym = fam.get("state") or {}, self.settings.get("gym") or {}
+        notes = self.store.notebook(str(fam["id"]), limit=1)
+        agenda = self.store.get("architect_agenda_section") or {}
+        from .practice import feedback_revision
+        body = {
+            "family": {key: fam.get(key) for key in ("trials", "band", "revisions", "best_version", "validated_version", "validations")},
+            "state": {key: state.get(key) for key in ("gate_ready", "gate_hold", "look_inflight", "gated_sha", "rewrite_ready",
+                       "extension_hold", "research_wake", "research_feedback_revision")},
+            "note": notes[-1]["seq"] if notes else None,
+            "agenda": agenda.get("text") if isinstance(agenda, Mapping) else agenda,
+            "gym": {key: gym.get(key) for key in ("image_checkpoint", "gate_checkpoint", "train_from")},
+            "release": str(CODE_DIR),
+            "practice": feedback_revision(self.store, self.settings, str(fam["id"])),
+        }
+        return hashlib.sha256(json.dumps(body, sort_keys=True, default=str).encode()).hexdigest()
+
     @staticmethod
     def seen(fam: Mapping[str, Any]) -> tuple[int, bool, Any]:
         return int(fam.get("trials") or 0), bool((fam.get("state") or {}).get("gate_ready")), fam.get("band")
@@ -153,6 +179,11 @@ class Scheduler:
     def holding(self, fam: Mapping[str, Any], now: float) -> bool:
         """The family waits out a hold (HOLD BACKOFF); a wait that ran out, that news lifted or that the clock going back
         passed is forgotten. Under the lock."""
+        if self.event_holds:
+            wait = (fam.get("state") or {}).get("research_wait")
+            if isinstance(wait, Mapping) and wait.get("format") == 1:
+                return wait.get("evidence") == self.evidence_key(fam)
+            return False
         held = self.held.get(fam["id"])
         if held is None:
             return False
@@ -193,6 +224,8 @@ class Scheduler:
                 # A last turn "in the future" (the clock went back) never strands a family (nor, `holding`, does a hold).
                 at = max(self.cooldown.get(f["id"], 0), min(self.last.get(f["id"], 0), now) + idle_seconds)
                 if self.holding(f, now):
+                    if self.event_holds:
+                        continue  # local polling may inspect evidence; no paid model turn is scheduled
                     at = max(at, self.held[f["id"]][1])
                 if at <= now:
                     ready.append(f)
@@ -225,7 +258,7 @@ class Scheduler:
         if fam is None or fam.get("retired_at"):
             return None
         dormant = dormant_count(fam)
-        wait = hold_wait(self.settings, dormant)
+        wait = float("inf") if self.event_holds else hold_wait(self.settings, dormant)
         counted = result.get("dormant_cycles")
         if wait <= 0 or (isinstance(counted, int) and dormant < counted):
             return None  # no backoff; or its dormant count restarted since the cycle ended (a result of its own landed)
@@ -240,7 +273,16 @@ class Scheduler:
         with self._lock:
             began = self.began.pop(fid, None)
         try:
-            held = self._hold_after(fid, result, began)
+            with self.store.atomic():
+                held = self._hold_after(fid, result, began)
+                fam = self.store.family(fid)
+                if fam is not None:
+                    # Durable across process restarts; creating it in the same transaction as the evidence read
+                    # prevents a late result or guidance note from being swallowed by the hold baseline.
+                    wait = ({"format": 1, "since": self.clock(), "evidence": self.evidence_key(fam)}
+                            if self.event_holds and held is not None else None)
+                    if wait is not None or (fam.get("state") or {}).get("research_wait") is not None:
+                        self.store.set_state(fid, research_wait=wait)
         except Exception:  # noqa: BLE001 - a hold is an economy, never a reason to strand a family
             held = None
         with self._lock:
@@ -354,12 +396,15 @@ class Swarm:
                 spec.update({"id": seed["id"] if roots == own else f"{seed['id']}-{roots[0].lower()}", "roots": roots,
                              "needs": {**spec["needs"], "roots": roots}, "seed": seed["id"]})
                 founder = next((f for f in kin if f["origin"] in ("seed", "reseed")), None)
-                dead = [f for f in families if f["retired_at"] and f["structure"] == seed["structure"] and sorted(f["roots"]) == roots]
+                # The slice's dead lineages (a single's slice holds long_single too: `same_slice`, `slice_priors`; for
+                # every other structure this is the newest dead family's lineage, as before).
+                dead = [f for f in families if f["retired_at"] and same_slice(f["structure"], seed["structure"])
+                        and sorted(f["roots"]) == roots]
                 with self.store.atomic():
                     if len(self.store.families(alive=True)) >= int(pop.get("start", 48)):
                         return born
                     fam = self.store.add_family(spec, origin="reseed", parent=founder["id"] if founder else None,
-                                                prior_lineage=dead[-1]["lineage"] if dead and not founder else None)
+                                                prior_lineage=slice_priors(dead, seed["structure"]) if dead and not founder else None)
                 self.store.event("swarm.born", fam["id"], {"parent": founder["id"] if founder else None, "mechanism": fam["mechanism"],
                                                             "structure": fam["structure"], "roots": fam["roots"], "origin": "reseed",
                                                             "founder": seed.get("founder")})
@@ -625,6 +670,19 @@ class Swarm:
                     f"{moved['failed']} emptied after an error")
         except Exception:  # noqa: BLE001 - the migration never keeps the swarm from starting; it runs again next start
             log(f"train objective migration failed: {traceback.format_exc()[-800:]}")
+        # Derived Train/validation views must change with the code/data that evaluates them. Run
+        # this before any researcher/tournament thread; historical trials and looks are untouched.
+        from .evaluator import adopt, identity
+
+        evaluator = identity(self.pool.image("gym"), self.pool.bundle())
+        if evaluator is None and getattr(self.pool, "driver_factory", None) is None:
+            self.release_lock()
+            raise RuntimeError("the swarm cannot select research without a known evaluator image and bundle")
+        # An explicitly injected driver may have no bundle before its first fake box exists.
+        # Production GymPool always builds its local bundle without a network call.
+        adopted_evaluator = adopt(self.store, evaluator)
+        if adopted_evaluator["adopted"]:
+            log(f"evaluator adopted: {adopted_evaluator['families']} families owe fresh evidence")
         adopted = self.pool.adopt() if hasattr(self.pool, "adopt") else 0
         self.store.event("swarm.status", None, {"action": "started", "pid": os.getpid(), "release": str(CODE_DIR), "adopted": adopted,
                                                 "families": len(self.store.families(alive=True))})

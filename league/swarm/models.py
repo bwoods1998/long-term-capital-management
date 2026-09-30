@@ -18,7 +18,9 @@
   or "review" there is the operator's opt-in, with no deploy. A role may also have its own daily line,
   `claude.role_usd_day` {role: usd} (a UTC day, holds included, each call on the day its hold was booked): a call that
   would take the role's Claude spend today past it skips Claude and falls to the role's next route. No entry is no extra
-  line. `claude.role_model` {role: model id} answers a role on its own Claude model (no entry: `claude.model`).
+  line. `claude.role_model` {role: model id} answers a role on its own Claude model (no entry: `claude.model`), and
+  `claude.role_effort` {role: effort} at its own effort when the caller names none (R11-3; no entry: `claude.effort`). An
+  architect answer cut at max_tokens is handed back for salvage (`ask(claude_keep_truncated)`), not sent to the next route.
 - CLAUDE'S TOOL TURNS (`ModelRouter.claude_turn`, Sept 29, 2026: the bandit's top researchers run their tool loop on
   Claude Sonnet 5.5, `claude.role_model.researcher`; league/swarm/claude_research.py). One turn of a tool loop, held,
   dispatched and settled exactly as `ask`'s Claude route (one admission, one durable hold, one settlement;
@@ -388,16 +390,26 @@ class ModelRouter:
         """The 1-hour cache is sent only once the operator says the gateway admits it (`claude.cache_1h`)."""
         return self._claude_cfg().get("cache_1h") is True
 
+    def claude_role_effort(self, role: str | None) -> str | None:
+        """The role's own Claude effort (`claude.role_effort` {role: effort}, R11-3), or None: no entry, or one that is not
+        an effort Claude takes (`league.claude.EFFORTS`: a typo never becomes the call's effort). It applies only when the
+        caller names no effort; `claude.effort` stays every other role's default (the gate's reads keep "high")."""
+        from ..claude import EFFORTS
+
+        efforts = self._claude_cfg().get("role_effort")
+        chosen = efforts.get(role) if role is not None and isinstance(efforts, Mapping) else None
+        return chosen if isinstance(chosen, str) and chosen in EFFORTS else None
+
     def claude_request(self, system: str, user: str, *, schema: Mapping[str, Any] | None = None,
                        effort: str | None = None, role: str | None = None,
                        prefix: Sequence[Mapping[str, Any]] | None = None) -> tuple[dict[str, Any], float]:
         """The exact Claude request a role's question becomes, and the hold it needs (the gateway's worst case), on the
-        role's model (`claude_model`). `effort` overrides `claude.effort` for this call; `prefix` puts system blocks
-        ahead of `system` (`claude_system_blocks`)."""
+        role's model (`claude_model`). `effort` overrides the role's own effort (`claude.role_effort`, R11-3), which
+        overrides `claude.effort`, for this call; `prefix` puts system blocks ahead of `system` (`claude_system_blocks`)."""
         from ..claude import EFFORTS, MAX_TOKENS, reservation_ceiling, request_body
 
         cfg = self._claude_cfg()
-        effort = str(effort or cfg.get("effort") or "high")
+        effort = str(effort or self.claude_role_effort(role) or cfg.get("effort") or "high")
         # Streamed (`claude.stream`, the default since Sept 27, 2026): a high-effort answer outlasts Cloudflare's
         # 100-second wait for a silent origin (HTTP 524) unless its events flow as they are made.
         body = request_body(self.claude_model(role), self.claude_system_blocks(system, prefix), [{"role": "user", "content": user}],
@@ -538,7 +550,8 @@ class ModelRouter:
 
     def _ask_claude(self, *, role: str, system: str, user: str, family: str | None, key: str, need_usd: float,
                     schema: Mapping[str, Any] | None, errors: list[str], billed: list[dict[str, Any]],
-                    effort: str | None = None, prefix: Sequence[Mapping[str, Any]] | None = None) -> dict[str, Any] | None:
+                    effort: str | None = None, prefix: Sequence[Mapping[str, Any]] | None = None,
+                    keep_truncated: bool = False, kinds: list[str] | None = None) -> dict[str, Any] | None:
         """The Claude route: the hold is booked (spend kind `claude`) and filed under the call's X-LTCM-Request id (kv
         `claude_unsettled`) in one transaction committed before the gateway hears of the call, so neither a crash nor a
         restart mid-call loses it: `settle_claude_holds` trues up whatever is still filed from the gateway's own record.
@@ -548,8 +561,9 @@ class ModelRouter:
         filed. Settling takes the filing out in the same transaction that books the cost, and only when it is still
         there, so a true-up and the call's own answer never both book it. None when there is no room, or the call
         refused or erred (the reason is in `errors`)."""
-        from ..claude import ClaudeError
+        from ..claude import ClaudeError, ClaudeTruncated
 
+        kinds = kinds if kinds is not None else []
         model = self.claude_model(role)
         try:
             need = Decimal(str(need_usd))
@@ -557,12 +571,14 @@ class ModelRouter:
                 raise ValueError("invalid Claude minimum reservation")
             body, ceiling = self.claude_request(system, user, schema=schema, effort=effort, role=role, prefix=prefix)
             required = float(max(need, Decimal(str(ceiling))))
-            request_id, _ = self._claude_admit(role=role, family=family, key=key, model=model, body=body, required=required,
-                                               errors=errors)
+            request_id, why = self._claude_admit(role=role, family=family, key=key, model=model, body=body, required=required,
+                                                 errors=errors)
             if request_id is None:
+                kinds.append(str(why or "no_room"))
                 return None
         except Exception as exc:  # noqa: BLE001 - invalid/unknown admission falls through without dispatch
             errors.append(f"claude admission: {type(exc).__name__}: {str(exc)[:160]}")
+            kinds.append("admission")
             return None
         hold = _ClaudeHold(self.store, request_id=request_id, usd=required, role=role, family=family, model=model, key=key)
         try:
@@ -572,12 +588,20 @@ class ModelRouter:
                                 max_tokens=body["max_tokens"], effort=body["output_config"]["effort"], schema=schema, cache=True,
                                 request_id=request_id, stream=body.get("stream") is True, **hour)
         except ClaudeError as exc:
-            hold.failed(exc, billed)
+            cost, _ = hold.failed(exc, billed)
             errors.append(f"claude: {type(exc).__name__}: {str(exc)[:160]}")
+            kinds.append("truncated" if isinstance(exc, ClaudeTruncated) else "error")
+            if keep_truncated and isinstance(exc, ClaudeTruncated) and exc.answer is not None:
+                # R11-3: the caller salvages a cut answer's complete parts itself (the architect's families) instead of
+                # falling to the next route; it is billed like any cut answer (in `billed` too).
+                return {"text": str(exc.answer.text or ""), "json": None, "route": "claude", "model": model, "cost_usd": cost,
+                        "cost_verified": cost is not None, "held_usd": 0.0 if cost is not None else required,
+                        "stop_reason": exc.answer.stop_reason, "usage": dict(exc.answer.usage or {}), "truncated": True}
             return None
         except Exception as exc:  # noqa: BLE001 - an unknown failure keeps the hold and falls through
             hold.unknown(type(exc).__name__)
             errors.append(f"claude: {type(exc).__name__}: {str(exc)[:160]}")
+            kinds.append("error")
             return None
         cost = hold.settle(answer.cost_usd, {"stop_reason": answer.stop_reason}) if answer.cost_verified else None
         if cost is None:
@@ -715,7 +739,7 @@ class ModelRouter:
             desk: str | None = None, cap_usd_day: float | None = None, claude: bool = False, rotate: bool = False,
             schema: Mapping[str, Any] | None = None, claude_effort: str | None = None,
             claude_prefix: Sequence[Mapping[str, Any]] | None = None, claude_system: str | None = None,
-            claude_user: str | None = None) -> dict[str, Any]:
+            claude_user: str | None = None, claude_keep_truncated: bool = False) -> dict[str, Any]:
         """A one-shot question for a role (the architect, the reviewer, the auditor, a rewrite, the diagnostician).
 
         The paid routes in order, then Sail: CLAUDE first when `claude` and the role is one of `claude.roles` and the
@@ -731,10 +755,16 @@ class ModelRouter:
 
         The Claude route alone may ask a different question (Sept 29, 2026): `claude_prefix` (system blocks ahead of the
         role's text, e.g. the whole graveyard as a cached digest), `claude_system` and `claude_user` replace `system` and
-        `user` there only. OpenAI and Sail always get `system` and `user` (their contexts are small)."""
+        `user` there only. OpenAI and Sail always get `system` and `user` (their contexts are small).
+
+        `claude_keep_truncated` (R11-3, the architect): a Claude answer cut at max_tokens is returned as the answer, marked
+        `truncated` with its partial text, instead of falling to the next route; the caller salvages it. A ModelError's
+        `kind` is the Claude route's last failure ("line", "no_room", "family_fuse", "admission", "truncated", "error")
+        when the call had no fallback after it."""
         self._require_committed_store()
         errors: list[str] = []
         billed: list[dict[str, Any]] = []
+        kinds: list[str] = []
         routes = (["claude"] if claude and self.claude_enabled(role) else []) + (["openai"] if openai_model else [])
         if rotate and len(routes) == 2 and self._turn(role) % 2 == 1:
             routes.reverse()
@@ -743,7 +773,7 @@ class ModelRouter:
                 result = self._ask_claude(role=role, system=claude_system if claude_system is not None else system,
                                           user=claude_user if claude_user is not None else user, family=family, key=key,
                                           need_usd=need_usd, schema=schema, errors=errors, billed=billed, effort=claude_effort,
-                                          prefix=claude_prefix)
+                                          prefix=claude_prefix, keep_truncated=claude_keep_truncated, kinds=kinds)
             else:
                 result = self._ask_openai(role=role, system=system, user=user, family=family, key=key, openai_model=openai_model,
                                           max_output=max_output, effort=effort, need_usd=need_usd, errors=errors)
@@ -753,7 +783,8 @@ class ModelRouter:
         # failure into another paid call on the fallback provider.
         self._require_committed_store()
         if not sail_profile:
-            raise ModelError("; ".join(errors) or "no paid route was available, and this role has no Sail fallback", billed=billed)
+            raise ModelError("; ".join(errors) or "no paid route was available, and this role has no Sail fallback", billed=billed,
+                             kind=kinds[-1] if kinds else "error")
         items = [{"role": "system", "content": system}, {"role": "user", "content": user}]
         try:
             response = self.sail(sail_profile, items, family=desk or family or "swarm", key=key, effort=effort, max_output=max_output,

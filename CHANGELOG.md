@@ -21,6 +21,59 @@ on branch `run/options-swarm-2026-09-26`) has the detail.
 
 ## Not yet deployed
 
+- **Causal optional volume context.** Share bars reach strategy contexts only with first-observation receipts and
+  explicit provenance/coverage. Finalized historical bars without those receipts stay unknown, including daily sums:
+  a completed-minute grid does not prove what was published then. Live reuses existing stock snapshots, persists first
+  observations across restarts, and excludes incomplete bars and index proxy volume. A late-revision regression checks
+  that finalized history cannot replace the first live value. No data purchase, production mutation, SQL/site migration,
+  or money-rule change. Actual live coverage remains to be measured after adoption.
+
+- **Persistent practice cohorts and receipts.** Builds on #430: immutable shadow snapshots survive research churn and
+  restarts; bounded observation windows include longer-DTE programs; no snapshot is promoted into real money.
+  Private decision/order/quote/fill/slippage receipts retry across restarts, program errors reduce coverage, and open
+  marked P&L includes fees already paid. Material researcher feedback requires ten program closes over three sessions.
+  Sized's fresh-forward window starts after both creation and selection of its version. New cohort/receipt and feedback
+  tests use simulated quotes only; actual multi-session practice evidence remains to be collected after deployment.
+
+- **The live practice league** (#430; not yet released; it changes `league/live`, so it is not a research release
+  under the amended D8). Every alive Gym-band family with a validated version, or an eligible Train
+  version (the tournament's candidate, not demoted), trades live quotes in the shadow book under the Gym's fill rules,
+  on a $10,000 practice account; never real, never tuition, never a forward row, never a band move.
+  - Admission: validated by validation t, then Train by Train score, under `live.observe_max` (48) and the new
+    `live.observe_roots_max` (24 distinct roots, the binding resource measured on the House Sept 29);
+    `live.observe_train` and `live.observe_read_calls` in `swarm.json`.
+  - Sustained pressure (3 pressed minutes of 10) sheds the lowest-priority quarter of the Train pins for the session;
+    validated pins never.
+  - The practice ledger (`observe.sqlite`): per family and version from its first live minute, kept after retirement:
+    realized P&L after fees (the headline), forced wind-down closes apart, open positions at the engine's mark, realized
+    and marked drawdown, coverage. `practice_summary` is read-only.
+  - Research feedback (`league/swarm/practice.py`, `practice.feedback`): the strategist's PRACTICE table, the
+    architect's PRACTICE BY CLASS lines, and the bandit's bonus (at most +25% of a family's share, at most 10% of all
+    share moved; it changes the weight only, which nothing on the way to real money reads).
+  - The forward embargo: a Sized move also needs the forward record after its version was written (a tightening;
+    nothing is Sized today).
+  - The site's `practice` block (needs a personal-site PR: `league/tests/fixtures/site_contract.md`,
+    `site_checkpoint_practice.json`; until then the House posts without it and warns once).
+  - The money digest stays `a3e2aa7c`; D2 is unchanged.
+  - After the deploy: `options_live.observe` shows `tiers`, `roots_used`, `effective_cap` and no `shed`;
+    `observe_reads_skipped` stays 0; `observe.sqlite` `practice` rows appear from 13:31Z; no `:o` in `live.sqlite` or
+    the swarm's `forward`; the tournament event's `practice_bonus` values are at most 0.25.
+
+- **R11b: honest verdicts, corrections that land, effort where it pays** (this pull request; not yet released). The ROI
+  plan's R11 code items (Sept 29, section (b)); research-side only, the money digest stays `a3e2aa7c`, Train figures
+  only (D2). R11-1: an idle-rule death is filed under its Train record's verdict (DRIFT, STRESS, THIN, EXHAUSTED; IDLE
+  only for the untested), the digest (format 3: one reseal) and the strategist (`screen` per family) read the verdicts,
+  a family holding three cycles with an eligible run or ten trials is offered `retire`, and a researcher's retirement is
+  SELF-REFUTED; `scripts/graveyard_verdicts.py` re-heads the rows already buried (the operator's, dry run by default).
+  R11-2: known ids are masked before the strategist's content rules, the prompt aims at 85% of the cap, a length-only
+  overflow up to 15% is trimmed at a sentence end, and `architect.max_alive_per_class` (12) caps births per mechanism
+  class. R11-3: `claude.role_effort`, and a cut architect answer keeps its complete families with one medium retry on
+  Claude, never a Kimi-K3 refill. R11-5: the bandit exploits only old families with a positive validation mean, 15% each
+  at most. R11-6: the Gym's zero-trade probe (off until `researcher.probe_year` is set). R11-4's rule: a validation that
+  met six checks holds its family out of the dormancy clause until the operator clears it (`scripts/extension_hold.py`).
+  Operator steps after the release: the migration's dry run then `--apply`; `claude.role_effort.architect` "medium";
+  `extension_hold.py --seed`; `tournament.explore_share` back to 0.25 if A4 was applied; `researcher.probe_year` 2022
+  when wanted. Details in [docs/operations.md](docs/operations.md) ("R11b").
 - **Train from 2017** (#424; not yet released). Train's window, `storelib.TRAIN_EARLIEST` and
   `gym.train_from` reach 2017-01-03 (a third start beside 2020-01-02 and 2022-01-03; over eight years the derived
   split is 24 and the time limit 2400 s). Stage 9's `EARLY` stays the literal 2020-01-02..2021-12-31. New public
@@ -36,6 +89,32 @@ on branch `run/options-swarm-2026-09-26`) has the detail.
   until an image is built with `--train-from 2017-01-03` and `swarm.json` names it with `train_from`. On release the
   Gym bundle and tables digests change, so every program re-runs once as a new trial and each family is re-validated
   once, as with #399; the money digest stays `a3e2aa7c`.
+- **Two-sided singles: the `long_single` structure** (#425; not yet released). A family may declare `long_single`:
+  one program that opens one `long_call` or one `long_put` at a time (one leg, long), the side chosen by its rule, in
+  place of a call/put twin pair. The architect's prompt describes it (the side rule, and why its calls and puts balance:
+  the drift screen charges whatever net exposure it holds) and asks for no twins, and `admit` refuses a one-sided twin
+  beside a living `long_single` or the other side of the same idea on the same roots; in GAPS a single option's one gap
+  is `long_single` (the one-sided singles are no longer gaps, though still admitted); coverage has its row; the
+  researcher, reviewer, auditor and diagnostician read what its orders are. It shares its singles' slice for lineage
+  matching and identical-code links; a `long_single` that continues one twin joins the other twin's lineage too
+  (`link_lineages`), and a new lineage on a singles' slice counts the newest dead lineage of each type there
+  (`slice_priors`, `prior_lineages`; every other structure keeps its one prior). Real eligibility (tuition, Probe,
+  Sized, the site's `real_structure`) needs BOTH `long_call` and `long_put` among `options_money.real_types`; every order
+  keeps its own type, is checked by it at the real book and the gateway, and is sized by its own unit; the live path
+  refuses a real open of any other type from a `long_single` family. The site shows the agent's structure as null (its
+  schema has the eleven order types) and each position as its own type. No Gym, verifier, D2, drift-screen, gateway or
+  money-table change: the money digest stays `a3e2aa7c` and the Gym bundle version does not move, so nothing is
+  re-validated. Once a `long_single` family exists, roll forward rather than back past #425 (a release before it fails
+  every architect pass).
+
+## 2026-09-30
+
+**05:01Z, restoration fix: House release `20260930T045038Z-cb6035693ef4`** (main `87af7a62`; #429).
+- Promoted 04:51:15Z; ten-minute health watch passed at 05:01:20Z.
+- Real instances restore by keyword, keeping `observe` false and the saved execution mode.
+- Verified on the running House: `house:rebound-live@0:h` is real, `observe: false`, mode `live`;
+  supervisor and House alive, health fresh. No options or working orders before the restart.
+- Money digest remains `a3e2aa7c`; the grant and accounting baseline were not changed.
 
 ## 2026-09-29
 

@@ -44,17 +44,21 @@ import secrets
 import time
 from typing import Any, Callable, Mapping
 
+from ..gym.experiment import check_experiment
+from ..gym.review_contract import grounded_answer, review_contract
+from ..gym.safety import CodeRefused
 from . import evidence
 from . import settings as settings_mod
 from .pool import GymJob, PoolError
 from .researcher import drift_verdict, needs_roots
-from .store import SwarmStore, dumps
+from .store import SwarmStore, dumps, structure_text
 
 REVIEW = """You review option-trading programs before they meet sealed data. A program is one Python file (NEEDS, PARAMS,
 decide(ctx)) that runs in a replay of recorded one-minute option quotes and then, unchanged, on live quotes and real
 money. Refuse it (verdict "fail") for any of:
 - LOOKAHEAD: anything that could know the future inside the replay (it only sees ctx; flag code that tries to reach
-  outside ctx, reads module state written by another run, or infers future data).
+  outside ctx or infers future data). The runtime creates fresh module state per independent run; do not assume
+  cross-run STATE leakage. Permitted causal state within one run can still be misused to reconstruct the calendar.
 - LEAKAGE: recognizing the calendar or a specific period. Refuse ABSOLUTE PRICE-LEVEL CONSTANTS (an underlying or
   strike level, e.g. "SPY above 550", identifies the years), CALENDAR RECONSTRUCTION (counting sessions, weekdays or
   event flags across a run to work out the date or the year), regime switches keyed to values that identify periods,
@@ -62,7 +66,15 @@ money. Refuse it (verdict "fail") for any of:
 - FILL ABUSE: relying on fills the live market will not give (limits far through the mid expected to fill, sizes beyond
   the quoted size, orders sent after the venue's cutoffs, churning cancels).
 - DANGER on real money: naked short exposure, structures that cannot be closed in one order, unbounded order loops.
-Otherwise pass it. Reply with ONE JSON object: {"verdict": "pass" or "fail", "reasons": ["..."], "notes": "..."}."""
+Use the supplied runtime facts, API fields and implementation excerpts as the execution contract. Do not invent
+unavailable APIs. A claim that contradicts that contract needs a concrete route or counterexample. Distinguish a
+verified defect from an unresolved concern; reply unclear when the evidence is insufficient. An inactive strategy
+or a causal STATE dictionary alone is not a violation. A price sampled from ctx is not a hard-coded price constant.
+For EACH failure provide a verbatim code excerpt present in the submitted file, a contract_reference from the supplied
+facts (state, parameters, context, calendar, fills, risk), and a causal counterexample: exact input conditions and the
+bad decision or data flow that follows. Do not claim you executed a test unless its result was supplied.
+Otherwise pass it. Reply with ONE JSON object: {"verdict": "pass" or "fail" or "unclear", "reasons": ["..."],
+"findings": [{"code_excerpt": "...", "contract_reference": "...", "counterexample": "..."}], "notes": "..."}."""
 
 
 def run_sha(version: Mapping[str, Any]) -> str:
@@ -105,18 +117,18 @@ class Gate:
         too (a default role), both reads of a program would be `claude.model` and the audit no longer a second, different
         model: give the review its own model in `claude.role_model` (e.g. {"review": "claude-sonnet-5-5"}). A program
         one model read twice is reported to the owner (`not_the_plans_reviewer`, `same_reader`)."""
-        user = (f"Family {fam['id']}: {fam['mechanism']}\nStructure {fam['structure']}, roots {', '.join(fam['roots'])}.\n\n"
+        user = (f"Family {fam['id']}: {fam['mechanism']}\nStructure {structure_text(fam['structure'])}, roots {', '.join(fam['roots'])}.\n\n"
+                f"Runtime contract (actual deployed source): {json.dumps(review_contract(), sort_keys=True)}\n\n"
                 f"```python\n{version['code']}\n```\nPARAMS overrides: {json.dumps(version.get('params') or {})}")
+        contract = review_contract()["sha256"][:12]
+        attempt_key = f"review_attempt:{contract}:{fam['id']}:{version['n']}"
         answer = self.router.ask(role="review", system=REVIEW, user=user, family=fam["id"],
-                                 key=f"swarm:{fam['id']}:review:{version['n']}:{self.store.get('review_attempt:' + fam['id'], 0)}",
+                                 key=f"swarm:{contract}:{fam['id']}:review:{version['n']}:{self.store.get(attempt_key, 0)}",
                                  openai_model=self.cfg.get("review_openai_model"), sail_profile=str(self.cfg.get("review_sail_profile",
                                                                                                                    "pro_balanced")),
                                  max_output=int(self.cfg.get("review_max_output_tokens", 6000)), effort="medium", need_usd=0.5,
                                  desk=f"{fam['id']}:review", cap_usd_day=float(self.cfg.get("review_usd_day", 1.0)), claude=True)
-        verdict = (answer.get("json") or {}).get("verdict")
-        return {"verdict": verdict if verdict in ("pass", "fail") else "unclear",
-                "reasons": [str(r)[:300] for r in ((answer.get("json") or {}).get("reasons") or [])][:6],
-                "route": answer.get("route"), "model": answer.get("model"), "cost_usd": answer.get("cost_usd")}
+        return grounded_answer(answer, version["code"])
 
     # ------------------------------------------------------------------ the audit
     def audit(self, fam: Mapping[str, Any], version: Mapping[str, Any], *, attempt: int = 0) -> dict[str, Any]:
@@ -127,17 +139,16 @@ class Gate:
         model = self.cfg.get("audit_openai_model", "gpt-6-astra")
         need = float(self.cfg.get("audit_need_usd", 1.0))
         use_openai = bool(model) and self.router.openai_room() >= need
-        user = (f"AUDIT. Family {fam['id']}: {fam['mechanism']}\nStructure {fam['structure']}, roots {', '.join(fam['roots'])}.\n\n"
+        user = (f"AUDIT. Family {fam['id']}: {fam['mechanism']}\nStructure {structure_text(fam['structure'])}, roots {', '.join(fam['roots'])}.\n\n"
+                f"Runtime contract (actual deployed source): {json.dumps(review_contract(), sort_keys=True)}\n\n"
                 f"```python\n{version['code']}\n```\nPARAMS overrides: {json.dumps(version.get('params') or {})}")
         answer = self.router.ask(role="audit", system=REVIEW, user=user, family=fam["id"],
-                                 key=f"swarm:{fam['id']}:audit:{version['n']}:{attempt}", openai_model=model if use_openai else None,
+                                 key=f"swarm:{review_contract()['sha256'][:12]}:{fam['id']}:audit:{version['n']}:{attempt}",
+                                 openai_model=model if use_openai else None,
                                  sail_profile=str(self.cfg.get("audit_sail_profile", "k3_balanced")),
                                  max_output=int(self.cfg.get("review_max_output_tokens", 6000)), effort="high", need_usd=need,
                                  desk=f"{fam['id']}:review", cap_usd_day=float(self.cfg.get("review_usd_day", 1.0)), claude=True)
-        verdict = (answer.get("json") or {}).get("verdict")
-        return {"verdict": verdict if verdict in ("pass", "fail") else "unclear",
-                "reasons": [str(r)[:300] for r in ((answer.get("json") or {}).get("reasons") or [])][:6],
-                "route": answer.get("route"), "model": answer.get("model"), "cost_usd": answer.get("cost_usd")}
+        return grounded_answer(answer, version["code"])
 
     def outcome(self, fid: str, sha: str, result: str) -> None:
         """What the gate did with a version (refused, failed, passed, waiting, demoted): the live path runs a Gym-band
@@ -201,6 +212,11 @@ class Gate:
                 continue
             if (state.get("look_inflight") or {}).get("sha") == sha:
                 continue  # its look is in flight
+            try:
+                check_experiment(version["code"], version.get("params") or {})
+            except CodeRefused as exc:
+                self.refuse(fam, n, sha, "experiment contract", [str(exc)], out)
+                continue  # a known invalid variant pays for neither model review nor a holdout look
             screen = drift_verdict(self.store, fam, n, self.settings)
             if screen is not None and not screen["passed"]:  # defense in depth: the tournament validates none of these
                 if screen["known"]:
@@ -214,7 +230,8 @@ class Gate:
                 else:
                     out["waiting"].append(fam["id"])
                 continue
-            review = state.get("review") if (state.get("review") or {}).get("sha") == sha else None
+            cached = state.get("review") or {}
+            review = cached if cached.get("sha") == sha and cached.get("contract_sha") == review_contract()["sha256"] else None
             if review is None:  # the review, once a version (kept, so an audit asked again does not redo it)
                 if not self._review_current(fam["id"], n, image, bundle):
                     continue
@@ -226,8 +243,9 @@ class Gate:
                 self.store.event("swarm.gate", fam["id"], {"action": "review", "version": n, **review,
                                                            "not_the_plans_reviewer": review.get("route") not in ("openai", "claude")})
                 if review["verdict"] == "unclear":
-                    attempts = int(self.store.get("review_attempt:" + fam["id"], 0)) + 1
-                    self.store.put("review_attempt:" + fam["id"], attempts)
+                    attempt_key = f"review_attempt:{review_contract()['sha256'][:12]}:{fam['id']}:{n}"
+                    attempts = int(self.store.get(attempt_key, 0)) + 1
+                    self.store.put(attempt_key, attempts)
                     if attempts < 3:
                         continue
                     review = {**review, "verdict": "fail", "reasons": ["the reviewer could not reach a verdict three times"]}
@@ -237,7 +255,8 @@ class Gate:
             if review["verdict"] == "pass" and "audit" not in review:  # the audit: a second reader, before any look
                 if not self._review_current(fam["id"], n, image, bundle):
                     continue  # the paid review remains evidence; a terminal family starts no new paid stage
-                attempts = int(self.store.get("audit_attempt:" + sha, 0))
+                attempt_key = f"audit_attempt:{review_contract()['sha256'][:12]}:{sha}"
+                attempts = int(self.store.get(attempt_key, 0))
                 try:
                     audit = self.audit(fam, version, attempt=attempts)
                 except Exception as exc:  # noqa: BLE001
@@ -245,7 +264,7 @@ class Gate:
                     continue
                 self.store.event("swarm.gate", fam["id"], {"action": "audit", "version": n, **audit})
                 if audit["verdict"] == "unclear":
-                    self.store.put("audit_attempt:" + sha, attempts + 1)
+                    self.store.put(attempt_key, attempts + 1)
                     if attempts + 1 < 3:
                         continue  # asked again next round, like an unclear review
                     audit = {**audit, "verdict": "fail", "reasons": ["the audit could not reach a verdict three times"]}
@@ -406,11 +425,29 @@ class Gate:
                            and (not has_bundle or (bundle is not None and result.get("gym_bundle") == bundle)))
         if line["passed"] and fam["band"] == "gym" and not fam.get("retired_at") and validation_image == image \
                 and validation_bundle == bundle and current_holdout:
-            self.store.set_state(fid, banded_version=n, banded_sha=version["sha"], banded_at=self.clock())
+            from ..gym import ENGINE_VERSION
+            from ..gym.experiment import CONTRACT_VERSION
+            from .evaluator import execution_fingerprint
+
+            self.store.set_state(fid, banded_version=n, banded_sha=version["sha"], banded_at=self.clock(),
+                                 banded_evaluator={"engine": ENGINE_VERSION, "parameter_contract": CONTRACT_VERSION,
+                                                   "execution_sha256": execution_fingerprint(),
+                                                   "run_sha": sha, "validation_bundle": bundle,
+                                                   "holdout_bundle": result.get("gym_bundle"), "holdout_image": result.get("gym_image")})
             self.store.set_band(fid, "candidate", reason="passed its holdout look")
         return bool(line["passed"])
 
     # ------------------------------------------------------------------ the nightly forward
+    def _current_forward_version(self, fam: Mapping[str, Any]) -> bool:
+        """Never mix a pre-upgrade band's forward record with decisions under new semantics."""
+        if not callable(getattr(self.pool, "bundle", None)):
+            return True  # identity-less synthetic pools; production always ships a named bundle
+        from .bands import current_banded_evaluator
+
+        state = fam.get("state") or {}
+        version = self.store.version(fam["id"], state.get("banded_version"))
+        return version is not None and current_banded_evaluator(state, run_sha(version))
+
     def forward_target(self) -> dict[str, str] | None:
         ready = self.settings.get("forward", {}).get("ready") or {}
         if ready.get("day") and ready.get("gate_checkpoint") == self.settings.get("gym", {}).get("gate_checkpoint"):
@@ -423,6 +460,7 @@ class Gate:
 
     def forward_pending(self, target: Mapping[str, Any]) -> list[dict[str, Any]]:
         return [f for f in self.store.families(alive=True) if f["band"] in ("candidate", "probe", "sized")
+                and self._current_forward_version(f)
                 and (f.get("state") or {}).get("forward_replay") !=
                 {"target": target, "version": (f.get("state") or {}).get("banded_version") or f.get("best_version")}]
 
@@ -436,7 +474,8 @@ class Gate:
         today = dt.datetime.fromtimestamp(now, dt.timezone.utc)
         after = int(self.settings.get("forward", {}).get("after_hour_utc", 7))
         attempted = self.store.get("forward_legacy_attempt") or {}
-        banded = any(f["band"] in ("candidate", "probe", "sized") for f in self.store.families(alive=True))
+        banded = any(f["band"] in ("candidate", "probe", "sized") and self._current_forward_version(f)
+                     for f in self.store.families(alive=True))
         return bool(banded and self.settings.get("gym", {}).get("gate_checkpoint")) and today.hour >= after and \
             self.store.get("forward_day") != today.date().isoformat() and (attempted.get("day") != today.date().isoformat() or
             now - float(attempted.get("at") or 0) >= float(self.settings.get("forward", {}).get("every_seconds", 3600)))
@@ -448,7 +487,8 @@ class Gate:
         now = self.clock()
         today = dt.datetime.fromtimestamp(now, dt.timezone.utc).date().isoformat()
         self.store.put("forward_legacy_attempt", {"day": today, "at": now})
-        banded = [f for f in self.store.families(alive=True) if f["band"] in ("candidate", "probe", "sized")]
+        banded = [f for f in self.store.families(alive=True) if f["band"] in ("candidate", "probe", "sized")
+                  and self._current_forward_version(f)]
         out: dict[str, Any] = {"families": len(banded), "trades": 0, "moves": []}
         if not banded or not self.settings.get("gym", {}).get("gate_checkpoint"):
             return out
@@ -543,6 +583,13 @@ class Gate:
         erred, found no data or was disqualified leaves the record as it was (None, and a `forward_failed` event)."""
         if record:
             self.store.add_run(fid, n, result, window="forward", stress=1.0, purpose="forward")
+        fam = self.store.family(fid)
+        has_bundle = callable(getattr(self.pool, "bundle", None))
+        if has_bundle and (fam is None or (fam.get("state") or {}).get("banded_version") != n or
+                           not self._current_forward_version(fam) or result.get("gym_bundle") != self.pool.bundle()):
+            self.store.event("swarm.gate", fid, {"action": "forward_failed", "version": n,
+                                                 "why": "the replay or qualified band uses another evaluator"})
+            return None
         if result.get("status") != "ok":
             self.store.event("swarm.gate", fid, {"action": "forward_failed", "version": n, "status": result.get("status")})
             return None

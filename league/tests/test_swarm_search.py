@@ -276,12 +276,12 @@ class RobustObjective(ResearcherCase):
         self.researcher().cycle(self.fam["id"])
         self.assertEqual(self.sail.bodies[-1]["model"], "deepseek-ai/DeepSeek-V4-Flash-0731")
 
-    def test_a_researchers_retirement_is_refused_atomically_at_the_start(self):
+    def test_a_researchers_retirement_is_refused_atomically_at_the_floor(self):
         self.researcher().cycle(self.fam["id"])
-        self.settings["population"].update(start=1, floor=0)
+        self.settings["population"].update(start=96, floor=1)
         self.store.update_family(self.fam["id"], validations=2)
         r = self.researcher()
-        r.can_retire = lambda fam: True  # a stale "above the start" read; the store's own count decides
+        r.can_retire = lambda fam: True  # a stale "above the floor" read; the store's own count decides
         self.steps = [{"calls": [("gym_run", {"params": {"vrp_min": 1.3}})]}, {"calls": [("retire", {"reason": "Costs won."})]},
                       {"text": "ok"}]
         out = r.cycle(self.fam["id"])
@@ -582,4 +582,3 @@ class GymYears(RoundCase):
         self.assertIn("kurt_traded", summary)
         self.assertNotIn("by_year", R.view({"summary": {}, "by_year": years, "breakdown": {}}, "validation"),
                          "no year leaves a validation run")
-

@@ -48,9 +48,18 @@ ALLOWED_KEYS = {
 }
 
 
+PRACTICE_KEYS = {"as_of", "sessions", "capital_usd", "totals", "rows"}
+PRACTICE_ROW_KEYS = {"agent", "family", "structure", "tier", "status", "sessions", "trades", "wins", "pnl_usd", "return_on_risk"}
+
+
 def keys_ok(test, body):
     """Every key in `body` is one the site's schema names for that block, and nothing else."""
-    test.assertEqual(set(body) - {"trading", "positions"}, ALLOWED_KEYS["top"])
+    test.assertEqual(set(body) - {"trading", "positions", "practice"}, ALLOWED_KEYS["top"])
+    if body.get("practice") is not None:
+        test.assertEqual(set(body["practice"]), PRACTICE_KEYS)
+        test.assertEqual(set(body["practice"]["totals"]), {"families", "trades", "wins", "pnl_usd"})
+        for row in body["practice"]["rows"]:
+            test.assertEqual(set(row), PRACTICE_ROW_KEYS)
     if body.get("trading") is not None:
         test.assertEqual(set(body["trading"]), {"as_of", "pnl_usd"})
     for block in ("run", "account", "performance", "compute", "gym"):
@@ -400,6 +409,89 @@ class BuildTest(unittest.TestCase):
         self.assertEqual(json.loads(path.read_text(encoding="utf-8")), body)
 
 
+# ---------------------------------------------------------------------------- the practice league
+def practised(agent_id, **overrides):
+    """A practice row as the live path gives it (`OptionsLive._site_practice`)."""
+    row = {"family": agent_id, "lineage": agent_id.rsplit("-", 1)[0], "structure": "iron_condor", "tier": "validated", "sessions": 3,
+           "trades": 9, "wins": 5, "pnl_usd": 42.5, "return_on_risk": 0.1234, "last_day": "2026-09-28", "live": True}
+    row.update(overrides)
+    return row
+
+
+FIXTURE_PRACTICE = {"as_of": "2026-09-28T14:57:00Z", "sessions": 2, "capital_usd": 10000.0, "rows": [
+    practised("condor-vrp-3"), practised("orb-4", structure="debit_vertical", tier="train", trades=4, wins=1, pnl_usd=-18.2,
+                                         return_on_risk=-0.091),
+    practised("gone-2", structure="long_straddle", trades=2, wins=0, pnl_usd=-7.0, return_on_risk=-0.05, last_day="2026-09-26",
+              live=False)]}
+
+
+class PracticeBlockTest(unittest.TestCase):
+    def test_the_block_is_the_sites_fields_and_never_a_quote_a_date_or_a_program(self):
+        smuggle = {**{field: "1.25" for field in QUOTE_FIELDS}, "legs": [{"strike": 600}], "expiry": "2026-10-02", "version": 7,
+                   "entry_minute": 571, "exit_day": "2026-09-27", "program": {"t_trade": 2.1}, "note": "bid 1.25 ask 1.30"}
+        rows = [practised("condor-vrp-3", **smuggle), practised("single-x-1", structure="long_single", tier="train"),
+                practised("Bad Case"), practised("paper-2", tier="paper"), practised("no-trades", trades=None),
+                practised("condor-vrp-3", trades=99)]
+        body = build_checkpoint(SiteInputs(**{**FIXTURE_INPUTS.__dict__, "practice": {**FIXTURE_PRACTICE, "rows": rows}}), PUBLISHED_AT)
+        keys_ok(self, body)
+        block = body["practice"]
+        self.assertEqual([r["agent"] for r in block["rows"]], ["condor-vrp-3", "single-x-1"], "a bad row is left out, an agent once")
+        condor, single = block["rows"]
+        self.assertEqual(condor, {"agent": "condor-vrp-3", "family": "condor-vrp", "structure": "iron_condor", "tier": "validated",
+                                  "status": "alive", "sessions": 3, "trades": 9, "wins": 5, "pnl_usd": "42.50",
+                                  "return_on_risk": "0.12"})
+        self.assertEqual((single["structure"], single["status"], single["tier"]), (None, "retired", "train"),
+                         "a type the site does not know is null; an agent not alive on the page is retired")
+        self.assertEqual((block["as_of"], block["sessions"], block["capital_usd"]), ("2026-09-28T14:57:00.000Z", 2, "10000.00"))
+        self.assertEqual(block["totals"], {"families": 2, "trades": 18, "wins": 10, "pnl_usd": "85.00"})
+        text = json.dumps(block)
+        for field in QUOTE_FIELDS + ["legs", "expiry", "version", "entry_minute", "exit_day", "last_day", "t_trade", "note"]:
+            self.assertNotIn(f'"{field}"', text, field)
+        for day in ("2026-09-27", "2026-09-28\"", "2026-10-02"):
+            self.assertNotIn(day, text)
+        for value in strings(block):
+            if not re.match(r"^\d{4}-\d\d-\d\dT[\d:.]+Z$|^-?\d+(?:\.\d+)?$", value):
+                self.assertTrue(quote_free(value), value)
+
+    def test_at_most_48_rows_the_alive_first_then_the_retired_by_last_session_and_it_fits(self):
+        alive = [f"alive-{n}" for n in range(30)]
+        rows = [practised(a, trades=n, wins=0) for n, a in enumerate(alive)]
+        rows += [practised(f"dead-{n}", trades=100 + n, last_day=f"2026-09-{n + 1:02d}", live=False) for n in range(28)]
+        agents = [agent(a) for a in alive]
+        body = build_checkpoint(SiteInputs(agents=agents, practice={**FIXTURE_PRACTICE, "rows": rows}), PUBLISHED_AT)
+        shown = body["practice"]["rows"]
+        self.assertEqual(len(shown), publish.MAX_PRACTICE_ROWS)
+        self.assertEqual([r["agent"] for r in shown[:30]], [f"alive-{n}" for n in reversed(range(30))], "alive, most trades first")
+        self.assertEqual(shown[30]["agent"], "dead-27", "then the retired, the latest last session first")
+        self.assertTrue(all(r["status"] == "retired" for r in shown[30:]))
+        self.assertEqual(body["practice"]["totals"]["families"], 58, "the totals are over every row")
+        self.assertLess(len(publish.canonical(body).encode()), publish.MAX_CHECKPOINT_BYTES)
+
+    def test_profit_trading_positions_and_the_rest_are_the_same_with_or_without_the_block(self):
+        from league.trading_profit import complete
+
+        trading, positions = complete(FIXTURE_BOOK, FIXTURE_ACCOUNT, at=PUBLISHED_AT)
+        plain = build_checkpoint(SiteInputs(**{**FIXTURE_INPUTS.__dict__, "trading": trading, "positions": positions}), PUBLISHED_AT)
+        both = build_checkpoint(SiteInputs(**{**FIXTURE_INPUTS.__dict__, "trading": trading, "positions": positions,
+                                              "practice": FIXTURE_PRACTICE}), PUBLISHED_AT)
+        self.assertIn("practice", both)
+        self.assertEqual({k: v for k, v in both.items() if k != "practice"}, plain, "byte for byte, but the block")
+        self.assertIsNone(build_checkpoint(SiteInputs(practice={"as_of": PUBLISHED_AT, "rows": []}), PUBLISHED_AT).get("practice"))
+        self.assertNotIn("practice", build_checkpoint(SiteInputs(practice={**FIXTURE_PRACTICE, "as_of": "2026-09-29T00:00:00Z"}),
+                                                      PUBLISHED_AT), "a reading after the stamp is refused by the site")
+
+    def test_the_practice_fixture_is_this_modules_own_output(self):
+        """`site_checkpoint_practice.json`: the fixture's checkpoint with the practice block, for the site's contract test of
+        the block (LTCM_WRITE_SITE_FIXTURES=1 rewrites it from here)."""
+        body = build_checkpoint(SiteInputs(**{**FIXTURE_INPUTS.__dict__, "practice": FIXTURE_PRACTICE}), PUBLISHED_AT)
+        keys_ok(self, body)
+        self.assertEqual([r["status"] for r in body["practice"]["rows"]], ["alive", "alive", "retired"])
+        path = FIXTURES / "site_checkpoint_practice.json"
+        if os.environ.get("LTCM_WRITE_SITE_FIXTURES"):
+            path.write_text(json.dumps(body, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), body)
+
+
 # ---------------------------------------------------------------------------- the tape
 class EventsTest(LedgerCase):
     def test_the_tape_is_notes_trades_news_and_marks_on_their_own_streams(self):
@@ -496,6 +588,17 @@ class FakeHouse:
         self.books = books or {}
 
 
+class _Reply:
+    def __init__(self, data):
+        self.data = data
+
+    def read(self, *a):
+        return self.data
+
+    def close(self):
+        pass
+
+
 def roster_agent(agent_id, alive=True, family="condor-vrp"):
     return SimpleNamespace(id=agent_id, family=family, alive=alive, born_at="2026-09-26T09:14:00.000Z", died_at=None if alive else "2026-09-27T21:40:00.000Z")
 
@@ -586,6 +689,56 @@ class PublisherTest(LedgerCase):
         self.assertEqual((body["compute"]["openai_usd"], body["compute"]["sail_usd"]), ("64.10", "13.00"))
         self.assertNotIn("bid", body["compute"])
         self.assertEqual(body["gym"]["trials"], 9)
+
+    def test_a_site_that_predates_the_practice_block_still_gets_the_checkpoint_and_is_asked_again_later(self):
+        import urllib.error
+
+        class Refusing(Site):
+            def __init__(self):
+                super().__init__()
+                self.takes, self.reply = False, b'{"error":"Invalid checkpoint."}'
+
+            def __call__(self, request, timeout=None):
+                body = json.loads(request.data)
+                if request.full_url.endswith("/checkpoint") and "practice" in body and not self.takes:
+                    self.posts.append((request.full_url, body))
+                    raise urllib.error.HTTPError(request.full_url, 400, "Bad Request", {}, _Reply(self.reply))
+                return super().__call__(request, timeout)
+
+        site = Refusing()
+        publisher = self.publisher(site)
+        house = FakeHouse(self.ledger, [roster_agent("condor-vrp-3")])
+        house.alerts = []
+        house.alert = lambda level, text, **kw: house.alerts.append((level, text))
+        house.site_inputs = lambda: {"practice": dict(FIXTURE_PRACTICE, as_of=PUBLISHED_AT)}
+        checkpoints = lambda: [body for url, body in site.posts if url.endswith("/checkpoint")]  # noqa: E731
+        said = lambda: [t for _, t in house.alerts if "refused the practice league block" in t]  # noqa: E731
+        self.assertEqual(publisher.publish(house)["checkpoint"], 200)
+        first, second = checkpoints()
+        self.assertIn("practice", first)
+        self.assertNotIn("practice", second)
+        self.assertEqual({k: v for k, v in first.items() if k != "practice"}, second, "the rest goes either way")
+        self.assertEqual(len(said()), 1)
+        self.assertIn("Invalid checkpoint.", said()[0], "the site's own reply")
+        self.assertFalse(said()[0].startswith("positions table"), "never said as the positions table")
+        self.clock.now += 60
+        publisher.publish(house)
+        self.assertEqual(len(checkpoints()), 3, "inside the half hour: one post, without the block")
+        self.assertNotIn("practice", checkpoints()[-1])
+        self.clock.now += publish.PRACTICE_RETRY_SECONDS
+        publisher.publish(house)
+        self.assertEqual(len(said()), 1, "the same reason, once")
+        site.reply = b'{"error":"Invalid checkpoint: practice."}'
+        self.clock.now += publish.PRACTICE_RETRY_SECONDS
+        publisher.publish(house)
+        self.assertEqual(len(said()), 2, "a new reason is said again")
+        site.takes = True
+        self.clock.now += publish.PRACTICE_RETRY_SECONDS
+        publisher.publish(house)
+        self.assertIn("practice", checkpoints()[-1])
+        self.clock.now += 60
+        publisher.publish(house)
+        self.assertIn("practice", checkpoints()[-1], "taken: offered every publish again")
 
     def test_the_hook_feeds_the_swarm_and_the_book_and_a_broken_hook_costs_nothing(self):
         house = FakeHouse(self.ledger, [roster_agent("condor-vrp-3")], rungs={"condor-vrp-3": 1})

@@ -225,12 +225,15 @@ class ChainView:
 class UnderlyingView:
     """The underlying of one root (PROGRAM.md, "ctx.under"): `price` now; today's one-minute `prices`
     from the open to now; `open`, `high`, `low` of today so far; the prior sessions (oldest first,
-    up to NEEDS["history"]) as `closes`, `opens`, `highs`, `lows`; `prior_close`."""
+    up to NEEDS["history"]) as `closes`, `opens`, `highs`, `lows`; `prior_close`. Volume counts shares in
+    completed regular-session bars only; NaN is unknown, not zero. `volume_coverage` counts known bars/sessions."""
 
-    __slots__ = ("root", "price", "prices", "open", "high", "low", "prior_close", "closes", "opens", "highs", "lows")
+    __slots__ = ("root", "price", "prices", "open", "high", "low", "prior_close", "closes", "opens", "highs", "lows",
+                 "volume", "minute_volumes", "daily_volumes", "prior_volume", "volume_coverage")
 
     def __init__(self, root: str, prices: np.ndarray, closes: np.ndarray, opens: np.ndarray, highs: np.ndarray,
-                 lows: np.ndarray):
+                 lows: np.ndarray, minute_volumes: np.ndarray | None = None, daily_volumes: np.ndarray | None = None,
+                 volume_provenance: str = "unavailable", daily_volume_provenance: str = "unavailable"):
         self.root = root
         self.prices = _ro(prices)
         self.price = float(prices[-1]) if prices.shape[0] else _NAN
@@ -242,19 +245,51 @@ class UnderlyingView:
         self.highs = _ro(highs)
         self.lows = _ro(lows)
         self.prior_close = float(closes[-1]) if closes.shape[0] else _NAN
+        minute_volumes = np.full(max(0, len(prices) - 1), np.nan) if minute_volumes is None else minute_volumes
+        daily_volumes = np.full(len(closes), np.nan) if daily_volumes is None else daily_volumes
+        if volume_provenance != "first_observed":
+            minute_volumes = np.full(len(minute_volumes), np.nan)
+        if daily_volume_provenance != "first_observed_session_sum":
+            daily_volumes = np.full(len(daily_volumes), np.nan)
+        self.minute_volumes = _ro(np.where(np.isfinite(minute_volumes) & (minute_volumes >= 0), minute_volumes, np.nan))
+        self.daily_volumes = _ro(np.where(np.isfinite(daily_volumes) & (daily_volumes >= 0), daily_volumes, np.nan))
+        known = int(np.isfinite(self.minute_volumes).sum())
+        self.volume = float(self.minute_volumes.sum()) if len(self.minute_volumes) and known == len(self.minute_volumes) else _NAN
+        self.prior_volume = float(self.daily_volumes[-1]) if len(self.daily_volumes) else _NAN
+        self.volume_coverage = {"basis": "completed_regular_session_bars", "minute_bars": known,
+                                "minute_expected": len(self.minute_volumes),
+                                "history_sessions": int(np.isfinite(self.daily_volumes).sum()), "history_expected": len(closes),
+                                "minute_provenance": volume_provenance, "history_provenance": daily_volume_provenance}
 
     def __repr__(self) -> str:
         return f"UnderlyingView({self.root}, {self.prices.shape[0]} minutes, {self.closes.shape[0]} sessions)"
 
+    def __reduce__(self):
+        # The live decider receives a pickle from the trusted House. Ordinary numpy unpickling makes a read-only
+        # array writable again; reconstruct through the constructor so one family's program cannot alter another's input.
+        return (type(self), (self.root, self.prices, self.closes, self.opens, self.highs, self.lows,
+                             self.minute_volumes, self.daily_volumes, self.volume_coverage["minute_provenance"],
+                             self.volume_coverage["history_provenance"]))
+
 
 def underlying_view(root: str, prices_today: Sequence[float], *, closes: Sequence[float] = (), opens: Sequence[float] = (),
-                    highs: Sequence[float] = (), lows: Sequence[float] = ()) -> UnderlyingView:
+                    highs: Sequence[float] = (), lows: Sequence[float] = (), minute_volumes: Sequence[float] | None = None,
+                    daily_volumes: Sequence[float] | None = None, volume_provenance: str = "unavailable",
+                    daily_volume_provenance: str = "unavailable") -> UnderlyingView:
     """`prices_today`: the price at each minute from the open through NOW (never later); missing
-    minutes should already hold the price in force before them. The history is the prior sessions."""
+    minutes should already hold the price in force before them. `minute_volumes` has one slot per completed
+    minute since the open, including unknown bars (NaN), and excludes the current bar. History is prior sessions."""
     prices = np.asarray(prices_today, dtype=np.float64)
+    minute_volumes = np.full(max(0, len(prices) - 1), np.nan) if minute_volumes is None else np.asarray(minute_volumes, dtype=np.float64).copy()
+    daily_volumes = np.full(len(closes), np.nan) if daily_volumes is None else np.asarray(daily_volumes, dtype=np.float64).copy()
+    if len(minute_volumes) != max(0, len(prices) - 1):
+        raise ValueError("minute volumes must align with completed minutes since the open")
+    if len(daily_volumes) != len(closes):
+        raise ValueError("daily volumes must align with prior-session closes")
     prices = prices[np.isfinite(prices)].copy()
     as_array = lambda xs: np.asarray(xs, dtype=np.float64).copy()  # noqa: E731
-    return UnderlyingView(str(root).upper(), prices, as_array(closes), as_array(opens), as_array(highs), as_array(lows))
+    return UnderlyingView(str(root).upper(), prices, as_array(closes), as_array(opens), as_array(highs), as_array(lows),
+                          minute_volumes, daily_volumes, volume_provenance, daily_volume_provenance)
 
 
 def parity_spot(dte: Any, strike: Any, is_call: Any, mid: Any, near: float, *, strikes: int = 3) -> float:

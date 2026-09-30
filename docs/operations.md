@@ -83,6 +83,50 @@ checkout's `.data` (the box record and the admin token): never `ln -sfn` over it
 - Never chain a deploy on another command's exit code (a grep, a filter): run the tests, read the
   result, then deploy.
 
+### Evaluator adoption and `gym-engine-4`
+
+Engine 4 binds parameter overrides to module `PARAMS` at its declaration, before aliases and helper
+defaults capture values; `ctx.params` starts with the same values. Each independent run still executes
+the module in a fresh namespace. Persistent module state within one run is permitted. This changes
+execution semantics for old programs that read global `PARAMS` with nondefault overrides, so prior
+results cannot qualify them under the new runtime.
+
+At swarm startup, before any research or tournament worker, `research_evaluator` records the current
+data image, full Gym bundle and execution fingerprint. An identity change archives and clears derived
+Train bests, candidates, submissions, stress/drift views, validation and review. Runs, versions, lineage
+trial counts, refusals, notebooks and consumed holdout looks remain. Late old-evaluator results are
+still counted but cannot refill current selection or forward evidence. Full result pruning retains
+each worker's actual image and bundle in its run summary. The replay key and standalone engine hash
+also change, so the old cache cannot supply a new result.
+If two different evaluator identities return the same standalone worker run ID, the store keeps
+separate result rows and files; it never relabels old metrics as new evidence.
+
+An old contract's pre-holdout refusal is archived and its active veto cleared, allowing a fresh review
+only after new-evaluator qualification. The refusal record stays; an actually consumed look remains
+in `looks` and cannot be reopened for that same program hash.
+
+Candidate, Probe and Sized entry authority additionally pins the program hash and the executable
+Gym/live/shared-source fingerprint in `banded_evaluator`. An old/missing fingerprint denies new opens
+and band confirmation; startup returns that family to Gym so researchers can requalify it. Frozen
+live instances and their positions keep their exit/reconciliation path, and historical band/forward
+records remain. A docs-only bundle change does not erase a band whose executable fingerprint still
+matches. A runtime, fill or context change does, even if an engine-version bump was missed. A new
+qualification still needs all existing Train, validation, independent review and holdout requirements;
+an identical code+parameter hash cannot acquire another sealed look because the evaluator changed.
+
+New practice cohorts require a current-image/current-bundle eligible Train or completed Validation
+replay; an old `best_train_version` or `validation_version` label alone is insufficient. A zero-trade or
+failed validation line remains information, not an automatic experiment-contract failure. Existing
+immutable cohorts separately pin their bundle, fill-model label and executable fingerprint: a changed evaluator makes them close-only, with
+forced wind-down outcomes excluded from strategy feedback. Their `(family, version)` identity cannot
+be reused for a new evaluator; re-entry requires a newly eligible source version.
+
+Adoption needs a new code release, not a new data checkpoint solely for this parameter fix: GymDriver
+uploads the content-addressed engine bundle to sealed workers, and results identify both bundle and
+data image. Verify the deployed `research_evaluator`, adoption events, unchanged total trials/looks,
+worker `gym_bundle`, real entry proof and practice evaluator before treating new observations as
+current evidence. Evaluator adoption is not a strategy promotion or a claim of profitability.
+
 ## Pause, resume, stop
 
 ```sh
@@ -172,6 +216,9 @@ positions table (`positions`, Sept 28, 2026): refused, the publisher posts the c
 and offers it again half an hour later (a warning per distinct reply of the site, "positions table: the site
 refused the positions table (old site, or a row it rejects) ... (the site said: ...)"), so either may go
 first. The first release of the table went site first (#15, 16:59Z Sept 28), then the House (R6, 20:08Z).
+The practice league's block (`practice`, Sept 29, 2026) is the second exception, handled the same way and first
+(a warning per distinct reply: "the site refused the practice league block (old site, or a row it rejects) ...");
+the site needs its own PR to take it (`league/tests/fixtures/site_contract.md`, `site_checkpoint_practice.json`).
 
 **Checkpoint the House box before risky work:** `python3 scripts/floor_box.py checkpoint --name why
 --ttl-days 30` (`checkpoints` lists them). A checkpoint holds the box's `.env`. Sail's checkpoint
@@ -204,6 +251,9 @@ cd /workspace/previous && /workspace/.venv/bin/python -m league.watchdog rollbac
   real account: the positions would sit unmanaged) or lacks the long-single code (it cannot close a long
   call or put; a same-day long call could be exercised into 100 shares the account cannot carry).
   `--force-real-risk` overrides it. **Close the real positions, or roll forward, before a rollback.**
+- **`long_single` (#425).** Once any `long_single` family exists, alive or retired, a release before #425
+  fails every architect pass (its coverage has no `long_single` row: a caught KeyError, so no family is
+  born) and refuses forks of it. Roll forward, or hotfix, rather than roll back past #425.
 - **The gateway:** `npx wrangler rollback` in `gateway/`. **The site:** the same in
   `~/Work/personal-site`.
 
@@ -304,6 +354,18 @@ python3 scripts/data/box.py run -- ARGS         # run backfill.py ARGS (or check
   image is no longer the configured one, and the Sail guard brakes it to zero before the House is at
   risk. They need no operator step: `swarm.json` sizes the pool, and adopting an image is one edit of
   `gym.image_checkpoint` (with `gym.gate_checkpoint` for its gate partner).
+- **Volume context (release candidate).** `ctx.under.minute_volumes` exposes completed regular-session
+  share volume only with first-observation receipts. Finalized historical SIP bars lack these receipts and remain
+  unknown in both minute and daily inputs: completion time alone does not exclude later vendor revisions.
+  `volume_coverage` names minute/history provenance and counts known/expected bars and prior sessions;
+  `volume`, `daily_volumes` and `prior_volume` require complete coverage of first observations. The House persists its observed
+  bars and first-observation minutes in `live.sqlite` KV `underlying_volume_session`; `underlying_volume_history`
+  keeps the last 60 observed sessions per root, including incomplete-coverage counts and provenance
+  `first_observed_session_sum`. A saved daily total without that provenance is unknown. Back up `live.sqlite` as usual.
+  No SQL migration, site schema change, new data call, or money-rule change is required. Deploy the matching House
+  and Gym bundle together; changed evaluator fingerprints require fresh qualifying evidence. Price-only images
+  do not gain usable volume merely by adopting the code. Daily API totals and SPY volume for index roots are not substituted.
+  `options_live.summary.volume_error` reports checkpoint/history failures; unknown values remain unavailable after restart.
 
 ## Real money
 
@@ -421,11 +483,77 @@ applies), 100% of equity opened a day, 250 of 300 orders open.
 1-lot SPY call about 1-2% out of the money (nearest expiry at least a day out, at the natural, held two
 minutes) with single-leg orders. Real long calls and puts open only after it (`paper_proof_single`).
 
-**The observe band**: every alive Gym-band family's validated version trades the shadow book as
-`<family>@<version>:o`, its version pinned for the session (pins in `live.sqlite`), never real, never a
-forward row, never on the site. Its programs load and decide after every real decision of the minute, in
-their own decider child (1 GB); its chains are read after the real path, under the minute's data budget.
-Its trades are kept in `/workspace/state/observe.sqlite` (0600) for the post-mortem only.
+**Two-sided single families (`long_single`, not yet released)**: a family may declare `long_single`, one
+program whose every open is one `long_call` or one `long_put` (one leg, long), the side chosen by its rule,
+in place of a call/put twin pair. It is a declared structure, never an order type: the money table's
+`real_types`, the money digest (`a3e2aa7c`) and the gateway's `OPTION_STRUCTURES_REAL` are unchanged, and
+none of them may name it. The live path maps it to real (tuition, Probe, Sized, the site's `real_structure`
+check) only while BOTH `long_call` and `long_put` are real types (`money.order_types`, `Table.family_real`,
+`Table.family_allowed`); drop either and the family is held at Candidate with the reason recorded. Every
+order it sends still carries its own type and is checked (`type_allowed`, the single-leg paper proof, the
+gateway) and sized by its own unit, exactly as a one-sided family's. Its declared type is enforced on real
+opens only: the live path refuses a real open of any other type from it ("a long_single family opens only
+long_call or long_put for real, never ..."; `money.DECLARED_TYPES`, the instance's `structure`, read at each
+sync). The Gym and the shadow book never read a family's structure: there, as for every family, each order is
+judged by its own type, and a one-sided `long_call` or `long_put` family is unchanged everywhere. Its forward
+record, D2 and the drift screen are any family's (it is only as drift-neutral as its side rule: the screen
+charges whatever net exposure it holds). The site shows the agent's structure as null (the site's schema has only the
+eleven order types) and each of its positions as `long_call` or `long_put`. The Gym is unchanged: it never
+reads a family's structure, so its bundle version does not move.
+
+**The practice league** (the observe band; the league since Sept 29, 2026): every alive Gym-band family with a
+validated version, or with an eligible Train version (the version the tournament validates next, not demoted),
+trades the shadow book on live quotes as `<family>@<version>:o`, on a $10,000 practice account. Its program is frozen in
+`observe.sqlite` before the first decision; session admissions are in `live.sqlite` `observe_pins`. It is never real, never
+tuition, never a forward row and never a band move. Its programs load and decide after every real decision of the
+minute, in their own decider child (1 GB); its chains are read after the real path, under the minute's data budget.
+
+- **Tiers and order.** The validated tier by validation t, then the Train tier by Train score (highest first, unknown
+  last), then by id (`bands.priority`). `live.observe_train` false leaves the Train tier out and winds its pins down at
+  the next families pass.
+- **Two caps.** `live.observe_max` instances (48) and `live.observe_roots_max` distinct roots (24). Roots bind first:
+  every root is read every minute at about 1.1-1.5 data calls, and holds a full-day grid in the House (about 3 MB, at
+  most 28 MB). A family whose roots would pass the roots cap is skipped, not stopped at: a later family on roots already
+  read may still join. A cap lowered at runtime keeps the first families pinned. The held-back families are said once a
+  day (`live.observe` {capped, why: "cap" | "roots"}).
+- **Measured** (the House, read-only, 13:33-13:50Z Sept 29): 1 vCPU, 4,284 MB, 3,510 MB available; the House 135-141 MB,
+  the swarm 470-513 MB, the observe child 36 MB; a minute of 1 real and 7-8 observe instances took 2.4-3.5 s end to end,
+  a decision under 50 ms; 11-16 data calls a minute for about 11 roots against the observe phase's 40. 24 roots is about
+  30-36 observe calls a minute. Expect 7-20 instances, not 48: eligibility is hard and families live hours.
+- **Degradation.** As before: at most 16 loads a minute above a 10 s floor; observe reads stop at
+  `live.observe_read_calls` (40; raise it with the roots cap, about 1.5 calls a root) and at 3 pages and 5 s a root;
+  a `BudgetSpent` batch waits a minute. New: when 3 of the last 10 session minutes were **pressed** (the observe batch
+  skipped or failed, or an observe read skipped), the lowest-priority quarter (at least one) of the Train-tier pins is
+  shed for the rest of the session, at most once every 10 minutes, and no new family joins past what is left
+  (`observe_shed` in the live state, so a restart keeps it; one `live.observe` {shed, effective_cap, why} and one
+  alert). Validated pins are never shed. The next session admits surviving frozen cohorts at the full caps.
+- **Frozen cohorts.** Research retirement and newer revisions do not terminate a cohort. It finishes between sessions
+  after at least three observed sessions and ten program closes while flat; otherwise its maximum is ten session days,
+  extended to cover the program's declared DTE horizon plus three sessions, bounded at sixty. An expired snapshot never
+  rejoins; a newer eligible version may. Switches, caps and pressure can still wind it down. These are practice durations,
+  not capital gates (`OptionsLive` config `observe_min_sessions`, `observe_min_trades`, `observe_max_sessions`).
+  Snapshots pin the Gym bundle and fill model. If either changes, old cohorts become close-only and their wind-down
+  outcomes are excluded from program feedback. The family/version ledger currently requires a newly eligible source
+  version for fresh practice after an evaluator change; it never mixes evaluators into one successful cohort.
+- **Private receipts.** `observe.sqlite.events` records decisions, coverage, intents, rejections, orders and fills with
+  leg quotes, fees and slippage against decision mid. The shadow account saves unacknowledged receipts and retries
+  idempotently after a restart. Events retain 120 days; a prolonged ledger outage has a 10,000-event per-account buffer
+  with an explicit dropped count. This private market data is never published. Program errors are `missed_errors`,
+  separate from missed quotes and budget; they do not count as successful decisions.
+- **The record.** `/workspace/state/observe.sqlite` (0600): `trades` (one row a closed practice trade: its session,
+  exit reason and `forced` when the House closed it winding down) and `practice` (one row per family and version from
+  its first live minute, kept after the family retires: tier, lineage, structure, roots, sessions, minutes, decisions
+  due / made / missed for want of quotes / missed for want of the budget / program errors, the per-minute marked P&L's peak and drawdown,
+  open positions at the engine's mark). Realized P&L is the headline; open positions are apart, at the mark.
+- **Who reads it.** Nothing that feeds evidence or money (the gate, the verifier, the bands, the money table, tuition,
+  Profit). The swarm reads its summary as a research signal (`league/swarm/practice.py`: the strategist's PRACTICE table,
+  the architect's PRACTICE BY CLASS lines, the bandit's bonus: at most +25% of a family's share and at most 10% of all
+  share moved). `family_feedback` also supplies researcher context after ten program closes over three close-session
+  days; its revision token changes on a new close day or another five closes, so idle researchers can wake on meaningful
+  observations. `practice.feedback` false turns these off. The site shows its aggregates (`practice`, below).
+- **The forward embargo.** Because practice feeds research, a Sized move also needs the forward record of the sessions
+  after the later of its version's creation and selection (`banded_at`) to meet Sized on its own (`OptionsLive._move_band`; held moves are `live.band` {held}
+  rows). The whole record still decides negative, Candidate and Probe.
 
 **The D3 calibration round trips**: 1-lot SPY, QQQ and IWM call verticals one dollar wide nearest the
 money, hourly at 10:00, 11:00, 12:00, 13:00, 14:00 and 15:00 ET (none starts from 15:15); open at the mid
@@ -531,7 +659,10 @@ entries still require the paper route proofs' witnessed round trips.
 5b. **The sprint's checks**: `health.json` `options_live.fill_model` names the refitted model (its `source`
    and `version`; `GYM_FILL_MODEL` or `/data/calibration/fill_model.json`, loaded once at the House's start);
    `options_live.observe.switches` shows observe on and calibration as intended; `swarm.json` reads as a
-   JSON object; after 13:30Z `options_live.observe.pins` lists the session's families; after the proofs,
+   JSON object; after 13:30Z `options_live.observe.pins` lists the session's families with their `tiers` and
+   `roots`, and `options_live.observe` shows `roots_used` under `roots_max` and `effective_cap` (no `shed`);
+   `observe_reads_skipped` stays 0 and `budget_spent` {}; `observe.sqlite` `practice` has a row per pinned family and
+   version; `live.sqlite` has no `:o` order, position or instance and `swarm.sqlite` `forward` no `:o` id; after the proofs,
    `paper_proof_single` passed; after 14:00Z `options_live.calibration.slots` and
    `python3 -m league.live --root /workspace/state --calibration`; `options_live.house_test`: `files`
    verified, `wanted` as intended, and no stop or end you did not expect.
@@ -611,7 +742,9 @@ entries still require the paper route proofs' witnessed round trips.
 | Kill switch | the gateway | off | every real order-creating call refused | `gateway_admin.py kill` / `unkill` |
 | `MAX_ORDER_MAX_LOSS_USD`, `MAX_ORDER_EQUITY_SHARE`, `MAX_DAY_EQUITY_SHARE`, `MAX_DAY_ORDERS`, `MAX_DAY_OPEN_ORDERS` | `gateway/wrangler.jsonc` | $1,000, 0.25, 1.0, 300, 250 | the real account's caps by maximum loss; equal to the constitution's `options_money.gateway` | gateway deploy with the matching House deploy |
 | `OPTION_STRUCTURES_REAL` | `gateway/wrangler.jsonc` | `debit_vertical,long_butterfly,long_call,long_put` | the types real money may open; must equal the constitution's `options_money.real_types` (`league.ci`) | gateway deploy with the matching House deploy and a ratify |
-| `live.observe`, `live.observe_max` | `swarm.json` on the box | true, 8 | the observe band and its cap (default 48); read each minute, no deploy (a swarm.json that is not a JSON object turns it off) | edit `swarm.json` |
+| `live.observe`, `live.observe_max` | `swarm.json` on the box | true, 48 (since 13:36Z Sept 29) | the practice league (the observe band) and its instance cap (default 48); read each minute, no deploy (a swarm.json that is not a JSON object turns it off) | edit `swarm.json` |
+| `live.observe_train`, `live.observe_roots_max`, `live.observe_read_calls` | `swarm.json` on the box | defaults: true, 24, 40 (once the practice league is released) | the Train tier; the distinct roots the league may read (1-128); the minute's data calls before observe reads stop (10-200; unset: the step's own 40) | edit `swarm.json` |
+| `practice.feedback`, `sessions`, `bonus`, `bonus_total`, `min_trades` | `swarm.json` on the box | defaults: true, 10, 0.25, 0.10, 3 (once released) | the practice league's research feedback: the strategist's table, the architect's lines, the bandit's bonus (code ceilings 0.5 and 0.2); off: none of the three | edit `swarm.json` |
 | `live.calibration`, `live.calibration_samples` | `swarm.json` on the box | true, 100 | the D3 round trips (still only with real money on, the grant and the paper proof); samples a symbol's open cell (the mid, or the patient mid at 12:00 and 14:00) stops at (defaults false, 30) | edit `swarm.json` |
 | `live.house_test` | `swarm.json` on the box | true (since 00:17:28Z Sept 29) | the House live test (still only with real money on, the grant, the paper proof and its private program verified); off: exits only | edit `swarm.json` |
 | The House live test's program | `/workspace/state/house-test/rebound-live/` on the box | present, verified | the frozen program and its params, hash-checked against `league/live/house_test.py` `FROZEN` | the operator's private upload script, `--apply` |
@@ -629,6 +762,11 @@ entries still require the paper route proofs' witnessed round trips.
 | `researcher.retire_idle_evaluations`, `dormant_cycles`; `tournament.retire_revisions`, `retire_evaluations` | `swarm.json` on the box | 500, 12; 200, 4000 | the idle rule and its dormancy clause; the tournament's retirement (defaults 150, 40; 30, 2000) | edit `swarm.json` |
 | `guard.burst_cap_usd`, `burst_until` | `swarm.json` on the box | $900, 2026-10-05 | the swarm's Sail spend for the research burst (the owner's 24/7 research, Sept 27); the $32 line is unchanged (defaults $350 until Monday Sept 28's open) | edit `swarm.json` |
 | `diagnostician.usd_day`, `per_round`, `family_hours`, `min_validations`, `near_miss_checks` | `swarm.json` on the box | $60, 6, 3, 1, 5 | the diagnostician's Claude spend a day, families a round, how often a family, who is eligible (defaults $15, 2, 6, 2, 6) | edit `swarm.json` |
+| `claude.role_effort` | `swarm.json` on the box | absent until R11b; then `{"architect": "medium"}` is the operator's step | a role's own Claude effort when the caller names none (R11b; default `{}`: `claude.effort` for every role, so the gate keeps "high") | edit `swarm.json` |
+| `architect.max_alive_per_class` | `swarm.json` on the box | default 12 (R11b) | the most living families of one mechanism class (structure x root group); `admit` refuses births past it; 0 or null off | edit `swarm.json` |
+| `researcher.retire_hold_cycles`, `retire_hold_trials`, `extension_hold_checks` | `swarm.json` on the box | defaults 3, 10, 6 (R11b) | the hold offer (retire after that many holds in a row with an eligible Train run or that many trials); the extension hold (a validation with that many checks met is exempt from the dormancy clause until cleared); 0 turns each off | edit `swarm.json` |
+| `researcher.probe_year`, `probe_timeout_seconds` | `swarm.json` on the box | default null (off), 300 (R11b) | the Gym's zero-trade probe: 2022 switches it on | edit `swarm.json` |
+| `tournament.exploit_per_positive` | `swarm.json` on the box | default 0.15 (R11b) | the bandit's exploit share a positive old family earns; null: `explore_share` alone, as before | edit `swarm.json` |
 | The money rules | `league/constitution.py` | the sprint's D4 table and the House live test's bounds (money `a3e2aa7c`) | what real money may do | owner deploy, then `--ratify` |
 
 In `swarm.json`, `researcher.sail_usd_per_hour`, when set, is the researcher pace: the Sail models' spend over
@@ -651,8 +789,10 @@ parameters, so a family re-running one placeholder makes trials but no revisions
 awaits the gate (`gate_ready`) or whose holdout look is out is never dead. With the population held at its start, dead
 families never qualified before and looped on placeholder runs (the operator retired 48 by hand on Sept 27). The
 tournament retires a dead family that never calls retire by the same rule, down to `population.floor`; the architect
-refills below `population.start`. The graveyard lesson and the public cause say the idle rule retired it (a time
-limit, not a refutation); the family's own last notebook lines carry its verdict.
+refills below `population.start`. The graveyard lesson and the public cause say the idle rule retired it; since R11b
+the lesson carries the verdict of its Train record (DRIFT, STRESS, THIN or EXHAUSTED, tested findings), and only a
+family that never traded on Train is "a time limit, not a refutation" (IDLE). The family's own last notebook lines carry
+its researcher's verdict.
 
 No duplicate runs (R3; the harness audit of Sept 28 found 44% of cycles wasted and 45% of trials identical
 re-runs). A `gym_run` or `gym_sweep` variant a family already ran to completion (the same code, merged params,
@@ -721,6 +861,100 @@ back with a profit. The robust Train objective, its robustness runs (1.5x and mi
 never starting or keeping a box awake) and the D2 validation line are code, not settings. The objective's one-time
 migration beats the heartbeat while it runs, skips a family it already moved and empties (never keeps) the best of a
 family it cannot rescore.
+
+## R11b: honest verdicts, corrections that land, effort where it pays (Sept 29)
+
+### Goal continuation: event-driven research and reachable retirement (Sept 30)
+
+The goal continuation keeps the R11b fixes and adds these defaults without changing models, funded budgets or any
+promotion threshold:
+
+- `researcher.hold_until_news: true`: a hold is stored in `family.state.research_wait`. Time and process restarts alone
+  never schedule another paid call. New trials, gate state, a rewrite, notebook guidance, the agenda, data image or
+  harness release can wake it. To deliver explicit new guidance, append a factual notebook note or change the family's
+  `research_wake` state token. `false` restores the optional R4 timer. A worker with nothing ready inspects local state
+  every few seconds; this does not contact a model.
+- `researcher.retire_min_trials: 10`: a researcher may retire after this many counted trials, or after two validations,
+  on either its REVISE or READ turn. It need not spend three holding cycles to receive the tool. All researcher and
+  diagnostician retirements use the atomic `population.floor`. `population.start` only governs refilling. Pending gate
+  work and extension/operator holds remain protected; the floor prevents concurrent retirements from draining the
+  population. The agent must explain abandonment, and all prior evidence remains.
+- `gym_run` and every variant of `gym_sweep` receive the static experiment-contract check before any version or Gym job
+  is created. Changed parameters that are provably unread, invalid override types and malformed declarations return
+  an actionable refusal without consuming a replay trial. A valid zero-trade control remains admissible.
+- Graveyard format 4 limits economic claims to the versions actually tested. Drift-screen failure means the required
+  alpha beyond exposure was not demonstrated. `UNRESOLVED` identifies missing/failed robustness evidence, rather than
+  falsely labeling an execution failure a measured stress loss. The digest reseals automatically. Run the existing
+  graveyard migration dry-run and review its counts before applying it to pre-R11b idle deaths.
+
+At deployment, verify `holding` families remain on the same cycle count without new evidence, then verify a genuine
+new result or guidance note wakes its family. Inspect retirement events to confirm tested families can exit below the
+refill target while the living count remains at or above the floor. The zero-trade probe remains off by default; no
+model migration or additional service funding is part of this change.
+
+The ROI audit and plan of Sept 29 (the operator's `scratch/roi/PLAN.md`, section (b)) found the swarm's inputs untrue in
+places: 99% of the dormancy deaths filed as "a time limit, not a finding" had been screened on Train, the strategist read
+them as untested, and its 13:10Z correction was voided by a family id. R11b is research-side only: no file under
+`league/live`, the gateway or the constitution changed, and the money digest stays `a3e2aa7c`. Train figures only (D2).
+
+- **The idle rule's verdict (R11-1).** An idle-rule death is filed under what its Train record shows
+  (`researcher.train_record`, from the family's `best_train`, `drift_failed`, `robust_failed`, `robust_why` and its Train
+  rows' `train_eligible` and `trades`): DRIFT (its eligible versions failed the drift screen), STRESS (they lost at 1.5x
+  the half-spread), THIN (it traded, never 40 trades on 20 days in every Train year), EXHAUSTED (it reached a Train
+  score, then ran dry). Only a family that never traded on Train keeps IDLE and the old words. The public cause of a
+  tested death is "Retired by the idle rule after its Train record was screened." The digest (format 3, one reseal)
+  tags each row by its verdict and says in its header that they are tested findings; the ladder shortens DRIFT, STRESS
+  and THIN rows with no Train score exactly as it shortened those IDLE rows, and its id lists name each verdict. The
+  strategist's evidence carries `screen` (scored, drift, stress, thin, untested) per family in place of
+  `eligible_train_version`, and its SYSTEM text says DRIFT, STRESS, THIN and EXHAUSTED are tested.
+- **The hold offer (R11-1).** A Gym family that held `researcher.retire_hold_cycles` (3) cycles in a row with an eligible
+  Train run, or `researcher.retire_hold_trials` (10) trials, behind it is offered `retire` on its REVISE turn too, down to
+  `population.floor` (the floor rule is unchanged). Every retirement a researcher calls is SELF-REFUTED in the graveyard
+  ("Self-refuted by its researcher: " and its reason; its last notes follow as before).
+- **The migration (R11-1, once, the operator's).** `scripts/graveyard_verdicts.py` re-heads the rows already buried from
+  the same function. Run it on the box right after the release is promoted and before the next architect pass, so the
+  digest reseals once:
+  `/workspace/.venv/bin/python /workspace/current/scripts/graveyard_verdicts.py --state /workspace/state` (a dry run:
+  counts by verdict and clause, examples, the digest's ladder before and after), then the same with `--apply` (a backup
+  of every changed row in `state/backups/graveyard-before-verdicts-<UTC>.json`, mode 600; compare-and-set in one
+  transaction; the seal emptied; the tags counted after). `--rollback <backup> --apply` restores. On the Sept 29 03:51Z
+  graveyard (809 rows) enriched with the ROI extracts, 473 of 474 IDLE rows re-head (305 DRIFT, 92 THIN, 50 EXHAUSTED,
+  26 STRESS) and the ladder stays at level 0.
+- **The strategist's corrections land (R11-2).** Every known graveyard or family id in a section is masked before the
+  content rules read it (an id is a name). The prompt asks for about 85% of `strategist.max_chars` ("at most 1,600
+  characters; about 1,350 is right"); the validator still checks the cap, and a section refused for its length alone and
+  at most 15% over is cut at its last sentence end inside the cap and validated again (the event's `trimmed`), instead
+  of paying for a repair turn.
+- **The class cap (R11-2).** `architect.max_alive_per_class` (12) living families of one mechanism class (structure x
+  root group, the strategist's `mechanism_class`); `admit` refuses births past it whatever the agenda says, the request
+  names the full classes, and the pass's event counts the refusals (`class_capped`).
+- **Per-role effort and truncation salvage (R11-3).** `claude.role_effort` {role: effort} applies when the caller names
+  no effort; `claude.effort` stays the default (the gate keeps "high"). After the deploy, set
+  `claude.role_effort.architect` to "medium" in `swarm.json`; roll back by removing the entry. An architect answer cut
+  at max_tokens keeps its complete families; fewer than 3 buys one retry on Claude alone at medium effort. A cut never
+  falls to a Kimi-K3 refill: a retry Claude has no room or line for leaves the pass, and the next pass routes as usual.
+  The event's `truncated` says what was salvaged and retried.
+- **The bandit exploits only positive evidence (R11-5).** Only an old family whose latest validation mean is positive is
+  in the exploit pool, each earning at most `tournament.exploit_per_positive` (0.15) of the share; the explore pool (new
+  families, and old ones at zero or below drawing from their own posterior) takes the rest, never less than
+  `explore_share`. It replaces the A4 stopgap (`explore_share` 0.75): with it, return `explore_share` to 0.25.
+- **The zero-trade probe (R11-6).** Off by default: `researcher.probe_year` 2022 in `swarm.json` switches it on. A new
+  version's first Train run at the normal spread is then preceded by a run over 2022 on the family's first root; a probe
+  with no trade is the answer ("disqualified: no trades in the probe year", one trial, a `probe` run row that no Train
+  score, best or drift screen reads), and the five-year run is skipped; the same program asked again is answered from
+  that row. A probe that trades, fails or does not answer in `researcher.probe_timeout_seconds` (300) says nothing and
+  the full run follows unrecorded. `gym_run` full=true skips it; sweeps and 1.5x runs are never probed. The risk is a
+  false negative (a program that trades only in other years or roots): watch `probe` in the cycle events.
+- **The extension hold (R11-4's swarm rule).** A validation that meets `researcher.extension_hold_checks` (6) of the
+  line's checks sets the family's `extension_hold`, and the family is exempt from the dormancy clause while it stands
+  (for the version its latest validation judged). The operator clears it once the 2017-19 extension result lands:
+  `scripts/extension_hold.py --state /workspace/state` lists the holds and the alive families that met the checks before
+  the rule shipped; `--seed --apply` holds those; `--clear FID ... --apply` ends a hold (the version is never held again;
+  the state keeps `extension_cleared`).
+
+Checks after R11b ships (with the plan's 4-hour check): the share of new graveyard rows tagged IDLE (expect under 5%),
+strategist acceptance (2 of 3 runs or better) and the largest mechanism class's share of births (expect under 25%),
+architect truncations and births per Claude pass, and `probe` outcomes once it is on.
 
 ## Models and Claude
 
@@ -826,3 +1060,20 @@ by default), and "strategist" must be in `claude.roles` (the default; the box's 
 it there, or the strategist runs on Sail's small packet and its event says so). The architect has no daily Claude line
 of its own unless `claude.role_usd_day["architect"]` is set: with the digest each call carries ~85k more input tokens.
 Each run is a private `swarm.strategist` event. Emptying `architect.agenda_locked` returns to `architect.agenda` as before.
+
+Two-sided singles (not yet released; `league/swarm/store.py`, `architect.py`). The architect's structure types include
+`long_single` (one program that buys calls or puts by its rule; a proposal states the side rule and why its calls
+and puts balance, since the drift screen charges whatever net exposure it holds), and its prompt asks for one
+`long_single` family where it would have proposed a call/put twin pair. `admit` enforces it: a `long_call` or `long_put`
+is refused while a living family on the same roots with the same idea (`same_idea`, one born earlier in the same pass
+too) is a `long_single` or the other side. In GAPS a single option's one gap is `long_single`, covered only by a living
+`long_single` family on the root; the one-sided `long_call` and `long_put` are never gaps (still admitted when proposed,
+on other roots or another idea), and the coverage table has a `long_single` row. A `long_single` and the singles it
+sends are one slice for lineage matching (`same_slice`): the same idea as a dead call or put twin on the same roots
+continues its lineage and joins BOTH twins' (`SwarmStore.link_lineages`: the other twin of its idea or its parent's,
+dead or alive, so their trials, looks and validated versions all count); a `long_single` of a living twin's idea
+continues that twin's lineage and joins the other's; another idea on the slice counts the newest dead lineage of each
+type there, its own first (`slice_priors`, stored as `prior_lineage` and `prior_lineages`; every other structure keeps
+its one `prior_lineage`, as before); and identical code links their lineages. So relabeling a program two-sided buys no
+trials or looks. Its graveyard reads include its singles' lessons. The researcher, the reviewer, the auditor and the diagnostician read what its orders are (`structure_text`);
+every other family's prompts are byte-identical.
