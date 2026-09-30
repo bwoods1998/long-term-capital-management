@@ -32,9 +32,12 @@ alias of this module until the full prune deletes it.
 from __future__ import annotations
 
 import base64
+import errno
 import json
 import os
 import re
+import socket
+import ssl
 import stat
 import time
 import uuid
@@ -125,6 +128,34 @@ class SailboxError(RuntimeError):
         super().__init__(message)
         self.status = status
         self.kind = kind
+
+
+class SailboxTransportError(SailboxError):
+    """Sanitized transport classification; retry policy belongs to the individual caller."""
+
+    def __init__(self, error_type: str, *, transient: bool):
+        super().__init__(f"sailbox transport failed: {error_type}", kind="transport")
+        self.transient = transient
+
+
+def _transient_transport(error: BaseException) -> bool:
+    """Only recognizable network failures, never a guessed meaning of an error's text.
+
+    urllib wraps socket errors in URLError.reason. TLS failures (including certificate and
+    protocol errors), permanent DNS failures, permissions and unknown causes fail closed.
+    Only a boolean leaves this classifier; potentially credential-bearing text is never read.
+    """
+    cause = error.reason if isinstance(error, URLError) else error
+    if isinstance(cause, ssl.SSLError):
+        return False
+    if isinstance(cause, socket.gaierror):
+        return cause.errno == socket.EAI_AGAIN
+    if isinstance(cause, (TimeoutError, ConnectionError)):
+        return True
+    return isinstance(cause, OSError) and cause.errno in (
+        errno.ETIMEDOUT, errno.ECONNRESET, errno.ECONNABORTED, errno.ECONNREFUSED,
+        errno.EPIPE, errno.ENETDOWN, errno.ENETRESET, errno.ENETUNREACH, errno.EHOSTUNREACH,
+    )
 
 
 def box_id(value: Any) -> str:
@@ -234,8 +265,6 @@ def _shared_ssl_context():
     """One TLS context per process for the Sail API (certificates loaded once)."""
     global _SSL_CONTEXT
     if _SSL_CONTEXT is None:
-        import ssl
-
         _SSL_CONTEXT = ssl.create_default_context()
     return _SSL_CONTEXT
 
@@ -399,7 +428,7 @@ class Transport:
         except HTTPError as error:
             raise _error(error.code, error.read(200_000)) from None
         except (URLError, TimeoutError, OSError) as error:
-            raise SailboxError(f"sailbox transport failed: {type(error).__name__}") from None
+            raise SailboxTransportError(type(error).__name__, transient=_transient_transport(error)) from None
         if stream:
             return _ndjson(response)
         with response:
