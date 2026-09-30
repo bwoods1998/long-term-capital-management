@@ -9,9 +9,12 @@ success within the driver's three attempts should end in the downloaded bytes. A
 retry. Labels are fixed by construction.
 
 dev: the House's Sept 29-30, 2026 failures (a timeout or refused connection on the download, a 503) and permanent
-controls. heldout: one or two faults drawn from a wider pool (read-phase faults included), permanent faults alone or
-after a transient one, drawn from the seed. Answer: failed_transient, retried_permanent, requests (the lane's cost),
-backoff_seconds.
+controls. heldout: SEEDED VARIANTS OF FAULTS THE DEV SPLIT NEVER USES (read-phase faults included): every held-out
+transient fault alone, then before and after another held-out transient twice each; every held-out permanent fault
+alone and after a transient one (stratified: the baseline's count does not depend on the seed's luck). The faults are in
+this public file: the split is held out from the dev split and the brief, not from a determined reader; the window
+after the release is the held-out test no one can read in advance. Answer: failed_transient, retried_permanent, requests
+(the lane's cost), backoff_seconds.
 """
 from __future__ import annotations
 
@@ -26,7 +29,7 @@ from urllib.error import HTTPError, URLError
 
 import _common
 
-PROTOCOL = "data-retry-v1"
+PROTOCOL = "data-retry-v2"
 BOX = "sb_0123456789abcdef"
 PATH = "/workspace/gym/jobs/synthetic/results.json"
 PAYLOAD = b'{"synthetic": true}'
@@ -103,19 +106,24 @@ def expected(script: list[str], retries: int = 3) -> tuple[bool, int | None]:
     return len(script) < retries, None
 
 
+HELD_TRANSIENT = tuple(k for k in TRANSIENT if not any(k in c for c in DEV))
+HELD_PERMANENT = tuple(k for k in PERMANENT if not any(k in c for c in DEV))
+
+
 def cases(split: str, seed: str) -> list[list[str]]:
     if split == "dev":
         return [list(c) for c in DEV]
     r = _common.rng(seed, PROTOCOL)
     out = []
-    for _ in range(48):
-        roll = r.random()
-        if roll < 0.55:
-            out.append([r.choice(TRANSIENT) for _ in range(r.choice((1, 1, 2)))])
-        elif roll < 0.75:
-            out.append([r.choice(PERMANENT)])
-        else:
-            out.append([r.choice(TRANSIENT), r.choice(PERMANENT)])
+    for kind in HELD_TRANSIENT:
+        out.append([kind])
+        for _ in range(2):
+            out.append([kind, r.choice(HELD_TRANSIENT)])
+            out.append([r.choice(HELD_TRANSIENT), kind])
+    for kind in HELD_PERMANENT:
+        out.append([kind])
+        out.append([r.choice(HELD_TRANSIENT), kind])
+    r.shuffle(out)
     return out
 
 
@@ -151,7 +159,7 @@ def main() -> None:
         return {"failed_transient": failed, "retried_permanent": wrong, "requests": requests,
                 "backoff_seconds": round(backoff, 6), "missed": missed, "cases": len(scenarios)}
 
-    _common.answer(PROTOCOL, opts.split, opts.seed, body)
+    _common.answer(PROTOCOL, opts, body)
 
 
 if __name__ == "__main__":

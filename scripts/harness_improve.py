@@ -58,6 +58,7 @@ def parser() -> argparse.ArgumentParser:
     part = sub.add_parser("stage")
     part.add_argument("key")
     part.add_argument("--candidate", required=True)
+    part.add_argument("--authoring-usd", type=float, help="what writing this attempt cost (the agent's dollars), recorded")
     part = sub.add_parser("evaluate")
     part.add_argument("key")
     part.add_argument("--python", type=Path, default=Path(sys.executable))
@@ -88,10 +89,13 @@ def parser() -> argparse.ArgumentParser:
     part = sub.add_parser("canary", help="start a promoted lane candidate's canary, or flip its gate by hand")
     part.add_argument("key")
     part.add_argument("--measurement", type=Path, help="`measure` taken after the watchdog promoted the evaluated tree")
+    part.add_argument("--control", type=Path, help="window lanes: `measure` of the base release just before the deploy")
     part.add_argument("--fraction", type=float, help="share of units in the canary arm (default: the lane's)")
+    part.add_argument("--deploy-usd", type=float, help="what the reviews and the deploy cost, recorded")
     flip = part.add_mutually_exclusive_group()
-    flip.add_argument("--revert", action="store_true", help="flip the gate to the old behavior now")
-    flip.add_argument("--retain", action="store_true", help="keep the new behavior for every unit (operator decision)")
+    flip.add_argument("--revert", action="store_true", help="flip the gate to the old behavior now (any time)")
+    flip.add_argument("--retain", action="store_true", help="re-install a gate the registered decision retained")
+    flip.add_argument("--graduated", metavar="MAIN_COMMIT", help="the retained change merged into main without its gate")
     sub.add_parser("next", help="each lane candidate's next command")
     return p
 
@@ -157,7 +161,7 @@ def step(lab, args):
     if args.command == "prepare":
         return lab.prepare(args.key, args.worktree)
     if args.command == "stage":
-        return lab.stage(args.key, args.candidate)
+        return lab.stage(args.key, args.candidate, authoring_usd=args.authoring_usd)
     if args.command == "evaluate":
         return lab.evaluate(args.key, python=args.python)
     if args.command == "reconcile":
@@ -176,14 +180,17 @@ def step(lab, args):
     if args.command == "brief":
         return lab.brief(args.key)
     if args.command == "canary":
+        if args.graduated:
+            return lab.canary_stop(args.key, state="graduated", commit=args.graduated)
         if args.revert or args.retain:
             return lab.canary_stop(args.key, state="retained" if args.retain else "reverted")
         if not args.measurement:
-            raise ImprovementError("canary needs --measurement (or --revert / --retain)")
-        return lab.canary_start(args.key, measurement=load_json(args.measurement), fraction=args.fraction)
+            raise ImprovementError("canary needs --measurement (or --revert / --retain / --graduated)")
+        return lab.canary_start(args.key, measurement=load_json(args.measurement), fraction=args.fraction,
+                                control=load_json(args.control) if args.control else None, deploy_usd=args.deploy_usd)
     if args.command == "next":
         return {"next": lab.next_steps(root=str(args.root), repo=str(args.repo))}
-    return {"verified_ledger_rows": lab.ledger.verify(), "jobs": [
+    return {"verified_ledger_rows": lab.ledger.verify(), "gates": lab.gates(), "jobs": [
         {**j.view(), "decision": j.last_status.get("decision"), "proposal": j.carry.get("_proposal")}
         for j in lab.worklist.jobs().values()]}
 
@@ -215,8 +222,13 @@ def lanes_snapshot(root: Path, swarm: Path, *, now: float | None = None) -> dict
     write_private(root / "lanes-ranked.json", {"at": doc["until"], "window": doc["window"], "policy": lanes.POLICY,
                                                "source": {k: (doc.get("source") or {}).get(k) for k in ("release", "digest")},
                                                "candidates": ranked})
+    from league.swarm import canary as gate
+
+    # The gates the House reads now (`<state>/harness/canary.json`): a retained one missing here has silently fallen
+    # back to the old behavior; the operator compares this with the journal's `status` (`gates`).
     return {"lanes_at": doc["until"], "lanes_captured": sum(1 for r in ranked if r["captured"]),
-            "lanes_errors": sorted(doc["errors"])}
+            "lanes_errors": sorted(doc["errors"]),
+            "gates": {k: v.get("state") for k, v in gate.read(Path(swarm) / gate.FILE).items()}}
 
 
 def heartbeat(args, identity, result):

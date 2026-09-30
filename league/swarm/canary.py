@@ -13,8 +13,10 @@ A candidate's code asks one question, with the key the loop gave it and the unit
     else:
         ...  # the old behavior, unchanged
 
-The unit is the lane's (`league/swarm/harness_lanes.py`, `Lane.canary["unit"]`): a family id for the research and
-execution lanes, `mechanism_unit(mechanism)` for the memory lane (a proposal has no final family id yet).
+The unit is the lane's (`league/swarm/harness_lanes.py`, `Lane.canary["unit"]`): the family id for the research lane,
+`mechanism_unit(mechanism)` for the memory lane (a proposal has no final family id yet). Only the arms lanes gate: no
+gate may sit in the evaluator fingerprint's files (`league/gym`, `league/live`, the four shared files), whose changes
+are planned releases compared before and after, and the staging guard refuses one there.
 
 THE FILE. `<state>/harness/canary.json`, written only by the loop's `canary` command in its own private directory
 (never by the swarm, never in `swarm.json`)::
@@ -28,6 +30,11 @@ malformed file, an unknown key, or a fraction outside [0, 1] all mean the OLD be
 Arm membership is `sha256(salt NUL key NUL unit)` below `fraction` of the hash space, so the same unit stays in the
 same arm for the whole window, across restarts and processes, and the observer computes the same split from the data.
 The file is re-read at most every `RECHECK_SECONDS` per process (a stat call per check otherwise). Standard library only.
+
+THE JUDGES' OVERRIDE. The loop's fixed judges score a candidate twice, with its gate forced open (every unit gets the new
+behavior: the change itself is judged) and forced closed (none does: the old behavior must be exactly the baseline's).
+They set `_FORCED[key]` in their own sandboxed process (`harness_judges/_common.force_gate`). Nothing on the House sets
+it, and a candidate may never name it (`harness_lanes.content_guard`).
 """
 
 from __future__ import annotations
@@ -43,6 +50,10 @@ FILE = Path("harness") / "canary.json"
 SCHEMA = 1
 STATES = ("canary", "retained", "reverted")
 RECHECK_SECONDS = 30.0
+#: key -> True (open) or False (closed), set only by the fixed judges (the module docstring). Empty in production.
+_FORCED: dict[str, bool] = {}
+#: The architect keeps a mechanism's first 600 characters, whitespace-normalized (`Architect.admit`).
+MECHANISM_CHARS = 600
 
 
 def in_arm(salt: str, key: str, unit: str, fraction: float) -> bool:
@@ -59,9 +70,11 @@ def in_arm(salt: str, key: str, unit: str, fraction: float) -> bool:
 
 def mechanism_unit(mechanism: Any) -> str:
     """The unit of a proposal that has no family id yet (the store may still change its slug): its mechanism text,
-    whitespace-normalized and lowercased, hashed. The architect and the store keep that text byte for byte, so the
-    gate at proposal time and the observer after the birth compute the same unit."""
-    return hashlib.sha256(" ".join(str(mechanism or "").split()).lower().encode("utf-8")).hexdigest()[:16]
+    whitespace-normalized, cut to the architect's 600 characters, normalized again (the store's own normalization
+    drops a space the cut leaves at the end) and lowercased, hashed. So the gate at proposal time (raw or admitted text
+    alike) and the observer after the birth compute the same unit."""
+    text = " ".join(" ".join(str(mechanism or "").split())[:MECHANISM_CHARS].split())
+    return hashlib.sha256(text.lower().encode("utf-8")).hexdigest()[:16]
 
 
 def decide(arms: Mapping[str, Any], key: str, unit: str) -> bool:
@@ -123,9 +136,12 @@ def enabled(key: str, unit: Any, *, root: str | Path) -> bool:
     """True when `unit` should get the new behavior of the harness change `key` (the module docstring). `root` is the
     swarm's state directory (`SwarmStore.root`). Never raises: any trouble is the old behavior."""
     try:
+        forced = _FORCED.get(str(key))
+        if forced is not None:
+            return bool(forced)
         return decide(_CACHE.arms(Path(root) / FILE), str(key), str(unit))
     except Exception:  # noqa: BLE001 - a gate never breaks the caller
         return False
 
 
-__all__ = ["FILE", "SCHEMA", "STATES", "in_arm", "mechanism_unit", "decide", "read", "enabled"]
+__all__ = ["FILE", "SCHEMA", "STATES", "MECHANISM_CHARS", "in_arm", "mechanism_unit", "decide", "read", "enabled"]

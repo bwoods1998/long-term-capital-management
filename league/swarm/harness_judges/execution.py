@@ -168,7 +168,7 @@ def main() -> None:
         return {"restart_divergences": divergences, "valid_rejected": valid_rejected, "invalid_accepted": invalid_accepted,
                 "scenarios": len(runs), "invalid_cases": len(INVALID), "cases": len(runs) + len(INVALID)}
 
-    _common.answer(PROTOCOL, opts.split, opts.seed, body)
+    _common.answer(PROTOCOL, opts, body)
 
 
 if __name__ == "__main__":
