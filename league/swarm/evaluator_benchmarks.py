@@ -1,0 +1,1532 @@
+"""The evaluator benchmark suite: known-answer cases run through the real Gym engine and the real evidence lines.
+
+    python -m league.swarm.benchmarks --suite evaluator --json [--output PATH] [--tree PATH]
+
+Each case is a synthetic program with a known answer, run on a synthetic store (never licensed data, never the sealed
+market holdout) through the evaluator's mechanical stages exactly as the swarm runs them:
+
+    static contract (`check_experiment` with the case's parameters) -> Train (normal and 1.5x-stress runs) ->
+    Train objective (`evidence.train_score`) and the drift screen -> Validation (normal and 1.5x-stress runs,
+    `evidence.validation_line`) -> the gate's static contract and drift verdict -> review -> one synthetic holdout
+    look (`evidence.holdout_line`, Holm across a fixed prior history).
+
+The review is a model call. The suite makes none: it scores the pipeline with a BLIND reviewer (one that passes every
+program), so a false promotion here is one the mechanical evaluator allows and only a model review could stop. Cases
+whose sole defense is the review are labelled `review_dependent`, and the suite separately checks that the review
+contract can carry a grounded rejection of each such case (`review_contract.grounded_answer`).
+
+Case families (the suite's pinned `CASES`):
+- signal controls: absent, cost-erased, drift-only and holdout-disappearing negatives; planted dense, sparse,
+  medium-frequency, conditional-regime and year-regime positives. False promotions and missed signals come from these
+  and the adversarial cases below;
+- LEAKAGE: programs that try to read the future through every ctx path found (indexing past now, array bases, private
+  attributes, date literals, greeks computed in blocks, next-session event flags, a process-global numpy dict carried
+  from an earlier run, and a memorized table keyed by price level). Each must be refused or score as no edge;
+- INVALID FILLS: programs that profit only from impossible fills: the decision minute's stale quote, crossed quotes,
+  package prices beyond the payoff range on open and close, and passive spread capture without adverse selection;
+- STATE: contract proofs that module STATE resets between runs, that parameters are copied, that a split Train run
+  differs from an unsplit one only at its boundary and that Validation is never split, and probes for process-global
+  channels between runs and between batch-mates;
+- BROKEN ABLATIONS: switches that work, that the static contract refuses, and that are read but ignored (which only a
+  behavioral ablation catches).
+
+The report gives, per release tree: the false-promotion rate over negative cases and the missed-signal rate over
+planted positives, each with exact (Clopper-Pearson) 95% bounds; the contract proofs and defects found (mapped to the
+review contract's facts); ablation detection by the static contract and by a behavioral probe; and the recorded stage
+figures, so threshold variants can be judged on the same outcomes (`variants`). The suite is pinned: `SUITE_SHA` is the
+hash of the protocol, the world, every case and every program template. A run whose computed hash differs is reported
+`pinned: false` and the CLI exits non-zero (`--allow-unpinned` is for developing the next suite id only).
+
+What it does not do: call a model, read market data or sealed days, change a threshold, write to a swarm, place an
+order, or claim anything about a real strategy's edge. The worlds are invented; the planted edges are deliberately
+strong controls; finite counts bound error rates only for this suite. Needs numpy and pyarrow (the Gym's).
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import hashlib
+import json
+import math
+import random
+import shutil
+import sys
+import tempfile
+import time
+from pathlib import Path
+from typing import Any, Callable, Mapping, Sequence
+
+SUITE_ID = "evaluator-suite-1"
+
+# ------------------------------------------------------------------------------------------------ the synthetic world
+#: One synthetic underlying, priced so options are fair (a martingale) whenever no edge is planted. The calendar is a
+#: thinned weekday calendar (every `stride`-th weekday), not an exchange calendar. Dollar units throughout.
+WORLD: dict[str, Any] = {
+    "root": "SPY",
+    "spot0": 400.0,
+    "years": {"train": [2022, 2023, 2024], "validation": [2025], "holdout": [2026]},
+    "holdout_last": "2026-09-25",
+    "stride": 4,
+    "history_sessions": 5,
+    "minute_sd": 0.20,
+    "drift_per_minute": 0.002,
+    "gap_sd": 2.0,
+    "tell_minutes": [600, 605, 610, 615, 620, 625, 630, 635, 640],
+    "tell_size": 1.0,
+    "big_tell_size": 3.0,
+    "window_minutes": [650, 680, 710, 740, 770, 800, 830, 860, 890],
+    "window_length": 30,
+    "quote_from": 645,
+    "strikes_each_side": 10,
+    "half_spread": 0.03,
+    "quote_size": 50,
+    "expiry_days": 1,
+    "next_session_minutes": 390,
+    "jump_minute": 921,
+    "jump_size": 2.0,
+    "blowout_close_minutes": [930, 934],
+    "blowout_open_minutes": [940, 944],
+    "crossed_minutes": [950, 954],
+    "blowout": 5.0,
+    "crossed_offset": 4.0,
+    "fill_hazard": 0.3,
+    "volume_up": 1000.0,
+    "volume_down": 2000.0,
+}
+
+#: The planted channels: channel k's tell is `tell_minutes[k]`, its window starts at `window_minutes[k]`. `amount` is the
+#: planted shift of the window's move in the tell's direction ($, spread evenly over the window's minutes), on the days
+#: `on` names: "all", "big" (a big tell, probability `big`), "gap" (|overnight gap| over `gap` dollars), or a year list.
+CHANNELS: dict[str, dict[str, Any]] = {
+    "dense": {"k": 0, "amount": 0.70, "on": "all"},
+    "sparse": {"k": 1, "amount": 1.60, "on": "big", "big": 0.2},
+    "medium": {"k": 2, "amount": 0.80, "on": "big", "big": 0.74},
+    "gap": {"k": 3, "amount": 1.10, "on": "gap", "gap": 2.0},
+    "years": {"k": 4, "amount": 0.70, "on": [2023, 2024, 2025, 2026]},
+    "fading": {"k": 5, "amount": 0.70, "on": [2022, 2023, 2024, 2025]},
+    "cost": {"k": 6, "amount": 0.06, "on": "all"},
+    "absent": {"k": 7, "amount": 0.0, "on": "all"},
+}
+
+
+def digest(value: Any) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
+
+
+def sessions() -> dict[str, list[dt.date]]:
+    """The world's sessions per window: every `stride`-th weekday of each year (the holdout to `holdout_last`)."""
+    out: dict[str, list[dt.date]] = {}
+    last = dt.date.fromisoformat(WORLD["holdout_last"])
+    for window, years in WORLD["years"].items():
+        days = []
+        for year in years:
+            day, n = dt.date(year, 1, 3), 0
+            while day.year == year and day <= (last if window == "holdout" else dt.date(year, 12, 31)):
+                if day.weekday() < 5:
+                    if n % WORLD["stride"] == 0:
+                        days.append(day)
+                    n += 1
+                day += dt.timedelta(days=1)
+        out[window] = days
+    return out
+
+
+def history_days(first: dt.date) -> list[dt.date]:
+    """Underlying-only sessions before the first Train day (a program's history going into it)."""
+    out, day = [], first - dt.timedelta(days=1)
+    while len(out) < WORLD["history_sessions"]:
+        if day.weekday() < 5:
+            out.append(day)
+        day -= dt.timedelta(days=1)
+    return sorted(out)
+
+
+def _bachelier(spot: Any, strike: Any, variance: Any, call: Any) -> Any:
+    """E[max(S_T - K, 0)] (call) or E[max(K - S_T, 0)] (put) for S_T ~ N(spot, variance): the fair price when the rest of
+    the day is Gaussian and driftless, so a quote path built from it is a martingale (no edge unless one is planted)."""
+    import numpy as np
+
+    from league.gym.greeks import norm_cdf, norm_pdf
+
+    sd = np.sqrt(np.maximum(variance, 1e-12))
+    d = (spot - strike) / sd
+    value_call = (spot - strike) * norm_cdf(d) + sd * norm_pdf(d)
+    return np.where(call, value_call, value_call - (spot - strike))
+
+
+def truth(replication: int) -> dict[str, Any]:
+    """The world's hidden truth for one replication: per session, the tells, the planted shifts, the window moves, the
+    jump. Everything a store is written from, and what the suite checks a probe's hit rate against."""
+    rng = random.Random(digest([SUITE_ID, "world", replication]))
+    windows = sessions()
+    first = windows["train"][0]
+    days = [(d, "history") for d in history_days(first)]
+    for window in ("train", "validation", "holdout"):
+        days += [(d, window) for d in windows[window]]
+    rows = []
+    for day, window in days:
+        tells = [1 if rng.random() < 0.5 else -1 for _ in WORLD["tell_minutes"]]
+        big = [rng.random() for _ in WORLD["tell_minutes"]]
+        gap = rng.gauss(0.0, WORLD["gap_sd"])
+        jump = 1 if rng.random() < 0.5 else -1
+        seed = rng.getrandbits(63)
+        planted = {}
+        for name, spec in CHANNELS.items():
+            k = spec["k"]
+            if spec["on"] == "all":
+                on = True
+            elif spec["on"] == "big":
+                on = big[k] < spec["big"]
+            elif spec["on"] == "gap":
+                on = abs(gap) > spec["gap"]
+            else:
+                on = day.year in spec["on"]
+            planted[name] = spec["amount"] * tells[k] if on and window != "history" else 0.0
+        bigs = {name: bool(big[spec["k"]] < spec.get("big", -1.0)) for name, spec in CHANNELS.items()}
+        rows.append({"day": day, "window": window, "tells": tells, "big": bigs, "gap": gap, "jump": jump,
+                     "seed": seed, "planted": planted})
+    return {"replication": replication, "days": rows}
+
+
+def _path(row: Mapping[str, Any], open_price: float):
+    """One session's underlying price at each minute 570..960: Gaussian minutes with the drift, the tells, the planted
+    shifts spread over their windows and the jump."""
+    import numpy as np
+
+    rng = np.random.default_rng(row["seed"])
+    minutes = np.arange(570, 961)
+    sd, mu = WORLD["minute_sd"], WORLD["drift_per_minute"]
+    step = mu + rng.normal(0.0, sd, minutes.size)
+    step[0] = 0.0
+    big = {CHANNELS[name]["k"]: flag for name, flag in row["big"].items()}
+    for k, minute in enumerate(WORLD["tell_minutes"]):
+        size = WORLD["big_tell_size"] if big.get(k) else WORLD["tell_size"]
+        step[minute - 570] = mu + row["tells"][k] * size
+    length = WORLD["window_length"]
+    for name, spec in CHANNELS.items():
+        start = WORLD["window_minutes"][spec["k"]]
+        step[start - 570 + 1: start - 570 + 1 + length] += row["planted"][name] / length
+    step[WORLD["jump_minute"] - 570] = mu + row["jump"] * WORLD["jump_size"]
+    price = open_price + np.cumsum(step)
+    return price
+
+
+def write_world(root: Path, world: Mapping[str, Any], *, level_scale: float = 1.0,
+                windows: Sequence[str] = ("train", "validation", "holdout")) -> dict[str, Any]:
+    """Write the replication's store (with the gate's mark: the synthetic holdout is the suite's, never the market's) and
+    return what was realized: each session's opening price and each channel window's move. `level_scale` multiplies every
+    price (the level-invariance probe's world: relative signals are unchanged by it); `windows` limits the chains written
+    (the underlying is written for every session, so history is continuous)."""
+    import numpy as np
+
+    from league.gym import synth
+
+    writer = synth.Writer(root)
+    rows = world["days"]
+    writer.calendar([r["day"] for r in rows])
+    expiry_rows = []
+    close = WORLD["spot0"]
+    root_name = WORLD["root"]
+    minutes = np.arange(570, 961)
+    q0 = WORLD["quote_from"] - 570
+    qmin = minutes[q0:]
+    sd2 = WORLD["minute_sd"] ** 2
+    after = sd2 * WORLD["next_session_minutes"] + WORLD["gap_sd"] ** 2
+    jump_i = WORLD["jump_minute"] - 570
+    length = WORLD["window_length"]
+    moves: list[dict[str, float]] = []
+    opens: list[float] = []
+    for r in rows:
+        day = r["day"]
+        open_price = close + r["gap"]
+        price = _path(r, open_price)
+        close = float(price[-1])
+        opens.append(float(price[0]))
+        moves.append({name: float(price[WORLD["window_minutes"][spec["k"]] - 570 + length] -
+                                  price[WORLD["window_minutes"][spec["k"]] - 570])
+                      for name, spec in CHANNELS.items()} if r["window"] != "history" else {})
+        # A volume column with no publication receipts, every bar of which encodes the absent window's LATER move: the
+        # replay must never show historical volume without first-observation receipts (NaN), or the day leaks.
+        up = bool(moves[-1]) and moves[-1]["absent"] > 0
+        volume = np.full(minutes.size, WORLD["volume_up"] if up else WORLD["volume_down"], dtype=np.float64)
+        writer.underlying(root_name, day, minutes, price * level_scale, extra={"volume": volume})
+        if r["window"] not in windows:
+            continue
+        # The listed strikes centre on the price when quotes begin (causal: a past price).
+        centre = round(float(price[q0]))
+        strikes = centre + np.arange(-WORLD["strikes_each_side"], WORLD["strikes_each_side"] + 1, dtype=np.float64)
+        expiry = day + dt.timedelta(days=WORLD["expiry_days"])
+        expiry_rows.append((root_name, day, expiry))
+        # Remaining variance from each quoted minute: the day's Gaussian minutes, the jump while it is ahead, the next
+        # session. The quote at the jump minute is STALE (the previous minute's), refreshed a minute later.
+        seen = price[q0:].copy()
+        seen[jump_i - q0] = price[jump_i - 1]
+        remaining = sd2 * (960 - qmin) + after + np.where(qmin < WORLD["jump_minute"], WORLD["jump_size"] ** 2, 0.0)
+        remaining[jump_i - q0] = sd2 * (960 - WORLD["jump_minute"] + 1) + after + WORLD["jump_size"] ** 2
+        k_close = float(strikes[np.argmin(np.abs(strikes - price[925 - 570]))])
+        k_open = float(strikes[np.argmin(np.abs(strikes - price[939 - 570]))])
+        k_cross = float(strikes[np.argmin(np.abs(strikes - (price[949 - 570] + WORLD["crossed_offset"])))])
+        exp_l, k_l, r_l, m_l, bid_l, ask_l = [], [], [], [], [], []
+        for strike in strikes:
+            for call in (True, False):
+                mid = _bachelier(seen, strike, remaining, call)
+                half = WORLD["half_spread"]
+                bid = np.maximum(0.0, np.round(mid - half, 2))
+                ask = np.maximum(np.round(mid + half, 2), bid + 0.01)
+                for when, hit in ((WORLD["blowout_close_minutes"], call and strike == k_close),
+                                  (WORLD["blowout_open_minutes"], call and strike == k_open + 1.0)):
+                    if hit:  # a leg's bid blows out: a vertical's natural leaves its payoff range
+                        a, b = (m - 570 - q0 for m in when)
+                        bid[a:b + 1] = np.round(mid[a:b + 1] + WORLD["blowout"], 2)
+                        ask[a:b + 1] = bid[a:b + 1] + 0.5
+                if call and strike == k_cross:  # crossed quotes: bid above ask (never a market)
+                    a, b = (m - 570 - q0 for m in WORLD["crossed_minutes"])
+                    bid[a:b + 1] = np.round(mid[a:b + 1] + 0.3, 2)
+                    ask[a:b + 1] = np.round(np.maximum(0.01, mid[a:b + 1] - 0.3), 2)
+                n = qmin.size
+                exp_l += [expiry] * n
+                k_l.append(np.full(n, strike))
+                r_l += ["C" if call else "P"] * n
+                m_l.append(qmin)
+                bid_l.append(bid * level_scale)
+                ask_l.append(ask * level_scale)
+        size = np.full(len(exp_l), WORLD["quote_size"], dtype=np.int32)
+        writer.nbbo(root_name, day, expiration=exp_l, strike=np.concatenate(k_l) * level_scale, right=r_l,
+                    minute=np.concatenate(m_l), bid=np.concatenate(bid_l), ask=np.concatenate(ask_l),
+                    bid_size=size, ask_size=size)
+    writer.expiries(expiry_rows)
+    writer.gate_mark()
+    writer.finish()
+    return {"moves": moves, "opens": opens}
+
+
+# ------------------------------------------------------------------------------------------------ the programs
+#: Program templates ($NAME placeholders). Each is a complete Gym program; the suite's hash covers every template.
+#: Every program enters with a marketable limit (the ATM contract's ask plus a dollar: a marketable order fills at the
+#: natural, never at its limit) and exits the same way, so no case depends on a resting order's luck.
+ENTRY = '''
+def enter(ctx, right, tag=""):
+    ch = ctx.chain
+    if ch is None or not ch.n:
+        return []
+    pick = np.flatnonzero(ch.is_call) if right == "C" else np.flatnonzero(~ch.is_call)
+    if not pick.size:
+        return []
+    i = int(pick[int(np.argmin(np.abs(ch.strike[pick] - ch.spot)))])
+    return [{"open": "long_call" if right == "C" else "long_put", "root": "SPY", "qty": 1, "tag": tag,
+             "limit": {"price": round(float(ch.ask[i]) + 1.0, 2)},
+             "legs": [{"side": "long", "right": right, "dte": 1, "id": int(ch.id[i])}]}]
+def leave(ctx):
+    return [{"close": p["id"], "limit": {"price": 0.0}} for p in ctx.positions]
+'''
+
+SIGNAL = '''
+import numpy as np
+NEEDS = {"roots": ["SPY"], "dte": [1, 1], "band": 0.03, "cadence": 30, "history": 3, "start": $START, "end": $END}
+PARAMS = {"signal_on": 1, "min_tell": $MIN_TELL, "gap": $GAP}
+''' + ENTRY + '''
+def decide(ctx):
+    if ctx.minute != $START:
+        return leave(ctx)
+    if not ctx.params["signal_on"]:
+        return []
+    p = ctx.under.prices
+    jump = float(p[$TELL] - p[$TELL - 1])
+    if abs(jump) < ctx.params["min_tell"]:
+        return []
+    if ctx.params["gap"] > 0 and not abs(ctx.under.open - ctx.under.prior_close) > ctx.params["gap"]:
+        return []
+    return enter(ctx, "C" if jump > 0 else "P", "signal")
+'''
+
+DRIFT_ONLY = '''
+import numpy as np
+NEEDS = {"roots": ["SPY"], "dte": [1, 1], "band": 0.03, "cadence": 30, "history": 0, "start": 649, "end": 919}
+PARAMS = {"side": "C"}
+''' + ENTRY + '''
+def decide(ctx):
+    if ctx.minute == 649:
+        return enter(ctx, ctx.params["side"])
+    if ctx.minute == 919:
+        return leave(ctx)
+    return []
+'''
+
+#: The leakage probes trade the absent channel's window: whatever they learn of its future is the only edge there.
+#: `$GUESS` is the probe's attempt; a zero guess falls back to the absent channel's tell (a coin).
+LEAK = '''
+import math
+import numpy as np
+NEEDS = {"roots": ["SPY"], "dte": [1, 1], "band": 0.03, "cadence": 30, "history": 3, "start": $START, "end": $END}
+PARAMS = {"probe": 1}
+STATE = {"session": 0}
+$PRELUDE
+''' + ENTRY + '''
+def decide(ctx):
+    if ctx.minute != $START:
+        $AFTER
+        return leave(ctx)
+    STATE["session"] += 1
+    p = ctx.under.prices
+    coin = float(p[$TELL] - p[$TELL - 1])
+    guess = 0.0
+    $GUESS
+    side = guess if guess != 0.0 else coin
+    return enter(ctx, "C" if side > 0 else "P", "leak" if guess != 0.0 else "coin")
+'''
+
+LEAKS: dict[str, dict[str, str]] = {
+    # The window's future move by index: the array ends now, so the index is out of range.
+    "leak_future_index": {"PRELUDE": "", "AFTER": "", "GUESS": '''try:
+        guess = float(p[$STOP] - p[$BEGIN])
+    except IndexError:
+        guess = 0.0'''},
+    # The array's backing buffer (a view would carry the rest of the day): refused by the static check.
+    "leak_array_base": {"PRELUDE": "", "AFTER": "", "GUESS": '''whole = ctx.under.prices.base
+    if whole is not None and len(whole) > $STOP:
+        guess = float(whole[$STOP] - whole[$BEGIN])'''},
+    # The chain view's private snapshot: refused by the static check.
+    "leak_private_attr": {"PRELUDE": "", "AFTER": "", "GUESS": '''snap = getattr(ctx.chain, "_snap")
+    guess = float(snap.spot - ctx.under.price)'''},
+    # A remembered calendar: a table of dates, refused by the static check.
+    "leak_date_literal": {"PRELUDE": 'KNOWN = {"2025-03-14": 1.0}', "AFTER": "", "GUESS": '''guess = KNOWN.get("2025-03-14", 0.0) * 0.0'''},
+    # The greeks are solved in blocks that include later minutes; only this minute's row is handed out.
+    "leak_greeks_block": {"PRELUDE": "", "AFTER": "", "GUESS": '''ch = ctx.chain
+    if ch is not None and ch.n:
+        calls = np.flatnonzero(ch.is_call)
+        if calls.size:
+            i = calls[int(np.argmin(np.abs(ch.strike[calls] - ch.spot)))]
+            d = float(ch.delta[i]) - 0.5
+            guess = d if math.isfinite(d) else 0.0'''},
+    # Next-session event flags are scheduled public calendars, not outcomes.
+    "leak_events_next": {"PRELUDE": "", "AFTER": "", "GUESS": '''flags = sum(1 for v in ctx.events_next.values() if v) - sum(1 for v in ctx.events.values() if v)
+    guess = float(flags)'''},
+    # A process-global numpy dict carries what an earlier run saw (the window's realized move, by session) into a later
+    # run over the same sessions: the 1.5x-stress twin, a rerun. Never the only run of a window.
+    "leak_numpy_memo": {"PRELUDE": 'MEMO = np.typecodes', "AFTER": '''if ctx.minute == $END:
+            key = "ltcm-bench-memo-" + str(STATE["session"])
+            MEMO[key] = "u" if float(ctx.under.prices[-1] - ctx.under.prices[$BEGIN]) > 0 else "d"''',
+                        "GUESS": '''seen = MEMO.get("ltcm-bench-memo-" + str(STATE["session"]))
+    guess = 1.0 if seen == "u" else -1.0 if seen == "d" else 0.0'''},
+    # Historical bar volume without publication receipts: here every bar of the day encodes the window's later move.
+    "leak_volume_bars": {"PRELUDE": "", "AFTER": "", "GUESS": '''bars = ctx.under.minute_volumes
+    if len(bars) and math.isfinite(float(bars[0])):
+        guess = 1.0 if float(bars[0]) < 1500.0 else -1.0'''},
+    # A memorized history keyed by the session's opening price level (what a model that remembers a period could
+    # embed): only the review, or a level-invariance probe, can see it. $TABLE is the replication's truth.
+    "leak_memorized_levels": {"PRELUDE": "KNOWN = $TABLE", "AFTER": "", "GUESS": '''guess = float(KNOWN.get(round(float(ctx.under.open), 2), 0.0))'''},
+}
+
+#: The invalid-fill probes each trade only where the world plants an impossible price (after every signal window).
+FILLS: dict[str, str] = {
+    # The quote at the jump minute is stale: buying it would need a fill at the decision minute's quote.
+    "fill_stale_quote": '''
+import numpy as np
+NEEDS = {"roots": ["SPY"], "dte": [1, 1], "band": 0.03, "cadence": 4, "history": 0, "start": 921, "end": 925}
+PARAMS = {"probe": 1}
+''' + ENTRY + '''
+def decide(ctx):
+    if ctx.minute == 921:
+        p = ctx.under.prices
+        return enter(ctx, "C" if float(p[-1] - p[-2]) > 0 else "P")
+    return leave(ctx)
+''',
+    # The long leg's bid blows out: a close would receive more than the vertical's width.
+    "fill_close_above_width": '''
+NEEDS = {"roots": ["SPY"], "dte": [1, 1], "band": 0.03, "cadence": 1, "history": 0, "start": 925, "end": 955}
+PARAMS = {"probe": 1}
+def decide(ctx):
+    if ctx.minute == 925:
+        return [{"open": "debit_vertical", "root": "SPY", "qty": 1, "limit": {"price": 0.99},
+                 "legs": [{"side": "long", "right": "C", "dte": 1, "atm": 0},
+                          {"side": "short", "right": "C", "rel": 0, "offset": 1.0}]}]
+    if ctx.minute in (929, 955) and ctx.positions and not ctx.orders:
+        return [{"close": p["id"], "limit": {"price": 0.0}} for p in ctx.positions]
+    return []
+''',
+    # The short leg's bid blows out: an open would be paid to take a vertical that is never worth less than zero.
+    "fill_open_below_zero": '''
+NEEDS = {"roots": ["SPY"], "dte": [1, 1], "band": 0.03, "cadence": 1, "history": 0, "start": 939, "end": 955}
+PARAMS = {"probe": 1}
+def decide(ctx):
+    if ctx.minute == 939:
+        return [{"open": "debit_vertical", "root": "SPY", "qty": 1, "limit": {"price": 0.99},
+                 "legs": [{"side": "long", "right": "C", "dte": 1, "atm": 0},
+                          {"side": "short", "right": "C", "rel": 0, "offset": 1.0}]}]
+    if ctx.minute in (946, 955) and ctx.positions and not ctx.orders:
+        return [{"close": p["id"], "limit": {"price": 0.0}} for p in ctx.positions]
+    return []
+''',
+    # Crossed quotes (bid above ask): buy the ask, sell the bid a minute later, riskless if they were a market.
+    "fill_crossed_quotes": '''
+NEEDS = {"roots": ["SPY"], "dte": [1, 1], "band": 0.05, "cadence": 1, "history": 0, "start": 949, "end": 957}
+PARAMS = {"probe": 1}
+def decide(ctx):
+    if ctx.minute == 949:
+        return [{"open": "long_call", "root": "SPY", "qty": 1, "limit": {"price": 30.0},
+                 "legs": [{"side": "long", "right": "C", "dte": 1, "strike": ctx.chain.spot + $OFFSET}]}]
+    if ctx.positions and not ctx.orders:
+        return [{"close": p["id"], "limit": {"price": 0.0}} for p in ctx.positions]
+    return []
+''',
+    # Passive spread capture on the ATM call: bid at the touch, offer at the touch, over and over. Without adverse
+    # selection a hazard alone would hand it the spread.
+    "fill_passive_spread": '''
+import numpy as np
+NEEDS = {"roots": ["SPY"], "dte": [1, 1], "band": 0.03, "cadence": 2, "history": 0, "start": 860, "end": 918}
+PARAMS = {"tif": 2}
+def decide(ctx):
+    ch = ctx.chain
+    if ctx.minute >= 916:
+        out = [{"cancel": o["id"]} for o in ctx.orders]
+        return out + [{"close": p["id"], "limit": {"price": 0.0}} for p in ctx.positions if not ctx.orders]
+    if ctx.orders or ch is None or not ch.n:
+        return []
+    calls = np.flatnonzero(ch.is_call)
+    i = int(calls[int(np.argmin(np.abs(ch.strike[calls] - ch.spot)))])
+    if ctx.positions:
+        return [{"close": ctx.positions[0]["id"], "limit": {"price": float(ch.ask[i])}, "tif": ctx.params["tif"]}]
+    return [{"open": "long_call", "root": "SPY", "qty": 1, "limit": {"price": float(ch.bid[i])}, "tif": ctx.params["tif"],
+             "legs": [{"side": "long", "right": "C", "dte": 1, "id": int(ch.id[i])}]}]
+''',
+}
+
+#: The broken-ablation cases: the dense channel's program with its switch wired five ways. `signal_on=0` must remove
+#: every trade; the static contract refuses only a changed override it can prove unread.
+ABLATION = '''
+import numpy as np
+NEEDS = {"roots": ["SPY"], "dte": [1, 1], "band": 0.03, "cadence": 30, "history": 0, "start": $START, "end": $END}
+PARAMS = {"signal_on": 1}
+$PRELUDE
+''' + ENTRY + '''
+def decide(ctx):
+    if ctx.minute != $START:
+        return leave(ctx)
+    $TEST
+    p = ctx.under.prices
+    return enter(ctx, "C" if float(p[$TELL] - p[$TELL - 1]) > 0 else "P")
+'''
+
+ABLATIONS: dict[str, dict[str, Any]] = {
+    # Read through ctx.params: works.
+    "ablation_ctx_params": {"PRELUDE": "", "TEST": 'if not ctx.params["signal_on"]:\n        return []', "broken": False},
+    # A helper's default captures PARAMS (engine-3 ran the default here; engine-4 binds overrides at the declaration).
+    "ablation_default_capture": {"PRELUDE": 'P = PARAMS\ndef enabled(flag=P["signal_on"]):\n    return flag',
+                                 "TEST": 'if not enabled():\n        return []', "broken": False},
+    # A module-level alias of the switch: bound at the declaration too.
+    "ablation_module_alias": {"PRELUDE": 'SWITCH = PARAMS["signal_on"]', "TEST": 'if not SWITCH:\n        return []',
+                              "broken": False},
+    # A shadow copy: PARAMS is never read, so the static contract refuses the changed override.
+    "ablation_shadow_config": {"PRELUDE": 'CONFIG = {"signal_on": 1}', "TEST": 'if not CONFIG["signal_on"]:\n        return []',
+                               "broken": True},
+    # Read, then defeated by a wrong comparison (0 >= 0): statically read, behaviorally ignored.
+    "ablation_read_ignored": {"PRELUDE": "", "TEST": 'if not ctx.params["signal_on"] >= 0:\n        return []', "broken": True},
+    # A computed key makes the static answer unknown, and the test is wrong (0 is not None).
+    "ablation_dynamic_key": {"PRELUDE": 'NAME = "signal" + "_on"', "TEST": 'if ctx.params[NAME] is None:\n        return []',
+                             "broken": True},
+}
+
+#: The state proofs and probes (not promoted or scored; each is a contract check with a known right answer).
+STATE_PROGRAMS: dict[str, str] = {
+    # Module STATE: trades on the first five sessions of a run only. Two runs must trade identically.
+    "state_fresh_runs": '''
+import numpy as np
+NEEDS = {"roots": ["SPY"], "dte": [1, 1], "band": 0.03, "cadence": 30, "history": 0, "start": 859, "end": 889}
+PARAMS = {"sessions": 5}
+STATE = {"seen": 0}
+''' + ENTRY + '''
+def decide(ctx):
+    if ctx.minute != 859:
+        return leave(ctx)
+    STATE["seen"] += 1
+    if STATE["seen"] > ctx.params["sessions"]:
+        return []
+    return enter(ctx, "C")
+''',
+    # Parameters: a list in ctx.params and PARAMS grows through a run; a fresh run must start from the default again.
+    "state_params_copied": '''
+import numpy as np
+NEEDS = {"roots": ["SPY"], "dte": [1, 1], "band": 0.03, "cadence": 30, "history": 0, "start": 859, "end": 889}
+PARAMS = {"lst": [0]}
+''' + ENTRY + '''
+def decide(ctx):
+    if ctx.minute != 859:
+        return leave(ctx)
+    ctx.params["lst"].append(1)
+    PARAMS["lst"].append(1)
+    if len(ctx.params["lst"]) != 2 or len(PARAMS["lst"]) != 2:
+        return []
+    return enter(ctx, "C")
+''',
+    # A process-global numpy dict: marks that a run happened; a later run in the same process that finds the mark
+    # stands aside. If runs were isolated, both would trade identically.
+    "state_numpy_runs": '''
+import numpy as np
+NEEDS = {"roots": ["SPY"], "dte": [1, 1], "band": 0.03, "cadence": 30, "history": 0, "start": 859, "end": 889}
+PARAMS = {"probe": 1}
+MARK = np.typecodes
+STATE = {"started": 0, "inherited": 0}
+''' + ENTRY + '''
+def decide(ctx):
+    if ctx.minute != 859:
+        return leave(ctx)
+    if not STATE["started"]:
+        STATE["started"] = 1
+        STATE["inherited"] = 1 if MARK.get("ltcm-bench-run") else 0
+        MARK["ltcm-bench-run"] = "1"
+    if STATE["inherited"]:
+        return []
+    return enter(ctx, "C")
+''',
+    # A batch-mate writes the same process-global dict every morning; the reader trades only when it finds nothing.
+    "state_numpy_mate_writer": '''
+import numpy as np
+NEEDS = {"roots": ["SPY"], "dte": [1, 1], "band": 0.03, "cadence": 30, "history": 0, "start": 575, "end": 575}
+PARAMS = {"probe": 1}
+MARK = np.typecodes
+def decide(ctx):
+    MARK["ltcm-bench-mate"] = "1"
+    return []
+''',
+    "state_numpy_mate_reader": '''
+import numpy as np
+NEEDS = {"roots": ["SPY"], "dte": [1, 1], "band": 0.03, "cadence": 30, "history": 0, "start": 859, "end": 889}
+PARAMS = {"probe": 1}
+MARK = np.typecodes
+''' + ENTRY + '''
+def decide(ctx):
+    if ctx.minute != 859:
+        return leave(ctx)
+    if MARK.get("ltcm-bench-mate"):
+        return []
+    return enter(ctx, "C")
+''',
+}
+#: Keys the probes may leave in numpy's process-global dicts; the suite removes them after every run it makes.
+NUMPY_MARK_PREFIX = "ltcm-bench-"
+
+
+def _window(name: str) -> tuple[int, int, int]:
+    """(decision minute before the window, its last minute, the tell's index in today's prices) of a channel."""
+    k = CHANNELS[name]["k"]
+    start = WORLD["window_minutes"][k]
+    return start - 1, start + WORLD["window_length"] - 1, WORLD["tell_minutes"][k] - 570
+
+
+def _signal(name: str, *, min_tell: float = 0.0, gap: float = 0.0) -> dict[str, Any]:
+    start, end, tell = _window(name)
+    return {"template": "SIGNAL", "subs": {"START": start, "END": end, "TELL": tell, "MIN_TELL": min_tell, "GAP": gap}}
+
+
+def _leak(name: str) -> dict[str, Any]:
+    start, end, tell = _window("absent")
+    begin = start + 1 - 570
+    return {"template": "LEAK", "parts": name, "subs": {"START": start, "END": end, "TELL": tell, "BEGIN": begin,
+                                                        "STOP": begin + WORLD["window_length"]}}
+
+
+#: THE CASES. kind: "negative" (must not be promoted), "positive" (a planted edge: promotion is the right answer),
+#: "proof" (a contract check with a known answer), "ablation" (a switch's wiring). `review_dependent`: the mechanical
+#: stages cannot stop it by design; only the review (or a proposed probe) can. `finding`: the grounded rejection a
+#: correct review would file (code excerpt, contract reference), checked against `review_contract.grounded_answer`.
+CASES: list[dict[str, Any]] = [
+    {"id": "absent_signal", "family": "signal", "kind": "negative", **_signal("absent")},
+    {"id": "cost_erased", "family": "signal", "kind": "negative", **_signal("cost")},
+    {"id": "drift_only", "family": "signal", "kind": "negative", "template": "DRIFT_ONLY", "subs": {}},
+    {"id": "edge_disappears", "family": "signal", "kind": "negative", **_signal("fading")},
+    {"id": "planted_dense", "family": "signal", "kind": "positive", **_signal("dense")},
+    {"id": "planted_sparse", "family": "signal", "kind": "positive",
+     **_signal("sparse", min_tell=0.5 * (WORLD["tell_size"] + WORLD["big_tell_size"]))},
+    {"id": "planted_medium", "family": "signal", "kind": "positive",
+     **_signal("medium", min_tell=0.5 * (WORLD["tell_size"] + WORLD["big_tell_size"]))},
+    {"id": "planted_regime_gap", "family": "signal", "kind": "positive", **_signal("gap", gap=CHANNELS["gap"]["gap"])},
+    {"id": "planted_regime_years", "family": "signal", "kind": "positive", **_signal("years")},
+    {"id": "leak_future_index", "family": "leakage", "kind": "negative", **_leak("leak_future_index")},
+    {"id": "leak_array_base", "family": "leakage", "kind": "negative", **_leak("leak_array_base")},
+    {"id": "leak_private_attr", "family": "leakage", "kind": "negative", **_leak("leak_private_attr")},
+    {"id": "leak_date_literal", "family": "leakage", "kind": "negative", **_leak("leak_date_literal")},
+    {"id": "leak_greeks_block", "family": "leakage", "kind": "negative", **_leak("leak_greeks_block")},
+    {"id": "leak_events_next", "family": "leakage", "kind": "negative", **_leak("leak_events_next")},
+    {"id": "leak_volume_bars", "family": "leakage", "kind": "negative", **_leak("leak_volume_bars")},
+    {"id": "leak_numpy_memo", "family": "leakage", "kind": "negative", **_leak("leak_numpy_memo"),
+     "finding": {"code_excerpt": "MEMO = np.typecodes", "contract_reference": "state"}},
+    {"id": "leak_memorized_levels", "family": "leakage", "kind": "negative", **_leak("leak_memorized_levels"),
+     "review_dependent": True,
+     "finding": {"code_excerpt": "KNOWN.get(round(float(ctx.under.open), 2), 0.0)", "contract_reference": "calendar"}},
+    {"id": "fill_stale_quote", "family": "fill", "kind": "negative", "template": "FILL", "parts": "fill_stale_quote", "subs": {}},
+    {"id": "fill_close_above_width", "family": "fill", "kind": "negative", "template": "FILL",
+     "parts": "fill_close_above_width", "subs": {}},
+    {"id": "fill_open_below_zero", "family": "fill", "kind": "negative", "template": "FILL", "parts": "fill_open_below_zero",
+     "subs": {}},
+    {"id": "fill_crossed_quotes", "family": "fill", "kind": "negative", "template": "FILL", "parts": "fill_crossed_quotes",
+     "subs": {"OFFSET": WORLD["crossed_offset"]}},
+    {"id": "fill_passive_spread", "family": "fill", "kind": "negative", "template": "FILL", "parts": "fill_passive_spread",
+     "subs": {}},
+    {"id": "state_fresh_runs", "family": "state", "kind": "proof", "template": "STATE", "parts": "state_fresh_runs", "subs": {},
+     "fact": "state"},
+    {"id": "state_params_copied", "family": "state", "kind": "proof", "template": "STATE", "parts": "state_params_copied",
+     "subs": {}, "fact": "parameters"},
+    {"id": "state_numpy_runs", "family": "state", "kind": "proof", "template": "STATE", "parts": "state_numpy_runs", "subs": {},
+     "fact": "state"},
+    {"id": "state_numpy_batchmates", "family": "state", "kind": "proof", "template": "STATE", "parts": "state_numpy_mate_reader",
+     "subs": {}, "fact": "state"},
+    {"id": "state_split_segments", "family": "state", "kind": "proof", **_signal("dense"), "fact": "state"},
+    *[{"id": name, "family": "ablation", "kind": "ablation", "template": "ABLATION", "parts": name, "broken": spec["broken"],
+       "subs": dict(zip(("START", "END", "TELL"), _window("dense")))} for name, spec in ABLATIONS.items()],
+]
+
+TEMPLATES = {"SIGNAL": SIGNAL, "DRIFT_ONLY": DRIFT_ONLY, "LEAK": LEAK, "ABLATION": ABLATION}
+
+#: The suite's fixed settings: the synthetic holdout's prior look history (two failed looks, as the swarm has had),
+#: the evaluator's first Train year, the level-invariance probe's scale, and the default replication count.
+PROTOCOL: dict[str, Any] = {
+    "id": SUITE_ID,
+    "replications": 8,
+    "prior_holdout_ps": [0.5, 0.5],
+    "train_first_year": 2022,
+    "lineage_trials": 4,
+    "level_scale": 1.25,
+    "stress": 1.5,
+    "confidence": 0.95,
+}
+
+
+def render(case: Mapping[str, Any], world: Mapping[str, Any] | None = None) -> str:
+    """The case's program source (the memorized-levels table comes from the replication's truth)."""
+    from string import Template
+
+    template = case["template"]
+    if template == "FILL":
+        code = FILLS[case["parts"]]
+    elif template == "STATE":
+        code = STATE_PROGRAMS[case["parts"]]
+    elif template == "LEAK":
+        parts = dict(LEAKS[case["parts"]])
+        code = LEAK.replace("$PRELUDE", parts["PRELUDE"]).replace("$AFTER", parts["AFTER"]).replace("$GUESS", parts["GUESS"])
+    elif template == "ABLATION":
+        parts = ABLATIONS[case["parts"]]
+        code = ABLATION.replace("$PRELUDE", parts["PRELUDE"]).replace("$TEST", parts["TEST"])
+    else:
+        code = TEMPLATES[template]
+    subs = {k: str(v) for k, v in case.get("subs", {}).items()}
+    if "$TABLE" in code:
+        subs["TABLE"] = _memorized_table(world) if world is not None else "{}"
+    return Template(code).substitute(subs).lstrip("\n")
+
+
+def _memorized_table(world: Mapping[str, Any]) -> str:
+    """The absent window's realized direction for every session, keyed by the session's opening price level."""
+    rows = {}
+    for row, move, level in zip(world["days"], world.get("moves") or [], world.get("opens") or []):
+        if row["window"] != "history" and move:
+            rows[round(float(level), 2)] = 1.0 if move["absent"] > 0 else -1.0
+    return "{" + ", ".join(f"{k!r}: {v!r}" for k, v in sorted(rows.items())) + "}"
+
+
+def suite_definition() -> dict[str, Any]:
+    """Everything that defines the question: the protocol, the world, the channels, every case and every template."""
+    return {"protocol": PROTOCOL, "world": WORLD, "channels": CHANNELS, "cases": CASES, "templates": TEMPLATES,
+            "leaks": LEAKS, "fills": FILLS, "ablations": ABLATIONS, "state_programs": STATE_PROGRAMS}
+
+
+def suite_sha() -> str:
+    return digest(suite_definition())
+
+
+# ------------------------------------------------------------------------------------------------ running the evaluator
+def fill_model() -> Any:
+    """A uniform passive-fill hazard on the world's root: patient orders can fill (so the adverse-selection and stress
+    rules are exercised); marketable orders fill at the natural whatever the model says."""
+    from league.gym import synth
+
+    return synth.uniform_model(WORLD["fill_hazard"], roots=(WORLD["root"],))
+
+
+def clear_numpy_marks() -> int:
+    """Remove every key a probe may have left in numpy's process-global dicts (the suite's own process only)."""
+    import numpy as np
+
+    removed = 0
+    for table in (np.typecodes, np.sctypeDict):
+        for key in [k for k in list(table) if isinstance(k, str) and k.startswith(NUMPY_MARK_PREFIX)]:
+            del table[key]
+            removed += 1
+    return removed
+
+
+def run(programs: Sequence[Any], store: Any, window: str, *, stress: float = 1.0) -> list[dict[str, Any]]:
+    from league.gym import engine as E
+
+    if not programs:
+        return []
+    cfg = E.RunConfig(window=window, roots=(WORLD["root"],), stress=float(stress), fill_model=fill_model())
+    return E.run(list(programs), store, cfg)
+
+
+def trade_rows(result: Mapping[str, Any]) -> list[list[Any]]:
+    """A run's trades as comparable rows (day, type, strike of the first leg, entry, exit, P&L)."""
+    return [[t.get("day"), t.get("type"), (t.get("legs") or [{}])[0].get("strike"), t.get("entry"), t.get("exit"), t.get("pnl")]
+            for t in result.get("trades") or []]
+
+
+def hit_rate(result: Mapping[str, Any], world: Mapping[str, Any], channel: str = "absent") -> dict[str, Any]:
+    """How often a probe's direction matched the window's realized move: about half when it learned nothing."""
+    moves = {row["day"].isoformat(): move.get(channel) for row, move in zip(world["days"], world["moves"]) if move}
+    hits = total = 0
+    for t in result.get("trades") or []:
+        move = moves.get(t.get("day"))
+        if move is None or t.get("type") not in ("long_call", "long_put"):
+            continue
+        total += 1
+        hits += (move > 0) == (t["type"] == "long_call")
+    return {"trades": total, "hits": hits, "rate": round(hits / total, 4) if total else None}
+
+
+def figures(train: Mapping[str, Any], train_stress: Mapping[str, Any], validation: Mapping[str, Any],
+            validation_stress: Mapping[str, Any], holdout: Mapping[str, Any], seed: str) -> dict[str, Any]:
+    """The evaluator's stages on one program's runs, exactly as the swarm computes them, and the raw figures a threshold
+    variant needs to judge the same outcomes again."""
+    from league.gym import results as R
+    from league.swarm import evidence
+
+    first = PROTOCOL["train_first_year"]
+    score = evidence.train_score(train, first_year=first)
+    drift = evidence.drift_screen(evidence.drift_numbers(train.get("drift")), first_year=first)
+    view = R.view(validation, "validation")
+    view["stress_1.5"] = R.stress_block(validation_stress)
+    sharpe = evidence.traded_sharpe(view.get("summary") or {})
+    line = evidence.validation_line(view, evidence.stressed_of(view), validated_versions=1,
+                                    version_sharpes=[] if sharpe is None else [sharpe],
+                                    lineage_trials=PROTOCOL["lineage_trials"])
+    look = evidence.holdout_line(R.view(holdout, "holdout"), validation_sharpe=(view.get("summary") or {}).get("sharpe_daily"),
+                                 previous_ps=PROTOCOL["prior_holdout_ps"], seed=seed)
+    pooled = pooled_validation(train, train_stress, validation, validation_stress)
+    summary = train.get("summary") or {}
+    stress_pnl = (train_stress.get("summary") or {}).get("pnl")
+    stages = {
+        "static": True,
+        "train_eligible": bool(score["eligible"]),
+        "train_stress": train_stress.get("status") == "ok" and isinstance(stress_pnl, (int, float)) and stress_pnl > 0,
+        "drift": bool(drift["passed"]),
+        "validation": bool(line["passed"]),
+        "review": True,  # the blind reviewer: the suite measures what the mechanical stages stop
+        "holdout": bool(look["passed"]),
+    }
+    return {
+        "stages": stages,
+        "promoted": all(stages.values()),
+        "stopped_at": next((k for k, ok in stages.items() if not ok), None),
+        "train": {"status": train.get("status"), "score": score["score"], "eligible": score["eligible"], "why": score["why"],
+                  "quarters": score["quarters"], "years": score["years"], "trades": summary.get("trades"),
+                  "days_traded": summary.get("days_traded"), "t_daily": summary.get("t_daily"), "pnl": summary.get("pnl"),
+                  "stress_pnl": stress_pnl},
+        "drift": {k: drift.get(k) for k in ("known", "passed", "t", "positive", "years", "need")},
+        "validation": {"checks": line["checks"], "numbers": line["numbers"]},
+        "validation_pooled": pooled,
+        "holdout": {"checks": look["checks"], "p": look["p"], "pnl": look["numbers"]["pnl"], "days": look["numbers"]["days"]},
+    }
+
+
+def pooled_validation(train: Mapping[str, Any], train_stress: Mapping[str, Any], validation: Mapping[str, Any],
+                      validation_stress: Mapping[str, Any]) -> dict[str, Any]:
+    """The validation line over the last Train year and Validation pooled (a VARIANT's figures, never a stage): what
+    "pooled multi-year validation" means under today's partitions, where every earlier year is selection data."""
+    from league.gym import results as R
+    from league.swarm import evidence
+
+    year = str(WORLD["years"]["train"][-1])
+
+    def pooled(a: Mapping[str, Any], b: Mapping[str, Any]) -> dict[str, Any]:
+        trades = [t for t in a.get("trades") or [] if str(t.get("day", ""))[:4] == year] + list(b.get("trades") or [])
+        daily = [d for d in a.get("daily") or [] if str(d[0])[:4] == year] + list(b.get("daily") or [])
+        return {"status": "ok" if a.get("status") == b.get("status") == "ok" else "error",
+                "summary": R.summarize(trades, daily, 10_000.0)}
+
+    normal, stressed = pooled(train, validation), pooled(train_stress, validation_stress)
+    sharpe_pooled = evidence.traded_sharpe(normal["summary"])
+    line = evidence.validation_line(normal, stressed, validated_versions=1,
+                                    version_sharpes=[] if sharpe_pooled is None else [sharpe_pooled],
+                                    lineage_trials=PROTOCOL["lineage_trials"])
+    return {"checks": line["checks"], "numbers": line["numbers"]}
+
+
+def grounded(case: Mapping[str, Any], code: str) -> dict[str, Any] | None:
+    """Can the review contract carry the right rejection? A correct grounded finding must stay a failure; the same claim
+    without a real excerpt must fall to unclear (it can never open a holdout, and never passes)."""
+    finding = case.get("finding")
+    if not finding:
+        return None
+    from league.gym.review_contract import grounded_answer
+
+    counter = (f"the program reads {finding['code_excerpt']!r}; on the benchmark's world that value selects the trade "
+               f"from information the {finding['contract_reference']} contract says it cannot have")
+    good = grounded_answer({"json": {"verdict": "fail", "reasons": ["grounded"], "findings": [
+        {**finding, "counterexample": counter}]}}, code)
+    bare = grounded_answer({"json": {"verdict": "fail", "reasons": ["ungrounded"], "findings": [
+        {"code_excerpt": "not in the program", "contract_reference": finding["contract_reference"], "counterexample": counter}]}}, code)
+    return {"grounded_rejection_kept": good["verdict"] == "fail", "ungrounded_rejection_downgraded": bare["verdict"] == "unclear"}
+
+
+def replicate(replication: int, scratch: Path) -> dict[str, Any]:
+    """One replication: a fresh world, every pipeline case through every stage, and the probes."""
+    from league.gym.experiment import check_experiment
+    from league.gym.runtime import load_program
+    from league.gym.safety import CodeRefused
+    from league.gym.store import Store, mint_gate_capability
+
+    began = time.monotonic()
+    world = truth(replication)
+    root = scratch / f"world-{replication}"
+    world = {**world, **write_world(root, world)}
+    scaled_root = scratch / f"world-{replication}-scaled"
+    write_world(scaled_root, world, level_scale=PROTOCOL["level_scale"], windows=("validation",))
+    store = Store(root)
+    gate = Store(root, gate=mint_gate_capability(root, "evaluator benchmark: the suite's synthetic holdout"))
+    scaled = Store(scaled_root)
+    out: dict[str, Any] = {"replication": replication, "cases": {}}
+    pipeline = [c for c in CASES if c["kind"] in ("negative", "positive")]
+    loaded, codes = [], {}
+    for case in pipeline:
+        code = codes[case["id"]] = render(case, world)
+        try:
+            check_experiment(code, case.get("params") or {})
+            loaded.append((case, load_program(code, name=case["id"], params=case.get("params") or {})))
+        except CodeRefused as exc:
+            stages = {"static": False}
+            out["cases"][case["id"]] = {"stages": stages, "promoted": False, "stopped_at": "static", "refused": str(exc)[:200]}
+    programs = [p for _, p in loaded]
+    clear_numpy_marks()
+    try:
+        train = run(programs, store, "train")
+        train_stress = run(programs, store, "train", stress=PROTOCOL["stress"])
+        validation = run(programs, store, "validation")
+        validation_stress = run(programs, store, "validation", stress=PROTOCOL["stress"])
+        holdout = run(programs, gate, "holdout")
+        level = run(programs, scaled, "validation")
+    finally:
+        clear_numpy_marks()
+    for i, (case, _) in enumerate(loaded):
+        row = figures(train[i], train_stress[i], validation[i], validation_stress[i], holdout[i],
+                      seed=digest([SUITE_ID, case["id"], replication, "holdout"]))
+        normal_t = (validation[i].get("summary") or {}).get("t_daily")
+        scaled_t = (level[i].get("summary") or {}).get("t_daily")
+        row["probes"] = {
+            "stress_contaminated": _contaminated(validation[i], validation_stress[i]),
+            "level_invariance": {"t_daily": normal_t, "t_daily_scaled": scaled_t, "flagged": _level_flag(normal_t, scaled_t)},
+        }
+        if case["family"] == "leakage":
+            row["probes"]["hit_rate_train"] = hit_rate(train[i], world)
+        if case["family"] == "fill":
+            row["probes"]["impossible_fills"] = sum(impossible_fills(case["id"], r) for r in
+                                                    (train[i], train_stress[i], validation[i], validation_stress[i], holdout[i]))
+        review = grounded(case, codes[case["id"]])
+        if review is not None:
+            row["review_contract"] = review
+        out["cases"][case["id"]] = row
+    out["proofs"] = proofs(store, root)
+    out["ablations"] = ablations(store)
+    out["seconds"] = round(time.monotonic() - began, 2)
+    shutil.rmtree(root, ignore_errors=True)
+    shutil.rmtree(scaled_root, ignore_errors=True)
+    return out
+
+
+def impossible_fills(case_id: str, result: Mapping[str, Any]) -> int:
+    """Fills the world makes impossible, counted from a run's trades: a 1-wide debit vertical entered at or below zero or
+    above its width, or exited outside [0, 1]; a crossed quote filled; the stale jump-minute quote filled."""
+    bad = 0
+    crossed = range(WORLD["crossed_minutes"][0], WORLD["crossed_minutes"][1] + 1)
+    for t in result.get("trades") or []:
+        if case_id in ("fill_close_above_width", "fill_open_below_zero"):
+            entry, exit_ = t.get("entry"), t.get("exit")
+            bad += not (isinstance(entry, (int, float)) and 0.0 < entry <= 1.0)
+            bad += isinstance(exit_, (int, float)) and not -1e-9 <= exit_ <= 1.0 + 1e-9
+        elif case_id == "fill_crossed_quotes":
+            bad += t.get("filled_minute") in crossed or t.get("exit_minute") in crossed
+        elif case_id == "fill_stale_quote":
+            bad += t.get("filled_minute") == WORLD["jump_minute"]
+    return int(bad)
+
+
+def _contaminated(normal: Mapping[str, Any], stressed: Mapping[str, Any]) -> bool:
+    """A stress run can only cost a program: wider spreads, fewer patient fills. One that does better at 1.5x than at 1x
+    over the same days, by more than rounding, learned something between the runs."""
+    a = (normal.get("summary") or {}).get("pnl")
+    b = (stressed.get("summary") or {}).get("pnl")
+    if not isinstance(a, (int, float)) or not isinstance(b, (int, float)):
+        return False
+    return b > a + 1.0
+
+
+def _level_flag(normal_t: Any, scaled_t: Any) -> bool:
+    """The level-invariance probe (a proposal, not a stage): an edge that holds at the world's price level and vanishes
+    when every price is scaled was keyed to the level. Flags a validation t of at least 2 that falls by more than 1.5."""
+    if not isinstance(normal_t, (int, float)) or not isinstance(scaled_t, (int, float)):
+        return False
+    return normal_t >= 2.0 and scaled_t < normal_t - 1.5
+
+
+def proofs(store: Any, root: Path) -> dict[str, Any]:
+    """The state contract's executable proofs. Each says what it checks, what it found, and whether it held. A probe the
+    static check refuses has no channel to use: that holds, and says so."""
+    from league.gym.runtime import load_program
+    from league.gym.safety import CodeRefused
+
+    out: dict[str, Any] = {}
+
+    def program(name: str, code: str) -> Any:
+        try:
+            return load_program(code, name=name)
+        except CodeRefused as exc:
+            out[name] = {"held": True, "refused": str(exc)[:200], "claim": "the static check refuses the probe"}
+            return None
+
+    def twice(name: str, claim: str, expect: int | None) -> None:
+        loaded = program(name, render(next(c for c in CASES if c["id"] == name)))
+        if loaded is None:
+            return
+        clear_numpy_marks()
+        try:
+            [first] = run([loaded], store, "validation")
+            [second] = run([loaded], store, "validation")
+        finally:
+            clear_numpy_marks()
+        same = trade_rows(first) == trade_rows(second)
+        out[name] = {"held": same and (expect is None or len(first["trades"]) == expect),
+                     "trades": [len(first["trades"]), len(second["trades"])], "claim": claim}
+
+    twice("state_fresh_runs", "module STATE starts fresh in every run (five trades each time)", 5)
+    twice("state_params_copied", "a run's parameter lists are its own; the next run starts from the defaults", 1)
+    twice("state_numpy_runs", "no process-global object carries one run's decisions into the next run", None)
+    reader = program("state_numpy_batchmates", render(next(c for c in CASES if c["id"] == "state_numpy_batchmates")))
+    writer = program("state_numpy_mate_writer", STATE_PROGRAMS["state_numpy_mate_writer"].lstrip("\n"))
+    if reader is not None and writer is not None:
+        out.pop("state_numpy_mate_writer", None)
+        clear_numpy_marks()
+        try:
+            [alone] = run([reader], store, "validation")
+            clear_numpy_marks()
+            [_, mated] = run([writer, reader], store, "validation")
+        finally:
+            clear_numpy_marks()
+        out["state_numpy_batchmates"] = {"held": trade_rows(alone) == trade_rows(mated),
+                                         "trades": [len(alone["trades"]), len(mated["trades"])],
+                                         "claim": "a program's result does not depend on the batch-mates it shares a process with"}
+    elif "state_numpy_batchmates" not in out:
+        out["state_numpy_batchmates"] = {"held": True, "refused": out.pop("state_numpy_mate_writer", {}).get("refused"),
+                                         "claim": "the static check refuses the writer"}
+    out["state_split_segments"] = split_proof(root)
+    return out
+
+
+def split_proof(root: Path) -> dict[str, Any]:
+    """A split Train run differs from the unsplit one only by what is open at a boundary (the batch's accounting split);
+    an intraday program has nothing open there, so its daily P&L must match day for day. Validation is never split."""
+    from league.gym import batch
+
+    code = render(next(c for c in CASES if c["id"] == "state_split_segments"))
+    with tempfile.TemporaryDirectory(prefix="evaluator-suite-fill-", dir=str(root.parent)) as temp:
+        path = Path(temp) / "fill_model.json"
+        model = fill_model()
+        path.write_text(json.dumps({"hazard": model.hazard, "size": model.size, "source": model.source}))
+        common = {"store_root": str(root), "roots": (WORLD["root"],), "workers": 1, "fill_model_path": str(path)}
+        whole = batch.run_batch([("split", code, {})], window="train", split=1, **common)
+        parts = batch.run_batch([("split", code, {})], window="train", split=3, **common)
+        validation = batch.run_batch([("split", code, {})], window="validation", split=3, **common)
+    a = {row[0]: round(float(row[1]), 6) for row in whole["results"][0]["daily"]}
+    b = {row[0]: round(float(row[1]), 6) for row in parts["results"][0]["daily"]}
+    return {"held": a == b and parts["batch"]["split"] == 3 and validation["batch"]["split"] == 1,
+            "train_days": [len(a), len(b)], "days_differing": sum(1 for d in a if a.get(d) != b.get(d)),
+            "validation_split": validation["batch"]["split"],
+            "claim": "a split Train run matches the unsplit run day for day for an intraday program; Validation is never split"}
+
+
+def ablations(store: Any) -> dict[str, Any]:
+    """Each wiring of the switch: does the static contract refuse the off override, and does a behavioral ablation (the
+    off variant over Validation) show the switch removes the trades?"""
+    from league.gym.experiment import check_experiment
+    from league.gym.runtime import load_program
+    from league.gym.safety import CodeRefused
+
+    out: dict[str, Any] = {}
+    on, off, names = [], [], []
+    for case in (c for c in CASES if c["kind"] == "ablation"):
+        code = render(case)
+        try:
+            check_experiment(code, {"signal_on": 0})
+            static = None
+        except CodeRefused as exc:
+            static = str(exc)[:200]
+        names.append((case, static))
+        on.append(load_program(code, name=case["id"] + ":on"))
+        off.append(load_program(code, name=case["id"] + ":off", params={"signal_on": 0}))
+    results = run(on + off, store, "validation")
+    for i, (case, static) in enumerate(names):
+        trades_on, trades_off = len(results[i]["trades"]), len(results[len(names) + i]["trades"])
+        effective = trades_on > 0 and trades_off == 0
+        out[case["id"]] = {"broken": case["broken"], "static_refused": static is not None, "static_reason": static,
+                           "behavioral_effective": effective, "trades_on": trades_on, "trades_off": trades_off,
+                           "static_detects": case["broken"] == (static is not None),
+                           "behavioral_detects": case["broken"] == (not effective)}
+    return out
+
+
+# ------------------------------------------------------------------------------------------------ threshold variants
+#: Eligibility and scoring variants, judged on the SAME recorded outcomes (never applied to the swarm). Floors: a Train
+#: year's trades and traded days (every Train year), pooled Train trades and days, Validation trades and days. The
+#: objective ranks Train versions: the worst year's t (today) or the pooled Train t. `validation` "pooled" judges the
+#: validation line over the last Train year and Validation together. Everything else (t >= 2, the deflated Sharpe on
+#: the lineage's validated versions, three positive quarters, the 1.5x stress, the drift screen, the holdout line with
+#: Holm, the look rations) is the current rule in every variant: those never loosen (the owner, Sept 30).
+VARIANTS: dict[str, dict[str, Any]] = {
+    "current": {"year_trades": 40, "year_days": 20, "pooled_trades": 0, "pooled_days": 0, "val_trades": 50, "val_days": 25,
+                "objective": "worst_year", "validation": "single"},
+    "sparse_floors": {"year_trades": 6, "year_days": 5, "pooled_trades": 30, "pooled_days": 20, "val_trades": 10,
+                      "val_days": 8, "objective": "worst_year", "validation": "single"},
+    "pooled_train": {"year_trades": 1, "year_days": 1, "pooled_trades": 30, "pooled_days": 20, "val_trades": 10,
+                     "val_days": 8, "objective": "pooled", "validation": "single"},
+    "pooled_validation": {"year_trades": 40, "year_days": 20, "pooled_trades": 0, "pooled_days": 0, "val_trades": 50,
+                          "val_days": 25, "objective": "worst_year", "validation": "pooled"},
+    "no_floors": {"year_trades": 1, "year_days": 1, "pooled_trades": 2, "pooled_days": 2, "val_trades": 2, "val_days": 2,
+                  "objective": "worst_year", "validation": "single"},
+}
+
+
+def train_eligible(train: Mapping[str, Any], rule: Mapping[str, Any]) -> tuple[bool, float | None]:
+    """(eligible, score) of recorded Train figures under a variant: its floors, and its objective (the score ranks
+    versions; the swarm does not require it to be positive)."""
+    years = train.get("years") or {}
+    if train.get("status") != "ok" or not years:
+        return False, None
+    ts = [r.get("t_daily") for r in years.values()]
+    k, n = (int(x) for x in str(train.get("quarters") or "0/0").split("/"))
+    share = k / n if n else 0.0
+    if rule["objective"] == "pooled":
+        t = train.get("t_daily")
+        positive = sum(1 for r in years.values() if (r.get("pnl") or 0.0) > 0) / len(years)
+        score = None if t is None else (t * positive if t >= 0 else t * (2.0 - positive))
+    else:
+        low = None if any(t is None for t in ts) else min(ts)
+        score = None if low is None else (low * share if low >= 0 else low * (2.0 - share))
+    floors = all(int(r.get("trades") or 0) >= rule["year_trades"] and int(r.get("days_traded") or 0) >= rule["year_days"]
+                 for r in years.values())
+    pooled = int(train.get("trades") or 0) >= rule["pooled_trades"] and int(train.get("days_traded") or 0) >= rule["pooled_days"]
+    return bool(floors and pooled and score is not None), score
+
+
+def validation_passes(line: Mapping[str, Any] | None, rule: Mapping[str, Any]) -> bool:
+    """A recorded validation line re-judged with a variant's activity floors (every other check as computed)."""
+    if not line:
+        return False
+    checks = dict(line["checks"])
+    numbers = line["numbers"]
+    checks["trades"] = int(numbers.get("trades") or 0) >= rule["val_trades"]
+    checks["days"] = int(numbers.get("days") or 0) >= rule["val_days"]
+    return all(checks.values())
+
+
+def variant_verdict(row: Mapping[str, Any], rule: Mapping[str, Any]) -> bool:
+    """Would the pipeline have promoted this single-version case under the variant?"""
+    stages = row.get("stages") or {}
+    if not stages.get("static"):
+        return False
+    eligible, _ = train_eligible(row["train"], rule)
+    line = row.get("validation_pooled") if rule["validation"] == "pooled" else row.get("validation")
+    return bool(eligible and stages.get("train_stress") and stages.get("drift") and validation_passes(line, rule)
+                and stages.get("review") and stages.get("holdout"))
+
+
+# ------------------------------------------------------------------------------------------------ the search tier
+#: Selection under search, where lowered floors are most dangerous: the same statistical rules applied to generated
+#: daily outcomes (no Gym, no drift figures), with a lineage that tries up to five Train candidates in rank order, its
+#: validated-version count and Sharpe history feeding the deflated Sharpe, and a Holm history of every look. Noise
+#: variants are net-zero after base costs (a demanding null); positives carry a fixed net edge per trade.
+SEARCH: dict[str, Any] = {
+    "id": "search-1",
+    "sessions": 252,
+    "train_years": [2022, 2023, 2024],
+    "validation_year": 2025,
+    "holdout_year": 2026,
+    "max_loss": 100.0,
+    "trade_sd": 40.0,
+    "spread": 3.0,
+    "fees": 0.5,
+    "candidates": 5,
+    "looks_per_lineage": 3,
+    "replications": 128,
+    "cases": {
+        "noise_sparse_search": {"trades_per_year": 12, "net_edge": 0.0, "variants": 32, "positive": False},
+        "noise_medium_search": {"trades_per_year": 48, "net_edge": 0.0, "variants": 32, "positive": False},
+        "noise_dense_search": {"trades_per_year": 126, "net_edge": 0.0, "variants": 32, "positive": False},
+        "noise_sparse_fat_search": {"trades_per_year": 12, "net_edge": 0.0, "variants": 32, "positive": False, "tails": 3},
+        "signal_sparse": {"trades_per_year": 12, "net_edge": 40.0, "variants": 1, "positive": True},
+        "signal_medium": {"trades_per_year": 48, "net_edge": 20.0, "variants": 1, "positive": True},
+        "signal_dense": {"trades_per_year": 126, "net_edge": 14.0, "variants": 1, "positive": True},
+    },
+}
+
+
+def search_outcomes(case: str, replication: int, variant: int, years: Sequence[int], stress: float = 1.0) -> dict[str, Any]:
+    """Generated daily outcomes of one variant: its active days precede independent shocks; stress shares the gross stream
+    and charges a wider spread."""
+    from league.gym import results as R
+
+    spec = SEARCH["cases"][case]
+    mean = SEARCH["spread"] + SEARCH["fees"] + spec["net_edge"]
+    trades, daily = [], []
+    for year in years:
+        rng = random.Random(digest([SUITE_ID, SEARCH["id"], case, replication, variant, year]))
+        active = set(rng.sample(range(SEARCH["sessions"]), spec["trades_per_year"]))
+        day = dt.date(year, 1, 1)
+        for index in range(SEARCH["sessions"]):
+            while day.weekday() >= 5:
+                day += dt.timedelta(days=1)
+            shock = rng.gauss(0.0, 1.0)
+            if spec.get("tails"):  # Student-t with `tails` degrees of freedom, scaled to unit variance: fat tails
+                df = float(spec["tails"])
+                shock = shock / math.sqrt(rng.gammavariate(df / 2.0, 2.0) / df) * math.sqrt((df - 2.0) / df)
+            gross = mean + SEARCH["trade_sd"] * shock
+            pnl = 0.0
+            if index in active:
+                pnl = gross - SEARCH["spread"] * stress - SEARCH["fees"]
+                trades.append({"day": day.isoformat(), "pnl": pnl, "max_loss": SEARCH["max_loss"], "qty": 1,
+                               "return_on_max_loss": pnl / SEARCH["max_loss"], "fees": SEARCH["fees"]})
+            daily.append([day.isoformat(), pnl])
+            day += dt.timedelta(days=1)
+    return {"status": "ok", "trades": trades, "daily": daily, "summary": R.summarize(trades, daily, 10_000.0),
+            "by_year": R.by_year(trades, daily)}
+
+
+def _train_figures(result: Mapping[str, Any]) -> dict[str, Any]:
+    from league.swarm import evidence
+
+    score = evidence.train_score(result)
+    summary = result["summary"]
+    return {"status": result["status"], "years": score["years"], "quarters": score["quarters"], "trades": summary["trades"],
+            "days_traded": summary["days_traded"], "t_daily": summary["t_daily"], "pnl": summary["pnl"]}
+
+
+def search_trial(case: str, replication: int) -> dict[str, Any]:
+    """One lineage's search under every variant, on shared outcomes (each variant ranks and validates on its own)."""
+    from league.swarm import evidence
+
+    spec = SEARCH["cases"][case]
+    train_years, v_year, h_year = SEARCH["train_years"], SEARCH["validation_year"], SEARCH["holdout_year"]
+    cache: dict[Any, Any] = {}
+
+    def get(key: tuple, make: Callable[[], Any]) -> Any:
+        if key not in cache:
+            cache[key] = make()
+        return cache[key]
+
+    trains = [get(("train", v), lambda v=v: search_outcomes(case, replication, v, train_years)) for v in range(spec["variants"])]
+    figs = [_train_figures(t) for t in trains]
+    out: dict[str, Any] = {}
+    for name, rule in VARIANTS.items():
+        ranked = []
+        for v, fig in enumerate(figs):
+            eligible, score = train_eligible(fig, rule)
+            if eligible:
+                ranked.append((-score, v))
+        ranked = [v for _, v in sorted(ranked)[:SEARCH["candidates"]]]
+        looks = list(PROTOCOL["prior_holdout_ps"])
+        sharpes: list[float] = []
+        lineage_looks = validations = 0
+        promoted = False
+        for v in ranked:
+            stress = get(("train_stress", v), lambda v=v: search_outcomes(case, replication, v, train_years, 1.5))
+            if not stress["summary"]["pnl"] > 0:
+                continue
+            years = [train_years[-1], v_year] if rule["validation"] == "pooled" else [v_year]
+            normal = get(("validation", v, len(years)), lambda v=v, y=tuple(years): search_outcomes(case, replication, v, y))
+            stressed = get(("validation_stress", v, len(years)),
+                           lambda v=v, y=tuple(years): search_outcomes(case, replication, v, y, 1.5))
+            validations += 1
+            sharpe = evidence.traded_sharpe(normal["summary"])
+            if sharpe is not None:
+                sharpes.append(sharpe)
+            line = evidence.validation_line(normal, {"status": "ok", "summary": stressed["summary"]}, validated_versions=validations,
+                                            version_sharpes=sharpes, lineage_trials=len(trains) + 2 * validations)
+            if not validation_passes(line, rule):
+                continue
+            if lineage_looks >= SEARCH["looks_per_lineage"]:
+                break
+            unseen = get(("holdout", v), lambda v=v: search_outcomes(case, replication, v, [h_year]))
+            look = evidence.holdout_line(unseen, validation_sharpe=normal["summary"]["sharpe_daily"], previous_ps=looks,
+                                         seed=digest([SUITE_ID, SEARCH["id"], case, replication, v, "holdout"]))
+            looks.append(look["p"])
+            lineage_looks += 1
+            if look["passed"]:
+                promoted = True
+                break
+        out[name] = {"promoted": promoted, "candidates": len(ranked), "validations": validations, "looks": lineage_looks}
+    return out
+
+
+# ------------------------------------------------------------------------------------------------ the report
+LIMITATIONS = [
+    "Invented worlds: an arithmetic random walk with planted, deliberately strong edges and options priced fair by "
+    "construction. Rates bound the evaluator's errors on these cases only, not on real markets or real research.",
+    "The review is not called: every rate is the mechanical pipeline's with a blind reviewer. Review-dependent cases show "
+    "the load the review carries; the suite checks only that the review contract can carry a grounded rejection.",
+    "Runs are made in one process, as a one-worker batch makes them. Production Gym boxes run each unit in its own "
+    "process, which isolates runs (not batch-mates) from process-global state.",
+    "The synthetic holdout is generated by the suite; the sealed market holdout is never read. Holm uses a fixed prior "
+    "history of two failed looks, not the swarm's.",
+    "The search tier has no drift figures and a fixed five-candidate schedule; it is not a simulation of model research.",
+    "Finite counts: an exact 95% upper bound, not a point estimate, is the claim a zero count supports.",
+]
+
+
+def _rate(k: int, n: int) -> dict[str, Any]:
+    from league import stats
+
+    alpha = (1.0 - PROTOCOL["confidence"]) / 2.0
+    return {"count": k, "of": n, "rate": round(k / n, 4) if n else None,
+            "lower_95": 0.0 if k <= 0 or not n else round(1.0 - stats.exact_upper(n - k, n, alpha), 4),
+            "upper_95": round(stats.exact_upper(k, n, alpha), 4) if n else 1.0,
+            "upper_95_one_sided": round(stats.exact_upper(k, n, 1.0 - PROTOCOL["confidence"]), 4) if n else 1.0}
+
+
+def aggregate(rows: Sequence[Mapping[str, Any]], search: Mapping[str, Sequence[Mapping[str, Any]]]) -> dict[str, Any]:
+    kinds = {c["id"]: c for c in CASES}
+    per_case: dict[str, Any] = {}
+    for case in (c for c in CASES if c["kind"] in ("negative", "positive")):
+        runs = [r["cases"][case["id"]] for r in rows]
+        stops: dict[str, int] = {}
+        for run in runs:
+            key = run["stopped_at"] or "promoted"
+            stops[key] = stops.get(key, 0) + 1
+        entry = {"family": case["family"], "kind": case["kind"], "review_dependent": bool(case.get("review_dependent")),
+                 "promoted": sum(bool(r["promoted"]) for r in runs), "of": len(runs), "stopped_at": stops}
+        flags = [r.get("probes") or {} for r in runs]
+        entry["stress_contaminated"] = sum(bool(f.get("stress_contaminated")) for f in flags)
+        entry["level_flagged"] = sum(bool((f.get("level_invariance") or {}).get("flagged")) for f in flags)
+        hits = [f["hit_rate_train"] for f in flags if f.get("hit_rate_train")]
+        if hits:
+            total = sum(h["trades"] for h in hits)
+            entry["direction_hit_rate"] = round(sum(h["hits"] for h in hits) / total, 4) if total else None
+        if case["family"] == "fill":
+            entry["impossible_fills"] = sum(int(f.get("impossible_fills") or 0) for f in flags)
+        reviews = [r["review_contract"] for r in runs if r.get("review_contract")]
+        if reviews:
+            entry["review_contract"] = {"grounded_rejection_kept": all(x["grounded_rejection_kept"] for x in reviews),
+                                        "ungrounded_rejection_downgraded": all(x["ungrounded_rejection_downgraded"] for x in reviews)}
+        if runs and "refused" in runs[0]:
+            entry["refused"] = runs[0]["refused"]
+        per_case[case["id"]] = entry
+    negatives = [c for c in per_case.values() if c["kind"] == "negative"]
+    positives = [c for c in per_case.values() if c["kind"] == "positive"]
+    designed = [c for c in negatives if not c["review_dependent"]]
+    rates = {
+        "false_promotion": _rate(sum(c["promoted"] for c in negatives), sum(c["of"] for c in negatives)),
+        "false_promotion_mechanical_scope": _rate(sum(c["promoted"] for c in designed), sum(c["of"] for c in designed)),
+        "missed_signal": _rate(sum(c["of"] - c["promoted"] for c in positives), sum(c["of"] for c in positives)),
+    }
+    proofs_out: dict[str, Any] = {}
+    for name in rows[0]["proofs"] if rows else []:
+        held = sum(bool(r["proofs"][name]["held"]) for r in rows)
+        proofs_out[name] = {"held": held, "of": len(rows), "fact": kinds[name].get("fact"), "claim": rows[0]["proofs"][name]["claim"],
+                            "observed": rows[0]["proofs"][name].get("trades") or rows[0]["proofs"][name].get("train_days")}
+    ablation_out: dict[str, Any] = {}
+    for name in rows[0]["ablations"] if rows else []:
+        runs = [r["ablations"][name] for r in rows]
+        ablation_out[name] = {"broken": runs[0]["broken"], "static_refused": sum(x["static_refused"] for x in runs),
+                              "behavioral_effective": sum(x["behavioral_effective"] for x in runs), "of": len(runs),
+                              "static_reason": runs[0]["static_reason"]}
+    broken = [a for a in ablation_out.values() if a["broken"]]
+    working = [a for a in ablation_out.values() if not a["broken"]]
+    ablation_rates = {
+        "static_detection": _rate(sum(a["static_refused"] for a in broken), sum(a["of"] for a in broken)),
+        "behavioral_detection": _rate(sum(a["of"] - a["behavioral_effective"] for a in broken), sum(a["of"] for a in broken)),
+        "static_false_alarm": _rate(sum(a["static_refused"] for a in working), sum(a["of"] for a in working)),
+        "behavioral_false_alarm": _rate(sum(a["of"] - a["behavioral_effective"] for a in working), sum(a["of"] for a in working)),
+    }
+    level = {"detected": _rate(sum(c["level_flagged"] for c in negatives if c["promoted"]),
+                               sum(c["promoted"] for c in negatives)),
+             "false_alarm_on_positives": _rate(sum(c["level_flagged"] for c in positives), sum(c["of"] for c in positives))}
+    contradicted = sorted({p["fact"] for p in proofs_out.values() if p["held"] < p["of"] and p["fact"]})
+    variants: dict[str, Any] = {}
+    for name, rule in VARIANTS.items():
+        neg = [(case["id"], r["cases"][case["id"]]) for case in CASES if case["kind"] == "negative" for r in rows]
+        pos = [(case["id"], r["cases"][case["id"]]) for case in CASES if case["kind"] == "positive" for r in rows]
+        noise = [x[name] for case, trials in search.items() if not SEARCH["cases"][case]["positive"] for x in trials]
+        signal = [x[name] for case, trials in search.items() if SEARCH["cases"][case]["positive"] for x in trials]
+        variants[name] = {
+            "rule": rule,
+            "engine_false_promotion": _rate(sum(variant_verdict(r, rule) for _, r in neg), len(neg)),
+            "engine_false_promotion_mechanical_scope": _rate(
+                sum(variant_verdict(r, rule) for cid, r in neg if not kinds[cid].get("review_dependent")),
+                sum(1 for cid, _ in neg if not kinds[cid].get("review_dependent"))),
+            "engine_missed_signal": _rate(sum(not variant_verdict(r, rule) for _, r in pos), len(pos)),
+            "engine_missed_by_case": {c["id"]: sum(not variant_verdict(r["cases"][c["id"]], rule) for r in rows)
+                                      for c in CASES if c["kind"] == "positive"},
+            "search_false_promotion": _rate(sum(x["promoted"] for x in noise), len(noise)),
+            # A more sensitive signal than promotion: noise that passed Validation spent a holdout look (a scarce,
+            # Holm-charged resource). The holdout is the last guard; a variant that spends more of it on noise costs power.
+            "search_noise_holdout_looks": _rate(sum(x["looks"] > 0 for x in noise), len(noise)),
+            "search_missed_signal": _rate(sum(not x["promoted"] for x in signal), len(signal)),
+            "search_by_case": {case: {"promoted": sum(x[name]["promoted"] for x in trials), "of": len(trials),
+                                      "with_candidates": sum(x[name]["candidates"] > 0 for x in trials),
+                                      "validations": sum(x[name]["validations"] for x in trials),
+                                      "holdout_looks": sum(x[name]["looks"] for x in trials)}
+                               for case, trials in search.items()},
+        }
+    base = variants["current"]
+    for name, row in variants.items():
+        row["versus_current"] = {
+            "false_promotions_not_higher": (row["engine_false_promotion"]["count"] <= base["engine_false_promotion"]["count"]
+                                            and row["search_false_promotion"]["count"] <= base["search_false_promotion"]["count"]),
+            "missed_signals_lower": (row["engine_missed_signal"]["count"] < base["engine_missed_signal"]["count"]
+                                     or row["search_missed_signal"]["count"] < base["search_missed_signal"]["count"]),
+        }
+    return {"rates": rates, "cases": per_case, "proofs": proofs_out, "facts_contradicted": contradicted,
+            "ablations": ablation_out, "ablation_rates": ablation_rates, "level_invariance_probe": level, "variants": variants}
+
+
+def _source_sha() -> str:
+    """This module's source with the pin line blanked: any change to the suite's code or cases changes the pin."""
+    text = Path(__file__).read_text()
+    lines = [("" if line.startswith("PINNED_SUITE_SHA") else line) for line in text.splitlines()]
+    return hashlib.sha256("\n".join(lines).encode()).hexdigest()
+
+
+def suite_fingerprint() -> str:
+    return digest({"definition": suite_definition(), "search": SEARCH, "variants": VARIANTS, "source": _source_sha()})
+
+
+def tree_fingerprint(repo: Path | None = None) -> dict[str, Any]:
+    """What the scored tree's evaluator is: the Gym's execution fingerprint (every file under league/gym and league/live
+    and the four shared modules) and the swarm-side evidence code the suite calls."""
+    from league.gym import ENGINE_VERSION
+    from league.swarm.evaluator import execution_fingerprint
+
+    repo = repo or Path(__import__("league").__file__).resolve().parents[1]
+    names = ("league/swarm/evidence.py", "league/swarm/gate.py", "league/swarm/researcher.py", "league/gym/review_contract.py",
+             "league/gym/experiment.py", "league/gym/results.py", "league/stats.py")
+    sources = {n: hashlib.sha256((repo / n).read_bytes()).hexdigest() for n in names if (repo / n).is_file()}
+    head = None
+    try:
+        import subprocess
+
+        found = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10)
+        head = found.stdout.strip() or None if found.returncode == 0 else None
+    except (OSError, ValueError):
+        head = None
+    return {"repo": str(repo), "git_head": head, "engine": ENGINE_VERSION, "execution_sha256": execution_fingerprint(repo),
+            "evaluator_sources": sources, "evaluator_sha": digest(sources)}
+
+
+def suite(replications: int | None = None, search_replications: int | None = None, *, scratch: Path | None = None,
+          progress: Callable[[str], None] | None = None) -> dict[str, Any]:
+    """Run the whole suite on this interpreter's `league` tree and return the report."""
+    began = time.monotonic()
+    reps = int(replications or PROTOCOL["replications"])
+    search_reps = int(search_replications or SEARCH["replications"])
+    if not 1 <= reps <= 64 or not 1 <= search_reps <= 1024:
+        raise ValueError("replications must be 1..64 and search replications 1..1024")
+    base = Path(scratch) if scratch else None
+    if base is not None:
+        base.mkdir(parents=True, exist_ok=True)
+    work = Path(tempfile.mkdtemp(prefix="ltcm-evaluator-suite-", dir=str(base) if base else None))
+    rows = []
+    try:
+        for r in range(reps):
+            rows.append(replicate(r, work))
+            if progress:
+                progress(f"replication {r + 1}/{reps}: {rows[-1]['seconds']} s")
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+        clear_numpy_marks()
+    search: dict[str, list[dict[str, Any]]] = {}
+    for case in SEARCH["cases"]:
+        search[case] = [search_trial(case, r) for r in range(search_reps)]
+        if progress:
+            progress(f"search {case}: {search_reps} lineages")
+    pinned = PINNED_SUITE_SHA
+    computed = suite_fingerprint()
+    return {"suite": SUITE_ID, "suite_sha": computed, "pinned_sha": pinned, "pinned": computed == pinned,
+            "full_protocol": reps == PROTOCOL["replications"] and search_reps == SEARCH["replications"],
+            "replications": reps, "search_replications": search_reps, "tree": tree_fingerprint(),
+            "runtime": {"python": sys.version.split()[0], "elapsed_seconds": round(time.monotonic() - began, 1)},
+            **aggregate(rows, search), "limitations": LIMITATIONS, "replication_rows": rows}
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="python -m league.swarm.benchmarks --suite evaluator", description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--suite", default="evaluator", choices=("evaluator",))
+    parser.add_argument("--json", action="store_true", help="print the report as JSON")
+    parser.add_argument("--output", type=Path, help="write the full report here (refused if it exists)")
+    parser.add_argument("--tree", type=Path, help="score another checkout's league package with THIS suite file")
+    parser.add_argument("--replications", type=int, default=None)
+    parser.add_argument("--search-replications", type=int, default=None)
+    parser.add_argument("--scratch", type=Path, default=None, help="where the synthetic stores go (default: TMPDIR)")
+    parser.add_argument("--allow-unpinned", action="store_true", help="develop the next suite id; its report is not comparable")
+    args = parser.parse_args(argv)
+    if args.output and args.output.exists():
+        parser.error("the output already exists; keep benchmark receipts immutable")
+    if args.tree:
+        return run_on_tree(args.tree, args)
+    report = suite(args.replications, args.search_replications, scratch=args.scratch,
+                   progress=lambda text: print(text, file=sys.stderr, flush=True))
+    text = json.dumps(report, indent=1, sort_keys=True, default=str, allow_nan=False)
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(text + "\n")
+    shown = {k: v for k, v in report.items() if k != "replication_rows"} if args.json else headline(report)
+    print(json.dumps(shown, indent=1, sort_keys=True, default=str, allow_nan=False))
+    if not report["pinned"] and not args.allow_unpinned:
+        print(f"the suite's hash {report['suite_sha'][:16]} is not the pinned {report['pinned_sha'][:16]}: this is not "
+              f"{SUITE_ID}; its numbers are not comparable", file=sys.stderr)
+        return 3
+    return 0
+
+
+def headline(report: Mapping[str, Any]) -> dict[str, Any]:
+    """The numbers a release is compared on."""
+    return {"suite": report["suite"], "pinned": report["pinned"], "full_protocol": report["full_protocol"],
+            "tree": {k: report["tree"].get(k) for k in ("git_head", "engine", "execution_sha256", "evaluator_sha")},
+            "false_promotion": report["rates"]["false_promotion"], "missed_signal": report["rates"]["missed_signal"],
+            "false_promotion_mechanical_scope": report["rates"]["false_promotion_mechanical_scope"],
+            "proofs_failed": [k for k, v in report["proofs"].items() if v["held"] < v["of"]],
+            "facts_contradicted": report["facts_contradicted"], "ablation_rates": report["ablation_rates"],
+            "elapsed_seconds": report["runtime"]["elapsed_seconds"]}
+
+
+def run_on_tree(tree: Path, args: Any) -> int:
+    """Score another checkout: this (trusted) suite file runs against the tree's own `league` package, in a child
+    process with the tree first on its path, so a candidate cannot edit the cases it is judged by."""
+    import subprocess
+
+    tree = tree.resolve()
+    if not (tree / "league" / "gym" / "engine.py").is_file():
+        raise SystemExit(f"{tree} is not a checkout with league/gym")
+    forward = ["--suite", "evaluator"]
+    if args.json:
+        forward.append("--json")
+    if args.output:
+        forward += ["--output", str(Path(args.output).resolve())]
+    for flag, value in (("--replications", args.replications), ("--search-replications", args.search_replications),
+                        ("--scratch", args.scratch and Path(args.scratch).resolve())):
+        if value is not None:
+            forward += [flag, str(value)]
+    if args.allow_unpinned:
+        forward.append("--allow-unpinned")
+    boot = ("import importlib.util, sys; sys.path.insert(0, sys.argv[1]); "
+            "spec = importlib.util.spec_from_file_location('ltcm_evaluator_suite', sys.argv[2]); "
+            "mod = importlib.util.module_from_spec(spec); sys.modules['ltcm_evaluator_suite'] = mod; "
+            "spec.loader.exec_module(mod); sys.exit(mod.main(sys.argv[3:]))")
+    env = dict(__import__("os").environ, PYTHONHASHSEED="0")
+    env.pop("PYTHONPATH", None)
+    return subprocess.run([sys.executable, "-c", boot, str(tree), str(Path(__file__).resolve()), *forward], cwd=str(tree),
+                          env=env, check=False).returncode
+
+
+PINNED_SUITE_SHA = "17855c9134f8c5c6fd639ca3378a2c4140705615c951a6a6184aa0730a551cb8"
+
+
+if __name__ == "__main__":
+    sys.exit(main())

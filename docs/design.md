@@ -337,7 +337,16 @@ diagnostician.
   not move.
 - **The leakage alarm:** once there are at least 10 holdout looks, if more than 30% pass, the gate
   stops until leakage is ruled out.
-- The lines may be tightened on evidence; loosening one is the owner's decision.
+- **The evaluator benchmark suite** (`league/swarm/evaluator_benchmarks.py`, Sept 30, 2026) scores each release's
+  evaluator on known-answer synthetic programs run through the real Gym engine and the real lines: absent, cost-erased,
+  drift-only and fading controls, planted dense, sparse and regime edges, leakage attempts through the ctx, impossible
+  fills, state carried between runs and batch-mates, and broken parameter ablations. It reports the false-promotion and
+  missed-signal rates with exact bounds (`python -m league.swarm.benchmarks --suite evaluator --json`; `--tree` scores
+  another checkout with the trusted suite file). The suite is pinned by hash; its first results and the threshold
+  variants it measured are `docs/benchmarks/EVALUATOR_1.md`. It never changes a threshold.
+- The lines may be tightened on evidence; loosening one is the owner's decision. Eligibility and scoring rules change only
+  when fixed benchmarks show false promotions do not rise and missed signals fall (the owner, Sept 30, 2026); the sealed
+  holdout, the multiple-testing control and the forward requirement never loosen.
 
 ## Money
 
