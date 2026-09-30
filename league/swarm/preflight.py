@@ -589,6 +589,8 @@ def run(code: str, params: Mapping[str, Any] | None, decider: Any, *, universe: 
         finally:
             _drop(decider, again_key)
         calls += int(again.get("calls") or 0)
+        if again["status"] == "inconclusive":  # it could not say there (its deadline, a timeout, the sandbox)
+            return _answer("inconclusive", f"on {label}: {again.get('why')}", calls=calls)
         if again["status"] != "refused" or _kind(again.get("error")) != _kind(verdict.get("error")):
             because = ("it may turn on how many contracts the chain lists, which the Gym's store decides" if regime == "sparse"
                        else "it may turn on the market's numbers (a quote's width, a vol, a size, a price), which are made "

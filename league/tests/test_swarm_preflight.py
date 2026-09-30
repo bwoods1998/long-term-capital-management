@@ -407,6 +407,12 @@ class Preflight(unittest.TestCase):
             self.assertEqual(out["status"], "inconclusive", (condition, out))
             self.assertIn(spared, out["why"], condition)
             self.assertIn("KeyError: 'seen'", out["why"], condition)
+        # Where another market could not say (there, an error its numbers cause), neither can the preflight: its reason.
+        out = self.check(program("c = ctx.chain\nif (c.spread <= 0.0101).all():\n    k = c.strike[c.strike < 0][0]\n"
+                                 "for pid, p in ctx.positions.items():\n    pass\nreturn []", head=head))
+        self.assertEqual(out["status"], "inconclusive", out)
+        self.assertIn("one tick wide", out["why"])
+        self.assertIn("IndexError", out["why"])
         # A misuse on any market is refused, on every one of them.
         out = self.refused(program("for pid, p in ctx.positions.items():\n    pass\nreturn []"))
         for words in ("sparser listing", "one tick wide", "three times as wide"):
