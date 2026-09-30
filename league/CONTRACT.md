@@ -122,6 +122,10 @@ does not establish information parity. Live persists first observations across r
 complete prior sessions; those sums are not labeled finalized exchange totals. Daily endpoint totals
 include extended-hours volume and are not substituted. XSP/SPXW inputs never borrow SPY volume.
 Volume availability is data coverage, not evidence of edge; it can differ between replay and live.
+Before choosing a hypothesis, read INPUT AVAILABILITY in your family brief. It describes locally
+cached Train metadata for the exact running Gym image; raw column coverage is separate from usable
+point-in-time inputs. A missing, invalid or different-image card means unknown coverage, never zero
+or permission to use finalized history. Current historical strategy volume remains unavailable.
 
 Account: `ctx.positions` (dicts: `id`, `type`, `root`, `qty`, `legs` [`id` (-1 when not in today's
 chain), `dte`, `strike`, `is_call`, `side`, `ratio`], `entry`, `mark`, `natural`, `pnl`, `max_loss`,

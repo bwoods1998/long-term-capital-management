@@ -112,6 +112,9 @@ class SwarmStep:
         self.failed_rows: dict[str, dict[str, Any]] = {}
         self.nightly = NightlySupervisor(self.root, code_dir=self.code_dir, python=self.python)
         self.pool_cleanup = StoppedPoolCleanup(self.root)
+        from .harness_runtime import HarnessSupervisor
+
+        self.harness = HarnessSupervisor(self.root, code_dir=self.code_dir, python=self.python, clock=self.clock)
 
     # ------------------------------------------------------------------ the House calls this
     def tick(self, house: Any = None, open_for_business: bool = True) -> dict[str, Any]:
@@ -120,6 +123,10 @@ class SwarmStep:
         out: dict[str, Any] = {"process": self.supervise(may_start=open_for_business)}
         out["pool_cleanup"] = self.pool_cleanup.tick(stopped=(
             (not out["process"].get("enabled") or bool(self.stopped())) and not out["process"].get("running")))
+        try:
+            out["harness"] = self.harness.tick()
+        except Exception as exc:  # the separate observer never interrupts trading, reconciliation or swarm supervision
+            out["harness"] = {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
         try:
             out["nightly"] = self.nightly.tick(may_start=open_for_business)
         except Exception as exc:  # the collector never blocks the House's trading/marking path
