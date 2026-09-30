@@ -1005,6 +1005,15 @@ never evidence.
   `health.json` `options_live.incubator.pins.refused` says why each passing cohort was not pinned.
 - **Keep (L2').** While the switch is on, a cohort whose first look passed keeps practising past its observation target
   to its bounded window (at most 8), so its re-checks go on. Off, the practice league's own rule is unchanged.
+  - **A failed read never ends an incubation.** Sometimes today's check cannot be taken: the cohorts or a cohort's
+    record cannot be read, or the first looks raise. Then the last keep's cohorts that no re-check ended stay kept, and
+    so does an active cohort whose first look could not read its record.
+  - Such a cohort is never pinned on the untaken check. `pins.refused` says so, and a private `live.incubator` event
+    (`unread`, `keep_carried`) and one alert a day record it.
+  - The keep is marked `unread` (health `keep_carried`), and the next families pass, 5 minutes later, takes the checks
+    again. Pins are still taken once a session.
+  - The first pass of a session day that cannot pin (the bands cannot be read, or the pins raise) is retried every 5
+    minutes, not every minute.
 - **The caps** (`money.plan_incubator`, with the tally read afresh from `live.sqlite` at every open). They live in the
   House only: the gateway cannot tell routes apart, so its caps are the backstop.
   - One lot; at most $50 a structure; at most $50 held or working per family.

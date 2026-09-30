@@ -283,6 +283,7 @@ class OptionsLive:
         self._account_at: float | None = None
         self.flows: M.FlowBook | None = None
         self._families_at = float("-inf")
+        self._session_pass_day: str | None = None   # the session day of the last families pass run in session
         self._activities_at = float("-inf")
         self._activities_changed = False
         self._stock_held = False
@@ -730,6 +731,8 @@ class OptionsLive:
         if not force and now - self._families_at < FAMILIES_EVERY and not self._observe_repin_due(now):
             return
         self._families_at = now
+        if self._in_session(now):
+            self._session_pass_day = ny(now).date().isoformat()   # `_observe_repin_due`: this session day's pass ran
         try:
             rows = self.families.read()
         except Exception as exc:  # noqa: BLE001 - the live set stays as it was
@@ -738,15 +741,20 @@ class OptionsLive:
         # THE INCUBATOR (`league/live/incubator.py`), in this order: the first looks at the session's first pass (before
         # the practice league's completions), then L2' (the passed cohorts it keeps practising), then the practice league,
         # then the D2 and tuition rows, then its pins (which yield to them).
+        # A read that fails leaves today's checks untaken: `keep` then carries the last keep's cohorts (never pinned on
+        # it) and is not settled (`checked`), so the next families pass takes the checks again.
         keep: frozenset = frozenset()
         if self.incubator is not None:
             today, in_session = ny(now).date().isoformat(), self._in_session(now)
             try:
-                if in_session and self.incubator.due(today):
-                    self.incubator.judge(today)
+                if in_session and (self.incubator.due(today) or not self.incubator.checked(today)):
+                    self.incubator.judge(today)           # never raises: a failure is today's checks untaken
+            except Exception as exc:  # noqa: BLE001 - `keep` below still carries the last keep forward
+                self.alert("warning", f"live: the incubator's first looks failed ({type(exc).__name__}: {str(exc)[:160]})")
+            try:
                 keep = self.incubator.keep(today, in_session=in_session)
             except Exception as exc:  # noqa: BLE001 - the practice league goes on with its own rule
-                self.alert("warning", f"live: the incubator's first looks failed ({type(exc).__name__}: {str(exc)[:160]})")
+                self.alert("warning", f"live: the incubator's keep failed ({type(exc).__name__}: {str(exc)[:160]})")
                 keep = frozenset()
         observed = self._observe_wanted(now, keep=keep)
         equity = self.sizing_equity()
@@ -843,11 +851,12 @@ class OptionsLive:
 
     def _observe_repin_due(self, now: float) -> bool:
         """The session's first sync must pin the observe band (and take the incubator's first looks and pins) at once, not
-        up to `FAMILIES_EVERY` later."""
+        up to `FAMILIES_EVERY` later. The incubator's alone asks once a session day: after a pass that could not pin
+        (the bands unreadable, its pins raised) the next is `FAMILIES_EVERY` later, never every minute."""
         if not self._in_session(now):
             return False
         today = ny(now).date().isoformat()
-        if self.incubator is not None and self.incubator.due(today):
+        if self.incubator is not None and self.incubator.due(today) and self._session_pass_day != today:
             return True
         if not self.switches()["observe"]:
             return False

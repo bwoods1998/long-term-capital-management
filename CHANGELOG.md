@@ -107,7 +107,8 @@ The House runs Release A, `20260930T200604Z-3bf48c3f8f9f` (main `777b894f`).
 
     Every families pass checks again, and a failure sends the instance to exits only.
   - **Keep (L2').** While the switch is on, a cohort whose first look passed keeps practising past its observation
-    target, to its bounded window. That is at most 8 cohorts.
+    target, to its bounded window. That is at most 8 cohorts. A failed read never ends an incubation: the last keep's
+    cohorts stay kept (never pinned on the untaken check), and the next families pass takes the checks again.
   - **The caps**, in the House only (`money.plan_incubator`). The gateway cannot tell routes apart, so its own caps are
     the backstop.
     - One lot of at most $50 a structure, and $50 held or working per family.
