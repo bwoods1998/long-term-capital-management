@@ -357,7 +357,7 @@ def _write(path: Path, value: Any) -> None:
     os.replace(tmp, path)
 
 
-def check_state(root: Path) -> None:
+def check_state(root: Path, *, allow_scratch: bool = False) -> None:
     """Before any engine constructor: reject real state and every non-observe account."""
     if not root.exists():
         return
@@ -367,7 +367,9 @@ def check_state(root: Path) -> None:
                "observe.sqlite-wal", "observe.sqlite-shm", "swarm.json", "live-shadow.json.tmp",
                "progress.json", "progress.json.tmp"}
     for path in root.rglob("*"):
-        if path.is_symlink() or not path.is_file() or path.name not in allowed or path.stat().st_nlink != 1:
+        scratch = allow_scratch and re.fullmatch(r"live-shadow\.json\.[a-z0-9_]{8}\.tmp", path.name)
+        if (path.is_symlink() or not path.is_file() or (path.name not in allowed and not scratch)
+                or path.stat().st_nlink != 1 or path.stat().st_uid != os.getuid()):
             raise PracticeError("unrecognized, linked or nonregular state file")
     dbpath = root / "live.sqlite"
     if dbpath.exists():
@@ -501,7 +503,7 @@ def run(input_path: Path, output: Path) -> dict:
         if old and digest(_json((root / "input.json").read_bytes())) != provenance["input_sha256"]:
             raise PracticeError("the frozen input changed")
         for name in ("state", "attempt"):
-            check_state(root / name)
+            check_state(root / name, allow_scratch=name == "attempt" and bool(old) and old.get("status") == "running")
         if old and old.get("status") == "complete":
             report = _json((root / "report.json").read_bytes())
             if digest(report) != old.get("report_sha256"):

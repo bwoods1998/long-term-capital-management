@@ -124,8 +124,11 @@ input_sha256, use}`. An interrupted run has status `running`, never `complete`.
 On restart with identical frozen identities, the runner verifies the private
 directory and discards only its previous checked scratch attempt, then rebuilds
 the input from frame zero. It does not resume partially committed SQLite/JSON
-books or preserve a strategy's interrupted in-memory globals. Successful recovery
-records `recovery: "replayed_from_start"`. No previous attempt's trades are added
+books or preserve a strategy's interrupted in-memory globals. Recovery also
+discards single-link, owner-owned files matching the engine's exact
+`live-shadow.json.<eight lowercase/digit/underscore characters>.tmp` scratch name,
+only inside a marked incomplete attempt. Unknown files still cause refusal.
+Successful recovery records `recovery: "replayed_from_start"`. No previous attempt's trades are added
 to the rebuilt aggregate. Identical completed input returns its hash-verified
 cached result without running strategies again. Modified frozen input, completed
 state, report, or evaluator identity is refused. Use a new output for a new run.

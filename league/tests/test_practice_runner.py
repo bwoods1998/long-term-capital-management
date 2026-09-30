@@ -249,6 +249,12 @@ class State(Case):
             with self.assertRaises(KeyboardInterrupt):
                 P.run(self.input, self.output)
         self.assertEqual(json.loads((self.output / "attempt" / "progress.json").read_text())["frames_completed"], 6)
+        # SIGKILL can leave the engine's mkstemp file midway through JSON. It is discarded with the incomplete
+        # attempt, never parsed/restored or accepted as part of a completed result.
+        scratch = self.output / "attempt" / "live-shadow.json.abcdefgh.tmp"
+        scratch.write_text('{"accounts":[')
+        with self.assertRaises(P.PracticeError):
+            P.check_state(self.output / "attempt")
         with patch.object(P, "SandboxedDecider", Fixture):
             resumed = P.run(self.input, self.output)
         self.assertEqual(resumed["recovery"], "replayed_from_start")
@@ -259,6 +265,21 @@ class State(Case):
         self.input.write_text(json.dumps(self.doc))
         with self.assertRaisesRegex(P.PracticeError, "identity changed"):
             P.run(self.input, self.output)
+
+    def test_incomplete_scratch_exception_does_not_admit_unknown_or_linked_files(self):
+        state = self.root / "scratch"
+        state.mkdir()
+        unknown = state / "live-shadow.json.not-engine-scratch.tmp"
+        unknown.write_text("unknown")
+        with self.assertRaises(P.PracticeError):
+            P.check_state(state, allow_scratch=True)
+        unknown.unlink()
+        scratch = state / "live-shadow.json.abcdefgh.tmp"
+        scratch.write_text("partial")
+        P.check_state(state, allow_scratch=True)
+        os.link(scratch, self.root / "linked-scratch")
+        with self.assertRaises(P.PracticeError):
+            P.check_state(state, allow_scratch=True)
 
     def test_missing_sandbox_refuses_before_strategy_loading(self):
         with patch.object(P.shutil, "which", return_value=None), patch.object(P, "_simulate", side_effect=AssertionError("program execution")):
