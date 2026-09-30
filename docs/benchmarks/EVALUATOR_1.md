@@ -276,7 +276,8 @@ python -m league.swarm.benchmarks --suite evaluator --json --output evaluator_1_
 python -m unittest league.tests.test_swarm_evaluator_benchmarks league.tests.test_swarm_benchmarks
 ```
 
-The run is deterministic for a pinned suite: worlds, fills and bootstraps are seeded by hashes, and two runs of the
+The run is deterministic for a pinned suite on the same Python and numpy (3.14 and 2.5.3 here): worlds, fills and
+bootstraps are seeded by hashes, and two runs of the
 suite here (before and after an edit that changed only its fingerprinting code) gave identical figures. The receipt
 beside this file keeps the aggregates, the tree fingerprint, the suite hash and a digest of every world's figures
 (`replication_rows_sha256`, per-world timings excluded); the full report is reproduced by the command above.
