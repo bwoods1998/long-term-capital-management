@@ -21,10 +21,11 @@ family's state. Each is bound to the evaluator it was made under, so no stale fa
    `drift_failed` and `train_passed` as read, so a demotion landing meanwhile wins. The newest `MARKS_KEPT` marks are
    kept per family. No Gym run is queued here: a version whose 1.5x run never landed stays unmarked (fail-closed).
 
-   A MARK GOES (`sweep`: at the start of `facts`, and at the start and the end of every gate round, so within one gate
-   round of the verdict) when its version is demoted or lost at 1.5x, when the gate bars its program, or when the drift
-   screen is switched off (an off screen never passes: the mark is made again once the screen is on and passes). A
-   mark is never removed while figures are only owed.
+   A MARK GOES when its version is demoted or lost at 1.5x, when the gate bars its program, or when the drift screen is
+   switched off (an off screen never passes: the mark is made again once the screen is on and passes): with the
+   verdict itself (THE VERDICT FIRST, below; `researcher.demote_version`), and by `sweep` (at the start of `facts`, and
+   at the start and the end of every gate round, the leakage alarm's too). A mark is never removed while figures are
+   only owed.
 
    THE GATE'S BAR (`gate_bar`) is durable, so it outlives the family's `gate_outcome` and `review` moving on to a newer
    version (the live side's own check reads `gate_outcome`, which names one program a family, and counts a passed
@@ -33,22 +34,30 @@ family's state. Each is bound to the evaluator it was made under, so no stale fa
    - the family's `gate_outcome` names it refused, failed or demoted;
    - THE GATE'S OWN REVIEW (`review`, `gate_review_bar`) names it with a verdict other than "pass", or with an audit that
      is not a readable passed audit, whatever its review contract: a failed review or audit, and one that cannot be
-     read (the gate itself refuses anything but "pass"). This holds without a refusal row: the gate records the
-     failed review first and its refusal only while the version is still its to judge (an operator's hold or a newer
-     validation landing during the read leave the fail in `review` alone). A passed review whose audit is owed bars
-     nothing: it is no verdict against the program, and the live side counts only a review and an audit that both
-     passed;
+     read (the gate itself refuses anything but "pass"). A passed review whose audit is owed bars nothing: it is no
+     verdict against the program, and the live side counts only a review and an audit that both passed;
    - THE INCUBATOR'S OWN REVIEW (`incubator_reviews[sha]`, `incubator_review_bar`) under the current review contract
      failed, or its audit is there but not a readable passed one (a failed review or audit is final for its program,
      so the live side never counts the gate's passed reading of it instead);
-   - an earlier such verdict of the gate was recorded in `incubator_barred[sha]`: the sweep records every
-     `gate_outcome` and every gate `review` it sees that bars a program, and keeps them all (none is dropped for a
-     newer one), so the bar outlives both moving on;
+   - such a verdict was recorded in `incubator_barred[sha]` (THE VERDICT FIRST, below; and the sweep records every
+     `gate_outcome` and every gate `review` it sees that bars a program). Every entry is kept (none is dropped for a
+     newer one, nor trimmed with the incubator's reviews), so the bar outlives all of them moving on;
    - FAIL-CLOSED: its version cannot be read, or a record that would name the program cannot be read (`family_bar`:
      a `review` that is not a mapping or names no program, an `incubator_barred` or `incubator_reviews` that is not a
      mapping). The latter bars every program of the family while it stays so, and is never recorded or revoked.
    The rows are never cleared; `incubator_barred` is evaluator-bound, like `gate_outcome` and `review` themselves (an
    adoption clears all three, and the gate reads the program again under the new evaluator).
+
+   THE VERDICT FIRST (`record_verdict`, `record_bar`). The gate writes its own verdicts only while the version is still
+   its to judge: its review and audit with a compare-and-set on `validation_version`, its refusal row and outcome after
+   `_review_current`. A newer validation, an operator's hold or an error landing during a model read would otherwise
+   leave a failed review or audit written nowhere. So every verdict against a program is recorded as its bar at
+   once, in one transaction that also takes the program's marks and revokes its passed incubator review (the
+   sweep's work for its family), before anything else is written and whether or not the gate's own write-back then
+   succeeds: the gate's failed review or audit (a direct fail, and a third unclear answer), its refusals and bad
+   outcomes, and the incubator's own failed review or audit (`put_review` records it in the same transaction as the
+   review, so the newest-`REVIEWS_KEPT` trim never drops it). The live side's reader, which needs the mark, never
+   sees a program so failed, not even until the next sweep. An unclear answer still to be asked again is no verdict.
 
 2. THE INCUBATOR REVIEW AND AUDIT (`due_reviews` names the versions; `gate.Gate.incubator_reviews` makes them). The owner
    kept the gate's review and audit required. A marked version of an active, current cohort is due once its practice
@@ -57,8 +66,9 @@ family's state. Each is bound to the evaluator it was made under, so no stale fa
    (`gate.run_sha`) exists under the current review contract: a gate review (`review`) that failed or was audited, or an
    incubator review (`incubator_reviews[sha]`) that failed or was audited. The gate records
    `incubator_reviews[sha] = {sha, version, verdict, reasons, model, route, contract_sha, audit, at}` (the newest
-   `REVIEWS_KEPT`). A failed review or audit is final for that program, and so is the gate's bar (the sweep turns a
-   passed incubator review of a program barred by name into verdict "fail", stage "gate"). The incubator's reads keep
+   `REVIEWS_KEPT`). A failed review or audit is final for that program (recorded in `incubator_barred` at once: THE
+   VERDICT FIRST), and so is the gate's bar (a passed incubator review of a program barred by name is turned into
+   verdict "fail", stage "gate"). The incubator's reads keep
    their own attempt counts, their own model-call keys and their own Sail fuse (desk `<family>:incubator`), so the
    gate's own review, its three tries and its daily fuse are exactly as they were; the paid routes' shared budgets
    (Claude's funded total and any `claude.role_usd_day` line for the review or the audit; the OpenAI month) are the
@@ -272,6 +282,78 @@ def unrecorded_bars(state: Mapping[str, Any]) -> dict[str, str]:
         if why is not None:
             out.setdefault(review["sha"], why)
     return {sha: why for sha, why in out.items() if sha not in (recorded or {})}
+
+
+def verdict_bar(record: Any, whose: str) -> str | None:
+    """Why a review record as its reader returned it or as it is kept (the gate's `review`, `incubator_reviews[sha]`)
+    bars its program, or None (`_audit_bar`): a failed review or audit and a verdict or audit that cannot be read. An
+    answer still to be asked again (an unclear review or audit: the gate asks up to three times) is no verdict yet, and a
+    record that is not a mapping is none (`family_bar` reads a kept one)."""
+    if not isinstance(record, Mapping):
+        return None
+    audit = record.get("audit")
+    if record.get("verdict") == "unclear" or (isinstance(audit, Mapping) and audit.get("verdict") == "unclear"):
+        return None
+    return _audit_bar(record, whose)
+
+
+def record_verdict(store: SwarmStore, fid: str, sha: str, record: Any, *, whose: str, version: int | None = None,
+                   clock: Callable[[], float] = time.time) -> str | None:
+    """THE VERDICT FIRST (the module docstring, 1) for a review or audit: when `record` bars program `sha`
+    (`verdict_bar`: `whose` is "the gate's" or "the incubator's"), it is recorded as the program's bar at once
+    (`record_bar`). Returns the bar's words, or None when it bars nothing."""
+    why = verdict_bar(record, whose)
+    if why is not None:
+        record_bar(store, fid, sha, why, version=version, clock=clock)
+    return why
+
+
+def record_bar(store: SwarmStore, fid: str, sha: str, why: str, *, version: int | None = None,
+               clock: Callable[[], float] = time.time) -> dict[str, list[str]]:
+    """THE VERDICT FIRST (the module docstring, 1): record a verdict against program `sha` in family `fid`'s
+    `incubator_barred[sha]` and, in the same transaction, take the program's marks and revoke its passed incubator
+    review (`sweep`'s work for this family), whatever the caller then writes or fails to write. The first entry for a
+    program is kept. An `incubator_barred` that cannot be read is never written over (`family_bar` bars every program
+    of the family while it stays so; the marks still go). Returns {removed, barred, revoked} as `sweep` does; anything
+    done is one private `swarm.gate` event (`incubator_bar`), written after the transaction."""
+    with store.atomic():
+        done, why_of = _record_bar(store, fid, sha, why, version, clock)
+    _bar_event(store, fid, sha, why, version, done, why_of)
+    return done
+
+
+def _record_bar(store: SwarmStore, fid: str, sha: str, why: str, version: int | None,
+                clock: Callable[[], float]) -> tuple[dict[str, list[str]], dict[str, str]]:
+    """`record_bar`'s writes, inside the caller's transaction."""
+    fam = store.family(fid)
+    if fam is None:
+        return {"removed": [], "barred": [], "revoked": []}, {}
+    state = fam.get("state") or {}
+    recorded = state.get("incubator_barred")
+    view, values = fam, {}
+    added = (recorded is None or isinstance(recorded, Mapping)) and sha not in (recorded or {})
+    if added:
+        entry: dict[str, Any] = {"why": str(why), "at": float(clock())}
+        if version is not None:
+            entry["version"] = int(version)
+        values["incubator_barred"] = {**dict(recorded or {}), sha: entry}
+        view = {**fam, "state": {**state, "incubator_barred": values["incubator_barred"]}}
+    # The sweep's work for this family, on the view that holds the new entry (its own record of `unrecorded_bars`
+    # builds on it). The drift screen is the sweep's own business: `screen_on` here only keeps its marks for it.
+    swept, done, why_of = _swept(store, view, True, store.looks(), clock)
+    values.update(swept)
+    if added:
+        done["barred"].insert(0, f"{fid}:{sha[:12]}")
+    if values:
+        store.set_state(fid, **values)
+    return done, why_of
+
+
+def _bar_event(store: SwarmStore, fid: str, sha: str, why: str, version: int | None, done: Mapping[str, list[str]],
+               why_of: Mapping[str, str]) -> None:
+    if any(done.values()):
+        store.event("swarm.gate", fid, {"action": "incubator_bar", "version": version, "sha": sha[:12], "bar": why,
+                                        **done, "why": dict(why_of)})
 
 
 def reviews_per_round(settings: Mapping[str, Any]) -> int:
@@ -544,6 +626,8 @@ def facts(store: SwarmStore, settings: Mapping[str, Any], root: str | Path | Non
             now = store.family(fid) or {}
             if now.get("retired_at") or now.get("band") != "gym":
                 continue
+            if changed == "written" and gate_bar(store, now, n) is not None:
+                continue  # a verdict against it landed since `mark_of` read the family (a row, `review`, a recorded bar)
             done = store.compare_and_set_state(fid, expect, train_passed=_kept(marks))
         if done:
             out[changed].append(f"{fid}@{n}")
@@ -619,17 +703,26 @@ def reviewable(store: SwarmStore, fid: str, n: int, sha: str) -> bool:
     return gate_bar(store, fam, n, sha=sha) is None
 
 
-def put_review(store: SwarmStore, fid: str, sha: str, record: Mapping[str, Any]) -> None:
-    """Record program `sha`'s incubator review in its family's state, keeping the newest `REVIEWS_KEPT`."""
+def put_review(store: SwarmStore, fid: str, sha: str, record: Mapping[str, Any], *,
+               clock: Callable[[], float] = time.time) -> None:
+    """Record program `sha`'s incubator review in its family's state, keeping the newest `REVIEWS_KEPT`. A failed review
+    or audit is recorded as the program's bar in the same transaction (THE VERDICT FIRST, `record_bar`), so the trim
+    never drops the verdict: it is final for that program."""
+    why = verdict_bar(record, "the incubator's")
     with store.atomic():
         state = (store.family(fid) or {}).get("state") or {}
         records = {k: v for k, v in dict(state.get("incubator_reviews") or {}).items() if isinstance(v, Mapping)}
         records[sha] = dict(record)
         keep = sorted(records, key=lambda k: (float(records[k].get("at") or 0.0), k))[-REVIEWS_KEPT:]
         store.set_state(fid, incubator_reviews={k: records[k] for k in keep})
+        if why is not None:
+            done, why_of = _record_bar(store, fid, sha, why, record.get("version"), clock)
+    if why is not None:
+        _bar_event(store, fid, sha, why, record.get("version"), done, why_of)
 
 
 __all__ = ["facts", "sweep", "due_reviews", "practice_cohorts", "practice_current", "current_mark", "final_review",
-           "mark_of", "gate_bar", "gate_review_bar", "incubator_review_bar", "family_bar", "unrecorded_bars", "BAD_OUTCOMES",
+           "mark_of", "gate_bar", "gate_review_bar", "incubator_review_bar", "family_bar", "unrecorded_bars", "verdict_bar",
+           "record_verdict", "record_bar", "BAD_OUTCOMES",
            "eligible_train_run", "reviewable", "put_review", "reviews_per_round", "session_day", "MARKS_KEPT",
            "REVIEWS_KEPT", "REVIEW_MIN_SESSIONS", "REVIEW_MIN_CLOSES", "REVIEWS_PER_ROUND", "REVIEWS_CEILING", "OBSERVE_FILE"]

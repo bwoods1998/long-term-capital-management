@@ -838,15 +838,19 @@ class GateBar(BarCase):
         self.gate().run()
         self.barred(n, sha, "demoted")
 
-    def test_the_gates_own_refusal_in_a_round_takes_the_mark_by_the_rounds_end(self):
+    def test_the_gates_own_refusal_in_a_round_takes_the_mark_with_the_verdict(self):
         n, sha = self.passed()
         self.store.set_state("a", gate_ready=True, validation_version=n, validation_image=None, validation_bundle=None)
         self.replies = [fail_reply("the gate's synthetic finding")]
         out = self.gate().run()
         self.assertEqual(out["refused"], ["a"])
-        self.barred(n, sha, "refused")
-        [event] = self.actions("incubator_sweep")
-        self.assertEqual(event["removed"], ["a@1"])
+        self.barred(n, sha, "the gate's reviewer failed it")
+        [event] = self.actions("incubator_bar")  # THE VERDICT FIRST: the failed review, before its refusal row
+        self.assertEqual((event["removed"], event["barred"], event["revoked"]), (["a@1"], [f"a:{sha[:12]}"], ["a@1"]))
+        self.assertEqual(event["bar"], "the gate's reviewer failed it")
+        self.assertEqual(self.actions("incubator_sweep"), [], "nothing left for the round's sweeps")
+        [refusal] = self.store.refusals("a")
+        self.assertEqual(refusal["stage"], "review", "the gate's own refusal, as before")
 
     def test_the_sweep_touches_nothing_the_gate_or_the_bands_read(self):
         n, sha = self.passed()
@@ -1054,8 +1058,9 @@ class ReviewBar(BarCase):
         out = self.gate().run()
         self.assertEqual(out["incubator"]["failed"], ["a@1"])
         self.assertNotIn(str(n), self.state("a")["train_passed"])
-        [event] = self.actions("incubator_sweep")
+        [event] = self.actions("incubator_bar")  # with the verdict itself (THE VERDICT FIRST)
         self.assertEqual(event["why"]["a@1"], "barred by the gate: the incubator's audit failed it")
+        self.assertEqual(self.state("a")["incubator_barred"][sha]["why"], "the incubator's audit failed it")
 
     def test_records_that_cannot_be_read_fail_closed(self):
         n, sha = self.passed()
@@ -1092,6 +1097,214 @@ class ReviewBar(BarCase):
         self.assertEqual(I.sweep(self.store, self.settings, clock=self.clock)["barred"], [f"a:{sha[:12]}"])
         self.assertEqual(I.unrecorded_bars(self.state("a")), {}, "recorded once")
         self.assertEqual(I.sweep(self.store, self.settings, clock=self.clock), {"removed": [], "barred": [], "revoked": []})
+
+
+# ---------------------------------------------------------------------------------------------------- the verdict first
+class VerdictFirst(BarCase):
+    """THE VERDICT FIRST (the round-2 verification's should-fix, probes p1, p1b, p3 and p5): a verdict against a program
+    is its incubator bar at once, and its mark goes in the same transaction, whatever the gate's own write-back then does:
+    a compare-and-set on `validation_version` that a newer validation beat during the model read, an error, the trim of
+    the incubator's reviews. Most rounds here run with the sweep switched off (`no_sweep`), so only the verdict itself
+    can take the mark; `barred` then asks the sweep, `facts`, `due_reviews`, `reviewable` and B1's own reader."""
+
+    def d2(self, n: int) -> None:
+        """Version n validated with its line passed and at the gate (D2's route: B1 leaves it to D2's tuition)."""
+        self.store.set_state("a", gate_ready=True, validation_version=n, validation_line={"passed": True},
+                             validation_image=None, validation_bundle=None)
+
+    def newer_validation_mid_read(self, stage: str, *, when=lambda: True):
+        """While the gate's own `stage` read of n is in flight, the tournament validates a newer version m whose line
+        failed (validation_version m, gate_ready False): the gate's compare-and-set on validation_version then fails, and
+        D2's route is gone, so only B2's facts stand between the program and B1's reader."""
+        real, probe = getattr(Gate, stage), self
+
+        def read(gate, fam, version, **kw):
+            answer = real(gate, fam, version, **kw)
+            if not kw.get("incubator") and when():
+                m = int(probe.store.add_version("a", CODE.format(fid="a") + f"# v{version['n'] + 1}\n", {"hold": 3}, author="t")["n"])
+                probe.store.set_state("a", validation_version=m, validation_line={"passed": False}, gate_ready=False)
+            return answer
+
+        return patch.object(Gate, stage, read)
+
+    def no_sweep(self):
+        return patch.object(I, "sweep", return_value={"removed": [], "barred": [], "revoked": []})
+
+    def gone(self, n: int, sha: str, words: str) -> None:
+        """The mark went with the verdict (no sweep ran), the bar is recorded, and it holds for good."""
+        state = self.state("a")
+        self.assertNotIn(str(n), state.get("train_passed") or {}, "the mark went with the verdict")
+        self.assertEqual(state["incubator_barred"][sha]["why"], words)
+        self.assertIsNotNone(I.gate_bar(self.store, self.store.family("a"), n))
+        self.assertFalse(accepts(state, n, sha, self.kv()))
+        self.assertIn(live_rows(self.root, "a", n), (None, []), "B1's own reader refuses it (release B)")
+        self.barred(n, sha, words)
+
+    def test_p1_the_gates_failed_review_outlives_a_newer_validation_landing_during_the_read(self):
+        n, sha = self.passed()
+        self.d2(n)
+        self.assertIn(live_rows(self.root, "a", n), (None, []), "D2's route while validated")
+        self.replies = [fail_reply("the gate's reviewer finds a flaw")]
+        with self.newer_validation_mid_read("review"), self.no_sweep():
+            out = self.gate().run()
+        state = self.state("a")
+        self.assertEqual((state.get("review"), self.store.refusals("a"), state.get("gate_outcome"), out["refused"]),
+                         (None, [], None, []), "the gate's own write-back lost the race: only the bar holds the fail")
+        self.gone(n, sha, "the gate's reviewer failed it")
+
+    def test_p1b_the_gates_failed_audit_outlives_a_newer_validation_landing_during_the_read(self):
+        n, sha = self.passed()
+        self.d2(n)
+        self.replies = [PASS, fail_reply("the gate's auditor finds a flaw")]
+        with self.newer_validation_mid_read("audit"), self.no_sweep():
+            self.gate().run()
+        review = self.state("a")["review"]
+        self.assertEqual((review["sha"], review["verdict"]), (sha, "pass"))
+        self.assertNotIn("audit", review, "the failed audit was never written back: the review reads as an audit owed")
+        self.assertIsNone(I.gate_review_bar(review, sha))
+        self.gone(n, sha, "the gate's audit failed it")
+
+    def third_unclear(self, stage: str, first: list, words: str) -> None:
+        """Three rounds of unclear answers from the gate's own `stage` read of n (`first`: the replies before it in the
+        first round); the tournament validates a newer version during the third read."""
+        n, sha = self.passed()
+        self.d2(n)
+        at = {"round": 0}
+        with self.newer_validation_mid_read(stage, when=lambda: at["round"] == 2), self.no_sweep():
+            for round_ in range(3):
+                at["round"] = round_
+                self.replies = (first if round_ == 0 else []) + [UNCLEAR]
+                self.gate().run()
+                if round_ < 2:
+                    self.assertIn(str(n), self.state("a")["train_passed"], "an unclear answer is no verdict yet")
+                    self.assertNotIn(sha, self.state("a").get("incubator_barred") or {})
+        self.assertEqual((self.store.refusals("a"), self.state("a").get("gate_outcome")), ([], None))
+        self.gone(n, sha, words)
+
+    def test_a_third_unclear_review_is_a_verdict_under_the_same_race(self):
+        self.third_unclear("review", [], "the gate's reviewer failed it")
+
+    def test_a_third_unclear_audit_is_a_verdict_under_the_same_race(self):
+        self.third_unclear("audit", [PASS], "the gate's audit failed it")
+
+    def test_an_error_after_the_read_loses_nothing(self):
+        n, sha = self.passed()
+        self.d2(n)
+        real = self.store.event
+
+        def event(kind, family, payload):
+            if payload.get("action") == "review":
+                raise RuntimeError("the store's disk is full")
+            return real(kind, family, payload)
+
+        self.replies = [fail_reply("the gate's reviewer finds a flaw")]
+        with patch.object(self.store, "event", event), self.no_sweep():
+            with self.assertRaises(RuntimeError):
+                self.gate().run()
+        self.assertIsNone(self.state("a").get("review"), "nothing after the read was written")
+        self.gone(n, sha, "the gate's reviewer failed it")
+
+    def test_a_refusal_takes_the_mark_at_once(self):
+        n, sha = self.passed()
+        self.d2(n)
+        with patch("league.swarm.gate.check_experiment", side_effect=CodeRefused("bad")), self.no_sweep():
+            out = self.gate().run()
+        self.assertEqual(out["refused"], ["a"])
+        self.gone(n, sha, "the gate refused it (the experiment contract)")
+
+    def outcome(self, result: str) -> None:
+        n, sha = self.passed()
+        with self.no_sweep():
+            self.gate().outcome("a", sha, result)
+        self.gone(n, sha, f"the gate's outcome for it was {result}")
+
+    def test_a_forward_demotion_takes_the_mark_at_once(self):
+        self.outcome("demoted")
+
+    def test_a_failed_look_takes_the_mark_at_once(self):
+        self.outcome("failed")
+
+    def test_an_outcome_that_is_no_verdict_bars_nothing(self):
+        n, sha = self.passed()
+        for result in ("waiting", "passed"):
+            self.gate().outcome("a", sha, result)
+            self.assertIn(str(n), self.state("a")["train_passed"], result)
+            self.assertNotIn(sha, self.state("a").get("incubator_barred") or {}, result)
+        self.assertEqual(self.actions("incubator_bar"), [])
+
+    def test_an_error_recording_the_bar_never_fails_the_gates_round_and_the_sweep_still_records_it(self):
+        n, sha = self.passed()
+        self.d2(n)
+        self.replies = [fail_reply("the gate's reviewer finds a flaw")]
+        with patch.object(I, "record_bar", side_effect=RuntimeError("boom")):
+            out = self.gate().run()
+        self.assertEqual(out["refused"], ["a"], "the gate's own work is as before")
+        self.assertGreaterEqual(len(self.actions("incubator_bar_error")), 1)
+        self.barred(n, sha, "refused")  # the round's end sweep recorded it
+
+    def test_a_round_the_leakage_alarm_cuts_short_still_sweeps_at_its_end(self):
+        self.ready()
+        swept = []
+        with patch.object(Gate, "alarm", side_effect=[False, True]), \
+                patch.object(Gate, "_incubator_sweep", lambda gate: swept.append(1) or {}):
+            out = self.gate().run()
+        self.assertEqual(len(swept), 2, "the round's start and its end")
+        self.assertNotIn("incubator", out, "the alarm stops every read")
+        self.assertEqual(len(self.sail.bodies), 0)
+
+    def test_p3_the_incubators_own_failed_review_is_final_after_the_trim(self):
+        n, sha = self.ready()
+        self.replies = [fail_reply("the incubator's reviewer finds a flaw")]
+        with self.no_sweep():
+            self.gate().run()
+        self.assertEqual(self.state("a")["incubator_reviews"][sha]["verdict"], "fail")
+        self.assertNotIn(str(n), self.state("a")["train_passed"], "the mark went with the verdict")
+        for i in range(I.REVIEWS_KEPT):
+            self.clock.t += 60
+            I.put_review(self.store, "a", f"{i:064x}", {"sha": f"{i:064x}", "version": 99, "verdict": "pass",
+                                                        "contract_sha": review_contract()["sha256"], "at": self.clock.t})
+        state = self.state("a")
+        self.assertNotIn(sha, state["incubator_reviews"], "trimmed from the reviews")
+        self.assertEqual(state["incubator_barred"][sha]["why"], "the incubator's reviewer failed it", "never from the bars")
+        self.assertIsNotNone(I.gate_bar(self.store, self.store.family("a"), n))
+        self.assertEqual(I.facts(self.store, self.settings, self.root, clock=self.clock)["written"], [], "never marked again")
+        self.assertEqual(I.due_reviews(self.store, self.settings, self.root, clock=self.clock), [])
+        asked = len(self.sail.bodies)
+        self.replies = [PASS, PASS]
+        self.assertNotIn("incubator", self.gate().run(), "never read again")
+        self.assertEqual(len(self.sail.bodies), asked)
+        self.assertFalse(accepts(self.state("a"), n, sha, self.kv()))
+        self.assertIn(live_rows(self.root, "a", n), (None, []))
+
+    def test_p5_a_verdict_landing_while_the_mark_is_made_wins(self):
+        injections = {
+            "a": lambda sha, n: self.store.set_state("a", review={"sha": sha, "version": n, "verdict": "fail"}),
+            "b": lambda sha, n: self.store.refuse("b", n, "review", "the gate's reviewer fails it"),
+            "c": lambda sha, n: self.store.set_state("c", incubator_barred={sha: {"why": "the gate's audit failed it"}}),
+        }
+        for fid in injections:
+            self.ready(fid)
+        self.settings["gate"]["incubator_reviews"] = len(injections)
+        self.replies = [PASS, PASS] * len(injections)
+        self.gate().run()
+        real = I.mark_of
+        for fid, inject in injections.items():
+            n, sha = 1, self.sha(fid, 1)
+            self.assertTrue(accepts(self.state(fid), n, sha, self.kv()), fid)
+            self.store.set_state(fid, train_passed={})  # the mark was taken earlier (the screen off a while): facts re-marks
+
+            def mark_of(store, fam, n_, settings, _fid=fid, _inject=inject, _sha=sha, **kw):
+                out = real(store, fam, n_, settings, **kw)
+                if fam["id"] == _fid:
+                    _inject(_sha, n_)  # the verdict lands between facts' read and its write
+                return out
+
+            with patch.object(I, "mark_of", mark_of):
+                out = I.facts(self.store, self.settings, self.root, clock=self.clock)
+            self.assertNotIn(f"{fid}@1", out["written"], fid)
+            self.assertNotIn("1", self.state(fid).get("train_passed") or {}, fid)
+            self.assertFalse(accepts(self.state(fid), n, sha, self.kv()), fid)
+            self.assertIn(live_rows(self.root, fid, n), (None, []), fid)
 
 
 # ---------------------------------------------------------------------------------------------------- never evidence

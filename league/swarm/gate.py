@@ -42,13 +42,14 @@ tries and its daily fuse are exactly as they were; only the paid routes' shared 
 both: a read they leave no room for falls to the role's next route, as any read does. The incubator's reads run after
 the round's own D2 work, so a D2 read waits at most for this round's (up to 2 x 2) incubator reads before the next
 round. They never touch the gate's own review state or its looks, and never spend a look.
-The leakage alarm stops them with the rest of the gate. THE INCUBATOR'S SWEEP (`incubator.sweep`) runs at the start and
-the end of every round, and again after an incubator read that failed: a program the gate refused, whose look failed,
-which it demoted, or whose review or audit failed (the gate's own `review`, with or without a refusal row: an operator's
-hold or a newer validation landing during the read leave the fail there alone; or the incubator's own) loses its
-incubator mark within the round, whatever the family's `gate_outcome` or `review` says later (the sweep records the
-gate's verdict in `incubator_barred`). It only removes marks and passes and records bars, which nothing of the gate
-reads.
+The leakage alarm stops them with the rest of the gate. THE VERDICT FIRST (`_incubator_bar`, `incubator.record_bar`): a
+verdict against a program (the gate's failed review or audit, a third unclear answer, a refusal, a bad outcome; the
+incubator's own failed review or audit) is recorded in the family's `incubator_barred[sha]` at once, before anything
+else is written, and the program's incubator mark goes in the same transaction. So neither the gate's compare-and-set on
+`validation_version` (a newer validation landing during the model read), nor an operator's hold, nor an error after the
+read can lose it, whatever the family's `gate_outcome` or `review` says later. THE INCUBATOR'S SWEEP (`incubator.sweep`)
+still runs at the start and the end of every round (the leakage alarm's too), and again after an incubator read that
+failed, and records what it finds. Both only remove marks and passes and record bars, which nothing of the gate reads.
 
 Every step is a `swarm.gate` event; band moves are `swarm.band` events (the site's news).
 Standard library only.
@@ -186,12 +187,19 @@ class Gate:
 
     def outcome(self, fid: str, sha: str, result: str) -> None:
         """What the gate did with a version (refused, failed, passed, waiting, demoted): the live path runs a Gym-band
-        family's validated version as tuition only while this says nothing worse than waiting (`bands.read`)."""
+        family's validated version as tuition only while this says nothing worse than waiting (`bands.read`). A bad
+        outcome is the program's incubator bar first (THE VERDICT FIRST: it outlives `gate_outcome` moving on)."""
+        from .incubator import BAD_OUTCOMES
+
+        if result in BAD_OUTCOMES:
+            self._incubator_bar(fid, None, sha, why=f"the gate's outcome for it was {result}")
         self.store.set_state(fid, gate_outcome={"sha": sha, "result": result, "at": self.clock()})
 
     def refuse(self, fam: Mapping[str, Any], n: int, sha: str, stage: str, reasons: list[str], out: dict[str, Any]) -> None:
-        """A refusal, recorded; the version's gate place is cleared only if it is still the one validated."""
+        """A refusal, recorded (the row, then the program's incubator bar: THE VERDICT FIRST); the version's gate place is
+        cleared only if it is still the one validated."""
         self.store.refuse(fam["id"], n, stage, "; ".join(reasons) or f"refused by the {stage}")
+        self._incubator_bar(fam["id"], n, sha, why=f"the gate refused it (the {stage})")
         # Its gate place and its dormant count go together (a verdict is news, `tell`): never gate_ready cleared with the
         # count of the cycles it held at the gate still standing.
         if not self.store.compare_and_set_state(fam["id"], {"validation_version": n}, gated_sha=sha, gate_ready=False,
@@ -275,6 +283,7 @@ class Gate:
                 except Exception as exc:  # noqa: BLE001 - no reviewer, no look
                     self.store.event("swarm.gate", fam["id"], {"action": "review_error", "version": n, "error": str(exc)[:300]})
                     continue
+                self._incubator_bar(fam["id"], n, sha, record=review)  # THE VERDICT FIRST: a failed review, before all else
                 self.store.event("swarm.gate", fam["id"], {"action": "review", "version": n, **review,
                                                            "not_the_plans_reviewer": review.get("route") not in ("openai", "claude")})
                 if review["verdict"] == "unclear":
@@ -284,9 +293,12 @@ class Gate:
                     if attempts < 3:
                         continue
                     review = {**review, "verdict": "fail", "reasons": ["the reviewer could not reach a verdict three times"]}
+                    self._incubator_bar(fam["id"], n, sha, record=review)
                 review = {**review, "sha": sha, "version": n}
                 if not self.store.compare_and_set_state(fam["id"], {"validation_version": n}, review=review):
-                    continue  # the tournament validated a newer version meanwhile: this one is not the gate's
+                    # The tournament validated a newer version meanwhile: this one is not the gate's. A failed review is
+                    # the program's incubator bar already (THE VERDICT FIRST), so the fail outlives this write-back.
+                    continue
             if review["verdict"] == "pass" and "audit" not in review:  # the audit: a second reader, before any look
                 if not self._review_current(fam["id"], n, image, bundle):
                     continue  # the paid review remains evidence; a terminal family starts no new paid stage
@@ -297,12 +309,14 @@ class Gate:
                 except Exception as exc:  # noqa: BLE001
                     self.store.event("swarm.gate", fam["id"], {"action": "audit_error", "version": n, "error": str(exc)[:300]})
                     continue
+                self._incubator_bar(fam["id"], n, sha, record={**review, "audit": audit})  # THE VERDICT FIRST: a failed audit
                 self.store.event("swarm.gate", fam["id"], {"action": "audit", "version": n, **audit})
                 if audit["verdict"] == "unclear":
                     self.store.put(attempt_key, attempts + 1)
                     if attempts + 1 < 3:
                         continue  # asked again next round, like an unclear review
                     audit = {**audit, "verdict": "fail", "reasons": ["the audit could not reach a verdict three times"]}
+                    self._incubator_bar(fam["id"], n, sha, record={**review, "audit": audit})
                 review = {**review, "audit": audit}
                 if audit["verdict"] != "pass":
                     review = {**review, "verdict": "fail", "stage": "audit",
@@ -320,7 +334,7 @@ class Gate:
                                 "a holdout look was reviewed without the plan's models (GPT-6 Sol or Claude reviews; Claude or "
                                 "GPT-6 Astra audits): their budgets had no room, so Sail models stood in"})
                 if not self.store.compare_and_set_state(fam["id"], {"validation_version": n}, review=review):
-                    continue
+                    continue  # as the review's: a failed audit is the program's incubator bar already
             if not self._review_current(fam["id"], n, image, bundle):
                 continue
             if review["verdict"] != "pass":
@@ -340,9 +354,30 @@ class Gate:
             incubated = self._incubator_round()
             if incubated:
                 out["incubator"] = incubated
+        else:
+            self._incubator_sweep()  # never a read: the round's verdicts still take their marks by its end
         return out
 
     # ------------------------------------------------------------------ the incubator's review and audit
+    def _incubator_bar(self, fid: str, n: int | None, sha: str, *, why: str | None = None,
+                       record: Mapping[str, Any] | None = None, whose: str = "the gate's") -> None:
+        """THE VERDICT FIRST (`incubator.record_bar`): a verdict against program `sha` is its incubator bar at once, before
+        the gate writes anything else, and its incubator mark goes in the same transaction; so no compare-and-set that a
+        newer validation beat, no operator's hold and no error after it can lose it. `why` names a refusal or an
+        outcome; `record` is a review (with its audit) as its reader returned it (`incubator.record_verdict`: a pass,
+        and an unclear answer still to be asked again, bar nothing), `whose` its reader. Never failing the gate: an
+        error is one private event, and the gate's own write-back and the sweep still record what they can."""
+        from . import incubator
+
+        try:
+            if record is not None:
+                incubator.record_verdict(self.store, fid, sha, record, whose=whose, version=n, clock=self.clock)
+            elif why is not None:
+                incubator.record_bar(self.store, fid, sha, why, version=n, clock=self.clock)
+        except Exception as exc:  # noqa: BLE001
+            self.store.event("swarm.gate", fid, {"action": "incubator_bar_error", "version": n,
+                                                 "error": f"{type(exc).__name__}: {str(exc)[:300]}"})
+
     def _incubator_sweep(self) -> dict[str, Any]:
         """`incubator.sweep`, never failing the gate's round (an error is one private event; the next round sweeps again)."""
         from . import incubator
@@ -423,7 +458,7 @@ class Gate:
             except CodeRefused as exc:  # a known invalid variant pays for no model read
                 incubator.put_review(self.store, fid, sha, {
                     "sha": sha, "version": n, "verdict": "fail", "stage": "experiment contract", "reasons": [str(exc)[:500]],
-                    "model": None, "route": None, "contract_sha": contract, "at": self.clock()})
+                    "model": None, "route": None, "contract_sha": contract, "at": self.clock()}, clock=self.clock)
                 self.store.event("swarm.gate", fid, {"action": "incubator_review", "version": n, "verdict": "fail",
                                                      "stage": "experiment contract", "reasons": [str(exc)[:300]]})
                 return "fail"
@@ -432,6 +467,7 @@ class Gate:
             except Exception as exc:  # noqa: BLE001 - no reviewer: asked again next round
                 self.store.event("swarm.gate", fid, {"action": "incubator_review_error", "version": n, "error": str(exc)[:300]})
                 return None
+            self._incubator_bar(fid, n, sha, record=review, whose="the incubator's")  # THE VERDICT FIRST: a failed review
             self.store.event("swarm.gate", fid, {"action": "incubator_review", "version": n, **review,
                                                  "not_the_plans_reviewer": review.get("route") not in ("openai", "claude")})
             if review["verdict"] == "unclear":
@@ -445,7 +481,9 @@ class Gate:
             record = {"sha": sha, "version": n, "verdict": review["verdict"], "reasons": list(review.get("reasons") or [])[:6],
                       "model": review.get("model"), "route": review.get("route"), "contract_sha": review.get("contract_sha") or contract,
                       "at": self.clock()}
-            incubator.put_review(self.store, fid, sha, record)  # kept, so an audit asked again does not redo the review
+            # Kept, so an audit asked again does not redo the review; a fail (a third unclear answer too) is the program's
+            # incubator bar in the same transaction.
+            incubator.put_review(self.store, fid, sha, record, clock=self.clock)
             if record["verdict"] != "pass":
                 return "fail"
             if not incubator.reviewable(self.store, fid, n, sha):
@@ -457,6 +495,7 @@ class Gate:
         except Exception as exc:  # noqa: BLE001
             self.store.event("swarm.gate", fid, {"action": "incubator_audit_error", "version": n, "error": str(exc)[:300]})
             return None
+        self._incubator_bar(fid, n, sha, record={**record, "audit": audit}, whose="the incubator's")  # THE VERDICT FIRST
         self.store.event("swarm.gate", fid, {"action": "incubator_audit", "version": n, **audit})
         if audit["verdict"] == "unclear":
             self.store.put(attempt_key, attempts + 1)
@@ -468,6 +507,7 @@ class Gate:
         record = {**record, "audit": kept, "at": self.clock()}
         if audit["verdict"] != "pass":
             record.update(verdict="fail", stage="audit", reasons=kept["reasons"] or ["the audit could not reach a verdict"])
+        incubator.put_review(self.store, fid, sha, record, clock=self.clock)  # the verdict first, the owner's alert after
         # The plan's two different paid readers (`run`): either read on Sail, or one model reading the program twice, is the
         # owner's to know, for an incubator review as for a holdout look.
         same = record.get("model") is not None and record.get("model") == audit.get("model")
@@ -479,7 +519,6 @@ class Gate:
                          "(claude.role_model can give the review its own Claude model)") if same else
                         "an incubator review was made without the plan's models (GPT-6 Sol or Claude reviews; Claude or GPT-6 "
                         "Astra audits): their budgets had no room, so Sail models stood in"})
-        incubator.put_review(self.store, fid, sha, record)
         return str(record["verdict"])
 
     def _review_current(self, fid: str, n: int, image: Any, bundle: Any) -> bool:
@@ -557,6 +596,7 @@ class Gate:
         elif self.store.compare_and_set_state(fid, {"validation_version": n}, gated_sha=sha, gate_ready=False,
                                               dormant_cycles=0) and tries == 3:  # a refusal: news, like `refuse`
             self.store.refuse(fid, n, "gym", "the gate box could not make this holdout look three times")
+            self._incubator_bar(fid, n, sha, why="the gate refused it (the gym)")
             self.store.event("swarm.status", fid, {"action": "look_failed_three_times", "alert": True, "version": n,
                                                    "text": "the gate box could not make a holdout look three times"})
 
