@@ -3,10 +3,11 @@
 One process beside the House loop, niced. Its threads:
 
 - RESEARCHERS: up to THE CONCURRENCY's workers (allocation.py, Release B: `researcher.concurrency` as the spend plan's
-  level, expanded up to `allocation.max_concurrency` while useful experiments wait and spend is under the plan,
-  contracted while it runs over), each taking the next family (THE TURNS: the lowest stride pass among the ready, so a
-  family's turns follow its share under contention) and running one cycle, while the guard allows; a family that held
-  waits out its hold (`Scheduler`'s durable event-driven holds);
+  level; only with an explicit `allocation.plan_usd_per_hour`, expanded up to `allocation.max_concurrency` while useful
+  experiments wait and the research spend, Sail and Gym, is under the plan, and contracted while it runs over), each
+  taking the next family (THE TURNS: the lowest start tag among the ready, so a family's turns follow its share under
+  contention) and running one cycle, while the guard allows; a family that held waits out its hold (`Scheduler`'s
+  durable event-driven holds);
 - THE GYM POOL's dispatchers (one per box) and forks (`pool.py`);
 - ROUNDS on their own threads so none blocks another: the tournament (hourly), the idle pass between its rounds (every
   five minutes, the idle rule's retirements alone: `Tournament.idle_pass`), the gate (every few
@@ -110,10 +111,11 @@ def hold_wait(settings: Mapping[str, Any], dormant: int) -> float:
 
 class Scheduler:
     """Which family runs next: THE TURNS (allocation.py's `StrideTurns`, Release B): among the families ready now, the one
-    whose stride pass is lowest, so under contention a family's turns follow its share; a ready family that has had no
-    turn for `allocation.max_wait_seconds` first; one cycle per family at a time (`allocation.scheduler` "legacy": the
-    bandit's share first as a minute's head start per unit of relative share, then the longest wait). Each take counts
-    the useful experiments left waiting (`queued_useful`), which the swarm's concurrency reads.
+    whose start tag is lowest, so under contention a family's turns follow its share; with `allocation.max_wait_seconds`
+    (0, off, by default) a ready family that has had no turn for that long first, out of order; one cycle per family at a
+    time (`allocation.scheduler` "legacy": the bandit's share first as a minute's head start per unit of relative share,
+    then the longest wait). Each take counts the useful experiments left waiting (`queued_useful`: the ready families
+    `useful_ids`, the tournament's last allocation, names), which the swarm's concurrency reads.
 
     By default a hold is persisted in family state and resumes only when its evidence/context key changes.
     Time, weight changes and process restarts never buy another model call. Trials, gate state, rewrites,
@@ -142,8 +144,10 @@ class Scheduler:
         self.held: dict[str, tuple[float, float, int, bool, Any, int]] = {}
         self.soon = float("-inf")  # when the last `take` that found nothing saw the next family ready (`pause`)
         self.turns = allocation_mod.StrideTurns()  # THE TURNS' passes (in memory: a restarted swarm starts them afresh)
-        #: Useful experiments (allocation.useful) ready and left waiting at the last take: THE CONCURRENCY's queue.
+        #: Useful experiments (allocation.queued_useful) ready and left waiting at the last take: THE CONCURRENCY's queue.
         self.queued_useful = 0
+        #: The families the tournament's last allocation named useful experiments (the Swarm wires it to its tournament).
+        self.useful_ids: Callable[[], Any] = lambda: ()
 
     @property
     def event_holds(self) -> bool:
@@ -264,8 +268,12 @@ class Scheduler:
             chosen = ordered[0]
             fid = chosen["id"]
             if c["scheduler"] != "legacy":
-                self.turns.took(fid, chosen.get("weight"), n)
-            self.queued_useful = sum(1 for f in ordered[1:] if allocation_mod.useful(f, n, self.settings, threshold=c["useful_share"]))
+                late = allocation_mod.StrideTurns.starving(fid, now=now, last=self.last, max_wait=c["max_wait_seconds"])
+                self.turns.took(fid, chosen.get("weight"), n, out_of_order=late)
+            try:
+                self.queued_useful = allocation_mod.queued_useful(ordered[1:], self.useful_ids())
+            except Exception:  # noqa: BLE001 - a misread queue is an empty one: nothing expands on it
+                self.queued_useful = 0
             self.running.add(fid)
             self.last[fid] = now
             self.began[fid] = self.seen(chosen)
@@ -362,6 +370,7 @@ class Swarm:
                                      starter=lambda spec: program_for(spec))
         self.researcher.pace = self.over_pace
         self.tournament = Tournament(self.store, self.pool, self.settings, clock=clock)
+        self.scheduler.useful_ids = lambda: self.tournament.useful  # THE CONCURRENCY's useful experiments
         self.gate = Gate(self.store, self.pool, self.router, self.settings, clock=clock)
         # The whole graveyard as one sealed digest, shared by the architect and the strategist (Sept 29, 2026): one pass's
         # two Claude calls send the same bytes, so the second reads the first's cache entry.
@@ -379,6 +388,7 @@ class Swarm:
         self._beat = float("-inf")
         self._pace = (float("-inf"), "", 0.0)
         self._concurrency: tuple[float, dict[str, Any]] | None = None  # THE CONCURRENCY, cached for 10 s
+        self._concurrency_lock = threading.Lock()  # one refresh at a time (every worker reads it)
         self._threads = False  # run() started the researcher threads (step() may add workers up to the ceiling)
 
     # ------------------------------------------------------------------ the population
@@ -523,24 +533,25 @@ class Swarm:
 
     def concurrency_status(self) -> dict[str, Any]:
         """THE CONCURRENCY (allocation.py `effective_concurrency`), read at most every 10 s: `researcher.concurrency` as the
-        spend plan's level, expanded up to `allocation.max_concurrency` while useful experiments wait and the research spend
-        is under the plan, contracted in proportion while it runs over it. `workers`: the researcher threads that may take a
-        family now (the others sleep)."""
-        now = self.clock()
-        cached = self._concurrency
-        if cached is not None and 0.0 <= now - cached[0] < 10.0:
-            return cached[1]
-        try:
-            pace = self.pace_status()
-            out = allocation_mod.effective_concurrency(self.settings, queued_useful=self.scheduler.queued_useful,
-                                                       running=len(self.scheduler.running),
-                                                       spent_usd_hour=float(pace["spent_last_hour_usd"]),
-                                                       pace_limit=pace["limit_usd_per_hour"])
-        except Exception as exc:  # noqa: BLE001 - a misread never stops research: the plan's level
-            base = allocation_mod.concurrency_bounds(self.settings)[0]
-            out = {"workers": base, "base": base, "why": f"unread ({type(exc).__name__}): the plan's level"}
-        self._concurrency = (now, out)
-        return out
+        spend plan's level; with an explicit `allocation.plan_usd_per_hour`, expanded up to `allocation.max_concurrency`
+        while useful experiments wait and the research spend (Sail models and Gym boxes in the last hour) is under the
+        plan, contracted in proportion while it runs over it. `workers`: the researcher threads that may take a family now
+        (the others sleep)."""
+        with self._concurrency_lock:
+            now = self.clock()
+            cached = self._concurrency
+            if cached is not None and 0.0 <= now - cached[0] < 10.0:
+                return cached[1]
+            try:
+                spent = (self.store.spent(list(allocation_mod.RESEARCH_SPEND), since=now - 3600)
+                         if allocation_mod.cfg(self.settings)["plan_usd_per_hour"] is not None else 0.0)
+                out = allocation_mod.effective_concurrency(self.settings, queued_useful=self.scheduler.queued_useful,
+                                                           running=len(self.scheduler.running), spent_usd_hour=float(spent))
+            except Exception as exc:  # noqa: BLE001 - a misread never stops research: the plan's level
+                base = allocation_mod.concurrency_bounds(self.settings)[0]
+                out = {"workers": base, "base": base, "why": f"unread ({type(exc).__name__}): the plan's level"}
+            self._concurrency = (now, out)
+            return out
 
     def _grow_workers(self) -> None:
         """Start researcher threads up to the concurrency's ceiling when the operator raised it (`allocation.max_concurrency`

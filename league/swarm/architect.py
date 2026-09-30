@@ -47,12 +47,13 @@ the refused proposals by class (`class_capped`).
 
 THE BIRTH QUOTA (Release B, Oct 2026; league/swarm/allocation.py `BirthQuota`: on Sept 30 100% of eight hours' births were
 debit verticals, 532 of 730 in the day). One STRUCTURE FAMILY (single = long_single, long_call and long_put; butterfly;
-vertical; straddle; condor; calendar) may hold at most `allocation.births.max_share` (40%) of the last
+vertical; straddle; condor; calendar) may hold at most `allocation.births.max_share` (60%) of the last
 `allocation.births.window_hours` (24) of births, once there were `allocation.births.min_window` (10), and at most that share of
-the pass's want; its first `allocation.births.per_pass_min` (1) in a pass is always allowed, and below
-`allocation.births.min_alive` living families (half of `population.start`) the day's rule rests. The request lists every structure
-family's births and which are full; a proposal past its quota is not born, and the pass's event counts the refusals by
-structure family (`structure_capped`). Forks and reseeds are not held to it.
+the pass's want; its first `allocation.births.per_pass_min` (1) in a pass is always allowed. One quota holds for a whole
+pass (`pass_quota`), a truncated answer's retry included. Below `allocation.births.min_alive` living families (three quarters
+of `population.start`) the whole quota rests, so the population never thins below it for want of diversity. The request
+lists every structure family's births and which are full; a proposal past its quota is not born, and the pass's event
+counts the refusals by structure family (`structure_capped`). Forks and reseeds are not held to it.
 
 TRUNCATION SALVAGE (R11-3, Sept 29: 6 of 28 Sonnet passes were cut at the 32k output cap, and each cut fell to a Kimi-K3
 refill of 19-24 births). A Claude answer cut at max_tokens comes back to the pass (`ModelRouter.ask(claude_keep_truncated)`)
@@ -862,6 +863,7 @@ class Architect:
         self.settings = settings
         self.clock = clock
         self.digest = digest
+        self.pass_quota: Any = None  # THE BIRTH QUOTA of the pass `run` is making (one a pass, its retry's admits included)
 
     @property
     def cfg(self) -> Mapping[str, Any]:
@@ -1048,10 +1050,13 @@ class Architect:
 
     def birth_quota(self) -> Any:
         """THE BIRTH QUOTA for a pass now (league/swarm/allocation.py `BirthQuota`: at most `allocation.births.max_share` of
-        the window's births and of the pass's want in one structure family), or None when the window cannot be read (the
-        pass goes without it: a quota is a diversity pressure, never a reason to stop births)."""
+        the window's births and of the pass's want in one structure family): the pass's own while `run` makes one (so a
+        truncated pass's retry shares its counts), else a new one; None when the window cannot be read (the pass goes
+        without it: a quota is a diversity pressure, never a reason to stop births)."""
         from .allocation import BirthQuota
 
+        if self.pass_quota is not None:
+            return self.pass_quota
         try:
             return BirthQuota(self.store, self.settings, now=self.clock(), want=self.want(),
                               alive=len(self.store.families(alive=True)))
@@ -1072,7 +1077,8 @@ class Architect:
         per_class, classes = self.class_cap(), self.classes()
         self.capped: dict[str, int] = {}
         quota = self.birth_quota()
-        self.structure_capped: dict[str, int] = {}
+        before = dict(quota.refused) if quota is not None else {}
+        self.structure_capped: dict[str, int] = {}  # this call's refusals by the quota, by structure family
         allowed_roots = set(self.settings.get("gym", {}).get("roots", ["SPY", "QQQ", "IWM", "XSP", "SPXW"]))
         born = []
         for row in rows if isinstance(rows, list) else []:
@@ -1108,7 +1114,7 @@ class Architect:
             # THE BIRTH QUOTA (Release B): past its structure family's share of the window's births (or of this pass), a
             # proposal is not born; counted by structure family in the pass's event (`structure_capped`).
             if quota is not None and not quota.admits(structure):
-                self.structure_capped = dict(quota.refused)
+                self.structure_capped = {b: k - before.get(b, 0) for b, k in quota.refused.items() if k > before.get(b, 0)}
                 continue
             try:
                 lo, hi = sorted((max(0, min(45, int(dte[0]))), max(0, min(45, int(dte[1])))))
@@ -1211,7 +1217,16 @@ class Architect:
 
     def run(self, *, paired: bool = False) -> dict[str, Any]:
         """One pass. `paired`: the strategist's Claude call just sent (and marked) the same sealed digest, so this call
-        marks it too and reads it from the cache (`digest_ttl`)."""
+        marks it too and reads it from the cache (`digest_ttl`). One BIRTH QUOTA holds for the whole pass (`pass_quota`):
+        its request, its admits and a truncated answer's retry."""
+        self.pass_quota = None
+        self.pass_quota = self.birth_quota()
+        try:
+            return self._pass(paired=paired)
+        finally:
+            self.pass_quota = None
+
+    def _pass(self, *, paired: bool) -> dict[str, Any]:
         began = self.clock()
         self.store.put("architect_at", began)
         room = int(self.settings.get("population", {}).get("ceiling", 96)) - len(self.store.families(alive=True))

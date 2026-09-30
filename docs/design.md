@@ -241,20 +241,28 @@ Agent count and simulated years measure activity; passing unseen evidence measur
   live settings (Sept 29) start at 96, the ceiling, with a floor of 12. Families compete for Gym time
   and researcher turns by **expected information value** (Release B, `league/swarm/allocation.py`): a
   family's value is the variance of its next validation's pass or fail under an empirical-Bayes
-  posterior (the swarm's recent validation looks, pooled by mechanism class, a family's own latest look
-  updating its class's prior), discounted by its own trials (breadth beats depth), by exhaustion (its
-  lineage's holdout looks spent, a drift-failed validation, a hold streak) and by half for a structure
-  the account cannot open for real. Every family keeps a 10% floor share; 35% is an explicit exploration
-  share for families without their own validation, split across mechanism classes before families; the
-  rest follows value; no family holds more than 5% and no class more than 30% (a cap's excess goes to
-  other families by value, at most tripling any one's share, and a cap gives way rather than feed a
-  family worth nothing). Shares buy turns: the researchers' scheduler is start-time fair queueing, so
-  under contention a family's turns follow its share, and the number of researchers expands above
-  `researcher.concurrency` (up to `allocation.max_concurrency`) while useful experiments wait and spend
-  is under the plan, and contracts when research spend runs over it. Births carry a **structure quota**:
-  one structure family (single, butterfly, vertical, straddle, condor, calendar) at most 40% of a day's
-  births and of a pass. `allocation.mode` "bandit" restores the R11b bandit (Thompson sampling in which
-  only an old family whose latest validation mean is positive is exploited, each earning at most 15%).
+  posterior (the swarm's recent validation looks on the running evaluator, pooled by mechanism class
+  and blended with the Sept 30 fit, a family's own latest look updating its class's prior; a family
+  past the t check but failing another counts as on the line), discounted by the idea's trials (its
+  own and those it inherited at birth: breadth beats depth), by exhaustion (its lineage's holdout
+  looks spent, a drift-failed validation, a hold streak) and by half for a structure the account
+  cannot open for real. Every family keeps a 10% floor share; 35% is an explicit exploration share
+  for breadth across mechanism classes (a class's slice is its families' value over the root of
+  their number, then by value within it); the rest follows value. No family holds more than 5%, and
+  no class more than 30% while other classes hold families worth the attention (a cap's excess goes
+  only to families worth at least what the average unit of share buys, at most tripling any one's
+  share; otherwise the class cap gives way, which it mostly does while one or two classes are most
+  of the population, and the round's report says so). Families at the gate or beyond get the floor
+  share and lead the leaderboard. Shares buy turns: the researchers' scheduler is start-time fair
+  queueing, so under contention a family's turns follow its share. With an explicit
+  `allocation.plan_usd_per_hour`, the number of researchers contracts when research spend (Sail
+  models and Gym boxes) runs over it and expands above `researcher.concurrency` (up to
+  `allocation.max_concurrency`) while useful experiments wait and spend is under 80% of it; with no
+  plan it is `researcher.concurrency`. Births carry a **structure quota**: one structure family
+  (single, butterfly, vertical, straddle, condor, calendar) at most 60% of a day's births and of a
+  pass, resting below three quarters of the start population. `allocation.mode` "bandit" restores
+  the R11b bandit (Thompson sampling in which only an old family whose latest validation mean is
+  positive is exploited, each earning at most 15%).
   A family
   retires when its best program has not improved on validation in 30
   revisions or 2,000 evaluations by default (200 and 4,000 live), or its trial-adjusted evidence falls

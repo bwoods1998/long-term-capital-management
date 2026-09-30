@@ -13,71 +13,88 @@ THE SHARE (`value_shares`; `allocation.mode` "value", the default). Every living
 Gym priority is the sum of three parts:
   - THE FLOOR (`floor_share`, 0.10) spread evenly and never capped: no family starves, so every family still reaches
     the rules that retire it;
-  - THE EXPLORATION SHARE (`explore_share`, 0.35) for families without their own usable validation evidence (never
-    validated, or its validated version failed the drift screen), split across MECHANISM CLASSES first (structure x root
-    group, the strategist's `mechanism_class`) by each class's value, then within a class by each family's value: a class
-    with 45 living families gets no more of it than its evidence earns, however many families it has;
+  - THE EXPLORATION SHARE (`explore_share`, 0.35): breadth across MECHANISM CLASSES (structure x root group, the
+    strategist's `mechanism_class`). Each class's slice is its families' value mass with diminishing returns in its size
+    (the sum of their values over the square root of their number), then within a class by each family's value. So a
+    small or unexplored class earns more a family than a crowded one, but only as much as its families' values justify:
+    a class the account cannot open for real, or whose lineages are spent or deep, carries those discounts into its slice;
   - THE DECISION SHARE (the rest, 0.55) to every family by its value.
-  Then the caps: no family above `family_cap` (0.05) and no mechanism class above `class_cap` (0.30); the excess goes to
-  the families under both caps in proportion to their values, none past `cap_boost` (3) times its own share (water-
-  filling: a family worth nothing, its lineage's looks spent, takes none of it while another is worth something; a cap
-  moves attention to other classes' families, never into one its value does not justify). A cap relaxes only when it
-  cannot hold: at least 2/n a family and 1/k a class, and a class cap gives way when the families outside the full
-  classes cannot take the excess within those bounds (a population that is nearly one class).
+  Then the caps: no family above `family_cap` (0.05) and no mechanism class above `class_cap` (0.30) WHEN THE OTHER
+  CLASSES CAN TAKE THE EXCESS. The excess goes to the families under both caps that are worth at least what the average
+  unit of share buys (`relief`: the value-weighted mean value), in proportion to their values, none past `cap_boost` (3)
+  times its own share (water-filling: a cap moves attention to other classes' families only where that does not dilute
+  the information it funds, never into one its value does not justify). A cap relaxes when it cannot hold: at least 2/n
+  a family and 1/k a class; and when those families cannot take a class cap's excess, the class cap rises to the lowest
+  level at which it holds, the same level for every class (`class_cap_in_force` in the report, `class_cap_relaxed`).
+  So the class cap binds at 30% only as far as other classes hold families worth the attention: while one or two
+  classes are most of the population it rises (the Sept 30 replay: two classes held 70 of 78 living families).
+  Exact ties are broken by value, then id, by a few parts in 10^12, so a "top N by weight" band holds N families.
 
 THE VALUE of a family is the variance of its NEXT validation's pass or fail (the line's t check, `evidence.MIN_T`)
-under an empirical-Bayes posterior, times two discounts:
-  value = p (1 - p) x depth x exhaustion, with p = P(next validation t >= MIN_T).
+under an empirical-Bayes posterior, times three discounts:
+  value = q (1 - q) x depth x exhaustion x execution, with p = P(next validation t >= MIN_T) and q = min(p, 1/2).
   - THE POSTERIOR. The validation t of every family validated in the last `lookback_hours` on the evaluator running now
     (its latest look; a look from another fingerprint is never pooled, even for attention) is a draw
     of (the family's true t) + (unit noise); a family's true t is its class's mean plus a within-class spread, and a
     class's mean is the swarm's mean plus a between-class spread. The swarm's mean and the two spreads are method-of-
-    moments estimates from those looks (bounded; defaults when fewer than `MIN_OBS` looks). A family's own latest t
-    (never when its validated version failed the drift screen) updates its prior; its class's statistics leave its own
-    look out. The predictive of its next look adds the unit noise back. So a family near the line has p near 0.5 and
-    the most value; a family far below it has almost none (R11-5's lesson without its rank weighting: an old family at
-    zero or below never earns a large share); a young family draws its class's prior, and an UNEXPLORED class (no look)
-    draws the swarm's mean with the widest spread, so its families are worth more than those of a class whose many looks
-    sit below the line.
-  - DEPTH = 1 / (1 + trials / `depth_trials` (80)). Sept 30 (40 hours of the House's runs): the chance per trial of a
-    family's first positive eligible Train version fell from 0.35% over its first ten trials to 0.20% at 40-80 and
-    none past 80, and first validations were 12.6% at t >= 1 against 5% for second looks and 0 of 6 after (breadth
-    beats depth; the Sept 29 ROI study: heavily worked versions validate weaker).
+    moments estimates from those looks, blended with the Sept 30 fit (PRIOR_*, worth PRIOR_LOOKS looks: an evidence reset
+    starts from what the swarm last measured and moves to its own looks as they come, never jumping at a count). A
+    family's own latest t (never when its validated version failed the drift screen) updates its prior; its class's
+    statistics leave its own look out. The predictive of its next look adds the unit noise back. So a family near the
+    line has p near 0.5 and the most value; a family far below it has almost none (R11-5's lesson without its rank
+    weighting: an old family at zero or below never earns a large share); a young family draws its class's prior, and an
+    UNEXPLORED class (no look) draws the swarm's mean with the widest spread. A family whose t check would pass but that
+    is not at the gate (another check failed it) is as undecided as one on the line: q = min(p, 1/2), the most value.
+  - DEPTH = 1 / (1 + trials / `depth_trials` (80)), TRIALS BEING THE IDEA'S: its own plus those it inherited at birth
+    (`inherited_trials`: a fork's lineage, or the dead lineages a new family was born on the slice of; the N the deflated
+    Sharpe already divides by), so a reborn mechanism is not a young one. Sept 30 (40 hours of the House's runs): the
+    chance per trial of a family's first positive eligible Train version fell from 0.35% over its first ten trials to
+    0.20% at 40-80 and none past 80, and first validations were 12.6% at t >= 1 against 5% for second looks and 0 of 6
+    after (breadth beats depth; the Sept 29 ROI study: heavily worked versions validate weaker).
   - EXHAUSTION = 0 when the lineage has spent its holdout looks (`evidence.LOOKS_PER_LINEAGE`: the gate can never look
     again), 0.5 when its validated version failed the drift screen, 0.5 while its researcher holds in a streak
     (`hold_streak` >= 3: it says it has nothing to run). A family at the gate, with a look out, or outside the Gym band
-    gets the floor only: the gate or its forward record decides it next, not research.
+    gets the floor only: the gate or its forward record decides it next, not research (the leaderboard lists such
+    families first, so the architect's and strategist's first 60 rows always hold them).
   - EXECUTION: a family whose declared structure the account cannot open for real (`real_structures`, the constitution's
     `options_money.real_types` and `long_single`, whose every order is one of them) is worth `shadow_value` (0.5) of one
     it can: its pass could not trade real money until the owner's equity and grant change.
-The allocation reads Validation's numbers exactly as the bandit did (the weight only; researchers and the architect
-still see pass or fail and a count of checks, D2a), and nothing on the way to validation, the gate, the bands or money
-reads the weight (practice.py's CannotPromote test). The practice bonus (practice.py) rides on top of the caps as it rode
-on the bandit (at most +25% of a family's share and 10% of all share: a capped family may sit up to a quarter above its
-cap). `allocation.mode` "bandit" restores R11-5's Thompson bandit (`evidence.thompson`) with no deploy.
+The allocation reads Validation's numbers exactly as the bandit did (into the weight only; researchers still see pass or
+fail and a count of checks, D2a). The architect and the strategist see each family's `share` on the leaderboard, as they
+did under the bandit: it is a function of the validation t among validated families (it was then too), never the t
+itself. Nothing on the way to validation, the gate, the bands or money reads the weight (practice.py's CannotPromote
+test). The practice bonus (practice.py) rides on top of the caps as it rode on the bandit (at most +25% of a family's
+share and 10% of all share: a capped family may sit up to a quarter above its cap). `allocation.mode` "bandit" restores
+R11-5's Thompson bandit (`evidence.thompson`) with no deploy.
 
 THE TURNS (`StrideTurns`, used by loop.Scheduler; `allocation.scheduler` "stride", the default). Start-time fair
 queueing: a turn moves a family's finish tag 1 / (its share x n) past its start, and among the families ready now the
 lowest start tag goes first; a family joining (born, back from a hold) starts at the virtual time (the last start
 served), so it neither jumps the queue with credit it never earned nor waits behind the others' history. Under
-contention a family's turns follow its share; without it every ready family runs. A ready family that has not had a
-turn for `max_wait_seconds` (1800) goes first whatever its share. "legacy" restores the minute-per-share head start.
+contention a family's turns follow its share; without it every ready family runs. Nothing starves: the floor share
+bounds every stride at 1 / `floor_share` (10) average strides. `max_wait_seconds` (0: off) optionally sends a ready family
+that has had no turn for that long first; that turn is out of order, so it moves the family's own tag but never the
+virtual time. "legacy" restores the minute-per-share head start.
 
-THE CONCURRENCY (`effective_concurrency`). `researcher.concurrency` is the spend plan's level. It EXPANDS up to
-`max_concurrency` (null: never) while distinct useful experiments wait (families ready now whose share is at least
-`useful_share` of the average) and the research spend in the last hour is under `expand_below` (0.8) of
-`plan_usd_per_hour` (null: the researcher pace's limit); it CONTRACTS in proportion when that spend runs over the plan,
-never below `min_concurrency` (4); otherwise it is the plan's level. Every worker the ceiling allows is started; the ones
-above the effective level sleep.
+THE CONCURRENCY (`effective_concurrency`). `researcher.concurrency` is the spend plan's level, and with no explicit
+`plan_usd_per_hour` (null, the default) it is the level, full stop: the controller never expands or contracts on a plan
+it was not given. With one, the research spend it drives (`RESEARCH_SPEND`: Sail models and Gym boxes in the last hour)
+is measured against it: the level CONTRACTS in proportion while that spend runs over the plan, never below
+`min_concurrency` (4), and EXPANDS up to `max_concurrency` (null: never) while distinct useful experiments wait and the
+spend is under `expand_below` (0.8) of the plan. A USEFUL EXPERIMENT is a ready family whose value is at least
+`useful_value` (0.5) of a fresh family's in an unexplored class (the tournament's last allocation names them; none
+before its first round, and none under the bandit): its lineage has looks left, it is not deep, not holding, and it is
+a structure real money can open, or its evidence makes up for it. Every worker the ceiling allows is started; the ones
+above the effective level sleep. It cuts nothing by itself: the cut is a lower `researcher.concurrency`.
 
 THE BIRTH QUOTA (`BirthQuota`, architect.py). A STRUCTURE FAMILY (`STRUCTURE_BUCKETS`: single = long_single, long_call,
-long_put; butterfly; vertical; straddle; condor; calendar) may hold at most `births.max_share` (0.4) of the births of the
-last `births.window_hours` (24) once there were `births.min_window` (10), and at most that share of a pass's want; the
-first `births.per_pass_min` (1) of a structure family in a pass is always allowed, so a pass is never barred outright.
-THE POPULATION GUARD: below `births.min_alive` living families (null: half of `population.start`) the window's rule rests
-and only the pass's cap holds, so proposals that stay one structure family thin the population but never starve it. The
-architect's request shows the counts and which families are full; a refused proposal is counted in the pass's event
-(`structure_capped`).
+long_put; butterfly; vertical; straddle; condor; calendar) may hold at most `births.max_share` (0.6) of the births of the
+last `births.window_hours` (24) once there were `births.min_window` (10), and at most that share of a pass's want (one
+quota a pass, the truncation retry's admits included); the first `births.per_pass_min` (1) of a structure family in a
+pass is always allowed, so a pass is never barred outright. THE POPULATION GUARD: below `births.min_alive` living
+families (null: three quarters of `population.start`, 72 of 96 live) the whole quota rests, so proposals that stay one
+structure family can thin the population to the guard but never below it. The architect's request shows the counts and
+which families are full; a refused proposal is counted in the pass's event (`structure_capped`).
 
 Every knob lives in swarm.json's `allocation` block (read every loop, no deploy; `settings.py` has no entry: this module's
 DEFAULTS are the defaults, and a misread value falls back to its default). Standard library only. Nothing on the live
@@ -100,31 +117,38 @@ DEFAULTS: dict[str, Any] = {
     "family_cap": 0.05,          # the most share one family may hold (about 4x the average at 80 families)
     "class_cap": 0.30,           # the most share one mechanism class (structure x root group) may hold
     "cap_boost": 3.0,            # a family takes at most this multiple of its own share from the caps' excess
-    "depth_trials": 80,          # own trials at which the depth discount halves a family's value
+    "depth_trials": 80,          # the idea's trials (own + inherited) at which the depth discount halves a family's value
     "hold_streak": 3,            # a hold streak this long halves a family's value
     "lookback_hours": 168,       # the validations the posterior learns from
     # The structures real money can open (the constitution's options_money.real_types under $2,000 of equity, and
     # long_single, whose every order is a long call or put); any other structure's value is `shadow_value` of theirs.
     "real_structures": ["debit_vertical", "long_butterfly", "long_call", "long_put", "long_single"],
     "shadow_value": 0.5,
-    "useful_share": 0.5,         # a ready family at this fraction of the average share or more is a useful experiment
+    "useful_value": 0.5,         # a useful experiment: at least this fraction of a fresh family's value in an unexplored class
     "scheduler": "stride",       # "stride" | "legacy"
-    "max_wait_seconds": 1800,    # a ready family waiting this long goes first
+    "max_wait_seconds": 0,       # 0: off (the floor share already bounds every wait); else a ready family waiting this long goes first
     "max_concurrency": None,     # null: never above researcher.concurrency
     "min_concurrency": 4,
-    "plan_usd_per_hour": None,   # null: the researcher pace's limit
+    "plan_usd_per_hour": None,   # null: no plan, so neither expansion nor contraction (researcher.concurrency is the level)
     "expand_below": 0.8,
-    # min_alive null: half of population.start (48 of 96 live); below it the window's rule rests and the pass's cap alone holds.
-    "births": {"max_share": 0.4, "window_hours": 24, "min_window": 10, "per_pass_min": 1, "min_alive": None},
+    # min_alive null: three quarters of population.start (72 of 96 live); below it the whole quota rests.
+    "births": {"max_share": 0.6, "window_hours": 24, "min_window": 10, "per_pass_min": 1, "min_alive": None},
 }
+#: The spend kinds the researchers' concurrency drives (a cycle's Sail model calls and the Gym boxes its Train jobs keep
+#: busy): THE CONCURRENCY's plan is measured against their sum over the last hour.
+RESEARCH_SPEND = ("sail_model", "gym_box")
 MODES = ("value", "bandit")
 SCHEDULERS = ("stride", "legacy")
-#: The posterior's defaults when fewer than MIN_OBS validations are known, and the bounds on its estimates. Sept 30: 145
-#: first-and-later validation looks in 40 hours had a median t of -0.7 and a spread well above the unit noise.
-MIN_OBS = 8
-PRIOR_MEAN = -0.7
-PRIOR_BETWEEN = 0.25   # between-class variance of the class means
-PRIOR_WITHIN = 0.5     # within-class variance of the families' true t
+#: The posterior's defaults, and the bounds on its estimates. They are the fit to the House's 119 latest validation looks
+#: of the week to 16:00Z Sept 30 (mean -0.97, between-class variance 0.09, within-class 2.84; median t -0.68), worth
+#: PRIOR_LOOKS looks: the estimates blend them with the running evaluator's own looks (n of them) at n / (n + PRIOR_LOOKS),
+#: so after an evidence reset the allocation starts where the swarm last measured and never jumps at a count. Below
+#: MIN_OBS looks the moments are not computed at all.
+MIN_OBS = 3
+PRIOR_LOOKS = 20
+PRIOR_MEAN = -0.97
+PRIOR_BETWEEN = 0.09   # between-class variance of the class means
+PRIOR_WITHIN = 2.84    # within-class variance of the families' true t
 MEAN_BOUNDS = (-3.0, 1.0)
 VAR_BOUNDS = (0.05, 4.0)
 NOISE = 1.0            # a validation t's own sampling variance
@@ -178,7 +202,7 @@ def cfg(settings: Mapping[str, Any] | None) -> dict[str, Any]:
         "real_structures": (list(raw["real_structures"]) if isinstance(raw.get("real_structures"), list)
                             and all(isinstance(x, str) for x in raw["real_structures"]) else list(d["real_structures"])),
         "shadow_value": _number(raw.get("shadow_value"), d["shadow_value"], 0.0, 1.0),
-        "useful_share": _number(raw.get("useful_share"), d["useful_share"], 0.0, 100.0),
+        "useful_value": _number(raw.get("useful_value"), d["useful_value"], 0.0, 100.0),
         "scheduler": raw.get("scheduler") if raw.get("scheduler") in SCHEDULERS else d["scheduler"],
         "max_wait_seconds": _number(raw.get("max_wait_seconds"), d["max_wait_seconds"], 0.0, 86400.0 * 7),
         "max_concurrency": _count(raw.get("max_concurrency"), None, 1, 512),
@@ -232,6 +256,7 @@ class Posterior:
         for c, t in self.looks.values():
             by_class.setdefault(c, []).append(t)
         self.by_class = {c: (len(v), sum(v)) for c, v in by_class.items()}
+        self.mean, self.between, self.within, self.weight = PRIOR_MEAN, PRIOR_BETWEEN, PRIOR_WITHIN, 0.0
         if self.n >= MIN_OBS:
             mean = sum(ts) / self.n
             var = sum((t - mean) ** 2 for t in ts) / (self.n - 1)
@@ -247,11 +272,12 @@ class Posterior:
                 between = (weighted - within_pooled) / max(n0, 1.0)
             else:
                 within_pooled, between = var, PRIOR_BETWEEN
-            self.mean = _clamp(mean, *MEAN_BOUNDS)
-            self.between = _clamp(between, *VAR_BOUNDS)
-            self.within = _clamp(within_pooled - NOISE, *VAR_BOUNDS)
-        else:
-            self.mean, self.between, self.within = PRIOR_MEAN, PRIOR_BETWEEN, PRIOR_WITHIN
+            # Each estimate is bounded, then blended with the Sept 30 fit, the looks weighing n / (n + PRIOR_LOOKS).
+            w = self.n / (self.n + PRIOR_LOOKS)
+            self.weight = w
+            self.mean = _clamp(w * _clamp(mean, *MEAN_BOUNDS) + (1 - w) * PRIOR_MEAN, *MEAN_BOUNDS)
+            self.between = _clamp(w * _clamp(between, *VAR_BOUNDS) + (1 - w) * PRIOR_BETWEEN, *VAR_BOUNDS)
+            self.within = _clamp(w * _clamp(within_pooled - NOISE, *VAR_BOUNDS) + (1 - w) * PRIOR_WITHIN, *VAR_BOUNDS)
 
     def class_prior(self, cls: str, *, leave_out: str | None = None) -> tuple[float, float]:
         """(mean, variance) of a new family's true t in class `cls`: the class mean's posterior (its looks, less the family
@@ -279,8 +305,8 @@ class Posterior:
         return _phi_upper((line - mean) / math.sqrt(max(var, 1e-9) + NOISE))
 
     def summary(self) -> dict[str, Any]:
-        return {"looks": self.n, "mean": round(self.mean, 4), "between": round(self.between, 4), "within": round(self.within, 4),
-                "fitted": self.n >= MIN_OBS}
+        return {"looks": self.n, "weight": round(self.weight, 4), "mean": round(self.mean, 4), "between": round(self.between, 4),
+                "within": round(self.within, 4)}
 
 
 # ------------------------------------------------------------------------------------------------------------ the rows
@@ -295,8 +321,12 @@ def row_of(fam: Mapping[str, Any], *, cls: str, looks_spent: bool) -> dict[str, 
     usable = int(fam.get("validations") or 0) > 0 and isinstance(t, (int, float)) and not isinstance(t, bool) \
         and math.isfinite(float(t)) and not drift
     streak = state.get("hold_streak")
+    own = int(fam.get("trials") or 0)
+    # DEPTH reads the idea's trials: its own and those it inherited at birth (a fork's lineage, or the dead lineages it
+    # was born on the slice of), never only its own (a reborn mechanism is not a young one).
     return {"id": str(fam["id"]), "cls": cls, "structure": fam.get("structure"), "t": float(t) if usable else None,
-            "drift_failed": drift, "trials": int(fam.get("trials") or 0), "looks_spent": bool(looks_spent),
+            "drift_failed": drift, "trials": own + max(0, int(fam.get("inherited_trials") or 0)), "own_trials": own,
+            "looks_spent": bool(looks_spent),
             "hold_streak": int(streak) if isinstance(streak, int) and not isinstance(streak, bool) else 0,
             "gate": bool(state.get("gate_ready") or state.get("look_inflight") or (fam.get("band") or "gym") != "gym")}
 
@@ -307,6 +337,8 @@ def value_of(row: Mapping[str, Any], post: Posterior, c: Mapping[str, Any]) -> d
         return {"value": 0.0, "p": None, "depth": None, "exhaustion": 0.0, "why": "gate"}
     mean, var = post.family(row["cls"], row.get("t"), fid=row["id"])
     p = post.pass_probability(mean, var)
+    # A family whose t check would pass but that is not at the gate failed another check: as undecided as one on the line.
+    q = min(p, 0.5)
     depth = 1.0 / (1.0 + max(0, int(row.get("trials") or 0)) / float(c["depth_trials"]))
     ex, why = 1.0, []
     if row.get("looks_spent"):
@@ -319,8 +351,16 @@ def value_of(row: Mapping[str, Any], post: Posterior, c: Mapping[str, Any]) -> d
             ex *= HOLDING
             why.append("holding")
     execution = 1.0 if str(row.get("structure")) in c["real_structures"] else c["shadow_value"]
-    return {"value": p * (1.0 - p) * depth * ex * execution, "p": p, "mean": mean, "var": var, "depth": depth, "exhaustion": ex,
+    return {"value": q * (1.0 - q) * depth * ex * execution, "p": p, "mean": mean, "var": var, "depth": depth, "exhaustion": ex,
             "execution": execution, "why": ", ".join(why) or None}
+
+
+def fresh_value(post: Posterior) -> float:
+    """The value of a fresh family (no trials, a structure real money can open) in a class with no look: the reference a
+    useful experiment is measured against (THE CONCURRENCY)."""
+    mean, var = post.class_prior("\x00unexplored")
+    q = min(post.pass_probability(mean, var), 0.5)
+    return q * (1.0 - q)
 
 
 def _fill(shares: dict[str, float], targets: Sequence[str], amount: float, weights: Mapping[str, float],
@@ -350,17 +390,13 @@ def _fill(shares: dict[str, float], targets: Sequence[str], amount: float, weigh
     return amount
 
 
-def _water_fill(shares: dict[str, float], cls_of: Mapping[str, str], weights: Mapping[str, float], family_cap: float,
-                class_cap: float, boost: float, floor: float) -> tuple[set[str], bool]:
-    """Cap each family at `family_cap` and each class at `class_cap`, in place, never taking a family below `floor` (the
-    floor share is never capped: only what a family holds above it moves). The excess goes to the families under both
-    caps in proportion to `weights` (their values: a family worth nothing takes none of it while any other is worth
-    something), none past `boost` times its own share before the caps (a cap moves attention to other classes' families,
-    never into one its value does not justify); what they cannot take goes to every family under the family cap, the
-    class caps relaxing. (the classes capped, whether a class cap relaxed)"""
+def _cap_pass(shares: dict[str, float], cls_of: Mapping[str, str], weights: Mapping[str, float], family_cap: float,
+              class_cap: float, floor: float, relief: float, limit: Mapping[str, float]) -> tuple[set[str], float]:
+    """One water-filling at `class_cap`, in place: cap each family at `family_cap` and each class at `class_cap`, never
+    taking a family below `floor` (only what a family holds above the floor share moves), and give the excess to the
+    families under both caps whose `weights` (values) are at least `relief`, in proportion to their values, none past its
+    `limit`. (the classes capped, what could not be placed: the caps do not hold at this level when it is above zero)"""
     capped: set[str] = set()
-    limit = {f: max(s, min(family_cap, boost * s)) for f, s in shares.items()}
-    ceiling = {f: family_cap for f in shares}
     for _ in range(100):
         excess, full = 0.0, set()
         for fid, s in shares.items():
@@ -387,36 +423,86 @@ def _water_fill(shares: dict[str, float], cls_of: Mapping[str, str], weights: Ma
                 capped.add(cls)
             full.update(members)
         if excess <= 1e-12:
-            return capped, False
-        left = _fill(shares, [f for f in shares if f not in full], excess, weights, limit)
-        if left <= 1e-12:
-            continue  # a class that took the excess may now be over its own cap: check again
-        left = _fill(shares, list(shares), left, weights, ceiling, evenly=True)
+            return capped, 0.0
+        left = _fill(shares, [f for f in shares if f not in full and float(weights.get(f, 0.0)) >= relief], excess, weights,
+                     limit)
+        if left > 1e-12:
+            return capped, left
+        # a class that took the excess may now be over its own cap: check again
+    return capped, 0.0
+
+
+def _water_fill(shares: dict[str, float], cls_of: Mapping[str, str], weights: Mapping[str, float], family_cap: float,
+                class_cap: float, boost: float, floor: float, relief: float = 0.0) -> tuple[set[str], bool, float]:
+    """THE CAPS, in place (THE SHARE in the module docstring): each family at most `family_cap` and each class at most
+    `class_cap`, never below `floor`; the excess to the families under both caps worth at least `relief` (what the
+    average unit of share buys: a cap moves attention to other classes' families only where it buys at least that, never
+    into one its value does not justify), in proportion to their values, none past `boost` times its own share. When they
+    cannot take it, the class cap RELAXES to the lowest level at which it holds (bisection), every class held to that
+    same level; what even no class cap leaves room for goes to every family by value up to the family cap, then evenly.
+    (the classes capped, whether the class cap relaxed, the class cap in force)"""
+    original = dict(shares)
+    limit = {f: max(s, min(family_cap, boost * s)) for f, s in original.items()}
+
+    def attempt(level: float) -> tuple[dict[str, float], set[str], float]:
+        trial = dict(original)
+        capped, left = _cap_pass(trial, cls_of, weights, family_cap, level, floor, relief, limit)
+        return trial, capped, left
+
+    trial, capped, left = attempt(class_cap)
+    level, relaxed = class_cap, False
+    if left > 1e-9:
+        relaxed = True
+        lo, hi = class_cap, 1.0
+        for _ in range(40):
+            mid = 0.5 * (lo + hi)
+            if attempt(mid)[2] > 1e-9:
+                lo = mid
+            else:
+                hi = mid
+        level = hi
+        trial, capped, left = attempt(level)
+    if left > 1e-12:
+        left = _fill(trial, list(trial), left, weights, {f: family_cap for f in trial}, evenly=True)
         if left > 1e-12:  # the family cap cannot hold either (it is at least 2/n, so this never happens): evenly
-            for f in shares:
-                shares[f] += left / len(shares)
-        return capped, True
-    return capped, False
+            for f in trial:
+                trial[f] += left / len(trial)
+    shares.update(trial)
+    return capped, relaxed, level
+
+
+#: THE SHARE's tie step (`_break_ties`): far below any share that matters, far above a float's resolution at one.
+TIE_STEP = 1e-12
+
+
+def _break_ties(shares: dict[str, float], values: Mapping[str, Mapping[str, Any]]) -> None:
+    """Exact ties (the family cap, the floor) broken in place by value, then id: each later member of a tie gives up a few
+    parts in 10^12 a place, so a "top N by weight" band (researcher.is_top) holds N families, never every tied one."""
+    order = sorted(shares, key=lambda f: (-round(shares[f], 12), -float(values[f]["value"]), f))
+    prev, k = None, 0
+    for fid in order:
+        key = round(shares[fid], 12)
+        k = k + 1 if key == prev else 0
+        prev = key
+        shares[fid] -= k * TIE_STEP
 
 
 def value_shares(rows: Sequence[Mapping[str, Any]], post: Posterior,
                  settings: Mapping[str, Any] | None = None) -> tuple[dict[str, float], dict[str, Any]]:
     """Each family's share (THE SHARE in the module docstring): ({id: share} summing to 1, a report). `rows` as `row_of`
-    makes them."""
+    makes them. The report's `useful_ids` are the families THE CONCURRENCY counts as useful experiments (the tournament
+    keeps them and leaves them out of its event)."""
     c = cfg(settings)
     rows = [r for r in rows if r.get("id")]
     if not rows:
-        return {}, {"mode": "value", "families": 0}
+        return {}, {"mode": "value", "families": 0, "useful_ids": []}
     n = len(rows)
     values = {r["id"]: value_of(r, post, c) for r in rows}
     cls_of = {r["id"]: str(r.get("cls") or "none") for r in rows}
     eligible = [r for r in rows if not r.get("gate")]
-    explore = [r for r in eligible if r.get("t") is None]
     floor, explore_share = c["floor_share"], c["explore_share"]
     if not eligible:
         floor, explore_share = 1.0, 0.0
-    elif not explore:
-        explore_share = 0.0
     decide_share = 1.0 - floor - explore_share
     shares = {r["id"]: floor / n for r in rows}
     pools: dict[str, float] = {"floor": floor, "explore": 0.0, "decide": 0.0}
@@ -431,20 +517,18 @@ def value_shares(rows: Sequence[Mapping[str, Any]], post: Posterior,
             shares[fid] += total * w / mass
         return total
 
-    # THE EXPLORATION SHARE: across classes by the class's value (a new family's in it, at no depth), then within. A class
-    # whose every member is worth nothing (its lineages' looks spent) takes none of it.
+    # THE EXPLORATION SHARE: breadth across mechanism classes. A class's slice is its families' value mass with
+    # diminishing returns in its size (sum / sqrt(count)): every discount its families carry (execution, depth,
+    # exhaustion, a hold) carries into its slice, and a class whose every member is worth nothing takes none of it.
     by_class: dict[str, list[Mapping[str, Any]]] = {}
-    for r in explore:
+    for r in eligible:
         by_class.setdefault(cls_of[r["id"]], []).append(r)
-    class_value = {}
-    for cls, members in by_class.items():
-        m, v = post.class_prior(cls)
-        p = post.pass_probability(m, v)
-        class_value[cls] = p * (1.0 - p) if any(values[r["id"]]["value"] > 0 for r in members) else 0.0
-    mass = sum(class_value.values())
+    class_weight = {cls: sum(values[r["id"]]["value"] for r in members) / math.sqrt(len(members))
+                    for cls, members in by_class.items()}
+    mass = sum(class_weight.values())
     for cls, members in sorted(by_class.items()):
-        if mass > 0 and class_value[cls] > 0:
-            pools["explore"] += spread(members, explore_share * class_value[cls] / mass)
+        if mass > 0 and class_weight[cls] > 0:
+            pools["explore"] += spread(members, explore_share * class_weight[cls] / mass)
     # THE DECISION SHARE: every family outside the gate by its value.
     pools["decide"] = spread(eligible, decide_share)
     # What no family's value could take (every value zero) is spread evenly: the floor's.
@@ -459,20 +543,29 @@ def value_shares(rows: Sequence[Mapping[str, Any]], post: Posterior,
     classes = set(cls_of.values())
     family_cap = max(c["family_cap"], 2.0 / n)
     class_cap = max(c["class_cap"], 1.0 / max(1, len(classes)))
-    capped, relaxed = _water_fill(shares, cls_of, {f: v["value"] for f, v in values.items()}, family_cap, class_cap,
-                                  c["cap_boost"], base)
+    # A cap's excess goes only to families worth at least what the average unit of share buys (attention follows value,
+    # so that is the value-weighted mean value): moving it never dilutes the information it funds.
+    mass = sum(values[r["id"]]["value"] for r in eligible)
+    relief = sum(values[r["id"]]["value"] ** 2 for r in eligible) / mass if mass > 0 else 0.0
+    capped, relaxed, level = _water_fill(shares, cls_of, {f: v["value"] for f, v in values.items()}, family_cap, class_cap,
+                                         c["cap_boost"], base, relief)
     total = sum(shares.values())
     shares = {f: s / total for f, s in shares.items()} if total > 0 else {f: 1.0 / n for f in shares}
+    _break_ties(shares, values)
     by_cls: dict[str, float] = {}
     for fid, s in shares.items():
         by_cls[cls_of[fid]] = by_cls.get(cls_of[fid], 0.0) + s
     top = sorted(shares, key=lambda f: (-shares[f], f))[:5]
-    report = {"mode": "value", "families": n, "explore_families": len(explore), "gate_families": n - len(eligible),
+    reference = fresh_value(post)
+    useful_ids = sorted(r["id"] for r in eligible if values[r["id"]]["value"] >= c["useful_value"] * reference > 0)
+    report = {"mode": "value", "families": n, "gate_families": n - len(eligible),
+              "unvalidated_families": sum(1 for r in eligible if r.get("t") is None),
               "pools": {k: round(v, 4) for k, v in pools.items()}, "posterior": post.summary(),
               "family_cap": round(family_cap, 4), "class_cap": round(class_cap, 4), "capped_classes": sorted(capped),
-              "class_cap_relaxed": relaxed,
+              "class_cap_relaxed": relaxed, "class_cap_in_force": round(level, 4),
               "classes": {k: round(v, 4) for k, v in sorted(by_cls.items(), key=lambda kv: -kv[1])[:12]},
               "exhausted": sorted(f for f, v in values.items() if v["exhaustion"] == 0.0 and v["why"] != "gate")[:20],
+              "fresh_value": round(reference, 5), "useful": len(useful_ids), "useful_ids": useful_ids,
               "top": [{"family": f, "share": round(shares[f], 4), "p": None if values[f]["p"] is None else round(values[f]["p"], 4),
                        "depth": None if values[f]["depth"] is None else round(values[f]["depth"], 3)} for f in top]}
     return shares, report
@@ -554,21 +647,27 @@ class StrideTurns:
         """The family's start tag now."""
         return max(self.passes.get(fid, float("-inf")), self.now_pass)
 
+    @staticmethod
+    def starving(fid: str, *, now: float, last: Mapping[str, float], max_wait: float) -> bool:
+        """The family has had no turn for `max_wait` seconds (0: the rule is off)."""
+        return max_wait > 0 and fid in last and now - float(last[fid]) >= max_wait
+
     def order(self, ready: Sequence[Mapping[str, Any]], n: int, *, now: float, last: Mapping[str, float],
               max_wait: float) -> list[Mapping[str, Any]]:
-        """The ready families in turn order: any that has waited `max_wait` since its last turn first (the longest wait
-        first), then by start tag, the larger share first on a tie."""
+        """The ready families in turn order: with `max_wait`, any that has waited that long since its last turn first (the
+        longest wait first); then by start tag, the larger share first on a tie."""
         def rank(f: Mapping[str, Any]) -> tuple:
-            waited = now - float(last.get(f["id"], now))
-            starving = max_wait > 0 and f["id"] in last and waited >= max_wait
-            if starving:
-                return (0, -waited, 0.0, f["id"])
+            if self.starving(f["id"], now=now, last=last, max_wait=max_wait):
+                return (0, -(now - float(last[f["id"]])), 0.0, f["id"])
             return (1, self.key(f["id"], f.get("weight"), n), self.stride(f.get("weight"), n), f["id"])
         return sorted(ready, key=rank)
 
-    def took(self, fid: str, share: Any, n: int) -> None:
+    def took(self, fid: str, share: Any, n: int, *, out_of_order: bool = False) -> None:
+        """A turn: the family's finish tag moves one stride past its start. A turn served `out_of_order` (the starvation
+        rule) never moves the virtual time, so the other families keep their places."""
         start = self.key(fid, share, n)
-        self.now_pass = max(self.now_pass, start)
+        if not out_of_order:
+            self.now_pass = max(self.now_pass, start)
         self.passes[fid] = start + self.stride(share, n)
 
     def forget(self, alive: Iterable[str]) -> None:
@@ -582,13 +681,12 @@ def legacy_order(ready: Sequence[Mapping[str, Any]], n: int, *, last: Mapping[st
     return sorted(ready, key=lambda f: (last.get(f["id"], 0) - 60.0 * (float(f.get("weight") or (1.0 / n)) * n - 1.0), f["id"]))
 
 
-def useful(fam: Mapping[str, Any], n: int, settings: Mapping[str, Any] | None, *, threshold: float | None = None) -> bool:
-    """A distinct useful experiment: a family whose share is at least `useful_share` of the average (a newborn without a
-    share yet counts: it has not been judged). `threshold`: `useful_share` already read."""
-    w = fam.get("weight")
-    if not isinstance(w, (int, float)) or isinstance(w, bool):
-        return True
-    return float(w) * max(1, n) >= (cfg(settings)["useful_share"] if threshold is None else threshold)
+def queued_useful(ordered: Sequence[Mapping[str, Any]], useful_ids: Iterable[str]) -> int:
+    """The distinct useful experiments left waiting (THE CONCURRENCY): the ready families after the one served that the
+    tournament's last allocation named useful (`value_shares`' `useful_ids`; a family born since, or any family under the
+    bandit, is not counted: nothing expands on a family nobody has valued)."""
+    ids = useful_ids if isinstance(useful_ids, (set, frozenset)) else set(useful_ids)
+    return sum(1 for f in ordered if f.get("id") in ids)
 
 
 # ---------------------------------------------------------------------------------------------------- the concurrency
@@ -602,18 +700,22 @@ def concurrency_bounds(settings: Mapping[str, Any] | None) -> tuple[int, int, in
     return base, ceiling, min(base, c["min_concurrency"])
 
 
-def effective_concurrency(settings: Mapping[str, Any] | None, *, queued_useful: int, running: int, spent_usd_hour: float,
-                          pace_limit: float | None) -> dict[str, Any]:
-    """THE CONCURRENCY (the module docstring): {workers, base, ceiling, floor, plan, why}."""
+def effective_concurrency(settings: Mapping[str, Any] | None, *, queued_useful: int, running: int,
+                          spent_usd_hour: float) -> dict[str, Any]:
+    """THE CONCURRENCY (the module docstring): {workers, base, ceiling, floor, plan, why}. `spent_usd_hour`: the research
+    spend (`RESEARCH_SPEND`) in the last hour."""
     base, ceiling, floor = concurrency_bounds(settings)
     c = cfg(settings)
-    plan = c["plan_usd_per_hour"] if c["plan_usd_per_hour"] is not None else pace_limit
-    out = {"base": base, "ceiling": ceiling, "floor": floor, "plan_usd_per_hour": plan, "queued_useful": int(queued_useful),
-           "spent_usd_hour": round(float(spent_usd_hour), 4), "workers": base, "why": "the plan's level"}
-    if plan is not None and plan > 0 and spent_usd_hour > plan:
+    plan = c["plan_usd_per_hour"]
+    out = {"base": base, "ceiling": ceiling, "floor": floor, "plan_usd_per_hour": plan, "spend_kinds": list(RESEARCH_SPEND),
+           "queued_useful": int(queued_useful), "spent_usd_hour": round(float(spent_usd_hour), 4), "workers": base,
+           "why": "the plan's level"}
+    if plan is None or plan <= 0:
+        out["why"] = "no allocation.plan_usd_per_hour: the plan's level"
+    elif spent_usd_hour > plan:
         out["workers"] = max(floor, min(base, int(base * plan / spent_usd_hour)))
         out["why"] = "over the spend plan: contracted"
-    elif ceiling > base and queued_useful > 0 and (plan is None or spent_usd_hour < c["expand_below"] * plan):
+    elif ceiling > base and queued_useful > 0 and spent_usd_hour < c["expand_below"] * plan:
         out["workers"] = min(ceiling, max(base, int(running) + int(queued_useful)))
         out["why"] = "useful experiments queued: expanded" if out["workers"] > base else out["why"]
     return out
@@ -647,10 +749,10 @@ class BirthQuota:
         self.window_hours = c["window_hours"]
         self.want = max(0, int(want))
         start = _count(((settings or {}).get("population") or {}).get("start", 48), 48, 0, 10 ** 6) or 0
-        self.min_alive = c["min_alive"] if c["min_alive"] is not None else start // 2
-        # THE POPULATION GUARD: below `min_alive` living families the window's rule rests (the pass's cap still holds), so a
-        # swarm whose proposals stay one structure family thins but never starves of births.
-        self.window_on = alive is None or int(alive) >= self.min_alive
+        self.min_alive = c["min_alive"] if c["min_alive"] is not None else (3 * start) // 4
+        # THE POPULATION GUARD: below `min_alive` living families the whole quota rests (the window's rule and the pass's
+        # cap), so a swarm whose proposals stay one structure family thins to the guard but never below it.
+        self.on = alive is None or int(alive) >= self.min_alive
         now = time.time() if now is None else float(now)
         self.window: dict[str, int] = {}
         from .store import iso, loads
@@ -667,7 +769,7 @@ class BirthQuota:
     def full(self, bucket: str) -> bool:
         """The structure family's window share is at its cap (only once the window holds `min_window` births, and only
         while the population guard lets the window's rule hold)."""
-        if not self.window_on:
+        if not self.on:
             return False
         total = sum(self.window.values()) + sum(self.passed.values())
         mine = self.window.get(bucket, 0) + self.passed.get(bucket, 0)
@@ -677,7 +779,7 @@ class BirthQuota:
         """May one more family of `structure` be born in this pass? A refusal is counted (`refused`)."""
         b = bucket_of(structure)
         mine = self.passed.get(b, 0)
-        ok = mine < self.per_pass_min or (mine < self.per_pass() and not self.full(b))
+        ok = not self.on or mine < self.per_pass_min or (mine < self.per_pass() and not self.full(b))
         if not ok:
             self.refused[b] = self.refused.get(b, 0) + 1
         return ok
@@ -694,14 +796,17 @@ class BirthQuota:
             n = self.window.get(bucket, 0)
             state = (f"FULL: at most {self.per_pass_min} this pass" if self.full(bucket) else f"open: up to {self.per_pass()} this pass")
             lines.append(f"- {bucket} ({', '.join(members)}): {n} of {total} ({(100.0 * n / total) if total else 0.0:.0f}%), {state}")
-        guard = ("" if self.window_on else
-                 f" (the day's rule rests while fewer than {self.min_alive} families live; the pass's cap holds)")
+        if not self.on:
+            return (f"BIRTH QUOTAS (structure families; the last {self.window_hours:g} h of births): they rest in this pass "
+                    f"(fewer than {self.min_alive} families live), so every well-formed proposal may be born; still, propose "
+                    f"across the structure families.\n" + "\n".join(f"- {b} ({', '.join(m)}): {self.window.get(b, 0)} of {total}"
+                                                                     for b, m in STRUCTURE_BUCKETS.items()))
         return (f"BIRTH QUOTAS (structure families; the last {self.window_hours:g} h of births): one structure family may hold at "
                 f"most {self.max_share:.0%} of them once there are {self.min_window}, and at most {self.per_pass()} of one "
-                f"in this pass{guard}. A proposal past its family's quota is not born; propose across the open families.\n"
+                f"in this pass. A proposal past its family's quota is not born; propose across the open families.\n"
                 + "\n".join(lines))
 
 
-__all__ = ["DEFAULTS", "cfg", "Posterior", "row_of", "value_of", "value_shares", "allocate_from_store", "looks_from_store",
-           "classes_from_store", "StrideTurns", "legacy_order", "useful", "effective_concurrency", "concurrency_bounds",
-           "STRUCTURE_BUCKETS", "bucket_of", "BirthQuota", "mechanism_class"]
+__all__ = ["DEFAULTS", "RESEARCH_SPEND", "cfg", "Posterior", "row_of", "value_of", "fresh_value", "value_shares",
+           "allocate_from_store", "looks_from_store", "classes_from_store", "StrideTurns", "legacy_order", "queued_useful",
+           "effective_concurrency", "concurrency_bounds", "STRUCTURE_BUCKETS", "bucket_of", "BirthQuota", "mechanism_class"]

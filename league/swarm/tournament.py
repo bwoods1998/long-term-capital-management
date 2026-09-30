@@ -16,9 +16,10 @@
    the gate's queue.
 3. THE ALLOCATION (Release B, league/swarm/allocation.py; `allocation.mode` "value"): each family's share of researcher
    turns and Gym priority by its expected information value (the variance of its next validation's pass or fail under
-   an empirical-Bayes posterior, discounted by its own trials and by exhaustion: its lineage's holdout looks spent, a
-   drift-failed validation, a hold streak), with a floor for every family, an explicit exploration share split across
-   mechanism classes first, and caps on one family's and one class's share. A validated version that failed the drift
+   an empirical-Bayes posterior, discounted by the idea's trials, its own and those inherited at birth, by exhaustion:
+   its lineage's holdout looks spent, a drift-failed validation, a hold streak, and by half for a structure real money
+   cannot open), with a floor for every family, an explicit exploration share for breadth across mechanism classes,
+   and caps on one family's and one class's share. A validated version that failed the drift
    screen earns nothing by its validation (the family counts as unvalidated). "bandit" restores THE BANDIT
    (`evidence.thompson`, `Tournament.bandit`): R11-5's Thompson sampling, at least 25% for the explore pool, only an old
    family whose latest validation mean is positive exploited, each earning at most `exploit_per_positive` (0.15) of the
@@ -47,7 +48,9 @@
    (`validated_trials`), from which the idle rule counts, and restarts its dormant cycles. THE IDLE PASS (R4,
    `idle_pass`) retires by the idle rule alone every `tournament.retire_every_seconds` (300) between the rounds.
 6. THE LEADERBOARD: one `swarm.tournament` event (the House mirrors it to its ledger) with every family's
-   rank, share, validation summary, trials and band, and the totals.
+   rank, share, validation summary, trials and band, and the totals. Its order (`board_rank`): Candidates and beyond,
+   then families at the gate or with a look out, then by share, so the architect's and the strategist's first 60 rows
+   always hold the most advanced families (the allocation gives them the floor share: the gate decides them next).
 
 Standard library only.
 """
@@ -83,6 +86,8 @@ class Tournament:
         self.idle_at = float("-inf")  # the last idle pass (`idle_due`); in memory: a restarted swarm runs one at once
         self.practice_bonus: dict[str, float] = {}  # the last allocation's practice bonus by family (`allocate`)
         self.allocation: dict[str, Any] = {}  # the last allocation's report (`allocate`; allocation.py's `value_shares`)
+        #: The families the last allocation named useful experiments (THE CONCURRENCY, allocation.py): none under the bandit.
+        self.useful: frozenset[str] = frozenset()
 
     @property
     def cfg(self) -> Mapping[str, Any]:
@@ -278,7 +283,9 @@ class Tournament:
                 shares, report = allocation.allocate_from_store(self.store, fams, self.settings, now=self.clock())
             except Exception as exc:  # noqa: BLE001 - a round never fails on its allocation: the bandit answers, and says why
                 self.allocation = {"mode": "bandit", "fallback": f"{type(exc).__name__}: {str(exc)[:200]}"}
+                self.useful = frozenset()
                 return self.bandit(fams)
+            self.useful = frozenset(report.pop("useful_ids", ()) or ())  # kept here, out of the round's event
             shares, self.practice_bonus = practice.apply_bonus(shares, self.store, self.settings)
             report["practice_bonus"] = dict(self.practice_bonus)
             self.allocation = report
@@ -286,6 +293,7 @@ class Tournament:
                 self.store.update_family(fid, weight=share)
             return shares
         self.allocation = {"mode": "bandit"}
+        self.useful = frozenset()
         return self.bandit(fams)
 
     def bandit(self, fams: list[dict[str, Any]]) -> dict[str, float]:
@@ -511,7 +519,11 @@ class Tournament:
         fams = self.store.families(alive=True)
         self.allocate(fams)  # again, so a newborn fork has its share at once
         board = []
-        for fam in sorted(fams, key=lambda f: -(f.get("weight") or 0.0)):
+        # THE LEADERBOARD'S ORDER: Candidates and beyond, then the families at the gate or with a look out, then the rest
+        # by share. The allocator gives the first two the floor share (the gate or the forward record decides them, not
+        # research), and the architect and the strategist read only the first 60 rows: the swarm's most advanced families
+        # are always in them.
+        for fam in sorted(fams, key=board_rank):
             state = fam.get("state") or {}
             board.append({"family": fam["id"], "band": fam["band"], "share": round(float(fam.get("weight") or 0.0), 4),
                           "structure": fam["structure"], "roots": fam["roots"], "revisions": fam["revisions"],
@@ -532,6 +544,14 @@ class Tournament:
         self.store.event("swarm.tournament", None, row)
         self.store.put("leaderboard", {"at": began, "board": board, "totals": totals})
         return row
+
+
+def board_rank(fam: Mapping[str, Any]) -> tuple:
+    """A living family's place on the leaderboard (`Tournament.run`): outside the Gym band first, then at the gate or with a
+    look out, then by share (the larger first), then by id."""
+    state = fam.get("state") or {}
+    stage = 0 if (fam.get("band") or "gym") != "gym" else 1 if (state.get("gate_ready") or state.get("look_inflight")) else 2
+    return (stage, -float(fam.get("weight") or 0.0), str(fam.get("id")))
 
 
 def typical_max_loss(result: Mapping[str, Any]) -> float | None:
