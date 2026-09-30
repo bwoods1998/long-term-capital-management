@@ -31,6 +31,11 @@
   truncated, http, stream, answer, admission, off, unknown), and the caller finishes its turn on its Sail profile from the
   same transcript.
 - Every settled cost is a `spend` row (kind `sail_model`, `openai` or `claude`, by family).
+- FALLBACKS (Release A, Sept 30, 2026): a call that asked Claude and ended elsewhere (`ask`: the next paid route, Sail, or
+  no route when the role has no Sail profile; `claude_turn`: the caller's Sail turn) is counted in memory by role, the
+  Claude route's failure kind and where it went (`note_fallback`). The swarm's `FundingWatch` drains the counts
+  (`drain_fallbacks`) and says them, so a role never falls back from Claude silently (league/swarm/funding.py). Counting
+  never changes a route and never raises.
 
 Standard library only.
 """
@@ -175,6 +180,37 @@ class ModelRouter:
         self.claude_factory = claude_factory
         self.claude_meter = claude_meter
         self._lock = threading.Lock()
+        #: (role, kind, to) -> {count, first_at, last_at, reason}: the fallbacks since the last `drain_fallbacks`.
+        self._fallbacks: dict[tuple[str, str, str], dict[str, Any]] = {}
+        self._fallback_lock = threading.Lock()
+
+    # ------------------------------------------------------------------ fallbacks (league/swarm/funding.py)
+    def note_fallback(self, role: Any, kind: Any, to: str, reasons: Sequence[str] | str = ()) -> None:
+        """Count one call of `role` that asked Claude and ended on `to` ("openai", "sail", or "none": no route), with the
+        Claude route's failure `kind` and the last reason given. Never raises: counting is never a reason for a call to
+        fail."""
+        try:
+            reason = reasons if isinstance(reasons, str) else (list(reasons)[-1] if reasons else "")
+            claude = [r for r in ([reasons] if isinstance(reasons, str) else list(reasons)) if str(r).startswith("claude")]
+            reason = str(claude[-1] if claude else reason)[:240]
+            try:
+                now = float(self.store.clock())
+            except Exception:  # noqa: BLE001 - a store without a clock
+                now = time.time()
+            with self._fallback_lock:
+                entry = self._fallbacks.setdefault((str(role), str(kind or "error"), str(to)),
+                                                   {"count": 0, "first_at": now, "last_at": now, "reason": ""})
+                entry["count"] += 1
+                entry["last_at"] = now
+                entry["reason"] = reason
+        except Exception:  # noqa: BLE001
+            pass
+
+    def drain_fallbacks(self) -> dict[tuple[str, str, str], dict[str, Any]]:
+        """The fallbacks counted since the last drain (`note_fallback`), and a fresh count."""
+        with self._fallback_lock:
+            drained, self._fallbacks = self._fallbacks, {}
+        return drained
 
     # ------------------------------------------------------------------ Sail
     def sail(self, profile: str, items: Sequence[Any], *, family: str, key: str, tools: Sequence[Mapping[str, Any]] | None = None,
@@ -620,6 +656,21 @@ class ModelRouter:
                     messages: Sequence[Mapping[str, Any]], effort: str = "medium", max_tokens: int = 16000,
                     timeout: float | None = None, family_usd_day: float | None = None, keep_usd: float = 0.0,
                     tool_choice: Any = "auto", model: str | None = None) -> ClaudeReply:
+        """One turn of a role's tool loop on Claude (`_claude_turn_once`). A `ModelError` (other than `off`: Claude not
+        configured for the role) is counted as a fallback to the caller's Sail turn (`note_fallback`) and raised as before."""
+        try:
+            return self._claude_turn_once(role=role, family=family, key=key, system=system, tools=tools, messages=messages,
+                                          effort=effort, max_tokens=max_tokens, timeout=timeout, family_usd_day=family_usd_day,
+                                          keep_usd=keep_usd, tool_choice=tool_choice, model=model)
+        except ModelError as exc:
+            if exc.kind != "off":
+                self.note_fallback(role, exc.kind, "sail", str(exc))
+            raise
+
+    def _claude_turn_once(self, *, role: str, family: str | None, key: str, system: Any, tools: Sequence[Mapping[str, Any]],
+                          messages: Sequence[Mapping[str, Any]], effort: str = "medium", max_tokens: int = 16000,
+                          timeout: float | None = None, family_usd_day: float | None = None, keep_usd: float = 0.0,
+                          tool_choice: Any = "auto", model: str | None = None) -> ClaudeReply:
         """One turn of a role's tool loop on Claude (the module docstring's CLAUDE'S TOOL TURNS): the exact body
         (`league.claude.tool_request_body`) on the role's model (`model`, else `claude_model(role)`: `claude.role_model`,
         else `claude.model`; an unpriced one is never sent) and its hold (the gateway's worst case), admitted within the role's line, the
@@ -768,6 +819,7 @@ class ModelRouter:
         routes = (["claude"] if claude and self.claude_enabled(role) else []) + (["openai"] if openai_model else [])
         if rotate and len(routes) == 2 and self._turn(role) % 2 == 1:
             routes.reverse()
+        claude_failed: str | None = None  # the Claude route's failure kind, once it was asked and gave no answer
         for route in routes:
             if route == "claude":
                 result = self._ask_claude(role=role, system=claude_system if claude_system is not None else system,
@@ -778,10 +830,16 @@ class ModelRouter:
                 result = self._ask_openai(role=role, system=system, user=user, family=family, key=key, openai_model=openai_model,
                                           max_output=max_output, effort=effort, need_usd=need_usd, errors=errors)
             if result is not None:
+                if claude_failed is not None:
+                    self.note_fallback(role, claude_failed, route, errors)
                 return result
+            if route == "claude":
+                claude_failed = kinds[-1] if kinds else "error"
         # A failed COMMIT/ROLLBACK may have left the admission store unusable. Do not turn that
         # failure into another paid call on the fallback provider.
         self._require_committed_store()
+        if claude_failed is not None:
+            self.note_fallback(role, claude_failed, "sail" if sail_profile else "none", errors)
         if not sail_profile:
             raise ModelError("; ".join(errors) or "no paid route was available, and this role has no Sail fallback", billed=billed,
                              kind=kinds[-1] if kinds else "error")

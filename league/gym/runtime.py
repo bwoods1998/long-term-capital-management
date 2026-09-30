@@ -264,7 +264,10 @@ def load_program(code: str, *, name: str = "program", params: Mapping[str, Any] 
     declaration = params_declaration(tree)
     declaration.value = ast.copy_location(ast.Call(func=ast.Name(id="__gym_bind_params", ctx=ast.Load()),
                                                    args=[declaration.value], keywords=[]), declaration.value)
-    compiled = compile(ast.fix_missing_locations(tree), PROGRAM_FILENAME, "exec")
+    try:  # the check compiled the code as written; this is the bound form (a refusal, never another error type)
+        compiled = compile(ast.fix_missing_locations(tree), PROGRAM_FILENAME, "exec")
+    except (SyntaxError, ValueError, RecursionError, MemoryError) as exc:
+        raise CodeRefused(f"the program does not compile: {type(exc).__name__}: {str(exc)[:160]}") from None
     namespace = _fresh_namespace(params)
     try:
         _limited(lambda: exec(compiled, namespace), LOAD_TIMEOUT)  # noqa: S102 - checked code, short builtins
