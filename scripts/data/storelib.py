@@ -77,6 +77,10 @@ DEFAULT_STRIKE_RANGE = 25
 STRIKE_RANGE = {"SPXW": 40}
 #: Days to expiry the NBBO keeps, and the back months for calendars (SPY, QQQ).
 MAX_DTE = 14
+SIP_SOURCE = "alpaca SIP completed-minute OHLCV v1"
+SIP_COVERAGE_SCHEMA = 2
+
+
 BACK_MONTH_DTE = 45
 BACK_MONTH_ROOTS = ("SPY", "QQQ")
 #: `expiries.parquet` lists every expiry listed on a day up to this many days out.
@@ -89,6 +93,15 @@ TQ_STRIKE_RANGE = 10
 NORMAL_OPEN, NORMAL_CLOSE, HALF_CLOSE = 570, 960, 780
 
 KINDS = ("nbbo", "underlying", "oi", "trade_quote")
+
+
+def sip_coverage(minutes: Sequence[int], hours: tuple[int, int]) -> dict[str, Any]:
+    """Completed-bar grid coverage, never a claim of first-publication/as-of availability."""
+    expected = set(range(hours[0] + 1, hours[1] + 1))
+    known = set(minutes)
+    return {"schema": SIP_COVERAGE_SCHEMA, "expected": len(expected), "known": len(known & expected),
+            "missing_minutes": sorted(expected - known), "complete": known == expected and len(minutes) == len(known),
+            "provenance": "finalized_without_publication_receipts"}
 
 
 def window_of(day: dt.date, train_from: dt.date | None = None) -> str:

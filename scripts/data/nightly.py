@@ -123,6 +123,7 @@ class Nightly:
                  gym_box_ids: Sequence[str] = (), log: Callable[[str], None] = print,
                  clock: Callable[[], dt.datetime] = lambda: dt.datetime.now(dt.timezone.utc), rehearsal: bool = False,
                  relay: Callable[[dt.date, Any], None] | None = None,
+                 sip_check: Callable[[dt.date, Any], dict] | None = None,
                  check_lease: Callable[[], None] = lambda: None):
         self.data, self.gate, self.images, self.save = data, gate, images, save
         self.checkpoint = checkpoint
@@ -135,6 +136,7 @@ class Nightly:
         #: skips the pull, and records under `nightly_rehearsals`, never as the gate's state.
         self.rehearsal = rehearsal
         self.relay = relay
+        self.sip_check = sip_check
         self.check_lease = check_lease
 
     def persist(self) -> None:
@@ -163,7 +165,8 @@ class Nightly:
         self.check_lease()
         if state.get("checkpoint"):
             self.log(f"{day}: already done (gate checkpoint {state['checkpoint']})")
-            return {"day": day.isoformat(), "already": True, **state}
+            return {"day": day.isoformat(), "already": True,
+                    'sip_coverage': {'status': 'legacy_unverified'}, **state}
         if dry_run:
             return {"day": day.isoformat(), "would": ["pull", "copy", "checkpoint"]}
 
@@ -220,6 +223,25 @@ class Nightly:
             state.pop("pulled", None)
             self.persist()
             raise RuntimeError("the forward day has NBBO without its underlying series")
+        if self.sip_check and not self.rehearsal:
+            # A legacy/resumed 'pulled' marker is not a receipt. Bind fresh verification to the
+            # exact transferred records, never just another view of the mutable source box.
+            try:
+                self.check_lease()
+                proof = self.sip_check(day, self.data)
+                roots = sorted(r for r, present in kinds.items() if 'nbbo' in present and r not in ('XSP', 'SPXW'))
+                pairs = sorted((r['root'], r['sha256']) for r in files if r['kind'] == 'underlying' and r['root'] in roots)
+                digest = hashlib.sha256(json.dumps(pairs, sort_keys=True).encode()).hexdigest()
+                if (proof.get('schema') != sl.SIP_COVERAGE_SCHEMA or proof.get('status') != 'complete'
+                        or proof.get('day') != str(day) or proof.get('roots') != roots or len(pairs) != len(roots)
+                        or proof.get('files_sha256') != digest):
+                    raise RuntimeError('forward SIP proof differs from the exact files to be copied')
+                state['sip_coverage'] = proof
+            except Exception:
+                state.pop('pulled', None)
+                state.pop('sip_coverage', None)
+                self.persist()
+                raise
 
         # 2. the copy, file by file, checked on arrival
         self.gate.wake()
@@ -430,11 +452,22 @@ def real_job(*, rehearsal_gate: str | None = None, api: Any = None,
     def relay(day, handle):
         from sip import relay_day
 
-        return relay_day(day, handle)
+        return relay_day(day, handle, check_lease=check_lease)
+
+    def sip_check(day, handle):
+        from sip import status_day
+
+        rows = status_day(handle, day)['roots']
+        if any(not r.get('complete') for r in rows):
+            raise RuntimeError('forward SIP coverage is incomplete; no gate copy or checkpoint')
+        return {'schema': sl.SIP_COVERAGE_SCHEMA, 'status': 'complete', 'day': str(day), 'verified_at': bl.now(),
+                'scope': 'stock_underlying_completed_grid', 'roots': [r['root'] for r in rows],
+                'files_sha256': hashlib.sha256(json.dumps([(r['root'], r['file_sha256']) for r in rows],
+                                                         sort_keys=True).encode()).hexdigest()}
 
     return Nightly(data=data, gate=gate_handle, images=images, save=lambda d: bl.write_json(bl.IMAGES, d),
                    checkpoint=checkpoint, calendar=calendar, last_backfill_args=last_args, gym_box_ids=gym_ids,
-                   rehearsal=bool(rehearsal_gate), relay=relay, check_lease=check_lease)
+                   rehearsal=bool(rehearsal_gate), relay=relay, sip_check=sip_check, check_lease=check_lease)
 
 
 def run_real(day: dt.date | None = None, *, rehearsal_gate: str | None = None,
@@ -478,7 +511,8 @@ def publish_ready(path: Path, result: Mapping[str, Any], now: dt.datetime) -> di
     if sl.window_of(day) != "forward":
         raise ValueError("only forward days can be published")
     document = {"schema": 1, "gate_checkpoint": result["checkpoint"], "day": day.isoformat(),
-                "ready_at": now.isoformat(), "roots": list(result.get("roots") or ())}
+                "ready_at": now.isoformat(), "roots": list(result.get("roots") or ()),
+                'sip_coverage': result.get('sip_coverage') or {'status': 'legacy_unverified'}}
     previous = bl.read_json(path)
     if str(previous.get("day", "")) <= day.isoformat():
         bl.write_json(path, document)

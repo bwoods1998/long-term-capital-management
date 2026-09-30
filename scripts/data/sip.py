@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """House-only SIP historical bars relay; the data box receives data, never a token.
 
-Alpaca stamps each bar at its start. A minute's OHLCV becomes visible at start+1
-minute, after the bar is complete. Requests use raw prices to match historical
-option strikes. Index underlyings keep the ThetaData/parity path.
+Alpaca stamps each bar at its start. We place finalized history at start+1 minute;
+that is a bar-completion grid, not a publication/as-of receipt. Historical volume
+remains unavailable to strategies. Requests use raw prices; index underlyings keep
+the ThetaData/parity path. Nightly is strict; only the historical gap queue may
+advance past incomplete roots, without claiming completion.
 """
 from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import math
 import os
@@ -21,10 +24,15 @@ import urllib.parse
 import urllib.request
 from zoneinfo import ZoneInfo
 
+try:
+    import storelib as sl
+except ImportError:
+    from . import storelib as sl
+
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 NY = ZoneInfo('America/New_York')
-SOURCE = 'alpaca SIP completed-minute OHLCV v1'
+SOURCE = sl.SIP_SOURCE
 INDEX_ROOTS = frozenset({'XSP', 'SPXW'})
 
 
@@ -114,53 +122,98 @@ def completed_rows(bars: list[dict], day: dt.date, hours: tuple[int, int]) -> li
     return [rows[minute] for minute in sorted(rows)]
 
 
-def _records(data: Any, day: dt.date) -> list[dict]:
-    ok, output = data.run(f'backfill.py records --date {day.isoformat()}', timeout=600)
+def status_day(data: Any, day: dt.date) -> dict:
+    ok, output = data.run(f'backfill.py sip-status --date {day.isoformat()}', timeout=600)
     if not ok:
-        raise SIPError('could not read the data box records')
-    records = [json.loads(line) for line in output.splitlines() if line.strip().startswith('{')]
-    return [row for row in records if row.get('type') == 'file']
+        raise SIPError('could not verify the data box SIP files')
+    try:
+        result = json.loads(output.strip().splitlines()[-1])
+        roots = result['roots']
+        if result['day'] != str(day) or not isinstance(roots, list):
+            raise ValueError('invalid SIP status shape')
+        names = [row['root'] for row in roots]
+        if len(set(names)) != len(names) or any(not re.fullmatch(r'[A-Z]{1,6}', r) or r in INDEX_ROOTS for r in names):
+            raise ValueError('invalid SIP status roots')
+        return result
+    except (ValueError, KeyError, TypeError, IndexError):
+        raise SIPError('invalid data-box SIP verification response') from None
+
+
+def packet_digest(packet: dict) -> str:
+    return hashlib.sha256(json.dumps(packet, sort_keys=True, allow_nan=False).encode()).hexdigest()
 
 
 def relay_day(day: dt.date, data: Any, *, gateway: Any = None, calendar: Any = None,
-              source_root: Callable[[str, dt.date], str] | None = None) -> dict[str, Any]:
-    """Relay one day while the caller holds the data operation lease/backfill pause."""
+              source_root: Callable[[str, dt.date], str] | None = None, allow_gaps: bool = False,
+              roots: list[str] | None = None, verified: dict | None = None,
+              check_lease: Callable[[], None] = lambda: None) -> dict[str, Any]:
+    """Complete root packets only. `allow_gaps` is for the durable historical queue, never nightly."""
     if calendar is None or source_root is None:
-        import storelib as sl
         if calendar is None:
             calendar = sl.Calendar.from_json(json.loads(data.download('/data/work/calendar.json'))['exceptions'])
         source_root = source_root or sl.source_root
     hours = calendar.hours(day)
     if hours is None:
         return {'day': day.isoformat(), 'skipped': 'not a trading day'}
-    records = _records(data, day)
-    roots = sorted({row['root'] for row in records if row.get('kind') == 'nbbo'} - INDEX_ROOTS)
-    if any(not isinstance(root, str) or not re.fullmatch(r'[A-Z]{1,6}', root) for root in roots):
-        raise SIPError('invalid canonical root in store records')
-    done = {row['root'] for row in records if row.get('kind') == 'underlying' and row.get('source') == SOURCE}
-    needed = [root for root in roots if root not in done]
+    before = verified or status_day(data, day)
+    by_root = {row['root']: row for row in before['roots']}
+    wanted = sorted(by_root) if roots is None else sorted(set(roots))
+    if set(wanted) - set(by_root):
+        raise SIPError('requested SIP roots are absent from the verified day plan')
+    needed = [root for root in wanted if not by_root[root].get('complete')]
     if not needed:
-        return {'day': day.isoformat(), 'roots': roots, 'already': True}
+        return {'day': str(day), 'roots': wanted, 'already': True, 'complete': True,
+                'coverage': [by_root[r] for r in wanted]}
     if gateway is None:
         config = json.loads((REPO / 'league' / 'config.json').read_text())
         gateway = GatewayBars(config['gateway_url'], os.environ.get('GATEWAY_TOKEN', ''))
     sources = {root: source_root(root, day) for root in needed}
     bars = gateway.fetch(sorted(set(sources.values())), day, hours)
-    packets = []
+    packets, receipts = [], []
     for root, symbol in sources.items():
-        rows = completed_rows(bars.get(symbol, []), day, hours)
-        if not rows:
-            raise SIPError(f'no regular-session SIP bars for {root} on {day}')
-        packets.append({'root': root, 'day': day.isoformat(), 'completed_minutes': True, 'rows': rows})
-    path = f'/data/work/sip-{day.isoformat()}.json'
-    data.upload(path, json.dumps(packets, allow_nan=False, separators=(',', ':')).encode(), 0o600)
-    ok, _ = data.run(f'backfill.py ingest-underlying --input {path}', timeout=600)
-    if not ok:
-        raise SIPError('the data box refused completed SIP bars')
-    confirmed = {row['root'] for row in _records(data, day) if row.get('kind') == 'underlying' and row.get('source') == SOURCE}
-    if not set(needed) <= confirmed:
-        raise SIPError('SIP bars were not confirmed by the data box journal')
-    return {'day': day.isoformat(), 'roots': needed, 'rows': sum(len(packet['rows']) for packet in packets)}
+        error = None
+        try:
+            rows = completed_rows(bars.get(symbol, []), day, hours)
+        except SIPError as exc:
+            rows, error = [], str(exc)[:200]
+        coverage = sl.sip_coverage([r['minute'] for r in rows], hours)
+        packet = {'root': root, 'day': str(day), 'completed_minutes': True, 'source_symbol': symbol, 'rows': rows,
+                  'decoded_response_sha256': hashlib.sha256(json.dumps(bars.get(symbol, []), sort_keys=True).encode()).hexdigest()}
+        receipt = {**coverage, 'root': root, 'day': str(day), 'source': SOURCE, 'source_symbol': symbol,
+                   'packet_sha256': packet_digest(packet),
+                   'status': 'error' if error else ('complete' if coverage['complete'] else ('partial' if rows else 'empty'))}
+        if error:
+            receipt['error'] = error
+        if coverage['complete']:
+            packets.append(packet)
+        else:
+            # Content-addressed and independent of attempt time: identical retries use the same private file.
+            path = f"/data/work/sip-partial-{day}-{root}-{receipt['packet_sha256']}.json"
+            check_lease()
+            data.upload(path, json.dumps({'packet': packet, 'coverage': receipt}, allow_nan=False,
+                                        sort_keys=True).encode(), 0o600)
+            receipt['quarantine'] = path
+        receipts.append(receipt)
+    gaps = [row for row in receipts if not row['complete']]
+    if gaps and not allow_gaps:
+        raise SIPError('incomplete regular-session SIP bars: ' + ', '.join(f"{r['root']} {r['known']}/{r['expected']}" for r in gaps))
+    if packets:
+        path = f'/data/work/sip-{day.isoformat()}.json'
+        check_lease()
+        data.upload(path, json.dumps(packets, allow_nan=False, separators=(',', ':')).encode(), 0o600)
+        check_lease()
+        ok, _ = data.run(f'backfill.py ingest-underlying --input {path}', timeout=600)
+        if not ok:
+            raise SIPError('the data box refused completed SIP bars')
+        confirmed = {row['root']: row for row in status_day(data, day)['roots']}
+        for receipt in receipts:
+            if receipt['complete']:
+                found = confirmed.get(receipt['root']) or {}
+                if not found.get('complete') or found.get('packet_sha256') != receipt['packet_sha256']:
+                    raise SIPError('SIP complete grid and packet hash were not confirmed by the data box')
+                receipt.update(found)
+    return {'day': str(day), 'roots': needed, 'rows': sum(len(p['rows']) for p in packets),
+            'complete': not gaps, 'coverage': receipts}
 
 
 def main(argv=None) -> int:
@@ -186,7 +239,7 @@ def main(argv=None) -> int:
     api = bl.client()
     data = BoxHandle(api, bl.data_box_id())
     data.wake()
-    with bl.RemoteLease(api, data.box_id):
+    with bl.RemoteLease(api, data.box_id) as lease:
         calendar = sl.Calendar.from_json(json.loads(data.download('/data/work/calendar.json'))['exceptions'])
         state = bl.read_json(bl.DATA_BOX)
         runs = state.get('runs') or []
@@ -195,12 +248,17 @@ def main(argv=None) -> int:
         if was_running and not backfill_args:
             raise SIPError('a running backfill has no recorded restart arguments')
         if was_running:
+            lease.check()
             data.stop_backfill()
         try:
+            lease.check()
+            bl.push_code(api, data.box_id)
             for day in calendar.days(args.start, args.end):
-                print(json.dumps(relay_day(day, data, calendar=calendar, source_root=sl.source_root)), flush=True)
+                print(json.dumps(relay_day(day, data, calendar=calendar, source_root=sl.source_root,
+                                           check_lease=lease.check)), flush=True)
         finally:
             if was_running:
+                lease.check()
                 data.start_backfill(backfill_args)
     return 0
 

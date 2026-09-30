@@ -33,6 +33,7 @@ argument: it is never put in the environment, a log line or an exception.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import datetime as dt
 import json
 import logging
@@ -1040,11 +1041,11 @@ def adopt(store: Store, records_path: str, calendar: sl.Calendar) -> dict[str, A
 
 
 def ingest_underlying(store: Store, payload: Any, calendar: sl.Calendar) -> dict[str, Any]:
-    """Trusted House SIP relay; complete bars are placed at their availability minute (+1).
+    """Trusted House SIP relay; finalized bars are placed on the completion grid (+1).
 
     Every packet is validated before writing any. The data box receives only bars; it never
-    receives the House's gateway token. The caller serializes ingestion with the data-operation
-    lease and pauses a backfill that could rewrite these files.
+    receives the House's gateway token. Completion is not a publication/as-of receipt. The caller
+    serializes ingestion with the data-operation lease and pauses a backfill that could rewrite files.
     """
     import math
     import polars as pl
@@ -1084,14 +1085,97 @@ def ingest_underlying(store: Store, payload: Any, calendar: sl.Calendar) -> dict
                 raise ValueError("inconsistent SIP OHLC or price")
             minutes.add(minute)
             rows.append({"minute": minute, **values})
-        prepared.append((root, day, pl.DataFrame(rows, schema=schema).sort("minute")))
+        coverage = sl.sip_coverage(list(minutes), hours)
+        if not coverage["complete"]:
+            raise ValueError("incomplete SIP session cannot replace canonical underlying data")
+        source_symbol = packet.get("source_symbol")
+        if source_symbol is not None and source_symbol != sl.source_root(root, day):
+            raise ValueError("SIP source symbol does not match the historical canonical root")
+        prepared.append((root, day, pl.DataFrame(rows, schema=schema).sort("minute"), coverage,
+                         source_symbol, hashlib.sha256(json.dumps(packet, sort_keys=True, allow_nan=False).encode()).hexdigest()))
     count = 0
-    for root, day, frame in prepared:
+    for root, day, frame, coverage, source_symbol, packet_sha in prepared:
         rows, digest, size = fr.write(frame, store.path("underlying", root, day))
-        store.journal.append(sl.file_record("underlying", root, day, rows=rows, sha256=digest, size=size,
-                                            source="alpaca SIP completed-minute OHLCV v1", fetched_at=sl.utc_now()))
+        record = sl.file_record("underlying", root, day, rows=rows, sha256=digest, size=size,
+                               source=sl.SIP_SOURCE, fetched_at=sl.utc_now())
+        record.update(sip_coverage=coverage, source_symbol=source_symbol, packet_sha256=packet_sha)
+        store.journal.append(record)
         count += rows
     return {"underlying_days": len(prepared), "rows": count, **compile_store(store, calendar)}
+
+
+def sip_status(store: Store, day: dt.date, calendar: sl.Calendar) -> dict[str, Any]:
+    """Validate the current bytes, not just their SOURCE label. Only coverage/hashes leave the data box."""
+    import math
+    import polars as pl
+
+    hours = calendar.hours(day)
+    if hours is None:
+        return {"day": str(day), "roots": []}
+    files = store.journal.files()
+    roots = sorted({r["root"] for r in files.values() if r.get("kind") == "nbbo" and r.get("date") == str(day)}
+                   - {"XSP", "SPXW"})
+    out = []
+    for root in roots:
+        record = files.get(sl.rel_path("underlying", root, day)) or {}
+        row = {"root": root, "day": str(day), "source": record.get("source"),
+               "source_symbol": record.get("source_symbol"), "source_symbol_expected": sl.source_root(root, day),
+               "file_sha256": record.get("sha256"), "packet_sha256": record.get("packet_sha256"),
+               **sl.sip_coverage([], hours), "status": "pending"}
+        if record.get("source") == sl.SIP_SOURCE:
+            try:
+                path = store.path("underlying", root, day)
+                digest, _ = sl.sha256_file(path)
+                if digest != record.get("sha256"):
+                    raise ValueError("canonical SIP file checksum mismatch")
+                frame = pl.read_parquet(path, columns=["minute", "price", "open", "high", "low", "close", "volume"])
+                minutes = frame["minute"].to_list()
+                if any(type(m) is not int or not hours[0] < m <= hours[1] for m in minutes) or len(set(minutes)) != len(minutes):
+                    raise ValueError("invalid SIP minute grid")
+                for item in frame.to_dicts():
+                    if (any(not isinstance(item[k], (int, float)) or not math.isfinite(item[k]) for k in item)
+                            or min(item[k] for k in ("price", "open", "high", "low", "close")) <= 0
+                            or item["volume"] < 0 or item["price"] != item["close"]
+                            or not item["low"] <= min(item["open"], item["close"]) <= max(item["open"], item["close"]) <= item["high"]):
+                        raise ValueError("invalid SIP OHLCV")
+                if record.get("source_symbol") not in (None, sl.source_root(root, day)):
+                    raise ValueError("SIP historical source symbol mismatch")
+                row.update(sl.sip_coverage(minutes, hours))
+                row.update(status="complete" if row["complete"] else "partial", file_sha256=digest,
+                           verification="current_file_hash_and_grid")
+            except Exception as error:  # malformed files are missing evidence, never a ready root
+                row.update(status="error", error=f"{type(error).__name__}: {str(error)[:160]}")
+        out.append(row)
+    return {"day": str(day), "roots": out}
+
+
+def sip_plan(store: Store, start: dt.date, end: dt.date, calendar: sl.Calendar, *, hash_files=False) -> dict[str, Any]:
+    """Private coverage plan and canonical identities. No prices/volumes leave the data box."""
+    if not sl.TRAIN[0] <= start <= end <= sl.HOLDOUT[1]:
+        raise ValueError("historical SIP plan must stay within the fixed historical windows")
+    files = store.journal.files()
+    roots_by_day = {}
+    for row in files.values():
+        if row.get('kind') == 'nbbo' and row['root'] not in ('XSP', 'SPXW'):
+            roots_by_day.setdefault(row['date'], set()).add(row['root'])
+    days, identities = [], []
+    for day in calendar.days(start, end):
+        roots = sorted(roots_by_day.get(str(day), set()))
+        days.append({'day': str(day), 'window': sl.window_of(day), 'hours': list(calendar.hours(day)),
+                     'roots': {r: sl.source_root(r, day) for r in roots}})
+        for root in roots:
+            record = files.get(sl.rel_path('underlying', root, day)) or {}
+            row = {'day': str(day), 'root': root, 'source': record.get('source'),
+                   'source_symbol': record.get('source_symbol'), 'file_sha256': record.get('sha256'),
+                   'packet_sha256': record.get('packet_sha256')}
+            if hash_files:
+                try:
+                    row['actual_sha256'] = sl.sha256_file(store.path('underlying', root, day))[0]
+                except OSError:
+                    row['actual_sha256'] = None
+            identities.append(row)
+    return {'plan': {'schema': sl.SIP_COVERAGE_SCHEMA, 'source': sl.SIP_SOURCE,
+                     'start': str(start), 'end': str(end), 'days': days}, 'files': identities}
 
 
 def invalidate(store: Store, root: str, before: dt.date, why: str) -> dict[str, Any]:
@@ -1233,6 +1317,12 @@ def _main(argv: Sequence[str] | None = None) -> int:
     ad.add_argument("--records", required=True)
     sip = sub.add_parser("ingest-underlying", help="ingest completed SIP bars relayed by the House")
     sip.add_argument("--input", required=True)
+    ss = sub.add_parser("sip-status", help="verify a day's SIP hashes, OHLCV and complete-minute coverage")
+    ss.add_argument("--date", required=True)
+    sp = sub.add_parser("sip-plan", help="historical SIP root/window/calendar plan and current file identities")
+    sp.add_argument("--start", required=True)
+    sp.add_argument("--end", required=True)
+    sp.add_argument("--hash-files", action="store_true", help="hash actual bytes, without reading price columns")
     sub.add_parser("verify")
     inv = sub.add_parser("invalidate", help="delete a root's results before a date and queue them again")
     inv.add_argument("--root", required=True)
@@ -1418,6 +1508,11 @@ def _main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(adopt(store, args.records, calendar)))
     elif args.cmd == "ingest-underlying":
         print(json.dumps(ingest_underlying(store, json.loads(Path(args.input).read_text()), calendar)))
+    elif args.cmd == "sip-status":
+        print(json.dumps(sip_status(store, dt.date.fromisoformat(args.date), calendar)))
+    elif args.cmd == "sip-plan":
+        print(json.dumps(sip_plan(store, dt.date.fromisoformat(args.start), dt.date.fromisoformat(args.end),
+                                  calendar, hash_files=args.hash_files)))
     elif args.cmd == "verify":
         print(json.dumps(verify(store)))
     elif args.cmd == "invalidate":

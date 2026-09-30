@@ -279,8 +279,8 @@ class Invalidate(unittest.TestCase):
 class SipIngest(unittest.TestCase):
     def packet(self):
         return {"root": "SPY", "day": DAY.isoformat(), "completed_minutes": True,
-                "rows": [{"minute": 571, "price": 100.5, "open": 100.0, "high": 101.0,
-                          "low": 99.0, "close": 100.5, "volume": 20.0}]}
+                "rows": [{"minute": m, "price": 100.5, "open": 100.0, "high": 101.0,
+                          "low": 99.0, "close": 100.5, "volume": 20.0} for m in range(571, 961)]}
 
     def test_completed_bars_are_written_and_journaled_with_ohlcv(self):
         import backfill as bf
@@ -308,3 +308,44 @@ class SipIngest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     bf.ingest_underlying(store, [self.packet(), packet], sl.Calendar({}))
                 self.assertEqual(store.journal.files(), {})
+
+    def test_sparse_packet_cannot_replace_better_canonical_bytes(self):
+        import backfill as bf
+        with tempfile.TemporaryDirectory() as tmp:
+            store = bf.Store(str(Path(tmp) / 'store'), str(Path(tmp) / 'work'))
+            bf.ingest_underlying(store, self.packet(), sl.Calendar({}))
+            before = store.path('underlying', 'SPY', DAY).read_bytes()
+            journal = store.journal.files()
+            partial = self.packet()
+            partial['rows'] = partial['rows'][:1]
+            with self.assertRaisesRegex(ValueError, 'incomplete SIP session'):
+                bf.ingest_underlying(store, partial, sl.Calendar({}))
+            self.assertEqual(store.path('underlying', 'SPY', DAY).read_bytes(), before)
+            self.assertEqual(store.journal.files(), journal)
+
+    def test_source_label_alone_is_not_complete_and_actual_hash_is_required(self):
+        import backfill as bf
+        import frames as fr
+        with tempfile.TemporaryDirectory() as tmp:
+            store = bf.Store(str(Path(tmp) / 'store'), str(Path(tmp) / 'work'))
+            store.journal.append(sl.file_record('nbbo', 'SPY', DAY, rows=1, sha256='nbbo', size=1,
+                                               source='test', fetched_at='test'))
+            for count in (1, 390):
+                # A legacy SIP SOURCE label has no packet/coverage receipt. Inspect actual bytes.
+                frame = pl.DataFrame(self.packet()['rows'][:count])
+                rows, sha, size = fr.write(frame, store.path('underlying', 'SPY', DAY))
+                store.journal.append(sl.file_record('underlying', 'SPY', DAY, rows=rows, sha256=sha, size=size,
+                                                   source=sl.SIP_SOURCE, fetched_at='test'))
+                status = bf.sip_status(store, DAY, sl.Calendar({}))['roots'][0]
+                self.assertEqual(status['known'], count)
+                self.assertEqual(status['complete'], count == 390)
+                self.assertEqual(status['provenance'], 'finalized_without_publication_receipts')
+            # A later write without a matching journal receipt invalidates verification.
+            fr.write(pl.DataFrame(self.packet()['rows'][:1]), store.path('underlying', 'SPY', DAY))
+            status = bf.sip_status(store, DAY, sl.Calendar({}))['roots'][0]
+            self.assertFalse(status['complete'])
+            self.assertIn('checksum mismatch', status['error'])
+            plan = bf.sip_plan(store, DAY, DAY, sl.Calendar({}), hash_files=True)
+            self.assertEqual(plan['plan']['days'][0]['roots'], {'SPY': 'SPY'})
+            self.assertEqual(plan['plan']['days'][0]['window'], 'train')
+            self.assertNotEqual(plan['files'][0]['actual_sha256'], plan['files'][0]['file_sha256'])
