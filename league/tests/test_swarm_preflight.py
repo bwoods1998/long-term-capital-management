@@ -413,6 +413,10 @@ class Preflight(unittest.TestCase):
         self.assertEqual(out["status"], "inconclusive", out)
         self.assertIn("one tick wide", out["why"])
         self.assertIn("IndexError", out["why"])
+        # The same misuse saying the same thing at another line recurs (another branch ran first on one-tick quotes).
+        out = self.refused(program("c = ctx.chain\nif (c.spread <= 0.0101).all():\n    return undefined_intents\n"
+                                   "return undefined_intents", head=head))
+        self.assertIn("name 'undefined_intents' is not defined", out["error"])
         # A misuse on any market is refused, on every one of them.
         out = self.refused(program("for pid, p in ctx.positions.items():\n    pass\nreturn []"))
         for words in ("sparser listing", "one tick wide", "three times as wide"):

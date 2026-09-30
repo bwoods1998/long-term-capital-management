@@ -34,12 +34,13 @@ half, and it runs nowhere near the Gym:
      and 3.14 alike). Until its first intent a Gym account is flat too, and an erring call returns no intent, so the
      Gym's account would stay exactly as flat as this one while the program erred: the only difference left is the
      market's numbers, which such an error does not depend on;
-  3. and a decide refusal recurs, the same exception at the same line, on a fresh instance of the program meeting each
-     of the other markets (`CONFIRMATIONS`, `REGIMES`). One is a sparser listing of the same roots
-     (`listing(sparse=True)`: one expiry a week, the next wider strike step). A listing is one the Gym holds over a long
-     stretch of Train, not on every day: a selection that keeps one contract on a coarser day keeps several on it (its
-     truth value then raises), and the sparse listing covers a listing one step or one expiry schedule finer than the
-     Gym's; a listing coarser than the Gym's only costs inconclusives (an empty selection is `market_dependent`). The
+  3. and a decide refusal recurs (`_recurs`: the same exception at the same line, or saying the same thing at another)
+     on a fresh instance of the program meeting each of the other markets (`CONFIRMATIONS`, `REGIMES`). One is a
+     sparser listing of the same roots (`listing(sparse=True)`: one expiry a week, the next wider strike step). A
+     listing is one the Gym holds over a long stretch of Train, not on every day: a selection that keeps one contract on
+     a coarser day keeps several on it (its truth value then raises), and the sparse listing covers a listing one step
+     or one expiry schedule finer than the Gym's; a listing coarser than the Gym's only costs inconclusives (an empty
+     selection is `market_dependent`). The
      others are the listing again with other numbers at both ends: one-tick quotes, deep books and a higher vol;
      quotes three times as wide, thin books and a lower vol; each on its own price paths at another level. An error
      that follows from the numbers without saying so (a liquidity filter that keeps nothing, then a STATE key it never
@@ -156,15 +157,17 @@ class Regime(NamedTuple):
     salt: int
 
 
-#: THE MARKETS a program meets. It is first run on the listing with typical quotes. A refusal must then recur, the same
-#: exception at the same line, on each of the others in turn (`CONFIRMATIONS`): the same roots listed more thinly (the
-#: listing's count of contracts), and the listing again with other numbers at both ends: every quote one tick wide (the
-#: venue's narrowest) on deep books at twice the vol and a higher price, whose richer premiums make those ticks the
-#: smallest share of a mid; and quotes three times as wide on thin books at a lower vol and price, the widest share;
-#: each on its own price paths. An error that turns on how many contracts a selection keeps, or on a quote's width, a
-#: vol, a size or a price (a liquidity filter that keeps nothing, then a STATE key it never wrote) is spared on one of
-#: them, and so never refuses. A filter that keeps nothing even on one-tick quotes at twice the vol would keep nothing on
-#: almost every Gym day either (no quote there is narrower than a tick), and 25 errors in a run disqualify it there.
+#: THE MARKETS a program meets. It is first run on the listing with typical quotes. A refusal must then recur (`_recurs`:
+#: the same exception at the same line, or saying the same thing at another) on each of the others in turn
+#: (`CONFIRMATIONS`): the same roots listed more thinly (the listing's count of contracts), and the listing again with
+#: other numbers at both ends: every quote one tick wide (the venue's narrowest) on deep books at twice the vol and a
+#: higher price, whose richer premiums make those ticks the smallest share of a mid; and quotes three times as wide on
+#: thin books at a lower vol and price, the widest share; each on its own price paths. An error that turns on how many
+#: contracts a selection keeps, or on a quote's width, a vol, a size or a price (a liquidity filter that keeps nothing,
+#: then a STATE key it never wrote) is spared on one of them, and so never refuses. A filter that keeps nothing even on
+#: one-tick quotes at twice the vol would keep nothing on almost every Gym day either (no quote there is narrower than a
+#: tick), and 25 errors in a run disqualify it there. The price is a misuse behind a gate on the prices (a z-score, a
+#: flat band) that other paths never open: it is left to the Gym.
 REGIMES = {
     "listed": Regime("the listed chain", False, 1.0, 1.0, 1.0, (5, 400), 50_000, 1),
     "sparse": Regime("a sparser listing of the same roots (one expiry a week, a wider strike step)", True, 1.0, 1.0, 1.0,
@@ -572,8 +575,8 @@ def run(code: str, params: Mapping[str, Any] | None, decider: Any, *, universe: 
         _drop(decider, key)
     if verdict["status"] != "refused":
         return verdict
-    # THE OTHER MARKETS (`CONFIRMATIONS`): a fresh instance of the program on each. The refusal stands only when the same
-    # exception at the same line recurs on every one, so an error that turns on how many contracts the chain lists (a
+    # THE OTHER MARKETS (`CONFIRMATIONS`): a fresh instance of the program on each. The refusal stands only when the error
+    # recurs on every one (`_recurs`), so an error that turns on how many contracts the chain lists (a
     # selection that holds one contract in the Gym holds several here) or on the made-up numbers (a liquidity filter
     # that keeps nothing at these quotes, then a STATE key it never wrote) never refuses on its own.
     calls = int(verdict.get("calls") or 0)
@@ -591,10 +594,11 @@ def run(code: str, params: Mapping[str, Any] | None, decider: Any, *, universe: 
         calls += int(again.get("calls") or 0)
         if again["status"] == "inconclusive":  # it could not say there (its deadline, a timeout, the sandbox)
             return _answer("inconclusive", f"on {label}: {again.get('why')}", calls=calls)
-        if again["status"] != "refused" or _kind(again.get("error")) != _kind(verdict.get("error")):
-            because = ("it may turn on how many contracts the chain lists, which the Gym's store decides" if regime == "sparse"
-                       else "it may turn on the market's numbers (a quote's width, a vol, a size, a price), which are made "
-                            "up here")
+        if again["status"] != "refused" or not _recurs(again.get("error"), verdict.get("error")):
+            because = ("it may turn on how many contracts the chain lists, which the Gym's store decides"
+                       if regime == "sparse" else
+                       "it may turn on the market's numbers (a quote's width, a vol, a size, a price), which are made "
+                       "up here")
             return _answer("inconclusive", f"the error did not recur on {label}: {because}: "
                                            f"{str(verdict.get('error') or '')[:240]}", calls=calls)
     verdict["why"] += ("; again on a sparser listing (one expiry a week, a wider strike step), on quotes one tick wide at "
@@ -615,6 +619,16 @@ def _kind(message: Any) -> tuple[str, str]:
     the same place, whatever numbers it prints."""
     m = re.match(r"(?:line (\d+): )?([\w.]+)", str(message or ""))
     return (m.group(1) or "", m.group(2)) if m else ("", "")
+
+
+def _recurs(again: Any, first: Any) -> bool:
+    """`again` (another market's streak) is `first` recurring: the same exception at the same line, or the same exception
+    saying the same thing at another line (`name 'intents' is not defined` where another branch ran first)."""
+    (line, kind), (first_line, first_kind) = _kind(again), _kind(first)
+    if kind != first_kind:
+        return False
+    text = lambda message: re.sub(r"^line \d+: ", "", str(message or ""))  # noqa: E731
+    return line == first_line or text(again) == text(first)
 
 
 def _decide_loop(code: str, params: Mapping[str, Any], decider: Any, key: str, needs: Mapping[str, Any],
@@ -803,6 +817,6 @@ class Preflight:
             self._decider.close()
 
 
-__all__ = ["VERSION", "STREAK", "SESSIONS", "PREFLIGHT_UID", "LISTING", "REGIMES", "CONFIRMATIONS", "Market", "Preflight",
-           "Regime", "advice", "decision_minutes", "environmental", "equity_step", "expiries", "listing", "market_dependent",
-           "quote", "run", "session_weekdays", "vol_of"]
+__all__ = ["VERSION", "STREAK", "SESSIONS", "PREFLIGHT_UID", "LISTING", "REGIMES", "CONFIRMATIONS", "Market",
+           "Preflight", "Regime", "advice", "decision_minutes", "environmental", "equity_step", "expiries", "listing",
+           "market_dependent", "quote", "run", "session_weekdays", "vol_of"]
