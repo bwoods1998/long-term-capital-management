@@ -7,7 +7,9 @@ One result per program per run (one TRIAL: one run of one program version over o
   and the run's settings), `program`, `program_sha`, `run_sha`, `params`, `window`, `roots`,
   `engine`, `data_version`, `fill_model`, `stress`, `capital`, `trials` (1);
 - `status`: ok, disqualified (the program erred or timed out too often: `runtime.messages` says
-  how), or no_data;
+  how), or no_data; a run that could not finish is `failed(program, why)` instead: status error,
+  its `reason`, no trial and no figures (a Gym batch's worker died or timed out, or with
+  `engine.run(isolate=True)` an exception ended this one program's run);
 - `summary`: trades, days, days_traded, pnl, pnl_per_max_loss; `t_daily` and
   `mean_return_on_max_loss_daily`, the one-sample t and mean of the DAILY return on maximum loss
   (each entry day's P&L over its maximum loss: THE statistic of the validation line, so splitting a
@@ -733,12 +735,21 @@ def view(result: Mapping[str, Any], window: str) -> dict[str, Any]:
     raise ValueError("window is train, validation, holdout, forward or gate")
 
 
+def failed(program: str, why: str) -> dict[str, Any]:
+    """The result of a program whose run could not finish: status error, the reason, no trial (`trials` 0) and no
+    figures. One shape for a Gym batch's dead or timed-out unit (`batch._failed`) and for one program's run ended by
+    an exception (`engine.run(isolate=True)`)."""
+    return {"program": program, "status": "error", "reason": why[:500], "trials": 0, "summary": {}, "fills": {}, "daily": [],
+            "trades": [], "data_version": "",
+            "runtime": {"calls": 0, "errors": 0, "timeouts": 0, "messages": [why[:200]], "disqualified": None}}
+
+
 def stress_block(result: Mapping[str, Any]) -> dict[str, Any]:
     """The stress twin's figures a validation view carries (`stress_1.5`)."""
     summary = result.get("summary") or {}
     return {"stress": result.get("stress"), "status": result.get("status"), **{k: summary.get(k) for k in STRESS_KEYS}}
 
 
-__all__ = ["build", "merge", "merge_splits", "view", "stress_block", "summarize", "daily_returns", "by_year", "merge_years", "drift", "merge_drift",
+__all__ = ["build", "merge", "merge_splits", "view", "stress_block", "failed", "summarize", "daily_returns", "by_year", "merge_years", "drift", "merge_drift",
            "drift_fit", "drift_moments", "combine_moments", "drift_stats", "combine_stats", "drift_from_stats", "drift_rows", "sha",
            "canonical", "ENGINE_VERSION"]
