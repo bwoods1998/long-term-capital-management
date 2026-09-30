@@ -28,7 +28,9 @@ more than ten sessions.
 
 STAGES. The first window runs first. When its signal arm errs the test is untestable; when its ablation arm errs, or makes
 no trade while the signal arm trades (a comparison enters wherever the signal would), the ablation is invalid; either way
-the other three windows never run (half of Sept 30's placebo rows never traded).
+the other three windows never run (half of Sept 30's placebo rows never traded). An arm the Gym failed for its own reasons
+(`INFRASTRUCTURE`: a worker that died, a unit past its deadline) is never a verdict: the test ends as a Gym error, asked
+again later, and such an arm is never reused.
 
 THE STATISTIC. Each arm's per-entry-day return on maximum loss (the validation line's own unit: a day's P&L over the
 day's maximum loss, trades grouped by entry day). The question is whether conditioning on the signal selects better
@@ -46,14 +48,17 @@ THE ABLATION AUDIT (`audit`). The comparison is written by the researcher being 
 make any signal pass. Before the statistic, both arms' trades are profiled (structure types, median days to expiry, median
 moneyness, median width, median entry minute, median sessions held) and an ablation whose trades are another structure,
 tenor, strike band, width, entry time or hold than the signal's is invalid. The tolerances are loose on purpose: a signal
-may shift its strikes or timing a little; the audit catches a comparison that trades something else. Both profiles are
-recorded with the verdict.
+may shift its strikes or timing a little; the audit catches a comparison that trades something else. A card whose inputs
+include the clock conditions on the time of day, so its comparison enters at other minutes by design: the entry-minute
+check is skipped for it (`CLOCK_SKIPS`). Both profiles are recorded with the verdict.
 
 THE NOISE BOUND. `min_t` (0.75) on a hypothesis's first test, rising by `step_t` (0.25) for each failed test of the same
 hypothesis before it: failed tests of every family of the lineage set (`store.lineages`: forks, parent-named revisions and
-rebirths that join or count the lineage) whose card sits in the same cell (mechanism class, structure family, holding). A
-retry is another look at the same question, so a signal with no information cannot walk through on retries, and a fork
-or rebirth never resets the count; an unrelated idea in the lineage (another cell) does not raise it. Set by a fixed-seed
+rebirths that join or count the lineage) whose card the rebirth refusal would match to this one (`cards.match_keys`: the
+same class, structure family and holding, with overlapping inputs, this family's read from its declared inputs and its own
+words). A retry is another look at the same question, so a signal with no information cannot walk through on retries, and
+a fork or rebirth never resets the count; an unrelated idea in the lineage (another cell, or disjoint inputs) does not
+raise it. Set by a fixed-seed
 simulation (league/tests/test_swarm_mechanism.py, `Benchmark`) at the eligibility floor's frequency with no cost drag (the
 hardest case for a real signal), against this module's first design (125 sample days, bounds 0.5, 1.0 and 1.5):
 
@@ -64,20 +69,29 @@ hardest case for a real signal), against this module's first design (125 sample 
     t 2 a year as a third version, after two       43%            73%                      60%
       failed versions of the same hypothesis
 
-Fewer false passes and fewer missed signals in every case. The owner's thresholds bind eligibility and scoring; this
-is a screen before Train, and it ships in SHADOW mode (below) until measured House evidence says it may gate.
+Against the first design: fewer false passes and fewer missed signals in every row. Against main, which has no test, any
+gate can only ADD missed signals (13% of validation-line signals on the first test above), so switching the gate on is
+not a case of the owner's rule that a threshold changes only when fixed benchmarks show missed signals fall: it is an
+exception to it, which only the owner can grant. It ships in SHADOW mode (below), which stops nothing.
 
-MODES (`researcher.mechanism_test.mode`). "shadow" (the default): a carded family's first broad replay is preceded by one
-test; its verdict is recorded on the card, charged to the lineage and told to the researcher, and the broad run goes ahead
-whatever it says, so the verdict can be checked against the family's Train outcome (`calibration` of
-`calibration_rows(store)`) before it is allowed to stop anything. "gate": a carded family's broad replay (at any stress) and its sweeps wait until its hypothesis has
-passed (any family of its lineage with the same card, or broad Train runs of such a family: the test gates the first
-broad replay only, never a re-test after a Gym change); `max_failures` tests of the hypothesis that failed below the BASE
-bound (`min_t`: a test failed only by a raised bound is never a finding) retire the family with the MECHANISM verdict,
-and `max_untestable` untestable versions retire it with the idle rule's words. `enabled` false (or `mechanism_test:
-false`) switches it off. The gate is switched on only when `calibration` over shadow verdicts shows that the families it
-would have stopped rarely reached an eligible Train version (the missed-signal rate), and that a test costs well under
-the broad replay it would save (the cycle events' `box_seconds` against `gym_box_seconds`).
+MODES (`researcher.mechanism_test.mode`).
+- "shadow" (the default): a `sample` share of carded families (0.25, chosen by a hash of the family id, never by a
+  result: `in_sample`) take one test each, at the first gym_run that can take it (a run with the signal off, or a program
+  without the card's switch, is skipped, not recorded). The verdict is recorded on the card and charged to the lineage as
+  trials, and the broad run goes ahead whatever it says. The test is BLIND: the researcher never sees the verdict (not in
+  the run's view, the status line or the notebook; it is told only that the test was recorded), so it cannot give up on,
+  or steer toward, what the verdict says, and `calibration` of `calibration_rows(store)` (blind rows only) measures what
+  the verdict predicts about the family's Train outcome before it is allowed to stop anything.
+- "gate": a carded family's broad replay (at any stress) and its sweeps wait until its hypothesis has passed (any family
+  of its lineage with the same card, or broad Train runs of such a family: the test gates the first broad replay only,
+  never a re-test after a Gym change). A test that FAILED BELOW THE BASE bound (`min_t`: a test failed only by a raised
+  bound is never a finding) retires the family with the MECHANISM verdict once `max_failures` such tests are recorded for
+  its card (its own and its forks', which share the card); a thin, invalid or untestable verdict retires it with the idle
+  rule's words once its own `max_untestable` versions made one. No other verdict ever retires it.
+`enabled` false (or `mechanism_test: false`) switches it off. Switching to gate is the owner's decision (above), read from
+`calibration` over blind shadow verdicts: how many of the families it would have stopped reached an eligible Train
+version (the missed-signal rate, meaningful only with enough eligible tested families), and whether a test costs well
+under the broad replay it would save (the cycle events' `box_seconds` against `gym_box_seconds`).
 
 VERDICTS. `passed`; `failed` (the signal did not beat its comparison beyond the bound: an economic finding about this
 program); `thin` (the signal arm entered on fewer than `min_on_days` counted days); `invalid_ablation` (the ablation arm
@@ -115,6 +129,7 @@ DEFAULTS: dict[str, Any] = {
     "max_failures": 3,
     "max_untestable": 4,
     "timeout_seconds": 900,
+    "sample": 0.25,
 }
 MODES = ("shadow", "gate")
 #: The pre-registered sample (the module docstring): four windows of three calendar months inside 2022-2024.
@@ -140,6 +155,11 @@ STATE_KEY = "mechanism"
 MISSING_DATA = re.compile(r"missing data|has no \w+ data", re.I)
 #: The audit's tolerances (the module docstring): an ablation is invalid past any of them.
 AUDIT = {"dte_days": 3, "dte_share": 0.5, "moneyness": 0.02, "width": 0.02, "minutes": 60, "sessions": 2, "sessions_share": 1.0}
+#: The audit's checks a card whose inputs include the clock skips: its signal is the time of day.
+CLOCK_SKIPS = frozenset({"minute"})
+#: An arm the Gym failed for its own reasons (league/gym/batch.py: a worker that died, a unit past its deadline and killed):
+#: never a verdict about the program.
+INFRASTRUCTURE = re.compile(r"the worker died|the unit timed out|worker was killed", re.I)
 
 
 def config(settings: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -157,9 +177,28 @@ def config(settings: Mapping[str, Any] | None) -> dict[str, Any]:
                 out[k] = default
             else:
                 out[k] = type(default)(v) if not isinstance(default, float) else float(v)
+        out["sample"] = min(1.0, max(0.0, float(out["sample"])))
     elif raw is False:
         out["enabled"] = False
     return out
+
+
+def in_sample(fid: str, share: float) -> bool:
+    """Is a family in shadow mode's `sample` share: a fixed hash of its id, never of anything it did."""
+    share = float(share)
+    if share >= 1.0:
+        return True
+    if share <= 0.0:
+        return False
+    return int(hashlib.sha256(f"mechanism-sample:{fid}".encode("utf-8")).hexdigest()[:8], 16) / float(1 << 32) < share
+
+
+def infrastructure(result: Mapping[str, Any]) -> bool:
+    """Did the Gym fail this arm for its own reasons (`INFRASTRUCTURE`), not the program's?"""
+    if str(result.get("status")) != "error":
+        return False
+    messages = (result.get("runtime") or {}).get("messages") or []
+    return bool(INFRASTRUCTURE.search(" ".join([str(result.get("reason") or ""), *(str(m) for m in messages)])))
 
 
 def sample_windows() -> list[tuple[str, str]]:
@@ -303,9 +342,11 @@ def profile(trades: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
     return {k: (round(v, 5) if isinstance(v, float) else v) for k, v in out.items()}
 
 
-def audit(on: Mapping[str, Any], off: Mapping[str, Any]) -> str | None:
+def audit(on: Mapping[str, Any], off: Mapping[str, Any], *, skip: Iterable[str] = ()) -> str | None:
     """Why the ablation arm's profile is not the signal's comparison (another structure, tenor, strike band, width, entry
-    time or hold: `AUDIT`'s tolerances), or None. Figures missing on either side are not judged."""
+    time or hold: `AUDIT`'s tolerances), or None. Figures missing on either side, and the checks named in `skip`
+    (`CLOCK_SKIPS` for a clock signal), are not judged."""
+    skipped = set(skip)
     if not on.get("trades") or not off.get("trades"):
         return None
     extra = sorted(set(on.get("types") or []) - set(off.get("types") or []))
@@ -314,7 +355,7 @@ def audit(on: Mapping[str, Any], off: Mapping[str, Any]) -> str | None:
 
     def far(name: str, limit: float) -> bool:
         a, b = on.get(name), off.get(name)
-        return a is not None and b is not None and abs(float(a) - float(b)) > limit
+        return name not in skipped and a is not None and b is not None and abs(float(a) - float(b)) > limit
 
     dte_on = on.get("dte")
     if dte_on is not None and far("dte", max(AUDIT["dte_days"], AUDIT["dte_share"] * abs(float(dte_on)))):
@@ -383,11 +424,13 @@ def calibration(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
 
 
 def calibration_rows(store: Any) -> list[dict[str, Any]]:
-    """`calibration`'s rows from a store (read-only): each tested family's FIRST mechanism verdict and whether any of its
-    broad Train runs was eligible, for the families whose outcome is known (retired, or already eligible): a family still
-    researching could yet become eligible."""
+    """`calibration`'s rows from a store (read-only): each tested family's FIRST BLIND mechanism verdict (shadow mode's:
+    the researcher never saw it, so it could not act on it) and whether any of its broad Train runs was eligible, for the
+    families whose outcome is known (retired, or already eligible): a family still researching could yet become
+    eligible. A gate-mode verdict is never a row: it was seen, and it stopped the broad replay."""
     try:
-        first = store._all("SELECT family, verdict, MIN(seq) AS seq FROM card_evidence WHERE kind='mechanism_test' GROUP BY family")
+        first = store._all("SELECT family, verdict, MIN(seq) AS seq FROM card_evidence WHERE kind='mechanism_test' "
+                           "AND json_extract(detail, '$.blind') = 1 GROUP BY family")
     except Exception:  # noqa: BLE001 - no card tables yet
         return []
     eligible = {r["family"] for r in store._all("SELECT DISTINCT family FROM runs WHERE window='train' AND purpose='train' "
@@ -399,7 +442,8 @@ def calibration_rows(store: Any) -> list[dict[str, Any]]:
 
 def view(verdict: Mapping[str, Any], *, version: int, windows: Sequence[Sequence[str]], ablation: Mapping[str, Any],
          arms: Mapping[str, Any], stored: bool = False) -> dict[str, Any]:
-    """The researcher's answer to a run whose mechanism test did not pass (the broad Train run was not made: gate mode)."""
+    """The researcher's answer to a run whose mechanism test did not pass (the broad Train run was not made: gate mode
+    only; a shadow verdict is never shown)."""
     name = verdict.get("verdict")
     status = {"failed": "mechanism_failed", "thin": "mechanism_thin", "invalid_ablation": "mechanism_invalid",
               "untestable": "mechanism_untestable"}.get(str(name), "mechanism_failed")
@@ -424,7 +468,7 @@ def view(verdict: Mapping[str, Any], *, version: int, windows: Sequence[Sequence
 
 def view_block(verdict: Mapping[str, Any], windows: Sequence[Sequence[str]], ablation: Mapping[str, Any],
                arms: Mapping[str, Any]) -> dict[str, Any]:
-    """The verdict as the researcher reads it (a gate's refusal, or beside a shadow run's broad result)."""
+    """The verdict as the researcher reads it (a gate's refusal)."""
     return {"verdict": verdict.get("verdict"), "why": verdict.get("why"), "method": verdict.get("method"), "t": verdict.get("t"),
             "min_t": verdict.get("min_t"), "signal_days": verdict.get("n_on"), "comparison_days": verdict.get("n_off"),
             "mean_on": verdict.get("mean_on"), "mean_off": verdict.get("mean_off"), "hurdle": verdict.get("hurdle"),
@@ -433,6 +477,6 @@ def view_block(verdict: Mapping[str, Any], windows: Sequence[Sequence[str]], abl
 
 
 __all__ = ["DEFAULTS", "MODES", "WINDOWS", "TAIL_DAYS", "MARK", "MECHANISM_CAUSE", "UNTESTABLE_CAUSE", "VERDICTS", "STATE_KEY",
-           "MISSING_DATA", "AUDIT", "config", "bound", "sample_windows", "counted_until", "counted", "windows_id", "day_returns",
-           "compare", "compare_flat", "profile", "audit", "trim", "arm_summary", "calibration", "calibration_rows", "view",
-           "view_block"]
+           "MISSING_DATA", "AUDIT", "CLOCK_SKIPS", "INFRASTRUCTURE", "config", "in_sample", "infrastructure", "bound",
+           "sample_windows", "counted_until", "counted", "windows_id", "day_returns", "compare", "compare_flat", "profile",
+           "audit", "trim", "arm_summary", "calibration", "calibration_rows", "view", "view_block"]

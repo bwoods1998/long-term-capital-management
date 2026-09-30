@@ -1,9 +1,9 @@
 """THE MECHANISM TEST (league/swarm/mechanism.py, release B) and its place in the researcher (league/swarm/researcher.py):
 before a carded family's first broad Train replay its program runs with the signal on and with its card's ablation over a
-pre-registered sample of Train windows. Shadow mode (the default) records the verdict and runs the broad replay anyway;
-gate mode makes broad replay and sweeps wait for a pass and retires a hypothesis that fails below the base bound three
-times. Every arm is a trial; the verdict is recorded on the card; the bound and the pass are the lineage's. Synthetic
-programs, a fake Gym and a synthetic Gym store only (no quotes, no real parameters)."""
+pre-registered sample of Train windows. Shadow mode (the default) records a blind verdict for a sample of families and
+runs the broad replay anyway; gate mode makes broad replay and sweeps wait for a pass and retires a card that fails below
+the base bound three times. Every arm is a trial; the verdict is recorded on the card; the bound and the pass are the
+lineage's. Synthetic programs, a fake Gym and a synthetic Gym store only (no quotes, no real parameters)."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from league.swarm import cards, mechanism
 from league.swarm import settings as S
@@ -125,8 +126,9 @@ class Statistic(unittest.TestCase):
         self.assertEqual(got, {"d1": 0.05})
 
     def test_config_falls_back_on_bad_values(self):
-        cfg = mechanism.config({"researcher": {"mechanism_test": {"min_t": "x", "enabled": 1, "mode": "bogus"}}})
-        self.assertEqual((cfg["min_t"], cfg["enabled"], cfg["mode"]), (0.75, True, "shadow"))
+        cfg = mechanism.config({"researcher": {"mechanism_test": {"min_t": "x", "enabled": 1, "mode": "bogus", "sample": 7}}})
+        self.assertEqual((cfg["min_t"], cfg["enabled"], cfg["mode"], cfg["sample"]), (0.75, True, "shadow", 1.0))
+        self.assertEqual(mechanism.config({})["sample"], 0.25, "shadow tests a quarter of carded families by default")
         self.assertEqual(mechanism.config({"researcher": {"mechanism_test": {"mode": "GATE"}}})["mode"], "gate")
         self.assertFalse(mechanism.config({"researcher": {"mechanism_test": False}})["enabled"])
         self.assertEqual(mechanism.config({})["mode"], "shadow", "shadow until House evidence says it may gate")
@@ -141,6 +143,14 @@ class Audit(unittest.TestCase):
         self.assertEqual((on["types"], on["dte"], on["moneyness"], on["width"], on["minute"], on["sessions"]),
                          (["debit_vertical"], 3.0, 0.0, 0.02, 600.0, 1.0))
         self.assertIsNone(mechanism.audit(on, self.arm(n=30, moneyness=0.01)), "a signal may shift its strikes a little")
+
+    def test_a_clock_signal_may_enter_at_other_minutes(self):
+        """Review of #446: a last-hour signal's comparison is the same structure entered at other times of day."""
+        on = mechanism.profile([{**trade(i, f"d{i}", 1.0), "entry_minute": 900} for i in range(12)])
+        off = mechanism.profile([{**trade(i, f"d{i}", 1.0), "entry_minute": 600} for i in range(20)])
+        self.assertIn("entry minute", mechanism.audit(on, off))
+        self.assertIsNone(mechanism.audit(on, off, skip=mechanism.CLOCK_SKIPS))
+        self.assertIn("days to expiry", mechanism.audit(on, self.arm(dte=30), skip=mechanism.CLOCK_SKIPS), "only the minute")
 
     def test_a_comparison_that_trades_something_else_is_caught(self):
         on = self.arm()
@@ -164,6 +174,20 @@ class Audit(unittest.TestCase):
         self.assertEqual(mechanism.profile(kept["trades"]), mechanism.profile(full["trades"]), "the audit reads either")
         self.assertEqual(mechanism.day_returns(kept["trades"]), mechanism.day_returns(full["trades"]))
         self.assertEqual((kept["run_id"], kept["trials"]), (full["run_id"], full["trials"]))
+
+    def test_the_shadow_sample_is_a_fixed_share_of_family_ids(self):
+        ids = [f"family-{i}" for i in range(2000)]
+        share = sum(mechanism.in_sample(f, 0.25) for f in ids) / len(ids)
+        self.assertTrue(0.22 < share < 0.28, share)
+        self.assertEqual([mechanism.in_sample(f, 0.25) for f in ids[:50]], [mechanism.in_sample(f, 0.25) for f in ids[:50]])
+        self.assertTrue(all(mechanism.in_sample(f, 1.0) for f in ids[:50]))
+        self.assertFalse(any(mechanism.in_sample(f, 0.0) for f in ids[:50]))
+
+    def test_an_arm_the_gym_failed_is_infrastructure_not_a_verdict(self):
+        dead = {"status": "error", "reason": "the worker died (exit -9)", "runtime": {"messages": ["the worker died (exit -9)"]}}
+        late = {"status": "error", "reason": "the unit timed out after 1800 s and its worker was killed"}
+        own = {"status": "error", "reason": "ZeroDivisionError: division by zero"}
+        self.assertEqual([mechanism.infrastructure(r) for r in (dead, late, own, {"status": "ok"})], [True, True, False, False])
 
     def test_calibration_says_what_the_gate_would_have_missed(self):
         rows = [{"verdict": "passed", "eligible": True}] * 3 + [{"verdict": "failed", "eligible": True}] + \
@@ -256,10 +280,12 @@ class ResearcherTest(ResearcherCase):
     def setUp(self):
         super().setUp()
         self.settings["population"]["floor"] = 0
+        self.shadow()  # every family in the shadow sample here (`sample` has its own test)
         self.fid = self.born("late-sell-rebound", CARD)
         self.edge = 0.4  # the signal's advantage per entry day, in daily return on maximum loss
         self.off_trades = True
         self.off_context: dict = {}
+        self.broken = lambda job: False  # an arm the Gym fails for its own reasons (a dead worker)
         self.pool = MechPool(self.answer)
 
     def born(self, fid: str, card: dict, structure: str = "debit_vertical", **kw) -> str:
@@ -273,11 +299,17 @@ class ResearcherTest(ResearcherCase):
     def gate(self, **extra):
         self.settings["researcher"]["mechanism_test"] = {"mode": "gate", **extra}
 
+    def shadow(self, **extra):
+        self.settings["researcher"]["mechanism_test"] = {"mode": "shadow", "sample": 1.0, **extra}
+
     def answer(self, job):
         """Signal on: 6 entry days a window, returning `edge` over the comparison; off: those days and 14 more at 0."""
         r = result(job.name, roots=job.roots)
         if job.purpose != "mechanism":
             return r
+        if self.broken(job):
+            return {"program": job.name, "status": "error", "reason": "the worker died (exit -9)", "trials": 0, "summary": {},
+                    "trades": [], "runtime": {"messages": ["the worker died (exit -9)"]}}
         on = bool(job.params.get("signal_on", 1))
         rows = [trade(i, d, (0.1 + self.edge + 0.02 * (i % 3)) * 50.0) for i, d in enumerate(trade_days(job.start, 6))]
         if not on:
@@ -303,31 +335,72 @@ class ResearcherTest(ResearcherCase):
     def evidence(self, fid=None):
         return cards.evidence(self.store, fid or self.fid, kind="mechanism_test")
 
+    def seen(self, view, fid=None) -> str:
+        """Everything the researcher can read about the family after a run: the run's view, its status line, its notebook."""
+        fam = self.store.family(fid or self.fid)
+        notes = [n["text"] for n in self.store.notebook(fid or self.fid, limit=50)]
+        return json.dumps(view, default=str) + "\n" + self.researcher().status(fam) + "\n" + "\n".join(notes)
+
     # ------------------------------------------------------------------ shadow (the default)
-    def test_shadow_records_the_verdict_and_never_stops_the_run(self):
+    def test_shadow_records_a_blind_verdict_and_never_stops_the_run(self):
         self.edge = -0.05
         view, out = self.run_()
         self.assertEqual(self.purposes(), ["mechanism"] * 8 + ["train"], "the test, then the broad run whatever it said")
         self.assertEqual(view["status"], "ok")
-        self.assertEqual(view["mechanism_test"]["verdict"], "failed")
-        self.assertIn("did not stop this run", view["mechanism_test"]["shadow"])
+        self.assertEqual(set(view["mechanism_test"]), {"mode", "recorded", "note"})
+        self.assertTrue(view["mechanism_test"]["recorded"])
+        self.assertIn("withheld", view["mechanism_test"]["note"])
         [ev] = self.evidence()
-        self.assertEqual((ev["verdict"], ev["detail"]["mode"], ev["detail"]["bound"]), ("failed", "shadow", 0.75))
+        self.assertEqual((ev["verdict"], ev["detail"]["mode"], ev["detail"]["bound"], ev["detail"]["blind"]),
+                         ("failed", "shadow", 0.75, True))
+        self.assertEqual(out["mechanism_test"]["verdict"], "failed", "the cycle's event (the operator's record) carries it")
         self.assertEqual(self.store.family(self.fid)["trials"], 9, "every arm is a trial in shadow too")
+        seen = self.seen(view)  # review of #446: the researcher never sees a shadow verdict (the view, the status, the notebook)
+        for words in (ev["detail"]["why"], f"t {ev['detail']['t']:+.2f}", "Mechanism test of version", "mechanism_failed",
+                      '"verdict"'):
+            self.assertNotIn(words, seen)
+        self.assertIn("withheld", self.researcher().mechanism_text(self.store.family(self.fid)))
         self.pool.jobs.clear()
         self.run_(params={"threshold": 590})
         self.assertEqual(self.purposes(), ["train"], "one test a family in shadow")
         self.assertFalse(self.store.family(self.fid)["retired_at"])
-        self.assertIn("shadow mode", self.researcher().mechanism_text(self.store.family(self.fid)))
 
-    def test_shadow_records_a_program_that_cannot_take_the_test_and_runs_it(self):
-        view, _ = self.run_(code=NO_SWITCH)
+    def test_a_passing_and_a_failing_shadow_test_look_the_same_to_the_researcher(self):
+        self.settings["researcher"]["probe_year"] = 2022
+        views = []
+        for edge, fid in ((0.4, self.fid), (-0.05, self.born("rebound-b", {**CARD, "hypothesis": CARD["hypothesis"] + " B."}))):
+            self.edge = edge
+            self.pool.jobs.clear()
+            view, _ = self.run_(fid=fid)
+            views.append((view["mechanism_test"], self.researcher().mechanism_text(self.store.family(fid)), self.purposes()))
+        self.assertEqual([e["verdict"] for f in (self.fid, "rebound-b") for e in self.evidence(f)], ["passed", "failed"])
+        self.assertEqual(views[0], views[1], "the same view, status and jobs (the probe runs either way) whatever the verdict")
+
+    def test_shadow_skips_a_run_that_cannot_take_the_test_and_tests_the_next(self):
+        view, out = self.run_(code=NO_SWITCH)
         self.assertEqual((view["status"], self.purposes()), ("ok", ["train"]))
-        [ev] = self.evidence()
-        self.assertEqual(ev["verdict"], "untestable")
-        self.assertIn("not in PARAMS", ev["detail"]["why"])
+        self.assertIn("not in PARAMS", out["mechanism_test"]["skipped"])
+        self.assertNotIn("mechanism_test", view)
+        self.run_(params={"signal_on": 0})  # a placebo first (review of #446): skipped, never recorded untestable
+        self.assertEqual((self.purposes(), self.evidence()), (["train", "train"], []))
+        self.pool.jobs.clear()
+        self.run_(params={"threshold": 590})
+        self.assertEqual(self.purposes(), ["mechanism"] * 8 + ["train"],
+                         "the first run that can take the test takes it, though the family already has broad runs")
+        self.assertEqual([e["verdict"] for e in self.evidence()], ["passed"])
 
-    def test_shadow_calibration_reads_the_first_verdict_and_the_train_outcome(self):
+    def test_shadow_tests_only_its_sample(self):
+        self.shadow(sample=0.0)
+        self.run_()
+        self.assertEqual((self.purposes(), self.evidence()), (["train"], []))
+        self.assertEqual(self.researcher().mechanism_text(self.store.family(self.fid)), "")
+        self.gate(sample=0.0)
+        self.fid = self.born("gated", {**CARD, "hypothesis": CARD["hypothesis"] + " Gated."})
+        self.pool.jobs.clear()
+        self.run_()
+        self.assertEqual(self.purposes(), ["mechanism"] * 8 + ["train"], "the gate tests every carded family")
+
+    def test_shadow_calibration_reads_the_first_blind_verdict_and_the_train_outcome(self):
         self.edge = -0.05
         self.run_()
         self.store.retire_gym(self.fid, "Retired by the idle rule", floor=0, source="test")
@@ -338,6 +411,9 @@ class ResearcherTest(ResearcherCase):
         self.assertEqual([(r["family"], r["verdict"]) for r in rows], [(self.fid, "failed")],
                          "a family still researching (no eligible run, not retired) is not counted yet")
         self.assertEqual(mechanism.calibration(rows)["tested"], 1)
+        self.store.retire_gym(young, "Retired by the idle rule", floor=0, source="test")
+        self.assertEqual([r["family"] for r in mechanism.calibration_rows(self.store)], [self.fid],
+                         "a gate verdict was seen and stopped the replay: never a calibration row")
 
     # ------------------------------------------------------------------ gate
     def test_a_pass_opens_broad_replay_and_every_arm_is_a_trial(self):
@@ -395,6 +471,75 @@ class ResearcherTest(ResearcherCase):
         self.assertIn(mechanism.MARK, fam["retire_reason"])
         self.assertEqual(tag_of(self.store._one("SELECT * FROM graveyard WHERE family=?", (self.fid,)), fam), "MECHANISM")
         self.assertIn("MECHANISM", str(last.get("retired")))
+
+    def test_a_verdict_that_is_not_a_hard_failure_never_retires_a_lineage_member(self):
+        """Review of #446 (probe A): the parent's card holds three hard failures; a fork's first test is invalid."""
+        self.gate()
+        self.edge = -0.05
+        self.run_()
+        self.run_(params={"threshold": 590})
+        self.run_(params={"threshold": 580})
+        self.assertTrue(self.store.family(self.fid)["retired_at"])
+        child = self.born("late-sell-rebound-child", CARD, parent=self.fid, origin="fork")
+        self.off_trades = False
+        view, _ = self.run_(fid=child)
+        self.assertEqual(([e["verdict"] for e in self.evidence(child)], view["status"]), (["invalid_ablation"], "mechanism_invalid"))
+        self.assertFalse(self.store.family(child)["retired_at"], "an untested verdict is never a MECHANISM finding")
+
+    def test_a_rebirth_failed_only_by_its_raised_bound_stays_alive(self):
+        """Review of #446 (probe B): a rebirth (a new input, another card) in the dead card's lineage and cell meets the
+        bound its hypothesis's failures raised; failing it above the base bound is not a finding, and the dead card's hard
+        failures never count toward the rebirth's retirement."""
+        self.gate()
+        self.edge = -0.05
+        self.run_()
+        self.run_(params={"threshold": 590})
+        self.run_(params={"threshold": 580})
+        reborn = {**CARD, "inputs": ["clock", "option_liquidity", "underlying_price"],
+                  "hypothesis": CARD["hypothesis"] + " Dealer inventory imbalance decides which rebounds complete."}
+        child = self.born("rebound-reborn", reborn, parent=self.fid, origin="architect")
+        cards.put(self.store, child, reborn, "debit_vertical")  # born() stores no card when a parent is given
+        self.assertEqual(self.researcher().mechanism_lineage(child)["failed"], 3, "the same hypothesis: the bound rises")
+        real = mechanism.compare
+
+        def between(on, off, *, min_t=0.75, min_on_days=10, min_off_days=10):
+            out = real(on, off, min_t=min_t, min_on_days=min_on_days, min_off_days=min_off_days)
+            return mechanism._finish(out, diff=0.01, t=1.0, min_t=min_t, method="welch", what="the comparison's")
+
+        with mock.patch.object(mechanism, "compare", between):
+            self.edge = 0.4
+            self.run_(fid=child)
+        [ev] = self.evidence(child)
+        self.assertEqual((ev["verdict"], ev["detail"]["bound"], ev["detail"]["below_base"]), ("failed", 1.5, False))
+        self.assertFalse(self.store.family(child)["retired_at"], "failed only by the raised bound: never a finding")
+        self.edge = -0.05
+        self.run_(fid=child, params={"threshold": 590})
+        self.assertEqual(self.researcher().mechanism_lineage(child)["hard"], 1, "only its own card's hard failures")
+        self.assertFalse(self.store.family(child)["retired_at"])
+
+    def test_disjoint_inputs_in_the_lineage_do_not_raise_the_bound(self):
+        self.gate()
+        self.edge = -0.05
+        self.run_()
+        skew = {**CARD, "inputs": ["iv_skew"], "hypothesis": "Put skew overprices crash protection after calm weeks, so the "
+                                                              "wing seller is paid for bearing it through the next sessions."}
+        child = self.born("skew-idea", skew, parent=self.fid, origin="architect")
+        cards.put(self.store, child, skew, "debit_vertical")
+        self.assertEqual(self.researcher().mechanism_lineage(child)["failed"], 0, "another information set: another hypothesis")
+
+    def test_a_worker_that_died_is_a_gym_error_and_its_arm_is_run_again(self):
+        """Review of #446: an arm the Gym failed for its own reasons is never a verdict, and never reused."""
+        self.gate()
+        self.broken = lambda job: job.params.get("signal_on") == 0 and job.start == mechanism.sample_windows()[0][0]
+        view, out = self.run_()
+        self.assertEqual((view["status"], self.evidence()), ("gym_error", []))
+        self.assertIn("worker died", out["gym_error"])
+        self.broken = lambda job: False
+        self.pool.jobs.clear()
+        view, _ = self.run_()
+        self.assertEqual(len([j for j in self.pool.by("mechanism") if j.params.get("signal_on") == 0
+                              and j.start == mechanism.sample_windows()[0][0]]), 1, "the errored arm runs again")
+        self.assertEqual(view["mechanism_test"]["verdict"], "passed")
 
     def test_a_failure_only_the_raised_bound_made_never_counts_toward_retirement(self):
         self.gate(min_t=0.5, step_t=10000.0)  # the second test's bound is out of reach
@@ -459,7 +604,7 @@ class ResearcherTest(ResearcherCase):
         self.gate()
         self.assertIn("mechanism test has not passed", sweep()["reason"])
         self.assertEqual(self.pool.jobs, [])
-        self.settings["researcher"]["mechanism_test"] = {"mode": "shadow"}
+        self.shadow()
         self.assertNotIn("mechanism test has not passed", str(sweep().get("reason")))
 
     def test_a_one_and_a_half_x_run_takes_the_test_first(self):
@@ -542,13 +687,13 @@ class ResearcherTest(ResearcherCase):
         self.gate()
         self.run_()
         self.assertEqual(self.purposes(), ["mechanism"] * 8 + ["train"], "it traded on the sample: no probe")
-        self.settings["researcher"]["mechanism_test"] = {"mode": "shadow"}
+        self.shadow()
         self.fid = self.born("shadowed", {**CARD, "hypothesis": CARD["hypothesis"] + " Shadowed."})
-        self.edge = -0.05
         self.pool.jobs.clear()
         self.run_()
         self.assertEqual(self.purposes(), ["mechanism"] * 8 + ["probe", "train"],
-                         "a version's mechanism rows are not its Train run: the probe still runs (review of #446)")
+                         "a version's mechanism rows are not its Train run: the probe still runs (review of #446), and in "
+                         "shadow it runs after a pass too (whether it runs would tell the verdict)")
 
     def test_a_family_born_before_cards_runs_as_before(self):
         self.fid = self.fam["id"]  # the seed family: no card
@@ -568,6 +713,7 @@ class ResearcherTest(ResearcherCase):
         self.assertIn("YOUR FAMILY CARD", brief)
         self.assertIn("PARAMS['signal_on'] = 0 must turn your signal into that comparison", brief)
         self.assertIn("shadow mode", r.status(fam))
+        self.assertIn("withheld from you", r.status(fam))
         self.gate()
         self.assertIn("Your mechanism test has not passed", self.researcher().status(fam))
 

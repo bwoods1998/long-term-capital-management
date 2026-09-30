@@ -306,11 +306,12 @@ diagnostician.
   economic hypothesis, a mechanism class from a small vocabulary drawn from the graveyard, the inputs it conditions on,
   its holding horizon, its cost hurdle (the architect's estimate of spread and fees as a share of maximum loss; the Gym's
   fills already charge them), the naive comparison it must beat, the PARAMS switch that turns its signal into that
-  comparison (or, for a structure that is not directional, a flat comparison: not trading), and a pre-declared
-  falsification. A proposal without a complete card is not born (`architect.require_card`, on by default); the refusal
-  names each field. Researchers read their card in every brief.
+  comparison (or, for a structure that is not directional and carries no drift, a flat comparison: not trading), and a
+  pre-declared falsification. A proposal without a complete card is not born (`architect.require_card`, on by default);
+  the refusal names each field. Researchers read their card in every brief.
 - **Card-based rebirth refusal.** A proposal whose cell (mechanism class, structure family, holding; with inputs that
-  overlap a carded row's) holds a graveyard row killed by a mechanism verdict (the operator's tests, refuted,
+  overlap a carded row's, its inputs being those it declares and those its own mechanism and hypothesis name) holds a
+  graveyard row killed by a mechanism verdict (the operator's tests, refuted,
   self-refuted, diagnosed, trial-adjusted, drift, stress, a failed mechanism test) is refused, and the row's lesson goes
   back to the architect, unless its rebirth names one of those rows, a mechanism-level change, an input the row did not
   read and checkable evidence (the new input, a run id or a card evidence number), while the row has backed fewer than
@@ -326,10 +327,14 @@ diagnostician.
   deterministic audit). The test passes when the signal's per-entry-day return on maximum loss beats the comparison's by
   t of at least 0.75, a bound that rises by 0.25 for each failed test of the same hypothesis across its lineage (forks and
   rebirths never reset it). Every arm is a trial of the lineage; the verdict is recorded on the card. It ships in shadow
-  mode (`researcher.mechanism_test.mode`): the verdict is recorded and told to the researcher, and the broad run goes
-  ahead, so the verdict can be checked against Train outcomes before it may stop anything. In gate mode broad replay (at
-  any stress) and sweeps wait for a pass by the hypothesis, and three failures below the base bound retire the family
-  with the MECHANISM verdict, which the rebirth refusal then reads. A pass holds for the whole lineage on any later Gym.
+  mode (`researcher.mechanism_test.mode`): a quarter of carded families (`sample`, by a hash of the family id) take one
+  blind test each; the verdict is recorded and never shown to the researcher, and the broad run goes ahead, so the
+  verdict can be checked against Train outcomes before it may stop anything. Any gate adds missed signals against no
+  test, so switching one on is an exception to the rule that thresholds change only when fixed benchmarks show missed
+  signals fall, and only the owner grants it. In gate mode broad replay (at any stress) and sweeps wait for a pass by
+  the hypothesis, and a test failed below the base bound retires the family with the MECHANISM verdict once its card
+  holds three such failures (no other verdict retires it), which the rebirth refusal then reads. A pass holds for the
+  whole lineage on any later Gym.
 - **The validation line** (a family's best program): at least 50 trades on at least 25 distinct
   days in Validation; mean P&L per dollar of maximum loss above zero after fees with a one-sided t of
   at least 2; a deflated Sharpe probability of at least 0.95 on the traded-day Sharpe, against the

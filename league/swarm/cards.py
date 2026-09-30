@@ -18,7 +18,8 @@ card, naming each missing or invalid field):
   by default, the contract's convention). The mechanism test (league/swarm/mechanism.py) runs the program both ways. A
   card whose structure is not directional (`STRUCTURE_FAMILIES`) may declare `{"flat": true}` instead: the structure
   itself is the edge (unconditional premium selling, say), so the comparison is not trading; a directional structure
-  never may (its comparison is its conditioning, or a drift-long exposure would pass);
+  never may (its comparison is its conditioning, or a drift-long exposure would pass), and neither may a credit vertical
+  (`FLAT_REFUSED`: a bull put spread is a directional bet that a one-sample test against zero passes on upward drift);
 - `falsification`: a concrete, pre-declared result that kills it;
 - `rebirth` (only when the card falls in a refuted cell, below): the graveyard `row` it re-enters, what is `different`,
   and the new `evidence` that justifies it.
@@ -38,12 +39,14 @@ refusal and of a budget is (class, structure family, holding).
 CARD-BASED REBIRTH REFUSAL (`RebirthIndex`). A proposal whose cell matches a graveyard row killed by a MECHANISM VERDICT
 (`MECHANISM_VERDICTS`: the operator's pre-registered tests, refuted, self-refuted, diagnosed, trial-adjusted, drift,
 stress, and a failed mechanism test) is refused unless its `rebirth` makes a valid case, and the refusal quotes the row's
-lesson, which the architect reads in its next request. MATCHING: a carded row matches on class, structure family and
-holding when the input sets overlap (an unused input added to a dead card never escapes it); a row from before cards has
-no declared key, so `infer_key` reads one from its mechanism text, structure and days to expiry (a deterministic keyword
-reading, deliberately coarse) and it matches on class, structure family and holding alone. The proposal's own mechanism
-text is read the same way (`infer_key`): when it reads as another class than the one declared, the rows of that class's
-cell match too (a refuted idea relabeled into an open class never escapes). A VALID REBIRTH names one of the matched rows
+lesson, which the architect reads in its next request. MATCHING (`match_keys`): a carded row matches on class, structure
+family and holding when the input sets overlap (an unused input added to a dead card never escapes it). The proposal's
+inputs for matching are its declared inputs AND those its own mechanism text and hypothesis name (`match_inputs`, the
+`infer_inputs` reading), so declaring inputs that avoid a dead card's while the text reads the same ones never escapes
+it either. A row from before cards has no declared key, so `infer_key` reads one from its mechanism text, structure and
+days to expiry (a deterministic keyword reading, deliberately coarse) and it matches on class, structure family and
+holding alone. The proposal's own mechanism text is read the same way (`infer_key`): when it reads as another class than
+the one declared, the rows of that class's cell match too (a refuted idea relabeled into an open class never escapes). A VALID REBIRTH names one of the matched rows
 (`row`), says what is different (`different`: words beyond the dead row's own mechanism, a new root, structure or horizon
 never counting) and adds at least one input the dead row did not read (its card's inputs, or `infer_inputs` of its text):
 new words alone are never a new idea. Its `evidence` cites something checkable: a new input by name, a run id or a
@@ -113,6 +116,9 @@ STRUCTURE_FAMILIES: dict[str, str] = {
     "long_butterfly": "butterfly",
     "calendar": "time_spread", "diagonal": "time_spread",
 }
+#: Structures that may not declare a flat comparison although their family is not directional: a credit vertical sells
+#: premium on one side only, so it carries the market's drift, and a one-sample test against zero would pass on it.
+FLAT_REFUSED = frozenset({"credit_vertical"})
 #: The graveyard tags that record a finding about the mechanism (architect.tag_of). Not IDLE (untested), THIN (activity),
 #: EXHAUSTED (it reached a score), UNRESOLVED (an experiment failure), STALL (the tournament's clock) or OPERATOR-RETIRED
 #: (housekeeping).
@@ -179,7 +185,7 @@ def _sized(card: dict[str, Any], errors: list[str], raw: Mapping[str, Any], name
 
 def validate(raw: Any, structure: Any = None) -> tuple[dict[str, Any] | None, list[str]]:
     """(the canonical card, []) or (None, every problem named). The card's fields are the module docstring's; `ablation`
-    defaults to `DEFAULT_ABLATION` (a flat one, `{"flat": true}`, only for a `structure` that is not directional), and
+    defaults to `DEFAULT_ABLATION` (a flat one, `{"flat": true}`, only for a `structure` `flat_allowed` admits), and
     `rebirth` is kept only when given (its rows are checked by `RebirthIndex`)."""
     if not isinstance(raw, Mapping):
         return None, ["card: missing (every family needs one: hypothesis, mechanism_class, inputs, holding, cost, comparison, "
@@ -228,10 +234,10 @@ def validate(raw: Any, structure: Any = None) -> tuple[dict[str, Any] | None, li
     if ablation is None:
         card["ablation"] = dict(DEFAULT_ABLATION)
     elif ablation == "flat" or (isinstance(ablation, Mapping) and ablation.get("flat") is True):
-        if structure is not None and structure_family(structure) == "directional":
-            errors.append(f"ablation: a flat comparison is only for a structure that is not directional ({structure} is): its "
-                          "comparison is the same structure without the signal's condition (default {\"param\": \"signal_on\", "
-                          "\"off\": 0})")
+        if structure is not None and not flat_allowed(structure):
+            errors.append(f"ablation: a flat comparison is only for a structure that is not directional ({structure} is "
+                          "directional or carries the market's drift): its comparison is the same structure without the signal's condition "
+                          "(default {\"param\": \"signal_on\", \"off\": 0})")
         else:
             card["ablation"] = {"flat": True}
     else:
@@ -274,6 +280,11 @@ def card_sha(card: Mapping[str, Any]) -> str:
 
 def structure_family(structure: Any) -> str:
     return STRUCTURE_FAMILIES.get(str(structure), str(structure))
+
+
+def flat_allowed(structure: Any) -> bool:
+    """May a card on this structure declare a flat comparison: not a directional structure, nor one in `FLAT_REFUSED`."""
+    return structure_family(structure) != "directional" and str(structure) not in FLAT_REFUSED
 
 
 def key_of(card: Mapping[str, Any], structure: Any) -> dict[str, Any]:
@@ -453,6 +464,25 @@ def infer_key(mechanism: Any, structure: Any, dte: Any = None) -> dict[str, Any]
     return {"class": cls, "inputs": None, "family": structure_family(structure), "holding": holding}
 
 
+def match_inputs(card: Mapping[str, Any], mechanism: Any = "") -> list[str]:
+    """The inputs a proposal is matched on: its declared inputs and those its own mechanism text and hypothesis name
+    (`infer_inputs`). Declared inputs are never checked against the program, so the words the proposal writes count too:
+    declaring inputs that avoid a dead card's while the text reads the same information never escapes it."""
+    text = f"{mechanism or ''} {card.get('hypothesis') or ''}"
+    return sorted(set(card.get("inputs") or []) | set(infer_inputs(text)))
+
+
+def match_keys(card: Mapping[str, Any], structure: Any, mechanism: Any = "", dte: Any = None) -> tuple[list[dict[str, Any]], str | None]:
+    """The keys a card is matched on (the rebirth refusal's and the mechanism test's notion of the same hypothesis): its
+    declared cell, and the cell of the class its own mechanism text reads as (`infer_key`) when that is another class, each
+    with `match_inputs`. (keys, that other class or None)."""
+    key = {**key_of(card, structure), "inputs": match_inputs(card, mechanism)}
+    text = infer_key(mechanism, structure, dte) if mechanism else None
+    if text is not None and text["class"] != key["class"]:
+        return [key, {**key, "class": text["class"]}], text["class"]
+    return [key], None
+
+
 def matches(new: Mapping[str, Any], dead: Mapping[str, Any]) -> bool:
     """Does a proposal's cell `new` fall in a dead row's cell `dead`: the same class, structure family and holding, and (a
     carded row, when the proposal's inputs are known) inputs that overlap the dead card's. A legacy row (`inputs` None)
@@ -604,17 +634,15 @@ class RebirthIndex:
 
     def matched(self, card: Mapping[str, Any], structure: Any, mechanism: Any = "", dte: Any = None) -> tuple[list[dict[str, Any]], str | None]:
         """(the matched rows, oldest first; the class the proposal's own text reads as when that adds rows): the rows in its
-        declared cell, and the rows of the cell its mechanism text reads as (`infer_key`'s class, with its declared
-        inputs, structure family and holding) when that is another class."""
-        key = key_of(card, structure)
-        hit = [r for r in self.rows if matches(key, r["key"])]
-        text = infer_key(mechanism, structure, dte) if mechanism else None
+        declared cell, and the rows of the cell its mechanism text reads as (`infer_key`'s class, with its structure family
+        and holding) when that is another class; inputs are `match_inputs` (declared, and named by its own words)."""
+        keys, other = match_keys(card, structure, mechanism, dte)
+        hit = [r for r in self.rows if matches(keys[0], r["key"])]
         text_class = None
-        if text is not None and text["class"] != key["class"]:
-            other = {**key, "class": text["class"]}
-            extra = [r for r in self.rows if matches(other, r["key"]) and r not in hit]
+        if other is not None:
+            extra = [r for r in self.rows if matches(keys[1], r["key"]) and r not in hit]
             if extra:
-                text_class = text["class"]
+                text_class = other
                 hit = sorted(hit + extra, key=lambda r: (r["at"], r["row"]))
         return hit, text_class
 
@@ -719,6 +747,7 @@ class RebirthIndex:
         return out
 
 
-__all__ = ["MECHANISM_CLASSES", "INPUTS", "HOLDING", "STRUCTURE_FAMILIES", "MECHANISM_VERDICTS", "DEFAULT_ABLATION", "validate",
-           "canonical", "card_sha", "structure_family", "key_of", "key_text", "ensure", "put", "card_of", "add_evidence",
-           "evidence", "vocabulary_text", "brief_text", "infer_key", "infer_inputs", "matches", "cell_of", "RebirthIndex"]
+__all__ = ["MECHANISM_CLASSES", "INPUTS", "HOLDING", "STRUCTURE_FAMILIES", "FLAT_REFUSED", "MECHANISM_VERDICTS", "DEFAULT_ABLATION",
+           "validate", "canonical", "card_sha", "structure_family", "flat_allowed", "key_of", "key_text", "ensure", "put",
+           "card_of", "add_evidence", "evidence", "vocabulary_text", "brief_text", "infer_key", "infer_inputs", "match_inputs",
+           "match_keys", "matches", "cell_of", "RebirthIndex"]

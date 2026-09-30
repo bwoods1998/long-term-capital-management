@@ -190,7 +190,11 @@ class Rebirth(Case):
         self.assertIn("Mechanism verdict MECHANISM", refused["lesson"])
         self.assertFalse(index.check({**card, "inputs": ["clock", "share_volume", "underlying_price"]}, "debit_vertical")["ok"],
                          "an unused input added to the dead card's never escapes its cell")
-        self.assertTrue(index.check({**card, "inputs": ["iv_skew"]}, "debit_vertical")["ok"], "disjoint inputs: another cell")
+        skew = {**card, "inputs": ["iv_skew"], "hypothesis": "Put skew overprices crash protection after calm weeks, so the wing "
+                                                              "seller is paid for bearing it through the next sessions."}
+        self.assertTrue(index.check(skew, "debit_vertical")["ok"], "disjoint inputs, and words that read no other: another cell")
+        self.assertFalse(index.check({**card, "inputs": ["iv_skew"]}, "debit_vertical")["ok"],
+                         "declared iv_skew, but its hypothesis reads the close and liquidity: the dead card's information")
         self.assertTrue(index.check(card, "iron_condor")["ok"], "another structure family is another cell")
         wider = {**card, "inputs": ["clock", "option_liquidity", "underlying_price"]}
         restated = {**wider, "rebirth": {"row": dead, "different": "the same late day selling and rebound now on QQQ calls "
@@ -229,6 +233,19 @@ class Rebirth(Case):
                                             mechanism="Dealer inventory imbalance after late selling predicts rebounds a week on.")])
         self.assertEqual(later, ["reborn-late"], "the budget is a rolling window")
 
+    def test_declared_inputs_that_avoid_a_dead_card_never_escape_it(self):
+        """Review of #446 (probe C): the same rebound text declared as reading only realized volatility."""
+        card, _ = cards.validate(CARD)
+        dead = self.bury("rebound-old", card, reason=mechanism.MECHANISM_CAUSE.format(n=3))
+        index = cards.RebirthIndex(self.store, self.settings)
+        same_idea = {**card, "inputs": ["realized_vol"]}
+        self.assertEqual(cards.match_inputs(same_idea, MECH), ["option_liquidity", "realized_vol", "underlying_price"])
+        refused = index.check(same_idea, "debit_vertical", MECH, [0, 5])
+        self.assertFalse(refused["ok"])
+        self.assertEqual(refused["row"], dead)
+        relabeled = {**same_idea, "mechanism_class": "calendar_flow"}
+        self.assertFalse(index.check(relabeled, "debit_vertical", MECH, [0, 5])["ok"], "in the text-class check too")
+
     def test_a_relabeled_class_is_read_by_its_own_text(self):
         card, _ = cards.validate(CARD)
         dead = self.bury("rebound-old", card, reason=mechanism.MECHANISM_CAUSE.format(n=3))
@@ -258,6 +275,10 @@ class FlatComparison(unittest.TestCase):
         self.assertIsNone(cards.validate(flat, "debit_vertical")[0])
         self.assertIn("only for a structure that is not directional", cards.validate(flat, "long_call")[1][0])
         self.assertIn("Comparison mode: flat", cards.brief_text({"card": card}))
+        refused = cards.validate(flat, "credit_vertical")
+        self.assertIsNone(refused[0], "review of #446: a credit vertical carries the market's drift")
+        self.assertIn("carries the market's drift", refused[1][0])
+        self.assertEqual(cards.validate(flat, "iron_butterfly")[1], [])
 
 
 class TheArchitect(Case):
