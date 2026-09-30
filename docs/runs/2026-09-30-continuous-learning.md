@@ -224,6 +224,55 @@ Its readiness certificate covers immutable checkpoints and the fixed historical 
 windows only. It excludes any retained forward files. Legacy forward auto-adoption remains a
 separate protocol limitation, explicitly documented without retroactive certification. No bars
 are invented, no sealed image is changed, and complete historical grids still lack publication
-receipts for strategy volume. Hosted CI remains required for this repair. No provider collection,
+receipts for strategy volume. PR #433 passed gateway and complete Python 3.11/3.14 checks on
+`a386c09f`, merged at 07:28:50 UTC as `6aa557d7`, and passed those checks on the merged commit.
+No provider collection,
 deployment, trade, allocation, capital or service-budget change was made during this follow-up.
 The production-profitability goal remains unmet.
+
+## Scheduler population scans and isolated local practice
+
+PR #434 shares one lazy agenda read within each scheduler population scan, leaving per-family
+notebooks/practice context and transactional hold creation fresh. An independent protocol was
+frozen before implementation and produced 160 declared case observations across five alternating
+repetitions. In twelve scans of 7, 23, 61 and 127 held families, total SQL statements fell by
+40–49%, with unchanged semantic controls. The original one-family judge remained at 5/5 quality,
+zero idle turns and 264 statements on both trees: its efficiency-improvement condition was
+unsatisfied. This separate study supports an engineering change, not admission or retained
+improvement under the registered harness protocol. The unchanged 124-test regression bundle
+passed on both trees and the integration tree. Full hosted checks passed; the PR merged at
+07:47:49 UTC as `c8313dbc`, which also passed those checks. Nothing was deployed.
+
+The [finite local practice runner](../local-practice.md) is frozen at `b91f1d5d`. It takes only
+explicit replay or synthetic snapshots, constructs neither brokerage account nor House, and
+executes strategy code in a mandatory isolated child without the input, output, host credentials
+or external network. Both code and input provenance are bound to private output. It makes no
+eligibility claim and has no researcher-feedback or promotion bridge. Its finite replay and
+restart checks do not establish continuous fresh-market learning.
+
+The first independent CLI study used inputs frozen before execution and ran eleven invocations
+against `fc889326`. It matched three prespecified invented price-path outcomes, modeled fees,
+missing-quote coverage, timestamp refusals and restart totals. Thirteen of fourteen checks
+passed. Identical cached reuse failed after read-only ledger inspection because SQLite sidecars
+were included in artifact hashes. This failure remains retained. The corrected implementation
+checkpoints and finalizes its private databases before hashing; changed committed WAL contents
+still cause refusal. A separate exact-pattern scratch recovery fix covers interrupted shadow
+writes only in marked incomplete attempts.
+
+All fourteen checks passed in the subsequent exposed-case regression against `b91f1d5d`, with
+the original inputs and assertions unchanged. It again terminated after five saved frames and
+rebuilt one completed simulation without duplicated trades. Independent review verified both
+durability fixes, busy-checkpoint refusal and preservation of committed data. The initial focused
+integration suite passed 49 tests; the updated runner tests and new checkpoint regression passed.
+Hosted checks are still required for this runner. Private evidence is retained in
+`Work/ltcm-goal-ops/practice-runner-evidence` at `f988286`; first and corrected receipt SHA256s are
+`3594b022cf0686f4470669e04df7133887bdae1e7635b08b7d499e1f315fe0cd` and
+`6b2f8640a125ba2a1895fbe38b3fae5be997946ccda2729058dac6be138adda0`. These invented outcomes
+are mechanical tests, never brokerage profit or evidence of an economic edge.
+
+The latest read-only swarm snapshot at 07:38:42 UTC still shows the restoration-only release,
+83 living families, 48 running researchers, two failed holdout looks, zero passes and no
+qualified forward rows. The old historical completion controller reported a restarted backfill
+and was waiting for it. A fresh brokerage read at
+07:56:52 UTC reports an active account, no open orders and no options positions. The goal remains
+unmet; merged code and synthetic checks do not establish deployed behavior or profitability.
