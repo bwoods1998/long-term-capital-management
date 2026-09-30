@@ -193,11 +193,64 @@ class Preflight(unittest.TestCase):
             self.assertEqual(out["status"], "inconclusive", (body, out))
             self.assertIn("market", out["why"])
         self.assertTrue(market_dependent("line 5: KeyError: 450.0"))
-        self.assertTrue(market_dependent("line 5: ValueError: min() arg is an empty sequence"))  # Python 3.11's wording
         self.assertTrue(market_dependent("line 5: KeyError: np.float64(450.0)"))
+        # Each runtime's own words: the House's Python 3.11 with numpy 2.4.4, and 3.14 with numpy 2.5.3.
+        for message in ("min() arg is an empty sequence", "min() iterable argument is empty",
+                        "math domain error", "expected a positive input, got 0.0", "expected a nonnegative input, got -1.0",
+                        "expected a number in range from -1 up to 1, got 2.0", "expected a finite input, got inf",
+                        "expected argument value > -1, got -1.0", "2 is not in list", "list.index(x): x not in list",
+                        "can only convert an array of size 1 to a Python scalar", "array of sample points is empty",
+                        "zero-size array to reduction operation minimum which has no identity",
+                        "The truth value of an empty array is ambiguous. Use `array.size > 0` to check that an array is not "
+                        "empty.", "attempt to get argmin of an empty sequence", "not enough values to unpack (expected 2, got 0)"):
+            self.assertTrue(market_dependent(f"line 5: ValueError: {message}"), message)
+        for message in ("expected non-empty vector for x", "only 0-dimensional arrays can be converted to Python scalars",
+                        "only length-1 arrays can be converted to Python scalars"):
+            self.assertTrue(market_dependent(f"line 5: TypeError: {message}"), message)
+        self.assertTrue(market_dependent("line 5: LinAlgError: SVD did not converge in Linear Least Squares"))
         self.assertFalse(market_dependent("line 5: KeyError: 'window'"))
-        self.assertFalse(market_dependent("line 5: ValueError: The truth value of an array with more than one element is "
-                                          "ambiguous. Use a.any() or a.all()"))
+        for message in ("ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or "
+                        "a.all()", "ValueError: could not convert string to float: 'SPY'",
+                        "TypeError: 'UnderlyingView' object is not subscriptable",
+                        "TypeError: expected x and y to have same length", "ValueError: fp and xp are not of the same length.",
+                        "TypeError: unsupported operand type(s) for -: 'list' and 'float'"):
+            self.assertFalse(market_dependent(f"line 5: {message}"), message)
+
+    def test_an_empty_selection_never_refuses_on_this_runtime(self):
+        # Raised here, on the Python and numpy these tests run on (CI: 3.11 with numpy 2.4.4, the House's; 3.14 with
+        # numpy 2.5.3), and read as the Gym's Runner reports them: whatever each runtime says, an empty selection, or
+        # one turned into a single number, is the market's doing; the misuses are not.
+        import warnings
+
+        from league.swarm.preflight import market_dependent
+
+        empty, two = numpy.zeros(0), numpy.array([1.0, 2.0])
+        spared = {"min()": lambda: min(empty), "max() of a list": lambda: max([]), "np.min": lambda: numpy.min(empty),
+                  "argmax": lambda: numpy.argmax(empty), "np.interp": lambda: numpy.interp(0.3, empty, empty),
+                  "np.polyfit": lambda: numpy.polyfit(empty, empty, 2), "item()": lambda: empty.item(),
+                  "item() of two": lambda: two.item(), "float()": lambda: float(empty),
+                  "float(np.squeeze())": lambda: float(numpy.squeeze(empty)), "int()": lambda: int(empty),
+                  "truth value": lambda: bool(empty), "[0]": lambda: empty[0], "np.percentile": lambda: numpy.percentile(empty, 50),
+                  "np.average": lambda: numpy.average(empty, weights=empty), "unpack": lambda: exec("a, b = e", {"e": empty}),
+                  "math.log(0)": lambda: math.log(0.0), "math.sqrt(-1)": lambda: math.sqrt(-1.0),
+                  "math.acos(2)": lambda: math.acos(2.0), "int(nan)": lambda: int(float("nan")),
+                  "reshape": lambda: empty.reshape(2), "np.stack": lambda: numpy.stack([]),
+                  "list.index": lambda: [1.0].index(2.0), "next()": lambda: next(iter(empty)),
+                  "1/0": lambda: 1 / 0, "np.linalg": lambda: numpy.linalg.inv(numpy.zeros((2, 2)))}
+        misuse = {"a list as a mapping": lambda: [].items(), "two as one boolean": lambda: bool(two),
+                  "a string as a number": lambda: float("SPY"), "a dict as an object": lambda: {}.price,
+                  "arrays of two lengths": lambda: numpy.interp(0.3, two, empty)}
+        for table, expected in ((spared, True), (misuse, False)):
+            for what, raise_it in table.items():
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    try:
+                        raise_it()
+                    except Exception as exc:  # noqa: BLE001 - every error is the point
+                        message = f"line 5: {type(exc).__name__}: {str(exc)[:160]}"
+                    else:
+                        self.fail(f"{what} raised nothing on this runtime")
+                self.assertEqual(market_dependent(message), expected, (what, message))
 
     def test_a_listed_strike_looked_up_exactly_is_found(self):
         # Reviewers' false refusals: a spread whose wing is found by exact strike on the listed grid (5-point SPXW, $1
@@ -269,14 +322,106 @@ class Preflight(unittest.TestCase):
         out = self.refused(program("for pid, p in ctx.positions.items():\n    pass\nreturn []"))
         self.assertIn("again on a sparser listing", out["why"])
 
+    LIQUID = {
+        # The verification review's probes: each errs on every call only when its liquidity filter keeps nothing.
+        "a STATE key written when the filter keeps something": (
+            'c = ctx.chain\nliquid = c.is_call & (c.spread <= ctx.params["max_spread"] * c.mid)\n'
+            'if liquid.any():\n    STATE["ref_iv"] = float(np.median(c.iv[liquid]))\nref = STATE["ref_iv"]\nreturn []'),
+        "np.interp over the kept contracts": (
+            'c = ctx.chain\nliquid = c.is_call & (c.spread <= ctx.params["max_spread"] * c.mid)\n'
+            'order = np.argsort(c.delta[liquid])\n'
+            'k30 = float(np.interp(0.30, c.delta[liquid][order], c.strike[liquid][order]))\nreturn []'),
+        "np.polyfit over the kept contracts": (
+            'c = ctx.chain\nliquid = ~c.is_call & (c.spread <= ctx.params["max_spread"] * c.mid)\n'
+            'fit = np.polyfit(c.strike[liquid] / c.spot - 1.0, c.iv[liquid], 2)\nreturn []'),
+        "item() of the kept contract": (
+            'c = ctx.chain\nliquid = c.is_call & (c.dte == c.dte.min()) & (c.spread <= ctx.params["max_spread"] * c.mid)\n'
+            'atm = liquid & (np.abs(c.strike - c.spot) <= 0.5)\npx = c.mid[atm].item()\nreturn []'),
+        "float(np.squeeze()) of the kept contract": (
+            'c = ctx.chain\nliquid = c.is_call & (c.dte == c.dte.min()) & (c.spread <= ctx.params["max_spread"] * c.mid)\n'
+            'atm = liquid & (np.abs(c.strike - c.spot) <= 0.5)\npx = float(np.squeeze(c.mid[atm]))\nreturn []'),
+        "a local set when the filter keeps something": (
+            'c = ctx.chain\nliquid = c.is_call & (c.spread <= ctx.params["max_spread"] * c.mid)\n'
+            'if liquid.any():\n    best = float(np.max(c.mid[liquid]))\nx = best * 2\nreturn []'),
+    }
+
+    def test_a_liquidity_filter_never_refuses(self):
+        # The review's false refusals: at a half-spread of 3% of every mid, a filter at 4% kept nothing, the program
+        # then erred on every call, and the sparser listing (the same quotes) "confirmed" it. The Gym runs these clean.
+        head = ('import numpy as np\nNEEDS = {"roots": ["SPY"], "dte": [0, 7], "band": 0.05, "cadence": 5, "history": 10}\n'
+                'PARAMS = {"max_spread": 0.04}\nSTATE = {}\n')
+        for what, body in self.LIQUID.items():
+            out = self.check(program(body, head=head), {"max_spread": 0.04})
+            self.assertEqual(out["status"], "passed", (what, out))
+            # A filter no quote could meet here keeps nothing on the tightest market either: never a refusal still.
+            for cap in (0.01, 0.002):
+                out = self.check(program(body, head=head), {"max_spread": cap})
+                self.assertNotEqual(out["status"], "refused", (what, cap, out))
+
+    def test_the_quotes_are_tight_near_the_money_and_never_under_a_tick(self):
+        # Near the money no wider than the Gym's own synthetic store (3% of the mid), so a 4% liquidity filter keeps calls
+        # there on every root at every minute; wider away from it; on the venue's tick grid, at least one tick wide.
+        from league.gym import venue
+        from league.swarm.preflight import Market
+
+        for root in ("SPY", "QQQ", "IWM", "SPXW", "GLD", "TSLA", "NVDA", "MARA", "XYZ"):
+            needs = {"roots": [root], "dte": [0, 7], "band": 0.5, "cadence": 5, "history": 5, "start": 571, "end": 958}
+            widths = {}
+            for regime in ("listed", "tight", "wide"):
+                market, near, far = Market([root], needs, regime=regime), [], []
+                for s in (0, 1):
+                    for mi in (5, 120, 380):
+                        snap = market.snapshot(root, s, mi)
+                        c = snap.view(snap.slice_index(0, 7, 0.5))
+                        # The venue's tick at each premium (away from $3, where it changes and the model's mid decides).
+                        clear = numpy.abs(c.mid - 3.0) > 0.15
+                        tick = numpy.array([venue.leg_tick(root, float(m)) for m in c.mid])[clear]
+                        spread, bid = c.spread[clear], c.bid[clear]
+                        self.assertTrue((spread >= tick - 1e-9).all(), (root, regime))
+                        self.assertTrue(numpy.allclose(numpy.round(bid / tick) * tick, bid), (root, regime))
+                        if regime == "tight":
+                            self.assertTrue(numpy.allclose(spread, tick), (root, "one tick"))
+                        share, delta = c.spread / c.mid, numpy.abs(c.delta)
+                        near += share[(delta >= 0.4) & (delta <= 0.6)].tolist()
+                        far += share[delta < 0.1].tolist()
+                        if regime == "listed":
+                            kept = c.is_call & (numpy.abs(c.strike / c.spot - 1.0) <= 0.025) & (share <= 0.04)
+                            self.assertGreater(int(kept.sum()), 0, (root, s, mi))
+                widths[regime] = float(numpy.median(near))
+                if regime == "listed":
+                    self.assertLessEqual(widths[regime], 0.03, root)
+                    self.assertGreater(float(numpy.median(far)), widths[regime], root)
+            self.assertLess(widths["tight"], widths["listed"], root)
+            self.assertGreater(widths["wide"], widths["listed"], root)
+
+    def test_a_refusal_must_recur_on_other_numbers(self):
+        # Each errs on every call of the listed market and of the sparser listing (the same numbers), but not on one of
+        # the others: a STATE key written only on one-tick quotes, only at a high vol, only at a low vol.
+        head = ('import numpy as np\nNEEDS = {"roots": ["SPY"], "dte": [0, 7], "band": 0.05, "cadence": 5, "history": 10}\n'
+                'PARAMS = {}\nSTATE = {}\n')
+        atm = ("c = ctx.chain\ni = np.flatnonzero(c.is_call & (c.dte == c.dte.max()))\n"
+               "iv = float(c.iv[i[np.argmin(np.abs(c.strike[i] - c.spot))]])\n")
+        for condition, spared in (("(c.spread <= 0.0101).all()", "one tick wide"), ("iv > 0.28", "one tick wide"),
+                                  ("iv < 0.12", "three times as wide")):
+            out = self.check(program(atm + f'if {condition}:\n    STATE["seen"] = True\nx = STATE["seen"]\nreturn []', head=head))
+            self.assertEqual(out["status"], "inconclusive", (condition, out))
+            self.assertIn(spared, out["why"], condition)
+            self.assertIn("KeyError: 'seen'", out["why"], condition)
+        # A misuse on any market is refused, on every one of them.
+        out = self.refused(program("for pid, p in ctx.positions.items():\n    pass\nreturn []"))
+        for words in ("sparser listing", "one tick wide", "three times as wide"):
+            self.assertIn(words, out["why"])
+
     def test_the_chain_is_the_listing(self):
-        # The listed step, the store's strikes a side of the open's money, the root's expiry weekdays and the store's
-        # reach in days to expiry (14; SPY and QQQ 45); the sparse listing: Fridays and the next wider step.
+        # The listed step, the store's strikes a side of the open's money (40 for SPXW only, as storelib's STRIKE_RANGE),
+        # the root's expiry weekdays and the store's reach in days to expiry (14; SPY and QQQ 45); the sparse listing:
+        # Fridays and the next wider step.
         from league.swarm.preflight import FRIDAY, Market, STORE_DEFAULT_STRIKES, listing
 
-        for root, step, weekdays, reach in (("SPXW", 5.0, {0, 1, 2, 3, 4}, 14), ("SPY", 1.0, {0, 1, 2, 3, 4}, 45),
-                                            ("IWM", 1.0, {0, 2, 4}, 14), ("MARA", 0.5, {4}, 14), ("AMZN", 1.0, {4}, 14),
-                                            ("TSLA", 2.5, {4}, 14), ("SMCI", 2.5, {4}, 14), ("XYZ", 1.0, {4}, 14)):
+        for root, step, weekdays, reach in (("SPXW", 5.0, {0, 1, 2, 3, 4}, 14), ("SPX", 5.0, {4}, 14),
+                                            ("SPY", 1.0, {0, 1, 2, 3, 4}, 45), ("IWM", 1.0, {0, 2, 4}, 14),
+                                            ("MARA", 0.5, {4}, 14), ("AMZN", 1.0, {4}, 14), ("TSLA", 2.5, {4}, 14),
+                                            ("SMCI", 2.5, {4}, 14), ("XYZ", 1.0, {4}, 14)):
             self.assertEqual(listing(root)[1:], (step, tuple(sorted(weekdays))), root)
             needs = {"roots": [root], "dte": [0, 60], "band": 0.5, "cadence": 5, "history": 5, "start": 571, "end": 958}
             market = Market([root], needs)
@@ -287,14 +432,18 @@ class Preflight(unittest.TestCase):
                     self.assertIn((weekday + d) % 7, weekdays if d <= 14 else {4}, (root, weekday, d))
                 ks = numpy.unique(snap.strike[snap.dte == snap.dte.min()])
                 self.assertTrue(numpy.allclose(numpy.diff(ks), step), root)
-                self.assertEqual(ks.size, 2 * (40 if root == "SPXW" else STORE_DEFAULT_STRIKES) + 1, root)
-                self.assertLessEqual(abs(float(numpy.median(ks)) - snap.spot), step, root)
+                # The strikes a side of the open's money (a grid that would pass zero stops above it).
+                side = 40 if root == "SPXW" else STORE_DEFAULT_STRIKES
+                atm = int(numpy.argmin(numpy.abs(ks - snap.spot)))
+                self.assertLessEqual(abs(float(ks[atm]) - snap.spot), step, root)
+                self.assertEqual(ks.size - 1 - atm, side, root)
+                self.assertTrue(atm == side or (atm < side and ks[0] <= step + 1e-9), (root, atm))
             thin = Market([root], needs, sparse=True)
             sparse = thin.snapshot(root, 0, 0)
             self.assertEqual({(thin.weekdays[0] + d) % 7 for d in numpy.unique(sparse.dte).tolist()}, set(FRIDAY), root)
             wider = numpy.diff(numpy.unique(sparse.strike[sparse.dte == sparse.dte.min()]))
-            self.assertTrue(numpy.allclose(wider, step if root in ("SPXW", "SPY", "IWM") else {0.5: 1.0, 1.0: 2.5, 2.5: 5.0}[step]),
-                            root)
+            fixed = root in ("SPXW", "SPX", "SPY", "IWM")
+            self.assertTrue(numpy.allclose(wider, step if fixed else {0.5: 1.0, 1.0: 2.5, 2.5: 5.0}[step]), root)
 
     def test_the_sessions_fall_on_days_the_roots_list(self):
         # Midweek when every weekday lists (SPY); a Friday-only root 10-20 days out lists on Monday (11), Tuesday (10) and

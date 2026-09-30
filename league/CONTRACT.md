@@ -78,11 +78,13 @@ rejections and signal frequency separately.
 
 Then a runtime preflight runs the program in a sandbox on up to three made-up sessions (synthetic quotes
 on your NEEDS, a flat account, the Gym's decision minutes). If it does not load, or `decide` raises the
-same misuse of the API on 25 calls in a row across two sessions before returning any intent, the run is
-refused with the exception, its line and the ctx API to use instead: no version, job or trial, and a
-note in your notebook. It checks only that the code runs; passing it says nothing about a run. The Gym
-itself is stricter: 25 errors in total over a run disqualify it, consecutive or not, so guard every
-lookup that can come back empty or None.
+same misuse of the API on 25 calls in a row across two sessions before returning any intent, and again
+at the same line on made-up markets with other numbers (a thinner chain; one-tick and wide quotes; other
+vols and prices), the run is refused with the exception, its line and the ctx API to use instead: no
+version, job or trial, and a note in your notebook. An error the market's numbers could cause (an empty
+selection, a division by zero, a None) is never refused there. It checks only that the code runs;
+passing it says nothing about a run. The Gym itself is stricter: 25 errors in total over a run
+disqualify it, consecutive or not, so guard every lookup that can come back empty or None.
 
 Gate readers receive the actual runtime source fingerprint, state-initialization excerpts and
 available context fields. A rejection must locate the submitted code, name the relevant contract
