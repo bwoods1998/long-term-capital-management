@@ -113,6 +113,12 @@ class Preflight(unittest.TestCase):
         out = self.check(program("t = 0\nfor i in range(10 ** 8):\n    t += i\nreturn []"), timeout=0.05)
         self.assertEqual(out["status"], "inconclusive", out)
 
+    def test_a_numpy_api_error_is_inconclusive(self):
+        # The House's numpy is not the Gym boxes' (requirements-gym.txt): an API one has and the other lacks says nothing.
+        code = "import numpy as np\n" + program("x = np.not_in_this_numpy(1.0)\nreturn []")
+        out = self.check(code)
+        self.assertEqual(out["status"], "inconclusive", out)
+
     def test_roots_outside_the_run_are_not_decided_on(self):
         out = self.check(program('u = ctx.under.get("price")\nreturn []'), roots=["QQQ"])
         self.assertEqual(out["status"], "passed")

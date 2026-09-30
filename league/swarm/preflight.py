@@ -18,7 +18,8 @@ half, and it runs nowhere near the Gym:
   nothing here reads recorded data, so it is no trial and says nothing about profit.
 - **When it refuses.** Only when the Gym would refuse or disqualify the same program on the same kind of input:
   1. `load` refuses it (the Gym's worker would refuse it identically), except a load that ran out of time or memory
-     (this box is not a Gym box: that says nothing);
+     (this box is not a Gym box: that says nothing) or an error in numpy's API (`environmental`: the House's numpy
+     and Python are not the Gym boxes');
   2. decide raised on `STREAK` (25, the Gym's `DEFAULT_MAX_ERRORS`) consecutive calls spanning at least two sessions,
      BEFORE the program returned any intent. Until its first intent a Gym account is flat too, and an erring call
      returns no intent, so the Gym's account would stay exactly as flat as this one while the program erred: the only
@@ -56,7 +57,7 @@ SESSIONS = 3
 #: numbers are the same either way up to scale).
 CAPITAL = 10_000.0
 #: The preflight's wall-clock budget; past it the program passes (inconclusive).
-DEADLINE_SECONDS = 30.0
+DEADLINE_SECONDS = 20.0
 #: Weekdays of the synthetic sessions (Tuesday, Wednesday, Thursday).
 WEEKDAYS = (1, 2, 3)
 OPEN, CLOSE = 570, 960
@@ -244,6 +245,9 @@ def advice(message: str, *, roots: Sequence[str] = (), params: Mapping[str, Any]
             return (f"ctx.chains, ctx.underlyings and ctx.rules hold only the NEEDS['roots'] with data now "
                     f"({', '.join(roots) or 'none'}); `{key}` is not one of them. Name it in NEEDS['roots'] (the Gym's "
                     f"admitted roots only), or read `ctx.chains.get(root)` and skip a None.")
+        if key in keys:
+            return (f"`{key}` is one of your PARAMS: read it as `ctx.params['{key}']` (or `PARAMS['{key}']`); it is not in "
+                    "STATE (empty at the start of every run), a position row or ctx.rules.")
         if key in LEG_KEYS and key not in POSITION_KEYS:
             return (f"a position row has no `{key}`; its legs do (`p['legs'][i]['{key}']`). A position row's keys: "
                     + ", ".join(POSITION_KEYS) + "; a leg's: " + ", ".join(LEG_KEYS) + ".")
@@ -273,6 +277,32 @@ def advice(message: str, *, roots: Sequence[str] = (), params: Mapping[str, Any]
     return "check the line against the ctx section of league/CONTRACT.md."
 
 
+def environmental(message: str) -> bool:
+    """An error that could be this box's and not the Gym's: the House runs Python 3.11 with numpy 2.4, the Gym's boxes
+    3.12+ with numpy 2.5 (requirements-gym.txt), so a numpy function or keyword one has and the other lacks says nothing
+    about the program. Such an error never refuses."""
+    text = str(message or "")
+    return "module 'numpy" in text or "unexpected keyword argument" in text or "No module named" in text
+
+
+def _declared(code: str, params: Mapping[str, Any] | None) -> dict[str, Any]:
+    """The program's PARAMS keys (its literal declaration with the overrides), for the advice; the overrides alone when
+    the declaration is not a literal."""
+    import ast
+
+    out: dict[str, Any] = {}
+    try:
+        from ..gym.safety import params_declaration
+
+        declared = ast.literal_eval(params_declaration(ast.parse(code)).value)
+        if isinstance(declared, dict):
+            out.update(declared)
+    except Exception:  # noqa: BLE001 - advice only
+        pass
+    out.update(params or {})
+    return out
+
+
 def _located(message: str, code: str) -> tuple[int | None, str]:
     m = re.match(r"line (\d+):", str(message or ""))
     if not m:
@@ -299,12 +329,12 @@ def run(code: str, params: Mapping[str, Any] | None, decider: Any, *, universe: 
         info = decider.load(key, code, dict(params or {}), name)
     except ProgramRefused as exc:
         message = str(exc)
-        if "ran past" in message or "MemoryError" in message:
+        if "ran past" in message or "MemoryError" in message or environmental(message):
             return _answer("inconclusive", f"the load says nothing on this box: {message[:300]}")
         line, source = _located(message, code)
         return _answer("refused", "the program does not load (the Gym's worker would refuse it the same way)", stage="load",
                        error=message[:500], line=line, source=source, calls=0,
-                       hint=advice(message, params=params, source=source))
+                       hint=advice(message, params=_declared(code, params), source=source))
     except DeciderError as exc:
         return _answer("inconclusive", f"the sandbox failed: {str(exc)[:300]}")
     try:
@@ -376,12 +406,15 @@ def _decide_loop(code: str, params: Mapping[str, Any], decider: Any, key: str, n
             messages = seen
             streak.append((s, calls))
             if len(streak) >= STREAK and len({x[0] for x in streak}) >= 2:
+                if environmental(first_message) or any(environmental(m) for m in messages):
+                    return _answer("inconclusive", f"the error may be this box's Python or numpy, not the Gym's: "
+                                                   f"{first_message[:300]}", calls=calls, errors=errors)
                 line, source = _located(first_message, code)
                 return _answer("refused", f"decide raised on every call from call {streak[0][1]} ({len(streak)} calls over "
                                           f"{len({x[0] for x in streak})} synthetic sessions, before any intent)",
                                stage="decide", error=first_message[:500], line=line, source=source, calls=calls,
                                errors=errors, messages=[m[:200] for m in messages[:4]],
-                               hint=advice(first_message, roots=roots, params=params, source=source))
+                               hint=advice(first_message, roots=roots, params=_declared(code, params), source=source))
     return _answer("passed", "no persistent error on the synthetic sessions", calls=calls, errors=errors)
 
 
@@ -421,4 +454,4 @@ class Preflight:
             self._decider.close()
 
 
-__all__ = ["VERSION", "STREAK", "SESSIONS", "Market", "Preflight", "advice", "decision_minutes", "run"]
+__all__ = ["VERSION", "STREAK", "SESSIONS", "Market", "Preflight", "advice", "decision_minutes", "environmental", "run"]

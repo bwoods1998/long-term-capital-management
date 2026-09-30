@@ -1727,7 +1727,7 @@ class Researcher:
             return self._refusal(out, refused)
         # NO DUPLICATE RUNS: the evaluation this run would be, on the roots it would run on.
         key = self.eval_key(code, params, stress=stress, window="train", roots=roots if change else fam["roots"])
-        if not (self.reuse and self._reusable(self.store.evaluated(fam["id"], key), stress=stress)):
+        if self.preflight is not None and not (self.reuse and self._reusable(self.store.evaluated(fam["id"], key), stress=stress)):
             failed = self._preflight(fam, code, [params], roots if change else fam["roots"], out)
             if failed is not None:
                 return failed
