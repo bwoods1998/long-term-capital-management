@@ -24,6 +24,12 @@ SPEC = {"id": "condor-vrp", "mechanism": "Index options price more movement than
         "structure": "iron_condor", "roots": ["SPY"], "dte": [0, 2]}
 
 
+def review_failure(reason):
+    """A scripted review receipt for state-machine tests, not a test of the mock model's judgment."""
+    return {"verdict": "fail", "reasons": [reason], "findings": [{"code_excerpt": "def decide(ctx):",
+            "contract_reference": "calendar", "counterexample": "Synthetic reviewer finding for this gate transition: " + reason}]}
+
+
 class FakeGymPool:
     """submit / wait / run: `answer(job)` makes each result; `fail` names families whose jobs fail."""
 
@@ -509,7 +515,7 @@ class GateTests(RoundCase):
 
     def test_a_failed_review_is_a_refusal_and_costs_no_look(self):
         self.ready()
-        self.replies = [{"text": json.dumps({"verdict": "fail", "reasons": ["counts sessions to known events"]})}]
+        self.replies = [{"text": json.dumps(review_failure("counts sessions to known events"))}]
         Gate(self.store, self.pool, self.router, self.settings).run()
         self.assertEqual(self.store.looks(), [])
         self.assertEqual(self.store.refusals("a")[0]["stage"], "review")
@@ -537,7 +543,7 @@ class GateTests(RoundCase):
     def test_an_audit_that_fails_costs_no_look(self):
         self.ready()
         self.month.value = 100
-        answers = iter([json.dumps({"verdict": "pass"}), json.dumps({"verdict": "fail", "reasons": ["counts sessions to the year"]})])
+        answers = iter([json.dumps({"verdict": "pass"}), json.dumps(review_failure("counts sessions to the year"))])
         self.router.frontier_factory = lambda model: FakeFrontier(model, text=next(answers), asked=self.asked)
         Gate(self.store, self.pool, self.router, self.settings).run()
         self.assertEqual(self.store.looks(), [])
@@ -559,7 +565,7 @@ class GateTests(RoundCase):
 
     def test_a_sail_audit_that_refuses_costs_no_look(self):
         self.ready()
-        self.replies = [{"text": json.dumps({"verdict": "pass"})}, {"text": json.dumps({"verdict": "fail", "reasons": ["a level"]})}]
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}, {"text": json.dumps(review_failure("a level"))}]
         Gate(self.store, self.pool, self.router, self.settings).run()
         self.assertEqual(self.store.looks(), [])
         self.assertEqual(self.store.refusals("a")[0]["stage"], "audit")

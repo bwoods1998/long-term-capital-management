@@ -44,6 +44,9 @@ import secrets
 import time
 from typing import Any, Callable, Mapping
 
+from ..gym.experiment import check_experiment
+from ..gym.review_contract import grounded_answer, review_contract
+from ..gym.safety import CodeRefused
 from . import evidence
 from . import settings as settings_mod
 from .pool import GymJob, PoolError
@@ -54,7 +57,8 @@ REVIEW = """You review option-trading programs before they meet sealed data. A p
 decide(ctx)) that runs in a replay of recorded one-minute option quotes and then, unchanged, on live quotes and real
 money. Refuse it (verdict "fail") for any of:
 - LOOKAHEAD: anything that could know the future inside the replay (it only sees ctx; flag code that tries to reach
-  outside ctx, reads module state written by another run, or infers future data).
+  outside ctx or infers future data). The runtime creates fresh module state per independent run; do not assume
+  cross-run STATE leakage. Permitted causal state within one run can still be misused to reconstruct the calendar.
 - LEAKAGE: recognizing the calendar or a specific period. Refuse ABSOLUTE PRICE-LEVEL CONSTANTS (an underlying or
   strike level, e.g. "SPY above 550", identifies the years), CALENDAR RECONSTRUCTION (counting sessions, weekdays or
   event flags across a run to work out the date or the year), regime switches keyed to values that identify periods,
@@ -62,7 +66,15 @@ money. Refuse it (verdict "fail") for any of:
 - FILL ABUSE: relying on fills the live market will not give (limits far through the mid expected to fill, sizes beyond
   the quoted size, orders sent after the venue's cutoffs, churning cancels).
 - DANGER on real money: naked short exposure, structures that cannot be closed in one order, unbounded order loops.
-Otherwise pass it. Reply with ONE JSON object: {"verdict": "pass" or "fail", "reasons": ["..."], "notes": "..."}."""
+Use the supplied runtime facts, API fields and implementation excerpts as the execution contract. Do not invent
+unavailable APIs. A claim that contradicts that contract needs a concrete route or counterexample. Distinguish a
+verified defect from an unresolved concern; reply unclear when the evidence is insufficient. An inactive strategy
+or a causal STATE dictionary alone is not a violation. A price sampled from ctx is not a hard-coded price constant.
+For EACH failure provide a verbatim code excerpt present in the submitted file, a contract_reference from the supplied
+facts (state, parameters, context, calendar, fills, risk), and a causal counterexample: exact input conditions and the
+bad decision or data flow that follows. Do not claim you executed a test unless its result was supplied.
+Otherwise pass it. Reply with ONE JSON object: {"verdict": "pass" or "fail" or "unclear", "reasons": ["..."],
+"findings": [{"code_excerpt": "...", "contract_reference": "...", "counterexample": "..."}], "notes": "..."}."""
 
 
 def run_sha(version: Mapping[str, Any]) -> str:
@@ -106,17 +118,17 @@ class Gate:
         model: give the review its own model in `claude.role_model` (e.g. {"review": "claude-sonnet-5-5"}). A program
         one model read twice is reported to the owner (`not_the_plans_reviewer`, `same_reader`)."""
         user = (f"Family {fam['id']}: {fam['mechanism']}\nStructure {fam['structure']}, roots {', '.join(fam['roots'])}.\n\n"
+                f"Runtime contract (actual deployed source): {json.dumps(review_contract(), sort_keys=True)}\n\n"
                 f"```python\n{version['code']}\n```\nPARAMS overrides: {json.dumps(version.get('params') or {})}")
+        contract = review_contract()["sha256"][:12]
+        attempt_key = f"review_attempt:{contract}:{fam['id']}:{version['n']}"
         answer = self.router.ask(role="review", system=REVIEW, user=user, family=fam["id"],
-                                 key=f"swarm:{fam['id']}:review:{version['n']}:{self.store.get('review_attempt:' + fam['id'], 0)}",
+                                 key=f"swarm:{contract}:{fam['id']}:review:{version['n']}:{self.store.get(attempt_key, 0)}",
                                  openai_model=self.cfg.get("review_openai_model"), sail_profile=str(self.cfg.get("review_sail_profile",
                                                                                                                    "pro_balanced")),
                                  max_output=int(self.cfg.get("review_max_output_tokens", 6000)), effort="medium", need_usd=0.5,
                                  desk=f"{fam['id']}:review", cap_usd_day=float(self.cfg.get("review_usd_day", 1.0)), claude=True)
-        verdict = (answer.get("json") or {}).get("verdict")
-        return {"verdict": verdict if verdict in ("pass", "fail") else "unclear",
-                "reasons": [str(r)[:300] for r in ((answer.get("json") or {}).get("reasons") or [])][:6],
-                "route": answer.get("route"), "model": answer.get("model"), "cost_usd": answer.get("cost_usd")}
+        return grounded_answer(answer, version["code"])
 
     # ------------------------------------------------------------------ the audit
     def audit(self, fam: Mapping[str, Any], version: Mapping[str, Any], *, attempt: int = 0) -> dict[str, Any]:
@@ -128,16 +140,15 @@ class Gate:
         need = float(self.cfg.get("audit_need_usd", 1.0))
         use_openai = bool(model) and self.router.openai_room() >= need
         user = (f"AUDIT. Family {fam['id']}: {fam['mechanism']}\nStructure {fam['structure']}, roots {', '.join(fam['roots'])}.\n\n"
+                f"Runtime contract (actual deployed source): {json.dumps(review_contract(), sort_keys=True)}\n\n"
                 f"```python\n{version['code']}\n```\nPARAMS overrides: {json.dumps(version.get('params') or {})}")
         answer = self.router.ask(role="audit", system=REVIEW, user=user, family=fam["id"],
-                                 key=f"swarm:{fam['id']}:audit:{version['n']}:{attempt}", openai_model=model if use_openai else None,
+                                 key=f"swarm:{review_contract()['sha256'][:12]}:{fam['id']}:audit:{version['n']}:{attempt}",
+                                 openai_model=model if use_openai else None,
                                  sail_profile=str(self.cfg.get("audit_sail_profile", "k3_balanced")),
                                  max_output=int(self.cfg.get("review_max_output_tokens", 6000)), effort="high", need_usd=need,
                                  desk=f"{fam['id']}:review", cap_usd_day=float(self.cfg.get("review_usd_day", 1.0)), claude=True)
-        verdict = (answer.get("json") or {}).get("verdict")
-        return {"verdict": verdict if verdict in ("pass", "fail") else "unclear",
-                "reasons": [str(r)[:300] for r in ((answer.get("json") or {}).get("reasons") or [])][:6],
-                "route": answer.get("route"), "model": answer.get("model"), "cost_usd": answer.get("cost_usd")}
+        return grounded_answer(answer, version["code"])
 
     def outcome(self, fid: str, sha: str, result: str) -> None:
         """What the gate did with a version (refused, failed, passed, waiting, demoted): the live path runs a Gym-band
@@ -201,6 +212,11 @@ class Gate:
                 continue
             if (state.get("look_inflight") or {}).get("sha") == sha:
                 continue  # its look is in flight
+            try:
+                check_experiment(version["code"], version.get("params") or {})
+            except CodeRefused as exc:
+                self.refuse(fam, n, sha, "experiment contract", [str(exc)], out)
+                continue  # a known invalid variant pays for neither model review nor a holdout look
             screen = drift_verdict(self.store, fam, n, self.settings)
             if screen is not None and not screen["passed"]:  # defense in depth: the tournament validates none of these
                 if screen["known"]:
@@ -214,7 +230,8 @@ class Gate:
                 else:
                     out["waiting"].append(fam["id"])
                 continue
-            review = state.get("review") if (state.get("review") or {}).get("sha") == sha else None
+            cached = state.get("review") or {}
+            review = cached if cached.get("sha") == sha and cached.get("contract_sha") == review_contract()["sha256"] else None
             if review is None:  # the review, once a version (kept, so an audit asked again does not redo it)
                 if not self._review_current(fam["id"], n, image, bundle):
                     continue
@@ -226,8 +243,9 @@ class Gate:
                 self.store.event("swarm.gate", fam["id"], {"action": "review", "version": n, **review,
                                                            "not_the_plans_reviewer": review.get("route") not in ("openai", "claude")})
                 if review["verdict"] == "unclear":
-                    attempts = int(self.store.get("review_attempt:" + fam["id"], 0)) + 1
-                    self.store.put("review_attempt:" + fam["id"], attempts)
+                    attempt_key = f"review_attempt:{review_contract()['sha256'][:12]}:{fam['id']}:{n}"
+                    attempts = int(self.store.get(attempt_key, 0)) + 1
+                    self.store.put(attempt_key, attempts)
                     if attempts < 3:
                         continue
                     review = {**review, "verdict": "fail", "reasons": ["the reviewer could not reach a verdict three times"]}
@@ -237,7 +255,8 @@ class Gate:
             if review["verdict"] == "pass" and "audit" not in review:  # the audit: a second reader, before any look
                 if not self._review_current(fam["id"], n, image, bundle):
                     continue  # the paid review remains evidence; a terminal family starts no new paid stage
-                attempts = int(self.store.get("audit_attempt:" + sha, 0))
+                attempt_key = f"audit_attempt:{review_contract()['sha256'][:12]}:{sha}"
+                attempts = int(self.store.get(attempt_key, 0))
                 try:
                     audit = self.audit(fam, version, attempt=attempts)
                 except Exception as exc:  # noqa: BLE001
@@ -245,7 +264,7 @@ class Gate:
                     continue
                 self.store.event("swarm.gate", fam["id"], {"action": "audit", "version": n, **audit})
                 if audit["verdict"] == "unclear":
-                    self.store.put("audit_attempt:" + sha, attempts + 1)
+                    self.store.put(attempt_key, attempts + 1)
                     if attempts + 1 < 3:
                         continue  # asked again next round, like an unclear review
                     audit = {**audit, "verdict": "fail", "reasons": ["the audit could not reach a verdict three times"]}

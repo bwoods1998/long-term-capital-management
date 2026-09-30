@@ -76,6 +76,13 @@ check is not proof that a parameter affects decisions: verify the intended ablat
 Zero trades alone is not invalid code or evidence of no economic edge; diagnose coverage, order
 rejections and signal frequency separately.
 
+Gate readers receive the actual runtime source fingerprint, state-initialization excerpts and
+available context fields. A rejection must locate the submitted code, name the relevant contract
+rule and describe a causal counterexample. Missing grounding requires another review; it never
+becomes a pass. Neither a model's claim nor a well-formed receipt substitutes for an executable
+test of a disputed runtime fact. Review approval is bound to that runtime contract. Historical
+trial counts and holdout looks survive runtime upgrades; an upgrade grants no extra looks.
+
 ## ctx
 
 Time: `ctx.minute` (minutes since midnight ET; 570 = 09:30), `ctx.open_minute`, `ctx.close_minute`
