@@ -670,7 +670,15 @@ export function createGate({ store, env = {}, now = Date.now }) {
       const at = now();
       if (!library.HOSTS.includes(host)) return { go: false, refused: 'host' };
       const row = this.libraryRow(at);
-      if (row.inflight) return { go: false, wait_ms: Math.max(250, Math.min(1000, Number(row.inflight.expires) - at)) };
+      if (row.inflight) {
+        // A waiter asks again no sooner than its own host's spacing allows a start (at most POLL_MS ahead), and each
+        // second only while a turn could come sooner, so a lease on its own host costs about one ask in three seconds,
+        // not three, of the object every order reserve also goes through (review of #447). A fixed POLL_MS for every
+        // waiter slept past most releases (a fetch takes about a second) and made queued reads miss their budget.
+        const spacing = (Number(row.last[host]) || 0) + library.SPACING_MS[host] - at;
+        const wait = spacing > 1000 ? Math.min(library.POLL_MS, spacing) : 1000;
+        return { go: false, wait_ms: Math.max(250, Math.min(wait, Number(row.inflight.expires) - at)) };
+      }
       if (row.backoff_until > at) return { go: false, wait_ms: row.backoff_until - at, backoff: true };
       const since = at - (Number(row.last[host]) || 0);
       if (since < library.SPACING_MS[host]) return { go: false, wait_ms: library.SPACING_MS[host] - since };

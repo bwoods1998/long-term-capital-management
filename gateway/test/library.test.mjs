@@ -45,10 +45,12 @@ const html = (body, status = 200) => new Response(body, { status, headers: { 'Co
 
 /**
  * arXiv as the tests see it, answering from `papers`: a search answers `hits` (bases, their LATEST versions, in rank
- * order); `id_list` answers each id asked (an unversioned id its latest version; an unknown one nothing); arxiv.org/html
- * answers `pages[<base>v<N>]` (else 404); ar5iv answers `ar5iv[<base>]` (else 404). `override(url)` may answer first.
+ * order); `id_list` answers each id asked (an unversioned id its latest version; an unknown one nothing), ONE entry for
+ * ids that name the same version (live, Sept 30, 2026: `id_list=1602.00865,1602.00865v1` answers one entry), and none
+ * for an unversioned id when `omitUnversioned` (an answer that leaves it out); arxiv.org/html answers
+ * `pages[<base>v<N>]` (else 404); ar5iv answers `ar5iv[<base>]` (else 404). `override(url)` may answer first.
  */
-function arxiv({ papers = PAPERS, hits = [], pages = {}, ar5iv = {}, override = null } = {}) {
+function arxiv({ papers = PAPERS, hits = [], pages = {}, ar5iv = {}, override = null, omitUnversioned = false } = {}) {
   return url => {
     const early = override?.(url);
     if (early) return early;
@@ -57,12 +59,14 @@ function arxiv({ papers = PAPERS, hits = [], pages = {}, ar5iv = {}, override = 
       const ids = parsed.searchParams.get('id_list');
       if (ids) {
         const entries = [];
+        const seen = new Set();
         for (const id of ids.split(',')) {
           const match = /^(.+?)(?:v(\d+))?$/.exec(id);
           const paper = papers[match[1]];
-          if (!paper) continue;
+          if (!paper || (omitUnversioned && !match[2])) continue;
           const n = match[2] ? Number(match[2]) : paper.versions.length;
-          if (n <= paper.versions.length) entries.push(entryXml(match[1], n, paper));
+          if (n <= paper.versions.length && !seen.has(n + match[1])) entries.push(entryXml(match[1], n, paper));
+          seen.add(n + match[1]);
         }
         return atom(feed(entries.reverse()));  // in no fixed order, as the API
       }
@@ -188,6 +192,15 @@ test('a revised paper\'s served version must hold EVERY query term itself (plura
   assert.equal(L.matchesTerms(entry, []), false);
   assert.deepEqual(['options', 'volatilities', 'indexes', 'analysis', 'gross', 'bonus', 'prices'].map(L.fold),
     ['option', 'volatility', 'index', 'analysis', 'gross', 'bonus', 'price']);
+  // Review of #447: a phrase never spans the title and the abstract, as arXiv matches `ti:"..."` or `abs:"..."` within one
+  // field (live, Sept 30, 2026: ti:"variance risk premium" does not match 2207.00949, whose abstract alone holds it).
+  const split = { title: 'Realized variance', summary: 'Risk premium estimates in index options.' };
+  assert.equal(L.matchesTerms(split, ['variance risk premium']), false, 'a phrase across the two fields');
+  assert.equal(L.matchesTerms(split, ['variance', 'premium']), true, 'separate terms, each (ti: OR abs:), may sit in either');
+  assert.equal(L.matchesTerms({ title: 'X', summary: 'the variance risk premium' }, ['variance risk premium']), true);
+  // The fold folds no further than arXiv's: ti:news matches "A New Set of Financial Instruments" (live, Sept 30, 2026).
+  assert.equal(L.fold('news'), 'new');
+  assert.notEqual(L.fold('bias'), L.fold('biases'), 'where unconfirmed, kept apart: the revised paper is withheld');
 });
 
 test('a missing or unparseable date, dates that disagree, and a 2501 id claiming 2024 are refused as unreliable', async () => {
@@ -217,7 +230,7 @@ test('a read of a version dated after the cutoff is answered exactly as a versio
   const late = await h.read('arXiv:2212.06888v3');
   assert.equal(late.status, 404);
   assert.equal(late.body.refused, 'not_found');
-  assert.equal(idList(apiCalls(h.calls)[0]).split(',').sort().join(','), '2212.06888,2212.06888v3', 'one call: the latest and the asked');
+  assert.deepEqual(apiCalls(h.calls).map(idList), ['2212.06888'], 'one call, the unversioned id alone: its latest is the version asked');
   const none = await h.read('arXiv:2212.06888v9');
   assert.equal(none.status, late.status);
   assert.deepEqual(Object.keys(none.body).sort(), Object.keys(late.body).sort());
@@ -242,15 +255,17 @@ test('an unversioned read serves the paper as it stood at the end of 2024: its n
   assert.equal(plain.body.version_date, '2024-07-01');
   assert.equal(plain.body.served_earlier_version, true);
   const api = apiCalls(h.calls);
-  assert.equal(api.length, 2, 'the latest and v1, then the versions between');
-  assert.equal(idList(api[0]).split(',').sort().join(','), '2212.06888,2212.06888v1');
-  assert.equal(idList(api[1]), '2212.06888v2');
+  assert.equal(api.length, 2, 'the latest (the unversioned id alone), then the versions below it');
+  assert.equal(idList(api[0]), '2212.06888');
+  assert.equal(idList(api[1]).split(',').sort().join(','), '2212.06888v1,2212.06888v2');
   const again = await h.read('arXiv:2212.06888');
   assert.equal(again.body.id, 'arXiv:2212.06888v2');
   assert.equal(apiCalls(h.calls).length, 2, 'from the cache (e: and m:)');
   const once = harness();
-  assert.equal((await once.read('2207.00949')).body.id, 'arXiv:2207.00949v1', 'two versions: v1, in ONE call');
-  assert.equal(apiCalls(once.calls).length, 1);
+  assert.equal((await once.read('2207.00949')).body.id, 'arXiv:2207.00949v1', 'two versions, the latest 2025: v1');
+  assert.deepEqual(apiCalls(once.calls).map(idList), ['2207.00949', '2207.00949v1'], 'the latest alone, then the version below');
+  assert.equal((await once.read('1602.00865')).body.id, 'arXiv:1602.00865v1', 'one version: one call');
+  assert.equal(apiCalls(once.calls).length, 3);
   assert.equal((await once.read('1805.01234')).body.id, 'arXiv:1805.01234v2', 'every version pre-2025: the latest');
   // A search and a read show a paper as the same version, so neither says whether it was revised after 2024.
   const both = harness({ upstream: arxiv({ hits: ['2212.06888', '2207.00949', '1805.01234'] }) });
@@ -634,9 +649,49 @@ test('no upstream request starts past the request\'s budget, so a library reques
   assert.match(body.text_note, /busy/);
   assert.equal(h.calls.filter(c => new URL(c.url).hostname === L.HTML_HOST).length, 0, 'the page was not asked for past the budget');
   assert.equal([...h.kv.map.keys()].includes('t0:2409.06496v1'), false, 'and "no text" is not remembered');
-  assert.equal(L.WORST_MS, L.REQUEST_BUDGET_MS + Math.max(...Object.values(L.FETCH_TIMEOUT_MS)));
-  assert.ok(L.WORST_MS <= 35_000, 'the House\'s client outwaits it (league/swarm/library.py CLIENT_FLOOR_SECONDS)');
+  assert.equal(L.WORST_MS, L.REQUEST_BUDGET_MS + Math.max(...Object.values(L.FETCH_TIMEOUT_MS)) + L.TAIL_MS);
+  assert.ok(L.WORST_MS <= 37_000, 'the House\'s client outwaits it (league/swarm/library.py CLIENT_FLOOR_SECONDS, 42 s)');
   assert.ok(L.IN_FLIGHT_STALE_MS >= L.WORST_MS && L.IN_FLIGHT_STALE_MS <= 60_000);
+});
+
+test('a KV or a Gate that does not answer costs at most OP_TIMEOUT_MS an operation, and nothing is waited for past WORST_MS (review of #447)', async () => {
+  const hang = () => new Promise(() => {});
+  let t = NOW;
+  const route = (env, gate, fetcher, path, params) => L.libraryRoute(new Request(`${GATEWAY}${path}?${new URLSearchParams(params)}`), env,
+    { gate, fetcher, now: () => t, sleep: async ms => { t += ms; }, opTimeoutMs: 25 });
+  // Every KV read and write hangs: the answers come, uncached, in milliseconds.
+  const env = { ...BASE_ENV, LIBRARY: { get: hang, put: hang } };
+  const gate = createGate({ store: memoryStore(), env, now: () => t });
+  const upstream = arxiv({ hits: ['1602.00865'], pages: { '2409.06496v1': page(article()) } });
+  const fetcher = async url => upstream(String(url));
+  const began = performance.now();
+  const found = await route(env, gate, fetcher, L.PATHS.search, { q: 'tail risk' });
+  assert.equal(found.status, 200);
+  assert.equal(found.headers.get(L.CACHE_HEADER), 'miss');
+  t += 20_000;
+  const read = await route(env, gate, fetcher, L.PATHS.read, { id: '2409.06496' });
+  assert.equal(read.status, 200);
+  assert.equal((await read.json()).text_source, 'arxiv_html');
+  assert.ok(performance.now() - began < 3000, `hung KV: ${(performance.now() - began).toFixed(0)} ms in all`);
+  // A Gate that does not answer: busy, and nothing is sent.
+  const sent = [];
+  const stuck = { libraryAcquire: hang, libraryRelease: hang };
+  const busy = await route({ ...BASE_ENV }, stuck, async url => { sent.push(url); return upstream(String(url)); }, L.PATHS.search, { q: 'tail risk' });
+  assert.equal(busy.status, 429);
+  assert.equal((await busy.json()).busy, true);
+  assert.deepEqual(sent, []);
+  // An upstream answer that ends past WORST_MS: no KV write is waited for (none is even started), and the lease is still
+  // given back.
+  let h;
+  h = harness({ upstream: arxiv({ hits: ['1602.00865'], override: url => {
+    if (new URL(url).searchParams.get('search_query')) h.advance(L.WORST_MS + 1);
+    return null;
+  } }) });
+  const late = await h.search('tail risk');
+  assert.equal(late.status, 200);
+  assert.equal(h.kv.writes, 0, 'past its end, the request answers and writes nothing');
+  assert.equal(h.gate.libraryStatus().in_flight, null, 'the lease was released');
+  assert.ok(L.OP_TIMEOUT_MS <= L.TAIL_MS && L.TAIL_MS <= 5000);
 });
 
 test('a 403 from arXiv starts the backoff as a 429 does, and a 403 or 451 is never remembered as "no text"', async () => {
@@ -675,6 +730,21 @@ test('a lease no worker released expires at its start plus the timeout plus 5 s'
   assert.equal(h.gate.libraryAcquire({ host: L.AR5IV_HOST }).go, true, 'the stale lease is gone');
   assert.deepEqual(h.gate.libraryRelease({ id: turn.id }), { ok: false }, 'a late release frees nothing that is not its own');
   assert.equal(h.gate.libraryAcquire({ host: 'example.com' }).refused, 'host');
+});
+
+test('a waiter asks the Gate again no sooner than its own host allows, and each second only while a turn could come sooner (review of #447)', () => {
+  const h = harness();
+  const api = h.gate.libraryAcquire({ host: L.API_HOST });
+  h.advance(100);
+  assert.equal(h.gate.libraryAcquire({ host: L.API_HOST }).wait_ms, 2900, 'the same host: its spacing, one ask');
+  assert.equal(h.gate.libraryAcquire({ host: L.AR5IV_HOST }).wait_ms, 1000, 'another host: the lease may end any moment');
+  h.gate.libraryRelease({ id: api.id, status: 200 });
+  const html = h.gate.libraryAcquire({ host: L.HTML_HOST });
+  assert.equal(html.go, true);
+  h.advance(100);
+  assert.equal(h.gate.libraryAcquire({ host: L.HTML_HOST }).wait_ms, L.POLL_MS, 'arxiv.org\'s 15 s: at most POLL_MS a sleep');
+  h.advance(L.FETCH_TIMEOUT_MS[L.HTML_HOST] + L.LEASE_SLACK_MS - 200);
+  assert.equal(h.gate.libraryAcquire({ host: L.API_HOST }).wait_ms, 250, 'never sooner than 250 ms, and never past the lease');
 });
 
 // --- 6. the day's budget -----------------------------------------------------------------------------------------------
@@ -810,6 +880,87 @@ test('ar5iv is read only after the paper\'s latest version was confirmed within 
   assert.equal(apiCalls(h.calls).length, before + 1, 'the latest version asked again before ar5iv');
 });
 
+//: A paper posted in 2022 and revised in 2026, old enough for ar5iv only (review of #447's probe c_partial.mjs).
+const LATE_REVISED = { ...PAPERS, '2203.01111': { categories: ['q-fin.TR'], authors: ['Uma Reyes'], versions: [
+  { date: '2022-03-01T00:00:00Z', title: 'Dealer gamma and index moves', summary: 'Dealer gamma hedging and intraday index returns.' },
+  { date: '2026-05-01T00:00:00Z', title: 'Dealer gamma and index moves', summary: 'Updated through the spring selloff.' }] } };
+//: ar5iv's rendering of that paper's 2026 version.
+const LATE_TEXT = page(article({ lead: 'In the tariff selloff of last spring, dealers were short gamma; 0DTE put buyers made the year.' }));
+
+test('an answer that leaves out the unversioned id is no latest: ar5iv never serves a later version\'s text (review of #447)', async () => {
+  // The review's probe: arXiv left out the unversioned id's entry and answered the version named; that version was
+  // recorded as a freshly confirmed latest, and ar5iv (the 2026 version) was served as v1 and kept 30 days.
+  const h = harness({ upstream: arxiv({ papers: LATE_REVISED, ar5iv: { '2203.01111': LATE_TEXT }, omitUnversioned: true }) });
+  for (const id of ['2203.01111', '2203.01111v1', 'arXiv:2203.01111v1']) {
+    const { status, body } = await h.read(id);
+    assert.deepEqual([status, body.refused], [404, 'not_found'], id);
+    assert.doesNotMatch(JSON.stringify(body), /tariff|0DTE|selloff/, id);
+  }
+  assert.equal(h.calls.some(c => new URL(c.url).hostname === L.AR5IV_HOST), false, 'ar5iv never asked');
+  assert.deepEqual(apiCalls(h.calls).map(idList), ['2203.01111', '2203.01111', '2203.01111'], 'the latest: the unversioned id ALONE');
+  assert.deepEqual([...h.kv.map.keys()].filter(k => /^(l|t|t0|e):/.test(k)), [], 'no latest, no text, nothing kept');
+  // Answered whole, the latest is v2 (2026): v1 is served, and ar5iv, which renders v2, is never asked.
+  const whole = harness({ upstream: arxiv({ papers: LATE_REVISED, ar5iv: { '2203.01111': LATE_TEXT } }) });
+  for (const id of ['2203.01111', '2203.01111v1']) {
+    const { body } = await whole.read(id);
+    assert.deepEqual([body.id, body.text_source], ['arXiv:2203.01111v1', 'none'], id);
+    assert.doesNotMatch(JSON.stringify(body), /tariff|0DTE|selloff/, id);
+  }
+  assert.equal(whole.calls.some(c => new URL(c.url).hostname === L.AR5IV_HOST), false);
+  assert.equal(JSON.parse(whole.kv.map.get('l:2203.01111').value).confirmed, true);
+  // arXiv merges `<base>` and `<base>v<latest>` into one entry, as the fake does: a two-id answer could not show the omission.
+  assert.equal(L.parseFeed(await (await arxiv()(L.idsUrl(['1602.00865', '1602.00865v1']))).text()).entries.length, 1);
+});
+
+test('a kept latest counts only when confirmed, dated and timed: every test fails closed (review of #447)', async () => {
+  const rows = {
+    'not confirmed (the shape before this fix)': { version: 1, updated: '2022-03-01T00:00:00Z', published: '2022-03-01T00:00:00Z', at: NOW },
+    'no time': { version: 1, updated: '2022-03-01T00:00:00Z', published: '2022-03-01T00:00:00Z', confirmed: true },
+    'a time that is no number': { version: 1, updated: '2022-03-01T00:00:00Z', published: '2022-03-01T00:00:00Z', at: 'soon', confirmed: true },
+    'no valid date': { version: 1, updated: 'soon', published: '2022-03-01T00:00:00Z', at: NOW, confirmed: true },
+    'confirmed two hours ago': { version: 1, updated: '2022-03-01T00:00:00Z', published: '2022-03-01T00:00:00Z', at: NOW - 7_200_000, confirmed: true },
+  };
+  for (const [why, row] of Object.entries(rows)) {
+    const h = harness({ upstream: arxiv({ papers: LATE_REVISED, ar5iv: { '2203.01111': LATE_TEXT } }) });
+    h.kv.map.set('l:2203.01111', { value: JSON.stringify(row), expires: Infinity });
+    h.kv.map.set('m:2203.01111v1', { value: JSON.stringify({ base: '2203.01111', version: 1, title: 'Dealer gamma and index moves',
+      summary: 'Dealer gamma hedging and intraday index returns.', published: '2022-03-01T00:00:00Z', updated: '2022-03-01T00:00:00Z',
+      authors: ['Uma Reyes'], categories: ['q-fin.TR'], primary: 'q-fin.TR' }), expires: Infinity });
+    const { body } = await h.read('2203.01111v1');
+    assert.deepEqual([body.id, body.text_source], ['arXiv:2203.01111v1', 'none'], why);
+    assert.equal(h.calls.some(c => new URL(c.url).hostname === L.AR5IV_HOST), false, `${why}: ar5iv never asked`);
+    assert.equal(idList(apiCalls(h.calls)[0]), '2203.01111', `${why}: the latest asked again`);
+  }
+});
+
+test('a page that names a later version of its own paper than the one served is never served (review of #447)', async () => {
+  // arXiv's own HTML names its version (watermark, image paths): v2's page at v1's URL is refused.
+  const pages = {
+    '2408.03333v1': page(article({ extra: '<img src="2408.03333v2/figure1.png" alt=""/>' })),
+    '2212.06888v2': page(article({ extra: 'An earlier version is arXiv:2212.06888v1.' })),  // a revision may cite its own v1
+  };
+  const ar5iv = { '1805.01234': page(article({ extra: 'Revised as arXiv:1805.01234v3.' })) };
+  const h = harness({ upstream: arxiv({ pages, ar5iv }) });
+  const later = await h.read('2408.03333');
+  assert.deepEqual([later.body.id, later.body.text_source], ['arXiv:2408.03333v1', 'none']);
+  const earlier = await h.read('2212.06888');
+  assert.deepEqual([earlier.body.id, earlier.body.text_source], ['arXiv:2212.06888v2', 'arxiv_html']);
+  const ahead = await h.read('1805.01234');
+  assert.deepEqual([ahead.body.id, ahead.body.text_source], ['arXiv:1805.01234v2', 'none'], 'ar5iv newer than the latest confirmed');
+  // A kept text that names a later version is not served either (kept texts are admitted again on the way out).
+  const kept = harness({ upstream: arxiv({ pages: { '2409.06496v1': page(article()) } }) });
+  kept.kv.map.set('t:2409.06496v1', { value: JSON.stringify({ source: 'arxiv_html', text: 'arXiv:2409.06496v2 later text', sections: [] }), expires: Infinity });
+  assert.doesNotMatch((await kept.read('2409.06496')).body.text, /later text/);
+  const cases = [['x 2212.06888v3 y', 2, true], ['2212.06888v2', 2, false], ['2212.06888v1', 2, false], ['12212.06888v9', 2, false],
+    ['2212.06888v', 2, false], ['2212.06888v10', 9, true], ['2212.06888.v3', 2, false]];
+  for (const [text, version, want] of cases) assert.equal(L.namesLaterVersion(text, '2212.06888', version), want, text);
+  assert.equal(L.namesLaterVersion('see cond-mat/0601001v2', 'cond-mat/0601001', 1), true);
+  const began = performance.now();
+  L.namesLaterVersion('2212.06888v'.repeat(300_000), '2212.06888', 1);
+  L.namesLaterVersion('2212.06888v1'.repeat(250_000), '2212.06888', 1);
+  assert.ok(performance.now() - began < 1000, 'one linear pass');
+});
+
 test('no answer names a post-cutoff date, nor the comment\'s address, nor a journal reference', async () => {
   const bases = Object.keys(PAPERS);
   const pages = { '2409.06496v1': page(article({ extra: 'Through 2030 and by Q3 2027.' })) };
@@ -902,6 +1053,29 @@ test('the heading scan is linear on malformed headings and bounded on many unmat
   let began = performance.now();
   L.articleText('<article>' + '<h2 class="x '.repeat(300_000) + '</article>');
   assert.ok(performance.now() - began < 1000, `3.9 MB of hostile openings: ${performance.now() - began} ms`);
+  // Review of #447: ONE long opening whose class test backtracked (3.8 s on 288 KB, 11.8 s and 24 s on 400 KB): every
+  // shape at 300 KB and at MAX_PAGE_BYTES.
+  const shapes = {
+    'class="ltx_title" repeated': n => '<article><h2 ' + 'class="ltx_title" '.repeat(Math.ceil(n / 18)) + '</article>',
+    'ltx_title in an unclosed class': n => '<article><h2 class="' + 'ltx_title'.repeat(Math.ceil(n / 9)) + '</article>',
+    'ltx_title tokens, then text with no >': n => '<article><h2 class="' + 'ltx_title '.repeat(Math.ceil(n / 20)) + '" ' + 'x'.repeat(Math.ceil(n / 2)) + '</article>',
+    '200 class attributes of 200 tokens': n => '<article><h2 ' + ('class="' + 'ltx_title '.repeat(200) + '" ').repeat(Math.ceil(n / 2008)) + '</article>',
+    'the same, closed': n => '<article><h2 ' + 'class="ltx_title" '.repeat(Math.ceil(n / 18)) + '>Title</h2></article>',
+  };
+  for (const [name, make] of Object.entries(shapes)) {
+    for (const size of [300_000, L.MAX_PAGE_BYTES]) {
+      const hostile = make(size);
+      began = performance.now();
+      L.articleText(hostile);
+      const ms = performance.now() - began;
+      assert.ok(ms < 1500, `${name}, ${hostile.length} chars: ${ms.toFixed(0)} ms`);
+    }
+  }
+  // Headings are found as before: attributes in any order, LaTeXML's class anywhere in it; other h2/h3 and h4 are not.
+  const mixed = L.articleText('<article><h2 id="S1" class="ltx_title ltx_title_section">One</h2><p>a</p>'
+    + '<h3 data-x="1" class="ltx_title">Two</h3><p>b</p><h2 class="other">Not</h2><p>c</p><h4 class="ltx_title">Nor</h4><p>d</p>'
+    + '<h2\nclass="x ltx_title_section" id="S3">Three</h2><p>e</p></article>');
+  assert.deepEqual(mixed.sections.map(s => s.title), ['One', 'Two', 'Three']);
   began = performance.now();
   const past = L.articleText('<article><p>' + 'a '.repeat(160_000) + '</p>' + '<h2 class="ltx_title">zz</h2>'.repeat(100_000) + '</article>');
   assert.ok(performance.now() - began < 1500, `100k headings past the text's cut: ${performance.now() - began} ms`);

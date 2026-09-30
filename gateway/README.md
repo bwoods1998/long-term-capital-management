@@ -174,8 +174,9 @@ on them, so the swarm gets a library instead, and the date rule is enforced here
 - **The search.** Every term is matched in titles and abstracts only (`(ti:<term> OR abs:<term>)`, the cs.LG market words
   too), never `all:`, which also searches comments and journal references an author can add after 2024 without a new
   version. arXiv matches a paper's LATEST version, so a paper revised after 2024 is kept only when every query term is
-  in the served version's own title or abstract (plurals folded as arXiv's stemmer does); else words added after 2024
-  would choose it.
+  in the served version's own title or its own abstract, a phrase within one field as arXiv matches it, plurals folded
+  no further than arXiv's stemmer folds them (both checked live, Sept 30, 2026); else words added after 2024 would
+  choose it.
 - **What the library does not remove.** The models' weights already hold 2025 and the first half of 2026. The library
   adds nothing dated after 2024, but it removes nothing a model already knows, and a pre-2025 citation does not show
   that an idea was chosen without knowledge of 2025-26 (the holdout is not sealed from the models' training either:
@@ -184,8 +185,10 @@ on them, so the swarm gets a library instead, and the date rule is enforced here
   categories are its current ones (a cross-listing added after 2024 can move it into the library's topics).
 - **The sources, exactly.** `https://export.arxiv.org/api/query` (search, and metadata by version), the version-pinned
   `https://arxiv.org/html/<id>v<N>` (its `<article>` only), and `https://ar5iv.labs.arxiv.org/html/<id>` (only when the
-  served version is the paper's latest and that latest is before the cutoff, confirmed within the hour). No PDF is
-  parsed. Every URL is built here and checked by `checkLibraryUrl` (no page of a new-style id after 2412), redirects
+  served version is the paper's latest and that latest is before the cutoff, confirmed within the hour by a call for
+  the unversioned id ALONE: arXiv answers `<id>` and `<id>v<latest>` with one entry, so an answer to both cannot show
+  that a later version was left out). A page that names a later version of its paper than the one served (arXiv's
+  watermark and image paths carry it) is never served. No PDF is parsed. Every URL is built here and checked by `checkLibraryUrl` (no page of a new-style id after 2412), redirects
   included (at most two, each paced) and only to the same item: the same API query, the same paper and version on
   arxiv.org, the same paper on ar5iv at no version past its confirmed latest. A page over 3 MB on arxiv.org is read to
   its cut and kept (it is pinned); ar5iv is read only whole. The only headers sent are a User-Agent and Accept. No
@@ -194,13 +197,18 @@ on them, so the swarm gets a library instead, and the date rule is enforced here
   our machines together; arxiv.org's robots.txt: `Crawl-delay: 15`. The Gate paces every request: one at a time across
   the three hosts, starts 3 s apart on the API and ar5iv and 15 s apart on arxiv.org, a backoff of at least 60 s (or the
   `Retry-After`) after a 403, 429 or 503 (a 403 is how a blocked address is told). No upstream request starts later than
-  20 s after the library request came in (else `429 {busy: true}`, with nothing sent or counted), so a library request
-  takes at most 35 s (`WORST_MS`); the House's client waits at least 40 s, so it never abandons one mid-flight.
+  20 s after the library request came in (else `429 {busy: true}`, with nothing sent or counted); every KV operation and
+  Gate call is waited for at most 2 s and never past the request's end (a read not back is a miss, a write is skipped).
+  So a library request takes at most 37 s (`WORST_MS`: the budget, one 15 s fetch, a 2 s tail); the House's client waits
+  at least 42 s, so it never abandons one mid-flight. A waiter asks the Gate again no sooner than its own host's spacing
+  allows, and each second only while a turn could come sooner.
 - **The budget.** `LIBRARY_DAY_UPSTREAM` (600) requests to arXiv a UTC day, the whole floor, counted in the Gate by host
   and by role (`library` in `/v1/health`); past it `429 {cap: "library_day"}`. Cache hits are free and answer at the cap;
   `"0"` stops every request to arXiv, and cache hits still answer.
-- **Orders first.** The library shares the isolate that serves orders, so its parsing is linear on hostile pages (the
-  section-heading scan crosses no tag, and looks at 120 headings at most), a library fault is its own request's `500`,
+- **Orders first.** The library shares the isolate that serves orders, so its parsing is linear on hostile pages: the
+  section-heading scan finds `<h2 ...>`/`<h3 ...>` openings with one part that crosses no tag and tests the class on the
+  tag found (a class test inside the pattern backtracked: 3.8 s on 288 KB of one malformed opening), 3 MB of every
+  hostile shape the reviews found takes under 20 ms, and it looks at 120 headings at most; a library fault is its own request's `500`,
   and the `library` block of `/v1/health` is read under a guard: a malformed library row reads as
   `{error: "library status unreadable"}`, never as a failed `/v1/health`, which the House would read as the kill switch.
 - **The web reader** (`/v1/web/fetch`) refuses arxiv.org, its subdomains and ar5iv.org: arXiv is read through the
@@ -214,11 +222,16 @@ on them, so the swarm gets a library instead, and the date rule is enforced here
   arXiv failed or asked us to slow down (arXiv's own error answer is an HTTP 400 Atom feed whose entry id is under
   `https://arxiv.org/api/errors`, verified Sept 29, 2026). A version dated after the cutoff is `404 {refused: "not_found"}`,
   as a version that does not exist.
-- **Deploy.** The first deploy that carries it: `npx wrangler kv namespace create LIBRARY`, then its id into
-  `wrangler.jsonc` as a top-level key after `"migrations"`: `"kv_namespaces": [{ "binding": "LIBRARY", "id": "<id>" }],`
-  (the comment by `LIBRARY_DAY_UPSTREAM` says the same), `npm run check && npm test`, `npx wrangler deploy`. No Durable
-  Object class is added (a new class would end `wrangler rollback` for the gateway that carries real orders); never
-  delete the namespace once a version has bound it.
+- **Deploy.** The first deploy that carries it, in this order (the House keeps `research.enabled` false throughout, so
+  nothing calls `/v1/research` until the last step): create the namespace, `npx wrangler kv namespace create
+  ltcm-gateway-library --binding LIBRARY` (a title of its own: the account also hosts the site; answer no if it offers to
+  edit the config); put its id into `wrangler.jsonc` as a top-level key after `"migrations"`: `"kv_namespaces":
+  [{ "binding": "LIBRARY", "id": "<id>" }],` (the comment by `LIBRARY_DAY_UPSTREAM` says the same) and merge it with the
+  library to `main`; then deploy the gateway from a clean checkout of exactly `origin/main` (`git rev-parse HEAD` equal
+  to `git rev-parse origin/main`, `git status --porcelain` empty), never from a branch, which would drop whatever else
+  `main` holds: `npm run check && npm test`, `npx wrangler deploy`. No Durable Object class is added (a new class would
+  end `wrangler rollback` for the gateway that carries real orders); never delete the namespace once a version has
+  bound it.
 
 ## The watchdog
 
