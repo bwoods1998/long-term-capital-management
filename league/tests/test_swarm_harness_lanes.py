@@ -276,6 +276,9 @@ class Decisions(unittest.TestCase):
                                  self.units(20, 4, prefix="c"), seed="s")
         self.assertEqual(costly["decision"], "revert_recommended")
         self.assertFalse(next(c for c in costly["checks"] if c["metric"] == "ok_runs_per_usd")["ok"])
+        noisy = lanes.retention(self.lane, self.bottleneck, self.units(20, 1, prefix="t", errors=5), self.units(20, 4, prefix="c"),
+                                seed="s")
+        self.assertEqual(noisy["decision"], "revert_recommended", "a guard rising from zero is a breach")
         thin = lanes.retention(self.lane, self.bottleneck, self.units(2, 0, prefix="t", runs=2), self.units(2, 1, prefix="c", runs=2),
                                seed="s")
         self.assertEqual(thin["decision"], "insufficient_activity")

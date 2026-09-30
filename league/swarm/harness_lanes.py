@@ -1189,8 +1189,10 @@ def retention(lane: Lane, bottleneck: Bottleneck, treated: Mapping[str, Mapping[
         # an unmeasurable guard does not block by itself, but the decision records it.
         sign = 1.0 if metric.direction == "lower" else -1.0
         worse = None if row["treated"] is None or row["control"] is None else (row["treated"] - row["control"]) * sign
-        row["ok"] = (row["relative"] is None or row["relative"] >= -metric.min_effect
-                     or (worse is not None and worse <= metric.abs_tolerance))
+        # A zero control makes the relative change undefined: then only the absolute tolerance can pass it (a guard that
+        # goes from no errors to some errors fails). Unmeasured on either side passes, and the decision records it.
+        row["ok"] = ((row["relative"] is not None and row["relative"] >= -metric.min_effect)
+                     or (worse is not None and worse <= metric.abs_tolerance) or worse is None)
         checks.append(row)
     decision = ("insufficient_activity" if not enough else
                 "retained" if improved and all(c["ok"] for c in checks) else "revert_recommended")
