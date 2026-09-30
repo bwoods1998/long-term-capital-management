@@ -73,9 +73,10 @@ BLOCK_KEY = "library_block"
 SEED_KEY = "library_seed_cursor"
 #: The largest tool output (JSON characters): the researcher's loop keeps 12,000 of a tool's output.
 MAX_OUTPUT_CHARS = 11500
-#: The least the client waits for the gateway: its longest library request (gateway/lib/library.mjs `WORST_MS`, 35 s:
-#: no upstream request starts after REQUEST_BUDGET_MS, 20 s, and one takes at most 15 s) plus a margin. A test pins it.
-CLIENT_FLOOR_SECONDS = 40.0
+#: The least the client waits for the gateway: its longest library request (gateway/lib/library.mjs `WORST_MS`, 37 s:
+#: no upstream request starts after REQUEST_BUDGET_MS, 20 s, one takes at most 15 s, and the lease's release and the
+#: cache's writes at most TAIL_MS, 2 s) plus a 5 s margin. A test pins it to the gateway's constants.
+CLIENT_FLOOR_SECONDS = 42.0
 #: What an agent is told of a paper or version the library does not have, a version dated after 2024 included.
 NO_SUCH_PAPER = "no such paper"
 MAX_SECTIONS = 25
@@ -371,6 +372,11 @@ class Library:
     def enabled(self) -> bool:
         return self.cfg.get("enabled") is True and self.client is not None
 
+    def min_seconds_left(self) -> float:
+        """The least of a cycle a call needs: `research.min_seconds_left`, and never under the client's floor plus the 5 s
+        a call ends before the cycle does (a setting cannot cut under it)."""
+        return max(self._number("min_seconds_left", 47, 0, 600), CLIENT_FLOOR_SECONDS + 5.0)
+
     # -------------------------------------------------------------- the lines
     def _day_start(self) -> str:
         return iso(self.clock())[:10] + "T00:00:00Z"
@@ -464,7 +470,7 @@ class Library:
         else:
             return refusal("action must be search or read")
         left = deadline - self.clock()
-        if left < max(self._number("min_seconds_left", 45, 0, 600), CLIENT_FLOOR_SECONDS + 5.0):
+        if left < self.min_seconds_left():
             return refusal("too little of this cycle is left for the library; use it next cycle")
         why = self.room("researcher", fid, calls)
         if why:

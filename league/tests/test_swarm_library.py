@@ -256,10 +256,12 @@ class DateRule(unittest.TestCase):
     def test_the_client_outwaits_the_gateways_longest_request(self):
         js = (REPO / "gateway" / "lib" / "library.mjs").read_text()
         budget = int(re.search(r"export const REQUEST_BUDGET_MS = (\d+);", js).group(1))
+        tail = int(re.search(r"export const TAIL_MS = (\d+);", js).group(1))
         fetch = max(int(x) for x in re.findall(r"\[\w+_HOST\]: (\d+)", re.search(r"export const FETCH_TIMEOUT_MS = \{([^}]*)\}", js).group(1)))
-        self.assertIn("export const WORST_MS = REQUEST_BUDGET_MS + 15000;", js)
+        self.assertIn("export const WORST_MS = REQUEST_BUDGET_MS + 15000 + TAIL_MS;", js)
         self.assertEqual(fetch, 15000)
-        self.assertGreaterEqual(L.CLIENT_FLOOR_SECONDS * 1000, budget + fetch + 5000, "a margin past the gateway's WORST_MS")
+        self.assertGreaterEqual(L.CLIENT_FLOOR_SECONDS * 1000, budget + fetch + tail + 5000, "a margin past the gateway's WORST_MS")
+        self.assertGreaterEqual(S.DEFAULTS["research"]["min_seconds_left"], L.CLIENT_FLOOR_SECONDS + 5, "the setting says the floor")
 
     def test_the_ids_an_agent_may_write(self):
         self.assertEqual(L.parse_id("arXiv:1602.00865v1"), ("1602.00865", 1))
@@ -394,7 +396,7 @@ class Tool(LibraryCase):
 
     def test_every_call_waits_at_least_the_client_floor_and_ends_before_the_cycle(self):
         self.call({"action": "search", "query": "tail risk"}, left=170)
-        self.call({"action": "read", "id": "2409.06496"}, left=45)
+        self.call({"action": "read", "id": "2409.06496"}, left=L.CLIENT_FLOOR_SECONDS + 5)
         self.assertEqual(self.client.timeouts, [60, L.CLIENT_FLOOR_SECONDS])
         refused, _ = self.call({"action": "search", "query": "skew"}, left=L.CLIENT_FLOOR_SECONDS + 4)
         self.assertIn("too little of this cycle", refused["reason"])

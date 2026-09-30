@@ -402,7 +402,7 @@ DEFAULTS: dict[str, Any] = {
         "requests_day": 300,
         "family_requests_day": 12,
         "cycle_calls": 2,
-        "min_seconds_left": 45,
+        "min_seconds_left": 47,
         "search_max": 5,
         "search_abstract_chars": 900,
         "read_chars": 8000,

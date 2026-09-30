@@ -1566,7 +1566,7 @@ class Researcher:
             return tools
         try:
             if revise:
-                need = float(self.cfg.get("min_call_seconds", 75)) + self.library._number("min_seconds_left", 45, 0, 600)  # type: ignore[union-attr]
+                need = float(self.cfg.get("min_call_seconds", 75)) + self.library.min_seconds_left()  # type: ignore[union-attr]
                 if out.get("literature_revise") or calls_left < 2 or seconds_left < need:
                     return tools
             room = self.library.room("researcher", fam["id"], int(out.get("literature_calls") or 0))  # type: ignore[union-attr]
