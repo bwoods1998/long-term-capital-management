@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import copy
 import inspect
+import json
 import random
 import re
 import tempfile
@@ -71,6 +72,21 @@ class PracticeStoreCase(unittest.TestCase):
 
 # ---------------------------------------------------------------------------------------------------------- inputs
 class Inputs(PracticeStoreCase):
+    def test_researcher_feedback_requires_three_sessions_and_ten_closes_and_wakes_only_on_material_change(self):
+        self.family("fam")
+        days = ("2026-09-28", "2026-09-29", "2026-09-30")
+        trades = [(days[i % 3], 10 if i % 2 else -2, 50, False) for i in range(9)]
+        self.practised("fam", trades, days=days)
+        self.assertIsNone(practice.family_feedback(self.store, self.settings, "fam"))
+        self.practised("fam", trades + [(days[-1], 3, 50, False)], days=days)
+        first = practice.family_feedback(self.store, self.settings, "fam")
+        self.assertEqual((first["trades"], first["sessions"], first["sign"]), (10, 3, "+"))
+        self.assertNotRegex(json.dumps(first), r"2026-\d{2}-\d{2}|version|pnl_usd|params")
+        self.practised("fam", trades + [(days[-1], 3, 50, False)] * 5, days=days)
+        self.assertEqual(practice.feedback_revision(self.store, self.settings, "fam"), first["revision"])
+        self.practised("fam", trades + [(days[-1], 3, 50, False)] * 6, days=days)
+        self.assertNotEqual(practice.feedback_revision(self.store, self.settings, "fam"), first["revision"])
+
     def test_without_a_record_or_with_feedback_off_there_is_nothing(self):
         self.assertEqual(practice.summary(None, 10), {})
         self.assertEqual(practice.summary(self.root, 10), {}, "the file exists with no practice yet")

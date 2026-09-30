@@ -33,6 +33,7 @@ embargo on Sized, `OptionsLive._move_band`). A test holds each of these (`league
 
 from __future__ import annotations
 
+import hashlib
 import math
 import threading
 import time
@@ -232,6 +233,38 @@ def family_records(store: Any, settings: Mapping[str, Any]) -> dict[str, dict[st
             for fid, p in per.items()}
 
 
+def family_feedback(store: Any, settings: Mapping[str, Any], family: str) -> dict[str, Any] | None:
+    """Actionable researcher context after ten program closes across three distinct sessions. It remains training
+    feedback, never promotion evidence. A scheduler can watch `revision` without waking on every quote or minute:
+    the token changes only on a new close day or another five closed trades. No dates, prices or versions are exposed."""
+    _, rows = _rows(store, settings)
+    rows = [r for r in rows if r.get("family") == family]
+    trades, pnl, days, returns, due, made, forced = 0, 0.0, {}, [], 0, 0, 0
+    for row in rows:
+        p = row.get("program") or {}
+        trades += int(p.get("trades") or 0)
+        pnl += float(p.get("pnl_usd") or 0)
+        returns.extend(float(x) for x in p.get("returns") or [])
+        for day, ret, _ in p.get("daily") or []:
+            days[day] = days.get(day, 0.0) + float(ret)
+        due += int(row.get("decisions_due") or 0)
+        made += int(row.get("decisions_made") or 0)
+        forced += int(row.get("forced") or 0)
+    if trades < 10 or len(days) < 3:
+        return None
+    token = hashlib.sha256(f"{family}:{trades // 5}:{max(days)}".encode()).hexdigest()[:16]
+    return {"revision": token, "trades": trades, "sessions": len(days), "sign": _sign(pnl),
+            "t": _t({"trades": trades, "days": len(days), "t_daily": _t_of(list(days.values()), 2),
+                     "t_trade": _t_of(returns, 3)}),
+            "coverage": round(made / due, 4) if due else None, "forced_closes_excluded": forced,
+            "use": "Practice research feedback only. Any resulting revision requires subsequent untouched evaluation."}
+
+
+def feedback_revision(store: Any, settings: Mapping[str, Any], family: str) -> str | None:
+    record = family_feedback(store, settings, family)
+    return record["revision"] if record else None
+
+
 def bonuses(shares: Mapping[str, float], records: Mapping[str, Mapping[str, Any]], c: Mapping[str, Any]) -> dict[str, float]:
     """Each family's relative bonus `b` (the module docstring), scaled so the added share is at most `bonus_total`. Pure."""
     top, total, need = float(c["bonus"]), float(c["bonus_total"]), int(c["min_trades"])
@@ -276,4 +309,5 @@ def apply_bonus(shares: Mapping[str, float], store: Any, settings: Mapping[str, 
 
 
 __all__ = ["cfg", "summary", "table", "class_lines", "family_records", "bonuses", "apply_bonus", "header", "clear_cache",
+           "family_feedback", "feedback_revision",
            "DEFAULTS", "CACHE_SECONDS", "BONUS_CEILING", "TOTAL_CEILING", "MAX_FAMILIES", "MAX_CLASSES"]
