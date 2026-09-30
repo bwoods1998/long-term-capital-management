@@ -62,17 +62,33 @@ class PinnedDefinition(unittest.TestCase):
         with self.assertRaises(ValueError):
             EB.truth(0, "holdout")
 
-    @unittest.skipUnless(HAVE, "numpy/pyarrow not installed (requirements-gym.txt)")
-    def test_the_bounds_and_prices_are_the_suites_own_and_agree_with_the_trees(self):
-        import numpy as np
-        from league import stats
-        from league.gym import greeks
+    def test_the_vendored_bound_is_the_exact_clopper_pearson_bound(self):
+        # Checked against the binomial definition, never against the scored tree's `league.stats` (the suite vendors
+        # the bound so a tree can change its own without moving the suite or failing here).
+        import math
 
         for n in (1, 8, 40, 136, 512):
             for k in sorted({0, 1, n // 3, n - 1, n}):
-                self.assertAlmostEqual(EB.exact_upper(k, n, 0.025), stats.exact_upper(k, n, 0.025), places=9)
+                upper = EB.exact_upper(k, n, 0.025)
+                if k >= n:
+                    self.assertEqual(upper, 1.0)
+                    continue
+                cdf = sum(math.comb(n, i) * upper ** i * (1.0 - upper) ** (n - i) for i in range(k + 1))
+                self.assertAlmostEqual(cdf, 0.025, places=9, msg=(k, n))
+        self.assertAlmostEqual(EB.exact_upper(0, 136, 0.025), 1.0 - 0.025 ** (1.0 / 136), places=12)
+
+    @unittest.skipUnless(HAVE, "numpy/pyarrow not installed (requirements-gym.txt)")
+    def test_the_vendored_normal_is_within_the_approximations_error_of_the_true_one(self):
+        # Abramowitz and Stegun 26.2.17 is good to 7.5e-8: checked against math.erf, not against the tree's greeks,
+        # which may change (an erf-based CDF, say) without touching the pinned suite.
+        import math
+
+        import numpy as np
+
         x = np.linspace(-8.0, 8.0, 2001)
-        self.assertTrue(np.array_equal(EB.norm_cdf(x), greeks.norm_cdf(x)))
+        exact = np.array([0.5 * (1.0 + math.erf(v / math.sqrt(2.0))) for v in x])
+        self.assertLess(float(np.max(np.abs(EB.norm_cdf(x) - exact))), 1e-7)
+        self.assertAlmostEqual(float(EB.norm_cdf(0.0)), 0.5, places=7)
 
 
 class StaticContract(unittest.TestCase):
@@ -183,6 +199,55 @@ class OneWorld(unittest.TestCase):
         self.assertGreater(rate["trades"], 50)
         self.assertGreater(rate["rate"], 0.95)
 
+    def test_the_refused_leak_probes_would_profit_if_the_static_check_let_them_through(self):
+        # Open the static check for these probes only (in-process): the greek-cache and date-table probes must then read
+        # the absent window's future, or their refusal would say nothing. The array-base probe has a second guard (the
+        # engine's copy: an array's base is a bytes copy of today so far), so it reads bytes, not prices, and learns
+        # nothing even opened.
+        from league.gym import runtime
+
+        names = ("leak_private_attr", "leak_date_literal", "leak_array_base")
+        with mock.patch.object(runtime, "check_program", lambda code: None):
+            programs = [self.load(name) for name in names]
+            results = EB.run(programs, self.store, "validation")
+        for name, result in zip(names[:2], results):
+            self.assertEqual(result["status"], "ok", name)
+            self.assertEqual({t.get("tag") for t in result["trades"]}, {"leak"}, name)
+            rate = EB.hit_rate(result, self.world)
+            self.assertGreater(rate["trades"], 50, name)
+            self.assertGreater(rate["rate"], 0.9, name)
+        self.assertEqual(results[2]["status"], "ok")
+        opened = EB.hit_rate(results[2], self.world)
+        self.assertGreater(opened["trades"], 50)
+        self.assertLess(opened["rate"], 0.7)  # a coin's hit rate: no information
+
+    def test_the_numpy_proofs_hold_only_when_every_container_is_closed(self):
+        # A partial fix (refusing np.typecodes only) must leave the sctypeDict proofs and the reach proof failing; the
+        # whole fix (both containers) makes every numpy proof hold. The static check is patched in-process only.
+        from league.gym import safety
+
+        def proofs_with(banned):
+            with mock.patch.object(safety, "NUMPY_BANNED", safety.NUMPY_BANNED | banned), \
+                    mock.patch.object(EB, "split_proof", lambda root: {"held": True, "claim": "stubbed (no Train here)"}):
+                return EB.proofs(self.store, self.dir)
+
+        numpy_proofs = ("state_numpy_runs", "state_numpy_batchmates", "state_numpy_runs_sctypedict",
+                        "state_numpy_batchmates_sctypedict", "state_numpy_reachable")
+        self.assertEqual(EB.numpy_containers(), ["np.sctypeDict", "np.typecodes"])
+        partial = proofs_with(frozenset({"typecodes"}))
+        self.assertTrue(partial["state_numpy_runs"]["held"] and partial["state_numpy_batchmates"]["held"])
+        self.assertIn("refused", partial["state_numpy_runs"])
+        self.assertFalse(partial["state_numpy_runs_sctypedict"]["held"])
+        self.assertGreater(partial["state_numpy_runs_sctypedict"]["trades"][0], 50)
+        self.assertEqual(partial["state_numpy_runs_sctypedict"]["trades"][1], 0)
+        self.assertFalse(partial["state_numpy_batchmates_sctypedict"]["held"])
+        self.assertFalse(partial["state_numpy_reachable"]["held"])
+        self.assertEqual(partial["state_numpy_reachable"]["reachable"], ["np.sctypeDict"])
+        whole = proofs_with(frozenset({"typecodes", "sctypeDict"}))
+        self.assertTrue(all(whole[name]["held"] for name in numpy_proofs), {n: whole[n] for n in numpy_proofs})
+        self.assertEqual(whole["state_numpy_reachable"]["reachable"], [])
+        self.assertEqual(EB.clear_numpy_marks(), 0)
+
     def test_historical_volume_without_receipts_is_hidden(self):
         [result] = EB.run([self.load("leak_volume_bars")], self.store, "validation")
         self.assertEqual({t.get("tag") for t in result["trades"]}, {"coin"})
@@ -260,6 +325,10 @@ class Report(unittest.TestCase):
                 if c["id"] == "leak_memorized_levels":  # promoted in 2 of 4 worlds, flagged in all 4
                     row["probes"] = {**row["probes"], "level_invariance": {"flagged": True}}
                     row["stages"] = {**row["stages"], "holdout": promoted}
+                if c["id"] == "leak_numpy_memo":  # its stress twin learns from the normal run in every world
+                    row["probes"] = {**row["probes"], "stress_contaminated": True}
+                if c.get("finding"):
+                    row["review_contract"] = {"grounded_rejection_kept": True, "ungrounded_rejection_downgraded": True}
                 cases[c["id"]] = row
             proofs = {name: {"held": name != "state_ctx_batchmates", "claim": name, "trades": [5, 5]}
                       for name in ("state_fresh_runs", "state_ctx_batchmates")}
@@ -317,9 +386,32 @@ class Report(unittest.TestCase):
         self.assertEqual(head["missed_by_case"]["planted_dense"], 1)
         self.assertEqual(head["refused"], sorted(REFUSED))
         self.assertEqual(head["impossible_fills"], 1)
+        self.assertEqual(head["impossible_fills_by_case"]["fill_crossed_quotes"], 1)
+        self.assertEqual(head["impossible_fills_by_case"]["fill_stale_quote"], 0)
+        self.assertEqual(head["stress_contaminated"], {"leak_numpy_memo": 4})
+        self.assertEqual(set(head["review_contract"]), {c["id"] for c in EB.CASES if c.get("finding")})
         self.assertEqual(head["proofs_failed"], ["state_ctx_batchmates"])
         self.assertEqual(head["runtime"], {"python": "3", "numpy": "2"})
         self.assertIn("aligned_floors", head["owner_rule"])
+        # A development run's verdicts are unconfirmed: none can be cited as meeting the rule.
+        self.assertTrue(all(v["met_and_confirmed"] is None for v in head["owner_rule"].values()))
+
+    def test_a_confirmation_run_records_whether_each_verdict_was_met_and_confirmed(self):
+        frozen = {"headline": {"owner_rule": {"aligned_floors": {"met": True}, "current": {"met": False},
+                                              "no_floors": {"met": True}}}}
+        variants = {"aligned_floors": {"owner_rule": {"met": True}}, "current": {"owner_rule": {"met": False}},
+                    "no_floors": {"owner_rule": {"met": False}}, "sparse_floors": {"owner_rule": {"met": True}}}
+        out = EB.confirm_owner_rule(frozen, variants)
+        self.assertEqual(out["aligned_floors"], {"development_met": True, "confirmation_met": True, "met_and_confirmed": True})
+        self.assertFalse(out["no_floors"]["met_and_confirmed"])  # met on development only
+        self.assertFalse(out["sparse_floors"]["met_and_confirmed"])  # never judged on development
+        self.assertIsNone(out["sparse_floors"]["development_met"])
+        report = {**self.report(), "cohort": "confirmation"}
+        report["owner_rule_confirmation"] = EB.confirm_owner_rule(
+            {"headline": {"owner_rule": {name: {"met": True} for name in EB.VARIANTS}}}, report["variants"])
+        head = EB.headline(report)
+        self.assertEqual({name: v["met_and_confirmed"] for name, v in head["owner_rule"].items()},
+                         {name: v["owner_rule"]["met"] for name, v in report["variants"].items()})
 
     def test_the_owner_rule_has_power_and_rejects_the_no_floors_reference(self):
         report = self.report()
@@ -349,6 +441,26 @@ class Report(unittest.TestCase):
         new["tree"] = {"fixture_sha": "other"}
         self.assertFalse(EB.compare(old, new)["comparable"])
 
+    def test_compare_steps_the_review_contract_and_contamination_per_case(self):
+        # Same totals, different cases: each move shows. A weakened review-contract answer is a regression.
+        old = self.report()
+        new = json.loads(json.dumps(old["headline"]))
+        new["review_contract"]["leak_memorized_levels"]["ungrounded_rejection_downgraded"] = False
+        new["stress_contaminated"] = {"fill_passive_spread": 4}
+        new["impossible_fills_by_case"] = {**new["impossible_fills_by_case"], "fill_crossed_quotes": 0, "fill_stale_quote": 1}
+        out = EB.compare(old, new)
+        self.assertTrue(out["comparable"])
+        self.assertIn("leak_memorized_levels review contract ungrounded_rejection_downgraded: True then False",
+                      out["regressions"])
+        self.assertIn("fill_passive_spread stress-contaminated runs: 0 then 4", out["regressions"])
+        self.assertIn("leak_numpy_memo stress-contaminated runs: 4 then 0", out["improvements"])
+        self.assertIn("fill_stale_quote impossible fills: 0 then 1", out["regressions"])
+        self.assertIn("fill_crossed_quotes impossible fills: 1 then 0", out["improvements"])
+        del new["review_contract"]["leak_numpy_memo"]
+        self.assertIn("leak_numpy_memo review contract: {'grounded_rejection_kept': True, 'ungrounded_rejection_downgraded': "
+                      "True} then None (the case set changed)", EB.compare(old, new)["regressions"])
+        self.assertEqual(EB.compare(old, old)["regressions"], [])
+
     def test_the_receipt_keeps_a_reproducible_rows_digest(self):
         report = {**self.report(), "replication_rows": [{"cases": {}, "seconds": 1.0}, {"cases": {}, "seconds": 2.0}]}
         receipt = EB.receipt(report)
@@ -358,14 +470,14 @@ class Report(unittest.TestCase):
 
     @unittest.skipUnless(HAVE, "numpy/pyarrow not installed (requirements-gym.txt)")
     def test_a_refused_numpy_probe_leaves_the_proofs_whole(self):
-        # The recommended release-B fix refuses numpy's mutable module attributes. Then both batch-mate probes are
-        # refused, the proofs hold by refusal, and the report is still built (no KeyError at the end of a long run).
+        # The recommended release-B fix refuses numpy's mutable module attributes. Then every numpy probe is refused, the
+        # proofs hold by refusal, and the report is still built (no KeyError at the end of a long run).
         from league.gym import runtime
 
         real = runtime.load_program
 
         def refusing(code, *args, **kwargs):
-            if "np.typecodes" in code:
+            if "np.typecodes" in code or "np.sctypeDict" in code:
                 raise CodeRefused("numpy module attributes are not allowed (simulated)")
             return real(code, *args, **kwargs)
 
@@ -377,12 +489,16 @@ class Report(unittest.TestCase):
                 mock.patch.object(EB, "mates", lambda *a, **k: {"held": True, "claim": "stub"}):
             proofs = EB.proofs(store=None, root=Path("unused"))
         self.assertEqual(set(proofs), {c["id"] for c in EB.CASES if c["kind"] == "proof"})
-        self.assertTrue(proofs["state_numpy_runs"]["held"] and proofs["state_numpy_batchmates"]["held"])
+        for name in ("state_numpy_runs", "state_numpy_batchmates", "state_numpy_runs_sctypedict",
+                     "state_numpy_batchmates_sctypedict", "state_numpy_reachable"):
+            self.assertTrue(proofs[name]["held"], name)
+        self.assertEqual(proofs["state_numpy_reachable"]["refused_containers"], EB.numpy_containers())
         rows = self.rows(2)
         for row in rows:
             row["proofs"] = proofs
         out = EB.aggregate(rows, self.search())
         self.assertEqual(out["proofs"]["state_numpy_batchmates"]["held"], 2)
+        self.assertEqual(out["proofs"]["state_numpy_reachable"]["observed"], [])
         self.assertNotIn("state", out["facts_contradicted"])
 
     def test_the_level_flag_counts_a_run_that_stopped_trading(self):

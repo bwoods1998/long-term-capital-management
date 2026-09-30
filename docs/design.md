@@ -360,7 +360,8 @@ diagnostician.
   pinned by hash; its first results are `docs/benchmarks/EVALUATOR_1.md`. It never changes a threshold.
 - The lines may be tightened on evidence; loosening one is the owner's decision. Eligibility and scoring rules change only
   when fixed benchmarks show false promotions do not rise and missed signals fall (the owner, Sept 30, 2026); the sealed
-  holdout, the multiple-testing control and the forward requirement never loosen.
+  holdout, the multiple-testing control and the forward requirement never loosen, and prior evidence keeps its prior
+  verdicts.
 
 ## Money
 

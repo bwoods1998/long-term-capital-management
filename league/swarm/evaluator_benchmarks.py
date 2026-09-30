@@ -24,15 +24,19 @@ Case families (the suite's pinned `CASES`):
   engine's greek cache behind a private attribute, a date table reached by reconstructing the session's date, greeks
   computed in blocks, prior-session bars, bar volume without publication receipts, a process-global numpy dict carried
   from an earlier run) and memorized tables a static check cannot see (keyed by price level, densely and sparsely, and
-  by a session counter from a recognized window start). Each probe profits if its route is open; each must be refused
-  or score as no edge, except the memorized tables, which only the review can stop (`review_dependent`). Next-session
-  event flags are a smoke test (`kind: smoke`): the world's moves do not depend on the calendar, so that probe cannot
-  profit and is kept out of the rates;
+  by a session counter from a recognized window start). Each must be refused or score as no edge, except the memorized
+  tables, which only the review can stop (`review_dependent`). The greek-cache and date-table probes profit when the
+  static check is opened for them (a unit test opens it); the array-base probe has a second guard, the engine's copy
+  (an array's base is a bytes copy of today so far), so it learns nothing even then. The numpy memo reaches
+  `np.typecodes` only. Next-session event flags are a smoke test (`kind: smoke`): the world's moves do not depend on
+  the calendar, so that probe cannot profit and is kept out of the rates;
 - INVALID FILLS: programs that profit only from impossible fills: the decision minute's stale quote, crossed quotes,
   package prices beyond the payoff range on open and close, and passive spread capture without adverse selection;
 - STATE: contract proofs that module STATE resets between runs, that parameters are copied, that a split Train run
   matches the unsplit run day for day and Validation is never split, and probes for channels between runs and between
-  batch-mates (process-global numpy dicts, a ctx object shared by a batch);
+  batch-mates: each of numpy's two mutable public dicts (`typecodes`, `sctypeDict`) on its own, every mutable public
+  numpy container the static check lets a program reach (enumerated at run time, so a partial fix shows), and a ctx
+  object shared by a batch;
 - BROKEN ABLATIONS: switches that work, that the static contract refuses, and that are read but ignored (which only a
   behavioral ablation catches);
 - a SEARCH tier: the same statistical lines on generated outcomes with lineage selection over noise variants, where
@@ -44,8 +48,10 @@ so the case counts are the effective sample); the contract proofs and defects fo
 facts); ablation detection by the static contract and by a behavioral probe; and threshold variants judged on the same
 recorded outcomes (`VARIANTS`, never applied) against the owner's rule, with a sensitivity check that the verdict
 rejects the no-floors reference. Its `headline` is a per-case vector (promotions per negative, misses per positive,
-static refusals, impossible fills, stress contamination, proofs, ablations); `compare` lists regressions between two
-headlines of the same suite, cohort and fixture, never on the pooled rates alone.
+static refusals, impossible fills and stress contamination per case, the review contract's answers per case, proofs,
+ablations); `compare` lists regressions between two headlines of the same suite, cohort and fixture, never on the
+pooled rates alone. A variant's owner-rule verdict on one cohort is never a confirmed one: a confirmation run records,
+per variant, whether the frozen development verdict and its own were both met (`met_and_confirmed`).
 
 Cohorts: `development` (the default; EVALUATOR_1's figures) and `confirmation`, whose worlds and search streams are
 independent. A confirmation run must name the frozen development report (`--frozen`) of the same pinned suite, tree
@@ -450,18 +456,25 @@ LEAKS: dict[str, dict[str, str]] = {
         guess = float(p[$STOP] - p[$BEGIN])
     except IndexError:
         guess = 0.0'''},
-    # The array's backing buffer (a view would carry the rest of the day): refused by the static check.
+    # The array's backing buffer (a view would carry the rest of the day): refused by the static check, and guarded a
+    # second time by the engine, which hands out a copy whose base is a bytes copy of today so far (opened, it reads
+    # bytes, not prices, and learns nothing).
     "leak_array_base": {"PRELUDE": "", "AFTER": "", "GUESS": '''whole = ctx.under.prices.base
     if whole is not None and len(whole) > $STOP:
         guess = float(whole[$STOP] - whole[$BEGIN])'''},
-    # The chain view's private snapshot, whose greek cache holds the whole day's underlying prices: refused by the
-    # static check. If the route opened, the window's move would be read straight out of the cache.
+    # The chain view's private snapshot, whose greeks source reaches the engine's greek cache and through it the whole
+    # day's underlying prices: refused by the static check. If the route opened, the window's move would be read straight
+    # out of the cache (the source is a closure over the cache, or a bound method of it: both are searched).
     "leak_private_attr": {"PRELUDE": "", "AFTER": "", "GUESS": '''snap = getattr(ctx.chain, "_snap")
-    cache = getattr(snap, "_source", None) if snap is not None else None
-    if cache is not None:
-        whole = cache.chain.underlying.price
-        if len(whole) > $STOP:
-            guess = float(whole[$STOP] - whole[$BEGIN])'''},
+    source = getattr(snap, "_source", None) if snap is not None else None
+    holders = [source, getattr(source, "__self__", None)] + list(getattr(source, "__defaults__", None) or ())
+    for cache in holders:
+        chain = getattr(cache, "chain", None)
+        if chain is not None:
+            whole = chain.underlying.price
+            if len(whole) > $STOP:
+                guess = float(whole[$STOP] - whole[$BEGIN])
+            break'''},
     # A remembered calendar: the session's date is reconstructed (a recognized window start and a session count) and
     # looked up in a table of dates. Refused by the static check (ISO dates); if the check let it through, it profits.
     "leak_date_literal": {"PRELUDE": "DATES = $DATED\nMOVES = $MOVES", "AFTER": "", "GUESS": '''mark = "".join("u" if p[k] > p[k - 1] else "d" for k in $MARKS)
@@ -484,7 +497,8 @@ LEAKS: dict[str, dict[str, str]] = {
     "leak_events_next": {"PRELUDE": "", "AFTER": "", "GUESS": '''flags = sum(1 for v in ctx.events_next.values() if v) - sum(1 for v in ctx.events.values() if v)
     guess = float(flags)'''},
     # A process-global numpy dict carries what an earlier run saw (the window's realized move, by session) into a later
-    # run over the same sessions: the 1.5x-stress twin, a rerun. Never the only run of a window.
+    # run over the same sessions: the 1.5x-stress twin, a rerun. Never the only run of a window. It reaches
+    # `np.typecodes` only; the state proofs test every numpy container on its own.
     "leak_numpy_memo": {"PRELUDE": 'MEMO = np.typecodes', "AFTER": '''if ctx.minute == $END:
             key = "ltcm-bench-memo-" + str(STATE["session"])
             MEMO[key] = "u" if float(ctx.under.prices[-1] - ctx.under.prices[$BEGIN]) > 0 else "d"''',
@@ -725,7 +739,22 @@ def decide(ctx):
         return []
     return enter(ctx, "C")
 ''',
+    # The reach probe: a program that binds one numpy object and does nothing else ($PATH, e.g. np.typecodes). The static
+    # check refuses it, or a program can hold (and write) that object.
+    "state_numpy_reach": '''
+import numpy as np
+NEEDS = {"roots": ["SPY"], "dte": [1, 1], "band": 0.03, "cadence": 30, "history": 0, "start": 859, "end": 859}
+PARAMS = {"probe": 1}
+REACHED = $PATH
+def decide(ctx):
+    return []
+''',
 }
+#: numpy's mutable public dicts, each proved on its own, so a fix that refuses one leaves the other's proofs failing.
+#: `typecodes` is the first probes' container; `sctypeDict` is the one numpy resolves dtype names with, so a write there
+#: can change what a batch-mate computes, not only what it knows.
+STATE_PROGRAMS.update({name + "_sctypedict": STATE_PROGRAMS[name].replace("MARK = np.typecodes", "MARK = np.sctypeDict")
+                       for name in ("state_numpy_runs", "state_numpy_mate_writer", "state_numpy_mate_reader")})
 #: Keys the probes may leave in numpy's process-global dicts; the suite removes them after every run it makes.
 NUMPY_MARK_PREFIX = "ltcm-bench-"
 
@@ -802,6 +831,12 @@ CASES: list[dict[str, Any]] = [
      "fact": "state"},
     {"id": "state_numpy_batchmates", "family": "state", "kind": "proof", "template": "STATE", "parts": "state_numpy_mate_reader",
      "subs": {}, "fact": "state"},
+    {"id": "state_numpy_runs_sctypedict", "family": "state", "kind": "proof", "template": "STATE",
+     "parts": "state_numpy_runs_sctypedict", "subs": {}, "fact": "state"},
+    {"id": "state_numpy_batchmates_sctypedict", "family": "state", "kind": "proof", "template": "STATE",
+     "parts": "state_numpy_mate_reader_sctypedict", "subs": {}, "fact": "state"},
+    {"id": "state_numpy_reachable", "family": "state", "kind": "proof", "template": "STATE", "parts": "state_numpy_reach",
+     "subs": {"PATH": "np.typecodes"}, "fact": "state"},
     {"id": "state_ctx_batchmates", "family": "state", "kind": "proof", "template": "STATE", "parts": "state_ctx_mate_reader",
      "subs": {}, "fact": "context"},
     {"id": "state_split_segments", "family": "state", "kind": "proof", **_signal("dense"), "fact": "state"},
@@ -1167,32 +1202,81 @@ def proofs(store: Any, root: Path) -> dict[str, Any]:
         out[name] = {"held": same and (expect is None or len(first["trades"]) == expect),
                      "trades": [len(first["trades"]), len(second["trades"])], "claim": claim}
 
+    def batchmates(name: str, writer_name: str, claim: str) -> None:
+        reader = program(name, render(next(c for c in CASES if c["id"] == name)))
+        writer = program(writer_name, STATE_PROGRAMS[writer_name].lstrip("\n"))
+        # The writer is half of the batch-mate proof, never a proof of its own: its refusal record never stays in `out`.
+        writer_refused = out.pop(writer_name, None)
+        if reader is not None and writer is not None:
+            clear_numpy_marks()
+            try:
+                [alone] = run([reader], store, "validation")
+                clear_numpy_marks()
+                [_, mated] = run([writer, reader], store, "validation")
+            finally:
+                clear_numpy_marks()
+            out[name] = {"held": trade_rows(alone) == trade_rows(mated), "trades": [len(alone["trades"]), len(mated["trades"])],
+                         "claim": claim}
+        elif reader is not None:  # the reader loads, the writer is refused: the channel has no writer
+            out[name] = {"held": True, "refused": (writer_refused or {}).get("refused"), "claim": "the static check refuses the writer"}
+        # else: the reader was refused, and `program` recorded the proof as held by refusal
+
     twice("state_fresh_runs", "module STATE starts fresh in every run (five trades each time)", 5)
     twice("state_params_copied", "a run's parameter lists are its own; the next run starts from the defaults", 1)
-    twice("state_numpy_runs", "no process-global object carries one run's decisions into the next run", None)
-    reader = program("state_numpy_batchmates", render(next(c for c in CASES if c["id"] == "state_numpy_batchmates")))
-    writer = program("state_numpy_mate_writer", STATE_PROGRAMS["state_numpy_mate_writer"].lstrip("\n"))
-    # The writer is half of the batch-mate proof, never a proof of its own: its refusal record never stays in `out`.
-    writer_refused = out.pop("state_numpy_mate_writer", None)
-    if reader is not None and writer is not None:
-        clear_numpy_marks()
-        try:
-            [alone] = run([reader], store, "validation")
-            clear_numpy_marks()
-            [_, mated] = run([writer, reader], store, "validation")
-        finally:
-            clear_numpy_marks()
-        out["state_numpy_batchmates"] = {"held": trade_rows(alone) == trade_rows(mated),
-                                         "trades": [len(alone["trades"]), len(mated["trades"])],
-                                         "claim": "a program's result does not depend on the batch-mates it shares a process with"}
-    elif reader is not None:  # the reader loads, the writer is refused: the channel has no writer
-        out["state_numpy_batchmates"] = {"held": True, "refused": (writer_refused or {}).get("refused"),
-                                         "claim": "the static check refuses the writer"}
-    # else: the reader was refused, and `program` recorded the proof as held by refusal
+    twice("state_numpy_runs", "no process-global object (np.typecodes) carries one run's decisions into the next run", None)
+    twice("state_numpy_runs_sctypedict", "no process-global object (np.sctypeDict) carries one run's decisions into the next "
+          "run", None)
+    batchmates("state_numpy_batchmates", "state_numpy_mate_writer",
+               "a program's result does not depend on the batch-mates it shares a process with (np.typecodes)")
+    batchmates("state_numpy_batchmates_sctypedict", "state_numpy_mate_writer_sctypedict",
+               "a program's result does not depend on the batch-mates it shares a process with (np.sctypeDict)")
+    out["state_numpy_reachable"] = numpy_reach()
     out["state_ctx_batchmates"] = mates(store, "state_ctx_mate_writer", "state_ctx_mate_reader",
                                         "a batch-mate cannot write into the ctx objects another program is handed")
     out["state_split_segments"] = split_proof(root)
     return out
+
+
+def numpy_containers() -> list[str]:
+    """numpy's public mutable builtin containers (dict, list, set, bytearray), at the top level and one public numpy
+    submodule down, as `np.` paths. Read from the module dicts, so enumerating imports nothing: it is what this
+    process's numpy holds (numpy 2.5: `np.sctypeDict` and `np.typecodes`)."""
+    import types
+
+    import numpy as np
+
+    mutable = (dict, list, set, bytearray)
+    found = []
+    for name, value in sorted(vars(np).items()):
+        if name.startswith("_"):
+            continue
+        if isinstance(value, mutable):
+            found.append(f"np.{name}")
+        elif isinstance(value, types.ModuleType) and value.__name__.startswith("numpy."):
+            found += [f"np.{name}.{inner}" for inner, item in sorted(vars(value).items())
+                      if not inner.startswith("_") and isinstance(item, mutable)]
+    return found
+
+
+def numpy_reach() -> dict[str, Any]:
+    """Every mutable public numpy container: does the static check refuse a program that reaches it? Held only when it
+    refuses them all. A container a program can hold is a channel between runs and batch-mates in one process, so a
+    fix that closes some containers and not others does not hold here."""
+    from string import Template
+
+    from league.gym.runtime import load_program
+    from league.gym.safety import CodeRefused
+
+    reachable, refused = [], []
+    for path in numpy_containers():
+        code = Template(STATE_PROGRAMS["state_numpy_reach"]).substitute(PATH=path).lstrip("\n")
+        try:
+            load_program(code, name="numpy-reach")
+            reachable.append(path)
+        except CodeRefused:
+            refused.append(path)
+    return {"held": not reachable, "reachable": reachable, "refused_containers": refused,
+            "claim": "the static check refuses every mutable public numpy container (a program cannot hold one)"}
 
 
 def mates(store: Any, writer_name: str, reader_name: str, claim: str) -> dict[str, Any]:
@@ -1577,8 +1661,11 @@ def aggregate(rows: Sequence[Mapping[str, Any]], search: Mapping[str, Sequence[M
     for name in rows[0]["proofs"] if rows else []:
         held = sum(bool(r["proofs"][name]["held"]) for r in rows)
         first = rows[0]["proofs"][name]
+        observed = next((first[key] for key in ("trades", "train_days", "reachable") if key in first), None)
         proofs_out[name] = {"held": held, "of": len(rows), "fact": (kinds.get(name) or {}).get("fact"), "claim": first["claim"],
-                            "observed": first.get("trades") or first.get("train_days"), "refused": first.get("refused")}
+                            "observed": observed, "refused": first.get("refused")}
+        if "refused_containers" in first:
+            proofs_out[name]["refused_containers"] = first["refused_containers"]
     ablation_out: dict[str, Any] = {}
     for name in rows[0]["ablations"] if rows else []:
         runs = [r["ablations"][name] for r in rows]
@@ -1825,15 +1912,33 @@ def suite(replications: int | None = None, search_replications: int | None = Non
               "replications": reps, "search_replications": search_reps, "tree": tree,
               "runtime": {**runtime_versions(), "elapsed_seconds": round(time.monotonic() - began, 1)},
               **aggregate(rows, search), "limitations": LIMITATIONS, "replication_rows": rows}
+    report["owner_rule_confirmation"] = (confirm_owner_rule(frozen, report["variants"])
+                                         if cohort == "confirmation" and frozen is not None else None)
     report["headline"] = headline(report)
     return report
 
 
+def confirm_owner_rule(frozen: Mapping[str, Any], variants: Mapping[str, Any]) -> dict[str, Any]:
+    """Per variant: the frozen development verdict, this confirmation run's, and whether both were met. Only
+    `met_and_confirmed` can be cited as a variant meeting the owner's rule; a single cohort's `met` cannot."""
+    before = _headline_of(frozen).get("owner_rule") or {}
+    out: dict[str, Any] = {}
+    for name, row in variants.items():
+        development = (before.get(name) or {}).get("met")
+        confirmation = row["owner_rule"]["met"]
+        out[name] = {"development_met": development, "confirmation_met": confirmation,
+                     "met_and_confirmed": development is True and confirmation is True}
+    return out
+
+
 def headline(report: Mapping[str, Any]) -> dict[str, Any]:
     """The vector a release is compared on (`compare`): per case, never only the pooled rates. A release that stops
-    promoting one negative and starts promoting another, or stops refusing a probe that cannot profit, shows here."""
+    promoting one negative and starts promoting another, stops refusing a probe, moves impossible fills or stress
+    contamination from one case to another, or weakens the review contract's answer on a case, shows here. Each
+    variant's `met_and_confirmed` is None on a development run (unconfirmed) and set only by a confirmation run."""
     cases = report["cases"]
     rates = report["rates"]
+    confirmation = report.get("owner_rule_confirmation")
     return {
         "suite": report["suite"], "suite_sha": report["suite_sha"], "cohort": report.get("cohort"), "pinned": report["pinned"],
         "full_protocol": report["full_protocol"],
@@ -1848,8 +1953,10 @@ def headline(report: Mapping[str, Any]) -> dict[str, Any]:
         "missed_by_case": {cid: c["of"] - c["promoted"] for cid, c in cases.items() if c["kind"] == "positive"},
         "refused": sorted(cid for cid, c in cases.items() if c.get("refused")),
         "impossible_fills": sum(int(c.get("impossible_fills") or 0) for c in cases.values()),
+        "impossible_fills_by_case": {cid: int(c["impossible_fills"]) for cid, c in cases.items() if "impossible_fills" in c},
         "stress_contaminated_total": sum(int(c.get("stress_contaminated") or 0) for c in cases.values()),
         "stress_contaminated": {cid: c["stress_contaminated"] for cid, c in cases.items() if c.get("stress_contaminated")},
+        "review_contract": {cid: dict(c["review_contract"]) for cid, c in cases.items() if c.get("review_contract")},
         "proofs_held": {k: v["held"] for k, v in report["proofs"].items()},
         "proofs_failed": [k for k, v in report["proofs"].items() if v["held"] < v["of"]],
         "facts_contradicted": report["facts_contradicted"],
@@ -1858,7 +1965,9 @@ def headline(report: Mapping[str, Any]) -> dict[str, Any]:
         "ablation_rates": report["ablation_rates"], "level_invariance_probe": report["level_invariance_probe"],
         "owner_rule": {name: {"met": v["owner_rule"]["met"],
                               "failed": sorted(k for k, ok in v["owner_rule"]["checks"].items() if not ok),
-                              "noise_bands_with_more_looks": v["owner_rule"]["noise_bands_with_more_looks"]}
+                              "noise_bands_with_more_looks": v["owner_rule"]["noise_bands_with_more_looks"],
+                              "met_and_confirmed": None if confirmation is None else
+                              bool((confirmation.get(name) or {}).get("met_and_confirmed"))}
                        for name, v in report["variants"].items()},
         "verdict_sensitivity": report.get("verdict_sensitivity"),
         "elapsed_seconds": report["runtime"]["elapsed_seconds"],
@@ -1903,8 +2012,24 @@ def compare(old: Mapping[str, Any], new: Mapping[str, Any]) -> dict[str, Any]:
     refused_was, refused_now = set(a.get("refused") or []), set(b.get("refused") or [])
     worse += [f"{cid} is no longer refused by the static check" for cid in sorted(refused_was - refused_now)]
     better += [f"{cid} is now refused by the static check" for cid in sorted(refused_now - refused_was)]
-    step("impossible fills", a.get("impossible_fills"), b.get("impossible_fills"))
-    step("stress-contaminated runs", a.get("stress_contaminated_total"), b.get("stress_contaminated_total"))
+    # Per case, so a release that moves impossible fills or stress contamination from one case to another shows; a case
+    # missing from the stress dict had none.
+    was, now = a.get("impossible_fills_by_case") or {}, b.get("impossible_fills_by_case") or {}
+    for cid in sorted(set(was) | set(now)):
+        step(f"{cid} impossible fills", was.get(cid), now.get(cid))
+    was, now = a.get("stress_contaminated") or {}, b.get("stress_contaminated") or {}
+    for cid in sorted(set(was) | set(now)):
+        step(f"{cid} stress-contaminated runs", was.get(cid, 0), now.get(cid, 0))
+    # The review contract's answers: losing a True (a grounded rejection no longer kept, an ungrounded one no longer
+    # downgraded) is a regression.
+    was, now = a.get("review_contract") or {}, b.get("review_contract") or {}
+    for cid in sorted(set(was) | set(now)):
+        x, y = was.get(cid), now.get(cid)
+        if x is None or y is None:
+            worse.append(f"{cid} review contract: {x} then {y} (the case set changed)")
+            continue
+        for key in sorted(set(x) | set(y)):
+            step(f"{cid} review contract {key}", x.get(key), y.get(key), higher_is_worse=False)
     was, now = a.get("proofs_held") or {}, b.get("proofs_held") or {}
     for name in sorted(set(was) | set(now)):
         step(f"proof {name} held", was.get(name), now.get(name), higher_is_worse=False)
@@ -2024,7 +2149,7 @@ def run_on_tree(tree: Path, args: Any) -> int:
                           env=env, check=False).returncode
 
 
-PINNED_SUITE_SHA = "292b847230786bc5cb1437752271eff8b306eb490595f85765dc874c01ae969b"
+PINNED_SUITE_SHA = "ce1617764510c9963edc2ead3ad5a12f6a31876d747afb5ba1529ace847f4094"
 
 
 if __name__ == "__main__":
