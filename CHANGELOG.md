@@ -93,6 +93,11 @@ The House runs Release A, `20260930T200604Z-3bf48c3f8f9f` (main `777b894f`).
     - not refused, failed or demoted by the gate on that sha;
     - not on D2's route.
 
+    With B2 (#444), the reader also keeps its own belt (`incubator_refusal`), whatever the mark says: no row for a
+    program the swarm barred (`incubator_barred`, which no adoption clears), one the gate's `review` names without a
+    readable pass and a passed audit, one whose incubator review or audit failed, a refused version, a failed look, or
+    a family whose verdict records cannot be read.
+
     **In this release no family can meet them.** The Train-and-drift mark and the incubator's reviews are written by B2
     (#444), which is not in B. Until B2 ships, the route pins nothing even with the switch on. First looks are still
     taken and recorded.

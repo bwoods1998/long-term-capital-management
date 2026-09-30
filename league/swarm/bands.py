@@ -58,9 +58,14 @@ objective (the store's `research_evaluator` and `train_objective`, both known: a
 retired and revived family's stale mark never passes) and showing a positive 1.5x Train P&L and the drift screen's
 figures, the family is not on D2's route (no validated version that met the validation line: its tuition row comes
 first, even when `read` cannot be read), the gate's review AND audit passed on `n`'s run sha under the current review
-contract (`state.review`, or `state.incubator_reviews[sha]`), and the gate did not refuse, fail or demote that sha. The row
-carries no program: {family, version, run_sha, structure, roots, band "gym", incubator True, observe False,
-holdout_passed False, validation_passed False}; the live path trades the practice cohort's own snapshot and requires
+contract (`state.review`, or `state.incubator_reviews[sha]`), and the gate did not refuse, fail or demote that sha.
+THE READER'S BELT (`incubator_refusal`; Oct 1, 2026, the owner's term that a program whose review or audit failed never
+trades the incubator) comes first and does not rely on the mark: no row for a program the swarm barred
+(`incubator_barred`, kept for good), one the gate's `review` names without a readable pass and passed audit, one whose
+incubator review or audit failed, a version the gate refused at any stage (its `refusals` rows), a program whose holdout
+look failed (its `looks` rows), or a family whose records cannot be read (fail-closed). The row carries no program:
+{family, version, run_sha, structure, roots, band "gym", incubator True, observe False, holdout_passed False,
+validation_passed False}; the live path trades the practice cohort's own snapshot and requires
 its run sha to be this row's. `read` never returns it. Unlike `read`, an unreadable store RAISES (`sqlite3.Error`): the
 live path then takes no new incubator pin and refuses incubator opens; exits are unaffected.
 
@@ -375,14 +380,74 @@ def _review_passed(review: Any, sha: str, contract: str) -> bool:
             and review.get("contract_sha") == contract and audit.get("contract_sha") == contract)
 
 
+#: THE READER'S BELT's records: a family's records that can name a verdict against a program. One that is there but is
+#: not a mapping cannot be read, and refuses every program of the family (fail-closed), as do the records `incubator`
+#: reads its other conditions from.
+BELT_RECORDS = ("review", "incubator_reviews", "incubator_barred", "gate_outcome")
+_READ_RECORDS = ("train_passed", "validation_line", "drift_failed")
+
+
+def _pass_and_audit(record: Mapping[str, Any]) -> bool:
+    """A review record that reads as a pass with a passed audit (both the word "pass"), whatever its contract."""
+    audit = record.get("audit")
+    return record.get("verdict") == "pass" and isinstance(audit, Mapping) and audit.get("verdict") == "pass"
+
+
+def incubator_refusal(state: Any, sha: str) -> str | None:
+    """THE READER'S BELT (Oct 1, 2026; the owner's term: a program whose review or audit failed never trades the
+    incubator): why `incubator` refuses program `sha` of a family whose state is `state`, whatever its Train-and-drift
+    mark says, or None. It reads the verdicts themselves, not the swarm's removal of the mark:
+    - the swarm recorded a bar for the program (`incubator_barred[sha]`, any entry: bars are kept for good);
+    - the gate's `review` names the program without a readable pass and a readable passed audit (a failed review or
+      audit, an unclear or unreadable verdict, and a pass whose audit is still owed: not final, so the House waits);
+    - the incubator's own review of it (`incubator_reviews[sha]`) failed, was revoked, or has an audit that did not
+      pass, whatever its contract, or cannot be read as this program's;
+    - the gate's `gate_outcome` names it refused, failed or demoted;
+    - FAIL-CLOSED: the state, one of `BELT_RECORDS`, or a record the conditions read (`train_passed`,
+      `validation_line`, `drift_failed`, `robust_failed`) cannot be read, or the gate's `review` names no program.
+    `incubator` also refuses a version the gate refused at any stage and a program whose holdout look failed (the
+    store's `refusals` and `looks` rows)."""
+    if not isinstance(state, Mapping):
+        return "the family's state cannot be read"
+    for key in (*BELT_RECORDS, *_READ_RECORDS):
+        if state.get(key) is not None and not isinstance(state.get(key), Mapping):
+            return f"its {key} cannot be read"
+    if state.get("robust_failed") is not None and not isinstance(state.get("robust_failed"), list):
+        return "its robust_failed cannot be read"
+    if sha in (state.get("incubator_barred") or {}):
+        return "the swarm barred its program (incubator_barred)"
+    review = state.get("review") or {}
+    if review:
+        named = review.get("sha")
+        if not isinstance(named, str) or not named:
+            return "the gate's review record names no program"
+        if named == sha and not _pass_and_audit(review):
+            return "the gate's review of it is not a pass with a passed audit"
+    reviews = state.get("incubator_reviews") or {}
+    if sha in reviews:
+        record = reviews[sha]
+        if not isinstance(record, Mapping) or record.get("sha") != sha:
+            return "the incubator's review of it cannot be read"
+        if record.get("verdict") != "pass" or ("audit" in record and not _pass_and_audit(record)):
+            return "the incubator's review or audit of it did not pass"
+    outcome = state.get("gate_outcome") or {}
+    if outcome.get("sha") == sha and outcome.get("result") in ("refused", "failed", "demoted"):
+        return f"the gate's outcome for it is {outcome['result']}"
+    return None
+
+
 def incubator(root: str | Path, *, family: str, version: int) -> list[dict[str, Any]]:
     """The incubator's facts for version `version` of `family` (the module docstring): one row, or []. Standard library
     and read-only (`mode=ro`, a one-second timeout); RAISES `sqlite3.Error` when the store cannot be read (fail-closed:
-    no new pin, no incubator open)."""
+    no new pin, no incubator open). THE READER'S BELT (`incubator_refusal`, and the gate's refusal and look rows) comes
+    before every other condition."""
     path = Path(root) / DB_NAME
     n = _count(version)
     if not path.exists() or n is None or not family:
         return []
+    from .gate import run_sha
+    from ..gym.review_contract import review_contract
+
     db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1.0)
     db.row_factory = sqlite3.Row
     try:
@@ -393,11 +458,22 @@ def incubator(root: str | Path, *, family: str, version: int) -> list[dict[str, 
         kv = {str(r["key"]): loads(r["value"], None) for r in db.execute(
             "SELECT key, value FROM kv WHERE key IN ('research_evaluator', 'train_objective')")}
         row = db.execute("SELECT n, sha, params FROM versions WHERE family=? AND n=?", (fam["id"], n)).fetchone()
+        if row is None:
+            return []
+        params = loads(row["params"], {}) or {}
+        sha = run_sha({"sha": row["sha"], "params": params})
+        # THE READER'S BELT's rows, kept for good (no adoption clears them): the gate refused this version at any
+        # stage, or a holdout look on its program failed.
+        ruled = db.execute("SELECT 1 FROM refusals WHERE family=? AND version=? LIMIT 1", (fam["id"], n)).fetchone()
+        failed = db.execute("SELECT 1 FROM looks WHERE run_sha=? AND passed=0 LIMIT 1", (sha,)).fetchone()
     finally:
         db.close()
-    if row is None or fam["band"] != "gym":
+    if fam["band"] != "gym" or ruled is not None or failed is not None:
         return []
-    state = loads(fam["state"], {}) or {}
+    state = loads(fam["state"], {})
+    state = {} if state is None else state
+    if incubator_refusal(state, sha) is not None:
+        return []
     if demoted(state, n):
         return []
     if (state.get("validation_line") or {}).get("passed") and state.get("validation_version"):
@@ -412,21 +488,14 @@ def incubator(root: str | Path, *, family: str, version: int) -> list[dict[str, 
     robust = _finite(mark.get("robust_pnl"))
     if robust is None or robust <= 0 or not isinstance(mark.get("drift"), Mapping):
         return []  # a belt: the mark itself shows a profit at 1.5x the half-spread and the drift screen's figures
-    from .gate import run_sha
-    from ..gym.review_contract import review_contract
-
-    params = loads(row["params"], {}) or {}
-    sha = run_sha({"sha": row["sha"], "params": params})
     contract = review_contract()["sha256"]
-    reviews = state.get("incubator_reviews") if isinstance(state.get("incubator_reviews"), Mapping) else {}
+    reviews = state.get("incubator_reviews") or {}
     if not (_review_passed(state.get("review"), sha, contract) or _review_passed(reviews.get(sha), sha, contract)):
-        return []
-    outcome = state.get("gate_outcome") or {}
-    if isinstance(outcome, Mapping) and outcome.get("sha") == sha and outcome.get("result") in ("refused", "failed", "demoted"):
         return []
     return [{"family": fam["id"], "version": n, "run_sha": sha, "structure": fam["structure"],
              "roots": [str(r).upper() for r in loads(fam["roots"], []) or []], "band": "gym", "incubator": True,
              "observe": False, "holdout_passed": False, "validation_passed": False}]
 
 
-__all__ = ["read", "observe", "incubator", "priority", "practice_tier", "demoted", "LIVE_BANDS", "TIERS", "BUNDLE_TTL"]
+__all__ = ["read", "observe", "incubator", "incubator_refusal", "priority", "practice_tier", "demoted", "LIVE_BANDS", "TIERS",
+           "BUNDLE_TTL", "BELT_RECORDS"]

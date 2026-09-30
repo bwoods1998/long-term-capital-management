@@ -19,9 +19,11 @@ SELECTION_KEYS = (
     "robustness", "robust_failed", "robust_why", "drift_failed", "validation_version", "validation_image",
     "validation_bundle", "validation_line", "validation_view", "validation_numbers", "typical_max_loss_usd",
     "typical_by_version", "gate_ready", "review", "gated_sha", "gate_outcome",
-    # The incubator's facts (release B2, `incubator.py`): its Train and drift marks, its reviews and the gate's outcomes
-    # it recorded as bars, evaluator-bound (the gate's refusals and failed looks are rows, and bar a program for good).
-    "train_passed", "incubator_reviews", "incubator_barred",
+    # The incubator's facts (release B2, `incubator.py`): its Train and drift marks and its reviews, evaluator-bound. Its
+    # bars (`incubator_barred`: a failed review or audit, the gate's or the incubator's, a refusal, a bad outcome) are
+    # NOT here: an adoption keeps them, so a bar is as durable as a refusal row for its program (the owner's term: a
+    # program whose review or audit failed never trades the incubator).
+    "train_passed", "incubator_reviews",
 )
 #: THE EXTENSION HOLD's records (`researcher.extension_held`): the hold a validation on the Gym earned, the versions held
 #: (`extension_versions`, which a hold the operator cleared stays in), and the last hold cleared and lapsed. They are Gym
@@ -91,7 +93,8 @@ def adopt(store: Any, expected: Mapping[str, Any] | None) -> dict[str, Any]:
     safe. New families created after the transition have no old evidence to invalidate. The extension
     hold's records (`HOLD_KEYS`) are archived and cleared with the selection when the Gym changed
     (`gym_changed`) and kept when only the execution fingerprint moved. The idle count restarts from
-    `evaluator_trials`, worded as the evaluator's change.
+    `evaluator_trials`, worded as the evaluator's change. The incubator's marks and reviews are cleared; its bars
+    (`incubator_barred`) are kept, like the refusal and look rows: a verdict against a program is final for it.
     """
     if expected is None:
         return {"adopted": False, "families": 0, "reason": "evaluator identity unavailable"}

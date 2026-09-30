@@ -45,8 +45,9 @@ family's state. Each is bound to the evaluator it was made under, so no stale fa
    - FAIL-CLOSED: its version cannot be read, or a record that would name the program cannot be read (`family_bar`:
      a `review` that is not a mapping or names no program, an `incubator_barred` or `incubator_reviews` that is not a
      mapping). The latter bars every program of the family while it stays so, and is never recorded or revoked.
-   The rows are never cleared; `incubator_barred` is evaluator-bound, like `gate_outcome` and `review` themselves (an
-   adoption clears all three, and the gate reads the program again under the new evaluator).
+   Nothing here is ever cleared: the rows are kept, and so is `incubator_barred`, which an evaluator adoption keeps
+   too (it clears `gate_outcome`, `review`, the marks and the incubator's reviews, never a bar). A bar is as durable as
+   a refusal row: a program whose review or audit failed never trades the incubator, under any later evaluator.
 
    THE VERDICT FIRST (`record_verdict`, `record_bar`). The gate writes its own verdicts only while the version is still
    its to judge: its review and audit with a compare-and-set on `validation_version`, its refusal row and outcome after
@@ -80,8 +81,11 @@ forward record, the bands' moves or `bands.read`. Only the live side's incubator
 for the incubator route, whose trades are tuition (never a forward row) under its own money row. Research never reads
 the House's real incubator rows; practice is read only from the House's `observe.sqlite`, read-only.
 
-Adoption of a new evaluator clears the marks, the reviews and the recorded bars (`evaluator.SELECTION_KEYS`);
-`researcher.demote_version` removes a demoted version's mark. Standard library only.
+Adoption of a new evaluator clears the marks and the reviews (`evaluator.SELECTION_KEYS`), never the recorded bars;
+`researcher.demote_version` removes a demoted version's mark. The live side's reader (`bands.incubator`) keeps its own
+belt: it refuses a program barred here, one the gate's `review` names without a readable pass and passed audit, one the
+incubator's own review or audit failed, a refused version, a failed look, and any record it cannot read, whatever the
+mark says. Standard library only.
 """
 
 from __future__ import annotations
@@ -99,8 +103,8 @@ from .researcher import drift_settings, drift_verdict, robust_at_stress, row_spa
 from .store import SwarmStore
 
 #: Marks and incubator reviews kept per family (the newest versions' marks; the newest reviews by time). The gate's bars
-#: (`incubator_barred`) are all kept, until an adoption clears them: a bar dropped for a newer one would let its program
-#: be marked again.
+#: (`incubator_barred`) are all kept for good (an adoption keeps them too): a bar dropped would let its program be marked
+#: and read again.
 MARKS_KEPT = 24
 REVIEWS_KEPT = 8
 #: The gate's outcomes that bar a program (`bands.incubator`'s own list).
@@ -704,21 +708,30 @@ def reviewable(store: SwarmStore, fid: str, n: int, sha: str) -> bool:
 
 
 def put_review(store: SwarmStore, fid: str, sha: str, record: Mapping[str, Any], *,
-               clock: Callable[[], float] = time.time) -> None:
-    """Record program `sha`'s incubator review in its family's state, keeping the newest `REVIEWS_KEPT`. A failed review
-    or audit is recorded as the program's bar in the same transaction (THE VERDICT FIRST, `record_bar`), so the trim
-    never drops the verdict: it is final for that program."""
+               clock: Callable[[], float] = time.time) -> dict[str, Any]:
+    """Record program `sha`'s incubator review in its family's state, keeping the newest `REVIEWS_KEPT`, and return the
+    record kept. A failed review or audit is recorded as the program's bar in the same transaction (THE VERDICT FIRST,
+    `record_bar`), so the trim never drops the verdict: it is final for that program. A pass of a program already
+    barred by name (`incubator_barred`: a verdict that landed while this read was in flight) is kept as the sweep's
+    revoked record (verdict "fail", stage "gate"), never written over it as a pass."""
     why = verdict_bar(record, "the incubator's")
     with store.atomic():
         state = (store.family(fid) or {}).get("state") or {}
         records = {k: v for k, v in dict(state.get("incubator_reviews") or {}).items() if isinstance(v, Mapping)}
-        records[sha] = dict(record)
+        kept = dict(record)
+        recorded = state.get("incubator_barred")
+        if why is None and kept.get("verdict") == "pass" and isinstance(recorded, Mapping) and sha in recorded:
+            entry = recorded[sha]
+            bar = str(entry.get("why") or "the gate barred it") if isinstance(entry, Mapping) else "the gate barred it"
+            kept.update(verdict="fail", stage="gate", reasons=[bar], revoked_at=float(clock()))
+        records[sha] = kept
         keep = sorted(records, key=lambda k: (float(records[k].get("at") or 0.0), k))[-REVIEWS_KEPT:]
         store.set_state(fid, incubator_reviews={k: records[k] for k in keep})
         if why is not None:
             done, why_of = _record_bar(store, fid, sha, why, record.get("version"), clock)
     if why is not None:
         _bar_event(store, fid, sha, why, record.get("version"), done, why_of)
+    return kept
 
 
 __all__ = ["facts", "sweep", "due_reviews", "practice_cohorts", "practice_current", "current_mark", "final_review",

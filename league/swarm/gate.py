@@ -47,9 +47,12 @@ verdict against a program (the gate's failed review or audit, a third unclear an
 incubator's own failed review or audit) is recorded in the family's `incubator_barred[sha]` at once, before anything
 else is written, and the program's incubator mark goes in the same transaction. So neither the gate's compare-and-set on
 `validation_version` (a newer validation landing during the model read), nor an operator's hold, nor an error after the
-read can lose it, whatever the family's `gate_outcome` or `review` says later. THE INCUBATOR'S SWEEP (`incubator.sweep`)
-still runs at the start and the end of every round (the leakage alarm's too), and again after an incubator read that
-failed, and records what it finds. Both only remove marks and passes and record bars, which nothing of the gate reads.
+read can lose it, whatever the family's `gate_outcome` or `review` says later. A bar an error kept from the store is
+owed (`bars_owed`): recorded again when the gate's own write-back fails, and at the start and the end of every round
+until it lands, and no incubator read of its program starts meanwhile. A bar is for good: an evaluator adoption keeps
+`incubator_barred`. THE INCUBATOR'S SWEEP (`incubator.sweep`) still runs at the start and the end of every round (the
+leakage alarm's too), and again after an incubator read that failed, and records what it finds. Both only remove marks
+and passes and record bars, which nothing of the gate reads.
 
 Every step is a `swarm.gate` event; band moves are `swarm.band` events (the site's news).
 Standard library only.
@@ -119,6 +122,10 @@ class Gate:
         #: The incubator's reads that came back without a final verdict this process, by program: when, so that the
         #: next round reads the others first (one version's repeated error never holds a round's places).
         self.incubator_tried: dict[str, float] = {}
+        #: THE VERDICT FIRST's bars not yet recorded (an error, such as a lock held past the store's busy timeout), by
+        #: (family, program): (version, why). Recorded again when the gate's own write-back of the verdict fails, and at
+        #: the start and the end of every round, before any incubator read, until one lands (`_incubator_owed`).
+        self.bars_owed: dict[tuple[str, str], tuple[int | None, str]] = {}
         #: No Gym job survives its process: a look marked in flight before this moment is owed again.
         self.started_at = clock()
 
@@ -213,6 +220,7 @@ class Gate:
     def run(self) -> dict[str, Any]:
         self.store.put("gate_at", self.clock())
         out: dict[str, Any] = {"looked": [], "refused": [], "waiting": [], "held": []}
+        self._incubator_owed()  # a verdict an error kept from its bar last round: recorded first
         self._incubator_sweep()  # a look that landed, or a demotion, since the last round: its mark goes first
         if self.alarm():
             if not self.store.get("leakage_alarm"):
@@ -297,7 +305,9 @@ class Gate:
                 review = {**review, "sha": sha, "version": n}
                 if not self.store.compare_and_set_state(fam["id"], {"validation_version": n}, review=review):
                     # The tournament validated a newer version meanwhile: this one is not the gate's. A failed review is
-                    # the program's incubator bar already (THE VERDICT FIRST), so the fail outlives this write-back.
+                    # the program's incubator bar already (THE VERDICT FIRST), so the fail outlives this write-back; a
+                    # bar an error kept from the store is tried again now, since nothing else holds this fail.
+                    self._record_owed(fam["id"], sha)
                     continue
             if review["verdict"] == "pass" and "audit" not in review:  # the audit: a second reader, before any look
                 if not self._review_current(fam["id"], n, image, bundle):
@@ -334,7 +344,8 @@ class Gate:
                                 "a holdout look was reviewed without the plan's models (GPT-6 Sol or Claude reviews; Claude or "
                                 "GPT-6 Astra audits): their budgets had no room, so Sail models stood in"})
                 if not self.store.compare_and_set_state(fam["id"], {"validation_version": n}, review=review):
-                    continue  # as the review's: a failed audit is the program's incubator bar already
+                    self._record_owed(fam["id"], sha)  # as the review's: a failed audit is the program's bar already
+                    continue
             if not self._review_current(fam["id"], n, image, bundle):
                 continue
             if review["verdict"] != "pass":
@@ -350,6 +361,7 @@ class Gate:
                 out["looked"].append({"family": fam["id"], "passed": look})
             if self.alarm():
                 break
+        self._incubator_owed()  # before any incubator read: a program owed a bar is never read or passed meanwhile
         if not self.alarm():  # the alarm stops the gate: no review of any kind starts
             incubated = self._incubator_round()
             if incubated:
@@ -364,19 +376,48 @@ class Gate:
         """THE VERDICT FIRST (`incubator.record_bar`): a verdict against program `sha` is its incubator bar at once, before
         the gate writes anything else, and its incubator mark goes in the same transaction; so no compare-and-set that a
         newer validation beat, no operator's hold and no error after it can lose it. `why` names a refusal or an
-        outcome; `record` is a review (with its audit) as its reader returned it (`incubator.record_verdict`: a pass,
-        and an unclear answer still to be asked again, bar nothing), `whose` its reader. Never failing the gate: an
-        error is one private event, and the gate's own write-back and the sweep still record what they can."""
+        outcome; `record` is a review (with its audit) as its reader returned it (`incubator.verdict_bar`: a pass, and
+        an unclear answer still to be asked again, bar nothing; a record it cannot read bars, fail-closed), `whose` its
+        reader. Never failing the gate: an error is one private event and the bar is OWED (`bars_owed`), recorded again
+        when the gate's write-back of the verdict fails and at the start and the end of every round until it lands."""
         from . import incubator
 
+        if record is not None:
+            try:
+                why = incubator.verdict_bar(record, whose)
+            except Exception:  # noqa: BLE001 - a verdict that cannot be read bars its program (fail-closed)
+                why = f"{whose} review of it cannot be read"
+        if why is None:
+            return
+        self.bars_owed[(str(fid), str(sha))] = (n, str(why))
+        self._record_owed(str(fid), str(sha))
+
+    def _record_owed(self, fid: str, sha: str) -> bool:
+        """Record the bar owed for program `sha` of family `fid` (`bars_owed`), if any: True once nothing is owed for it.
+        `incubator.record_bar` keeps a program's first entry, so a second recording changes nothing. An error is one
+        private event (`incubator_bar_error`) and the bar stays owed."""
+        from . import incubator
+
+        owed = self.bars_owed.get((str(fid), str(sha)))
+        if owed is None:
+            return True
+        n, why = owed
         try:
-            if record is not None:
-                incubator.record_verdict(self.store, fid, sha, record, whose=whose, version=n, clock=self.clock)
-            elif why is not None:
-                incubator.record_bar(self.store, fid, sha, why, version=n, clock=self.clock)
+            incubator.record_bar(self.store, str(fid), str(sha), why, version=n, clock=self.clock)
         except Exception as exc:  # noqa: BLE001
-            self.store.event("swarm.gate", fid, {"action": "incubator_bar_error", "version": n,
-                                                 "error": f"{type(exc).__name__}: {str(exc)[:300]}"})
+            try:
+                self.store.event("swarm.gate", str(fid), {"action": "incubator_bar_error", "version": n, "sha": str(sha)[:12],
+                                                          "bar": why, "error": f"{type(exc).__name__}: {str(exc)[:300]}"})
+            except Exception:  # noqa: BLE001 - the store itself erring: the bar stays owed all the same
+                pass
+            return False
+        self.bars_owed.pop((str(fid), str(sha)), None)
+        return True
+
+    def _incubator_owed(self) -> None:
+        """Every bar still owed (`bars_owed`), recorded again; never failing the gate's round."""
+        for fid, sha in list(self.bars_owed):
+            self._record_owed(fid, sha)
 
     def _incubator_sweep(self) -> dict[str, Any]:
         """`incubator.sweep`, never failing the gate's round (an error is one private event; the next round sweeps again)."""
@@ -420,6 +461,7 @@ class Gate:
         if limit <= 0:
             return {}
         due = incubator.due_reviews(self.store, self.settings, self.store.root, clock=self.clock)
+        due = [r for r in due if (str(r["family"]), str(r["sha"])) not in self.bars_owed]  # a verdict against it is owed
         due = sorted(due, key=lambda r: self.incubator_tried.get(str(r["sha"]), 0.0))[:limit]  # stable: oldest cohort next
         if not due:
             return {}
@@ -483,7 +525,7 @@ class Gate:
                       "at": self.clock()}
             # Kept, so an audit asked again does not redo the review; a fail (a third unclear answer too) is the program's
             # incubator bar in the same transaction.
-            incubator.put_review(self.store, fid, sha, record, clock=self.clock)
+            record = incubator.put_review(self.store, fid, sha, record, clock=self.clock)  # as kept (a barred pass: revoked)
             if record["verdict"] != "pass":
                 return "fail"
             if not incubator.reviewable(self.store, fid, n, sha):
@@ -507,7 +549,7 @@ class Gate:
         record = {**record, "audit": kept, "at": self.clock()}
         if audit["verdict"] != "pass":
             record.update(verdict="fail", stage="audit", reasons=kept["reasons"] or ["the audit could not reach a verdict"])
-        incubator.put_review(self.store, fid, sha, record, clock=self.clock)  # the verdict first, the owner's alert after
+        record = incubator.put_review(self.store, fid, sha, record, clock=self.clock)  # the verdict first, the alert after
         # The plan's two different paid readers (`run`): either read on Sail, or one model reading the program twice, is the
         # owner's to know, for an incubator review as for a holdout look.
         same = record.get("model") is not None and record.get("model") == audit.get("model")
