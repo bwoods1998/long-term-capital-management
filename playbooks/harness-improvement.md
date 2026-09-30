@@ -105,12 +105,53 @@ For continuous, free capture and receipt reconciliation:
 ```sh
 python scripts/harness_improve.py --root /workspace/state/harness watch \
   --swarm /workspace/state --base FULL_BASE_COMMIT_SHA \
+  --release /workspace/releases/EXACT_RELEASE \
   --deploy-base /workspace --interval 60
 ```
 
-The watcher releases the journal lock between scans. It advances the baseline SHA automatically
-when a retained candidate is the exact running tree. An unrelated deployment requires its
-reviewed baseline SHA. It does not generate patches, repeatedly re-evaluate failed candidates,
-change the evaluator, or deploy/roll back by itself. Those steps remain agent/operator-mediated
-in this initial implementation. No production controller process is started by installing this
-code or running its tests.
+The watcher holds `watch.lock` for its lifetime, so another watcher cannot scan or overwrite its
+heartbeat. It attempts the transition lock without waiting. A long evaluation produces a fresh
+waiting heartbeat every 30–60 seconds, rather than making the observer appear hung. Capture is
+bound to the supplied release directory (the executable checkout by default); a different swarm
+heartbeat produces an explicit error and cannot create a candidate under the old base. Capture
+can derive a base from a retained candidate only when the measured tree matches exactly.
+
+It does not generate patches, repeatedly re-evaluate failed candidates, change the evaluator,
+or deploy/roll back by itself. Those steps remain agent/operator-mediated. Installing code or
+running tests does not start a production controller.
+
+### Supervised observer
+
+The House can supervise this same read-only observer when an operator installs an explicit private
+`<swarm-state>/harness/runtime.json`. A missing or disabled policy starts nothing. Its shape is:
+
+```json
+{
+  "schema": 1,
+  "enabled": true,
+  "mode": "observe",
+  "base": "FULL_REVIEWED_40_HEX_GIT_COMMIT",
+  "release_digest": "ACTUAL_RUNNING_TREE_64_HEX_SHA256"
+}
+```
+
+Replace both placeholders with the reviewed release's full commit and `league.watchdog.tree_digest`
+digest. The staged Git archive must reproduce that digest; a commit label alone is not evidence.
+Install the policy by atomic replacement in the private directory with mode 0600. This policy
+does not enable a patch author, paid queries, evaluation, deployment or orders. A new release
+requires a reviewed policy update, even after a retained improvement; an unrelated rollout never
+inherits a guessed base SHA.
+
+The supervisor checks a small heartbeat on each House tick and hashes the immutable release once
+per House process. It reaps its own exited child, waits 60 seconds between launches, and recovers
+an existing observer only from its Linux start token and exact journal, state, release, base,
+digest and policy arguments. If the House crashes between spawn and process-record persistence,
+the lifetime lock prevents duplicate observation and the verified heartbeat permits recovery.
+An occupied lock without a verifiable heartbeat is reported as waiting and is not force-killed.
+
+A heartbeat older than 180 seconds, a changed policy or a state/parent `STOP` file stops the managed
+observer. Signals use Linux pidfds with identity checked after opening the descriptor; PID reuse
+cannot redirect a signal. There is no raw-PID fallback. Capture errors and transition waits remain
+visible in the House's `harness` status without restarting a responsive observer. Disabling the
+policy stops the verified child while preserving the journal and receipts. Filesystem work on the
+House thread is small but synchronous; exception isolation is not a hard latency guarantee.
