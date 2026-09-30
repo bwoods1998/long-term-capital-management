@@ -275,6 +275,17 @@ class Record(KeepCase):
         self.assertEqual(self.tournament().incubator_keep(),
                          frozenset({"missed-one", "admitted-friday", "admitted-today"}))
 
+    def test_a_house_that_practises_no_cohort_is_an_outage_not_a_cohort_left_out(self):
+        for fid in ("a", "b"):
+            self.family(fid)
+            self.dead(fid)
+            self.cohort(fid)                                    # practised Oct 1, 2 and 5
+        self.clock.t = at("2026-10-08", 8, 0)                   # the House down Oct 6 and 7
+        self.assertEqual([r["unpracticed"] for r in practice.cohort_status(self.root, today="2026-10-08")], [2, 2])
+        self.assertEqual(self.tournament().incubator_keep(), frozenset({"a", "b"}))
+        self.practised("b", days=("2026-10-08",))               # back, practising b only: a is left out
+        self.assertEqual(self.tournament().incubator_keep(), frozenset({"b"}))
+
     def test_the_keep_ends_when_the_cohort_fails_or_its_window_runs_out(self):
         sessions = ("2026-10-01", "2026-10-02", "2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09",
                     "2026-10-12", "2026-10-13", "2026-10-14")

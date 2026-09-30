@@ -51,8 +51,8 @@
    incubator's sample (3 completed sessions, 10 program closes) it is kept whatever its record so far: the first look is
    the one pre-registered P&L test, and a record judged sooner would drop a third or more of the cohorts whose first look
    would pass. Once it meets the sample it is kept only while that record is not negative (program-closed P&L at least
-   0, and all closes at least 0). A cohort the House has not practised on `KEEP_UNPRACTICED` (2) sessions, or whose
-   practice row began before it (the incubator never looks at it), is not kept. At most
+   0, and all closes at least 0). A cohort the House has not practised on `KEEP_UNPRACTICED` (2) sessions while it
+   practises others, or whose practice row began before it (the incubator never looks at it), is not kept. At most
    `tournament.incubator_keep_max` (12; 0 turns it off) families: first those that meet the sample (by return on risk,
    highest first), then those whose record so far is not negative, then the rest, each by the practice league's own
    order (`bands.priority`). It never spares a family from the deflated-Sharpe rule, its researcher's or the
@@ -97,7 +97,8 @@ KEEP_CEILING = 96
 KEEP_SAMPLE_SESSIONS = 3
 KEEP_SAMPLE_TRADES = 10
 #: A cohort the House has not practised on this many sessions (`practice.cohort_status` `unpracticed`: left out by
-#: `observe_max` or the roots cap, a Train cohort with `observe_train` off, shed, or the House down) is not kept.
+#: `observe_max` or the roots cap, a Train cohort with `observe_train` off, or shed) is not kept, while the House
+#: practises another active cohort (with none practised, the House is down or `live.observe` is off: an outage keeps them).
 KEEP_UNPRACTICED = 2
 #: When the practice record cannot be read, the last keep read stands this long, never longer: a record that stays
 #: unreadable gives every family main's rules again (and one alert).
@@ -108,7 +109,8 @@ def keep_order(rows: list[Mapping[str, Any]], alive: Mapping[str, Any] | set[str
                cap: int) -> list[dict[str, Any]]:
     """THE COHORT KEEP's choice (pure): of the active cohorts `rows` (`practice.cohort_status`, each record before today),
     each one whose family is in `alive` (the living Gym families), whose session window has not run out (`elapsed <
-    window`), that the House is practising (`unpracticed < KEEP_UNPRACTICED`) and that the incubator can look at
+    window`), that the House is practising (`unpracticed < KEEP_UNPRACTICED`, unless it practises no active cohort at
+    all: an outage) and that the incubator can look at
     (`sessions` known), and that either has not met the incubator's sample (`KEEP_SAMPLE_SESSIONS` completed sessions and
     `KEEP_SAMPLE_TRADES` program closes) or has a record that is not negative (`pnl_program >= 0` and `pnl_all >= 0`, to
     the cent). Ordered: the sample met, by return on risk, highest first; then the rest whose record so far is not
@@ -116,11 +118,14 @@ def keep_order(rows: list[Mapping[str, Any]], alive: Mapping[str, Any] | set[str
     family (its first), at most `cap`; each row gains `sample` and `negative`."""
     from .bands import priority
 
+    # The House practising no active cohort at all (down, or `live.observe` off) is an outage, not a cohort left out: the
+    # unpractised rule waits for it (the window still bounds the keep).
+    practising = any(int(r.get("unpracticed") or 0) < KEEP_UNPRACTICED for r in rows)
     ranked = []
     for r in rows:
         if r["family"] not in alive or r.get("sessions") is None:
             continue
-        if int(r["elapsed"]) >= int(r["window"]) or int(r.get("unpracticed") or 0) >= KEEP_UNPRACTICED:
+        if int(r["elapsed"]) >= int(r["window"]) or (practising and int(r.get("unpracticed") or 0) >= KEEP_UNPRACTICED):
             continue
         negative = round(float(r["pnl_program"]), 2) < 0 or round(float(r["pnl_all"]), 2) < 0
         sample = int(r["sessions"]) >= KEEP_SAMPLE_SESSIONS and int(r["closes_program"]) >= KEEP_SAMPLE_TRADES
