@@ -366,6 +366,33 @@ python3 scripts/data/box.py run -- ARGS         # run backfill.py ARGS (or check
   and Gym bundle together; changed evaluator fingerprints require fresh qualifying evidence. Price-only images
   do not gain usable volume merely by adopting the code. Daily API totals and SPY volume for index roots are not substituted.
   `options_live.summary.volume_error` reports checkpoint/history failures; unknown values remain unavailable after restart.
+- **Input capability card (separate follow-up candidate).** An operator's private Train audit can be installed as
+  `/workspace/state/input-capabilities.json`, beside `swarm.sqlite` (use the actual swarm root if different).
+  The Researcher family brief and Architect proposal request read it before hypothesis selection. Reads are local
+  and cached by file revision; there is no model, data-provider, or Gym query to refresh coverage on a turn. Replace
+  the file atomically after an audit. Missing, invalid, oversized (over 128 KiB), or different-image cards report
+  unknown coverage; changing `gym.image_checkpoint` invalidates the old counts immediately. A new card does not
+  by itself wake event-held families; an image change or an explicit `research_wake` does.
+  Schema 1 requires `image_checkpoint`, ISO `audited_at`, `train_from`, `train_through`, `raw_file_count`,
+  `raw_volume_file_count`, `raw_complete_volume_sessions`, `point_in_time_verified_volume_sessions`, and `roots`.
+  Each root has `train_sessions`, `raw_volume_sessions`, `raw_complete_sessions`, `asof_verified_sessions`,
+  `raw_first`, and `raw_last` (both null when no raw volume). Counts must reconcile across roots; other audit fields
+  stay private and are not rendered as prompt instructions. Raw counts/date coverage and verified as-of counts are
+  labeled separately; the current historical reader loads no volume receipts, so all historical strategy volume
+  remains unavailable even with a matching card. No image, SQL or public-site schema change is needed for this card.
+  Generate audits from nonsealed Train inputs/metadata only; never infer coverage from holdout/forward prices.
+  The measured card itself belongs in private state, not in the repository or a public checkpoint.
+
+  **Future replay receipt requirement (not implemented here):** the current-day volume KV is overwritten on the
+  next session, and 60 daily aggregates cannot reconstruct first observations. Replay needs an append-only private
+  archive per root/session/bar of the first accepted value, its bar interval and first-available decision minute,
+  plus the actual receive timestamp, source/feed, and the extraction/evaluator version. Preserve session calendars,
+  explicit gaps and polling failures, restart/duplicate identity, and a content hash so later vendor corrections
+  cannot silently replace an observation. Persist each receipt before day rollover with restart-safe idempotency;
+  retain the minute series as long as the evidence using it. Archive completeness must itself be measured. Current
+  KV rows preserve values and decision minutes, but lack wall-clock receive/source receipts and durable multi-day
+  minute history. Any future replay ingestion needs a reviewed as-of schema and explicit evidence-window policy;
+  live observations must not silently enter the sealed historical Train image.
 
 ## Real money
 

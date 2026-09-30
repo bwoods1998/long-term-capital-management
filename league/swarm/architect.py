@@ -67,7 +67,7 @@ import unicodedata
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Mapping, Sequence
 
-from . import diagnostics
+from . import diagnostics, inputs
 from . import settings as settings_mod
 from .researcher import MAX_ROOTS, SCREENED, SELF_REFUTED, VERDICT_TAG, VERDICT_WORDS
 from .store import LONG_SINGLE, SINGLE_SIDES, STRUCTURES, SwarmStore, iso, same_slice, slice_priors, slugify, structure_query
@@ -1012,7 +1012,10 @@ class Architect:
                       for g in self.store.graveyard(limit=20)]
             graveyard = f"THE GRAVEYARD:\n{json.dumps(graves)}"
         want = self.want()
-        roots = ", ".join(self.settings.get("gym", {}).get("roots", ["SPY", "QQQ", "IWM", "XSP", "SPXW"]))
+        gym = self.settings.get("gym", {})
+        admitted_roots = gym.get("roots", ["SPY", "QQQ", "IWM", "XSP", "SPXW"])
+        roots = ", ".join(admitted_roots)
+        available = inputs.context(self.store.root, gym.get("image_checkpoint"), admitted_roots)
         gaps = json.dumps(self._gaps_by_root(), separators=(",", ":"))
         coverage = json.dumps(self.coverage(), separators=(",", ":"))
         # During a burst refill, ask for the whole bounded gap. Asking for "3 to 12" repeatedly underfilled a
@@ -1025,7 +1028,7 @@ class Architect:
         full_text = ("\n\nFULL MECHANISM CLASSES (structure x root group: index, etf, names; each already has the most living "
                      "families one class may have, so a proposal in one is not born):\n" + json.dumps(full)) if full else ""
         return (f"Propose {number} new families, on these roots only (the Gym "
-                f"holds their data): {roots}.\n\nLIVING FAMILIES "
+                f"holds their data): {roots}.\n\n{available}\n\nLIVING FAMILIES "
                 f"(leaderboard):\n{json.dumps(living)}\n\n{graveyard}\n\n"
                 f"RESEARCH COVERAGE (effort, not profitability; validated means evaluated, not passed):\n{coverage}\n\n{practice}"
                 f"GAPS (uncovered structure types by root; [] means all covered):\n{gaps}" + full_text

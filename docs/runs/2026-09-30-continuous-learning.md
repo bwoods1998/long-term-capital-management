@@ -84,8 +84,9 @@ waits while that collector is running. No vendor failure was relabeled valid dat
 Cost reconciliation found another distinction to preserve: at approximately 04:56 UTC the Sail
 provider reported $71.90 for all 307 project boxes since T0, whereas the swarm had booked $121.81
 of estimated Gym-box usage. These are alternative measures, not additive charges. Recorded model
-charges were Sail $197.70, OpenAI $50.23 and Claude $144.69, with no unresolved model holds at that
-reading. Data subscriptions and any unallocated standalone work still need reconciliation; none of
+charges were Sail $197.70, OpenAI $50.23 and Claude $144.69. These were booked totals; that reading
+did not establish settlement coverage, and the later journal audit identified outstanding holds.
+Data subscriptions and any unallocated standalone work still need reconciliation; none of
 these readings establishes complete project Net. Existing ledgers and financial baselines remain
 unchanged.
 
@@ -115,3 +116,72 @@ candidate therefore withholds those minute values and daily sums from strategies
 observations remain available with explicit provenance and restart persistence. The correction's
 115 targeted tests passed, including the concrete late-revision counterexample; final integrated
 volume checks remain required. Raw coverage does not establish point-in-time input availability.
+
+## Foundation merged; observation through 06:13 UTC
+
+PR #431 passed the gateway job and both complete hosted Python 3.11/3.14 jobs on
+`9249c470b48432f4f1116e07d7a7845aced256db`, then merged at 05:59:25 UTC as `ed545499`.
+The final local volume/live/qualification checks passed 103 tests. The actual House remains on
+`20260930T045038Z-cb6035693ef4`; none of the broader foundation changes has been deployed or
+verified in production. The prepared adoption audit must compare the new evaluator, current
+entry proofs, trials, consumed looks, frozen exit paths and persistent practice state before
+deployment can be described as successful.
+
+Read-only observations at 05:31, 06:05 and 06:13 UTC show a fresh House/swarm heartbeat and no
+reported health failures. At the last reading there are 66 living Gym families and 1,676 retired
+families, two failed holdout looks, zero passed looks and no qualified forward rows. Those are
+research activity counts, not profits. The September 29 nightly forward job has completed and
+published its checkpoint; the September 28 checkpoint remains recorded. No trade, allocation,
+capital, provider-budget or live-release change was made during this follow-up.
+
+Historical SIP completion still retries March 8, 2022. A read-only probe of the existing provider
+endpoint found only the 21:00 UTC close-stamped PLTR bar and zero regular-session bars, both when
+requested alone and with the full stock universe. BABA and TSM had one regular-session bar each;
+most peers had 390. This establishes a source-coverage gap, not a calendar correction or permission
+to synthesize bars. The missing day remains incomplete. Raw response prices are not in this record.
+
+## Research supervision and evidence follow-up
+
+The separate follow-up adds a release-bound read-only harness observer with an explicit private
+policy, a lifetime lock, verified recovery after an interrupted process-record write, nonblocking
+transition waits, pidfd-bound stop signals, and visible capture/reconciliation errors. The observer
+does not author patches, call paid models, evaluate candidates, deploy code or place orders. No
+production policy or observer was activated. The combined runtime/hook/lab tests passed 75 cases;
+the final nested-error correction passed all 23 runtime/CLI cases. Independent review reproduced
+the original failures and confirmed the corrections. Its runbook distinguishes exception handling
+from a hard latency bound on synchronous House filesystem work.
+
+Researchers and the Architect also receive cached metadata for the exact active Train image.
+Missing, malformed or differently imaged cards remain unknown. Raw volume coverage never grants
+point-in-time volume access; publication receipts are still absent from the historical reader.
+
+The [frozen long-single diagnostic](../benchmarks/LONG_SINGLE_GATES_1.md) adds two independent
+64-world cohorts using the actual frequency, drift, Validation, holdout and lineage functions.
+Both cohorts reject all 12- and 48-trade positive controls, while the deliberately strong
+126-trade signal passes in every world. Searching 64 noise policies produces many more attractive
+Train candidates; one confirmation candidate passes Validation and is rejected by holdout. Failed
+looks and later validations remain counted. No negative control completes the statistical path,
+but zero of 64 permits a 4.57% one-sided 95% upper bound per case. This is a synthetic sensitivity
+study, not evidence of a market edge, complete pipeline calibration or permission to lower a gate.
+
+The private economic reporter now preserves source receipts and separates booked reservations,
+priced charges, finalized box costs and estimates. Independent review caught unknown Claude
+gateway settlements being mistaken for priced bills and missing fee/liability coverage being
+treated as complete. Corrected schema 2 keeps these unresolved, rejects inconsistent position
+counts, and settles a later verified bill exactly once. The 83 accounting regressions pass,
+including 28 focused cases independently rechecked. Earlier reports remain historical snapshots;
+they are not silently upgraded. External engineering attribution, outstanding reservations and
+different billing cutoffs still prevent complete project Net. Fees already present in position
+cash are not charged again, and provider box bills replace rather than add to Gym estimates.
+
+The combined follow-up checks passed 178 tests. A final correction for the real book's explicit
+reconciliation reason string passed all 28 economics tests; a missing reason remains unknown.
+Content checks pass, and the execution fingerprint, model configuration and capital permissions
+match the merged foundation. The schema 2 report captured at 06:16:22 UTC has $469.55 of known
+inputs, excluding unresolved reservations and unknown external costs. Complete Net remains null.
+Its live reconciliation receipt was 619 seconds old, so that snapshot also refuses to certify
+broker-adjusted cash from a stale reading; the raw closed book cash remains minus $17.80.
+
+These follow-up changes still require hosted CI. Repeated independently
+retained harness improvements, qualified forward strategy profits and positive all-input project
+Net have not been demonstrated. The production-profitability goal remains unmet.
