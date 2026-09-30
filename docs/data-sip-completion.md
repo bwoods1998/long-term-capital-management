@@ -20,8 +20,11 @@ cover pre-Train extensions or forward days.
 - `sip_gaps`: the initial scan finished with unresolved work. Retries visit at most five due dates
   per step, with three automatic attempts per root and persistent exponential backoff. Reservations
   survive a crash; an ingest whose acknowledgement was lost resolves only after current file/grid
-  verification. Exhausted roots count as `deferred`, remain incomplete, and cause no further provider
-  requests or data-box wakeups until reconsidered. There is no images-ready certificate while gaps remain.
+  verification. A final unacknowledged or uncertain write gets one separately reserved read-only
+  recovery observation, with no additional provider attempt. A failed/incomplete recovery is recorded
+  and cannot repeat indefinitely. Exhausted roots then count as `deferred`, remain incomplete, and
+  cause no further provider requests or data-box wakeups until reconsidered. There is no images-ready
+  certificate while gaps remain.
 - `gym`, `gate`, `calibrate`: reached only with complete queue receipts. Actual canonical file hashes
   and current journal identities are compared to those receipts before each source snapshot, under
   the lease for the exact box being checkpointed. Changed files reopen gaps; changed root/source/

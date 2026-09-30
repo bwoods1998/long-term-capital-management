@@ -45,6 +45,41 @@ def identities():
 
 
 class DurableGaps(unittest.TestCase):
+    def test_final_uncertain_write_gets_one_read_only_recovery_without_an_extra_provider_attempt(self):
+        for reported_error in (False, True):
+            for canonical_complete in (False, True):
+                with self.subTest(error=reported_error, full=canonical_complete), tempfile.TemporaryDirectory() as tmp:
+                    now = [1000.0]
+                    path = Path(tmp) / 'sip.sqlite'
+                    with Progress(path, plan(), clock=lambda: now[0]) as q:
+                        finished(q)
+                        for attempt in range(1, 4):
+                            now[0] += 10000
+                            q.reserve(DAYS[0], [receipt(DAYS[0], 'PLTR'), receipt(DAYS[0], 'SPY', full=True)])
+                            if attempt < 3:
+                                q.record(DAYS[0], [receipt(DAYS[0], 'PLTR')])
+                        if reported_error:
+                            q.record(DAYS[0], [{**receipt(DAYS[0], 'PLTR'), 'status': 'error',
+                                               'uncertain_write': True, 'error': 'lost ingestion acknowledgement'}])
+                        original = q.db.execute('SELECT receipt FROM attempts WHERE root=? AND n=3', ('PLTR',)).fetchone()[0]
+                    now[0] += 10000
+                    with Progress.existing(path, clock=lambda: now[0]) as q:
+                        self.assertEqual(q.due_days(), [DAYS[0]])
+                        ops = object.__new__(complete.Operations)
+                        ops.data = object()
+                        status = {'roots': [receipt(DAYS[0], 'PLTR', full=canonical_complete), receipt(DAYS[0], 'SPY', full=True)]}
+                        with patch.object(sl, 'in_quiet', return_value=False), patch.object(sip, 'status_day', return_value=status), \
+                                patch.object(sip, 'relay_day', side_effect=AssertionError('no extra provider attempt')) as relay:
+                            ops._relay_days([dt.date.fromisoformat(DAYS[0])], q, object(), lambda: None)
+                            relay.assert_not_called()
+                        self.assertEqual(q.due_days(), [])
+                        self.assertEqual(q.summary()['complete'], canonical_complete)
+                        self.assertEqual(q.db.execute('SELECT COUNT(*) FROM attempts WHERE root=?', ('PLTR',)).fetchone()[0], 3)
+                        self.assertEqual(q.db.execute('SELECT receipt FROM attempts WHERE root=? AND n=3', ('PLTR',)).fetchone()[0], original)
+                        observed = q.db.execute('SELECT receipt FROM recoveries').fetchall()
+                        self.assertEqual(len(observed), 1)
+                        self.assertEqual(json.loads(observed[0][0])['complete'], canonical_complete)
+
     def test_later_dates_advance_and_budget_survives_crash_then_evidence_reconsideration(self):
         now = [1000.0]
         with tempfile.TemporaryDirectory() as tmp:

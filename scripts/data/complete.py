@@ -93,14 +93,20 @@ class Operations:
             check_lease()
             if sl.in_quiet(dt.datetime.now(dt.timezone.utc), 600):
                 raise RuntimeError('historical SIP deferred for the nightly quiet window')
-            status = status_day(self.data, day)
-            due = progress.reserve(str(day), status['roots'])
+            recovery = progress.reserve_recovery(str(day))
+            try:
+                status = status_day(self.data, day)
+                due = progress.reserve(str(day), status['roots'])
+            except Exception as error:
+                progress.recovery_result(str(day), recovery, error=f'{type(error).__name__}: {str(error)[:200]}')
+                raise
+            progress.recovery_result(str(day), recovery, rows=status['roots'])
             if due:
                 try:
                     result = relay_day(day, self.data, calendar=calendar, source_root=sl.source_root,
                                        roots=due, verified=status, allow_gaps=True, check_lease=check_lease)
                 except Exception as error:
-                    progress.record(str(day), [{**r, 'complete': False, 'status': 'error',
+                    progress.record(str(day), [{**r, 'complete': False, 'status': 'error', 'uncertain_write': True,
                                                 'error': f'{type(error).__name__}: {str(error)[:200]}'}
                                                for r in status['roots'] if r['root'] in due])
                     raise

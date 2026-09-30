@@ -32,8 +32,12 @@ class Progress:
             CREATE TABLE IF NOT EXISTS roots(
                 day TEXT NOT NULL, root TEXT NOT NULL, status TEXT NOT NULL,
                 attempts INTEGER NOT NULL DEFAULT 0, budget INTEGER NOT NULL DEFAULT 3,
-                retry_at REAL NOT NULL DEFAULT 0, receipt TEXT NOT NULL, PRIMARY KEY(day,root));
+                retry_at REAL NOT NULL DEFAULT 0, recovery_pending INTEGER NOT NULL DEFAULT 0,
+                receipt TEXT NOT NULL, PRIMARY KEY(day,root));
             CREATE TABLE IF NOT EXISTS attempts(
+                day TEXT NOT NULL, root TEXT NOT NULL, n INTEGER NOT NULL, at REAL NOT NULL,
+                receipt TEXT, PRIMARY KEY(day,root,n));
+            CREATE TABLE IF NOT EXISTS recoveries(
                 day TEXT NOT NULL, root TEXT NOT NULL, n INTEGER NOT NULL, at REAL NOT NULL,
                 receipt TEXT, PRIMARY KEY(day,root,n));
             CREATE TABLE IF NOT EXISTS reconsiderations(
@@ -108,7 +112,7 @@ class Progress:
                 self.db.execute("INSERT INTO roots(day,root,status,receipt) VALUES(?,?,'pending',?) "
                                 "ON CONFLICT(day,root) DO NOTHING", (day, row['root'], body))
                 if row.get('complete'):
-                    self.db.execute("UPDATE roots SET status='complete',retry_at=0,receipt=? WHERE day=? AND root=?",
+                    self.db.execute("UPDATE roots SET status='complete',retry_at=0,recovery_pending=0,receipt=? WHERE day=? AND root=?",
                                     (body, day, row['root']))
                 else:
                     # A changed/missing file invalidates a complete receipt without forgiving past attempts.
@@ -125,7 +129,7 @@ class Progress:
                 if attempts >= budget or retry_at > now:
                     continue
                 attempt = attempts + 1
-                self.db.execute("UPDATE roots SET status='retrying',attempts=?,retry_at=? WHERE day=? AND root=?",
+                self.db.execute("UPDATE roots SET status='retrying',attempts=?,retry_at=?,recovery_pending=1 WHERE day=? AND root=?",
                                 (attempt, now + RETRY_SECONDS * 2 ** min(attempt - 1, 4), day, root))
                 self.db.execute("INSERT INTO attempts(day,root,n,at) VALUES(?,?,?,?)", (day, root, attempt, now))
                 due.append(root)
@@ -142,8 +146,9 @@ class Progress:
                 if saved is None or saved[1] != 'retrying':
                     raise ValueError("unreserved SIP receipt")
                 body = json.dumps(row, sort_keys=True, allow_nan=False)
-                self.db.execute("UPDATE roots SET status=?,receipt=?,retry_at=CASE WHEN ? THEN 0 ELSE retry_at END "
-                                "WHERE day=? AND root=?", (row['status'], body, bool(row.get('complete')), day, row['root']))
+                self.db.execute("UPDATE roots SET status=?,receipt=?,recovery_pending=?,retry_at=CASE WHEN ? THEN 0 ELSE retry_at END "
+                                "WHERE day=? AND root=?", (row['status'], body, bool(row.get('uncertain_write')),
+                                                         bool(row.get('complete')), day, row['root']))
                 self.db.execute("UPDATE attempts SET receipt=? WHERE day=? AND root=? AND n=?",
                                 (body, day, row['root'], saved[0]))
 
@@ -156,7 +161,28 @@ class Progress:
 
     def due_days(self) -> list[str]:
         return [row[0] for row in self.db.execute("SELECT DISTINCT day FROM roots WHERE status!='complete' "
-                "AND attempts<budget AND retry_at<=? ORDER BY day LIMIT ?", (self.clock(), RETRY_DAYS))]
+                "AND (attempts<budget OR recovery_pending=1) AND retry_at<=? ORDER BY day LIMIT ?", (self.clock(), RETRY_DAYS))]
+
+    def reserve_recovery(self, day: str) -> list[str]:
+        """One read-only observation for a final unacknowledged/uncertain write, never another provider attempt."""
+        with self.db:
+            rows = self.db.execute("SELECT root,attempts FROM roots WHERE day=? AND status!='complete' "
+                                   "AND attempts>=budget AND recovery_pending=1 AND retry_at<=?", (day, self.clock())).fetchall()
+            for root, attempt in rows:
+                self.db.execute("UPDATE roots SET recovery_pending=0 WHERE day=? AND root=?", (day, root))
+                self.db.execute("INSERT INTO recoveries(day,root,n,at) VALUES(?,?,?,?)", (day, root, attempt, self.clock()))
+        return [r[0] for r in rows]
+
+    def recovery_result(self, day: str, roots: list[str], *, rows=(), error=None):
+        by_root = {r['root']: r for r in rows}
+        with self.db:
+            for root in roots:
+                result = {'error': error} if error else by_root[root]
+                self.db.execute("UPDATE recoveries SET receipt=? WHERE day=? AND root=? "
+                                "AND n=(SELECT attempts FROM roots WHERE day=? AND root=?)",
+                                (json.dumps(result, sort_keys=True), day, root, day, root))
+                self.db.execute("UPDATE roots SET status=? WHERE day=? AND root=?",
+                                ('error' if error else result['status'], day, root))
 
     def compare_files(self, files: list[dict]):
         """Before an image snapshot: compare actual file hashes and current journal identities to receipts."""
