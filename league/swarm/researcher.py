@@ -592,6 +592,28 @@ def full_run(args: Any) -> bool:
     return value is True or (isinstance(value, str) and value.strip().lower() == "true")
 
 
+#: Warnings of one advisory preflight a run's answer carries at most (`_advised`).
+ADVISORY_WARNINGS = 3
+ADVISORY_NOTE = ("before this run, decide raised on a made-up market in the preflight. It refuses only a misuse of the ctx "
+                 "API that no market could spare, so the run went ahead; each line below may still cost Gym errors (25 in "
+                 "a run disqualify it). Fix what the hint names, especially if the run was disqualified.")
+
+
+def _advised(answer: Any, advisories: Sequence[Mapping[str, Any]]) -> Any:
+    """A run's or a sweep's answer with the preflight's advisories beside it (`Researcher._preflight`): the first's
+    reason and warnings, and each variant's for a sweep with more than one. A refused answer is left as it is."""
+    if not advisories or not isinstance(answer, dict) or answer.get("stage") == "preflight":
+        return answer
+    first = advisories[0]
+    note: dict[str, Any] = {"status": "advisory", "note": ADVISORY_NOTE, "why": first.get("why"),
+                            "warnings": first.get("warnings") or []}
+    if len(advisories) > 1 or first.get("variant") is not None:
+        note["variants"] = [dict(a) for a in advisories[:MAX_SWEEP_VARIANTS]]
+        note.pop("warnings")
+        note.pop("why")
+    return {**answer, "preflight": note}
+
+
 #: The idle rule's default (`researcher.retire_idle_evaluations`): Gym evaluations (trials, `add_run`) since a family's birth
 #: or last validation without an eligible Train version. Calibrated on the run's history (Sept 27): every family that
 #: ever made an eligible version made its first within about a hundred Train runs of its birth, and a family makes
@@ -1108,9 +1130,10 @@ class Researcher:
         self.system = ROLE + self.contract
         self.starter = starter
         self.background = background
-        #: THE PREFLIGHT (`league/swarm/preflight.py`): a new Train run's program on a synthetic session in the decider's
-        #: sandbox first; None (tests, a House without the Gym's pool) runs none. `researcher.preflight: false` switches
-        #: it off.
+        #: THE PREFLIGHT (`league/swarm/preflight.py`): a new Train run's program on synthetic sessions in the decider's
+        #: sandbox first; it refuses only market-independent misuse of the ctx API, and its advisories ride along with the
+        #: run's answer (`_advised`). None (tests, a House without the Gym's pool) runs none. `researcher.preflight: false`
+        #: switches it off.
         self.preflight = preflight
         self._rewriting: dict[str, Any] = {}
         #: (family, version, label) robustness runs this process has in flight (a restart loses queued jobs: they are
@@ -1655,11 +1678,13 @@ class Researcher:
         return None, roots, change
 
     def _preflight(self, fam: Mapping[str, Any], code: str, variants: Sequence[Mapping[str, Any]], roots: Sequence[str],
-                   out: dict[str, Any]) -> dict[str, Any] | None:
-        """THE PREFLIGHT (`league/swarm/preflight.py`): each variant about to become a Train job, on a synthetic session in
-        the decider's sandbox. A refusal is the researcher's own doing (`_refusal`): no version, no Gym job, no trial; it is
-        written in the family's notebook with the error and the API the program should have used. None: go on to the
-        Gym (it passed, or the preflight could not say: it never blocks on its own failure)."""
+                   out: dict[str, Any], advisories: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
+        """THE PREFLIGHT (`league/swarm/preflight.py`): each variant about to become a Train job, on synthetic sessions in
+        the decider's sandbox. A refusal (market-independent misuse of the ctx API only) is the researcher's own doing
+        (`_refusal`): no version, no Gym job, no trial; it is written in the family's notebook with the error and the API
+        the program should have used. None: go on to the Gym (it passed, it is advisory, or the preflight could not say:
+        it never blocks on its own failure). An advisory's warnings (each error, its line and the API to use) go into
+        `advisories`, for the run's own answer (`_advised`)."""
         check = self.preflight
         if check is None or self.cfg.get("preflight", True) is False:
             return None
@@ -1672,12 +1697,23 @@ class Researcher:
             out["preflight"] = int(out.get("preflight") or 0) + 1
             out["preflight_seconds"] = round(float(out.get("preflight_seconds") or 0) + float(verdict.get("seconds") or 0), 3)
             if verdict.get("status") == "inconclusive":
-                # It could not say (a timeout, the sandbox, its deadline, a busy lock, an error this box or this market
-                # may cause): the run goes on to the Gym. Counted, with the first reason, so a preflight that silently
-                # does nothing shows.
+                # It could not say (a timeout, the sandbox, its deadline, a busy lock): the run goes on to the Gym.
+                # Counted, with the first reason, so a preflight that silently does nothing shows.
                 out["preflight_inconclusive"] = int(out.get("preflight_inconclusive") or 0) + 1
                 out.setdefault("preflight_inconclusive_why", str(verdict.get("why") or "")[:200])
+            elif verdict.get("status") == "advisory":
+                # decide raised on a made-up market, but not with a misuse no market could spare: the run goes on to the
+                # Gym, and the researcher reads the warnings beside its answer.
+                out["preflight_advisory"] = int(out.get("preflight_advisory") or 0) + 1
+                out.setdefault("preflight_advisory_why", str(verdict.get("why") or "")[:200])
             if verdict.get("status") != "refused":
+                if advisories is not None and verdict.get("warnings"):
+                    row = {"why": str(verdict.get("why") or "")[:400], "warnings": [
+                        {k: (str(v)[:400] if isinstance(v, str) else v) for k, v in w.items()}
+                        for w in list(verdict.get("warnings") or [])[:ADVISORY_WARNINGS]]}
+                    if len(variants) > 1:
+                        row["variant"] = dict(params or {})
+                    advisories.append(row)
                 continue
             out["preflight_refused"] = int(out.get("preflight_refused") or 0) + 1
             where = f"line {verdict['line']}: " if verdict.get("line") and not str(verdict.get("error") or "").startswith("line") else ""
@@ -1695,7 +1731,8 @@ class Researcher:
             return self._refusal(out, {k: v for k, v in answer.items() if v is not None})
         return None
 
-    def _gym_run(self, fam: Mapping[str, Any], args: Mapping[str, Any], out: dict[str, Any], *, author: str) -> dict[str, Any]:
+    def _gym_run(self, fam: Mapping[str, Any], args: Mapping[str, Any], out: dict[str, Any], *, author: str,
+                 advisories: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         if self._terminal(fam["id"], out):
             return {"status": "retired", "reason": "the family is retired; no run started"}
         if holding(args):
@@ -1734,7 +1771,7 @@ class Researcher:
         # NO DUPLICATE RUNS: the evaluation this run would be, on the roots it would run on.
         key = self.eval_key(code, params, stress=stress, window="train", roots=roots if change else fam["roots"])
         if self.preflight is not None and not (self.reuse and self._reusable(self.store.evaluated(fam["id"], key), stress=stress)):
-            failed = self._preflight(fam, code, [params], roots if change else fam["roots"], out)
+            failed = self._preflight(fam, code, [params], roots if change else fam["roots"], out, advisories)
             if failed is not None:
                 return failed
         stored = None
@@ -2042,7 +2079,8 @@ class Researcher:
                           sort_keys=True, default=str)
         return f"{fid}:sweep:{hashlib.sha256(body.encode('utf-8')).hexdigest()[:16]}"
 
-    def _gym_sweep(self, fam: Mapping[str, Any], args: Mapping[str, Any], out: dict[str, Any], *, author: str) -> dict[str, Any]:
+    def _gym_sweep(self, fam: Mapping[str, Any], args: Mapping[str, Any], out: dict[str, Any], *, author: str,
+                   advisories: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         """`gym_sweep` (the module docstring, SWEEPS and SWEEP LOAD): the variants of one program on Train at once, each its
         own version and its own run and trial; a table sorted by the Train score."""
         fid = fam["id"]
@@ -2085,7 +2123,8 @@ class Researcher:
                     stored[i] = run
         fresh = len(variants) - len(stored)
         if fresh:
-            failed = self._preflight(fam, code, [p for i, p in enumerate(variants) if i not in stored], run_roots, out)
+            failed = self._preflight(fam, code, [p for i, p in enumerate(variants) if i not in stored], run_roots, out,
+                                     advisories)
             if failed is not None:
                 return failed
         if fresh and not self._reserve_sweep(fid, fresh):  # the pool's room for sweeps (SWEEP LOAD): a plain refusal, no backoff
@@ -2323,10 +2362,10 @@ class Researcher:
             else:
                 out["retire_refused"] = True
             return result
-        if name == "gym_run":
-            return self._gym_run(fam, args, out, author=author)
-        if name == "gym_sweep":
-            return self._gym_sweep(fam, args, out, author=author)
+        if name in RUNS:
+            advisories: list[dict[str, Any]] = []
+            run = self._gym_run if name == "gym_run" else self._gym_sweep
+            return _advised(run(fam, args, out, author=author, advisories=advisories), advisories)
         with self.store.atomic():  # local tools cannot change the best or notebook after another connection retires it
             if self._terminal(fam["id"], out):
                 return {"status": "refused", "reason": "the family is retired; no further tools run"}

@@ -1,5 +1,6 @@
-"""The preflight (league/swarm/preflight.py): agent API misuse is refused on a synthetic session before a Train run is
-spent, and nothing that would run in the Gym is (no false refusals: every seed and example program passes)."""
+"""The preflight (league/swarm/preflight.py): market-independent misuse of the ctx API is refused on synthetic sessions
+before a Train run is spent, and nothing that would run in the Gym is (no false refusals): every error the market's
+numbers could cause or spare is advisory, its warnings go to the researcher and the run goes ahead."""
 
 from __future__ import annotations
 
@@ -43,6 +44,14 @@ class Preflight(unittest.TestCase):
         self.assertNotEqual(out["status"], "refused", out)
         return out
 
+    def advisory(self, code, **kw):
+        out = self.check(code, **kw)
+        self.assertEqual(out["status"], "advisory", out)
+        self.assertTrue(out["warnings"], out)
+        for warning in out["warnings"]:
+            self.assertTrue(warning.get("error") and warning.get("hint"), warning)
+        return out
+
     # ------------------------------------------------------------------ what it catches (Sept 30's disqualifications)
     def test_positions_used_as_a_mapping(self):
         out = self.refused(program("for pid, p in ctx.positions.items():\n    pass\nreturn []"))
@@ -63,13 +72,15 @@ class Preflight(unittest.TestCase):
         self.assertIn("Did you mean `strike`", out["hint"])
 
     def test_arithmetic_on_a_none_is_left_to_the_gym(self):
-        # A None can be a search that found nothing on this made-up market: never a refusal (the Gym judges it). The
-        # advice for one still names the program's PARAMS.
+        # A None can be a search that found nothing on this made-up market: never a refusal (the Gym judges it), but an
+        # advisory whose warning carries the line and the API. The advice for one still names the program's PARAMS.
         from league.swarm.preflight import advice
 
-        out = self.check(program('x = ctx.params.get("missing") / 2.0\nreturn []'))
-        self.assertEqual(out["status"], "inconclusive", out)
+        out = self.advisory(program('x = ctx.params.get("missing") / 2.0\nreturn []'))
         self.assertIn("market", out["why"])
+        self.assertEqual((out["line"], out["source"]), (5, 'x = ctx.params.get("missing") / 2.0'))
+        self.assertIn("is None", out["hint"])
+        self.assertIn("made-up market", out["warnings"][0]["may_be"])
         hint = advice("line 5: TypeError: unsupported operand type(s) for /: 'NoneType' and 'float'", params={"k": 1.0})
         self.assertIn("is None", hint)
         self.assertIn(": k", hint)
@@ -79,19 +90,25 @@ class Preflight(unittest.TestCase):
         self.assertIn("KeyError: 'QQQ'", out["error"])
         self.assertIn("SPY", out["hint"])
 
-    def test_state_that_never_fills_errs_every_session(self):
-        out = self.refused(program('prev = STATE["last"]\nSTATE["last"] = ctx.under.price\nreturn []'))
+    def test_state_that_never_fills_is_advisory(self):
+        # STATE is the program's own: a key only a market condition would write is advisory, whatever the line reads.
+        out = self.advisory(program('prev = STATE["last"]\nSTATE["last"] = ctx.under.price\nreturn []'))
         self.assertIn("KeyError: 'last'", out["error"])
         self.assertIn("STATE", out["hint"])
 
     def test_a_params_key_read_from_the_wrong_place(self):
-        out = self.refused(program('n = STATE["k"]\nreturn []'))
+        out = self.advisory(program('n = STATE["k"]\nreturn []'))
         self.assertIn("ctx.params['k']", out["hint"])
 
     def test_the_advice_names_the_declared_params(self):
-        out = self.refused(program('x = PARAMS["window"]\nreturn []'))
-        self.assertIn("KeyError: 'window'", out["error"])
-        self.assertIn(": k", out["hint"])
+        # A key the program never declared is never in its PARAMS (only read, never written) nor in ctx.params.
+        for line in ('x = PARAMS["window"]', 'x = ctx.params["window"]', 'p = ctx.params\nx = p["window"]'):
+            out = self.refused(program(line + "\nreturn []"))
+            self.assertIn("KeyError: 'window'", out["error"])
+            self.assertIn(": k", out["hint"])
+            self.assertIn("never a key", out["why"])
+        # A PARAMS the program writes to could hold it by then: advisory.
+        self.advisory(program('if ctx.events["fomc"]:\n    PARAMS["window"] = 3\nx = PARAMS["window"]\nreturn []'))
 
     def test_a_module_body_that_fails_to_load(self):
         code = HEAD + 'TABLE = {"a": 1}\nFIRST = TABLE["b"]\ndef decide(ctx):\n    return []\n'
@@ -111,8 +128,10 @@ class Preflight(unittest.TestCase):
         self.assertEqual(refused, [])
 
     def test_a_warm_up_error_that_stops_is_not_refused(self):
-        # Errs on its first 10 calls (fewer than the Gym's 25), then runs.
-        self.passed(program('STATE["n"] = STATE.get("n", 0) + 1\nif STATE["n"] <= 10:\n    raise ValueError("warming")\nreturn []'))
+        # Errs on its first 10 calls (fewer than the Gym's 25), then runs: advisory, with its line.
+        out = self.advisory(program('STATE["n"] = STATE.get("n", 0) + 1\nif STATE["n"] <= 10:\n    raise ValueError("warming")\nreturn []'))
+        self.assertIn("10 of", out["why"])
+        self.assertEqual(out["line"], 7)
 
     def test_an_error_on_one_weekday_only_is_not_refused(self):
         self.passed(program('if ctx.weekday == 1:\n    raise ValueError("tuesday")\nreturn []'))
@@ -148,16 +167,15 @@ class Preflight(unittest.TestCase):
         self.assertEqual(out["status"], "inconclusive", out)
         self.assertEqual(out["calls"], 1)
 
-    def test_a_numpy_api_error_is_inconclusive(self):
+    def test_a_numpy_api_error_is_advisory(self):
         # The House's numpy is not the Gym boxes' (requirements-gym.txt): an API one has and the other lacks says nothing.
-        code = "import numpy as np\n" + program("x = np.not_in_this_numpy(1.0)\nreturn []")
-        out = self.check(code)
-        self.assertEqual(out["status"], "inconclusive", out)
+        out = self.advisory("import numpy as np\n" + program("x = np.not_in_this_numpy(1.0)\nreturn []"))
+        self.assertIn("this box", out["warnings"][0]["may_be"])
 
-    def test_a_missing_stdlib_function_is_inconclusive(self):
+    def test_a_missing_stdlib_function_is_advisory(self):
         # The House runs Python 3.11; the Gym's boxes 3.12+ (math.sumprod, int.is_integer): not the program's fault.
-        out = self.check("import math\n" + program("x = math.not_in_this_python([1.0], [2.0])\nreturn []"))
-        self.assertEqual(out["status"], "inconclusive", out)
+        out = self.advisory("import math\n" + program("x = math.not_in_this_python([1.0], [2.0])\nreturn []"))
+        self.assertIn("this box", out["why"])
 
     def test_what_is_this_box_and_what_is_the_program(self):
         from league.swarm.preflight import environmental
@@ -182,15 +200,14 @@ class Preflight(unittest.TestCase):
                         "line 5: KeyError: 'last'"):
             self.assertFalse(environmental(message), message)
 
-    def test_an_error_on_the_market_numbers_is_inconclusive(self):
+    def test_an_error_on_the_market_numbers_is_advisory(self):
         from league.swarm.preflight import market_dependent
 
         head = "import numpy as np\n" + HEAD
         for body in ("i = np.flatnonzero(ctx.chain.strike == round(ctx.under.price) + 0.25)[0]\nreturn []",
                      "x = 1.0 / (ctx.chain.n * 0)\nreturn []",
                      "k = min(s for s in ctx.chain.strike if s < 0)\nreturn []"):
-            out = self.check(program(body, head=head))
-            self.assertEqual(out["status"], "inconclusive", (body, out))
+            out = self.advisory(program(body, head=head))
             self.assertIn("market", out["why"])
         self.assertTrue(market_dependent("line 5: KeyError: 450.0"))
         self.assertTrue(market_dependent("line 5: KeyError: np.float64(450.0)"))
@@ -349,13 +366,11 @@ class Preflight(unittest.TestCase):
         body = ("c = ctx.chain\nk = round(ctx.under.price / 2.5) * 2.5\natm = c.is_call & np.isclose(c.strike, k, atol=1.0)\n"
                 "if c.ask[atm] - c.bid[atm] > ctx.params[\"edge\"]:\n    return []\nreturn []")
         with mock.patch.object(PF, "listing", finer):
-            out = self.check(program(body, head=head))
-        self.assertEqual(out["status"], "inconclusive", out)
-        self.assertIn("sparser listing", out["why"])
-        self.assertIn("truth value of an array", out["why"])
+            out = self.advisory(program(body, head=head))
+        self.assertIn("truth value of an array", out["error"])
         # The same misuse on every chain still refuses, confirmed on the sparser listing.
         out = self.refused(program("for pid, p in ctx.positions.items():\n    pass\nreturn []"))
-        self.assertIn("again on a sparser listing", out["why"])
+        self.assertIn("on a sparser and a denser listing", out["why"])
 
     def test_a_chain_coarser_than_the_gyms_never_refuses_on_its_own(self):
         # The correctness review's false refusals (round 3): IWM is listed Monday, Wednesday and Friday, so a calendar
@@ -366,12 +381,9 @@ class Preflight(unittest.TestCase):
         stated = "c = ctx.chain\nd = c.mid[(c.dte == 1) & c.is_call] - c.mid[(c.dte == 0) & c.is_call]\nreturn []"
         gated = ("c = ctx.chain\nf = (c.dte == 0) & c.is_call\nb = (c.dte == 1) & c.is_call\nif f.any() and b.any():\n"
                  "    STATE[\"cal\"] = 1\nx = STATE[\"cal\"]\nreturn []")
-        out = self.check(program(stated, head=head))
-        self.assertEqual(out["status"], "inconclusive", out)
+        out = self.advisory(program(stated, head=head))
         self.assertIn("broadcast together with shapes", out["why"])
-        out = self.check(program(gated, head=head))
-        self.assertEqual(out["status"], "inconclusive", out)
-        self.assertIn("denser listing", out["why"])
+        out = self.advisory(program(gated, head=head))
         self.assertIn("KeyError: 'cal'", out["why"])
         # XSP lists every weekday (the store's 2024 sample): both run clean on the listing itself.
         for body in (stated, gated):
@@ -380,7 +392,7 @@ class Preflight(unittest.TestCase):
         # A misuse after the same calendar still refuses on every market, the denser one too.
         out = self.refused(program(gated.replace('x = STATE["cal"]', "for pid, p in ctx.positions.items():\n    pass"),
                                    head=head))
-        self.assertIn("denser one", out["why"])
+        self.assertIn("denser listing", out["why"])
 
     def test_a_selection_read_whatever_its_count_is_never_refused(self):
         # The evidence review's case: np.squeeze(axis=0) of a selection raises on none and on several alike, as .item()
@@ -388,8 +400,7 @@ class Preflight(unittest.TestCase):
         head = "import numpy as np\n" + HEAD
         pick = "sel = c.mid[(c.iv > 0.5) & c.is_call & (c.dte == c.dte.min())]\n"
         for read in ("px = float(np.squeeze(sel, axis=0))", "px = sel.item()"):
-            out = self.check(program("c = ctx.chain\n" + pick + read + "\nreturn []", head=head))
-            self.assertEqual(out["status"], "inconclusive", (read, out))
+            self.advisory(program("c = ctx.chain\n" + pick + read + "\nreturn []", head=head))
 
     def test_a_wide_quote_on_a_deep_book_exists(self):
         # The correctness review's nit: a filter for wide quotes on deep books kept nothing on any market (the listing's
@@ -436,12 +447,14 @@ class Preflight(unittest.TestCase):
         head = ('import numpy as np\nNEEDS = {"roots": ["SPY"], "dte": [0, 7], "band": 0.05, "cadence": 5, "history": 10}\n'
                 'PARAMS = {"max_spread": 0.04}\nSTATE = {}\n')
         for what, body in self.LIQUID.items():
+            # At 4% each keeps contracts on most minutes: passed, or advisory where a minute's quotes keep none or two.
             out = self.check(program(body, head=head), {"max_spread": 0.04})
-            self.assertEqual(out["status"], "passed", (what, out))
-            # A filter no quote could meet here keeps nothing on the tightest market either: never a refusal still.
+            self.assertIn(out["status"], ("passed", "advisory"), (what, out))
+            self.assertLess(out.get("errors") or 0, 25, (what, out))
+            # A filter no quote could meet here keeps nothing on the tightest market either: advisory, never refused.
             for cap in (0.01, 0.002):
                 out = self.check(program(body, head=head), {"max_spread": cap})
-                self.assertNotEqual(out["status"], "refused", (what, cap, out))
+                self.assertIn(out["status"], ("passed", "advisory"), (what, cap, out))
 
     def test_the_quotes_are_tight_near_the_money_and_never_under_a_tick(self):
         # Near the money no wider than the Gym's own synthetic store (3% of the mid), so a 4% liquidity filter keeps calls
@@ -479,32 +492,32 @@ class Preflight(unittest.TestCase):
             self.assertLess(widths["tight"], widths["listed"], root)
             self.assertGreater(widths["wide"], widths["listed"], root)
 
-    def test_a_refusal_must_recur_on_other_numbers(self):
-        # Each errs on every call of the listed market and of the sparser listing (the same numbers), but not on one of
-        # the others: a STATE key written only on one-tick quotes, only at a high vol, only at a low vol.
+    def test_a_refusal_must_recur_at_the_same_line_on_every_market(self):
+        # A misuse behind a branch the made-up numbers open on the listed market but not on another: advisory, naming the
+        # market that spared it (one-tick quotes, the wide market's lower price, known volumes on the saturated market).
         head = ('import numpy as np\nNEEDS = {"roots": ["SPY"], "dte": [0, 7], "band": 0.05, "cadence": 5, "history": 10}\n'
                 'PARAMS = {}\nSTATE = {}\n')
         atm = ("c = ctx.chain\ni = np.flatnonzero(c.is_call & (c.dte == c.dte.max()))\n"
                "iv = float(c.iv[i[np.argmin(np.abs(c.strike[i] - c.spot))]])\n")
-        for condition, spared in (("(c.spread <= 0.0101).all()", "one tick wide"), ("iv > 0.28", "one tick wide"),
-                                  ("iv < 0.12", "three times as wide")):
-            out = self.check(program(atm + f'if {condition}:\n    STATE["seen"] = True\nx = STATE["seen"]\nreturn []', head=head))
-            self.assertEqual(out["status"], "inconclusive", (condition, out))
+        for condition, spared in (("not (c.spread <= 0.0101).all()", "one tick wide"), ("ctx.under.price > 425", "three times as wide"),
+                                  ("ctx.under.volume != ctx.under.volume", "saturated")):
+            out = self.advisory(program(atm + f"if {condition}:\n    for pid, p in ctx.positions.items():\n        pass\n"
+                                              "return []", head=head))
             self.assertIn(spared, out["why"], condition)
-            self.assertIn("KeyError: 'seen'", out["why"], condition)
-        # Where another market could not say (there, an error its numbers cause), neither can the preflight: its reason.
-        out = self.check(program("c = ctx.chain\nif (c.spread <= 0.0101).all():\n    k = c.strike[c.strike < 0][0]\n"
-                                 "for pid, p in ctx.positions.items():\n    pass\nreturn []", head=head))
-        self.assertEqual(out["status"], "inconclusive", out)
+            self.assertIn("'list' object has no attribute 'items'", out["why"], condition)
+            self.assertIn("LISTS", out["hint"], condition)
+        # Where another market raises something else first (there, an error its numbers cause), the misuse is advisory.
+        out = self.advisory(program("c = ctx.chain\nif (c.spread <= 0.0101).all():\n    k = c.strike[c.strike < 0][0]\n"
+                                    "for pid, p in ctx.positions.items():\n    pass\nreturn []", head=head))
         self.assertIn("one tick wide", out["why"])
         self.assertIn("IndexError", out["why"])
-        # The same misuse saying the same thing at another line recurs (another branch ran first on one-tick quotes).
-        out = self.refused(program("c = ctx.chain\nif (c.spread <= 0.0101).all():\n    return undefined_intents\n"
-                                   "return undefined_intents", head=head))
-        self.assertIn("name 'undefined_intents' is not defined", out["error"])
+        # The same misuse at ANOTHER line on one market is not the same line: advisory (the rule is strict).
+        out = self.advisory(program('c = ctx.chain\nif (c.spread <= 0.0101).all():\n    x = ctx.under.get("a")\n'
+                                    'x = ctx.under.get("b")\nreturn []', head=head))
+        self.assertIn("line 8", out["why"])
         # A misuse on any market is refused, on every one of them.
         out = self.refused(program("for pid, p in ctx.positions.items():\n    pass\nreturn []"))
-        for words in ("sparser listing", "denser one", "one tick wide", "three times as wide"):
+        for words in ("saturated market", "sparser", "denser", "one tick wide", "three times as wide"):
             self.assertIn(words, out["why"])
 
     def test_the_chain_is_the_listing(self):
@@ -568,14 +581,168 @@ class Preflight(unittest.TestCase):
                                    'px = ctx.underlyings["MSFT"].get("price")\nreturn []', head=head))
         self.assertIn("UnderlyingView", out["error"])
 
-    def test_a_streak_the_runners_list_cannot_name_is_inconclusive(self):
+    def test_a_streak_the_runners_list_cannot_name_is_advisory(self):
         # Ten distinct warm-up errors fill the Runner's message list (it keeps ten); the streak after them is not in it,
         # so neither its line nor whether it is this box's error can be known.
         for tail in ("for pid, p in ctx.positions.items():\n        pass", "x = np.not_in_this_numpy(1.0)"):
             body = ('n = STATE.get("n", 0) + 1\nSTATE["n"] = n\nif n <= 20 and n % 2 == 0:\n'
                     '    raise ValueError("warm " + str(n))\nif n > 20:\n    ' + tail + "\nreturn []")
-            out = self.check(program(body, head="import numpy as np\n" + HEAD))
-            self.assertEqual(out["status"], "inconclusive", (tail, out))
+            out = self.advisory(program(body, head="import numpy as np\n" + HEAD))
+            self.assertIn("Runner's list", out["why"], tail)
+
+    DEEP = {what: body.replace('(c.spread <= ctx.params["max_spread"] * c.mid)',
+                               '(c.bid_size >= ctx.params["depth"]) & (c.ask_size >= ctx.params["depth"])')
+            for what, body in LIQUID.items()}
+
+    def test_a_depth_filter_past_the_listings_books_is_advisory(self):
+        # Round 5's false refusal: the listing's books stop at 5,000 contracts while real SPY NBBO sizes reach 10-31k, so a
+        # depth filter above 5,000 kept nothing and the program erred on every call. Advisory now, whatever it then does
+        # with the empty selection; and the saturated market's books reach past any real size.
+        from league.swarm.preflight import Market
+
+        head = ('import numpy as np\nNEEDS = {"roots": ["SPY"], "dte": [0, 7], "band": 0.05, "cadence": 5, "history": 10}\n'
+                'PARAMS = {"depth": 5000}\nSTATE = {}\n')
+        for what, body in self.DEEP.items():
+            self.assertIn("depth", body, what)
+            for depth in (10_000, 20_000, 31_000):
+                out = self.advisory(program(body, head=head), params={"depth": depth})
+                self.assertNotIn("stage", out, (what, depth))
+        needs = {"roots": ["SPY"], "dte": [0, 7], "band": 0.05, "cadence": 5, "history": 5, "start": 571, "end": 958}
+        listed, saturated = Market(["SPY"], needs).snapshot("SPY", 0, 60), Market(["SPY"], needs, regime="saturated").snapshot("SPY", 0, 60)
+        self.assertLessEqual(int(listed.bid_size.max()), 5_000)
+        self.assertGreater(int((saturated.bid_size >= 31_000).sum()), 50)
+
+    def test_every_earlier_false_refusal_is_advisory(self):
+        # Each class a verification round found refused (a program that runs in the Gym): a quote-width filter that keeps
+        # nothing here, an empty selection, a selection read as one number, a depth filter past the listing's books.
+        # Every one is advisory: the run goes ahead with the warning.
+        head = ('import numpy as np\nNEEDS = {"roots": ["SPY"], "dte": [0, 7], "band": 0.05, "cadence": 5, "history": 10}\n'
+                'PARAMS = {"max_spread": 0.04}\nSTATE = {}\n')
+        for what, body in self.LIQUID.items():  # no quote is narrower than a tick: a 0 cap keeps nothing on any market
+            self.advisory(program(body, head=head), params={"max_spread": 0.0})
+        iwm = head.replace('"SPY"], "dte": [0, 7]', '"IWM"], "dte": [0, 1]')
+        empty = ("c = ctx.chain\nd = c.mid[(c.dte == 1) & c.is_call] - c.mid[(c.dte == 0) & c.is_call]\nreturn []",
+                 "c = ctx.chain\nf = (c.dte == 0) & c.is_call\nb = (c.dte == 1) & c.is_call\nif f.any() and b.any():\n"
+                 "    STATE[\"cal\"] = 1\nx = STATE[\"cal\"]\nreturn []")
+        for body in empty:
+            self.advisory(program(body, head=iwm))
+        pick = "c = ctx.chain\nsel = c.mid[(c.iv > 0.5) & c.is_call & (c.dte == c.dte.min())]\n"
+        for read in ("px = float(np.squeeze(sel, axis=0))", "px = sel.item()", "px = float(np.squeeze(sel))",
+                     "k = min(c.strike[c.strike < 0])"):
+            self.advisory(program(pick + read + "\nreturn []", head=head))
+
+    def test_the_diagnostics_misuse_is_refused(self):
+        # The misuse in the retained disqualifications of Sept 30 (train-failure-diagnostic-20260930): list-as-mapping,
+        # UnderlyingView.get and [...], a ChainView read as a dict or iterated, ctx fields that do not exist, a root never
+        # asked for, a PARAMS key never declared. Operations on a None are advisory (a None can be the market's).
+        head = ('import numpy as np\nNEEDS = {"roots": ["SPY", "QQQ"], "dte": [0, 7], "band": 0.05, "cadence": 5, '
+                '"history": 10}\nPARAMS = {"zmin": 1.5, "max_positions": 2}\nSTATE = {}\n')
+        refused = {
+            "for posid in list(ctx.positions.keys()):\n    pass": "'list' object has no attribute 'keys'",
+            "for pos in ctx.positions.values():\n    pass": "'list' object has no attribute 'values'",
+            'has = any(p.get("type") == "x" for p in ctx.positions.values())': "no attribute 'values'",
+            'under = ctx.underlyings.get("SPY")\nif under is None or len(under.get("closes", [])) < 3:\n    return []':
+                "'UnderlyingView' object has no attribute 'get'",
+            'if ctx.underlyings["QQQ"].get("prices") is None:\n    return []': "no attribute 'get'",
+            'u = ctx.under\nprice = u["price"]': "'UnderlyingView' object is not subscriptable",
+            'closes = {r: list(ctx.underlyings[r]["closes"]) for r in ctx.roots}': "not subscriptable",
+            'chain = ctx.chain\nif chain is None or chain["n"] == 0:\n    return []': "'ChainView' object is not subscriptable",
+            'calls = [c for c in ctx.chains["QQQ"] if c["is_call"]]': "'ChainView' object is not iterable",
+            'if not ctx.underlies.keys():\n    return []': "'Ctx' object has no attribute 'underlies'",
+            'near = ctx.NEEDS["dte"][0]': "'Ctx' object has no attribute 'NEEDS'",
+            'day = ctx.weekday if "minute" not in ctx else ctx.minute': "'Ctx'",
+            'p = ctx.params\nstrong = 2.0 >= p.zmin': "'dict' object has no attribute 'zmin'",
+            'if len(ctx.positions) >= PARAMS["max_position"]:\n    return []': "KeyError: 'max_position'",
+            'u = ctx.underlyings["TSLA"]': "KeyError: 'TSLA'",
+        }
+        for body, words in refused.items():
+            out = self.refused(program(body + "\nreturn []", head=head))
+            self.assertIn(words, out["error"], body)
+            self.assertTrue(out["hint"] and out["misuse"], out)
+        for body in ('x = ctx.params.get("vol_max") >= 0.3', 'u = ctx.underlyings.get("IWM")\nx = u.price'):
+            self.advisory(program(body + "\nreturn []", head=head))
+
+    def test_misuse_is_read_off_the_receiver(self):
+        # The classifier on its own: a plain list, dict or number misuses the ctx API only when the receiver on the line
+        # is a ctx field of that type, through every binding of every alias; the program's own containers never are.
+        from league.swarm.preflight import api_misuse
+
+        def misuse(body, message, line=None):
+            code = program(body)
+            n = line or len(code.splitlines())
+            return api_misuse(f"line {n}: {message}", code, roots=["SPY"], params={})
+
+        items = "AttributeError: 'list' object has no attribute 'items'"
+        self.assertTrue(misuse("x = ctx.positions.items()", items))
+        self.assertTrue(misuse("pos = ctx.positions\nrows = pos\nx = rows.items()", items))
+        self.assertTrue(misuse("def inner():\n    return ctx.orders.items()\nx = inner()", items, 6))
+        self.assertIsNone(misuse('book = STATE.get("b", [])\nx = book.items()', items))
+        self.assertIsNone(misuse('x = ctx.positions\nif ctx.minute > 600:\n    x = STATE.get("m", [])\ny = x.items()', items))
+        self.assertIsNone(misuse("x = ctx.positions.items()", "AttributeError: 'NoneType' object has no attribute 'items'"))
+        self.assertIsNone(misuse("x = ctx.orders", items))  # no `.items` on the line: not located
+        helper = (HEAD + "def pick(ctx, r):\n    return ctx.chains[r].strike.items()\n"
+                  "def decide(ctx):\n    return pick(ctx, 'SPY')\n")
+        self.assertTrue(api_misuse("line 5: AttributeError: 'numpy.ndarray' object has no attribute 'items'", helper,
+                                   roots=["SPY"]))
+        loop = "for r, c in ctx.chains.items():\n    x = c.strike.items()"
+        self.assertTrue(misuse(loop, "AttributeError: 'numpy.ndarray' object has no attribute 'items'"))
+        # getattr with a name the program computed may be what raised: never misuse.
+        self.assertIsNone(misuse('x = getattr(ctx.under, STATE.get("f", "vwap"))',
+                                 "AttributeError: 'UnderlyingView' object has no attribute 'vwap'"))
+        self.assertTrue(misuse("x = ctx.under.vwap", "AttributeError: 'UnderlyingView' object has no attribute 'vwap'"))
+        # KeyError: only a key a ctx dict can never hold, and only when nothing else on the line could have raised it.
+        self.assertTrue(misuse('x = ctx.chains["QQQ"]', "KeyError: 'QQQ'"))
+        self.assertIsNone(misuse('x = ctx.chains["SPY"]', "KeyError: 'SPY'"))  # a NEEDS root without data now
+        self.assertIsNone(misuse('x = ctx.events["fomc"]', "KeyError: 'fomc'"))
+        self.assertIsNone(misuse('x = "{a}".format(**STATE) + ctx.chains[r].root', "KeyError: 'a'"))
+        self.assertIsNone(misuse('x = STATE[k] + ctx.chains[r].n', "KeyError: 'QQQ'"))
+        # Numbers, lists and arrays by their receivers.
+        self.assertTrue(misuse("x = ctx.under.price[-1]", "TypeError: 'float' object is not subscriptable"))
+        self.assertIsNone(misuse('x = STATE.get("p", 0.0)[-1]', "TypeError: 'float' object is not subscriptable"))
+        self.assertTrue(misuse("x = ctx.positions()", "TypeError: 'list' object is not callable"))
+        self.assertIsNone(misuse('x = STATE["f"]()', "TypeError: 'list' object is not callable"))
+        self.assertTrue(misuse("x = ctx.chain.mid[:, 0]", "IndexError: too many indices for array: array is 1-dimensional, "
+                                                          "but 2 were indexed"))
+        self.assertIsNone(misuse("a = np.zeros(3)\nx = a[:, 0]", "IndexError: too many indices for array: array is "
+                                                                  "1-dimensional, but 2 were indexed"))
+        self.assertIsNone(misuse("x = ctx.chain.mid[5]", "IndexError: index 5 is out of bounds for axis 0 with size 3"))
+        # Never an error this box or the market's numbers may cause, and never the classifier's own failure.
+        self.assertIsNone(misuse("x = ctx.under.price.is_integer()", "AttributeError: 'float' object has no attribute "
+                                                                      "'is_integer'"))
+        self.assertIsNone(misuse("x = min(ctx.chain.strike[ctx.chain.strike < 0])",
+                                 "ValueError: min() arg is an empty sequence"))
+        self.assertIsNone(api_misuse("line 1: AttributeError: 'list' object has no attribute 'items'", "def (:", roots=[]))
+
+    def test_the_saturated_market(self):
+        # Every calendar day of the dte range lists an expiry; every listed strike is there with half the finer step
+        # beside it and the far wings; each contract has its own vol, its quote any width from one tick to past its mid,
+        # its books up to a million; the underlying's volumes are known.
+        from league.gym import venue
+        from league.swarm.preflight import Market, strikes
+
+        needs = {"roots": ["SPY"], "dte": [0, 10], "band": 0.05, "cadence": 5, "history": 5, "start": 571, "end": 958}
+        listed, market = Market(["SPY"], needs), Market(["SPY"], needs, regime="saturated")
+        self.assertEqual(market.weekdays, listed.weekdays)
+        snap = market.snapshot("SPY", 0, 60)
+        self.assertEqual(sorted(numpy.unique(snap.dte).tolist()), list(range(11)))
+        ks = numpy.unique(snap.strike)
+        own = strikes("SPY", float(market.days["SPY"][0]["path"][0]))
+        self.assertTrue(numpy.isin(numpy.round(own, 6), numpy.round(ks, 6)).all())
+        self.assertTrue(numpy.isin(numpy.round(own[len(own) // 2] + 0.5, 6), numpy.round(ks, 6)))
+        self.assertGreater(float(ks.max() / snap.spot), 1.09)
+        c = snap.view(snap.slice_index(0, 10, 0.05))
+        share = c.spread / c.mid
+        self.assertLess(float(numpy.nanmin(share)), 0.005)
+        self.assertGreater(float(numpy.nanmax(share)), 0.5)
+        tick = numpy.array([venue.leg_tick("SPY", float(m)) for m in c.mid])
+        self.assertTrue((c.spread >= tick - 1e-9).all())
+        iv = c.iv[numpy.isfinite(c.iv)]
+        self.assertLess(float(iv.min()), 0.08)
+        self.assertGreater(float(iv.max()), 1.5)
+        self.assertLess(int(c.bid_size.min()), 10)
+        self.assertGreater(int(c.bid_size.max()), 100_000)
+        self.assertTrue(numpy.isfinite(market.under("SPY", 1, 30).volume))
+        self.assertTrue(numpy.isnan(listed.under("SPY", 1, 30).volume))
 
     def test_roots_outside_the_run_are_not_decided_on(self):
         out = self.check(program('u = ctx.under.get("price")\nreturn []'), roots=["QQQ"])
@@ -865,6 +1032,38 @@ class ResearcherPreflight(unittest.TestCase):
         out = self.make().cycle(self.fam["id"])
         self.assertEqual(len(self.pool.jobs), 2)
         self.assertIn("preflight_error", out)
+
+    def test_an_advisory_rides_along_with_the_run(self):
+        # decide raised on every call, but not with a misuse no market could spare: the run goes to the Gym, and its
+        # answer carries the preflight's warning (the line, its source, the API).
+        code = program('prev = STATE["last"]\nSTATE["last"] = ctx.under.price\nif ctx.params["k"] > 9:\n    return []\nreturn []')
+        self.steps = [{"calls": [("gym_run", {"code": code, "params": {"k": 2.0}})]}, {"text": "ok"}]
+        out = self.make().cycle(self.fam["id"])
+        answer = self.answer()
+        self.assertEqual(len(self.pool.jobs), 2, "the run went ahead")
+        self.assertEqual(out.get("preflight_advisory"), 1)
+        self.assertNotIn("preflight_refused", out)
+        note = answer["preflight"]
+        self.assertEqual(note["status"], "advisory")
+        self.assertIn("went ahead", note["note"])
+        warning = note["warnings"][0]
+        self.assertIn("KeyError: 'last'", warning["error"])
+        self.assertEqual(warning["source"], 'prev = STATE["last"]')
+        self.assertIn("STATE", warning["hint"])
+        notes = [n["text"] for n in self.store.notebook(self.fam["id"])]
+        self.assertFalse(any(n.startswith("Preflight refused") for n in notes), notes)
+
+    def test_a_sweeps_advisories_name_their_variants(self):
+        code = program('if ctx.params["k"] > 1:\n    x = STATE["never"]\nreturn []')
+        self.steps = [{"calls": [("gym_sweep", {"code": code, "variants": [{"k": 2.0}, {"k": 5.0}, {"k": 0.0}]})]},
+                      {"text": "ok"}]
+        out = self.make().cycle(self.fam["id"])
+        answer = self.answer()
+        self.assertEqual(len(self.pool.jobs), 4, "every variant went ahead")
+        self.assertEqual(out.get("preflight_advisory"), 2)
+        rows = answer["preflight"]["variants"]
+        self.assertEqual([r["variant"] for r in rows], [{"k": 2.0}, {"k": 5.0}])
+        self.assertIn("KeyError: 'never'", rows[0]["warnings"][0]["error"])
 
     def test_a_sweep_with_a_failing_variant_is_refused_whole(self):
         code = program('if ctx.params["k"] > 1:\n    for pid, p in ctx.positions.items():\n        pass\nreturn []')

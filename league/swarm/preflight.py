@@ -1,4 +1,4 @@
-"""THE PREFLIGHT: a candidate program meets a small synthetic session in the decider's sandbox before a Train run is spent.
+"""THE PREFLIGHT: a candidate program meets small synthetic sessions in the decider's sandbox before a Train run is spent.
 
 About one Train run in nine came back disqualified on Sept 30, 2026, and the retained ones were not losing ideas but
 programs that could not run: `ctx.positions.items()` (a list used as a mapping), `ctx.under.get("price")` (the
@@ -24,44 +24,50 @@ half, and it runs nowhere near the Gym:
   unknown (NaN, as in the replay), the Gym's venue rules, and a flat account of the Gym's capital. It is called at the
   Gym's own decision minutes (`engine.Account.decision_minutes`). The market is made up; nothing here reads recorded
   data, so it is no trial and says nothing about profit.
-- **When it refuses.** Only when the Gym would refuse or disqualify the same program on the same kind of input:
-  1. `load` refuses it (the Gym's worker would refuse it identically), except a load that ran out of time or memory
-     (this box is not a Gym box: that says nothing) or an `environmental` error (the House's Python, numpy and memory
-     cap are not the Gym boxes');
-  2. decide raised on `STREAK` (25, the Gym's `DEFAULT_MAX_ERRORS`) consecutive calls spanning at least two sessions,
-     BEFORE the program returned any intent, and every error the streak may hold is named in the Runner's message
-     list and is neither `environmental` nor `market_dependent` (an empty selection, a selection turned into one
-     number, two selections of different lengths, a division by zero, a numeric key, a None: the made-up numbers could
-     cause or spare those, on Python 3.11 and 3.14 alike). Until its first intent a Gym account is flat too, and an
-     erring call returns no intent, so the Gym's account would stay exactly as flat as this one while the program
-     erred: the only difference left is the market's numbers, which such an error does not depend on;
-  3. and a decide refusal recurs (`_recurs`: the same exception at the same line, or saying the same thing at another)
-     on a fresh instance of the program meeting each of the other markets (`CONFIRMATIONS`, `REGIMES`). Two bracket the
-     listing: a sparser one of the same roots (`listing(sparse=True)`: one expiry a week, the next wider strike step)
-     and a denser one (`listing(dense=True)`: an expiry every weekday and, where a root's step changes over Train, the
-     next finer step as well as its own). A listing is one the Gym holds over a long stretch of Train, not on every day,
-     and each admitted root's store lies between these two on every Train day (`LISTING`). So an error that turns on
-     how many contracts a selection keeps is spared on one of them: a selection that keeps one contract on a coarser
-     day keeps several on the listing (its truth value then raises) but not on the sparse one, and a selection the
-     listing leaves empty (a calendar between two expiries it never lists on one day, then a STATE key never written) is
-     filled on the dense one. The others are the listing again with other numbers at both ends: one-tick quotes, deep
-     books and a higher vol; quotes three times as wide, thin books and a lower vol; each on its own price paths at
-     another level (the dense market has its own too, at a vol between). An error that follows from the numbers
-     without saying so (a liquidity filter that keeps nothing, then a STATE key it never wrote or a local it never set)
-     is spared on one of them.
-  Anything else passes: the first intent ends the preflight (a flat account no longer mirrors the Gym's), as does a
-  call past its time limit, a decider failure or the preflight's own deadline. The preflight never blocks on its own
-  failure. A clean program costs one session plus `STREAK` calls of the next (a streak that begins later could only
-  be confirmed by yet another session, and is left to the Gym).
-- **What the researcher gets.** The exception, the line and its source, the call it began at, and the ctx API it
-  should have used (`advice`): no Gym job, no version and no trial are made, and the refusal is written in the family's
-  notebook.
+- **What it says.** One of four answers. The Train run goes ahead on every one but `refused`:
+  - `passed`: decide never raised.
+  - `advisory`: decide raised, and the error is not one that no market could spare. The researcher gets each error
+    with its line, the line's source and the ctx API to use (`warnings`, `advice`), and the run goes on to the Gym,
+    which judges it. Every error that could turn on the market's numbers is advisory, however often it recurs: an
+    empty selection, a filter that keeps nothing (a quote width, a book's depth, a vol), a selection turned into one
+    number, two selections of different lengths, a None, a numeric edge case, a STATE key or a local only a market
+    condition would have written, a name not defined.
+  - `inconclusive`: it could not say (a call past its time limit, the sandbox, the preflight's deadline, a busy lock).
+  - `refused`, only for MARKET-INDEPENDENT MISUSE OF THE CTX API (`api_misuse`), when all three hold:
+    1. decide raised on `STREAK` (25, the Gym's `DEFAULT_MAX_ERRORS`) consecutive calls spanning at least two
+       sessions, before the program returned any intent, and every error the streak may hold is named in the Runner's
+       message list;
+    2. each of those errors is an AttributeError, TypeError, KeyError or IndexError that misuses a ctx object in a way
+       its type forbids on every market, at a line whose failing expression is located in the program's source: a ctx
+       list used as a mapping, a chain, an underlying or ctx itself read with `.get` or `[...]`, iterated or called, a
+       field it does not have, a key a ctx dict can never hold (a root outside NEEDS, a PARAMS key the program never
+       declared, an event that does not exist), a ctx array indexed in two dimensions, a ctx method called with the
+       wrong number of arguments. Where the error names a plain type (a list, a dict, a float), the receiver on the
+       line must resolve statically to a ctx field of that type (`_Source`): the program's own lists and dicts can hold
+       what the market put there. Never an error raised on a None, an empty or size-0 value, one the House's own Python
+       or numpy may cause (`environmental`) or one that says the market's numbers caused it (`market_dependent`);
+    3. and the same exception type at the same line recurs, as a refusable streak, on a fresh instance of the program
+       meeting each of the other markets (`CONFIRMATIONS`, `REGIMES`): a SATURATED one where every selection is filled
+       and any filter keeps contracts (an expiry every calendar day, strikes at half the finer step and out to the far
+       wings, each contract its own vol from 3% to 300%, quotes from one tick to one and a half times the mid, books to a
+       million contracts, known volumes); a sparser and a denser listing, which bracket each admitted root's store on
+       every Train day (`LISTING`); the listing quoted one tick wide on deep books at twice the vol; and quoted three
+       times as wide on thin books at a lower vol, each on its own price paths.
+  A load the Gym's worker would refuse identically (`load_program`) is also refused: loading reads no market. A load
+  that ran out of time is inconclusive and one that failed on an `environmental` error is advisory. A clean program
+  costs one session plus `STREAK` calls of the next (a streak that begins later could only be confirmed by yet another
+  session, and is left to the Gym); the first intent ends the preflight (a flat account no longer mirrors the Gym's).
+  The preflight never blocks on its own failure.
+- **What the researcher gets.** On a refusal: the exception, the line and its source, the call it began at, and the
+  ctx API it should have used (`advice`): no Gym job, no version and no trial are made, and the refusal is written in
+  the family's notebook. On an advisory: the same for each error (`warnings`), beside the Gym's own answer.
 
 numpy on the calling side (the House has it; the Gym's store and pyarrow are not needed). Python 3.11+.
 """
 
 from __future__ import annotations
 
+import ast
 import atexit
 import difflib
 import hashlib
@@ -73,17 +79,19 @@ import time
 import zlib
 from typing import Any, Callable, Mapping, NamedTuple, Sequence
 
-VERSION = "preflight-v5"
+VERSION = "preflight-v6"
 #: Consecutive erring calls that refuse: the Gym's own disqualification count (`league.gym.runtime.DEFAULT_MAX_ERRORS`).
 STREAK = 25
 #: Synthetic sessions at most (a third only to confirm a streak that began in the second).
 SESSIONS = 3
 #: Distinct messages a Gym Runner keeps (`league.gym.runtime.Runner._error`): an error past them is not reported.
 RUNNER_MESSAGES = 10
+#: Errors an advisory answer describes at most (`warnings`).
+WARNINGS = 4
 #: The account's capital: the Gym's default (`swarm.json` `gym.capital` overrides it for real runs; a flat account's
 #: numbers are the same either way up to scale).
 CAPITAL = 10_000.0
-#: The preflight's wall-clock budget; past it the program passes (inconclusive).
+#: The preflight's wall-clock budget; past it the program is not refused (inconclusive, or advisory with what it saw).
 DEADLINE_SECONDS = 20.0
 #: Weekdays of the synthetic sessions when the roots list as much every weekday (Tuesday, Wednesday, Thursday), and the
 #: order ties are broken in otherwise (`session_weekdays`).
@@ -104,18 +112,18 @@ DAILY, MON_WED_FRI, FRIDAY = (0, 1, 2, 3, 4), (0, 2, 4), (4,)
 #: is what the store holds: a representative price, the strike step at that price, and the weekdays that have an expiry
 #: within FRONT_DTE (past it, Fridays). A root's schedule changed over Train, so no one listing is the Gym's on every
 #: day. Two confirming listings bracket it (`listing`): the sparse one, Fridays only and the next wider step, and the
-#: dense one, every weekday and the next finer step's strikes too; a refusal must recur on both. Every admitted root's
-#: store lies inside that bracket on every Train day, whatever it listed that day: SPY and QQQ list every weekday from
-#: late 2022 (Monday, Wednesday and Friday before), SPXW from spring 2022 (the same before), XSP every weekday in the
-#: store's 2024 sample (fewer earlier), IWM Monday, Wednesday and Friday for most of Train (every weekday from spring
-#: 2024), all at a fixed step. Each is listed here with its latest schedule but IWM; the listing only decides what the
-#: first market shows, the bracket decides a refusal. Every other root lists Fridays (the weeklies and the monthly). A
-#: root with monthlies only is coarser than the sparse listing: SPX (the AM-settled root; its weeklies are SPXW) is one,
-#: and like a stock without weeklies it is not an admitted root; admitting one needs its schedule here first. The index
-#: ETFs and GLD list $1 strikes and SPX/SPXW $5 at any price; a stock or another ETF lists by its price (`equity_step`:
-#: $0.5 under $75, $1 under $150, $2.5 under $500, $5 above). A root not named here is a $100 stock with Friday
-#: expiries. When in doubt, list a root as it lists on most Train days: the bracket covers one expiry schedule and one
-#: strike step either side of it, and nothing past that.
+#: dense one, every weekday and the next finer step's strikes too; a refusal must recur on both (and on the saturated
+#: market, which lists more than any of them). Every admitted root's store lies inside that bracket on every Train day,
+#: whatever it listed that day: SPY and QQQ list every weekday from late 2022 (Monday, Wednesday and Friday before),
+#: SPXW from spring 2022 (the same before), XSP every weekday in the store's 2024 sample (fewer earlier), IWM Monday,
+#: Wednesday and Friday for most of Train (every weekday from spring 2024), all at a fixed step. Each is listed here with
+#: its latest schedule but IWM; the listing only decides what the first market shows. Every other root lists Fridays
+#: (the weeklies and the monthly). A root with monthlies only is coarser than the sparse listing: SPX (the AM-settled
+#: root; its weeklies are SPXW) is one, and like a stock without weeklies it is not an admitted root. The index ETFs and
+#: GLD list $1 strikes and SPX/SPXW $5 at any price; a stock or another ETF lists by its price (`equity_step`: $0.5
+#: under $75, $1 under $150, $2.5 under $500, $5 above). A root not named here is a $100 stock with Friday expiries.
+#: Since v6 a listing that is off costs catches, never a refusal: an error that turns on what a chain lists is not a
+#: misuse of the ctx API (`api_misuse`) and never refuses, whatever the listing.
 LISTING: dict[str, tuple[float, float, tuple[int, ...]]] = {
     "SPY": (450.0, 1.0, DAILY), "QQQ": (380.0, 1.0, DAILY), "SPXW": (4500.0, 5.0, DAILY), "SPX": (4500.0, 5.0, FRIDAY),
     "IWM": (190.0, 1.0, MON_WED_FRI), "XSP": (450.0, 1.0, DAILY), "DIA": (350.0, 1.0, FRIDAY),
@@ -148,18 +156,27 @@ DEFAULT_VOL = 0.35
 #: deviation of moneyness, up to `WIDEST_Z` of them), and none is narrower than one tick of the venue's (`venue.leg_tick`:
 #: a cent on SPY, QQQ and IWM; $0.05 and $0.10 on SPX/SPXW; a cent under $3 and a nickel from $3 on the rest), so a far
 #: out-of-the-money contract of a few cents is quoted tens of percent wide, as in the market. Near the money every root
-#: quotes no wider than the Gym's own synthetic store (3% of the mid, `gym.synth.generate`), so a liquidity filter that
-#: keeps contracts there keeps them here.
+#: quotes no wider than the Gym's own synthetic store (3% of the mid, `gym.synth.generate`).
 NEAR_WIDTH = {"SPY": 0.004, "QQQ": 0.004, "IWM": 0.008, "SPXW": 0.01, "SPX": 0.01}
 DEFAULT_WIDTH = 0.015
 WIDENING, WIDEST_Z = 0.5, 4.0
+#: THE SATURATED MARKET (`REGIMES["saturated"]`): numbers drawn so wide that a filter on any of them keeps contracts and
+#: every selection by expiry or strike is filled. Each contract's vol is drawn once a session, evenly on a log scale
+#: (`SATURATED_VOLS`); its quote's width as a share of its mid at every minute (`SATURATED_WIDTHS`, never under one tick);
+#: its books up to `REGIMES["saturated"].sizes` and its open interest up to `.oi`, evenly on a log scale. Its chain lists
+#: an expiry on every calendar day of the program's dte range out to BACK_MONTH_DTE, and strikes at half the finer step
+#: across the listing's span plus a strike every `WING_STEP` of the open out to the program's band and `WING_MARGIN`
+#: past it (`saturated_strikes`, at most `SATURATED_REACH`). The underlying's minute and daily volumes are known.
+SATURATED_VOLS = (0.03, 3.0)
+SATURATED_WIDTHS = (1e-4, 1.5)
+WING_STEP, WING_MARGIN, SATURATED_REACH = 0.025, 0.05, 0.6
 
 
 class Regime(NamedTuple):
-    """One synthetic market's numbers (`REGIMES`): its listing (`chain`: "listed", "sparse" or "dense", `listing`), its
-    quotes' width (a multiple of `quote`'s; 0: every quote one tick wide, the venue's narrowest), each root's vol and
-    price as multiples of `VOLS` and the listing's price, its books' sizes (a range, drawn evenly on a log scale) and open
-    interest (the most), and its own price paths (`salt`)."""
+    """One synthetic market's numbers (`REGIMES`): its listing (`chain`: "listed", "sparse", "dense" or "saturated",
+    `listing`), its quotes' width (a multiple of `quote`'s; 0: every quote one tick wide, the venue's narrowest), each
+    root's vol and price as multiples of `VOLS` and the listing's price, its books' sizes (a range, drawn evenly on a log
+    scale) and open interest (the most), and its own price paths (`salt`)."""
 
     label: str
     chain: str
@@ -172,20 +189,19 @@ class Regime(NamedTuple):
 
 
 #: THE MARKETS a program meets. It is first run on the listing with typical quotes on books of every size, from one
-#: contract to thousands. A refusal must then recur (`_recurs`: the same exception at the same line, or saying the same
-#: thing at another) on each of the others in turn (`CONFIRMATIONS`): the listing's bracket (`LISTING`), the same roots
-#: listed more thinly on the same numbers and listed more densely on its own price paths at a vol between the listing's
-#: and the tight market's; and the listing again with other numbers at both ends: every quote one tick wide (the venue's
-#: narrowest) on deep books at twice the vol and a higher price, whose richer premiums make those ticks the smallest
-#: share of a mid; and quotes three times as wide on thin books at a lower vol and price, the widest share; each on its
-#: own price paths. An error that turns on how many contracts a selection keeps, or on a quote's width, a vol, a size or
-#: a price (a liquidity filter that keeps nothing, then a STATE key it never wrote) is spared on one of them, and so
-#: never refuses. A filter that keeps nothing even on one-tick quotes at twice the vol would keep nothing on almost every
-#: Gym day either (no quote there is narrower than a tick), and 25 errors in a run disqualify it there. The price is a
-#: misuse behind a gate on the numbers that none of these markets opens (a z-score, a band of vols between theirs): it is
-#: left to the Gym.
+#: contract to thousands. A refusal must then recur (the same exception type at the same line, as a refusable streak) on
+#: each of the others in turn (`CONFIRMATIONS`): the saturated market (THE SATURATED MARKET above); the listing's bracket
+#: (`LISTING`), the same roots listed more thinly on the same numbers and listed more densely on its own price paths at a
+#: vol between the listing's and the tight market's; and the listing again with other numbers at both ends: every quote
+#: one tick wide (the venue's narrowest) on deep books at twice the vol and a higher price, and quotes three times as wide
+#: on thin books at a lower vol and price; each on its own price paths. Only a misuse of the ctx API (`api_misuse`) can
+#: refuse at all; these markets check that it does not hang on a branch the made-up numbers opened.
 REGIMES = {
     "listed": Regime("the listed chain", "listed", 1.0, 1.0, 1.0, (1, 5_000), 50_000, 1),
+    "saturated": Regime("a saturated market (an expiry every calendar day, strikes at half the finer step and out to the "
+                        "far wings, each contract its own vol from 3% to 300%, quotes from one tick to 1.5 times the mid, "
+                        "books to a million contracts, known volumes)", "saturated", 1.0, 1.0, 1.0, (1, 1_000_000),
+                        10_000_000, 5),
     "sparse": Regime("a sparser listing of the same roots (one expiry a week, a wider strike step)", "sparse", 1.0, 1.0,
                      1.0, (1, 5_000), 50_000, 1),
     "dense": Regime("a denser listing of the same roots (an expiry every weekday, a finer strike step; another price "
@@ -195,7 +211,7 @@ REGIMES = {
     "wide": Regime("the listing quoted three times as wide on thin books (a lower vol, another price path, a lower price)",
                    "listed", 3.0, 0.6, 0.9, (1, 40), 3_000, 3),
 }
-CONFIRMATIONS = ("sparse", "dense", "tight", "wide")
+CONFIRMATIONS = ("saturated", "sparse", "dense", "tight", "wide")
 
 
 def equity_step(price: float) -> float:
@@ -207,9 +223,7 @@ def listing(root: str, *, sparse: bool = False, dense: bool = False) -> tuple[fl
     """(price, strike step, expiry weekdays) of `root` (`LISTING`). `sparse`: the same root listed more thinly, one
     expiry a week (Fridays) and, unless the root's step never changes, the next wider strike step. `dense`: listed more
     densely, an expiry every weekday and, unless the root's step never changes, the next finer step (`strikes` lists it
-    beside the root's own). A refusal on the listing must recur on both (`run`): a listing one step or schedule finer or
-    coarser than the Gym's on some day (a selection that holds one contract there holds several here, or one that holds
-    a contract there holds none here) then never refuses on its own."""
+    beside the root's own)."""
     root = str(root).upper()
     if root in LISTING:
         price, step, weekdays = LISTING[root]
@@ -242,15 +256,33 @@ def strikes(root: str, price: float, *, chain: str = "listed") -> Any:
     return ks[ks > 0]
 
 
+def saturated_strikes(root: str, price: float, band: float) -> Any:
+    """The saturated market's strikes about `price` (THE SATURATED MARKET): the dense chain's (so every strike of the
+    listing), half the finer step across the same span, and a strike every WING_STEP of `price` out to `band` and
+    WING_MARGIN past it (at most SATURATED_REACH), each on the half step; none at or under zero."""
+    import numpy as np
+
+    root = str(root).upper()
+    ks = strikes(root, price, chain="dense")
+    half = min(listing(root)[1], listing(root, dense=True)[1]) / 2.0
+    lo, hi = float(ks[0]), float(ks[-1])
+    grid = half * np.arange(math.ceil(lo / half - 1e-9), math.floor(hi / half + 1e-9) + 1)
+    wings = int(min(SATURATED_REACH, max(0.0, float(band)) + WING_MARGIN) / WING_STEP)
+    far = np.round(float(price) * (1.0 + WING_STEP * np.arange(-wings, wings + 1)) / half) * half
+    ks = np.unique(np.round(np.concatenate([ks, grid, far]), 6))
+    return ks[ks > 0]
+
+
 def vol_of(root: str) -> float:
     """`root`'s implied vol in the synthetic market (`VOLS`)."""
     return VOLS.get(str(root).upper(), DEFAULT_VOL)
 
 
-def quote(root: str, mid: Any, z: Any, width: float = 1.0) -> tuple[Any, Any]:
+def quote(root: str, mid: Any, z: Any, width: float = 1.0, *, share: Any = None) -> tuple[Any, Any]:
     """Bid and ask about each `mid` (THE QUOTES, `NEAR_WIDTH`): `width` times the root's near-money width as a share of
     the mid, wider by WIDENING for each standard deviation of moneyness `z` (up to WIDEST_Z), to the nearest tick of the
-    venue's at that premium and never less than one (`venue.leg_tick`); `width` 0 quotes every contract one tick wide."""
+    venue's at that premium and never less than one (`venue.leg_tick`); `width` 0 quotes every contract one tick wide.
+    `share`: each contract's full width as a share of its mid instead (the saturated market's), never under one tick."""
     import numpy as np
 
     from ..gym import venue as V
@@ -258,8 +290,9 @@ def quote(root: str, mid: Any, z: Any, width: float = 1.0) -> tuple[Any, Any]:
     root = str(root).upper()
     mid = np.asarray(mid, dtype=np.float64)
     tick = np.where(mid < 3.0, V.leg_tick(root, 0.0), V.leg_tick(root, 3.0))
-    share = NEAR_WIDTH.get(root, DEFAULT_WIDTH) * float(width) * (1.0 + WIDENING * np.minimum(np.abs(z), WIDEST_Z))
-    ticks = np.maximum(1.0, np.round(share * mid / tick))
+    if share is None:
+        share = NEAR_WIDTH.get(root, DEFAULT_WIDTH) * float(width) * (1.0 + WIDENING * np.minimum(np.abs(z), WIDEST_Z))
+    ticks = np.maximum(1.0, np.round(np.asarray(share, dtype=np.float64) * mid / tick))
     bid = np.maximum(0.0, np.round((mid - 0.5 * ticks * tick) / tick)) * tick
     return np.round(bid, 4), np.round(bid + ticks * tick, 4)
 
@@ -290,12 +323,18 @@ def _rng(root: str, salt: int) -> Any:
     return np.random.default_rng(zlib.crc32(f"{root}:{salt}".encode()) & 0xFFFFFFFF)
 
 
+def _log_uniform(rng: Any, low: float, high: float, n: int) -> Any:
+    import numpy as np
+
+    return np.exp(rng.uniform(math.log(low), math.log(high), n))
+
+
 class Market:
-    """Synthetic sessions for a program's NEEDS (the module docstring) on each root's chain (`listing`, `strikes`) with
-    the numbers of `regime` (`REGIMES`: "listed" first; `sparse` is the "sparse" one). Its sessions fall on the weekdays
-    of the listing's (`session_weekdays`), the dense one's too, so on each session the dense chain lists every expiry the
-    listing does and, about its own open, the listing's strikes with the finer step's beside them. Deterministic: the
-    same roots, NEEDS and regime make the same market."""
+    """Synthetic sessions for a program's NEEDS (the module docstring) on each root's chain (`listing`, `strikes`,
+    `saturated_strikes`) with the numbers of `regime` (`REGIMES`: "listed" first; `sparse` is the "sparse" one). Its
+    sessions fall on the weekdays of the listing's (`session_weekdays`), the dense and saturated ones' too, so on each
+    session the dense chain lists every expiry the listing does and, about its own open, the listing's strikes with the
+    finer step's beside them. Deterministic: the same roots, NEEDS and regime make the same market."""
 
     def __init__(self, roots: Sequence[str], needs: Mapping[str, Any], *, sparse: bool = False, regime: str = "listed"):
         import numpy as np
@@ -306,7 +345,7 @@ class Market:
         self.needs = dict(needs)
         self.regime = REGIMES["sparse" if sparse else regime]
         self.chain = self.regime.chain
-        self.sparse, self.dense = self.chain == "sparse", self.chain == "dense"
+        self.sparse, self.dense, self.saturated = self.chain == "sparse", self.chain == "dense", self.chain == "saturated"
         self.weekdays = session_weekdays(self.roots, needs, sparse=self.sparse)
         dte_min, dte_max = (int(x) for x in needs["dte"])
         history = int(needs["history"])
@@ -326,28 +365,41 @@ class Market:
                 bars.append((float(path[0]), float(path.max()), float(path.min()), float(path[-1])))
                 paths.append(path)
                 spot = float(path[-1])
+            daily = _log_uniform(rng, 1e6, 1e9, history + SESSIONS).round() if self.saturated else None
             sessions = []
             for s in range(SESSIONS):
                 i = history + s
                 prior = np.array(bars[i - history:i], dtype=np.float64).reshape(-1, 4)
                 path = paths[i]
                 weekday = self.weekdays[s]
-                dtes = expiries(root, weekday, dte_min, dte_max, weekdays)
-                ks = strikes(root, float(path[0]), chain=self.chain)  # the store's strikes a side of the open's money
+                if self.saturated:  # every calendar day, and strikes past the listing's (THE SATURATED MARKET)
+                    dtes = list(range(dte_min, min(dte_max, BACK_MONTH_DTE) + 1))
+                    ks = saturated_strikes(root, float(path[0]), float(needs["band"]))
+                else:
+                    dtes = expiries(root, weekday, dte_min, dte_max, weekdays)
+                    ks = strikes(root, float(path[0]), chain=self.chain)  # the store's strikes a side of the open's money
                 dte = np.repeat(np.array(dtes, dtype=np.int64), ks.size * 2)
                 strike = np.tile(np.repeat(ks, 2), len(dtes))
                 is_call = np.tile(np.array([True, False]), ks.size * len(dtes))
                 n = strike.size
-                sessions.append({"weekday": weekday, "path": path, "prior": prior, "dte": dte, "strike": strike,
-                                 "is_call": is_call, "oi": rng.integers(0, self.regime.oi, n),
-                                 "rng": _rng(root, 100 * self.regime.salt + s)})
+                day = {"weekday": weekday, "path": path, "prior": prior, "dte": dte, "strike": strike, "is_call": is_call}
+                if self.saturated:
+                    day["oi"] = np.floor(_log_uniform(rng, 1.0, float(self.regime.oi), n)).astype(np.int64)
+                    day["sigma"] = _log_uniform(rng, *SATURATED_VOLS, n)
+                    day["minute_volumes"] = _log_uniform(rng, 1e2, 1e6, MINUTES).round()
+                    day["daily_volumes"] = daily[s:i]
+                else:
+                    day["oi"] = rng.integers(0, self.regime.oi, n)
+                day["rng"] = _rng(root, 100 * self.regime.salt + s)
+                sessions.append(day)
             self.days[root] = sessions
         self._G = G
 
     def snapshot(self, root: str, session: int, mi: int) -> Any:
         """The root's chain at minute `mi` of the session (a `Snapshot`, as the replay makes one): Black-Scholes mids on
-        the root's vol with a skew, quoted about them (`quote`), with the regime's sizes (evenly on a log scale, so a
-        size filter at any depth in the range keeps some contracts and drops others, at any quote width)."""
+        the root's vol with a skew (the saturated market: each contract's own vol), quoted about them (`quote`), with the
+        regime's sizes (evenly on a log scale, so a size filter at any depth in the range keeps some contracts and drops
+        others, at any quote width)."""
         import numpy as np
 
         from ..gym.ctx import Snapshot
@@ -360,24 +412,31 @@ class Market:
             return Snapshot(root, OPEN + mi, spot, dte, strike, is_call, np.zeros(0), np.zeros(0), oi=day["oi"], rate=RATE)
         years = self._G.years_to_expiry(dte, OPEN + mi, close_minute=CLOSE)
         m = np.log(strike / spot)
-        sigma = self.vols[root] * (1.0 - 1.5 * m + 8.0 * m * m)
-        mid = self._G.bs_price(spot, strike, years, RATE, sigma, is_call)
-        bid, ask = quote(root, mid, m / (sigma * np.sqrt(years)), self.regime.width)
         rng, (low, high) = day["rng"], self.regime.sizes
+        if self.saturated:
+            mid = self._G.bs_price(spot, strike, years, RATE, day["sigma"], is_call)
+            bid, ask = quote(root, mid, 0.0, share=_log_uniform(rng, *SATURATED_WIDTHS, n))
+        else:
+            sigma = self.vols[root] * (1.0 - 1.5 * m + 8.0 * m * m)
+            mid = self._G.bs_price(spot, strike, years, RATE, sigma, is_call)
+            bid, ask = quote(root, mid, m / (sigma * np.sqrt(years)), self.regime.width)
         sizes = lambda: np.floor(np.exp(rng.uniform(math.log(low), math.log(high + 1), n))).astype(np.int64)  # noqa: E731
         return Snapshot(root, OPEN + mi, spot, dte, strike, is_call, bid, ask, sizes(), sizes(), oi=day["oi"], rate=RATE,
                         close_minute=CLOSE)
 
     def under(self, root: str, session: int, mi: int) -> Any:
         """The root's underlying at minute `mi` (as `engine.DayData.under`: prices from the open, prior sessions, volume
-        unknown as in a replay without first-observation receipts)."""
+        unknown as in a replay without first-observation receipts; the saturated market's volumes are known)."""
         from ..gym.ctx import underlying_view
 
         day = self.days[root][session]
         prior = day["prior"]
+        volumes: dict[str, Any] = {"volume_provenance": "historical_without_asof", "daily_volume_provenance": "unavailable"}
+        if self.saturated:
+            volumes = {"minute_volumes": day["minute_volumes"][:mi], "daily_volumes": day["daily_volumes"],
+                       "volume_provenance": "first_observed", "daily_volume_provenance": "first_observed_session_sum"}
         return underlying_view(root, day["path"][: mi + 1], opens=prior[:, 0], highs=prior[:, 1], lows=prior[:, 2],
-                               closes=prior[:, 3], volume_provenance="historical_without_asof",
-                               daily_volume_provenance="unavailable")
+                               closes=prior[:, 3], **volumes)
 
 
 def decision_minutes(needs: Mapping[str, Any]) -> list[int]:
@@ -445,7 +504,8 @@ def advice(message: str, *, roots: Sequence[str] = (), params: Mapping[str, Any]
     if re.search(r"'(float|int)' object is not (subscriptable|iterable)", text):
         return ("a number was indexed or iterated: ctx.under.price, .open, .high, .low and .prior_close are numbers; "
                 "ctx.under.prices (today's minutes) and .closes, .opens, .highs, .lows (prior sessions) are the arrays.")
-    if re.search(r"'(ChainView|UnderlyingView|Ctx)' object is not (subscriptable|iterable)", text):
+    if re.search(r"'(ChainView|UnderlyingView|Ctx)'( object is not| is not a container)", text) or \
+            re.search(r"argument of type '(ChainView|UnderlyingView|Ctx)'", text):
         return ("ctx, a chain (ctx.chains[root]) and an underlying (ctx.underlyings[root]) are objects: read their fields as "
                 "attributes (`ctx.chain.strike`, `ctx.under.price`); only ctx.chains, ctx.underlyings, ctx.rules, "
                 "ctx.params and ctx.events are dicts.")
@@ -472,6 +532,9 @@ def advice(message: str, *, roots: Sequence[str] = (), params: Mapping[str, Any]
     if re.search(r"'(int|float|str|bool|numpy\.\w+)' object has no attribute 'get'", text):
         return ("`.get` was called on a number or a string, not a dict: check what the name holds (a position row's "
                 "fields are plain values; ctx.chain fields are numpy arrays; ctx.under fields are attributes).")
+    if "too many indices for array" in text:
+        return ("ctx.chain's fields are one-dimensional numpy arrays, one entry per contract: index them with one index or "
+                "mask (`c.mid[i]`, `c.mid[mask]`), never two (`c.mid[i, j]`, `c.mid[:, 0]`).")
     if "truth value of an array" in text:
         return ("a numpy array was used as one boolean: chain fields are arrays, one entry per contract, and a mask keeps "
                 "every contract that matches it (every listed expiry, every strike within a tolerance); use `.any()`, "
@@ -490,6 +553,9 @@ def advice(message: str, *, roots: Sequence[str] = (), params: Mapping[str, Any]
         return "a division by zero: guard the denominator (a bid, a spread or a count can be 0)."
     if "decide returned" in text or "an intent" in text:
         return "decide returns a list of intent dicts (or [] / None), each with exactly one of 'open', 'close' or 'cancel'."
+    if "not associated with a value" in text:
+        return ("a local was read before any assignment reached it: set it on every path (a default before the `if` that "
+                "fills it), since a filter can keep nothing on some minutes.")
     if "is not defined" in text:
         return "a name is not defined: only math and numpy import, and the short list of safe builtins is all there is."
     return "check the line against the ctx section of league/CONTRACT.md."
@@ -529,28 +595,20 @@ def environmental(message: str) -> bool:
 
 #: Errors whose presence turns on the market's numbers, not on the program's use of the API: an empty selection, a
 #: division by a price or a count, a strike looked up in a dict, a log of a non-positive number, a None from a search that
-#: found nothing on this market. The synthetic market is not the real one, so such an error proves nothing about the Gym
-#: and never refuses (the Gym still judges it). First by the exception's type alone, whatever its words: an index past an
-#: empty or short array, a division by zero, an exhausted search, an overflow, a singular fit, a None, a numeric key (a
-#: strike, or a strike's text), a pop from an empty set or dict.
+#: found nothing on this market. Such an error is advisory however often it recurs; `api_misuse` never takes one (but for
+#: an array indexed in two dimensions, which its own words place outside this list). First by the exception's type alone,
+#: whatever its words: an index past an empty or short array, a division by zero, an exhausted search, an overflow, a
+#: singular fit, a None, a numeric key (a strike, or a strike's text), a pop from an empty set or dict.
 _MARKET_ERRORS = re.compile(r"\b(IndexError|ZeroDivisionError|StopIteration|OverflowError|FloatingPointError|LinAlgError|"
                             r"NoneType|KeyError: -?[\d.]+|KeyError: '-?\d+(?:\.\d+)?'|KeyError: \(|KeyError: np\.|"
                             r"KeyError: nan|KeyError: '(?:pop from an empty set|popitem\(\): dictionary is empty)')")
 #: Then a ValueError or a TypeError by what it says, each wording raised on the House's runtime (Python 3.11, numpy 2.4.4)
-#: and on 3.14 with numpy 2.5.3 (the tests raise every one on the runtime they run on; CI runs both, and the wordings
-#: below are the same on both but where named). An empty selection says "empty", "non-empty", "size 0" or "zero-size"
-#: (min() and max(): 3.11's "arg is an empty sequence", 3.14's "iterable argument is empty"; argmin, a reduction,
-#: np.interp, np.polyfit, the truth value of an empty array), or prints a shape with a zero in it ("(0,)", "(3, 0)"), or
-#: is too small for what was asked of it (np.gradient, np.partition's kth, a count less one as a length). Turning a
-#: selection into one number cannot tell an empty one from a crowded one (`.item()`, `np.squeeze(axis=0)`; `float()`,
-#: `int()` or a format of an array, which np.squeeze of exactly one contract would have spared), so none of them refuses. Two
-#: selections of different lengths (a broadcast, a dot product, np.interp's fp and xp, np.polyfit's x and y, a strict
-#: zip) are each as long as the market makes them; np.interp and np.polyfit do not say whether one was empty. A search
-#: that found nothing (`list.index`, `tuple.index`, an all-NaN slice), a step, a scale or a range worked out from the
-#: numbers, and a NaN or an infinity are the market's too. The math module's domain errors say "math domain error" on 3.11
-#: and, on 3.14, what they expected and got ("expected a positive input, got 0.0"). The truth value of an array of
-#: several contracts, a string read as a number and an operator on a list stay refusable: a sparser listing keeps them
-#: from refusing where a selection could hold one contract in the Gym.
+#: and on 3.14 with numpy 2.5.3 (the tests raise every one on the runtime they run on; CI runs both). An empty selection
+#: says "empty", "non-empty", "size 0" or "zero-size", or prints a shape with a zero in it, or is too small for what was
+#: asked of it. Turning a selection into one number cannot tell an empty one from a crowded one (`.item()`,
+#: `np.squeeze(axis=0)`; `float()`, `int()` or a format of an array). Two selections of different lengths are each as long
+#: as the market makes them. A search that found nothing, a step, a scale or a range worked out from the numbers, and a
+#: NaN or an infinity are the market's too, as are the math module's domain errors on 3.11 and 3.14.
 _MARKET_VALUES = re.compile(
     r"\bempty\b|non-empty|\bsize 0\b|zero-size|can only convert an array of size 1|"
     r"only (?:0-dimensional|length-1|size-1) arrays can be converted|squeeze out which has size not equal to one|"
@@ -575,22 +633,515 @@ def market_dependent(message: str) -> bool:
     return bool(m and _MARKET_VALUES.search(m.group(1)))
 
 
-def _declared(code: str, params: Mapping[str, Any] | None) -> dict[str, Any]:
-    """The program's PARAMS keys (its literal declaration with the overrides), for the advice; the overrides alone when
-    the declaration is not a literal."""
-    import ast
+# ------------------------------------------------------------------------------------------------ what refuses
+#: The ctx's own classes. The program cannot make one: an error that names one of them is about the ctx object itself,
+#: and one it raises for its type (a field it lacks, `[...]`, iteration, a call, arithmetic) it raises on every market.
+CTX_CLASSES = frozenset({"ChainView", "UnderlyingView", "Ctx"})
+#: The type each ctx field ALWAYS has (league/gym/ctx.py `build_ctx`, `ChainView`, `UnderlyingView`), as an error names
+#: it; a dict or a list carries which one it is, so a key can be checked against the keys it can ever hold. A view field
+#: can also be None (a root without data now): an error on a None never refuses.
+_CTX_TYPES = {"positions": "list:positions", "orders": "list:orders", "closed": "list:closed", "rejects": "list:rejects",
+              "roots": "tuple:roots", "chains": "dict:chains", "underlyings": "dict:underlyings", "rules": "dict:rules",
+              "params": "dict:params", "events": "dict:events", "events_next": "dict:events", "chain": "ChainView",
+              "under": "UnderlyingView", "minute": "int", "open_minute": "int", "close_minute": "int",
+              "minutes_to_close": "int", "weekday": "int", "cash": "float", "equity": "float", "budget": "float",
+              "buying_power": "float", "root": "str"}
+_CHAIN_TYPES = {"root": "str", "spot": "float", "minute": "int", "n": "int",
+                **{name: "numpy.ndarray" for name in ("id", "dte", "strike", "is_call", "bid", "ask", "mid", "spread",
+                                                      "bid_size", "ask_size", "oi", "expiries", "iv", "delta", "gamma",
+                                                      "theta", "vega")}}
+_UNDER_TYPES = {"root": "str", "volume_coverage": "dict:coverage",
+                **{name: "float" for name in ("price", "open", "high", "low", "prior_close", "volume", "prior_volume")},
+                **{name: "numpy.ndarray" for name in ("prices", "closes", "opens", "highs", "lows", "minute_volumes",
+                                                      "daily_volumes")}}
+#: What one entry of a ctx container is (a position row, a chain, a root's rules, an event's flag).
+_ITEMS = {"dict:chains": "ChainView", "dict:underlyings": "UnderlyingView", "dict:rules": "dict:rule",
+          "dict:events": "bool", "list:positions": "dict:position", "list:orders": "dict:order",
+          "list:closed": "dict:closed", "list:rejects": "str", "tuple:roots": "str"}
+#: Builtins that iterate their positional arguments.
+_ITERATING = frozenset({"list", "tuple", "set", "frozenset", "dict", "sorted", "sum", "min", "max", "any", "all", "zip",
+                        "enumerate", "map", "filter", "reversed", "iter"})
+#: The TypeErrors that say a ctx object was used as something its type is not: a number, a sequence, a function.
+_CTX_CLASS_TYPE_ERRORS = (
+    r"^'(\w+)' object is not (?:subscriptable|iterable|callable)",
+    r"^'(\w+)' object does(?:n't| not) support item (?:assignment|deletion)",
+    r"^argument of type '(\w+)' is not (?:a container or )?iterable", r"^cannot unpack non-iterable (\w+) object",
+    r"^object of type '(\w+)' has no len\(\)", r"^type (\w+) doesn't define __round__ method",
+    r"argument must be [^']*, not '(\w+)'", r"^'(\w+)' object cannot be interpreted as an integer",
+    r"^bad operand type for [^:]+: '(\w+)'", r"^unsupported operand type\(s\) for [^:]+: '(\w+)' and '\w+'",
+    r"^unsupported operand type\(s\) for [^:]+: '\w+' and '(\w+)'",
+    r"^'[^']+' not supported between instances of '(\w+)' and '\w+'",
+    r"^'[^']+' not supported between instances of '\w+' and '(\w+)'",
+)
 
-    out: dict[str, Any] = {}
+
+def _base(kind: str | None) -> str | None:
+    return None if kind is None else kind.split(":", 1)[0]
+
+
+def _literal_params(tree: ast.Module, overrides: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """The program's PARAMS as the Gym binds them (the literal declaration with the overrides, `merge_params`); None
+    when the declaration is not a literal dict."""
     try:
         from ..gym.safety import params_declaration
 
-        declared = ast.literal_eval(params_declaration(ast.parse(code)).value)
-        if isinstance(declared, dict):
-            out.update(declared)
-    except Exception:  # noqa: BLE001 - advice only
-        pass
-    out.update(params or {})
+        declared = ast.literal_eval(params_declaration(tree).value)
+    except Exception:  # noqa: BLE001 - not a literal: no key is known to be missing
+        return None
+    if not isinstance(declared, dict):
+        return None
+    out = {str(k): (list(v) if isinstance(v, (list, tuple)) else v) for k, v in declared.items()}
+    for key, value in (overrides or {}).items():
+        out[str(key)] = list(value) if isinstance(value, (list, tuple)) else value
     return out
+
+
+class _Source:
+    """The program's source, read to locate a runtime error at its line and name what the failing expression's receiver
+    is (`kind`). Nothing is guessed: a receiver is a ctx field only when every binding of every name on the way to it
+    resolves to one (an alias assigned once from ctx, a loop over a ctx container, decide's own parameter, a closure's
+    or a helper's parameter named `ctx`); anything else is unknown, and an unknown receiver never refuses."""
+
+    SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+
+    def __init__(self, code: str, roots: Sequence[str], params: Mapping[str, Any] | None):
+        import builtins
+
+        from ..gym.events import EVENT_NAMES
+        from ..gym.runtime import _SAFE_BUILTIN_NAMES
+        from ..gym import venue as V
+
+        self.tree = ast.parse(code)
+        self.parents: dict[ast.AST, ast.AST] = {}
+        for node in ast.walk(self.tree):
+            for child in ast.iter_child_nodes(node):
+                self.parents[child] = node
+        self.params = _literal_params(self.tree, params)
+        self.domains: dict[str, frozenset[str] | None] = {
+            "dict:chains": frozenset(str(r).upper() for r in roots), "dict:underlyings": frozenset(str(r).upper() for r in roots),
+            "dict:rules": frozenset(str(r).upper() for r in roots), "dict:events": frozenset(EVENT_NAMES),
+            "dict:rule": frozenset(V.rules_for("SPY").as_dict()),
+            "dict:params": None if self.params is None else frozenset(self.params)}
+        stored: dict[str, int] = {}
+        for node in ast.walk(self.tree):
+            for name in self._bound_names(node):
+                stored[name] = stored.get(name, 0) + 1
+        self.stored = stored
+        self.builtins = {n for n in _SAFE_BUILTIN_NAMES if callable(getattr(builtins, n, None)) and n not in stored}
+        self.defs = {node.name for node in self.tree.body
+                     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and stored.get(node.name) == 1}
+        self.modules: dict[str, Any] = {}
+        for node in self.tree.body:
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    name = alias.asname or alias.name.split(".")[0]
+                    if stored.get(name) == 1 and alias.name in ("math", "numpy"):
+                        self.modules[name] = __import__(alias.name)
+        self.readonly_params = self._params_readonly()
+        self._bindings: dict[Any, dict[str, list[tuple]]] = {}
+
+    @staticmethod
+    def _bound_names(node: ast.AST) -> list[str]:
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            return [node.id]
+        if isinstance(node, ast.arg):
+            return [node.arg]
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            return [node.name]
+        if isinstance(node, ast.alias):
+            return [node.asname or node.name.split(".")[0]]
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            return list(node.names)
+        if isinstance(node, ast.ExceptHandler) and node.name:
+            return [node.name]
+        if isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+            return [node.name]
+        if isinstance(node, ast.MatchMapping) and node.rest:
+            return [node.rest]
+        return []
+
+    def _params_readonly(self) -> bool:
+        """PARAMS is only ever read after its declaration (a key, `.get`, `.keys`/`.items`/`.values`, `in`, `len`):
+        then its keys are exactly the declared ones on every call, and a key it lacks is never there."""
+        if self.params is None:
+            return False
+        try:
+            from ..gym.safety import params_declaration
+
+            declaration = params_declaration(self.tree)
+        except Exception:  # noqa: BLE001
+            return False
+        target = declaration.targets[0] if isinstance(declaration, ast.Assign) else declaration.target
+        for node in ast.walk(self.tree):
+            if isinstance(node, (ast.Global, ast.Nonlocal)) and "PARAMS" in node.names:
+                return False
+            if not isinstance(node, ast.Name) or node.id != "PARAMS" or node is target:
+                continue
+            parent = self.parents.get(node)
+            if not isinstance(node.ctx, ast.Load):
+                return False
+            if isinstance(parent, ast.Subscript) and parent.value is node and isinstance(parent.ctx, ast.Load):
+                continue
+            if isinstance(parent, ast.Attribute) and parent.attr in ("get", "keys", "items", "values") and \
+                    isinstance(self.parents.get(parent), ast.Call) and self.parents[parent].func is parent:
+                continue
+            if isinstance(parent, ast.Compare) and node is not parent.left and \
+                    all(isinstance(op, (ast.In, ast.NotIn)) for op in parent.ops):
+                continue
+            if isinstance(parent, ast.Call) and isinstance(parent.func, ast.Name) and parent.func.id == "len" \
+                    and "len" in self.builtins:
+                continue
+            return False
+        return True
+
+    # -------------------------------------------------------------- names
+    def scope(self, node: ast.AST) -> ast.AST | None:
+        """The function (or lambda) whose local names `node` sees first; None: the module."""
+        parent = self.parents.get(node)
+        while parent is not None and not isinstance(parent, self.SCOPES):
+            parent = self.parents.get(parent)
+        return parent
+
+    def bindings(self, scope: ast.AST) -> dict[str, list[tuple]]:
+        """Every binding of every name local to `scope`, as ("ctx",), ("expr", node), ("item", iterable),
+        ("key", mapping), ("value", mapping), ("int",) or ("unknown",)."""
+        if scope in self._bindings:
+            return self._bindings[scope]
+        out: dict[str, list[tuple]] = {}
+        add = lambda name, how: out.setdefault(name, []).append(how)  # noqa: E731
+        args = scope.args
+        positional = [*args.posonlyargs, *args.args]
+        first = positional[0].arg if positional else None
+        is_decide = isinstance(scope, ast.FunctionDef) and scope.name == "decide" and self.scope(scope) is None
+        for arg in [*positional, *args.kwonlyargs, *([args.vararg] if args.vararg else []),
+                    *([args.kwarg] if args.kwarg else [])]:
+            add(arg.arg, ("ctx",) if (arg.arg == "ctx" or (is_decide and arg.arg == first)) and arg not in
+                (args.vararg, args.kwarg) else ("unknown",))
+        body = scope.body if isinstance(scope.body, list) else [scope.body]
+        todo = list(body)
+        while todo:
+            node = todo.pop()
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                add(node.name, ("unknown",))
+                todo.extend(node.decorator_list)
+                continue
+            if isinstance(node, ast.Lambda):
+                continue
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    self._assign(target, node.value, add)
+            elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)) and isinstance(node.target, ast.Name):
+                if getattr(node, "value", None) is not None:
+                    add(node.target.id, ("expr", node.value))
+            elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+                self._loop(node.target, node.iter, add)
+            else:
+                for name in self._bound_names(node):
+                    if not (isinstance(node, ast.Name) and self._handled(node)):
+                        add(name, ("unknown",))
+            todo.extend(ast.iter_child_nodes(node))
+        self._bindings[scope] = out
+        return out
+
+    def _handled(self, name: ast.Name) -> bool:
+        """A stored Name the Assign, AnnAssign, NamedExpr, For or comprehension above it already recorded."""
+        node: ast.AST = name
+        parent = self.parents.get(node)
+        while isinstance(parent, (ast.Tuple, ast.List, ast.Starred)):
+            node, parent = parent, self.parents.get(parent)
+        if isinstance(parent, ast.Assign) and node in parent.targets:
+            return True
+        if isinstance(parent, (ast.AnnAssign, ast.NamedExpr)) and parent.target is node and \
+                getattr(parent, "value", None) is not None and node is name:
+            return True
+        return isinstance(parent, (ast.For, ast.AsyncFor, ast.comprehension)) and parent.target is node
+
+    def _assign(self, target: ast.AST, value: ast.AST, add: Callable[[str, tuple], None]) -> None:
+        if isinstance(target, ast.Name):
+            add(target.id, ("expr", value))
+        elif isinstance(target, (ast.Tuple, ast.List)) and isinstance(value, (ast.Tuple, ast.List)) and \
+                len(target.elts) == len(value.elts) and not any(isinstance(e, ast.Starred) for e in target.elts):
+            for t, v in zip(target.elts, value.elts):
+                self._assign(t, v, add)
+        else:
+            for node in ast.walk(target):
+                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                    add(node.id, ("unknown",))
+
+    def _loop(self, target: ast.AST, iterable: ast.AST, add: Callable[[str, tuple], None]) -> None:
+        if isinstance(target, ast.Name):
+            add(target.id, ("item", iterable))
+            return
+        if isinstance(target, (ast.Tuple, ast.List)) and len(target.elts) == 2 and \
+                all(isinstance(e, ast.Name) for e in target.elts) and isinstance(iterable, ast.Call) and \
+                not iterable.keywords:
+            func = iterable.func
+            if isinstance(func, ast.Attribute) and func.attr == "items" and not iterable.args:
+                add(target.elts[0].id, ("key", func.value))
+                add(target.elts[1].id, ("value", func.value))
+                return
+            if isinstance(func, ast.Name) and func.id == "enumerate" and "enumerate" in self.builtins and \
+                    len(iterable.args) == 1:
+                add(target.elts[0].id, ("int",))
+                add(target.elts[1].id, ("item", iterable.args[0]))
+                return
+        for node in ast.walk(target):
+            if isinstance(node, ast.Name):
+                add(node.id, ("unknown",))
+
+    # -------------------------------------------------------------- kinds
+    def kind(self, node: ast.AST, depth: int = 0) -> str | None:
+        """What `node` always is when it is a ctx field or a part of one (`_CTX_TYPES`); None: unknown."""
+        if depth > 24:
+            return None
+        if isinstance(node, ast.Name):
+            return self._name(node.id, self.scope(node), depth)
+        if isinstance(node, ast.Attribute):
+            owner = self.kind(node.value, depth + 1)
+            table = {"Ctx": _CTX_TYPES, "ChainView": _CHAIN_TYPES, "UnderlyingView": _UNDER_TYPES}.get(owner or "")
+            return table.get(node.attr) if table else None
+        if isinstance(node, ast.Subscript):
+            owner = self.kind(node.value, depth + 1)
+            if owner is None:
+                return None
+            if isinstance(node.slice, ast.Slice):
+                return owner if owner.startswith(("list:", "tuple:")) else None
+            if owner == "dict:params":
+                return self._param(node.slice)
+            return _ITEMS.get(owner)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and not node.keywords:
+            owner = self.kind(node.func.value, depth + 1)
+            if owner is None:
+                return None
+            if node.func.attr == "get" and owner.startswith("dict:") and (
+                    len(node.args) == 1 or len(node.args) == 2 and isinstance(node.args[1], ast.Constant)
+                    and node.args[1].value is None):
+                return self._param(node.args[0]) if owner == "dict:params" else _ITEMS.get(owner)
+            if node.func.attr == "copy" and not node.args and owner.startswith(("list:", "dict:")):
+                return owner
+        return None
+
+    def _param(self, key: ast.AST) -> str | None:
+        if self.params is None or not isinstance(key, ast.Constant) or key.value not in self.params:
+            return None
+        value = self.params[key.value]
+        return {bool: "bool", int: "int", float: "float", str: "str", list: "list:param"}.get(type(value))
+
+    def _name(self, name: str, scope: ast.AST | None, depth: int) -> str | None:
+        while scope is not None:
+            bound = self.bindings(scope).get(name)
+            if bound is not None:
+                kinds = {self._binding(how, scope, depth + 1) for how in bound}
+                return kinds.pop() if len(kinds) == 1 and None not in kinds else None
+            scope = self.scope(scope)
+        return "dict:params" if name == "PARAMS" and self.readonly_params else None
+
+    def _binding(self, how: tuple, scope: ast.AST, depth: int) -> str | None:
+        tag = how[0]
+        if tag == "ctx":
+            return "Ctx"
+        if tag == "int":
+            return "int"
+        if tag == "expr":
+            return self.kind(how[1], depth)
+        if tag in ("key", "value"):
+            owner = self.kind(how[1], depth)
+            if owner is None or not owner.startswith("dict:"):
+                return None
+            return "str" if tag == "key" else (None if owner == "dict:params" else _ITEMS.get(owner))
+        if tag == "item":
+            iterable = how[1]
+            if isinstance(iterable, ast.Call) and isinstance(iterable.func, ast.Attribute) and not iterable.args \
+                    and not iterable.keywords and iterable.func.attr in ("keys", "values"):
+                owner = self.kind(iterable.func.value, depth)
+                if owner is None or not owner.startswith("dict:"):
+                    return None
+                return "str" if iterable.func.attr == "keys" else (None if owner == "dict:params" else _ITEMS.get(owner))
+            owner = self.kind(iterable, depth)
+            if owner is None:
+                return None
+            if owner.startswith("dict:"):
+                return "str"
+            return _ITEMS.get(owner)
+        return None
+
+    # -------------------------------------------------------------- the line
+    def at(self, line: int) -> list[ast.AST]:
+        """Every expression and statement node that spans `line` (the Runner's line is the failing instruction's)."""
+        return [node for node in ast.walk(self.tree) if isinstance(node, (ast.expr, ast.stmt, ast.comprehension))
+                and getattr(node, "lineno", None) is not None and node.lineno <= line <= (node.end_lineno or node.lineno)]
+
+    def known_callable(self, func: ast.AST) -> bool:
+        """A callee that is certainly callable: a safe builtin or a module-level function the program never rebinds, or
+        a function of math or numpy."""
+        if isinstance(func, ast.Name):
+            return func.id in self.builtins or func.id in self.defs
+        chain = []
+        while isinstance(func, ast.Attribute):
+            chain.append(func.attr)
+            func = func.value
+        if not isinstance(func, ast.Name) or func.id not in self.modules or self._name(func.id, self.scope(func), 0) \
+                is not None or func.id in self._locals_of(func):
+            return False
+        value = self.modules[func.id]
+        for attr in reversed(chain):
+            value = getattr(value, attr, None)
+        return callable(value)
+
+    def _locals_of(self, node: ast.AST) -> set[str]:
+        scope, names = self.scope(node), set()
+        while scope is not None:
+            names |= set(self.bindings(scope))
+            scope = self.scope(scope)
+        return names
+
+    def only(self, receivers: Sequence[ast.AST], kind: str) -> str | None:
+        """What the receivers that could be a `kind` are (`_what` of the first), when every one of them (unknown, or
+        known to be one) is known to be one and there is one; None otherwise."""
+        kinds = [self.kind(r) for r in receivers]
+        relevant = [k for k in kinds if k is None or _base(k) == kind]
+        return _what(relevant[0]) if relevant and all(k is not None for k in relevant) else None
+
+
+def _a(name: str) -> str:
+    return ("an " if name[:1].upper() in "AEIOU" else "a ") + name
+
+
+def _what(kind: str) -> str:
+    names = {"list:positions": "ctx.positions (a list)", "list:orders": "ctx.orders (a list)", "list:closed":
+             "ctx.closed (a list)", "list:rejects": "ctx.rejects (a list)", "tuple:roots": "ctx.roots (a tuple)",
+             "dict:chains": "ctx.chains", "dict:underlyings": "ctx.underlyings", "dict:rules": "ctx.rules",
+             "dict:params": "the program's PARAMS (ctx.params)", "dict:events": "ctx.events", "dict:rule": "ctx.rules[root]"}
+    return names.get(kind, f"{_a('ctx ' + str(_base(kind)))}")
+
+
+def api_misuse(message: str, code: str, *, roots: Sequence[str] = (), params: Mapping[str, Any] | None = None) -> str | None:
+    """Why a runtime error message (the Runner's `line N: Type: words`) is MARKET-INDEPENDENT MISUSE OF THE CTX API at
+    that line of `code` (a short phrase), or None (`_misuse`). The classifier's own failure is None: it never refuses."""
+    try:
+        return _misuse(message, code, roots=roots, params=params)
+    except Exception:  # noqa: BLE001 - an unreadable line is not misuse
+        return None
+
+
+def _misuse(message: str, code: str, *, roots: Sequence[str] = (), params: Mapping[str, Any] | None = None) -> str | None:
+    """`api_misuse`. `roots`: the program's NEEDS roots (the only keys ctx.chains,
+    ctx.underlyings and ctx.rules can hold); `params`: the run's overrides. Only an AttributeError, a TypeError, a
+    KeyError or an IndexError; never one raised on a None or an empty value (`market_dependent`) or one this box may cause
+    (`environmental`); and only when the failing expression is found on the line and its receiver is a ctx object of the
+    type the error names (a ctx class by the error's own words; a list, a dict or a number by `_Source.kind`)."""
+    text = str(message or "")
+    m = re.match(r"line (\d+): ([\w.]+): (.*)", text, re.S)
+    if not m or m.group(2) not in ("AttributeError", "TypeError", "KeyError", "IndexError"):
+        return None
+    line, error, said = int(m.group(1)), m.group(2), m.group(3).strip()
+    if environmental(text) or "NoneType" in said:
+        return None
+    src = _Source(code, roots, params)
+    nodes = src.at(line)
+    if not nodes:
+        return None
+    if error == "IndexError":  # a 1-D ctx array indexed in two dimensions: its words are not the market's
+        if not re.match(r"too many indices for array: array is 1-dimensional, but \d+ were indexed", said):
+            return None
+        subs = [n.value for n in nodes if isinstance(n, ast.Subscript) and not isinstance(n.slice, (ast.Constant, ast.Slice))]
+        return "a ctx array is one-dimensional" if src.only(subs, "numpy.ndarray") else None
+    if market_dependent(text):
+        return None
+    if error == "AttributeError":
+        m = re.match(r"'([\w.]+)' object has no attribute '(\w+)'", said)
+        if not m:
+            return None
+        kind, attr = m.groups()
+        if any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in ("getattr", "delattr")
+               and len(n.args) == 2 and not (isinstance(n.args[1], ast.Constant) and n.args[1].value != attr)
+               for n in nodes):
+            return None  # getattr(x, name) may have raised it, with a name the market chose
+        found = [n.value for n in nodes if isinstance(n, ast.Attribute) and n.attr == attr]
+        if not found:
+            return None
+        if kind in CTX_CLASSES:
+            return f"{_a(kind)} has no `{attr}`"
+        what = src.only(found, kind)
+        return f"{what} has no `{attr}`" if what else None
+    if error == "KeyError":
+        m = re.fullmatch(r"'([^'\\]*)'", said)
+        if not m:
+            return None
+        key, receivers = m.group(1), []
+        for n in nodes:
+            if isinstance(n, ast.Subscript) and not isinstance(n.ctx, ast.Store):
+                if isinstance(n.slice, ast.Constant):
+                    if n.slice.value == key:
+                        receivers.append(n.value)
+                elif not isinstance(n.slice, ast.Slice):
+                    receivers.append(n.value)
+            elif isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in (
+                    "pop", "remove", "format", "format_map", "popitem", "__getitem__", "__delitem__"):
+                receivers.append(n.func.value)
+            elif isinstance(n, ast.Call) and not isinstance(n.func, ast.Attribute) and not src.known_callable(n.func):
+                return None
+            elif isinstance(n, ast.BinOp) and isinstance(n.op, ast.Mod) and isinstance(n.left, (ast.Constant, ast.JoinedStr)):
+                return None
+        kinds = [k for k in (src.kind(r) for r in receivers) if k is None or k.startswith("dict:")]
+        if not kinds or any(k is None or src.domains.get(k) is None or key in src.domains[k] for k in kinds):
+            return None
+        return f"`{key}` is never a key of {_what(kinds[0])}"
+    # TypeError
+    for pattern in _CTX_CLASS_TYPE_ERRORS:
+        m = re.search(pattern, said)
+        if m and m.group(1) in CTX_CLASSES:
+            return f"{_a(m.group(1))} used as something it is not"
+    m = re.match(r"'([\w.]+)' object (is not subscriptable|does(?:n't| not) support item \w+|is not callable|is not iterable)",
+                 said) or re.match(r"argument of type '([\w.]+)' (is not (?:a container or )?iterable)", said)
+    if m:
+        kind, how = m.groups()
+        if "subscriptable" in how or "support item" in how:
+            receivers = [n.value for n in nodes if isinstance(n, ast.Subscript)]
+        elif "callable" in how:
+            receivers = [n.func for n in nodes if isinstance(n, ast.Call) and not src.known_callable(n.func)]
+        else:
+            receivers = []
+            for n in nodes:
+                if isinstance(n, (ast.For, ast.AsyncFor, ast.comprehension)):
+                    receivers.append(n.iter)
+                elif isinstance(n, ast.Compare):
+                    receivers += [c for op, c in zip(n.ops, n.comparators) if isinstance(op, (ast.In, ast.NotIn))]
+                elif isinstance(n, ast.Starred):
+                    receivers.append(n.value)
+                elif isinstance(n, ast.Assign) and any(isinstance(t, (ast.Tuple, ast.List)) for t in n.targets):
+                    receivers.append(n.value)
+                elif isinstance(n, ast.Call):
+                    receivers += [a for a in n.args if not isinstance(a, ast.Starred)]
+                    receivers += [k.value for k in n.keywords]
+        what = src.only(receivers, kind)
+        return f"{what} {how}" if what else None
+    m = re.match(r"(list|tuple) indices must be integers or slices, not \w+", said)
+    if m:
+        what = src.only([n.value for n in nodes if isinstance(n, ast.Subscript)], m.group(1))
+        return f"{what} is indexed by position" if what else None
+    m = re.match(r"(?:([\w.]+)\.)?(\w+)\(\) (?:takes|missing|got)", said) or \
+        re.match(r"()(\w+) expected (?:at least |at most )?\d+ arguments?, got \d+", said)
+    if m:  # a ctx container's method called with the wrong arguments
+        owner, method = m.groups()
+        calls = [n for n in nodes if isinstance(n, ast.Call) and (
+            isinstance(n.func, ast.Attribute) and n.func.attr == method or isinstance(n.func, ast.Name) and n.func.id == method)]
+        if not calls or not all(isinstance(c.func, ast.Attribute) for c in calls):
+            return None
+        kinds = [src.kind(c.func.value) for c in calls]
+        if any(k is None or (owner and _base(k) != owner) for k in kinds):
+            return None
+        return f"{_what(kinds[0])}.{method}() takes other arguments"
+    return None
+
+
+def _declared(code: str, params: Mapping[str, Any] | None) -> dict[str, Any]:
+    """The program's PARAMS keys (its literal declaration with the overrides), for the advice; the overrides alone when
+    the declaration is not a literal."""
+    try:
+        return _literal_params(ast.parse(code), params) or dict(params or {})
+    except (SyntaxError, ValueError, RecursionError):
+        return dict(params or {})
 
 
 def _located(message: str, code: str) -> tuple[int | None, str]:
@@ -602,15 +1153,43 @@ def _located(message: str, code: str) -> tuple[int | None, str]:
     return line, (lines[line - 1].strip()[:200] if 0 < line <= len(lines) else "")
 
 
+def warnings_for(messages: Sequence[str], code: str, *, roots: Sequence[str] = (),
+                 params: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
+    """What an advisory says of each error (the first WARNINGS): the Runner's message, its line and the line's source,
+    the ctx API to use (`advice`) and, where the error could be the made-up market's or this box's, which."""
+    declared = _declared(code, params)
+    out = []
+    for message in list(dict.fromkeys(str(m) for m in messages))[:WARNINGS]:
+        line, source = _located(message, code)
+        row: dict[str, Any] = {"error": message[:300], "line": line, "source": source,
+                               "hint": advice(message, roots=roots, params=declared, source=source)}
+        if environmental(message):
+            row["may_be"] = "this box's Python, numpy or memory, not the Gym's"
+        elif market_dependent(message):
+            row["may_be"] = "the made-up market's numbers (an empty selection, a count, a None): the Gym's may spare it"
+        out.append({k: v for k, v in row.items() if v not in (None, "")})
+    return out
+
+
 # ------------------------------------------------------------------------------------------------ the run
 def _answer(status: str, why: str, **fields: Any) -> dict[str, Any]:
     return {"status": status, "why": why, "version": VERSION, **fields}
 
 
+def _advisory(why: str, messages: Sequence[str], code: str, roots: Sequence[str], params: Mapping[str, Any] | None,
+              **fields: Any) -> dict[str, Any]:
+    """An advisory answer: `why`, and each error as `warnings`, the first's error, line, source and hint on top."""
+    warned = warnings_for(messages, code, roots=roots, params=params)
+    first = warned[0] if warned else {}
+    return _answer("advisory", why, warnings=warned, **{k: first[k] for k in ("error", "line", "source", "hint") if k in first},
+                   **fields)
+
+
 def run(code: str, params: Mapping[str, Any] | None, decider: Any, *, universe: Sequence[str] | None = None,
         name: str = "preflight", deadline: float = DEADLINE_SECONDS, clock: Callable[[], float] = time.monotonic) -> dict:
     """The preflight of one (code, params) on `decider` (a `league.live.decider` Decider or InlineDecider). `universe`: the
-    run's roots (a program trades its NEEDS roots within them). {"status": "passed" | "refused" | "inconclusive", ...}."""
+    run's roots (a program trades its NEEDS roots within them). {"status": "passed" | "advisory" | "refused" |
+    "inconclusive", "why": ..., ...}: only "refused" stops the Train run."""
     from ..live.decider import DeciderError, ProgramRefused
 
     began = clock()
@@ -619,52 +1198,55 @@ def run(code: str, params: Mapping[str, Any] | None, decider: Any, *, universe: 
         info = decider.load(key, code, dict(params or {}), name)
     except ProgramRefused as exc:
         message = str(exc)
-        if "ran past" in message or environmental(message):
+        if "ran past" in message:
             return _answer("inconclusive", f"the load says nothing on this box: {message[:300]}")
+        if environmental(message):
+            return _advisory("the program did not load on this box, whose Python, numpy and memory are not the Gym "
+                             "boxes': the run goes ahead", [message], code, (), params, stage="load", calls=0)
         line, source = _located(message, code)
         return _answer("refused", "the program does not load (the Gym's worker would refuse it the same way)", stage="load",
                        error=message[:500], line=line, source=source, calls=0,
                        hint=advice(message, params=_declared(code, params), source=source))
     except DeciderError as exc:
         return _answer("inconclusive", f"the sandbox failed: {str(exc)[:300]}")
+    needs = info["needs"]
     try:
-        verdict = _decide_loop(code, params or {}, decider, key, info["needs"], universe, began, deadline, clock)
+        verdict = _decide_loop(code, params or {}, decider, key, needs, universe, began, deadline, clock)
     except DeciderError as exc:
         return _answer("inconclusive", f"the sandbox failed: {str(exc)[:300]}")
     finally:
         _drop(decider, key)
     if verdict["status"] != "refused":
         return verdict
-    # THE OTHER MARKETS (`CONFIRMATIONS`): a fresh instance of the program on each. The refusal stands only when the error
-    # recurs on every one (`_recurs`), so an error that turns on how many contracts the chain lists (a selection that
-    # holds one contract in the Gym holds several here, or none) or on the made-up numbers (a liquidity filter that keeps
-    # nothing at these quotes, then a STATE key it never wrote) never refuses on its own.
-    calls = int(verdict.get("calls") or 0)
+    # THE OTHER MARKETS (`CONFIRMATIONS`): a fresh instance of the program on each. The refusal stands only when the same
+    # exception type at the same line recurs, as a refusable streak, on every one (`_same`): a misuse behind a branch the
+    # made-up numbers opened (a filter that kept something here, a vol in a band) is then advisory.
+    calls, roots = int(verdict.get("calls") or 0), [str(r).upper() for r in needs["roots"]]
+    first = verdict.get("messages") or [verdict["error"]]
     for regime in CONFIRMATIONS:
         label = REGIMES[regime].label
         again_key = f"{key}:{regime}"
         try:
             decider.load(again_key, code, dict(params or {}), name)
-            again = _decide_loop(code, params or {}, decider, again_key, info["needs"], universe, began, deadline, clock,
+            again = _decide_loop(code, params or {}, decider, again_key, needs, universe, began, deadline, clock,
                                  regime=regime)
         except (ProgramRefused, DeciderError) as exc:
-            return _answer("inconclusive", f"the sandbox failed on {label}: {str(exc)[:300]}", calls=calls)
+            return _advisory(f"decide raised a misuse of the ctx API on every call, but the sandbox failed on {label}, so "
+                             f"it could not be confirmed there: {str(exc)[:200]}; the run goes ahead", first, code, roots,
+                             params, calls=calls)
         finally:
             _drop(decider, again_key)
         calls += int(again.get("calls") or 0)
-        if again["status"] == "inconclusive":  # it could not say there (its deadline, a timeout, the sandbox)
-            return _answer("inconclusive", f"on {label}: {again.get('why')}", calls=calls)
-        if again["status"] != "refused" or not _recurs(again.get("error"), verdict.get("error")):
-            because = {"sparse": "it may turn on how many contracts the chain lists, which the Gym's store decides",
-                       "dense": "it may turn on how many contracts the chain lists, which the Gym's store decides, or on "
-                                "the market's numbers, which are made up here"}.get(
-                regime, "it may turn on the market's numbers (a quote's width, a vol, a size, a price), which are made up "
-                        "here")
-            return _answer("inconclusive", f"the error did not recur on {label}: {because}: "
-                                           f"{str(verdict.get('error') or '')[:240]}", calls=calls)
-    verdict["why"] += ("; again on a sparser listing (one expiry a week, a wider strike step), on a denser one (an expiry "
-                       "every weekday, a finer strike step), on quotes one tick wide at twice the vol and on quotes three "
-                       "times as wide at a lower vol (other price paths and levels)")
+        if again["status"] != "refused" or not _same(again.get("error"), verdict.get("error")):
+            err = str(again.get("error") or "")[:160]
+            said = ("there decide did not raise" if again["status"] == "passed" else f"there it raised `{err}`" if err
+                    else f"there: {str(again.get('why') or '')[:160]}")
+            return _advisory(f"decide raised `{str(verdict.get('error') or '')[:200]}` on every call, a misuse of the ctx "
+                             f"API on this market, but not at the same line on {label} ({said}): it may hang on a branch "
+                             "the made-up numbers opened, so the run goes ahead", first, code, roots, params, calls=calls)
+    verdict["why"] += ("; again, the same exception at the same line, on a saturated market (every selection filled, any "
+                       "filter keeping contracts), on a sparser and a denser listing, on quotes one tick wide at twice the "
+                       "vol and on quotes three times as wide at a lower vol (other price paths and levels)")
     verdict["calls"] = calls
     return verdict
 
@@ -683,14 +1265,10 @@ def _kind(message: Any) -> tuple[str, str]:
     return (m.group(1) or "", m.group(2)) if m else ("", "")
 
 
-def _recurs(again: Any, first: Any) -> bool:
-    """`again` (another market's streak) is `first` recurring: the same exception at the same line, or the same exception
-    saying the same thing at another line (`name 'intents' is not defined` where another branch ran first)."""
-    (line, kind), (first_line, first_kind) = _kind(again), _kind(first)
-    if kind != first_kind:
-        return False
-    text = lambda message: re.sub(r"^line \d+: ", "", str(message or ""))  # noqa: E731
-    return line == first_line or text(again) == text(first)
+def _same(again: Any, first: Any) -> bool:
+    """`again` (another market's streak) is `first` recurring: the same exception type at the same line."""
+    line, kind = _kind(again)
+    return bool(line) and (line, kind) == _kind(first)
 
 
 def _decide_loop(code: str, params: Mapping[str, Any], decider: Any, key: str, needs: Mapping[str, Any],
@@ -714,15 +1292,25 @@ def _decide_loop(code: str, params: Mapping[str, Any], decider: Any, key: str, n
     unnamed = blind = False               # a streak error already in the list / one the full list could not take
     first_message = ""
     messages: list[str] = []
+
+    def settle(status: str, why: str) -> dict:
+        """A loop that ended without a refusable streak: `status`, or advisory when decide raised at all."""
+        if errors and status == "passed":
+            return _advisory(f"decide raised on {errors} of {calls} calls on {REGIMES[regime].label} ({why}); only a "
+                             "misuse of the ctx API that raises on every call on every made-up market is refused, so the "
+                             "run goes ahead", messages, code, wanted, params, calls=calls, errors=errors)
+        extra = {"warnings": warnings_for(messages, code, roots=wanted, params=params)} if errors else {}
+        return _answer(status, why, calls=calls, errors=errors, **extra)
+
     for s in range(SESSIONS):
         if s == SESSIONS - 1 and not streak:
             break  # the last session only confirms a streak still running at the end of the one before
         for k, mi in enumerate(schedule):
             if s and k >= STREAK and not streak:
                 # A streak must span two sessions: one not running STREAK calls into a later session cannot, this session.
-                return _answer("passed", "no persistent error on the synthetic sessions", calls=calls, errors=errors)
+                return settle("passed", "no persistent error on the synthetic sessions")
             if clock() - began > deadline:
-                return _answer("inconclusive", f"the preflight's {deadline:.0f} s ran out after {calls} calls", calls=calls)
+                return settle("inconclusive", f"the preflight's {deadline:.0f} s ran out after {calls} calls")
             token = s * 1000 + mi
             snaps = {(r, token): market.snapshot(r, s, mi) for r in roots}
             unders = {(r, int(needs["history"]), token): market.under(r, s, mi) for r in roots}
@@ -734,16 +1322,18 @@ def _decide_loop(code: str, params: Mapping[str, Any], decider: Any, key: str, n
             stats = answer.get("stats")
             if answer.get("missing") or answer.get("skipped") or not isinstance(stats, Mapping) \
                     or getattr(decider, "restarts", 0) != restarts or int(stats.get("calls") or 0) != calls + 1:
-                return _answer("inconclusive", "the sandbox lost the program's runner", calls=calls)
+                return settle("inconclusive", "the sandbox lost the program's runner")
             calls += 1
-            if int(stats.get("timeouts") or 0) > timeouts:
-                return _answer("inconclusive", "a call ran past its time limit (this box is not a Gym box)", calls=calls)
             raised = int(stats.get("errors") or 0) - errors
             errors = int(stats.get("errors") or 0)
             seen = [str(m) for m in stats.get("messages") or []]
+            if int(stats.get("timeouts") or 0) > timeouts:
+                messages = seen
+                return settle("inconclusive", "a call ran past its time limit (this box is not a Gym box)")
             if answer.get("intents"):
-                return _answer("passed", f"the program returned an intent at call {calls}; a flat account no longer "
-                                         "mirrors the Gym's from there", calls=calls, errors=errors)
+                messages = seen
+                return settle("passed", f"the program returned an intent at call {calls}; a flat account no longer "
+                                        "mirrors the Gym's from there")
             if raised <= 0:
                 streak, named, unnamed, blind, first_message = [], [], False, False, ""
                 messages = seen
@@ -762,37 +1352,44 @@ def _decide_loop(code: str, params: Mapping[str, Any], decider: Any, key: str, n
             messages = seen
             streak.append((s, calls))
             if len(streak) >= STREAK and len({x[0] for x in streak}) >= 2:
-                return _verdict(code, params, roots, streak, named, unnamed, blind, first_message, seen, calls, errors)
-    return _answer("passed", "no persistent error on the synthetic sessions", calls=calls, errors=errors)
+                return _verdict(code, params, wanted, streak, named, unnamed, blind, first_message, seen, calls, errors)
+    return settle("passed", "no persistent error on the synthetic sessions")
 
 
 def _verdict(code: str, params: Mapping[str, Any], roots: Sequence[str], streak: Sequence[tuple[int, int]],
              named: Sequence[str], unnamed: bool, blind: bool, first_message: str, seen: Sequence[str], calls: int,
              errors: int) -> dict:
-    """A streak long enough to refuse: refused only when every error it may hold is known and says the program misuses the
-    API on any market, on any box (not `environmental`, not `market_dependent`)."""
+    """A streak long enough to refuse: refused (for the other markets to confirm, `run`) only when every error it may
+    hold is known and is market-independent misuse of the ctx API (`api_misuse`); advisory otherwise."""
+    span = f"{len(streak)} calls over {len({x[0] for x in streak})} synthetic sessions, before any intent"
+    advisory = lambda why, shown: _advisory(  # noqa: E731
+        f"decide raised on every call from call {streak[0][1]} ({span}), but {why}: the run goes ahead", shown, code,
+        roots, params, calls=calls, errors=errors)
     if blind:
-        return _answer("inconclusive", f"the Runner's list holds {RUNNER_MESSAGES} messages and the streak's error is not "
-                                       "among them", calls=calls, errors=errors)
+        return advisory(f"the Runner's list holds {RUNNER_MESSAGES} messages and the streak's error is not among them",
+                        seen)
     candidates = list(dict.fromkeys([*named, *(seen if unnamed else ())]))
     if not first_message and len(candidates) == 1:
         first_message = candidates[0]
     if not first_message or not candidates:
-        return _answer("inconclusive", "the streak's first error cannot be told apart from earlier ones", calls=calls,
-                       errors=errors)
-    if any(environmental(m) for m in [*candidates, *seen]):
-        found = next(m for m in [*candidates, *seen] if environmental(m))
-        return _answer("inconclusive", f"the error may be this box's Python, numpy or memory, not the Gym's: {found[:300]}",
-                       calls=calls, errors=errors)
-    if any(market_dependent(m) for m in candidates):
-        found = next(m for m in candidates if market_dependent(m))
-        return _answer("inconclusive", f"the error turns on the market's numbers, which are made up here: {found[:300]}",
-                       calls=calls, errors=errors)
+        return advisory("the streak's first error cannot be told apart from earlier ones", seen)
+    shown = [first_message, *[m for m in candidates if m != first_message], *seen]
+    found = next((m for m in candidates if environmental(m)), None)
+    if found:
+        return advisory(f"the error may be this box's Python, numpy or memory, not the Gym's: {found[:200]}", shown)
+    reasons = [api_misuse(m, code, roots=roots, params=params) for m in candidates]
+    if not all(reasons):
+        found = next(m for m, why in zip(candidates, reasons) if not why)
+        if market_dependent(found):
+            return advisory(f"the error could turn on the market's numbers, which are made up here: {found[:200]}", shown)
+        return advisory(f"`{found[:200]}` is not a misuse of the ctx API that no market could spare (only such a misuse "
+                        "is refused)", shown)
     line, source = _located(first_message, code)
-    return _answer("refused", f"decide raised on every call from call {streak[0][1]} ({len(streak)} calls over "
-                              f"{len({x[0] for x in streak})} synthetic sessions, before any intent)",
+    misuse = reasons[candidates.index(first_message)] if first_message in candidates else reasons[0]
+    return _answer("refused", f"decide raised the same misuse of the ctx API ({misuse}) on every call from call "
+                              f"{streak[0][1]} ({span})",
                    stage="decide", error=first_message[:500], line=line, source=source, calls=calls, errors=errors,
-                   messages=[m[:200] for m in candidates[:4]],
+                   misuse=misuse, messages=[m[:200] for m in candidates[:4]],
                    hint=advice(first_message, roots=roots, params=_declared(code, params), source=source))
 
 
@@ -901,6 +1498,7 @@ class Preflight:
             self._decider.close()
 
 
-__all__ = ["VERSION", "STREAK", "SESSIONS", "PREFLIGHT_UID", "PREFLIGHT_NICE", "LISTING", "REGIMES", "CONFIRMATIONS",
+__all__ = ["VERSION", "STREAK", "SESSIONS", "PREFLIGHT_UID", "PREFLIGHT_NICE", "LISTING", "REGIMES", "CONFIRMATIONS", "CTX_CLASSES",
            "Market", "Preflight", "Regime", "advice", "decision_minutes", "environmental", "equity_step", "expiries",
-           "listing", "market_dependent", "quote", "run", "session_weekdays", "strikes", "vol_of"]
+           "listing", "market_dependent", "quote", "run", "saturated_strikes", "session_weekdays", "strikes", "vol_of",
+           "api_misuse", "warnings_for"]
