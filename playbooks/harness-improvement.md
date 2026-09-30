@@ -213,8 +213,10 @@ adapter load on the live path whenever the gate does: changes there are money-pa
    only once the commit is staged, so no author can see or tune to the held-out cases. Both trees
    are scored on both splits with the same seed. The receipt records the seed afterwards.
 2. **Operational.** A capture names its motivating units: the families, mechanisms or boxes whose
-   rows the brief shows. The retention comparison excludes them from both arms, and every window is
-   later than the capture, so a retained change must work on units its author never saw.
+   rows the brief shows. An arms comparison excludes them from both arms; a before/after window is
+   held out by time instead (it starts after the release, later than every motivating row, and
+   dropping the boxes that failed from the "before" side would remove the bottleneck itself). A
+   retained change must work on units, or in hours, its author never saw.
 
 ### Retain or revert, with cost
 
@@ -239,6 +241,12 @@ adapter load on the live path whenever the gate does: changes there are money-pa
 The journal is the laptop's (for example `~/Work/.ltcm-main/harness/journal`); it holds the
 ledger, the held-out secret, the candidates' patches and receipts, and `canary.json`. The House
 reads only `<swarm-state>/harness/canary.json`. `next` prints every candidate's next command.
+
+The supervised observer (the `runtime.json` policy above) also measures the last day read-only every
+30 minutes and writes `lanes-measurement.json` and `lanes-ranked.json` (mode 0600) into its own
+directory; its heartbeat carries `lanes_at`, `lanes_captured` and any `lanes_error`. It never
+registers a candidate: the operator reads that measurement off the House and runs `rank` with it,
+which is the same as step 1 below.
 
 ```sh
 J=~/Work/.ltcm-main/harness/journal; R=~/Work/ltcm-deploy

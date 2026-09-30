@@ -843,9 +843,9 @@ class HarnessImprovement:
         return {"gate": state, "gate_file": str(path)}
 
     def reconcile_lane(self, key: str, *, measurement: Mapping[str, Any]) -> dict:
-        """The registered decision on the window [canary since, since + observation_seconds): canary arm against the
-        concurrent control arm (arms modes), or the window against the capture's baseline (window mode), motivating units
-        excluded both ways. Computed once; a later measurement never reopens it."""
+        """The registered decision on the window [canary since, since + observation_seconds): the canary arm against the
+        concurrent control arm with the motivating units excluded from both (arms modes), or the window, held out by
+        time, against the capture's baseline (window mode). Computed once; a later measurement never reopens it."""
         job = self.worklist.get(key)
         if job is None or not job.details.get("lane") or job.state not in ("canary", "observing", "verified"):
             raise ImprovementError("the candidate is not awaiting or following a canary")
@@ -873,7 +873,8 @@ class HarnessImprovement:
             return {"waiting": "the evaluated release is not running; the window cannot be judged",
                     "current": measurement.get("current")}
         started = float((measurement.get("source") or {}).get("started_at") or 0.0)
-        if arm["mode"] == "window" and started > since:
+        restarts_are_units = lane.canary_for(bottleneck).get("unit") == "restart"
+        if arm["mode"] == "window" and started > since and not restarts_are_units:
             return {"waiting": "the swarm restarted inside a before/after window; this comparison is confounded"}
         data = (measurement.get("lanes") or {}).get(lane.id)
         if not isinstance(data, Mapping):
@@ -886,9 +887,11 @@ class HarnessImprovement:
                                                 exclude=motivating)
             result = lanes.retention(lane, bottleneck, treated, control, seed=seed, alpha=ALPHA)
         else:
-            skip = set(motivating)
-            treated = {u: r for u, r in (data.get("units") or {}).items() if u not in skip}
-            control = {u: r for u, r in (proposal["baseline"].get("units") or {}).items() if u not in skip}
+            # Before/after: the window is later than every motivating row, so it is held out by time. Dropping the
+            # motivating units (the boxes that failed) from the capture's side would remove the bottleneck itself.
+            motivating = []
+            treated = dict(data.get("units") or {})
+            control = dict(proposal["baseline"].get("units") or {})
             after = {k: v for k, v in lanes.lane_tallies(lane.id, data).items() if k in extras}
             before = dict(proposal["baseline"].get("extra") or {})
             result = lanes.retention(lane, bottleneck, treated, control, seed=seed, alpha=ALPHA,

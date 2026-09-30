@@ -29,6 +29,10 @@ from league.watchdog import tree_digest
 
 #: Commands that never open a journal (read-only, or definitions only).
 NO_JOURNAL = ("measure", "lanes")
+#: The supervised observer's lane measurement: the last day, read only, at most this often (about 1.5 CPU seconds on the
+#: House per measurement, Sept 30, 2026). Written to its own directory only; registering candidates stays the operator's.
+LANES_EVERY = 1800
+LANES_WINDOW = 86400
 
 
 def parser() -> argparse.ArgumentParser:
@@ -198,6 +202,20 @@ def transition(args):
             lab.close()
 
 
+def lanes_snapshot(root: Path, swarm: Path, *, now: float | None = None) -> dict:
+    """The observer's bottleneck capture for the lanes: measure the last day read-only and write the measurement and its
+    ranked bottlenecks to the observer's own directory (`lanes-measurement.json`, `lanes-ranked.json`, mode 0600). The
+    operator copies them out and registers candidates with `rank --measurement`; nothing here opens the journal."""
+    doc = lanes.measure(swarm, now=now, seconds=LANES_WINDOW, examples=20)
+    ranked = lanes.rank(doc)
+    write_private(root / "lanes-measurement.json", doc)
+    write_private(root / "lanes-ranked.json", {"at": doc["until"], "window": doc["window"], "policy": lanes.POLICY,
+                                               "source": {k: (doc.get("source") or {}).get(k) for k in ("release", "digest")},
+                                               "candidates": ranked})
+    return {"lanes_at": doc["until"], "lanes_captured": sum(1 for r in ranked if r["captured"]),
+            "lanes_errors": sorted(doc["errors"])}
+
+
 def heartbeat(args, identity, result):
     failures = [str(row['error'])[:160] for row in (result.get('reconciliation') or {}).values()
                 if isinstance(row, dict) and row.get('error')]
@@ -206,7 +224,7 @@ def heartbeat(args, identity, result):
         parts.append(f"{len(failures)} reconciliation error(s): " + '; '.join(failures[:2]))
     write_json(args.root / "observer-heartbeat.json", {**identity, "at": time.time(),
         "error": '; '.join(parts)[:512] or None, "reconciliation_error_count": len(failures),
-        "waiting": result.get("waiting")})
+        "waiting": result.get("waiting"), **(result.get("lanes") or {})})
 
 
 def main() -> int:
@@ -243,6 +261,7 @@ def main() -> int:
                             "base": args.base, "release_digest": digest, "policy": args.policy_signature,
                             "session_started_at": time.time()}
                 heartbeat(args, identity, {"waiting": "first observation"})
+            lanes_last, lanes_state = 0.0, {}
             while True:
                 if args.command == "watch" and any(p.exists() for p in (args.swarm / "STOP", args.swarm.parent / "STOP")):
                     return 0
@@ -253,6 +272,13 @@ def main() -> int:
                 print(json.dumps(result, sort_keys=True, allow_nan=False), flush=True)
                 if args.command != "watch":
                     return 1 if "error" in result else 0
+                if time.time() - lanes_last >= LANES_EVERY:
+                    lanes_last = time.time()
+                    try:
+                        lanes_state = lanes_snapshot(args.root, args.swarm)
+                    except (ValueError, OSError, sqlite3.Error) as exc:
+                        lanes_state = {"lanes_error": f"{type(exc).__name__}: {str(exc)[:200]}"}
+                result["lanes"] = lanes_state
                 heartbeat(args, identity, result)
                 time.sleep(max(30, min(60, args.interval)))
     except KeyboardInterrupt:

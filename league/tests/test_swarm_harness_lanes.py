@@ -544,6 +544,23 @@ class Cli(unittest.TestCase):
             doc = json.loads((root / "m.json").read_text())
             self.assertEqual(sorted(doc["lanes"]), ["data", "execution", "memory", "research"])
 
+    def test_the_observer_writes_its_ranked_lanes_to_its_own_directory_only(self):
+        from scripts import harness_improve as cli
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            store = SwarmStore(root / "state", clock=Clock(1_790_000_000.0))
+            store.close()
+            before = sorted(p.name for p in (root / "state").iterdir())
+            (root / "harness").mkdir()
+            state = cli.lanes_snapshot(root / "harness", root / "state", now=1_790_000_100.0)
+            self.assertEqual(state["lanes_captured"], 0)
+            ranked = json.loads((root / "harness" / "lanes-ranked.json").read_text())
+            self.assertEqual(ranked["policy"], lanes.POLICY)
+            self.assertTrue(all(not c["captured"] for c in ranked["candidates"]))
+            self.assertEqual(oct((root / "harness" / "lanes-measurement.json").stat().st_mode & 0o777), "0o600")
+            self.assertEqual(before, sorted(p.name for p in (root / "state").iterdir()))
+
 
 if __name__ == "__main__":
     unittest.main()

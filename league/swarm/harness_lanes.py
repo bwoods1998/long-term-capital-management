@@ -1063,11 +1063,13 @@ def compare(metric: Metric, treated: Mapping[str, Mapping[str, float]], control:
     """The metric in each group (a ratio of sums over units) and a one-sided cluster-bootstrap p-value that the treated
     group is better. Units are resampled whole, so correlated rows of one family count once. `extra_*` are group-level
     tallies with no unit split (e.g. restarts)."""
-    a, b = list(treated.values()), list(control.values())
-    if extra_treated is not None:
-        a = a + [extra_treated]
-    if extra_control is not None:
-        b = b + [extra_control]
+    def has(row: Mapping[str, float]) -> bool:
+        return metric.numerator in row or metric.denominator in row
+
+    # Only rows that carry the metric's fields resample: a unit without them adds nothing to either sum, and a group
+    # tally (`extra_*`) joins only the metrics it holds.
+    a = [r for r in treated.values() if has(r)] + ([extra_treated] if extra_treated and has(extra_treated) else [])
+    b = [r for r in control.values() if has(r)] + ([extra_control] if extra_control and has(extra_control) else [])
     va, vb = _ratio(a, metric), _ratio(b, metric)
     out: dict[str, Any] = {"metric": metric.name, "treated": va, "control": vb, "direction": metric.direction,
                            "treated_denominator": sum(float(r.get(metric.denominator) or 0.0) for r in a),
