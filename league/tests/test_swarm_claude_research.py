@@ -506,9 +506,9 @@ class Fallbacks(ClaudeCase):
 class ReviewFixes(Fallbacks):
     """Sept 29, 2026: the two reviews of PR #417, each finding a case."""
 
-    def test_retire_on_a_revise_turn_is_refused_for_a_family_that_is_not_dead(self):
-        # Review 1, F1: Claude sees every tool every turn; `can_retire` alone must never retire a family on REVISE.
-        with mock.patch.object(Researcher, "can_retire", return_value=True), mock.patch.object(Researcher, "dead", return_value=None):
+    def test_retire_on_a_revise_turn_is_refused_for_an_ineligible_family(self):
+        # Claude sees every tool every turn; a tool the current family is not offered must still be refused.
+        with mock.patch.object(Researcher, "can_retire", return_value=False), mock.patch.object(Researcher, "dead", return_value=None):
             self.claude_script[:] = [answer(call("retire", {"reason": "refuted"}), self.revise_call()),
                                      answer(text("Read it."), stop="end_turn")]
             out = self.cycle()
@@ -520,7 +520,7 @@ class ReviewFixes(Fallbacks):
         self.assertEqual(out["tool_calls"], 1, "the run ran")
         # A REVISE answered with retire alone is no run: retried on Sail, and the family is still alive.
         self.setUp()
-        with mock.patch.object(Researcher, "can_retire", return_value=True), mock.patch.object(Researcher, "dead", return_value=None):
+        with mock.patch.object(Researcher, "can_retire", return_value=False), mock.patch.object(Researcher, "dead", return_value=None):
             self.claude_script[:] = [answer(call("retire", {"reason": "refuted"}), cost="0.020000")]
             self.sail_revises()
             self.check_fallback("no_run", billed=0.02)

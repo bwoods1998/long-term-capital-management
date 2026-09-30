@@ -40,7 +40,11 @@ class Records(RoundCase):
             "scored": ({"best_train": -0.2}, {}, None),
             "drift": ({}, {"drift_failed": {"3": "t 0.4", "5": "t 0.1"}, "robust_failed": [3, 5, 7]}, None),
             "drift ": ({}, {"robust_failed": [2], "robust_why": {"2": "fails the drift screen: t 0.3"}}, None),
-            "stress": ({}, {"robust_failed": [2, 4], "drift_failed": {"6": "t 0.2"}}, None),
+            "stress": ({}, {"robust_failed": [2, 4], "drift_failed": {"6": "t 0.2"},
+                            "robust_why": {"2": "lost money on Train at 1.5x the half-spread",
+                                           "4": "lost money on Train at 1.5x the half-spread"}}, None),
+            "unresolved": ({}, {"robust_failed": [2], "robust_why": {"2": "its 1.5x run failed 3 times"}}, None),
+            "unresolved ": ({}, {"robust_failed": [2]}, None),
             "thin": ({}, {}, (12, False)),
             "untested": ({}, {}, (0, False)),
             "untested ": ({}, {}, None),
@@ -95,7 +99,7 @@ class Tags(StoreCase):
         self.assertEqual(tag_of({"family": "x", "lesson": ""}, {"retire_reason": "The mechanism is refuted"}), "REFUTED")
 
     def test_the_header_says_the_verdicts_are_tested_and_the_format_moved(self):
-        self.assertEqual(arch.DIGEST_FORMAT, 3)
+        self.assertEqual(arch.DIGEST_FORMAT, 4)
         for words in ("DRIFT = its eligible versions failed the drift screen", "THIN = it traded", "EXHAUSTED =",
                       "SELF-REFUTED =", "TESTED findings", "Only IDLE = never traded on Train: untested"):
             self.assertIn(words, arch.DIGEST_HEADER)
@@ -232,6 +236,7 @@ class HoldOffer(ResearcherCase):
 
     def test_without_the_offer_the_revise_turn_stays_a_revision(self):
         self.researcher().cycle(self.fid)
+        self.settings["researcher"]["retire_min_trials"] = 0  # isolate the legacy hold-count offer
         self.held(1, trials=12)
         self.steps = [{"calls": [("gym_run", {"hold": True, "note": "Nothing new."})]}]
         self.researcher().cycle(self.fid)

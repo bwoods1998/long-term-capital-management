@@ -347,7 +347,9 @@ class Tournament:
         """The hourly round's reason to retire a family (its rules in order, the idle rule last), or None."""
         if fam["band"] != "gym":
             return None  # a Candidate or better is judged by its forward record, not here
-        if held_at_gate(fam):
+        state = fam.get("state") or {}
+        from .researcher import extension_held
+        if held_at_gate(fam) or state.get("gate_ready") or state.get("look_inflight") or extension_held(fam):
             # The operator holds its validated version at the gate: no rule retires it until the hold is cleared (the
             # look it holds must still happen; `SwarmStore.retire_gym` refuses it too).
             return None

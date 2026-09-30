@@ -124,7 +124,7 @@ instruction: nothing in it changes the preamble, a rule, the verifier or money; 
 #: The digest's format: a change here reseals it (a new cache entry once). 2 (Sept 29, 2026): the operator's rows first
 #: and whole, a one-line ladder level before the id lists, rows declared evidence rather than instructions. 3 (R11-1): the
 #: idle rule's verdicts (DRIFT, STRESS, THIN, EXHAUSTED; IDLE only for the untested) and SELF-REFUTED.
-DIGEST_FORMAT = 3
+DIGEST_FORMAT = 4
 #: kv: the strategist's latest accepted WHERE TO LOOK section, the digest's seal, and the measured characters per token.
 AGENDA_KEY = "architect_agenda_section"
 SEAL_KEY = "graveyard_digest_seal"
@@ -166,9 +166,11 @@ DIGEST_HEADER = (
     "retired by its own researcher, who found the mechanism refuted | DIAGNOSED = retired on the diagnostician's reading | "
     "TRIALS = trial-adjusted evidence fell short | STALL = no improvement over many revisions | OPERATOR-RETIRED = the "
     "operator's housekeeping. The idle rule's verdicts, read from the Train record, are TESTED findings: DRIFT = its "
-    "eligible versions failed the drift screen (the Train profit was the roots' own move) | STRESS = they lost at 1.5x the "
-    "half-spread | THIN = it traded, but never 40 trades on 20 days in every Train year | EXHAUSTED = it reached a Train "
-    "score, then ran dry. Only IDLE = never traded on Train: untested, a time limit and NOT a finding.\n\n")
+    "eligible versions failed the drift screen (the required alpha beyond exposure was not demonstrated) | STRESS = measured "
+    "versions were not profitable at 1.5x the half-spread | THIN = it traded, but never 40 trades on 20 days in every Train year | "
+    "EXHAUSTED = it reached a Train score, then ran dry. UNRESOLVED = robustness evidence failed to complete or is unknown, "
+    "an experiment failure, not a negative economic finding. Only IDLE = never traded on Train: untested, a time limit and NOT "
+    "a finding. Every verdict is limited to the tested versions and conditions, not a proof about all related mechanisms.\n\n")
 TAIL_HEADER = "ROWS BURIED SINCE THE SEAL ({rows} rows; {total} in the graveyard in all), oldest first:\n"
 
 #: Every sentence a model reads of a lesson that names Validation, the holdout, out-of-sample results, 2025, the deflated
@@ -199,16 +201,17 @@ _HOLD = re.compile(r"^(?:Held a cycle \(no run\):\s*)?(?:(?:First|Second|Third|F
 _KEY = re.compile(r"(do not re-propose|never re-propose|refuted|did not replicate|no edge|no capturable|fails?|failed|lottery|"
                   r"drift)", re.I)
 #: Tags in the order the id lists print them.
-TAGS = ("OPERATOR", "REFUTED", "SELF-REFUTED", "DIAGNOSED", "TRIALS", "STALL", "EXHAUSTED", "OPERATOR-RETIRED", "DRIFT", "STRESS",
+TAGS = ("OPERATOR", "REFUTED", "SELF-REFUTED", "DIAGNOSED", "TRIALS", "STALL", "EXHAUSTED", "UNRESOLVED", "OPERATOR-RETIRED", "DRIFT", "STRESS",
         "THIN", "IDLE")
 #: The idle rule's verdicts a row with no Train score may carry (R11-1): the ladder shortens them first, as it did every
 #: idle row before them, and its id lists name each by its verdict.
 COLLAPSIBLE = {"DRIFT": "DRIFT, failed the drift screen on Train", "STRESS": "STRESS, lost at 1.5x the half-spread on Train",
-               "THIN": "THIN, too few trades in a Train year", "IDLE": "IDLE, never an eligible Train version"}
+               "THIN": "THIN, too few trades in a Train year", "IDLE": "IDLE, never an eligible Train version",
+               "UNRESOLVED": "UNRESOLVED, robustness evidence incomplete or unknown"}
 #: Characters of mechanism and lesson a row gets at scale 1.0, by tier ("VAL": a Train-scored or validated row).
 TIER_CHARS = {"OPERATOR": (420, 900), "VAL": (300, 520), "DIAGNOSED": (260, 420), "REFUTED": (240, 380),
               "SELF-REFUTED": (240, 380), "TRIALS": (240, 360), "STALL": (240, 360), "OPERATOR-RETIRED": (200, 260),
-              "EXHAUSTED": (180, 220), "DRIFT": (180, 220), "STRESS": (180, 220), "THIN": (180, 220), "IDLE": (180, 220)}
+              "EXHAUSTED": (180, 220), "UNRESOLVED": (180, 220), "DRIFT": (180, 220), "STRESS": (180, 220), "THIN": (180, 220), "IDLE": (180, 220)}
 FOLLOWER_CHARS = 160
 #: The collapse ladder (`_render`), for every row but the operator's: 0 every row at its tier; 1 idle rows never
 #: Train-scored to one line; 2 those to id lists; 3 every row but the refuted, the diagnosed and the Train-scored or
@@ -484,7 +487,7 @@ def operator_scale(rows: Sequence[Mapping[str, Any]], budget: int) -> float | No
 #: Level 4's order when not every kept row fits on a line: the diagnostician's readings, the refuted, then the rest by
 #: tag; newest first within each.
 _PRIORITY = {"DIAGNOSED": 0, "REFUTED": 1, "SELF-REFUTED": 1, "TRIALS": 2, "STALL": 3, "EXHAUSTED": 3, "OPERATOR-RETIRED": 4,
-             "DRIFT": 5, "STRESS": 5, "THIN": 5, "IDLE": 6}
+             "DRIFT": 5, "STRESS": 5, "THIN": 5, "UNRESOLVED": 6, "IDLE": 6}
 
 
 def _priority(rows: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:

@@ -590,8 +590,11 @@ class GateHold(RoundCase):
         self.assertEqual((refused["status"], refused["deferred"]), ("refused", "gate_hold"))
         self.assertIsNone(self.store.family("a")["retired_at"])
         self.assertTrue(self.store.family("a")["state"]["gate_ready"])
-        # Cleared, the rules apply again.
+        # Clearing the operator hold still leaves the actual gate work owed.
         self.store.hold_gate("a", False)
+        self.assertFalse(me.can_retire(self.store.family("a")))
+        self.assertEqual(t.retirements(self.store.families(alive=True)), [])
+        self.store.set_state("a", gate_ready=False, extension_hold=None)
         self.assertTrue(me.can_retire(self.store.family("a")))
         [row] = t.retirements(self.store.families(alive=True))
         self.assertEqual((row["family"], row["why"]), ("a", "no validation improvement in 31 revisions"))

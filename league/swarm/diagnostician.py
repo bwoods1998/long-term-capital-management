@@ -362,10 +362,18 @@ class Diagnostician:
         if decision == "retire":
             lesson = " ".join(str(reply.get("lesson") or diagnosis or "the diagnostician found no capturable edge").split())[:1500]
             population = self.settings.get("population", {})
-            # The start population is the floor `retire_gym` checks inside its own transaction, so a tournament retiring
-            # at the same moment cannot take the swarm below it.
-            floor = max(int(population.get("floor", 16)), int(population.get("start", 48)))
-            result = self.store.retire_gym(fid, f"the diagnostician: {lesson}", floor=floor, source=ROLE)
+            # Start is the architect's refill target, not a second floor (start == ceiling otherwise makes this
+            # decision unreachable). The store serializes concurrent retirements against the actual floor.
+            floor = int(population.get("floor", 16))
+            from .researcher import extension_held
+            with self.store.atomic():
+                current = self.store.family(fid) or fam
+                state = current.get("state") or {}
+                if extension_held(current) or state.get("gate_ready") or state.get("look_inflight"):
+                    out.update(outcome="retire_refused", reason="independent evidence is pending or held")
+                    self.store.note(fid, f"The diagnostician recommends retiring this family after its pending evidence: {lesson}")
+                    return self._record(out, began)
+                result = self.store.retire_gym(fid, f"the diagnostician: {lesson}", floor=floor, source=ROLE)
             if result.get("status") == "retired" and not result.get("already_retired"):
                 try:
                     if self.pool is not None:
@@ -375,7 +383,7 @@ class Diagnostician:
                 out.update(outcome="retired", lesson=lesson[:300])
                 return self._record(out, began)
             if result.get("deferred") == "population_floor":
-                out.update(outcome="retire_noted", reason="not above the start population")
+                out.update(outcome="retire_noted", reason="not above the population floor")
             else:
                 out.update(outcome="retire_refused", reason=str(result.get("reason") or result.get("status"))[:200])
             self.store.note(fid, f"The diagnostician recommends retiring this family: {lesson}")

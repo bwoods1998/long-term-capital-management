@@ -772,6 +772,34 @@ family it cannot rescore.
 
 ## R11b: honest verdicts, corrections that land, effort where it pays (Sept 29)
 
+### Goal continuation: event-driven research and reachable retirement (Sept 30)
+
+The goal continuation keeps the R11b fixes and adds these defaults without changing models, funded budgets or any
+promotion threshold:
+
+- `researcher.hold_until_news: true`: a hold is stored in `family.state.research_wait`. Time and process restarts alone
+  never schedule another paid call. New trials, gate state, a rewrite, notebook guidance, the agenda, data image or
+  harness release can wake it. To deliver explicit new guidance, append a factual notebook note or change the family's
+  `research_wake` state token. `false` restores the optional R4 timer. A worker with nothing ready inspects local state
+  every few seconds; this does not contact a model.
+- `researcher.retire_min_trials: 10`: a researcher may retire after this many counted trials, or after two validations,
+  on either its REVISE or READ turn. It need not spend three holding cycles to receive the tool. All researcher and
+  diagnostician retirements use the atomic `population.floor`. `population.start` only governs refilling. Pending gate
+  work and extension/operator holds remain protected; the floor prevents concurrent retirements from draining the
+  population. The agent must explain abandonment, and all prior evidence remains.
+- `gym_run` and every variant of `gym_sweep` receive the static experiment-contract check before any version or Gym job
+  is created. Changed parameters that are provably unread, invalid override types and malformed declarations return
+  an actionable refusal without consuming a replay trial. A valid zero-trade control remains admissible.
+- Graveyard format 4 limits economic claims to the versions actually tested. Drift-screen failure means the required
+  alpha beyond exposure was not demonstrated. `UNRESOLVED` identifies missing/failed robustness evidence, rather than
+  falsely labeling an execution failure a measured stress loss. The digest reseals automatically. Run the existing
+  graveyard migration dry-run and review its counts before applying it to pre-R11b idle deaths.
+
+At deployment, verify `holding` families remain on the same cycle count without new evidence, then verify a genuine
+new result or guidance note wakes its family. Inspect retirement events to confirm tested families can exit below the
+refill target while the living count remains at or above the floor. The zero-trade probe remains off by default; no
+model migration or additional service funding is part of this change.
+
 The ROI audit and plan of Sept 29 (the operator's `scratch/roi/PLAN.md`, section (b)) found the swarm's inputs untrue in
 places: 99% of the dormancy deaths filed as "a time limit, not a finding" had been screened on Train, the strategist read
 them as untested, and its 13:10Z correction was voided by a family id. R11b is research-side only: no file under

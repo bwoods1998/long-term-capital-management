@@ -66,21 +66,15 @@ DRIFT (its eligible versions failed the drift screen), STRESS (they lost at 1.5x
 never 40 trades on 20 days in every Train year), EXHAUSTED (it reached a Train score, then ran dry); only a family that
 never traded on Train is untested and keeps IDLE (`idle_cause`). A family's own `retire` is SELF-REFUTED.
 
-RETIRE (Sept 26: an unguarded `retire` on the REVISE turn took the population from 49 to 16 in 24 minutes). A REVISE
-turn offers `gym_run` and `gym_sweep` alone (a REVISE always revises), and `retire` beside them only to a dead family
-(`idle_dead`, under `can_retire`: R4, Sept 28, a family that holds never reaches a READ turn, so its researcher could not
-retire the mechanism it found refuted and held every cycle instead). A READ turn offers `retire` only while more
-families live than `population.start` and the family has had at least two validations, or, by THE IDLE RULE (R3, Sept
-27: with the population held at its start, dead families never qualified and looped on placeholder runs), while more
-live than `population.floor` and the family is dead (`idle_dead`: `researcher.retire_idle_evaluations` Gym evaluations
-since its birth or last validation without an eligible Train version, or three times as many with its best Train score
-below zero, or `researcher.dormant_cycles` dormant cycles in a row; never while a validated version awaits the gate)
-(`can_retire`). THE HOLD OFFER (R11-1, `hold_offer`): a family that held its last `researcher.retire_hold_cycles` (3)
-cycles in a row with an eligible Train run or `researcher.retire_hold_trials` (10) trials behind it is offered `retire`
-on its REVISE turn too, down to `population.floor`. Never while the operator holds its validated version at the gate
-(`held_at_gate`): no rule retires such a family. A retire that is refused anyway is a plain refusal, never a cycle error (an error backs the family off
-for up to 30 minutes). The tournament retires a dead family that never calls retire by the same rule; the architect
-refills below the start.
+RETIRE (Sept 30). Both REVISE and READ offer an evidence-backed retirement after two validations or
+`researcher.retire_min_trials` counted trials (10 by default), and retain the idle-rule and legacy hold offers.
+Every path uses the atomic `population.floor`; `population.start` is the architect's refill target, not an
+additional floor. Gate work in flight, gate-ready versions and extension/operator holds are protected. Retirement
+preserves the program, lineage, trials, results and explanation. It never turns a research decision into an order.
+
+EVENT-DRIVEN HOLDS (Sept 30). A held family is parked durably by `loop.Scheduler` until a result, rewrite, guidance,
+research agenda, data image or release changes. Elapsed time and process restarts alone never buy another call.
+The researcher should retire an exhausted mechanism when offered, and hold when a specific input is missing.
 
 WHAT IT SEES. Train in full; of Validation only pass or fail and how many of the line's checks passed (the owner's
 decision D2a, `diagnostics.validation_view`); of the holdout only the gate's pass or fail. Never a date in ctx (the
@@ -306,13 +300,15 @@ return over the hours you held) and drift-adjusted alpha (what your choice of da
 t). A version whose alpha fails the drift screen over Train is never your best and is never validated (your status and
 each run give the line); a placebo row that holds the same exposure on random days earns the drift and nothing else.
 Your family trades one to five of the Gym's roots; to change them, name the new roots in your program's NEEDS.
-The retire tool appears only while the population is above its start and your family has had at least two
-validations, or once your family has spent many Gym evaluations since its birth or last validation without an eligible
+The retire tool appears while the population is above its floor and your family has had at least two
+validations or enough counted trials to support abandoning its mechanism, or once your family has spent many Gym evaluations since its birth or last validation without an eligible
 Train version (or far more with a best Train score below zero), or many cycles in a row with only holds and stored
 results, or a few holds in a row once your family has an eligible Train run or enough trials behind it. Call it only
 when you abandon the entire mechanism, not one rejected version; a dead mechanism is better
 retired than kept on holds, since its slot goes to a new idea. Retirement is final for the family and preserves its best
 program and all evidence.
+Holding parks your researcher without further paid calls until new evidence, guidance, data or a harness change arrives.
+Use it to wait for a specific missing input. If your evidence has exhausted the mechanism, retire when offered instead.
 Your notes (the notebook and gym_run's note) are PUBLIC: they may appear on the public site. Write the mechanism and your
 reasoning there, never a threshold, level, delta, ratio, date or any other fitted value, in digits or in words; the
 numbers belong in your program and in the diagnostics, which stay private.
@@ -774,8 +770,8 @@ def idle_dead(fam: Mapping[str, Any], settings: Mapping[str, Any], *, current: t
 #: The screens a family's Train record can show (`train_record`), and the tag each gives an idle-rule death: only a family
 #: that never traded on Train (or never ran) is untested and keeps IDLE. Sept 29: 99% of the dormancy deaths filed as "a
 #: time limit, not a finding" had been screened on Train, and the strategist read them as untested.
-SCREENS = ("drift", "stress", "thin", "scored", "untested")
-IDLE_VERDICTS = {"drift": "DRIFT", "stress": "STRESS", "thin": "THIN", "scored": "EXHAUSTED", "untested": "IDLE"}
+SCREENS = ("drift", "stress", "thin", "scored", "unresolved", "untested")
+IDLE_VERDICTS = {"drift": "DRIFT", "stress": "STRESS", "thin": "THIN", "scored": "EXHAUSTED", "unresolved": "UNRESOLVED", "untested": "IDLE"}
 #: The words of an untested idle-rule death (the store publishes only a reason's sentences without a figure, and this one
 #: has none). The architect and researchers read the graveyard as refutations; an untested family's death is a clock.
 IDLE_CAUSE = ("Retired by the idle rule, a limit on how long a family may research without an eligible Train version, "
@@ -783,16 +779,18 @@ IDLE_CAUSE = ("Retired by the idle rule, a limit on how long a family may resear
 #: A tested idle-rule death: its public sentence (no figure, no colon: `public.note_text` keeps it), then its verdict.
 SCREENED = "Retired by the idle rule after its Train record was screened"
 VERDICT_WORDS = {
-    "drift": ("Idle verdict DRIFT, a tested finding: its eligible Train versions failed the drift screen, so their Train profit "
-              "was the roots' own move and not the signal's"),
-    "stress": "Idle verdict STRESS, a tested finding: its eligible Train versions lost money at 1.5x the half-spread",
+    "drift": ("Idle verdict DRIFT, a tested finding: its screened Train versions did not demonstrate the required alpha "
+              "beyond market exposure; this does not establish that every related mechanism lacks an edge"),
+    "stress": "Idle verdict STRESS, a tested finding: its measured Train versions did not remain profitable at 1.5x the half-spread",
     "thin": ("Idle verdict THIN, a tested finding: it traded on Train, but no version made 40 trades on 20 days in every "
              "Train year"),
     "scored": ("Idle verdict EXHAUSTED, a tested finding: it reached a Train score, then its research ran dry (no new "
                "evaluation, or a best that stayed below zero)"),
+    "unresolved": ("Idle verdict UNRESOLVED: required robustness evidence failed to complete or its outcome is unknown; "
+                   "this is an experiment failure, not evidence of an unprofitable mechanism"),
 }
 #: The verdict's mark in a retirement reason or lesson (`architect.tag_of` reads it).
-VERDICT_TAG = re.compile(r"\bIdle verdict (DRIFT|STRESS|THIN|EXHAUSTED)\b")
+VERDICT_TAG = re.compile(r"\bIdle verdict (DRIFT|STRESS|THIN|EXHAUSTED|UNRESOLVED)\b")
 #: A retirement its own researcher called (`retire`): the reason's head, so the graveyard tags it SELF-REFUTED.
 SELF_REFUTED = "Self-refuted by its researcher"
 
@@ -838,12 +836,14 @@ def train_record(store: SwarmStore, fam: Mapping[str, Any]) -> dict[str, Any]:
     drift = {str(k) for k in marks} if isinstance(marks, Mapping) else set()
     failed = [v for v in (state.get("robust_failed") or []) if isinstance(v, int) and not isinstance(v, bool)]
     drift |= {str(v) for v in failed if str(whys.get(str(v)) or "").startswith("fails the drift screen")}
-    stress = [v for v in failed if str(v) not in drift]
-    known = fam.get("best_train") is not None or bool(drift or stress) or bool(state.get("train_candidates"))
+    stress = [v for v in failed if str(v) not in drift and "lost money on Train at 1.5x" in str(whys.get(str(v)) or "")]
+    known = fam.get("best_train") is not None or bool(drift or failed) or bool(state.get("train_candidates"))
     if fam.get("best_train") is not None:
         screen = "scored"
     elif drift or stress:
         screen = "drift" if len(drift) >= len(stress) else "stress"
+    elif failed:
+        screen = "unresolved"
     else:
         eligible, traded = _run_record(store, str(fam["id"]))
         return {"screen": "thin" if traded else "untested", "eligible": known or eligible}
@@ -1191,6 +1191,12 @@ class Researcher:
                      "trades or weaken the evidence requirements.")
         if gate:
             parts.append(f"The gate's last answer: {gate}.")
+        from .practice import family_feedback
+        practice = family_feedback(self.store, self.settings, str(fam["id"]))
+        if practice:
+            parts.append("Your live-market PRACTICE feedback (shadow fills, research guidance only; never promotion "
+                         "evidence, and any revision requires subsequent untouched observations): "
+                         + json.dumps(practice, sort_keys=True))
         if state.get("gate_hold") and state.get("gate_ready"):
             parts.append("Your validated version is held by the operator before the gate: it is looked at once the hold is "
                          "cleared.")
@@ -1352,7 +1358,7 @@ class Researcher:
 
     def tools(self, *, revise: bool, retire: bool) -> list[dict[str, Any]]:
         """A turn's tools: REVISE a run or a sweep (a call is required), READ every tool, `retire` only when the family
-        may retire (`can_retire`; on REVISE only a dead family, `idle_dead`); `gym_sweep` only while sweeps are on, its
+        may retire (`can_retire`, on REVISE and READ alike); `gym_sweep` only while sweeps are on, its
         limit from the settings."""
         base = (TOOLS_REVISE + TOOLS[-1:] if retire else TOOLS_REVISE) if revise else (TOOLS if retire else TOOLS_READ)
         if not self.sweeps:
@@ -1422,25 +1428,25 @@ class Researcher:
         return bool(train_record(self.store, fam)["eligible"])
 
     def can_retire(self, fam: Mapping[str, Any]) -> bool:
-        """`retire` is offered (and accepted) for a Gym family with at least two validations while more families live
-        than `population.start` (the sprint, Sept 26), and for a dead family (`idle_dead`, R3) or one the hold offer
-        covers (`hold_offer`, R11-1) while more live than `population.floor`, whatever the start. Never while the operator
-        holds its validated version at the gate (`held_at_gate`: `SwarmStore.retire_gym` refuses it too)."""
-        if fam.get("band") != "gym" or held_at_gate(fam):
+        """An evidence-backed abandonment may use the atomic population floor, including on REVISE.
+
+        ``start`` is a refill target, never a second floor: start == ceiling made normal retirement unreachable.
+        A counted trial threshold offers retirement before an exhausted family has to buy hold calls to unlock it.
+        Pending independent evidence and operator extension holds remain protected.
+        """
+        state = fam.get("state") or {}
+        if (fam.get("band") != "gym" or held_at_gate(fam) or state.get("gate_ready") or state.get("look_inflight")
+                or extension_held(fam)):
             return False
         pop = self.settings.get("population", {})
         alive = len(self.store.families(alive=True))
-        if alive > int(pop.get("floor", 16)) and (self.dead(fam) or self.hold_offer(fam)):
-            return True
-        return int(fam.get("validations") or 0) >= 2 and alive > int(pop.get("start", 48))
+        need = _count_setting(self.settings, "retire_min_trials", 10)
+        tested = int(fam.get("validations") or 0) >= 2 or (need > 0 and int(fam.get("trials") or 0) >= need)
+        return alive > int(pop.get("floor", 16)) and bool(tested or self.dead(fam) or self.hold_offer(fam))
 
     def retire_floor(self, fam: Mapping[str, Any]) -> int:
-        """The population a researcher's retirement may not take the swarm to (`retire_gym` checks it atomically):
-        `population.floor` for a dead family (`idle_dead`) or one the hold offer covers (`hold_offer`), else the start
-        (never below the floor)."""
-        pop = self.settings.get("population", {})
-        floor = int(pop.get("floor", 16))
-        return floor if self.dead(fam) or self.hold_offer(fam) else max(floor, int(pop.get("start", 48)))
+        """The single population floor, checked atomically by ``retire_gym`` even for concurrent retirements."""
+        return int(self.settings.get("population", {}).get("floor", 16))
 
     def is_top(self, fam: Mapping[str, Any], *, top: int) -> bool:
         """Among the bandit's `top` families by weight (a weight of zero or none never is)."""
@@ -1663,6 +1669,13 @@ class Researcher:
             self.store.note(fam["id"], note)
             out["note"] = note
         params = args.get("params") if isinstance(args.get("params"), dict) else {}
+        from ..gym.experiment import check_experiment
+        from ..gym.safety import CodeRefused
+        try:
+            check_experiment(code, params)
+        except (CodeRefused, ValueError, TypeError) as exc:
+            return self._refusal(out, {"status": "refused", "reason": str(exc)[:600],
+                                       "hint": "repair the experiment contract before replay; no version, job or trial was created"})
         stress = float(args.get("stress") or 1.0)
         if stress not in (1.0, 1.5):
             stress = 1.0
@@ -1993,6 +2006,14 @@ class Researcher:
         if why:
             return self._refusal(out, {"status": "refused", "reason": why[:600],
                                        "hint": "fix the variants (each key in your PARAMS, of its type) and sweep again"})
+        from ..gym.experiment import check_experiment
+        from ..gym.safety import CodeRefused
+        try:
+            for params in variants:
+                check_experiment(code, params)
+        except (CodeRefused, ValueError, TypeError) as exc:
+            return self._refusal(out, {"status": "refused", "reason": str(exc)[:600],
+                                       "hint": "repair every variant before replay; no version, job or trial was created"})
         # NO DUPLICATE RUNS: a variant the family already evaluated (any earlier run or sweep, or this very sweep's variant
         # that landed after the Gym gave up on it) is read back from the store, never run again, and needs no room.
         run_roots = roots if change else fam["roots"]
@@ -2213,12 +2234,11 @@ class Researcher:
                 if not self.can_retire(current):
                     out["retire_refused"] = True
                     return {"status": "refused", "reason": "retire is not available to your family now (it needs at least two "
-                                                           "validations and a population above its start, or many Gym "
+                                                           "validations or enough counted trials and a population above its floor, or many Gym "
                                                            "evaluations without an eligible Train version, or many cycles "
                                                            "of only holds and stored results, or a few holds in a row with "
                                                            "a Train record behind them): keep researching"}
-                # The store checks the population atomically: a researcher's retirement never takes it to its start or
-                # below, a dead family's (`idle_dead`) or one the hold offer covers never to its floor or below. Its own
+                # The store checks the population floor atomically; start is the architect's refill target. Its own
                 # researcher's verdict: the graveyard tags it SELF-REFUTED (R11-1), its reason and last notes after.
                 reason = args.get("reason")
                 if isinstance(reason, str) and reason.strip():
@@ -2675,13 +2695,11 @@ class Researcher:
             chars = sum(len(json.dumps(i, default=str)) for i in items)
             profile, effort, most = self._profile(chars, fam)
             key = f"swarm:{fid}:c{n}:m{out['model_calls']}:{int(fam.get('revisions') or 0)}"
-            # REVISE requires a run or a sweep; READ follows a completed run and offers every tool, retire only when the
-            # family may retire (`can_retire`). A DEAD family's REVISE offers retire too (R4, Sept 28: researchers that
-            # found their mechanism refuted held every cycle, "retire tool not offered", since a hold never reaches READ).
+            # REVISE requires a run, a hold, or an evidence-backed retirement; READ follows a completed run.
+            # Retirement is available before a new run when the mechanism is already exhausted.
             revise = not gym_done
-            # A family that holds never reaches READ: the hold offer's family (R11-1) sees retire on its REVISE turn too.
-            tools = self.tools(revise=revise, retire=self.can_retire(fam) and (not revise or bool(self.dead(fam))
-                                                                               or self.hold_offer(fam)))
+            # The refill target never makes a tested family buy extra holds or runs before it can retire.
+            tools = self.tools(revise=revise, retire=self.can_retire(fam))
             response: Any = None
             via = "sail"
             if claude:

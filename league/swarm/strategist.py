@@ -79,10 +79,12 @@ and the architect. You cannot change it; your section is appended after it.
 Ground every direction in THE GRAVEYARD (the system prompt's first blocks, or the request's sample of it: retired
 families and every operator lesson) and in the board. Check each direction against the whole graveyard and cite the rows
 it builds on or avoids. Say what to stop proposing when the families born under your last section died for one reason.
-Idle-rule deaths carry the verdict of their Train record: DRIFT (the Train profit was the roots' own move), STRESS (lost
+Idle-rule deaths carry the verdict of their Train record: DRIFT (required alpha beyond market exposure was not demonstrated), STRESS (lost
 at 1.5x the half-spread), THIN (traded, but never 40 trades on 20 days in every Train year) and EXHAUSTED (reached a
 Train score, then ran dry) are TESTED findings; only IDLE (never traded on Train) is untested, a time limit. SELF-REFUTED
 rows were retired by their own researcher. Say whether a class died untested or tested and failed, and on which screen.
+UNRESOLVED means required robustness evidence failed to complete or is unknown: repair the experiment before drawing
+an economic conclusion. Every finding applies to its tested versions and conditions, not all related mechanisms.
 Prefer a few deep directions over many shallow ones, each with a reason to exist (a risk
 premium, a flow, a behavioral bias, a venue rule) that the Gym's data can test and enough independent trades to measure.
 

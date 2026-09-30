@@ -124,6 +124,10 @@ DEFAULTS: dict[str, Any] = {
         "family_usd_day": 3.0,          # each family's daily model budget (the Provider's desk cap): a fuse
         "floor_usd_day": 150.0,         # every model call of the swarm together, a day (the Provider's floor cap): a fuse
         "idle_seconds": 5,              # between a family's cycles
+        # Holds survive restarts and resume only on new evidence, guidance, data or a harness release. False restores
+        # the legacy timer below. A researcher may retire an exhausted mechanism before choosing to wait.
+        "hold_until_news": True,
+        "retire_min_trials": 10,         # evidence-backed abandonment before a first hold, down to population.floor
         # HOLD BACKOFF (R4, Sept 28: 2,223 of 2,364 cycles in ten minutes were holds, a holding family back every ~12 s,
         # ~$6.6/h of holds against a $4.5/h pace). A family whose cycle ended in a hold with no new evaluation (and no run
         # queued) waits `hold_idle_seconds` before its next turn; news lifts the wait at once (a result of its own landed,
