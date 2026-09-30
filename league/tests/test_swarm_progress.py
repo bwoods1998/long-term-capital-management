@@ -13,11 +13,11 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from league import publish
-from league.gym.driver import build_bundle
 from league.live import money as M
 from league.swarm import progress, sitefeed
 from league.swarm.gate import run_sha
 from league.swarm.store import SwarmStore
+from league.tests.swarm_fakes import gym_bundle_version
 
 MONDAY = dt.datetime(2026, 9, 28, 13, 30, tzinfo=dt.timezone.utc).timestamp()
 NOW = MONDAY + 86400 + 3600
@@ -33,7 +33,7 @@ class ProgressCase(unittest.TestCase):
         self.now = NOW
         self.store = SwarmStore(self.root, clock=lambda: self.now)
         self.addCleanup(self.store.close)
-        self.bundle = build_bundle()[1]
+        self.bundle = gym_bundle_version()
         (self.root / "swarm.json").write_text(json.dumps({"gym": {
             "image_checkpoint": "sbcp_synthetic_gym", "gate_checkpoint": "sbcp_synthetic_gate"}}))
         self.local = {}

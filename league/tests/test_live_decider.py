@@ -4,6 +4,7 @@ and a House-side deadline that kills and restarts a child that stops answering."
 import os
 import subprocess
 import sys
+import time
 import unittest
 
 try:
@@ -127,23 +128,39 @@ class AHungChild(unittest.TestCase):
     def test_the_house_kills_it_restarts_it_and_reloads_every_program(self):
         class Stuck(Decider):
             hang = False
+            hung = None
 
             def _spawn(self, budget_seconds=10.0):
                 if Stuck.hang:
                     self.proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], stdin=subprocess.PIPE,
                                                  stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-                    Stuck.hang = False
+                    Stuck.hang, Stuck.hung = False, self.proc
                 else:
                     super()._spawn(budget_seconds=budget_seconds)
 
+        from league.live.decider import batch_deadline
+
         decider = Stuck(timeout=0.2, python=sys.executable, allow_unisolated=True)
+        # The House's own deadline for this batch with no budget given: 5 s plus the call's limit and margin. The hung
+        # request below is given a short explicit budget instead, so the test waits under a second for the deadline
+        # (not 5.45 s); the kill, the restart and the reload are the same whichever bound expires.
+        self.assertAlmostEqual(batch_deadline(decider.timeout, 1), 5.45)
+        budget = 0.75
         try:
             decider.load("v", VERTICAL, {}, "vert")
             decider._kill()
             Stuck.hang = True
-            with self.assertRaises(DeciderError):
-                decider.decide({("SPY", 30): snapshot()}, {("SPY", 2, 30): underlying_view("SPY", [600.0])}, [job("v")])
+            began = time.monotonic()
+            with self.assertRaises(DeciderError) as caught:
+                decider.decide({("SPY", 30): snapshot()}, {("SPY", 2, 30): underlying_view("SPY", [600.0])}, [job("v")],
+                               budget_seconds=budget)
+            waited = time.monotonic() - began
+            self.assertIn("in time", str(caught.exception))
+            self.assertGreaterEqual(waited, budget * 0.9, "the House waited out the deadline before the kill")
+            self.assertLess(waited, batch_deadline(decider.timeout, 1), "the explicit budget bounded it, not the default")
             self.assertEqual(decider.restarts, 1)
+            self.assertIsNone(decider.proc)
+            self.assertIsNotNone(Stuck.hung.wait(timeout=5), "the hung child was killed")
             # The next child has every program again (fresh memory).
             answer = decider.decide({("SPY", 30): snapshot()}, {("SPY", 2, 30): underlying_view("SPY", [600.0])}, [job("v")])
             self.assertIn("v", answer)
