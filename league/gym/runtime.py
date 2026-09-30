@@ -270,6 +270,8 @@ def load_program(code: str, *, name: str = "program", params: Mapping[str, Any] 
         _limited(lambda: exec(compiled, namespace), LOAD_TIMEOUT)  # noqa: S102 - checked code, short builtins
     except ProgramTimeout:
         raise CodeRefused(f"the program's module body ran past {LOAD_TIMEOUT:.0f} s") from None
+    except NeedsRefused:
+        raise  # preserve the public configuration-error type when binding the declaration
     except Exception as exc:  # the module body itself failed
         raise CodeRefused(f"{_where(exc)}: the program fails to load: {type(exc).__name__}: {str(exc)[:160]}") from None
     needs = parse_needs(namespace.get("NEEDS"))
