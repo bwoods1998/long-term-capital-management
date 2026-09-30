@@ -27,6 +27,40 @@ class ConstitutionTest(unittest.TestCase):
         self.assertEqual(CONSTITUTION["options_money"]["house_test"],
                          {"structure_usd": "100", "open": 3, "envelope_usd": "300", "stop_usd": "150", "sessions": 20,
                           "round_trips": 30})
+        # The incubator (the owner, Sept 29, 2026, 14:51:12Z; the reading of Sept 30): one lot, at most $50 of maximum loss
+        # each, at most 4 open, $150 a week net, after a first look of 3 sessions, 10 program closes and 0.80 coverage.
+        self.assertEqual(CONSTITUTION["options_money"]["incubator"],
+                         {"max_loss_usd": "50", "contracts": 1, "max_open": 4, "week_loss_usd": "150",
+                          "min_sessions": 3, "min_trades": 10, "min_coverage": "0.80"})
+
+    def test_the_incubator_row_moved_the_money_digest_to_the_one_the_owner_ratifies(self):
+        """Release B's money digest (a3e2aa7c before it) and the full digest (fcf8d735 before it): the grant is ratified
+        again on this one right after the deploy."""
+        from league.constitution import money_digest
+
+        self.assertEqual(money_digest(), "42c4a3af2b5c7d1c83e720650ac0596bebf69e0bc77556601347b589f759643a")
+        self.assertEqual(PINNED_DIGEST, "595228a68a0a0e146901ba08185dfa7b39bcb2952a2abc1ae0cf16f19193d102")
+
+    def test_the_incubator_row_may_only_tighten(self):
+        import copy
+
+        from league.constitution import options_money_problems
+
+        self.assertEqual(options_money_problems(), [])
+        for key, value in (("max_loss_usd", "50.01"), ("max_open", 5), ("week_loss_usd", "150.01"), ("min_sessions", 2),
+                           ("min_trades", 9), ("min_coverage", "0.79"), ("contracts", 2), ("contracts", 0),
+                           ("max_open", 1.0)):
+            changed = copy.deepcopy(CONSTITUTION)
+            changed["options_money"]["incubator"][key] = value
+            self.assertTrue(any(f"incubator.{key}" in p for p in options_money_problems(changed)), (key, value))
+        for key, value in (("max_loss_usd", "0"), ("max_open", 0), ("week_loss_usd", "0"), ("min_sessions", 5),
+                           ("min_trades", 20), ("min_coverage", "0.9")):
+            changed = copy.deepcopy(CONSTITUTION)
+            changed["options_money"]["incubator"][key] = value
+            self.assertEqual(options_money_problems(changed), [], (key, value))
+        changed = copy.deepcopy(CONSTITUTION)
+        del changed["options_money"]["incubator"]
+        self.assertTrue(any("incubator" in p for p in options_money_problems(changed)))
 
     def test_sizing_stays_on_the_lower_bound_and_death_keeps_its_budget(self):
         """Whatever the owner's appetite, two properties hold: the scaled rung is never sized above
