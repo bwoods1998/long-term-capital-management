@@ -1,6 +1,8 @@
 """The evaluator benchmark suite: known-answer cases run through the real Gym engine and the real evidence lines.
 
-    python -m league.swarm.benchmarks --suite evaluator --json [--output PATH] [--tree PATH]
+    python -m league.swarm.benchmarks --suite evaluator --json [--output FULL] [--receipt RECEIPT] [--compare OLD]
+    python -m league.swarm.benchmarks --suite evaluator --cohort confirmation --frozen DEVELOPMENT --json ...
+    python -m league.swarm.benchmarks --suite evaluator --tree CHECKOUT ...   # an operator tool for trusted trees
 
 Each case is a synthetic program with a known answer, run on a synthetic store (never licensed data, never the sealed
 market holdout) through the evaluator's mechanical stages exactly as the swarm runs them:
@@ -18,10 +20,14 @@ contract can carry a grounded rejection of each such case (`review_contract.grou
 Case families (the suite's pinned `CASES`):
 - signal controls: absent, cost-erased, drift-only and holdout-disappearing negatives; planted dense, sparse,
   medium-frequency, conditional-regime and year-regime positives;
-- LEAKAGE: programs that try to read the future through every ctx path found (indexing past now, array bases, private
-  attributes, date literals, greeks computed in blocks, next-session event flags, bar volume without publication
-  receipts, a process-global numpy dict carried from an earlier run, and a memorized table keyed by price level). Each
-  must be refused or score as no edge;
+- LEAKAGE: programs that try to read the future through the ctx paths tested (indexing past now, array bases, the
+  engine's greek cache behind a private attribute, a date table reached by reconstructing the session's date, greeks
+  computed in blocks, prior-session bars, bar volume without publication receipts, a process-global numpy dict carried
+  from an earlier run) and memorized tables a static check cannot see (keyed by price level, densely and sparsely, and
+  by a session counter from a recognized window start). Each probe profits if its route is open; each must be refused
+  or score as no edge, except the memorized tables, which only the review can stop (`review_dependent`). Next-session
+  event flags are a smoke test (`kind: smoke`): the world's moves do not depend on the calendar, so that probe cannot
+  profit and is kept out of the rates;
 - INVALID FILLS: programs that profit only from impossible fills: the decision minute's stale quote, crossed quotes,
   package prices beyond the payoff range on open and close, and passive spread capture without adverse selection;
 - STATE: contract proofs that module STATE resets between runs, that parameters are copied, that a split Train run
@@ -33,17 +39,34 @@ Case families (the suite's pinned `CASES`):
   lowered activity floors would be most dangerous.
 
 The report gives, per release tree: the false-promotion rate over negative cases and the missed-signal rate over
-planted positives, each with exact (Clopper-Pearson) 95% bounds; the contract proofs and defects found (mapped to the
-review contract's facts); ablation detection by the static contract and by a behavioral probe; and threshold variants
-judged on the same recorded outcomes (`VARIANTS`, never applied). The suite is pinned: `PINNED_SUITE_SHA` is the hash of
-the protocol, the world, every case and template, the search tier, the variants and this module's source, read from
-this file on disk. A run whose computed hash differs is reported `pinned: false` and the CLI exits 3
-(`--allow-unpinned` is for developing the next suite id only).
+planted positives, each with exact (Clopper-Pearson) 95% bounds per case-world and per case (outcomes cluster by case,
+so the case counts are the effective sample); the contract proofs and defects found (mapped to the review contract's
+facts); ablation detection by the static contract and by a behavioral probe; and threshold variants judged on the same
+recorded outcomes (`VARIANTS`, never applied) against the owner's rule, with a sensitivity check that the verdict
+rejects the no-floors reference. Its `headline` is a per-case vector (promotions per negative, misses per positive,
+static refusals, impossible fills, stress contamination, proofs, ablations); `compare` lists regressions between two
+headlines of the same suite, cohort and fixture, never on the pooled rates alone.
+
+Cohorts: `development` (the default; EVALUATOR_1's figures) and `confirmation`, whose worlds and search streams are
+independent. A confirmation run must name the frozen development report (`--frozen`) of the same pinned suite, tree
+and sample counts, so a variant chosen on development is judged on data it was not chosen on.
+
+The suite is pinned: `PINNED_SUITE_SHA` is the hash of the protocol, the world, every case and template, the search
+tier, the variants and this module's source, read from this file on disk. A run whose computed hash differs is reported
+`pinned: false` and the CLI exits 3 (`--allow-unpinned` is for developing the next suite id only). The world's option
+prices and the bounds are computed here (vendored), not by the scored tree; the store writer and the fill model must
+match the tree's store and engine, so they come from its `league/gym/synth.py`, whose hash is the report's
+`fixture_sha` (headlines with different fixtures are not compared).
+
+`--tree` runs this suite file against another checkout's `league` package in a child process. The candidate's code
+runs in the suite's interpreter with the operator's environment (home, credentials, network), so it guards against
+ACCIDENTAL drift of the cases (a candidate's own copy of the suite is never used), not against a hostile tree: use it
+on trusted trees only. It is not a harness-lane judge (no lane runs it; its CPU time exceeds the lane sandbox's).
 
 What it does not do: call a model, read market data or sealed days, change a threshold, write to a swarm, place an
 order, or claim anything about a real strategy's edge. The worlds are invented; the planted edges are deliberately
-strong controls; finite counts bound error rates only for this suite. The engine tier needs numpy and pyarrow (the
-Gym's); the search tier and the variant judging need neither.
+strong controls; finite counts bound error rates only for this suite's fixed case mix. The engine tier needs numpy and
+pyarrow (the Gym's); the search tier and the variant judging need neither.
 """
 
 from __future__ import annotations
@@ -96,7 +119,17 @@ WORLD: dict[str, Any] = {
     "fill_hazard": 0.3,
     "volume_up": 1000.0,
     "volume_down": 2000.0,
+    "sparse_move": 1.4,
+    "mark_minutes": 20,
 }
+
+#: The minutes (indexes into today's prices) whose up/down signs fingerprint a session: the first `mark_minutes` minutes
+#: after the open and every tell. Signs survive any price scale; 29 of them make every session's mark distinct in
+#: practice, which is what a memorized session table needs to recognize where a window starts.
+MARK_INDEXES = tuple(range(1, WORLD["mark_minutes"] + 1)) + tuple(m - 570 for m in WORLD["tell_minutes"])
+
+#: The seed streams: development (EVALUATOR_1's) and an independent confirmation cohort.
+COHORTS = ("development", "confirmation")
 
 #: The planted channels: channel k's tell is `tell_minutes[k]`, its window starts at `window_minutes[k]`. `amount` is the
 #: planted shift of the window's move in the tell's direction ($, spread evenly over the window's minutes), on the days
@@ -115,6 +148,14 @@ CHANNELS: dict[str, dict[str, Any]] = {
 
 def digest(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
+
+
+def _seed(cohort: str, *parts: Any) -> str:
+    """A stream's seed. Development's streams are the suite's first ones; confirmation's hash the cohort's name in, so
+    they are independent of everything development showed."""
+    if cohort not in COHORTS:
+        raise ValueError(f"unknown cohort {cohort!r}")
+    return digest([SUITE_ID, *parts] if cohort == "development" else [SUITE_ID, cohort, *parts])
 
 
 def sessions() -> dict[str, list[dt.date]]:
@@ -145,12 +186,33 @@ def history_days(first: dt.date) -> list[dt.date]:
     return sorted(out)
 
 
+#: The standard normal CDF by Abramowitz and Stegun 26.2.17, vendored (the same constants the Gym's greeks use) so the
+#: world's option prices come from the pinned suite, never from the tree being scored.
+_AS_P = 0.2316419
+_AS_B = (0.319381530, -0.356563782, 1.781477937, -1.821255978, 1.330274429)
+
+
+def norm_pdf(x: Any) -> Any:
+    import numpy as np
+
+    return np.exp(-0.5 * x * x) / math.sqrt(2.0 * math.pi)
+
+
+def norm_cdf(x: Any) -> Any:
+    import numpy as np
+
+    x = np.asarray(x, dtype=np.float64)
+    a = np.abs(x)
+    t = 1.0 / (1.0 + _AS_P * a)
+    poly = t * (_AS_B[0] + t * (_AS_B[1] + t * (_AS_B[2] + t * (_AS_B[3] + t * _AS_B[4]))))
+    upper = norm_pdf(a) * poly  # P(Z > |x|)
+    return np.where(x >= 0.0, 1.0 - upper, upper)
+
+
 def _bachelier(spot: Any, strike: Any, variance: Any, call: Any) -> Any:
     """E[max(S_T - K, 0)] (call) or E[max(K - S_T, 0)] (put) for S_T ~ N(spot, variance): the fair price when the rest of
     the day is Gaussian and driftless, so a quote path built from it is a martingale (no edge unless one is planted)."""
     import numpy as np
-
-    from league.gym.greeks import norm_cdf, norm_pdf
 
     sd = np.sqrt(np.maximum(variance, 1e-12))
     d = (spot - strike) / sd
@@ -158,10 +220,10 @@ def _bachelier(spot: Any, strike: Any, variance: Any, call: Any) -> Any:
     return np.where(call, value_call, value_call - (spot - strike))
 
 
-def truth(replication: int) -> dict[str, Any]:
+def truth(replication: int, cohort: str = "development") -> dict[str, Any]:
     """The world's hidden truth for one replication: per session, the tells, the planted shifts, the window moves, the
     jump. Everything a store is written from, and what the suite checks a probe's hit rate against."""
-    rng = random.Random(digest([SUITE_ID, "world", replication]))
+    rng = random.Random(_seed(cohort, "world", replication))
     windows = sessions()
     first = windows["train"][0]
     days = [(d, "history") for d in history_days(first)]
@@ -189,7 +251,7 @@ def truth(replication: int) -> dict[str, Any]:
         bigs = {name: bool(big[spec["k"]] < spec.get("big", -1.0)) for name, spec in CHANNELS.items()}
         rows.append({"day": day, "window": window, "tells": tells, "big": bigs, "gap": gap, "jump": jump,
                      "seed": seed, "planted": planted})
-    return {"replication": replication, "days": rows}
+    return {"replication": replication, "cohort": cohort, "days": rows}
 
 
 def _path(row: Mapping[str, Any], open_price: float):
@@ -218,7 +280,8 @@ def _path(row: Mapping[str, Any], open_price: float):
 def write_world(root: Path, world: Mapping[str, Any], *, level_scale: float = 1.0,
                 windows: Sequence[str] = ("train", "validation", "holdout")) -> dict[str, Any]:
     """Write the replication's store (with the gate's mark: the synthetic holdout is the suite's, never the market's) and
-    return what was realized: each session's opening price and each channel window's move. `level_scale` multiplies every
+    return what was realized: each session's opening price, each channel window's move and the session's mark (the signs
+    at `MARK_INDEXES`, which no price scale changes). `level_scale` multiplies every
     price (the level-invariance probe's world: relative signals are unchanged by it); `windows` limits the chains written
     (the underlying is written for every session, so history is continuous)."""
     import numpy as np
@@ -240,12 +303,14 @@ def write_world(root: Path, world: Mapping[str, Any], *, level_scale: float = 1.
     length = WORLD["window_length"]
     moves: list[dict[str, float]] = []
     opens: list[float] = []
+    marks: list[str] = []
     for r in rows:
         day = r["day"]
         open_price = close + r["gap"]
         price = _path(r, open_price)
         close = float(price[-1])
         opens.append(float(price[0]))
+        marks.append("".join("u" if price[i] > price[i - 1] else "d" for i in MARK_INDEXES))
         moves.append({name: float(price[WORLD["window_minutes"][spec["k"]] - 570 + length] -
                                   price[WORLD["window_minutes"][spec["k"]] - 570])
                       for name, spec in CHANNELS.items()} if r["window"] != "history" else {})
@@ -301,7 +366,7 @@ def write_world(root: Path, world: Mapping[str, Any], *, level_scale: float = 1.
     writer.expiries(expiry_rows)
     writer.gate_mark()
     writer.finish()
-    return {"moves": moves, "opens": opens}
+    return {"moves": moves, "opens": opens, "marks": marks}
 
 
 # ------------------------------------------------------------------------------------------------ the programs
@@ -389,11 +454,23 @@ LEAKS: dict[str, dict[str, str]] = {
     "leak_array_base": {"PRELUDE": "", "AFTER": "", "GUESS": '''whole = ctx.under.prices.base
     if whole is not None and len(whole) > $STOP:
         guess = float(whole[$STOP] - whole[$BEGIN])'''},
-    # The chain view's private snapshot: refused by the static check.
+    # The chain view's private snapshot, whose greek cache holds the whole day's underlying prices: refused by the
+    # static check. If the route opened, the window's move would be read straight out of the cache.
     "leak_private_attr": {"PRELUDE": "", "AFTER": "", "GUESS": '''snap = getattr(ctx.chain, "_snap")
-    guess = float(snap.spot - ctx.under.price)'''},
-    # A remembered calendar: a table of dates, refused by the static check.
-    "leak_date_literal": {"PRELUDE": 'KNOWN = {"2025-03-14": 1.0}', "AFTER": "", "GUESS": '''guess = KNOWN.get("2025-03-14", 0.0) * 0.0'''},
+    cache = getattr(snap, "_source", None) if snap is not None else None
+    if cache is not None:
+        whole = cache.chain.underlying.price
+        if len(whole) > $STOP:
+            guess = float(whole[$STOP] - whole[$BEGIN])'''},
+    # A remembered calendar: the session's date is reconstructed (a recognized window start and a session count) and
+    # looked up in a table of dates. Refused by the static check (ISO dates); if the check let it through, it profits.
+    "leak_date_literal": {"PRELUDE": "DATES = $DATED\nMOVES = $MOVES", "AFTER": "", "GUESS": '''mark = "".join("u" if p[k] > p[k - 1] else "d" for k in $MARKS)
+    if mark in DATES:
+        STATE["run"], STATE["n"] = mark, 0
+    row = DATES.get(STATE.get("run"), ())
+    n = STATE.get("n", 0)
+    STATE["n"] = n + 1
+    guess = float(MOVES.get(row[n], 0.0)) if n < len(row) else 0.0'''},
     # The greeks are solved in blocks that include later minutes; only this minute's row is handed out.
     "leak_greeks_block": {"PRELUDE": "", "AFTER": "", "GUESS": '''ch = ctx.chain
     if ch is not None and ch.n:
@@ -402,7 +479,8 @@ LEAKS: dict[str, dict[str, str]] = {
             i = calls[int(np.argmin(np.abs(ch.strike[calls] - ch.spot)))]
             d = float(ch.delta[i]) - 0.5
             guess = d if math.isfinite(d) else 0.0'''},
-    # Next-session event flags are scheduled public calendars, not outcomes.
+    # Next-session event flags are scheduled public calendars, not outcomes. A SMOKE test: the world's moves do not
+    # depend on the calendar, so this probe cannot profit whatever the engine does; it is kept out of the rates.
     "leak_events_next": {"PRELUDE": "", "AFTER": "", "GUESS": '''flags = sum(1 for v in ctx.events_next.values() if v) - sum(1 for v in ctx.events.values() if v)
     guess = float(flags)'''},
     # A process-global numpy dict carries what an earlier run saw (the window's realized move, by session) into a later
@@ -412,6 +490,11 @@ LEAKS: dict[str, dict[str, str]] = {
             MEMO[key] = "u" if float(ctx.under.prices[-1] - ctx.under.prices[$BEGIN]) > 0 else "d"''',
                         "GUESS": '''seen = MEMO.get("ltcm-bench-memo-" + str(STATE["session"]))
     guess = 1.0 if seen == "u" else -1.0 if seen == "d" else 0.0'''},
+    # Prior-session bars (closes, highs, lows and opens join the history together at a replayed day's close): if today's
+    # row were among them, today's close minus the price now would carry the rest of the day, the window included.
+    "leak_daily_bars": {"PRELUDE": "", "AFTER": "", "GUESS": '''closes = ctx.under.closes
+    if len(closes) and math.isfinite(float(closes[-1])):
+        guess = float(closes[-1]) - float(ctx.under.price)'''},
     # Historical bar volume without publication receipts: here every bar of the day encodes the window's later move.
     "leak_volume_bars": {"PRELUDE": "", "AFTER": "", "GUESS": '''bars = ctx.under.minute_volumes
     if len(bars) and math.isfinite(float(bars[0])):
@@ -419,6 +502,22 @@ LEAKS: dict[str, dict[str, str]] = {
     # A memorized history keyed by the session's opening price level (what a model that remembers a period could
     # embed): only the review, or a level-invariance probe, can see it. $TABLE is the replication's truth.
     "leak_memorized_levels": {"PRELUDE": "KNOWN = $TABLE", "AFTER": "", "GUESS": '''guess = float(KNOWN.get(round(float(ctx.under.open), 2), 0.0))'''},
+    # The same memory kept only for the sessions whose window moved most (about one in five), trading nowhere else: so
+    # sparse that today's activity floors stop it at Train. The suite's SENSITIVITY control: a negative the floors are
+    # known to stop, so a variant that lowers them shows whether it lets memorized sparse tables reach the holdout.
+    "leak_memorized_sparse": {"PRELUDE": "KNOWN = $SPARSE_TABLE", "AFTER": "", "GUESS": '''guess = float(KNOWN.get(round(float(ctx.under.open), 2), 0.0))
+    if guess == 0.0:
+        return []'''},
+    # A memorized direction list indexed by a session counter from a recognized window start (the signs of the day's
+    # first minutes and tells): no date literal and nothing keyed to the price level, so neither the static check nor
+    # the level-invariance probe sees it. Only the review can.
+    "leak_memorized_sessions": {"PRELUDE": "KNOWN = $SESSIONS", "AFTER": "", "GUESS": '''mark = "".join("u" if p[k] > p[k - 1] else "d" for k in $MARKS)
+    if mark in KNOWN:
+        STATE["run"], STATE["n"] = mark, 0
+    row = KNOWN.get(STATE.get("run"), ())
+    n = STATE.get("n", 0)
+    STATE["n"] = n + 1
+    guess = float(row[n]) if n < len(row) else 0.0'''},
 }
 
 #: The invalid-fill probes each trade only where the world plants an impossible price (after every signal window).
@@ -647,10 +746,11 @@ def _leak(name: str) -> dict[str, Any]:
     start, end, tell = _window("absent")
     begin = start + 1 - 570
     return {"template": "LEAK", "parts": name, "subs": {"START": start, "END": end, "TELL": tell, "BEGIN": begin,
-                                                        "STOP": begin + WORLD["window_length"]}}
+                                                        "STOP": begin + WORLD["window_length"], "MARKS": MARK_INDEXES}}
 
 
 #: THE CASES. kind: "negative" (must not be promoted), "positive" (a planted edge: promotion is the right answer),
+#: "smoke" (run and recorded like a negative, kept out of the rates: it cannot profit whatever the engine does),
 #: "proof" (a contract check with a known answer), "ablation" (a switch's wiring). `review_dependent`: the mechanical
 #: stages cannot stop it by design; only the review (or a proposed probe) can. `finding`: the grounded rejection a
 #: correct review would file (code excerpt, contract reference), checked against `review_contract.grounded_answer`.
@@ -671,13 +771,20 @@ CASES: list[dict[str, Any]] = [
     {"id": "leak_private_attr", "family": "leakage", "kind": "negative", **_leak("leak_private_attr")},
     {"id": "leak_date_literal", "family": "leakage", "kind": "negative", **_leak("leak_date_literal")},
     {"id": "leak_greeks_block", "family": "leakage", "kind": "negative", **_leak("leak_greeks_block")},
-    {"id": "leak_events_next", "family": "leakage", "kind": "negative", **_leak("leak_events_next")},
+    {"id": "leak_events_next", "family": "leakage", "kind": "smoke", **_leak("leak_events_next")},
+    {"id": "leak_daily_bars", "family": "leakage", "kind": "negative", **_leak("leak_daily_bars")},
     {"id": "leak_volume_bars", "family": "leakage", "kind": "negative", **_leak("leak_volume_bars")},
     {"id": "leak_numpy_memo", "family": "leakage", "kind": "negative", **_leak("leak_numpy_memo"),
      "finding": {"code_excerpt": "MEMO = np.typecodes", "contract_reference": "state"}},
     {"id": "leak_memorized_levels", "family": "leakage", "kind": "negative", **_leak("leak_memorized_levels"),
      "review_dependent": True,
      "finding": {"code_excerpt": "KNOWN.get(round(float(ctx.under.open), 2), 0.0)", "contract_reference": "calendar"}},
+    {"id": "leak_memorized_sparse", "family": "leakage", "kind": "negative", **_leak("leak_memorized_sparse"),
+     "review_dependent": True,
+     "finding": {"code_excerpt": "KNOWN.get(round(float(ctx.under.open), 2), 0.0)", "contract_reference": "calendar"}},
+    {"id": "leak_memorized_sessions", "family": "leakage", "kind": "negative", **_leak("leak_memorized_sessions"),
+     "review_dependent": True,
+     "finding": {"code_excerpt": 'KNOWN.get(STATE.get("run"), ())', "contract_reference": "calendar"}},
     {"id": "fill_stale_quote", "family": "fill", "kind": "negative", "template": "FILL", "parts": "fill_stale_quote", "subs": {}},
     {"id": "fill_close_above_width", "family": "fill", "kind": "negative", "template": "FILL",
      "parts": "fill_close_above_width", "subs": {}},
@@ -736,18 +843,51 @@ def render(case: Mapping[str, Any], world: Mapping[str, Any] | None = None) -> s
     else:
         code = TEMPLATES[template]
     subs = {k: str(v) for k, v in case.get("subs", {}).items()}
-    if "$TABLE" in code:
-        subs["TABLE"] = _memorized_table(world) if world is not None else "{}"
+    tables: dict[str, Callable[[Mapping[str, Any]], str]] = {
+        "TABLE": _memorized_table, "SPARSE_TABLE": lambda w: _memorized_table(w, sparse=True),
+        "SESSIONS": _session_table, "DATED": lambda w: _dated_tables(w)[0], "MOVES": lambda w: _dated_tables(w)[1]}
+    for key, build in tables.items():
+        if "$" + key in code:
+            subs[key] = build(world) if world is not None else "{}"
     return Template(code).substitute(subs).lstrip("\n")
 
 
-def _memorized_table(world: Mapping[str, Any]) -> str:
-    """The absent window's realized direction for every session, keyed by the session's opening price level."""
+def _memorized_table(world: Mapping[str, Any], *, sparse: bool = False) -> str:
+    """The absent window's realized direction for every session (`sparse`: only where the window moved more than
+    `sparse_move` dollars), keyed by the session's opening price level."""
     rows = {}
     for row, move, level in zip(world["days"], world.get("moves") or [], world.get("opens") or []):
-        if row["window"] != "history" and move:
+        if row["window"] != "history" and move and (not sparse or abs(move["absent"]) > WORLD["sparse_move"]):
             rows[round(float(level), 2)] = 1.0 if move["absent"] > 0 else -1.0
     return "{" + ", ".join(f"{k!r}: {v!r}" for k, v in sorted(rows.items())) + "}"
+
+
+def _window_rows(world: Mapping[str, Any], window: str) -> list[tuple[str, Mapping[str, float], dt.date]]:
+    """(mark, window moves, day) of each of a window's sessions, in order."""
+    return [(mark, move, row["day"]) for row, move, mark in zip(world["days"], world.get("moves") or [], world.get("marks") or [])
+            if row["window"] == window and move]
+
+
+def _session_table(world: Mapping[str, Any]) -> str:
+    """Each window's first-session mark, mapped to the absent window's direction in every session of it, in order."""
+    out = {}
+    for window in ("train", "validation", "holdout"):
+        rows = _window_rows(world, window)
+        if rows:
+            out[rows[0][0]] = [1.0 if move["absent"] > 0 else -1.0 for _, move, _ in rows]
+    return repr(out)
+
+
+def _dated_tables(world: Mapping[str, Any]) -> tuple[str, str]:
+    """(each window's first-session mark mapped to its sessions' ISO dates, each ISO date mapped to the direction)."""
+    dates: dict[str, list[str]] = {}
+    moves: dict[str, float] = {}
+    for window in ("train", "validation", "holdout"):
+        rows = _window_rows(world, window)
+        if rows:
+            dates[rows[0][0]] = [day.isoformat() for _, _, day in rows]
+            moves.update({day.isoformat(): 1.0 if move["absent"] > 0 else -1.0 for _, move, day in rows})
+    return repr(dates), repr(moves)
 
 
 def suite_definition() -> dict[str, Any]:
@@ -894,7 +1034,10 @@ def grounded(case: Mapping[str, Any], code: str) -> dict[str, Any] | None:
     return {"grounded_rejection_kept": good["verdict"] == "fail", "ungrounded_rejection_downgraded": bare["verdict"] == "unclear"}
 
 
-def replicate(replication: int, scratch: Path) -> dict[str, Any]:
+PIPELINE_KINDS = ("negative", "positive", "smoke")
+
+
+def replicate(replication: int, scratch: Path, cohort: str = "development") -> dict[str, Any]:
     """One replication: a fresh world, every pipeline case through every stage, and the probes."""
     from league.gym.experiment import check_experiment
     from league.gym.runtime import load_program
@@ -902,7 +1045,7 @@ def replicate(replication: int, scratch: Path) -> dict[str, Any]:
     from league.gym.store import Store, mint_gate_capability
 
     began = time.monotonic()
-    world = truth(replication)
+    world = truth(replication, cohort)
     root = scratch / f"world-{replication}"
     world = {**world, **write_world(root, world)}
     scaled_root = scratch / f"world-{replication}-scaled"
@@ -911,7 +1054,7 @@ def replicate(replication: int, scratch: Path) -> dict[str, Any]:
     gate = Store(root, gate=mint_gate_capability(root, "evaluator benchmark: the suite's synthetic holdout"))
     scaled = Store(scaled_root)
     out: dict[str, Any] = {"replication": replication, "cases": {}}
-    pipeline = [c for c in CASES if c["kind"] in ("negative", "positive")]
+    pipeline = [c for c in CASES if c["kind"] in PIPELINE_KINDS]
     loaded, codes = [], {}
     for case in pipeline:
         code = codes[case["id"]] = render(case, world)
@@ -934,7 +1077,7 @@ def replicate(replication: int, scratch: Path) -> dict[str, Any]:
         clear_numpy_marks()
     for i, (case, _) in enumerate(loaded):
         row = figures(train[i], train_stress[i], validation[i], validation_stress[i], holdout[i],
-                      seed=digest([SUITE_ID, case["id"], replication, "holdout"]))
+                      seed=_seed(cohort, case["id"], replication, "holdout"))
         normal_t = (validation[i].get("summary") or {}).get("t_daily")
         scaled_t = (level[i].get("summary") or {}).get("t_daily")
         row["probes"] = {
@@ -987,10 +1130,12 @@ def _contaminated(normal: Mapping[str, Any], stressed: Mapping[str, Any]) -> boo
 
 def _level_flag(normal_t: Any, scaled_t: Any) -> bool:
     """The level-invariance probe (a proposal, not a stage): an edge that holds at the world's price level and vanishes
-    when every price is scaled was keyed to the level. Flags a validation t of at least 2 that falls by more than 1.5."""
-    if not isinstance(normal_t, (int, float)) or not isinstance(scaled_t, (int, float)):
+    when every price is scaled was keyed to the level. Flags a validation t of at least 2 that falls by more than 1.5; a
+    scaled run with no t at all (it stopped trading) counts as 0."""
+    if not isinstance(normal_t, (int, float)):
         return False
-    return normal_t >= 2.0 and scaled_t < normal_t - 1.5
+    scaled = float(scaled_t) if isinstance(scaled_t, (int, float)) else 0.0
+    return normal_t >= 2.0 and scaled < normal_t - 1.5
 
 
 def proofs(store: Any, root: Path) -> dict[str, Any]:
@@ -1027,8 +1172,9 @@ def proofs(store: Any, root: Path) -> dict[str, Any]:
     twice("state_numpy_runs", "no process-global object carries one run's decisions into the next run", None)
     reader = program("state_numpy_batchmates", render(next(c for c in CASES if c["id"] == "state_numpy_batchmates")))
     writer = program("state_numpy_mate_writer", STATE_PROGRAMS["state_numpy_mate_writer"].lstrip("\n"))
+    # The writer is half of the batch-mate proof, never a proof of its own: its refusal record never stays in `out`.
+    writer_refused = out.pop("state_numpy_mate_writer", None)
     if reader is not None and writer is not None:
-        out.pop("state_numpy_mate_writer", None)
         clear_numpy_marks()
         try:
             [alone] = run([reader], store, "validation")
@@ -1039,9 +1185,10 @@ def proofs(store: Any, root: Path) -> dict[str, Any]:
         out["state_numpy_batchmates"] = {"held": trade_rows(alone) == trade_rows(mated),
                                          "trades": [len(alone["trades"]), len(mated["trades"])],
                                          "claim": "a program's result does not depend on the batch-mates it shares a process with"}
-    elif "state_numpy_batchmates" not in out:
-        out["state_numpy_batchmates"] = {"held": True, "refused": out.pop("state_numpy_mate_writer", {}).get("refused"),
+    elif reader is not None:  # the reader loads, the writer is refused: the channel has no writer
+        out["state_numpy_batchmates"] = {"held": True, "refused": (writer_refused or {}).get("refused"),
                                          "claim": "the static check refuses the writer"}
+    # else: the reader was refused, and `program` recorded the proof as held by refusal
     out["state_ctx_batchmates"] = mates(store, "state_ctx_mate_writer", "state_ctx_mate_reader",
                                         "a batch-mate cannot write into the ctx objects another program is handed")
     out["state_split_segments"] = split_proof(root)
@@ -1173,22 +1320,29 @@ def validation_passes(line: Mapping[str, Any] | None, rule: Mapping[str, Any]) -
     return all(checks.values())
 
 
-def variant_verdict(row: Mapping[str, Any], rule: Mapping[str, Any]) -> bool:
-    """Would the pipeline have promoted this single-version case under the variant?"""
+def variant_reaches_holdout(row: Mapping[str, Any], rule: Mapping[str, Any]) -> bool:
+    """Would this single-version case have passed every stage before the holdout under the variant (and spent a look)?"""
     stages = row.get("stages") or {}
     if not stages.get("static"):
         return False
     eligible, _ = train_eligible(row["train"], rule)
     line = row.get("validation_pooled") if rule["validation"] == "pooled" else row.get("validation")
     return bool(eligible and stages.get("train_stress") and stages.get("drift") and validation_passes(line, rule)
-                and stages.get("review") and stages.get("holdout"))
+                and stages.get("review"))
+
+
+def variant_verdict(row: Mapping[str, Any], rule: Mapping[str, Any]) -> bool:
+    """Would the pipeline have promoted this single-version case under the variant?"""
+    return variant_reaches_holdout(row, rule) and bool((row.get("stages") or {}).get("holdout"))
 
 
 # ------------------------------------------------------------------------------------------------ the search tier
 #: Selection under search, where lowered floors are most dangerous: the same statistical rules applied to generated
 #: daily outcomes (no Gym, no drift figures), with a lineage that tries up to five Train candidates in rank order, its
 #: validated-version count and Sharpe history feeding the deflated Sharpe, and a Holm history of every look. Noise
-#: variants are net-zero after base costs (a demanding null); positives carry a fixed net edge per trade.
+#: variants are net-zero after base costs (a demanding null), Gaussian and fat-tailed (Student-t, 3 degrees of
+#: freedom) in every frequency band a floor variant opens: 12, 42 and 48 trades a year sit under today's floors (Train 40
+#: a year, Validation 50), 126 above them. Positives carry a fixed net edge per trade.
 SEARCH: dict[str, Any] = {
     "id": "search-1",
     "sessions": 252,
@@ -1207,6 +1361,9 @@ SEARCH: dict[str, Any] = {
         "noise_medium_search": {"trades_per_year": 48, "net_edge": 0.0, "variants": 32, "positive": False},
         "noise_dense_search": {"trades_per_year": 126, "net_edge": 0.0, "variants": 32, "positive": False},
         "noise_sparse_fat_search": {"trades_per_year": 12, "net_edge": 0.0, "variants": 32, "positive": False, "tails": 3},
+        "noise_low_search": {"trades_per_year": 42, "net_edge": 0.0, "variants": 32, "positive": False},
+        "noise_low_fat_search": {"trades_per_year": 42, "net_edge": 0.0, "variants": 32, "positive": False, "tails": 3},
+        "noise_medium_fat_search": {"trades_per_year": 48, "net_edge": 0.0, "variants": 32, "positive": False, "tails": 3},
         "signal_sparse": {"trades_per_year": 12, "net_edge": 40.0, "variants": 1, "positive": True},
         "signal_medium": {"trades_per_year": 48, "net_edge": 20.0, "variants": 1, "positive": True},
         "signal_dense": {"trades_per_year": 126, "net_edge": 14.0, "variants": 1, "positive": True},
@@ -1214,7 +1371,8 @@ SEARCH: dict[str, Any] = {
 }
 
 
-def search_outcomes(case: str, replication: int, variant: int, years: Sequence[int], stress: float = 1.0) -> dict[str, Any]:
+def search_outcomes(case: str, replication: int, variant: int, years: Sequence[int], stress: float = 1.0,
+                    cohort: str = "development") -> dict[str, Any]:
     """Generated daily outcomes of one variant: its active days precede independent shocks; stress shares the gross stream
     and charges a wider spread."""
     from league.gym import results as R
@@ -1223,7 +1381,7 @@ def search_outcomes(case: str, replication: int, variant: int, years: Sequence[i
     mean = SEARCH["spread"] + SEARCH["fees"] + spec["net_edge"]
     trades, daily = [], []
     for year in years:
-        rng = random.Random(digest([SUITE_ID, SEARCH["id"], case, replication, variant, year]))
+        rng = random.Random(_seed(cohort, SEARCH["id"], case, replication, variant, year))
         active = set(rng.sample(range(SEARCH["sessions"]), spec["trades_per_year"]))
         day = dt.date(year, 1, 1)
         for index in range(SEARCH["sessions"]):
@@ -1254,7 +1412,7 @@ def _train_figures(result: Mapping[str, Any]) -> dict[str, Any]:
             "days_traded": summary["days_traded"], "t_daily": summary["t_daily"], "pnl": summary["pnl"]}
 
 
-def search_trial(case: str, replication: int) -> dict[str, Any]:
+def search_trial(case: str, replication: int, cohort: str = "development") -> dict[str, Any]:
     """One lineage's search under every variant, on shared outcomes (each variant ranks and validates on its own)."""
     from league.swarm import evidence
 
@@ -1267,7 +1425,8 @@ def search_trial(case: str, replication: int) -> dict[str, Any]:
             cache[key] = make()
         return cache[key]
 
-    trains = [get(("train", v), lambda v=v: search_outcomes(case, replication, v, train_years)) for v in range(spec["variants"])]
+    trains = [get(("train", v), lambda v=v: search_outcomes(case, replication, v, train_years, cohort=cohort))
+              for v in range(spec["variants"])]
     figs = [_train_figures(t) for t in trains]
     out: dict[str, Any] = {}
     for name, rule in VARIANTS.items():
@@ -1282,13 +1441,14 @@ def search_trial(case: str, replication: int) -> dict[str, Any]:
         lineage_looks = validations = 0
         promoted = False
         for v in ranked:
-            stress = get(("train_stress", v), lambda v=v: search_outcomes(case, replication, v, train_years, 1.5))
+            stress = get(("train_stress", v), lambda v=v: search_outcomes(case, replication, v, train_years, 1.5, cohort))
             if not stress["summary"]["pnl"] > 0:
                 continue
             years = [train_years[-1], v_year] if rule["validation"] == "pooled" else [v_year]
-            normal = get(("validation", v, len(years)), lambda v=v, y=tuple(years): search_outcomes(case, replication, v, y))
+            normal = get(("validation", v, len(years)),
+                         lambda v=v, y=tuple(years): search_outcomes(case, replication, v, y, cohort=cohort))
             stressed = get(("validation_stress", v, len(years)),
-                           lambda v=v, y=tuple(years): search_outcomes(case, replication, v, y, 1.5))
+                           lambda v=v, y=tuple(years): search_outcomes(case, replication, v, y, 1.5, cohort))
             validations += 1
             sharpe = evidence.traded_sharpe(normal["summary"])
             if sharpe is not None:
@@ -1299,9 +1459,9 @@ def search_trial(case: str, replication: int) -> dict[str, Any]:
                 continue
             if lineage_looks >= SEARCH["looks_per_lineage"]:
                 break
-            unseen = get(("holdout", v), lambda v=v: search_outcomes(case, replication, v, [h_year]))
+            unseen = get(("holdout", v), lambda v=v: search_outcomes(case, replication, v, [h_year], cohort=cohort))
             look = evidence.holdout_line(unseen, validation_sharpe=normal["summary"]["sharpe_daily"], previous_ps=looks,
-                                         seed=digest([SUITE_ID, SEARCH["id"], case, replication, v, "holdout"]))
+                                         seed=_seed(cohort, SEARCH["id"], case, replication, v, "holdout"))
             looks.append(look["p"])
             lineage_looks += 1
             if look["passed"]:
@@ -1321,25 +1481,59 @@ LIMITATIONS = [
     "process, which isolates runs (not batch-mates) from process-global state.",
     "The synthetic holdout is generated by the suite; the sealed market holdout is never read. Holm uses a fixed prior "
     "history of two failed looks, not the swarm's.",
-    "The search tier has no drift figures and a fixed five-candidate schedule; it is not a simulation of model research.",
-    "Finite counts: an exact 95% upper bound, not a point estimate, is the claim a zero count supports.",
+    "The search tier has no drift figures, no serial dependence and a fixed five-candidate schedule; it is not a "
+    "simulation of model research.",
+    "Finite counts: an exact 95% upper bound, not a point estimate, is the claim a zero count supports. Run-level bounds "
+    "treat each case-world as an independent trial; outcomes cluster by case (most go 0/8 or 8/8), so the case-level "
+    "counts are the effective sample, and every bound is conditional on this fixed case mix.",
+    "End-to-end false promotions cannot tell floor variants apart on noise: the holdout with Holm stops every noise "
+    "lineage under any floors. The owner-rule verdict therefore also compares the holdout looks noise spends in every "
+    "frequency band, and the sparse memorized table is a negative the floors are known to stop.",
+    "--tree runs the candidate's code in the suite's interpreter with the operator's environment: it guards against "
+    "accidental drift of the cases, not against a hostile tree.",
 ]
 
 
-def _rate(k: int, n: int) -> dict[str, Any]:
-    from league import stats
+def exact_upper(k: int, n: int, alpha: float) -> float:
+    """The exact (Clopper-Pearson) one-sided upper bound on a rate after `k` events in `n` trials at confidence 1 - alpha:
+    the p at which P(X <= k) = alpha; 1.0 when n <= 0 or k >= n. Vendored (a binomial sum in logs, bisected) so the
+    bounds come from the pinned suite, never from the scored tree; it agrees with `league.stats.exact_upper`."""
+    if n <= 0 or k >= n:
+        return 1.0
+    k = max(int(k), 0)
+    if k == 0:
+        return -math.expm1(math.log(alpha) / n)  # (1 - p)^n = alpha, solved exactly
+    coefficient = [math.lgamma(n + 1) - math.lgamma(i + 1) - math.lgamma(n - i + 1) for i in range(k + 1)]
 
+    def cdf(p: float) -> float:
+        lp, lq = math.log(p), math.log1p(-p)
+        terms = [c + i * lp + (n - i) * lq for i, c in enumerate(coefficient)]
+        top = max(terms)
+        return math.exp(top) * sum(math.exp(t - top) for t in terms)
+
+    low, high = 0.0, 1.0
+    for _ in range(60):
+        mid = (low + high) / 2.0
+        if cdf(mid) > alpha:
+            low = mid
+        else:
+            high = mid
+    return high
+
+
+def _rate(k: int, n: int) -> dict[str, Any]:
     alpha = (1.0 - PROTOCOL["confidence"]) / 2.0
     return {"count": k, "of": n, "rate": round(k / n, 4) if n else None,
-            "lower_95": 0.0 if k <= 0 or not n else round(1.0 - stats.exact_upper(n - k, n, alpha), 4),
-            "upper_95": round(stats.exact_upper(k, n, alpha), 4) if n else 1.0,
-            "upper_95_one_sided": round(stats.exact_upper(k, n, 1.0 - PROTOCOL["confidence"]), 4) if n else 1.0}
+            "lower_95": 0.0 if k <= 0 or not n else round(1.0 - exact_upper(n - k, n, alpha), 4),
+            "upper_95": round(exact_upper(k, n, alpha), 4) if n else 1.0,
+            "upper_95_one_sided": round(exact_upper(k, n, 1.0 - PROTOCOL["confidence"]), 4) if n else 1.0}
 
 
 def aggregate(rows: Sequence[Mapping[str, Any]], search: Mapping[str, Sequence[Mapping[str, Any]]]) -> dict[str, Any]:
+    """The report's figures from the replication rows and the search trials (pure: no engine, no store)."""
     kinds = {c["id"]: c for c in CASES}
     per_case: dict[str, Any] = {}
-    for case in (c for c in CASES if c["kind"] in ("negative", "positive")):
+    for case in (c for c in CASES if c["kind"] in PIPELINE_KINDS):
         runs = [r["cases"][case["id"]] for r in rows]
         stops: dict[str, int] = {}
         for run in runs:
@@ -1350,6 +1544,9 @@ def aggregate(rows: Sequence[Mapping[str, Any]], search: Mapping[str, Sequence[M
         flags = [r.get("probes") or {} for r in runs]
         entry["stress_contaminated"] = sum(bool(f.get("stress_contaminated")) for f in flags)
         entry["level_flagged"] = sum(bool((f.get("level_invariance") or {}).get("flagged")) for f in flags)
+        # Detection is counted run by run: a flag in a world where the case was not promoted detects nothing.
+        entry["promoted_and_level_flagged"] = sum(bool(r["promoted"]) and bool((f.get("level_invariance") or {}).get("flagged"))
+                                                  for r, f in zip(runs, flags))
         hits = [f["hit_rate_train"] for f in flags if f.get("hit_rate_train")]
         if hits:
             total = sum(h["trades"] for h in hits)
@@ -1360,8 +1557,9 @@ def aggregate(rows: Sequence[Mapping[str, Any]], search: Mapping[str, Sequence[M
         if reviews:
             entry["review_contract"] = {"grounded_rejection_kept": all(x["grounded_rejection_kept"] for x in reviews),
                                         "ungrounded_rejection_downgraded": all(x["ungrounded_rejection_downgraded"] for x in reviews)}
-        if runs and "refused" in runs[0]:
-            entry["refused"] = runs[0]["refused"]
+        refused = [r["refused"] for r in runs if r.get("refused")]
+        if refused:
+            entry["refused"], entry["refused_in"] = refused[0], len(refused)
         per_case[case["id"]] = entry
     negatives = [c for c in per_case.values() if c["kind"] == "negative"]
     positives = [c for c in per_case.values() if c["kind"] == "positive"]
@@ -1370,12 +1568,17 @@ def aggregate(rows: Sequence[Mapping[str, Any]], search: Mapping[str, Sequence[M
         "false_promotion": _rate(sum(c["promoted"] for c in negatives), sum(c["of"] for c in negatives)),
         "false_promotion_mechanical_scope": _rate(sum(c["promoted"] for c in designed), sum(c["of"] for c in designed)),
         "missed_signal": _rate(sum(c["of"] - c["promoted"] for c in positives), sum(c["of"] for c in positives)),
+        # The effective sample: whole cases (outcomes cluster within a case), conditional on this case mix.
+        "negative_cases_promoted": _rate(sum(c["promoted"] > 0 for c in negatives), len(negatives)),
+        "negative_cases_promoted_mechanical_scope": _rate(sum(c["promoted"] > 0 for c in designed), len(designed)),
+        "positive_cases_missed_in_any_world": _rate(sum(c["promoted"] < c["of"] for c in positives), len(positives)),
     }
     proofs_out: dict[str, Any] = {}
     for name in rows[0]["proofs"] if rows else []:
         held = sum(bool(r["proofs"][name]["held"]) for r in rows)
-        proofs_out[name] = {"held": held, "of": len(rows), "fact": kinds[name].get("fact"), "claim": rows[0]["proofs"][name]["claim"],
-                            "observed": rows[0]["proofs"][name].get("trades") or rows[0]["proofs"][name].get("train_days")}
+        first = rows[0]["proofs"][name]
+        proofs_out[name] = {"held": held, "of": len(rows), "fact": (kinds.get(name) or {}).get("fact"), "claim": first["claim"],
+                            "observed": first.get("trades") or first.get("train_days"), "refused": first.get("refused")}
     ablation_out: dict[str, Any] = {}
     for name in rows[0]["ablations"] if rows else []:
         runs = [r["ablations"][name] for r in rows]
@@ -1390,48 +1593,76 @@ def aggregate(rows: Sequence[Mapping[str, Any]], search: Mapping[str, Sequence[M
         "static_false_alarm": _rate(sum(a["static_refused"] for a in working), sum(a["of"] for a in working)),
         "behavioral_false_alarm": _rate(sum(a["of"] - a["behavioral_effective"] for a in working), sum(a["of"] for a in working)),
     }
-    level = {"detected": _rate(sum(c["level_flagged"] for c in negatives if c["promoted"]),
-                               sum(c["promoted"] for c in negatives)),
+    level = {"detected": _rate(sum(c["promoted_and_level_flagged"] for c in negatives), sum(c["promoted"] for c in negatives)),
              "false_alarm_on_positives": _rate(sum(c["level_flagged"] for c in positives), sum(c["of"] for c in positives))}
     contradicted = sorted({p["fact"] for p in proofs_out.values() if p["held"] < p["of"] and p["fact"]})
+    variants, sensitivity = judge_variants(rows, search)
+    return {"rates": rates, "cases": per_case, "proofs": proofs_out, "facts_contradicted": contradicted,
+            "ablations": ablation_out, "ablation_rates": ablation_rates, "level_invariance_probe": level, "variants": variants,
+            "verdict_sensitivity": sensitivity}
+
+
+def judge_variants(rows: Sequence[Mapping[str, Any]],
+                   search: Mapping[str, Sequence[Mapping[str, Any]]]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Every variant on the same recorded outcomes, and the owner's rule (Sept 30) as a verdict with power: false
+    promotions not higher (engine, search), holdout looks spent by negatives not higher (engine negatives; noise lineages
+    in EVERY search band, Gaussian and fat-tailed), and missed signals lower. The sensitivity check: the verdict must
+    reject the no-floors reference, or it cannot see a floor change at all."""
+    review_dependent = {c["id"] for c in CASES if c.get("review_dependent")}
+    neg = [(case["id"], r["cases"][case["id"]]) for case in CASES if case["kind"] == "negative" for r in rows]
+    pos = [(case["id"], r["cases"][case["id"]]) for case in CASES if case["kind"] == "positive" for r in rows]
+    noise_cases = [case for case in search if not SEARCH["cases"][case]["positive"]]
     variants: dict[str, Any] = {}
     for name, rule in VARIANTS.items():
-        neg = [(case["id"], r["cases"][case["id"]]) for case in CASES if case["kind"] == "negative" for r in rows]
-        pos = [(case["id"], r["cases"][case["id"]]) for case in CASES if case["kind"] == "positive" for r in rows]
         noise = [x[name] for case, trials in search.items() if not SEARCH["cases"][case]["positive"] for x in trials]
         signal = [x[name] for case, trials in search.items() if SEARCH["cases"][case]["positive"] for x in trials]
         variants[name] = {
             "rule": rule,
             "engine_false_promotion": _rate(sum(variant_verdict(r, rule) for _, r in neg), len(neg)),
             "engine_false_promotion_mechanical_scope": _rate(
-                sum(variant_verdict(r, rule) for cid, r in neg if not kinds[cid].get("review_dependent")),
-                sum(1 for cid, _ in neg if not kinds[cid].get("review_dependent"))),
+                sum(variant_verdict(r, rule) for cid, r in neg if cid not in review_dependent),
+                sum(1 for cid, _ in neg if cid not in review_dependent)),
+            "engine_false_promotion_by_case": {c["id"]: sum(variant_verdict(r["cases"][c["id"]], rule) for r in rows)
+                                               for c in CASES if c["kind"] == "negative"},
+            # Negatives that passed Validation and would spend a holdout look.
+            "engine_negative_looks": _rate(sum(variant_reaches_holdout(r, rule) for _, r in neg), len(neg)),
             "engine_missed_signal": _rate(sum(not variant_verdict(r, rule) for _, r in pos), len(pos)),
             "engine_missed_by_case": {c["id"]: sum(not variant_verdict(r["cases"][c["id"]], rule) for r in rows)
                                       for c in CASES if c["kind"] == "positive"},
             "search_false_promotion": _rate(sum(x["promoted"] for x in noise), len(noise)),
-            # A more sensitive signal than promotion: noise that passed Validation spent a holdout look (a scarce,
-            # Holm-charged resource). The holdout is the last guard; a variant that spends more of it on noise costs power.
+            # Noise that passed Validation spent a holdout look (a scarce, Holm-charged resource). The holdout is the last
+            # guard; a variant that spends more of it on noise costs every later look power.
             "search_noise_holdout_looks": _rate(sum(x["looks"] > 0 for x in noise), len(noise)),
             "search_missed_signal": _rate(sum(not x["promoted"] for x in signal), len(signal)),
             "search_by_case": {case: {"promoted": sum(x[name]["promoted"] for x in trials), "of": len(trials),
                                       "with_candidates": sum(x[name]["candidates"] > 0 for x in trials),
                                       "validations": sum(x[name]["validations"] for x in trials),
-                                      "holdout_looks": sum(x[name]["looks"] for x in trials)}
+                                      "holdout_looks": sum(x[name]["looks"] for x in trials),
+                                      "lineages_with_look": sum(x[name]["looks"] > 0 for x in trials)}
                                for case, trials in search.items()},
         }
     base = variants["current"]
     for name, row in variants.items():
-        row["versus_current"] = {
-            "false_promotions_not_higher": (row["engine_false_promotion"]["count"] <= base["engine_false_promotion"]["count"]
-                                            and row["search_false_promotion"]["count"] <= base["search_false_promotion"]["count"]),
-            "noise_holdout_looks_not_higher": (row["search_noise_holdout_looks"]["count"] <=
-                                               base["search_noise_holdout_looks"]["count"]),
+        more_looks = sorted(case for case in noise_cases if row["search_by_case"][case]["lineages_with_look"] >
+                            base["search_by_case"][case]["lineages_with_look"])
+        checks = {
+            "engine_false_promotions_not_higher": row["engine_false_promotion"]["count"] <= base["engine_false_promotion"]["count"],
+            "search_false_promotions_not_higher": row["search_false_promotion"]["count"] <= base["search_false_promotion"]["count"],
+            "engine_negative_looks_not_higher": row["engine_negative_looks"]["count"] <= base["engine_negative_looks"]["count"],
+            "noise_looks_not_higher_in_any_band": not more_looks,
             "missed_signals_lower": (row["engine_missed_signal"]["count"] < base["engine_missed_signal"]["count"]
                                      or row["search_missed_signal"]["count"] < base["search_missed_signal"]["count"]),
         }
-    return {"rates": rates, "cases": per_case, "proofs": proofs_out, "facts_contradicted": contradicted,
-            "ablations": ablation_out, "ablation_rates": ablation_rates, "level_invariance_probe": level, "variants": variants}
+        row["owner_rule"] = {"met": all(checks.values()), "checks": checks, "noise_bands_with_more_looks": more_looks}
+    reference = variants.get("no_floors")
+    sensitivity = {
+        "no_floors_rejected": bool(reference) and not reference["owner_rule"]["met"],
+        "false_promotions_see_no_floors": bool(reference) and (
+            reference["engine_false_promotion"]["count"] > base["engine_false_promotion"]["count"]
+            or reference["search_false_promotion"]["count"] > base["search_false_promotion"]["count"]),
+        "noise_looks_see_no_floors": bool(reference) and bool(reference["owner_rule"]["noise_bands_with_more_looks"]),
+    }
+    return variants, sensitivity
 
 
 def _source_sha() -> str:
@@ -1453,9 +1684,57 @@ def source_pin() -> str | None:
     return found.group(1) if found else None
 
 
+#: The interfaces the suite calls in the scored tree. main at f082cf5e is the oldest tree that has them all (the
+#: production release before it lacks the review contract's `grounded_answer`, `check_experiment` and the swarm's
+#: `execution_fingerprint`).
+REQUIRED: tuple[tuple[str, str], ...] = (
+    ("league.gym", "ENGINE_VERSION"), ("league.gym.engine", "run"), ("league.gym.engine", "RunConfig"),
+    ("league.gym.batch", "run_batch"), ("league.gym.experiment", "check_experiment"),
+    ("league.gym.review_contract", "grounded_answer"), ("league.gym.runtime", "load_program"),
+    ("league.gym.safety", "CodeRefused"), ("league.gym.store", "Store"), ("league.gym.store", "mint_gate_capability"),
+    ("league.gym.synth", "Writer"), ("league.gym.synth", "uniform_model"), ("league.gym.results", "view"),
+    ("league.gym.results", "stress_block"), ("league.gym.results", "summarize"), ("league.gym.results", "by_year"),
+    ("league.swarm.evaluator", "execution_fingerprint"), ("league.swarm.evidence", "train_score"),
+    ("league.swarm.evidence", "drift_screen"), ("league.swarm.evidence", "drift_numbers"),
+    ("league.swarm.evidence", "validation_line"), ("league.swarm.evidence", "holdout_line"),
+    ("league.swarm.evidence", "traded_sharpe"), ("league.swarm.evidence", "stressed_of"),
+)
+
+#: The scored tree's files the synthetic world is built with: the store writer and the fill model must match the tree's
+#: own store and engine, so they cannot be vendored. Their hash is the report's `fixture_sha`.
+FIXTURES = ("league/gym/synth.py",)
+
+
+def scorable() -> list[str]:
+    """What the scored tree lacks of the interfaces the suite calls (empty: it can be scored)."""
+    import importlib
+
+    missing = []
+    for module, name in REQUIRED:
+        try:
+            if not hasattr(importlib.import_module(module), name):
+                missing.append(f"{module}.{name}")
+        except Exception as exc:  # noqa: BLE001 - an older or broken tree is reported, never a traceback
+            missing.append(f"{module} ({type(exc).__name__})")
+    return missing
+
+
+def runtime_versions() -> dict[str, Any]:
+    """The interpreter and the libraries the synthetic streams and the store depend on."""
+    import importlib
+
+    out: dict[str, Any] = {"python": sys.version.split()[0]}
+    for lib in ("numpy", "pyarrow"):
+        try:
+            out[lib] = importlib.import_module(lib).__version__
+        except ImportError:
+            out[lib] = None
+    return out
+
+
 def tree_fingerprint(repo: Path | None = None) -> dict[str, Any]:
     """What the scored tree's evaluator is: the Gym's execution fingerprint (every file under league/gym and league/live
-    and the four shared modules) and the swarm-side evidence code the suite calls."""
+    and the four shared modules), the swarm-side evidence code the suite calls, and the world's fixture."""
     from league.gym import ENGINE_VERSION
     from league.swarm.evaluator import execution_fingerprint
 
@@ -1463,6 +1742,7 @@ def tree_fingerprint(repo: Path | None = None) -> dict[str, Any]:
     names = ("league/swarm/evidence.py", "league/swarm/gate.py", "league/swarm/researcher.py", "league/gym/review_contract.py",
              "league/gym/experiment.py", "league/gym/results.py", "league/stats.py")
     sources = {n: hashlib.sha256((repo / n).read_bytes()).hexdigest() for n in names if (repo / n).is_file()}
+    fixtures = {n: hashlib.sha256((repo / n).read_bytes()).hexdigest() for n in FIXTURES if (repo / n).is_file()}
     head, dirty = None, None
     try:
         import subprocess
@@ -1479,10 +1759,36 @@ def tree_fingerprint(repo: Path | None = None) -> dict[str, Any]:
     except (OSError, ValueError):
         head, dirty = None, None
     return {"git_head": head, "league_uncommitted_changes": dirty, "engine": ENGINE_VERSION,
-            "execution_sha256": execution_fingerprint(repo), "evaluator_sources": sources, "evaluator_sha": digest(sources)}
+            "execution_sha256": execution_fingerprint(repo), "evaluator_sources": sources, "evaluator_sha": digest(sources),
+            "fixture_sources": fixtures, "fixture_sha": digest(fixtures)}
 
 
-def suite(replications: int | None = None, search_replications: int | None = None, *, scratch: Path | None = None,
+def admit_confirmation(frozen: Any, suite_sha: str, replications: int, search_replications: int,
+                       tree: Mapping[str, Any]) -> str:
+    """A confirmation run is admissible only against the frozen development report (a full report or its receipt) of
+    the same pinned suite, evaluator, fixture and sample counts. Returns the frozen headline's digest; raises
+    ValueError naming every difference."""
+    if not isinstance(frozen, Mapping):
+        raise ValueError("a confirmation run needs the frozen development report (--frozen)")
+    problems = []
+    if frozen.get("cohort") != "development":
+        problems.append("the frozen report is not a development report")
+    if not frozen.get("pinned") or frozen.get("suite_sha") != suite_sha:
+        problems.append("the suite is not the pinned suite the development report ran")
+    if frozen.get("replications") != replications or frozen.get("search_replications") != search_replications:
+        problems.append("the sample counts differ from development's")
+    before = frozen.get("tree") or {}
+    problems += [f"the tree's {key} changed after development" for key in ("execution_sha256", "evaluator_sha", "fixture_sha")
+                 if before.get(key) != tree.get(key)]
+    if not isinstance(frozen.get("headline"), Mapping):
+        problems.append("the frozen report has no headline")
+    if problems:
+        raise ValueError("confirmation is not admissible: " + "; ".join(problems))
+    return digest(frozen["headline"])
+
+
+def suite(replications: int | None = None, search_replications: int | None = None, *, cohort: str = "development",
+          frozen: Mapping[str, Any] | None = None, scratch: Path | None = None,
           progress: Callable[[str], None] | None = None) -> dict[str, Any]:
     """Run the whole suite on this interpreter's `league` tree and return the report."""
     began = time.monotonic()
@@ -1490,6 +1796,11 @@ def suite(replications: int | None = None, search_replications: int | None = Non
     search_reps = int(search_replications or SEARCH["replications"])
     if not 1 <= reps <= 64 or not 1 <= search_reps <= 1024:
         raise ValueError("replications must be 1..64 and search replications 1..1024")
+    if cohort not in COHORTS:
+        raise ValueError(f"unknown cohort {cohort!r}")
+    tree = tree_fingerprint()
+    pinned, computed = source_pin(), suite_fingerprint()
+    frozen_sha = admit_confirmation(frozen, computed, reps, search_reps, tree) if cohort == "confirmation" else None
     base = Path(scratch) if scratch else None
     if base is not None:
         base.mkdir(parents=True, exist_ok=True)
@@ -1497,7 +1808,7 @@ def suite(replications: int | None = None, search_replications: int | None = Non
     rows = []
     try:
         for r in range(reps):
-            rows.append(replicate(r, work))
+            rows.append(replicate(r, work, cohort))
             if progress:
                 progress(f"replication {r + 1}/{reps}: {rows[-1]['seconds']} s")
     finally:
@@ -1505,79 +1816,200 @@ def suite(replications: int | None = None, search_replications: int | None = Non
         clear_numpy_marks()
     search: dict[str, list[dict[str, Any]]] = {}
     for case in SEARCH["cases"]:
-        search[case] = [search_trial(case, r) for r in range(search_reps)]
+        search[case] = [search_trial(case, r, cohort) for r in range(search_reps)]
         if progress:
             progress(f"search {case}: {search_reps} lineages")
-    pinned = source_pin()
-    computed = suite_fingerprint()
-    return {"suite": SUITE_ID, "suite_sha": computed, "pinned_sha": pinned, "pinned": computed == pinned,
-            "compiled_pin_current": PINNED_SUITE_SHA == pinned,
-            "full_protocol": reps == PROTOCOL["replications"] and search_reps == SEARCH["replications"],
-            "replications": reps, "search_replications": search_reps, "tree": tree_fingerprint(),
-            "runtime": {"python": sys.version.split()[0], "elapsed_seconds": round(time.monotonic() - began, 1)},
-            **aggregate(rows, search), "limitations": LIMITATIONS, "replication_rows": rows}
+    report = {"suite": SUITE_ID, "cohort": cohort, "frozen_development_headline_sha": frozen_sha, "suite_sha": computed,
+              "pinned_sha": pinned, "pinned": computed == pinned, "compiled_pin_current": PINNED_SUITE_SHA == pinned,
+              "full_protocol": reps == PROTOCOL["replications"] and search_reps == SEARCH["replications"],
+              "replications": reps, "search_replications": search_reps, "tree": tree,
+              "runtime": {**runtime_versions(), "elapsed_seconds": round(time.monotonic() - began, 1)},
+              **aggregate(rows, search), "limitations": LIMITATIONS, "replication_rows": rows}
+    report["headline"] = headline(report)
+    return report
+
+
+def headline(report: Mapping[str, Any]) -> dict[str, Any]:
+    """The vector a release is compared on (`compare`): per case, never only the pooled rates. A release that stops
+    promoting one negative and starts promoting another, or stops refusing a probe that cannot profit, shows here."""
+    cases = report["cases"]
+    rates = report["rates"]
+    return {
+        "suite": report["suite"], "suite_sha": report["suite_sha"], "cohort": report.get("cohort"), "pinned": report["pinned"],
+        "full_protocol": report["full_protocol"],
+        "tree": {k: report["tree"].get(k) for k in ("git_head", "league_uncommitted_changes", "engine", "execution_sha256",
+                                                    "evaluator_sha", "fixture_sha")},
+        "runtime": {k: v for k, v in report["runtime"].items() if k != "elapsed_seconds"},
+        "false_promotion": rates["false_promotion"], "missed_signal": rates["missed_signal"],
+        "false_promotion_mechanical_scope": rates["false_promotion_mechanical_scope"],
+        "negative_cases_promoted": rates.get("negative_cases_promoted"),
+        "positive_cases_missed_in_any_world": rates.get("positive_cases_missed_in_any_world"),
+        "promoted_by_case": {cid: c["promoted"] for cid, c in cases.items() if c["kind"] in ("negative", "smoke")},
+        "missed_by_case": {cid: c["of"] - c["promoted"] for cid, c in cases.items() if c["kind"] == "positive"},
+        "refused": sorted(cid for cid, c in cases.items() if c.get("refused")),
+        "impossible_fills": sum(int(c.get("impossible_fills") or 0) for c in cases.values()),
+        "stress_contaminated_total": sum(int(c.get("stress_contaminated") or 0) for c in cases.values()),
+        "stress_contaminated": {cid: c["stress_contaminated"] for cid, c in cases.items() if c.get("stress_contaminated")},
+        "proofs_held": {k: v["held"] for k, v in report["proofs"].items()},
+        "proofs_failed": [k for k, v in report["proofs"].items() if v["held"] < v["of"]],
+        "facts_contradicted": report["facts_contradicted"],
+        "ablations": {k: {"broken": v["broken"], "static_refused": v["static_refused"],
+                          "behavioral_effective": v["behavioral_effective"]} for k, v in report["ablations"].items()},
+        "ablation_rates": report["ablation_rates"], "level_invariance_probe": report["level_invariance_probe"],
+        "owner_rule": {name: {"met": v["owner_rule"]["met"],
+                              "failed": sorted(k for k, ok in v["owner_rule"]["checks"].items() if not ok),
+                              "noise_bands_with_more_looks": v["owner_rule"]["noise_bands_with_more_looks"]}
+                       for name, v in report["variants"].items()},
+        "verdict_sensitivity": report.get("verdict_sensitivity"),
+        "elapsed_seconds": report["runtime"]["elapsed_seconds"],
+    }
+
+
+def _headline_of(value: Mapping[str, Any]) -> Mapping[str, Any]:
+    """A headline from a full report, a receipt, or a headline itself."""
+    if isinstance(value.get("headline"), Mapping):
+        return value["headline"]
+    if "replication_rows" in value:
+        return headline(value)
+    return value
+
+
+def compare(old: Mapping[str, Any], new: Mapping[str, Any]) -> dict[str, Any]:
+    """What changed between two runs, case by case. Comparable only for the same pinned suite, cohort and world fixture
+    at the full protocol; a different Python, numpy or pyarrow is noted (the synthetic streams may shift with them)."""
+    a, b = _headline_of(old), _headline_of(new)
+    why_not = [f"{key} differs" for key in ("suite_sha", "cohort") if a.get(key) != b.get(key)]
+    if (a.get("tree") or {}).get("fixture_sha") != (b.get("tree") or {}).get("fixture_sha"):
+        why_not.append("the world's fixture (league/gym/synth.py) differs: rates would move for reasons not the evaluator's")
+    if not all(h.get("pinned") and h.get("full_protocol") for h in (a, b)):
+        why_not.append("a run is unpinned or not at the full protocol")
+    ra, rb = a.get("runtime") or {}, b.get("runtime") or {}
+    notes = [f"{lib} differs ({ra.get(lib)} then {rb.get(lib)}): the synthetic streams may shift"
+             for lib in ("python", "numpy", "pyarrow") if ra.get(lib) != rb.get(lib)]
+    worse: list[str] = []
+    better: list[str] = []
+
+    def step(label: str, before: Any, after: Any, *, higher_is_worse: bool = True) -> None:
+        if not isinstance(before, (int, float)) or not isinstance(after, (int, float)) or before == after:
+            if (before is None) != (after is None):
+                worse.append(f"{label}: {before} then {after} (the case set changed)")
+            return
+        (worse if (after > before) == higher_is_worse else better).append(f"{label}: {before} then {after}")
+
+    for key, label in (("promoted_by_case", "promoted"), ("missed_by_case", "missed")):
+        was, now = a.get(key) or {}, b.get(key) or {}
+        for cid in sorted(set(was) | set(now)):
+            step(f"{cid} {label}", was.get(cid), now.get(cid))
+    refused_was, refused_now = set(a.get("refused") or []), set(b.get("refused") or [])
+    worse += [f"{cid} is no longer refused by the static check" for cid in sorted(refused_was - refused_now)]
+    better += [f"{cid} is now refused by the static check" for cid in sorted(refused_now - refused_was)]
+    step("impossible fills", a.get("impossible_fills"), b.get("impossible_fills"))
+    step("stress-contaminated runs", a.get("stress_contaminated_total"), b.get("stress_contaminated_total"))
+    was, now = a.get("proofs_held") or {}, b.get("proofs_held") or {}
+    for name in sorted(set(was) | set(now)):
+        step(f"proof {name} held", was.get(name), now.get(name), higher_is_worse=False)
+    was, now = a.get("ablations") or {}, b.get("ablations") or {}
+    for name in sorted(set(was) | set(now)):
+        x, y = was.get(name) or {}, now.get(name) or {}
+        broken = bool(y.get("broken", x.get("broken")))
+        # A broken switch should be refused and should not look effective; a working one the opposite.
+        step(f"{name} static refusals", x.get("static_refused"), y.get("static_refused"), higher_is_worse=not broken)
+        step(f"{name} off variant removed every trade", x.get("behavioral_effective"), y.get("behavioral_effective"),
+             higher_is_worse=broken)
+    return {"comparable": not why_not, "why_not": why_not, "notes": notes, "regressions": worse, "improvements": better}
+
+
+def receipt(report: Mapping[str, Any]) -> dict[str, Any]:
+    """The public receipt of a full report: everything but the per-world rows, which it keeps as a digest (per-world
+    seconds excluded, so the digest is reproducible). Neither holds a path, a quote or account data."""
+    rows = [{k: v for k, v in row.items() if k != "seconds"} for row in report["replication_rows"]]
+    out = {k: v for k, v in report.items() if k != "replication_rows"}
+    cohort = report.get("cohort")
+    out["replication_rows_sha256"] = digest(rows)
+    out["title"] = f"{SUITE_ID}, {cohort} cohort: a synthetic known-answer benchmark of the evaluator, not a qualification"
+    out["reproduce"] = (f"python -m league.swarm.benchmarks --suite evaluator --cohort {cohort}"
+                        + (" --frozen DEVELOPMENT.json" if cohort == "confirmation" else "")
+                        + " --json --output FULL.json --receipt RECEIPT.json (the rows digest excludes per-world seconds)")
+    return out
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Exit codes: 0 done; 2 a confirmation run was not admissible; 3 the suite is not the pinned suite; 4 `--compare`
+    found regressions or the runs are not comparable; 5 the tree lacks an interface the suite calls."""
     import argparse
 
     parser = argparse.ArgumentParser(prog="python -m league.swarm.benchmarks --suite evaluator", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--suite", default="evaluator", choices=("evaluator",))
-    parser.add_argument("--json", action="store_true", help="print the report as JSON")
+    parser.add_argument("--json", action="store_true", help="print the report (without its per-world rows) as JSON")
     parser.add_argument("--output", type=Path, help="write the full report here (refused if it exists)")
-    parser.add_argument("--tree", type=Path, help="score another checkout's league package with THIS suite file")
+    parser.add_argument("--receipt", type=Path, help="write the public receipt here (refused if it exists)")
+    parser.add_argument("--compare", type=Path, help="a previous report or receipt: list regressions against it")
+    parser.add_argument("--cohort", choices=COHORTS, default="development")
+    parser.add_argument("--frozen", type=Path, help="confirmation: the frozen development report or receipt")
+    parser.add_argument("--tree", type=Path, help="score another (trusted) checkout's league package with THIS suite file")
     parser.add_argument("--replications", type=int, default=None)
     parser.add_argument("--search-replications", type=int, default=None)
     parser.add_argument("--scratch", type=Path, default=None, help="where the synthetic stores go (default: TMPDIR)")
     parser.add_argument("--allow-unpinned", action="store_true", help="develop the next suite id; its report is not comparable")
     args = parser.parse_args(argv)
-    if args.output and args.output.exists():
-        parser.error("the output already exists; keep benchmark receipts immutable")
+    for path in (args.output, args.receipt):
+        if path and path.exists():
+            parser.error(f"{path} already exists; keep benchmark receipts immutable")
+    if args.cohort == "confirmation" and not args.frozen:
+        parser.error("a confirmation run needs --frozen DEVELOPMENT (the development report or receipt, frozen first)")
     if args.tree:
         return run_on_tree(args.tree, args)
-    report = suite(args.replications, args.search_replications, scratch=args.scratch,
-                   progress=lambda text: print(text, file=sys.stderr, flush=True))
-    text = json.dumps(report, indent=1, sort_keys=True, default=str, allow_nan=False)
+    missing = scorable()
+    if missing:
+        print(f"this tree cannot be scored by {SUITE_ID}: it lacks {', '.join(missing)} "
+              "(main at f082cf5e is the oldest tree that can be)", file=sys.stderr)
+        return 5
+    frozen = json.loads(args.frozen.read_text()) if args.frozen else None
+    old = json.loads(args.compare.read_text()) if args.compare else None
+    try:
+        report = suite(args.replications, args.search_replications, cohort=args.cohort, frozen=frozen, scratch=args.scratch,
+                       progress=lambda text: print(text, file=sys.stderr, flush=True))
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(text + "\n")
-    shown = {k: v for k, v in report.items() if k != "replication_rows"} if args.json else headline(report)
+        args.output.write_text(json.dumps(report, indent=1, sort_keys=True, default=str, allow_nan=False) + "\n")
+    if args.receipt:
+        args.receipt.parent.mkdir(parents=True, exist_ok=True)
+        args.receipt.write_text(json.dumps(receipt(report), indent=1, sort_keys=True, default=str, allow_nan=False) + "\n")
+    shown = {k: v for k, v in report.items() if k != "replication_rows"} if args.json else dict(report["headline"])
+    comparison = compare(old, report) if old is not None else None
+    if comparison is not None:
+        shown["comparison"] = comparison
     print(json.dumps(shown, indent=1, sort_keys=True, default=str, allow_nan=False))
     if not report["pinned"] and not args.allow_unpinned:
-        print(f"the suite's hash {report['suite_sha'][:16]} is not the pinned {report['pinned_sha'][:16]}: this is not "
-              f"{SUITE_ID}; its numbers are not comparable", file=sys.stderr)
+        print(f"the suite's hash {report['suite_sha'][:16]} is not the pinned {str(report['pinned_sha'])[:16]}: this is "
+              f"not {SUITE_ID}; its numbers are not comparable", file=sys.stderr)
         return 3
+    if comparison is not None and (comparison["regressions"] or not comparison["comparable"]):
+        return 4
     return 0
 
 
-def headline(report: Mapping[str, Any]) -> dict[str, Any]:
-    """The numbers a release is compared on."""
-    return {"suite": report["suite"], "pinned": report["pinned"], "full_protocol": report["full_protocol"],
-            "tree": {k: report["tree"].get(k) for k in ("git_head", "league_uncommitted_changes", "engine", "execution_sha256",
-                                                        "evaluator_sha")},
-            "false_promotion": report["rates"]["false_promotion"], "missed_signal": report["rates"]["missed_signal"],
-            "false_promotion_mechanical_scope": report["rates"]["false_promotion_mechanical_scope"],
-            "proofs_failed": [k for k, v in report["proofs"].items() if v["held"] < v["of"]],
-            "facts_contradicted": report["facts_contradicted"], "ablation_rates": report["ablation_rates"],
-            "elapsed_seconds": report["runtime"]["elapsed_seconds"]}
-
-
 def run_on_tree(tree: Path, args: Any) -> int:
-    """Score another checkout: this (trusted) suite file runs against the tree's own `league` package, in a child
-    process with the tree first on its path, so a candidate cannot edit the cases it is judged by."""
+    """Score another checkout: this suite file runs against the tree's own `league` package, in a child process with the
+    tree first on its path, so the cases are never the tree's own copy. The tree's code runs in the same interpreter
+    as the suite, with the operator's environment: this guards against accidental drift, not a hostile tree."""
     import subprocess
 
     tree = tree.resolve()
     if not (tree / "league" / "gym" / "engine.py").is_file():
         raise SystemExit(f"{tree} is not a checkout with league/gym")
-    forward = ["--suite", "evaluator"]
+    forward = ["--suite", "evaluator", "--cohort", args.cohort]
     if args.json:
         forward.append("--json")
-    if args.output:
-        forward += ["--output", str(Path(args.output).resolve())]
-    for flag, value in (("--replications", args.replications), ("--search-replications", args.search_replications),
-                        ("--scratch", args.scratch and Path(args.scratch).resolve())):
+    for flag, value in (("--output", args.output), ("--receipt", args.receipt), ("--compare", args.compare),
+                        ("--frozen", args.frozen), ("--scratch", args.scratch)):
+        if value is not None:
+            forward += [flag, str(Path(value).resolve())]
+    for flag, value in (("--replications", args.replications), ("--search-replications", args.search_replications)):
         if value is not None:
             forward += [flag, str(value)]
     if args.allow_unpinned:
@@ -1592,7 +2024,7 @@ def run_on_tree(tree: Path, args: Any) -> int:
                           env=env, check=False).returncode
 
 
-PINNED_SUITE_SHA = "c853a5cff1a01559fc94f6042e2d8adc63637297c856f24993730cd8051ae4ef"
+PINNED_SUITE_SHA = "292b847230786bc5cb1437752271eff8b306eb490595f85765dc874c01ae969b"
 
 
 if __name__ == "__main__":
