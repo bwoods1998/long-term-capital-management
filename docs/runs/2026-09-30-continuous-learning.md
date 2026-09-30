@@ -88,3 +88,24 @@ charges were Sail $197.70, OpenAI $50.23 and Claude $144.69, with no unresolved 
 reading. Data subscriptions and any unallocated standalone work still need reconciliation; none of
 these readings establishes complete project Net. Existing ledgers and financial baselines remain
 unchanged.
+
+## Release candidate at 05:25 UTC
+
+The candidate now also includes evaluator-scoped adoption, executable qualification proofs,
+causal optional share-volume inputs, and PR #425's two-sided single-option families. Adoption
+archives old selections, requires current replay evidence, and preserves every trial, holdout
+look and reservation. Colliding worker run IDs across evaluator bundles retain separate metrics
+and result files. The declared `long_single` family still submits concrete call or put orders;
+its joined lineages retain both sides' search history. Constitution and money digests are unchanged.
+
+The combined Gym/live/swarm/data/publishing run exercised 1,599 tests. Its one failing integration
+fixture constructed a live band without the newly required qualification proof; the fixture was
+corrected and all 36 targeted proof tests passed. The adoption branch separately passed 382 live
+and 123 final store/cache/sweep tests. Final combined swarm and hosted CI checks remain required
+before promotion of this candidate. These checks are engineering evidence, not trading returns.
+
+At 05:20:54 UTC the historical runner stopped for its scheduled quiet window, with no requests in
+flight and the eleven vendor failures preserved. The collector is clear for the 06:00 UTC nightly
+forward job. An audit of the active Train image found volume in 991 of 21,349 underlying sessions;
+891 of those sessions contain every expected minute. Missing volume remains unknown, so exposing
+the API does not imply that broad volume-based research is supported by the current image.
