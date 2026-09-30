@@ -10,7 +10,7 @@ disagree, the code is right and this page is fixed. How to operate it is in
 
 | Part | Code | State |
 |---|---|---|
-| The House, options only | `league/` | running the restoration fix, release `20260930T045038Z-cb6035693ef4` (main `87af7a62`: R11a plus #429); real money on since Sept 27; the grant active on money digest `a3e2aa7c`. Release A (main `f082cf5e` with #431-#436, plus #437, #443, #440, #439, #442, #441) deploys after the Sept 30 session; the money digest does not move |
+| The House, options only | `league/` | running Release A, `20260930T200604Z-3bf48c3f8f9f` (main `777b894f`: #431-#436 plus #437, #443, #440, #439, #442, #441; promoted 20:06Z Sept 30, evidence reset 1); real money on since Sept 27; the grant active on money digest `a3e2aa7c`. Release B (the incubator, shipped switched off; L1; the research library) deploys overnight, moves the money digest to `42c4a3af` and is evidence reset 2 |
 | The data store and images | `scripts/data/` | the core five from 2020 and the 20 added names from 2022, 0-14 days to expiry, SPY/QQQ back months to 45; ThetaData Options Standard's history reaches 2016; Train from 2017 is released (R11a), and its image is still to be built; longer history arrives as private blocks (#413) |
 | The Gym | `league/gym/` | 25 roots, Train 2020-2024 on a sealed image adopted Sept 28 (2022-2024 for the added names); 11 types including long calls and puts; the honest fill model from Train samples; engine 4 and per-program batch failures from Release A |
 | The swarm | `league/swarm/`, `league/CONTRACT.md` | at the Sept 30 reconciliation: about 90 alive, all in the Gym band; 2 holdout looks, 0 passes; every birth a debit vertical; since Sept 30's spend cut, the architect on Kimi-K3 and Claude only at the gate and for the strategist; OpenAI unused |
@@ -18,7 +18,8 @@ disagree, the code is right and this page is fixed. How to operate it is in
 | The public page | blakewoods.us/capital | deployed: genuine thoughts first, Profit/Running, clickable agent dots with evidence-based progress, a positions table that adds up to Profit (an opt-in read); Net and costs by service arrive with Release A and personal-site PR #17 |
 
 This is observed state, not completion of the design below. Broad universe discovery, covered strategies, the
-general paper environment, the incubator (Release B) and exposure-aware allocation are still to build.
+general paper environment and exposure-aware allocation are still to build. The incubator is built (Release B, switched
+off until after its ratification), and its swarm-side facts (B2) are still to ship.
 
 ## The goal and the one number
 
@@ -292,7 +293,7 @@ Agent count and simulated years measure activity; passing unseen evidence measur
 | Diagnostician | every 5 minutes | Claude | reads a stuck or nearly-there family's Train diagnostics (never Validation's numbers); rewrites its mechanism or writes its lesson; off live since Sept 30 (`diagnostician.enabled` false: its rewrites produced no validation in 48 hours) | a new mechanism, or a lesson and a retirement |
 | Gate | when a family meets the validation line | review: Claude when "review" is in `claude.roles` (live: Sonnet 5.5), else GPT-6 Sol while the OpenAI month has room and `gate.review_openai_model` names it (null live), else DeepSeek-V4-Pro on Sail; audit: Claude (live: Opus 5.5, `claude.role_model`), then GPT-6 Astra on the same terms (null live), then a second Sail model; the gate box | review for lookahead, leakage and fill abuse; the audit; one holdout look | a Candidate, or a recorded refusal |
 | Nightly forward | after 01:45 ET each trading night | the data box, the gate box | the new day goes to the gate image only; every Candidate is re-run on it | one unseen day a night for every Candidate |
-| Live | 09:30-16:00 ET | the House | the practice league (from Release A): every alive family's validated or eligible Train version in observe shadow (two caps: 48 instances, 24 roots); Candidates in live shadow; Probes and Sized on real money; the House's D3 calibration round trips and its live test; no general agent paper book yet | separate paper, shadow, practice and real records |
+| Live | 09:30-16:00 ET | the House | the practice league (from Release A): every alive family's validated or eligible Train version in observe shadow (two caps: 48 instances, 24 roots); Candidates in live shadow; Probes and Sized on real money; the House's D3 calibration round trips and its live test; from Release B, the incubator (one real lot for a cohort whose practice passed its first look; never evidence); no general agent paper book yet | separate paper, shadow, practice and real records |
 | Post-mortem | after each close; weekly | the operator for now (no scheduled post-mortem is built; it would run on Claude, whose `reserve_usd` is kept for it) | compare captured executions with the Gym; diagnose gaps and propose repairs | private reports; calibration only through the recalibration protocol |
 
 **Models** (Sept 29, 2026; only Sail and Claude are topped up from now on). The inner loop runs on
@@ -397,6 +398,7 @@ diagnostician.
 | Execution tuition: 1-lot real orders before the holdout, to measure multi-leg fills (never evidence) | $200 max loss a day, $300 a week | $0-200 a day |
 | D3 calibration: the House's own 1-lot round trips on SPY, QQQ and IWM (never evidence) | $50 of possible loss a day | - |
 | The House live test: one frozen, pre-registered program as the House's own instance (never evidence) | a structure at most $100, 3 open, $300 at risk, no new open after a $150 loss, 20 sessions, 30 round trips | - |
+| The incubator (Release B): one lot of a real structure for a family that passed Train and the drift screen, the gate's review and audit, and a pre-registered first look at its live practice (3 sessions, 10 program closes, coverage 0.80, P&L above $0 three ways); never evidence, never a promotion | $50 max loss a structure, 4 held or working, stopped for the ISO week once its net realized loss reaches $150 | $0-50, 0-4, $0-150 (0 stops it) |
 
 - **Sizing is by maximum loss**, never by premium.
 - **The order path:** the House nets every agent's intents into one order stream per contract;

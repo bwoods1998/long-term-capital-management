@@ -27,18 +27,17 @@ session was Monday September 28 (13:30Z); no family had passed the holdout, so i
 orders were the House's own calibration round trips. Profitable production trading is the goal, not an
 outcome established by more agents, more trials, or a successful backtest.
 
-## Current state: September 30, 18:00Z
+## Current state: September 30, 21:30Z
 
 - **Real money is on** (since Sept 27). The grant `options-swarm-20260928` is active on money digest `a3e2aa7c`. No
-  family has passed the holdout (2 looks, 0 passes), so no family trades real money yet. The real trades so far are
-  the House's own:
-  - ten D3 calibration round trips, realized -$16.29 (market moves and the broker's fees);
-  - the House live test, one frozen, pre-registered program at tuition size and never evidence, which had sent no order
-    by 14:28Z Sept 30.
+  family has passed the holdout (2 looks, 0 passes), so no family trades real money on D2 yet. The real trades so far:
+  - fifteen D3 calibration round trips, realized -$25.80 (market moves and the broker's fees);
+  - the House live test, one frozen, pre-registered program at tuition size and never evidence;
+  - one tuition trade (a 1-lot debit vertical, never evidence), opened Sept 30 and still open at the close.
 
-  Known input costs since the Sept 26 reset were about $505 by Sept 30 14:17Z, so project Net is about -$521.
-- **The House** runs the restoration fix of Sept 30: #429 restores real instances by keyword.
-- **Release A** deploys after the Sept 30 session, at 20:05Z or later. It is the Sept 30 foundation (#431-#436) plus:
+  At the Sept 30 close, realized options P&L since the Sept 26 reset was -$27.02 and input costs were $541.72, so
+  project Net is -$568.74 ([the run record](docs/runs/2026-09-30-continuous-learning.md), Sept 30 night).
+- **The House** runs Release A (promoted 20:06Z Sept 30): the Sept 30 foundation (#431-#436) plus:
   - live guards, so no practice instance can reach the real order path;
   - a hardened program sandbox;
   - Gym batches in which one bad program fails alone;
@@ -47,11 +46,15 @@ outcome established by more agents, more trials, or a successful backtest.
   - an honest public cost.
 
   The foundation (#431-#436) brings engine 4, evaluator adoption, R11b, research that waits for news, and the live
-  practice league.
+  practice league. Release A was the first planned evidence reset. A restart and an induced swarm crash both recovered
+  under it.
+- **Release B** deploys overnight, before 13:25Z Oct 1, and resets the evidence a second time. It carries:
+  - the incubator: one lot of real money for a family whose live practice was positive, at most $50 a structure and $150
+    a week net. It is never evidence, ships switched off, and moves the money digest (a re-ratify);
+  - a cohort keep, so a practising family survives to its first look;
+  - a research library of pre-2025 arXiv papers.
 
-  Release A resets the research evidence once (a planned reset). Release B, the incubator (one lot, $150 a week net,
-  never evidence), follows overnight and resets it again. Then the Gym and live code freeze. The
-  [run record](docs/runs/2026-09-30-continuous-learning.md) has the plan.
+  Then the Gym and live code freeze while practice evidence accrues.
 - **Research, at the Sept 30 reconciliation:** about 90 families alive, every birth a debit vertical. The swarm trains
   on 25 roots, with Train 2020-2024 (2022-2024 for the 20 added names), and the gate is on. Alpaca's asset lookup
   returned 6,177 tradable optionable equity/ETF assets: discovery is much broader than training readiness.
