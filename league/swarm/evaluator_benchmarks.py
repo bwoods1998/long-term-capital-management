@@ -6,9 +6,9 @@ Each case is a synthetic program with a known answer, run on a synthetic store (
 market holdout) through the evaluator's mechanical stages exactly as the swarm runs them:
 
     static contract (`check_experiment` with the case's parameters) -> Train (normal and 1.5x-stress runs) ->
-    Train objective (`evidence.train_score`) and the drift screen -> Validation (normal and 1.5x-stress runs,
-    `evidence.validation_line`) -> the gate's static contract and drift verdict -> review -> one synthetic holdout
-    look (`evidence.holdout_line`, Holm across a fixed prior history).
+    Train eligibility (`evidence.train_score`) and the drift screen -> Validation (normal and 1.5x-stress runs,
+    `evidence.validation_line`) -> review -> one synthetic holdout look (`evidence.holdout_line`, Holm across a fixed
+    prior history). The gate's own static and drift checks repeat the first two and are not scored twice.
 
 The review is a model call. The suite makes none: it scores the pipeline with a BLIND reviewer (one that passes every
 program), so a false promotion here is one the mechanical evaluator allows and only a model review could stop. Cases
@@ -17,29 +17,33 @@ contract can carry a grounded rejection of each such case (`review_contract.grou
 
 Case families (the suite's pinned `CASES`):
 - signal controls: absent, cost-erased, drift-only and holdout-disappearing negatives; planted dense, sparse,
-  medium-frequency, conditional-regime and year-regime positives. False promotions and missed signals come from these
-  and the adversarial cases below;
+  medium-frequency, conditional-regime and year-regime positives;
 - LEAKAGE: programs that try to read the future through every ctx path found (indexing past now, array bases, private
-  attributes, date literals, greeks computed in blocks, next-session event flags, a process-global numpy dict carried
-  from an earlier run, and a memorized table keyed by price level). Each must be refused or score as no edge;
+  attributes, date literals, greeks computed in blocks, next-session event flags, bar volume without publication
+  receipts, a process-global numpy dict carried from an earlier run, and a memorized table keyed by price level). Each
+  must be refused or score as no edge;
 - INVALID FILLS: programs that profit only from impossible fills: the decision minute's stale quote, crossed quotes,
   package prices beyond the payoff range on open and close, and passive spread capture without adverse selection;
 - STATE: contract proofs that module STATE resets between runs, that parameters are copied, that a split Train run
-  differs from an unsplit one only at its boundary and that Validation is never split, and probes for process-global
-  channels between runs and between batch-mates;
+  matches the unsplit run day for day and Validation is never split, and probes for channels between runs and between
+  batch-mates (process-global numpy dicts, a ctx object shared by a batch);
 - BROKEN ABLATIONS: switches that work, that the static contract refuses, and that are read but ignored (which only a
-  behavioral ablation catches).
+  behavioral ablation catches);
+- a SEARCH tier: the same statistical lines on generated outcomes with lineage selection over noise variants, where
+  lowered activity floors would be most dangerous.
 
 The report gives, per release tree: the false-promotion rate over negative cases and the missed-signal rate over
 planted positives, each with exact (Clopper-Pearson) 95% bounds; the contract proofs and defects found (mapped to the
-review contract's facts); ablation detection by the static contract and by a behavioral probe; and the recorded stage
-figures, so threshold variants can be judged on the same outcomes (`variants`). The suite is pinned: `SUITE_SHA` is the
-hash of the protocol, the world, every case and every program template. A run whose computed hash differs is reported
-`pinned: false` and the CLI exits non-zero (`--allow-unpinned` is for developing the next suite id only).
+review contract's facts); ablation detection by the static contract and by a behavioral probe; and threshold variants
+judged on the same recorded outcomes (`VARIANTS`, never applied). The suite is pinned: `PINNED_SUITE_SHA` is the hash of
+the protocol, the world, every case and template, the search tier, the variants and this module's source, read from
+this file on disk. A run whose computed hash differs is reported `pinned: false` and the CLI exits 3
+(`--allow-unpinned` is for developing the next suite id only).
 
 What it does not do: call a model, read market data or sealed days, change a threshold, write to a swarm, place an
 order, or claim anything about a real strategy's edge. The worlds are invented; the planted edges are deliberately
-strong controls; finite counts bound error rates only for this suite. Needs numpy and pyarrow (the Gym's).
+strong controls; finite counts bound error rates only for this suite. The engine tier needs numpy and pyarrow (the
+Gym's); the search tier and the variant judging need neither.
 """
 
 from __future__ import annotations
@@ -1588,7 +1592,7 @@ def run_on_tree(tree: Path, args: Any) -> int:
                           env=env, check=False).returncode
 
 
-PINNED_SUITE_SHA = "0953e1ba3f2f7dd52490229cde552bd3a9e9b77d762b5ae6e45e57ef50fef62d"
+PINNED_SUITE_SHA = "c853a5cff1a01559fc94f6042e2d8adc63637297c856f24993730cd8051ae4ef"
 
 
 if __name__ == "__main__":
