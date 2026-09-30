@@ -327,6 +327,13 @@ DEFAULTS: dict[str, Any] = {
         # The House live test (league/live/house_test.py): ON only by swarm.json {"live": {"house_test": true}}, and then
         # only with real money on, the grant, the paper proof and its private program verified. Off: exits only.
         "house_test": False,
+        # THE INCUBATOR (league/live/incubator.py; the owner's terms of Sept 29-30, 2026; the money table's
+        # `options_money.incubator`): one lot of real money for a family whose practice cohort passed its pre-registered
+        # first look, Train and drift and its review and audit; never evidence, never a promotion. ON only by swarm.json
+        # {"live": {"incubator": true}} (JSON true; any other value reads off and is alerted once), switched on outside a
+        # session after the ratification and the site's label. Off: its instances go to exits only and their working
+        # opens are cancelled within a minute; first looks are still recorded.
+        "incubator": False,
     },
     # THE PRACTICE LEAGUE'S FEEDBACK (Sept 29, 2026; league/swarm/practice.py): the practice record (shadow trades on live
     # quotes under the Gym's fill rules, the House's private observe.sqlite) as a RESEARCH signal, never evidence: the

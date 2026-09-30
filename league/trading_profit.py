@@ -51,6 +51,9 @@ from zoneinfo import ZoneInfo
 CALIBRATION_FAMILY = 'house:calibration'
 #: The House live test (`league/live/house_test.py` `FAMILY`; spelled here so this module imports nothing live).
 HOUSE_TEST_FAMILY = 'house:rebound-live'
+#: The incubator's instance suffix (`league.live.real.INCUBATOR_SUFFIX`, held equal by its test; spelled here so this module
+#: imports nothing live).
+INCUBATOR_SUFFIX = ':i'
 #: A House family the site has no word for: never one of `publish.POSITION_SOURCES`.
 HOUSE_UNLISTED = 'house_unlisted'
 #: The parts of the "Other account activity" line (`league.account_activity.classify`), in the order the site draws them.
@@ -176,12 +179,16 @@ def _venue_fill_time(order: Mapping[str, Any] | None) -> float | None:
     return _epoch(answer.get('filled_at')) if isinstance(answer, Mapping) else None
 
 
-def source_of(family: Any) -> str:
+def source_of(family: Any, instance: Any = None) -> str:
     """Who a position belongs to on the site: "calibration" (the House's calibration round trips), "house" (exactly the
-    House live test, `HOUSE_TEST_FAMILY`: the site reads "house" as "House live test"), else "agent" (the family is the
-    agent's id). Any other of the House's own families (`house:*`) has no source the site knows (`HOUSE_UNLISTED`): its
-    rows fold into the table's not-listed line (alerted, and the sum still holds) until it is given its own."""
+    House live test, `HOUSE_TEST_FAMILY`: the site reads "house" as "House live test"), "incubator" (an agent's position
+    on the incubator route, its instance `<family>@<version>:i`: real money at tuition size, never evidence; the family
+    is the agent's id), else "agent" (the family is the agent's id). Any other of the House's own families (`house:*`)
+    has no source the site knows (`HOUSE_UNLISTED`): its rows fold into the table's not-listed line (alerted, and the sum
+    still holds) until it is given its own."""
     family = str(family or '')
+    if str(instance or '').endswith(INCUBATOR_SUFFIX) and not family.startswith('house:'):
+        return 'incubator'
     if family == CALIBRATION_FAMILY:
         return 'calibration'
     if family == HOUSE_TEST_FAMILY:
@@ -244,7 +251,7 @@ def position_rows(positions: Sequence[Mapping[str, Any]], orders: Sequence[Mappi
                 closed = _expiry_close(max(expiries) if expiries and all(expiries) else None)
         value = row_value(row, marks)
         out.append({
-            'pid': pid, 'family': str(row.get('family') or ''), 'source': source_of(row.get('family')),
+            'pid': pid, 'family': str(row.get('family') or ''), 'source': source_of(row.get('family'), row.get('instance')),
             'underlying': str(row.get('root') or ''), 'structure': str(row.get('type') or ''), 'right': _right(legs),
             'legs': len(legs), 'quantity': int(row.get('opened_qty') or 0),
             'open_quantity': int(row.get('qty') or 0) if status in ('open', 'awaiting_expiry') else 0,

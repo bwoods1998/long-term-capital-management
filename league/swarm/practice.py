@@ -4,7 +4,10 @@ WHAT PRACTICE IS. Every alive Gym-band family with a validated version, or an el
 shadow book on live quotes as a practice instance (`league/live/step.py`, the observe band), under the Gym's own fill
 rules, on a $10,000 practice account; never a real order, never a forward row. Its trades and its minute-by-minute record
 are the House's private `<state>/observe.sqlite` (`league/live/observe.py`). Live quotes from Sept 29, 2026 on are the one
-period no model behind the architect, the strategist or the researchers has seen.
+period no model behind the architect, the strategist or the researchers has seen. THE INCUBATOR (release B, Oct 1, 2026;
+`league/live/incubator.py`) is the one other reader of that record: it reads a cohort's record as a pre-registered sign
+test of positive live practice, for one lot of real money within the owner's caps. That is money, and never a
+promotion, a band, a forward row or evidence; nothing here, and no weight, feeds it.
 
 WHAT THIS MODULE GIVES RESEARCH (`observe.practice_summary`, read-only, cached `CACHE_SECONDS` a process):
 

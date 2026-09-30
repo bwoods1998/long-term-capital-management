@@ -59,11 +59,93 @@ from .state import LiveState, dumps, loads
 from .venue import TERMINAL, WORKING, Account, Submitted, dec, occ_parts
 
 PREFIX = "lv-"
+#: The incubator's instances (`<family>@<version>:i`, `league/live/incubator.py`): real, tuition-size, never evidence.
+INCUBATOR_SUFFIX = ":i"
 #: The real types that are one contract bought to open (the sprint, B4): single-leg orders, not `mleg`.
 SINGLE_TYPES = ("long_call", "long_put")
 #: The Brokerage Account's legacy crypto dust, below the venue's minimum order: a known holding outside P&L.
 KNOWN_DUST = {"LTCUSD": Decimal("0.000373062")}
 _SLUG = re.compile(r"[^a-z0-9-]+")
+
+
+def is_incubator(instance: Any) -> bool:
+    """An incubator instance's key (`<family>@<version>:i`): the ONLY test of the incubator route (`Instance.incubator`
+    is derived from it; the tally, tuition's sums and the forward export read it)."""
+    return str(instance or "").endswith(INCUBATOR_SUFFIX)
+
+
+def _ny_day(epoch: Any) -> str | None:
+    from zoneinfo import ZoneInfo
+
+    try:
+        return dt.datetime.fromtimestamp(float(epoch), ZoneInfo("America/New_York")).date().isoformat()
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+
+
+def incubator_tally(rows: Callable[..., list], *, day: str, week_start: str, family: str | None = None) -> M.IncubatorTally:
+    """The incubator's numbers (`money.IncubatorTally`) from the live state's own rows, selected by the instance suffix
+    `:i` only, so a restart reads the same numbers (`rows(sql, params)` returns dicts: `LiveState.rows`, or a read-only
+    connection's). R: this ISO week's net realized loss, over closed incubator positions whose New York close day is on or
+    after `week_start` (floored at zero; the book's fee estimate until the broker's post). The week's PEAK: the running
+    net of those closes in their close order (a tie's losses first), its most negative point floored at zero: the weekly
+    stop's latch, so a gain later in the week never lifts the stop. H: each held, expiring or unpriced incubator
+    position's maximum loss with its fees twice, or what its cash already lost when that is more (a broken structure's
+    legs closed at a loss). W: each working, pending or unknown incubator open's maximum loss with its fees twice for what
+    may still fill, and this ISO week's lost opens whole (a lost open the venue later shows is taken back and its fills
+    booked, `ingest`: it counts until the week ends, a tightening of "today's" in the spec). `open_n`: positions not
+    closed and working, unknown or this week's lost opens without a position. `legs_today`: today's dispatched order legs
+    and cancels. `opened_today`: today's dispatched opens' maximum loss. `family`: H and W for that family too."""
+    like = INCUBATOR_SUFFIX                  # substr(instance, -2): exact and case-sensitive (LIKE is neither)
+    realized = held = working = fam_held = fam_working = opened = M.ZERO
+    open_n = legs = 0
+    cash_week = M.ZERO
+    closes: list[tuple[float, Decimal]] = []
+    for r in rows("SELECT family, qty, opened_qty, max_loss_share, fees, cash, status, closed_at FROM positions "
+                  "WHERE substr(instance, -2)=?", (like,)):
+        if r["status"] == "closed":
+            closed = _ny_day(r["closed_at"])
+            if closed is not None and closed >= week_start:
+                cash = M.D(r["cash"])
+                cash_week += cash
+                closes.append((float(r["closed_at"]), cash))
+            continue
+        units = int(r["opened_qty"]) if r["status"] == "unpriced_close" else max(0, int(r["qty"]))
+        loss = max(M.D(r["max_loss_share"]) * V.MULTIPLIER * units + 2 * M.D(r["fees"]), -M.D(r["cash"]))
+        held += loss
+        open_n += 1
+        if family is not None and r["family"] == family:
+            fam_held += loss
+    realized = max(M.ZERO, -cash_week)
+    running = peak = M.ZERO
+    for _, cash in sorted(closes, key=lambda c: (c[0], c[1])):
+        running += cash
+        peak = max(peak, -running)
+    for r in rows("SELECT family, qty, filled_qty, status, max_loss, fees_est, day, pid FROM orders WHERE action='open' "
+                  "AND substr(instance, -2)=? AND status IN ('pending', 'working', 'unknown', 'lost')", (like,)):
+        if r["status"] == "lost" and not str(r["day"] or "") >= week_start:
+            continue
+        remaining = int(r["qty"]) if r["status"] == "lost" else max(0, int(r["qty"]) - int(r["filled_qty"]))
+        loss = (M.D(r["max_loss"]) + 2 * M.D(r["fees_est"])) * M.D(remaining) / max(1, int(r["qty"]))
+        working += loss
+        if family is not None and r["family"] == family:
+            fam_working += loss
+        if r["pid"] is None:
+            open_n += 1
+    for r in rows("SELECT d.legs FROM dispatch_counts d JOIN orders o ON o.oid = d.oid "
+                  "WHERE d.day=? AND substr(o.instance, -2)=?", (day, like)):
+        legs += int(r["legs"])
+    for r in rows("SELECT legs, cancel_sent FROM orders WHERE substr(instance, -2)=? AND cancel_sent IS NOT NULL", (like,)):
+        if _ny_day(r["cancel_sent"]) == day:
+            legs += len(loads(r["legs"], []) or [])
+    for r in rows("SELECT max_loss, status, answer FROM orders WHERE action='open' AND day=? AND substr(instance, -2)=?",
+                  (day, like)):
+        answer = loads(r["answer"], {}) or {}
+        if bool(answer.get("dispatched")) or r["status"] in ("pending", "unknown"):
+            opened += M.D(r["max_loss"])
+    return M.IncubatorTally(realized_loss=realized, held=held, working=working, family_held=fam_held,
+                            family_working=fam_working, open_n=open_n, legs_today=legs, opened_today=opened,
+                            week_peak_loss=peak)
 
 
 def client_id(oid: int, family: str, *, nonce: str = "") -> str:
@@ -381,8 +463,8 @@ class RealBook:
             o.max_loss * o.remaining / max(1, o.qty) for o in self.orders.values() if o.working and o.action == "open" and o.family == family)
         book = sum(p.max_loss for p in self.positions.values() if p.qty > 0) + sum(
             o.max_loss * o.remaining / max(1, o.qty) for o in self.orders.values() if o.working and o.action == "open")
-        sent = self.state.rows("SELECT day, max_loss, qty, filled_qty, status, tuition, answer FROM orders WHERE action='open' AND day>=?",
-                               (week_start,))
+        sent = self.state.rows("SELECT day, max_loss, qty, filled_qty, status, tuition, answer, instance FROM orders "
+                               "WHERE action='open' AND day>=?", (week_start,))
         day_opened = Decimal(0)
         tuition_day = Decimal(0)
         tuition_week = Decimal(0)
@@ -391,8 +473,9 @@ class RealBook:
             dispatched = bool(answer.get("dispatched")) or r["status"] in ("pending", "unknown")
             if r["day"] == day and dispatched:
                 day_opened += M.D(r["max_loss"])
-            if r["tuition"]:
-                # What tuition risks: the filled part, and what a working order may still fill.
+            if r["tuition"] and not is_incubator(r["instance"]):
+                # What tuition risks: the filled part, and what a working order may still fill. The incubator's orders
+                # (`:i`, tuition-flagged too) have their own caps (`incubator_tally`): the two routes' sums stay apart.
                 live = r["status"] in ("pending", "working", "unknown")
                 units = int(r["qty"]) if live else int(r["filled_qty"])
                 loss = M.D(r["max_loss"]) * units / max(1, int(r["qty"]))
@@ -401,6 +484,10 @@ class RealBook:
                     tuition_day += loss
         return M.Exposure(family_open=fam_open, family_loss=M.D(round(fam_loss, 2)), book_loss=M.D(round(book, 2)),
                           day_opened=day_opened, tuition_day=tuition_day, tuition_week=tuition_week)
+
+    def incubator_tally(self, *, day: str, week_start: str, family: str | None = None) -> M.IncubatorTally:
+        """The incubator's numbers from the live state's rows, read afresh (`incubator_tally`)."""
+        return incubator_tally(self.state.rows, day=day, week_start=week_start, family=family)
 
     def reserved(self) -> float:
         return sum(o.reserve * o.remaining / max(1, o.qty) for o in self.orders.values() if o.working and o.action == "open")
@@ -1045,4 +1132,5 @@ def real_legs(order: L.Order, chain: Any) -> list[RLeg]:
 
 
 __all__ = ["RealBook", "RLeg", "RPosition", "ROrder", "mleg_body", "single_leg_body", "single_body", "order_body", "is_single",
-           "limit_price", "client_id", "structure_fill", "real_legs", "leg_fees", "PREFIX", "KNOWN_DUST", "SINGLE_TYPES"]
+           "limit_price", "client_id", "structure_fill", "real_legs", "leg_fees", "PREFIX", "KNOWN_DUST", "SINGLE_TYPES",
+           "INCUBATOR_SUFFIX", "is_incubator", "incubator_tally"]
