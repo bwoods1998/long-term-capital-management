@@ -79,7 +79,7 @@ class TheBand(ObserveCase):
 
 
 class Pins(ObserveCase):
-    def test_the_version_is_pinned_for_the_session_across_a_restart_and_moves_at_the_next_session(self):
+    def test_the_version_is_frozen_across_a_restart_and_the_next_session(self):
         live = self.make([], observed=[observed("obs")])
         self.run_to(9, 33)
         self.assertIn("obs@1:o", live.instances)
@@ -96,27 +96,27 @@ class Pins(ObserveCase):
         self.assertEqual(set(live.shadow.accounts["obs@1:o"].positions), set(before), "and its shadow book")
         self.clock.set(at(TUESDAY, 9, 31))
         live.minute()
-        self.assertIn("obs@2:o", live.instances, "the next session pins the current validated version")
-        self.assertEqual(live.instances["obs@1:o"].mode, "wind_down")
+        self.assertNotIn("obs@2:o", live.instances, "the cohort needs several sessions before replacing its program")
+        self.assertEqual(live.instances["obs@1:o"].mode, "live")
         self.clock.set(at(TUESDAY, 9, 40))
         for _ in range(3):
             live.minute()
             self.clock.set(self.clock() + 60)
-        self.assertNotIn("obs@1:o", live.instances)
-        self.assertNotIn("obs@1:o", live.shadow.accounts)
+        self.assertIn("obs@1:o", live.instances)
+        self.assertIn("obs@1:o", live.shadow.accounts)
         self.assertEqual(self.families.forward, {})
 
-    def test_retirement_winds_the_instance_down(self):
+    def test_research_retirement_keeps_the_frozen_practice_cohort(self):
         live = self.make([], observed=[observed("obs")])
         self.run_to(9, 34)
         self.assertTrue(live.shadow.accounts["obs@1:o"].positions)
         del self.families.observed["obs"]                                  # retired (or promoted out of the Gym band)
         live.sync_families(self.clock(), force=True)
-        self.assertEqual(live.instances["obs@1:o"].mode, "wind_down")
+        self.assertEqual(live.instances["obs@1:o"].mode, "live")
         self.run_to(9, 40)
-        self.assertNotIn("obs@1:o", live.instances)
-        self.assertNotIn("obs@1:o", live.shadow.accounts)
-        self.assertEqual(live.state.get("observe_pins")["order"], [])
+        self.assertIn("obs@1:o", live.instances)
+        self.assertIn("obs@1:o", live.shadow.accounts)
+        self.assertEqual(live.state.get("observe_pins")["order"], ["obs"])
         self.assertEqual(self.families.forward, {})
         self.assertEqual(self.venue.sent, [])
 

@@ -426,8 +426,8 @@ minutes) with single-leg orders. Real long calls and puts open only after it (`p
 
 **The practice league** (the observe band; the league since Sept 29, 2026): every alive Gym-band family with a
 validated version, or with an eligible Train version (the version the tournament validates next, not demoted),
-trades the shadow book on live quotes as `<family>@<version>:o`, on a $10,000 practice account, its version pinned for
-the session (pins in `live.sqlite`: `observe_pins` {day, order, versions, tiers, roots}). It is never real, never
+trades the shadow book on live quotes as `<family>@<version>:o`, on a $10,000 practice account. Its program is frozen in
+`observe.sqlite` before the first decision; session admissions are in `live.sqlite` `observe_pins`. It is never real, never
 tuition, never a forward row and never a band move. Its programs load and decide after every real decision of the
 minute, in their own decider child (1 GB); its chains are read after the real path, under the minute's data budget.
 
@@ -449,18 +449,33 @@ minute, in their own decider child (1 GB); its chains are read after the real pa
   skipped or failed, or an observe read skipped), the lowest-priority quarter (at least one) of the Train-tier pins is
   shed for the rest of the session, at most once every 10 minutes, and no new family joins past what is left
   (`observe_shed` in the live state, so a restart keeps it; one `live.observe` {shed, effective_cap, why} and one
-  alert). Validated pins are never shed. The next session pins afresh at the full caps.
+  alert). Validated pins are never shed. The next session admits surviving frozen cohorts at the full caps.
+- **Frozen cohorts.** Research retirement and newer revisions do not terminate a cohort. It finishes between sessions
+  after at least three observed sessions and ten program closes while flat; otherwise its maximum is ten session days,
+  extended to cover the program's declared DTE horizon plus three sessions, bounded at sixty. An expired snapshot never
+  rejoins; a newer eligible version may. Switches, caps and pressure can still wind it down. These are practice durations,
+  not capital gates (`OptionsLive` config `observe_min_sessions`, `observe_min_trades`, `observe_max_sessions`).
+  Snapshots pin the Gym bundle and fill model. If either changes, old cohorts become close-only and their wind-down
+  outcomes are excluded from program feedback. The family/version ledger currently requires a newly eligible source
+  version for fresh practice after an evaluator change; it never mixes evaluators into one successful cohort.
+- **Private receipts.** `observe.sqlite.events` records decisions, coverage, intents, rejections, orders and fills with
+  leg quotes, fees and slippage against decision mid. The shadow account saves unacknowledged receipts and retries
+  idempotently after a restart. Events retain 120 days; a prolonged ledger outage has a 10,000-event per-account buffer
+  with an explicit dropped count. This private market data is never published. Program errors are `missed_errors`,
+  separate from missed quotes and budget; they do not count as successful decisions.
 - **The record.** `/workspace/state/observe.sqlite` (0600): `trades` (one row a closed practice trade: its session,
   exit reason and `forced` when the House closed it winding down) and `practice` (one row per family and version from
   its first live minute, kept after the family retires: tier, lineage, structure, roots, sessions, minutes, decisions
-  due / made / missed for want of quotes / missed for want of the budget, the per-minute marked P&L's peak and drawdown,
+  due / made / missed for want of quotes / missed for want of the budget / program errors, the per-minute marked P&L's peak and drawdown,
   open positions at the engine's mark). Realized P&L is the headline; open positions are apart, at the mark.
 - **Who reads it.** Nothing that feeds evidence or money (the gate, the verifier, the bands, the money table, tuition,
   Profit). The swarm reads its summary as a research signal (`league/swarm/practice.py`: the strategist's PRACTICE table,
   the architect's PRACTICE BY CLASS lines, the bandit's bonus: at most +25% of a family's share and at most 10% of all
-  share moved; `practice.feedback` false turns all three off). The site shows its aggregates (`practice`, below).
+  share moved). `family_feedback` also supplies researcher context after ten program closes over three close-session
+  days; its revision token changes on a new close day or another five closes, so idle researchers can wake on meaningful
+  observations. `practice.feedback` false turns these off. The site shows its aggregates (`practice`, below).
 - **The forward embargo.** Because practice feeds research, a Sized move also needs the forward record of the sessions
-  after its version was written to meet Sized on its own (`OptionsLive._move_band`; held moves are `live.band` {held}
+  after the later of its version's creation and selection (`banded_at`) to meet Sized on its own (`OptionsLive._move_band`; held moves are `live.band` {held}
   rows). The whole record still decides negative, Candidate and Probe.
 
 **The D3 calibration round trips**: 1-lot SPY, QQQ and IWM call verticals one dollar wide nearest the

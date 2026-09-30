@@ -377,13 +377,14 @@ class Accounting(PracticeCase):
                                                                                                "obs-line"))
         held = live.shadow.accounts["held@1:o"]
         [pos] = held.positions.values()
-        mark = round((pos.last_mark - pos.entry) * 100 * pos.qty, 2)
+        mark = round(pos.cash + pos.last_mark * 100 * pos.qty, 2)
         row = self.row("held")
         self.assertEqual((row["trades"], row["pnl_usd"], row["open_positions"]), (0, 0.0, 1), "open is never realized")
         self.assertAlmostEqual(row["open_mark_pnl_usd"], mark, places=2)
-        del self.families.observed["held"]                                   # retired: the House winds it down
+        # Explicit practice disable winds down even an unfinished frozen cohort; research retirement alone does not.
+        self.switches(observe=False)
         live.sync_families(self.clock(), force=True)
-        self.run_to(9, 50)
+        self.run_to(9, 53)  # refresh switches, submit the close, then meet the next minute's quotes
         self.assertNotIn("held@1:o", live.instances)
         row = self.row("held")
         self.assertEqual((row["trades"], row["forced"], row["program"]["trades"], row["status"]), (1, 1, 0, "wound_down"),
@@ -542,6 +543,12 @@ class Embargo(LiveCase):
         self.probe("2026-09-26T00:00:00Z", returns=[-0.2, 0.1, -0.3, -0.1] * 6)
         self.run_to(9, 31)
         self.assertEqual(self.families.rows["vert"]["band"], "candidate", "demoted on the whole record")
+
+    def test_selection_of_an_old_version_restarts_the_fresh_evaluation_window(self):
+        self.probe("2026-08-31T12:00:00Z")
+        self.families.rows["vert"]["version_selected_at"] = "2026-09-26T12:00:00Z"
+        self.run_to(9, 31)
+        self.assertEqual(self.families.rows["vert"]["band"], "probe", "practice used to select an old program is training")
 
     def test_a_candidates_move_to_probe_is_unchanged(self):
         self.make([dict(family("cand", VERTICAL, band="candidate"), version_created_at="2026-10-05T00:00:00Z")])

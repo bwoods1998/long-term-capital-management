@@ -24,6 +24,8 @@ orders that measure multi-leg fills and are never evidence). Each row:
                           negative (>= 20 trades and P&L below zero)
     version_created_at    when that version was written (UTC ISO): a Sized move counts only the forward record of
                           sessions after it (the forward embargo, Sept 29, 2026; `league/live/step.py` `_move_band`)
+    version_selected_at   when the gate selected the banded version (UTC epoch); fresh forward also starts after this
+                          so practice cannot select an old version and reuse its selection period as evaluation
 
 THE PRACTICE LEAGUE (the observe band: the sprint, B4, Sept 26, 2026; the Train tier Sept 29, 2026): `observe(root)` ->
 one SHADOW-ONLY row per alive Gym-band family that has a version to practise, in one of two tiers:
@@ -174,6 +176,7 @@ def read(root: str | Path, *, family: str | None = None) -> list[dict[str, Any]]
             # When the version was written (UTC): the live path's Sized move counts only the forward record of sessions
             # after it (the forward embargo, Sept 29, 2026: `OptionsLive._move_band`).
             "version_created_at": v.get("created_at"),
+            "version_selected_at": state.get("banded_at"),
         })
     return out
 

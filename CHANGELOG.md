@@ -21,6 +21,13 @@ on branch `run/options-swarm-2026-09-26`) has the detail.
 
 ## Not yet deployed
 
+- **Persistent practice cohorts and receipts.** Builds on #430: immutable shadow snapshots survive research churn and
+  restarts; bounded observation windows include longer-DTE programs; no snapshot is promoted into real money.
+  Private decision/order/quote/fill/slippage receipts retry across restarts, program errors reduce coverage, and open
+  marked P&L includes fees already paid. Material researcher feedback requires ten program closes over three sessions.
+  Sized's fresh-forward window starts after both creation and selection of its version. New cohort/receipt and feedback
+  tests use simulated quotes only; actual multi-session practice evidence remains to be collected after deployment.
+
 - **The live practice league** (#430; not yet released; it changes `league/live`, so it is not a research release
   under the amended D8). Every alive Gym-band family with a validated version, or an eligible Train
   version (the tournament's candidate, not demoted), trades live quotes in the shadow book under the Gym's fill rules,

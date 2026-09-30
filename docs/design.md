@@ -314,8 +314,13 @@ diagnostician.
   (a family gains at most 25% of its share, all bonuses move at most 10% of share; the weight only orders
   research, Train jobs, retirements and the Claude band). Promotion to real money is D2 exactly:
   Validation, the holdout, then the money table.
+- **Immutable practice cohorts.** A program survives research retirement and newer revisions long enough to collect
+  observations: three observed sessions and ten program closes while flat, or a bounded horizon that accommodates its
+  declared DTE. Snapshots, coverage, decisions, quotes, rejected orders and fill receipts survive restarts in the private
+  practice ledger. Completed snapshots never re-enter. Researcher feedback becomes actionable at ten program closes
+  over three close-session days; a new feedback revision wakes an idle researcher without paying for idle polling.
 - **The forward embargo.** Because practice now lets forward-window days select among Gym programs, a Sized
-  move also needs the forward record of the sessions after the banded version was written to meet Sized on
+  move also needs the forward record of the sessions after both the banded version's creation and selection to meet Sized on
   its own; demotion and every other rule still read the whole record. This only makes Sized harder; the
   Validation and holdout periods end before any practice day and are untouched, and the money digest does
   not move.
