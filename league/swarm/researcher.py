@@ -58,7 +58,8 @@ back to the Gym starts afresh. A family whose last `researcher.dormant_cycles` (
 idle rule (`idle_dead`: the same floor, gate exemption and graveyard wording), unless its best awaits validation
 (`awaiting_validation`: holding while the tournament validates it is honest) or it is under THE EXTENSION HOLD (R11-4's
 swarm rule, `extension_held`: its latest validation met `researcher.extension_hold_checks` (6) of the line's checks, so
-it waits for its 2017-19 extension result until the operator clears the flag).
+it waits for its 2017-19 extension result until the operator clears the flag; a validation of the held version below
+the checks, or an adoption of a new Gym, ends the hold).
 
 THE IDLE RULE'S VERDICT (R11-1, Sept 29: 99% of the dormancy deaths filed as "a time limit, not a finding" had been
 screened on Train). An idle-rule death is filed under what its Train record shows (`train_record`, Train figures only):
@@ -717,6 +718,12 @@ def holding(args: Any) -> bool:
     return value is True or (isinstance(value, str) and value.strip().lower() == "true")
 
 
+#: The marks that restart the idle count (`idle_evaluations`), each the family's trials when it was set, with the words the
+#: idle rule's clause gives it (`_idle_since`): `migrate_objective` sets the first when Train's span changes, and
+#: `evaluator.adopt` the second when the evaluator does.
+IDLE_RESTARTS = (("span_trials", "Train's span changed"), ("evaluator_trials", "the evaluator changed"))
+
+
 def idle_evaluations(fam: Mapping[str, Any]) -> int:
     """Gym evaluations since the family's birth or last validation: its trials less those it had at its last counted
     validation (`validated_trials`, which the tournament's verdict records from R3 on), and never more than
@@ -727,11 +734,13 @@ def idle_evaluations(fam: Mapping[str, Any]) -> int:
 
     A change of Train's span (the 2020-21 switch: `migrate_objective` records the trials then as `span_trials`) starts
     the count again: every best was chosen anew over the new span, most of them empty, and evaluations over the old span
-    say nothing about whether the family can make an eligible version over the new one."""
+    say nothing about whether the family can make an eligible version over the new one. So does a change of the
+    evaluator (`evaluator.adopt` records the trials then as `evaluator_trials`): its selection was cleared, and is owed
+    again under the current Gym."""
     since = int(fam.get("since_val_trials") or 0)
     state = fam.get("state") or {}
     trials = int(fam.get("trials") or 0)
-    for key in ("validated_trials", "span_trials"):
+    for key in ("validated_trials", *(mark for mark, _ in IDLE_RESTARTS)):
         mark = state.get(key)
         if isinstance(mark, int) and not isinstance(mark, bool):
             since = max(0, min(since, trials - mark))
@@ -760,14 +769,24 @@ def revalidation_owed(fam: Mapping[str, Any], current: tuple[Any, Any] | None) -
     return n not in demoted and str(n) not in (state.get("drift_failed") or {})
 
 
+def _plain_int(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
 def _idle_since(fam: Mapping[str, Any]) -> str:
-    """What the idle count runs from, in words: the Train span's change, the last validation, or the birth."""
+    """What the idle count runs from, in words: the latest restart (`IDLE_RESTARTS`: Train's span or the evaluator
+    changed) unless a validation came after it, else the last validation, or the birth. At equal marks the later entry
+    of `IDLE_RESTARTS` is the one named (at a start the swarm migrates the objective, then adopts the evaluator)."""
     state = fam.get("state") or {}
-    span_mark = state.get("span_trials")
-    if isinstance(span_mark, int) and not isinstance(span_mark, bool):
-        valid_mark = state.get("validated_trials")
-        if not (isinstance(valid_mark, int) and not isinstance(valid_mark, bool) and valid_mark > span_mark):
-            return "Train's span changed"
+    latest: tuple[int, str] | None = None
+    for key, words in IDLE_RESTARTS:
+        mark = _plain_int(state.get(key))
+        if mark is not None and (latest is None or mark >= latest[0]):
+            latest = (mark, words)
+    if latest is not None:
+        valid_mark = _plain_int(state.get("validated_trials"))
+        if valid_mark is None or valid_mark <= latest[0]:
+            return latest[1]
     return "its last validation" if int(fam.get("validations") or 0) else "its birth"
 
 
@@ -921,7 +940,10 @@ def extension_held(fam: Mapping[str, Any]) -> bool:
     """THE EXTENSION HOLD (R11-4's swarm rule): the family's state carries `extension_hold` (set by the tournament when a
     validation of version n met `researcher.extension_hold_checks` of the line's checks) for the version its latest
     validation judged. It is exempt from the dormancy clause until the operator clears the flag (its 2017-19 extension
-    result landed: `scripts/extension_hold.py --clear`); a later validation of another version ends it."""
+    result landed: `scripts/extension_hold.py --clear`); a later validation of another version ends it, a validation of
+    the same version below the checks ends it (`judge_extension`), and so does an adoption that changes the Gym
+    (`evaluator.adopt` archives and clears the hold's records with the selection they were earned under, so the new
+    Gym must earn it again; one that moves only the execution fingerprint keeps them, `evaluator.gym_changed`)."""
     state = fam.get("state") or {}
     hold = state.get("extension_hold")
     if not isinstance(hold, Mapping) or fam.get("band") != "gym":
@@ -930,23 +952,47 @@ def extension_held(fam: Mapping[str, Any]) -> bool:
     return isinstance(version, int) and not isinstance(version, bool) and version == state.get("validation_version")
 
 
-def mark_extension(store: SwarmStore, fid: str, n: int, line: Any, settings: Mapping[str, Any], *,
-                   clock: Callable[[], float] = time.time) -> bool:
-    """Set the family's extension hold for version `n` when its validation `line` met `researcher.extension_hold_checks`
-    checks and the version was never held (`extension_versions`: a hold the operator cleared is never set again for the
-    same version). Under the caller's transaction. True when it set one."""
+def judge_extension(store: SwarmStore, fid: str, n: int, line: Any, settings: Mapping[str, Any], *,
+                    clock: Callable[[], float] = time.time) -> str | None:
+    """What version `n`'s validation `line` does to the family's extension hold, under the caller's transaction:
+    "held" when the line met `researcher.extension_hold_checks` checks and the version is not in `extension_versions`
+    (it sets the hold); "lapsed" when the line fell below them and the hold is on this version (it ends the hold, which
+    the state keeps as `extension_lapsed`, and takes the version out of `extension_versions`); else None.
+
+    The hold stands for the held version's latest validation: without the lapse, a re-validation of the same version
+    below the checks would leave an exemption that validation no longer earns, and a later one that meets them again
+    holds it again. A hold the operator cleared (`scripts/extension_hold.py --clear`) has no hold left to lapse, so its
+    version stays in `extension_versions` and is not held again on the same Gym; an adoption of a new Gym clears that
+    record (`evaluator.adopt`, `evaluator.gym_changed`), and the version is held again if it meets the checks there,
+    until the operator clears it once its extension verdict under the new Gym is in. With the rule off (0) it writes
+    nothing."""
     need = extension_checks(settings)
+    if need <= 0:
+        return None
     met, total = checks_met(line)
-    if need <= 0 or met < need:
-        return False
     fam = store.family(fid) or {}
-    seen = [v for v in ((fam.get("state") or {}).get("extension_versions") or []) if isinstance(v, int)]
-    if int(n) in seen:
-        return False
+    state = fam.get("state") or {}
+    seen = [v for v in (state.get("extension_versions") or []) if isinstance(v, int)]
     at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(clock()))
+    if met < need:
+        hold = state.get("extension_hold")
+        if not (isinstance(hold, Mapping) and _plain_int(hold.get("version")) == int(n)):
+            return None
+        store.set_state(fid, extension_hold=None, extension_versions=[v for v in seen if v != int(n)],
+                        extension_lapsed={**dict(hold), "lapsed_at": at, "checks_then": f"{met}/{total}"})
+        return "lapsed"
+    if int(n) in seen:
+        return None
     store.set_state(fid, extension_hold={"version": int(n), "checks": f"{met}/{total}", "at": at},
                     extension_versions=(seen + [int(n)])[-20:])
-    return True
+    return "held"
+
+
+def mark_extension(store: SwarmStore, fid: str, n: int, line: Any, settings: Mapping[str, Any], *,
+                   clock: Callable[[], float] = time.time) -> bool:
+    """`judge_extension` for a caller that asks only whether it set a hold (`scripts/extension_hold.py --seed`). True
+    when it set one."""
+    return judge_extension(store, fid, n, line, settings, clock=clock) == "held"
 
 
 def drift_settings(settings: Mapping[str, Any]) -> tuple[float, int | None] | None:
