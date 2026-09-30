@@ -16,6 +16,8 @@ The box is sealed (`no_network`): code and programs go in as files, results come
 - Transient failures (HTTP 408/429/5xx, connection errors) are retried with backoff; a command that
   ran and failed is not. Exit 3 from the batch is `GymDataMissing` with the batch's own message, a
   timed-out exec is `GymTimeout`, anything else is `GymError` with the output's tail.
+- Sanitized Sailbox transport failures are retried only for the idempotent result-file download,
+  when the transport identifies a transient cause. Unknown or TLS failures still stop at once.
 
 Standard library only (the House imports it; the box runs the bundle).
 """
@@ -110,7 +112,8 @@ class GymDriver:
         self.calls: list[str] = []
 
     # ------------------------------------------------------------------ transport
-    def _retry(self, what: str, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    def _retry(self, what: str, fn: Callable[..., Any], *args: Any,
+               retry_transport: bool = False, **kwargs: Any) -> Any:
         last: Exception | None = None
         for attempt in range(self.retries):
             try:
@@ -119,6 +122,10 @@ class GymDriver:
             except Exception as exc:  # the real client raises SailboxError(status=...), transports OSError
                 status = getattr(exc, "status", None)
                 transient = (status in RETRYABLE) or (status is None and isinstance(exc, (OSError, ConnectionError, TimeoutError)))
+                if retry_transport:
+                    from ..sailbox import SailboxTransportError
+
+                    transient = transient or (isinstance(exc, SailboxTransportError) and exc.transient)
                 if not transient or attempt == self.retries - 1:
                     raise GymError(f"{what} failed on {self.box}: {exc}") from exc
                 last = exc
@@ -214,7 +221,9 @@ class GymDriver:
                 raise GymError(f"the box refused a sealed window: {self._tail(result)}")
             if code != 0:
                 raise GymError(f"the batch failed (exit {code}, status {status}): {self._tail(result)}")
-        raw = self._retry("download", self.client.download, self.box, out)
+        # Retry only this read of an already completed result, never redispatch the batch to
+        # recover a download timeout. The same bounded attempts/backoff apply as for HTTP errors.
+        raw = self._retry("download", self.client.download, self.box, out, retry_transport=True)
         doc = json.loads(raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw)
         if len(doc.get("results") or []) < len(programs):
             raise GymError(f"the batch returned {len(doc.get('results') or [])} results for {len(programs)} programs")
