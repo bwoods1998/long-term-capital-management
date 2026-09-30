@@ -28,11 +28,13 @@ drift screen, the gate, the holdout, `bands.read` or `bands.observe`, the live p
 the grant. Promotion to real money stays D2 exactly: Validation plus the holdout, then the money table (and the forward
 embargo on Sized, `OptionsLive._move_band`). A test holds each of these (`league/tests/test_swarm_practice.py`).
 THE COHORT KEEP (L1, release B, Sept 30) is research attention only, too: `cohort_status` reads the House's active practice
-cohorts, and the tournament spares at most `tournament.incubator_keep_max` (12) Gym families whose active cohort's record
-is not negative from its revision, evaluation and idle retirement rules until the cohort's window ends
-(`Tournament.incubator_keep`). It never spares a family from the deflated-Sharpe rule, its researcher's or the
-diagnostician's own retire, the population floor or the operator's gate hold, and no trial count, look, validation, gate,
-band or money rule reads it (`league/tests/test_swarm_incubator_keep.py`).
+cohorts and their records before today, and the tournament spares at most `tournament.incubator_keep_max` (12) Gym
+families with an active cohort (whatever its record before the incubator's sample, and a record that is not negative
+once it meets it) from its revision, evaluation and idle retirement rules until the cohort's window ends
+(`Tournament.incubator_keep`); what it keeps is saved (`KEEP_KV`) so that a kept family's researcher is not urged to
+retire it for being idle (`kept_version`). It never spares a family from the deflated-Sharpe rule, its researcher's or
+the diagnostician's own retire, the population floor or the operator's gate hold, and no trial count, look, validation,
+gate, band or money rule reads it (`league/tests/test_swarm_incubator_keep.py`).
 
 `practice.feedback` false (swarm.json, no deploy) turns all three off (not the keep: `tournament.incubator_keep_max` 0
 does). Standard library only.
@@ -327,6 +329,11 @@ COHORT_WINDOW = 10
 COHORT_WINDOW_MAX = 60
 COHORT_WINDOW_MIN = 3
 NEW_YORK = ZoneInfo("America/New_York")
+#: THE COHORT KEEP's store key (L1): the tournament's last keep, {"at": epoch, "families": {family: version}}, written at
+#: each read (`Tournament.incubator_keep`) and read by a researcher's status (`kept_version`) so that a family the keep
+#: holds is not urged to retire for being idle. A value older than `KEEP_KV_SECONDS` reads as no keep.
+KEEP_KV = "cohort_keep"  # not the House's own `incubator_keep` (L2', in its live state)
+KEEP_KV_SECONDS = 7200.0
 
 
 def session_day(at: float) -> str:
@@ -334,12 +341,28 @@ def session_day(at: float) -> str:
     return dt.datetime.fromtimestamp(float(at), NEW_YORK).date().isoformat()
 
 
+def kept_version(store: Any, family: str, *, now: float) -> int | None:
+    """The version THE COHORT KEEP holds `family` alive for (`KEEP_KV`, the tournament's last keep), or None: none, a
+    value older than `KEEP_KV_SECONDS`, or one that cannot be read. Never raises."""
+    try:
+        value = store.get(KEEP_KV) or {}
+        at = value.get("at")
+        if isinstance(at, bool) or not isinstance(at, (int, float)) or not 0 <= float(now) - float(at) <= KEEP_KV_SECONDS:
+            return None
+        version = (value.get("families") or {}).get(str(family))
+        return int(version) if isinstance(version, int) and not isinstance(version, bool) else None
+    except Exception:  # noqa: BLE001 - a status line never fails a cycle
+        return None
+
+
 def cohort_status(root: str | Path | None, *, today: str | None = None) -> list[dict[str, Any]] | None:
-    """THE ACTIVE PRACTICE COHORTS (`<state>/observe.sqlite`, table `cohorts`, status "active") and each one's record under
-    its OWN evaluator (its snapshot's `practice_evaluator`). Read-only (`mode=ro`, a one-second timeout), standard library
-    only, never raising: [] without a root, a file or a cohorts table; None when the file cannot be read, which a caller
-    must never take for "no cohort". `today` is the New York session date (default: now). A cohort whose snapshot cannot
-    be read is left out. One row a cohort, the oldest admitted first:
+    """THE ACTIVE PRACTICE COHORTS (`<state>/observe.sqlite`, table `cohorts`, status "active") and each one's record
+    BEFORE `today` under its OWN evaluator (its snapshot's `practice_evaluator`): the basis of the incubator's first look
+    and its re-checks (`observe.practice_record(before=today)`), so today's closes and today's session are left out and the
+    record moves at most once a session day. Read-only (`mode=ro`, a one-second timeout), standard library only, never
+    raising: [] without a root, a file or a cohorts table; None when the file cannot be read, which a caller must never
+    take for "no cohort". `today` is the New York session date (default: now). A cohort whose snapshot cannot be read is
+    left out. One row a cohort, the oldest admitted first:
 
         family, version, first_day                   the cohort (`first_day`: the session it was frozen in)
         evaluator, tier, validation_t, best_train,   from its snapshot (`tier`, `validation_t`, `best_train`: what
@@ -347,28 +370,30 @@ def cohort_status(root: str | Path | None, *, today: str | None = None) -> list[
         window     its bounded session window (the House's rule, `COHORT_WINDOW`)
         elapsed    session days on the calendar from its first day to before `today`, counted up to `window` (the House
                    completes it at the first session at which `elapsed >= window`)
-        sessions   its practice row's completed sessions before `today`; None when that row predates the cohort
+        sessions   its practice row's completed sessions before `today`; None when that row predates the cohort (the
+                   incubator never takes a first look at such a cohort)
+        unpracticed  session days on the calendar before `today` since the House last practised it (its practice row's
+                   last day, else its first day), counted up to `window`: 0 while it is practised every session
         coverage   decisions made / due over its practice row; None before any was due
-        closes_program, pnl_program      program closes (not forced) under its evaluator, and their realized P&L
-        closes_program_before            those that closed before `today`
-        closes_all, pnl_all, max_loss_all   every close under its evaluator, forced ones included
-        open_mark        its practice row's open positions at the engine's mark (0 without a row)
+        closes_program, pnl_program      program closes (not forced) under its evaluator before `today`, and their P&L
+        closes_all, pnl_all, max_loss_all   every close under its evaluator before `today`, forced ones included
         return_on_risk   pnl_all / max_loss_all (None without a maximum loss)
 
-    P&L is the engine's after its fees under the House's shadow fill model, in dollars to the cent. `practice.pnl_marked`
-    is never read: it is rebased on trades of any evaluator."""
+    P&L is the engine's after its fees under the House's shadow fill model, in dollars to the cent, realized only: the
+    open mark is left to the incubator's own first look (it starts below zero at every open, the entry's fees and spread
+    booked against it). `practice.pnl_marked` is never read: it is rebased on trades of any evaluator."""
     if root is None:
         return []
-    from ..live.observe import FILE
-
-    path = Path(root) / FILE
-    if not path.exists():
-        return []
-    day = today or session_day(time.time())
     try:
+        from ..live.observe import FILE
+
+        path = Path(root) / FILE
+        if not path.exists():
+            return []
+        day = str(today or session_day(time.time()))
         db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1.0)
         try:
-            return _cohorts(db, str(day))
+            return _cohorts(db, day)
         finally:
             db.close()
     except Exception:  # noqa: BLE001 - None: the caller decides what an unreadable record means
@@ -397,33 +422,39 @@ def _cohorts(db: sqlite3.Connection, today: str) -> list[dict[str, Any]]:
         horizon = snap.get("practice_max_sessions")
         horizon = int(horizon) if isinstance(horizon, int) and not isinstance(horizon, bool) else COHORT_WINDOW
         window = max(COHORT_WINDOW_MIN, min(COHORT_WINDOW_MAX, max(COHORT_WINDOW, horizon)))
-        closes_all = closes = before = 0
+        closes_all = closes = 0
         pnl_all = pnl = max_loss = 0.0
         if has_trades:
             row = db.execute(
                 "SELECT COUNT(*), COALESCE(SUM(pnl), 0), COALESCE(SUM(max_loss), 0), "
                 "COALESCE(SUM(CASE WHEN COALESCE(forced, 0) = 0 THEN 1 ELSE 0 END), 0), "
-                "COALESCE(SUM(CASE WHEN COALESCE(forced, 0) = 0 THEN pnl ELSE 0 END), 0), "
-                "COALESCE(SUM(CASE WHEN COALESCE(forced, 0) = 0 AND exit_day < ? THEN 1 ELSE 0 END), 0) "
-                "FROM trades WHERE family=? AND version=? AND evaluator=?", (today, family, version, evaluator)).fetchone()
-            closes_all, pnl_all, max_loss, closes, pnl, before = (int(row[0]), float(row[1]), float(row[2]), int(row[3]),
-                                                                  float(row[4]), int(row[5]))
-        live = (db.execute("SELECT first_day, last_day, sessions, decisions_due, decisions_made, open_mark_pnl FROM practice "
+                "COALESCE(SUM(CASE WHEN COALESCE(forced, 0) = 0 THEN pnl ELSE 0 END), 0) "
+                "FROM trades WHERE family=? AND version=? AND evaluator=? AND exit_day IS NOT NULL AND exit_day<?",
+                (family, version, evaluator, today)).fetchone()
+            closes_all, pnl_all, max_loss, closes, pnl = (int(row[0]), float(row[1]), float(row[2]), int(row[3]),
+                                                          float(row[4]))
+        live = (db.execute("SELECT first_day, last_day, sessions, decisions_due, decisions_made FROM practice "
                            "WHERE family=? AND version=?", (family, version)).fetchone() if "practice" in tables else None)
         sessions: int | None = 0
-        coverage, mark = None, 0.0
+        coverage = None
+        since = first_date
         if live is not None:
-            sessions = None if str(live[0]) < str(first) else int(live[2]) - int(str(live[1]) == today)
+            if str(live[0]) < str(first):
+                sessions = None
+            else:
+                sessions = int(live[2]) - int(str(live[1]) == today)
+                try:
+                    since = max(first_date, dt.date.fromisoformat(str(live[1])) + dt.timedelta(days=1))
+                except ValueError:
+                    pass
             coverage = round(int(live[4]) / int(live[3]), 4) if int(live[3] or 0) > 0 else None
-            mark = float(live[5] or 0.0)
         out.append({"family": str(family), "version": version, "first_day": str(first), "evaluator": evaluator,
                     "tier": snap.get("tier") or "validated", "validation_t": snap.get("validation_t"),
                     "best_train": snap.get("best_train"), "structure": snap.get("structure"), "run_sha": snap.get("run_sha"),
                     "window": window, "elapsed": _sessions_between(first_date, today, window),
-                    "sessions": sessions, "coverage": coverage,
-                    "closes_program": closes, "closes_program_before": before, "pnl_program": round(pnl, 2),
+                    "sessions": sessions, "unpracticed": _sessions_between(since, today, window), "coverage": coverage,
+                    "closes_program": closes, "pnl_program": round(pnl, 2),
                     "closes_all": closes_all, "pnl_all": round(pnl_all, 2), "max_loss_all": round(max_loss, 2),
-                    "open_mark": round(mark, 2),
                     "return_on_risk": round(pnl_all / max_loss, 4) if max_loss > 0 else None})
     return out
 
@@ -444,6 +475,6 @@ def _sessions_between(first: dt.date, today: str, limit: int) -> int:
 
 
 __all__ = ["cfg", "summary", "table", "class_lines", "family_records", "bonuses", "apply_bonus", "header", "clear_cache",
-           "family_feedback", "feedback_revision", "cohort_status", "session_day",
+           "family_feedback", "feedback_revision", "cohort_status", "session_day", "kept_version",
            "DEFAULTS", "CACHE_SECONDS", "BONUS_CEILING", "TOTAL_CEILING", "MAX_FAMILIES", "MAX_CLASSES",
-           "COHORT_WINDOW", "COHORT_WINDOW_MAX", "COHORT_WINDOW_MIN"]
+           "COHORT_WINDOW", "COHORT_WINDOW_MAX", "COHORT_WINDOW_MIN", "KEEP_KV", "KEEP_KV_SECONDS"]
