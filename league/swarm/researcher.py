@@ -166,7 +166,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from . import diagnostics, evidence, public
+from . import diagnostics, evidence, inputs, public
 from . import settings as settings_mod
 from .claude_research import ClaudeSession, ClaudeTurn, anthropic_tools, sail_items, tool_calls
 from .pool import ROBUSTNESS_PRIORITY, GymJob, PoolError
@@ -1157,7 +1157,8 @@ class Researcher:
                  f"Mechanism: {fam['mechanism']}",
                  f"Structure: {structure_text(fam['structure'])}. Roots: {', '.join(fam['roots'])}. Days to expiry: "
                  f"{(spec.get('dte') or ['?', '?'])[0]}-{(spec.get('dte') or ['?', '?'])[1]}.",
-                 f"Rejection test: {spec.get('rejection') or 'state one in your notebook'}"]
+                 f"Rejection test: {spec.get('rejection') or 'state one in your notebook'}",
+                 inputs.context(self.store.root, self.settings.get("gym", {}).get("image_checkpoint"), fam["roots"])]
         lessons = spec.get("lessons") or []
         if lessons:
             lines.append("Lessons from the graveyard when you were born:")
