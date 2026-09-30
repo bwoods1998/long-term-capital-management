@@ -4,8 +4,9 @@
 // Worker, the test runner and the page import the same rules.
 //
 // Schema 2 (Sept 26, 2026, the options swarm). The page starts over: one Brokerage Account, a swarm
-// of agents in five bands, the Gym's pace, open structures, the ledger of real positions (Sept 28), and
-// the tape of the agents' decisions.
+// of agents in five bands, the Gym's pace, open structures, the ledger of real positions (Sept 28), the
+// practice league (Sept 29), every input cost by part and the incubator route (Sept 30), and the tape of
+// the agents' decisions.
 // Every block is an allowlist: exact keys, typed values, nothing else. The data licenses behind the
 // swarm (the option quote feeds) forbid publishing quotes, bids, asks, spreads, implied vols, greeks,
 // surfaces or fitted parameters, so no block has a field for any of them, and every sentence an agent
@@ -262,13 +263,32 @@ export function validPerformance(value, publishedAt) {
     && (value.verified_at === null || (Date.parse(value.verified_at) >= Date.parse(value.start_at)
       && Date.parse(value.verified_at) <= Date.parse(publishedAt)));
 }
-// What the swarm has cost since the reset, part by part: Sail (models and boxes), OpenAI, ThetaData and
-// the market-data subscription, and anything else the run adds. A part not yet metered is null, and
-// the page then shows no profit after compute rather than a flattering one.
-export const COMPUTE_PARTS = ['sail_usd', 'openai_usd', 'thetadata_usd', 'market_data_usd', 'other_usd'];
+// What the project has cost since the reset, part by part: Sail (models and boxes, as Sail billed them), Claude (the
+// research roles' model calls), OpenAI, ThetaData, the market-data subscription, and anything else the run adds. A part
+// not yet metered is null, and the page then shows no Net rather than a flattering one.
+// Since Sept 30, 2026 Claude is its own part (`claude_usd`). A House before that publishes the older five parts: Claude
+// inside `other_usd`, or nowhere at all (before #431), so the page cannot tell Claude's cost from that shape and shows no
+// Net for it. Either shape validates, so either repository may deploy first.
+export const COMPUTE_PARTS = ['sail_usd', 'claude_usd', 'openai_usd', 'thetadata_usd', 'market_data_usd', 'other_usd'];
+export const LEGACY_COMPUTE_PARTS = COMPUTE_PARTS.filter(part => part !== 'claude_usd');
+export const computeParts = value => (plainObject(value) && Object.hasOwn(value, 'claude_usd') ? COMPUTE_PARTS : LEGACY_COMPUTE_PARTS);
 export function validCompute(value, publishedAt) {
-  return exact(value, ['as_of', ...COMPUTE_PARTS]) && notAfter(value.as_of, publishedAt)
-    && COMPUTE_PARTS.every(part => nullable(value[part], money));
+  const parts = computeParts(value);
+  return exact(value, ['as_of', ...parts]) && notAfter(value.as_of, publishedAt) && parts.every(part => nullable(value[part], money));
+}
+// A published decimal from an exact integer of 10^-8 dollars (`scaledAmount`), in the shortest form with at least cents.
+export function scaledDecimal(amount) {
+  const negative = amount < 0n;
+  const size = negative ? -amount : amount;
+  const fraction = (size % 100000000n).toString().padStart(8, '0').replace(/0{1,6}$/, '');
+  return `${negative ? '-' : ''}${size / 100000000n}.${fraction}`;
+}
+// The older five parts for a page that validates them (the Worker's older reads): Claude back inside `other_usd`, as
+// the House published it before Sept 30, 2026. Unknown when either is unknown.
+export function legacyCompute(value) {
+  if (!plainObject(value) || !Object.hasOwn(value, 'claude_usd')) return value;
+  const { claude_usd: claude, ...rest } = value;
+  return { ...rest, other_usd: claude === null || rest.other_usd === null ? null : scaledDecimal(scaledAmount(claude) + scaledAmount(rest.other_usd)) };
 }
 // The Gym's pace: programs tested (every evaluation is a trial), market-years simulated, and the
 // families alive and retired. Never a result: those are derived from licensed quotes.
@@ -335,11 +355,21 @@ export function validAgent(value, publishedAt, { publicRead = false } = {}) {
 // One open structure, held as one instrument: whose, on what, which kind, how many legs, its (nearest)
 // expiry, how many, whether it is real money or the shadow book, its maximum loss and its P&L at the
 // House's mark. Never a strike price, a leg price or anything else the quote feed said.
+// A real structure may name its `route`: "incubator" (from Oct 1, 2026) is real money at tuition size, never evidence.
 export const STRUCTURE_FIELDS = ['id', 'agent', 'underlying', 'structure', 'legs', 'expiry', 'quantity', 'real', 'opened_at', 'max_loss_usd', 'pnl_usd'];
+export const STRUCTURE_ROUTES = ['incubator'];
 export function validStructure(value, publishedAt) {
-  return exact(value, STRUCTURE_FIELDS) && eventId(value.id) && agentId(value.agent) && underlying(value.underlying)
+  const routed = plainObject(value) && Object.hasOwn(value, 'route');
+  return exact(value, routed ? [...STRUCTURE_FIELDS, 'route'] : STRUCTURE_FIELDS) && (!routed || (STRUCTURE_ROUTES.includes(value.route) && value.real === true))
+    && eventId(value.id) && agentId(value.agent) && underlying(value.underlying)
     && structureType(value.structure) && integer(value.legs, 1, 4) && calendarDay(value.expiry) && integer(value.quantity, 1, 10000)
     && typeof value.real === 'boolean' && notAfter(value.opened_at, publishedAt) && money(value.max_loss_usd) && nullable(value.pnl_usd, signedMoney);
+}
+// The older structure for a page that validates the exact fields (the Worker's older reads): no route.
+export function legacyStructure(value) {
+  if (!plainObject(value) || !Object.hasOwn(value, 'route')) return value;
+  const { route: _route, ...rest } = value;
+  return rest;
 }
 // ----------------------------------------------------------------------- the positions ledger
 // Every real position on the Brokerage Account since the reset, open and closed: whose it was (an agent,
@@ -357,7 +387,10 @@ export function validStructure(value, publishedAt) {
 // shows a difference it cannot explain as `unreconciled_usd`, never by leaving it out. While Profit is
 // unknown, any line may be unknown too (an unpriced row, and so `earlier` holding it).
 export const MAX_POSITIONS = 300;
-export const POSITION_SOURCES = ['agent', 'calibration', 'house'];
+// `incubator` (from Oct 1, 2026): an agent's position on the incubator route, real money at tuition size and never
+// evidence. It names its agent, like an agent's row.
+export const POSITION_SOURCES = ['agent', 'calibration', 'house', 'incubator'];
+export const AGENT_SOURCES = ['agent', 'incubator'];
 export const POSITION_RIGHTS = ['call', 'put', 'both'];
 export const POSITION_STATUSES = ['open', 'closed'];
 export const POSITION_FIELDS = ['id', 'source', 'agent', 'underlying', 'structure', 'right', 'legs', 'quantity', 'open_quantity', 'status',
@@ -388,13 +421,13 @@ export const positionId = value => typeof value === 'string' && /^real:\d{1,12}$
 export const minuteInstant = value => instant(value) && value.endsWith(':00.000Z');
 export function validPosition(value, publishedAt, { publicRead = false } = {}) {
   if (!plainObject(value)) return false;
-  // The site's partner name rides a public read, and only on an agent's row.
+  // The site's partner name rides a public read, and only on a row that names an agent.
   const named = publicRead && Object.hasOwn(value, 'display_name');
   if (!exact(value, named ? [...POSITION_FIELDS, 'display_name'] : POSITION_FIELDS)) return false;
-  if (named && (value.source !== 'agent' || !validDisplayName(value.display_name))) return false;
+  if (named && (!AGENT_SOURCES.includes(value.source) || !validDisplayName(value.display_name))) return false;
   const open = value.status === 'open';
   return positionId(value.id) && POSITION_SOURCES.includes(value.source)
-    && (value.source === 'agent' ? agentId(value.agent) : value.agent === null)
+    && (AGENT_SOURCES.includes(value.source) ? agentId(value.agent) : value.agent === null)
     && underlying(value.underlying) && structureType(value.structure) && STRUCTURE_RIGHTS[value.structure].includes(value.right)
     && integer(value.legs, 1, 4) && integer(value.quantity, 1, 10000) && integer(value.open_quantity, 0, value.quantity)
     && POSITION_STATUSES.includes(value.status) && calendarDay(value.expiry) && notAfter(value.opened_at, publishedAt) && minuteInstant(value.opened_at)
@@ -404,6 +437,9 @@ export function validPosition(value, publishedAt, { publicRead = false } = {}) {
         && Date.parse(value.closed_at) >= Date.parse(value.opened_at))
     && nullable(value.pnl_usd, centsAmount);
 }
+// The older row for a page that knows only the first three sources (the Worker's older reads): an incubator row reads
+// as its agent's, which it is. Profit and the sum are unchanged.
+export const legacyPosition = value => (plainObject(value) && value.source === 'incubator' ? { ...value, source: 'agent' } : value);
 // Unknown (null) only while Profit is: `validPositions` requires every line once Profit is known.
 export const validEarlier = value => exact(value, EARLIER_FIELDS) && integer(value.positions, 1, 1000000000) && nullable(value.pnl_usd, centsAmount);
 export const validOther = (value, publishedAt) => exact(value, ['as_of', ...OTHER_PARTS]) && notAfter(value.as_of, publishedAt)
@@ -427,10 +463,53 @@ export function validPositions(value, trading, publishedAt, { publicRead = false
   return amounts.reduce((sum, amount) => sum + scaledAmount(amount), 0n) === scaledAmount(trading.pnl_usd);
 }
 
+// ----------------------------------------------------------------------- the practice league
+// Every family practising on live quotes in the House's shadow book under the Gym's fill rules (Sept 29, 2026): never
+// real money, never Profit, never the positions ledger or a forward record. One row per family: its agent, lineage,
+// structure kind, tier (it practised a validated version, or an eligible Train version), whether its agent is alive,
+// sessions, closed trades, wins, realized P&L after fees (whole cents) and return on maximum loss (two places). Never
+// a price, strike, leg, expiry, minute, trade date, version, code, parameter or Validation figure. `totals` are over
+// every family, shown or not; when every family is shown they are exactly the rows' sums.
+export const MAX_PRACTICE_ROWS = 48;
+export const PRACTICE_TIERS = ['validated', 'train'];
+export const PRACTICE_STATUSES = ['alive', 'retired'];
+export const PRACTICE_FIELDS = ['as_of', 'sessions', 'capital_usd', 'totals', 'rows'];
+export const PRACTICE_TOTALS = ['families', 'trades', 'wins', 'pnl_usd'];
+export const PRACTICE_ROW_FIELDS = ['agent', 'family', 'structure', 'tier', 'status', 'sessions', 'trades', 'wins', 'pnl_usd', 'return_on_risk'];
+const returnOnRisk = value => decimal(value, { signed: true, fraction: 2 }) && Math.abs(Number(value)) <= 1000;
+export function validPracticeRow(value, { publicRead = false } = {}) {
+  if (!plainObject(value)) return false;
+  const named = publicRead && Object.hasOwn(value, 'display_name');
+  return exact(value, named ? [...PRACTICE_ROW_FIELDS, 'display_name'] : PRACTICE_ROW_FIELDS) && (!named || validDisplayName(value.display_name))
+    && agentId(value.agent) && slug(value.family) && nullable(value.structure, structureType)
+    && PRACTICE_TIERS.includes(value.tier) && PRACTICE_STATUSES.includes(value.status)
+    && counter(value.sessions, 10000) && counter(value.trades) && counter(value.wins) && value.wins <= value.trades
+    && centsAmount(value.pnl_usd) && nullable(value.return_on_risk, returnOnRisk);
+}
+export function validPractice(value, publishedAt, { publicRead = false } = {}) {
+  if (!exact(value, PRACTICE_FIELDS) || !notAfter(value.as_of, publishedAt) || !counter(value.sessions, 10000)
+    || !(centsAmount(value.capital_usd) && money(value.capital_usd) && scaledAmount(value.capital_usd) > 0n)) return false;
+  const { totals, rows } = value;
+  if (!exact(totals, PRACTICE_TOTALS) || !counter(totals.families, 1000000) || !counter(totals.trades) || !counter(totals.wins)
+    || totals.wins > totals.trades || !centsAmount(totals.pnl_usd)) return false;
+  if (!Array.isArray(rows) || rows.length > MAX_PRACTICE_ROWS || new Set(rows.map(row => row?.agent)).size !== rows.length
+    || !rows.every(row => validPracticeRow(row, { publicRead }))) return false;
+  const trades = rows.reduce((sum, row) => sum + row.trades, 0);
+  const wins = rows.reduce((sum, row) => sum + row.wins, 0);
+  if (totals.families < rows.length || totals.trades < trades || totals.wins < wins) return false;
+  if (totals.families > rows.length) return true;
+  return totals.trades === trades && totals.wins === wins
+    && rows.reduce((sum, row) => sum + scaledAmount(row.pnl_usd), 0n) === scaledAmount(totals.pnl_usd);
+}
+
+// Blocks a newer House adds, each optional so an older House's checkpoint still validates: Profit (`trading`), the
+// positions ledger beside it, and the practice league.
+export const OPTIONAL_CHECKPOINT_FIELDS = ['trading', 'positions', 'practice'];
 export function validCheckpoint(checkpoint, { publicRead = false } = {}) {
   try {
-    if (!exact(checkpoint, CHECKPOINT_FIELDS) && !exact(checkpoint, [...CHECKPOINT_FIELDS, 'trading'])
-      && !exact(checkpoint, [...CHECKPOINT_FIELDS, 'trading', 'positions'])) return false;
+    if (!plainObject(checkpoint) || !CHECKPOINT_FIELDS.every(field => Object.hasOwn(checkpoint, field))
+      || !Object.keys(checkpoint).every(key => CHECKPOINT_FIELDS.includes(key) || OPTIONAL_CHECKPOINT_FIELDS.includes(key))
+      || (Object.hasOwn(checkpoint, 'positions') && !Object.hasOwn(checkpoint, 'trading'))) return false;
     const at = checkpoint.published_at;
     if (checkpoint.schema_version !== SCHEMA_VERSION || !instant(at)) return false;
     if (!validRun(checkpoint.run, at)) return false;
@@ -442,6 +521,7 @@ export function validCheckpoint(checkpoint, { publicRead = false } = {}) {
     // The ledger is optional (a House that predates it sends none) and needs the Profit it sums to.
     if (Object.hasOwn(checkpoint, 'positions')
       && !nullable(checkpoint.positions, value => validPositions(value, checkpoint.trading, at, { publicRead }))) return false;
+    if (Object.hasOwn(checkpoint, 'practice') && !nullable(checkpoint.practice, value => validPractice(value, at, { publicRead }))) return false;
     const { agents, structures } = checkpoint;
     if (!Array.isArray(agents) || agents.length > MAX_AGENTS || new Set(agents.map(agent => agent?.id)).size !== agents.length
       || !agents.every(agent => validAgent(agent, at, { publicRead }))) return false;

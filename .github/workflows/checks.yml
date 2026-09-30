@@ -16,7 +16,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: checks-${{ github.ref }}
+  # A newer change to a ref supersedes the run still testing the older one. The hourly run has a group of its own:
+  # sharing one, its start cancelled the push run already testing the same head (Sept 30, 2026: push run 36679154604
+  # on main, cancelled at 06:49:51Z by schedule run 36680281219, begun at 06:49:37Z).
+  group: checks-${{ github.ref }}-${{ github.event_name == 'schedule' && 'hourly' || 'change' }}
   cancel-in-progress: true
 
 jobs:
@@ -35,9 +38,13 @@ jobs:
         run: npm run check && npm test
   tests:
     runs-on: ubuntu-latest
-    # 20, not 10 (Sept 24, 2026): the 3.14 job hit a 10-minute limit twice in a row on Deploy C' (#274:
-    # 15:58:41-16:08:56Z and 16:09:28-16:19:43Z) while 3.11 took 9m07s; it had sat at the limit since Sept 23.
-    timeout-minutes: 20
+    # 35, not 20 (Sept 30, 2026): the league's tests alone took 8m41s-17m49s a job on Sept 29-30 (most 12-15 minutes),
+    # and the 20-minute limit cut off two 3.11 jobs: PR run 36578499862 (Sept 29) and the push run on f082cf5e
+    # (36689802805, 08:47:58Z Sept 30, its league step 17m49s in). A run cut off by its own limit attests nothing
+    # (`league/updater.py` reads a cancelled run as no verdict), so the limit keeps a wide margin over the slowest job
+    # seen, and the tests' scratch lives in memory (the step below).
+    # Before that, 20, not 10 (Sept 24, 2026): the 3.14 job hit a 10-minute limit twice in a row on Deploy C' (#274).
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
@@ -49,6 +56,21 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
+      - name: Keep the tests' scratch files in memory
+        # The live path keeps its state in SQLite (WAL, synchronous=FULL) and writes JSON with fsync
+        # (`league/live/state.py`), and the whole-day live tests commit thousands of times: on the runner's disk each
+        # commit waits for the device. On /dev/shm (tmpfs) the same code runs and the same fsync calls return at once.
+        # The runner's own temp directory stays where /dev/shm is missing, not writable or mounted noexec (some tests
+        # run programs they write to their scratch).
+        run: |
+          dir=/dev/shm/ltcm-tests
+          if mkdir -p "$dir" && [ -w "$dir" ] && ! findmnt -rno OPTIONS --target /dev/shm | tr ',' '\n' | grep -qx noexec; then
+            echo "TMPDIR=$dir" >> "$GITHUB_ENV"
+            echo "the tests' scratch: $dir"
+            df -h /dev/shm
+          else
+            echo "the tests' scratch: the runner's temp directory (/dev/shm is not usable here)"
+          fi
       - name: Install the Gym's dependencies when the tree pins them
         # The Gym (league/gym/, Wave 3 of the options overhaul, Sept 26, 2026) needs numpy, pyarrow and polars; the rest
         # of the repository is standard library only. Nothing to install on a tree without the file.

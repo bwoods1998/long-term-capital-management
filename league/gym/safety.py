@@ -15,7 +15,10 @@ Gym's rules on top:
   `setflags`, `flags`, `seterr`, `testing`, ... (`NUMPY_BANNED`);
 - no date: an integer or float literal from 2019 to 2030 (a year), an eight-digit YYYYMMDD integer,
   or a string holding an ISO date or such a year is refused. The models know what happened in those
-  years; a program that could recognize one could replay it.
+  years; a program that could recognize one could replay it;
+- it compiles, not only parses (`compiles`): code the parser takes and the compiler refuses (an
+  assignment expression in a comprehension's iterable, an expression nested past the compiler's
+  stack) is refused here, so a load never raises anything but `CodeRefused` for it.
 
 Standard library only (the live path imports it without numpy).
 """
@@ -99,7 +102,7 @@ def check_program(code: str) -> None:
         raise CodeRefused(f"the program is over {MAX_CODE_CHARS} characters")
     try:
         tree = ast.parse(text)
-    except (SyntaxError, ValueError) as exc:
+    except (SyntaxError, ValueError, RecursionError, MemoryError) as exc:
         raise CodeRefused(f"the program does not compile: {str(exc)[:160]}") from None
     banned_attributes = BANNED_ATTRIBUTES | NUMPY_BANNED
     banned_names = BANNED_NAMES | EXTRA_BANNED_NAMES
@@ -196,6 +199,22 @@ def check_program(code: str) -> None:
         if name not in assigned:
             raise CodeRefused(f"a program assigns {name} at the top level (PROGRAM.md)")
     params_declaration(tree)
+    compiles(tree)
 
 
-__all__ = ["check_program", "params_declaration", "CodeRefused", "NUMPY_BANNED", "ALLOWED_IMPORTS"]
+def compiles(tree: ast.Module) -> None:
+    """Refuse (`CodeRefused`, with the line) a parsed program the compiler rejects. Parsing is not compiling: the
+    symbol-table stage refuses code the parser takes (an assignment expression in a comprehension's iterable, a name
+    both global and assigned first, `nonlocal` at the top level, ...) and the compiler can run out of stack on an
+    expression nested thousands deep. Such a program can never load, so it is refused here, at the check, with a
+    reason its author can act on, instead of raising something else inside the Gym's batch or the live path's load."""
+    try:  # compiled as `runtime.load_program` compiles it: both modules' `from __future__ import annotations` is inherited
+        compile(tree, "<gym-program>", "exec")
+    except (SyntaxError, ValueError, RecursionError, MemoryError) as exc:
+        line = getattr(exc, "lineno", None)
+        what = getattr(exc, "msg", None) if isinstance(exc, SyntaxError) else None
+        raise CodeRefused(f"{f'line {line}: ' if line else ''}the program does not compile: "
+                          f"{type(exc).__name__}: {str(what or exc)[:160]}") from None
+
+
+__all__ = ["check_program", "params_declaration", "compiles", "CodeRefused", "NUMPY_BANNED", "ALLOWED_IMPORTS"]

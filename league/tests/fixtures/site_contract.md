@@ -75,7 +75,7 @@ the old ladder's bands, alerts, credits) publishes nothing.
 | `run` | `{started_at: instant \| null}`: the House's first `ops.started` on its new ledger. The page's timer. |
 | `account` | `null` or `{equity, cash, as_of, stale: bool}`: the Brokerage Account. `stale` repeats the last good reading. |
 | `performance` | `null` or `{start_at, start_equity (> 0), net_flows: signedMoney \| null, verified_at: instant \| null}`: the profit basis; flows and their check both or neither; `start_at <= verified_at <= published_at`. |
-| `compute` | `null` or `{as_of, sail_usd, openai_usd, thetadata_usd, market_data_usd, other_usd}`, each money or null: spend since the reset. |
+| `compute` | `null` or `{as_of, sail_usd, claude_usd, openai_usd, thetadata_usd, market_data_usd, other_usd}`, each money or null: every input cost since the reset, by service (below). |
 | `gym` | `null` or `{as_of, trials, market_years (one decimal), families_alive, families_retired}`, each nullable. The pace, never a result. |
 | `agents` | <= 160, ids unique: `{id, family, mechanism, structure \| null, band, born_at \| null, retired_at \| null, record: {trials, revisions, forward: tally \| null, real: tally \| null}}`, tally `{trades, wins (<= trades), pnl_usd}`. `band` is `gym candidate probe sized retired`. The page names an agent by its id ("condor-vrp-3" reads "Condor Vrp 3"). |
 | `structures` | <= 100, ids unique: `{id, agent, underlying, structure, legs, expiry, quantity, real, opened_at, max_loss_usd, pnl_usd \| null}`. |
@@ -100,6 +100,17 @@ reading must be within ten minutes of both the checkpoint and the current time. 
 compute costs and the account's starting balance do not enter this number. **Running** is elapsed time
 since `run.started_at`, falling back to the reset's performance basis when the run timestamp is absent.
 
+**Costs and Net** (Sept 30, 2026). `compute` is the bill since the reset, by service: `sail_usd` as Sail billed it (the
+swarm's `sitefeed.sail_billed`: the Sail guard's balance meter plus the provider-billed window before it began, never the
+Gym's booked box estimate), `claude_usd` (the research roles' Claude calls, settled plus in-flight holds), `openai_usd`
+(unresolved holds included), the two subscriptions prorated from `performance.start_at`, and `other_usd`. The page shows
+the parts in one line under the masthead and **Net**: realized options P&L since the reset (Profit without any open
+position's gain and without a positive unreconciled difference) less the sum of the parts; a dash while any part is null
+or the bill is older than ten minutes. A site older than Sept 30 knows five parts (no `claude_usd`); the House sends it
+Claude inside `other_usd` (`publish.legacy_compute`, #431's shape) together with the practice block's fallback, and the
+site shows no Net for a five-part bill. The site's Worker serves the six parts, the practice block and the incubator route
+only to `?progress=1&positions=1&practice=1` (the page's read); every older read gets the shapes it validated.
+
 Since Sept 28, 2026 Profit is **complete**: it includes the House's D3 calibration round trips (real money on the
 owner's account, labelled "House calibration") and the account's own activity outside the book's positions, so
 that the positions table below adds up to it to the cent (`league/trading_profit.py`, `league/account_activity.py`).
@@ -109,8 +120,8 @@ that the positions table below adds up to it to the cent (`league/trading_profit
 The owner's line of sight into what the agents trade: every real-options position on the Brokerage Account since
 `performance.start_at`, open and closed, with its dollar P&L after fees. `site_checkpoint_positions.json` beside this
 file is `site_checkpoint.json` plus `trading` and `positions` (`build_checkpoint`, pinned by `test_publish.py`).
-`site_schema.js` beside it is a copy of the site's `capital/schema.js` (personal-site commit 6ee749c, the positions-ledger
-release of Sept 28, 2026): `test_positions_ledger.py` runs the site's own `validCheckpoint` over both fixtures and over the tables
+`site_schema.js` beside it is a copy of the site's `capital/schema.js` (personal-site commit b8cf77b, branch
+capital/cost-net-practice: the itemized bill, the practice league and the incubator route of Sept 30, 2026): `test_positions_ledger.py` runs the site's own `validCheckpoint` over both fixtures and over the tables
 the House builds, in node (the review of #408 found the two sides' blocks disagreeing because each tested only its own
 fixture). Copy the site's file here whenever its schema changes.
 
@@ -168,8 +179,9 @@ Every alive family with a validated or an eligible Train version practises on li
 under the Gym's own fill rules, on a $10,000 practice account: **never real money**. The block is never part of
 `trading`, `positions`, `performance` or Profit, and the page labels it "Practice league: shadow trades on live quotes,
 never real money". `site_checkpoint_practice.json` beside this file is `site_checkpoint.json` plus `practice`
-(`build_checkpoint`, pinned by `test_publish.py`); the site needs its own PR to accept it (`validCheckpoint`'s variants, a
-`validPractice`, a panel).
+(`build_checkpoint`, pinned by `test_publish.py`); the site accepts it since the personal-site PR of Sept 30, 2026
+(`validPractice`, a table under the agents; `test_positions_ledger.py` runs the site's schema over it). The site checks
+that `totals` are at least the rows' sums, and exactly them when every family is listed.
 
 ```
 practice: {

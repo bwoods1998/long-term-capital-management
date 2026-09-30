@@ -40,7 +40,7 @@ QUOTE_FIELDS = ["bid", "ask", "mid", "mark", "last", "spread", "iv", "implied_vo
 ALLOWED_KEYS = {
     "top": {"schema_version", "published_at", "run", "account", "performance", "compute", "gym", "agents", "structures"},
     "run": {"started_at"}, "account": {"equity", "cash", "as_of", "stale"}, "performance": {"start_at", "start_equity", "net_flows", "verified_at"},
-    "compute": {"as_of", "sail_usd", "openai_usd", "thetadata_usd", "market_data_usd", "other_usd"},
+    "compute": {"as_of", "sail_usd", "claude_usd", "openai_usd", "thetadata_usd", "market_data_usd", "other_usd"},
     "gym": {"as_of", "trials", "market_years", "families_alive", "families_retired"},
     "agent": {"id", "family", "mechanism", "structure", "band", "born_at", "retired_at", "record"},
     "record": {"trials", "revisions", "forward", "real"}, "tally": {"trades", "wins", "pnl_usd"},
@@ -150,7 +150,8 @@ FIXTURE_INPUTS = SiteInputs(
     started_at="2026-09-26T07:02:18.000Z",
     account={"equity": "5694.37", "cash": "5210.12", "as_of": "2026-09-28T14:57:58.000Z", "stale": False},
     performance={"start_at": RESET_AT, "start_equity": "481.65", "net_flows": "5000", "verified_at": "2026-09-28T14:55:02.000Z"},
-    compute={"as_of": "2026-09-28T14:57:00.000Z", "sail_usd": "212.40", "openai_usd": "64.10", "thetadata_usd": "5.43", "market_data_usd": "5.66", "other_usd": "0"},
+    compute={"as_of": "2026-09-28T14:57:00.000Z", "sail_usd": "212.40", "claude_usd": "41.20", "openai_usd": "64.10", "thetadata_usd": "5.43",
+             "market_data_usd": "5.66", "other_usd": "0"},
     gym={"as_of": "2026-09-28T14:50:00.000Z", "trials": 48213, "market_years": "51240.5", "families_alive": 11, "families_retired": 37},
     agents=FIXTURE_AGENTS, structures=FIXTURE_STRUCTURES,
 )
@@ -681,6 +682,7 @@ class PublisherTest(LedgerCase):
         days = (T - 1790403930.0) / 86400  # from the reset
         self.assertEqual(compute["sail_usd"], "13.00")
         self.assertEqual(compute["openai_usd"], None, "not metered until the House says")
+        self.assertEqual(compute["claude_usd"], None, "nor Claude: the page shows no Net until the House says")
         self.assertAlmostEqual(float(compute["thetadata_usd"]), 80 * days / (365.25 / 12), places=2)
         self.assertAlmostEqual(float(compute["market_data_usd"]), 1000 / 12 * days / (365.25 / 12), places=2)
         self.assertEqual(compute["other_usd"], "0.00")
@@ -714,16 +716,21 @@ class PublisherTest(LedgerCase):
         checkpoints = lambda: [body for url, body in site.posts if url.endswith("/checkpoint")]  # noqa: E731
         said = lambda: [t for _, t in house.alerts if "refused the practice league block" in t]  # noqa: E731
         self.assertEqual(publisher.publish(house)["checkpoint"], 200)
-        first, second = checkpoints()
+        first, tableless, second = checkpoints()
         self.assertIn("practice", first)
+        self.assertEqual((("positions" in tableless), ("practice" in tableless)), (False, True),
+                         "the table alone is tried first (a bad row never costs the newer shape), and refused too")
+        self.assertIn("positions", second, "only the newer shape was refused: the table goes")
         self.assertNotIn("practice", second)
-        self.assertEqual({k: v for k, v in first.items() if k != "practice"}, second, "the rest goes either way")
+        self.assertIn("claude_usd", first["compute"])
+        self.assertNotIn("claude_usd", second["compute"], "an older site gets the older compute with it")
+        self.assertEqual(publish.legacy_compute({k: v for k, v in first.items() if k != "practice"}), second, "the rest goes either way")
         self.assertEqual(len(said()), 1)
         self.assertIn("Invalid checkpoint.", said()[0], "the site's own reply")
         self.assertFalse(said()[0].startswith("positions table"), "never said as the positions table")
         self.clock.now += 60
         publisher.publish(house)
-        self.assertEqual(len(checkpoints()), 3, "inside the half hour: one post, without the block")
+        self.assertEqual(len(checkpoints()), 4, "inside the half hour: one post, without the block")
         self.assertNotIn("practice", checkpoints()[-1])
         self.clock.now += publish.PRACTICE_RETRY_SECONDS
         publisher.publish(house)
@@ -739,6 +746,53 @@ class PublisherTest(LedgerCase):
         self.clock.now += 60
         publisher.publish(house)
         self.assertIn("practice", checkpoints()[-1], "taken: offered every publish again")
+
+    def test_a_site_that_predates_claudes_own_part_gets_claude_inside_other_and_is_asked_again_later(self):
+        """Sept 30, 2026: Claude is its own compute part. A site that knows only five parts (before the personal-site PR
+        of that day) refuses the checkpoint; it gets it again with Claude inside `other_usd`, #431's shape, so its total
+        is unchanged, and is offered the part again in half an hour."""
+        import urllib.error
+
+        class Refusing(Site):
+            def __init__(self):
+                super().__init__()
+                self.takes = False
+
+            def __call__(self, request, timeout=None):
+                body = json.loads(request.data)
+                if request.full_url.endswith("/checkpoint") and "claude_usd" in (body.get("compute") or {}) and not self.takes:
+                    self.posts.append((request.full_url, body))
+                    raise urllib.error.HTTPError(request.full_url, 400, "Bad Request", {}, _Reply(b'{"error":"Invalid checkpoint."}'))
+                return super().__call__(request, timeout)
+
+        site = Refusing()
+        publisher = self.publisher(site)
+        house = FakeHouse(self.ledger, [roster_agent("condor-vrp-3")])
+        house.alerts = []
+        house.alert = lambda level, text, **kw: house.alerts.append((level, text))
+        house.site_inputs = lambda: {"compute": {"sail_usd": "294.15", "claude_usd": "160.42", "openai_usd": "50.23"}}
+        checkpoints = lambda: [body for url, body in site.posts if url.endswith("/checkpoint")]  # noqa: E731
+        said = lambda: [t for _, t in house.alerts if "Claude's own compute part" in t]  # noqa: E731
+        self.assertEqual(publisher.publish(house)["checkpoint"], 200)
+        first, tableless, second = checkpoints()
+        self.assertEqual(("positions" in first, "positions" in tableless, "positions" in second), (True, False, True))
+        self.assertEqual((first["compute"]["claude_usd"], first["compute"]["other_usd"]), ("160.42", "0.00"))
+        self.assertNotIn("claude_usd", second["compute"])
+        self.assertEqual(second["compute"]["other_usd"], "160.42", "Claude inside other: the older site's total is the same")
+        self.assertEqual({k: v for k, v in first["compute"].items() if k not in ("claude_usd", "other_usd")},
+                         {k: v for k, v in second["compute"].items() if k != "other_usd"})
+        self.assertEqual({k: v for k, v in first.items() if k != "compute"}, {k: v for k, v in second.items() if k != "compute"})
+        self.assertEqual(len(said()), 1)
+        self.clock.now += 60
+        publisher.publish(house)
+        self.assertEqual(len(checkpoints()), 4, "inside the half hour: one post, in the older shape")
+        self.assertNotIn("claude_usd", checkpoints()[-1]["compute"])
+        site.takes = True
+        self.clock.now += publish.PRACTICE_RETRY_SECONDS
+        publisher.publish(house)
+        self.assertEqual(checkpoints()[-1]["compute"]["claude_usd"], "160.42", "offered again, and taken")
+        self.assertIsNone(publish.legacy_compute({"compute": {"claude_usd": None, "other_usd": "0.00"}})["compute"]["other_usd"],
+                          "an unknown Claude is an unknown other")
 
     def test_the_hook_feeds_the_swarm_and_the_book_and_a_broken_hook_costs_nothing(self):
         house = FakeHouse(self.ledger, [roster_agent("condor-vrp-3")], rungs={"condor-vrp-3": 1})
