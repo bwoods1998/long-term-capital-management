@@ -44,8 +44,9 @@ HELD-OUT, HONESTLY. A capture names its motivating units (the families, mechanis
 author); the arms comparison excludes them, and a before/after window is later than all of them. The offline judge's
 held-out split is SEEDED VARIANTS OF CLASSES ITS DEV SPLIT NEVER USES, seeded only after the candidate is committed
 (`heldout_seed`), stratified so every class appears; the author sees only pass or fail for it. Its generator is in the
-public judge file, so it is held out from the brief and the dev split, not from a determined reader: the concurrent
-canary (or the window after the release) is the held-out test no one can read in advance.
+public judge file, so it is held out from the brief and the dev split, not from a determined reader. An "improve"
+rule therefore also asks the dev split's count (the motivating failures) to fall wherever its baseline has any, and
+the concurrent canary (or the window after the release) is the held-out test no one can read in advance.
 
 Standard library only (the observers run on the House, the loop on the owner's machine).
 """
