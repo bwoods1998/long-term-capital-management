@@ -327,8 +327,12 @@ class TheSiteAndTheBands(ProgressCase):
     """The public progress (`progress._live`), the bands the live path reads, and the publisher."""
 
     def two_sided(self, band):
+        from league.tests.evaluator_fakes import band_proof
+
         version = self.family(band=band)
         self.store.update_family("synthetic-family", structure="long_single")
+        if band in bands.LIVE_BANDS:
+            self.store.set_state("synthetic-family", banded_evaluator=band_proof(version))
         return version
 
     def test_a_long_single_candidates_real_structure_check_needs_both_singles(self):
