@@ -14,7 +14,9 @@ One process beside the House loop, niced. Its threads:
 - RESEEDS (the sprint, Sept 26): below `population.start` while the architect is not due, the seeds' mechanisms are
   founded again on admitted roots they never tried (`reseed`, at most `population.reseed_max` a pass);
 - THE MAIN LOOP (every few seconds): re-read the settings, check the guard (brake: the Gym to sleep and the
-  researchers idle), manage the pool, start the rounds that are due, write the heartbeat, and leave when
+  researchers idle), say the funding cliffs ahead and the Claude fallbacks (`funding.FundingWatch`: deduped
+  `swarm.status` alerts, `status.funding` in the heartbeat), manage the pool, start the rounds that are due, write the
+  heartbeat, and leave when
   asked (the STOP files, `<root>/swarm.stop`) or when the House's release changed (the House starts the new one).
 
 The heartbeat (`<root>/swarm.heartbeat`, JSON) carries the pid, the release directory, the time, and a live
@@ -41,6 +43,7 @@ from typing import Any, Callable, Mapping
 from . import HEARTBEAT, LOCK_FILE, LOG_FILE, PID_FILE, settings as settings_mod
 from .architect import Architect, GraveyardDigest
 from .diagnostician import Diagnostician
+from .funding import FundingWatch
 from .gate import Gate
 from .guard import SailGuard, provider_reader
 from .pool import GymPool
@@ -354,6 +357,9 @@ class Swarm:
                                      architect=self.architect)
         self.diagnostician = Diagnostician(self.store, self.router, self.settings, pool=self.pool, researcher=self.researcher,
                                            clock=clock)
+        # FUNDING CLIFFS (Release A, Sept 30, 2026): runway and calendar alerts for Claude's room, the OpenAI month, the
+        # Sail guard and the burst's end, and Claude fallbacks, said once each (league/swarm/funding.py).
+        self.funding = FundingWatch(self.store, self.settings, router=self.router, guard=self.guard, clock=clock, log=log)
         self.stop = threading.Event()
         self.workers: list[threading.Thread] = []
         self.rounds: dict[str, threading.Thread] = {}
@@ -439,7 +445,8 @@ class Swarm:
                 "cycle_errors_last_hour": sum(1 for p in recent if p.get("error")),
                 "researcher_pace": self.pace_status(),
                 "guard": getattr(self.guard, "last", {}), "braked": not self.guard.allows(), "pool": self.pool.status(),
-                "rounds": sorted(k for k, t in self.rounds.items() if t.is_alive())}
+                "rounds": sorted(k for k, t in self.rounds.items() if t.is_alive()),
+                "funding": getattr(getattr(self, "funding", None), "last", {})}
 
     def heartbeat(self, extra: Mapping[str, Any] | None = None) -> None:
         body = {"pid": os.getpid(), "at": self.clock(), "release": str(CODE_DIR), "started_at": self.started_at,
@@ -623,6 +630,10 @@ class Swarm:
                 if not was:
                     log(f"guard: brake ({getattr(self.guard, 'reason', '')})")
                 self.pool.scale_to_zero(getattr(self.guard, "reason", "the guard"))
+        try:  # after the guard's reading, braked or not: a cliff is news most of all under the brake
+            self.funding.tick()
+        except Exception:  # noqa: BLE001 - a notice never stops the loop
+            log(f"funding watch failed: {traceback.format_exc()[-600:]}")
         self.pool.manage()
         if self.guard.allows() and self.gym_ready():
             if self.tournament.due():

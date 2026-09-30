@@ -5,6 +5,7 @@ forbids committing real quotes)."""
 from __future__ import annotations
 
 import datetime as dt
+import functools
 import math
 import uuid
 from decimal import Decimal
@@ -27,6 +28,12 @@ def at(day: dt.date, hh: int, mm: int, ss: int = 3) -> float:
 
 def iso(t: float) -> str:
     return dt.datetime.fromtimestamp(t, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f") + "123Z"
+
+
+# The OCC symbol of a contract and its parts are pure functions of their arguments; the fake market names every
+# contract of a chain at each read, so it remembers them (a read of the chain still prices every contract afresh).
+_occ_symbol = functools.lru_cache(maxsize=1 << 17)(occ_symbol)
+_occ_parts = functools.lru_cache(maxsize=1 << 17)(occ_parts)
 
 
 class Clock:
@@ -72,6 +79,9 @@ class Market:
         return self.spot * self.share(root)
 
     def rows(self, root: str) -> dict[str, dict]:
+        """Every listed contract of `root` priced at this moment: the clock, the spot, the vol and `overrides` as they
+        are now (nothing is kept from one read to the next). The arithmetic is vectorized where numpy gives the same
+        float64 results as the scalar form, element for element, and each row is a new dict."""
         t = self.clock()
         local = dt.datetime.fromtimestamp(t, NY)
         minute = local.hour * 60 + local.minute
@@ -79,30 +89,48 @@ class Market:
         step = self.steps.get(root, 5.0 if root in ("SPXW", "SPX") else 1.0)
         listed = self.center * self.share(root)
         base = round(listed / step) * step
+        stamp = iso(t - 1)
+        strikes = base + step * np.arange(-self.width, self.width + 1)
+        half = 0.01 + 0.002 * np.abs(strikes - level) / step         # the half spread, wider away from the money
+        keys = [float(k) for k in strikes]
+        overrides = self.overrides
         out = {}
         for d in self.expiries:
-            expiry = self.day + dt.timedelta(days=d)
-            strikes = base + step * np.arange(-self.width, self.width + 1)
+            expiry = (self.day + dt.timedelta(days=d)).isoformat()
+            years = G.years_to_expiry(np.full(strikes.size, d), minute)
             for is_call in (True, False):
-                years = G.years_to_expiry(np.full(strikes.size, d), minute)
                 mid = G.bs_price(level, strikes, years, 0.04, self.vol, is_call)
-                for k, m in zip(strikes, mid):
-                    sym = occ_symbol(root, expiry.isoformat(), is_call, float(k))
-                    half = 0.01 + 0.002 * abs(k - level) / step
-                    bid, ask = max(0.0, round(m - half, 2)), round(max(m + half, 0.01), 2)
-                    if sym in self.overrides:
-                        bid, ask, bs, as_ = self.overrides[sym]
+                bids = np.round(mid - half, 2)                          # round(m - half, 2), element for element
+                high = mid + half
+                asks = np.round(np.maximum(high, 0.01), 2)              # round(max(m + half, 0.01), 2)
+                floor = high < 0.01                                     # where max() took the 0.01 (a plain float)
+                for k, b, a, low in zip(keys, bids, asks, floor.tolist()):
+                    sym = _occ_symbol(root, expiry, is_call, k)
+                    if sym in overrides:
+                        bid, ask, bs, as_ = overrides[sym]
                     else:
-                        bs, as_ = 50, 60
+                        bid, ask, bs, as_ = max(0.0, b), (0.01 if low else a), 50, 60
                     out[sym] = {"latestQuote": {"ap": ask, "as": as_, "ax": "Q", "bp": bid, "bs": bs, "bx": "Q", "c": " ",
-                                                "t": iso(t - 1)}}
+                                                "t": stamp}}
         return out
 
     def quote(self, symbol: str) -> tuple[float, float]:
-        parts = occ_parts(symbol)
+        parts = _occ_parts(symbol)
         row = self.rows(parts[0]).get(symbol)
         q = row["latestQuote"]
         return float(q["bp"]), float(q["ap"])
+
+    def quotes(self, symbols: Iterable[str]) -> dict[str, tuple[float, float]]:
+        """`quote` of several contracts at one moment: each root's chain is priced once for them all."""
+        chains: dict[str, dict[str, dict]] = {}
+        out = {}
+        for symbol in symbols:
+            root = _occ_parts(symbol)[0]
+            if root not in chains:
+                chains[root] = self.rows(root)
+            q = chains[root].get(symbol)["latestQuote"]
+            out[symbol] = (float(q["bp"]), float(q["ap"]))
+        return out
 
     def chain(self, underlying: str, *, expiry_from: str, expiry_to: str, strike_from=None, strike_to=None,
               max_pages=None, timeout=None) -> dict:
@@ -114,7 +142,7 @@ class Market:
             raise RuntimeError("market data HTTP 500")
         out = {}
         for sym, row in self.rows(underlying).items():
-            _, expiry, _, strike = occ_parts(sym)
+            _, expiry, _, strike = _occ_parts(sym)
             if not expiry_from <= expiry <= expiry_to:
                 continue
             if strike_from is not None and strike < strike_from:
@@ -129,10 +157,13 @@ class Market:
         symbols = list(symbols)
         self.contract_reads.append(sorted(symbols))
         out = {}
+        chains: dict[str, dict[str, dict]] = {}      # each root's chain priced once for this read, not once a contract
         for sym in symbols:
-            rows = self.rows(occ_parts(sym)[0])
-            if sym in rows:
-                out[sym] = rows[sym]
+            root = _occ_parts(sym)[0]
+            if root not in chains:
+                chains[root] = self.rows(root)
+            if sym in chains[root]:
+                out[sym] = chains[root][sym]
         return out
 
     def stocks(self, symbols: Iterable[str]) -> dict:
@@ -289,8 +320,9 @@ class Venue:
         prices = []
         value = 0.0
         opening = order["legs"][0]["position_intent"].endswith("open")
+        quotes = self.market.quotes([leg["symbol"] for leg in order["legs"]])
         for leg in order["legs"]:
-            bid, ask = self.market.quote(leg["symbol"])
+            bid, ask = quotes[leg["symbol"]]
             buying = leg["side"] == "buy"
             price = ask if buying else bid
             prices.append(price)
