@@ -253,6 +253,21 @@ class TournamentAllocates(RoundCase):
         self.assertEqual(t.allocation["mode"], "bandit")
         self.assertIn("store unreadable", t.allocation["fallback"])
 
+    def test_the_posterior_pools_only_the_running_evaluators_looks(self):
+        from league.swarm.evaluator import KEY
+
+        self.family("a")
+        self.family("b")
+        for fid, image, t in (("a", "img-old", 5.0), ("b", "img-new", -1.0)):
+            self.store.add_run(fid, 1, {"run_id": f"v-{fid}", "status": "ok", "trials": 1,
+                                        "summary": {"t_daily": t, "gym_image": image, "gym_bundle": "bundle"}},
+                               window="validation", stress=1.0, purpose="validation")
+        classes = A.classes_from_store(self.store)
+        every = A.looks_from_store(self.store, since=0.0, class_of=classes.get)
+        self.assertEqual(sorted(every), ["a", "b"], "no evaluator recorded: every look")
+        self.store.put(KEY, {"image": "img-new", "bundle": "bundle", "execution": "x"})
+        self.assertEqual(sorted(A.looks_from_store(self.store, since=0.0, class_of=classes.get)), ["b"])
+
     def test_the_bandit_mode_is_r11_5_unchanged(self):
         self.validated("pos", 1.0, 0.02)
         self.validated("neg", -1.0, -0.02)

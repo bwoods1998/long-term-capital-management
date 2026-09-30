@@ -28,7 +28,8 @@ Gym priority is the sum of three parts:
 THE VALUE of a family is the variance of its NEXT validation's pass or fail (the line's t check, `evidence.MIN_T`)
 under an empirical-Bayes posterior, times two discounts:
   value = p (1 - p) x depth x exhaustion, with p = P(next validation t >= MIN_T).
-  - THE POSTERIOR. The validation t of every family validated in the last `lookback_hours` (its latest look) is a draw
+  - THE POSTERIOR. The validation t of every family validated in the last `lookback_hours` on the evaluator running now
+    (its latest look; a look from another fingerprint is never pooled, even for attention) is a draw
     of (the family's true t) + (unit noise); a family's true t is its class's mean plus a within-class spread, and a
     class's mean is the swarm's mean plus a between-class spread. The swarm's mean and the two spreads are method-of-
     moments estimates from those looks (bounded; defaults when fewer than `MIN_OBS` looks). A family's own latest t
@@ -479,14 +480,21 @@ def value_shares(rows: Sequence[Mapping[str, Any]], post: Posterior,
 
 # ------------------------------------------------------------------------------------------------- the store's side
 def looks_from_store(store: Any, *, since: float, class_of: Callable[[str], str | None]) -> dict[str, tuple[str, float]]:
-    """{family: (class, t)}: each family's latest validation (normal spread) since `since`, its `t_daily`."""
+    """{family: (class, t)}: each family's latest validation (normal spread) since `since`, its `t_daily`, made on the
+    evaluator the swarm runs now (its image and bundle, `evaluator.KEY`; every look while none is recorded): evidence
+    from another fingerprint is never pooled with this one's, even for attention."""
+    from .evaluator import KEY, matches
     from .store import iso, loads
 
+    current = store.get(KEY)
     rows = store._all("SELECT family, at, summary FROM runs WHERE window='validation' AND stress=1.0 AND trials>0 AND at>=? "
                       "ORDER BY at, rowid", (iso(since),))
     out: dict[str, tuple[str, float]] = {}
     for row in rows:
-        t = (loads(row["summary"], {}) or {}).get("t_daily")
+        summary = loads(row["summary"], {}) or {}
+        if current is not None and not matches(summary, current):
+            continue
+        t = summary.get("t_daily")
         cls = class_of(str(row["family"]))
         if cls is None or isinstance(t, bool) or not isinstance(t, (int, float)) or not math.isfinite(float(t)):
             continue
@@ -574,13 +582,13 @@ def legacy_order(ready: Sequence[Mapping[str, Any]], n: int, *, last: Mapping[st
     return sorted(ready, key=lambda f: (last.get(f["id"], 0) - 60.0 * (float(f.get("weight") or (1.0 / n)) * n - 1.0), f["id"]))
 
 
-def useful(fam: Mapping[str, Any], n: int, settings: Mapping[str, Any] | None) -> bool:
+def useful(fam: Mapping[str, Any], n: int, settings: Mapping[str, Any] | None, *, threshold: float | None = None) -> bool:
     """A distinct useful experiment: a family whose share is at least `useful_share` of the average (a newborn without a
-    share yet counts: it has not been judged)."""
+    share yet counts: it has not been judged). `threshold`: `useful_share` already read."""
     w = fam.get("weight")
     if not isinstance(w, (int, float)) or isinstance(w, bool):
         return True
-    return float(w) * max(1, n) >= cfg(settings)["useful_share"]
+    return float(w) * max(1, n) >= (cfg(settings)["useful_share"] if threshold is None else threshold)
 
 
 # ---------------------------------------------------------------------------------------------------- the concurrency

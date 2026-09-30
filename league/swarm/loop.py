@@ -265,7 +265,7 @@ class Scheduler:
             fid = chosen["id"]
             if c["scheduler"] != "legacy":
                 self.turns.took(fid, chosen.get("weight"), n)
-            self.queued_useful = sum(1 for f in ordered[1:] if allocation_mod.useful(f, n, self.settings))
+            self.queued_useful = sum(1 for f in ordered[1:] if allocation_mod.useful(f, n, self.settings, threshold=c["useful_share"]))
             self.running.add(fid)
             self.last[fid] = now
             self.began[fid] = self.seen(chosen)
