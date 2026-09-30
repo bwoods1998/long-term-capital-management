@@ -180,9 +180,10 @@
     // swarm's agents. No secret. arXiv's API terms: "make no more than one request every three seconds, and limit
     // requests to a single connection at a time", for all of the machines under our control as a whole; arxiv.org's
     // robots.txt: Crawl-delay 15. The Gate paces every request to that and counts them here: at most this many requests
-    // to arXiv a UTC day, the whole floor (about 2% of what the terms allow); "0" closes the library. Cache hits are free.
-    // The cache is a KV namespace bound as LIBRARY, added at the first deploy that carries the library (docs/operations.md
-    // "Deploy"): `npx wrangler kv namespace create LIBRARY`, then here, beside "vars":
+    // to arXiv a UTC day, the whole floor (about 2% of what the terms allow); "0" stops every request to arXiv, while
+    // cache hits still answer (they are free). The cache is a KV namespace bound as LIBRARY, added at the first deploy that
+    // carries the library (gateway/README.md, "The research library", Deploy): `npx wrangler kv namespace create LIBRARY`,
+    // then here, beside "vars":
     //   "kv_namespaces": [{ "binding": "LIBRARY", "id": "<the id it printed>" }],
     // Without the binding the library answers uncached. Never delete the namespace once a version bound it: that would
     // block `wrangler rollback` to those versions.

@@ -136,6 +136,12 @@ const REFUSED = {
   'https://another-worker.bw.workers.dev/': /own domain/,
   'not a url': /cannot be parsed/,
   ['https://example.com/' + 'a'.repeat(2048)]: /longer than 2048/,
+  // arXiv is read through the research library alone, at its pace and under its date rule (review of #428, gateway F4).
+  'https://arxiv.org/abs/2501.00001': /research library/,
+  'https://export.arxiv.org/api/query?search_query=all:vol': /research library/,
+  'http://ARXIV.ORG./pdf/2409.06496v1': /research library/,
+  'https://ar5iv.labs.arxiv.org/html/1805.01234': /research library/,
+  'https://ar5iv.org/abs/1805.01234': /research library/,
 };
 
 test('every refused url class is refused before anything is fetched or counted', async () => {
@@ -163,6 +169,8 @@ test('public urls pass the rules, fragment dropped', () => {
     ['http://[2606:4700:4700::1111]/', 'http://[2606:4700:4700::1111]/'],
     ['https://someone-else.workers.dev/', 'https://someone-else.workers.dev/'],
     ['https://site.example.com/', 'https://site.example.com/'],
+    ['https://notarxiv.org/paper', 'https://notarxiv.org/paper'],
+    ['https://arxiv.org.example.com/', 'https://arxiv.org.example.com/'],
     ['  https://example.com/padded  ', 'https://example.com/padded'],
   ]) {
     const checked = web.checkUrl(url, own);
@@ -175,7 +183,7 @@ test('public urls pass the rules, fragment dropped', () => {
 
 test('a public page that redirects to a private address is refused at the hop', async () => {
   for (const target of ['http://169.254.169.254/latest/meta-data/', 'http://localhost:8080/', 'http://[::1]/', 'ftp://example.com/',
-    'http://10.0.0.5/', 'https://ltcm-gateway.bw.workers.dev/v1/health', 'http://user:pw@example.org/']) {
+    'http://10.0.0.5/', 'https://ltcm-gateway.bw.workers.dev/v1/health', 'http://user:pw@example.org/', 'https://arxiv.org/abs/2501.00001']) {
     const { response, calls, body, gate } = await call({ url: 'https://example.com/go' }, {
       replies: { 'https://example.com/go': redirect(target) },
     });

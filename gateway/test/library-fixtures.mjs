@@ -45,6 +45,27 @@ export const PAPERS = {
         summary: 'Calendar effects in commodity futures, now with the variance risk premium of index options.' },
     ],
   },
+  // A revised paper whose v1 holds ONE of the query's words ("variance") but not the others: arXiv matched its later
+  // abstract, so it is withheld (review of #428, look-ahead F1: one word was enough before).
+  '2103.00005': {
+    categories: ['q-fin.ST'],
+    authors: ['Hana Ito'],
+    versions: [
+      { date: '2021-03-02T08:00:00Z', title: 'Realized variance of index options', summary: 'Realized variance of index options at one-minute sampling.' },
+      { date: '2025-04-01T08:00:00Z', title: 'Realized variance of index options',
+        summary: 'Realized variance of index options, and now the variance risk premium they carry.' },
+    ],
+  },
+  // HTML era, v1 in 2024 and v2 in 2026: a redirect from v1's page to v2's must never serve v2's text as v1 (review of
+  // #428, look-ahead F2).
+  '2408.03333': {
+    categories: ['q-fin.TR'],
+    authors: ['Ines Varga'],
+    versions: [
+      { date: '2024-08-20T10:00:00Z', title: 'Intraday option order flow', summary: 'Order flow in index options within the day.' },
+      { date: '2026-03-01T10:00:00Z', title: 'Intraday option order flow', summary: 'Order flow in index options within the day, re-estimated.' },
+    ],
+  },
   // Posted in 2025: never served.
   '2502.00001': {
     categories: ['q-fin.PR'],

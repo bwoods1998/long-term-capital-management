@@ -7,10 +7,17 @@
 //
 // THE DATE RULE. An item is served only if both its first-posted date (arXiv `published`, the v1 submission time) and
 // the date of the version served (`updated` of that version) are before CUTOFF, in UTC, from arXiv's own metadata.
-//   - An entry whose latest version is dated on or after CUTOFF is not served as that version: its v1 is served instead
-//     when v1 passes the rule, and only as the pinned `v1`. In a search, such a v1 is kept only when its own title or
-//     abstract holds one of the query's terms (arXiv matches the LATEST abstract, so a revised entry could otherwise be
-//     found by words added after 2024 and then served as v1).
+//   - A paper is served as it stood at the end of 2024: the NEWEST version dated before CUTOFF (`newestBefore`), pinned.
+//     Every version posted from now on is dated after CUTOFF, so that version never changes (kept in KV as `e:`). A
+//     search and an unversioned read both serve it; a read that names a version serves that version only when it is
+//     itself before CUTOFF, and answers a later one exactly as a version that does not exist (`not_found`), so no answer
+//     shows whether, or how often, a paper was revised after 2024 (review of #428, look-ahead F3).
+//   - A search matches titles and abstracts only (`ti:`/`abs:`, never `all:`, which also searches comments and journal
+//     references an author can add without a new version: review of #428, look-ahead F1). arXiv matches the LATEST
+//     version, so a paper revised after 2024 is kept only when EVERY query term is in the served version's own title or
+//     abstract (`matchesTerms`, plurals folded as arXiv's stemmer does); else words added after 2024 would choose it.
+//     What remains: arXiv's relevance ORDER among the admitted items is computed on the latest text, and a paper's
+//     categories are its current ones (a cross-listing added after 2024 can move it into the library's topics).
 //   - A missing or unparseable date, dates that disagree (updated before published), or a new-style id whose YYMM is
 //     2501 or later whatever its dates say, is refused (`no_reliable_date`).
 //   - Every item served is PINNED to a version (`arXiv:<base>v<N>`); a pinned version never changes, so a cached one
@@ -34,17 +41,21 @@
 //                                          CUTOFF (so every version is), with the latest re-read within the hour.
 //   PDFs are not parsed (a dependency, and CPU in the isolate that serves orders): an item with no HTML is its
 //   metadata and abstract (`text_source: "none"`). Redirects are followed by hand, at most MAX_REDIRECTS, each hop
-//   checked and paced like a request. The only headers sent are a fixed User-Agent and Accept; no secret is needed.
+//   checked and paced like a request, and only to the SAME item (`fetchPaced`'s `expect`: the same API query, the same
+//   paper and version on arxiv.org/html, the same paper on ar5iv at no version past its confirmed latest), so no
+//   redirect can serve another version's text under this one's id (review of #428, look-ahead F2). No URL names a
+//   new-style id after 2412. The only headers sent are a fixed User-Agent and Accept; no secret is needed.
 //
 // ARXIV'S TERMS (info.arxiv.org/help/api/tou.html, read Sept 29, 2026): "make no more than one request every three
 // seconds, and limit requests to a single connection at a time", for "all of the machines under your control as a
 // whole"; arxiv.org's robots.txt sets `Crawl-delay: 15`. So one arXiv request at a time across all three hosts, each
 // host's starts SPACING_MS apart (3 s for the API and ar5iv, 15 s for arxiv.org), a backoff of at least BACKOFF_MS
-// when arXiv answers 429 or 503, and at most LIBRARY_DAY_UPSTREAM requests a UTC day (600 by default, about 2% of what
-// the terms allow). The pace, the lease and the day's count live in the Gate (`libraryAcquire`, `libraryRelease`: two
+// when arXiv answers 403, 429 or 503 (a 403 is how a blocked address is told), and at most LIBRARY_DAY_UPSTREAM
+// requests a UTC day (600 by default, about 2% of what the terms allow). The pace, the lease and the day's count live in the Gate (`libraryAcquire`, `libraryRelease`: two
 // small synchronous transactions, the `webFetchReserve` pattern; no new Durable Object class, which would end
-// `wrangler rollback` for the gateway that carries real orders). A request waits for its turn at most REQUEST_BUDGET_MS,
-// else it is `429 {busy: true}` with nothing sent and nothing counted. Metadata is CC0; e-print text is read for our
+// `wrangler rollback` for the gateway that carries real orders). No upstream request starts later than REQUEST_BUDGET_MS
+// after the library request came in; one that cannot is `429 {busy: true}` with nothing sent and nothing counted. So a
+// library request takes at most WORST_MS (the budget plus one fetch's timeout), which the House's client outwaits. Metadata is CC0; e-print text is read for our
 // own research and served only to the authenticated House, never published (never an event, never the site, never
 // git), and its cache expires.
 //
@@ -145,13 +156,22 @@ export const SPACING_MS = { [API_HOST]: 3000, [HTML_HOST]: 15000, [AR5IV_HOST]: 
 //: How long one upstream request may take; a lease no worker released expires at its start plus this plus LEASE_SLACK_MS.
 export const FETCH_TIMEOUT_MS = { [API_HOST]: 10000, [HTML_HOST]: 15000, [AR5IV_HOST]: 15000 };
 export const LEASE_SLACK_MS = 5000;
-//: The least pause after arXiv answers 429 or 503 (longer when its Retry-After says so).
+//: The least pause after arXiv answers one of BACKOFF_STATUSES (longer when its Retry-After says so).
 export const BACKOFF_MS = 60000;
-//: A request waits for its turn at most this long in all; past it, `429 {busy: true}` with nothing sent or counted.
-export const REQUEST_BUDGET_MS = 30000;
+//: arXiv's answers that start a backoff: 429 and 503 ask us to slow down, and a 403 is how a blocked address is told
+//: (review of #428, gateway F3: without it a block was hit at full pace up to the day's cap).
+export const BACKOFF_STATUSES = [403, 429, 503];
+//: No upstream request starts later than this after the library request came in; one that cannot is `429 {busy: true}`
+//: with nothing sent or counted.
+export const REQUEST_BUDGET_MS = 20000;
+//: The longest a library request takes (the budget, then one fetch at the longest timeout). The House's client waits at
+//: least this plus a margin (league/swarm/library.py CLIENT_FLOOR_SECONDS), so it never abandons a request mid-flight:
+//: an abandoned request can leave its lease held and its in-flight place taken (review of #428, gateway F7).
+export const WORST_MS = REQUEST_BUDGET_MS + 15000;
 //: The longest single sleep between two asks of the Gate.
 export const POLL_MS = 3000;
-//: Upstream requests a UTC day, the whole floor (LIBRARY_DAY_UPSTREAM overrides it; 0 closes the library).
+//: Upstream requests a UTC day, the whole floor (LIBRARY_DAY_UPSTREAM overrides it; 0 stops every request to arXiv,
+//: while cache hits still answer).
 export const DAY_UPSTREAM = 600;
 const DAY_UPSTREAM_MAX = 20000;
 //: Library requests one isolate serves at once (the isolate that serves the order routes holds their bodies).
@@ -164,14 +184,22 @@ export const MAX_ABSTRACT_CHARS = 2000;
 export const MAX_TITLE_CHARS = 400;
 export const MAX_AUTHORS = 6;
 export const MAX_SECTIONS = 40;
+//: Headings an article's scan looks at, found or not (each costs a search of the text): a hostile page of thousands of
+//: empty or unmatched headings stays cheap in the isolate that serves orders.
+export const MAX_HEADINGS = 3 * MAX_SECTIONS;
+//: A paper's versions one batched metadata call may ask for, and one search's batch in all (a feed of about 3 KB an
+//: entry stays well under MAX_FEED_BYTES).
+export const MAX_VERSIONS = 60;
+export const MAX_BATCH_IDS = 100;
 export const READ_CHARS = 8000;
 export const MAX_READ_CHARS = 10000;
 //: arXiv's own HTML exists for papers from about December 2023 on: an older version is not asked for it.
 export const HTML_SINCE_MS = Date.UTC(2023, 11, 1);
 //: ar5iv is read only while the paper's latest version was confirmed this recently.
 export const LATEST_FRESH_MS = 3600000;
-//: KV lifetimes, in seconds: a search answer, a pinned version's metadata, a paper's latest version, its text, "no text".
-export const TTL = { search: 7 * 86400, meta: 180 * 86400, latest: 7 * 86400, text: 30 * 86400, none: 7 * 86400 };
+//: KV lifetimes, in seconds: a search answer, a pinned version's metadata, a paper's latest version, its text, "no text",
+//: and the paper's newest version before the cutoff (`e:`: it never changes, as every later version is after it).
+export const TTL = { search: 7 * 86400, meta: 180 * 86400, latest: 7 * 86400, text: 30 * 86400, none: 7 * 86400, best: 180 * 86400 };
 export const USER_AGENT = 'LTCM-library/1.0 (+https://blakewoods.us/capital)';
 export const PATHS = { search: '/v1/research/search', read: '/v1/research/read', health: '/v1/research/health' };
 export const CACHE_HEADER = 'X-LTCM-Library';
@@ -211,11 +239,19 @@ export const idAfterCutoff = parsed => parsed.yymm !== null && parsed.yymm > LAS
 const HTML_PATH = new RegExp(`^/html/(${BASE})v[1-9][0-9]{0,2}/?$`);
 const AR5IV_PATH = new RegExp(`^/html/(${BASE})(?:v[1-9][0-9]{0,2})?/?$`);
 
+/** True when a page path's paper is one the rule may read: a valid id whose own name is not after the cutoff. */
+const pathPaper = (pattern, pathname) => {
+  const match = pattern.exec(pathname);
+  const parsed = match && parseId(match[1]);
+  return Boolean(parsed) && !idAfterCutoff(parsed);
+};
+
 /**
  * `{ ok: true, url, host }` for one of the three shapes the library reads, else `{ ok: false, error }`: exactly
  * https://export.arxiv.org/api/query?..., https://arxiv.org/html/<base>v<N> (the version is required) and
- * https://ar5iv.labs.arxiv.org/html/<base>; no port, user, fragment, other host or path. Checked before every fetch and
- * on every redirect's target.
+ * https://ar5iv.labs.arxiv.org/html/<base>; no port, user, fragment, other host or path, and no page of a new-style id
+ * after 2412 (review of #428, look-ahead F2). Checked before every fetch and on every redirect's target, where
+ * `fetchPaced`'s `expect` also holds the target to the same item.
  */
 export function checkLibraryUrl(raw) {
   if (typeof raw !== 'string' || raw.length > 4096) return { ok: false, error: 'not a url' };
@@ -232,10 +268,10 @@ export function checkLibraryUrl(raw) {
     return url.pathname === '/api/query' && url.search.length > 1 ? { ok: true, url, host } : { ok: false, error: 'only /api/query' };
   }
   if (host === HTML_HOST) {
-    return HTML_PATH.test(url.pathname) && !url.search ? { ok: true, url, host } : { ok: false, error: 'only /html/<id>v<N>' };
+    return pathPaper(HTML_PATH, url.pathname) && !url.search ? { ok: true, url, host } : { ok: false, error: 'only /html/<id>v<N> before 2501' };
   }
   if (host === AR5IV_HOST) {
-    return AR5IV_PATH.test(url.pathname) && !url.search ? { ok: true, url, host } : { ok: false, error: 'only /html/<id>' };
+    return pathPaper(AR5IV_PATH, url.pathname) && !url.search ? { ok: true, url, host } : { ok: false, error: 'only /html/<id> before 2501' };
   }
   return { ok: false, error: 'not a library host' };
 }
@@ -246,11 +282,17 @@ export const CATEGORIES = ['all', 'q-fin', 'econ', 'stat.ML', 'cs.LG'];
 //: "cs.LG where it concerns markets": the words one of which a cs.LG item must hold.
 export const MARKET_WORDS = ['market', 'markets', 'trading', 'option', 'options', 'volatility', 'portfolio', 'financial',
   'finance', 'asset', 'stock', 'price'];
+/** A term matched in a title or an abstract only: `all:` would also search comments and journal references, which an
+ * author can change without a new version, so no date the rule checks would move (review of #428, look-ahead F1). */
+export const inTitleOrAbstract = term => {
+  const field = term.includes(' ') ? `"${term}"` : term;
+  return `(ti:${field} OR abs:${field})`;
+};
 const CAT_CLAUSE = {
   'q-fin': 'cat:q-fin.*',
   econ: 'cat:econ.*',
   'stat.ML': 'cat:stat.ML',
-  'cs.LG': `(cat:cs.LG AND (${MARKET_WORDS.map(w => `all:${w}`).join(' OR ')}))`,
+  'cs.LG': `(cat:cs.LG AND (${MARKET_WORDS.map(w => `ti:${w} OR abs:${w}`).join(' OR ')}))`,
 };
 CAT_CLAUSE.all = `(${['q-fin', 'econ', 'stat.ML', 'cs.LG'].map(k => CAT_CLAUSE[k]).join(' OR ')})`;
 //: arXiv's v1 filter, a pre-filter only: `updated` decides per entry (the API silently rewrites lastUpdatedDate into
@@ -273,8 +315,8 @@ function wordsOf(text) {
  * The arXiv query for an agent's keywords. Nothing of `q` passes through raw: quoted phrases are kept; every other
  * word is a term; every character outside letters, digits, spaces, `-`, `'` and `"` is removed (no `:`, brackets,
  * parentheses or field prefixes reach arXiv); AND, OR and ANDNOT are removed, and so is every year from 2025 on; at most
- * MAX_TERMS terms. Each term is `all:<term>`, ANDed; the category clause and DATE_CLAUSE are always added.
- * `{ query, terms, cat }` or `{ error }`.
+ * MAX_TERMS terms. Each term is `(ti:<term> OR abs:<term>)`, ANDed; the category clause and DATE_CLAUSE are always
+ * added. `{ query, terms, cat }` or `{ error }`.
  */
 export function buildQuery(q, cat = 'all') {
   if (typeof q !== 'string') return { error: 'q (plain keywords) is required.' };
@@ -299,8 +341,7 @@ export function buildQuery(q, cat = 'all') {
     }
   });
   if (!terms.length) return { error: 'q has no searchable words (plain keywords; no years from 2025 on).' };
-  const clauses = terms.map(t => (t.includes(' ') ? `all:"${t}"` : `all:${t}`));
-  return { query: `${CAT_CLAUSE[cat]} AND (${clauses.join(' AND ')}) AND ${DATE_CLAUSE}`, terms, cat };
+  return { query: `${CAT_CLAUSE[cat]} AND (${terms.map(inTitleOrAbstract).join(' AND ')}) AND ${DATE_CLAUSE}`, terms, cat };
 }
 
 const apiUrl = params => `https://${API_HOST}/api/query?${new URLSearchParams(params).toString()}`;
@@ -435,10 +476,30 @@ export function onTopic(entry) {
   return MARKET_WORDS.some(w => new RegExp(`\\b${w}\\b`).test(text));
 }
 
-/** True when a v1's own title or abstract holds one of the query's terms (its words, or a phrase whole). */
+/** A word with an English plural folded ("options" -> "option", "volatilities" -> "volatility", "indexes" -> "index"),
+ * as arXiv's stemmer folds it; "analysis", "gross" and "bonus" stay. The same fold on both sides of a comparison. */
+export function fold(word) {
+  if (word.length > 4 && word.endsWith('ies')) return `${word.slice(0, -3)}y`;
+  if (word.length > 3 && /(?:ss|us|is)$/.test(word)) return word;
+  if (word.length > 4 && /(?:ches|shes|sses|xes|zes)$/.test(word)) return word.slice(0, -2);
+  if (word.length > 3 && word.endsWith('s')) return word.slice(0, -1);
+  return word;
+}
+
+/** `text` as folded words, spaced: lower case, apostrophes dropped, every other non-alphanumeric a space. */
+const foldedWords = text => String(text || '').toLowerCase().replace(/['\u2019]/g, '').split(/[^a-z0-9]+/).filter(Boolean).map(fold);
+
+/**
+ * True when EVERY query term (a word, or a phrase as consecutive words) is in the entry's own title or abstract, plurals
+ * folded. The test for a paper revised after 2024 that is served as an earlier version: arXiv matched its LATEST text,
+ * so a term only a later version holds must not choose it (review of #428, look-ahead F1: one term was enough before).
+ */
 export function matchesTerms(entry, terms) {
-  const text = `${entry.title} ${entry.summary}`.toLowerCase().replace(/[^a-z0-9]+/g, ' ');
-  return terms.some(t => text.includes(t));
+  const text = ` ${foldedWords(`${entry.title} ${entry.summary}`).join(' ')} `;
+  return Array.isArray(terms) && terms.length > 0 && terms.every(term => {
+    const words = foldedWords(term);
+    return words.length > 0 && text.includes(` ${words.join(' ')} `);
+  });
 }
 
 /** An admitted entry as the library answers it (`ITEM`), its texts scrubbed; null when a text cannot be. */
@@ -476,8 +537,9 @@ export function admitItem(item) {
 
 // --- full text ---------------------------------------------------------------------------------------------------------
 
-/** The page's first `<article ...>` element (LaTeXML's document), or null. */
-export function articleOf(html) {
+/** The page's first `<article ...>` element (LaTeXML's document), or null. `partial` (a page cut at MAX_PAGE_BYTES):
+ * an article that never closes is read to the end of what arrived. */
+export function articleOf(html, { partial = false } = {}) {
   let at = 0;
   for (;;) {
     const open = html.indexOf('<article', at);
@@ -485,7 +547,8 @@ export function articleOf(html) {
     const next = html.charCodeAt(open + 8);
     if (next === 62 || next === 32 || next === 10 || next === 9) {
       const close = html.lastIndexOf('</article>');
-      return close > open ? html.slice(open, close + 10) : null;
+      if (close > open) return html.slice(open, close + 10);
+      return partial ? html.slice(open) : null;
     }
     at = open + 1;
   }
@@ -513,17 +576,21 @@ export function mathAsTex(html) {
   }
 }
 
-const HEADING = /<h([23])\s[^>]*class="[^"]*ltx_title[^"]*"[^>]*>/g;
+//: A LaTeXML section heading's opening tag. No part of it may cross a `<` or `>`, so each attempt ends at the next tag
+//: and the scan is linear (review of #428, gateway F1: `[^>]*` made it super-linear, 3.4 s on 52 KB of malformed
+//: `<h2 ` openings, in the isolate that serves orders).
+const HEADING = /<h([23])\s[^<>]*class="[^"<>]*ltx_title[^"<>]*"[^<>]*>/g;
 
 /** `{ text, sections }` of an article: its readable text (at most MAX_TEXT_CHARS) and at most MAX_SECTIONS headings with
- * where each starts in the text. */
+ * where each starts in the text, from at most MAX_HEADINGS headings looked at. */
 export function articleText(article) {
   const html = mathAsTex(article);
   const text = cut(htmlToText(html).text, MAX_TEXT_CHARS);
   const sections = [];
   let cursor = 0;
+  let seen = 0;
   HEADING.lastIndex = 0;
-  for (let found = HEADING.exec(html); found && sections.length < MAX_SECTIONS; found = HEADING.exec(html)) {
+  for (let found = HEADING.exec(html); found && sections.length < MAX_SECTIONS && seen++ < MAX_HEADINGS; found = HEADING.exec(html)) {
     const close = html.indexOf(`</h${found[1]}>`, found.index);
     if (close === -1) break;
     const title = htmlToText(html.slice(found.index + found[0].length, close)).text.replace(/\s+/g, ' ').trim().slice(0, 120);
@@ -542,8 +609,9 @@ export function articleText(article) {
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 const inFlight = new Map();
 let requestSeq = 0;
-//: A request held longer than this no longer holds its place (a request the runtime ended never runs its `finally`).
-const IN_FLIGHT_STALE_MS = 120_000;
+//: A request held longer than this no longer holds its place (a request the runtime ended never runs its `finally`):
+//: past WORST_MS, as the web reader's (review of #428, gateway F7).
+export const IN_FLIGHT_STALE_MS = 60_000;
 
 /** Library requests this isolate serves now, stale places dropped. */
 export function inFlightNow(at = Date.now()) {
@@ -559,6 +627,7 @@ const defaultSleep = ms => new Promise(resolve => setTimeout(resolve, ms));
  */
 async function acquire(host, ctx) {
   for (;;) {
+    if (ctx.now() > ctx.deadline) return { busy: true, wait_ms: POLL_MS };  // no request starts past the budget
     const turn = await ctx.gate.libraryAcquire({ host, role: ctx.role });
     if (turn.go || turn.cap || turn.refused) return turn;
     const wait = Math.max(1, Number(turn.wait_ms) || POLL_MS);
@@ -567,16 +636,38 @@ async function acquire(host, ctx) {
   }
 }
 
+/** The API query `href` itself: the same host, path and query string (a redirect may not change the question). */
+export const sameQuery = href => {
+  const want = new URL(href);
+  return url => url.hostname === API_HOST && url.pathname === want.pathname && url.search === want.search;
+};
+
+/** arxiv.org's HTML of exactly `<base>v<n>` (a trailing slash allowed). */
+export const samePage = (base, n) => url => url.hostname === HTML_HOST
+  && (url.pathname === `/html/${base}v${n}` || url.pathname === `/html/${base}v${n}/`);
+
+/** ar5iv's rendering of `base`, unversioned or at a version no later than `latest` (the paper's confirmed latest). */
+export const sameAr5iv = (base, latest) => url => {
+  if (url.hostname !== AR5IV_HOST || !url.pathname.startsWith(`/html/${base}`)) return false;
+  const rest = url.pathname.slice(`/html/${base}`.length).replace(/\/$/, '');
+  if (rest === '') return true;
+  const match = /^v([1-9][0-9]{0,2})$/.exec(rest);
+  return Boolean(match) && Number(match[1]) <= latest;
+};
+
 /**
- * One upstream GET, paced: every hop (a redirect is another request) waits its turn, passes `checkLibraryUrl`, and
+ * One upstream GET, paced: every hop (a redirect is another request) passes `checkLibraryUrl` and `expect` (the URL is
+ * the item asked for: a redirect to another version, paper or query is refused, never fetched), waits its turn, and
  * releases its lease in a `finally`. `{ ok, status, text }` for a body of an accepted type; `{ status }` for any other
- * answer; `{ busy }`, `{ cap }` when it could not go; `{ failed }` when it went and nothing came back.
+ * answer; `{ busy }`, `{ cap }` when it could not go; `{ failed }` when it went and nothing came back; `{ refused }`
+ * for a URL outside the allowlist or not the item.
  */
-async function fetchPaced(raw, ctx, { types, limit }) {
+async function fetchPaced(raw, ctx, { types, limit, expect }) {
   let current = raw;
   for (let hop = 0; ; hop++) {
     const checked = checkLibraryUrl(current);
     if (!checked.ok) return { refused: checked.error };
+    if (typeof expect !== 'function' || !expect(checked.url)) return { refused: 'not the item asked for' };
     const turn = await acquire(checked.host, ctx);
     if (!turn.go) return turn;
     let status = 0;
@@ -617,12 +708,13 @@ async function fetchPaced(raw, ctx, { types, limit }) {
 
 /** Entries from the API for `url`: `{ entries }`, or `{ response }` (the refusal to answer). */
 async function apiEntries(url, ctx) {
-  const got = await fetchPaced(url, ctx, { types: ['application/atom+xml', 'application/xml', 'text/xml'], limit: MAX_FEED_BYTES });
+  const got = await fetchPaced(url, ctx, { types: ['application/atom+xml', 'application/xml', 'text/xml'], limit: MAX_FEED_BYTES,
+    expect: sameQuery(url) });
   if (got.busy) return { response: busy(got.wait_ms) };
   if (got.cap) return { response: json({ error: 'The library\'s upstream requests for today are spent.', cap: 'library_day' }, 429, { 'Retry-After': '3600' }) };
   if (got.refused) return { response: json({ error: `The library refused its own url: ${got.refused}.` }, 500) };
   if (got.failed) return { response: json({ error: `${got.failed}.`, upstream: true }, got.status === 502 ? 502 : 504) };
-  if (got.status === 429 || got.status === 503) return { response: json({ error: `arXiv answered ${got.status}: the library backs off.`, upstream: true, backoff: true }, 503) };
+  if (BACKOFF_STATUSES.includes(got.status)) return { response: json({ error: `arXiv answered ${got.status}: the library backs off.`, upstream: true, backoff: true }, 503) };
   if (got.text === undefined) return { response: json({ error: `arXiv answered ${got.status} (${got.type || 'no type'}).`, upstream: true }, 502) };
   if (got.cut) return { response: json({ error: 'arXiv\'s feed was larger than the library reads.', upstream: true }, 502) };
   const feed = parseFeed(got.text);
@@ -662,9 +754,69 @@ async function sha256(text) {
 const answer = (body, cache, status = 200) => json(body, status, { [CACHE_HEADER]: cache });
 const refuse = (status, refused, error) => json({ error, refused }, status);
 
+// --- a paper as it stood at the end of 2024 ----------------------------------------------------------------------------
+
+const pinned = entry => ({ base: entry.base, version: entry.version, title: entry.title, summary: entry.summary, published: entry.published,
+  updated: entry.updated, authors: entry.authors, categories: entry.categories, primary: entry.primary });
+
+/** A cached pinned version that can be served as it is. */
+const servable = (meta, base, n) => Boolean(meta) && meta.base === base && meta.version === n && judge(meta) === 'ok'
+  && typeof meta.title === 'string' && typeof meta.summary === 'string' && Array.isArray(meta.authors) && Array.isArray(meta.categories);
+
+/**
+ * The newest version of a paper dated before the cutoff, from `versions` (version number -> entry), walking down from
+ * version `n`: `{ entry }`; `{ missing: k }` when version k, which the walk needs, is not held; `{ refused }`
+ * ('no_reliable_date', or 'after_cutoff' when even v1 is) when a version's dates cannot be relied on. The first version
+ * that passes the rule is the one: every version above it is after the cutoff.
+ */
+export function newestBefore(versions, n) {
+  for (let k = n; k >= 1; k--) {
+    const entry = versions.get(k);
+    if (!entry) return { missing: k };
+    const verdict = judge(entry);
+    if (verdict === 'ok') return { entry };
+    if (verdict !== 'revised') return { refused: verdict };
+  }
+  return { refused: 'after_cutoff' };
+}
+
+/** The cached pinned metadata of version `n` of `base` when it can be served, else null. */
+async function cachedMeta(env, base, n) {
+  const meta = await kvGet(env, `m:${base}v${n}`);
+  return servable(meta, base, n) ? meta : null;
+}
+
+/** The paper's newest version before the cutoff from the cache (`e:`, then its `m:`), or null. */
+async function cachedBest(env, base) {
+  const best = await kvGet(env, `e:${base}`);
+  return best && Number.isInteger(best.version) && best.version >= 1 ? cachedMeta(env, base, best.version) : null;
+}
+
+/** Every version of `base` in `versions` that passes the rule kept as pinned metadata (`m:`), and `best`, the paper's
+ * newest version before the cutoff, as `e:` (it never changes: every version posted from now on is after the cutoff). */
+async function remember(env, base, versions, best) {
+  const writes = [...versions.values()].filter(entry => typeof entry.title === 'string' && judge(entry) === 'ok')
+    .map(entry => kvPut(env, `m:${base}v${entry.version}`, pinned(entry), TTL.meta));
+  if (best) writes.push(kvPut(env, `e:${base}`, { version: best.version }, TTL.best));
+  await Promise.all(writes);  // each write swallows its own failure (`kvPut`)
+}
+
+/** API entries grouped by paper: base -> (version -> pinned entry), for the papers in `bases` only. */
+function byPaper(entries, bases) {
+  const out = new Map();
+  for (const entry of entries) {
+    if (!entry.base || !entry.version || !bases.has(entry.base)) continue;
+    if (!out.has(entry.base)) out.set(entry.base, new Map());
+    out.get(entry.base).set(entry.version, pinned(entry));
+  }
+  return out;
+}
+
 // --- search ------------------------------------------------------------------------------------------------------------
 
-const WITHHELD = () => ({ after_cutoff: 0, revised_to_v1: 0, v1_unmatched: 0, off_topic: 0, no_date: 0, unresolved: 0 });
+//: What a search withheld, for the House's log only (it never reaches a model).
+const WITHHELD = () => ({ after_cutoff: 0, revised_earlier: 0, revised_unmatched: 0, off_topic: 0, no_date: 0, unresolved: 0,
+  too_many_versions: 0 });
 
 async function search(url, env, ctx) {
   const maxRaw = url.searchParams.get('max');
@@ -672,7 +824,9 @@ async function search(url, env, ctx) {
   if (!Number.isInteger(max) || max < 1 || max > 10) return refuse(400, 'query', 'max must be a whole number from 1 to 10.');
   const built = buildQuery(url.searchParams.get('q'), url.searchParams.get('cat') || 'all');
   if (built.error) return refuse(400, 'query', built.error);
-  const key = `s:${await sha256(JSON.stringify({ v: 1, terms: built.terms, cat: built.cat, max }))}`;
+  // v: 2, the review's fixes: titles and abstracts only, every term in a revised paper's served version, and the newest
+  // version before the cutoff served (answers cached under v: 1 are never read again).
+  const key = `s:${await sha256(JSON.stringify({ v: 2, terms: built.terms, cat: built.cat, max }))}`;
   const head = { query: built.terms, category: built.cat, last_day: LAST_DAY };
   const cached = await kvGet(env, key);
   if (cached && Array.isArray(cached.items)) {
@@ -683,39 +837,67 @@ async function search(url, env, ctx) {
   const found = await apiEntries(searchUrl(built.query, Math.min(2 * max, 20)), ctx);
   if (found.response) return found.response;
   const withheld = WITHHELD();
-  const ranked = [];  // entries in arXiv's order: admitted as they are, or waiting for their v1
+  const ranked = [];  // entries in arXiv's order: admitted as they are, or waiting for their newest version before the cutoff
+  const revised = new Map();  // a paper revised after 2024 -> its latest version's number
   for (const entry of found.entries) {
     const verdict = judge(entry);
-    if (verdict === 'ok') ranked.push({ entry });
-    else if (verdict === 'revised') ranked.push({ revised: entry.base });
-    else withheld[verdict === 'after_cutoff' ? 'after_cutoff' : 'no_date'] += 1;
-  }
-  const revised = [...new Set(ranked.filter(r => r.revised).map(r => r.revised))];
-  let firsts = new Map();
-  let complete = true;
-  if (revised.length) {
-    // ONE batched call for every revised entry's v1 (matched by id: the API answers in no fixed order).
-    const got = await apiEntries(idsUrl(revised.map(base => `${base}v1`)), ctx);
-    if (got.entries) {
-      firsts = new Map(got.entries.filter(e => e.version === 1).map(e => [e.base, e]));
+    if (verdict === 'ok') {
+      ranked.push({ entry });
+    } else if (verdict === 'revised') {
+      ranked.push({ revised: entry.base });
+      if (!revised.has(entry.base)) revised.set(entry.base, entry.version);
     } else {
-      complete = false;  // busy, capped or failed: the revised entries are left out and the answer is not cached
+      withheld[verdict === 'after_cutoff' ? 'after_cutoff' : 'no_date'] += 1;
+    }
+  }
+  // Each revised paper is served as it stood at the end of 2024, as a read serves it: its newest version before the
+  // cutoff, from the cache (`e:`) or from ONE batched call for the versions below every such paper's latest (matched by
+  // id: the API answers in no fixed order).
+  const chosen = new Map();  // base -> { entry } or { withheld: <why> }
+  const ask = [];
+  for (const [base, n] of revised) {
+    const hit = await cachedBest(env, base);
+    if (hit) chosen.set(base, { entry: hit });
+    else if (n < 2) chosen.set(base, { withheld: 'no_date' });  // a v1 dated after its own posting: unreliable
+    else if (n - 1 > MAX_VERSIONS || ask.length + n - 1 > MAX_BATCH_IDS) chosen.set(base, { withheld: 'too_many_versions' });
+    else for (let k = 1; k < n; k++) ask.push(`${base}v${k}`);
+  }
+  let complete = true;
+  if (ask.length) {
+    const got = await apiEntries(idsUrl(ask), ctx);
+    if (got.entries) {
+      const papers = byPaper(got.entries, revised);
+      for (const [base, n] of revised) {
+        if (chosen.has(base)) continue;
+        const versions = papers.get(base) || new Map();
+        const walk = newestBefore(versions, n - 1);
+        if (walk.missing) {
+          chosen.set(base, { withheld: 'unresolved' });
+          complete = false;  // arXiv left out a version that exists: ask again another time
+          continue;
+        }
+        chosen.set(base, walk.entry ? { entry: walk.entry } : { withheld: walk.refused === 'after_cutoff' ? 'after_cutoff' : 'no_date' });
+        await remember(env, base, versions, walk.entry);
+      }
+    } else {
+      complete = false;  // busy, capped or failed: the revised papers are left out and the answer is not cached
     }
   }
   const items = [];
   for (const row of ranked) {
     let entry = row.entry;
     if (row.revised) {
-      entry = firsts.get(row.revised);
-      if (!entry || judge(entry) !== 'ok') {
-        withheld[complete ? 'after_cutoff' : 'unresolved'] += 1;
+      const pick = chosen.get(row.revised) || { withheld: 'unresolved' };
+      if (!pick.entry) {
+        withheld[pick.withheld] += 1;
         continue;
       }
-      if (!matchesTerms(entry, built.terms)) {
-        withheld.v1_unmatched += 1;
+      if (!matchesTerms(pick.entry, built.terms)) {
+        withheld.revised_unmatched += 1;  // found only through words its own version lacks
         continue;
       }
-      withheld.revised_to_v1 += 1;
+      withheld.revised_earlier += 1;
+      entry = pick.entry;
     }
     if (!onTopic(entry)) {
       withheld.off_topic += 1;
@@ -735,72 +917,96 @@ async function search(url, env, ctx) {
 
 // --- read --------------------------------------------------------------------------------------------------------------
 
-const pinned = entry => ({ base: entry.base, version: entry.version, title: entry.title, summary: entry.summary, published: entry.published,
-  updated: entry.updated, authors: entry.authors, categories: entry.categories, primary: entry.primary });
-
-/** A cached pinned version that can be served as it is. */
-const servable = (meta, base, n) => Boolean(meta) && meta.base === base && meta.version === n && judge(meta) === 'ok'
-  && typeof meta.title === 'string' && typeof meta.summary === 'string' && Array.isArray(meta.authors) && Array.isArray(meta.categories);
+const knownLatest = latest => Boolean(latest) && Number.isInteger(latest.version) && latest.version >= 1
+  && stampMs(latest.updated) !== null && stampMs(latest.published) !== null;
 
 /**
- * The versions a read needs: the paper's latest (its number and dates: `latest`), and in `versions` the version asked
- * for (or the latest) and, when that one is after the cutoff, v1. From the cache (`l:` and `m:` keys) when it holds them,
- * else from ONE API call (`id_list=<base>,<base>v<asked>,<base>v1`, matched by id). `fresh` wants a `latest` read within
- * LATEST_FRESH_MS. `{ latest, versions, cached }` or `{ response }`.
+ * What a read needs of paper `parsed.base`: its latest version (`latest`: number, dates, when read), in `versions` the
+ * version named (a read that names one), and in `best` the newest version before the cutoff (an unversioned read). From
+ * the cache (`l:`, `m:`, `e:`) when it holds them, else from the API: ONE call (`id_list=<base>,<base>v<named, or 1>`,
+ * matched by id), and for an unversioned read of a paper revised after 2024 with three or more versions, ONE more for
+ * the versions between. `{ latest, versions, best, cached }` or `{ response }`.
  */
-async function versionsOf(parsed, env, ctx, { fresh = false } = {}) {
-  const latest = await kvGet(env, `l:${parsed.base}`);
-  const known = latest && Number.isInteger(latest.version) && latest.version >= 1 && stampMs(latest.updated) !== null
-    && stampMs(latest.published) !== null && (!parsed.version || parsed.version <= latest.version)
-    && (!fresh || ctx.now() - Number(latest.at) < LATEST_FRESH_MS);
-  if (known) {
-    const target = parsed.version || latest.version;
-    const meta = await kvGet(env, `m:${parsed.base}v${target}`);
-    if (servable(meta, parsed.base, target)) return { latest, versions: new Map([[target, meta]]), cached: true };
-    if (target === latest.version && stampMs(latest.updated) >= CUTOFF_MS) {
-      const first = await kvGet(env, `m:${parsed.base}v1`);
-      if (servable(first, parsed.base, 1)) {
-        const stub = { base: parsed.base, version: target, published: latest.published, updated: latest.updated };
-        return { latest, versions: new Map([[target, stub], [1, first]]), cached: true };
-      }
+async function versionsOf(parsed, env, ctx) {
+  const { base } = parsed;
+  const latest = await kvGet(env, `l:${base}`);
+  if (knownLatest(latest)) {
+    const stub = { base, version: latest.version, published: latest.published, updated: latest.updated };
+    const versions = new Map([[latest.version, stub]]);
+    if (parsed.version) {
+      // A version past the latest known does not exist, or was posted since (so after the cutoff): no such version.
+      if (parsed.version > latest.version) return { latest, versions, cached: true };
+      const meta = await cachedMeta(env, base, parsed.version);
+      if (meta) return { latest, versions: versions.set(parsed.version, meta), cached: true };
+      if (parsed.version === latest.version && judge(stub) === 'revised') return { latest, versions, cached: true };
+      const best = await kvGet(env, `e:${base}`);
+      if (best && Number.isInteger(best.version) && parsed.version > best.version) return { latest, versions, cached: true };
+    } else {
+      const best = judge(stub) === 'ok' ? await cachedMeta(env, base, latest.version) : await cachedBest(env, base);
+      if (best) return { latest, versions: versions.set(best.version, best), best, cached: true };
     }
   }
-  const ids = [...new Set([parsed.base, ...[parsed.version, 1].filter(Boolean).map(n => `${parsed.base}v${n}`)])];
-  const got = await apiEntries(idsUrl(ids), ctx);
-  if (got.api_error) return { response: refuse(404, 'not_found', `arXiv has no paper ${parsed.base}.`) };
+  const got = await apiEntries(idsUrl([...new Set([base, `${base}v${parsed.version || 1}`])]), ctx);
+  if (got.api_error) return { response: NO_PAPER(base) };
   if (got.response) return { response: got.response };
-  const mine = got.entries.filter(e => e.base === parsed.base && e.version);
-  if (!mine.length) return { response: refuse(404, 'not_found', `arXiv has no paper ${parsed.base}.`) };
-  const top = mine.reduce((a, b) => (b.version > a.version ? b : a));
+  const versions = byPaper(got.entries, new Set([base])).get(base) || new Map();
+  if (!versions.size) return { response: NO_PAPER(base) };
+  const top = versions.get(Math.max(...versions.keys()));
   const newest = { version: top.version, updated: top.updated, published: top.published, at: ctx.now() };
-  await kvPut(env, `l:${parsed.base}`, newest, TTL.latest);
-  const versions = new Map();
-  for (const entry of mine) {
-    versions.set(entry.version, pinned(entry));
-    if (judge(entry) === 'ok') await kvPut(env, `m:${parsed.base}v${entry.version}`, pinned(entry), TTL.meta);
+  await kvPut(env, `l:${base}`, newest, TTL.latest);
+  let best = null;
+  if (!parsed.version) {
+    let walk = newestBefore(versions, top.version);
+    if (walk.missing) {
+      // Revised after 2024, with versions between v1 and the latest: ONE more call for them (the newest MAX_VERSIONS).
+      const need = [];
+      for (let k = Math.max(2, top.version - MAX_VERSIONS); k < top.version; k++) if (!versions.has(k)) need.push(`${base}v${k}`);
+      const more = need.length ? await apiEntries(idsUrl(need), ctx) : { entries: [] };
+      if (more.response) return { response: more.response };
+      for (const [n, entry] of byPaper(more.entries, new Set([base])).get(base) || []) if (n < top.version) versions.set(n, entry);
+      walk = newestBefore(versions, top.version);
+    }
+    best = walk.entry || null;
   }
-  return { latest: newest, versions, cached: false };
+  await remember(env, base, versions, best);
+  return { latest: newest, versions, best, cached: false };
+}
+
+/** The paper's latest version read from arXiv now (ONE call, `id_list=<base>`), kept as `l:`; null when it cannot be. */
+async function confirmLatest(base, env, ctx) {
+  const got = await apiEntries(idsUrl([base]), ctx);
+  const versions = got.entries ? byPaper(got.entries, new Set([base])).get(base) : null;
+  if (!versions || !versions.size) return null;
+  const top = versions.get(Math.max(...versions.keys()));
+  const newest = { version: top.version, updated: top.updated, published: top.published, at: ctx.now() };
+  await kvPut(env, `l:${base}`, newest, TTL.latest);
+  return newest;
 }
 
 const AFTER = () => refuse(403, 'after_cutoff', 'The library holds research posted before its cutoff only.');
 const UNRELIABLE = () => refuse(403, 'no_reliable_date', 'That item\'s dates cannot be relied on.');
+const NO_PAPER = base => refuse(404, 'not_found', `arXiv has no paper ${base}.`);
+//: A version that does not exist and a version dated after the cutoff get this same answer (review of #428, look-ahead F3).
+const NO_VERSION = parsed => refuse(404, 'not_found', `arXiv has no version ${parsed.version} of ${parsed.base}.`);
 
 /**
- * The version a read serves: the one asked for (or the latest) when it passes the rule, else v1 when v1 does (only the
- * pinned v1). `{ entry, instead }` or `{ response }`.
+ * The version a read serves: a named version only as itself and only when it passes the rule (one after the cutoff is
+ * `NO_VERSION`, exactly as one that does not exist); an unversioned read, the paper's newest version before the cutoff
+ * (`instead`: a later version exists, for the House's log only). `{ entry, instead }` or `{ response }`.
  */
 function choose(parsed, found) {
-  const target = parsed.version || found.latest.version;
-  const entry = found.versions.get(target);
-  if (!entry) return { response: refuse(404, 'not_found', `arXiv has no version ${target} of ${parsed.base}.`) };
-  const verdict = judge(entry);
-  if (verdict === 'ok') return { entry, instead: false };
-  if (verdict === 'no_reliable_date') return { response: UNRELIABLE() };
-  if (verdict === 'after_cutoff') return { response: AFTER() };
-  const first = found.versions.get(1);
-  const firstVerdict = first ? judge(first) : 'after_cutoff';
-  if (firstVerdict === 'ok' && target !== 1) return { entry: first, instead: true };
-  return { response: firstVerdict === 'no_reliable_date' ? UNRELIABLE() : AFTER() };
+  const n = found.latest.version;
+  if (parsed.version) {
+    const entry = found.versions.get(parsed.version);
+    const verdict = entry ? judge(entry) : 'missing';
+    if (verdict === 'ok') return { entry, instead: false };
+    if (verdict === 'no_reliable_date') return { response: UNRELIABLE() };
+    if (verdict === 'after_cutoff') return { response: AFTER() };
+    return { response: NO_VERSION(parsed) };
+  }
+  const walk = found.best ? { entry: found.best } : newestBefore(found.versions, n);
+  if (walk.entry) return { entry: walk.entry, instead: walk.entry.version !== n };
+  return { response: walk.refused === 'after_cutoff' ? AFTER() : UNRELIABLE() };
 }
 
 /**
@@ -821,7 +1027,7 @@ export function servedText(source, text, sections) {
   }
   const found = [];
   let cursor = 0;
-  for (const section of sections) {
+  for (const section of sections.slice(0, MAX_SECTIONS)) {
     const title = source === 'ar5iv' ? String(section?.title || '') : scrubDates(String(section?.title || ''));
     const start = title ? clean.indexOf(title, cursor) : -1;
     if (start === -1) continue;
@@ -834,10 +1040,17 @@ export function servedText(source, text, sections) {
 const BUSY_NOTE = 'the full text was not fetched now (the library is busy); ask again later';
 const FAILED_NOTE = 'the full text could not be read now; ask again later';
 
+/** True when a fetch's outcome is lasting: the page is there (2xx) or is not (404, 410). A fetch that did not go, did
+ * not come back, was refused, or met another answer (a 403 or 451 is how a blocked address is told: review of #428,
+ * gateway F3) says nothing lasting, so "no text" is not remembered for it. */
+const settled = got => got.status === 404 || got.status === 410 || (got.status >= 200 && got.status < 300);
+
 /**
  * `{ source, text, sections }` of the pinned version `entry`, or `{ source: 'none', note }`. arXiv's own HTML first (a
- * version dated from HTML_SINCE_MS on), then ar5iv only when `entry` is the paper's latest version and that latest is
- * before the cutoff, confirmed within LATEST_FRESH_MS. "No text" is remembered (`t0:`) only when it is certain.
+ * version dated from HTML_SINCE_MS on; a page cut at MAX_PAGE_BYTES is read to its cut, as it is pinned), then ar5iv
+ * only when `entry` is the paper's latest version and that latest is before the cutoff, confirmed within
+ * LATEST_FRESH_MS (a whole page only: ar5iv is not pinned, so its every word is scanned). "No text" is remembered
+ * (`t0:`) only when it is certain.
  */
 async function textOf(entry, found, env, ctx) {
   const key = `${entry.base}v${entry.version}`;
@@ -851,8 +1064,11 @@ async function textOf(entry, found, env, ctx) {
   let certain = true;
   let note = null;
   if (stampMs(entry.updated) >= HTML_SINCE_MS) {
-    const got = await fetchPaced(`https://${HTML_HOST}/html/${key}`, ctx, { types, limit: MAX_PAGE_BYTES });
-    const article = got.ok && !got.cut ? articleOf(got.text) : null;
+    const got = await fetchPaced(`https://${HTML_HOST}/html/${key}`, ctx, { types, limit: MAX_PAGE_BYTES,
+      expect: samePage(entry.base, entry.version) });
+    // A page over MAX_PAGE_BYTES is read to where it was cut and kept (review of #428, gateway F5: it was fetched again,
+    // 3 MB and a 15 s turn, on every read, for no text).
+    const article = got.ok ? articleOf(got.text, { partial: Boolean(got.cut) }) : null;
     if (article) {
       const raw = articleText(article);
       const served = servedText('arxiv_html', raw.text, raw.sections);
@@ -860,7 +1076,7 @@ async function textOf(entry, found, env, ctx) {
         await kvPut(env, `t:${key}`, { source: 'arxiv_html', ...raw }, TTL.text);
         return { source: 'arxiv_html', ...served };
       }
-    } else if (got.status !== 404) {
+    } else if (!settled(got)) {
       certain = false;
       note = got.busy || got.cap ? BUSY_NOTE : FAILED_NOTE;
     }
@@ -868,15 +1084,15 @@ async function textOf(entry, found, env, ctx) {
   let latest = found.latest;
   if (entry.version === latest.version && stampMs(latest.updated) < CUTOFF_MS && ctx.now() - Number(latest.at) >= LATEST_FRESH_MS) {
     // ar5iv renders SOME version of the paper: the latest is confirmed first (a newer one after the cutoff ends ar5iv).
-    const again = await versionsOf({ base: entry.base, version: null }, env, ctx, { fresh: true });
-    latest = again.latest || null;
+    latest = await confirmLatest(entry.base, env, ctx);
     if (!latest) {
       certain = false;
       note = note || BUSY_NOTE;
     }
   }
   if (latest && entry.version === latest.version && stampMs(latest.updated) < CUTOFF_MS) {
-    const got = await fetchPaced(`https://${AR5IV_HOST}/html/${entry.base}`, ctx, { types, limit: MAX_PAGE_BYTES });
+    const got = await fetchPaced(`https://${AR5IV_HOST}/html/${entry.base}`, ctx, { types, limit: MAX_PAGE_BYTES,
+      expect: sameAr5iv(entry.base, latest.version) });
     const article = got.ok && !got.cut ? articleOf(got.text) : null;
     if (article) {
       const raw = articleText(article);
@@ -885,7 +1101,7 @@ async function textOf(entry, found, env, ctx) {
         await kvPut(env, `t:${key}`, { source: 'ar5iv', ...raw }, TTL.text);
         return { source: 'ar5iv', ...served };
       }
-    } else if (got.busy || got.cap || got.failed || got.status === 429 || got.status >= 500) {
+    } else if (!settled(got)) {
       certain = false;
       note = note || (got.busy || got.cap ? BUSY_NOTE : FAILED_NOTE);
     }
@@ -942,7 +1158,13 @@ export async function libraryRoute(request, env, { gate, fetcher = fetch, now = 
   if (request.method !== 'GET') return json({ error: 'Method not allowed.' }, 405, { Allow: 'GET' });
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, '');
-  if (path === PATHS.health) return json({ library: await gate.libraryStatus() });
+  if (path === PATHS.health) {
+    try {
+      return json({ library: await gate.libraryStatus() });
+    } catch {
+      return json({ library: { error: 'library status unreadable' } }, 503);
+    }
+  }
   if (inFlightNow() >= MAX_IN_FLIGHT) return busy(5000);
   const role = url.searchParams.get('role');
   const ctx = { gate, fetcher, now, sleep, deadline: now() + REQUEST_BUDGET_MS, role: /^[a-z0-9][a-z0-9_-]{0,31}$/.test(role || '') ? role : null };
@@ -950,6 +1172,9 @@ export async function libraryRoute(request, env, { gate, fetcher = fetch, now = 
   inFlight.set(id, Date.now());
   try {
     return path === PATHS.search ? await search(url, env, ctx) : await read(url, env, ctx);
+  } catch (error) {
+    // A library fault is this request's answer and nothing more: never an unhandled error in the isolate that serves orders.
+    return json({ error: `The library failed (${String(error?.name || 'Error').slice(0, 40)}).` }, 500);
   } finally {
     inFlight.delete(id);
   }

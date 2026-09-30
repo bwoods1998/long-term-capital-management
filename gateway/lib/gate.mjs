@@ -644,8 +644,8 @@ export function createGate({ store, env = {}, now = Date.now }) {
      */
     libraryRow(at = now()) {
       const day = iso(at).slice(0, 10);
-      const row = read(store, LIBRARY_KEY, {});
       const plain = value => (value && typeof value === 'object' && !Array.isArray(value) ? value : {});
+      const row = plain(read(store, LIBRARY_KEY, {}));  // a row of another shape reads as none, never a throw
       const today = row.day === day;
       return {
         day,
@@ -692,14 +692,16 @@ export function createGate({ store, env = {}, now = Date.now }) {
       return { go: true, id, upstream: row.upstream + 1 };
     },
 
-    /** The lease `id` given back; a 429 or 503 from arXiv starts a backoff of at least BACKOFF_MS (its Retry-After when longer). */
+    /** The lease `id` given back; a 403, 429 or 503 from arXiv (`library.BACKOFF_STATUSES`) starts a backoff of at least
+     * BACKOFF_MS (its Retry-After when longer). */
     libraryRelease({ id, status = 0, retry_after_ms = null } = {}) {
       const at = now();
       const row = this.libraryRow(at);
-      const stored = read(store, LIBRARY_KEY, {});
-      const mine = Boolean(stored.inflight) && stored.inflight.id === id;
+      const raw = read(store, LIBRARY_KEY, {});
+      const stored = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+      const mine = Boolean(stored.inflight) && typeof stored.inflight === 'object' && stored.inflight.id === id;
       const next = { ...stored, inflight: mine ? null : stored.inflight };
-      if (status === 429 || status === 503) {
+      if (library.BACKOFF_STATUSES.includes(status)) {
         const pause = Math.max(Number(retry_after_ms) || 0, library.BACKOFF_MS);
         next.backoff_until = Math.max(row.backoff_until, at + pause);
         next.backoff_why = `arXiv answered ${status} at ${iso(at)}`;
@@ -708,13 +710,15 @@ export function createGate({ store, env = {}, now = Date.now }) {
       return { ok: mine };
     },
 
-    /** The `library` block of /v1/health and /v1/research/health. */
+    /** The `library` block of /v1/health and /v1/research/health. A stored field of the wrong shape reads as null (a
+     * lease without its start once made `iso` throw, and /v1/health with it: review of #428, gateway F2). */
     libraryStatus(at = now()) {
       const row = this.libraryRow(at);
+      const stamp = ms => (Number.isFinite(ms) && Math.abs(ms) <= 8.64e15 ? iso(ms) : null);
       return {
         day: row.day, upstream: row.upstream, cap: library.dayCap(env), by_host: row.by_host, by_role: row.by_role,
-        in_flight: row.inflight ? { host: row.inflight.host, since: iso(Number(row.inflight.at)) } : null,
-        backoff_until: row.backoff_until > at ? iso(row.backoff_until) : null, backoff_why: row.backoff_until > at ? row.backoff_why : null,
+        in_flight: row.inflight ? { host: row.inflight.host, since: stamp(Number(row.inflight.at)) } : null,
+        backoff_until: row.backoff_until > at ? stamp(row.backoff_until) : null, backoff_why: row.backoff_until > at ? row.backoff_why : null,
         spacing_ms: library.SPACING_MS, served_through: library.LAST_DAY,
         terms: 'arXiv API: at most one request every 3 s and one connection at a time, across all our machines; arxiv.org robots.txt: Crawl-delay 15',
       };
@@ -822,8 +826,16 @@ export function createGate({ store, env = {}, now = Date.now }) {
           const row = this.webFetchDay(at);
           return { day: row.day, fetches: row.count, cap: webFetchDayCap, by_agent: row.by_agent };
         })(),
-        // The research library's pace and day (Sept 29, 2026): read from this object's own row, no upstream call.
-        library: this.libraryStatus(at),
+        // The research library's pace and day (Sept 29, 2026): read from this object's own row, no upstream call. A fault
+        // here is the block's own answer, never /v1/health's: the House reads a failed health as the kill switch
+        // engaged, so a library row must never halt trading (review of #428, gateway F2).
+        library: (() => {
+          try {
+            return this.libraryStatus(at);
+          } catch {
+            return { error: 'library status unreadable' };
+          }
+        })(),
         watchdog: {
           last_check_at: watch.last_check_at ?? null,
           last_action: watch.last_action ?? null,

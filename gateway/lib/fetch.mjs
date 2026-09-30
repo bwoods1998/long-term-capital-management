@@ -133,6 +133,9 @@ export function ownDomains(host) {
   return name.endsWith('.workers.dev') && labels.length > 3 ? [name, labels.slice(-3).join('.')] : [name];
 }
 
+//: Hosts the web reader refuses because the research library reads them (arxiv.org and every subdomain; ar5iv.org).
+export const ARXIV_NAMES = ['arxiv.org', 'ar5iv.org'];
+
 /**
  * The URL rules. Answers `{ url }` (a parsed URL, fragment dropped) or `{ error }` naming the rule.
  * Checked on the request and again on every redirect's target.
@@ -169,6 +172,11 @@ export function checkUrl(raw, own = []) {
     return { error: `The url names a local or internal host (${host}).` };
   }
   if (!host.includes('.')) return { error: `The url names a host with no domain (${host}).` };
+  // arXiv is read only through the research library (lib/library.mjs, GET /v1/research/*): its date rule, and arXiv's
+  // pace, which binds "all of the machines under your control as a whole" (review of #428, gateway F4).
+  if (ARXIV_NAMES.some(name => host === name || host.endsWith('.' + name))) {
+    return { error: 'arXiv is read through the research library (/v1/research), not the web reader.' };
+  }
   if (own.some(domain => host === domain || host.endsWith('.' + domain))) {
     return { error: 'The url names the gateway\'s own domain.' };
   }
