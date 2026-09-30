@@ -165,6 +165,7 @@ class Instance:
     stats: dict = field(default_factory=dict)
     error_since: float | None = None
     retried_at: float = float("-inf")
+    structure: str = ""          # the family's DECLARED structure (its swarm row's), read at each sync; "" until one is read
 
 
 def ny(t: float) -> dt.datetime:
@@ -703,7 +704,9 @@ class OptionsLive:
                 if band in ("probe", "sized") and self._real_on() and self._real_eligible(fid):
                     wanted[f"{fid}@{version}:r"] = (dict(row, band=band), "real", False)
             elif (band == "gym" and row.get("validation_passed") and not row.get("holdout_passed") and self._real_on()
-                  and self.table.tuition_day > 0 and row.get("structure") in self.table.real_types):
+                  and self.table.tuition_day > 0 and self.table.family_real(str(row.get("structure") or ""))):
+                # Tuition only for a family whose every order type is real: a `long_single` needs both `long_call` and
+                # `long_put` among the real types (`Table.family_real`); each of its orders is still checked by its type.
                 wanted[f"{fid}@{version}:t"] = (row, "real", True)
         if self.house_test is not None:
             # The House live test (`league/live/house_test.py`): its own real instance while its switch, real money, its
@@ -733,7 +736,8 @@ class OptionsLive:
             if inst is None:
                 inst = Instance(key, str(row["family"]), int(row.get("version") or 0), kind, str(row.get("code") or ""),
                                 dict(row.get("params") or {}), str(row.get("run_sha") or ""), str(row.get("band") or ""), tuition,
-                                observe=key.endswith(":o") and row.get("observe") is True and kind == "shadow" and not tuition)
+                                observe=key.endswith(":o") and row.get("observe") is True and kind == "shadow" and not tuition,
+                                structure=str(row.get("structure") or ""))
                 if key.endswith(":o") != inst.observe or (inst.observe and not inst.code):
                     continue  # an observe key is only ever an observe row's, with its program
                 if inst.observe:
@@ -751,6 +755,7 @@ class OptionsLive:
                                               "tuition": tuition, "observe": inst.observe, "state": "started"}, agent=inst.family)
             else:
                 inst.band = str(row.get("band") or inst.band)
+                inst.structure = str(row.get("structure") or inst.structure)
                 if inst.mode != "live" and kind == "real" and not inst.fatal:
                     inst.mode = "live"
                     self._persist_instance(inst)
@@ -2340,6 +2345,11 @@ class OptionsLive:
         unit_intent = {k: v for k, v in intent.items() if k not in ("qty", "max_loss")}
         unit_intent["qty"] = 1
         order = L.resolve_open(unit_intent, snap, rules, buying_power=float("inf"))
+        # A family that DECLARED a structure that is not an order type (`M.DECLARED_TYPES`: a `long_single`) opens only
+        # the types it declared for real (review of #425); every other family's orders are judged by their own type alone.
+        declared = M.DECLARED_TYPES.get(inst.structure)
+        if declared is not None and order.type not in declared:
+            return f"a {inst.structure} family opens only {' or '.join(declared)} for real, never {order.type}"
         equity_now = M.D(self.account_row["equity"])
         sizing = self.sizing_equity()
         if sizing is None:

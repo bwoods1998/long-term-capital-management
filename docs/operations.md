@@ -249,6 +249,9 @@ cd /workspace/previous && /workspace/.venv/bin/python -m league.watchdog rollbac
   real account: the positions would sit unmanaged) or lacks the long-single code (it cannot close a long
   call or put; a same-day long call could be exercised into 100 shares the account cannot carry).
   `--force-real-risk` overrides it. **Close the real positions, or roll forward, before a rollback.**
+- **`long_single` (#425).** Once any `long_single` family exists, alive or retired, a release before #425
+  fails every architect pass (its coverage has no `long_single` row: a caught KeyError, so no family is
+  born) and refuses forks of it. Roll forward, or hotfix, rather than roll back past #425.
 - **The gateway:** `npx wrangler rollback` in `gateway/`. **The site:** the same in
   `~/Work/personal-site`.
 
@@ -475,6 +478,24 @@ applies), 100% of equity opened a day, 250 of 300 orders open.
 **The single-leg paper proof**: once the vertical's has passed, the practice account opens and closes a
 1-lot SPY call about 1-2% out of the money (nearest expiry at least a day out, at the natural, held two
 minutes) with single-leg orders. Real long calls and puts open only after it (`paper_proof_single`).
+
+**Two-sided single families (`long_single`, not yet released)**: a family may declare `long_single`, one
+program whose every open is one `long_call` or one `long_put` (one leg, long), the side chosen by its rule,
+in place of a call/put twin pair. It is a declared structure, never an order type: the money table's
+`real_types`, the money digest (`a3e2aa7c`) and the gateway's `OPTION_STRUCTURES_REAL` are unchanged, and
+none of them may name it. The live path maps it to real (tuition, Probe, Sized, the site's `real_structure`
+check) only while BOTH `long_call` and `long_put` are real types (`money.order_types`, `Table.family_real`,
+`Table.family_allowed`); drop either and the family is held at Candidate with the reason recorded. Every
+order it sends still carries its own type and is checked (`type_allowed`, the single-leg paper proof, the
+gateway) and sized by its own unit, exactly as a one-sided family's. Its declared type is enforced on real
+opens only: the live path refuses a real open of any other type from it ("a long_single family opens only
+long_call or long_put for real, never ..."; `money.DECLARED_TYPES`, the instance's `structure`, read at each
+sync). The Gym and the shadow book never read a family's structure: there, as for every family, each order is
+judged by its own type, and a one-sided `long_call` or `long_put` family is unchanged everywhere. Its forward
+record, D2 and the drift screen are any family's (it is only as drift-neutral as its side rule: the screen
+charges whatever net exposure it holds). The site shows the agent's structure as null (the site's schema has only the
+eleven order types) and each of its positions as `long_call` or `long_put`. The Gym is unchanged: it never
+reads a family's structure, so its bundle version does not move.
 
 **The practice league** (the observe band; the league since Sept 29, 2026): every alive Gym-band family with a
 validated version, or with an eligible Train version (the version the tournament validates next, not demoted),
@@ -1035,3 +1056,20 @@ by default), and "strategist" must be in `claude.roles` (the default; the box's 
 it there, or the strategist runs on Sail's small packet and its event says so). The architect has no daily Claude line
 of its own unless `claude.role_usd_day["architect"]` is set: with the digest each call carries ~85k more input tokens.
 Each run is a private `swarm.strategist` event. Emptying `architect.agenda_locked` returns to `architect.agenda` as before.
+
+Two-sided singles (not yet released; `league/swarm/store.py`, `architect.py`). The architect's structure types include
+`long_single` (one program that buys calls or puts by its rule; a proposal states the side rule and why its calls
+and puts balance, since the drift screen charges whatever net exposure it holds), and its prompt asks for one
+`long_single` family where it would have proposed a call/put twin pair. `admit` enforces it: a `long_call` or `long_put`
+is refused while a living family on the same roots with the same idea (`same_idea`, one born earlier in the same pass
+too) is a `long_single` or the other side. In GAPS a single option's one gap is `long_single`, covered only by a living
+`long_single` family on the root; the one-sided `long_call` and `long_put` are never gaps (still admitted when proposed,
+on other roots or another idea), and the coverage table has a `long_single` row. A `long_single` and the singles it
+sends are one slice for lineage matching (`same_slice`): the same idea as a dead call or put twin on the same roots
+continues its lineage and joins BOTH twins' (`SwarmStore.link_lineages`: the other twin of its idea or its parent's,
+dead or alive, so their trials, looks and validated versions all count); a `long_single` of a living twin's idea
+continues that twin's lineage and joins the other's; another idea on the slice counts the newest dead lineage of each
+type there, its own first (`slice_priors`, stored as `prior_lineage` and `prior_lineages`; every other structure keeps
+its one `prior_lineage`, as before); and identical code links their lineages. So relabeling a program two-sided buys no
+trials or looks. Its graveyard reads include its singles' lessons. The researcher, the reviewer, the auditor and the diagnostician read what its orders are (`structure_text`);
+every other family's prompts are byte-identical.
