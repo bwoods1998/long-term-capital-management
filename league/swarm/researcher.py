@@ -1211,7 +1211,13 @@ class Researcher:
             parts.append("Your notebook (latest):\n" + "\n".join(f"- {diagnostics.scrub(n['text'])[:300]}" for n in notes))
         may_retire = self.can_retire(fam)
         dead = self.dead(fam) if may_retire else None
-        if dead:
+        from .practice import kept_version
+        if kept_version(self.store, str(fam["id"]), now=self.clock()) is not None:
+            # THE COHORT KEEP (L1, `tournament.py`): the tournament holds the family alive while its practice cohort runs,
+            # so idleness is not urged as a reason to retire it; the retire tool stays offered (`can_retire`).
+            parts.append("Your family is in a live practice cohort, so the tournament keeps it alive while the cohort runs: "
+                         "being idle or holding is no reason to retire it now.")
+        elif dead:
             parts.append(f"Your family {dead}. If its mechanism is dead, call retire with your reason when the tool is offered "
                          "rather than re-running a placeholder: its slot goes to a new idea.")
         elif may_retire and self.hold_offer(fam):
