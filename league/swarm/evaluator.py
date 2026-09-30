@@ -19,6 +19,8 @@ SELECTION_KEYS = (
     "robustness", "robust_failed", "robust_why", "drift_failed", "validation_version", "validation_image",
     "validation_bundle", "validation_line", "validation_view", "validation_numbers", "typical_max_loss_usd",
     "typical_by_version", "gate_ready", "review", "gated_sha", "gate_outcome",
+    # The incubator's facts (release B2, `incubator.py`): its Train and drift marks and its reviews, evaluator-bound.
+    "train_passed", "incubator_reviews",
 )
 
 
@@ -101,8 +103,8 @@ def adopt(store: Any, expected: Mapping[str, Any] | None) -> dict[str, Any]:
                                 validated_version=None, stall=0, since_val_revisions=0, since_val_trials=0)
             cleared = {key: None for key in SELECTION_KEYS}
             cleared.update(train_candidates=[], robustness={}, robust_failed=[], robust_why={}, drift_failed={},
-                           gate_ready=False, dormant_cycles=0, span_trials=int(fam.get("trials") or 0),
-                           evaluator=expected, previous_evaluator_selection=archived)
+                           train_passed={}, incubator_reviews={}, gate_ready=False, dormant_cycles=0,
+                           span_trials=int(fam.get("trials") or 0), evaluator=expected, previous_evaluator_selection=archived)
             if fam["band"] != "gym" and band_current:
                 # Sizing of a genuinely unchanged, already qualified semantic engine remains
                 # attached to its banded version. Changed semantics are blocked by the entry proof.

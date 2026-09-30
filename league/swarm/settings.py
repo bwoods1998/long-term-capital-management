@@ -286,6 +286,9 @@ DEFAULTS: dict[str, Any] = {
         "review_max_output_tokens": 6000,
         "review_usd_day": 1.0,          # a family's reviews and audits a day, on their own fuse
         "every_seconds": 300,
+        # The incubator's review and audit (`gate.Gate.incubator_reviews`, release B2): versions read a gate round, 0 to 8
+        # (0: none). Never a holdout look; the same reviewer, auditor and daily fuse as the gate's.
+        "incubator_reviews": 2,
         "gate_box_idle_sleep_seconds": 300,
     },
     "forward": {

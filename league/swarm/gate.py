@@ -31,6 +31,13 @@ already in flight is still judged when it lands. The round's answer lists it und
 the tournament's board and `python -m league.swarm status` say "held by the operator"; the public progress shows the
 site's `gate_paused` (the site's closed list of blockers has no key of its own for it).
 
+THE INCUBATOR'S REVIEW AND AUDIT (release B2, Sept 30, 2026; `incubator_reviews`, `league/swarm/incubator.py`): the owner
+kept the gate's review and audit required for the House's incubator route (one lot, never evidence, never a promotion).
+At the end of every round, also when nothing is gate_ready, the same reviewer and auditor read at most
+`gate.incubator_reviews` (2) of the versions `incubator.due_reviews` names, and the verdicts go to the family's
+`incubator_reviews`. They never touch the gate's own review state or its looks, and never spend a look. The leakage alarm
+stops them with the rest of the gate.
+
 Every step is a `swarm.gate` event; band moves are `swarm.band` events (the site's news).
 Standard library only.
 """
@@ -301,7 +308,128 @@ class Gate:
                 out["looked"].append({"family": fam["id"], "passed": look})
             if self.alarm():
                 break
+        if not self.alarm():  # the alarm stops the gate: no review of any kind starts
+            incubated = self._incubator_round()
+            if incubated:
+                out["incubator"] = incubated
         return out
+
+    # ------------------------------------------------------------------ the incubator's review and audit
+    def _incubator_round(self) -> dict[str, Any]:
+        """`incubator_reviews`, never failing the gate's round (an error is one private event)."""
+        try:
+            return self.incubator_reviews()
+        except Exception as exc:  # noqa: BLE001 - the gate's own work is done; the incubator waits for the next round
+            self.store.event("swarm.gate", None, {"action": "incubator_error", "error": f"{type(exc).__name__}: {str(exc)[:300]}"})
+            return {"error": type(exc).__name__}
+
+    def incubator_reviews(self) -> dict[str, Any]:
+        """THE INCUBATOR'S REVIEW AND AUDIT (`league/swarm/incubator.py`; release B2, Sept 30, 2026). The owner kept the
+        gate's review and audit required for the incubator route. At most `gate.incubator_reviews` (2) of the versions
+        `incubator.due_reviews` names are read a round, also when nothing is gate_ready: by the same `review` and `audit`
+        (the same prompt, routing and models), the same attempt rules (an unclear answer is asked again next round, and a
+        third is a failure; the attempt counts are the gate's own for that version and program) and the same
+        `not_the_plans_reviewer` alert. The result is `incubator_reviews[sha]` in the family's state, the review kept while
+        its audit is owed. A failed review or audit is final for that program. It never touches `review`, `gate_ready`,
+        `gated_sha`, `gate_outcome` or the looks, spends no look, and tells the researcher nothing: the incubator is never
+        evidence and never a promotion. Returns {"reviewed", "failed", "waiting"} (family@version), empty when nothing
+        was due."""
+        from . import incubator
+
+        limit = incubator.reviews_per_round(self.settings)
+        if limit <= 0:
+            return {}
+        due = incubator.due_reviews(self.store, self.settings, self.store.root, clock=self.clock)[:limit]
+        if not due:
+            return {}
+        out: dict[str, Any] = {"reviewed": [], "failed": [], "waiting": []}
+        for item in due:
+            fid, n, sha = str(item["family"]), int(item["version"]), str(item["sha"])
+            try:
+                verdict = self._incubator_review(fid, n, sha)
+            except Exception as exc:  # noqa: BLE001 - one version never stops the others
+                self.store.event("swarm.gate", fid, {"action": "incubator_error", "version": n,
+                                                     "error": f"{type(exc).__name__}: {str(exc)[:300]}"})
+                verdict = None
+            key = {"pass": "reviewed", "fail": "failed"}.get(str(verdict), "waiting")
+            out[key].append(f"{fid}@{n}")
+        return out
+
+    def _incubator_review(self, fid: str, n: int, sha: str) -> str | None:
+        """One version's incubator review, then its audit: "pass" or "fail" once final, else None (asked again next
+        round, or no longer reviewable)."""
+        from . import incubator
+
+        if not incubator.reviewable(self.store, fid, n, sha):
+            return None
+        fam = self.store.family(fid) or {}
+        version = self.store.version(fid, n) or {}
+        contract = review_contract()["sha256"]
+        record = ((fam.get("state") or {}).get("incubator_reviews") or {}).get(sha)
+        if not (isinstance(record, Mapping) and record.get("sha") == sha and record.get("contract_sha") == contract
+                and record.get("verdict") == "pass"):
+            try:
+                check_experiment(version["code"], version.get("params") or {})
+            except CodeRefused as exc:  # a known invalid variant pays for no model read
+                incubator.put_review(self.store, fid, sha, {
+                    "sha": sha, "version": n, "verdict": "fail", "stage": "experiment contract", "reasons": [str(exc)[:500]],
+                    "model": None, "route": None, "contract_sha": contract, "at": self.clock()})
+                self.store.event("swarm.gate", fid, {"action": "incubator_review", "version": n, "verdict": "fail",
+                                                     "stage": "experiment contract", "reasons": [str(exc)[:300]]})
+                return "fail"
+            try:
+                review = self.review(fam, version)
+            except Exception as exc:  # noqa: BLE001 - no reviewer: asked again next round
+                self.store.event("swarm.gate", fid, {"action": "incubator_review_error", "version": n, "error": str(exc)[:300]})
+                return None
+            self.store.event("swarm.gate", fid, {"action": "incubator_review", "version": n, **review,
+                                                 "not_the_plans_reviewer": review.get("route") not in ("openai", "claude")})
+            if review["verdict"] == "unclear":
+                attempt_key = f"review_attempt:{contract[:12]}:{fid}:{n}"
+                attempts = int(self.store.get(attempt_key, 0)) + 1
+                self.store.put(attempt_key, attempts)
+                if attempts < 3:
+                    return None
+                review = {**review, "verdict": "fail", "reasons": ["the reviewer could not reach a verdict three times"]}
+            record = {"sha": sha, "version": n, "verdict": review["verdict"], "reasons": list(review.get("reasons") or [])[:6],
+                      "model": review.get("model"), "route": review.get("route"), "contract_sha": review.get("contract_sha") or contract,
+                      "at": self.clock()}
+            incubator.put_review(self.store, fid, sha, record)  # kept, so an audit asked again does not redo the review
+            if record["verdict"] != "pass":
+                return "fail"
+            if not incubator.reviewable(self.store, fid, n, sha):
+                return None  # the paid review stays recorded; a version no longer eligible starts no new paid stage
+        attempt_key = f"audit_attempt:{contract[:12]}:{sha}"
+        attempts = int(self.store.get(attempt_key, 0))
+        try:
+            audit = self.audit(fam, version, attempt=attempts)
+        except Exception as exc:  # noqa: BLE001
+            self.store.event("swarm.gate", fid, {"action": "incubator_audit_error", "version": n, "error": str(exc)[:300]})
+            return None
+        self.store.event("swarm.gate", fid, {"action": "incubator_audit", "version": n, **audit})
+        if audit["verdict"] == "unclear":
+            self.store.put(attempt_key, attempts + 1)
+            if attempts + 1 < 3:
+                return None
+            audit = {**audit, "verdict": "fail", "reasons": ["the audit could not reach a verdict three times"]}
+        kept = {"verdict": audit["verdict"], "reasons": list(audit.get("reasons") or [])[:6], "model": audit.get("model"),
+                "route": audit.get("route"), "contract_sha": audit.get("contract_sha") or contract}
+        record = {**record, "audit": kept, "at": self.clock()}
+        if audit["verdict"] != "pass":
+            record.update(verdict="fail", stage="audit", reasons=kept["reasons"] or ["the audit could not reach a verdict"])
+        # The plan's two different paid readers (`run`): either read on Sail, or one model reading the program twice, is the
+        # owner's to know, for an incubator review as for a holdout look.
+        same = record.get("model") is not None and record.get("model") == audit.get("model")
+        if same or record.get("route") not in ("openai", "claude") or audit.get("route") not in ("claude", "openai"):
+            self.store.event("swarm.status", fid, {
+                "action": "not_the_plans_reviewer", "alert": True, "version": n, "same_reader": same, "incubator": True,
+                "review": record.get("model"), "audit": audit.get("model"),
+                "text": (f"an incubator review and its audit were both {audit.get('model')}: one model read the program twice "
+                         "(claude.role_model can give the review its own Claude model)") if same else
+                        "an incubator review was made without the plan's models (GPT-6 Sol or Claude reviews; Claude or GPT-6 "
+                        "Astra audits): their budgets had no room, so Sail models stood in"})
+        incubator.put_review(self.store, fid, sha, record)
+        return str(record["verdict"])
 
     def _review_current(self, fid: str, n: int, image: Any, bundle: Any) -> bool:
         fam = self.store.family(fid) or {}

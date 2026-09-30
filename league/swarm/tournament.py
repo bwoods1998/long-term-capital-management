@@ -13,7 +13,10 @@
    its own NEEDS roots (a family's roots may have moved since).
 2. THE LINE (`evidence.validation_line`, as the owner's decision D2 amended it): its deflated Sharpe is on traded
    days with N = the lineage's validated versions (`SwarmStore.lineage_validated`). A family that meets it goes to
-   the gate's queue.
+   the gate's queue. Then THE INCUBATOR'S TRAIN AND DRIFT MARKS (`incubator.facts`, release B2, Sept 30, 2026): each
+   version an alive Gym family practises in an active, current cohort is marked `train_passed` once it has an eligible
+   Train run, a profitable 1.5x run, no demotion and a passed drift screen, under the current evaluator. The mark is
+   a fact for the House's incubator route only (one lot, never evidence, never a promotion); nothing here reads it.
 3. THE BANDIT (`evidence.thompson`): each family's share of researcher cycles and Gym priority from its
    validation evidence, with at least 25% for the explore pool; a validated version that failed the drift screen earns
    nothing by its validation (the family counts as unvalidated). R11-5: only an old family whose latest validation mean
@@ -54,7 +57,7 @@ import random
 import time
 from typing import Any, Callable, Mapping
 
-from . import diagnostics, evidence, practice
+from . import diagnostics, evidence, incubator, practice
 from .pool import GymJob, PoolError
 from .researcher import (IDLE_CAUSE, MAX_ROOTS, drift_verdict, held_at_gate, idle_cause, idle_dead, mark_extension, needs_roots,
                          robust_at_stress, screen_best, train_record, validation_drift_failed, with_roots)
@@ -259,6 +262,15 @@ class Tournament:
             return False
         sha = run_sha(version)
         return bool(self.store.looked(sha) or state.get("gated_sha") == sha)
+
+    def incubator_facts(self) -> dict[str, Any]:
+        """THE INCUBATOR'S TRAIN AND DRIFT MARKS (`incubator.facts`, step 2 of the round), never failing the round: an error
+        is one private `swarm.status` event and the marks wait for the next round."""
+        try:
+            return incubator.facts(self.store, self.settings, self.store.root, clock=self.clock)
+        except Exception as exc:  # noqa: BLE001
+            self.store.event("swarm.status", None, {"action": "incubator_facts_error", "error": f"{type(exc).__name__}: {str(exc)[:300]}"})
+            return {"error": type(exc).__name__}
 
     # ------------------------------------------------------------------ 3. the bandit
     def allocate(self, fams: list[dict[str, Any]]) -> dict[str, float]:
@@ -476,6 +488,7 @@ class Tournament:
         self.store.put("tournament_at", began)
         fams = self.store.families(alive=True)
         validation = self.validate(fams)
+        facts = self.incubator_facts()
         fams = self.store.families(alive=True)
         self.allocate(fams)  # the shares retirements rank by (the least favoured go first)
         retired = self.retirements(self.store.families(alive=True))
@@ -499,7 +512,8 @@ class Tournament:
         last_hour = {"cycles": int(cycles["n"] or 0), "cycle_errors": int(cycles["errors"] or 0),
                      "usd": {k: round(self.store.spent([k], since=began - 3600), 4) for k in ("sail_model", "gym_box", "openai")}}
         row = {"at": began, "seconds": round(self.clock() - began, 1), "validation": validation, "retired": retired, "born": born,
-               "board": board, "totals": totals, "last_hour": last_hour, "practice_bonus": dict(self.practice_bonus)}
+               "board": board, "totals": totals, "last_hour": last_hour, "practice_bonus": dict(self.practice_bonus),
+               "incubator": facts}
         self.store.event("swarm.tournament", None, row)
         self.store.put("leaderboard", {"at": began, "board": board, "totals": totals})
         return row
