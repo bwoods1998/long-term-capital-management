@@ -37,10 +37,12 @@ pins is shed for the rest of the session (at most once every 10 minutes; never a
 past what is left. An observe instance is never real, never tuition, never a band move, never a forward row; it winds
 down when its cohort completes, a switch disables it or capacity/pressure removes it. Its programs run in their OWN
 decider child, asked after every real decision of the minute has been sent, so no observe program can delay, starve or
-reset a real one. THE RECORD: every minute, each practice account's equity (at the engine's mark), open positions and
-decision coverage go to the private practice ledger (`league/live/observe.py`), its closed trades too; the swarm reads its
-summary as a research signal (`league/swarm/practice.py`) and the site shows its aggregates (`site_inputs`), never a
-forward row and never evidence.
+reset a real one. Two guards hold the line (#427): `Instance.observe` is True only for a shadow, non-tuition instance
+under a `:o` key (coerced, so a real instance, the House live test's included, is never an observe one, restored or
+not), and the order path (`_real_intent`) refuses, alerted, any instance that is not real. THE RECORD: every minute,
+each practice account's equity (at the engine's mark), open positions and decision coverage go to the private practice
+ledger (`league/live/observe.py`), its closed trades too; the swarm reads its summary as a research signal
+(`league/swarm/practice.py`) and the site shows its aggregates (`site_inputs`), never a forward row and never evidence.
 
 THE FORWARD EMBARGO (Sept 29, 2026): practice feeds research, so forward-window days select among Gym programs. A Sized
 move (`_move_band`) therefore also needs the forward record of the sessions AFTER the banded version was written AND selected to
@@ -166,6 +168,16 @@ class Instance:
     error_since: float | None = None
     retried_at: float = float("-inf")
     structure: str = ""          # the family's DECLARED structure (its swarm row's), read at each sync; "" until one is read
+
+    def __post_init__(self) -> None:
+        # An observe instance is exactly a shadow, non-tuition instance under an observe key that was made one (the money
+        # path's guard, #427, Sept 29, 2026): the practice league's `<family>@<version>:o` shadows, validated or Train
+        # tier alike. A truthy non-bool, a real or tuition instance (a family's `:r`/`:t`, the House live test's `:h`)
+        # or any other key is never one. A restored real instance once came back with its saved mode in this field (a
+        # positional shift) and ran as an observe instance: its program loaded in the observe child and its chains were
+        # never read for it. Coerced, never raised: a bad row must not stop the House from building its live step (the
+        # order path's belt, `_real_intent`, refuses whatever is not a real instance anyway).
+        self.observe = self.observe is True and _is_observe(self.key) and self.kind == "shadow" and not self.tuition
 
 
 def ny(t: float) -> dt.datetime:
@@ -2300,6 +2312,14 @@ class OptionsLive:
     def _real_intent(self, inst: Instance, day: LiveDay, mi: int, intent: dict, out: dict) -> str | None:
         book = self.book
         assert book is not None
+        if _is_observe(inst.key) or inst.observe is not False or inst.kind != "real":
+            # The belt (#427, Sept 29, 2026): only a real instance's answer ever reaches the order path (an open, a close
+            # or a cancel alike). `real_due` holds real instances only, and an observe instance (the practice league's
+            # `:o` shadows, validated or Train tier) is always a shadow one (`Instance.__post_init__`); this refuses,
+            # alerted, whatever would break either. Tuition (`:t`) and the House live test (`:h`) are real instances and
+            # pass; the calibration round trips never come this way (`league/live/calibration.py` sends its own).
+            self.alert("error", f"live: {inst.key} is not a real instance and asked for a real order: refused")
+            return "this instance is not a real one: it never sends a real order"
         today = day.day.isoformat()
         minute = day.open_min + mi + 1
         if "cancel" in intent:
