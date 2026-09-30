@@ -18,8 +18,8 @@ evidence: [continuous learning](../goals/LTCM_CONTINUOUS_LEARNING.md). The goal 
 
 ## Work in progress
 
-- Restoration: reviewed PR #429; 82 local House/live tests pass with pinned Gym dependencies. The
-  previously cancelled Python 3.11 CI job has been restarted. Deployment remains outstanding.
+- Restoration: reviewed and merged PR #429 as `87af7a62`; 82 local House/live tests pass with pinned
+  Gym dependencies, and CI passed on Python 3.11 and 3.14. Deployment remains outstanding.
 - Research efficiency: preserve R11b, fix normal/diagnostician retirement, replace repeated paid
   hold polling with durable waits, and integrate practice-feedback wake events.
 - Experiment contract: enforce effective parameter overrides, fast preflight, runtime-state
@@ -32,3 +32,28 @@ evidence: [continuous learning](../goals/LTCM_CONTINUOUS_LEARNING.md). The goal 
 
 Private operator evidence lives under the owner's `Work/ltcm-goal-ops/`; no raw quotes, program
 parameters, credentials, or licensed data are committed with this record.
+
+## Initial statistical benchmark
+
+`python -m league.swarm.benchmarks --replications 32` exercised the actual summary, Train,
+Validation and holdout arithmetic with generated cash outcomes. Protocol SHA:
+`aa434f1015839bf98bd0fd4e6d038977bf29bb0933854e891e87e92e82f256ab`.
+Evaluator SHA: `2783ee61c3d627754cdfa563ac8e9991fd70f7cda2154b223a35d6a5c911e0fe`.
+The development and independent confirmation cohorts each produced:
+
+| Generated case | Pipeline passes / 32 | Finding |
+| --- | --- | --- |
+| Absent signal | 0 | Rejected before holdout |
+| Planted edge | 32 | Detected by the tested statistical path |
+| Costs erase gross edge | 0 | Rejected before holdout |
+| Edge disappears on unseen data | 0 | 32 holdout looks, all rejected |
+| Positive low-frequency edge | 0 | Existing annual trade-count requirement rejects it |
+
+Zero of 32 gives a one-sided 95% upper pass-rate bound of 8.94%, so these controls do not establish
+a 5% false-promotion guarantee. This benchmark does not test adaptive search, drift screening,
+code review, actual fills, or live promotion. It establishes no market edge. The sparse-case
+result motivates an independent study of eligibility rules; no threshold was changed.
+
+The published compute feed also omitted Claude charges while retaining historical OpenAI charges.
+The fix uses the existing `other_usd` field, with an end-to-end checkpoint assertion; 63 publishing
+tests pass. Complete all-input accounting remains outstanding.
