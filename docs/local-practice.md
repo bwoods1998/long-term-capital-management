@@ -132,6 +132,12 @@ Successful recovery records `recovery: "replayed_from_start"`. No previous attem
 to the rebuilt aggregate. Identical completed input returns its hash-verified
 cached result without running strategies again. Modified frozen input, completed
 state, report, or evaluator identity is refused. Use a new output for a new run.
+Before completion, both private SQLite databases are fully checkpointed and
+switched to DELETE journal mode after all engine/summary connections close.
+Finalization must be non-busy with no remaining sidecars. The hash therefore
+binds self-contained durable database bytes, and read-only inspection does not
+create WAL/SHM files that invalidate a cached run. Later committed changes,
+including WAL-backed changes, still fail the completed-artifact check.
 
 Choose a dedicated output outside every production/researcher root and every
 other checkout; the runner does not discover those locations. It creates no

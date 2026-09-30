@@ -181,6 +181,31 @@ class Mechanics(Case):
 
 
 class State(Case):
+    def test_busy_finalization_refuses_and_later_seal_preserves_committed_wal(self):
+        state = self.root / "busy"
+        state.mkdir()
+        path = state / "live.sqlite"
+        writer = sqlite3.connect(path)
+        reader = sqlite3.connect(path)
+        try:
+            writer.execute("PRAGMA journal_mode=WAL")
+            writer.execute("CREATE TABLE receipts(value INTEGER)")
+            writer.execute("INSERT INTO receipts VALUES(1)")
+            writer.commit()
+            reader.execute("BEGIN")
+            reader.execute("SELECT * FROM receipts").fetchall()
+            writer.execute("INSERT INTO receipts VALUES(2)")
+            writer.commit()
+            with self.assertRaisesRegex(P.PracticeError, "busy or incomplete"):
+                P._finalize_state(state)
+        finally:
+            reader.close()
+            writer.close()
+        P._finalize_state(state)
+        with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as db:
+            self.assertEqual(db.execute("SELECT value FROM receipts ORDER BY value").fetchall(), [(1,), (2,)])
+            self.assertEqual(db.execute("PRAGMA journal_mode").fetchone()[0], "delete")
+
     def test_normalized_system_and_numerical_mount_paths_and_hardlinks_are_refused(self):
         import numpy
         for path in (Path("/tmp/../usr/local/practice-output"), Path(numpy.__file__).parent / "uncreated-output"):
@@ -202,6 +227,25 @@ class State(Case):
         (self.output / "state" / "progress.json").write_text("{}")
         with self.assertRaisesRegex(P.PracticeError, "state changed"):
             P.run(self.input, self.output)
+
+    def test_committed_wal_changes_are_not_excluded_from_completed_identity(self):
+        class Fixture(InlineDecider):
+            def probe(self):
+                return {}
+            def __init__(self, **_):
+                super().__init__()
+        with patch.object(P, "SandboxedDecider", Fixture):
+            P.run(self.input, self.output)
+        db = sqlite3.connect(self.output / "state" / "observe.sqlite")
+        try:
+            self.assertEqual(db.execute("PRAGMA journal_mode=WAL").fetchone()[0], "wal")
+            db.execute("UPDATE practice SET decisions_made=decisions_made+1")
+            db.commit()
+            self.assertTrue((self.output / "state" / "observe.sqlite-wal").exists())
+            with self.assertRaisesRegex(P.PracticeError, "state changed"):
+                P.run(self.input, self.output)
+        finally:
+            db.close()
 
     def test_unknown_existing_symlink_checkout_and_locked_output_are_refused(self):
         self.output.mkdir(mode=0o700)
@@ -292,6 +336,26 @@ class State(Case):
                      and Path(sys.executable).resolve().is_relative_to("/usr"),
                      "requires bubblewrap and isolated system-Python venv; public run refuses without them")
 class Isolation(Case):
+    def test_separate_process_readonly_inspection_then_cached_cli_needs_no_sandbox(self):
+        command = [sys.executable, "-B", str(P.REPO / "scripts/practice_run.py"),
+                   "--input", str(self.input), "--output", str(self.output)]
+        env = {"PATH": "/usr/bin:/bin", "OPENBLAS_NUM_THREADS": "1"}
+        first = subprocess.run(command, capture_output=True, env=env, timeout=30)
+        self.assertEqual(first.returncode, 0, first.stderr.decode())
+        original = (self.output / "report.json").read_bytes()
+        inspector = ("import sqlite3,sys; from pathlib import Path; "
+                     "p=Path(sys.argv[1]); db=sqlite3.connect(p.as_uri()+'?mode=ro', uri=True); "
+                     "assert db.execute('PRAGMA journal_mode').fetchone()[0]=='delete'; "
+                     "assert db.execute('SELECT COUNT(*) FROM trades').fetchone()[0] > 0; db.close()")
+        inspected = subprocess.run([sys.executable, "-B", "-c", inspector,
+                                    str(self.output / "state" / "observe.sqlite")], capture_output=True, env=env, timeout=15)
+        self.assertEqual(inspected.returncode, 0, inspected.stderr.decode())
+        self.assertFalse(list((self.output / "state").glob("*-wal")))
+        self.assertFalse(list((self.output / "state").glob("*-shm")))
+        cached = subprocess.run(command, capture_output=True, env={**env, "PATH": "/no-sandbox-binary"}, timeout=15)
+        self.assertEqual(cached.returncode, 0, cached.stderr.decode())
+        self.assertEqual((self.output / "report.json").read_bytes(), original)
+
     def test_actual_child_roots_and_post_probe_transport_failure_refuse_the_run(self):
         self.doc["programs"][0]["code"] += '\nNEEDS["roots"] = ["QQQ"]\n'
         self.input.write_text(json.dumps(self.doc))

@@ -439,6 +439,30 @@ def _state_hashes(root: Path) -> dict[str, str]:
     return {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(root.iterdir()) if p.is_file()}
 
 
+def _finalize_state(root: Path) -> None:
+    """Seal durable SQLite bytes before hashing; read-only inspection must not create WAL/SHM artifacts.
+
+    All engine/summary connections are closed by the caller. Checkpointing folds committed WAL data into the
+    main files; DELETE mode then makes each completed DB self-contained. Never discard or ignore WAL bytes.
+    A concurrent reader/writer that prevents finalization leaves an incomplete run, eligible for clean rebuild.
+    """
+    for name in ("live.sqlite", "observe.sqlite"):
+        path = root / name
+        if not path.exists():
+            continue
+        db = sqlite3.connect(path, timeout=1.0, isolation_level=None)
+        try:
+            busy, frames, checked = db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            if busy or (frames >= 0 and frames != checked):
+                raise PracticeError("private SQLite checkpoint is busy or incomplete")
+            if db.execute("PRAGMA journal_mode=DELETE").fetchone()[0].lower() != "delete":
+                raise PracticeError("private SQLite finalization failed")
+        finally:
+            db.close()
+        if any(Path(str(path) + suffix).exists() for suffix in ("-wal", "-shm", "-journal")):
+            raise PracticeError("private SQLite sidecars remain after finalization")
+
+
 def _simulate(bundle: dict, root: Path, provenance: dict, decider) -> dict:
     """Private engine seam for trusted-fixture unit tests. Public run() always supplies SandboxedDecider."""
     from .gym.fills import FillModel
@@ -487,6 +511,7 @@ def _simulate(bundle: dict, root: Path, provenance: dict, decider) -> dict:
     finally:
         engine.close()
         engine.state.close()
+    _finalize_state(root)
     check_state(root)
     return report
 
