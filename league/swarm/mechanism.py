@@ -1,8 +1,9 @@
 """THE MECHANISM TEST (release B, Oct 2026): before a carded family's first broad Train replay, does its signal beat its
 own declared comparison on a small pre-registered sample of Train days?
 
-WHY. A broad Train replay is five years on every root of the family (about 20 box-seconds on the Sept 30 image, and a
-family makes hundreds). On Sept 30, 788 House sweeps had a `signal_on` placebo row: half of those placebo rows made no
+WHY. A broad Train replay is five years on every root of the family (about 20 box-seconds on the Sept 30 image; the
+families that died on that image made 22 each on average, and 91% of them never reached an eligible Train version). On
+Sept 30, 788 House sweeps had a `signal_on` placebo row: half of those placebo rows made no
 trade at all (the switch turned the program off, so nothing was compared), and where both rows traded, only 22% of
 signals beat their placebo by half a standard error even on the whole of Train. Most families were replaying programs
 whose signal carried no information beyond the structure it traded.

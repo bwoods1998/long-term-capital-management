@@ -242,6 +242,9 @@ class TheArchitect(Case):
         born = a.admit([proposal("rebound-new", card=reborn, mechanism="Dealer inventory imbalance after late selling "
                                                                         "predicts which rebounds complete next session.")])
         self.assertEqual(born, ["rebound-new"])
+        born_event = [e for e in self.store.events_after(0) if e["kind"] == "swarm.born"][-1]
+        self.assertEqual((born_event["payload"]["card"]["rebirth"], born_event["payload"]["card"]["text_cell"]["rows"]), (dead, 1),
+                         "the birth records the cell its own text reads as, for the audit")
         fam = self.store.family("rebound-new")
         self.assertEqual(fam["parent"], dead, "a rebirth on the row's own slice continues its lineage: no fresh count")
         self.assertIn("Mechanism verdict MECHANISM", fam["spec"]["lessons"][0], "it is born with the lesson it re-enters")

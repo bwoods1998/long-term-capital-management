@@ -504,6 +504,17 @@ class RebirthIndex:
         key = key_of(card, structure)
         return [r for r in self.rows if matches(key, r["key"])]
 
+    def text_cell(self, mechanism: Any, structure: Any, dte: Any = None) -> dict[str, Any] | None:
+        """The AUDIT of a declared card: the cell the proposal's own mechanism text reads as (`infer_key`) and how many
+        mechanism-verdict rows share it (class, structure family and holding). Recorded at birth, never a refusal (the
+        keyword reading is too coarse to refuse on): a card declared outside a refuted cell whose text reads inside one is
+        what a later audit looks at."""
+        key = infer_key(mechanism, structure, dte)
+        if key is None:
+            return None
+        rows = [r for r in self.rows if matches(key, {**r["key"], "inputs": None})]
+        return {"class": key["class"], "holding": key["holding"], "rows": len(rows)}
+
     def check(self, card: Mapping[str, Any], structure: Any, mechanism: Any = "") -> dict[str, Any]:
         """{"ok": bool, "matched": [row ids], "reason": why refused, "row": the row the refusal points at, "lesson": its
         lesson}. ok with no match; ok with a match only through a valid `rebirth` (a matched row, a `different` that says

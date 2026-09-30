@@ -1234,6 +1234,8 @@ class Architect:
                                             "origin": "architect"}
             if card is not None:
                 born_payload["card"] = {**cards.key_of(card, structure), "sha": spec["card_sha"], "rebirth": reborn}
+                if index is not None:  # the audit of the declared class: the cell its own text reads as (never a refusal)
+                    born_payload["card"]["text_cell"] = index.text_cell(mechanism, structure, [lo, hi])
             self.store.event("swarm.born", fam["id"], born_payload)
             born.append(fam["id"])
         return born
