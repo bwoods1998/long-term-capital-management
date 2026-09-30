@@ -688,8 +688,9 @@ class HarnessImprovement:
                            "see only pass or fail for it",
                 "canary": {**canary, "unit_in_code": unit, "gate": gate, "where": where if arms else None,
                            "rule": ("every change must sit in a gated branch whose else is the baseline's code, or be a new "
-                                    "definition, a new plain constant or a new import; a changed module constant or prose "
-                                    "cannot be gated") if arms else "no gate: the window after the release against a fresh "
+                                    "definition, a new plain constant or a new import; the gate is asked about the lane's "
+                                    "unit (the one its observer splits); a changed module constant or prose cannot be "
+                                    "gated") if arms else "no gate: the window after the release against a fresh "
                                                                     "control window before it"},
                 "release_classes": list(lane.release_classes),
                 "deploy_rules": {c: lanes.DEPLOY_RULES[c] for c in lane.release_classes},
@@ -730,7 +731,7 @@ class HarnessImprovement:
                 lanes.content_guard(path, before, after)
                 lanes.symbol_guard(path, before, after)
                 if mode == "arms" and not fnmatch.fnmatchcase(path, lanes.NEW_TEST):
-                    gates += lanes.gate_coverage(path, before, after, key)
+                    gates += lanes.gate_coverage(path, before, after, key, canary.get("unit"))
             if mode == "arms" and not gates:
                 raise ImprovementError(f"the {lane.id} lane's canary gates the change per {canary.get('unit')}: "
                                        f'`if canary.enabled("{key}", <unit>, root=...):` in a surface module (see the brief)')

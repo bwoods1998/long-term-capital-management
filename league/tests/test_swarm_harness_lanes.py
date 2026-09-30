@@ -89,6 +89,8 @@ class Boundary(unittest.TestCase):
                                ("\ndef g():\n    return sys.argv\n", "plumbing"),
                                ("\ndef g():\n    return os.environ\n", "plumbing"),
                                ("\ndef g(o):\n    return o.__dict__\n", "reflective"),
+                               ("\ndef g():\n    return sys.exc_info()\n", "plumbing"),
+                               ("\ndef g(e):\n    return e.tb_frame.f_back.f_locals\n", "reflective"),
                                ("\ndef g(m):\n    m.value = 3\n", "another object"),
                                ("\nclass C:\n    def run(self):\n        return 1\n    def swap(self):\n        self.run = None\n",
                                 "another object"),
@@ -199,6 +201,12 @@ class GateCoverage(unittest.TestCase):
                 lanes.gate_coverage("league/swarm/researcher.py", self.BASE, head, self.KEY)
         with self.assertRaisesRegex(labmod.ImprovementError, "Python"):
             lanes.gate_coverage("league/CONTRACT.md", "a", "b", self.KEY)
+        self.assertEqual(lanes.gate_coverage("league/swarm/researcher.py", self.BASE, self.gated(), self.KEY, "family"), 1)
+        by_code = self.gated().replace("fam['id']", "code")
+        with self.assertRaisesRegex(labmod.ImprovementError, "unit"):
+            lanes.gate_coverage("league/swarm/researcher.py", self.BASE, by_code, self.KEY, "family")
+        with self.assertRaisesRegex(labmod.ImprovementError, "mechanism_unit"):
+            lanes.gate_coverage("league/swarm/researcher.py", self.BASE, self.gated(), self.KEY, "mechanism")
 
 
 class Gate(unittest.TestCase):
@@ -505,7 +513,7 @@ class Decisions(unittest.TestCase):
         self.assertEqual(lanes.required_units({"restart_failures": 6, "restarts": 12}, restart, alpha=0.05), 6)
 
 
-SOURCE = "import json\n\n\ndef preflight(code):\n    return {'status': 'passed'}\n"
+SOURCE = "import json\n\n\ndef preflight(code, family=None):\n    return {'status': 'passed'}\n"
 SAILBOX = "RETRIES = 2\n\n\ndef retries():\n    return RETRIES\n"
 
 
@@ -553,7 +561,7 @@ class LaneCycle(unittest.TestCase):
     def gated(self):
         return SOURCE.replace("    return {'status': 'passed'}\n",
                               "    from league.swarm import canary\n"
-                              f"    if canary.enabled('{self.key}', code, root='.'):\n"
+                              f"    if canary.enabled('{self.key}', family, root='.'):\n"
                               "        return {'status': 'refused'}\n    return {'status': 'passed'}\n")
 
     def capture(self):

@@ -128,7 +128,11 @@ NETWORK_MODULES = frozenset({"http", "urllib", "socket", "ssl"})
 #: `sys`/`os` members a candidate may not start using: the interpreter's plumbing, the process's output and exit.
 PLUMBING = frozenset({"modules", "argv", "stdout", "stderr", "stdin", "exit", "_exit", "_getframe", "settrace",
                       "setprofile", "meta_path", "path_hooks", "path", "displayhook", "excepthook", "environ",
-                      "__stdout__", "__stderr__", "write", "dup2", "execv", "execve", "spawnv"})
+                      "__stdout__", "__stderr__", "write", "dup2", "execv", "execve", "spawnv", "exc_info", "exception",
+                      "last_traceback", "last_value", "last_exc", "_current_frames", "addaudithook"})
+#: Frame and code introspection (a frame's locals would hold a judge's nonce): reflection whatever the object.
+FRAME_ATTRS = frozenset({"tb_frame", "tb_next", "f_back", "f_locals", "f_globals", "f_builtins", "f_code", "gi_frame",
+                         "cr_frame", "ag_frame", "co_consts", "co_code"})
 #: Dunder attributes a candidate may use freely; any other new one (`__dict__`, `__globals__`, `__subclasses__`, ...)
 #: is reflection.
 SAFE_DUNDERS = frozenset({"__name__", "__qualname__", "__doc__", "__init__", "__post_init__", "__enter__", "__exit__",
@@ -284,7 +288,7 @@ def _facts(source: str | None) -> dict[str, Any]:
                 out["plumbing"][f"{n.value.id}.{n.attr}"] += 1
             if isinstance(n.value, ast.Name) and n.value.id == "canary":
                 out["gate"][f"canary.{n.attr}"] += 1
-            if n.attr.startswith("__") and n.attr.endswith("__") and n.attr not in SAFE_DUNDERS:
+            if (n.attr.startswith("__") and n.attr.endswith("__") and n.attr not in SAFE_DUNDERS) or n.attr in FRAME_ATTRS:
                 out["dunders"][n.attr] += 1
             if "_FORCED" in n.attr:
                 out["forced"] += 1
@@ -571,22 +575,42 @@ def symbol_guard(path: str, before: str | None, after: str) -> None:
 
 
 # ------------------------------------------------------------------------------------------------ gate coverage
-def is_gate(node: ast.AST, key: str) -> bool:
-    """`canary.enabled("<key>", <unit>, root=<state dir>)`, the only gate form a candidate may use."""
+#: What a lane's gate must be asked about, so the gate splits the units the observer splits: the family (a name for it
+#: in the unit expression: `fam["id"]`, `fid`, `family`) or the mechanism (`canary.mechanism_unit(...)`).
+UNIT_NAMES = frozenset({"fam", "fid", "family", "family_id"})
+
+
+def unit_ok(node: ast.AST, unit: str | None) -> bool:
+    if unit == "family":
+        return any(isinstance(n, ast.Name) and n.id in UNIT_NAMES for n in ast.walk(node))
+    if unit == "mechanism":
+        return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "mechanism_unit"
+                and isinstance(node.func.value, ast.Name) and node.func.value.id == "canary")
+    return True
+
+
+def is_gate(node: ast.AST, key: str, unit: str | None = None) -> bool:
+    """`canary.enabled("<key>", <unit>, root=<state dir>)`, the only gate form a candidate may use, asked about the
+    lane's unit (`unit_ok`)."""
     return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "enabled"
             and isinstance(node.func.value, ast.Name) and node.func.value.id == "canary" and len(node.args) == 2
             and isinstance(node.args[0], ast.Constant) and node.args[0].value == key
-            and [kw.arg for kw in node.keywords] == ["root"])
+            and [kw.arg for kw in node.keywords] == ["root"] and unit_ok(node.args[1], unit))
 
 
 class _Ungate(ast.NodeTransformer):
     """Replace every gated branch with its old one: `if <gate>: new else: old` -> old; `new if <gate> else old` -> old."""
 
-    def __init__(self, key: str) -> None:
-        self.key, self.gates = key, 0
+    def __init__(self, key: str, unit: str | None = None) -> None:
+        self.key, self.unit, self.gates, self.wrong_unit = key, unit, 0, 0
+
+    def visit_Call(self, node: ast.Call) -> Any:
+        if is_gate(node, self.key) and not unit_ok(node.args[1], self.unit):
+            self.wrong_unit += 1
+        return self.generic_visit(node)
 
     def visit_If(self, node: ast.If) -> Any:
-        if is_gate(node.test, self.key):
+        if is_gate(node.test, self.key, self.unit):
             self.gates += 1
             out = []
             for stmt in node.orelse:
@@ -603,7 +627,7 @@ class _Ungate(ast.NodeTransformer):
         return node
 
     def visit_IfExp(self, node: ast.IfExp) -> Any:
-        if is_gate(node.test, self.key):
+        if is_gate(node.test, self.key, self.unit):
             self.gates += 1
             return self.visit(node.orelse)
         return self.generic_visit(node)
@@ -690,7 +714,7 @@ class _Docless(ast.NodeTransformer):
         return node
 
 
-def gate_coverage(path: str, before: str | None, after: str, key: str) -> int:
+def gate_coverage(path: str, before: str | None, after: str, key: str, unit: str | None = None) -> int:
     """For an arms-mode lane: `after` must be `before` plus gated branches (`if canary.enabled(KEY, unit, root=...):
     new else: old`, the old branch byte for byte the baseline's code), new inert definitions, new plain constants and new
     imports. So with the gate closed the module runs exactly the baseline. Returns the number of gates."""
@@ -700,8 +724,12 @@ def gate_coverage(path: str, before: str | None, after: str, key: str) -> int:
         raise ImprovementError(f"{path}: an arms-mode lane changes only Python: a prose or data change cannot be gated per "
                                "unit (put new text in a new constant chosen under the gate)")
     head = ast.parse(after)
-    ungate = _Ungate(key)
+    ungate = _Ungate(key, unit)
     head = ungate.visit(head)
+    if ungate.wrong_unit:
+        raise ImprovementError(f"{path}: the gate must be asked about the lane's unit ({unit}: "
+                               + ('a name for the family, e.g. fam["id"]' if unit == "family" else
+                                  "canary.mechanism_unit(<the mechanism text>)") + "), the unit its observer splits")
     base = ast.parse(before) if before is not None else ast.Module(body=[], type_ignores=[])
     head, base = _Docless().visit(head), _Docless().visit(base)
     kept = _strip_new(_docless(head.body), _docless(base.body))
