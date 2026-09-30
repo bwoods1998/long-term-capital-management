@@ -77,6 +77,15 @@ class Preflight(unittest.TestCase):
         self.assertIn("KeyError: 'last'", out["error"])
         self.assertIn("STATE", out["hint"])
 
+    def test_a_params_key_read_from_the_wrong_place(self):
+        out = self.refused(program('n = STATE["k"]\nreturn []'))
+        self.assertIn("ctx.params['k']", out["hint"])
+
+    def test_the_advice_names_the_declared_params(self):
+        out = self.refused(program('x = PARAMS["window"]\nreturn []'))
+        self.assertIn("KeyError: 'window'", out["error"])
+        self.assertIn(": k", out["hint"])
+
     def test_a_module_body_that_fails_to_load(self):
         code = HEAD + 'TABLE = {"a": 1}\nFIRST = TABLE["b"]\ndef decide(ctx):\n    return []\n'
         out = self.refused(code, stage="load")
