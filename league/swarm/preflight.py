@@ -7,24 +7,28 @@ Gym box, a trial, and a research cycle. `check_experiment` (league/gym/experimen
 half, and it runs nowhere near the Gym:
 
 - **Where the code runs.** In the live path's own sandbox, `league.live.decider.Decider`: a child process with an
-  empty environment, `-E -s`, a capped address space and (as root, on the House) uid 65534 in a private network
-  namespace. The House never executes a program in its own process. `load` is the Gym's `load_program` (safety
+  empty environment, `-E -s`, a capped address space and (as root, on the House) a private network namespace, under
+  its own uid (`PREFLIGHT_UID`, not the 65534 the live and observe deciders run as, so an escaped program cannot signal
+  or trace them). The House never executes a program in its own process. `load` is the Gym's `load_program` (safety
   check, NEEDS, PARAMS, the module body) and each call is the Gym's `Runner.decide` with its one-second limit.
 - **What it sees.** Up to three synthetic sessions (Tuesday to Thursday, a regular 09:30-16:00 day, no event) on the
-  program's own NEEDS: every root it names, with a full chain (every weekday expiry in its dte range, strikes past its
-  band, two-sided quotes priced by Black-Scholes with a skew), the underlying's prices from the open, NEEDS['history']
-  prior sessions, volume unknown (NaN, as in the replay), the Gym's venue rules, and a flat account of the Gym's
-  capital. It is called at the Gym's own decision minutes (`engine.Account.decision_minutes`). The market is made up;
-  nothing here reads recorded data, so it is no trial and says nothing about profit.
+  program's own NEEDS: every root it names, with a full chain (every weekday expiry in its dte range; strikes on the
+  listed grid, 5 points for SPX/SPXW and 0.5 for the rest, which holds every $0.5, $1, $2.5 and $5 strike, out past its
+  band but never past the store's coverage; two-sided quotes priced by Black-Scholes with a skew), the underlying's
+  prices from the open, NEEDS['history'] prior sessions, volume unknown (NaN, as in the replay), the Gym's venue rules,
+  and a flat account of the Gym's capital. It is called at the Gym's own decision minutes
+  (`engine.Account.decision_minutes`). The market is made up; nothing here reads recorded data, so it is no trial and
+  says nothing about profit.
 - **When it refuses.** Only when the Gym would refuse or disqualify the same program on the same kind of input:
   1. `load` refuses it (the Gym's worker would refuse it identically), except a load that ran out of time or memory
-     (this box is not a Gym box: that says nothing) or an error in numpy's API (`environmental`: the House's numpy
-     and Python are not the Gym boxes');
+     (this box is not a Gym box: that says nothing) or an `environmental` error (the House's Python, numpy and memory
+     cap are not the Gym boxes');
   2. decide raised on `STREAK` (25, the Gym's `DEFAULT_MAX_ERRORS`) consecutive calls spanning at least two sessions,
-     BEFORE the program returned any intent. Until its first intent a Gym account is flat too, and an erring call
-     returns no intent, so the Gym's account would stay exactly as flat as this one while the program erred: the only
-     difference left is the market's numbers, and a program that errs on every call across two made-up sessions
-     errs on real ones.
+     BEFORE the program returned any intent, and every error the streak may hold is named in the Runner's message
+     list and is neither `environmental` nor `market_dependent` (an empty selection, a division by zero, a numeric
+     key, a None: the made-up numbers could cause or spare those). Until its first intent a Gym account is flat too,
+     and an erring call returns no intent, so the Gym's account would stay exactly as flat as this one while the
+     program erred: the only difference left is the market's numbers, which such an error does not depend on.
   Anything else passes: the first intent ends the preflight (a flat account no longer mirrors the Gym's), as does a
   call past its time limit, a decider failure or the preflight's own deadline. The preflight never blocks on its own
   failure. A clean program costs one session plus `STREAK` calls of the next (a streak that begins later could only
@@ -48,11 +52,13 @@ import time
 import zlib
 from typing import Any, Callable, Mapping, Sequence
 
-VERSION = "preflight-v1"
+VERSION = "preflight-v2"
 #: Consecutive erring calls that refuse: the Gym's own disqualification count (`league.gym.runtime.DEFAULT_MAX_ERRORS`).
 STREAK = 25
 #: Synthetic sessions at most (a third only to confirm a streak that began in the second).
 SESSIONS = 3
+#: Distinct messages a Gym Runner keeps (`league.gym.runtime.Runner._error`): an error past them is not reported.
+RUNNER_MESSAGES = 10
 #: The account's capital: the Gym's default (`swarm.json` `gym.capital` overrides it for real runs; a flat account's
 #: numbers are the same either way up to scale).
 CAPITAL = 10_000.0
@@ -65,6 +71,15 @@ MINUTES = CLOSE - OPEN + 1
 RATE = 0.04
 VOL = 0.18
 SPOTS = {"SPY": 450.0, "QQQ": 380.0, "IWM": 190.0, "DIA": 350.0, "XSP": 450.0, "SPXW": 4500.0, "SPX": 4500.0}
+#: The synthetic strike step (`_step`): the listed near-money step for SPX/SPXW, 0.5 (a common divisor of every listed
+#: grid) for the rest.
+LISTED_STEP = {"SPXW": 5.0, "SPX": 5.0}
+FINE_STEP = 0.5
+#: The store's strikes a side of the money (scripts/data/storelib.py STRIKE_RANGE) and each root's widest listed step
+#: near the money (`_reach`): the Gym never shows a strike further out.
+STORE_STRIKES = {"SPXW": 40, "SPX": 40}
+STORE_DEFAULT_STRIKES = 25
+WIDEST_STEP = {"SPXW": 5.0, "SPX": 5.0, "SPY": 1.0, "QQQ": 1.0, "IWM": 1.0, "DIA": 1.0, "XSP": 1.0}
 
 
 # ------------------------------------------------------------------------------------------------ the synthetic market
@@ -74,13 +89,20 @@ def _rng(root: str, salt: int) -> Any:
     return np.random.default_rng(zlib.crc32(f"{root}:{salt}".encode()) & 0xFFFFFFFF)
 
 
-def _step(root: str, spot: float, band: float) -> float:
-    """A strike step like the listed ones near the money, widened so a wide band stays at most ~60 strikes a side."""
-    base = 5.0 if root in ("SPXW", "SPX") else (1.0 if spot >= 50 else 0.5)
-    for step in (base, base * 2.5, base * 5, base * 10, base * 25, base * 50):
-        if spot * (band + 0.02) / step <= 60:
-            return step
-    return base * 100
+def _step(root: str) -> float:
+    """The synthetic strike step: every strike the root lists near the money is on it. SPX and SPXW list 5-point strikes
+    (the store and the Gym's own synth.py use 5); every other root gets 0.5, which holds the $0.5, $1, $2.5 and $5 grids
+    alike (a spread's wing looked up by exact strike, `strike == k + 1`, finds it here whenever it is listed). Never
+    widened: a coarser grid than the listed one refuses a valid program that looks a listed strike up."""
+    return LISTED_STEP.get(root, FINE_STEP)
+
+
+def _reach(root: str, spot: float, band: float) -> float:
+    """How far from the open the synthetic strikes go: past the band (the chain is sliced to +-band of the minute's
+    spot), but never past what the store can hold (`STORE_STRIKES` listed strikes a side at the root's widest near-money
+    step, plus a tenth of spot for the day's drift): the Gym shows no strike beyond that, so neither need this."""
+    cover = (STORE_STRIKES.get(root, STORE_DEFAULT_STRIKES) + 15) * WIDEST_STEP.get(root, 5.0) + 0.10 * spot
+    return min(spot * (band + 0.02), cover)
 
 
 class Market:
@@ -117,8 +139,8 @@ class Market:
                 weekday = WEEKDAYS[s]
                 dtes = [d for d in range(dte_min, dte_max + 1) if (weekday + d) % 7 < 5]
                 s0 = float(path[0])
-                step = _step(root, s0, band)
-                reach = s0 * (band + 0.02)
+                step = _step(root)
+                reach = _reach(root, s0, band)
                 atm = round(s0 / step) * step
                 ks = atm + step * np.arange(-math.ceil(reach / step), math.ceil(reach / step) + 1)
                 ks = ks[ks > 0]
@@ -277,12 +299,53 @@ def advice(message: str, *, roots: Sequence[str] = (), params: Mapping[str, Any]
     return "check the line against the ctx section of league/CONTRACT.md."
 
 
+#: Attribute names no Python or numpy version gives a number, a string or an array: reading one of them off such a value
+#: is the program's mistake on every version (the ctx's own names are added in `environmental`).
+_NEVER_ON_SCALARS = frozenset({"get", "items", "keys", "values", "update", "setdefault", "popitem", "append", "extend",
+                               "insert", "remove", "add", "discard"})
+#: Types whose attributes Python 3.11-3.14 all share (none gained a method since 3.11), and the ctx's own classes (the same
+#: league/gym code on the House and in the Gym's bundle). An attribute missing on one of them is missing in the Gym too.
+_STABLE_TYPES = frozenset({"list", "tuple", "dict", "set", "frozenset", "NoneType", "range", "ChainView", "UnderlyingView",
+                           "Ctx", "Snapshot"})
+
+
 def environmental(message: str) -> bool:
-    """An error that could be this box's and not the Gym's: the House runs Python 3.11 with numpy 2.4, the Gym's boxes
-    3.12+ with numpy 2.5 (requirements-gym.txt), so a numpy function or keyword one has and the other lacks says nothing
+    """An error that could be this box's and not the Gym's: the House runs Python 3.11 with numpy 2.4 and caps the
+    decider child at 2 GB, the Gym's boxes run 3.12+ with numpy 2.5 (requirements-gym.txt) and give a worker 6 GB. So a
+    module attribute one version has and the other lacks (`math.sumprod`, a numpy function), a keyword, a method a
+    newer Python gave a number, a string or a numpy value (`int.is_integer`), memory, or recursion depth says nothing
     about the program. Such an error never refuses."""
     text = str(message or "")
-    return "module 'numpy" in text or "unexpected keyword argument" in text or "No module named" in text
+    if ("unexpected keyword argument" in text or "No module named" in text or "MemoryError" in text
+            or "Unable to allocate" in text or "recursed too deep" in text or "RecursionError" in text):
+        return True
+    if re.search(r"module '[\w.]+' has no attribute", text):
+        return True
+    m = re.search(r"'([\w.]+)' object has no attribute '(\w+)'", text)
+    if m and m.group(1) not in _STABLE_TYPES:
+        from ..gym.ctx import ChainView, Ctx, UnderlyingView
+
+        ctx_names = set(_names(ChainView)) | set(_names(UnderlyingView)) | set(_names(Ctx)) | set(POSITION_KEYS) | \
+            set(ORDER_KEYS) | set(LEG_KEYS)
+        return m.group(2) not in _NEVER_ON_SCALARS and m.group(2) not in ctx_names
+    return False
+
+
+#: Errors whose presence turns on the market's numbers, not on the program's use of the API: an empty selection, a
+#: division by a price or a count, a strike looked up in a dict, a log of a non-positive number, a None from a search that
+#: found nothing on this market. The synthetic market is not the real one, so such an error proves nothing about the Gym
+#: and never refuses (the Gym still judges it).
+_MARKET_ERRORS = re.compile(r"\b(IndexError|ZeroDivisionError|StopIteration|OverflowError|FloatingPointError|NoneType|"
+                            r"KeyError: -?[\d.]+|KeyError: \(|KeyError: np\.|KeyError: nan)")
+_MARKET_VALUES = ("empty sequence", "argument is empty", "zero-size array", "math domain error", "not in list",
+                  "cannot convert float NaN", "cannot convert float infinity", "attempt to get argm",
+                  "not enough values to unpack", "too many values to unpack", "array must not contain infs or NaNs")
+
+
+def market_dependent(message: str) -> bool:
+    """An error the market's numbers could cause or spare (`_MARKET_ERRORS`, `_MARKET_VALUES`): never a refusal."""
+    text = str(message or "")
+    return bool(_MARKET_ERRORS.search(text)) or ("ValueError" in text and any(v in text for v in _MARKET_VALUES))
 
 
 def _declared(code: str, params: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -329,7 +392,7 @@ def run(code: str, params: Mapping[str, Any] | None, decider: Any, *, universe: 
         info = decider.load(key, code, dict(params or {}), name)
     except ProgramRefused as exc:
         message = str(exc)
-        if "ran past" in message or "MemoryError" in message or environmental(message):
+        if "ran past" in message or environmental(message):
             return _answer("inconclusive", f"the load says nothing on this box: {message[:300]}")
         line, source = _located(message, code)
         return _answer("refused", "the program does not load (the Gym's worker would refuse it the same way)", stage="load",
@@ -364,6 +427,8 @@ def _decide_loop(code: str, params: Mapping[str, Any], decider: Any, key: str, n
     restarts = getattr(decider, "restarts", 0)
     calls = errors = timeouts = 0
     streak: list[tuple[int, int]] = []    # (session, call) of the current run of erring calls
+    named: list[str] = []                 # the streak's errors the Runner's message list names (new in it at the call)
+    unnamed = blind = False               # a streak error already in the list / one the full list could not take
     first_message = ""
     messages: list[str] = []
     for s in range(SESSIONS):
@@ -390,35 +455,129 @@ def _decide_loop(code: str, params: Mapping[str, Any], decider: Any, key: str, n
             calls += 1
             if int(stats.get("timeouts") or 0) > timeouts:
                 return _answer("inconclusive", "a call ran past its time limit (this box is not a Gym box)", calls=calls)
-            erred = int(stats.get("errors") or 0) > errors
+            raised = int(stats.get("errors") or 0) - errors
             errors = int(stats.get("errors") or 0)
             seen = [str(m) for m in stats.get("messages") or []]
             if answer.get("intents"):
                 return _answer("passed", f"the program returned an intent at call {calls}; a flat account no longer "
                                          "mirrors the Gym's from there", calls=calls, errors=errors)
-            if not erred:
-                streak, first_message = [], ""
+            if raised <= 0:
+                streak, named, unnamed, blind, first_message = [], [], False, False, ""
                 messages = seen
                 continue
+            # The Runner keeps the first RUNNER_MESSAGES distinct messages only: a call's error is named when it is new in
+            # the list; one already there is one of the list's; one the full list did not take could be anything.
             new = [m for m in seen if m not in messages]
             if not streak:
-                first_message = new[0] if new else (seen[-1] if seen else "")
+                first_message = new[0] if new else ""
+            named.extend(new)
+            if raised > len(new):
+                if len(messages) + len(new) >= RUNNER_MESSAGES:
+                    blind = True
+                else:
+                    unnamed = True
             messages = seen
             streak.append((s, calls))
             if len(streak) >= STREAK and len({x[0] for x in streak}) >= 2:
-                if environmental(first_message) or any(environmental(m) for m in messages):
-                    return _answer("inconclusive", f"the error may be this box's Python or numpy, not the Gym's: "
-                                                   f"{first_message[:300]}", calls=calls, errors=errors)
-                line, source = _located(first_message, code)
-                return _answer("refused", f"decide raised on every call from call {streak[0][1]} ({len(streak)} calls over "
-                                          f"{len({x[0] for x in streak})} synthetic sessions, before any intent)",
-                               stage="decide", error=first_message[:500], line=line, source=source, calls=calls,
-                               errors=errors, messages=[m[:200] for m in messages[:4]],
-                               hint=advice(first_message, roots=roots, params=_declared(code, params), source=source))
+                return _verdict(code, params, roots, streak, named, unnamed, blind, first_message, seen, calls, errors)
+    return _answer("passed", "no persistent error on the synthetic sessions", calls=calls, errors=errors)
+
+
+def _verdict(code: str, params: Mapping[str, Any], roots: Sequence[str], streak: Sequence[tuple[int, int]],
+             named: Sequence[str], unnamed: bool, blind: bool, first_message: str, seen: Sequence[str], calls: int,
+             errors: int) -> dict:
+    """A streak long enough to refuse: refused only when every error it may hold is known and says the program misuses the
+    API on any market, on any box (not `environmental`, not `market_dependent`)."""
+    if blind:
+        return _answer("inconclusive", f"the Runner's list holds {RUNNER_MESSAGES} messages and the streak's error is not "
+                                       "among them", calls=calls, errors=errors)
+    candidates = list(dict.fromkeys([*named, *(seen if unnamed else ())]))
+    if not first_message and len(candidates) == 1:
+        first_message = candidates[0]
+    if not first_message or not candidates:
+        return _answer("inconclusive", "the streak's first error cannot be told apart from earlier ones", calls=calls,
+                       errors=errors)
+    if any(environmental(m) for m in [*candidates, *seen]):
+        found = next(m for m in [*candidates, *seen] if environmental(m))
+        return _answer("inconclusive", f"the error may be this box's Python, numpy or memory, not the Gym's: {found[:300]}",
+                       calls=calls, errors=errors)
+    if any(market_dependent(m) for m in candidates):
+        found = next(m for m in candidates if market_dependent(m))
+        return _answer("inconclusive", f"the error turns on the market's numbers, which are made up here: {found[:300]}",
+                       calls=calls, errors=errors)
+    line, source = _located(first_message, code)
+    return _answer("refused", f"decide raised on every call from call {streak[0][1]} ({len(streak)} calls over "
+                              f"{len({x[0] for x in streak})} synthetic sessions, before any intent)",
+                   stage="decide", error=first_message[:500], line=line, source=source, calls=calls, errors=errors,
+                   messages=[m[:200] for m in candidates[:4]],
+                   hint=advice(first_message, roots=roots, params=_declared(code, params), source=source))
     return _answer("passed", "no persistent error on the synthetic sessions", calls=calls, errors=errors)
 
 
 # ------------------------------------------------------------------------------------------------ the House's instance
+#: The preflight child's uid and gid on the root House: not 65534, which the live and observe decider children run as.
+#: Programs no Gym has run yet execute here, so a process that escaped the code check must not be able to signal or trace
+#: the money path's decider (the kernel's kill and ptrace checks compare these uids). No process on the House runs as it.
+PREFLIGHT_UID = 65533
+
+
+def _sandbox() -> Any:
+    """The decider's sandbox under its own uid: `league.live.decider.Decider` with `_spawn` spawning the child as
+    `PREFLIGHT_UID`. Everything else (empty environment, `-E -s`, the read-only runtime copy, the memory cap, the
+    mandatory private network namespace as root) is the decider's own; only the credentials differ."""
+    import shutil
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    from ..live import decider as D
+
+    class SandboxDecider(D.Decider):
+        uid = PREFLIGHT_UID
+
+        def _spawn(self, budget_seconds: float = 10.0) -> None:
+            # Mirrors `Decider._spawn` (league/live/decider.py) line for line but for the credentials.
+            D.protect_house_process()
+            credentials = {"user": self.uid, "group": self.uid, "extra_groups": []} if self.isolated else {}
+            env = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "HOME": "/tmp", "LIVE_DECIDER_MEMORY_MB": str(self.memory_mb),
+                   "OPENBLAS_NUM_THREADS": "1", "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1"}
+            if self.netns is None:
+                self.netns = D._netns_available(timeout=max(0.001, min(10.0, budget_seconds)), credentials=credentials)
+            if self.isolated and not self.netns:
+                raise D.DeciderError("the preflight's decider requires a network namespace under its separate uid")
+            cwd = D.REPO
+            if self.isolated:
+                if self._runtime is None:
+                    self._runtime = Path(tempfile.mkdtemp(prefix="ltcm-preflight-runtime-"))
+                    files = ("league/__init__.py", "league/safety.py", "league/structure_core.py", "league/live/__init__.py",
+                             "league/live/decider.py", "league/gym/__init__.py", "league/gym/runtime.py",
+                             "league/gym/safety.py", "league/gym/ctx.py", "league/gym/greeks.py", "league/gym/venue.py")
+                    for name in files:
+                        path = self._runtime / name
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copyfile(D.REPO / name, path)
+                        path.chmod(0o444)
+                    for path in self._runtime.rglob("*"):
+                        if path.is_dir():
+                            path.chmod(0o555)
+                    self._runtime.chmod(0o555)
+                cwd = self._runtime
+            command = [self.python, "-E", "-s", "-m", "league.live.decider"]
+            if self.netns:
+                command = ["unshare", "--net", "--map-root-user", *command]
+            err = open(self.log, "ab") if self.log else subprocess.DEVNULL  # noqa: SIM115
+            try:
+                self.proc = subprocess.Popen(command, cwd=str(cwd), env=env, **credentials,
+                                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=err, close_fds=True)
+            finally:
+                if err is not subprocess.DEVNULL:
+                    err.close()
+            self.pid = self.proc.pid
+            self._ready.clear()
+
+    return SandboxDecider
+
+
 class Preflight:
     """The researcher's preflight: one sandboxed decider child for the process, one preflight at a time (the House has
     one core; a Gym run can wait a second, the live minute cannot). `decider` for tests (an InlineDecider)."""
@@ -430,10 +589,8 @@ class Preflight:
 
     def decider(self) -> Any:
         if self._decider is None:
-            from ..live.decider import Decider
-
             # max_errors: every call's own outcome is read (the preflight counts its streak itself, at the Gym's 25).
-            self._decider = Decider(timeout=1.0, max_errors=10 ** 9)
+            self._decider = _sandbox()(timeout=1.0, max_errors=10 ** 9)
             atexit.register(self.close)  # the child and its read-only runtime copy go with the process
         return self._decider
 
@@ -454,4 +611,5 @@ class Preflight:
             self._decider.close()
 
 
-__all__ = ["VERSION", "STREAK", "SESSIONS", "Market", "Preflight", "advice", "decision_minutes", "environmental", "run"]
+__all__ = ["VERSION", "STREAK", "SESSIONS", "PREFLIGHT_UID", "Market", "Preflight", "advice", "decision_minutes",
+           "environmental", "market_dependent", "run"]

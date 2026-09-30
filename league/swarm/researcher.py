@@ -1671,6 +1671,12 @@ class Researcher:
                 return None
             out["preflight"] = int(out.get("preflight") or 0) + 1
             out["preflight_seconds"] = round(float(out.get("preflight_seconds") or 0) + float(verdict.get("seconds") or 0), 3)
+            if verdict.get("status") == "inconclusive":
+                # It could not say (a timeout, the sandbox, its deadline, a busy lock, an error this box or this market
+                # may cause): the run goes on to the Gym. Counted, with the first reason, so a preflight that silently
+                # does nothing shows.
+                out["preflight_inconclusive"] = int(out.get("preflight_inconclusive") or 0) + 1
+                out.setdefault("preflight_inconclusive_why", str(verdict.get("why") or "")[:200])
             if verdict.get("status") != "refused":
                 continue
             out["preflight_refused"] = int(out.get("preflight_refused") or 0) + 1

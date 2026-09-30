@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import tempfile
 import unittest
 from pathlib import Path
@@ -61,11 +62,17 @@ class Preflight(unittest.TestCase):
         out = self.refused(program("s = ctx.chain.strikes\nreturn []"))
         self.assertIn("Did you mean `strike`", out["hint"])
 
-    def test_arithmetic_on_a_none(self):
-        out = self.refused(program('x = ctx.params.get("missing") / 2.0\nreturn []'))
-        self.assertIn("NoneType", out["error"])
-        self.assertIn("is None", out["hint"])
-        self.assertIn("k", out["hint"])  # the program's PARAMS keys are named
+    def test_arithmetic_on_a_none_is_left_to_the_gym(self):
+        # A None can be a search that found nothing on this made-up market: never a refusal (the Gym judges it). The
+        # advice for one still names the program's PARAMS.
+        from league.swarm.preflight import advice
+
+        out = self.check(program('x = ctx.params.get("missing") / 2.0\nreturn []'))
+        self.assertEqual(out["status"], "inconclusive", out)
+        self.assertIn("market", out["why"])
+        hint = advice("line 5: TypeError: unsupported operand type(s) for /: 'NoneType' and 'float'", params={"k": 1.0})
+        self.assertIn("is None", hint)
+        self.assertIn(": k", hint)
 
     def test_a_root_it_never_asked_for(self):
         out = self.refused(program('u = ctx.underlyings["QQQ"]\nreturn []'))
@@ -146,6 +153,126 @@ class Preflight(unittest.TestCase):
         code = "import numpy as np\n" + program("x = np.not_in_this_numpy(1.0)\nreturn []")
         out = self.check(code)
         self.assertEqual(out["status"], "inconclusive", out)
+
+    def test_a_missing_stdlib_function_is_inconclusive(self):
+        # The House runs Python 3.11; the Gym's boxes 3.12+ (math.sumprod, int.is_integer): not the program's fault.
+        out = self.check("import math\n" + program("x = math.not_in_this_python([1.0], [2.0])\nreturn []"))
+        self.assertEqual(out["status"], "inconclusive", out)
+
+    def test_what_is_this_box_and_what_is_the_program(self):
+        from league.swarm.preflight import environmental
+
+        for message in ("line 5: AttributeError: module 'math' has no attribute 'sumprod'",
+                        "line 5: AttributeError: module 'numpy.linalg' has no attribute 'vecdot'",
+                        "line 5: AttributeError: 'int' object has no attribute 'is_integer'",
+                        "line 5: AttributeError: 'float' object has no attribute 'from_number'",
+                        "line 5: AttributeError: 'numpy.ndarray' object has no attribute 'to_device'",
+                        "line 5: MemoryError: Unable to allocate 2.24 GiB for an array with shape (20000, 15000)",
+                        "line 5: MemoryError: ", "decide recursed too deep",
+                        "line 5: TypeError: sort() got an unexpected keyword argument 'stable'"):
+            self.assertTrue(environmental(message), message)
+        for message in ("line 5: AttributeError: 'list' object has no attribute 'items'",
+                        "line 5: AttributeError: 'UnderlyingView' object has no attribute 'get'",
+                        "line 5: AttributeError: 'dict' object has no attribute 'signal_on'",
+                        "line 5: AttributeError: 'Ctx' object has no attribute 'cadence'",
+                        "line 5: AttributeError: 'numpy.ndarray' object has no attribute 'get'",
+                        "line 5: AttributeError: 'float' object has no attribute 'price'",
+                        "line 5: AttributeError: 'numpy.float64' object has no attribute 'strike'",
+                        "line 5: TypeError: 'UnderlyingView' object is not subscriptable",
+                        "line 5: KeyError: 'last'"):
+            self.assertFalse(environmental(message), message)
+
+    def test_an_error_on_the_market_numbers_is_inconclusive(self):
+        from league.swarm.preflight import market_dependent
+
+        head = "import numpy as np\n" + HEAD
+        for body in ("i = np.flatnonzero(ctx.chain.strike == round(ctx.under.price) + 0.25)[0]\nreturn []",
+                     "x = 1.0 / (ctx.chain.n * 0)\nreturn []",
+                     "k = min(s for s in ctx.chain.strike if s < 0)\nreturn []"):
+            out = self.check(program(body, head=head))
+            self.assertEqual(out["status"], "inconclusive", (body, out))
+            self.assertIn("market", out["why"])
+        self.assertTrue(market_dependent("line 5: KeyError: 450.0"))
+        self.assertTrue(market_dependent("line 5: ValueError: min() arg is an empty sequence"))  # Python 3.11's wording
+        self.assertTrue(market_dependent("line 5: KeyError: np.float64(450.0)"))
+        self.assertFalse(market_dependent("line 5: KeyError: 'window'"))
+        self.assertFalse(market_dependent("line 5: ValueError: The truth value of an array with more than one element is "
+                                          "ambiguous. Use a.any() or a.all()"))
+
+    def test_a_listed_strike_looked_up_exactly_is_found(self):
+        # Reviewers' false refusals: a spread whose wing is found by exact strike on the listed grid (5-point SPXW, $1
+        # SPY past a 0.114 band, $0.5 and $2.5 names outside the index roots) runs clean in the Gym and must here too.
+        cases = (("SPXW", 0.05, "k = math.floor(s / 5) * 5 - 10", 5.0),
+                 ("SPXW", 0.10, "k = math.floor(s / 5) * 5 - 40", 10.0),
+                 ("SPY", 0.15, "k = float(round(s)) - 3", 1.0),
+                 ("QQQ", 0.20, "k = float(round(s)) - 2", 1.0),
+                 ("MARA", 0.10, "k = math.floor(s * 2) / 2 - 1", 0.5),
+                 ("SLV", 0.10, "k = math.floor(s * 2) / 2 - 1", 0.5),
+                 ("TSLA", 0.20, "k = math.floor(s / 2.5) * 2.5 - 5", 2.5),
+                 ("AMZN", 0.20, "k = math.floor(s / 2.5) * 2.5 - 5", 2.5))
+        for root, band, pick, width in cases:
+            head = (f'import math\nimport numpy as np\nNEEDS = {{"roots": ["{root}"], "dte": [0, 2], "band": {band}, '
+                    f'"cadence": 5, "history": 10}}\nPARAMS = {{}}\nSTATE = {{}}\n')
+            body = (f"c = ctx.chain\ns = ctx.under.price\n{pick}\nputs = ~c.is_call & (c.dte == c.dte.min())\n"
+                    f"i = np.flatnonzero(puts & (c.strike == k))[0]\nj = np.flatnonzero(puts & (c.strike == k - {width}))[0]\n"
+                    "return []")
+            out = self.check(program(body, head=head))
+            self.assertEqual((out["status"], out.get("errors")), ("passed", 0), (root, band, out))
+
+    def test_the_grid_holds_every_listed_strike(self):
+        from league.swarm.preflight import Market
+
+        for root, band, step in (("SPXW", 0.05, 5.0), ("SPY", 0.20, 1.0), ("MARA", 0.10, 0.5), ("TSLA", 0.30, 2.5)):
+            needs = {"roots": [root], "dte": [0, 5], "band": band, "cadence": 5, "history": 5, "start": 571, "end": 958}
+            snap = Market([root], needs).snapshot(root, 0, 100)
+            ks = set(numpy.unique(snap.strike).tolist())
+            near = [k for k in ks if abs(k / snap.spot - 1) <= band]
+            listed = numpy.arange(math.floor(min(near) / step) * step + step, max(near) - step, step)
+            self.assertTrue(set(listed.tolist()) <= ks, (root, band))
+
+    def test_a_streak_the_runners_list_cannot_name_is_inconclusive(self):
+        # Ten distinct warm-up errors fill the Runner's message list (it keeps ten); the streak after them is not in it,
+        # so neither its line nor whether it is this box's error can be known.
+        for tail in ("for pid, p in ctx.positions.items():\n        pass", "x = np.not_in_this_numpy(1.0)"):
+            body = ('n = STATE.get("n", 0) + 1\nSTATE["n"] = n\nif n <= 20 and n % 2 == 0:\n'
+                    '    raise ValueError("warm " + str(n))\nif n > 20:\n    ' + tail + "\nreturn []")
+            out = self.check(program(body, head="import numpy as np\n" + HEAD))
+            self.assertEqual(out["status"], "inconclusive", (tail, out))
+
+    def test_the_preflight_child_is_not_the_live_deciders_uid(self):
+        # The live and observe deciders run as 65534; the preflight child (programs no Gym has run) must not share it.
+        # Its spawn is the decider's own but for the credentials.
+        import os
+        import shutil
+        from unittest import mock
+
+        from league.live import decider as D
+        from league.swarm.preflight import PREFLIGHT_UID, _sandbox
+
+        self.assertNotEqual(PREFLIGHT_UID, 65534)
+        spawned = []
+
+        def popen(command, **kwargs):
+            spawned.append((command, kwargs))
+            return mock.Mock(pid=4242)
+
+        made = []
+        with mock.patch.object(D, "protect_house_process"), mock.patch("subprocess.Popen", popen):
+            for cls in (D.Decider, _sandbox()):
+                d = cls(timeout=1.0, max_errors=10 ** 9)
+                d.isolated, d.netns = True, True
+                d._spawn()
+                made.append(d._runtime)
+        for path in made:
+            for dirpath, _, _ in os.walk(path):
+                os.chmod(dirpath, 0o755)
+            shutil.rmtree(path)
+        (live_cmd, live), (pre_cmd, pre) = spawned
+        self.assertEqual((live["user"], live["group"]), (65534, 65534))
+        self.assertEqual((pre["user"], pre["group"], pre["extra_groups"]), (PREFLIGHT_UID, PREFLIGHT_UID, []))
+        self.assertEqual(live_cmd, pre_cmd)
+        same = lambda kw: {k: v for k, v in kw.items() if k not in ("user", "group", "cwd")}  # noqa: E731
+        self.assertEqual(same(live), same(pre))
 
     def test_roots_outside_the_run_are_not_decided_on(self):
         out = self.check(program('u = ctx.under.get("price")\nreturn []'), roots=["QQQ"])
@@ -237,6 +364,15 @@ class ResearcherPreflight(unittest.TestCase):
         self.assertEqual(out.get("preflight"), 1)
         self.assertNotIn("preflight_refused", out)
 
+    def test_an_inconclusive_preflight_is_counted_and_runs(self):
+        self.check = lambda *args, **kwargs: {"status": "inconclusive", "why": "another preflight held the sandbox"}
+        bad = program('px = ctx.under.get("price")\nreturn []')
+        self.steps = [{"calls": [("gym_run", {"code": bad})]}, {"text": "ok"}]
+        out = self.make().cycle(self.fam["id"])
+        self.assertEqual(len(self.pool.jobs), 2)
+        self.assertEqual(out.get("preflight_inconclusive"), 1)
+        self.assertEqual(out.get("preflight_inconclusive_why"), "another preflight held the sandbox")
+
     def test_switched_off_in_settings(self):
         self.settings["researcher"]["preflight"] = False
         bad = program('px = ctx.under.get("price")\nreturn []')
@@ -256,13 +392,13 @@ class ResearcherPreflight(unittest.TestCase):
         self.assertIn("preflight_error", out)
 
     def test_a_sweep_with_a_failing_variant_is_refused_whole(self):
-        code = program('xs = [1.0, 2.0]\nv = xs[int(ctx.params["k"])]\nreturn []')
+        code = program('if ctx.params["k"] > 1:\n    for pid, p in ctx.positions.items():\n        pass\nreturn []')
         self.steps = [{"calls": [("gym_sweep", {"code": code, "variants": [{"k": 0.0}, {"k": 5.0}]})]}, {"text": "ok"}]
         out = self.make().cycle(self.fam["id"])
         answer = self.answer()
         self.assertEqual((answer.get("status"), answer.get("stage")), ("refused", "preflight"), answer)
         self.assertEqual(answer["variant"], {"k": 5.0})
-        self.assertIn("IndexError", answer["error"])
+        self.assertIn("'list' object has no attribute 'items'", answer["error"])
         self.assertEqual(len(self.pool.jobs), 1)
         self.assertEqual(out.get("preflight_refused"), 1)
 
