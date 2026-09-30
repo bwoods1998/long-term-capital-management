@@ -205,26 +205,45 @@ class Preflight(unittest.TestCase):
                         "empty.", "attempt to get argmin of an empty sequence", "not enough values to unpack (expected 2, got 0)"):
             self.assertTrue(market_dependent(f"line 5: ValueError: {message}"), message)
         for message in ("expected non-empty vector for x", "only 0-dimensional arrays can be converted to Python scalars",
-                        "only length-1 arrays can be converted to Python scalars"):
+                        "only length-1 arrays can be converted to Python scalars", "expected x and y to have same length",
+                        "unsupported format string passed to numpy.ndarray.__format__"):
             self.assertTrue(market_dependent(f"line 5: TypeError: {message}"), message)
-        self.assertTrue(market_dependent("line 5: LinAlgError: SVD did not converge in Linear Least Squares"))
+        # The reviews' empty selections and different lengths (the same words on both runtimes): a zero in a shape, a
+        # selection too short for what was asked, two selections' lengths, a search that found nothing.
+        for message in ("operands could not be broadcast together with shapes (46,) (0,) ",
+                        "operands could not be broadcast together with shapes (46,) (45,) ",
+                        "shapes (0,) and (3,) not aligned: 0 (dim 0) != 3 (dim 0)",
+                        "could not broadcast input array from shape (0,) into shape (3,)",
+                        "matmul: Input operand 1 has a mismatch in its core dimension 0, with gufunc signature "
+                        "(n?,k),(k,m?)->(n?,m?) (size 3 is different from 0)", "fp and xp are not of the same length.",
+                        "All-NaN slice encountered", "tuple.index(x): x not in tuple",
+                        "zip() argument 2 is longer than argument 1", "zip() argument 2 is shorter than argument 1",
+                        "Shape of array too small to calculate a numerical gradient, at least (edge_order + 1) elements "
+                        "are required.", "cannot select an axis to squeeze out which has size not equal to one",
+                        "kth(=5) out of bounds (2)", "Number of samples, -1, must be non-negative.",
+                        "negative dimensions are not allowed", "range() arg 3 must not be zero"):
+            self.assertTrue(market_dependent(f"line 5: ValueError: {message}"), message)
+        for message in ("KeyError: 'pop from an empty set'", "KeyError: 'popitem(): dictionary is empty'",
+                        "KeyError: '451.0'", "LinAlgError: SVD did not converge in Linear Least Squares"):
+            self.assertTrue(market_dependent(f"line 5: {message}"), message)
         self.assertFalse(market_dependent("line 5: KeyError: 'window'"))
         for message in ("ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or "
                         "a.all()", "ValueError: could not convert string to float: 'SPY'",
                         "TypeError: 'UnderlyingView' object is not subscriptable",
-                        "TypeError: expected x and y to have same length", "ValueError: fp and xp are not of the same length.",
-                        "TypeError: unsupported operand type(s) for -: 'list' and 'float'"):
+                        "TypeError: type numpy.ndarray doesn't define __round__ method", "ValueError: substring not found",
+                        "TypeError: unsupported operand type(s) for -: 'list' and 'float'", "KeyError: 'rich_put'"):
             self.assertFalse(market_dependent(f"line 5: {message}"), message)
 
     def test_an_empty_selection_never_refuses_on_this_runtime(self):
         # Raised here, on the Python and numpy these tests run on (CI: 3.11 with numpy 2.4.4, the House's; 3.14 with
-        # numpy 2.5.3), and read as the Gym's Runner reports them: whatever each runtime says, an empty selection, or
-        # one turned into a single number, is the market's doing; the misuses are not.
+        # numpy 2.5.3), and read as the Gym's Runner reports them: whatever each runtime says, an empty selection, one
+        # turned into a single number, or two of different lengths, is the market's doing; the misuses are not.
         import warnings
 
         from league.swarm.preflight import market_dependent
 
-        empty, two = numpy.zeros(0), numpy.array([1.0, 2.0])
+        empty, one, two, three = numpy.zeros(0), numpy.array([1.5]), numpy.array([1.0, 2.0]), numpy.array([1.0, 2.0, 3.0])
+        nan2 = numpy.array([numpy.nan, numpy.nan])
         spared = {"min()": lambda: min(empty), "max() of a list": lambda: max([]), "np.min": lambda: numpy.min(empty),
                   "argmax": lambda: numpy.argmax(empty), "np.interp": lambda: numpy.interp(0.3, empty, empty),
                   "np.polyfit": lambda: numpy.polyfit(empty, empty, 2), "item()": lambda: empty.item(),
@@ -236,10 +255,26 @@ class Preflight(unittest.TestCase):
                   "math.acos(2)": lambda: math.acos(2.0), "int(nan)": lambda: int(float("nan")),
                   "reshape": lambda: empty.reshape(2), "np.stack": lambda: numpy.stack([]),
                   "list.index": lambda: [1.0].index(2.0), "next()": lambda: next(iter(empty)),
-                  "1/0": lambda: 1 / 0, "np.linalg": lambda: numpy.linalg.inv(numpy.zeros((2, 2)))}
+                  "1/0": lambda: 1 / 0, "np.linalg": lambda: numpy.linalg.inv(numpy.zeros((2, 2))),
+                  # The reviews' (round 3): a zero-length operand, a count too small, a search that found nothing.
+                  "a broadcast with an empty one": lambda: two - empty, "np.dot": lambda: numpy.dot(empty, three),
+                  "an assignment": lambda: exec("a = np.zeros(3)\na[:] = e", {"np": numpy, "e": empty}),
+                  "matmul": lambda: empty @ three, "np.nanargmin of all-NaN": lambda: numpy.nanargmin(nan2),
+                  "tuple.index": lambda: (1.0,).index(2.0), "zip(strict=True)": lambda: list(zip(empty, two, strict=True)),
+                  "np.gradient": lambda: numpy.gradient(numpy.array([1.0])),
+                  "np.squeeze(axis=0) of two": lambda: numpy.squeeze(two, axis=0),
+                  "np.squeeze(axis=0) of none": lambda: numpy.squeeze(empty, axis=0),
+                  "set().pop()": lambda: set().pop(), "{}.popitem()": lambda: {}.popitem(),
+                  "np.partition past the selection": lambda: numpy.partition(two, 5),
+                  "np.linspace of a count less one": lambda: numpy.linspace(0.0, 1.0, empty.size - 1),
+                  "np.zeros of a count less one": lambda: numpy.zeros(empty.size - 1),
+                  "a format of a selection": lambda: f"{two:.2f}",
+                  # Two selections of different lengths: each is as long as the market makes it.
+                  "a broadcast of two lengths": lambda: two - three, "np.interp of two lengths": lambda: numpy.interp(0.3, two, empty),
+                  "np.polyfit of two lengths": lambda: numpy.polyfit(two, three, 1)}
         misuse = {"a list as a mapping": lambda: [].items(), "two as one boolean": lambda: bool(two),
                   "a string as a number": lambda: float("SPY"), "a dict as an object": lambda: {}.price,
-                  "arrays of two lengths": lambda: numpy.interp(0.3, two, empty)}
+                  "round() of an array": lambda: round(numpy.squeeze(one)), "a list less a number": lambda: [1.0] - 1.0}
         for table, expected in ((spared, True), (misuse, False)):
             for what, raise_it in table.items():
                 with warnings.catch_warnings():
@@ -306,7 +341,7 @@ class Preflight(unittest.TestCase):
 
         real = PF.listing
 
-        def finer(root, *, sparse=False):
+        def finer(root, *, sparse=False, dense=False):
             return real(root, sparse=True) if sparse else (real(root)[0], 0.5, PF.DAILY)
 
         head = ('import numpy as np\nNEEDS = {"roots": ["TSLA"], "dte": [0, 7], "band": 0.05, "cadence": 5, "history": 5}\n'
@@ -321,6 +356,56 @@ class Preflight(unittest.TestCase):
         # The same misuse on every chain still refuses, confirmed on the sparser listing.
         out = self.refused(program("for pid, p in ctx.positions.items():\n    pass\nreturn []"))
         self.assertIn("again on a sparser listing", out["why"])
+
+    def test_a_chain_coarser_than_the_gyms_never_refuses_on_its_own(self):
+        # The correctness review's false refusals (round 3): IWM is listed Monday, Wednesday and Friday, so a calendar
+        # between the 0- and 1-day expiries never finds both on one session. The Gym lists IWM every weekday from spring
+        # 2024 and runs these clean there; the denser listing holds both and spares them, stated or not.
+        head = ('import numpy as np\nNEEDS = {"roots": ["IWM"], "dte": [0, 1], "band": 0.05, "cadence": 5, "history": 10}\n'
+                'PARAMS = {}\nSTATE = {}\n')
+        stated = "c = ctx.chain\nd = c.mid[(c.dte == 1) & c.is_call] - c.mid[(c.dte == 0) & c.is_call]\nreturn []"
+        gated = ("c = ctx.chain\nf = (c.dte == 0) & c.is_call\nb = (c.dte == 1) & c.is_call\nif f.any() and b.any():\n"
+                 "    STATE[\"cal\"] = 1\nx = STATE[\"cal\"]\nreturn []")
+        out = self.check(program(stated, head=head))
+        self.assertEqual(out["status"], "inconclusive", out)
+        self.assertIn("broadcast together with shapes", out["why"])
+        out = self.check(program(gated, head=head))
+        self.assertEqual(out["status"], "inconclusive", out)
+        self.assertIn("denser listing", out["why"])
+        self.assertIn("KeyError: 'cal'", out["why"])
+        # XSP lists every weekday (the store's 2024 sample): both run clean on the listing itself.
+        for body in (stated, gated):
+            out = self.check(program(body, head=head.replace('"IWM"', '"XSP"')))
+            self.assertEqual((out["status"], out.get("errors")), ("passed", 0), out)
+        # A misuse after the same calendar still refuses on every market, the denser one too.
+        out = self.refused(program(gated.replace('x = STATE["cal"]', "for pid, p in ctx.positions.items():\n    pass"),
+                                   head=head))
+        self.assertIn("denser one", out["why"])
+
+    def test_a_selection_read_whatever_its_count_is_never_refused(self):
+        # The evidence review's case: np.squeeze(axis=0) of a selection raises on none and on several alike, as .item()
+        # does; neither refuses.
+        head = "import numpy as np\n" + HEAD
+        pick = "sel = c.mid[(c.iv > 0.5) & c.is_call & (c.dte == c.dte.min())]\n"
+        for read in ("px = float(np.squeeze(sel, axis=0))", "px = sel.item()"):
+            out = self.check(program("c = ctx.chain\n" + pick + read + "\nreturn []", head=head))
+            self.assertEqual(out["status"], "inconclusive", (read, out))
+
+    def test_a_wide_quote_on_a_deep_book_exists(self):
+        # The correctness review's nit: a filter for wide quotes on deep books kept nothing on any market (the listing's
+        # books were thin, the tight market's quotes a tick, the wide market's books thin), so STATE never filled. The
+        # listing's books now run from one contract to thousands on a log scale, at every quote width.
+        head = "import numpy as np\n" + HEAD
+        body = ("c = ctx.chain\nroom = (c.spread >= 0.03) & (c.bid_size >= 500) & (c.ask_size >= 500)\n"
+                "if room.any():\n    STATE[\"t\"] = int(np.flatnonzero(room)[0])\nt = STATE[\"t\"]\nreturn []")
+        out = self.check(program(body, head=head))
+        self.assertEqual((out["status"], out.get("errors")), ("passed", 0), out)
+        from league.swarm.preflight import Market
+
+        needs = {"roots": ["SPY"], "dte": [0, 7], "band": 0.05, "cadence": 5, "history": 5, "start": 571, "end": 958}
+        snap = Market(["SPY"], needs).snapshot("SPY", 0, 60)
+        self.assertLess(int(snap.bid_size.min()), 10)
+        self.assertGreater(int(snap.bid_size.max()), 1_000)
 
     LIQUID = {
         # The verification review's probes: each errs on every call only when its liquidity filter keeps nothing.
@@ -419,14 +504,14 @@ class Preflight(unittest.TestCase):
         self.assertIn("name 'undefined_intents' is not defined", out["error"])
         # A misuse on any market is refused, on every one of them.
         out = self.refused(program("for pid, p in ctx.positions.items():\n    pass\nreturn []"))
-        for words in ("sparser listing", "one tick wide", "three times as wide"):
+        for words in ("sparser listing", "denser one", "one tick wide", "three times as wide"):
             self.assertIn(words, out["why"])
 
     def test_the_chain_is_the_listing(self):
         # The listed step, the store's strikes a side of the open's money (40 for SPXW only, as storelib's STRIKE_RANGE),
         # the root's expiry weekdays and the store's reach in days to expiry (14; SPY and QQQ 45); the sparse listing:
-        # Fridays and the next wider step.
-        from league.swarm.preflight import FRIDAY, Market, STORE_DEFAULT_STRIKES, listing
+        # Fridays and the next wider step; the dense one: every weekday and the next finer step too.
+        from league.swarm.preflight import FRIDAY, Market, STORE_DEFAULT_STRIKES, listing, strikes
 
         for root, step, weekdays, reach in (("SPXW", 5.0, {0, 1, 2, 3, 4}, 14), ("SPX", 5.0, {4}, 14),
                                             ("SPY", 1.0, {0, 1, 2, 3, 4}, 45), ("IWM", 1.0, {0, 2, 4}, 14),
@@ -454,6 +539,21 @@ class Preflight(unittest.TestCase):
             wider = numpy.diff(numpy.unique(sparse.strike[sparse.dte == sparse.dte.min()]))
             fixed = root in ("SPXW", "SPX", "SPY", "IWM")
             self.assertTrue(numpy.allclose(wider, step if fixed else {0.5: 1.0, 1.0: 2.5, 2.5: 5.0}[step]), root)
+            # The dense listing, on the listing's own weekdays: an expiry every weekday out to 14 days, and the next
+            # finer step's strikes beside the root's own across the listing's span (a fixed-step root keeps its step).
+            dense = Market([root], needs, regime="dense")
+            self.assertEqual(dense.weekdays, market.weekdays, root)
+            for s, weekday in enumerate(dense.weekdays):
+                snap = dense.snapshot(root, s, 0)
+                days = numpy.unique(snap.dte).tolist()
+                self.assertEqual([d for d in days if d <= 14], [d for d in range(15) if (weekday + d) % 7 < 5], root)
+                ks = numpy.unique(snap.strike[snap.dte == snap.dte.min()])
+                own = strikes(root, float(dense.days[root][s]["path"][0]))
+                self.assertTrue(numpy.isin(numpy.round(own, 6), numpy.round(ks, 6)).all(), root)
+                fine = step if fixed or step == 0.5 else {1.0: 0.5, 2.5: 1.0, 5.0: 2.5}[step]
+                self.assertEqual(ks.size > own.size, fine != step, root)
+                self.assertTrue(numpy.isin(numpy.round(fine * numpy.round(own[len(own) // 2] / fine) + fine, 6),
+                                           numpy.round(ks, 6)), root)
 
     def test_the_sessions_fall_on_days_the_roots_list(self):
         # Midweek when every weekday lists (SPY); a Friday-only root 10-20 days out lists on Monday (11), Tuesday (10) and
@@ -640,6 +740,29 @@ class SandboxSpawn(unittest.TestCase):
                 d._spawn()
             self.made.append(d._runtime)
         self.assertEqual(len(killed), 1)
+
+    def test_the_child_runs_at_the_lowest_priority(self):
+        # The House has one core and the live decider's child runs at nice 5: the preflight's child is reniced to 19
+        # right after its spawn, so the live minute wins the core. A stand-in (a test's mock) is never reniced.
+        import os
+        import subprocess
+        import sys
+        from unittest import mock
+
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            self.PF._lowest_priority(child)
+            self.assertEqual(os.getpriority(os.PRIO_PROCESS, child.pid), self.PF.PREFLIGHT_NICE)
+        finally:
+            child.kill()
+            child.wait()
+        with mock.patch("os.setpriority") as renice:
+            self.PF._lowest_priority(mock.Mock(pid=4242))
+            self.PF._lowest_priority(None)
+        renice.assert_not_called()
+        with mock.patch.object(self.D.Decider, "_spawn"), mock.patch.object(self.PF, "_lowest_priority") as lowest:
+            self.Sandbox(timeout=1.0, max_errors=10 ** 9)._spawn(3.0)
+        lowest.assert_called_once()
 
     @unittest.skipUnless(Path("/proc/self/status").exists(), "no /proc")
     def test_the_uid_is_read_back_from_proc(self):

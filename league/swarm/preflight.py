@@ -8,9 +8,10 @@ half, and it runs nowhere near the Gym:
 
 - **Where the code runs.** In the live path's own sandbox: `league.live.decider.Decider` itself, its spawn and every
   isolation rule it has (an empty environment, `-E -s`, the child's own limits, a read-only runtime copy, fail-closed
-  off a root House, a mandatory private network namespace whose failed probe is retried), with one difference: the
+  off a root House, a mandatory private network namespace whose failed probe is retried), with two differences: the
   child runs under its own uid (`PREFLIGHT_UID`, not the 65534 the live and observe deciders run as, so an escaped
-  program cannot signal or trace them). The House never executes a program in its own process. `load` is the Gym's
+  program cannot signal or trace them), and at the lowest scheduling priority (`PREFLIGHT_NICE`: the live minute wins
+  the House's one core). The House never executes a program in its own process. `load` is the Gym's
   `load_program` (safety check, NEEDS, PARAMS, the module body) and each call is the Gym's `Runner.decide` with its
   one-second limit.
 - **What it sees.** Up to three synthetic sessions (a regular 09:30-16:00 day, no event; Tuesday to Thursday, or the
@@ -30,21 +31,24 @@ half, and it runs nowhere near the Gym:
   2. decide raised on `STREAK` (25, the Gym's `DEFAULT_MAX_ERRORS`) consecutive calls spanning at least two sessions,
      BEFORE the program returned any intent, and every error the streak may hold is named in the Runner's message
      list and is neither `environmental` nor `market_dependent` (an empty selection, a selection turned into one
-     number, a division by zero, a numeric key, a None: the made-up numbers could cause or spare those, on Python 3.11
-     and 3.14 alike). Until its first intent a Gym account is flat too, and an erring call returns no intent, so the
-     Gym's account would stay exactly as flat as this one while the program erred: the only difference left is the
-     market's numbers, which such an error does not depend on;
+     number, two selections of different lengths, a division by zero, a numeric key, a None: the made-up numbers could
+     cause or spare those, on Python 3.11 and 3.14 alike). Until its first intent a Gym account is flat too, and an
+     erring call returns no intent, so the Gym's account would stay exactly as flat as this one while the program
+     erred: the only difference left is the market's numbers, which such an error does not depend on;
   3. and a decide refusal recurs (`_recurs`: the same exception at the same line, or saying the same thing at another)
-     on a fresh instance of the program meeting each of the other markets (`CONFIRMATIONS`, `REGIMES`). One is a
-     sparser listing of the same roots (`listing(sparse=True)`: one expiry a week, the next wider strike step). A
-     listing is one the Gym holds over a long stretch of Train, not on every day: a selection that keeps one contract on
-     a coarser day keeps several on it (its truth value then raises), and the sparse listing covers a listing one step
-     or one expiry schedule finer than the Gym's; a listing coarser than the Gym's only costs inconclusives (an empty
-     selection is `market_dependent`). The
-     others are the listing again with other numbers at both ends: one-tick quotes, deep books and a higher vol;
-     quotes three times as wide, thin books and a lower vol; each on its own price paths at another level. An error
-     that follows from the numbers without saying so (a liquidity filter that keeps nothing, then a STATE key it never
-     wrote or a local it never set) is spared on one of them.
+     on a fresh instance of the program meeting each of the other markets (`CONFIRMATIONS`, `REGIMES`). Two bracket the
+     listing: a sparser one of the same roots (`listing(sparse=True)`: one expiry a week, the next wider strike step)
+     and a denser one (`listing(dense=True)`: an expiry every weekday and, where a root's step changes over Train, the
+     next finer step as well as its own). A listing is one the Gym holds over a long stretch of Train, not on every day,
+     and each admitted root's store lies between these two on every Train day (`LISTING`). So an error that turns on
+     how many contracts a selection keeps is spared on one of them: a selection that keeps one contract on a coarser
+     day keeps several on the listing (its truth value then raises) but not on the sparse one, and a selection the
+     listing leaves empty (a calendar between two expiries it never lists on one day, then a STATE key never written) is
+     filled on the dense one. The others are the listing again with other numbers at both ends: one-tick quotes, deep
+     books and a higher vol; quotes three times as wide, thin books and a lower vol; each on its own price paths at
+     another level (the dense market has its own too, at a vol between). An error that follows from the numbers
+     without saying so (a liquidity filter that keeps nothing, then a STATE key it never wrote or a local it never set)
+     is spared on one of them.
   Anything else passes: the first intent ends the preflight (a flat account no longer mirrors the Gym's), as does a
   call past its time limit, a decider failure or the preflight's own deadline. The preflight never blocks on its own
   failure. A clean program costs one session plus `STREAK` calls of the next (a streak that begins later could only
@@ -63,12 +67,13 @@ import difflib
 import hashlib
 import math
 import re
+import subprocess
 import threading
 import time
 import zlib
 from typing import Any, Callable, Mapping, NamedTuple, Sequence
 
-VERSION = "preflight-v4"
+VERSION = "preflight-v5"
 #: Consecutive erring calls that refuse: the Gym's own disqualification count (`league.gym.runtime.DEFAULT_MAX_ERRORS`).
 STREAK = 25
 #: Synthetic sessions at most (a third only to confirm a streak that began in the second).
@@ -97,17 +102,23 @@ STORE_DEFAULT_STRIKES = 25
 DAILY, MON_WED_FRI, FRIDAY = (0, 1, 2, 3, 4), (0, 2, 4), (4,)
 #: THE LISTING: each root's chain as the exchanges list it near the money over Train (2020-2024, `gym.train_from`), which
 #: is what the store holds: a representative price, the strike step at that price, and the weekdays that have an expiry
-#: within FRONT_DTE (past it, Fridays). SPY, QQQ and SPXW are listed here with an expiry every weekday, as from 2022 on;
-#: before that SPY and QQQ listed Monday, Wednesday and Friday (to late 2022) and SPXW too (to spring 2022), one expiry
-#: schedule coarser than this, which the sparse listing (`listing(sparse=True)`, Fridays only) covers: a refusal must
-#: recur there. IWM and XSP list Monday, Wednesday and Friday (IWM every weekday from spring 2024: this is then the
-#: coarser one, and an empty selection never refuses), every other root Fridays (the weeklies and the monthly). The index
+#: within FRONT_DTE (past it, Fridays). A root's schedule changed over Train, so no one listing is the Gym's on every
+#: day. Two confirming listings bracket it (`listing`): the sparse one, Fridays only and the next wider step, and the
+#: dense one, every weekday and the next finer step's strikes too; a refusal must recur on both. Every admitted root's
+#: store lies inside that bracket on every Train day, whatever it listed that day: SPY and QQQ list every weekday from
+#: late 2022 (Monday, Wednesday and Friday before), SPXW from spring 2022 (the same before), XSP every weekday in the
+#: store's 2024 sample (fewer earlier), IWM Monday, Wednesday and Friday for most of Train (every weekday from spring
+#: 2024), all at a fixed step. Each is listed here with its latest schedule but IWM; the listing only decides what the
+#: first market shows, the bracket decides a refusal. Every other root lists Fridays (the weeklies and the monthly). A
+#: root with monthlies only is coarser than the sparse listing: SPX (the AM-settled root; its weeklies are SPXW) is one,
+#: and like a stock without weeklies it is not an admitted root; admitting one needs its schedule here first. The index
 #: ETFs and GLD list $1 strikes and SPX/SPXW $5 at any price; a stock or another ETF lists by its price (`equity_step`:
 #: $0.5 under $75, $1 under $150, $2.5 under $500, $5 above). A root not named here is a $100 stock with Friday
-#: expiries.
+#: expiries. When in doubt, list a root as it lists on most Train days: the bracket covers one expiry schedule and one
+#: strike step either side of it, and nothing past that.
 LISTING: dict[str, tuple[float, float, tuple[int, ...]]] = {
     "SPY": (450.0, 1.0, DAILY), "QQQ": (380.0, 1.0, DAILY), "SPXW": (4500.0, 5.0, DAILY), "SPX": (4500.0, 5.0, FRIDAY),
-    "IWM": (190.0, 1.0, MON_WED_FRI), "XSP": (450.0, 1.0, MON_WED_FRI), "DIA": (350.0, 1.0, FRIDAY),
+    "IWM": (190.0, 1.0, MON_WED_FRI), "XSP": (450.0, 1.0, DAILY), "DIA": (350.0, 1.0, FRIDAY),
     "GLD": (180.0, 1.0, FRIDAY),
 }
 #: Representative Train prices of the rest of the universe (`equity_step` gives their strike step, Fridays their
@@ -116,10 +127,12 @@ PRICES = {"SLV": 22.0, "TLT": 100.0, "SMH": 220.0, "NVDA": 400.0, "MSFT": 300.0,
           "GOOGL": 120.0, "TSM": 100.0, "TSLA": 220.0, "PLTR": 20.0, "SMCI": 250.0, "META": 300.0, "AAPL": 170.0,
           "MARA": 15.0, "MU": 80.0, "BABA": 90.0, "SOXL": 25.0, "TQQQ": 40.0}
 DEFAULT_PRICE = 100.0
-#: The roots whose near-money step is the same on every Train day (the $1 index ETFs, SPX's $5): a sparser listing
-#: (`listing(sparse=True)`) keeps it; any other root's sparser listing takes the next wider step.
+#: The roots whose near-money step is the same on every Train day (the $1 index ETFs, SPX's $5): a sparser or denser
+#: listing (`listing`) keeps it; any other root's sparser listing takes the next wider step, and its denser one lists
+#: the next finer step's strikes beside its own (`strikes`).
 FIXED_STEP = frozenset({"SPY", "QQQ", "IWM", "XSP", "DIA", "SPXW", "SPX"})
 WIDER = {0.5: 1.0, 1.0: 2.5, 2.5: 5.0, 5.0: 10.0}
+FINER = {1.0: 0.5, 2.5: 1.0, 5.0: 2.5}
 #: Each root's implied vol in the synthetic market: ballpark levels of the kind any options screen shows, not fitted to
 #: any vendor's quotes (the repository is public and holds none). A cheap, wild stock needs its own: at the index's vol a
 #: $15 stock's weekly at-the-money option would be worth a few cents, and its one-cent tick a quarter of that.
@@ -143,12 +156,13 @@ WIDENING, WIDEST_Z = 0.5, 4.0
 
 
 class Regime(NamedTuple):
-    """One synthetic market's numbers (`REGIMES`): its listing (`sparse`), its quotes' width (a multiple of `quote`'s;
-    0: every quote one tick wide, the venue's narrowest), each root's vol and price as multiples of `VOLS` and the
-    listing's price, its books' sizes (a range) and open interest (the most), and its own price paths (`salt`)."""
+    """One synthetic market's numbers (`REGIMES`): its listing (`chain`: "listed", "sparse" or "dense", `listing`), its
+    quotes' width (a multiple of `quote`'s; 0: every quote one tick wide, the venue's narrowest), each root's vol and
+    price as multiples of `VOLS` and the listing's price, its books' sizes (a range, drawn evenly on a log scale) and open
+    interest (the most), and its own price paths (`salt`)."""
 
     label: str
-    sparse: bool
+    chain: str
     width: float
     vol: float
     level: float
@@ -157,27 +171,31 @@ class Regime(NamedTuple):
     salt: int
 
 
-#: THE MARKETS a program meets. It is first run on the listing with typical quotes. A refusal must then recur (`_recurs`:
-#: the same exception at the same line, or saying the same thing at another) on each of the others in turn
-#: (`CONFIRMATIONS`): the same roots listed more thinly (the listing's count of contracts), and the listing again with
-#: other numbers at both ends: every quote one tick wide (the venue's narrowest) on deep books at twice the vol and a
-#: higher price, whose richer premiums make those ticks the smallest share of a mid; and quotes three times as wide on
-#: thin books at a lower vol and price, the widest share; each on its own price paths. An error that turns on how many
-#: contracts a selection keeps, or on a quote's width, a vol, a size or a price (a liquidity filter that keeps nothing,
-#: then a STATE key it never wrote) is spared on one of them, and so never refuses. A filter that keeps nothing even on
-#: one-tick quotes at twice the vol would keep nothing on almost every Gym day either (no quote there is narrower than a
-#: tick), and 25 errors in a run disqualify it there. The price is a misuse behind a gate on the prices (a z-score, a
-#: flat band) that other paths never open: it is left to the Gym.
+#: THE MARKETS a program meets. It is first run on the listing with typical quotes on books of every size, from one
+#: contract to thousands. A refusal must then recur (`_recurs`: the same exception at the same line, or saying the same
+#: thing at another) on each of the others in turn (`CONFIRMATIONS`): the listing's bracket (`LISTING`), the same roots
+#: listed more thinly on the same numbers and listed more densely on its own price paths at a vol between the listing's
+#: and the tight market's; and the listing again with other numbers at both ends: every quote one tick wide (the venue's
+#: narrowest) on deep books at twice the vol and a higher price, whose richer premiums make those ticks the smallest
+#: share of a mid; and quotes three times as wide on thin books at a lower vol and price, the widest share; each on its
+#: own price paths. An error that turns on how many contracts a selection keeps, or on a quote's width, a vol, a size or
+#: a price (a liquidity filter that keeps nothing, then a STATE key it never wrote) is spared on one of them, and so
+#: never refuses. A filter that keeps nothing even on one-tick quotes at twice the vol would keep nothing on almost every
+#: Gym day either (no quote there is narrower than a tick), and 25 errors in a run disqualify it there. The price is a
+#: misuse behind a gate on the numbers that none of these markets opens (a z-score, a band of vols between theirs): it is
+#: left to the Gym.
 REGIMES = {
-    "listed": Regime("the listed chain", False, 1.0, 1.0, 1.0, (5, 400), 50_000, 1),
-    "sparse": Regime("a sparser listing of the same roots (one expiry a week, a wider strike step)", True, 1.0, 1.0, 1.0,
-                     (5, 400), 50_000, 1),
+    "listed": Regime("the listed chain", "listed", 1.0, 1.0, 1.0, (1, 5_000), 50_000, 1),
+    "sparse": Regime("a sparser listing of the same roots (one expiry a week, a wider strike step)", "sparse", 1.0, 1.0,
+                     1.0, (1, 5_000), 50_000, 1),
+    "dense": Regime("a denser listing of the same roots (an expiry every weekday, a finer strike step; another price "
+                    "path, a vol between)", "dense", 1.0, 1.4, 1.05, (1, 5_000), 50_000, 4),
     "tight": Regime("the listing quoted one tick wide on deep books (twice the vol, another price path, a higher price)",
-                    False, 0.0, 2.0, 1.1, (200, 5_000), 500_000, 2),
+                    "listed", 0.0, 2.0, 1.1, (200, 5_000), 500_000, 2),
     "wide": Regime("the listing quoted three times as wide on thin books (a lower vol, another price path, a lower price)",
-                   False, 3.0, 0.6, 0.9, (1, 40), 3_000, 3),
+                   "listed", 3.0, 0.6, 0.9, (1, 40), 3_000, 3),
 }
-CONFIRMATIONS = ("sparse", "tight", "wide")
+CONFIRMATIONS = ("sparse", "dense", "tight", "wide")
 
 
 def equity_step(price: float) -> float:
@@ -185,11 +203,13 @@ def equity_step(price: float) -> float:
     return 0.5 if price < 75 else 1.0 if price < 150 else 2.5 if price < 500 else 5.0
 
 
-def listing(root: str, *, sparse: bool = False) -> tuple[float, float, tuple[int, ...]]:
+def listing(root: str, *, sparse: bool = False, dense: bool = False) -> tuple[float, float, tuple[int, ...]]:
     """(price, strike step, expiry weekdays) of `root` (`LISTING`). `sparse`: the same root listed more thinly, one
-    expiry a week (Fridays) and, unless the root's step never changes, the next wider strike step. A refusal on the
-    listing must recur on the sparse one (`run`): a listing one step finer than the Gym's on some day (a selection that
-    holds one contract there holds several here) then never refuses on its own."""
+    expiry a week (Fridays) and, unless the root's step never changes, the next wider strike step. `dense`: listed more
+    densely, an expiry every weekday and, unless the root's step never changes, the next finer step (`strikes` lists it
+    beside the root's own). A refusal on the listing must recur on both (`run`): a listing one step or schedule finer or
+    coarser than the Gym's on some day (a selection that holds one contract there holds several here, or one that holds
+    a contract there holds none here) then never refuses on its own."""
     root = str(root).upper()
     if root in LISTING:
         price, step, weekdays = LISTING[root]
@@ -198,7 +218,28 @@ def listing(root: str, *, sparse: bool = False) -> tuple[float, float, tuple[int
         step, weekdays = equity_step(price), FRIDAY
     if sparse:
         return price, (step if root in FIXED_STEP else WIDER.get(step, 2.0 * step)), FRIDAY
+    if dense:
+        return price, (step if root in FIXED_STEP else FINER.get(step, step)), DAILY
     return price, step, weekdays
+
+
+def strikes(root: str, price: float, *, chain: str = "listed") -> Any:
+    """The strikes listed about `price` (the session's open): the store's count a side of the money on the step of
+    `chain`'s listing (`listing`, `STORE_STRIKES`), none at or under zero. The dense chain spans the listing's strikes
+    and lists the finer step's inside that span beside them, so it holds every strike of the listing."""
+    import numpy as np
+
+    root = str(root).upper()
+    side = STORE_STRIKES.get(root, STORE_DEFAULT_STRIKES)
+    step = listing(root, sparse=chain == "sparse")[1]
+    ks = round(float(price) / step) * step + step * np.arange(-side, side + 1)
+    if chain == "dense":
+        fine = listing(root, dense=True)[1]
+        if fine != step:
+            lo, hi = float(ks[0]), float(ks[-1])
+            finer = fine * np.arange(math.ceil(lo / fine - 1e-9), math.floor(hi / fine + 1e-9) + 1)
+            ks = np.unique(np.round(np.concatenate([ks, finer]), 6))
+    return ks[ks > 0]
 
 
 def vol_of(root: str) -> float:
@@ -250,9 +291,10 @@ def _rng(root: str, salt: int) -> Any:
 
 
 class Market:
-    """Synthetic sessions for a program's NEEDS (the module docstring) on each root's listed chain (`listing`) with the
-    numbers of `regime` (`REGIMES`: "listed" first; `sparse` is the "sparse" one). Deterministic: the same roots, NEEDS
-    and regime make the same market."""
+    """Synthetic sessions for a program's NEEDS (the module docstring) on each root's chain (`listing`, `strikes`) with
+    the numbers of `regime` (`REGIMES`: "listed" first; `sparse` is the "sparse" one). Its sessions fall on the weekdays
+    of the listing's (`session_weekdays`), the dense one's too, so its chain holds every expiry and strike the listing's
+    does on each. Deterministic: the same roots, NEEDS and regime make the same market."""
 
     def __init__(self, roots: Sequence[str], needs: Mapping[str, Any], *, sparse: bool = False, regime: str = "listed"):
         import numpy as np
@@ -262,7 +304,8 @@ class Market:
         self.roots = tuple(roots)
         self.needs = dict(needs)
         self.regime = REGIMES["sparse" if sparse else regime]
-        self.sparse = self.regime.sparse
+        self.chain = self.regime.chain
+        self.sparse, self.dense = self.chain == "sparse", self.chain == "dense"
         self.weekdays = session_weekdays(self.roots, needs, sparse=self.sparse)
         dte_min, dte_max = (int(x) for x in needs["dte"])
         history = int(needs["history"])
@@ -270,11 +313,10 @@ class Market:
         self.days: dict[str, list[dict[str, Any]]] = {}
         for root in self.roots:
             rng = _rng(root, self.regime.salt)
-            spot, step, weekdays = listing(root, sparse=self.sparse)
+            spot, _, weekdays = listing(root, sparse=self.sparse, dense=self.dense)
             spot *= self.regime.level
             per_minute = self.vols[root] / math.sqrt(252 * 390)
             overnight = 0.35 * self.vols[root] / math.sqrt(252)  # about a third of a day's move
-            side = STORE_STRIKES.get(root, STORE_DEFAULT_STRIKES)
             bars, paths = [], []
             for _ in range(history + SESSIONS):
                 spot *= math.exp(rng.normal(0.0, overnight))  # the overnight move
@@ -290,9 +332,7 @@ class Market:
                 path = paths[i]
                 weekday = self.weekdays[s]
                 dtes = expiries(root, weekday, dte_min, dte_max, weekdays)
-                atm = round(float(path[0]) / step) * step
-                ks = atm + step * np.arange(-side, side + 1)  # the store's strikes a side of the open's money
-                ks = ks[ks > 0]
+                ks = strikes(root, float(path[0]), chain=self.chain)  # the store's strikes a side of the open's money
                 dte = np.repeat(np.array(dtes, dtype=np.int64), ks.size * 2)
                 strike = np.tile(np.repeat(ks, 2), len(dtes))
                 is_call = np.tile(np.array([True, False]), ks.size * len(dtes))
@@ -305,7 +345,8 @@ class Market:
 
     def snapshot(self, root: str, session: int, mi: int) -> Any:
         """The root's chain at minute `mi` of the session (a `Snapshot`, as the replay makes one): Black-Scholes mids on
-        the root's vol with a skew, quoted about them (`quote`), with the regime's sizes."""
+        the root's vol with a skew, quoted about them (`quote`), with the regime's sizes (evenly on a log scale, so a
+        size filter at any depth in the range keeps some contracts and drops others, at any quote width)."""
         import numpy as np
 
         from ..gym.ctx import Snapshot
@@ -322,8 +363,9 @@ class Market:
         mid = self._G.bs_price(spot, strike, years, RATE, sigma, is_call)
         bid, ask = quote(root, mid, m / (sigma * np.sqrt(years)), self.regime.width)
         rng, (low, high) = day["rng"], self.regime.sizes
-        return Snapshot(root, OPEN + mi, spot, dte, strike, is_call, bid, ask, rng.integers(low, high, n),
-                        rng.integers(low, high, n), oi=day["oi"], rate=RATE, close_minute=CLOSE)
+        sizes = lambda: np.floor(np.exp(rng.uniform(math.log(low), math.log(high + 1), n))).astype(np.int64)  # noqa: E731
+        return Snapshot(root, OPEN + mi, spot, dte, strike, is_call, bid, ask, sizes(), sizes(), oi=day["oi"], rate=RATE,
+                        close_minute=CLOSE)
 
     def under(self, root: str, session: int, mi: int) -> Any:
         """The root's underlying at minute `mi` (as `engine.DayData.under`: prices from the open, prior sessions, volume
@@ -488,21 +530,38 @@ def environmental(message: str) -> bool:
 #: division by a price or a count, a strike looked up in a dict, a log of a non-positive number, a None from a search that
 #: found nothing on this market. The synthetic market is not the real one, so such an error proves nothing about the Gym
 #: and never refuses (the Gym still judges it). First by the exception's type alone, whatever its words: an index past an
-#: empty or short array, a division by zero, an exhausted search, an overflow, a singular fit, a None, a numeric key.
+#: empty or short array, a division by zero, an exhausted search, an overflow, a singular fit, a None, a numeric key (a
+#: strike, or a strike's text), a pop from an empty set or dict.
 _MARKET_ERRORS = re.compile(r"\b(IndexError|ZeroDivisionError|StopIteration|OverflowError|FloatingPointError|LinAlgError|"
-                            r"NoneType|KeyError: -?[\d.]+|KeyError: \(|KeyError: np\.|KeyError: nan)")
+                            r"NoneType|KeyError: -?[\d.]+|KeyError: '-?\d+(?:\.\d+)?'|KeyError: \(|KeyError: np\.|"
+                            r"KeyError: nan|KeyError: '(?:pop from an empty set|popitem\(\): dictionary is empty)')")
 #: Then a ValueError or a TypeError by what it says, each wording raised on the House's runtime (Python 3.11, numpy 2.4.4)
-#: and on 3.14 with numpy 2.5.3 (the tests raise every one on the runtime they run on; CI runs both). An empty selection
-#: says "empty", "non-empty", "size 0" or "zero-size" (min() and max(): 3.11's "arg is an empty sequence", 3.14's
-#: "iterable argument is empty"; argmin, a reduction, np.interp, np.polyfit, the truth value of an empty array). Turning a
-#: selection into one number cannot tell an empty one from a crowded one (`.item()`; `float()` or `int()` of an array,
-#: which np.squeeze of exactly one contract would have spared), so neither refuses. The math module's domain errors say
-#: "math domain error" on 3.11 and, on 3.14, what they expected and got ("expected a positive input, got 0.0").
+#: and on 3.14 with numpy 2.5.3 (the tests raise every one on the runtime they run on; CI runs both, and the wordings
+#: below are the same on both but where named). An empty selection says "empty", "non-empty", "size 0" or "zero-size"
+#: (min() and max(): 3.11's "arg is an empty sequence", 3.14's "iterable argument is empty"; argmin, a reduction,
+#: np.interp, np.polyfit, the truth value of an empty array), or prints a shape with a zero in it ("(0,)", "(3, 0)"), or
+#: is too small for what was asked of it (np.gradient, np.partition's kth, a count less one as a length). Turning a
+#: selection into one number cannot tell an empty one from a crowded one (`.item()`, `np.squeeze(axis=0)`; `float()`,
+#: `int()` or a format of an array, which np.squeeze of exactly one contract would have spared), so none of them refuses. Two
+#: selections of different lengths (a broadcast, a dot product, np.interp's fp and xp, np.polyfit's x and y, a strict
+#: zip) are each as long as the market makes them; np.interp and np.polyfit do not say whether one was empty. A search
+#: that found nothing (`list.index`, `tuple.index`, an all-NaN slice), a step, a scale or a range worked out from the
+#: numbers, and a NaN or an infinity are the market's too. The math module's domain errors say "math domain error" on 3.11
+#: and, on 3.14, what they expected and got ("expected a positive input, got 0.0"). The truth value of an array of
+#: several contracts, a string read as a number and an operator on a list stay refusable: a sparser listing keeps them
+#: from refusing where a selection could hold one contract in the Gym.
 _MARKET_VALUES = re.compile(
     r"\bempty\b|non-empty|\bsize 0\b|zero-size|can only convert an array of size 1|"
-    r"only (?:0-dimensional|length-1|size-1) arrays can be converted|math domain error|^expected [^,]*, got |"
-    r"not in list|cannot convert float (?:NaN|infinity)|attempt to get argm|(?:not enough|too many) values to unpack|"
-    r"must not contain infs or NaNs|cannot reshape array of size|need at least one array")
+    r"only (?:0-dimensional|length-1|size-1) arrays can be converted|squeeze out which has size not equal to one|"
+    r"unsupported format string passed to numpy\.ndarray|"
+    r"\((?:\d+,\s*)*0(?:,\s*\d+)*,?\)|size 0 is different|different from 0\)|"
+    r"broadcast|not aligned|mismatch in its core dimension|not of the same length|to have same length|"
+    r"zip\(\) argument \d+ is (?:longer|shorter) than|too small to calculate|kth\(=-?\d+\) out of bounds|"
+    r"number sections must be larger than 0|does not result in an equal division|must be non-negative|"
+    r"negative dimensions are not allowed|arg 3 must not be zero|max must be larger than min|scale < 0|"
+    r"math domain error|^expected [^,]*, got |not in (?:list|tuple)|All-NaN slice|cannot convert float (?:NaN|infinity)|"
+    r"attempt to get argm|(?:not enough|too many) values to unpack|must not contain infs or NaNs|"
+    r"cannot reshape array of size|need at least one array")
 _VALUE_OR_TYPE = re.compile(r"\b(?:ValueError|TypeError): (.*)", re.S)
 
 
@@ -576,9 +635,9 @@ def run(code: str, params: Mapping[str, Any] | None, decider: Any, *, universe: 
     if verdict["status"] != "refused":
         return verdict
     # THE OTHER MARKETS (`CONFIRMATIONS`): a fresh instance of the program on each. The refusal stands only when the error
-    # recurs on every one (`_recurs`), so an error that turns on how many contracts the chain lists (a
-    # selection that holds one contract in the Gym holds several here) or on the made-up numbers (a liquidity filter
-    # that keeps nothing at these quotes, then a STATE key it never wrote) never refuses on its own.
+    # recurs on every one (`_recurs`), so an error that turns on how many contracts the chain lists (a selection that
+    # holds one contract in the Gym holds several here, or none) or on the made-up numbers (a liquidity filter that keeps
+    # nothing at these quotes, then a STATE key it never wrote) never refuses on its own.
     calls = int(verdict.get("calls") or 0)
     for regime in CONFIRMATIONS:
         label = REGIMES[regime].label
@@ -595,14 +654,16 @@ def run(code: str, params: Mapping[str, Any] | None, decider: Any, *, universe: 
         if again["status"] == "inconclusive":  # it could not say there (its deadline, a timeout, the sandbox)
             return _answer("inconclusive", f"on {label}: {again.get('why')}", calls=calls)
         if again["status"] != "refused" or not _recurs(again.get("error"), verdict.get("error")):
-            because = ("it may turn on how many contracts the chain lists, which the Gym's store decides"
-                       if regime == "sparse" else
-                       "it may turn on the market's numbers (a quote's width, a vol, a size, a price), which are made "
-                       "up here")
+            because = {"sparse": "it may turn on how many contracts the chain lists, which the Gym's store decides",
+                       "dense": "it may turn on how many contracts the chain lists, which the Gym's store decides, or on "
+                                "the market's numbers, which are made up here"}.get(
+                regime, "it may turn on the market's numbers (a quote's width, a vol, a size, a price), which are made up "
+                        "here")
             return _answer("inconclusive", f"the error did not recur on {label}: {because}: "
                                            f"{str(verdict.get('error') or '')[:240]}", calls=calls)
-    verdict["why"] += ("; again on a sparser listing (one expiry a week, a wider strike step), on quotes one tick wide at "
-                       "twice the vol and on quotes three times as wide at a lower vol (other price paths and levels)")
+    verdict["why"] += ("; again on a sparser listing (one expiry a week, a wider strike step), on a denser one (an expiry "
+                       "every weekday, a finer strike step), on quotes one tick wide at twice the vol and on quotes three "
+                       "times as wide at a lower vol (other price paths and levels)")
     verdict["calls"] = calls
     return verdict
 
@@ -754,6 +815,27 @@ def child_uids(pid: int) -> tuple[int, ...]:
     return ()
 
 
+#: The preflight child's scheduling priority: the lowest. The House has one core, the live decider's child runs at nice
+#: 5 (`decider.child_main`) and each call's limit is wall-clock time, so the live minute must win the core from a
+#: preflight whenever both want it (a preflight call that then runs past its limit is inconclusive, never a refusal).
+PREFLIGHT_NICE = 19
+_POPEN = subprocess.Popen
+
+
+def _lowest_priority(proc: Any) -> None:
+    """Renice a freshly spawned preflight child to PREFLIGHT_NICE. The root House may renice its child whatever its uid;
+    elsewhere it is the caller's own child. The child's own `os.nice(5)` at start then leaves it at the lowest either way.
+    Only a real child is reniced (`_POPEN`, the class as imported, never a test's stand-in or its pid); one that cannot
+    be still runs (the priority only orders the core)."""
+    import os
+
+    try:
+        if isinstance(proc, _POPEN) and isinstance(proc.pid, int) and proc.pid > 0:
+            os.setpriority(os.PRIO_PROCESS, proc.pid, PREFLIGHT_NICE)
+    except (OSError, AttributeError, TypeError):
+        pass
+
+
 def _sandbox() -> Any:
     """`league.live.decider.Decider` under the preflight's own uid. Nothing of the decider is copied: the spawn is
     `Decider._spawn`, so every isolation rule it has or gains (fail-closed off a root House, the network-namespace probe
@@ -780,6 +862,7 @@ def _sandbox() -> Any:
                     self._kill()
                     raise D.DeciderError(f"the preflight's decider child runs as uid {uids or 'unknown'}, not "
                                          f"{self.uid}: it was killed before any program reached it")
+            _lowest_priority(self.proc)
 
     return SandboxDecider
 
@@ -817,6 +900,6 @@ class Preflight:
             self._decider.close()
 
 
-__all__ = ["VERSION", "STREAK", "SESSIONS", "PREFLIGHT_UID", "LISTING", "REGIMES", "CONFIRMATIONS", "Market",
-           "Preflight", "Regime", "advice", "decision_minutes", "environmental", "equity_step", "expiries", "listing",
-           "market_dependent", "quote", "run", "session_weekdays", "vol_of"]
+__all__ = ["VERSION", "STREAK", "SESSIONS", "PREFLIGHT_UID", "PREFLIGHT_NICE", "LISTING", "REGIMES", "CONFIRMATIONS",
+           "Market", "Preflight", "Regime", "advice", "decision_minutes", "environmental", "equity_step", "expiries",
+           "listing", "market_dependent", "quote", "run", "session_weekdays", "strikes", "vol_of"]
