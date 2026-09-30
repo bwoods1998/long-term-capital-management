@@ -477,8 +477,11 @@ class OptionsLive:
     # ------------------------------------------------------------------ families and instances
     def _restore_real_instances(self) -> None:
         for r in self.state.rows("SELECT * FROM instances WHERE retired_at IS NULL"):
+            # Keywords, never positions: the tenth field is `observe`, and a mode string there made every restored real
+            # instance an observe one (truthy) and dropped its saved mode (Sept 29, 2026).
             inst = Instance(r["id"], r["family"], int(r["version"] or 0), "real", r["code"], dict(json_or(r["params"], {})),
-                            r["run_sha"] or "", r["band"] or "", bool(r["tuition"]), r["mode"] or "live")
+                            run_sha=r["run_sha"] or "", band=r["band"] or "", tuition=bool(r["tuition"]),
+                            observe=False, mode=r["mode"] or "live")
             if str(r.get("why") or "").startswith(("disqualified:", "the program does not load:", "its decider could not recover")):
                 inst.error, inst.fatal, inst.mode = r["why"], True, "exit_only"
                 self.instances[inst.key] = inst
