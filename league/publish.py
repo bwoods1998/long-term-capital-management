@@ -29,8 +29,8 @@ with any of these keys, and anything not yet available as None or an empty list.
     started_at   ISO time the House first started on its new ledger (default: the first `ops.started`)
     account      {equity, cash, as_of, stale}                       the Brokerage Account
     performance  {start_at, start_equity, net_flows, verified_at}   the profit basis
-    compute      {sail_usd, openai_usd, thetadata_usd, market_data_usd, other_usd}  since the reset;
-                 merged part by part over the defaults
+    compute      {sail_usd, claude_usd, openai_usd, thetadata_usd, market_data_usd, other_usd}  since the reset;
+                 merged part by part over the defaults (Sail as Sail billed it, Claude its own part: below)
     gym          {trials, market_years, families_alive, families_retired}
     agents       [{id, family, mechanism, structure, band, born_at, retired_at,
                    trials, revisions, forward: {trades, wins, pnl_usd} | None, real: {...} | None}]
@@ -45,6 +45,14 @@ practised on live quotes in the shadow book under the Gym's fill rules (never re
 `trading`, `positions`, `performance` or Profit, and never carries a price, strike, leg, expiry, minute, trade date,
 version or code. A site that refuses a checkpoint carrying it (the site accepts exact shapes: an older site) gets the
 checkpoint again without it and is offered it again half an hour later, with a warning that quotes the site's reply.
+
+**Every input cost, by service** (the owner, Sept 30, 2026: the public site must stop understating cost and show Net).
+`compute` is the bill since the reset, part by part: Sail as Sail billed it (the swarm's `sitefeed.sail_billed`: the
+guard's balance meter, never the Gym's booked box estimate, which ran about 70% above the provider's bill), Claude
+(`claude_usd`, the research roles' model calls), OpenAI, the two data subscriptions prorated from the reset, and
+`other_usd`. The site derives Net from it and the positions table (realized options P&L less every input cost). A site
+older than Sept 30, 2026 knows five parts, so it gets Claude back inside `other_usd` (`legacy_compute`, #431's shape),
+together with the practice block's fallback below: either repository may deploy first.
 
 **Profit and the positions table** (the owner, Sept 28, 2026). `trading {as_of, pnl_usd}` is the complete
 real-options P&L of the Brokerage Account since `performance.start_at`, and `positions {as_of, rows, earlier, other,
@@ -117,7 +125,7 @@ FLOWS_FRESH_SECONDS = 600
 #: `subscriptions_monthly_usd` overrides either.
 SUBSCRIPTIONS_MONTHLY_USD = {"thetadata_usd": Decimal("80"), "market_data_usd": Decimal("1000") / 12}
 MONTH_SECONDS = Decimal(365.25 * 86400) / 12
-COMPUTE_PARTS = ("sail_usd", "openai_usd", "thetadata_usd", "market_data_usd", "other_usd")
+COMPUTE_PARTS = ("sail_usd", "claude_usd", "openai_usd", "thetadata_usd", "market_data_usd", "other_usd")
 
 BANDS = ("gym", "candidate", "probe", "sized", "retired")
 REAL_BANDS = ("probe", "sized")
@@ -390,13 +398,25 @@ def site_performance(value: Any, published_at: str) -> dict[str, Any] | None:
 
 
 def site_compute(value: Any, published_at: str) -> dict[str, Any] | None:
-    """{as_of, sail_usd, openai_usd, thetadata_usd, market_data_usd, other_usd}, each dollars or None."""
+    """{as_of, sail_usd, claude_usd, openai_usd, thetadata_usd, market_data_usd, other_usd}, each dollars or None."""
     if not isinstance(value, Mapping):
         return None
     at = site_instant(value.get("as_of")) or published_at
     if not _not_after(at, published_at):
         at = published_at
     return {"as_of": at, **{part: _money(value.get(part)) for part in COMPUTE_PARTS}}
+
+
+def legacy_compute(body: dict[str, Any]) -> dict[str, Any]:
+    """The checkpoint for a site older than Sept 30, 2026, which knows five compute parts: Claude back inside `other_usd`
+    (#431's shape), unknown when either is. Anything without a Claude part is returned as it is."""
+    compute = body.get("compute")
+    if not isinstance(compute, Mapping) or "claude_usd" not in compute:
+        return body
+    parts = {key: value for key, value in compute.items() if key != "claude_usd"}
+    claude, other = compute.get("claude_usd"), compute.get("other_usd")
+    parts["other_usd"] = None if claude is None or other is None else money(Decimal(claude) + Decimal(other), 2)
+    return {**body, "compute": parts}
 
 
 def site_trading(value: Any, published_at: str) -> dict[str, Any] | None:
@@ -1058,42 +1078,53 @@ class Publisher:
             self._state["cursor"] = batch[-1].seq
             self._save()
         body = checkpoint = self.checkpoint(house)
-        # The practice block first (the newest): a site that refuses the checkpoint with it gets it again without it, and
-        # is offered it again in half an hour, like the positions table below; either side may ship first.
+        # Two older shapes a site may need, each offered again half an hour after the site refused it; either repository
+        # may deploy first. `older`: without the practice league and with Claude inside `other_usd` (a site before Sept 30,
+        # 2026: `legacy_compute`). `tableless`: without the positions table (a site before Sept 28, or a row or a sum it
+        # rejects). On a refusal each is tried alone (the table first, so a bad row never costs the newer shape), then both;
+        # only what the site then took is marked refused, and the warning quotes the site's reply.
+        newer = lambda value: "practice" in value or "claude_usd" in (value.get("compute") or {})  # noqa: E731
+        older = lambda value: legacy_compute({key: item for key, item in value.items() if key != "practice"})  # noqa: E731
+        tableless = lambda value: {key: item for key, item in value.items() if key != "positions"}  # noqa: E731
         refused = self._practice_refused
-        if "practice" in body and refused is not None and self.clock() - refused < PRACTICE_RETRY_SECONDS:
-            body = {key: value for key, value in body.items() if key != "practice"}
+        if newer(body) and refused is not None and self.clock() - refused < PRACTICE_RETRY_SECONDS:
+            body = older(body)
         refused = self._positions_refused
         if "positions" in body and refused is not None and self.clock() - refused < POSITIONS_RETRY_SECONDS:
-            body = {key: value for key, value in body.items() if key != "positions"}
+            body = tableless(body)
         status, reply = self.post("/checkpoint", body)
-        if status == 400 and "practice" in body:
-            plain = {key: value for key, value in body.items() if key != "practice"}
-            retried, again = self.post("/checkpoint", plain)
-            if retried in (200, 409) or (retried == 400 and "positions" in plain):
+        dropped = (False, False)
+        if status == 400:
+            tries = [(False, True)] if "positions" in body else []
+            tries += [(True, False)] if newer(body) else []
+            tries += [(True, True)] if "positions" in body and newer(body) else []
+            for drop_newer, drop_table in tries:
+                plain = tableless(body) if drop_table else body
+                plain = older(plain) if drop_newer else plain
+                retried, again = self.post("/checkpoint", plain)
+                if retried not in (200, 409):
+                    continue
                 why = " ".join(str(reply).split())[:200]
-                if why != self._practice_refusal:
-                    self._warn(house, f"the site refused the practice league block (old site, or a row it rejects): the "
-                                      f"checkpoint went without it and the block is offered again in half an hour (the site "
-                                      f"said: {why})")
-                self._practice_refused, self._practice_refusal = self.clock(), why
-                body, status, reply = plain, retried, again
-        elif status in (200, 409) and "practice" in body:
-            self._practice_refused = self._practice_refusal = None
-        if status == 400 and "positions" in body:
-            # The site refused the checkpoint with the table (an older site's exact schema, or a row or a sum it rejects):
-            # the rest of the checkpoint still goes, and the table is offered again in half an hour. The warning quotes
-            # the site's reply, and is said again whenever the reply changes.
-            plain = {key: value for key, value in body.items() if key != "positions"}
-            retried, again = self.post("/checkpoint", plain)
-            if retried in (200, 409):
-                why = " ".join(str(reply).split())[:200]
-                if why != self._positions_refusal:
-                    self._alert(house, f"the site refused the positions table (old site, or a row it rejects): the checkpoint "
-                                       f"went without it and the table is offered again in half an hour (the site said: {why})")
-                self._positions_refused, self._positions_refusal, status, reply = self.clock(), why, retried, again
-        elif status in (200, 409) and "positions" in body:
-            self._positions_refused = self._positions_refusal = None
+                if drop_newer:
+                    if why != self._practice_refusal:
+                        self._warn(house, f"the site refused the practice league block or Claude's own compute part (old "
+                                          f"site, or a row it rejects): the checkpoint went without the block and with Claude "
+                                          f"inside other_usd, and both are offered again in half an hour (the site said: {why})")
+                    self._practice_refused, self._practice_refusal = self.clock(), why
+                if drop_table:
+                    if why != self._positions_refusal:
+                        self._alert(house, f"the site refused the positions table (old site, or a row it rejects): the "
+                                           f"checkpoint went without it and the table is offered again in half an hour (the "
+                                           f"site said: {why})")
+                    self._positions_refused, self._positions_refusal = self.clock(), why
+                dropped, body, status, reply = (drop_newer, drop_table), plain, retried, again
+                break
+        if status in (200, 409):
+            # Taken with a shape: it is offered every publish again.
+            if not dropped[0] and newer(body):
+                self._practice_refused = self._practice_refusal = None
+            if not dropped[1] and "positions" in body:
+                self._positions_refused = self._positions_refusal = None
         if status not in (200, 409):
             raise PublishError(f"the site refused the checkpoint: HTTP {status} {reply}", status=status)
         self._alert_positions(house, checkpoint)
@@ -1259,11 +1290,11 @@ class Publisher:
         return {"start_at": start, "start_equity": equity, "net_flows": net, "verified_at": site_instant(verified) if verified is not None else None}
 
     def _compute(self, folds: _Folds | None, now: str) -> dict[str, Any]:
-        """Since the reset: Sail from its meter's rows on the ledger (None until it writes one), OpenAI from
-        the House's hook only (None until then: the page shows no profit after compute rather than a
-        flattering one), the subscriptions prorated from `performance.start_at`, and nothing else yet."""
-        out: dict[str, Any] = {"as_of": now, "sail_usd": folds.sail if folds is not None else None, "openai_usd": None,
-                               "thetadata_usd": None, "market_data_usd": None, "other_usd": ZERO}
+        """Since the reset: Sail from its meter's rows on the ledger (None until it writes one), Claude and OpenAI from
+        the House's hook only (None until then: the page shows no Net rather than a flattering one), the subscriptions
+        prorated from `performance.start_at`, and nothing else yet. The swarm's hook replaces Sail with the bill."""
+        out: dict[str, Any] = {"as_of": now, "sail_usd": folds.sail if folds is not None else None, "claude_usd": None,
+                               "openai_usd": None, "thetadata_usd": None, "market_data_usd": None, "other_usd": ZERO}
         start, end = _epoch(self.performance.get("start_at")), _epoch(now)
         if start is not None and end is not None:
             months = Decimal(str(max(end - start, 0.0))) / MONTH_SECONDS

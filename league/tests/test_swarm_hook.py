@@ -718,10 +718,28 @@ class Reads(HookCase):
         inputs = sitefeed.site_inputs(self.root)
         checkpoint = publish.build_checkpoint({**inputs, "started_at": None}, "2026-09-26T12:00:00Z")
         compute = checkpoint["compute"]
-        self.assertEqual(compute["sail_usd"], "4.00")
+        self.assertEqual(compute["sail_usd"], "4.00", "no meter in this store: the booked figures stand in")
         self.assertEqual(compute["openai_usd"], "3.00")
-        self.assertEqual(compute["other_usd"], "4.00")
-        self.assertEqual(sum(float(compute[k]) for k in ("sail_usd", "openai_usd", "other_usd")), 11.0)
+        self.assertEqual(compute["claude_usd"], "4.00", "Claude is its own part")
+        self.assertEqual(sum(float(compute[k]) for k in ("sail_usd", "claude_usd", "openai_usd")), 11.0)
+
+    def test_published_sail_is_what_sail_billed_never_the_gyms_booked_estimate(self):
+        """The owner, Sept 30, 2026: the public cost is the bill. The guard's balance meter (every fall of the Sail balance
+        since the swarm began) plus the window before it, never below the model calls the swarm booked; a meter that began
+        later than the original cannot say what came before, so the booked figures stand in."""
+        store = SwarmStore(self.root, clock=self.clock)
+        for kind, usd in (("sail_model", 215.24), ("gym_box", 134.01), ("claude", 160.42)):
+            store.add_spend(kind, usd)
+        store.put("burst_started_at", 1790418146.67)
+        store.put("metered_spent", 293.69)
+        store.close()
+        self.assertEqual(sitefeed.site_inputs(self.root)["compute"]["sail_usd"], round(293.69 + sitefeed.PRE_METER_SAIL_USD, 2))
+        self.assertEqual(sitefeed.site_inputs(self.root)["compute"]["sail_usd"], 294.15, "the bill, not 349.25 booked")
+        spend = {"sail_model": 215.24, "gym_box": 134.01}
+        self.assertAlmostEqual(sitefeed.sail_billed(spend, 100.0, 1790418146.67), 215.24, 6, "never below the model calls booked")
+        self.assertAlmostEqual(sitefeed.sail_billed(spend, 293.69, 1790500000.0), 349.25, 6, "a later meter: the booked figures")
+        self.assertAlmostEqual(sitefeed.sail_billed(spend, None, 1790418146.67), 349.25, 6, "no reading: the booked figures")
+        self.assertAlmostEqual(sitefeed.sail_billed(spend, "x", None), 349.25, 6)
 
 
 class SwarmHouse(BuildCase):

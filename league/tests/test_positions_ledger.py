@@ -819,6 +819,13 @@ class ReviewOf408Test(Case):
         off = {**fixture, "positions": {**fixture["positions"], "unreconciled_usd": "0.01"}}
         self.assertEqual(site_accepts([fixture, plain, week, stale, old_shape, off]), [True, True, True, True, False, False],
                          "the fixtures and the House's tables; never #408's first shape, nor lines that do not add up")
+        # Sept 30, 2026: the practice league and Claude's own compute part, and the older shape an older site is sent.
+        from league.publish import legacy_compute
+
+        practice = json.loads((FIXTURES / "site_checkpoint_practice.json").read_text(encoding="utf-8"))
+        self.assertIn("claude_usd", practice["compute"])
+        self.assertEqual(site_accepts([practice, legacy_compute({k: v for k, v in practice.items() if k != "practice"}),
+                                       {**practice, "compute": {**practice["compute"], "claude_usd": "-1.00"}}]), [True, True, False])
 
     def test_the_houses_row_rules_are_the_sites(self):
         from league.publish import site_position
