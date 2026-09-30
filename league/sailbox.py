@@ -425,6 +425,11 @@ class Transport:
         request = Request(url, data=payload, headers=headers, method=method)
         try:
             response = self._opener.open(request, timeout=timeout)
+            # A file download can fail after its headers arrive. Keep that read inside the
+            # same sanitized boundary; exec streams and mutation response handling stay as-is.
+            if raw and not stream:
+                with response:
+                    return response.read(256_000_000)
         except HTTPError as error:
             raise _error(error.code, error.read(200_000)) from None
         except (URLError, TimeoutError, OSError) as error:
@@ -432,8 +437,6 @@ class Transport:
         if stream:
             return _ndjson(response)
         with response:
-            if raw:
-                return response.read(256_000_000)
             body_bytes = response.read(20_000_000)
         if not body_bytes:
             return {}

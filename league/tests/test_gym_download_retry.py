@@ -23,13 +23,24 @@ SECRET = "synthetic-credential-must-not-appear"
 PROGRAMS = {"synthetic": "NEEDS = {}\nPARAMS = {}\ndef decide(ctx):\n    return []\n"}
 
 
+class BrokenResponse(io.BytesIO):
+    def __init__(self, error):
+        super().__init__(b"")
+        self.error = error
+
+    def read(self, size=-1):
+        raise self.error
+
+
 class FakeOpener:
     """A completed synthetic batch; injected errors happen at the actual HTTP boundary."""
 
-    def __init__(self, *, failures=(), fail_operation="download", fail_command=None, existing=False):
+    def __init__(self, *, failures=(), fail_operation="download", fail_command=None, fail_read=False, existing=False):
         self.failures = list(failures)
         self.fail_operation = fail_operation
         self.fail_command = fail_command
+        self.fail_read = fail_read
+        self.failed_responses = []
         self.existing = existing
         self.calls = []
 
@@ -46,7 +57,12 @@ class FakeOpener:
         self.calls.append((operation, command))
         if (operation == self.fail_operation and self.failures
                 and (self.fail_command is None or self.fail_command in (command or ""))):
-            raise self.failures.pop(0)
+            error = self.failures.pop(0)
+            if self.fail_read:
+                response = BrokenResponse(error)
+                self.failed_responses.append(response)
+                return response
+            raise error
         if operation == "download":
             return io.BytesIO(b'{"batch":{},"results":[{"program":"synthetic","status":"ok"}]}')
         if operation == "upload":
@@ -134,6 +150,41 @@ class ResultDownloadRetry(unittest.TestCase):
             self.run_batch(self.driver(opener, retries=1))
         self.assertEqual(opener.count("download"), 1)
         self.assertEqual(self.delays, [])
+
+    def test_file_body_failures_use_the_same_classification_and_redaction(self):
+        cases = [(TimeoutError(SECRET), True), (URLError(TimeoutError(SECRET)), True),
+                 (ConnectionResetError(SECRET), True), (ssl.SSLCertVerificationError(1, SECRET), False),
+                 (URLError(ssl.SSLError(1, SECRET)), False), (OSError(SECRET), False),
+                 (PermissionError(errno.EACCES, SECRET), False)]
+        for error, transient in cases:
+            with self.subTest(error=type(error).__name__):
+                opener = FakeOpener(failures=[error], fail_read=True)
+                driver = self.driver(opener)
+                if transient:
+                    self.run_batch(driver)
+                    self.assertEqual(opener.count("download"), 2)
+                    self.assertEqual(self.delays, [0.25])
+                else:
+                    with self.assertRaises(GymError) as caught:
+                        self.run_batch(driver)
+                    self.assertIsInstance(caught.exception.__cause__, SailboxTransportError)
+                    self.assertFalse(caught.exception.__cause__.transient)
+                    self.assertNotIn(SECRET, "".join(traceback.format_exception(caught.exception)))
+                    self.assertEqual(opener.count("download"), 1)
+                    self.assertEqual(self.delays, [])
+                self.assertEqual(opener.count("upload"), 1)
+                self.assertEqual(opener.batches(), 1)
+                self.assertTrue(opener.failed_responses[0].closed)
+
+    def test_existing_upload_body_timeout_behavior_is_unchanged(self):
+        # The old bare-OSError rule already retries this path; adding the raw file boundary
+        # must neither extend that rule to new exec/upload errors nor silently change it.
+        opener = FakeOpener(failures=[TimeoutError("synthetic timeout")], fail_operation="upload", fail_read=True)
+        self.run_batch(self.driver(opener))
+        self.assertEqual(opener.count("upload"), 2)
+        self.assertEqual(opener.batches(), 1)
+        self.assertEqual(opener.count("download"), 1)
+        self.assertEqual(self.delays, [0.25])
 
     def test_tls_auth_permanent_and_unknown_failures_stop_without_retry(self):
         errors = [ssl.SSLCertVerificationError(1, SECRET), URLError(ssl.SSLError(1, SECRET)),
