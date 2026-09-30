@@ -1007,13 +1007,24 @@ never evidence.
   to its bounded window (at most 8), so its re-checks go on. Off, the practice league's own rule is unchanged.
   - **A failed read never ends an incubation.** Sometimes today's check cannot be taken: the cohorts or a cohort's
     record cannot be read, or the first looks raise. Then the last keep's cohorts that no re-check ended stay kept, and
-    so does an active cohort whose first look could not read its record.
+    so does an active cohort whose first look could not read its record (first look or not, and across a restart).
+  - While the cohorts themselves cannot be read, and on a pass where the keep raises, the practice league completes
+    no cohort at its observation target (`observe.HOLD`). That is practising only, for that pass.
   - Such a cohort is never pinned on the untaken check. `pins.refused` says so, and a private `live.incubator` event
-    (`unread`, `keep_carried`) and one alert a day record it.
+    (`unread`, `keep_carried`) and one alert a day record it. A failed ledger write never changes the keep.
   - The keep is marked `unread` (health `keep_carried`), and the next families pass, 5 minutes later, takes the checks
-    again. Pins are still taken once a session.
-  - The first pass of a session day that cannot pin (the bands cannot be read, or the pins raise) is retried every 5
-    minutes, not every minute.
+    again, at most 12 times a day. After that the day's keep stands and the next session's first pass reads again.
+    Pins are still taken once a session.
+  - Within a day the keep only grows. A cohort kept at an earlier pass leaves it only when a check ends it (or its first
+    look fails) or its cohort is no longer active, so a pinned cohort is never completed mid-session. A cohort held on
+    an untaken check is kept beyond the 8 and never takes the place of one checked that day.
+  - A check retried after the session's first pass reads the closes and sessions before today, as the first pass does,
+    but the practice row's decision coverage and open mark at the retry. A retried re-check that fails on P3 or P6
+    alone is `deferred`, not ended, and a retried first look of an active cohort that fails on them alone is not taken.
+    Both stay kept and are checked at the next session's first pass. A P4 or P5 failure at a retry still ends it.
+  - The first pass of a session day that cannot pin is retried every 5 minutes, not every minute. That covers the bands,
+    the observe band or its cohorts being unreadable, and the incubator's pins raising. A restart asks again at once,
+    and switching the observe band on mid-session still pins it at the next minute.
 - **The caps** (`money.plan_incubator`, with the tally read afresh from `live.sqlite` at every open). They live in the
   House only: the gateway cannot tell routes apart, so its caps are the backstop.
   - One lot; at most $50 a structure; at most $50 held or working per family.

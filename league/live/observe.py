@@ -51,6 +51,15 @@ MAX_ROWS = 50_000
 KEEP_DAYS = 120
 PRUNE_EVERY = 3600.0
 
+
+class Hold(frozenset):
+    """`cohort_candidates(keep=HOLD)`: this pass completes no cohort at its observation target."""
+
+
+#: The incubator's keep could not be taken this pass (the cohorts unread, or `keep` raised): fail open for practising
+#: only, for that pass (its window, an evaluator change or a failure still end a cohort; pins still need `_passing`).
+HOLD = Hold()
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS trades (
     seq INTEGER PRIMARY KEY AUTOINCREMENT, instance TEXT NOT NULL, account TEXT NOT NULL, family TEXT NOT NULL,
@@ -164,7 +173,8 @@ class ObserveStore:
         calendar-session window; capacity/pressure switches still apply in the caller. This is shadow authority only.
         `keep` (L2', the incubator's: (family, version) of cohorts whose first look passed, while `live.incubator` is on):
         such a cohort is not completed at its observation target; its window, an evaluator change or a failure still
-        end it. Empty, this is exactly the league's own rule."""
+        end it. Empty, this is exactly the league's own rule. `HOLD`: no cohort is completed at its target this pass."""
+        hold = keep is HOLD
         keep = {(str(f), int(n)) for f, n in keep}
         from datetime import date, timedelta
         from .chains import session_minutes
@@ -195,7 +205,7 @@ class ObserveStore:
                     elapsed += session_minutes(cursor) is not None
                     cursor += timedelta(days=1)
                 if (completed >= max(1, min_sessions) and trades >= max(1, min_trades) and evidence and evidence[2] == 0
-                        and (family, int(version)) not in keep):
+                        and not hold and (family, int(version)) not in keep):
                     reason = "observation target reached"
                 elif elapsed >= max(min_sessions, min(60, horizon)):
                     reason = "maximum session window reached"
@@ -672,4 +682,5 @@ def _num(value: Any) -> float | None:
     return out if math.isfinite(out) else None
 
 
-__all__ = ["ObserveStore", "practice_summary", "practice_record", "cohort_rows", "t_stat", "FILE", "MAX_ROWS", "KEEP_DAYS"]
+__all__ = ["ObserveStore", "practice_summary", "practice_record", "cohort_rows", "t_stat", "FILE", "MAX_ROWS", "KEEP_DAYS",
+           "HOLD"]

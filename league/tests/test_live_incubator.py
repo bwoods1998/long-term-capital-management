@@ -1414,5 +1414,247 @@ class TheFirstPassRetry(Base):
         self.assertEqual(self.pins()["day"], "2026-09-28")
 
 
+@unittest.skipUnless(HAVE, "numpy not installed")
+class L2PrimeSecondReview(Base):
+    """The second review of the keep (Sept 30): two read faults in a row, a keep recomputed within the day, a keep that
+    raises or a ledger that fails, a retried check on the practice row's live values, and a read that never recovers."""
+
+    def setUp(self):
+        super().setUp()
+        self.switch(True, observe=True)
+
+    status = L2Prime.status
+
+    def new_cohort(self, fid="z", pnl=20.0, **kw):
+        """A cohort that reaches its sample on the current day (its first look is due at this session's first pass)."""
+        self.cohort(fid, 1, trades=winning(10, pnl=pnl), params=dict(PARAMS, opens=0), **kw)
+        self.live.observe_store._connect().execute("UPDATE practice SET last_at=? WHERE family=?",
+                                                   (self.clock() - 3600, fid))
+
+    @staticmethod
+    def unread_for(*families):
+        real = INC.practice_record
+
+        def flaky(root, f, n, **kw):
+            return None if f in families else real(root, f, n, **kw)
+        return mock.patch.object(INC, "practice_record", side_effect=flaky)
+
+    @staticmethod
+    def marked(mark=-1000.0):
+        """The practice row's open mark at a retried pass: a P6 failure on the live value alone."""
+        real = INC.practice_record
+
+        def marked(root, f, n, **kw):
+            record = real(root, f, n, **kw)
+            return None if record is None else dict(record, open_mark=mark)
+        return mock.patch.object(INC, "practice_record", side_effect=marked)
+
+    def kept(self):
+        return [tuple(c) for c in self.live.state.get(INC.KEEP)["cohorts"]]
+
+    def monday(self):
+        self.first()
+        self.run_to(9, 31)
+        self.assertEqual(self.pins()["order"], ["fam@1:i"])
+        self.clock.set(at(TUESDAY, 9, 31))
+
+    def test_a_first_look_unread_then_the_cohorts_unread_still_keeps_it(self):
+        self.monday()
+        self.new_cohort()
+        with self.unread_for("z"):
+            self.run_to(9, 31)
+        self.assertIn(("z", 1), self.kept())
+        with mock.patch.object(INC, "cohort_rows", return_value=None):
+            self.run_to(9, 36)
+        self.assertEqual(self.status("z"), ("active", None), "held: not completed at its target before its first look")
+        self.assertIn(("z", 1), self.kept())
+        self.assertEqual(self.status(), ("active", None))
+        self.run_to(9, 41)
+        self.assertTrue(self.verdicts()["z@1"]["passed"])
+        self.assertEqual(self.status("z"), ("active", None))
+        self.assertTrue(self.live.incubator.checked("2026-09-29"))
+        self.assertEqual(self.pins()["order"], ["fam@1:i"], "no mid-session join")
+        self.clock.set(at(TUESDAY, 9, 31) + 86400)
+        self.run_to(9, 31)
+        self.assertEqual(sorted(self.pins()["order"]), ["fam@1:i", "z@1:i"])
+
+    def test_a_first_look_unread_then_a_restart_then_the_cohorts_unread_still_keeps_it(self):
+        self.first()
+        with mock.patch.object(INC, "practice_record", return_value=None):
+            self.run_to(9, 31)
+        self.assertEqual(self.kept(), [("fam", 1)])
+        self.restart()
+        with mock.patch.object(INC, "cohort_rows", return_value=None):
+            self.run_to(9, 36)
+        self.assertEqual(self.status(), ("active", None))
+        self.assertEqual(self.kept(), [("fam", 1)])
+        self.clock.set(at(TUESDAY, 9, 31))
+        with mock.patch.object(INC, "cohort_rows", return_value=None):
+            self.run_to(9, 31)
+        self.assertEqual(self.status(), ("active", None), "the next day too")
+        self.assertEqual(self.pins()["order"], [])
+
+    def test_the_cohorts_unread_hold_a_cohort_that_reaches_its_sample_that_day(self):
+        self.monday()
+        self.new_cohort()
+        with mock.patch.object(INC, "cohort_rows", return_value=None):
+            self.run_to(9, 31)
+        self.assertTrue(self.live.incubator.holding("2026-09-29"))
+        self.assertEqual(self.status("z"), ("active", None), "no cohort is completed at its target on an unread pass")
+        self.assertEqual(self.pins()["order"], [])
+        self.run_to(9, 36)
+        self.assertFalse(self.live.incubator.holding("2026-09-29"))
+        self.assertTrue(self.verdicts()["z@1"]["passed"])
+        self.assertEqual(sorted(self.kept()), [("fam", 1), ("z", 1)])
+        self.assertEqual(self.status("z"), ("active", None))
+        self.assertEqual(self.status(), ("active", None))
+
+    def test_a_late_first_look_never_displaces_a_cohort_kept_and_pinned_earlier_that_day(self):
+        self.make()
+        for i in range(8):
+            self.cohort(f"f{i}", 1, trades=winning(10, pnl=1.0 + i))
+        self.run_to(9, 31)
+        self.assertEqual(len(self.pins()["order"]), 8)
+        self.clock.set(at(TUESDAY, 9, 31))
+        self.new_cohort()
+        with self.unread_for("z"):
+            self.run_to(9, 31)
+        self.assertEqual(len(self.pins()["order"]), 8)
+        self.assertEqual(self.status("z"), ("active", None), "held beyond the cap while its first look is unread")
+        self.run_to(9, 41)
+        self.assertTrue(self.verdicts()["z@1"]["passed"])
+        kept = self.kept()
+        self.assertEqual(len(kept), 9)
+        for i in range(8):
+            self.assertIn((f"f{i}", 1), kept)
+            self.assertEqual(self.status(f"f{i}"), ("active", None), f"f{i}")
+            self.assertEqual(self.live.instances[f"f{i}@1:i"].mode, "live", f"f{i}")
+        self.assertEqual(self.status("z"), ("active", None))
+        self.assertFalse([p for p, _ in self.ledger.of("live.incubator") if "exits_only" in p])
+
+    def test_a_carried_cohort_never_pushes_out_one_checked_that_day(self):
+        with mock.patch.object(INC, "MAX_PINS", 2):
+            self.make()
+            self.cohort("hi", 1, trades=winning(10, pnl=3.0))
+            self.cohort("lo", 1, trades=winning(10, pnl=1.0))
+            self.run_to(9, 31)
+            self.assertEqual(self.kept(), [("hi", 1), ("lo", 1)])
+            self.clock.set(at(TUESDAY, 9, 31))
+            self.new_cohort("mid", pnl=2.0)
+            with self.unread_for("hi"):
+                self.run_to(9, 31)
+            self.assertEqual(self.kept(), [("mid", 1), ("lo", 1), ("hi", 1)], "the checked ones, then the carried")
+            self.assertEqual(self.live.state.get(INC.KEEP)["carried"], [["hi", 1]])
+            self.assertEqual(sorted(self.pins()["order"]), ["lo@1:i", "mid@1:i"])
+            db = self.live.observe_store._connect()
+            db.execute("INSERT INTO trades(instance, account, family, version, trade_id, day, pnl, max_loss, recorded_at, "
+                       "body, exit_day, reason, forced, evaluator) VALUES('hi@1:o', 'a', 'hi', 1, 'loss', '2026-09-28', -80, "
+                       "30, 1, '{}', '2026-09-28', 'program', 0, ?)", (self.live.observe_store.evaluator,))
+            self.run_to(9, 41)
+            self.assertIn("ended", self.verdicts()["hi@1"])
+            self.assertEqual(self.kept(), [("mid", 1), ("lo", 1)])
+            for fid in ("lo", "mid"):
+                self.assertEqual(self.status(fid), ("active", None), fid)
+                self.assertEqual(self.live.instances[f"{fid}@1:i"].mode, "live", fid)
+
+    def test_a_keep_that_raises_completes_no_cohort_at_its_target(self):
+        self.monday()
+        with mock.patch.object(INC.Incubator, "keep", side_effect=RuntimeError("boom")):
+            self.run_to(9, 33)
+        self.assertEqual(self.status(), ("active", None), "held: never completed on a keep that raised")
+        self.assertNotEqual(self.pins().get("day"), "2026-09-29", "its pins need the keep too: taken again later")
+        self.assertNotIn("fam@1:i", [k for k, i in self.live.instances.items() if i.mode == "live"])
+        self.assertEqual(len([t for _, t in self.alerts if "the incubator's keep failed (RuntimeError" in t]), 1)
+        self.run_to(9, 38)
+        self.assertEqual(self.status(), ("active", None))
+        self.assertEqual(self.kept(), [("fam", 1)])
+        self.assertEqual(self.pins()["order"], ["fam@1:i"])
+
+    def test_a_ledger_that_fails_on_the_carried_event_never_changes_the_keep(self):
+        self.monday()
+        real = self.live.record
+
+        def flaky(kind, payload, agent=None):
+            if isinstance(payload, dict) and "keep_carried" in payload:
+                raise sqlite3.OperationalError("disk I/O error")
+            return real(kind, payload, agent)
+        with mock.patch.object(self.live, "record", side_effect=flaky), \
+                mock.patch.object(INC, "cohort_rows", return_value=None):
+            self.run_to(9, 31)
+        self.assertEqual(self.status(), ("active", None))
+        keep = self.live.state.get(INC.KEEP)
+        self.assertEqual((keep["cohorts"], keep["carried"], keep["unread"]), ([["fam", 1]], [["fam", 1]], True))
+
+    def test_a_retried_recheck_failing_on_the_live_mark_alone_is_deferred_never_ended(self):
+        self.monday()
+        with mock.patch.object(INC, "practice_record", return_value=None):
+            self.run_to(9, 31)
+        with self.marked():
+            self.run_to(9, 36)
+        verdict = self.verdicts()["fam@1"]
+        self.assertNotIn("ended", verdict)
+        self.assertTrue(verdict["latest"]["why"].startswith("P6"), verdict["latest"])
+        self.assertEqual((verdict["latest"]["ok"], verdict["latest"]["deferred"]), (False, True))
+        keep = self.live.state.get(INC.KEEP)
+        self.assertEqual(keep, {"day": "2026-09-29", "cohorts": [["fam", 1]], "carried": [["fam", 1]]})
+        self.assertTrue(self.live.incubator.checked("2026-09-29"), "settled: checked at the next session's first pass")
+        self.assertEqual(self.status(), ("active", None))
+        self.assertTrue([p for p, _ in self.ledger.of("live.incubator") if p.get("deferred") == "fam@1"])
+        self.clock.set(at(TUESDAY, 9, 31) + 86400)
+        self.run_to(9, 31)
+        self.assertEqual(self.pins()["order"], ["fam@1:i"])
+        self.assertTrue(self.verdicts()["fam@1"]["latest"]["ok"])
+
+    def test_the_first_pass_recheck_failing_on_the_mark_still_ends_it(self):
+        self.monday()
+        with self.marked():
+            self.run_to(9, 31)
+        self.assertTrue(self.verdicts()["fam@1"]["ended"]["why"].startswith("P6"))
+
+    def test_a_retried_first_look_failing_on_the_live_mark_alone_is_not_taken(self):
+        self.first()
+        with mock.patch.object(INC, "practice_record", return_value=None):
+            self.run_to(9, 31)
+        with self.marked():
+            self.run_to(9, 36)
+        self.assertEqual(self.verdicts(), {}, "a first look is final: not taken on the live mark")
+        self.assertEqual(self.live.state.get(INC.KEEP), {"day": "2026-09-28", "cohorts": [["fam", 1]],
+                                                          "carried": [["fam", 1]]})
+        self.assertTrue(self.live.incubator.checked("2026-09-28"))
+        self.assertEqual(self.status(), ("active", None))
+        self.clock.set(at(TUESDAY, 9, 31))
+        self.run_to(9, 31)
+        self.assertTrue(self.verdicts()["fam@1"]["passed"])
+        self.assertEqual(self.pins()["order"], ["fam@1:i"])
+
+    def test_a_read_that_never_recovers_is_retried_at_most_retries_times(self):
+        self.monday()
+        judged = mock.patch.object(INC.Incubator, "judge", wraps=self.live.incubator.judge)
+        with mock.patch.object(INC, "RETRIES", 2), mock.patch.object(INC, "practice_record", return_value=None), \
+                judged as judge:
+            self.run_to(9, 51)
+            self.assertTrue(self.live.incubator.checked("2026-09-29"))
+        self.assertEqual(judge.call_count, 3, "the first pass and two retries")
+        self.assertEqual(self.status(), ("active", None), "the day's keep stands")
+        self.assertEqual(self.kept(), [("fam", 1)])
+        self.assertEqual(len([t for _, t in self.alerts if "after 2 retries" in t]), 1)
+        self.assertNotIn("ended", self.verdicts()["fam@1"])
+
+
+@unittest.skipUnless(HAVE, "numpy not installed")
+class TheObserveRetry(Base):
+    """With the observe band on (production), unreadable bands at the session's first pass are read again
+    `FAMILIES_EVERY` later, not every minute."""
+
+    def test_unreadable_bands_are_read_again_every_five_minutes(self):
+        self.switch(False, observe=True)
+        self.first()
+        with mock.patch.object(self.families, "read", side_effect=sqlite3.OperationalError("database is locked")):
+            self.run_to(9, 35)
+        self.assertEqual(len([t for _, t in self.alerts if "bands could not be read" in t]), 1)
+        self.run_to(9, 36)
+        self.assertEqual((self.live.state.get("observe_pins") or {}).get("day"), "2026-09-28")
+
+
 if __name__ == "__main__":
     unittest.main()

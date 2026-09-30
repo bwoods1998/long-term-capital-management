@@ -81,6 +81,7 @@ tuition) and the instance live. Exits need only the kill switch off.
 from __future__ import annotations
 
 import collections
+import contextlib
 import datetime as dt
 import math
 import threading
@@ -106,7 +107,7 @@ from .calibration import FAMILY as CALIBRATION_FAMILY, Calibration
 from .chains import LiveDay, from_ordinal, ordinal, session_minutes, trading_days_around, uses_parity
 from .decider import BudgetSpent, DeciderError, ProgramRefused, MAX_BATCH_SECONDS
 from .families import MemoryFamilies
-from .observe import ObserveStore, evaluator_bundle
+from .observe import HOLD, ObserveStore, evaluator_bundle
 from .paper import PaperProof
 from .real import SINGLE_TYPES, RealBook, RLeg, RPosition, is_incubator, real_legs
 from .shadow import SHADOW_FILE, ShadowAccount, ShadowBook, needs_of
@@ -284,6 +285,7 @@ class OptionsLive:
         self.flows: M.FlowBook | None = None
         self._families_at = float("-inf")
         self._session_pass_day: str | None = None   # the session day of the last families pass run in session
+        self._observe_pass_day: str | None = None   # ... and of the last one run with the observe switch on
         self._activities_at = float("-inf")
         self._activities_changed = False
         self._stock_held = False
@@ -733,6 +735,8 @@ class OptionsLive:
         self._families_at = now
         if self._in_session(now):
             self._session_pass_day = ny(now).date().isoformat()   # `_observe_repin_due`: this session day's pass ran
+            if self.switches()["observe"]:
+                self._observe_pass_day = self._session_pass_day
         try:
             rows = self.families.read()
         except Exception as exc:  # noqa: BLE001 - the live set stays as it was
@@ -742,7 +746,9 @@ class OptionsLive:
         # the practice league's completions), then L2' (the passed cohorts it keeps practising), then the practice league,
         # then the D2 and tuition rows, then its pins (which yield to them).
         # A read that fails leaves today's checks untaken: `keep` then carries the last keep's cohorts (never pinned on
-        # it) and is not settled (`checked`), so the next families pass takes the checks again.
+        # it) and is not settled (`checked`), so the next families pass takes the checks again. While the cohorts are
+        # unread (`holding`), or when the keep cannot be taken at all, no cohort is completed at its observation target
+        # this pass (`HOLD`): fail open for practising only, since a pin still needs today's check passed.
         keep: frozenset = frozenset()
         if self.incubator is not None:
             today, in_session = ny(now).date().isoformat(), self._in_session(now)
@@ -753,9 +759,15 @@ class OptionsLive:
                 self.alert("warning", f"live: the incubator's first looks failed ({type(exc).__name__}: {str(exc)[:160]})")
             try:
                 keep = self.incubator.keep(today, in_session=in_session)
-            except Exception as exc:  # noqa: BLE001 - the practice league goes on with its own rule
-                self.alert("warning", f"live: the incubator's keep failed ({type(exc).__name__}: {str(exc)[:160]})")
-                keep = frozenset()
+                if in_session and self.incubator.holding(today):
+                    keep = HOLD
+            except Exception as exc:  # noqa: BLE001 - practising goes on, and no kept cohort is completed on it
+                keep = HOLD
+                with contextlib.suppress(Exception):
+                    self.incubator._alert_once(f"keep:{today}:{type(exc).__name__}",
+                                               f"live: the incubator's keep failed ({type(exc).__name__}: "
+                                               f"{str(exc)[:160]}); no practice cohort is completed at its observation "
+                                               "target until it can be taken, and nothing is pinned on it")
         observed = self._observe_wanted(now, keep=keep)
         equity = self.sizing_equity()
         wanted: dict[str, tuple[dict, str, bool]] = {}
@@ -851,14 +863,16 @@ class OptionsLive:
 
     def _observe_repin_due(self, now: float) -> bool:
         """The session's first sync must pin the observe band (and take the incubator's first looks and pins) at once, not
-        up to `FAMILIES_EVERY` later. The incubator's alone asks once a session day: after a pass that could not pin
-        (the bands unreadable, its pins raised) the next is `FAMILIES_EVERY` later, never every minute."""
+        up to `FAMILIES_EVERY` later. Each asks once a session day (the observe band's, once a day it is on, so switching
+        it on mid-session pins at the next minute): after a pass that could not pin (the bands unreadable, the observe
+        band or its cohorts unreadable, the incubator's pins raised) the next is `FAMILIES_EVERY` later, never every
+        minute (a restart asks again)."""
         if not self._in_session(now):
             return False
         today = ny(now).date().isoformat()
         if self.incubator is not None and self.incubator.due(today) and self._session_pass_day != today:
             return True
-        if not self.switches()["observe"]:
+        if not self.switches()["observe"] or self._observe_pass_day == today:
             return False
         return (self.state.get("observe_pins", {}) or {}).get("day") != today
 
