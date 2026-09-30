@@ -277,8 +277,9 @@ load on the live path whenever the gate does: changes there are money path.
   measurement of exactly that window (within a minute) taken after it ended (`taken_at`); `measure`
   refuses a window that ends in the future. The first registered decision is final.
 - **Void.** Another release promoted inside the window, or (window modes) a swarm restart inside it,
-  voids the comparison: the gate flips back, the candidate is closed, and a new capture may register
-  the bottleneck again. A watchdog rollback marks the candidate reverted.
+  voids the comparison: the gate flips back and the candidate is closed. The next `rank` on a newer
+  measurement reopens the bottleneck (on a new base it is a new key anyway), and the voided attempt
+  does not count against its three. A watchdog rollback marks the candidate reverted.
 - **Money path.** A gate in code the live path loads turns new behavior on only outside New York's
   session (09:30-16:05): `canary` start and a retaining `reconcile` wait for the close; flipping back
   is allowed at any time.

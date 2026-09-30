@@ -809,6 +809,13 @@ class LaneCycle(unittest.TestCase):
         self.assertEqual(self.lab.worklist.get(self.key).state, "rejected")
         self.assertEqual(gate.read(self.temp / "journal" / "canary.json")[self.key]["state"], "reverted")
         self.assertIn("voided", self.lab.next_steps()[0]["next"])
+        attempts = self.lab.worklist.get(self.key).attempt
+        again = self.measurement(self.units(30, 3, "f"), since=86400.0 * 2, until=86400.0 * 3)
+        again["lanes"]["data"] = {"units": {"sb": {"gym_usd": 100.0, "gym_seconds": 60000.0, "slots": 1000.0}}}
+        self.lab.capture_lanes(again, base=self.base)
+        job = self.lab.worklist.get(self.key)
+        self.assertEqual((job.state, job.attempt), ("proposed", attempts - 1), "a void reopens and does not use an attempt")
+        self.assertIn("prepare", self.lab.next_steps()[0]["next"])
 
     def test_a_money_path_gate_never_turns_on_in_session(self):
         self.assertTrue(labmod.in_session(lanes.epoch_of("2026-10-01T15:00:00Z")))

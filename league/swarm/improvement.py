@@ -608,7 +608,10 @@ class HarnessImprovement:
             key = f"harness:{name}:{metric}:{base[:16]}"
             row["key"] = key
             old = self.worklist.get(key)
-            if old is not None and (old.through.get("research", 0) >= through or old.state not in ("proposed", "admitted")):
+            voided = old is not None and old.state == "rejected" and \
+                ((old.carry.get("_proposal") or {}).get("observation") or {}).get("decision") == "voided"
+            if old is not None and (old.through.get("research", 0) >= through
+                                    or (old.state not in ("proposed", "admitted") and not voided)):
                 row["state"] = old.state
                 out.append(row)
                 continue
@@ -630,6 +633,12 @@ class HarnessImprovement:
                                           "measurement_sha": digest, "stake": row["stake"], "rank": row["rank"],
                                           "value": row["value"], "payback": row.get("payback"),
                                           "required_units": row.get("required_units")})
+            if voided:
+                # A voided comparison judged nothing: the bottleneck, measured again, reopens, and the voided attempt
+                # does not count against its three.
+                self.worklist.transition(key, "proposed", attempt=max(0, old.attempt - 1),
+                                         note="Reopened on a new measurement after a voided canary.",
+                                         extra={"_proposal": {"reopened_after": "voided"}, "decision": "reopened"})
             row["state"] = self.worklist.get(key).state
             out.append(row)
         return out
