@@ -307,7 +307,9 @@ class LiveDay:
             volumes = self.history_volumes.get(root, [])[-len(rows):] if rows else []
             volumes = [float("nan")] * (len(rows) - len(volumes)) + volumes
             found = underlying_view(root, chain.underlying.price[: mi + 1], opens=a[:, 0], highs=a[:, 1], lows=a[:, 2],
-                                    closes=a[:, 3], minute_volumes=chain.underlying.completed_volumes(mi), daily_volumes=volumes)
+                                    closes=a[:, 3], minute_volumes=chain.underlying.completed_volumes(mi), daily_volumes=volumes,
+                                    volume_provenance=chain.underlying.volume_provenance,
+                                    daily_volume_provenance="first_observed_session_sum" if np.isfinite(volumes).any() else "unavailable")
             self._unders[key] = found
         return found
 

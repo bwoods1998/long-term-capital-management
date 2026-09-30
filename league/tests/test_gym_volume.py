@@ -1,4 +1,4 @@
-"""Completed stock volume is causal and has the same meaning in replay and live decisions. Invented data only."""
+"""Volume needs publication receipts: a completed grid alone does not establish information parity. Invented data only."""
 
 import datetime as dt
 import math
@@ -47,18 +47,37 @@ def bar(minute=570, volume=10.0, day=DAY):
 class CompletedVolume(unittest.TestCase):
     def test_missing_and_invalid_volume_are_not_zero_and_never_forward_fill(self):
         for volumes in (None, np.array([999, 0, np.nan, -1, np.inf, 4])):
-            under = Underlying(price=np.full(6, 400.0), volume=volumes)
+            under = Underlying(price=np.full(6, 400.0), volume=volumes, volume_available_at=np.arange(6))
             values = under.completed_volumes(5)
             expected = [0, np.nan, np.nan, np.nan, 4] if volumes is not None else [np.nan] * 5
             np.testing.assert_equal(values, expected)
-            view = underlying_view("SPY", under.price, minute_volumes=values)
+            view = underlying_view("SPY", under.price, minute_volumes=values, volume_provenance="first_observed")
             self.assertTrue(math.isnan(view.volume))
             self.assertEqual(view.volume_coverage["minute_expected"], 5)
             self.assertEqual(view.volume_coverage["minute_bars"], 2 if volumes is not None else 0)
             self.assertTrue(math.isnan(under.session_volume()))
-        zero = Underlying(price=np.full(3, 400.0), volume=np.array([np.nan, 0, 0]))
+        zero = Underlying(price=np.full(3, 400.0), volume=np.array([np.nan, 0, 0]), volume_available_at=np.arange(3))
         self.assertEqual(zero.session_volume(), 0)
-        self.assertEqual(underlying_view("SPY", zero.price, minute_volumes=zero.completed_volumes(2)).volume, 0)
+        self.assertEqual(underlying_view("SPY", zero.price, minute_volumes=zero.completed_volumes(2),
+                                        volume_provenance="first_observed").volume, 0)
+
+    def test_late_revision_cannot_be_backdated_from_final_history_into_the_first_live_decision(self):
+        # The 09:30 bar first publishes at 09:31:01 with 7 shares; at 09:31:30 a late trade revises it to 9.
+        # Both records name the same completed interval. Only the live first-observation receipt fixes what was known.
+        chain = LiveChain("SPY", DAY, 570, 960)
+        self.assertTrue(chain.record_volume(1, bar(570, 7)))
+        self.assertFalse(chain.record_volume(1, bar(570, 9)))
+        finalized = Underlying(price=np.full(2, 400.0), volume=np.array([np.nan, 9]))
+        self.assertEqual(chain.underlying.completed_volumes(1)[0], 7)
+        self.assertTrue(np.isnan(finalized.completed_volumes(1)).all())
+        self.assertTrue(math.isnan(finalized.session_volume()), "a later session does not manufacture an as-of receipt")
+        self.assertEqual(finalized.volume_provenance, "historical_without_asof")
+        # An unverified caller cannot re-label a raw volume array as strategy-usable by only putting it on the grid.
+        view = underlying_view("SPY", finalized.price, minute_volumes=[9], closes=[399], daily_volumes=[900])
+        self.assertTrue(math.isnan(view.volume))
+        self.assertTrue(math.isnan(view.prior_volume))
+        self.assertEqual(view.volume_coverage["minute_bars"], 0)
+        self.assertEqual(view.volume_coverage["history_sessions"], 0)
 
     def test_current_bar_is_incomplete_and_late_bars_do_not_rewrite_past_decisions(self):
         chain = LiveChain("SPY", DAY, 570, 960)
@@ -96,13 +115,15 @@ class CompletedVolume(unittest.TestCase):
         minute = np.array([0, 20, np.nan])
         daily = np.array([120, np.nan, 0])
         view = underlying_view("SPY", [400] * 4, closes=[398, 399, 400],
-                               minute_volumes=minute, daily_volumes=daily)
+                               minute_volumes=minute, daily_volumes=daily, volume_provenance="first_observed",
+                               daily_volume_provenance="first_observed_session_sum")
         minute[0] = daily[0] = 999
         self.assertEqual(view.minute_volumes[0], 0)
         self.assertEqual(view.daily_volumes[0], 120)
         self.assertEqual(view.prior_volume, 0)
         self.assertEqual(view.volume_coverage, {"basis": "completed_regular_session_bars", "minute_bars": 2,
-            "minute_expected": 3, "history_sessions": 2, "history_expected": 3})
+            "minute_expected": 3, "history_sessions": 2, "history_expected": 3,
+            "minute_provenance": "first_observed", "history_provenance": "first_observed_session_sum"})
         for value in (view.minute_volumes, view.daily_volumes):
             self.assertNotIsInstance(value.base, np.ndarray)
             with self.assertRaises(ValueError):
@@ -138,7 +159,7 @@ class ReplayVolume(unittest.TestCase):
         writer.nbbo("SPY", day, expiration=[day + dt.timedelta(days=1)], strike=[400.0], right=["C"],
                     minute=[571], bid=[1.0], ask=[1.1], bid_size=[50], ask_size=[50])
 
-    def test_actual_sip_ingest_store_and_live_contexts_agree_at_each_completion(self):
+    def test_completed_sip_store_needs_asof_receipts_before_it_can_match_live(self):
         bars = [bar(570, 0), bar(571, 10), bar(573, 1000)]  # missing 09:32 must stay missing
         rows = completed_rows(bars, DAY, (570, 960))
         with tempfile.TemporaryDirectory() as path:
@@ -161,17 +182,27 @@ class ReplayVolume(unittest.TestCase):
                 if mi and not math.isfinite(chain.underlying.price[mi]):
                     chain.set_price(mi, 400.0)
                 actual, expected = live.under("SPY", mi, 2), historical.under("SPY", mi, 2)
+                self.assertTrue(np.isnan(expected.minute_volumes).all())
+                self.assertEqual(expected.volume_coverage["minute_provenance"], "historical_without_asof")
+                self.assertEqual(actual.volume_coverage["minute_provenance"], "first_observed")
+                self.assertEqual(actual.volume_coverage["minute_expected"], expected.volume_coverage["minute_expected"])
+            self.assertEqual(live.under("SPY", 2, 2).volume, 10)
+            self.assertTrue(math.isnan(historical.under("SPY", 2, 2).volume))
+            # A replay with the SAME values AND recorded availability (not just finalized SIP rows) can agree.
+            historical.chains["SPY"].underlying.volume_available_at = chain.underlying.volume_available_at.copy()
+            historical.advance(4)
+            for mi in range(5):
+                actual, expected = live.under("SPY", mi, 2), historical.under("SPY", mi, 2)
                 np.testing.assert_equal(actual.minute_volumes, expected.minute_volumes)
                 np.testing.assert_equal(actual.volume, expected.volume)
                 self.assertEqual(actual.volume_coverage, expected.volume_coverage)
-            self.assertEqual(historical.under("SPY", 2, 2).volume, 10)
             self.assertTrue(math.isnan(historical.under("SPY", 4, 2).volume))
             earlier = historical.under("SPY", 2, 2).minute_volumes
             historical.chains["SPY"].underlying.volume[4] = 999999
             np.testing.assert_equal(earlier, [0, 10])
             historical.close()
 
-    def test_replay_warm_history_and_completed_sessions_exclude_todays_total(self):
+    def test_finalized_replay_volume_remains_unknown_in_warm_history_and_after_session_close(self):
         prior, tomorrow = DAY - dt.timedelta(days=1), DAY + dt.timedelta(days=1)
         with tempfile.TemporaryDirectory() as path:
             writer = synth.Writer(path)
@@ -193,7 +224,13 @@ def decide(ctx):
             [result] = E.run([R.load_program(code)], S.Store(path), E.RunConfig(window="train", roots=("SPY",)),
                              days=[DAY, tomorrow], keep=keep)
             self.assertEqual(result["runtime"]["errors"], 0)
-            self.assertEqual(keep[0].runner._namespace["STATE"]["seen"], [[2, [390], 390], [3, [390, 780], 780]])
+            seen = keep[0].runner._namespace["STATE"]["seen"]
+            self.assertEqual(len(seen), 2)
+            for n, (today, priors, prior) in enumerate(seen, 1):
+                self.assertTrue(math.isnan(today))
+                self.assertTrue(math.isnan(prior))
+                self.assertEqual(len(priors), n)
+                self.assertTrue(np.isnan(priors).all())
 
 
 @unittest.skipUnless(HAVE, "numpy not installed")
@@ -243,8 +280,10 @@ class LiveVolume(LiveCase if HAVE else unittest.TestCase):
         day.chain("QQQ").underlying.volume[3] = np.nan
         live._end_volume(day)
         totals = live.state.get("underlying_volume_history")
-        self.assertEqual(totals["SPY"][MONDAY.isoformat()], {"volume": 0, "known": 390, "expected": 390})
-        self.assertEqual(totals["QQQ"][MONDAY.isoformat()], {"volume": None, "known": 389, "expected": 390})
+        self.assertEqual(totals["SPY"][MONDAY.isoformat()], {"volume": 0, "known": 390, "expected": 390,
+                                                          "provenance": "first_observed_session_sum"})
+        self.assertEqual(totals["QQQ"][MONDAY.isoformat()], {"volume": None, "known": 389, "expected": 390,
+                                                          "provenance": "first_observed_session_sum"})
         tomorrow = MONDAY + dt.timedelta(days=1)
         later = LiveDay(tomorrow, 570, 960, trading_days=trading_days_around(tomorrow))
 
@@ -259,12 +298,19 @@ class LiveVolume(LiveCase if HAVE else unittest.TestCase):
             np.testing.assert_equal(later.under("SPY", 1, 2).daily_volumes, [np.nan, 0])
             self.assertEqual(later.under("SPY", 1, 2).prior_volume, 0)
             self.assertEqual(later.under("SPY", 1, 2).volume_coverage["history_sessions"], 1)
+            self.assertEqual(later.under("SPY", 1, 2).volume_coverage["history_provenance"], "first_observed_session_sum")
             self.assertTrue(np.isnan(later.under("QQQ", 1, 2).daily_volumes).all())
             self.assertTrue(np.isnan(later.under("XSP", 1, 2).daily_volumes).all())
             # Even if the endpoint accidentally includes today's bar, today's recorded total is not prior history.
             same_day = LiveDay(MONDAY, 570, 960, trading_days=trading_days_around(MONDAY))
             live._history(same_day, "SPY", 400, 400)
             self.assertTrue(np.isnan(same_day.history_volumes["SPY"]).all())
+            # A persisted complete-looking total without provenance is not an observed session receipt.
+            del totals["SPY"][MONDAY.isoformat()]["provenance"]
+            live.state.put("underlying_volume_history", totals)
+            unverified = LiveDay(tomorrow, 570, 960, trading_days=trading_days_around(tomorrow))
+            live._history(unverified, "SPY", 400, 400)
+            self.assertTrue(np.isnan(unverified.history_volumes["SPY"]).all())
 
     def test_volume_checkpoint_failure_is_visible_and_does_not_erase_observed_values(self):
         live = self.make([], real_money=False)

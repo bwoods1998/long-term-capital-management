@@ -354,15 +354,17 @@ python3 scripts/data/box.py run -- ARGS         # run backfill.py ARGS (or check
   image is no longer the configured one, and the Sail guard brakes it to zero before the House is at
   risk. They need no operator step: `swarm.json` sizes the pool, and adopting an image is one edit of
   `gym.image_checkpoint` (with `gym.gate_checkpoint` for its gate partner).
-- **Volume context (release candidate).** `ctx.under.minute_volumes` exposes only completed regular-session
-  share volume already present in the image or existing live stock snapshots. A price-only underlying remains
-  unknown, not zero. `volume_coverage` counts known/expected bars and prior sessions; `volume`, `daily_volumes`
-  and `prior_volume` require complete regular-session coverage. The House persists its current session's observed
+- **Volume context (release candidate).** `ctx.under.minute_volumes` exposes completed regular-session
+  share volume only with first-observation receipts. Finalized historical SIP bars lack these receipts and remain
+  unknown in both minute and daily inputs: completion time alone does not exclude later vendor revisions.
+  `volume_coverage` names minute/history provenance and counts known/expected bars and prior sessions;
+  `volume`, `daily_volumes` and `prior_volume` require complete coverage of first observations. The House persists its observed
   bars and first-observation minutes in `live.sqlite` KV `underlying_volume_session`; `underlying_volume_history`
-  keeps the last 60 observed sessions per root, including incomplete-coverage counts. Back up `live.sqlite` as usual.
+  keeps the last 60 observed sessions per root, including incomplete-coverage counts and provenance
+  `first_observed_session_sum`. A saved daily total without that provenance is unknown. Back up `live.sqlite` as usual.
   No SQL migration, site schema change, new data call, or money-rule change is required. Deploy the matching House
   and Gym bundle together; changed evaluator fingerprints require fresh qualifying evidence. Price-only images
-  do not gain volume merely by adopting the code. Daily API totals and SPY volume for index roots are not substituted.
+  do not gain usable volume merely by adopting the code. Daily API totals and SPY volume for index roots are not substituted.
   `options_live.summary.volume_error` reports checkpoint/history failures; unknown values remain unavailable after restart.
 
 ## Real money

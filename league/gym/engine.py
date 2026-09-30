@@ -429,9 +429,11 @@ class DayData:
         if found is None:
             chain = self.chains[root]
             opens, highs, lows, closes = self.history.arrays(root, history)
+            volumes = self.history.volume_array(root, history)
             found = underlying_view(root, chain.underlying.price[: mi + 1], closes=closes, opens=opens, highs=highs, lows=lows,
                                     minute_volumes=chain.underlying.completed_volumes(mi),
-                                    daily_volumes=self.history.volume_array(root, history))
+                                    daily_volumes=volumes, volume_provenance=chain.underlying.volume_provenance,
+                                    daily_volume_provenance="first_observed_session_sum" if np.isfinite(volumes).any() else "unavailable")
             self._unders[key] = found
         return found
 

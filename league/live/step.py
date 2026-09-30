@@ -547,15 +547,16 @@ class OptionsLive:
                 records = [r for r in bars.get(source) or [] if all(k in r for k in ("o", "h", "l", "c"))][-60:]
                 day.history[source] = [(float(r["o"]), float(r["h"]), float(r["l"]), float(r["c"])) for r in records]
                 totals = (self.state.get("underlying_volume_history", {}) or {}).get(source, {})
-                # The daily endpoint's session basis is not verified here. Use only our own complete regular-session
-                # totals, which match historical SIP minute sums; never substitute its dailyBar.v or a missing zero.
+                # Only sums of our own first-observed completed bars have publication receipts. Finalized historical
+                # bars can contain later revisions; vendor daily totals also include extended-hours volume.
                 day.history_volumes[source] = []
                 for row in records:
                     session = _new_york_day(row.get("t"))
                     total = (totals.get(session) or {}) if session and session < day.day.isoformat() else {}
                     try:
                         value = float(total.get("volume"))
-                        complete = int(total.get("expected") or 0) > 0 and total.get("known") == total.get("expected")
+                        complete = (total.get("provenance") == "first_observed_session_sum"
+                                    and int(total.get("expected") or 0) > 0 and total.get("known") == total.get("expected"))
                         value = value if complete and math.isfinite(value) and value >= 0 else math.nan
                     except (TypeError, ValueError, OverflowError):
                         value = math.nan
@@ -2474,7 +2475,7 @@ class OptionsLive:
 
     # ------------------------------------------------------------------ the close and the quiet hours
     def _end_volume(self, day: LiveDay) -> None:
-        """Prior-session share totals have the same completed regular-session basis as replay."""
+        """Archive the complete session's first observations, never claim they are finalized exchange volume."""
         volumes = self.state.get("underlying_volume_history", {}) or {}
         for root, chain in day.chains.items():
             if uses_parity(root):
@@ -2483,7 +2484,7 @@ class OptionsLive:
             total = chain.underlying.session_volume()
             history = dict(volumes.get(root) or {})
             history[day.day.isoformat()] = {"volume": total if math.isfinite(total) else None,
-                "known": int(np.isfinite(values).sum()), "expected": len(values)}
+                "known": int(np.isfinite(values).sum()), "expected": len(values), "provenance": "first_observed_session_sum"}
             volumes[root] = {d: history[d] for d in sorted(history)[-60:]}
         self.state.put("underlying_volume_history", volumes)
 

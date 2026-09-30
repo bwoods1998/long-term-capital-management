@@ -58,7 +58,8 @@ def from_ordinal(value: int) -> dt.date:
 class Underlying:
     """One root's underlying for one day: `price[i]` at minute index i (NaN where none), plus the
     optional completed one-minute bars. SIP ingestion places a bar at its availability minute: the bar beginning
-    at 09:30 occupies index 1 (09:31). Index 0 has no completed regular-session bar. Missing volume stays NaN."""
+    at 09:30 occupies index 1 (09:31). That grid does not establish when a revised volume value was published.
+    Strategy-visible volume additionally requires first-observation receipts. Missing or unverified volume stays NaN."""
 
     price: np.ndarray
     open: np.ndarray | None = None
@@ -67,28 +68,33 @@ class Underlying:
     close: np.ndarray | None = None
     volume: np.ndarray | None = None
     settle: np.ndarray | None = None     # a recorded settlement level (optional column `settle`)
-    volume_available_at: np.ndarray | None = None  # live first-observed minute; historical grids use their own index
+    volume_available_at: np.ndarray | None = None  # first-observed minute of the stored value; None means no as-of receipt
+
+    @property
+    def volume_provenance(self) -> str:
+        return "first_observed" if self.volume_available_at is not None else "historical_without_asof"
 
     def completed_volumes(self, mi: int) -> np.ndarray:
         """Completed regular-session bars visible by minute `mi`, aligned from the open; never forward filled.
         Live bars observed late remain unavailable to an earlier decision, including a delayed shadow decision."""
         n = max(0, min(int(mi), len(self.price) - 1))
         out = np.full(n, np.nan)
-        if self.volume is None:
+        if self.volume is None or self.volume_available_at is None:
+            # Finalized historical bars can include a revision published after the original minute. A completed-bar
+            # timestamp alone cannot reconstruct the first live value; do not backdate it into a strategy decision.
             return out
         count = min(n, max(0, len(self.volume) - 1))
         values = np.asarray(self.volume[1:count + 1], dtype=np.float64)
         known = np.isfinite(values) & (values >= 0)
-        if self.volume_available_at is not None:
-            available = np.asarray(self.volume_available_at[1:count + 1], dtype=np.float64)
-            if len(available) != count:
-                return out
-            known &= np.isfinite(available) & (available <= mi)
+        available = np.asarray(self.volume_available_at[1:count + 1], dtype=np.float64)
+        if len(available) != count:
+            return out
+        known &= np.isfinite(available) & (available >= np.arange(1, count + 1)) & (available <= mi)
         out[:count] = np.where(known, values, np.nan)
         return out
 
     def session_volume(self) -> float:
-        """A complete regular session's total only; a partial or absent series is unknown, including missing zeros."""
+        """Sum of a complete session's first observations, not the vendor's finalized/daily total. Unknown without receipts."""
         values = self.completed_volumes(len(self.price) - 1)
         return float(values.sum()) if values.size and np.isfinite(values).all() else float("nan")
 

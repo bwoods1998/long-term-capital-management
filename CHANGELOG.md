@@ -21,11 +21,12 @@ on branch `run/options-swarm-2026-09-26`) has the detail.
 
 ## Not yet deployed
 
-- **Causal optional volume context.** Completed regular-session share bars now reach Gym and live strategy contexts,
-  with explicit missing-data coverage and complete-only cumulative/prior-session totals. Live reuses existing stock
-  snapshots, persists first-observation times across restarts, and excludes incomplete bars and index proxy volume.
-  Synthetic SIP/store/live parity, missing-data, history and restart tests cover the interface; deployed image and live
-  coverage remain to be measured. No paid data fetch, production mutation, SQL/site migration, or money-rule change.
+- **Causal optional volume context.** Share bars reach strategy contexts only with first-observation receipts and
+  explicit provenance/coverage. Finalized historical bars without those receipts stay unknown, including daily sums:
+  a completed-minute grid does not prove what was published then. Live reuses existing stock snapshots, persists first
+  observations across restarts, and excludes incomplete bars and index proxy volume. A late-revision regression checks
+  that finalized history cannot replace the first live value. No data purchase, production mutation, SQL/site migration,
+  or money-rule change. Actual live coverage remains to be measured after adoption.
 
 - **Persistent practice cohorts and receipts.** Builds on #430: immutable shadow snapshots survive research churn and
   restarts; bounded observation windows include longer-DTE programs; no snapshot is promoted into real money.
