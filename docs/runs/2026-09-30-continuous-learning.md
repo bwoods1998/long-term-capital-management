@@ -102,10 +102,16 @@ The combined Gym/live/swarm/data/publishing run exercised 1,599 tests. Its one f
 fixture constructed a live band without the newly required qualification proof; the fixture was
 corrected and all 36 targeted proof tests passed. The adoption branch separately passed 382 live
 and 123 final store/cache/sweep tests. Final combined swarm and hosted CI checks remain required
-before promotion of this candidate. These checks are engineering evidence, not trading returns.
+before promotion of this candidate. The complete final swarm rerun passed 816 tests (one existing
+skip), and all 16 integrated harness-controller tests passed, including sandboxed comparisons of
+two actual commits. These checks are engineering evidence, not trading returns.
 
 At 05:20:54 UTC the historical runner stopped for its scheduled quiet window, with no requests in
 flight and the eleven vendor failures preserved. The collector is clear for the 06:00 UTC nightly
 forward job. An audit of the active Train image found volume in 991 of 21,349 underlying sessions;
-891 of those sessions contain every expected minute. Missing volume remains unknown, so exposing
-the API does not imply that broad volume-based research is supported by the current image.
+891 of those sessions contain every expected minute. These historical values lack publication/as-of
+receipts: a bar revised after its minute cannot be backdated into the original live decision. The
+candidate therefore withholds those minute values and daily sums from strategies. Live first
+observations remain available with explicit provenance and restart persistence. The correction's
+115 targeted tests passed, including the concrete late-revision counterexample; final integrated
+volume checks remain required. Raw coverage does not establish point-in-time input availability.
