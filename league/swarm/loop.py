@@ -141,7 +141,7 @@ class Scheduler:
         """Waiting is free: a held researcher resumes on new evidence, never merely on a timer."""
         return (self.settings.get("researcher") or {}).get("hold_until_news", True) is not False
 
-    def evidence_key(self, fam: Mapping[str, Any]) -> str:
+    def evidence_key(self, fam: Mapping[str, Any], *, scan: dict[str, Any] | None = None) -> str:
         """Only actionable context invalidates a durable hold, not weights, spend, or wall-clock time.
 
         Notebook additions include operator/diagnostician guidance. A changed agenda, admitted data image,
@@ -150,7 +150,15 @@ class Scheduler:
         """
         state, gym = fam.get("state") or {}, self.settings.get("gym") or {}
         notes = self.store.notebook(str(fam["id"]), limit=1)
-        agenda = self.store.get("architect_agenda_section") or {}
+        # A population scan shares only its agenda read. The next scan starts fresh, while
+        # direct calls and release's atomic hold baseline always read their own current value.
+        # Read lazily so legacy holds and scans without event waits add no store dependency.
+        if scan is None:
+            agenda = self.store.get("architect_agenda_section") or {}
+        else:
+            if "agenda" not in scan:
+                scan["agenda"] = self.store.get("architect_agenda_section") or {}
+            agenda = scan["agenda"]
         from .practice import feedback_revision
         body = {
             "family": {key: fam.get(key) for key in ("trials", "band", "revisions", "best_version", "validated_version", "validations")},
@@ -176,13 +184,13 @@ class Scheduler:
         return (trials_now > trials or gate_now != gate_ready or band_now != band or dormant_count(fam) < dormant
                 or bool((fam.get("state") or {}).get("rewrite_ready")))
 
-    def holding(self, fam: Mapping[str, Any], now: float) -> bool:
+    def holding(self, fam: Mapping[str, Any], now: float, *, scan: dict[str, Any] | None = None) -> bool:
         """The family waits out a hold (HOLD BACKOFF); a wait that ran out, that news lifted or that the clock going back
         passed is forgotten. Under the lock."""
         if self.event_holds:
             wait = (fam.get("state") or {}).get("research_wait")
             if isinstance(wait, Mapping) and wait.get("format") == 1:
-                return wait.get("evidence") == self.evidence_key(fam)
+                return wait.get("evidence") == self.evidence_key(fam, scan=scan)
             return False
         held = self.held.get(fam["id"])
         if held is None:
@@ -199,7 +207,8 @@ class Scheduler:
         now = self.clock()
         with self._lock:
             self._prune(fams)
-            return sum(1 for f in fams if self.holding(f, now))
+            scan: dict[str, Any] = {}
+            return sum(1 for f in fams if self.holding(f, now, scan=scan))
 
     def _prune(self, fams: list[dict[str, Any]]) -> None:
         """Forget the holds of families no longer alive (under the lock)."""
@@ -218,12 +227,13 @@ class Scheduler:
         with self._lock:
             self._prune(fams)
             ready, soon = [], float("inf")
+            scan: dict[str, Any] = {}
             for f in fams:
                 if f["id"] in self.running:
                     continue
                 # A last turn "in the future" (the clock went back) never strands a family (nor, `holding`, does a hold).
                 at = max(self.cooldown.get(f["id"], 0), min(self.last.get(f["id"], 0), now) + idle_seconds)
-                if self.holding(f, now):
+                if self.holding(f, now, scan=scan):
                     if self.event_holds:
                         continue  # local polling may inspect evidence; no paid model turn is scheduled
                     at = max(at, self.held[f["id"]][1])
