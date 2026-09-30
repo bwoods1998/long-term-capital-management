@@ -171,8 +171,16 @@ class Dedupe(Case):
     def test_no_burn_measured_is_not_a_recovery(self):
         w = self.watch()
         self.assertIsNotNone(self.decide(w, "warning", 20))
+        before = self.store.get("funding_alerts")
+        self.clock.advance(300)
         self.assertIsNone(self.decide(w, "ok", None))
-        self.assertIn("claude_room", self.store.get("funding_alerts"), "still remembered: a quiet meter is not a top-up")
+        self.assertEqual(self.store.get("funding_alerts"), before, "a quiet meter is not a top-up: nothing forgotten or moved")
+        self.clock.advance(300)
+        self.assertIsNone(self.decide(w, "warning", 20), "burn measured again: the warning said ten minutes ago stands")
+        self.clock.advance(12 * HOUR)
+        self.assertIsNone(self.decide(w, "ok", None))
+        again = self.decide(w, "warning", 8)
+        self.assertEqual((again["tier"], again["repeat"]), ("warning", True), "only the twice-a-day reminder")
 
     def test_a_calendar_out_is_said_once_and_a_restart_says_nothing_again(self):
         w = self.watch()
@@ -232,6 +240,28 @@ class ClaudeRoom(Case):
         self.assertEqual(self.said(), [])
         self.assertEqual(w.last["claude_room"]["state"], "unreadable")
 
+    def test_no_burn_is_no_tier_and_keeps_what_was_said(self):
+        """Claude's room low with a burn, then a day with no Claude spend (the roles fell back): the runway is not in sight,
+        which neither clears the urgent already said nor says it again as news once the burn comes back."""
+        self.burn("claude", 30, 20)
+        self.meter.value = 11  # $6 above the reserve: (6 - 2) / 1.25 = 3.2 hours
+        w = self.watch()
+        w.check()
+        self.assertEqual([p["tier"] for p in self.said(cliff="claude_room")], ["urgent"])
+        self.clock.advance(25 * HOUR)  # the $30 leaves the window; nothing booked, the meter still
+        w.check()
+        self.assertEqual(w.last["claude_room"]["state"], "no burn")
+        self.assertNotIn("tier", w.last["claude_room"], "the heartbeat never shows a quiet meter as ok")
+        self.assertEqual(self.store.get("funding_alerts")["claude_room"]["tier"], "urgent")
+        self.burn("claude", 6, 1)  # $1 an hour over the 6-hour window: 4 hours left, urgent again
+        self.clock.advance(300)
+        w.check()
+        self.assertEqual(len(self.said(cliff="claude_room")), 2, "the burn is back: the standing urgent's 12 h reminder")
+        self.assertTrue(self.said(cliff="claude_room")[-1]["repeat"])
+        self.clock.advance(300)
+        w.check()
+        self.assertEqual(len(self.said(cliff="claude_room")), 2, "and nothing more")
+
     def test_the_meters_own_fall_counts_when_the_swarm_booked_nothing(self):
         """The gateway's `spent_usd` rises with every consumer (the House too): sampled every ten minutes, its rate over
         the last hours is the burn even when the swarm's own rows are empty."""
@@ -272,6 +302,40 @@ class SailGuard(Case):
         out = self.said(cliff="sail_guard")[-1]
         self.assertEqual(out["tier"], "out")
         self.assertIn("the House keeps running", out["text"])
+
+    def test_a_braked_guard_under_its_release_line_stays_out_after_a_small_top_up(self):
+        self.reading(31)
+        self.guard.last["braked"] = True
+        w = self.watch()
+        w.check()
+        self.assertEqual([p["tier"] for p in self.said(cliff="sail_guard")], ["out"])
+        self.reading(34)  # over the $32 line, under the $37 release line (the default $5 margin)
+        self.guard.last["braked"] = True
+        self.clock.advance(300)
+        w.check()
+        self.assertEqual(len(self.said(cliff="sail_guard")), 1)
+        self.assertEqual((w.last["sail_guard"]["tier"], w.last["sail_guard"]["state"], w.last["sail_guard"]["release_usd"]),
+                         ("out", "braked", 37.0), "the heartbeat says the brake still holds")
+        self.clock.advance(12 * HOUR)
+        self.reading(34)
+        self.guard.last["braked"] = True
+        w.check()
+        reminder = self.said(cliff="sail_guard")[-1]
+        self.assertEqual((reminder["tier"], reminder["repeat"]), ("out", True))
+        self.assertIn("still braked", reminder["text"])
+        self.reading(38)  # past the release line: the guard releases at its next check; the runway is to the line again
+        self.guard.last["braked"] = False
+        self.clock.advance(300)
+        w.check()
+        self.assertEqual((w.last["sail_guard"]["state"], w.last["sail_guard"]["tier"]), ("measured", "urgent"))
+
+    def test_no_sail_burn_is_no_tier(self):
+        self.reading(40, burn_day=0.0)
+        w = self.watch()
+        w.check()
+        self.assertEqual(self.said(cliff="sail_guard"), [])
+        self.assertEqual((w.last["sail_guard"]["state"], w.last["sail_guard"]["hours"]), ("no burn", None))
+        self.assertNotIn("tier", w.last["sail_guard"])
 
     def test_a_stale_or_missing_reading_says_nothing(self):
         self.reading(40, at=T0 - 2 * HOUR)

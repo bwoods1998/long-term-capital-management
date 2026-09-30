@@ -8,7 +8,8 @@ On Sept 30 four cliffs stood, and none of them would have said a word:
 - THE OPENAI MONTH. The gateway's frontier month is a FUNDED month (`FRONTIER_FUNDED_MONTH`): its cap goes to $0 at the
   next UTC month boundary unless the owner funds the next one.
 - THE SAIL GUARD. `SailGuard` brakes the Gym and the researchers when Sail's balance falls under its line (2 x the
-  House's burn + `guard.margin_usd`).
+  House's burn + `guard.margin_usd`), and releases only at the line + `guard.release_margin_usd`: while braked under
+  that release line the cliff stays out (state "braked", `release_usd`), even after a top-up over the line itself.
 - THE BURST'S END. At `guard.burst_until` the guard's allowance becomes `guard.after_burst_usd_day` for the account.
 
 `FundingWatch.tick()` runs on the swarm's main loop (`Swarm.step`) and does two cheap things:
@@ -33,11 +34,13 @@ event with `alert: true` when it RISES to it; a tier already said is said again 
 and then only as a rise or while a warning, urgent or out stands (a calendar cliff's out is said once). A fall is
 silent: a runway flapping across a lead says nothing new, and a fall of two tiers or more (a top-up) makes the tiers
 above it news again. A cliff that recovers past `funding.clear_factor` (1.5) x its first lead is said once as a
-`funding_ok` status event without an alert, and forgotten. What was said lives in the swarm's store (`funding_alerts`),
-so a restart says nothing again. A fallback
-is said the first time its (role, kind, route) is seen, then at most once every `funding.fallback_every_seconds` (6 h)
-with the count since, from `funding_fallbacks`; only a fallback for want of room (`no_room`, a funding cliff) is an
-alert, the rest (a role's own daily line, an error) are events the operator reads without an alert.
+`funding_ok` status event without an alert, and forgotten. A runway with no burn measured (nothing booked, the meter
+still) is NOT IN SIGHT: state "no burn", no tier, so it is neither a recovery nor a reason to say a tier again, and the
+next measured assessment is judged against what was already said. What was said lives in the swarm's store
+(`funding_alerts`), so a restart says nothing again. A fallback is said the first time its (role, kind, route) is
+seen, then at most once every `funding.fallback_every_seconds` (6 h) with the count since, from `funding_fallbacks`;
+only a fallback for want of room (`no_room`, a funding cliff) is an alert, the rest (a role's own daily line, an error)
+are events the operator reads without an alert.
 
 WHERE IT SHOWS. The House's swarm step (`hook.SwarmStep`) mirrors every `swarm.status` row into the House ledger
 (private) and turns each one with `alert: true` into a House `ops.alert` at level WARNING, so the watch
@@ -239,6 +242,10 @@ class FundingWatch:
           event (no alert), and the key is forgotten."""
         key, tier = str(found["key"]), str(found["tier"])
         leads = cfg["lead_hours"].get(found["cliff"]) or [0.0]
+        if tier == "ok" and found.get("hours") is None:
+            # Not in sight (no burn measured): neither a tier nor a recovery. What was said, and where it stood, is kept, so
+            # the next measured assessment is judged against it (never a fresh alert, never a two-tier wipe).
+            return None
         payload = None
         with self.store.atomic():
             stored = self.store.get("funding_alerts") or {}
@@ -342,17 +349,22 @@ class FundingWatch:
         rate = max(self._booked_rate(["claude"], now, cfg), sampled or 0.0)
         out_usd = float(cfg["claude_out_usd"])
         left = room - out_usd
-        hours = 0.0 if left <= 0 else (left / rate if rate > 0 else None)
+        if left > 0 and rate <= 0:
+            # No burn measured (nothing booked, the meter still): the runway is not in sight, which is neither a tier nor a
+            # recovery. No tier, so the dedupe keeps what it said and the heartbeat says why.
+            return {"cliff": "claude_room", "key": "claude_room", "state": "no burn", "room_usd": round(room, 2),
+                    "burn_usd_per_hour": 0.0, "hours": None, "roles": roles}
+        hours = 0.0 if left <= 0 else left / rate
         tier = tier_for(hours, cfg["lead_hours"]["claude_room"])
         who = ", ".join(roles)
         found = {"cliff": "claude_room", "key": "claude_room", "tier": tier, "state": "measured", "room_usd": round(room, 2),
-                 "burn_usd_per_hour": round(rate, 4), "hours": None if hours is None else round(hours, 1), "roles": roles,
-                 "runs_out_at": None if hours is None else _stamp(now + hours * 3600)}
+                 "burn_usd_per_hour": round(rate, 4), "hours": round(hours, 1), "roles": roles,
+                 "runs_out_at": _stamp(now + hours * 3600)}
         if tier == "out":
             found["text"] = (f"funding: Claude's room is spent (${room:.2f} left above the reserve): {who} fall back to "
                              "their next route (OpenAI, then Sail) and a Claude-only role stops, until the funded total is "
                              "topped up (the owner's step)")
-        elif hours is not None:
+        else:
             found["text"] = (f"funding: Claude's room runs out in about {_hours_text(hours)} (about {found['runs_out_at']}): "
                              f"${room:.2f} left above the reserve at the measured ${rate:.2f}/h; then {who} fall back to "
                              "their next route (Sail) and a Claude-only role stops, until the funded total is topped up")
@@ -370,16 +382,31 @@ class FundingWatch:
         burn_day = _number(last.get("burn_day"), 0.0)
         sampled = self._sample("sail", now, window_hours=cfg["burn_window_hours"], balance=balance)
         rate = max(burn_day / 24, sampled or 0.0)
-        left = balance - line
-        hours = 0.0 if left <= 0 else (left / rate if rate > 0 else None)
+        # A braked guard releases only at its line plus `guard.release_margin_usd` (`SailGuard.check`'s hysteresis): while
+        # braked under that, the balance still holds the brake, so the cliff stays out after a top-up too small to release.
+        guard_cfg = self.settings.get("guard") if isinstance(self.settings.get("guard"), Mapping) else {}
+        release = line + _number(guard_cfg.get("release_margin_usd", 5.0), 5.0)
+        held = last.get("braked") is True and balance < release
+        left = 0.0 if held else balance - line
+        if left > 0 and rate <= 0:
+            # No burn measured: the runway is not in sight (neither a tier nor a recovery; the dedupe keeps what it said).
+            return {"cliff": "sail_guard", "key": "sail_guard", "state": "no burn", "balance_usd": round(balance, 2),
+                    "line_usd": round(line, 2), "burn_usd_per_hour": 0.0, "hours": None}
+        hours = 0.0 if left <= 0 else left / rate
         tier = tier_for(hours, cfg["lead_hours"]["sail_guard"])
-        found = {"cliff": "sail_guard", "key": "sail_guard", "tier": tier, "state": "measured", "balance_usd": round(balance, 2),
-                 "line_usd": round(line, 2), "burn_usd_per_hour": round(rate, 4), "hours": None if hours is None else round(hours, 1),
-                 "brakes_at": None if hours is None else _stamp(now + hours * 3600)}
-        if tier == "out":
+        found = {"cliff": "sail_guard", "key": "sail_guard", "tier": tier, "state": "braked" if held else "measured",
+                 "balance_usd": round(balance, 2), "line_usd": round(line, 2), "burn_usd_per_hour": round(rate, 4),
+                 "hours": round(hours, 1), "brakes_at": _stamp(now + hours * 3600)}
+        if held:
+            found["release_usd"] = round(release, 2)
+        if tier == "out" and held and balance >= line:
+            found["text"] = (f"funding: the Sail guard is still braked (balance ${balance:.2f} is over its line ${line:.2f} "
+                             f"but under its release line ${release:.2f}): the Gym and the researchers stay stopped until "
+                             "Sail is topped up past it (the owner's step); the House keeps running")
+        elif tier == "out":
             found["text"] = (f"funding: the Sail guard's line is reached (balance ${balance:.2f}, line ${line:.2f}): the "
                              "Gym and the researchers stop until Sail is topped up (the owner's step); the House keeps running")
-        elif hours is not None:
+        else:
             found["text"] = (f"funding: the Sail guard brakes the swarm in about {_hours_text(hours)} (about "
                              f"{found['brakes_at']}): balance ${balance:.2f}, line ${line:.2f}, at the measured "
                              f"${rate:.2f}/h; then the Gym and the researchers stop (the House keeps running)")
