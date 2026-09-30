@@ -211,7 +211,10 @@ adapter load on the live path whenever the gate does: changes there are money-pa
    and a `heldout` split generated from a seed that is `sha256(journal secret, key, candidate
    commit)`. The secret lives only in the journal (`heldout.secret`, mode 0600); the seed exists
    only once the commit is staged, so no author can see or tune to the held-out cases. Both trees
-   are scored on both splits with the same seed. The receipt records the seed afterwards.
+   are scored on both splits with the same seed. The receipt records the seed afterwards. The
+   secret keeps an honest author from tuning to held-out cases; it is a file on the operator's
+   machine, not a barrier against an author that sets out to read it (the judge's generator is
+   public). The concurrent canary below is the held-out test nothing on the laptop can see in advance.
 2. **Operational.** A capture names its motivating units: the families, mechanisms or boxes whose
    rows the brief shows. An arms comparison excludes them from both arms; a before/after window is
    held out by time instead (it starts after the release, later than every motivating row, and
