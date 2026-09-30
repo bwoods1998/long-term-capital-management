@@ -23,7 +23,8 @@ from .trading_profit import cents, complete as complete_trading, row_value
 
 T0 = "2026-09-26T06:23:14Z"
 FINANCIAL_START = "2026-09-26T06:25:30Z"
-SCHEMA = "project-economics-1"
+SCHEMA = "project-economics-2"
+MODEL_SETTLEMENT_BASIS = "admissions-and-verified-settlements-2"
 MODEL_KINDS = ("sail_model", "openai", "claude")
 ZERO = Decimal(0)
 
@@ -41,6 +42,17 @@ def decimal(value: Any) -> Decimal | None:
 def money(value: Any) -> str | None:
     value = decimal(value)
     return None if value is None else format(value.quantize(Decimal("0.000001")), "f")
+
+
+def is_count(value: Any) -> bool:
+    return type(value) is int and value >= 0
+
+
+def position_money_map(value: Any) -> bool:
+    """An explicit map, including an explicitly empty one; no missing map or ambiguous position ids."""
+    return isinstance(value, dict) and all(
+        isinstance(pid, str) and pid.isdecimal() and str(int(pid)) == pid and int(pid) > 0 and decimal(amount) is not None
+        for pid, amount in value.items())
 
 
 def epoch(value: Any) -> float | None:
@@ -98,6 +110,7 @@ def collect(root: Path, *, clock=time.time) -> dict:
                     origins.setdefault((row["kind"], str(key)), []).append(row["epoch"])
             invalid_kinds, excluded_settlements = set(), {}
             openai_holds = {}
+            claude_calls = {}
             ambiguous_refunds = 0
             for row in rows:
                 amount = decimal(row["usd"])
@@ -116,6 +129,23 @@ def collect(root: Path, *, clock=time.time) -> dict:
                         continue
                 booked[kind] = booked.get(kind, ZERO) + amount
                 count[kind] = count.get(kind, 0) + 1
+                if kind == "claude":
+                    key = detail.get("request") or detail.get("settles_hold") or detail.get("hold") or detail.get("settles")
+                    if not key:
+                        invalid_kinds.add(kind)
+                        errors.append("Claude booking has no identifiable request receipt")
+                    else:
+                        call = claude_calls.setdefault(str(key), {"usd": ZERO, "state": "unmatched_admission"})
+                        call["usd"] += amount
+                        if detail.get("hold"):
+                            call["state"] = "unmatched_admission"
+                        elif detail.get("settles_hold"):
+                            gateway = detail.get("gateway_state")
+                            call["state"] = ("verified" if gateway in ("settled", "released", "absent")
+                                             else "gateway_unknown" if gateway == "unknown" else "missing_gateway_state")
+                        elif detail.get("settles"):
+                            # _ClaudeHold.resolve only records a priced response or a verified refusal here.
+                            call["state"] = "gateway_unknown" if detail.get("gateway_state") == "unknown" else "verified"
                 if kind == "openai":
                     if detail.get("hold"):
                         key = str(detail["hold"])
@@ -128,12 +158,13 @@ def collect(root: Path, *, clock=time.time) -> dict:
                         # Historical 4xx refund rows did not name their hold. Never guess which parallel call it was.
                         ambiguous_refunds += 1
             holds = {kind: {"count": 0, "usd": ZERO} for kind in MODEL_KINDS}
+            held_keys = set()
             for field, default_kind in (("unsettled", "sail_model"), ("claude_unsettled", "claude")):
                 if field not in states or not isinstance(states[field], dict):
                     errors.append(f"{field} state unavailable; model settlement coverage is incomplete")
                     invalid_kinds.add(default_kind)
                     continue
-                for item in states[field].values():
+                for key, item in states[field].items():
                     kind = item.get("kind", default_kind)
                     amount = decimal(item.get("usd"))
                     if kind not in holds or amount is None or amount < 0:
@@ -146,11 +177,30 @@ def collect(root: Path, *, clock=time.time) -> dict:
                         continue
                     holds[kind]["count"] += 1
                     holds[kind]["usd"] += amount
+                    held_keys.add((kind, str(key)))
             holds["openai"] = {"count": len(openai_holds), "usd": sum(openai_holds.values(), ZERO)}
+            unverified = {"count": 0, "usd": ZERO, "reasons": {}}
+            for key, call in claude_calls.items():
+                if call["state"] == "verified":
+                    continue
+                if ("claude", key) in held_keys:
+                    if call["state"] != "unmatched_admission":
+                        invalid_kinds.add("claude")
+                        errors.append("Claude request is both an active hold and an unverified gateway booking")
+                    continue  # a still-filed reservation is already excluded by holds; never subtract it twice
+                if call["usd"] < 0:
+                    invalid_kinds.add("claude")
+                    errors.append("Claude unverified booking has a negative balance")
+                    continue
+                unverified["count"] += 1
+                unverified["usd"] += call["usd"]
+                unverified["reasons"][call["state"]] = unverified["reasons"].get(call["state"], 0) + 1
             sources["models"] = {"as_of": iso(clock()), "booked_usd": {k: money(v) if k not in invalid_kinds else None for k, v in booked.items()},
                                  "rows": count, "through_seq": rows[-1]["seq"] if rows else 0,
                                  "prior_period_settlements_excluded": excluded_settlements,
                                  "holds": {k: {**v, "usd": money(v["usd"])} for k, v in holds.items()},
+                                 "settlement_basis": MODEL_SETTLEMENT_BASIS,
+                                 "claude_unverified_bookings": {**unverified, "usd": money(unverified["usd"])},
                                  "openai_hold_attribution_uncertain": bool(ambiguous_refunds),
                                  "basis": "swarm spend, including negative settlements; open holds listed separately"}
     except (OSError, sqlite3.Error, ValueError, TypeError, KeyError, AttributeError) as exc:
@@ -202,17 +252,18 @@ def collect(root: Path, *, clock=time.time) -> dict:
                                   "pending_orders": sum(r["status"] in ("pending", "unknown") for r in orders),
                                   "last_book_change_at": iso(last_change),
                                   "recon": {"as_of": iso(recon["at"]) if epoch(recon.get("at")) is not None else None,
-                                            "frozen": bool(recon.get("frozen")), "problems": len(recon.get("problems") or []),
+                                            "frozen": recon.get("frozen") if isinstance(recon.get("frozen"), bool) else None,
+                                            "problems": len(recon["problems"]) if isinstance(recon.get("problems"), list) else None,
                                             "good": recon.get("good")},
                                   "basis": "all closed real positions opened since the financial basis; cash already net of execution fees"}
-    except (OSError, sqlite3.Error, ValueError, TypeError, KeyError) as exc:
+    except (OSError, sqlite3.Error, ValueError, TypeError, KeyError, AttributeError) as exc:
         errors.append(f"real options book unavailable: {type(exc).__name__}")
     try:
         saved = json.loads((root / "publish.json").read_text()).get("activity")
         reading = saved["reading"]
         sources["broker_activity"] = {"as_of": reading["as_of"], "read_at": saved["read_at"], "start_at": saved["start_at"],
-                                      "fees_by_pid": reading.get("fees_by_pid"), "blocking": reading.get("blocking") or [],
-                                      "problems": reading.get("problems") or [], **{
+                                      "fees_by_pid": reading.get("fees_by_pid"), "blocking": reading.get("blocking"),
+                                      "problems": reading.get("problems"), **{
                                           k: reading.get(k) for k in ("fees_usd", "crypto_usd", "interest_usd", "misc_usd", "unreconciled_usd")}}
     except (OSError, ValueError, TypeError, KeyError) as exc:
         errors.append(f"broker activity receipt unavailable: {type(exc).__name__}")
@@ -264,11 +315,26 @@ def report(evidence: Mapping[str, Any], boxes: Mapping[str, Any] | None, *, app_
         held = (models.get("holds") or {}).get(kind) or {}
         amount = decimal(held.get("usd"))
         settled = (booked - amount if booked is not None and amount is not None and booked >= amount >= 0
-                   and isinstance(held.get("count"), int) and held["count"] >= 0 else None)
+                   and is_count(held.get("count")) and (held["count"] > 0 or amount == ZERO) else None)
         inputs[kind] = {"usd": money(settled), "booked_usd": money(booked), "included_hold_usd": money(amount),
                         "as_of": models.get("as_of"), "basis": "recorded model spend less outstanding booked reservations"}
         if held.get("count"):
             unresolved.append(f"{kind}: {held['count']} unresolved booked reservation(s), not an extra charge")
+    unverified = models.get("claude_unverified_bookings")
+    unverified = unverified if isinstance(unverified, dict) else {}
+    unverified_usd = decimal(unverified.get("usd"))
+    claude_settled = decimal(inputs["claude"]["usd"])
+    if (models.get("settlement_basis") != MODEL_SETTLEMENT_BASIS or not is_count(unverified.get("count"))
+            or unverified_usd is None or unverified_usd < 0 or (unverified["count"] == 0 and unverified_usd != ZERO)
+            or claude_settled is None or claude_settled < unverified_usd):
+        inputs["claude"]["usd"] = None
+        unresolved.append("Claude admission/gateway settlement verification is missing or inconsistent")
+    else:
+        inputs["claude"]["usd"] = money(claude_settled - unverified_usd)
+        if unverified["count"]:
+            unresolved.append(f"claude: {unverified['count']} unverified booking(s) require a priced gateway receipt or invoice")
+    inputs["claude"]["included_unverified_booking_usd"] = money(unverified_usd)
+    inputs["claude"]["basis"] = "recorded model spend less outstanding reservations and unverified gateway bookings"
     if models.get("openai_hold_attribution_uncertain"):
         inputs["openai"]["usd"] = None
         unresolved.append("historical OpenAI hold/refund attribution is ambiguous")
@@ -331,15 +397,24 @@ def report(evidence: Mapping[str, Any], boxes: Mapping[str, Any] | None, *, app_
             unresolved.append(f"asynchronous cost source: {name} ends at {component['as_of']}, not the reporting cutoff")
     options, broker = sources.get("options") or {}, sources.get("broker_activity") or {}
     cash_rows = options.get("closed_cash_by_pid")
-    raw_cash = sum((decimal(v) for v in cash_rows.values()), ZERO) if isinstance(cash_rows, dict) and all(decimal(v) is not None for v in cash_rows.values()) else None
-    brokerage_ok = bool(broker and options and epoch(broker.get("start_at")) == epoch(FINANCIAL_START)
+    closed_coverage = position_money_map(cash_rows) and is_count(options.get("closed")) and options["closed"] == len(cash_rows)
+    raw_cash = sum((decimal(v) for v in cash_rows.values()), ZERO) if closed_coverage else None
+    if not closed_coverage:
+        unresolved.append("closed position count and cash receipts are missing or inconsistent")
+    broker_fields = (position_money_map(broker.get("fees_by_pid")) and isinstance(broker.get("blocking"), list)
+                     and all(isinstance(reason, str) for reason in broker["blocking"]))
+    if not broker_fields:
+        unresolved.append("broker fee corrections or blocking-liability coverage is missing or invalid")
+    brokerage_ok = bool(broker and options and closed_coverage and broker_fields
+                        and epoch(broker.get("start_at")) == epoch(FINANCIAL_START)
                         and epoch(broker.get("as_of")) is not None and 0 <= at - epoch(broker["as_of"]) <= 600
                         and epoch(broker.get("read_at")) is not None and 0 <= at - epoch(broker["read_at"]) <= 600
                         and epoch(options.get("last_book_change_at")) is not None
                         and epoch(options["last_book_change_at"]) <= epoch(broker["as_of"])
                         and not broker.get("blocking") and decimal(broker.get("unreconciled_usd")) is not None
-                        and options.get("pending_orders") == 0 and (options.get("recon") or {}).get("frozen") is False
-                        and (options.get("recon") or {}).get("problems") == 0
+                        and is_count(options.get("pending_orders")) and options["pending_orders"] == 0
+                        and (options.get("recon") or {}).get("frozen") is False
+                        and is_count((options.get("recon") or {}).get("problems")) and options["recon"]["problems"] == 0
                         and epoch((options.get("recon") or {}).get("as_of")) is not None
                         and 0 <= at - epoch(options["recon"]["as_of"]) <= 600)
     realized = correction = other = unreconciled = cash_total = None
@@ -357,7 +432,7 @@ def report(evidence: Mapping[str, Any], boxes: Mapping[str, Any] | None, *, app_
             unreconciled = decimal(positions["unreconciled_usd"])
     if not brokerage_ok or realized is None or other is None:
         unresolved.append("brokerage cash/fee reconciliation is missing, stale, blocked, or predates a book change")
-    if options.get("open_or_unresolved") != 0 or raw_cash is None:
+    if not is_count(options.get("open_or_unresolved")) or options["open_or_unresolved"] != 0 or raw_cash is None:
         unresolved.append("open or unresolved options prevent a complete realized project Net")
         # The closed rows remain useful, but a whole-account cash figure would incorrectly absorb fee corrections
         # for positions whose current cash/inventory is absent from this intentionally realized-only report.
@@ -373,11 +448,12 @@ def report(evidence: Mapping[str, Any], boxes: Mapping[str, Any] | None, *, app_
             "provisional_subtotal_with_active_box_estimate_usd": money(known + estimate) if estimate is not None else None,
             "comparison_only": {"booked_gym_box_estimate_usd": (models.get("booked_usd") or {}).get("gym_box"), "included_in_total": False},
             "reservations_and_provider_comparison": {"booked_model_holds": models.get("holds"),
+                                                      "claude_unverified_bookings": models.get("claude_unverified_bookings"),
                                                       "provider_requests": provider, "additional_invoice_charge": False},
             "trading": {"book_closed_net_cash_usd": money(raw_cash), "fees_already_in_cash_usd": options.get("fees_already_in_cash_usd"),
                         "broker_fee_correction_usd": money(correction) if brokerage_ok else None, "realized_options_net_usd": money(realized),
                         "other_reconciled_account_activity_usd": money(other), "cached_broker_receipt_consistent": brokerage_ok,
-                        "account_unreconciled_usd": money(unreconciled), "diagnostic_notes": broker.get("problems") or [],
+                        "account_unreconciled_usd": money(unreconciled), "diagnostic_notes": broker.get("problems"),
                         "broker_reconciled": brokerage_ok and unreconciled == ZERO and epoch(broker.get("as_of")) == at and epoch(options.get("as_of")) == at,
                         "book_as_of": options.get("as_of"), "broker_as_of": broker.get("as_of"), "open_or_unresolved": options.get("open_or_unresolved")},
             "known_realized_less_known_inputs_usd": money(cash_total - known) if cash_total is not None else None,

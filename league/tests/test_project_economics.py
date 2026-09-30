@@ -19,6 +19,8 @@ def evidence():
     return {"schema": economics.SCHEMA, "as_of": AT, "cost_start": economics.T0,
             "financial_start": economics.FINANCIAL_START, "errors": [], "sources": {
         "models": {"as_of": AT, "booked_usd": {"sail_model": "10", "openai": "20", "claude": "30", "gym_box": "999"},
+                   "settlement_basis": economics.MODEL_SETTLEMENT_BASIS,
+                   "claude_unverified_bookings": {"count": 0, "usd": "0", "reasons": {}},
                    "holds": {k: {"count": 0, "usd": "0"} for k in economics.MODEL_KINDS}},
         "provider_requests": {"as_of": AT, "cost_basis": "verified_usage_only", "groups": {
             "completed": {"count": 1, "settled_usd": "10", "reserved_usd": "99", "unpriced": 0, "unverified": 0, "unverified_booked_usd": "0"}}},
@@ -201,6 +203,47 @@ class EconomicsReport(unittest.TestCase):
         del state["sources"]["house_accounting"]["rows_by_kind"]
         self.assertIsNone(self.report(state)["project_net_usd"])
 
+    def test_missing_fee_map_or_blocking_coverage_cannot_certify_known_cash(self):
+        for field in ("fees_by_pid", "blocking"):
+            for value in ("missing", None, False, ""):
+                state = evidence()
+                if value == "missing":
+                    del state["sources"]["broker_activity"][field]
+                else:
+                    state["sources"]["broker_activity"][field] = value
+                out = self.report(state)
+                self.assertFalse(out["complete"], (field, value))
+                self.assertIsNone(out["trading"]["realized_options_net_usd"])
+                self.assertFalse(out["trading"]["cached_broker_receipt_consistent"])
+        state = evidence()
+        state["sources"]["broker_activity"]["fees_by_pid"] = {}
+        out = self.report(state)
+        self.assertTrue(out["complete"], out["unresolved"])
+        self.assertEqual(out["trading"]["realized_options_net_usd"], "10.000000")
+
+    def test_closed_position_count_must_match_the_identified_cash_rows(self):
+        cases = [(1, {}), (0, {"1": "10"}), (None, {"1": "10"}), (True, {"1": "10"}),
+                 (1, {"bad-id": "10"}), (2, {"1": "10", "01": "10"}), (1, {"1": None})]
+        for closed, rows in cases:
+            state = evidence()
+            state["sources"]["options"].update(closed=closed, closed_cash_by_pid=rows)
+            out = self.report(state)
+            self.assertFalse(out["complete"], (closed, rows))
+            self.assertIsNone(out["trading"]["book_closed_net_cash_usd"])
+            self.assertIsNone(out["known_realized_less_known_inputs_usd"])
+        state = evidence()
+        state["sources"]["options"].update(closed=0, closed_cash_by_pid={})
+        state["sources"]["broker_activity"]["fees_by_pid"] = {}
+        self.assertTrue(self.report(state)["complete"])
+
+    def test_old_model_receipt_cannot_certify_verified_claude_spend(self):
+        for field in ("settlement_basis", "claude_unverified_bookings"):
+            state = evidence()
+            del state["sources"]["models"][field]
+            out = self.report(state)
+            self.assertIsNone(out["inputs"]["claude"]["usd"])
+            self.assertIsNone(out["project_net_usd"])
+
     def test_private_snapshots_are_idempotent_concurrently_and_keep_history(self):
         with tempfile.TemporaryDirectory() as td:
             directory = Path(td) / "reports"
@@ -218,6 +261,93 @@ class EconomicsReport(unittest.TestCase):
 
 
 class CollectReadOnly(unittest.TestCase):
+    def model_receipt(self, claude_rows, holds=None):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            db = sqlite3.connect(root / "swarm.sqlite")
+            db.executescript("CREATE TABLE spend(seq INTEGER,epoch REAL,kind TEXT,usd REAL,detail TEXT); CREATE TABLE kv(key TEXT,value TEXT);")
+            rows = [("sail_model", 10, {}), ("openai", 20, {"hold": "openai-1"}),
+                    ("openai", 0, {"settles": "openai-1"}), *[("claude", usd, detail) for usd, detail in claude_rows]]
+            at = economics.epoch(AT)
+            db.executemany("INSERT INTO spend VALUES (?,?,?,?,?)", [
+                (seq, at - 100 + seq, kind, usd, json.dumps(detail)) for seq, (kind, usd, detail) in enumerate(rows, 1)])
+            db.executemany("INSERT INTO kv VALUES (?,?)", [("unsettled", "{}"), ("claude_unsettled", json.dumps(holds or {}))])
+            db.commit()
+            db.close()
+            return economics.collect(root, clock=lambda: at)["sources"]["models"]
+
+    def test_unknown_gateway_booking_remains_unverified_after_kv_hold_is_removed(self):
+        for gateway in ("unknown", None):
+            models = self.model_receipt([
+                (30, {"hold": "call-key", "request": "claude-1"}),
+                (0, {"settles_hold": "claude-1", **({"gateway_state": gateway} if gateway else {})})])
+            self.assertEqual(models["holds"]["claude"]["count"], 0)
+            self.assertEqual(models["claude_unverified_bookings"]["usd"], "30.000000")
+            state = evidence()
+            state["sources"]["models"] = models
+            out = economics.report(state, boxes(), app_id=APP, external=external())
+            self.assertEqual(out["inputs"]["claude"]["usd"], "0.000000")
+            self.assertEqual(out["inputs"]["claude"]["included_unverified_booking_usd"], "30.000000")
+            self.assertFalse(out["complete"])
+            self.assertIsNone(out["project_net_usd"])
+            self.assertTrue(any("unverified booking" in reason for reason in out["unresolved"]))
+
+    def test_unverified_call_balance_and_confirmed_settlement_are_attributed_once(self):
+        rows = [(30, {"hold": "call-key", "request": "claude-1"}),
+                (-5, {"settles_hold": "claude-1", "gateway_state": "unknown"}),
+                (10, {"hold": "priced", "request": "claude-2"}),
+                (-6, {"settles": "priced", "request": "claude-2"})]
+        models = self.model_receipt(rows)
+        self.assertEqual(models["booked_usd"]["claude"], "29.000000")
+        self.assertEqual(models["claude_unverified_bookings"]["usd"], "25.000000")
+        state = evidence()
+        state["sources"]["models"] = models
+        out = economics.report(state, boxes(), app_id=APP, external=external())
+        self.assertEqual(out["inputs"]["claude"]["usd"], "4.000000")
+        self.assertFalse(out["complete"])
+        models = self.model_receipt(rows + [(-22, {"settles_hold": "claude-1", "gateway_state": "settled"})])
+        state["sources"]["models"] = models
+        out = economics.report(state, boxes(), app_id=APP, external=external())
+        self.assertTrue(out["complete"], out["unresolved"])
+        self.assertEqual(out["inputs"]["claude"]["usd"], "7.000000")
+
+    def test_active_claude_hold_is_excluded_once_and_lost_hold_stays_unknown(self):
+        rows = [(30, {"hold": "call-key", "request": "claude-1"})]
+        filed = {"claude-1": {"usd": 30, "at": economics.epoch(AT) - 96}}
+        for holds, unverified_count in ((filed, 0), ({}, 1)):
+            models = self.model_receipt(rows, holds)
+            self.assertEqual(models["claude_unverified_bookings"]["count"], unverified_count)
+            state = evidence()
+            state["sources"]["models"] = models
+            out = economics.report(state, boxes(), app_id=APP, external=external())
+            self.assertEqual(out["inputs"]["claude"]["usd"], "0.000000")
+            self.assertFalse(out["complete"])
+
+    def test_collector_preserves_missing_broker_and_recon_fields_as_unknown(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            db = sqlite3.connect(root / "live.sqlite")
+            db.executescript("""CREATE TABLE positions(pid INTEGER,qty INTEGER,cash REAL,fees REAL,status TEXT,opened_at REAL,closed_at REAL);
+                CREATE TABLE orders(status TEXT,updated_at REAL); CREATE TABLE fills(at REAL); CREATE TABLE kv(key TEXT,value TEXT);""")
+            db.execute("INSERT INTO kv VALUES ('recon',?)", (json.dumps({"at": economics.epoch(AT), "good": 1}),))
+            db.commit()
+            db.close()
+            broker = evidence()["sources"]["broker_activity"]
+            del broker["fees_by_pid"], broker["blocking"]
+            (root / "publish.json").write_text(json.dumps({"activity": {
+                "start_at": economics.FINANCIAL_START, "read_at": economics.epoch(AT), "reading": broker}}))
+            collected = economics.collect(root, clock=lambda: economics.epoch(AT))
+            state = evidence()
+            for name in ("broker_activity", "options"):
+                state["sources"][name] = collected["sources"][name]
+            self.assertIsNone(state["sources"]["broker_activity"]["fees_by_pid"])
+            self.assertIsNone(state["sources"]["broker_activity"]["blocking"])
+            self.assertIsNone(state["sources"]["options"]["recon"]["frozen"])
+            self.assertIsNone(state["sources"]["options"]["recon"]["problems"])
+            out = economics.report(state, boxes(), app_id=APP, external=external())
+            self.assertFalse(out["complete"])
+            self.assertFalse(out["trading"]["broker_reconciled"])
+
     def test_provider_receipt_uses_request_time_and_never_counts_reservations_as_cost(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -254,7 +384,7 @@ class CollectReadOnly(unittest.TestCase):
                 (3, start + 10, "claude", -9, '{"settles":"old","request":"old-request"}'),
                 (4, start + 20, "openai", -18, '{"settles":"prior-openai"}'),
                 (5, start + 30, "claude", 6, '{"hold":"new","request":"new-request"}'),
-                (6, start + 40, "claude", -2, '{"settles_hold":"new-request"}'),
+                (6, start + 40, "claude", -2, '{"settles_hold":"new-request","gateway_state":"settled"}'),
                 (7, start + 50, "openai", 5, '{"hold":"new-openai"}'),
                 (8, start + 60, "openai", -1, '{"settles":"new-openai"}')])
             db.executemany("INSERT INTO kv VALUES (?,?)", [("unsettled", "{}"), ("claude_unsettled", "{}")])
@@ -274,7 +404,7 @@ class CollectReadOnly(unittest.TestCase):
             db.executescript("CREATE TABLE spend(seq INTEGER,epoch REAL,kind TEXT,usd REAL,detail TEXT); CREATE TABLE kv(key TEXT,value TEXT);")
             at = economics.epoch(AT)
             db.executemany("INSERT INTO spend VALUES (?,?,?,?,?)", [
-                (1, at - 10, "claude", 10, '{"hold":"a"}'), (2, at - 5, "claude", -4, '{"settles_hold":"a"}'),
+                (1, at - 10, "claude", 10, '{"hold":"a"}'), (2, at - 5, "claude", -4, '{"settles_hold":"a","gateway_state":"settled"}'),
                 (3, at - 4, "openai", 20, '{"hold":"lost-response"}'),
                 (4, economics.epoch(economics.T0) - 1, "sail_model", 500, '{}')])
             db.executemany("INSERT INTO kv VALUES (?,?)", [("unsettled", "{}"), ("claude_unsettled", "{}")])

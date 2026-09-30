@@ -31,6 +31,9 @@ Each dollar has one place:
   requests and outstanding holds stay unresolved. A Provider `usage_unsettled` cost is its conservative reservation,
   kept separately from measured cost until invoice reconciliation. OpenAI and Claude use recorded cost less identifiable outstanding
   reservations. Negative settlement entries are retained, attributed to the call's original admission interval.
+  Claude gateway `unknown` bookings remain unverified even after the runtime removes their active hold. The collector
+  follows the admission and settlement journal, retaining the request's remaining booked balance until a priced
+  settlement is recorded. A lost admission with no settlement also remains unknown; active holds are excluded once.
 * Box cost uses the provider's per-box rows for the specified project app. Finalized costs replace the booked Gym
   estimate; the estimate is shown only for comparison. Active estimated usage is a separate provisional amount.
   Global provider totals and unrelated apps are excluded. Deposited provider credit is not an invoice.
@@ -41,6 +44,8 @@ Each dollar has one place:
   `trading_profit.complete` applies posted broker fee corrections once and retains Other and known Unreconciled
   account activity. Diagnostic notes alone do not block known cash. Blocking liabilities, stale readings, pending
   orders and invalidated book snapshots do. Later posted fees may revise the record.
+  The broker fee-correction map and blocking-liability list must be explicitly present. Closed-position counts must
+  match the identified cash rows. Missing reconciliation flags stay unknown rather than becoming a clear account.
 * Account deposits, withdrawals, balance movement and practice P&L are not profits. This report does not mark open
   positions; open or unresolved inventory prevents a complete realized project Net.
 
@@ -52,6 +57,10 @@ active box estimates. `known_realized_less_known_inputs_usd` remains a partial f
 Under the existing Profit convention a known signed Unreconciled dollar amount is included once, with its diagnostic
 notes intact. Such a report may have complete dollar coverage while `broker_reconciled` is false. That flag and any
 blocking liability remain separate; this report grants no trading or profitability gate approval.
+
+Schema `project-economics-2` requires the model settlement classification above. Earlier reports remain historical
+snapshots; an older state receipt cannot certify settled Claude costs until the journal is collected with the new
+classifier. The command does not rewrite or silently upgrade historical evidence.
 
 The collector timestamps its separate database reads honestly. Cached broker activity and provider billing often
 end at different times. Freshness may make the cached broker receipt internally consistent, but the report will not
