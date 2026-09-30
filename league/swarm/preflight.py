@@ -145,7 +145,7 @@ def expiries(root: str, weekday: int, dte_min: int, dte_max: int, weekdays: Sequ
 def session_weekdays(roots: Sequence[str], needs: Mapping[str, Any], *, sparse: bool = False) -> tuple[int, ...]:
     """The synthetic sessions' weekdays: the SESSIONS weekdays on which the roots' listings hold the most expiries in the
     program's dte range (ties: Tuesday, Wednesday, Thursday, Monday, Friday), in calendar order. A Friday-only root with
-    dte [10, 21] lists on Monday, Tuesday and Friday (11, 10 and 14 days out), not midweek: its sessions are those."""
+    dte [10, 20] lists on Monday, Tuesday and Friday (11, 10 and 14 days out), not midweek: its sessions are those."""
     dte_min, dte_max = (int(x) for x in needs["dte"])
     held = {day: sum(len(expiries(root, day, dte_min, dte_max, listing(root, sparse=sparse)[2])) for root in roots)
             for day in PREFERRED_WEEKDAYS}

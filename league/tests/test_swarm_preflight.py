@@ -297,16 +297,16 @@ class Preflight(unittest.TestCase):
                             root)
 
     def test_the_sessions_fall_on_days_the_roots_list(self):
-        # Midweek when every weekday lists (SPY); a Friday-only root 10-21 days out lists on Monday (11), Tuesday (10) and
+        # Midweek when every weekday lists (SPY); a Friday-only root 10-20 days out lists on Monday (11), Tuesday (10) and
         # Friday (14), so a misuse behind a check for an empty chain is caught there, not passed on quiet Wednesdays.
         from league.swarm.preflight import session_weekdays
 
         self.assertEqual(session_weekdays(["SPY"], {"dte": [0, 7]}), (1, 2, 3))
-        self.assertEqual(session_weekdays(["SMCI", "NVDA", "AMD"], {"dte": [10, 21]}), (0, 1, 4))
-        head = ('NEEDS = {"roots": ["SMCI", "NVDA", "AMD"], "dte": [10, 21], "band": 0.06, "cadence": 30, "history": 10}\n'
+        self.assertEqual(session_weekdays(["AAPL", "MSFT"], {"dte": [10, 20]}), (0, 1, 4))
+        head = ('NEEDS = {"roots": ["AAPL", "MSFT"], "dte": [10, 20], "band": 0.10, "cadence": 30, "history": 5}\n'
                 'PARAMS = {}\nSTATE = {}\n')
-        out = self.refused(program('c = ctx.chains.get("NVDA")\nif c is None or c.n == 0:\n    return []\n'
-                                   'px = ctx.underlyings["NVDA"].get("price")\nreturn []', head=head))
+        out = self.refused(program('c = ctx.chains.get("MSFT")\nif c is None or c.n == 0:\n    return []\n'
+                                   'px = ctx.underlyings["MSFT"].get("price")\nreturn []', head=head))
         self.assertIn("UnderlyingView", out["error"])
 
     def test_a_streak_the_runners_list_cannot_name_is_inconclusive(self):
