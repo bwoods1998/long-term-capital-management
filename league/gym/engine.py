@@ -1598,17 +1598,48 @@ def _split_alerts(data: DayData, history: History, seen: Mapping[str, dt.date]) 
 
 
 def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Sequence[dt.date] | None = None,
-        progress: Any = None, keep: list | None = None) -> list[dict]:
+        progress: Any = None, keep: list | None = None, isolate: bool = False) -> list[dict]:
     """Run a batch of programs over the window, day-major; return one result dict per program
-    (`results.build`), in the order given. `keep`, a list, receives the accounts (for inspection)."""
+    (`results.build`), in the order given. `keep`, a list, receives the accounts (for inspection).
+
+    `isolate` (the Gym batch's workers, `batch._unit`): an exception out of one program's account (its start, its
+    day's open, schedule or close, a minute's step, a warm-up decision, its result) ends that program's run alone: it
+    returns `results.failed` (status error, the reason, no trial), is never stepped again, and every other program runs
+    on exactly as it would have (accounts share nothing but the day's read-only data, and a failed account's roots stay
+    in the run's). A MemoryError still propagates (the worker's memory cap, `batch._cap_memory`, is the whole unit's,
+    so it is no one program's). Without `isolate` every exception propagates, as it always has."""
     from . import results as R
+    from .runtime import ProgramTimeout
 
     began = time.perf_counter()
     universe = tuple(r.upper() for r in cfg.roots)
-    accounts: list[Account] = []
+    failed: dict[int, str] = {}   # id(account) -> why its run ended (isolate only)
+
+    def ends(account: Account, exc: BaseException) -> bool:
+        """True when `exc` ends this account's run alone (recorded); False: the caller re-raises it."""
+        if not isolate or isinstance(exc, MemoryError):
+            return False
+        failed[id(account)] = f"{type(exc).__name__}: {str(exc)[:300]}"
+        return True
+
+    def schedule_of(account: Account, data: DayData) -> set[int]:
+        try:
+            return account.decision_minutes(data)
+        except Exception as exc:
+            if not ends(account, exc):
+                raise
+            return set()
+
+    slots: list[Account | str] = []   # each program's account, or why it could not start (isolate only)
     for program in programs:
         roots = tuple(r for r in program.needs.roots if not universe or r in universe)
-        accounts.append(Account(program, cfg, roots))
+        try:
+            slots.append(Account(program, cfg, roots))
+        except (Exception, ProgramTimeout) as exc:  # the module body runs again in a fresh namespace (Runner)
+            if not isolate or isinstance(exc, MemoryError):
+                raise
+            slots.append(f"{type(exc).__name__}: {str(exc)[:300]}")
+    accounts: list[Account] = [a for a in slots if isinstance(a, Account)]
     if keep is not None:
         keep.extend(accounts)
     all_roots = tuple(sorted({r for a in accounts for r in a.roots}))
@@ -1645,8 +1676,8 @@ def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Se
 
     for day in warm:
         data = DayData(store, day, all_roots, events, history, to_ordinal(day))
-        live = [a for a in accounts if a.roots and not a.runner.disqualified]
-        schedules = [account.decision_minutes(data) for account in live]
+        live = [a for a in accounts if a.roots and not a.runner.disqualified and id(a) not in failed]
+        schedules = [schedule_of(account, data) for account in live]
         for account, schedule in zip(live, schedules):
             account.warming = True
             for root in account.roots:
@@ -1654,8 +1685,12 @@ def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Se
         for mi in range(1, data.minutes - 1):
             data.advance(mi)
             for account, schedule in zip(live, schedules):
-                if mi in schedule and not account.runner.disqualified:
-                    account._decide(data, mi)
+                if mi in schedule and not account.runner.disqualified and (not failed or id(account) not in failed):
+                    try:
+                        account._decide(data, mi)
+                    except Exception as exc:
+                        if not ends(account, exc):
+                            raise
         for account in live:
             account.warming = False
             account.closed_since, account.rejects_since = [], []
@@ -1664,10 +1699,15 @@ def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Se
     for n, day in enumerate(days):
         data = DayData(store, day, all_roots, events, history, to_ordinal(day), split_eve=eves.get(day))
         alerts += _split_alerts(data, history, seen)
-        live = [a for a in accounts if a.roots]
+        live = [a for a in accounts if a.roots and id(a) not in failed]
         for account in live:
-            account.begin_day(data)
-        schedules = [account.decision_minutes(data) for account in live]
+            try:
+                account.begin_day(data)
+            except Exception as exc:
+                if not ends(account, exc):
+                    raise
+        live = [a for a in live if id(a) not in failed]
+        schedules = [schedule_of(account, data) for account in live]
         for account, schedule in zip(live, schedules):
             for root in account.roots:
                 data.want(root, schedule)
@@ -1684,10 +1724,21 @@ def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Se
             data.advance(mi)
             for account, schedule in zip(live, schedules):
                 wants = mi in schedule
-                if wants or account.orders or (account.positions and mi in events_minutes):
-                    account.step(data, mi, wants)
+                if (wants or account.orders or (account.positions and mi in events_minutes)) and \
+                        (not failed or id(account) not in failed):
+                    try:
+                        account.step(data, mi, wants)
+                    except Exception as exc:
+                        if not ends(account, exc):
+                            raise
         for account in live:
-            account.end_day(data, last=n == len(days) - 1)
+            if failed and id(account) in failed:
+                continue
+            try:
+                account.end_day(data, last=n == len(days) - 1)
+            except Exception as exc:
+                if not ends(account, exc):
+                    raise
         _close_day(data, history, seen)
         if progress is not None:
             progress(n + 1, len(days), day)
@@ -1700,8 +1751,21 @@ def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Se
     elapsed = time.perf_counter() - began
     data_version = store.data_version(all_roots, warm + days) if days else "no-days"
     code, tables = code_digest(), tables_digest()
-    return [R.build(a, cfg, days, data_version, regimes, elapsed / max(1, len(accounts)), code=code, tables=tables)
-            for a in accounts]
+    out: list[dict] = []
+    for program, slot in zip(programs, slots):
+        if isinstance(slot, str):
+            out.append(R.failed(program.name, f"the program failed to start: {slot}"))
+            continue
+        if id(slot) not in failed:
+            try:
+                out.append(R.build(slot, cfg, days, data_version, regimes, elapsed / max(1, len(accounts)), code=code,
+                                   tables=tables))
+                continue
+            except Exception as exc:
+                if not ends(slot, exc):
+                    raise
+        out.append(R.failed(program.name, f"the program's run stopped on an error: {failed[id(slot)]}"))
+    return out
 
 
 __all__ = ["RunConfig", "run", "Account", "DayData", "DayClosed", "History", "Unsaid", "split_factor", "split_eves", "split_alert",
