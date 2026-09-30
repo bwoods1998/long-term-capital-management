@@ -83,6 +83,15 @@ on branch `run/options-swarm-2026-09-26`) has the detail.
   Gym bundle and tables digests change, so every program re-runs once as a new trial and each family is re-validated
   once, as with #399; the money digest stays `a3e2aa7c`.
 
+## 2026-09-30
+
+**05:01Z, restoration fix: House release `20260930T045038Z-cb6035693ef4`** (main `87af7a62`; #429).
+- Promoted 04:51:15Z; ten-minute health watch passed at 05:01:20Z.
+- Real instances restore by keyword, keeping `observe` false and the saved execution mode.
+- Verified on the running House: `house:rebound-live@0:h` is real, `observe: false`, mode `live`;
+  supervisor and House alive, health fresh. No options or working orders before the restart.
+- Money digest remains `a3e2aa7c`; the grant and accounting baseline were not changed.
+
 ## 2026-09-29
 
 **13:44Z, R11a: House release `20260929T134303Z-8366493c614c`** (main `2f6d5109`; #424, Train from 2017).

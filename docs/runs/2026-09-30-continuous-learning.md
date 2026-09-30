@@ -19,7 +19,11 @@ evidence: [continuous learning](../goals/LTCM_CONTINUOUS_LEARNING.md). The goal 
 ## Work in progress
 
 - Restoration: reviewed and merged PR #429 as `87af7a62`; 82 local House/live tests pass with pinned
-  Gym dependencies, and CI passed on Python 3.11 and 3.14. Deployment remains outstanding.
+  Gym dependencies, and CI passed on Python 3.11 and 3.14. Release
+  `20260930T045038Z-cb6035693ef4` promoted at 04:51:15 UTC and completed its ten-minute health watch
+  at 05:01:20 UTC. The restored real instance reports `observe: false`, saved mode `live`; the
+  money digest is unchanged. Source hashes confirmed this release changed only the restoration fix
+  and its regression test from the previously deployed tree.
 - Research efficiency: preserve R11b, fix normal/diagnostician retirement, replace repeated paid
   hold polling with durable waits, and integrate practice-feedback wake events.
 - Experiment contract: enforce effective parameter overrides, fast preflight, runtime-state
@@ -57,3 +61,30 @@ result motivates an independent study of eligibility rules; no threshold was cha
 The published compute feed also omitted Claude charges while retaining historical OpenAI charges.
 The fix uses the existing `other_usd` field, with an end-to-end checkpoint assertion; 63 publishing
 tests pass. Complete all-input accounting remains outstanding.
+
+## Integration and remaining adoption checks
+
+The integration tree combines R11b, durable research waits/retirement, the practice league and
+immutable cohorts, parameter binding, grounded gate reviews, and the existing history-window
+controller (PR #413). The combined initial swarm suite passed 779 tests (one existing skip);
+the cohort delta passed 247 focused tests; the merged data tools passed 158 data tests. These
+changes are not yet deployed. Engine adoption must invalidate old selection caches, reject late
+old-evaluator results, and require current qualification for entries while preserving exits,
+historical trials and consumed holdout looks.
+
+Read-only adoption audit: all living families are still Gym; no qualified real strategy. The real
+House experiment reads `ctx.params` rather than global `PARAMS`, so binding global defaults does
+not change that frozen program's decisions. The residual practice program has no overrides.
+
+At 05:00 UTC the historical collector was alive, with eleven failing tasks left in optional older
+history blocks. The base stages are complete. The runner's confirmed quiet cutoff is 05:20 UTC;
+the next forward job is due at 06:00 UTC. Historical SIP completion has reached March 2022 but
+waits while that collector is running. No vendor failure was relabeled valid data.
+
+Cost reconciliation found another distinction to preserve: at approximately 04:56 UTC the Sail
+provider reported $71.90 for all 307 project boxes since T0, whereas the swarm had booked $121.81
+of estimated Gym-box usage. These are alternative measures, not additive charges. Recorded model
+charges were Sail $197.70, OpenAI $50.23 and Claude $144.69, with no unresolved model holds at that
+reading. Data subscriptions and any unallocated standalone work still need reconciliation; none of
+these readings establishes complete project Net. Existing ledgers and financial baselines remain
+unchanged.
