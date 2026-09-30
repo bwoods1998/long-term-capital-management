@@ -1441,6 +1441,14 @@ def suite_fingerprint() -> str:
     return digest({"definition": suite_definition(), "search": SEARCH, "variants": VARIANTS, "source": _source_sha()})
 
 
+def source_pin() -> str | None:
+    """The pin as written in this file on disk (the file is the suite; a stale compiled copy of it is not)."""
+    import re
+
+    found = re.search(r'^PINNED_SUITE_SHA = "([0-9a-f]{64})"$', Path(__file__).read_text(), re.M)
+    return found.group(1) if found else None
+
+
 def tree_fingerprint(repo: Path | None = None) -> dict[str, Any]:
     """What the scored tree's evaluator is: the Gym's execution fingerprint (every file under league/gym and league/live
     and the four shared modules) and the swarm-side evidence code the suite calls."""
@@ -1496,9 +1504,10 @@ def suite(replications: int | None = None, search_replications: int | None = Non
         search[case] = [search_trial(case, r) for r in range(search_reps)]
         if progress:
             progress(f"search {case}: {search_reps} lineages")
-    pinned = PINNED_SUITE_SHA
+    pinned = source_pin()
     computed = suite_fingerprint()
     return {"suite": SUITE_ID, "suite_sha": computed, "pinned_sha": pinned, "pinned": computed == pinned,
+            "compiled_pin_current": PINNED_SUITE_SHA == pinned,
             "full_protocol": reps == PROTOCOL["replications"] and search_reps == SEARCH["replications"],
             "replications": reps, "search_replications": search_reps, "tree": tree_fingerprint(),
             "runtime": {"python": sys.version.split()[0], "elapsed_seconds": round(time.monotonic() - began, 1)},
@@ -1579,7 +1588,7 @@ def run_on_tree(tree: Path, args: Any) -> int:
                           env=env, check=False).returncode
 
 
-PINNED_SUITE_SHA = "88875ad95efc8136e0e0f77401c961fe14e4da2c159026fe29376703e78b6371"
+PINNED_SUITE_SHA = "0953e1ba3f2f7dd52490229cde552bd3a9e9b77d762b5ae6e45e57ef50fef62d"
 
 
 if __name__ == "__main__":

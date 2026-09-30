@@ -28,7 +28,8 @@ class PinnedDefinition(unittest.TestCase):
     def test_the_pin_is_the_suites_hash(self):
         # A change to any case, template, world setting, variant or line of the suite's code moves the hash: bump
         # SUITE_ID and re-pin deliberately, never quietly.
-        self.assertEqual(EB.PINNED_SUITE_SHA, EB.suite_fingerprint())
+        self.assertEqual(EB.source_pin(), EB.suite_fingerprint())
+        self.assertEqual(EB.PINNED_SUITE_SHA, EB.source_pin())
 
     def test_every_case_has_a_known_answer(self):
         ids = [c["id"] for c in EB.CASES]
