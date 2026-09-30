@@ -76,19 +76,20 @@ check is not proof that a parameter affects decisions: verify the intended ablat
 Zero trades alone is not invalid code or evidence of no economic edge; diagnose coverage, order
 rejections and signal frequency separately.
 
-Then a runtime preflight runs the program in a sandbox on up to three made-up sessions (synthetic quotes
-on your NEEDS, a flat account, the Gym's decision minutes). If it does not load, or `decide` raises the
-same misuse of the API on 25 calls in a row across two sessions before returning any intent, and again
-(the same exception at the same line, or with the same message at another) on made-up markets with
-other chains and numbers (a thinner and a denser chain; one-tick and wide quotes; other vols and
-prices), the run is refused with the exception, its line and the ctx API to use instead: no version,
-job or trial, and a note in your notebook. An error that says the market's numbers caused it (an empty
-selection, a selection turned into one number, two selections of different lengths, a division by
-zero, a None) is never refused there; one that follows from them without saying so (a filter that
-keeps nothing, then a STATE key never written) is refused only when it recurs on every one of those
-markets. It checks only that the code runs; passing it says nothing about a run. The Gym itself is
-stricter: 25 errors in total over a run disqualify it, consecutive or not, so guard every lookup that
-can come back empty or None.
+Then a runtime preflight runs the program in a sandbox on made-up sessions (synthetic quotes on your
+NEEDS, a flat account, the Gym's decision minutes). It refuses the run only when the program does not
+load, or when `decide` misuses the ctx API in a way no market data could change, on 25 calls in a row
+before any intent and at the same line on every one of several made-up markets (among them one where
+every selection is filled and any filter keeps contracts): a ctx list used as a mapping
+(`ctx.positions.items()`), a chain, an underlying or ctx itself read with `.get` or `[...]`, iterated
+or called, a field that does not exist, a key a ctx dict can never hold (a root outside NEEDS, a PARAMS
+key you never declared). Then you get the exception, its line and the ctx API to use: no version, job
+or trial, and a note in your notebook. Any other error (an empty selection, a filter that keeps
+nothing, a None, a STATE key not yet written, a numeric edge case) does not stop the run: its warnings
+(the error, its line, the API to use) come back with the run's answer under `preflight`. It checks only
+that the code runs; passing it says nothing about a run. The Gym itself is stricter: 25 errors in
+total over a run disqualify it, consecutive or not, so guard every lookup that can come back empty or
+None.
 
 Gate readers receive the actual runtime source fingerprint, state-initialization excerpts and
 available context fields. A rejection must locate the submitted code, name the relevant contract

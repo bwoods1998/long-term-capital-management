@@ -696,6 +696,14 @@ class Preflight(unittest.TestCase):
         self.assertIsNone(misuse('x = ctx.events["fomc"]', "KeyError: 'fomc'"))
         self.assertIsNone(misuse('x = "{a}".format(**STATE) + ctx.chains[r].root', "KeyError: 'a'"))
         self.assertIsNone(misuse('x = STATE[k] + ctx.chains[r].n', "KeyError: 'QQQ'"))
+        # A ctx dict is built afresh for each call: one the program writes to, mutates or hands on could hold the key on
+        # some markets only. So could a ctx field the program reassigns (Ctx's slots take an assignment).
+        self.assertIsNone(misuse('if ctx.minute > 900:\n    ctx.chains["QQQ"] = ctx.chain\nx = ctx.chains["QQQ"]', "KeyError: 'QQQ'"))
+        self.assertIsNone(misuse('d = ctx.params\nif ctx.minute > 900:\n    d.update(window=1)\nx = ctx.params["window"]',
+                                 "KeyError: 'window'"))
+        self.assertIsNone(misuse('STATE["p"] = ctx.params\nx = ctx.params["window"]', "KeyError: 'window'"))
+        self.assertTrue(misuse('d = ctx.params\nn = len(d) + len(ctx.params.keys())\nx = d["window"]', "KeyError: 'window'"))
+        self.assertIsNone(misuse('if ctx.minute > 900:\n    ctx.positions = {}\nx = ctx.positions.items()', items))
         # Numbers, lists and arrays by their receivers.
         self.assertTrue(misuse("x = ctx.under.price[-1]", "TypeError: 'float' object is not subscriptable"))
         self.assertIsNone(misuse('x = STATE.get("p", 0.0)[-1]', "TypeError: 'float' object is not subscriptable"))

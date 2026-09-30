@@ -738,7 +738,12 @@ class _Source:
                     if stored.get(name) == 1 and alias.name in ("math", "numpy"):
                         self.modules[name] = __import__(alias.name)
         self.readonly_params = self._params_readonly()
+        #: The program assigns or deletes an attribute somewhere: it could have replaced a ctx field (Ctx's slots take an
+        #: assignment) on some markets only, so no field's type is certain (`_misuse`).
+        self.stored_attrs = any(isinstance(n, ast.Attribute) and isinstance(n.ctx, (ast.Store, ast.Del))
+                                for n in ast.walk(self.tree))
         self._bindings: dict[Any, dict[str, list[tuple]]] = {}
+        self._readonly: dict[str, bool] = {}
 
     @staticmethod
     def _bound_names(node: ast.AST) -> list[str]:
@@ -995,6 +1000,46 @@ class _Source:
             scope = self.scope(scope)
         return names
 
+    #: What reads a dict without changing it or handing it on (`readonly`).
+    READS = ("get", "keys", "items", "values", "copy")
+    PURE = frozenset({"len", "list", "sorted", "set", "frozenset", "tuple", "any", "all", "enumerate", "zip", "iter",
+                      "bool", "str", "max", "min", "sum", "reversed"})
+
+    def readonly(self, kind: str) -> bool:
+        """Every expression of `kind` (a ctx dict, built afresh for each call) is only read: by key, `.get`, `.keys`,
+        `.items`, `.values`, `.copy`, a comparison, `len` and the like, a loop, a test, a format or an alias that is
+        itself only read. A ctx dict the program writes to, mutates or hands on could hold a key on some markets only."""
+        if kind not in self._readonly:
+            self._readonly[kind] = all(self._read_only(node) for node in ast.walk(self.tree)
+                                       if isinstance(node, (ast.Name, ast.Attribute, ast.Subscript, ast.Call))
+                                       and not isinstance(getattr(node, "ctx", None), (ast.Store, ast.Del))
+                                       and self.kind(node) == kind)
+        return self._readonly[kind]
+
+    def _read_only(self, node: ast.AST) -> bool:
+        parent = self.parents.get(node)
+        if isinstance(parent, ast.Subscript) and parent.value is node:
+            return isinstance(parent.ctx, ast.Load)
+        if isinstance(parent, ast.Attribute) and parent.value is node:
+            call = self.parents.get(parent)
+            called = isinstance(call, ast.Call) and call.func is parent
+            return parent.attr in self.READS if called else (isinstance(parent.ctx, ast.Load)
+                                                             and not hasattr(dict, parent.attr))
+        if isinstance(parent, (ast.Compare, ast.Expr, ast.FormattedValue)):
+            return True
+        if isinstance(parent, (ast.If, ast.While, ast.IfExp, ast.Assert)) and parent.test is node:
+            return True
+        if isinstance(parent, ast.UnaryOp) and isinstance(parent.op, ast.Not):
+            return True
+        if isinstance(parent, (ast.For, ast.AsyncFor, ast.comprehension)) and parent.iter is node:
+            return True
+        if isinstance(parent, ast.Call) and node in parent.args:
+            return isinstance(parent.func, ast.Name) and parent.func.id in self.PURE and parent.func.id in self.builtins
+        if isinstance(parent, (ast.Assign, ast.AnnAssign, ast.NamedExpr)) and parent.value is node:
+            targets = parent.targets if isinstance(parent, ast.Assign) else [parent.target]
+            return all(isinstance(t, ast.Name) and self._name(t.id, self.scope(t), 0) == self.kind(node) for t in targets)
+        return False
+
     def only(self, receivers: Sequence[ast.AST], kind: str) -> str | None:
         """What the receivers that could be a `kind` are (`_what` of the first), when every one of them (unknown, or
         known to be one) is known to be one and there is one; None otherwise."""
@@ -1029,7 +1074,9 @@ def _misuse(message: str, code: str, *, roots: Sequence[str] = (), params: Mappi
     ctx.underlyings and ctx.rules can hold); `params`: the run's overrides. Only an AttributeError, a TypeError, a
     KeyError or an IndexError; never one raised on a None or an empty value (`market_dependent`) or one this box may cause
     (`environmental`); and only when the failing expression is found on the line and its receiver is a ctx object of the
-    type the error names (a ctx class by the error's own words; a list, a dict or a number by `_Source.kind`)."""
+    type the error names (a ctx class by the error's own words; a list, a dict or a number by `_Source.kind`). A KeyError
+    only on a ctx dict the program never writes to or hands on (`_Source.readonly`), and nothing at all in a program that
+    assigns an attribute anywhere (it could have replaced a ctx field on some markets only)."""
     text = str(message or "")
     m = re.match(r"line (\d+): ([\w.]+): (.*)", text, re.S)
     if not m or m.group(2) not in ("AttributeError", "TypeError", "KeyError", "IndexError"):
@@ -1039,7 +1086,7 @@ def _misuse(message: str, code: str, *, roots: Sequence[str] = (), params: Mappi
         return None
     src = _Source(code, roots, params)
     nodes = src.at(line)
-    if not nodes:
+    if not nodes or src.stored_attrs:
         return None
     if error == "IndexError":  # a 1-D ctx array indexed in two dimensions: its words are not the market's
         if not re.match(r"too many indices for array: array is 1-dimensional, but \d+ were indexed", said):
@@ -1084,7 +1131,8 @@ def _misuse(message: str, code: str, *, roots: Sequence[str] = (), params: Mappi
             elif isinstance(n, ast.BinOp) and isinstance(n.op, ast.Mod) and isinstance(n.left, (ast.Constant, ast.JoinedStr)):
                 return None
         kinds = [k for k in (src.kind(r) for r in receivers) if k is None or k.startswith("dict:")]
-        if not kinds or any(k is None or src.domains.get(k) is None or key in src.domains[k] for k in kinds):
+        if not kinds or any(k is None or src.domains.get(k) is None or key in src.domains[k] or not src.readonly(k)
+                            for k in kinds):
             return None
         return f"`{key}` is never a key of {_what(kinds[0])}"
     # TypeError
