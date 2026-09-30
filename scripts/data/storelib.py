@@ -17,6 +17,17 @@ Stage 9 also fetches the underlying alone for the `HISTORY_SESSIONS` (60) sessio
 history a program may ask for (NEEDS `history`, at most 60) going into the March 2020 crash. An image built with
 `--train-from` keeps the underlying of the 60 sessions before its first Train day as "history" (never Train: no chain, no
 trade); every other image keeps none. `--early-roots` leaves a root out of stages 9 and 10 (and of an image's 2020-21).
+
+BLOCKS (stages 11 and up, Sept 29, 2026). Longer history is fetched as "blocks": pre-2022 stretches of roots and days
+read from a private file on the data box (`backfill.py run --blocks /data/work/blocks.json`). Which roots the vendor
+serves from which day is account knowledge, so it never goes into this public module; the code stays generic and
+refuses any block that could touch a file stages 1-10 own (`check_block_task`): a block never plans a day on or after
+Train's first day (2022-01-03), nor the core roots' 2020-21 chains. Every block day is "pre" to every image built today.
+A block's jobs keep an underlying series the journal already holds (the history under an adopted image never moves).
+
+THE QUIET WINDOW. The nightly forward job (nightly.py) runs at 02:00 America/New_York and the account allows one
+ThetaData session. A backfill started with `--nightly-quiet` holds no session inside `quiet_window` (05:30-07:30Z, and
+02:00 ET - 30 min .. + 90 min, so 05:30-08:30Z in winter): it stops before it, and refuses to log in inside it.
 """
 
 from __future__ import annotations
@@ -100,6 +111,46 @@ def window_of(day: dt.date, train_from: dt.date | None = None) -> str:
     return "gap"  # 2025-01-01 and 2026-01-01 are holidays; nothing lands here
 
 
+#: The nightly job's quiet window (module docstring): fixed UTC minutes, widened to cover 02:00 ET's own margins.
+QUIET_UTC = (5 * 60 + 30, 7 * 60 + 30)
+QUIET_ET_MARGINS = (30, 90)  # minutes before and after 02:00 America/New_York
+#: Without a time-zone database the window is the winter one, which covers both.
+QUIET_FALLBACK_END = 8 * 60 + 30
+#: The exit code of a runner that stopped (or refused to start) for the quiet window.
+QUIET_EXIT = 75
+
+
+def quiet_window(day: dt.date) -> tuple[dt.datetime, dt.datetime]:
+    """The quiet window of UTC date `day`, as aware UTC datetimes [start, end)."""
+    utc = dt.timezone.utc
+    start = dt.datetime.combine(day, dt.time(QUIET_UTC[0] // 60, QUIET_UTC[0] % 60), utc)
+    end = dt.datetime.combine(day, dt.time(QUIET_UTC[1] // 60, QUIET_UTC[1] % 60), utc)
+    try:
+        from zoneinfo import ZoneInfo
+
+        nightly = dt.datetime.combine(day, dt.time(2, 0), ZoneInfo("America/New_York")).astimezone(utc)
+    except Exception:  # noqa: BLE001 - no tz database: the widest (winter) window
+        return start, max(end, dt.datetime.combine(day, dt.time(QUIET_FALLBACK_END // 60, QUIET_FALLBACK_END % 60), utc))
+    return (min(start, nightly - dt.timedelta(minutes=QUIET_ET_MARGINS[0])),
+            max(end, nightly + dt.timedelta(minutes=QUIET_ET_MARGINS[1])))
+
+
+def next_quiet(now: dt.datetime) -> tuple[dt.datetime, dt.datetime]:
+    """The quiet window that contains `now` (aware), else the next one."""
+    now = now.astimezone(dt.timezone.utc)
+    for offset in (-1, 0, 1, 2):
+        start, end = quiet_window(now.date() + dt.timedelta(days=offset))
+        if now < end:
+            return start, end
+    raise AssertionError("unreachable: a window ends every day")  # pragma: no cover
+
+
+def in_quiet(now: dt.datetime, margin_seconds: float = 0.0) -> bool:
+    """Whether `now` is inside the quiet window, or less than `margin_seconds` before it."""
+    start, end = next_quiet(now)
+    return start - dt.timedelta(seconds=float(margin_seconds)) <= now.astimezone(dt.timezone.utc) < end
+
+
 #: A root whose options were listed under another symbol before a date: (first day of the new
 #: symbol, the older symbol). Facebook's options were FB until META took the ticker on 2022-06-09;
 #: before that, the symbol META belonged to the Roundhill Ball Metaverse ETF (a different underlying).
@@ -118,10 +169,15 @@ def strike_range(root: str) -> int:
     return int(STRIKE_RANGE.get(root, DEFAULT_STRIKE_RANGE))
 
 
-def calendar_years(stages: Sequence[int] = ()) -> tuple[int, ...]:
-    """The calendar years a run of `stages` needs: 2019-2021 as well when it plans stage 9 or 10."""
+def calendar_years(stages: Sequence[int] = (), blocks: Mapping[int, "Block"] | None = None) -> tuple[int, ...]:
+    """The calendar years a run of `stages` needs: 2019-2021 as well when it plans stage 9 or 10, and each planned
+    block's years (its history sessions' year included)."""
     early = EARLY_YEARS if set(stages) & set(EARLY_STAGES) else ()
-    return tuple(sorted(set(CALENDAR_YEARS) | set(early)))
+    extra: set[int] = set()
+    for stage in stages:
+        if blocks and stage in blocks:
+            extra |= set(blocks[stage].years())
+    return tuple(sorted(set(CALENDAR_YEARS) | set(early) | extra))
 
 
 def history_days(calendar: "Calendar", first: dt.date, sessions: int = HISTORY_SESSIONS) -> list[dt.date]:
@@ -321,6 +377,176 @@ STAGES: dict[int, str] = {
 }
 
 
+#: Stages from here on are blocks (module docstring): read from the private blocks file, never written here.
+FIRST_BLOCK_STAGE = 11
+LAST_BLOCK_STAGE = 99
+BLOCK_JOBS = ("day", "back")
+#: A block's first day is never before this (a guard against a mistyped year; the vendor decides what it serves).
+BLOCK_FLOOR = dt.date(2000, 1, 3)
+
+
+class Block:
+    """One pre-2022 stretch: `job` ("day": chains, underlying, OI and listed expiries; "back": the 15-45 DTE back
+    months merged into a day block's files, after it) for `roots` on the trading days `first`..`last`. A root in
+    `root_first` starts on its own later day, a root in `skip` is left out, and a day block may also take the underlying
+    alone for `history_sessions` sessions before `first` (job `under`, like stage 9)."""
+
+    __slots__ = ("stage", "what", "job", "roots", "first", "last", "root_first", "skip", "history_sessions", "after")
+
+    def __init__(self, stage: int, *, job: str, roots: Sequence[str], first: dt.date, last: dt.date, what: str = "",
+                 root_first: Mapping[str, dt.date] | None = None, skip: Sequence[str] = (), history_sessions: int = 0,
+                 after: int | None = None):
+        self.stage, self.what, self.job = int(stage), str(what), str(job)
+        self.roots = tuple(roots)
+        self.first, self.last = first, last
+        self.root_first = dict(root_first or {})
+        self.skip = frozenset(skip)
+        self.history_sessions = int(history_sessions)
+        self.after = None if after is None else int(after)
+
+    def day_roots(self, day: dt.date) -> list[str]:
+        """The roots this block fetches on `day`."""
+        if not self.first <= day <= self.last:
+            return []
+        return [r for r in self.roots if r not in self.skip and day >= self.root_first.get(r, self.first)]
+
+    def history(self, calendar: Calendar) -> list[dt.date]:
+        return history_days(calendar, self.first, self.history_sessions) if self.history_sessions else []
+
+    def history_roots(self) -> list[str]:
+        """History goes to the roots that start on the block's first day."""
+        return [r for r in self.roots if r not in self.skip and self.root_first.get(r, self.first) <= self.first]
+
+    def years(self) -> list[int]:
+        start = self.first - dt.timedelta(days=2 * self.history_sessions + 30) if self.history_sessions else self.first
+        return list(range(start.year, self.last.year + 1))
+
+    def tasks(self, calendar: Calendar) -> list[Task]:
+        out = []
+        if self.job == "day":
+            for day in self.history(calendar):
+                for root in self.history_roots():
+                    out.append(Task(self.stage, "under", root, day))
+        for day in calendar.days(self.first, self.last):
+            for root in self.day_roots(day):
+                out.append(Task(self.stage, self.job, root, day))
+        return out
+
+
+def _block_date(value: Any, what: str) -> dt.date:
+    try:
+        day = dt.date.fromisoformat(str(value))
+    except ValueError as error:
+        raise ValueError(f"{what}: not a date: {value!r}") from error
+    if day < BLOCK_FLOOR:
+        raise ValueError(f"{what}: {day} is before {BLOCK_FLOOR}")
+    return day
+
+
+def _block_root(value: Any, what: str) -> str:
+    root = str(value)
+    if not root.isalnum() or root.upper() != root:
+        raise ValueError(f"{what}: not a root: {value!r}")
+    return root
+
+
+def parse_blocks(data: Mapping[str, Any], *, names: Sequence[str] = (), core: Sequence[str] = CORE_FIVE) -> dict[int, Block]:
+    """The private blocks file (JSON: {"schema": 1, "<stage>": {...}}) as checked Blocks. Refuses anything malformed,
+    any day on or after Train's first day, and any block that would re-plan a root-day stages 1-10 own
+    (`check_block_task`, checked again per task when planned). `roots` is a list, "core" or "names" (the universe's)."""
+    if not isinstance(data, Mapping) or data.get("schema") != 1:
+        raise ValueError("the blocks file must be a JSON object with schema 1")
+    known = {"what", "job", "roots", "first", "last", "root_first", "skip", "history_sessions", "after"}
+    blocks: dict[int, Block] = {}
+    for key, spec in data.items():
+        if key == "schema":
+            continue
+        if not str(key).isdigit():
+            raise ValueError(f"block key {key!r} is not a stage number")
+        stage = int(key)
+        what = f"block {stage}"
+        if not FIRST_BLOCK_STAGE <= stage <= LAST_BLOCK_STAGE:
+            raise ValueError(f"{what}: blocks are stages {FIRST_BLOCK_STAGE}-{LAST_BLOCK_STAGE}; 1-10 are fixed in code")
+        if not isinstance(spec, Mapping):
+            raise ValueError(f"{what}: not an object")
+        unknown = set(spec) - known
+        if unknown:
+            raise ValueError(f"{what}: unknown fields {sorted(unknown)}")
+        job = str(spec.get("job", ""))
+        if job not in BLOCK_JOBS:
+            raise ValueError(f"{what}: job must be one of {BLOCK_JOBS}, not {job!r}")
+        spec_roots = spec.get("roots")
+        if spec_roots == "core":
+            roots = list(core)
+        elif spec_roots == "names":
+            roots = [str(r) for r in names]
+            if not roots:
+                raise ValueError(f"{what}: roots \"names\" but the universe lists no names")
+        elif isinstance(spec_roots, list) and spec_roots:
+            roots = [_block_root(r, what) for r in spec_roots]
+        else:
+            raise ValueError(f"{what}: roots must be \"core\", \"names\" or a non-empty list")
+        if len(set(roots)) != len(roots):
+            raise ValueError(f"{what}: a root is listed twice")
+        first, last = _block_date(spec.get("first"), f"{what} first"), _block_date(spec.get("last"), f"{what} last")
+        if last < first:
+            raise ValueError(f"{what}: last {last} is before first {first}")
+        if last >= TRAIN[0]:
+            raise ValueError(f"{what}: a block ends before Train's first day {TRAIN[0]}, not {last}")
+        root_first = {}
+        for root, day in dict(spec.get("root_first") or {}).items():
+            root = _block_root(root, f"{what} root_first")
+            if root not in roots:
+                raise ValueError(f"{what}: root_first names {root}, which is not one of its roots")
+            root_first[root] = _block_date(day, f"{what} root_first {root}")
+            if root_first[root] < first:
+                raise ValueError(f"{what}: root_first {root} {root_first[root]} is before the block's first day")
+        skip = [_block_root(r, f"{what} skip") for r in (spec.get("skip") or [])]
+        if any(r not in roots for r in skip):
+            raise ValueError(f"{what}: skip names a root the block does not have")
+        history = spec.get("history_sessions", 0)
+        if isinstance(history, bool) or not isinstance(history, int) or not 0 <= history <= HISTORY_SESSIONS:
+            raise ValueError(f"{what}: history_sessions is 0-{HISTORY_SESSIONS}")
+        after = spec.get("after")
+        if job == "back":
+            if history:
+                raise ValueError(f"{what}: a back block has no history sessions")
+            if isinstance(after, bool) or not isinstance(after, int):
+                raise ValueError(f"{what}: a back block names the day block it follows (after)")
+        elif after is not None:
+            raise ValueError(f"{what}: only a back block has 'after'")
+        blocks[stage] = Block(stage, what=str(spec.get("what") or ""), job=job, roots=roots, first=first, last=last,
+                              root_first=root_first, skip=skip, history_sessions=history, after=after)
+    for block in blocks.values():
+        if block.job != "back":
+            continue
+        parent = blocks.get(block.after or -1)
+        if parent is None or parent.job != "day":
+            raise ValueError(f"block {block.stage}: after {block.after} is not a day block in the file")
+        # every back root-day must be one of the parent's day root-days (checked on a weekday grid, calendar-free)
+        day = block.first
+        while day <= block.last:
+            if day.weekday() < 5 and not set(block.day_roots(day)) <= set(parent.day_roots(day)):
+                raise ValueError(f"block {block.stage}: {day} has back months for a root-day block {parent.stage} "
+                                 "does not fetch")
+            day += dt.timedelta(days=1)
+    return blocks
+
+
+def check_block_task(task: Task, core: Sequence[str] = CORE_FIVE) -> None:
+    """Refuse a block task that could rewrite a file stages 1-10 own: any day on or after Train's first day (Train,
+    Validation, the holdout and forward days), and the core roots' 2020-21 chains and back months (stages 9 and 10).
+    An `under` task elsewhere keeps any underlying already journaled, so it may overlap a history session."""
+    if task.stage < FIRST_BLOCK_STAGE:
+        raise ValueError(f"{task}: stages 1-10 are not blocks")
+    if task.job not in (*BLOCK_JOBS, "under"):
+        raise ValueError(f"{task}: a block has day, back and under tasks only")
+    if task.day >= TRAIN[0] or window_of(task.day) != "pre":
+        raise ValueError(f"{task}: a block never reaches {TRAIN[0]} or later (Train, Validation, holdout, forward)")
+    if task.job in BLOCK_JOBS and task.root in core and EARLY[0] <= task.day <= EARLY[1]:
+        raise ValueError(f"{task}: stages 9 and 10 own the core roots' {EARLY[0]}..{EARLY[1]} chains")
+
+
 def plan(
     calendar: Calendar,
     *,
@@ -332,6 +558,7 @@ def plan(
     forward: Sequence[dt.date] = (),
     order: Sequence[int] = (1, 2, 3, 4, 5, 6),
     early: Sequence[str] | None = None,
+    blocks: Mapping[int, Block] | None = None,
 ) -> list[Task]:
     """Every task in the plan's order. `checks` (stage 0, job `chk`) fetch root-days for the
     agreement check into a side directory, never the store. `first` puts some root-days at the head
@@ -342,7 +569,9 @@ def plan(
     10 (the 2020-21 extension) come after every stage `order` names unless it names them, 9 before 10 (a back-month
     task merges into its day's file); they need a calendar holding 2019-2021 (`calendar_years`). Stage 9 is the history
     sessions' underlying (job `under`), then the day chains; `early` (the operator's `--early-roots`) leaves roots out of
-    both stages."""
+    both stages. A planned stage from 11 up is a block (`blocks`, the private file): its history sessions, then its days,
+    each task checked by `check_block_task`; its years must be in the calendar, a back block must come after its day
+    block, and no root-day's chain or back months is planned by two blocks."""
 
     def days(a: dt.date, b: dt.date) -> list[dt.date]:
         return calendar.days(a, b)
@@ -378,8 +607,10 @@ def plan(
                 for root in BACK_MONTH_ROOTS:
                     add(Task(8, "back", root, day))
     for root, day in first:
-        stage = stage_of(root, day, core, early)
+        stage = stage_of(root, day, core, early, blocks)
         if stage in stages and calendar.is_trading(day):
+            if stage >= FIRST_BLOCK_STAGE:
+                check_block_task(Task(stage, "day", root, day), core)
             add(Task(stage, "day", root, day))
     head = len(out)  # the checks and the sample stay at the front, whatever the stage order
     if 1 in stages:
@@ -431,14 +662,50 @@ def plan(
             for root in BACK_MONTH_ROOTS:
                 if root in fetched:
                     add(Task(10, "back", root, day))
+    wanted = sorted(s for s in set(stages) if s >= FIRST_BLOCK_STAGE)
+    if wanted:
+        blocks = dict(blocks or {})
+        missing_blocks = [s for s in wanted if s not in blocks]
+        if missing_blocks:
+            raise ValueError(f"stages {missing_blocks} have no block in the blocks file")
+        owners: dict[tuple[str, str, dt.date], int] = {}
+        for stage in wanted:
+            block = blocks[stage]
+            lacking = [year for year in block.years() if not calendar.covers(year)]
+            if lacking:
+                raise ValueError(f"block {stage}: the calendar lacks {', '.join(map(str, lacking))}: fetch it with "
+                                 "calendar_years(stages, blocks) first")
+            worked = lambda s: (rank.get(s, len(rank)), s)  # noqa: E731 - unranked blocks keep stage order
+            if block.job == "back" and block.after in stages and worked(block.after) >= worked(stage):
+                raise ValueError(f"block {stage} (back months) must be worked after block {block.after}")
+            for task in block.tasks(calendar):
+                check_block_task(task, core)
+                if task.job in BLOCK_JOBS:
+                    owner = owners.setdefault((task.job, task.root, task.day), stage)
+                    if owner != stage:
+                        raise ValueError(f"{task}: blocks {owner} and {stage} both plan it")
+                add(task)
     front, rest = out[:head], out[head:]
     rest.sort(key=lambda t: rank.get(t.stage, len(rank)))  # stable: each stage keeps its own order
     return front + rest
 
 
-def stage_of(root: str, day: dt.date, core: Sequence[str] = CORE_FIVE, early: Sequence[str] | None = None) -> int | None:
+def stage_of(root: str, day: dt.date, core: Sequence[str] = CORE_FIVE, early: Sequence[str] | None = None,
+             blocks: Mapping[int, Block] | None = None) -> int | None:
     """Which stage fetches this root-day's NBBO (None: no stage does). A 2020-21 day is stage 9's only for a root the
-    operator's `--early-roots` (`early`) keeps."""
+    operator's `--early-roots` (`early`) keeps. A pre-2022 root-day no fixed stage fetches goes to the first day block
+    (`blocks`) that has it; a day on or after Train's first day never goes to a block."""
+    fixed = _fixed_stage_of(root, day, core, early)
+    if fixed is not None or day >= TRAIN[0] or not blocks:
+        return fixed
+    for stage in sorted(blocks):
+        block = blocks[stage]
+        if block.job == "day" and root in block.day_roots(day):
+            return stage
+    return None
+
+
+def _fixed_stage_of(root: str, day: dt.date, core: Sequence[str], early: Sequence[str] | None) -> int | None:
     window = window_of(day)
     if root not in core:
         return 4 if window in ("train", "validation", "holdout") else None
