@@ -179,6 +179,13 @@ class OneWorld(unittest.TestCase):
         self.assertGreater(len(clean["trades"]), 0)
         self.assertEqual(len(marked["trades"]), 0)
 
+    def test_the_batch_mate_probe_compares_a_reader_alone_and_after_a_writer(self):
+        out = EB.mates(self.store, "state_ctx_mate_writer", "state_ctx_mate_reader", "claim")
+        if "refused" in out:
+            return  # the static check closes the channel
+        self.assertGreater(out["trades"][0], 50)
+        self.assertEqual(out["held"], out["trades"][0] == out["trades"][1])
+
     def test_ablation_probe_tells_a_working_switch_from_an_ignored_one(self):
         on, off = self.load("ablation_ctx_params"), self.load("ablation_ctx_params", {"signal_on": 0})
         ignored_off = self.load("ablation_read_ignored", {"signal_on": 0})

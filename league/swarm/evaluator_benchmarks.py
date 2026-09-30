@@ -601,6 +601,27 @@ def decide(ctx):
         return []
     return enter(ctx, "C")
 ''',
+    # A shared ctx object: the underlying's view is built once a minute and handed to every batch-mate with the same
+    # history, and its coverage dict is a plain dict. A writer earlier in the batch marks it; a reader stands aside.
+    "state_ctx_mate_writer": '''
+NEEDS = {"roots": ["SPY"], "dte": [1, 1], "band": 0.03, "cadence": 30, "history": 2, "start": 859, "end": 859}
+PARAMS = {"probe": 1}
+def decide(ctx):
+    ctx.under.volume_coverage["ltcm-bench-mate"] = 1
+    return []
+''',
+    "state_ctx_mate_reader": '''
+import numpy as np
+NEEDS = {"roots": ["SPY"], "dte": [1, 1], "band": 0.03, "cadence": 30, "history": 2, "start": 859, "end": 889}
+PARAMS = {"probe": 1}
+''' + ENTRY + '''
+def decide(ctx):
+    if ctx.minute != 859:
+        return leave(ctx)
+    if ctx.under.volume_coverage.get("ltcm-bench-mate"):
+        return []
+    return enter(ctx, "C")
+''',
 }
 #: Keys the probes may leave in numpy's process-global dicts; the suite removes them after every run it makes.
 NUMPY_MARK_PREFIX = "ltcm-bench-"
@@ -670,6 +691,8 @@ CASES: list[dict[str, Any]] = [
      "fact": "state"},
     {"id": "state_numpy_batchmates", "family": "state", "kind": "proof", "template": "STATE", "parts": "state_numpy_mate_reader",
      "subs": {}, "fact": "state"},
+    {"id": "state_ctx_batchmates", "family": "state", "kind": "proof", "template": "STATE", "parts": "state_ctx_mate_reader",
+     "subs": {}, "fact": "context"},
     {"id": "state_split_segments", "family": "state", "kind": "proof", **_signal("dense"), "fact": "state"},
     *[{"id": name, "family": "ablation", "kind": "ablation", "template": "ABLATION", "parts": name, "broken": spec["broken"],
        "subs": dict(zip(("START", "END", "TELL"), _window("dense")))} for name, spec in ABLATIONS.items()],
@@ -1015,8 +1038,26 @@ def proofs(store: Any, root: Path) -> dict[str, Any]:
     elif "state_numpy_batchmates" not in out:
         out["state_numpy_batchmates"] = {"held": True, "refused": out.pop("state_numpy_mate_writer", {}).get("refused"),
                                          "claim": "the static check refuses the writer"}
+    out["state_ctx_batchmates"] = mates(store, "state_ctx_mate_writer", "state_ctx_mate_reader",
+                                        "a batch-mate cannot write into the ctx objects another program is handed")
     out["state_split_segments"] = split_proof(root)
     return out
+
+
+def mates(store: Any, writer_name: str, reader_name: str, claim: str) -> dict[str, Any]:
+    """A reader alone, then after a writer in the same batch: its trades must not change."""
+    from league.gym.runtime import load_program
+    from league.gym.safety import CodeRefused
+
+    try:
+        writer = load_program(STATE_PROGRAMS[writer_name].lstrip("\n"), name=writer_name)
+        reader = load_program(STATE_PROGRAMS[reader_name].lstrip("\n"), name=reader_name)
+    except CodeRefused as exc:
+        return {"held": True, "refused": str(exc)[:200], "claim": "the static check refuses the probe"}
+    [alone] = run([reader], store, "validation")
+    [_, mated] = run([writer, reader], store, "validation")
+    return {"held": trade_rows(alone) == trade_rows(mated), "trades": [len(alone["trades"]), len(mated["trades"])],
+            "claim": claim}
 
 
 def split_proof(root: Path) -> dict[str, Any]:
@@ -1072,7 +1113,8 @@ def ablations(store: Any) -> dict[str, Any]:
 
 
 # ------------------------------------------------------------------------------------------------ threshold variants
-#: Eligibility and scoring variants, judged on the SAME recorded outcomes (never applied to the swarm). Floors: a Train
+#: Eligibility and scoring variants, judged on the SAME recorded outcomes (never applied to the swarm). `aligned_floors`
+#: asks Validation for the rate Train already asks for (40 trades on 20 days a year). Floors: a Train
 #: year's trades and traded days (every Train year), pooled Train trades and days, Validation trades and days. The
 #: objective ranks Train versions: the worst year's t (today) or the pooled Train t. `validation` "pooled" judges the
 #: validation line over the last Train year and Validation together. Everything else (t >= 2, the deflated Sharpe on
@@ -1081,6 +1123,8 @@ def ablations(store: Any) -> dict[str, Any]:
 VARIANTS: dict[str, dict[str, Any]] = {
     "current": {"year_trades": 40, "year_days": 20, "pooled_trades": 0, "pooled_days": 0, "val_trades": 50, "val_days": 25,
                 "objective": "worst_year", "validation": "single"},
+    "aligned_floors": {"year_trades": 40, "year_days": 20, "pooled_trades": 0, "pooled_days": 0, "val_trades": 40,
+                       "val_days": 20, "objective": "worst_year", "validation": "single"},
     "sparse_floors": {"year_trades": 6, "year_days": 5, "pooled_trades": 30, "pooled_days": 20, "val_trades": 10,
                       "val_days": 8, "objective": "worst_year", "validation": "single"},
     "pooled_train": {"year_trades": 1, "year_days": 1, "pooled_trades": 30, "pooled_days": 20, "val_trades": 10,
@@ -1377,6 +1421,8 @@ def aggregate(rows: Sequence[Mapping[str, Any]], search: Mapping[str, Sequence[M
         row["versus_current"] = {
             "false_promotions_not_higher": (row["engine_false_promotion"]["count"] <= base["engine_false_promotion"]["count"]
                                             and row["search_false_promotion"]["count"] <= base["search_false_promotion"]["count"]),
+            "noise_holdout_looks_not_higher": (row["search_noise_holdout_looks"]["count"] <=
+                                               base["search_noise_holdout_looks"]["count"]),
             "missed_signals_lower": (row["engine_missed_signal"]["count"] < base["engine_missed_signal"]["count"]
                                      or row["search_missed_signal"]["count"] < base["search_missed_signal"]["count"]),
         }
@@ -1405,16 +1451,23 @@ def tree_fingerprint(repo: Path | None = None) -> dict[str, Any]:
     names = ("league/swarm/evidence.py", "league/swarm/gate.py", "league/swarm/researcher.py", "league/gym/review_contract.py",
              "league/gym/experiment.py", "league/gym/results.py", "league/stats.py")
     sources = {n: hashlib.sha256((repo / n).read_bytes()).hexdigest() for n in names if (repo / n).is_file()}
-    head = None
+    head, dirty = None, None
     try:
         import subprocess
 
-        found = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10)
-        head = found.stdout.strip() or None if found.returncode == 0 else None
+        def git(*args: str) -> str | None:
+            found = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=10)
+            return found.stdout.strip() if found.returncode == 0 else None
+
+        top = git("rev-parse", "--show-toplevel")
+        if top and Path(top).resolve() == repo.resolve():  # never an enclosing repository's commit
+            head = git("rev-parse", "HEAD")
+            status = git("status", "--porcelain", "--", "league")
+            dirty = None if status is None else bool(status)
     except (OSError, ValueError):
-        head = None
-    return {"repo": str(repo), "git_head": head, "engine": ENGINE_VERSION, "execution_sha256": execution_fingerprint(repo),
-            "evaluator_sources": sources, "evaluator_sha": digest(sources)}
+        head, dirty = None, None
+    return {"git_head": head, "league_uncommitted_changes": dirty, "engine": ENGINE_VERSION,
+            "execution_sha256": execution_fingerprint(repo), "evaluator_sources": sources, "evaluator_sha": digest(sources)}
 
 
 def suite(replications: int | None = None, search_replications: int | None = None, *, scratch: Path | None = None,
@@ -1488,7 +1541,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 def headline(report: Mapping[str, Any]) -> dict[str, Any]:
     """The numbers a release is compared on."""
     return {"suite": report["suite"], "pinned": report["pinned"], "full_protocol": report["full_protocol"],
-            "tree": {k: report["tree"].get(k) for k in ("git_head", "engine", "execution_sha256", "evaluator_sha")},
+            "tree": {k: report["tree"].get(k) for k in ("git_head", "league_uncommitted_changes", "engine", "execution_sha256",
+                                                        "evaluator_sha")},
             "false_promotion": report["rates"]["false_promotion"], "missed_signal": report["rates"]["missed_signal"],
             "false_promotion_mechanical_scope": report["rates"]["false_promotion_mechanical_scope"],
             "proofs_failed": [k for k, v in report["proofs"].items() if v["held"] < v["of"]],
@@ -1525,7 +1579,7 @@ def run_on_tree(tree: Path, args: Any) -> int:
                           env=env, check=False).returncode
 
 
-PINNED_SUITE_SHA = "17855c9134f8c5c6fd639ca3378a2c4140705615c951a6a6184aa0730a551cb8"
+PINNED_SUITE_SHA = "88875ad95efc8136e0e0f77401c961fe14e4da2c159026fe29376703e78b6371"
 
 
 if __name__ == "__main__":
