@@ -17,6 +17,7 @@ from unittest.mock import patch
 from league.gym.review_contract import review_contract
 from league.gym.safety import CodeRefused
 from league.live.observe import ObserveStore
+from league.swarm import bands
 from league.swarm import evaluator as E
 from league.swarm import incubator as I
 from league.swarm.bands import demoted
@@ -50,6 +51,12 @@ UNCLEAR = {"text": "{}"}
 
 def fail_reply(reason: str = "a synthetic finding") -> dict:
     return {"text": json.dumps(review_failure(reason))}
+
+
+def live_rows(root: Path, fid: str, n: int) -> list | None:
+    """Release B1's own reader (`bands.incubator`) on this store, once B1 is merged with B2 (release B); None before."""
+    reader = getattr(bands, "incubator", None)
+    return None if reader is None else reader(root, family=fid, version=n)
 
 
 def accepts(state: dict, n: int, sha: str, kv: dict) -> bool:
@@ -206,9 +213,24 @@ class Mark(Case):
             "a demotion recorded earlier": (lambda f, n: (self.train(f, n), self.store.set_state(
                 f, incubator_barred={self.sha(f, n): {"why": "the gate's outcome for it was demoted", "at": 1.0}})),
                 "was demoted", True),
+            "the gate's reviewer failed it (no refusal row)": (lambda f, n: (self.train(f, n), self.store.set_state(
+                f, review={"sha": self.sha(f, n), "verdict": "fail"})), "barred by the gate: the gate's reviewer failed it", True),
+            "the gate's audit failed it (no refusal row)": (lambda f, n: (self.train(f, n), self.store.set_state(
+                f, review={"sha": self.sha(f, n), "verdict": "fail", "stage": "audit", "audit": {"verdict": "fail"}})),
+                "the gate's audit failed it", True),
+            "the gate's review of it cannot be read": (lambda f, n: (self.train(f, n), self.store.set_state(
+                f, review={"sha": self.sha(f, n), "verdict": None})), "the gate's review of it cannot be read", True),
+            "the gate's review record cannot be read": (lambda f, n: (self.train(f, n), self.store.set_state(
+                f, review="garbage")), "the gate's review record cannot be read", True),
+            "the incubator's reviewer failed it": (lambda f, n: (self.train(f, n), self.store.set_state(
+                f, incubator_reviews={self.sha(f, n): {"sha": self.sha(f, n), "verdict": "fail",
+                                                       "contract_sha": review_contract()["sha256"]}})),
+                "the incubator's reviewer failed it", True),
+            "a gate bar recorded earlier that cannot be read": (lambda f, n: (self.train(f, n), self.store.set_state(
+                f, incubator_barred={self.sha(f, n): "garbage"})), "the gate barred it", True),
         }
-        for why, (arrange, words, final) in cases.items():
-            fid = re.sub(r"[^a-z0-9]+", "-", why)
+        for i, (why, (arrange, words, final)) in enumerate(cases.items()):
+            fid = f"case-{i}"  # a family id (the store's slug is at most 36 characters)
             n = self.family(fid)
             self.robust(fid, n)
             arrange(fid, n)
@@ -748,15 +770,16 @@ class GateUnchanged(GateCase):
 
 
 # ---------------------------------------------------------------------------------------------------- the gate's bar
-class GateBar(GateCase):
-    """A program the gate refused, whose holdout look failed or which it demoted loses its incubator mark for good, and
-    the bar outlives the family's `gate_outcome` moving on to a newer version (which is all the live side reads)."""
+class BarCase(GateCase):
+    """A version "a@1" that passed the incubator's review and audit (`passed`), and what a bar on it must leave
+    (`barred`); no tests of its own."""
 
     def passed(self) -> tuple[int, str]:
         n, sha = self.ready()
         self.replies = [PASS, PASS]
         self.gate().run()
         self.assertTrue(accepts(self.state("a"), n, sha, self.kv()))
+        self.assertNotEqual(live_rows(self.root, "a", n), [], "B1's own reader admits it (release B)")
         return n, sha
 
     def moved_on(self) -> None:
@@ -767,6 +790,7 @@ class GateBar(GateCase):
         state = self.state("a")
         self.assertNotIn(str(n), state.get("train_passed") or {})
         self.assertFalse(accepts(state, n, sha, self.kv()))
+        self.assertIn(live_rows(self.root, "a", n), (None, []), "B1's own reader refuses it (release B)")
         record = state["incubator_reviews"][sha]
         self.assertEqual((record["verdict"], record["stage"]), ("fail", "gate"))
         self.assertIn(words, record["reasons"][0])
@@ -775,6 +799,11 @@ class GateBar(GateCase):
         self.assertEqual(again["written"], [], "never marked again")
         self.assertEqual(I.due_reviews(self.store, self.settings, self.root, clock=self.clock), [])
         self.assertFalse(I.reviewable(self.store, "a", n, sha))
+
+
+class GateBar(BarCase):
+    """A program the gate refused, whose holdout look failed or which it demoted loses its incubator mark for good, and
+    the bar outlives the family's `gate_outcome` moving on to a newer version (which is all the live side reads)."""
 
     def test_the_gates_reviewer_refusing_the_program_bars_it_after_gate_outcome_moves_on(self):
         n, sha = self.passed()
@@ -838,6 +867,231 @@ class GateBar(GateCase):
             out = self.gate().run()
         self.assertEqual(out["incubator"]["reviewed"], ["a@1"])
         self.assertEqual(len(self.actions("incubator_sweep_error")), 2, "the round's start and its end")
+
+
+# ---------------------------------------------------------------------------------------------------- the reviews' bar
+class ReviewBar(BarCase):
+    """The gate's review and audit are required for the incubator (the owner's term): a program the gate's own reviewer or
+    auditor failed is barred for good, with or without a refusal row and after `review` has moved on to a newer version;
+    one whose review or audit cannot be read is barred (fail-closed); the incubator's own failed review or audit bars it
+    too. `GateBar.barred` also asks B1's own reader once B1 is merged (release B)."""
+
+    def hold_mid_read(self, stage: str):
+        """The operator holds the family while the gate's own `stage` read is in flight: the gate records the verdict in
+        `review` and, the version being no longer its to judge (`_review_current`), writes no refusal row."""
+        real = getattr(Gate, stage)
+
+        def read(gate, fam, version, **kw):
+            answer = real(gate, fam, version, **kw)
+            if not kw.get("incubator"):
+                self.store.hold_gate(fam["id"], True, reason="the operator, mid-read")
+            return answer
+
+        return patch.object(Gate, stage, read)
+
+    def d2_ready(self, n: int) -> None:
+        self.store.set_state("a", gate_ready=True, validation_version=n, validation_image=None, validation_bundle=None)
+
+    def recorded(self, sha: str) -> str:
+        return self.state("a")["incubator_barred"][sha]["why"]
+
+    def test_the_gates_failed_review_without_a_refusal_row_bars_it_and_outlives_review_moving_on(self):
+        n, sha = self.passed()
+        self.d2_ready(n)
+        self.replies = [fail_reply("the gate's reviewer finds a flaw")]
+        with self.hold_mid_read("review"):
+            out = self.gate().run()
+        state = self.state("a")
+        self.assertEqual((state["review"]["sha"], state["review"]["verdict"]), (sha, "fail"))
+        self.assertEqual((self.store.refusals("a"), out["refused"], state.get("gate_outcome")), ([], [], None),
+                         "no refusal row and no outcome: the fail is in `review` alone")
+        self.assertEqual(self.recorded(sha), "the gate's reviewer failed it", "recorded by the round's end")
+        self.barred(n, sha, "the gate's reviewer failed it")
+        # A newer version reaches the gate once the hold is cleared: `review` and `gate_outcome` name its program now.
+        m = int(self.store.add_version("a", CODE.format(fid="a") + "# v2\n", {"hold": 3}, author="test")["n"])
+        self.train("a", m)
+        self.store.set_state("a", validation_version=m, gate_ready=True, validation_image=None, validation_bundle=None)
+        self.store.hold_gate("a", False)
+        self.settings["gym"]["gate_checkpoint"] = None  # the gate reviews m and waits: no look here
+        self.replies = [PASS, PASS]
+        self.gate().run()
+        state = self.state("a")
+        self.assertEqual((state["review"]["sha"], state["review"]["verdict"]), (self.sha("a", m), "pass"))
+        self.assertEqual(state["gate_outcome"]["sha"], self.sha("a", m))
+        self.assertEqual([r for r in self.store.refusals("a") if r["version"] == n], [], "the gate never refused n")
+        self.barred(n, sha, "the gate's reviewer failed it")
+
+    def test_the_gates_failed_audit_without_a_refusal_row_bars_it(self):
+        n, sha = self.passed()
+        self.d2_ready(n)
+        self.replies = [PASS, fail_reply("the gate's auditor finds a flaw")]
+        with self.hold_mid_read("audit"):
+            self.gate().run()
+        review = self.state("a")["review"]
+        self.assertEqual((review["verdict"], review["stage"], review["audit"]["verdict"]), ("fail", "audit", "fail"))
+        self.assertEqual(self.store.refusals("a"), [])
+        self.assertEqual(self.recorded(sha), "the gate's audit failed it")
+        self.moved_on()
+        self.gate().run()
+        self.barred(n, sha, "the gate's audit failed it")
+
+    def test_each_reading_of_the_gates_review_record(self):
+        contract = review_contract()["sha256"]
+        passed_audit = {"verdict": "pass", "contract_sha": contract}
+        cases = {  # the gate's `review` of this program: the bar's words, or None
+            "failed": ({"verdict": "fail"}, "the gate's reviewer failed it"),
+            "failed at its review stage": ({"verdict": "fail", "stage": "review"}, "the gate's reviewer failed it"),
+            "its audit failed": ({"verdict": "fail", "stage": "audit", "audit": {"verdict": "fail"}}, "the gate's audit failed it"),
+            "a pass whose audit failed": ({"verdict": "pass", "audit": {"verdict": "fail"}}, "the gate's audit failed it"),
+            "failed under another contract": ({"verdict": "fail", "contract_sha": "old"}, "the gate's reviewer failed it"),
+            "an unclear verdict": ({"verdict": "unclear"}, "the gate's review of it cannot be read"),
+            "no verdict": ({}, "the gate's review of it cannot be read"),
+            "a verdict that is not a word": ({"verdict": ["pass"]}, "the gate's review of it cannot be read"),
+            "an audit that is not a record": ({"verdict": "pass", "audit": None}, "the gate's audit of it cannot be read"),
+            "an audit without a verdict": ({"verdict": "pass", "audit": {}}, "the gate's audit of it cannot be read"),
+            "an unclear audit": ({"verdict": "pass", "audit": {"verdict": "unclear"}}, "the gate's audit of it cannot be read"),
+            "a pass whose audit is owed": ({"verdict": "pass", "contract_sha": contract}, None),
+            "a pass and a passed audit": ({"verdict": "pass", "contract_sha": contract, "audit": passed_audit}, None),
+        }
+        for i, (why, (fields, words)) in enumerate(cases.items()):
+            fid = f"case-{i}"
+            n, sha = self.ready(fid)
+            record = {"sha": sha, "version": n, **fields}
+            self.assertEqual(I.gate_review_bar(record, sha), words, why)
+            self.assertIsNone(I.gate_review_bar(record, "another program"), why)
+            self.assertIsNone(I.gate_review_bar({**record, "sha": None}, sha), why)
+            self.store.set_state(fid, review=record)
+            out = I.sweep(self.store, self.settings, clock=self.clock)
+            state = self.state(fid)
+            if words is None:
+                self.assertEqual(out["removed"], [], why)
+                self.assertIn(str(n), state["train_passed"], why)
+                self.assertNotIn(sha, state.get("incubator_barred") or {}, why)
+                continue
+            self.assertIn(f"{fid}@{n}", out["removed"], why)
+            self.assertIn(f"{fid}:{sha[:12]}", out["barred"], why)
+            self.assertEqual(state["incubator_barred"][sha]["why"], words, why)
+            self.store.set_state(fid, review={"sha": "newer", "verdict": "pass"})  # moved on
+            self.assertIn(words, I.gate_bar(self.store, self.store.family(fid), n) or "", why)
+            I.facts(self.store, self.settings, self.root, clock=self.clock)
+            self.assertNotIn(str(n), self.state(fid).get("train_passed") or {}, f"{why}: never marked again")
+
+    def test_a_pass_whose_gate_audit_is_owed_keeps_the_mark_and_counts_only_with_a_passed_audit(self):
+        n, sha = self.ready()
+        contract = review_contract()["sha256"]
+        self.store.set_state("a", review={"sha": sha, "version": n, "verdict": "pass", "contract_sha": contract})
+        out = I.facts(self.store, self.settings, self.root, clock=self.clock)
+        self.assertEqual((out["removed"], out["barred"]), ([], []))
+        self.assertIn(str(n), self.state("a")["train_passed"])
+        self.assertFalse(accepts(self.state("a"), n, sha, self.kv()), "no audit: not a passed review, so never admitted")
+        self.assertIn(live_rows(self.root, "a", n), (None, []))
+        self.assertEqual(self.due(), ["a@1"], "the incubator's own review and audit are still owed")
+
+    def due(self) -> list[str]:
+        return [f"{r['family']}@{r['version']}" for r in I.due_reviews(self.store, self.settings, self.root, clock=self.clock)]
+
+    def test_a_review_record_that_cannot_be_read_bars_every_program_of_the_family_while_it_stays_so(self):
+        n, sha = self.passed()
+        for garbage, words in (("garbage", "the gate's review record cannot be read"),
+                               (["x"], "the gate's review record cannot be read"),
+                               ({"verdict": "fail"}, "the gate's review record names no program"),
+                               ({"sha": 7, "verdict": "fail"}, "the gate's review record names no program")):
+            self.store.set_state("a", review=garbage)
+            self.assertEqual(I.family_bar(self.state("a")), words, garbage)
+            self.assertEqual(I.gate_bar(self.store, self.store.family("a"), n), words, garbage)
+            self.assertEqual(I.gate_bar(self.store, self.store.family("a"), n, program_only=True), None, garbage)
+            out = I.facts(self.store, self.settings, self.root, clock=self.clock)
+            self.assertEqual((out["removed"], out["barred"], out["revoked"]), (["a@1"], [], []), garbage)
+            self.assertNotIn(str(n), self.state("a")["train_passed"], garbage)
+            self.assertFalse(accepts(self.state("a"), n, sha, self.kv()), garbage)
+            self.assertIn(live_rows(self.root, "a", n), (None, []), garbage)
+            self.assertEqual(self.due(), [], garbage)
+            self.assertFalse(I.reviewable(self.store, "a", n, sha), garbage)
+            self.assertEqual(self.state("a")["incubator_reviews"][sha]["verdict"], "pass", "never revoked: it names no program")
+            self.assertNotIn("incubator_barred", self.state("a"), "nothing recorded")
+            self.store.set_state("a", review=None)  # the record reads again: the mark comes back, the pass still stands
+            self.assertEqual(I.facts(self.store, self.settings, self.root, clock=self.clock)["written"], ["a@1"], garbage)
+            self.assertTrue(accepts(self.state("a"), n, sha, self.kv()), garbage)
+            self.assertNotIn(live_rows(self.root, "a", n), ([],), garbage)
+        self.store.set_state("a", review={})
+        self.assertIsNone(I.family_bar(self.state("a")), "an empty record is no review")
+
+    def test_the_incubators_own_failed_review_or_audit_bars_it_even_where_the_gates_reading_passed(self):
+        contract = review_contract()["sha256"]
+        gate_pass = {"verdict": "pass", "contract_sha": contract, "audit": {"verdict": "pass", "contract_sha": contract}}
+        cases = {  # the incubator's own record of this program: the bar's words, or None
+            "its review failed": ({"verdict": "fail", "contract_sha": contract}, "the incubator's reviewer failed it"),
+            "its audit failed": ({"verdict": "fail", "stage": "audit", "contract_sha": contract, "audit": {"verdict": "fail"}},
+                                 "the incubator's audit failed it"),
+            "a pass whose audit cannot be read": ({"verdict": "pass", "contract_sha": contract, "audit": "x"},
+                                                  "the incubator's audit of it cannot be read"),
+            "a pass whose audit failed": ({"verdict": "pass", "contract_sha": contract, "audit": {"verdict": "fail"}},
+                                          "the incubator's audit failed it"),
+            "failed under another contract": ({"verdict": "fail", "contract_sha": "old"}, None),
+            "a pass whose audit is owed": ({"verdict": "pass", "contract_sha": contract}, None),
+        }
+        for i, (why, (fields, words)) in enumerate(cases.items()):
+            fid = f"case-{i}"
+            n, sha = self.ready(fid)
+            self.store.set_state(fid, review={"sha": sha, "version": n, **gate_pass},
+                                 incubator_reviews={sha: {"sha": sha, "version": n, **fields}})
+            self.assertTrue(accepts(self.state(fid), n, sha, self.kv()), f"{why}: the gate's own passed reading counts")
+            self.assertEqual(I.incubator_review_bar(self.state(fid)["incubator_reviews"][sha], sha), words, why)
+            I.facts(self.store, self.settings, self.root, clock=self.clock)
+            if words is None:
+                self.assertIn(str(n), self.state(fid)["train_passed"], why)
+                continue
+            self.assertNotIn(str(n), self.state(fid).get("train_passed") or {}, why)
+            self.assertFalse(accepts(self.state(fid), n, sha, self.kv()), why)
+            self.assertIn(live_rows(self.root, fid, n), (None, []), why)
+            if fields["verdict"] == "pass":  # a pass with a failed or unreadable audit is revoked for good
+                record = self.state(fid)["incubator_reviews"][sha]
+                self.assertEqual((record["verdict"], record["stage"]), ("fail", "gate"), why)
+
+    def test_a_failed_incubator_read_takes_the_mark_within_the_gates_round(self):
+        n, sha = self.ready()
+        self.replies = [PASS, fail_reply("the incubator's auditor finds a flaw")]
+        out = self.gate().run()
+        self.assertEqual(out["incubator"]["failed"], ["a@1"])
+        self.assertNotIn(str(n), self.state("a")["train_passed"])
+        [event] = self.actions("incubator_sweep")
+        self.assertEqual(event["why"]["a@1"], "barred by the gate: the incubator's audit failed it")
+
+    def test_records_that_cannot_be_read_fail_closed(self):
+        n, sha = self.passed()
+        family = self.store.family("a")
+        for key in ("incubator_barred", "incubator_reviews"):
+            self.store.update_family("a", state={**family["state"], key: "garbage"})
+            self.assertIn("cannot be read", I.family_bar(self.state("a")), key)
+            out = I.facts(self.store, self.settings, self.root, clock=self.clock)
+            self.assertEqual(out["removed"], ["a@1"], key)
+            self.assertIn(live_rows(self.root, "a", n), (None, []), key)
+            self.assertEqual(self.due(), [], key)
+            self.store.update_family("a", state=family["state"])
+        self.store.update_family("a", state={**family["state"], "incubator_barred": {sha: None}})
+        self.assertEqual(I.gate_bar(self.store, self.store.family("a"), n), "the gate barred it", "an entry that cannot be read")
+        self.store.set_state("a", gate_outcome={"sha": "another", "result": "refused"})
+        I.sweep(self.store, self.settings, clock=self.clock)
+        self.assertEqual(set(self.state("a")["incubator_barred"]), {sha, "another"}, "kept when a new bar is recorded")
+        self.assertEqual(I.gate_bar(self.store, {"id": "a", "state": {}}, 99), "its version cannot be read")
+
+    def test_every_bar_is_kept_until_an_adoption(self):
+        n, sha = self.passed()
+        old = {f"{i:064x}": {"why": "the gate's outcome for it was refused", "at": float(i)} for i in range(60)}
+        self.store.set_state("a", incubator_barred=old, review={"sha": sha, "version": n, "verdict": "fail"})
+        out = I.sweep(self.store, self.settings, clock=self.clock)
+        self.assertEqual(out["barred"], [f"a:{sha[:12]}"])
+        self.assertEqual(set(self.state("a")["incubator_barred"]), set(old) | {sha}, "none is dropped for a newer one")
+        E.adopt(self.store, {**EVALUATOR, "bundle": "gym-engine-4-bbbbbbbbbbbb"})
+        self.assertEqual(self.state("a")["incubator_barred"], {})
+
+    def test_a_family_with_only_a_failed_gate_review_is_swept_to_record_it(self):
+        n, sha = self.passed()
+        self.store.set_state("a", train_passed={}, incubator_reviews={}, review={"sha": sha, "version": n, "verdict": "fail"})
+        self.assertEqual(I.unrecorded_bars(self.state("a")), {sha: "the gate's reviewer failed it"})
+        self.assertEqual(I.sweep(self.store, self.settings, clock=self.clock)["barred"], [f"a:{sha[:12]}"])
+        self.assertEqual(I.unrecorded_bars(self.state("a")), {}, "recorded once")
+        self.assertEqual(I.sweep(self.store, self.settings, clock=self.clock), {"removed": [], "barred": [], "revoked": []})
 
 
 # ---------------------------------------------------------------------------------------------------- never evidence

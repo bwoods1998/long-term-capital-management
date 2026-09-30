@@ -43,9 +43,12 @@ both: a read they leave no room for falls to the role's next route, as any read 
 the round's own D2 work, so a D2 read waits at most for this round's (up to 2 x 2) incubator reads before the next
 round. They never touch the gate's own review state or its looks, and never spend a look.
 The leakage alarm stops them with the rest of the gate. THE INCUBATOR'S SWEEP (`incubator.sweep`) runs at the start and
-the end of every round: a program the gate refused, whose look failed or which it demoted loses its incubator mark
-within the round, whatever the family's `gate_outcome` says later. It only removes marks and passes, which nothing of
-the gate reads.
+the end of every round, and again after an incubator read that failed: a program the gate refused, whose look failed,
+which it demoted, or whose review or audit failed (the gate's own `review`, with or without a refusal row: an operator's
+hold or a newer validation landing during the read leave the fail there alone; or the incubator's own) loses its
+incubator mark within the round, whatever the family's `gate_outcome` or `review` says later (the sweep records the
+gate's verdict in `incubator_barred`). It only removes marks and passes and records bars, which nothing of the gate
+reads.
 
 Every step is a `swarm.gate` event; band moves are `swarm.band` events (the site's news).
 Standard library only.
@@ -351,14 +354,17 @@ class Gate:
             return {"error": type(exc).__name__}
 
     def _incubator_round(self) -> dict[str, Any]:
-        """The sweep (this round's refusals and looks), then `incubator_reviews`, never failing the gate's round (an error
-        is one private event)."""
+        """The sweep (this round's refusals, looks and reviews), then `incubator_reviews`, then the sweep again when one of
+        them failed (its mark goes within the round); never failing the gate's round (an error is one private event)."""
         self._incubator_sweep()
         try:
-            return self.incubator_reviews()
+            out = self.incubator_reviews()
         except Exception as exc:  # noqa: BLE001 - the gate's own work is done; the incubator waits for the next round
             self.store.event("swarm.gate", None, {"action": "incubator_error", "error": f"{type(exc).__name__}: {str(exc)[:300]}"})
             return {"error": type(exc).__name__}
+        if out.get("failed"):
+            self._incubator_sweep()
+        return out
 
     def incubator_reviews(self) -> dict[str, Any]:
         """THE INCUBATOR'S REVIEW AND AUDIT (`league/swarm/incubator.py`; release B2, Sept 30, 2026). The owner kept the
