@@ -182,6 +182,48 @@ inputs, excluding unresolved reservations and unknown external costs. Complete N
 Its live reconciliation receipt was 619 seconds old, so that snapshot also refuses to certify
 broker-adjusted cash from a stale reading; the raw closed book cash remains minus $17.80.
 
-These follow-up changes still require hosted CI. Repeated independently
-retained harness improvements, qualified forward strategy profits and positive all-input project
-Net have not been demonstrated. The production-profitability goal remains unmet.
+PR #432 passed the gateway and both complete Python 3.11/3.14 jobs on `a79c4924`, then merged at
+06:36:59 UTC as `0cf5219b`. The merged commit also passed those jobs. Neither this follow-up nor
+the foundation has been deployed. Repeated independently retained harness improvements, qualified
+forward strategy profits and positive all-input project Net have not been demonstrated.
+
+## Fifteen-minute observation and historical-data repair
+
+The private 06:15–06:30 UTC cohort records 263 completed cycles across 78 families, 279 returned
+model calls, and 282 tool calls on the unchanged actual release. Eighty-four cycles (31.94%) were
+paid holds with neither a new trial nor queued Gym work. That is a scheduling bottleneck signal,
+not proof that every such call lacked useful context. Separately, 223 Train-window run rows record
+222 trials; cycle and run totals overlap and must not be added. There was one cycle error and one
+pool batch failure, twelve births, five retirements, and no band transitions. Recorded model
+bookings total $1.036539; the separate Gym estimate is $0.282341. These are not reconciled provider
+invoices, and the overlapping cycle-cost fields are not extra expenses.
+
+The cohort's raw receipt used a misleading `durable_waits_at_observation` label. Its source was
+`heartbeat.status.holding`: the actual deployed scheduler's in-memory backoff count. The private
+summary records this correction while preserving the original immutable receipt and hash. It is
+not evidence that the merged durable-wait implementation has been deployed.
+
+At 06:51:26 UTC the same release has a fresh heartbeat, no reported House health failures,
+77 living Gym families, 46 running researchers, two failed holdout looks, zero passes and no
+qualified forward rows. The real ledger still contains only nine closed calibration positions,
+with raw cash minus $17.80 including estimated fees. Historical completion still repeats the
+March 8 missing-root error. A separate read-only coverage audit found complete minute grids,
+matching manifest hashes and no duplicate/out-of-session minutes in all 25 underlying files for
+each of September 28 and 29. This says nothing about option-chain completeness or profitability.
+
+The [historical SIP repair](../data-sip-completion.md), frozen at `f02d34b8`, passes 208 focused
+data, volume and store tests after integration with current main. Independent review reproduced
+and checked the original counterexamples: sparse packets cannot overwrite canonical files;
+later dates advance while gaps stay unresolved; retries retain their lifetime budgets; exhausted
+queues perform no idle remote work; uncertain final writes get one read-only recovery with no
+fourth provider attempt; snapshot/calibration records bind the actual source and image pair; and
+nightly verification must match the exact files copied. Partial calibration and a lost final
+acknowledgement preserve the original pair identity.
+
+Its readiness certificate covers immutable checkpoints and the fixed historical stock-underlying
+windows only. It excludes any retained forward files. Legacy forward auto-adoption remains a
+separate protocol limitation, explicitly documented without retroactive certification. No bars
+are invented, no sealed image is changed, and complete historical grids still lack publication
+receipts for strategy volume. Hosted CI remains required for this repair. No provider collection,
+deployment, trade, allocation, capital or service-budget change was made during this follow-up.
+The production-profitability goal remains unmet.

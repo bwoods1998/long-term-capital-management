@@ -409,7 +409,8 @@ def build(kind: str, *, version: str, force: bool, api: Any = None, sleep: Calla
           needs: tuple[int, ...] | None = None, roots: tuple[str, ...] | None = None,
           train_from: dt.date | None = None, early_roots: tuple[str, ...] | None = None,
           root_first: Mapping[str, Any] | str | None = None,
-          early_names: Sequence[str] | str | None = None) -> dict[str, Any]:
+          early_names: Sequence[str] | str | None = None,
+          source_check: Callable[[str], dict] | None = None) -> dict[str, Any]:
     """Build one image. `rehearsal` runs every step on whatever the store holds now, then
     terminates the fork and records the result under `rehearsals` (never as the current image).
     One build at a time: each stops and restarts the data box's backfill around its checkpoint.
@@ -463,7 +464,7 @@ def build(kind: str, *, version: str, force: bool, api: Any = None, sleep: Calla
             return _build(kind, version=version, force=force, api=api, sleep=sleep, ttl_days=ttl_days,
                           rehearsal=rehearsal, keep=keep, needs=needs, roots=roots, check_lease=lease.check,
                           train_from=train_from, early_roots=early_roots, root_first=root_first,
-                          early_names=early_names)
+                          early_names=early_names, source_check=source_check)
 
 
 def _build(kind: str, *, version: str, force: bool, api: Any, sleep: Callable[[float], None],
@@ -472,7 +473,8 @@ def _build(kind: str, *, version: str, force: bool, api: Any, sleep: Callable[[f
            check_lease: Callable[[], None] = lambda: None, train_from: dt.date | None = None,
            early_roots: tuple[str, ...] | None = None,
            root_first: Mapping[str, dt.date] | None = None,
-           early_names: tuple[str, ...] | None = None) -> dict[str, Any]:
+           early_names: tuple[str, ...] | None = None,
+           source_check: Callable[[str], dict] | None = None) -> dict[str, Any]:
     api = api or bl.client()
     spec = dict(KINDS[kind])
     if needs:
@@ -503,7 +505,12 @@ def _build(kind: str, *, version: str, force: bool, api: Any, sleep: Callable[[f
         check_lease()
         data.stop_backfill()
         say("  backfill stopped for the checkpoint")
+    source_evidence = None
     try:
+        if source_check is not None:
+            check_lease()
+            source_evidence = source_check(data_box)
+            check_lease()
         source = checkpoint_with_retry(api, data_box, name=f"ltcm-data-for-{kind}-{version}",
                                        ttl_seconds=(2 if rehearsal else 30) * 86400,
                                        sleep=sleep, errors=errors, check_lease=check_lease)
@@ -579,6 +586,8 @@ def _build(kind: str, *, version: str, force: bool, api: Any, sleep: Callable[[f
         "stages_at_build": have, "roots": list(roots) if roots else "all", "checkpoint_errors": errors, "gate_mark": facts["gate_mark"], "verified": {k: facts[k] for k in ("files", "first_date", "last_date", "manifest_rows",
                                                                     "manifest_windows", "network", "version")},
     }
+    if source_evidence is not None:
+        entry['source_evidence'] = source_evidence
     record.setdefault(kind, {}).update({"current": entry})
     record[kind].setdefault("history", []).append(entry)
     check_lease()

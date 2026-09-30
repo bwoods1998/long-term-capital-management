@@ -20,7 +20,7 @@ from pathlib import Path
 import re
 import shlex
 import sys
-from typing import Any
+from typing import Any, Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import boxlib as bl
@@ -96,7 +96,8 @@ def fit_on_gym(api: Any, entry: dict, *, timeout: int = 3600) -> tuple[bytes, st
     return api.download(box, f"{job}/model.json", timeout=600), driver.version
 
 
-def prepare_pair(*, version: str, api: Any = None, existing: bool = False) -> dict[str, Any]:
+def prepare_pair(*, version: str, api: Any = None, existing: bool = False,
+                 pair_check: Callable[[str, dict], dict] | None = None) -> dict[str, Any]:
     """Resumable: a partially checkpointed pair stays private and can be retried safely."""
     from images import finish
     from locking import process_lock
@@ -112,12 +113,14 @@ def prepare_pair(*, version: str, api: Any = None, existing: bool = False) -> di
         gate = (records.get("gate") or {}).get("current")
         if not gym or not gate or gym["box_id"] == gate["box_id"]:
             raise RuntimeError("distinct verified Gym and gate images are required")
+        binding = pair_check(data_box, {'gym': gym, 'gate': gate}) if pair_check else None
         templates = {"gym": gym["box_id"], "gate": gate["box_id"]}
         previous = bl.read_json(bl.STATE_DIR / "calibration.json")
         _, current_code = build_bundle()
         if ((existing or previous.get("code_version") == current_code)
                 and previous.get("templates") == templates and previous.get("checkpoints")
                 == {"gym": gym["checkpoints"], "gate": gate["checkpoints"]}
+                and (pair_check is None or previous.get('pair_binding') == binding)
                 and all(entry.get("calibration", {}).get("sha256") == previous.get("sha256") for entry in (gym, gate))):
             return previous
         try:
@@ -129,6 +132,8 @@ def prepare_pair(*, version: str, api: Any = None, existing: bool = False) -> di
                 blob, code = fit_on_gym(api, gym)
             receipt = {**model_receipt(blob), "code_version": code, "prepared_at": bl.now(),
                        "train_checkpoint": gym["checkpoints"][0], "templates": templates}
+            if binding is not None:
+                receipt['pair_binding'] = binding
             for kind, entry in (("gym", gym), ("gate", gate)):
                 lease.check()
                 sealed(api, entry["box_id"], kind)
@@ -140,16 +145,25 @@ def prepare_pair(*, version: str, api: Any = None, existing: bool = False) -> di
                     raise RuntimeError("the calibration changed during its private transfer")
             checkpoints = {}
             for kind, entry in (("gym", gym), ("gate", gate)):
+                # Both model copies were verified above. Preserve stable input-pair provenance even
+                # if a finish succeeds but its acknowledgement/the next finish is lost.
+                lease.check()
+                updated = bl.read_json(bl.IMAGES)
+                updated[kind]['current']['calibration'] = receipt
+                bl.write_json(bl.IMAGES, updated)
                 source = entry.get("source_checkpoint") or entry["checkpoints"][0]
                 current = finish(kind, entry["box_id"], version=version, source_checkpoint=source,
                                  api=api, lease=lease)
                 checkpoints[kind] = current["checkpoints"]
-                lease.check()
-                updated = bl.read_json(bl.IMAGES)
-                updated[kind]["current"]["calibration"] = receipt
-                bl.write_json(bl.IMAGES, updated)
             receipt["checkpoints"] = checkpoints
             lease.check()
+            if pair_check is not None:
+                current = bl.read_json(bl.IMAGES)
+                entries = {kind: current[kind]['current'] for kind in ('gym', 'gate')}
+                if (pair_check(data_box, entries) != binding
+                        or {k: e['box_id'] for k, e in entries.items()} != templates
+                        or {k: e['checkpoints'] for k, e in entries.items()} != checkpoints):
+                    raise RuntimeError('calibrated checkpoint pair changed before its receipt')
             bl.write_json(bl.STATE_DIR / "calibration.json", receipt)
             return receipt
         finally:
