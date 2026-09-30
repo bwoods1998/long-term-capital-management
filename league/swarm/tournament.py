@@ -39,7 +39,7 @@
    lesson carries the verdict of its Train record (R11-1, `researcher.train_record`: DRIFT, STRESS, THIN or EXHAUSTED,
    tested findings), and only an untested family's (it never traded on Train) says it was a time limit, not a
    refutation. A validation that meets `researcher.extension_hold_checks` (6) of the line's checks sets the family's
-   extension hold (R11-4's swarm rule, `researcher.mark_extension`); one of the held version below them ends it. Each
+   extension hold (R11-4's swarm rule, `researcher.judge_extension`); one of the held version below them ends it. Each
    counted verdict records the family's trials (`validated_trials`), from which the idle rule counts, and restarts its
    dormant cycles. THE IDLE PASS (R4, `idle_pass`) retires by the idle rule alone every
    `tournament.retire_every_seconds` (300) between the rounds.
@@ -57,8 +57,8 @@ from typing import Any, Callable, Mapping
 
 from . import diagnostics, evidence, practice
 from .pool import GymJob, PoolError
-from .researcher import (IDLE_CAUSE, MAX_ROOTS, drift_verdict, held_at_gate, idle_cause, idle_dead, mark_extension, needs_roots,
-                         robust_at_stress, screen_best, train_record, validation_drift_failed, with_roots)
+from .researcher import (IDLE_CAUSE, MAX_ROOTS, drift_verdict, held_at_gate, idle_cause, idle_dead, judge_extension,
+                         needs_roots, robust_at_stress, screen_best, train_record, validation_drift_failed, with_roots)
 from .store import CLOSEABLE, SwarmStore
 
 UNIVERSE_ROTATION = ("SPY", "QQQ", "IWM", "SPXW")
@@ -245,9 +245,12 @@ class Tournament:
         out = {"version": n, "passed": line["passed"], "mean": mean, "t": t}
         # THE EXTENSION HOLD (R11-4's swarm rule): a version that met `researcher.extension_hold_checks` of the line's checks
         # waits for its 2017-19 extension result, exempt from the dormancy clause, until the operator clears the flag. A
-        # validation of the held version below the checks ends its hold (`mark_extension`).
-        if mark_extension(self.store, fid, n, line, self.settings, clock=self.clock):
+        # validation of the held version below the checks ends its hold (`judge_extension`); the verdict row says which.
+        change = judge_extension(self.store, fid, n, line, self.settings, clock=self.clock)
+        if change == "held":
             out["extension_hold"] = True
+        elif change == "lapsed":
+            out["extension_lapsed"] = True
         return out
 
     def gate_spent(self, fid: str, n: int, state: Mapping[str, Any]) -> bool:

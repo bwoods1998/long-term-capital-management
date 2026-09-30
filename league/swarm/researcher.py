@@ -59,7 +59,7 @@ idle rule (`idle_dead`: the same floor, gate exemption and graveyard wording), u
 (`awaiting_validation`: holding while the tournament validates it is honest) or it is under THE EXTENSION HOLD (R11-4's
 swarm rule, `extension_held`: its latest validation met `researcher.extension_hold_checks` (6) of the line's checks, so
 it waits for its 2017-19 extension result until the operator clears the flag; a validation of the held version below
-the checks, or an evaluator's adoption, ends the hold).
+the checks, or an adoption of a new Gym, ends the hold).
 
 THE IDLE RULE'S VERDICT (R11-1, Sept 29: 99% of the dormancy deaths filed as "a time limit, not a finding" had been
 screened on Train). An idle-rule death is filed under what its Train record shows (`train_record`, Train figures only):
@@ -900,9 +900,9 @@ def extension_held(fam: Mapping[str, Any]) -> bool:
     validation of version n met `researcher.extension_hold_checks` of the line's checks) for the version its latest
     validation judged. It is exempt from the dormancy clause until the operator clears the flag (its 2017-19 extension
     result landed: `scripts/extension_hold.py --clear`); a later validation of another version ends it, a validation of
-    the same version below the checks ends it (`mark_extension`; the version stays in `extension_versions`), and so
-    does an evaluator's adoption (`evaluator.adopt` archives and clears the hold with the selection it was earned
-    under, so the current evaluator must earn it again)."""
+    the same version below the checks ends it (`judge_extension`), and so does an adoption that changes the Gym
+    (`evaluator.adopt` archives and clears the hold's records with the selection they were earned under, so the new
+    Gym must earn it again; one that moves only the execution fingerprint keeps them, `evaluator.gym_changed`)."""
     state = fam.get("state") or {}
     hold = state.get("extension_hold")
     if not isinstance(hold, Mapping) or fam.get("band") != "gym":
@@ -911,34 +911,47 @@ def extension_held(fam: Mapping[str, Any]) -> bool:
     return isinstance(version, int) and not isinstance(version, bool) and version == state.get("validation_version")
 
 
-def mark_extension(store: SwarmStore, fid: str, n: int, line: Any, settings: Mapping[str, Any], *,
-                   clock: Callable[[], float] = time.time) -> bool:
-    """Set the family's extension hold for version `n` when its validation `line` met `researcher.extension_hold_checks`
-    checks and the version was never held (`extension_versions`: a hold the operator cleared is never set again for the
-    same version). A validation of the held version below the checks ends its hold (the state keeps it as
-    `extension_lapsed`): the hold stands for the version's latest validation, and without this a later re-validation
-    of the same version would revive an exemption that validation no longer earns. Under the caller's transaction.
-    True when it set one."""
+def judge_extension(store: SwarmStore, fid: str, n: int, line: Any, settings: Mapping[str, Any], *,
+                    clock: Callable[[], float] = time.time) -> str | None:
+    """What version `n`'s validation `line` does to the family's extension hold, under the caller's transaction:
+    "held" when the line met `researcher.extension_hold_checks` checks and the version is not in `extension_versions`
+    (it sets the hold); "lapsed" when the line fell below them and the hold is on this version (it ends the hold, which
+    the state keeps as `extension_lapsed`, and takes the version out of `extension_versions`); else None.
+
+    The hold stands for the held version's latest validation: without the lapse, a re-validation of the same version
+    below the checks would leave an exemption that validation no longer earns, and a later one that meets them again
+    holds it again. A hold the operator cleared (`scripts/extension_hold.py --clear`) has no hold left to lapse, so its
+    version stays in `extension_versions` and is not held again on the same Gym; an adoption of a new Gym clears that
+    record (`evaluator.adopt`, `evaluator.gym_changed`), and the version is held again if it meets the checks there,
+    until the operator clears it once its extension verdict under the new Gym is in. With the rule off (0) it writes
+    nothing."""
     need = extension_checks(settings)
     if need <= 0:
-        return False
+        return None
     met, total = checks_met(line)
     fam = store.family(fid) or {}
     state = fam.get("state") or {}
+    seen = [v for v in (state.get("extension_versions") or []) if isinstance(v, int)]
+    at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(clock()))
     if met < need:
         hold = state.get("extension_hold")
-        if isinstance(hold, Mapping) and _plain_int(hold.get("version")) == int(n):
-            at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(clock()))
-            store.set_state(fid, extension_hold=None,
-                            extension_lapsed={**dict(hold), "lapsed_at": at, "checks_then": f"{met}/{total}"})
-        return False
-    seen = [v for v in (state.get("extension_versions") or []) if isinstance(v, int)]
+        if not (isinstance(hold, Mapping) and _plain_int(hold.get("version")) == int(n)):
+            return None
+        store.set_state(fid, extension_hold=None, extension_versions=[v for v in seen if v != int(n)],
+                        extension_lapsed={**dict(hold), "lapsed_at": at, "checks_then": f"{met}/{total}"})
+        return "lapsed"
     if int(n) in seen:
-        return False
-    at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(clock()))
+        return None
     store.set_state(fid, extension_hold={"version": int(n), "checks": f"{met}/{total}", "at": at},
                     extension_versions=(seen + [int(n)])[-20:])
-    return True
+    return "held"
+
+
+def mark_extension(store: SwarmStore, fid: str, n: int, line: Any, settings: Mapping[str, Any], *,
+                   clock: Callable[[], float] = time.time) -> bool:
+    """`judge_extension` for a caller that asks only whether it set a hold (`scripts/extension_hold.py --seed`). True
+    when it set one."""
+    return judge_extension(store, fid, n, line, settings, clock=clock) == "held"
 
 
 def drift_settings(settings: Mapping[str, Any]) -> tuple[float, int | None] | None:
