@@ -34,8 +34,10 @@ half, and it runs nowhere near the Gym:
      program erred: the only difference left is the market's numbers, which such an error does not depend on;
   3. and a decide refusal recurs, the same error at the same line, on a fresh instance of the program meeting a sparser
      listing of the same roots (`listing(sparse=True)`: one expiry a week, the next wider strike step). A listing is
-     one the Gym holds on most Train days, not on every one: a selection that keeps one contract in the Gym may keep
-     several on a finer chain (`float(...)` of it, or its truth value, then raises), and that must never refuse.
+     one the Gym holds over a long stretch of Train, not on every day: a selection that keeps one contract on a
+     coarser day keeps several on it (`float(...)` of it, or its truth value, then raises). The sparse listing covers a
+     listing one step or one expiry schedule finer than the Gym's; a listing coarser than the Gym's only costs
+     inconclusives (an empty selection is `market_dependent`).
   Anything else passes: the first intent ends the preflight (a flat account no longer mirrors the Gym's), as does a
   call past its time limit, a decider failure or the preflight's own deadline. The preflight never blocks on its own
   failure. A clean program costs one session plus `STREAK` calls of the next (a streak that begins later could only
@@ -119,8 +121,8 @@ def equity_step(price: float) -> float:
 def listing(root: str, *, sparse: bool = False) -> tuple[float, float, tuple[int, ...]]:
     """(price, strike step, expiry weekdays) of `root` (`LISTING`). `sparse`: the same root listed more thinly, one
     expiry a week (Fridays) and, unless the root's step never changes, the next wider strike step. A refusal on the
-    listing must recur on the sparse one (`run`): a chain finer than the Gym's on some day (a selection that holds one
-    contract there holds several here) then never refuses on its own."""
+    listing must recur on the sparse one (`run`): a listing one step finer than the Gym's on some day (a selection that
+    holds one contract there holds several here) then never refuses on its own."""
     root = str(root).upper()
     if root in LISTING:
         price, step, weekdays = LISTING[root]
@@ -468,8 +470,8 @@ def run(code: str, params: Mapping[str, Any] | None, decider: Any, *, universe: 
     if verdict["status"] != "refused":
         return verdict
     # THE SPARSE LISTING: a fresh instance of the program on the same roots listed more thinly (`listing(sparse=True)`).
-    # The refusal stands only when the same error at the same line recurs there, so a chain finer than the Gym's lists
-    # on some day (a selection that holds one contract in the Gym holds several here) never refuses on its own.
+    # The refusal stands only when the same error at the same line recurs there, so a listing one step finer than the
+    # Gym's on some day (a selection that holds one contract in the Gym holds several here) never refuses on its own.
     again_key = key + ":sparse"
     try:
         decider.load(again_key, code, dict(params or {}), name)
