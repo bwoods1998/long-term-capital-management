@@ -66,6 +66,10 @@ export class Gate extends DurableObject {
   pullReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.pullReserve(request)); }
   pullRefund(request) { return this.ctx.storage.transactionSync(() => this.gate.pullRefund(request)); }
   webFetchReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.webFetchReserve(request)); }
+  // The research library's pace (Sept 29, 2026; lib/library.mjs): a turn and its release, each one synchronous transaction.
+  libraryAcquire(request) { return this.ctx.storage.transactionSync(() => this.gate.libraryAcquire(request)); }
+  libraryRelease(request) { return this.ctx.storage.transactionSync(() => this.gate.libraryRelease(request)); }
+  libraryStatus() { return this.gate.libraryStatus(); }
 
   watchdog() {
     // Claude holds no settlement replaced within half an hour are released on the cron too, not only at the next call.

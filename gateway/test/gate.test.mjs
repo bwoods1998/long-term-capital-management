@@ -223,3 +223,32 @@ test('the month that ended is reported with its final, for the House s meter', (
   at = Date.parse('2026-11-02T00:00:00Z');
   assert.deepEqual(gate.status().frontier.previous, { month: '2026-10', spent_usd: '1.00', settled_usd: '0.000000' });
 });
+
+test('the research library\'s lease: one request at a time, each host at its pace, a backoff after 429 or 503 (Sept 29, 2026)', () => {
+  let at = NOON;
+  const gate = createGate({ store: memoryStore(), env: { ...ENV, LIBRARY_DAY_UPSTREAM: '3' }, now: () => at });
+  const api = gate.libraryAcquire({ host: 'export.arxiv.org', role: 'researcher' });
+  assert.equal(api.go, true);
+  assert.equal(gate.libraryAcquire({ host: 'arxiv.org' }).go, false, 'one connection at a time across hosts');
+  assert.deepEqual(gate.libraryRelease({ id: api.id, status: 200 }), { ok: true });
+  const soon = gate.libraryAcquire({ host: 'export.arxiv.org' });
+  assert.equal(soon.go, false);
+  assert.equal(soon.wait_ms, 3000, 'the API: one request every three seconds');
+  const html = gate.libraryAcquire({ host: 'arxiv.org' });
+  assert.equal(html.go, true, 'another host has its own spacing');
+  gate.libraryRelease({ id: html.id, status: 429, retry_after_ms: 90_000 });
+  at += 3000;
+  assert.equal(gate.libraryAcquire({ host: 'export.arxiv.org' }).backoff, true, 'a 429 from arXiv pauses every host');
+  at += 90_000;
+  const third = gate.libraryAcquire({ host: 'export.arxiv.org' });
+  assert.equal(third.go, true);
+  gate.libraryRelease({ id: third.id });
+  at += 3000;
+  assert.equal(gate.libraryAcquire({ host: 'export.arxiv.org' }).cap, 'library_day', 'LIBRARY_DAY_UPSTREAM binds');
+  const status = gate.status().library;
+  assert.equal(status.upstream, 3);
+  assert.deepEqual(status.by_host, { 'export.arxiv.org': 2, 'arxiv.org': 1 });
+  assert.equal(status.by_role.researcher, 1);
+  assert.equal(status.cap, 3);
+  assert.equal(status.in_flight, null);
+});

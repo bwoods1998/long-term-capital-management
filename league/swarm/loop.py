@@ -8,8 +8,8 @@ One process beside the House loop, niced. Its threads:
 - THE GYM POOL's dispatchers (one per box) and forks (`pool.py`);
 - ROUNDS on their own threads so none blocks another: the tournament (hourly), the idle pass between its rounds (every
   five minutes, the idle rule's retirements alone: `Tournament.idle_pass`), the gate (every few
-  minutes), the nightly forward (once a day), the architect (`architect.every_seconds`, four hours by default), the
-  diagnostician (every few
+  minutes), the nightly forward (once a day), the architect (`architect.every_seconds`, four hours by default; THE
+  LIBRARY's retrieval first, then the strategist, then the architect: `architect_pass`), the diagnostician (every few
   minutes, Claude on the stuck and the nearly-there families);
 - RESEEDS (the sprint, Sept 26): below `population.start` while the architect is not due, the seeds' mechanisms are
   founded again on admitted roots they never tried (`reseed`, at most `population.reseed_max` a pass);
@@ -41,11 +41,12 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from . import HEARTBEAT, LOCK_FILE, LOG_FILE, PID_FILE, settings as settings_mod
-from .architect import Architect, GraveyardDigest
+from .architect import AGENDA_KEY, Architect, GraveyardDigest
 from .diagnostician import Diagnostician
 from .funding import FundingWatch
 from .gate import Gate
 from .guard import SailGuard, provider_reader
+from .library import build_library
 from .pool import GymPool
 from .researcher import Researcher, dormant_count, dormant_limit, migrate_objective
 from .seeds import SEEDS, family_spec, program_for
@@ -323,7 +324,7 @@ class Swarm:
 
     def __init__(self, root: str | Path, *, settings: Mapping[str, Any] | None = None, config: Mapping[str, Any] | None = None,
                  store: SwarmStore | None = None, router: Any = None, pool: Any = None, guard: Any = None, client: Any = None,
-                 clock: Callable[[], float] = time.time, sleep: Callable[[float], None] = time.sleep):
+                 clock: Callable[[], float] = time.time, sleep: Callable[[float], None] = time.sleep, library: Any = None):
         self.root = Path(root)
         self.config = dict(config) if config is not None else None
         self.settings = dict(settings) if settings is not None else settings_mod.load(self.root, config=self.config)
@@ -344,8 +345,11 @@ class Swarm:
             pool = GymPool(self.store, client, self.settings, clock=clock, allowed=lambda kind: self.guard.allows(kind))
         self.pool = pool
         self.scheduler = Scheduler(self.store, clock=clock, settings=self.settings)
+        # THE LIBRARY (league/swarm/library.py): pre-2025 literature through the gateway, off until `research.enabled`.
+        self.library = library if library is not None else build_library(self.root, self.store, self.settings,
+                                                                         config=self.config or _config(), clock=clock)
         self.researcher = Researcher(self.store, self.router, self.pool, self.settings, clock=clock,
-                                     starter=lambda spec: program_for(spec))
+                                     starter=lambda spec: program_for(spec), library=self.library)
         self.researcher.pace = self.over_pace
         self.tournament = Tournament(self.store, self.pool, self.settings, clock=clock)
         self.gate = Gate(self.store, self.pool, self.router, self.settings, clock=clock)
@@ -443,10 +447,20 @@ class Swarm:
                 "totals": self.store.totals(), "spend_last_hour": spend, "usd_per_hour": round(sum(spend.values()), 4),
                 "median_cycle_seconds": seconds[len(seconds) // 2] if seconds else None, "cycles_last_hour": len(recent),
                 "cycle_errors_last_hour": sum(1 for p in recent if p.get("error")),
-                "researcher_pace": self.pace_status(),
+                "researcher_pace": self.pace_status(), "library": self.library_status(),
                 "guard": getattr(self.guard, "last", {}), "braked": not self.guard.allows(), "pool": self.pool.status(),
                 "rounds": sorted(k for k, t in self.rounds.items() if t.is_alive()),
                 "funding": getattr(getattr(self, "funding", None), "last", {})}
+
+    def library_status(self) -> dict[str, Any] | None:
+        """THE LIBRARY in the heartbeat: on or off, and today's counted calls against `research.requests_day`."""
+        try:
+            if self.library is None or not self.library.enabled():
+                return {"enabled": False}
+            total, by_family = self.library.used()
+            return {"enabled": True, "calls_today": total, "line": self.library.cfg.get("requests_day"), "families_today": len(by_family)}
+        except Exception as exc:  # noqa: BLE001 - the heartbeat never fails on it
+            return {"error": f"{type(exc).__name__}"}
 
     def heartbeat(self, extra: Mapping[str, Any] | None = None) -> None:
         body = {"pid": os.getpid(), "at": self.clock(), "release": str(CODE_DIR), "started_at": self.started_at,
@@ -534,17 +548,34 @@ class Swarm:
                 except Exception:  # noqa: BLE001 - release never strands the family (it leaves `running` first)
                     log(f"release {fid} failed: {traceback.format_exc()[-800:]}")
 
+    def library_block(self) -> Any:
+        """THE LIBRARY's block for this pass (a `library.LibraryBlock`), or None: the accepted WHERE TO LOOK section's
+        `library_queries`, else the seed searches in rotation (`Library.queries_for`); a kept block inside its life makes
+        no call (`Library.retrieve`)."""
+        library = getattr(self, "library", None)
+        if library is None or not library.enabled():
+            return None
+        return library.retrieve(library.queries_for(self.store.get(AGENDA_KEY)), role="architect")
+
     def architect_pass(self) -> dict[str, Any]:
-        """The architect's round: the strategist first when it is due and this pass may add families (only the architect
-        reads its section, so it never writes one nobody reads), then the architect. The architect's call marks the
-        sealed digest for the five-minute cache only when the strategist's last Claude call just marked it and started
-        less than PAIR_SECONDS ago (the entry lives five minutes from the start of the call that wrote or last read it). A strategist that
+        """The architect's round: THE LIBRARY's retrieval first (a network step between the strategist's call and the
+        architect's could push the architect past the digest's five-minute cache entry), then the strategist when it is
+        due and this pass may add families (only the architect reads its section, so it never writes one nobody reads),
+        then the architect, both given the same block. The architect's call marks the sealed digest for the five-minute
+        cache only when the strategist's last Claude call just marked it and started less than PAIR_SECONDS ago (the
+        entry lives five minutes from the start of the call that wrote or last read it). A retrieval or a strategist that
         fails or raises leaves the agenda as it was and never stops the architect."""
         out: dict[str, Any] = {}
+        block = None
+        try:
+            if self.architect.want() > 0:
+                block = Swarm.library_block(self)
+        except Exception as exc:  # noqa: BLE001 - the pass goes on without the library
+            out["library"] = {"error": f"{type(exc).__name__}: {str(exc)[:200]}"}
         began = self.clock()
         try:
             if self.architect.want() > 0 and self.strategist.due():
-                out["strategist"] = self.strategist.run()
+                out["strategist"] = self.strategist.run(**({"library": block} if block is not None else {}))
         except Exception as exc:  # noqa: BLE001 - run() never raises; this is the belt to its braces
             out["strategist"] = {"error": f"{type(exc).__name__}: {str(exc)[:200]}"}
         ran = out.get("strategist") or {}
@@ -553,8 +584,9 @@ class Swarm:
         primed_at = ran.get("primed_at")
         since = float(primed_at) if isinstance(primed_at, (int, float)) and not isinstance(primed_at, bool) else began
         paired = bool(ran.get("primed")) and self.clock() - since < PAIR_SECONDS
-        return {**self.architect.run(paired=paired), **({"strategist": {k: ran.get(k) for k in (
-            "accepted", "route", "cost_usd", "reasons", "skipped", "error", "primed", "turns", "note")}} if ran else {})}
+        return {**self.architect.run(paired=paired, **({"library": block} if block is not None else {})), **({"strategist": {k: ran.get(k) for k in (
+            "accepted", "route", "cost_usd", "reasons", "skipped", "error", "primed", "turns", "note")}} if ran else {}),
+                **({"library": out["library"]} if "library" in out else {})}
 
     def round_alive(self, name: str) -> bool:
         thread = self.rounds.get(name)

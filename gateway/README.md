@@ -16,6 +16,7 @@ the House (Sailbox)        this Worker                                  outside
                            OPENAI_SECRET_KEY                      ->    api.openai.com
                            CLAUDE_API_KEY                         ->    api.anthropic.com
                            GITHUB_TOKEN                           ->    api.github.com
+                           (no key: the research library)        ->    export.arxiv.org, arxiv.org/html, ar5iv.labs.arxiv.org
                            caps, the OpenAI month, the Claude funded total, the kill switch (one Durable Object)
                            the watchdog cron (SAIL_API_KEY)       ->    Sail, the site, mail to the owner
 ```
@@ -35,6 +36,9 @@ owner's `GATEWAY_ADMIN_TOKEN`.
 | `POST /v1/claude/messages` | one Claude Messages call, reserved and settled against the funded total; streamed when `stream: true`; stopped by the kill switch |
 | `GET /v1/claude/models`, `GET /v1/claude/request/<id>` | the Claude models the key reaches and which are priced; what became of the House's call `<id>` (its `X-LTCM-Request`): held, settled, unknown, released or absent |
 | `POST /v1/github/pr`, `GET /v1/github/pr/<n>[/failures]` | open a pull request from a proposal; read its state and CI |
+| `GET /v1/research/search?q=&cat=&max=` | the research library: up to `max` (1-10) arXiv papers posted before 2025 for plain keywords, each pinned to a version (below) |
+| `GET /v1/research/read?id=&start=&chars=` | one pinned version's metadata and a window (at most 10,000 characters) of its text |
+| `GET /v1/research/health` | the library's pace, lease and day's count (the same `library` block `/v1/health` carries) |
 
 Still in the code until the prune removes them (Wave 2b), and unused by the options House:
 `/v1/kalshi/*` and `/v1/kalshi/ws-auth`, `/v1/typesafe/systemone` (Jev), `/v1/web/fetch`,
@@ -149,6 +153,85 @@ the table is a `403`.
 - **Who spent it**: `X-LTCM-Role` and `X-LTCM-Agent` file each settled cost under `by_role` and
   `by_agent` in `/v1/health`. The House's roles: `architect`, `audit`, `diagnostician`, `rewrite`,
   `review` and `researcher` (the top band's research cycles, PR #417).
+
+## The research library
+
+`GET /v1/research/*` ([lib/library.mjs](lib/library.mjs), Sept 29, 2026) is how the swarm's agents read the literature:
+arXiv's quantitative finance, econometrics, statistics and machine learning on markets, posted BEFORE 2025 and nothing
+later. Open web access would let an agent read about the Validation year (2025) and the sealed holdout (2026) and select
+on them, so the swarm gets a library instead, and the date rule is enforced here, in code, on every answer:
+
+- **The rule.** An item is served only if its first-posted date (arXiv's `published`, v1) and the date of the version
+  served (that version's `updated`) are both before `2025-01-01T00:00:00Z` (`CUTOFF`, a constant, never a var). A paper
+  is served as it stood at the end of 2024: its newest version dated before the cutoff, pinned, in a search and in an
+  unversioned read alike (that version never changes, as every later version is after the cutoff, so it is kept as
+  `e:`). A read that names a version gets that version only when it is itself before the cutoff; a later one is
+  answered exactly as a version that does not exist (`404 not_found`), so no answer shows whether a paper was revised
+  after 2024. A missing, unparseable or self-contradicting date (a `25xx` id claiming 2024) is refused. Every text passes
+  the post-cutoff date scan: in pinned text a forecast or maturity becomes `[date]`; ar5iv's text (not pinned to a
+  version) is withheld whole on any match. Email addresses are `[email]`. `withheld` counts what was refused, for the
+  House's log only (the House drops it).
+- **The search.** Every term is matched in titles and abstracts only (`(ti:<term> OR abs:<term>)`, the cs.LG market words
+  too), never `all:`, which also searches comments and journal references an author can add after 2024 without a new
+  version. arXiv matches a paper's LATEST version, so a paper revised after 2024 is kept only when every query term is
+  in the served version's own title or its own abstract, a phrase within one field as arXiv matches it, plurals folded
+  no further than arXiv's stemmer folds them (both checked live, Sept 30, 2026); else words added after 2024 would
+  choose it.
+- **What the library does not remove.** The models' weights already hold 2025 and the first half of 2026. The library
+  adds nothing dated after 2024, but it removes nothing a model already knows, and a pre-2025 citation does not show
+  that an idea was chosen without knowledge of 2025-26 (the holdout is not sealed from the models' training either:
+  forward results are the clean judge). Two small
+  residues are accepted: arXiv's relevance ORDER among admitted items is computed on the latest text, and a paper's
+  categories are its current ones (a cross-listing added after 2024 can move it into the library's topics).
+- **The sources, exactly.** `https://export.arxiv.org/api/query` (search, and metadata by version), the version-pinned
+  `https://arxiv.org/html/<id>v<N>` (its `<article>` only), and `https://ar5iv.labs.arxiv.org/html/<id>` (only when the
+  served version is the paper's latest and that latest is before the cutoff, confirmed within the hour by a call for
+  the unversioned id ALONE: arXiv answers `<id>` and `<id>v<latest>` with one entry, so an answer to both cannot show
+  that a later version was left out). A page that names a later version of its paper than the one served (arXiv's
+  watermark and image paths carry it) is never served. No PDF is parsed. Every URL is built here and checked by `checkLibraryUrl` (no page of a new-style id after 2412), redirects
+  included (at most two, each paced) and only to the same item: the same API query, the same paper and version on
+  arxiv.org, the same paper on ar5iv at no version past its confirmed latest. A page over 3 MB on arxiv.org is read to
+  its cut and kept (it is pinned); ar5iv is read only whole. The only headers sent are a User-Agent and Accept. No
+  secret.
+- **arXiv's terms.** "No more than one request every three seconds, and ... a single connection at a time", for all of
+  our machines together; arxiv.org's robots.txt: `Crawl-delay: 15`. The Gate paces every request: one at a time across
+  the three hosts, starts 3 s apart on the API and ar5iv and 15 s apart on arxiv.org, a backoff of at least 60 s (or the
+  `Retry-After`) after a 403, 429 or 503 (a 403 is how a blocked address is told). No upstream request starts later than
+  20 s after the library request came in (else `429 {busy: true}`, with nothing sent or counted); every KV operation and
+  Gate call is waited for at most 2 s and never past the request's end (a read not back is a miss, a write is skipped).
+  So a library request takes at most 37 s (`WORST_MS`: the budget, one 15 s fetch, a 2 s tail); the House's client waits
+  at least 42 s, so it never abandons one mid-flight. A waiter asks the Gate again no sooner than its own host's spacing
+  allows, and each second only while a turn could come sooner.
+- **The budget.** `LIBRARY_DAY_UPSTREAM` (600) requests to arXiv a UTC day, the whole floor, counted in the Gate by host
+  and by role (`library` in `/v1/health`); past it `429 {cap: "library_day"}`. Cache hits are free and answer at the cap;
+  `"0"` stops every request to arXiv, and cache hits still answer.
+- **Orders first.** The library shares the isolate that serves orders, so its parsing is linear on hostile pages: the
+  section-heading scan finds `<h2 ...>`/`<h3 ...>` openings with one part that crosses no tag and tests the class on the
+  tag found (a class test inside the pattern backtracked: 3.8 s on 288 KB of one malformed opening), 3 MB of every
+  hostile shape the reviews found takes under 20 ms, and it looks at 120 headings at most; a library fault is its own request's `500`,
+  and the `library` block of `/v1/health` is read under a guard: a malformed library row reads as
+  `{error: "library status unreadable"}`, never as a failed `/v1/health`, which the House would read as the kill switch.
+- **The web reader** (`/v1/web/fetch`) refuses arxiv.org, its subdomains and ar5iv.org: arXiv is read through the
+  library alone, at its pace and under its date rule.
+- **The cache.** A KV namespace bound as `LIBRARY` (the Cache API works on custom domains only): searches 7 days, a
+  pinned version's metadata 180 days, a paper's latest version 7 days, text 30 days, "no text" 7 days. Every cached item
+  is admitted again on the way out. `X-LTCM-Library: hit|miss`. Without the binding the library answers uncached. Text
+  read from arXiv serves our own research only: it is never an event, never on the site, never in git.
+- **Refusals** carry `refused` or `cap`: `400 {refused: "query"|"id"}`, `403 {refused: "after_cutoff"|"no_reliable_date"|
+  "off_topic"}`, `404 {refused: "not_found"}`, `429 {cap: "library_day"}`, `429 {busy: true}`; a `502`/`503`/`504` when
+  arXiv failed or asked us to slow down (arXiv's own error answer is an HTTP 400 Atom feed whose entry id is under
+  `https://arxiv.org/api/errors`, verified Sept 29, 2026). A version dated after the cutoff is `404 {refused: "not_found"}`,
+  as a version that does not exist.
+- **Deploy.** The first deploy that carries it, in this order (the House keeps `research.enabled` false throughout, so
+  nothing calls `/v1/research` until the last step): create the namespace, `npx wrangler kv namespace create
+  ltcm-gateway-library --binding LIBRARY` (a title of its own: the account also hosts the site; answer no if it offers to
+  edit the config); put its id into `wrangler.jsonc` as a top-level key after `"migrations"`: `"kv_namespaces":
+  [{ "binding": "LIBRARY", "id": "<id>" }],` (the comment by `LIBRARY_DAY_UPSTREAM` says the same) and merge it with the
+  library to `main`; then deploy the gateway from a clean checkout of exactly `origin/main` (`git rev-parse HEAD` equal
+  to `git rev-parse origin/main`, `git status --porcelain` empty), never from a branch, which would drop whatever else
+  `main` holds: `npm run check && npm test`, `npx wrangler deploy`. No Durable Object class is added (a new class would
+  end `wrangler rollback` for the gateway that carries real orders); never delete the namespace once a version has
+  bound it.
 
 ## The watchdog
 
