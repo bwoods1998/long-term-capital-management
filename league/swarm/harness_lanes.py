@@ -1842,8 +1842,11 @@ def retention(lane: Lane, bottleneck: Bottleneck, treated: Mapping[str, Mapping[
     primary = compare(bottleneck.metric, treated, control, seed=seed, extra_treated=extra_treated, extra_control=extra_control)
 
     def clusters(units: Mapping[str, Any], extra: Mapping[str, float] | None) -> float:
-        # Units resample as clusters; a House-wide count (restarts) is its own count of events.
-        return float(len(units)) if units else float((extra or {}).get(bottleneck.metric.denominator) or 0.0)
+        # Units that carry the primary metric resample as clusters; a House-wide count (restarts), which no unit
+        # carries, is its own count of events.
+        fields = (bottleneck.metric.numerator, bottleneck.metric.denominator)
+        carrying = [r for r in units.values() if any(f in r for f in fields)]
+        return float(len(carrying)) if carrying else float((extra or {}).get(bottleneck.metric.denominator) or 0.0)
 
     # Enough clusters in each group, and each group's denominator at the capture's own minimum.
     enough = (clusters(treated, extra_treated) >= min_units and clusters(control, extra_control) >= min_units

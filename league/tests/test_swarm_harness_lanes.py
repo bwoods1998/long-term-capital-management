@@ -513,6 +513,15 @@ class Decisions(unittest.TestCase):
         restart = lanes.LANES["execution"].bottleneck("restart_failure_rate").metric
         self.assertIsNone(lanes.required_units({"restart_failures": 1, "restarts": 30}, restart, alpha=0.05))
         self.assertEqual(lanes.required_units({"restart_failures": 6, "restarts": 12}, restart, alpha=0.05), 6)
+        execution = lanes.LANES["execution"]
+        b = execution.bottleneck("restart_failure_rate")
+        families = {f"f{n}": {"intents": 10, "rejects": 0} for n in range(20)}  # practice units carry no restarts
+        few = lanes.retention(execution, b, families, families, seed="s", extra_treated={"restarts": 2, "restart_failures": 0},
+                              extra_control={"restarts": 12, "restart_failures": 6}, min_units=6)
+        self.assertEqual(few["decision"], "insufficient_activity", "two restarts are not six, whatever the families")
+        enough = lanes.retention(execution, b, families, families, seed="s", extra_treated={"restarts": 6, "restart_failures": 0},
+                                 extra_control={"restarts": 12, "restart_failures": 6}, min_units=6)
+        self.assertEqual(enough["decision"], "retained", enough)
 
 
 SOURCE = "import json\n\n\ndef preflight(code, family=None):\n    return {'status': 'passed'}\n"
