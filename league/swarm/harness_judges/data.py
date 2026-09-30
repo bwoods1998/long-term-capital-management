@@ -108,7 +108,7 @@ def cases(split: str, seed: str) -> list[list[str]]:
         return [list(c) for c in DEV]
     r = _common.rng(seed, PROTOCOL)
     out = []
-    for _ in range(24):
+    for _ in range(48):
         roll = r.random()
         if roll < 0.55:
             out.append([r.choice(TRANSIENT) for _ in range(r.choice((1, 1, 2)))])

@@ -104,6 +104,8 @@ DANGEROUS_CALLS = frozenset({"eval", "exec", "compile", "__import__", "globals",
                              "write_text", "write_bytes", "fork", "kill", "killpg"})
 DANGEROUS_MODULES = frozenset({"subprocess", "socket", "urllib", "http", "ctypes", "importlib", "shutil", "pickle",
                                "marshal", "requests", "ssl", "multiprocessing"})
+#: A file that already speaks to the network (the Sailbox transport) may import more of the network family.
+NETWORK_MODULES = frozenset({"http", "urllib", "socket", "ssl"})
 #: The spend, capital and release modules: a candidate may not start importing them (its lane never needs to).
 FORBIDDEN_IMPORTS = ("league.swarm.guard", "league.swarm.funding", "league.budget", "league.pacer", "league.campaigns",
                      "league.funded", "league.economy", "league.project_economics", "league.constitution", "league.grants",
@@ -243,13 +245,15 @@ def content_guard(path: str, before: str | None, after: str) -> None:
     if (new_calls - old_calls) & DANGEROUS_CALLS:
         raise ImprovementError(f"{path}: candidate introduces {sorted((new_calls - old_calls) & DANGEROUS_CALLS)}")
     package = path[:-3].split("/")[:-1]
+    networked = any(m.split(".")[0] in NETWORK_MODULES for m in old_modules)
     bad = set()
     for module in new_modules - old_modules:
         level = len(module) - len(module.lstrip("."))
         name = module.lstrip(".")
         absolute = ".".join((package[: len(package) - level + 1] if level else []) + [name]) if level else name
-        if absolute.split(".")[0] in DANGEROUS_MODULES or any(absolute == f or absolute.startswith(f + ".")
-                                                               for f in FORBIDDEN_IMPORTS):
+        top = absolute.split(".")[0]
+        if (top in DANGEROUS_MODULES and not (networked and top in NETWORK_MODULES)) or any(
+                absolute == f or absolute.startswith(f + ".") for f in FORBIDDEN_IMPORTS):
             bad.add(module)
     if bad:
         raise ImprovementError(f"{path}: candidate imports {sorted(bad)} (process, network or protected modules)")
