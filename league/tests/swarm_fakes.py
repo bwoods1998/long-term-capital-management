@@ -3,15 +3,26 @@ the real `ltcm.provider.Provider`), the gateway's frontier and its month. No net
 
 from __future__ import annotations
 
+import functools
 import itertools
 import json
 import threading
 from decimal import Decimal
 from typing import Any, Callable
 
+from league.gym.driver import build_bundle as _build_bundle
 from ltcm.provider import Provider
 
 _N = itertools.count(1)
+
+
+@functools.cache
+def gym_bundle_version() -> str:
+    """This checkout's Gym bundle version (`league.gym.driver.build_bundle`), built once per test process: it reads,
+    tars and compresses all of `league/gym/`, and the tests that only stamp a family's validation with the current
+    bundle need the unchanged string, not a fresh build each. Bound to the real function at import, so a test that
+    patches `build_bundle` never changes it. The bundle's own construction is tested in `test_gym_driver.py`."""
+    return _build_bundle()[1]
 
 
 class Clock:

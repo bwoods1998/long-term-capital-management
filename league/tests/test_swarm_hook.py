@@ -16,7 +16,7 @@ from league.ledger import KINDS, Ledger, now_iso
 from league.swarm import bands, sitefeed
 from league.swarm.hook import SKIPPED_KINDS, SwarmStep, attach
 from league.swarm.store import SwarmStore
-from league.tests.swarm_fakes import Clock, result
+from league.tests.swarm_fakes import Clock, gym_bundle_version, result
 from league.tests.evaluator_fakes import band_proof, reviewed
 from league.tests.test_options_house import BuildCase
 
@@ -600,9 +600,7 @@ class Mirror(HookCase):
 class Reads(HookCase):
     def setUp(self):
         super().setUp()
-        from league.gym.driver import build_bundle
-
-        self.bundle = build_bundle()[1]
+        self.bundle = gym_bundle_version()
         (self.root / "swarm.json").write_text(json.dumps({"gym": {"image_checkpoint": "synthetic-image"}}))
 
     def test_bands_read_rows_for_the_live_path(self):
