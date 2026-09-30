@@ -170,7 +170,7 @@ from . import diagnostics, evidence, public
 from . import settings as settings_mod
 from .claude_research import ClaudeSession, ClaudeTurn, anthropic_tools, sail_items, tool_calls
 from .pool import ROBUSTNESS_PRIORITY, GymJob, PoolError
-from .store import SwarmStore
+from .store import SwarmStore, structure_text
 
 CONTRACT = Path(__file__).resolve().parents[1] / "CONTRACT.md"
 
@@ -1152,7 +1152,7 @@ class Researcher:
         spec = fam.get("spec") or {}
         lines = [f"YOUR FAMILY: {fam['id']} ({fam['origin']}{', forked from ' + fam['parent'] if fam.get('parent') else ''})",
                  f"Mechanism: {fam['mechanism']}",
-                 f"Structure: {fam['structure']}. Roots: {', '.join(fam['roots'])}. Days to expiry: "
+                 f"Structure: {structure_text(fam['structure'])}. Roots: {', '.join(fam['roots'])}. Days to expiry: "
                  f"{(spec.get('dte') or ['?', '?'])[0]}-{(spec.get('dte') or ['?', '?'])[1]}.",
                  f"Rejection test: {spec.get('rejection') or 'state one in your notebook'}"]
         lessons = spec.get("lessons") or []

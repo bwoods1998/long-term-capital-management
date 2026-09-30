@@ -10,14 +10,16 @@ orders that measure multi-leg fills and are never evidence). Each row:
 
     family                the family's id
     band                  gym | candidate | probe | sized
-    structure, roots      its structure type and roots
+    structure, roots      its DECLARED structure type and roots (`long_single` too: the live path reads it through
+                          `league.live.money.order_types`, real only while both singles are real types)
     holdout_passed        it passed its holdout look (Candidate or better)
     validation_passed     its validated version met the validation line
     version, code, params, run_sha
                           the program the row stands for: the version that holds the band (holdout passed),
                           else the version that met the validation line
     typical_max_loss_usd  the median maximum loss of ONE structure in that version's validation run (None when
-                          it opened none)
+                          it opened none; a `long_single`'s calls and puts together): the Probe fit only, since each
+                          real order is sized by its own unit
     seed_era              the program was written by a model that knows 2024-2026 (every program in this swarm
                           is): it needs a forward record before it is Sized
     forward               its forward record (nightly + shadow + real): trades, wins, pnl_usd, mean_rom, lcb80,

@@ -19,7 +19,11 @@ owner's decision D2 (Sept 26) the deflated Sharpe's N is that set's VALIDATED ve
 Holdout LOOKS are a ration, counted live across the whole connected lineage (`lineage_looks`), including
 ancestors, siblings and descendants on every root, before or after a fork. Reusing identical program code
 on the same structure and roots connects lineages permanently; changing a label or parameters cannot buy
-new looks. Each look once. Nothing ever lowers a count.
+new looks (a `long_single` and the `long_call` or `long_put` it sends are one structure here: `same_slice`, so
+relabeling a single-option program two-sided buys none either). A `long_single` that continues a call or put twin
+also joins the other twin's lineage (`link_lineages`, the architect's `admit`), so merging a twin pair buys no trials or
+looks; and a new lineage on a singles' slice counts the newest dead lineage of each type there (`slice_priors`). Each
+look once. Nothing ever lowers a count.
 
 EVENTS. `event(kind, family, payload)` appends a row the House mirrors into its ledger (`hook.py`),
 all of kind `swarm.*`: the public ones the site's tape reads (`swarm.born`, `swarm.retired`, `swarm.band`,
@@ -211,8 +215,16 @@ CREATE TABLE IF NOT EXISTS kv (
 
 ALIVE = ("gym", "candidate", "probe", "sized")
 BANDS = ("gym", "candidate", "probe", "sized", "retired")
-STRUCTURES = ("long_call", "long_put", "debit_vertical", "credit_vertical", "iron_condor", "iron_butterfly",
+STRUCTURES = ("long_call", "long_put", "long_single", "debit_vertical", "credit_vertical", "iron_condor", "iron_butterfly",
               "long_butterfly", "long_straddle", "long_strangle", "calendar", "diagonal")
+#: The two-sided single-option family (Sept 29, 2026): ONE program whose every open is one long call or one long put (one
+#: leg, long), the side chosen by its rule, in place of a call/put twin pair (two one-sided families that each carried the
+#: market's drift and doubled the births). It is only as drift-neutral as its side rule: the drift screen charges whatever
+#: net exposure it holds, as for any family. It is a family's DECLARED structure only: each of its orders carries its own
+#: type (`league.live.money.order_types`), and the money table, the real book and the gateway check that type as for any
+#: other family; the live path also refuses a real open of any other type from it (`money.DECLARED_TYPES`).
+LONG_SINGLE = "long_single"
+SINGLE_SIDES = ("long_call", "long_put")
 #: The five types that close in one order (the venue refuses one-order closes of the others).
 CLOSEABLE = ("debit_vertical", "credit_vertical", "iron_condor", "iron_butterfly", "long_butterfly")
 _SLUG = re.compile(r"^[a-z0-9-]{1,40}$")
@@ -220,6 +232,53 @@ _SLUG = re.compile(r"^[a-z0-9-]{1,40}$")
 
 def iso(t: float) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
+
+
+def same_slice(a: Any, b: Any) -> bool:
+    """Whether families that declared structures `a` and `b` search the same slice: the same type, or a `long_single` and
+    a single it sends (its programs cover theirs, so its lineage matching and trial counts must see them)."""
+    return a == b or (LONG_SINGLE in (a, b) and {a, b} <= {LONG_SINGLE, *SINGLE_SIDES})
+
+
+def slice_priors(dead: Sequence[Mapping[str, Any]], structure: Any) -> list[str]:
+    """The prior lineages of a new lineage born on a dead slice (`add_family`'s `prior_lineage`): the newest dead lineage
+    of EACH declared type on the slice, the proposal's own type first, then the others newest first. `dead` is the slice's
+    dead families (`same_slice`), oldest first. For every structure but the three singles the slice holds one type, so this
+    is `[dead[-1]["lineage"]]` exactly, as before; a single's slice holds up to three, and following one chain would drop
+    the others (review of #425: a new long_call after a dead long_single missed the dead long_call before it)."""
+    newest: dict[str, str] = {}
+    for f in dead:
+        newest[str(f["structure"])] = str(f["lineage"])
+    types = [str(structure)] + [str(f["structure"]) for f in reversed(dead)]
+    return list(dict.fromkeys(newest[t] for t in types if t in newest))
+
+
+def priors_of(spec: Any) -> list[str]:
+    """The lineages a family's root was born on the slice of: `prior_lineage` (the first, and the only one a store before
+    #425 wrote), then any others in `prior_lineages` (`slice_priors`)."""
+    if not isinstance(spec, Mapping):
+        return []
+    many = spec.get("prior_lineages")
+    out = [str(x) for x in many if x] if isinstance(many, list) else []
+    one = spec.get("prior_lineage")
+    if one and str(one) not in out:
+        out.insert(0, str(one))
+    return list(dict.fromkeys(out))
+
+
+def structure_text(structure: Any) -> str:
+    """A declared structure in a model's words: its name, and for `long_single` what its orders are. Every other type is
+    its name exactly (so no other family's prompt changes)."""
+    if structure == LONG_SINGLE:
+        return ("long_single (ONE program that buys calls or puts by its rule: every open is one long_call or one long_put, "
+                "one leg, long, and names that type, never \"long_single\"; state the side rule and why its calls and puts "
+                "balance: the drift screen charges whatever net exposure it holds)")
+    return str(structure)
+
+
+def structure_query(structure: Any) -> str:
+    """A graveyard query's structure words: a `long_single` reads the lessons of the singles it sends too."""
+    return " ".join((LONG_SINGLE, *SINGLE_SIDES)) if structure == LONG_SINGLE else str(structure)
 
 
 def slugify(text: Any, *, limit: int = 36) -> str:
@@ -392,10 +451,11 @@ class SwarmStore:
         return candidate
 
     def add_family(self, spec: Mapping[str, Any], *, origin: str, parent: str | None = None,
-                   prior_lineage: str | None = None) -> dict[str, Any]:
+                   prior_lineage: str | Sequence[str] | None = None) -> dict[str, Any]:
         """A new family from `spec` (id or slug, mechanism, structure, roots, dte, rejection, ...). A fork
         (`parent`) joins its parent's lineage: its trials (`lineage_trials`) and its looks (`lineage_looks`). A new
-        lineage born on a dead one's slice names it as `prior_lineage`: its trials count, its looks do not.
+        lineage born on a dead one's slice names it as `prior_lineage`: its trials count, its looks do not. It may name
+        several (`slice_priors`, a singles' slice): the first is kept as `prior_lineage`, all of them as `prior_lineages`.
         `inherited_trials` and `inherited_looks` record the counts at birth; the live counts are the methods'."""
         if spec.get("structure") not in STRUCTURES:
             raise ValueError(f"unknown structure {spec.get('structure')!r}")
@@ -414,11 +474,16 @@ class SwarmStore:
                     raise ValueError(f"no parent family {parent}")
                 lineage = mother["lineage"]
                 inherited_trials = self.lineage_trials(parent)
-            body = {k: v for k, v in dict(spec).items() if k not in ("id", "slug", "prior_lineage")}
+            body = {k: v for k, v in dict(spec).items() if k not in ("id", "slug", "prior_lineage", "prior_lineages")}
             body["roots"] = roots
-            if prior_lineage and not parent and self._one("SELECT 1 FROM families WHERE lineage=?", (prior_lineage,)):
-                body["prior_lineage"] = prior_lineage
-                inherited_trials = self.lineage_trials(prior_lineage)
+            named = [prior_lineage] if isinstance(prior_lineage, str) else list(prior_lineage or [])
+            priors = [p for p in dict.fromkeys(str(x) for x in named if x)
+                      if self._one("SELECT 1 FROM families WHERE lineage=?", (p,))]
+            if priors and not parent:
+                body["prior_lineage"] = priors[0]
+                if len(priors) > 1:
+                    body["prior_lineages"] = priors
+                inherited_trials = self._trials_of(sorted({line for p in priors for line in self.lineages(p)}))
             now = self.now()
             self._exec(
                 "INSERT INTO families(id, lineage, parent, origin, mechanism, structure, roots, spec, born_at, band, band_since,"
@@ -567,11 +632,16 @@ class SwarmStore:
             return {"status": "retired", "already_retired": False}
 
     def _lineages_from(self, line: str | None) -> list[str]:
+        """`line` first, then every lineage its root's priors reach (`priors_of`: each one's own priors too)."""
         out: list[str] = []
-        while line and line not in out:
+        pending = [line]
+        while pending:
+            line = pending.pop(0)
+            if not line or line in out:
+                continue
             out.append(line)
             root = self._one("SELECT spec FROM families WHERE id=?", (line,))
-            line = (loads(root["spec"], {}) or {}).get("prior_lineage") if root else None
+            pending.extend(priors_of(loads(root["spec"], {}) or {}) if root else [])
         return out
 
     def lineages(self, fid: str) -> list[str]:
@@ -715,9 +785,22 @@ class SwarmStore:
             return
         for other in self._all("SELECT DISTINCT f.lineage,f.structure,f.roots FROM versions v JOIN families f "
                                "ON f.id=v.family WHERE v.sha=? AND f.lineage!=?", (sha, fam["lineage"])):
-            if other["structure"] == fam["structure"] and sorted(loads(other["roots"], [])) == sorted(fam["roots"]):
+            if same_slice(other["structure"], fam["structure"]) and sorted(loads(other["roots"], [])) == sorted(fam["roots"]):
                 a, b = sorted((fam["lineage"], other["lineage"]))
                 self._exec("INSERT OR IGNORE INTO lineage_links(a,b) VALUES(?,?)", (a, b))
+
+    def link_lineages(self, a: str, b: str) -> bool:
+        """Join two lineages for good, as identical code does (`_link_code`): their trials, looks and validated versions
+        count together from now on. The architect joins a `long_single` that continues one call or put twin to the other
+        twin's lineage (review of #425). True when a new link was made; never a lineage to itself or to one that does not
+        exist."""
+        if not a or not b or a == b:
+            return False
+        with self._lock:
+            if not (self._one("SELECT 1 FROM families WHERE lineage=?", (a,)) and self._one("SELECT 1 FROM families WHERE lineage=?", (b,))):
+                return False
+            a, b = sorted((a, b))
+            return self._exec("INSERT OR IGNORE INTO lineage_links(a,b) VALUES(?,?)", (a, b)).rowcount > 0
 
     def add_versions(self, fid: str, code: str, params_list: Sequence[Mapping[str, Any] | None], *, author: str,
                      note: str = "") -> list[dict[str, Any]]:
@@ -1079,4 +1162,5 @@ class SwarmStore:
                        (fid, dumps(items), dumps(pending) if pending is not None else None, self.now()))
 
 
-__all__ = ["SwarmStore", "ALIVE", "BANDS", "STRUCTURES", "CLOSEABLE", "slugify", "code_sha", "dumps", "loads", "iso"]
+__all__ = ["SwarmStore", "ALIVE", "BANDS", "STRUCTURES", "LONG_SINGLE", "SINGLE_SIDES", "same_slice", "slice_priors",
+           "priors_of", "structure_text", "structure_query", "CLOSEABLE", "slugify", "code_sha", "dumps", "loads", "iso"]
