@@ -19,6 +19,7 @@
   "compute": {
     "as_of": "2026-09-28T14:57:00.000Z",
     "sail_usd": "212.40",
+    "claude_usd": "41.20",
     "openai_usd": "64.10",
     "thetadata_usd": "5.43",
     "market_data_usd": "5.66",

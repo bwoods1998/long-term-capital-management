@@ -3,7 +3,7 @@
     agents  [{id, family, mechanism, structure, band, born_at, retired_at,
               record: {trials, revisions, forward: {trades, wins, pnl_usd} | None, real: {...} | None}}]
     gym     {as_of, trials, market_years, families_alive, families_retired}
-    compute {as_of, sail_usd, openai_usd, other_usd}: the swarm's own spend (Claude in other_usd)
+    compute {as_of, sail_usd, claude_usd, openai_usd}: the swarm's own spend; Sail as Sail billed it (`sail_billed`)
 
 An agent is a family (its id); `family` is its lineage (the founder a fork descends from). Never a program,
 a parameter, a quote, a spread, an implied vol or a result of the Gym beyond counts: the publisher's own
@@ -28,6 +28,32 @@ def _iso(t: float) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
 
 
+#: Sail's billed cost between the reset (T0, 2026-09-26T06:23:14Z) and the moment the Sail guard's balance meter began
+#: (the swarm store's `burst_started_at`, 2026-09-26T10:22:26Z): the provider's app-scoped box billing for exactly that
+#: window, $0.457 over 21 boxes (read Sept 30, 2026). No Sail model call was made before the meter began (the swarm's
+#: first was at 10:23:35Z), so the meter plus this is every Sail charge since the reset.
+PRE_METER_SAIL_USD = 0.46
+#: The original meter's start, to the second. A later start (a new swarm store) missed more than that window.
+METER_STARTED_BY = 1790418147.0
+
+
+def sail_billed(spend: dict[str, float], metered: Any, started: Any) -> float:
+    """Sail since the reset as Sail billed it (the owner, Sept 30, 2026: the public cost never understated): the guard's
+    own meter (`guard.SailGuard._metered`: every fall of the Sail balance between two good readings since the swarm began,
+    so every box and model call on the account, booked or not) plus the window before it, and never less than the model
+    calls the swarm booked itself. The Gym's booked box estimate is NOT the bill: it runs about 70% above the provider's
+    box billing (the economics report, Sept 30, 2026). A store whose meter began later than the original, or has no
+    reading, cannot say what Sail billed before it, so the booked figures stand in (they run above the bill)."""
+    booked = float(spend.get("sail_model", 0.0))
+    try:
+        metered, started = float(metered), float(started)
+    except (TypeError, ValueError):
+        return booked + float(spend.get("gym_box", 0.0))
+    if started > METER_STARTED_BY or metered < 0:
+        return booked + float(spend.get("gym_box", 0.0))
+    return max(metered + PRE_METER_SAIL_USD, booked)
+
+
 def site_inputs(root: str | Path, *, retired_shown: int = 24) -> dict[str, Any]:
     """{"gym": ..., "agents": [...]} from the swarm's store (read-only); {} when there is no store."""
     path = Path(root) / DB_NAME
@@ -41,6 +67,8 @@ def site_inputs(root: str | Path, *, retired_shown: int = 24) -> dict[str, Any]:
                                                 " revisions, spec FROM families")]
             totals = dict(db.execute("SELECT COALESCE(SUM(trials),0) AS trials, COALESCE(SUM(program_years),0) AS years FROM runs").fetchone())
             spend = {r["kind"]: float(r["usd"] or 0.0) for r in db.execute("SELECT kind, SUM(usd) AS usd FROM spend GROUP BY kind")}
+            meter = {r["key"]: loads(r["value"], None) for r in db.execute(
+                "SELECT key, value FROM kv WHERE key IN ('metered_spent', 'burst_started_at')")}
             rows: dict[str, list[dict[str, Any]]] = {}
             for r in db.execute("SELECT family, source, day, pnl, max_loss, version FROM forward"):
                 rows.setdefault(r["family"], []).append(dict(r))
@@ -97,13 +125,14 @@ def site_inputs(root: str | Path, *, retired_shown: int = 24) -> dict[str, Any]:
                                   "forward": fwd, "real": real}})
     gym = {"as_of": _iso(time.time()), "trials": int(totals["trials"]), "market_years": round(float(totals["years"]), 1),
            "families_alive": len(alive), "families_retired": len(fams) - len(alive)}
-    # The swarm's OWN spend since it began. Claude's gateway-settled charges (and conservative in-flight holds)
-    # already live in this ledger under "claude". The site's existing schema calls them other_usd; leaving them out
-    # overstated project Net after the research roles moved to Claude. Keep OpenAI's historical charges separately.
+    # The project's input costs since the reset, by service. Sail as Sail billed it (`sail_billed`), never the Gym's booked
+    # estimate. Claude's gateway-settled charges (and conservative in-flight holds) live in this ledger under "claude" and
+    # publish as their own part (Sept 30, 2026; #431 had put them in other_usd, and an older site still gets them there:
+    # `publish.legacy_compute`). OpenAI's historical charges stay separate, unresolved holds included (they may yet bill).
     # The House's `site_inputs()` adds the House's own before the page shows compute.
-    compute = {"as_of": gym["as_of"], "sail_usd": round(spend.get("sail_model", 0.0) + spend.get("gym_box", 0.0), 2),
-               "openai_usd": round(spend.get("openai", 0.0), 2), "other_usd": round(spend.get("claude", 0.0), 2)}
+    compute = {"as_of": gym["as_of"], "sail_usd": round(sail_billed(spend, meter.get("metered_spent"), meter.get("burst_started_at")), 2),
+               "claude_usd": round(spend.get("claude", 0.0), 2), "openai_usd": round(spend.get("openai", 0.0), 2)}
     return {"gym": gym, "agents": agents, "compute": compute}
 
 
-__all__ = ["site_inputs"]
+__all__ = ["PRE_METER_SAIL_USD", "sail_billed", "site_inputs"]

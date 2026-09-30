@@ -45,6 +45,15 @@ Each unit (a worker's share of programs over one segment) runs in its own proces
 (`--unit-timeout`, default 30 s a program-day and at least 30 minutes): past it the process is killed
 and its programs come back as errors, so a program stuck in C code cannot hang a Gym box.
 
+ONE PROGRAM'S FAILURE IS ITS OWN. A program the parent's load check cannot load, for any reason (the
+safety check, NEEDS or PARAMS, or anything else `load_program` raises), comes back `refused` with the
+reason and never reaches a worker. In a worker each program is loaded on its own (one that fails there
+comes back `error`), and the engine runs the unit with `isolate=True`: an exception out of one
+program's run (its start, a step, its day's open or close, its result) ends that program's run alone
+(`error`, no trial). The unit's other programs run on and return exactly what they would have. Only
+what cannot be pinned on one program still fails the whole unit: a MemoryError while the programs run
+(the worker's memory cap is shared by the unit), a worker that dies, or the unit's deadline.
+
 Exit codes: 0 done; 2 bad arguments or no programs; 3 the store lacks the data (the message names
 it: the box is missing data); 4 a sealed window without the gate. `--check` only reports what the
 store holds for the window and roots (exit 3 when a root has no day).
@@ -114,6 +123,7 @@ def _unit(args: tuple) -> list[tuple[int, int, dict]]:
     pyarrow.set_io_thread_count(1)
     from . import engine as E
     from . import fills as F
+    from . import results as R
     from .runtime import load_program
     from .store import Store, mint_gate_capability
 
@@ -122,9 +132,16 @@ def _unit(args: tuple) -> list[tuple[int, int, dict]]:
     model = F.FillModel.load(cfg_kw.pop("fill_model_path")) if cfg_kw.get("fill_model_path") else F.FillModel.load()
     cfg_kw.pop("fill_model_path", None)
     cfg = E.RunConfig(fill_model=model, start=segment[0], end=segment[1], **cfg_kw)
-    programs = [load_program(code, name=name, params=params) for _, (name, code, params) in jobs]
-    results = E.run(programs, store, cfg)
-    return [(job_index, seg_index, result) for (job_index, _), result in zip(jobs, results)]
+    rows: list[tuple[int, int, dict]] = []
+    loaded = []
+    for job_index, (name, code, params) in jobs:
+        try:
+            loaded.append((job_index, load_program(code, name=name, params=params)))
+        except Exception as exc:  # noqa: BLE001 - the parent loaded it; whatever fails here is this program's alone
+            rows.append((job_index, seg_index, R.failed(name, f"the program failed to load in its worker: "
+                                                              f"{type(exc).__name__}: {exc}")))
+    results = E.run([program for _, program in loaded], store, cfg, isolate=True) if loaded else []
+    return rows + [(job_index, seg_index, result) for (job_index, _), result in zip(loaded, results)]
 
 
 def _cap_memory() -> None:
@@ -143,10 +160,9 @@ def _cap_memory() -> None:
 
 def _failed(unit: tuple, why: str) -> list[tuple[int, int, dict]]:
     """A unit whose worker died: each of its programs gets an error result (no trial is counted)."""
-    return [(job_index, unit[3], {"program": job[0], "status": "error", "reason": why[:500], "trials": 0,
-                                  "summary": {}, "fills": {}, "daily": [], "trades": [], "data_version": "",
-                                  "runtime": {"calls": 0, "errors": 0, "timeouts": 0, "messages": [why[:200]], "disqualified": None}})
-            for job_index, job in unit[5]]
+    from .results import failed
+
+    return [(job_index, unit[3], failed(job[0], why)) for job_index, job in unit[5]]
 
 
 def _child(unit: tuple, conn: Any) -> None:
@@ -240,6 +256,9 @@ def run_batch(jobs: Sequence[tuple[str, str, dict]], *, store_root: str, window:
             valid.append((i, (name, code, params)))
         except CodeRefused as exc:
             out[i] = {"program": name, "status": "refused", "reason": str(exc), "trials": 0}
+        except Exception as exc:  # noqa: BLE001 - anything else a load raises is this program's alone: the batch runs on
+            out[i] = {"program": name, "status": "refused", "trials": 0,
+                      "reason": f"the program fails to load: {type(exc).__name__}: {str(exc)[:300]}"}
     segments = _segments(days, split) if days else [(start, end)]
     cfg_kw = {"window": window, "roots": roots, "stress": float(stress), "capital": float(capital), "fill_model_path": fill_model_path}
     per_segment = max(1, math.ceil(max(1, workers) / len(segments)))
