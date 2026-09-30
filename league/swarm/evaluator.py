@@ -20,6 +20,10 @@ SELECTION_KEYS = (
     "validation_bundle", "validation_line", "validation_view", "validation_numbers", "typical_max_loss_usd",
     "typical_by_version", "gate_ready", "review", "gated_sha", "gate_outcome",
 )
+#: THE EXTENSION HOLD (`researcher.extension_held`) was earned by a validation under the evaluator that judged it, and
+#: `extension_versions` records which versions were ever held. Both belong to that evaluator: adoption archives them with
+#: the selection and clears them, so a version is held again only when it meets the checks under the current evaluator.
+HOLD_KEYS = ("extension_hold", "extension_versions")
 
 
 @lru_cache(maxsize=4)
@@ -71,7 +75,9 @@ def adopt(store: Any, expected: Mapping[str, Any] | None) -> dict[str, Any]:
     """At process start, invalidate derived views once per image/bundle before workers can select.
 
     A missing identity cannot authorize adoption. The transition is one transaction and is restart
-    safe. New families created after the transition have no old evidence to invalidate.
+    safe. New families created after the transition have no old evidence to invalidate. Extension
+    holds (`HOLD_KEYS`) are archived and cleared with the selection, and the idle count restarts
+    from `evaluator_trials`, worded as the evaluator's change.
     """
     if expected is None:
         return {"adopted": False, "families": 0, "reason": "evaluator identity unavailable"}
@@ -92,17 +98,20 @@ def adopt(store: Any, expected: Mapping[str, Any] | None) -> dict[str, Any]:
                 # The House retains frozen instances for exits. Research only selects Gym families,
                 # so an old band must return there rather than become permanently unevaluable.
                 store.set_band(fam["id"], "gym", reason="execution semantics changed; fresh qualification is required")
-            archived = {key: state[key] for key in SELECTION_KEYS if key in state}
+            archived = {key: state[key] for key in (*SELECTION_KEYS, *HOLD_KEYS) if key in state}
             archived.update({key: fam.get(key) for key in ("best_train", "best_version", "best_validation", "validated_version")})
             # Banded identity remains an historical claim; bands.read separately denies entry.
             store.event("swarm.status", fam["id"], {"action": "evaluator_adopted", "from": previous, "to": expected,
                                                        "_previous_selection": archived})
             store.update_family(fam["id"], best_train=None, best_version=None, best_validation=None,
                                 validated_version=None, stall=0, since_val_revisions=0, since_val_trials=0)
-            cleared = {key: None for key in SELECTION_KEYS}
+            cleared = {key: None for key in (*SELECTION_KEYS, *HOLD_KEYS)}
+            # The idle count starts again from here (`researcher.idle_evaluations`), and its words say the evaluator
+            # changed (`evaluator_trials`), not Train's span (`span_trials` is `migrate_objective`'s mark alone).
             cleared.update(train_candidates=[], robustness={}, robust_failed=[], robust_why={}, drift_failed={},
-                           gate_ready=False, dormant_cycles=0, span_trials=int(fam.get("trials") or 0),
-                           evaluator=expected, previous_evaluator_selection=archived)
+                           extension_versions=[], gate_ready=False, dormant_cycles=0,
+                           evaluator_trials=int(fam.get("trials") or 0), evaluator=expected,
+                           previous_evaluator_selection=archived)
             if fam["band"] != "gym" and band_current:
                 # Sizing of a genuinely unchanged, already qualified semantic engine remains
                 # attached to its banded version. Changed semantics are blocked by the entry proof.
@@ -117,4 +126,4 @@ def adopt(store: Any, expected: Mapping[str, Any] | None) -> dict[str, Any]:
     return {"adopted": True, "families": count, "previous": previous, "current": expected}
 
 
-__all__ = ["KEY", "identity", "matches", "row_matches", "adopt", "execution_fingerprint"]
+__all__ = ["KEY", "SELECTION_KEYS", "HOLD_KEYS", "identity", "matches", "row_matches", "adopt", "execution_fingerprint"]

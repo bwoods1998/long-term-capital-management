@@ -39,9 +39,10 @@
    lesson carries the verdict of its Train record (R11-1, `researcher.train_record`: DRIFT, STRESS, THIN or EXHAUSTED,
    tested findings), and only an untested family's (it never traded on Train) says it was a time limit, not a
    refutation. A validation that meets `researcher.extension_hold_checks` (6) of the line's checks sets the family's
-   extension hold (R11-4's swarm rule, `researcher.mark_extension`). Each counted verdict records the family's trials
-   (`validated_trials`), from which the idle rule counts, and restarts its dormant cycles. THE IDLE PASS (R4,
-   `idle_pass`) retires by the idle rule alone every `tournament.retire_every_seconds` (300) between the rounds.
+   extension hold (R11-4's swarm rule, `researcher.mark_extension`); one of the held version below them ends it. Each
+   counted verdict records the family's trials (`validated_trials`), from which the idle rule counts, and restarts its
+   dormant cycles. THE IDLE PASS (R4, `idle_pass`) retires by the idle rule alone every
+   `tournament.retire_every_seconds` (300) between the rounds.
 6. THE LEADERBOARD: one `swarm.tournament` event (the House mirrors it to its ledger) with every family's
    rank, share, validation summary, trials and band, and the totals.
 
@@ -243,7 +244,8 @@ class Tournament:
                              gate_ready=bool(line["passed"]) and not self.gate_spent(fid, n, state))
         out = {"version": n, "passed": line["passed"], "mean": mean, "t": t}
         # THE EXTENSION HOLD (R11-4's swarm rule): a version that met `researcher.extension_hold_checks` of the line's checks
-        # waits for its 2017-19 extension result, exempt from the dormancy clause, until the operator clears the flag.
+        # waits for its 2017-19 extension result, exempt from the dormancy clause, until the operator clears the flag. A
+        # validation of the held version below the checks ends its hold (`mark_extension`).
         if mark_extension(self.store, fid, n, line, self.settings, clock=self.clock):
             out["extension_hold"] = True
         return out
