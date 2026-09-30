@@ -54,8 +54,10 @@ THE INCUBATOR'S FACTS (release B, Oct 1, 2026; `league/live/incubator.py`): `inc
 row, or [], saying whether version `n` of `f` may trade the incubator route (one lot of real money after positive live
 practice; never evidence, never a promotion): `f` is alive and in the Gym band, `n` was not demoted (1.5x or drift),
 `n` carries a Train-and-drift pass (`state.train_passed[str(n)]`) made under the CURRENT research evaluator and Train
-objective (the store's `research_evaluator` and `train_objective`: adoption clears alive families only, so a retired and
-revived family's stale mark never passes), the gate's review AND audit passed on `n`'s run sha under the current review
+objective (the store's `research_evaluator` and `train_objective`, both known: adoption clears alive families only, so a
+retired and revived family's stale mark never passes) and showing a positive 1.5x Train P&L and the drift screen's
+figures, the family is not on D2's route (no validated version that met the validation line: its tuition row comes
+first, even when `read` cannot be read), the gate's review AND audit passed on `n`'s run sha under the current review
 contract (`state.review`, or `state.incubator_reviews[sha]`), and the gate did not refuse, fail or demote that sha. The row
 carries no program: {family, version, run_sha, structure, roots, band "gym", incubator True, observe False,
 holdout_passed False, validation_passed False}; the live path trades the practice cohort's own snapshot and requires
@@ -398,11 +400,18 @@ def incubator(root: str | Path, *, family: str, version: int) -> list[dict[str, 
     state = loads(fam["state"], {}) or {}
     if demoted(state, n):
         return []
+    if (state.get("validation_line") or {}).get("passed") and state.get("validation_version"):
+        # D2's route (its tuition row: `:t` > `:i`), decided from the family's own state here, so a `read` that came back
+        # empty for a moment (a lock) never lets the incubator trade a family D2 owns.
+        return []
     mark = (state.get("train_passed") or {}).get(str(n))
-    evaluator = kv.get("research_evaluator")
-    if (not isinstance(mark, Mapping) or evaluator is None or mark.get("evaluator") != evaluator
-            or "objective" not in mark or mark.get("objective") != kv.get("train_objective")):
-        return []  # no Train-and-drift pass under the current evaluator and Train objective
+    evaluator, objective = kv.get("research_evaluator"), kv.get("train_objective")
+    if (not isinstance(mark, Mapping) or evaluator is None or objective is None or mark.get("evaluator") != evaluator
+            or mark.get("objective") != objective):
+        return []  # no Train-and-drift pass under the current evaluator and Train objective (both known)
+    robust = _finite(mark.get("robust_pnl"))
+    if robust is None or robust <= 0 or not isinstance(mark.get("drift"), Mapping):
+        return []  # a belt: the mark itself shows a profit at 1.5x the half-spread and the drift screen's figures
     from .gate import run_sha
     from ..gym.review_contract import review_contract
 

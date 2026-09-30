@@ -46,7 +46,8 @@ by their own unit):
   `incubator.contracts` (one) lot of a structure whose unit is at most `incubator.max_loss_usd`; the family's held and
   working incubator maximum loss plus the new unit at most that too; at most `incubator.max_open` held or working; the
   weekly ENVELOPE (this ISO week's net realized incubator loss R, plus what is held H, plus what is working W, plus the
-  new unit, at most `incubator.week_loss_usd`: once R alone reaches it the route stops for the week); at most
+  new unit, at most `incubator.week_loss_usd`: once the week's net realized loss has reached it at any close, the route
+  stops for the rest of the ISO week, a later gain notwithstanding); at most
   `INCUBATOR_DAY_LEGS` order legs a day and `INCUBATOR_DAY_OPEN_SHARE` of the gateway's day cap; and it keeps room in
   the book's and the day's caps for the families' Probe floors and the House live test. Its eligibility is the practice
   rule (`practice_ok`: the first look, pre-registered). Never evidence, never a band, never a promotion.
@@ -502,10 +503,12 @@ INCUBATOR_DAY_OPEN_SHARE = Decimal("0.25")
 @dataclass(frozen=True)
 class IncubatorTally:
     """The incubator's own numbers, read from the live state's rows (`RealBook.incubator_tally`): dollars of maximum loss
-    and realized loss, with fees. `realized_loss` R is this ISO week's net realized loss (floored at zero); `held` H and
-    `working` W every held position's and working open's possible loss; `family_held` and `family_working` the same for
-    one family; `open_n` the structures held or working; `legs_today` today's order legs and cancels; `opened_today`
-    today's dispatched opens' maximum loss."""
+    and realized loss, with fees. `realized_loss` R is this ISO week's net realized loss (floored at zero);
+    `week_peak_loss` the most this week's net realized loss has been at any close so far (the running net over the week's
+    closes in their order, floored at zero: the weekly stop's LATCH, so a later gain in the same week never re-opens the
+    route); `held` H and `working` W every held position's and working open's possible loss; `family_held` and
+    `family_working` the same for one family; `open_n` the structures held or working; `legs_today` today's order legs
+    and cancels; `opened_today` today's dispatched opens' maximum loss."""
 
     realized_loss: Decimal = ZERO
     held: Decimal = ZERO
@@ -515,14 +518,21 @@ class IncubatorTally:
     open_n: int = 0
     legs_today: int = 0
     opened_today: Decimal = ZERO
+    week_peak_loss: Decimal = ZERO
 
     @property
     def possible(self) -> Decimal:
         """R + H + W: what the week could already have lost."""
         return self.realized_loss + self.held + self.working
 
+    @property
+    def week_loss_seen(self) -> Decimal:
+        """The weekly stop's reading: the most the week's net realized loss has been (never less than R now)."""
+        return max(self.realized_loss, self.week_peak_loss)
+
     def as_dict(self) -> dict[str, Any]:
-        return {"realized_loss_usd": str(cents(self.realized_loss)), "held_usd": str(cents(self.held)),
+        return {"realized_loss_usd": str(cents(self.realized_loss)), "week_peak_loss_usd": str(cents(self.week_peak_loss)),
+                "held_usd": str(cents(self.held)),
                 "working_usd": str(cents(self.working)), "possible_usd": str(cents(self.possible)), "open": self.open_n,
                 "legs_today": self.legs_today, "opened_today_usd": str(cents(self.opened_today))}
 
@@ -602,9 +612,12 @@ def plan_incubator(table: Table, *, unit: Decimal, equity: Decimal | None, tally
     if tally.open_n >= table.incubator_max_open:
         return Plan(0, cap, f"incubator: {tally.open_n} structures held or working, the most it holds is "
                             f"{table.incubator_max_open}")
-    if tally.realized_loss >= table.incubator_week_loss:
-        return Plan(0, cap, f"incubator: stopped for the week (its net realized loss ${cents(tally.realized_loss)} "
-                            f"reached ${table.incubator_week_loss})")
+    if tally.week_loss_seen >= table.incubator_week_loss:
+        # THE LATCH: once the week's net realized loss has reached the row at any close, the route stays stopped for the
+        # rest of the ISO week, whatever a later gain does to R (the owner's "stops for the week").
+        return Plan(0, cap, f"incubator: stopped for the week (its net realized loss reached "
+                            f"${cents(tally.week_loss_seen)} this week, at or over ${table.incubator_week_loss}; now "
+                            f"${cents(tally.realized_loss)})")
     if tally.possible + unit > table.incubator_week_loss:
         return Plan(0, cap, f"incubator: the week's envelope: ${cents(tally.possible)} could already be lost (realized "
                             f"${cents(tally.realized_loss)}, held ${cents(tally.held)}, working ${cents(tally.working)}) "

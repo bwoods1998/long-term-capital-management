@@ -87,22 +87,28 @@ def incubator_tally(rows: Callable[..., list], *, day: str, week_start: str, fam
     """The incubator's numbers (`money.IncubatorTally`) from the live state's own rows, selected by the instance suffix
     `:i` only, so a restart reads the same numbers (`rows(sql, params)` returns dicts: `LiveState.rows`, or a read-only
     connection's). R: this ISO week's net realized loss, over closed incubator positions whose New York close day is on or
-    after `week_start` (floored at zero; the book's fee estimate until the broker's post). H: each held, expiring or
-    unpriced incubator position's maximum loss with its fees twice, or what its cash already lost when that is more (a
-    broken structure's legs closed at a loss). W: each working, pending or unknown incubator open's maximum loss with
-    its fees twice for what may still fill, and today's lost opens whole. `open_n`: positions not closed and working
-    opens without a position. `legs_today`: today's dispatched order legs and cancels. `opened_today`: today's
-    dispatched opens' maximum loss. `family`: H and W for that family too."""
+    after `week_start` (floored at zero; the book's fee estimate until the broker's post). The week's PEAK: the running
+    net of those closes in their close order (a tie's losses first), its most negative point floored at zero: the weekly
+    stop's latch, so a gain later in the week never lifts the stop. H: each held, expiring or unpriced incubator
+    position's maximum loss with its fees twice, or what its cash already lost when that is more (a broken structure's
+    legs closed at a loss). W: each working, pending or unknown incubator open's maximum loss with its fees twice for what
+    may still fill, and this ISO week's lost opens whole (a lost open the venue later shows is taken back and its fills
+    booked, `ingest`: it counts until the week ends, a tightening of "today's" in the spec). `open_n`: positions not
+    closed and working, unknown or this week's lost opens without a position. `legs_today`: today's dispatched order legs
+    and cancels. `opened_today`: today's dispatched opens' maximum loss. `family`: H and W for that family too."""
     like = INCUBATOR_SUFFIX                  # substr(instance, -2): exact and case-sensitive (LIKE is neither)
     realized = held = working = fam_held = fam_working = opened = M.ZERO
     open_n = legs = 0
     cash_week = M.ZERO
+    closes: list[tuple[float, Decimal]] = []
     for r in rows("SELECT family, qty, opened_qty, max_loss_share, fees, cash, status, closed_at FROM positions "
                   "WHERE substr(instance, -2)=?", (like,)):
         if r["status"] == "closed":
             closed = _ny_day(r["closed_at"])
             if closed is not None and closed >= week_start:
-                cash_week += M.D(r["cash"])
+                cash = M.D(r["cash"])
+                cash_week += cash
+                closes.append((float(r["closed_at"]), cash))
             continue
         units = int(r["opened_qty"]) if r["status"] == "unpriced_close" else max(0, int(r["qty"]))
         loss = max(M.D(r["max_loss_share"]) * V.MULTIPLIER * units + 2 * M.D(r["fees"]), -M.D(r["cash"]))
@@ -111,9 +117,13 @@ def incubator_tally(rows: Callable[..., list], *, day: str, week_start: str, fam
         if family is not None and r["family"] == family:
             fam_held += loss
     realized = max(M.ZERO, -cash_week)
+    running = peak = M.ZERO
+    for _, cash in sorted(closes, key=lambda c: (c[0], c[1])):
+        running += cash
+        peak = max(peak, -running)
     for r in rows("SELECT family, qty, filled_qty, status, max_loss, fees_est, day, pid FROM orders WHERE action='open' "
                   "AND substr(instance, -2)=? AND status IN ('pending', 'working', 'unknown', 'lost')", (like,)):
-        if r["status"] == "lost" and r["day"] != day:
+        if r["status"] == "lost" and not str(r["day"] or "") >= week_start:
             continue
         remaining = int(r["qty"]) if r["status"] == "lost" else max(0, int(r["qty"]) - int(r["filled_qty"]))
         loss = (M.D(r["max_loss"]) + 2 * M.D(r["fees_est"])) * M.D(remaining) / max(1, int(r["qty"]))
@@ -134,7 +144,8 @@ def incubator_tally(rows: Callable[..., list], *, day: str, week_start: str, fam
         if bool(answer.get("dispatched")) or r["status"] in ("pending", "unknown"):
             opened += M.D(r["max_loss"])
     return M.IncubatorTally(realized_loss=realized, held=held, working=working, family_held=fam_held,
-                            family_working=fam_working, open_n=open_n, legs_today=legs, opened_today=opened)
+                            family_working=fam_working, open_n=open_n, legs_today=legs, opened_today=opened,
+                            week_peak_loss=peak)
 
 
 def client_id(oid: int, family: str, *, nonce: str = "") -> str:

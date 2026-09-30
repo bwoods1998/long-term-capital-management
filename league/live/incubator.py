@@ -26,15 +26,16 @@ practising past its observation target to its bounded window (at most `MAX_PINS`
 shadow (`:o`) and real (`:i`) decisions continue. Off, the practice league's own rule is unchanged.
 
 THE PINS, at the session's first families pass (a restart reuses them; no mid-session join), at most `MAX_PINS`, by
-first-look return on risk then family id. A cohort is pinned only with all of: the switch on; real money on; the table's
-rows above zero; its first look passed and its extended record still passing; the cohort active under the running
-evaluator with its program unchanged; the swarm's facts (`bands.incubator`: alive, Gym band, not demoted, Train and
-drift passed under the current evaluator, review and audit passed, not refused, failed or demoted by the gate) with the
-snapshot's run sha; no D2 route for the family (no `:r` or `:t` this pass, no `bands.read` row: `:r` > `:t` > `:i`); a
-real structure (`Table.family_real`, `family_allowed`); and at least one sampled program close that a one lot could
-open under the unit cap (`feasible`). Its instance is `<family>@<version>:i`, REAL and tuition-flagged. Every families
-pass re-checks the switch, the facts, the D2 precedence and the cohort; a failure sends it to exits only (its working
-opens cancelled within a minute).
+first-look return on risk then family id, and only from that day's L2' cohorts (`keep`: a pinned cohort always keeps
+practising, so no pass finds it completed mid-session). A cohort is pinned only with all of: the switch on; real money
+on; the table's rows above zero; its first look passed and its extended record still passing; the cohort active under
+the running evaluator with its program unchanged; the swarm's facts (`bands.incubator`: alive, Gym band, not demoted,
+Train and drift passed under the current evaluator, review and audit passed, not refused, failed or demoted by the gate,
+not on D2's route) with the snapshot's run sha; no D2 route for the family (no `:r` or `:t` this pass, no `bands.read`
+row: `:r` > `:t` > `:i`); a real structure (`Table.family_real`, `family_allowed`); and at least one sampled program
+close that a one lot could open under the unit cap (`feasible`). Its instance is `<family>@<version>:i`, REAL and
+tuition-flagged. Every families pass re-checks the switch, the facts, the D2 precedence and the cohort; a failure sends
+it to exits only (its working opens cancelled within a minute).
 
 ORDERS (`OptionsLive._real_intent`): `plan` (`money.plan_incubator`, the tally read afresh from `live.sqlite` for every
 open) and `admit` (the facts, the pin, the switch, the cohort and the tally again, under the families' lock). Within a
@@ -45,9 +46,11 @@ when a D2 family's real order was refused, after that open was placed, on one of
 THE CAPS (`money.plan_incubator`) live in the House only (the gateway's own caps are the backstop; it cannot tell routes
 apart): one lot; at most `incubator.max_loss_usd` a structure and a family; at most `incubator.max_open` held or working;
 the weekly ENVELOPE R + H + W + the new unit at most `incubator.week_loss_usd` (so "$150 a week net" is a true bound but
-for residuals: broker fees above the book's estimate, a broken structure closed leg by leg), and once R alone reaches it,
-"stopped for the week" (alerted once a week); `DAY_LEGS` legs and `DAY_OPEN_SHARE` of the day cap a day; and room kept in
-the book's and the day's caps for two Probe floors and, while it can still open, the House live test's structure.
+for residuals: broker fees above the book's estimate, a broken structure closed leg by leg), and once the week's net
+realized loss has reached it at any close, "stopped for the week" for the rest of the ISO week (a LATCH read from the
+live state's closes, `IncubatorTally.week_peak_loss`: a later gain never re-opens it; alerted once a week); `DAY_LEGS`
+legs and `DAY_OPEN_SHARE` of the day cap a day; and room kept in the book's and the day's caps for two Probe floors and,
+while it can still open, the House live test's structure.
 
 NEVER EVIDENCE, NEVER A PROMOTION: its orders and positions are tuition-flagged, and it is never a forward row
 (`_export_real` skips tuition and every `:i`), never a band move (only `bands.read` rows are ever banded), never in
@@ -120,6 +123,8 @@ class Incubator:
         # `_yield`'s marks at its last pass: the working incubator opens then, and each D2 instance's refusals.
         self._marks: tuple[set[int], dict[str, tuple[list, int]]] | None = None
         self._told: set[str] = set()
+        # The held and working incubator structures at the last minute: a change is when the weekly stop is looked at.
+        self._book_seen: frozenset | None = None
 
     # ------------------------------------------------------------------ state
     def _get(self, key: str) -> dict:
@@ -308,11 +313,18 @@ class Incubator:
         pins: dict[str, Any] = {"day": today, "order": [], "versions": {}, "run_sha": {}, "rr": {}, "refused": {}}
         closed = self.closed()
         if closed is None:
+            # Only today's L2' cohorts are pinned: a pinned cohort is always one the practice league keeps (never one
+            # completed at its target mid-session while its `:i` was pinned), and pins never outnumber `keep`.
+            keep = self.keep(today, in_session=True)
             candidates = sorted((v for v in self.verdicts().values() if self._passing(v, today)), key=self._rank)
             families: set[str] = set()
             for verdict in candidates:
                 f, n = str(verdict["family"]), int(verdict["version"])
                 vk = cohort_key(f, n)
+                if (f, n) not in keep:
+                    pins["refused"][vk] = (f"not among today's {MAX_PINS} kept cohorts (L2'): the incubator pins only "
+                                           "those")
+                    continue
                 if len(pins["order"]) >= MAX_PINS:
                     pins["refused"][vk] = f"the incubator pins at most {MAX_PINS} cohorts a session"
                     continue
@@ -383,17 +395,23 @@ class Incubator:
         if why:
             return M.Plan(0, table.incubator_max_loss, why)
         tally = self.tally(day.day, family)
-        if tally.realized_loss >= table.incubator_week_loss:
-            self._week_stopped(day.day, tally)
+        self._week_check(day.day, tally)
         return M.plan_incubator(table, unit=unit, equity=equity, tally=tally, exposure=exposure, room=self.room())
+
+    def _week_check(self, day: dt.date, tally: M.IncubatorTally) -> None:
+        """Record and alert the weekly stop once a week when the tally's latch has reached the row. The stop itself is
+        `plan_incubator`'s, read from the live state's closes at every open: this record is what health and the owner
+        see, never what decides."""
+        if tally.week_loss_seen >= self.live.table.incubator_week_loss:
+            self._week_stopped(day, tally)
 
     def _week_stopped(self, day: dt.date, tally: M.IncubatorTally) -> None:
         week = week_start_of(day)
         st = self._get(WEEK)
         if st.get("week") == week:
             return
-        why = (f"its net realized loss this week ${M.cents(tally.realized_loss)} reached "
-               f"${self.live.table.incubator_week_loss}: stopped for the week (exits go on)")
+        why = (f"its net realized loss this week reached ${M.cents(tally.week_loss_seen)}, at or over "
+               f"${self.live.table.incubator_week_loss}: stopped for the rest of the week (exits go on)")
         self.live.state.put(WEEK, {"week": week, "at": self.live.clock(), "why": why})
         self.live.record("live.incubator", {"week_stopped": week, "why": why})
         self.live.alert("warning", f"live: the incubator {why}")
@@ -463,6 +481,12 @@ class Incubator:
         working = [o for o in live.book.orders.values() if is_incubator(o.instance) and o.working]
         if held or working:
             out["incubator"] = {"open": len(held), "working": len(working)}
+        seen = frozenset([("p", p.pid) for p in held] + [("o", o.oid) for o in working])
+        if self._book_seen is not None and self._book_seen - seen:
+            # A held structure closed (or an open ended) this minute: the weekly stop is recorded and alerted now, not
+            # only at the next open (the stop itself is the plan's, from the live state's closes).
+            self._week_check(day.day, self.tally(day.day))
+        self._book_seen = seen
 
     def _yield(self) -> None:
         """A working incubator open holding a contract a D2 family's real order (`:r`, `:t`) was refused on AFTER the open
@@ -505,6 +529,13 @@ class Incubator:
             tally = self.tally(today).as_dict() if live.book is not None else None
         except Exception:  # noqa: BLE001
             tally = None
+        week = week_start_of(today)
+        stopped = self._get(WEEK)
+        if stopped.get("week") != week:
+            stopped = {}
+            seen = (tally or {}).get("week_peak_loss_usd")
+            if seen is not None and max(M.D(seen), M.D(tally["realized_loss_usd"])) >= table.incubator_week_loss:
+                stopped = {"week": week, "why": f"its net realized loss this week reached ${seen} (not yet recorded)"}
         return {"switch": bool((live._switches or {}).get("incubator")),
                 "table": {"max_loss_usd": str(table.incubator_max_loss), "contracts": table.incubator_contracts,
                           "max_open": table.incubator_max_open, "week_loss_usd": str(table.incubator_week_loss),
@@ -515,7 +546,7 @@ class Incubator:
                 "keep": self._get(KEEP).get("cohorts") or [],
                 "verdicts": {"judged": len(verdicts), "passed": sum(1 for v in verdicts.values() if v.get("passed")),
                              "ended": sum(1 for v in verdicts.values() if v.get("ended"))},
-                "tally": tally, "week_stopped": self._get(WEEK) or None}
+                "tally": tally, "week_stopped": stopped or None}
 
 
 __all__ = ["Incubator", "SUFFIX", "DAY_LEGS", "DAY_OPEN_SHARE", "MAX_PINS", "VERDICTS", "PINS", "KEEP", "WEEK", "YIELDED",

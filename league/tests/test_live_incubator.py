@@ -422,6 +422,37 @@ class TheCaps(unittest.TestCase):
         self.assertEqual(plan.qty, 0)
         self.assertIn("stopped for the week", plan.reason)
 
+    def test_the_weekly_stop_latches_a_later_gain_in_the_same_week_never_reopens_it(self):
+        """The review's case (Sept 30): Monday R $100 with A ($30) and B ($20) held; Wednesday A, a broken structure, closes
+        leg by leg for -$56 (R $156: stopped); Thursday B closes +$15 (R $141). The route stays stopped for the rest of
+        the ISO week, across a restart, and opens again the next Monday."""
+        monday, wednesday = (at(dt.date(2026, 9, d), 11, 0) for d in (28, 30))
+        thursday = at(dt.date(2026, 10, 1), 11, 0)
+        self.position("z", status="closed", cash=D("-100"), closed_at=monday)
+        a = self.position("a", loss=D("30"))
+        b = self.position("b", loss=D("20"))
+        self.assertIn("envelope", self.plan("0.01", "c", day="2026-09-28").reason, "Monday: the envelope is full")
+        self.state.execute("UPDATE positions SET status='closed', qty=0, cash=-56, closed_at=? WHERE pid=?", (wednesday, a))
+        self.assertIn("stopped for the week", self.plan("8.50", "c", day="2026-09-30").reason)
+        self.state.execute("UPDATE positions SET status='closed', qty=0, cash=15, closed_at=? WHERE pid=?", (thursday, b))
+        t = self.tally("c", day="2026-10-01")
+        self.assertEqual((t.realized_loss, t.week_peak_loss, t.held), (D("141"), D("156"), D("0")))
+        plan = self.plan("8.50", "c", day="2026-10-01")
+        self.assertEqual(plan.qty, 0, "a gain later in the week never re-opens the route")
+        self.assertIn("stopped for the week", plan.reason)
+        self.state.close()
+        self.state = LiveState(Path(self.tmp.name) / "live.sqlite")
+        self.assertEqual(self.plan("8.50", "c", day="2026-10-02").qty, 0, "restart-safe: read from the live state's closes")
+        self.assertEqual(self.plan("8.50", "c", day="2026-10-05").qty, 1, "the next ISO week opens again")
+
+    def test_the_latch_reads_a_ties_losses_first(self):
+        t = at(dt.date(2026, 9, 28), 10, 0)
+        self.position("a", status="closed", cash=D("40"), closed_at=t)
+        self.position("b", status="closed", cash=D("-160"), closed_at=t)
+        tally = self.tally("c")
+        self.assertEqual((tally.realized_loss, tally.week_peak_loss), (D("120"), D("160")))
+        self.assertIn("stopped for the week", self.plan("1", "c").reason)
+
     def test_net_gains_offset_losses_within_the_week(self):
         t = at(dt.date(2026, 9, 28), 10, 0)
         self.position("a", status="closed", cash=D("-120"), closed_at=t)
@@ -432,12 +463,15 @@ class TheCaps(unittest.TestCase):
         self.position("a", loss=D("30"), cash=D("-44"))
         self.assertEqual(self.tally("a").held, D("44"))
 
-    def test_lost_opens_count_whole_today_only_and_unpriced_closes_hold(self):
+    def test_lost_opens_count_whole_for_their_iso_week_and_unpriced_closes_hold(self):
+        """A lost open the venue later shows is taken back and its fills booked (`RealBook.ingest`): it counts whole until
+        its ISO week ends (a tightening of the spec's "today's"), never last week's."""
         self.order("a", unit=D("30"), status="lost", day="2026-09-28")
         self.order("a", unit=D("30"), status="lost", day="2026-09-25")
         self.position("b", loss=D("20"), status="unpriced_close")
-        t = self.tally("a")
-        self.assertEqual((t.working, t.held, t.open_n), (D("30"), D("20"), 2))
+        t = self.tally("a", day="2026-09-30")
+        self.assertEqual((t.working, t.held, t.open_n), (D("30"), D("20"), 2), "Wednesday: Monday's lost open counts")
+        self.assertEqual(self.tally("a", day="2026-10-05").working, D("0"), "the next Monday: it no longer counts")
 
     def test_tuition_and_other_families_rows_never_count_and_the_suffix_is_exact(self):
         self.order("t", unit=D("30"), instance="t@1:t")
@@ -521,6 +555,7 @@ class TheCaps(unittest.TestCase):
             self.state.execute("DELETE FROM dispatch_counts")
             day = start
             weekly: dict[str, D] = {}
+            peak: dict[str, D] = {}
             residual: dict[str, D] = {}
             for step in range(80):
                 today = day.isoformat()
@@ -537,6 +572,7 @@ class TheCaps(unittest.TestCase):
                         self.assertLessEqual(t.family_held + t.family_working + unit, D("50"))
                         self.assertLess(t.open_n, 4)
                         self.assertLessEqual(t.realized_loss + t.held + t.working + unit, D("150"))
+                        self.assertLess(peak.get(week, D(0)), D("150"), "no open in a week after its net loss reached $150")
                         self.order(fam, unit=unit, day=today, fees=D("1"))
                 elif action < 0.55:
                     # A working open fills (whole or one lot of it) at or under its admitted maximum loss.
@@ -565,6 +601,7 @@ class TheCaps(unittest.TestCase):
                         self.state.execute("UPDATE positions SET status='closed', qty=0, cash=?, closed_at=? WHERE pid=?",
                                            (float(cash), at(day, 12, 0), r["pid"]))
                         weekly[week] = weekly.get(week, D(0)) + cash
+                        peak[week] = max(peak.get(week, D(0)), -weekly[week])
                 elif action < 0.9:
                     # A restart: a new book on the same file reads the same numbers.
                     before = self.tally(fam, today)
@@ -585,7 +622,29 @@ class TheCaps(unittest.TestCase):
         self.assertEqual([r["tuition"] for r in rows], [1])
         book = RealBook(self.state, None, self.table)
         exposure = book.exposure("fam", day="2026-09-28", week_start="2026-09-28")
-        self.assertEqual((exposure.tuition_day, exposure.tuition_week), (D(0), D(0)))
+        self.assertEqual((exposure.tuition_day, exposure.tuition_week), (D(0), D(0)), "B: the two routes' sums apart")
+
+        def release_a_tuition(state, *, day, week_start):
+            """Release A's tuition sums, copied from `RealBook.exposure` at a/live-guards 1df0e7fb (no `:i` skip)."""
+            sent = state.rows("SELECT day, max_loss, qty, filled_qty, status, tuition, answer FROM orders WHERE "
+                              "action='open' AND day>=?", (week_start,))
+            tuition_day = tuition_week = D(0)
+            for r in sent:
+                if r["tuition"]:
+                    live = r["status"] in ("pending", "working", "unknown")
+                    units = int(r["qty"]) if live else int(r["filled_qty"])
+                    loss = M.D(r["max_loss"]) * units / max(1, int(r["qty"]))
+                    tuition_week += loss
+                    if r["day"] == day:
+                        tuition_day += loss
+            return tuition_day, tuition_week
+
+        self.assertEqual(release_a_tuition(self.state, day="2026-09-28", week_start="2026-09-28"), (D("28"), D("28")),
+                         "A: the incubator's working $30 open ($28 of maximum loss before fees) counts as tuition")
+        import inspect
+
+        source = inspect.getsource(RealBook.exposure)
+        self.assertIn('if r["tuition"] and not is_incubator(r["instance"]):', source, "B's only change to that loop")
 
 
 # ======================================================================================================== first looks
@@ -802,6 +861,46 @@ class Eligibility(Base):
         self.run_to(9, 31)
         self.assertEqual(self.pins()["order"], [f"f{i}@1:i" for i in range(9, 1, -1)])
         del live
+
+    def test_pins_come_only_from_todays_kept_cohorts(self):
+        """The review's case (Sept 30): the best-ranked cohort has a D2 row, so it is kept (L2') but never pinned, and the
+        ninth-ranked is not pinned in its place: it is not kept, so the practice league could complete it mid-session."""
+        live = self.make([family("f9", VERTICAL, band="gym", holdout=False, validation=True)])
+        for i in range(10):
+            self.cohort(f"f{i}", 1, trades=winning(10, pnl=1.0 + i))
+        self.run_to(9, 31)
+        kept = {tuple(c) for c in live.state.get(INC.KEEP)["cohorts"]}
+        self.assertEqual(kept, {(f"f{i}", 1) for i in range(2, 10)})
+        self.assertEqual(self.pins()["order"], [f"f{i}@1:i" for i in range(8, 1, -1)])
+        self.assertTrue({(k[: -len(INC.SUFFIX)].rsplit("@", 1)[0], 1) for k in self.pins()["order"]} <= kept)
+        self.assertIn("D2", self.pins()["refused"]["f9@1"])
+        self.assertIn("kept cohorts", self.pins()["refused"]["f1@1"])
+
+
+# ================================================================================================ the weekly stop
+@unittest.skipUnless(HAVE, "numpy not installed")
+class TheWeeklyStop(Base):
+    def test_the_minute_records_the_stop_when_a_close_reaches_it_and_health_shows_it_before(self):
+        """The stop is the plan's (from the live state's closes, at every open); the record and the alert come at the
+        minute an incubator structure leaves the book, not only at the next open, and health derives it until then."""
+        live = self.first()
+        self.run_to(9, 31)
+        self.assertEqual(len(self.opens()), 1)
+        live.state.upsert("positions", {"pid": 9000, "instance": "old@1:i", "family": "old", "type": "debit_vertical",
+                                        "root": "SPY", "legs": "[]", "qty": 0, "opened_qty": 1, "entry": 0.4,
+                                        "max_loss_share": 0.4, "collateral": 0.0, "fees": 1.0, "cash": -150.0,
+                                        "opened_at": 1.0, "opened_day": "2026-09-28", "opened_minute": 1,
+                                        "status": "closed", "closed_at": at(MONDAY, 9, 0), "tuition": 1, "info": "{}"},
+                          "pid")
+        self.assertIsNone(live.state.get(INC.WEEK))
+        shown = live.health()["incubator"]["week_stopped"]
+        self.assertEqual(shown["week"], "2026-09-28")
+        self.assertIn("not yet recorded", shown["why"])
+        self.run_to(9, 45)
+        self.assertEqual(live.state.get(INC.WEEK)["week"], "2026-09-28")
+        said = [t for _, t in self.alerts if "stopped for the rest of the week" in t]
+        self.assertEqual(len(said), 1, "once a week")
+        self.assertEqual(len(self.opens()), 1, "no open after it")
 
 
 # ======================================================================================================== the switch

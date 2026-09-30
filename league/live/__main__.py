@@ -108,8 +108,18 @@ def incubator_report(root: Path, *, now: float | None = None) -> dict:
         refusals = [{"at": r["at"], **loads(r["payload"], {})} for r in rows(
             "SELECT at, payload FROM events WHERE kind='live.refusal' AND at>=? ORDER BY seq", (start,))]
         refusals = [{k: v for k, v in r.items() if k != "_intent"} for r in refusals if is_incubator(r.get("instance"))]
+        try:
+            from .money import Table
+
+            # The weekly stop as the plan reads it (the latch over this week's closes), whatever was recorded.
+            stopped_now: bool | None = tally.week_loss_seen >= Table.from_constitution().incubator_week_loss
+        except Exception:  # noqa: BLE001 - a report, never a decision
+            stopped_now = None
+        recorded = kv(WEEK)
         return {"switch": {"live.incubator": switch, "on": switch is True},
-                "pins": kv(PINS), "keep": kv(KEEP), "week_stopped": kv(WEEK), "verdicts": kv(VERDICTS) or {},
+                "pins": kv(PINS), "keep": kv(KEEP),
+                "week_stopped": recorded if (recorded or {}).get("week") == week_start_of(today) else None,
+                "stopped_this_week": stopped_now, "verdicts": kv(VERDICTS) or {},
                 "tally": tally.as_dict(),
                 "instances": [r for r in rows("SELECT id, family, band, tuition, mode, why FROM instances WHERE retired_at IS NULL")
                               if is_incubator(r["id"])],

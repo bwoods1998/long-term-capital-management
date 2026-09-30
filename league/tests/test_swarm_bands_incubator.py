@@ -52,7 +52,7 @@ class FactsCase(unittest.TestCase):
         self.store.add_version(fid, CODE, {"hold": 3}, author="test")
         sha = self.sha(fid)
         state = {"train_passed": {"1": {"evaluator": EVALUATOR, "objective": OBJECTIVE, "run": "r1", "robust_pnl": 12.0,
-                                        "drift": {"t": 1.1, "positive": True, "years": 5}, "at": 1.0}}}
+                                        "drift": {"t": 1.1, "positive": 4, "years": 5}, "at": 1.0}}}
         if review_in == "review":
             state["review"] = self.review(sha)
         else:
@@ -132,6 +132,35 @@ class EveryConditionAlone(FactsCase):
         self.assertEqual(len(self.row()), 1)
         self.store.put("research_evaluator", None)
         self.assertNoRow("no current evaluator")
+
+    def test_the_marks_own_content_is_a_belt(self):
+        """B2 writes only passing marks; this reader still wants a known Train objective, a positive 1.5x Train P&L and
+        the drift screen's figures (B2's shape: `positive` is a count of positive years)."""
+        self.eligible()
+        mark = self.store.family("fam")["state"]["train_passed"]["1"]
+        self.store.put("train_objective", None)
+        self.store.set_state("fam", train_passed={"1": dict(mark, objective=None)})
+        self.assertNoRow("no Train objective in the store, and a mark without one")
+        self.store.put("train_objective", OBJECTIVE)
+        for pnl in (0.0, -3.0, None, "12"):
+            self.store.set_state("fam", train_passed={"1": dict(mark, robust_pnl=pnl)})
+            self.assertNoRow(f"robust_pnl {pnl!r}")
+        self.store.set_state("fam", train_passed={"1": {k: v for k, v in mark.items() if k != "robust_pnl"}})
+        self.assertNoRow("no robust_pnl")
+        for drift in (None, "passed", []):
+            self.store.set_state("fam", train_passed={"1": dict(mark, drift=drift)})
+            self.assertNoRow(f"drift {drift!r}")
+        self.store.set_state("fam", train_passed={"1": mark})
+        self.assertEqual(len(self.row()), 1)
+
+    def test_a_family_on_the_d2_route_has_no_row_even_when_read_cannot_admit_it(self):
+        """A Gym family whose validated version met the validation line is D2's (its tuition row, `:t` > `:i`): no
+        incubator row, so a `bands.read` that came back empty for a moment never lets its `:i` trade first."""
+        self.eligible()
+        self.store.set_state("fam", validation_line={"passed": True}, validation_version=1)
+        self.assertNoRow("validated: D2's route")
+        self.store.set_state("fam", validation_line={"passed": False})
+        self.assertEqual(len(self.row()), 1, "a validation line not met leaves the incubator's route")
 
     def test_no_review_a_failed_review_or_audit_a_stale_contract_or_another_shas(self):
         sha = self.eligible()
