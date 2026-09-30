@@ -6,17 +6,20 @@ underlying is an object), arithmetic on a None, a root the program never asked f
 Gym box, a trial, and a research cycle. `check_experiment` (league/gym/experiment.py) is static; this is the runtime
 half, and it runs nowhere near the Gym:
 
-- **Where the code runs.** In the live path's own sandbox, `league.live.decider.Decider`: a child process with an
-  empty environment, `-E -s`, a capped address space and (as root, on the House) a private network namespace, under
-  its own uid (`PREFLIGHT_UID`, not the 65534 the live and observe deciders run as, so an escaped program cannot signal
-  or trace them). The House never executes a program in its own process. `load` is the Gym's `load_program` (safety
-  check, NEEDS, PARAMS, the module body) and each call is the Gym's `Runner.decide` with its one-second limit.
-- **What it sees.** Up to three synthetic sessions (Tuesday to Thursday, a regular 09:30-16:00 day, no event) on the
-  program's own NEEDS: every root it names, with a full chain (every weekday expiry in its dte range; strikes on the
-  listed grid, 5 points for SPX/SPXW and 0.5 for the rest, which holds every $0.5, $1, $2.5 and $5 strike, out past its
-  band but never past the store's coverage; two-sided quotes priced by Black-Scholes with a skew), the underlying's
-  prices from the open, NEEDS['history'] prior sessions, volume unknown (NaN, as in the replay), the Gym's venue rules,
-  and a flat account of the Gym's capital. It is called at the Gym's own decision minutes
+- **Where the code runs.** In the live path's own sandbox: `league.live.decider.Decider` itself, its spawn and every
+  isolation rule it has (an empty environment, `-E -s`, the child's own limits, a read-only runtime copy, fail-closed
+  off a root House, a mandatory private network namespace whose failed probe is retried), with one difference: the
+  child runs under its own uid (`PREFLIGHT_UID`, not the 65534 the live and observe deciders run as, so an escaped
+  program cannot signal or trace them). The House never executes a program in its own process. `load` is the Gym's
+  `load_program` (safety check, NEEDS, PARAMS, the module body) and each call is the Gym's `Runner.decide` with its
+  one-second limit.
+- **What it sees.** Up to three synthetic sessions (a regular 09:30-16:00 day, no event; Tuesday to Thursday, or the
+  weekdays on which its roots list the most expiries in its dte range, `session_weekdays`) on the program's own NEEDS:
+  every root it names, with the chain the Gym's store lists for it (`listing`: the root's expiry weekdays within its dte
+  range and the store's reach, 14 days, 45 for SPY and QQQ; the store's count of strikes a side on the root's listed
+  step, $1 for the index ETFs, $5 for SPX/SPXW, a stock's by its price; two-sided quotes priced by Black-Scholes with a
+  skew), the underlying's prices from the open, NEEDS['history'] prior sessions, volume unknown (NaN, as in the replay),
+  the Gym's venue rules, and a flat account of the Gym's capital. It is called at the Gym's own decision minutes
   (`engine.Account.decision_minutes`). The market is made up; nothing here reads recorded data, so it is no trial and
   says nothing about profit.
 - **When it refuses.** Only when the Gym would refuse or disqualify the same program on the same kind of input:
@@ -28,7 +31,11 @@ half, and it runs nowhere near the Gym:
      list and is neither `environmental` nor `market_dependent` (an empty selection, a division by zero, a numeric
      key, a None: the made-up numbers could cause or spare those). Until its first intent a Gym account is flat too,
      and an erring call returns no intent, so the Gym's account would stay exactly as flat as this one while the
-     program erred: the only difference left is the market's numbers, which such an error does not depend on.
+     program erred: the only difference left is the market's numbers, which such an error does not depend on;
+  3. and a decide refusal recurs, the same error at the same line, on a fresh instance of the program meeting a sparser
+     listing of the same roots (`listing(sparse=True)`: one expiry a week, the next wider strike step). A listing is
+     one the Gym holds on most Train days, not on every one: a selection that keeps one contract in the Gym may keep
+     several on a finer chain (`float(...)` of it, or its truth value, then raises), and that must never refuse.
   Anything else passes: the first intent ends the preflight (a flat account no longer mirrors the Gym's), as does a
   call past its time limit, a decider failure or the preflight's own deadline. The preflight never blocks on its own
   failure. A clean program costs one session plus `STREAK` calls of the next (a streak that begins later could only
@@ -52,7 +59,7 @@ import time
 import zlib
 from typing import Any, Callable, Mapping, Sequence
 
-VERSION = "preflight-v2"
+VERSION = "preflight-v3"
 #: Consecutive erring calls that refuse: the Gym's own disqualification count (`league.gym.runtime.DEFAULT_MAX_ERRORS`).
 STREAK = 25
 #: Synthetic sessions at most (a third only to confirm a streak that began in the second).
@@ -64,22 +71,84 @@ RUNNER_MESSAGES = 10
 CAPITAL = 10_000.0
 #: The preflight's wall-clock budget; past it the program passes (inconclusive).
 DEADLINE_SECONDS = 20.0
-#: Weekdays of the synthetic sessions (Tuesday, Wednesday, Thursday).
+#: Weekdays of the synthetic sessions when the roots list as much every weekday (Tuesday, Wednesday, Thursday), and the
+#: order ties are broken in otherwise (`session_weekdays`).
 WEEKDAYS = (1, 2, 3)
+PREFERRED_WEEKDAYS = (1, 2, 3, 0, 4)
 OPEN, CLOSE = 570, 960
 MINUTES = CLOSE - OPEN + 1
 RATE = 0.04
 VOL = 0.18
-SPOTS = {"SPY": 450.0, "QQQ": 380.0, "IWM": 190.0, "DIA": 350.0, "XSP": 450.0, "SPXW": 4500.0, "SPX": 4500.0}
-#: The synthetic strike step (`_step`): the listed near-money step for SPX/SPXW, 0.5 (a common divisor of every listed
-#: grid) for the rest.
-LISTED_STEP = {"SPXW": 5.0, "SPX": 5.0}
-FINE_STEP = 0.5
-#: The store's strikes a side of the money (scripts/data/storelib.py STRIKE_RANGE) and each root's widest listed step
-#: near the money (`_reach`): the Gym never shows a strike further out.
+#: What the Gym's store holds of a root's chain (scripts/data/storelib.py): NBBO 0-14 days to expiry (`MAX_DTE`) for every
+#: root and, for SPY and QQQ only, their back months out to 45 (`BACK_MONTH_DTE`); `STRIKE_RANGE` listed strikes a side
+#: of the money (25; 40 for SPXW).
+FRONT_DTE, BACK_MONTH_DTE = 14, 45
+BACK_MONTH_ROOTS = frozenset({"SPY", "QQQ"})
 STORE_STRIKES = {"SPXW": 40, "SPX": 40}
 STORE_DEFAULT_STRIKES = 25
-WIDEST_STEP = {"SPXW": 5.0, "SPX": 5.0, "SPY": 1.0, "QQQ": 1.0, "IWM": 1.0, "DIA": 1.0, "XSP": 1.0}
+DAILY, MON_WED_FRI, FRIDAY = (0, 1, 2, 3, 4), (0, 2, 4), (4,)
+#: THE LISTING: each root's chain as the exchanges list it near the money over Train (2022-2024), which is what the
+#: store holds: a representative price, the strike step at that price, and the weekdays that have an expiry within
+#: FRONT_DTE (past it, Fridays). SPY, QQQ and SPXW list an expiry every weekday (Tuesdays and Thursdays since 2022),
+#: IWM and XSP on Monday, Wednesday and Friday, every other root on Fridays (the weeklies and the monthly). The index
+#: ETFs and GLD list $1 strikes and SPX/SPXW $5 at any price; a stock or another ETF lists by its price (`equity_step`:
+#: $0.5 under $75, $1 under $150, $2.5 under $500, $5 above). A root not named here is a $100 stock with Friday
+#: expiries.
+LISTING: dict[str, tuple[float, float, tuple[int, ...]]] = {
+    "SPY": (450.0, 1.0, DAILY), "QQQ": (380.0, 1.0, DAILY), "SPXW": (4500.0, 5.0, DAILY), "SPX": (4500.0, 5.0, FRIDAY),
+    "IWM": (190.0, 1.0, MON_WED_FRI), "XSP": (450.0, 1.0, MON_WED_FRI), "DIA": (350.0, 1.0, FRIDAY),
+    "GLD": (180.0, 1.0, FRIDAY),
+}
+#: Representative Train prices of the rest of the universe (`equity_step` gives their strike step, Fridays their
+#: expiries).
+PRICES = {"SLV": 22.0, "TLT": 100.0, "SMH": 220.0, "NVDA": 400.0, "MSFT": 300.0, "AMZN": 130.0, "AMD": 110.0,
+          "GOOGL": 120.0, "TSM": 100.0, "TSLA": 220.0, "PLTR": 20.0, "SMCI": 250.0, "META": 300.0, "AAPL": 170.0,
+          "MARA": 15.0, "MU": 80.0, "BABA": 90.0, "SOXL": 25.0, "TQQQ": 40.0}
+DEFAULT_PRICE = 100.0
+#: The roots whose near-money step is the same on every Train day (the $1 index ETFs, SPX's $5): a sparser listing
+#: (`listing(sparse=True)`) keeps it; any other root's sparser listing takes the next wider step.
+FIXED_STEP = frozenset({"SPY", "QQQ", "IWM", "XSP", "DIA", "SPXW", "SPX"})
+WIDER = {0.5: 1.0, 1.0: 2.5, 2.5: 5.0, 5.0: 10.0}
+
+
+def equity_step(price: float) -> float:
+    """The strike step a stock's weekly lists near the money at `price` (`LISTING`)."""
+    return 0.5 if price < 75 else 1.0 if price < 150 else 2.5 if price < 500 else 5.0
+
+
+def listing(root: str, *, sparse: bool = False) -> tuple[float, float, tuple[int, ...]]:
+    """(price, strike step, expiry weekdays) of `root` (`LISTING`). `sparse`: the same root listed more thinly, one
+    expiry a week (Fridays) and, unless the root's step never changes, the next wider strike step. A refusal on the
+    listing must recur on the sparse one (`run`): a chain finer than the Gym's on some day (a selection that holds one
+    contract there holds several here) then never refuses on its own."""
+    root = str(root).upper()
+    if root in LISTING:
+        price, step, weekdays = LISTING[root]
+    else:
+        price = PRICES.get(root, DEFAULT_PRICE)
+        step, weekdays = equity_step(price), FRIDAY
+    if sparse:
+        return price, (step if root in FIXED_STEP else WIDER.get(step, 2.0 * step)), FRIDAY
+    return price, step, weekdays
+
+
+def expiries(root: str, weekday: int, dte_min: int, dte_max: int, weekdays: Sequence[int]) -> list[int]:
+    """The days to expiry listed on a session of `weekday` (0 = Monday) within [dte_min, dte_max]: an expiry on each of
+    `weekdays` out to FRONT_DTE, Fridays past it, and nothing past what the store keeps for the root."""
+    top = BACK_MONTH_DTE if str(root).upper() in BACK_MONTH_ROOTS else FRONT_DTE
+    return [d for d in range(int(dte_min), min(int(dte_max), top) + 1)
+            if (weekday + d) % 7 in (weekdays if d <= FRONT_DTE else FRIDAY)]
+
+
+def session_weekdays(roots: Sequence[str], needs: Mapping[str, Any], *, sparse: bool = False) -> tuple[int, ...]:
+    """The synthetic sessions' weekdays: the SESSIONS weekdays on which the roots' listings hold the most expiries in the
+    program's dte range (ties: Tuesday, Wednesday, Thursday, Monday, Friday), in calendar order. A Friday-only root with
+    dte [10, 21] lists on Monday, Tuesday and Friday (11, 10 and 14 days out), not midweek: its sessions are those."""
+    dte_min, dte_max = (int(x) for x in needs["dte"])
+    held = {day: sum(len(expiries(root, day, dte_min, dte_max, listing(root, sparse=sparse)[2])) for root in roots)
+            for day in PREFERRED_WEEKDAYS}
+    ranked = sorted(PREFERRED_WEEKDAYS, key=lambda day: (-held[day], PREFERRED_WEEKDAYS.index(day)))
+    return tuple(sorted(ranked[:SESSIONS]))
 
 
 # ------------------------------------------------------------------------------------------------ the synthetic market
@@ -89,40 +158,27 @@ def _rng(root: str, salt: int) -> Any:
     return np.random.default_rng(zlib.crc32(f"{root}:{salt}".encode()) & 0xFFFFFFFF)
 
 
-def _step(root: str) -> float:
-    """The synthetic strike step: every strike the root lists near the money is on it. SPX and SPXW list 5-point strikes
-    (the store and the Gym's own synth.py use 5); every other root gets 0.5, which holds the $0.5, $1, $2.5 and $5 grids
-    alike (a spread's wing looked up by exact strike, `strike == k + 1`, finds it here whenever it is listed). Never
-    widened: a coarser grid than the listed one refuses a valid program that looks a listed strike up."""
-    return LISTED_STEP.get(root, FINE_STEP)
-
-
-def _reach(root: str, spot: float, band: float) -> float:
-    """How far from the open the synthetic strikes go: past the band (the chain is sliced to +-band of the minute's
-    spot), but never past what the store can hold (`STORE_STRIKES` listed strikes a side at the root's widest near-money
-    step, plus a tenth of spot for the day's drift): the Gym shows no strike beyond that, so neither need this."""
-    cover = (STORE_STRIKES.get(root, STORE_DEFAULT_STRIKES) + 15) * WIDEST_STEP.get(root, 5.0) + 0.10 * spot
-    return min(spot * (band + 0.02), cover)
-
-
 class Market:
-    """Synthetic sessions for a program's NEEDS (the module docstring). Deterministic: the same roots and NEEDS make the
-    same market."""
+    """Synthetic sessions for a program's NEEDS (the module docstring) on each root's listed chain (`listing`), or on
+    its sparser listing (`sparse`). Deterministic: the same roots and NEEDS make the same market."""
 
-    def __init__(self, roots: Sequence[str], needs: Mapping[str, Any]):
+    def __init__(self, roots: Sequence[str], needs: Mapping[str, Any], *, sparse: bool = False):
         import numpy as np
 
         from ..gym import greeks as G
 
         self.roots = tuple(roots)
         self.needs = dict(needs)
+        self.sparse = bool(sparse)
+        self.weekdays = session_weekdays(self.roots, needs, sparse=self.sparse)
         dte_min, dte_max = (int(x) for x in needs["dte"])
-        band, history = float(needs["band"]), int(needs["history"])
+        history = int(needs["history"])
         per_minute = VOL / math.sqrt(252 * 390)
         self.days: dict[str, list[dict[str, Any]]] = {}
         for root in self.roots:
             rng = _rng(root, 1)
-            spot = SPOTS.get(root, 100.0)
+            spot, step, weekdays = listing(root, sparse=self.sparse)
+            side = STORE_STRIKES.get(root, STORE_DEFAULT_STRIKES)
             bars, paths = [], []
             for _ in range(history + SESSIONS):
                 spot *= math.exp(rng.normal(0.0, 0.004))  # the overnight move
@@ -136,13 +192,10 @@ class Market:
                 i = history + s
                 prior = np.array(bars[i - history:i], dtype=np.float64).reshape(-1, 4)
                 path = paths[i]
-                weekday = WEEKDAYS[s]
-                dtes = [d for d in range(dte_min, dte_max + 1) if (weekday + d) % 7 < 5]
-                s0 = float(path[0])
-                step = _step(root)
-                reach = _reach(root, s0, band)
-                atm = round(s0 / step) * step
-                ks = atm + step * np.arange(-math.ceil(reach / step), math.ceil(reach / step) + 1)
+                weekday = self.weekdays[s]
+                dtes = expiries(root, weekday, dte_min, dte_max, weekdays)
+                atm = round(float(path[0]) / step) * step
+                ks = atm + step * np.arange(-side, side + 1)  # the store's strikes a side of the open's money
                 ks = ks[ks > 0]
                 dte = np.repeat(np.array(dtes, dtype=np.int64), ks.size * 2)
                 strike = np.tile(np.repeat(ks, 2), len(dtes))
@@ -282,8 +335,13 @@ def advice(message: str, *, roots: Sequence[str] = (), params: Mapping[str, Any]
         return ("`.get` was called on a number or a string, not a dict: check what the name holds (a position row's "
                 "fields are plain values; ctx.chain fields are numpy arrays; ctx.under fields are attributes).")
     if "truth value of an array" in text:
-        return ("a numpy array was used as one boolean: chain fields are arrays, one entry per contract; use `.any()`, "
-                "`.all()`, or index a single contract first.")
+        return ("a numpy array was used as one boolean: chain fields are arrays, one entry per contract, and a mask keeps "
+                "every contract that matches it (every listed expiry, every strike within a tolerance); use `.any()`, "
+                "`.all()`, or index a single contract first (`i = np.flatnonzero(mask)`, check `i.size`).")
+    if re.search(r"only (length-1|0-dimensional) arrays can be converted|convert an array of size 1", text):
+        return ("an array was converted to one number: `float(c.bid[mask])` needs a mask that keeps exactly one contract, "
+                "and the Gym's numpy refuses even that; index one contract first (`i = np.flatnonzero(mask)`, check "
+                "`i.size`, then `float(c.bid[i[0]])`).")
     if "read-only" in text:
         return "arrays from ctx are read-only: copy one first (`np.array(ctx.chain.mid)`) before changing it."
     if "IndexError" in text:
@@ -337,9 +395,10 @@ def environmental(message: str) -> bool:
 #: and never refuses (the Gym still judges it).
 _MARKET_ERRORS = re.compile(r"\b(IndexError|ZeroDivisionError|StopIteration|OverflowError|FloatingPointError|NoneType|"
                             r"KeyError: -?[\d.]+|KeyError: \(|KeyError: np\.|KeyError: nan)")
-_MARKET_VALUES = ("empty sequence", "argument is empty", "zero-size array", "math domain error", "not in list",
-                  "cannot convert float NaN", "cannot convert float infinity", "attempt to get argm",
-                  "not enough values to unpack", "too many values to unpack", "array must not contain infs or NaNs")
+_MARKET_VALUES = ("empty sequence", "argument is empty", "zero-size array", "truth value of an empty array",
+                  "math domain error", "not in list", "cannot convert float NaN", "cannot convert float infinity",
+                  "attempt to get argm", "not enough values to unpack", "too many values to unpack",
+                  "array must not contain infs or NaNs")
 
 
 def market_dependent(message: str) -> bool:
@@ -401,18 +460,53 @@ def run(code: str, params: Mapping[str, Any] | None, decider: Any, *, universe: 
     except DeciderError as exc:
         return _answer("inconclusive", f"the sandbox failed: {str(exc)[:300]}")
     try:
-        return _decide_loop(code, params or {}, decider, key, info["needs"], universe, began, deadline, clock)
+        verdict = _decide_loop(code, params or {}, decider, key, info["needs"], universe, began, deadline, clock)
     except DeciderError as exc:
         return _answer("inconclusive", f"the sandbox failed: {str(exc)[:300]}")
     finally:
-        try:
-            decider.drop(key)
-        except Exception:  # noqa: BLE001 - dropping a runner never fails the preflight
-            pass
+        _drop(decider, key)
+    if verdict["status"] != "refused":
+        return verdict
+    # THE SPARSE LISTING: a fresh instance of the program on the same roots listed more thinly (`listing(sparse=True)`).
+    # The refusal stands only when the same error at the same line recurs there, so a chain finer than the Gym's lists
+    # on some day (a selection that holds one contract in the Gym holds several here) never refuses on its own.
+    again_key = key + ":sparse"
+    try:
+        decider.load(again_key, code, dict(params or {}), name)
+        again = _decide_loop(code, params or {}, decider, again_key, info["needs"], universe, began, deadline, clock,
+                             sparse=True)
+    except (ProgramRefused, DeciderError) as exc:
+        return _answer("inconclusive", f"the sandbox failed on the sparser listing: {str(exc)[:300]}",
+                       calls=verdict.get("calls"))
+    finally:
+        _drop(decider, again_key)
+    if again["status"] == "refused" and _kind(again.get("error")) == _kind(verdict.get("error")):
+        verdict["why"] += "; again on a sparser listing (one expiry a week, a wider strike step)"
+        verdict["calls"] = int(verdict.get("calls") or 0) + int(again.get("calls") or 0)
+        return verdict
+    return _answer("inconclusive", "the error did not recur on a sparser listing of the same roots (one expiry a week, a "
+                                   "wider strike step): it may turn on how many contracts the chain lists, which the "
+                                   f"Gym's store decides: {str(verdict.get('error') or '')[:240]}",
+                   calls=int(verdict.get("calls") or 0) + int(again.get("calls") or 0))
+
+
+def _drop(decider: Any, key: str) -> None:
+    try:
+        decider.drop(key)
+    except Exception:  # noqa: BLE001 - dropping a runner never fails the preflight
+        pass
+
+
+def _kind(message: Any) -> tuple[str, str]:
+    """An error's line and exception type (`line 12: TypeError: ...` -> ("12", "TypeError")): the same kind of error at
+    the same place, whatever numbers it prints."""
+    m = re.match(r"(?:line (\d+): )?([\w.]+)", str(message or ""))
+    return (m.group(1) or "", m.group(2)) if m else ("", "")
 
 
 def _decide_loop(code: str, params: Mapping[str, Any], decider: Any, key: str, needs: Mapping[str, Any],
-                 universe: Sequence[str] | None, began: float, deadline: float, clock: Callable[[], float]) -> dict:
+                 universe: Sequence[str] | None, began: float, deadline: float, clock: Callable[[], float], *,
+                 sparse: bool = False) -> dict:
     from ..gym import venue as V
     from ..gym.events import EVENT_NAMES
 
@@ -421,7 +515,7 @@ def _decide_loop(code: str, params: Mapping[str, Any], decider: Any, key: str, n
     schedule = decision_minutes(needs)
     if not roots or not schedule:
         return _answer("passed", "the program has no decision in the run's roots and hours", calls=0)
-    market = Market(roots, needs)
+    market = Market(roots, needs, sparse=sparse)
     rules = {r: V.rules_for(r).as_dict() for r in roots}
     quiet = {name: False for name in EVENT_NAMES}
     restarts = getattr(decider, "restarts", 0)
@@ -444,7 +538,7 @@ def _decide_loop(code: str, params: Mapping[str, Any], decider: Any, key: str, n
             snaps = {(r, token): market.snapshot(r, s, mi) for r in roots}
             unders = {(r, int(needs["history"]), token): market.under(r, s, mi) for r in roots}
             job = {"key": key, "mi": token, "roots": roots, "minute": OPEN + mi, "open_minute": OPEN, "close_minute": CLOSE,
-                   "weekday": WEEKDAYS[s], "positions": [], "orders": [], "cash": CAPITAL, "equity": CAPITAL,
+                   "weekday": market.weekdays[s], "positions": [], "orders": [], "cash": CAPITAL, "equity": CAPITAL,
                    "budget": CAPITAL, "buying_power": CAPITAL, "rules": rules, "events": quiet, "events_next": quiet,
                    "closed": [], "rejects": []}
             answer = decider.decide(snaps, unders, [job]).get(key) or {}
@@ -511,7 +605,6 @@ def _verdict(code: str, params: Mapping[str, Any], roots: Sequence[str], streak:
                    stage="decide", error=first_message[:500], line=line, source=source, calls=calls, errors=errors,
                    messages=[m[:200] for m in candidates[:4]],
                    hint=advice(first_message, roots=roots, params=_declared(code, params), source=source))
-    return _answer("passed", "no persistent error on the synthetic sessions", calls=calls, errors=errors)
 
 
 # ------------------------------------------------------------------------------------------------ the House's instance
@@ -521,59 +614,45 @@ def _verdict(code: str, params: Mapping[str, Any], roots: Sequence[str], streak:
 PREFLIGHT_UID = 65533
 
 
-def _sandbox() -> Any:
-    """The decider's sandbox under its own uid: `league.live.decider.Decider` with `_spawn` spawning the child as
-    `PREFLIGHT_UID`. Everything else (empty environment, `-E -s`, the read-only runtime copy, the memory cap, the
-    mandatory private network namespace as root) is the decider's own; only the credentials differ."""
-    import shutil
-    import subprocess
-    import tempfile
-    from pathlib import Path
+def child_uids(pid: int) -> tuple[int, ...]:
+    """A process's real and effective uid, from `/proc/<pid>/status` (as the parent's namespace sees them); () when it
+    cannot be read."""
+    try:
+        with open(f"/proc/{int(pid)}/status", encoding="ascii", errors="replace") as status:
+            for line in status:
+                if line.startswith("Uid:"):
+                    return tuple(int(x) for x in line.split()[1:3])
+    except (OSError, ValueError):
+        pass
+    return ()
 
+
+def _sandbox() -> Any:
+    """`league.live.decider.Decider` under the preflight's own uid. Nothing of the decider is copied: the spawn is
+    `Decider._spawn`, so every isolation rule it has or gains (fail-closed off a root House, the network-namespace probe
+    and its retry window, the empty environment, the child's own limits, the read-only runtime copy) is the
+    preflight's too. `Decider._spawn` builds the child's credentials and hands that very dict to `_namespace` (the
+    probe runs under them) and then to `Popen`; `_namespace` here writes the preflight's uid into it. Should a later
+    decider stop doing that, the child would run as 65534: `_spawn` then reads the child's uid back and kills a child
+    that is not `PREFLIGHT_UID` before any program reaches it."""
     from ..live import decider as D
 
     class SandboxDecider(D.Decider):
         uid = PREFLIGHT_UID
 
+        def _namespace(self, budget_seconds: float, credentials: Any) -> bool:
+            if credentials:  # the root House's credentials (the child's): the preflight's own uid and gid
+                credentials.update(user=self.uid, group=self.uid, extra_groups=[])
+            return super()._namespace(budget_seconds, credentials)
+
         def _spawn(self, budget_seconds: float = 10.0) -> None:
-            # Mirrors `Decider._spawn` (league/live/decider.py) line for line but for the credentials.
-            D.protect_house_process()
-            credentials = {"user": self.uid, "group": self.uid, "extra_groups": []} if self.isolated else {}
-            env = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "HOME": "/tmp", "LIVE_DECIDER_MEMORY_MB": str(self.memory_mb),
-                   "OPENBLAS_NUM_THREADS": "1", "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1"}
-            if self.netns is None:
-                self.netns = D._netns_available(timeout=max(0.001, min(10.0, budget_seconds)), credentials=credentials)
-            if self.isolated and not self.netns:
-                raise D.DeciderError("the preflight's decider requires a network namespace under its separate uid")
-            cwd = D.REPO
-            if self.isolated:
-                if self._runtime is None:
-                    self._runtime = Path(tempfile.mkdtemp(prefix="ltcm-preflight-runtime-"))
-                    files = ("league/__init__.py", "league/safety.py", "league/structure_core.py", "league/live/__init__.py",
-                             "league/live/decider.py", "league/gym/__init__.py", "league/gym/runtime.py",
-                             "league/gym/safety.py", "league/gym/ctx.py", "league/gym/greeks.py", "league/gym/venue.py")
-                    for name in files:
-                        path = self._runtime / name
-                        path.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copyfile(D.REPO / name, path)
-                        path.chmod(0o444)
-                    for path in self._runtime.rglob("*"):
-                        if path.is_dir():
-                            path.chmod(0o555)
-                    self._runtime.chmod(0o555)
-                cwd = self._runtime
-            command = [self.python, "-E", "-s", "-m", "league.live.decider"]
-            if self.netns:
-                command = ["unshare", "--net", "--map-root-user", *command]
-            err = open(self.log, "ab") if self.log else subprocess.DEVNULL  # noqa: SIM115
-            try:
-                self.proc = subprocess.Popen(command, cwd=str(cwd), env=env, **credentials,
-                                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=err, close_fds=True)
-            finally:
-                if err is not subprocess.DEVNULL:
-                    err.close()
-            self.pid = self.proc.pid
-            self._ready.clear()
+            super()._spawn(budget_seconds)
+            if self.isolated and self.proc is not None:
+                uids = child_uids(self.proc.pid)
+                if not uids or any(uid != self.uid for uid in uids):
+                    self._kill()
+                    raise D.DeciderError(f"the preflight's decider child runs as uid {uids or 'unknown'}, not "
+                                         f"{self.uid}: it was killed before any program reached it")
 
     return SandboxDecider
 
@@ -611,5 +690,6 @@ class Preflight:
             self._decider.close()
 
 
-__all__ = ["VERSION", "STREAK", "SESSIONS", "PREFLIGHT_UID", "Market", "Preflight", "advice", "decision_minutes",
-           "environmental", "market_dependent", "run"]
+__all__ = ["VERSION", "STREAK", "SESSIONS", "PREFLIGHT_UID", "LISTING", "Market", "Preflight", "advice",
+           "decision_minutes", "environmental", "equity_step", "expiries", "listing", "market_dependent", "run",
+           "session_weekdays"]

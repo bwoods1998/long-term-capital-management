@@ -201,34 +201,113 @@ class Preflight(unittest.TestCase):
 
     def test_a_listed_strike_looked_up_exactly_is_found(self):
         # Reviewers' false refusals: a spread whose wing is found by exact strike on the listed grid (5-point SPXW, $1
-        # SPY past a 0.114 band, $0.5 and $2.5 names outside the index roots) runs clean in the Gym and must here too.
+        # SPY past a 0.114 band, $0.5 and $2.5 names, a $1 name at its price) runs clean in the Gym and must here too.
         cases = (("SPXW", 0.05, "k = math.floor(s / 5) * 5 - 10", 5.0),
                  ("SPXW", 0.10, "k = math.floor(s / 5) * 5 - 40", 10.0),
                  ("SPY", 0.15, "k = float(round(s)) - 3", 1.0),
                  ("QQQ", 0.20, "k = float(round(s)) - 2", 1.0),
-                 ("MARA", 0.10, "k = math.floor(s * 2) / 2 - 1", 0.5),
+                 ("MARA", 0.10, "k = math.floor(s * 2) / 2", 0.5),
                  ("SLV", 0.10, "k = math.floor(s * 2) / 2 - 1", 0.5),
                  ("TSLA", 0.20, "k = math.floor(s / 2.5) * 2.5 - 5", 2.5),
-                 ("AMZN", 0.20, "k = math.floor(s / 2.5) * 2.5 - 5", 2.5))
+                 ("NVDA", 0.20, "k = math.floor(s / 2.5) * 2.5 - 5", 2.5),
+                 ("AMZN", 0.20, "k = float(round(s)) - 3", 1.0))
         for root, band, pick, width in cases:
             head = (f'import math\nimport numpy as np\nNEEDS = {{"roots": ["{root}"], "dte": [0, 2], "band": {band}, '
                     f'"cadence": 5, "history": 10}}\nPARAMS = {{}}\nSTATE = {{}}\n')
+            if root not in ("SPXW", "SPY", "QQQ"):  # a Friday-only root lists nothing 0-2 days out on a Tuesday
+                head = head.replace('"dte": [0, 2]', '"dte": [0, 7]')
             body = (f"c = ctx.chain\ns = ctx.under.price\n{pick}\nputs = ~c.is_call & (c.dte == c.dte.min())\n"
                     f"i = np.flatnonzero(puts & (c.strike == k))[0]\nj = np.flatnonzero(puts & (c.strike == k - {width}))[0]\n"
                     "return []")
             out = self.check(program(body, head=head))
             self.assertEqual((out["status"], out.get("errors")), ("passed", 0), (root, band, out))
 
-    def test_the_grid_holds_every_listed_strike(self):
-        from league.swarm.preflight import Market
+    def test_a_single_contract_selection_is_not_refused(self):
+        # The verification review's probe: a mask that keeps exactly one contract on the listed chain (an ATM strike
+        # within half a step; every expiry of a Friday-only root in [0, 7], which is one), used as one number. A chain
+        # finer than the listed one (every $0.5, an expiry every weekday) keeps several, and the truth value of that
+        # array raised on every call.
+        cases = (("SPY", "k = float(round(s))", 0.5, "(c.dte == c.dte.min()) & "),
+                 ("QQQ", "k = float(round(s))", 0.5, "(c.dte == c.dte.min()) & "),
+                 ("TSLA", "k = round(s / 2.5) * 2.5", 1.0, "(c.dte == c.dte.min()) & "),
+                 ("TSLA", "k = round(s / 2.5) * 2.5", 1.0, ""),
+                 ("MARA", "k = round(s * 2) / 2", 0.2, ""),
+                 ("AMZN", "k = float(round(s))", 0.4, ""))
+        for root, pick, atol, near in cases:
+            head = (f'import numpy as np\nNEEDS = {{"roots": ["{root}"], "dte": [0, 7], "band": 0.05, "cadence": 5, '
+                    f'"history": 5}}\nPARAMS = {{"edge": 50.0}}\nSTATE = {{}}\n')
+            body = (f"c = ctx.chain\ns = ctx.under.price\n{pick}\n"
+                    f"atm = c.is_call & {near}np.isclose(c.strike, k, atol={atol})\n"
+                    "if c.ask[atm] - c.bid[atm] > ctx.params[\"edge\"]:\n"
+                    f"    return [{{\"open\": \"long_call\", \"root\": \"{root}\", \"qty\": 1}}]\n"
+                    "x = float(c.mid[atm].sum())\nreturn []")
+            out = self.check(program(body, head=head))
+            self.assertEqual((out["status"], out.get("errors")), ("passed", 0), (root, near, out))
 
-        for root, band, step in (("SPXW", 0.05, 5.0), ("SPY", 0.20, 1.0), ("MARA", 0.10, 0.5), ("TSLA", 0.30, 2.5)):
-            needs = {"roots": [root], "dte": [0, 5], "band": band, "cadence": 5, "history": 5, "start": 571, "end": 958}
-            snap = Market([root], needs).snapshot(root, 0, 100)
-            ks = set(numpy.unique(snap.strike).tolist())
-            near = [k for k in ks if abs(k / snap.spot - 1) <= band]
-            listed = numpy.arange(math.floor(min(near) / step) * step + step, max(near) - step, step)
-            self.assertTrue(set(listed.tolist()) <= ks, (root, band))
+    def test_a_chain_finer_than_the_gyms_never_refuses_on_its_own(self):
+        # Were a root's listing finer than the Gym's store on some day, a single-contract selection would keep several
+        # contracts and raise on every call; the refusal must recur on the sparser listing, where it does not.
+        from unittest import mock
+
+        import league.swarm.preflight as PF
+
+        real = PF.listing
+
+        def finer(root, *, sparse=False):
+            return real(root, sparse=True) if sparse else (real(root)[0], 0.5, PF.DAILY)
+
+        head = ('import numpy as np\nNEEDS = {"roots": ["TSLA"], "dte": [0, 7], "band": 0.05, "cadence": 5, "history": 5}\n'
+                'PARAMS = {"edge": 50.0}\nSTATE = {}\n')
+        body = ("c = ctx.chain\nk = round(ctx.under.price / 2.5) * 2.5\natm = c.is_call & np.isclose(c.strike, k, atol=1.0)\n"
+                "if c.ask[atm] - c.bid[atm] > ctx.params[\"edge\"]:\n    return []\nreturn []")
+        with mock.patch.object(PF, "listing", finer):
+            out = self.check(program(body, head=head))
+        self.assertEqual(out["status"], "inconclusive", out)
+        self.assertIn("sparser listing", out["why"])
+        self.assertIn("truth value of an array", out["why"])
+        # The same misuse on every chain still refuses, confirmed on the sparser listing.
+        out = self.refused(program("for pid, p in ctx.positions.items():\n    pass\nreturn []"))
+        self.assertIn("again on a sparser listing", out["why"])
+
+    def test_the_chain_is_the_listing(self):
+        # The listed step, the store's strikes a side of the open's money, the root's expiry weekdays and the store's
+        # reach in days to expiry (14; SPY and QQQ 45); the sparse listing: Fridays and the next wider step.
+        from league.swarm.preflight import FRIDAY, Market, STORE_DEFAULT_STRIKES, listing
+
+        for root, step, weekdays, reach in (("SPXW", 5.0, {0, 1, 2, 3, 4}, 14), ("SPY", 1.0, {0, 1, 2, 3, 4}, 45),
+                                            ("IWM", 1.0, {0, 2, 4}, 14), ("MARA", 0.5, {4}, 14), ("AMZN", 1.0, {4}, 14),
+                                            ("TSLA", 2.5, {4}, 14), ("SMCI", 2.5, {4}, 14), ("XYZ", 1.0, {4}, 14)):
+            self.assertEqual(listing(root)[1:], (step, tuple(sorted(weekdays))), root)
+            needs = {"roots": [root], "dte": [0, 60], "band": 0.5, "cadence": 5, "history": 5, "start": 571, "end": 958}
+            market = Market([root], needs)
+            for s, weekday in enumerate(market.weekdays):
+                snap = market.snapshot(root, s, 0)
+                for d in numpy.unique(snap.dte).tolist():
+                    self.assertLessEqual(d, reach, root)
+                    self.assertIn((weekday + d) % 7, weekdays if d <= 14 else {4}, (root, weekday, d))
+                ks = numpy.unique(snap.strike[snap.dte == snap.dte.min()])
+                self.assertTrue(numpy.allclose(numpy.diff(ks), step), root)
+                self.assertEqual(ks.size, 2 * (40 if root == "SPXW" else STORE_DEFAULT_STRIKES) + 1, root)
+                self.assertLessEqual(abs(float(numpy.median(ks)) - snap.spot), step, root)
+            thin = Market([root], needs, sparse=True)
+            sparse = thin.snapshot(root, 0, 0)
+            self.assertEqual({(thin.weekdays[0] + d) % 7 for d in numpy.unique(sparse.dte).tolist()}, set(FRIDAY), root)
+            wider = numpy.diff(numpy.unique(sparse.strike[sparse.dte == sparse.dte.min()]))
+            self.assertTrue(numpy.allclose(wider, step if root in ("SPXW", "SPY", "IWM") else {0.5: 1.0, 1.0: 2.5, 2.5: 5.0}[step]),
+                            root)
+
+    def test_the_sessions_fall_on_days_the_roots_list(self):
+        # Midweek when every weekday lists (SPY); a Friday-only root 10-21 days out lists on Monday (11), Tuesday (10) and
+        # Friday (14), so a misuse behind a check for an empty chain is caught there, not passed on quiet Wednesdays.
+        from league.swarm.preflight import session_weekdays
+
+        self.assertEqual(session_weekdays(["SPY"], {"dte": [0, 7]}), (1, 2, 3))
+        self.assertEqual(session_weekdays(["SMCI", "NVDA", "AMD"], {"dte": [10, 21]}), (0, 1, 4))
+        head = ('NEEDS = {"roots": ["SMCI", "NVDA", "AMD"], "dte": [10, 21], "band": 0.06, "cadence": 30, "history": 10}\n'
+                'PARAMS = {}\nSTATE = {}\n')
+        out = self.refused(program('c = ctx.chains.get("NVDA")\nif c is None or c.n == 0:\n    return []\n'
+                                   'px = ctx.underlyings["NVDA"].get("price")\nreturn []', head=head))
+        self.assertIn("UnderlyingView", out["error"])
 
     def test_a_streak_the_runners_list_cannot_name_is_inconclusive(self):
         # Ten distinct warm-up errors fill the Runner's message list (it keeps ten); the streak after them is not in it,
@@ -238,41 +317,6 @@ class Preflight(unittest.TestCase):
                     '    raise ValueError("warm " + str(n))\nif n > 20:\n    ' + tail + "\nreturn []")
             out = self.check(program(body, head="import numpy as np\n" + HEAD))
             self.assertEqual(out["status"], "inconclusive", (tail, out))
-
-    def test_the_preflight_child_is_not_the_live_deciders_uid(self):
-        # The live and observe deciders run as 65534; the preflight child (programs no Gym has run) must not share it.
-        # Its spawn is the decider's own but for the credentials.
-        import os
-        import shutil
-        from unittest import mock
-
-        from league.live import decider as D
-        from league.swarm.preflight import PREFLIGHT_UID, _sandbox
-
-        self.assertNotEqual(PREFLIGHT_UID, 65534)
-        spawned = []
-
-        def popen(command, **kwargs):
-            spawned.append((command, kwargs))
-            return mock.Mock(pid=4242)
-
-        made = []
-        with mock.patch.object(D, "protect_house_process"), mock.patch("subprocess.Popen", popen):
-            for cls in (D.Decider, _sandbox()):
-                d = cls(timeout=1.0, max_errors=10 ** 9)
-                d.isolated, d.netns = True, True
-                d._spawn()
-                made.append(d._runtime)
-        for path in made:
-            for dirpath, _, _ in os.walk(path):
-                os.chmod(dirpath, 0o755)
-            shutil.rmtree(path)
-        (live_cmd, live), (pre_cmd, pre) = spawned
-        self.assertEqual((live["user"], live["group"]), (65534, 65534))
-        self.assertEqual((pre["user"], pre["group"], pre["extra_groups"]), (PREFLIGHT_UID, PREFLIGHT_UID, []))
-        self.assertEqual(live_cmd, pre_cmd)
-        same = lambda kw: {k: v for k, v in kw.items() if k not in ("user", "group", "cwd")}  # noqa: E731
-        self.assertEqual(same(live), same(pre))
 
     def test_roots_outside_the_run_are_not_decided_on(self):
         out = self.check(program('u = ctx.under.get("price")\nreturn []'), roots=["QQQ"])
@@ -295,6 +339,155 @@ class Preflight(unittest.TestCase):
         self.assertTrue(numpy.isnan(under.volume))
         self.assertEqual(decision_minutes(needs)[:2], [30, 45])
         self.assertEqual(Market(["SPY"], {**needs, "history": 0}).under("SPY", 0, 5).closes.shape, (0,))
+
+
+class SandboxSpawn(unittest.TestCase):
+    """The preflight's child is `league.live.decider.Decider`'s own spawn (#443's fail-closed start, namespace probe and
+    retry, env and limits), under `PREFLIGHT_UID` instead of 65534. Each scenario runs on both classes: a preflight that
+    copied or replaced the decider's spawn would part from it here the first time the decider changed."""
+
+    def setUp(self):
+        import tempfile
+
+        from league.live import decider as D
+        from league.swarm import preflight as PF
+
+        self.D, self.PF = D, PF
+        self.Sandbox = PF._sandbox()
+        self.tmp = tempfile.mkdtemp(prefix="preflight-spawn-")
+        self.addCleanup(self._clean)
+        self.made: list = []
+
+    def _clean(self):
+        import os
+        import shutil
+
+        for path in [*self.made, self.tmp]:
+            if path and os.path.isdir(path):
+                for dirpath, _, _ in os.walk(path):
+                    os.chmod(dirpath, 0o755)
+                shutil.rmtree(path)
+
+    def scenario(self, cls, *, isolated, allow=False, probes=(True,), windows=1):
+        """Spawn `windows` times (each after the retry window) with the namespace probe answering `probes` in turn:
+        what happened each time, the Popen calls and the probe's credentials."""
+        from unittest import mock
+
+        D = self.D
+        popens, probed, answers = [], [], iter(probes)
+
+        def popen(command, **kwargs):
+            popens.append((command, kwargs))
+            return mock.Mock(pid=4242)
+
+        def probe(timeout=10.0, *, credentials=None):
+            probed.append(dict(credentials or {}))
+            return next(answers)
+
+        outcomes = []
+        with mock.patch.object(D, "protect_house_process"), mock.patch("subprocess.Popen", popen), \
+                mock.patch.object(D, "_netns_available", probe), mock.patch("tempfile.tempdir", self.tmp), \
+                mock.patch.object(self.PF, "child_uids", return_value=(self.PF.PREFLIGHT_UID,) * 2):
+            d = cls(timeout=1.0, max_errors=10 ** 9, allow_unisolated=allow)
+            d.isolated = isolated
+            for n in range(windows):
+                if n:
+                    d._netns_retry_at = float("-inf")  # NETNS_RETRY_SECONDS have passed
+                try:
+                    d._spawn()
+                    outcomes.append("spawned")
+                except D.DeciderError:
+                    outcomes.append("refused")
+                self.made.append(d._runtime)
+                d.proc = None
+            # A second spawn inside the retry window never probes again after a failure.
+            if outcomes[-1] == "refused" and isolated:
+                before = len(probed)
+                try:
+                    d._spawn()
+                except D.DeciderError:
+                    outcomes.append("refused in the window")
+                self.assertEqual(len(probed), before)
+        return outcomes, popens, probed, d
+
+    def same_but_uid(self, live, pre):
+        (live_out, live_popen, live_probe, _), (pre_out, pre_popen, pre_probe, _) = live, pre
+        self.assertEqual(live_out, pre_out)
+        self.assertEqual(len(live_popen), len(pre_popen))
+        for (lc, lk), (pc, pk) in zip(live_popen, pre_popen):
+            self.assertEqual(lc, pc)
+            strip = lambda kw: {k: v for k, v in kw.items() if k not in ("user", "group", "cwd")}  # noqa: E731
+            self.assertEqual(strip(lk), strip(pk))
+        self.assertEqual(len(live_probe), len(pre_probe))
+
+    def test_the_spawn_is_the_deciders_own(self):
+        from unittest import mock
+
+        with mock.patch.object(self.D.Decider, "_spawn") as spawn:
+            self.Sandbox(timeout=1.0, max_errors=10 ** 9)._spawn(3.0)
+        spawn.assert_called_once_with(3.0)
+        self.assertTrue(issubclass(self.Sandbox, self.D.Decider))
+        own = {k for k in vars(self.Sandbox) if not k.startswith("__")}
+        self.assertEqual(own, {"uid", "_namespace", "_spawn"}, "the preflight overrides only its uid's seams")
+
+    def test_on_the_root_house_only_the_uid_differs(self):
+        PF = self.PF
+        live = self.scenario(self.D.Decider, isolated=True)
+        pre = self.scenario(self.Sandbox, isolated=True)
+        self.same_but_uid(live, pre)
+        (_, [(_, kw_live)], [probe_live], _), (_, [(command, kw_pre)], [probe_pre], _) = live, pre
+        self.assertEqual((kw_live["user"], kw_live["group"], kw_live["extra_groups"]), (65534, 65534, []))
+        self.assertEqual((kw_pre["user"], kw_pre["group"], kw_pre["extra_groups"]), (PF.PREFLIGHT_UID, PF.PREFLIGHT_UID, []))
+        self.assertEqual(probe_pre["user"], PF.PREFLIGHT_UID, "the namespace probe runs as the preflight's uid")
+        self.assertEqual(probe_live["user"], 65534)
+        self.assertEqual(command[:3], ["unshare", "--net", "--map-root-user"])
+        self.assertEqual(command[-2:], ["-m", "league.live.decider"], "the decider's child (its limit_child)")
+        self.assertEqual(kw_pre["env"]["OPENBLAS_NUM_THREADS"], "1")
+        self.assertNotIn("GATEWAY_TOKEN", kw_pre["env"])
+
+    def test_off_a_root_house_it_fails_closed(self):
+        live = self.scenario(self.D.Decider, isolated=False)
+        pre = self.scenario(self.Sandbox, isolated=False)
+        self.same_but_uid(live, pre)
+        self.assertEqual(pre[0], ["refused"])
+        self.assertEqual(pre[1], [], "no child")
+        # A test's explicit allowance, as for the decider: no credentials to change.
+        live = self.scenario(self.D.Decider, isolated=False, allow=True)
+        pre = self.scenario(self.Sandbox, isolated=False, allow=True)
+        self.same_but_uid(live, pre)
+        self.assertNotIn("user", pre[1][0][1])
+
+    def test_a_failed_namespace_probe_is_retried_as_the_deciders(self):
+        for probes in ((False, True), (False, False)):
+            live = self.scenario(self.D.Decider, isolated=True, probes=probes, windows=2)
+            pre = self.scenario(self.Sandbox, isolated=True, probes=probes, windows=2)
+            self.same_but_uid(live, pre)
+            self.assertEqual(pre[0][0], "refused", probes)
+            self.assertEqual(pre[0][1], "spawned" if probes[1] else "refused", probes)
+
+    def test_a_child_that_is_not_the_preflights_uid_is_killed(self):
+        # Should a later decider stop handing its credentials to _namespace, the child would run as 65534.
+        from unittest import mock
+
+        D = self.D
+        killed = []
+        with mock.patch.object(D, "protect_house_process"), mock.patch("subprocess.Popen", return_value=mock.Mock(pid=4242)), \
+                mock.patch.object(D, "_netns_available", return_value=True), mock.patch("tempfile.tempdir", self.tmp), \
+                mock.patch.object(self.PF, "child_uids", return_value=(65534, 65534)):
+            d = self.Sandbox(timeout=1.0, max_errors=10 ** 9)
+            d.isolated = True
+            d._kill = lambda: killed.append(d.proc)
+            with self.assertRaises(D.DeciderError):
+                d._spawn()
+            self.made.append(d._runtime)
+        self.assertEqual(len(killed), 1)
+
+    @unittest.skipUnless(Path("/proc/self/status").exists(), "no /proc")
+    def test_the_uid_is_read_back_from_proc(self):
+        import os
+
+        self.assertEqual(self.PF.child_uids(os.getpid()), (os.getuid(), os.geteuid()))
+        self.assertEqual(self.PF.child_uids(2 ** 22 + 12345), ())
 
 
 @unittest.skipUnless(HAVE, "numpy not installed")
