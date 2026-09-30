@@ -331,6 +331,13 @@ DEFAULTS: dict[str, Any] = {
         # The House live test (league/live/house_test.py): ON only by swarm.json {"live": {"house_test": true}}, and then
         # only with real money on, the grant, the paper proof and its private program verified. Off: exits only.
         "house_test": False,
+        # THE INCUBATOR (league/live/incubator.py; the owner's terms of Sept 29-30, 2026; the money table's
+        # `options_money.incubator`): one lot of real money for a family whose practice cohort passed its pre-registered
+        # first look, Train and drift and its review and audit; never evidence, never a promotion. ON only by swarm.json
+        # {"live": {"incubator": true}} (JSON true; any other value reads off and is alerted once), switched on outside a
+        # session after the ratification and the site's label. Off: its instances go to exits only and their working
+        # opens are cancelled within a minute; first looks are still recorded.
+        "incubator": False,
     },
     # THE PRACTICE LEAGUE'S FEEDBACK (Sept 29, 2026; league/swarm/practice.py): the practice record (shadow trades on live
     # quotes under the Gym's fill rules, the House's private observe.sqlite) as a RESEARCH signal, never evidence: the
@@ -391,6 +398,31 @@ DEFAULTS: dict[str, Any] = {
         "near_miss_checks": 6,
         "structured": True,             # a JSON-schema answer (structured outputs); false reads the JSON from the text
         "retry_truncated": True,        # one retry at medium effort after an answer cut off at max_tokens
+    },
+    # THE RESEARCH LIBRARY (Sept 29, 2026; league/swarm/library.py, the gateway's GET /v1/research/*): arXiv papers posted
+    # by the end of 2024, for the Claude researchers (the `literature` tool) and a retrieved block for the architect and
+    # the strategist. Off until `enabled` is true in swarm.json, after the gateway that carries it is deployed. The lines
+    # count calls a UTC day from the `swarm.research` events: `requests_day` every role together (the line the spend
+    # report names), `family_requests_day` a family, `cycle_calls` a research cycle; a call they refuse is a plain refusal.
+    # `min_seconds_left`: no call with less of the cycle left. `search_max` items a search, `search_abstract_chars` of each
+    # abstract and `read_chars` of text a read reach the model. `retrieval`: the architect's searches (`queries`, each
+    # `per_query` items, `items` kept, within `seconds`), kept `ttl_seconds`; `seed_queries` are searched four at a time in
+    # rotation until the strategist's accepted section names its own `library_queries`.
+    "research": {
+        "enabled": False,
+        "requests_day": 300,
+        "family_requests_day": 12,
+        "cycle_calls": 2,
+        "min_seconds_left": 47,
+        "search_max": 5,
+        "search_abstract_chars": 900,
+        "read_chars": 8000,
+        "timeout_seconds": 60,
+        "retrieval": {"queries": 4, "per_query": 4, "items": 8, "abstract_chars": 900, "seconds": 60, "ttl_seconds": 10800},
+        "seed_queries": ["variance risk premium index options", "zero days to expiration options",
+                         "overnight returns index options", "implied volatility term structure predictability",
+                         "option order flow informed trading", "dealer gamma hedging intraday",
+                         "weekly options volatility risk premium", "volatility skew return predictability"],
     },
     "heartbeat_seconds": 20,
     "stale_heartbeat_seconds": 240,     # the House restarts a swarm whose heartbeat is older than this

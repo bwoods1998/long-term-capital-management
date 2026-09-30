@@ -20,6 +20,9 @@
 //   GET             /v1/claude/request/<id>  what became of the House's Claude call <id> (its X-LTCM-Request)
 //   POST            /v1/typesafe/systemone  funded Jev judgments, with durable request identities
 //   POST            /v1/web/fetch            one public page's text for research, capped per day (lib/fetch.mjs)
+//   GET             /v1/research/search      the research library: arXiv papers posted before 2025 for plain keywords
+//   GET             /v1/research/read        one pinned version's metadata and a window of its text (lib/library.mjs)
+//   GET             /v1/research/health      the library's pace, lease and day's count (also `library` in /v1/health)
 //   POST            /v1/github/pr            a proposal becomes a branch and a pull request, never a push
 //   GET             /v1/github/pr/<n>        that pull request and its CI, so the VM can watch it
 //   GET             /v1/github/pr/<n>/failures  why CI refused it: failed runs and their annotations
@@ -58,6 +61,7 @@ import * as equity from './equity.mjs';
 import * as account from './account.mjs';
 import * as typesafe from './typesafe.mjs';
 import * as web from './fetch.mjs';
+import * as library from './library.mjs';
 import * as github from './github.mjs';
 
 export const VENUES = ['kalshi', 'alpaca', 'alpaca-paper'];
@@ -101,7 +105,7 @@ export function parseRoute(pathname) {
   return { venue: match[1], path };
 }
 
-export async function route(request, env, { gate, fetcher = fetch, now = Date.now, mailer = null, waitUntil = null } = {}) {
+export async function route(request, env, { gate, fetcher = fetch, now = Date.now, mailer = null, waitUntil = null, sleep } = {}) {
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, '') || '/';
 
@@ -220,6 +224,12 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
     // Research reads one public page; it moves no money, so the kill switch does not stop it.
     if (request.method !== 'POST') return fail('Method not allowed.', 405, { Allow: 'POST' });
     return web.webFetch(request, env, { gate, fetcher, now });
+  }
+
+  if (library.isLibraryPath(path)) {
+    // The research library (Sept 29, 2026): arXiv before 2025, paced to arXiv's terms; it moves no money, so the kill
+    // switch does not stop it.
+    return library.libraryRoute(request, env, { gate, fetcher, now, ...(sleep ? { sleep } : {}) });
   }
 
   if (path === '/v1/github/pr') {

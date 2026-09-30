@@ -20,6 +20,14 @@ The options-swarm run, Wave 5 (Sept 26, 2026), the interface agreed with Wave 4 
   parameters are what the instance runs; it is never real, never tuition, never a forward row, and an observe row never
   stands in for any other band's row.
 
+- `league.swarm.bands.incubator(root, family=f, version=n)` -> THE INCUBATOR's facts (release B, Oct 1, 2026;
+  `league/live/incubator.py`): one row, or [], when version `n` of the alive Gym-band family `f` passed Train and the
+  drift screen under the current evaluator and its review and audit passed. The row carries no program (the live path
+  trades the practice cohort's own snapshot, whose run sha must be the row's) and says `incubator: True`. An incubator
+  row admits only an incubator instance (`<family>@<version>:i`, real, tuition-flagged, one lot), and only an incubator
+  row admits one (`_entry_matches`); it is never a forward row, a band or a promotion. An unreadable store raises (no new
+  pin, no incubator open; exits unaffected).
+
 `MemoryFamilies` is the same API in memory, for tests and for a House without the swarm.
 """
 
@@ -35,7 +43,16 @@ from typing import Any, Iterable, Mapping, Sequence
 def _entry_matches(row: Mapping[str, Any] | None, expected: Mapping[str, Any], real: bool) -> bool:
     # The decider's run hash includes merged program defaults; the swarm's hash covers stored overrides. Compare
     # the exact immutable source and overrides actually loaded, so those distinct hash conventions cannot disagree.
-    if (not row or row.get("version") != expected.get("version") or row.get("code") != expected.get("code")
+    if not row or row.get("version") != expected.get("version"):
+        return False
+    if bool(row.get("incubator")) != bool(expected.get("incubator")):
+        return False  # an incubator row admits only an incubator instance, and only an incubator row admits one
+    if expected.get("incubator"):
+        # The incubator's facts carry no program: its program is the practice cohort's snapshot, whose run sha (the
+        # swarm's) must be the row's. Real opens only, one lot, tuition-flagged, never an observe or a banded row.
+        return (real and row.get("band") == "gym" and expected.get("tuition") is True and not expected.get("observe")
+                and not row.get("observe") and bool(row.get("run_sha")) and row.get("run_sha") == expected.get("run_sha"))
+    if (row.get("code") != expected.get("code")
             or (row.get("params") or {}) != (expected.get("params") or {})):
         return False
     if bool(row.get("observe")) != bool(expected.get("observe")):
@@ -78,6 +95,23 @@ class SwarmFamilies:
         from ..swarm import bands
 
         return [dict(row) for row in bands.observe(self.root, family=family, version=version)]
+
+    def incubator(self, family: str, version: int) -> list[dict]:
+        """The incubator's facts (`bands.incubator`): one row or []. Raises when the store cannot be read."""
+        from ..swarm import bands
+
+        return [dict(row) for row in bands.incubator(self.root, family=family, version=int(version))]
+
+    @contextmanager
+    def admit_incubator(self, expected: Mapping[str, Any]):
+        """An incubator open's admission (`league/live/incubator.py`): its facts row read again under the lock, matched to
+        the instance's identity (`_entry_matches`, real). An unreadable store admits nothing."""
+        with self.lock:
+            try:
+                row = next(iter(self.incubator(str(expected["family"]), int(expected.get("version") or 0))), None)
+            except Exception:  # noqa: BLE001 - fail-closed
+                row = None
+            yield _entry_matches(row, expected, True)
 
     def forward_rows(self, family: str) -> list[dict]:
         with self.lock:
@@ -162,8 +196,15 @@ class SwarmFamilies:
 class MemoryFamilies:
     """In memory (tests; a House whose swarm is off). Rows as `SwarmFamilies.read` returns them."""
 
-    def __init__(self, rows: Iterable[Mapping[str, Any]] = (), observed: Iterable[Mapping[str, Any]] = ()):
+    def __init__(self, rows: Iterable[Mapping[str, Any]] = (), observed: Iterable[Mapping[str, Any]] = (),
+                 incubated: Iterable[Mapping[str, Any]] = ()):
         self.rows = {str(r["family"]): dict(r) for r in rows}
+        #: The incubator's facts: {(family, version): row} (a row as `bands.incubator` gives it); `incubator_error` makes
+        #: every read raise (an unreadable store).
+        self.incubated: dict[tuple[str, int], dict] = {
+            (str(r["family"]), int(r["version"])): dict(r, incubator=True, observe=False, band="gym", holdout_passed=False,
+                                                         validation_passed=False) for r in incubated}
+        self.incubator_error: Exception | None = None
         #: The observe band: {family: {version: row}} (a row as `bands.observe` gives it; `tier` "validated" unless the
         #: row says "train"); `observe()` returns each family's highest version (its current one); a family popped from
         #: here is retired or promoted.
@@ -196,6 +237,25 @@ class MemoryFamilies:
                 row.setdefault("tier", "validated")
             out.sort(key=priority)  # as `bands.observe`: validated by validation t, then Train by Train score, then id
             return out
+
+    def incubator(self, family: str, version: int) -> list[dict]:
+        with self.lock:
+            return self._incubator(family, version)
+
+    def _incubator(self, family: str, version: int) -> list[dict]:
+        if self.incubator_error is not None:
+            raise self.incubator_error
+        row = self.incubated.get((str(family), int(version)))
+        return [copy.deepcopy(row)] if row is not None else []
+
+    @contextmanager
+    def admit_incubator(self, expected: Mapping[str, Any]):
+        with self.lock:
+            try:
+                row = next(iter(self._incubator(str(expected["family"]), int(expected.get("version") or 0))), None)
+            except Exception:  # noqa: BLE001
+                row = None
+            yield _entry_matches(row, expected, True)
 
     def forward_rows(self, family: str) -> list[dict]:
         with self.lock:

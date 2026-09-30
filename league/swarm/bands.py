@@ -50,6 +50,20 @@ research. `observe(root, family=f, version=n)` is the pinned version `n` of `f` 
 band and has a version in either tier, and `n` (when it is not the validated version) was not demoted ([] otherwise):
 what the live path admits a pinned instance's shadow opens against.
 
+THE INCUBATOR'S FACTS (release B, Oct 1, 2026; `league/live/incubator.py`): `incubator(root, family=f, version=n)` -> one
+row, or [], saying whether version `n` of `f` may trade the incubator route (one lot of real money after positive live
+practice; never evidence, never a promotion): `f` is alive and in the Gym band, `n` was not demoted (1.5x or drift),
+`n` carries a Train-and-drift pass (`state.train_passed[str(n)]`) made under the CURRENT research evaluator and Train
+objective (the store's `research_evaluator` and `train_objective`, both known: adoption clears alive families only, so a
+retired and revived family's stale mark never passes) and showing a positive 1.5x Train P&L and the drift screen's
+figures, the family is not on D2's route (no validated version that met the validation line: its tuition row comes
+first, even when `read` cannot be read), the gate's review AND audit passed on `n`'s run sha under the current review
+contract (`state.review`, or `state.incubator_reviews[sha]`), and the gate did not refuse, fail or demote that sha. The row
+carries no program: {family, version, run_sha, structure, roots, band "gym", incubator True, observe False,
+holdout_passed False, validation_passed False}; the live path trades the practice cohort's own snapshot and requires
+its run sha to be this row's. `read` never returns it. Unlike `read`, an unreadable store RAISES (`sqlite3.Error`): the
+live path then takes no new incubator pin and refuses incubator opens; exits are unaffected.
+
 `read(root, family=f)` and `observe(root, family=f)` read one family only (the live path's per-minute admissions). The
 Gym bundle's version is built once per `BUNDLE_TTL` seconds a process, not once per call (it reads and hashes every file
 of the Gym's code).
@@ -352,4 +366,67 @@ def observe(root: str | Path, *, family: str | None = None, version: int | None 
     return out
 
 
-__all__ = ["read", "observe", "priority", "practice_tier", "demoted", "LIVE_BANDS", "TIERS", "BUNDLE_TTL"]
+def _review_passed(review: Any, sha: str, contract: str) -> bool:
+    """The gate's review AND audit passed on `sha` under the current review contract (`read`'s own check)."""
+    if not isinstance(review, Mapping):
+        return False
+    audit = review.get("audit") if isinstance(review.get("audit"), Mapping) else {}
+    return (review.get("sha") == sha and review.get("verdict") == "pass" and audit.get("verdict") == "pass"
+            and review.get("contract_sha") == contract and audit.get("contract_sha") == contract)
+
+
+def incubator(root: str | Path, *, family: str, version: int) -> list[dict[str, Any]]:
+    """The incubator's facts for version `version` of `family` (the module docstring): one row, or []. Standard library
+    and read-only (`mode=ro`, a one-second timeout); RAISES `sqlite3.Error` when the store cannot be read (fail-closed:
+    no new pin, no incubator open)."""
+    path = Path(root) / DB_NAME
+    n = _count(version)
+    if not path.exists() or n is None or not family:
+        return []
+    db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1.0)
+    db.row_factory = sqlite3.Row
+    try:
+        fams = _families(db, str(family), gym_only=True)
+        if not fams:
+            return []
+        fam = fams[0]
+        kv = {str(r["key"]): loads(r["value"], None) for r in db.execute(
+            "SELECT key, value FROM kv WHERE key IN ('research_evaluator', 'train_objective')")}
+        row = db.execute("SELECT n, sha, params FROM versions WHERE family=? AND n=?", (fam["id"], n)).fetchone()
+    finally:
+        db.close()
+    if row is None or fam["band"] != "gym":
+        return []
+    state = loads(fam["state"], {}) or {}
+    if demoted(state, n):
+        return []
+    if (state.get("validation_line") or {}).get("passed") and state.get("validation_version"):
+        # D2's route (its tuition row: `:t` > `:i`), decided from the family's own state here, so a `read` that came back
+        # empty for a moment (a lock) never lets the incubator trade a family D2 owns.
+        return []
+    mark = (state.get("train_passed") or {}).get(str(n))
+    evaluator, objective = kv.get("research_evaluator"), kv.get("train_objective")
+    if (not isinstance(mark, Mapping) or evaluator is None or objective is None or mark.get("evaluator") != evaluator
+            or mark.get("objective") != objective):
+        return []  # no Train-and-drift pass under the current evaluator and Train objective (both known)
+    robust = _finite(mark.get("robust_pnl"))
+    if robust is None or robust <= 0 or not isinstance(mark.get("drift"), Mapping):
+        return []  # a belt: the mark itself shows a profit at 1.5x the half-spread and the drift screen's figures
+    from .gate import run_sha
+    from ..gym.review_contract import review_contract
+
+    params = loads(row["params"], {}) or {}
+    sha = run_sha({"sha": row["sha"], "params": params})
+    contract = review_contract()["sha256"]
+    reviews = state.get("incubator_reviews") if isinstance(state.get("incubator_reviews"), Mapping) else {}
+    if not (_review_passed(state.get("review"), sha, contract) or _review_passed(reviews.get(sha), sha, contract)):
+        return []
+    outcome = state.get("gate_outcome") or {}
+    if isinstance(outcome, Mapping) and outcome.get("sha") == sha and outcome.get("result") in ("refused", "failed", "demoted"):
+        return []
+    return [{"family": fam["id"], "version": n, "run_sha": sha, "structure": fam["structure"],
+             "roots": [str(r).upper() for r in loads(fam["roots"], []) or []], "band": "gym", "incubator": True,
+             "observe": False, "holdout_passed": False, "validation_passed": False}]
+
+
+__all__ = ["read", "observe", "incubator", "priority", "practice_tier", "demoted", "LIVE_BANDS", "TIERS", "BUNDLE_TTL"]

@@ -42,9 +42,28 @@
    lesson carries the verdict of its Train record (R11-1, `researcher.train_record`: DRIFT, STRESS, THIN or EXHAUSTED,
    tested findings), and only an untested family's (it never traded on Train) says it was a time limit, not a
    refutation. A validation that meets `researcher.extension_hold_checks` (6) of the line's checks sets the family's
-   extension hold (R11-4's swarm rule, `researcher.mark_extension`). Each counted verdict records the family's trials
-   (`validated_trials`), from which the idle rule counts, and restarts its dormant cycles. THE IDLE PASS (R4,
-   `idle_pass`) retires by the idle rule alone every `tournament.retire_every_seconds` (300) between the rounds.
+   extension hold (R11-4's swarm rule, `researcher.judge_extension`); one of the held version below them ends it. Each
+   counted verdict records the family's trials (`validated_trials`), from which the idle rule counts, and restarts its
+   dormant cycles. THE IDLE PASS (R4, `idle_pass`) retires by the idle rule alone every
+   `tournament.retire_every_seconds` (300) between the rounds.
+   THE COHORT KEEP (L1, release B, Sept 30, `incubator_keep`): a Gym family with an ACTIVE practice cohort (the House's
+   frozen program, `practice.cohort_status`) is spared the revision, evaluation and idle rules until its cohort completes,
+   fails or reaches its session window, so a family is still alive when its practice sample is complete and the
+   incubator takes its first look (families lived a median 1.71 hours on Sept 30). The cohort's record is read BEFORE
+   TODAY under its own evaluator, the incubator's own basis, realized only (the open mark starts below zero at every open,
+   the entry's fees and spread booked against it, and is left to the first look). Before the cohort meets the
+   incubator's sample (3 completed sessions, 10 program closes) it is kept whatever its record so far: the first look is
+   the one pre-registered P&L test, and a record judged sooner would drop a third or more of the cohorts whose first look
+   would pass. Once it meets the sample it is kept only while that record is not negative (program-closed P&L at least
+   0, and all closes at least 0). A cohort the House has not practised on `KEEP_UNPRACTICED` (2) sessions while it
+   practises others, or whose practice row began before it (the incubator never looks at it), is not kept. At most
+   `tournament.incubator_keep_max` (12; 0 turns it off) families: first those that meet the sample (by return on risk,
+   highest first), then those whose record so far is not negative, then the rest, each by the practice league's own
+   order (`bands.priority`). It never spares a family from the deflated-Sharpe rule, its researcher's or the
+   diagnostician's own retire, the population floor or the operator's gate hold. Research attention only: no trial
+   count, look, validation, gate, band or money rule reads it. The keep is saved at each read (`practice.KEEP_KV`), so a
+   kept family's researcher is not urged to retire it for being idle (the retire tool stays offered). The round records
+   the kept families and what each was spared in one private `swarm.status` event (`incubator_keep`).
 6. THE LEADERBOARD: one `swarm.tournament` event (the House mirrors it to its ledger) with every family's
    rank, share, validation summary, trials and band, and the totals.
 
@@ -53,14 +72,15 @@ Standard library only.
 
 from __future__ import annotations
 
+import math
 import random
 import time
 from typing import Any, Callable, Mapping
 
 from . import diagnostics, evidence, incubator, practice
 from .pool import GymJob, PoolError
-from .researcher import (IDLE_CAUSE, MAX_ROOTS, drift_verdict, held_at_gate, idle_cause, idle_dead, mark_extension, needs_roots,
-                         robust_at_stress, screen_best, train_record, validation_drift_failed, with_roots)
+from .researcher import (IDLE_CAUSE, MAX_ROOTS, drift_verdict, held_at_gate, idle_cause, idle_dead, judge_extension,
+                         needs_roots, robust_at_stress, screen_best, train_record, validation_drift_failed, with_roots)
 from .store import CLOSEABLE, SwarmStore
 
 UNIVERSE_ROTATION = ("SPY", "QQQ", "IWM", "SPXW")
@@ -69,6 +89,63 @@ INDEX = ("XSP", "SPXW")
 NOT_ROTATED = ("XSP",)
 #: `IDLE_CAUSE` (researcher.py, re-exported here) is the words of an UNTESTED idle-rule death; a tested one carries its
 #: verdict (R11-1, `researcher.idle_cause`).
+
+#: THE COHORT KEEP (L1, the module docstring): `tournament.incubator_keep_max`'s default (the key absent). A number reads
+#: as its whole part, at most `KEEP_CEILING`; 0 or below, or anything that is not a finite number (null, a boolean, a
+#: string), turns it off, as `retire_every_seconds` does.
+KEEP_MAX = 12
+KEEP_CEILING = 96
+#: The incubator's pre-registered practice sample (its money row's `min_sessions` and `min_trades`, the House's cohort
+#: target `observe_min_sessions` and `observe_min_trades`): before a cohort meets it, its record is not judged; once it
+#: does, it is kept only while that record is not negative, and first (a test holds these equal to the House's).
+KEEP_SAMPLE_SESSIONS = 3
+KEEP_SAMPLE_TRADES = 10
+#: A cohort the House has not practised on this many sessions (`practice.cohort_status` `unpracticed`: left out by
+#: `observe_max` or the roots cap, a Train cohort with `observe_train` off, or shed) is not kept, while the House
+#: practises another active cohort (with none practised, the House is down or `live.observe` is off: an outage keeps them).
+KEEP_UNPRACTICED = 2
+#: When the practice record cannot be read, the last keep read stands this long, never longer: a record that stays
+#: unreadable gives every family main's rules again (and one alert).
+KEEP_STALE_SECONDS = 3600.0
+
+
+def keep_order(rows: list[Mapping[str, Any]], alive: Mapping[str, Any] | set[str] | frozenset[str],
+               cap: int) -> list[dict[str, Any]]:
+    """THE COHORT KEEP's choice (pure): of the active cohorts `rows` (`practice.cohort_status`, each record before today),
+    each one whose family is in `alive` (the living Gym families), whose session window has not run out (`elapsed <
+    window`), that the House is practising (`unpracticed < KEEP_UNPRACTICED`, unless it practises no active cohort at
+    all: an outage) and that the incubator can look at
+    (`sessions` known), and that either has not met the incubator's sample (`KEEP_SAMPLE_SESSIONS` completed sessions and
+    `KEEP_SAMPLE_TRADES` program closes) or has a record that is not negative (`pnl_program >= 0` and `pnl_all >= 0`, to
+    the cent). Ordered: the sample met, by return on risk, highest first; then the rest whose record so far is not
+    negative; then the rest; each then by the practice league's order (`bands.priority`), then by version. One row a
+    family (its first), at most `cap`; each row gains `sample` and `negative`."""
+    from .bands import priority
+
+    # The House practising no active cohort at all (down, or `live.observe` off) is an outage, not a cohort left out: the
+    # unpractised rule waits for it (the window still bounds the keep).
+    practising = any(int(r.get("unpracticed") or 0) < KEEP_UNPRACTICED for r in rows)
+    ranked = []
+    for r in rows:
+        if r["family"] not in alive or r.get("sessions") is None:
+            continue
+        if int(r["elapsed"]) >= int(r["window"]) or (practising and int(r.get("unpracticed") or 0) >= KEEP_UNPRACTICED):
+            continue
+        negative = round(float(r["pnl_program"]), 2) < 0 or round(float(r["pnl_all"]), 2) < 0
+        sample = int(r["sessions"]) >= KEEP_SAMPLE_SESSIONS and int(r["closes_program"]) >= KEEP_SAMPLE_TRADES
+        if sample and negative:
+            continue
+        ror = r.get("return_on_risk") if sample else None
+        head = (0, ror is None, -float(ror or 0.0)) if sample else (1 + int(negative), False, 0.0)
+        ranked.append((head + tuple(priority(r)) + (int(r["version"]),), {**dict(r), "sample": sample, "negative": negative}))
+    ranked.sort(key=lambda x: x[0])
+    out: list[dict[str, Any]] = []
+    for _, row in ranked:
+        if len(out) >= max(0, int(cap)):
+            break
+        if all(row["family"] != o["family"] for o in out):
+            out.append(row)
+    return out
 
 
 class Tournament:
@@ -81,6 +158,15 @@ class Tournament:
         self.rng = rng or random.Random()
         self.idle_at = float("-inf")  # the last idle pass (`idle_due`); in memory: a restarted swarm runs one at once
         self.practice_bonus: dict[str, float] = {}  # the last allocation's practice bonus by family (`allocate`)
+        # THE COHORT KEEP (L1, `incubator_keep`), in memory: the last good read (when, the families, their rows), how the
+        # last read went ("ok", "stale", "failed" or "off"), and each kept family's spared rule since the round's event.
+        self.kept_at = float("-inf")
+        self.kept: frozenset[str] = frozenset()
+        self.kept_rows: list[dict[str, Any]] = []
+        self.keep_read = "off"
+        self.keep_error: str | None = None  # why the last read failed ("stale" or "failed")
+        self.keep_spared: dict[str, str] = {}
+        self._keep_told = False
 
     @property
     def cfg(self) -> Mapping[str, Any]:
@@ -246,9 +332,13 @@ class Tournament:
                              gate_ready=bool(line["passed"]) and not self.gate_spent(fid, n, state))
         out = {"version": n, "passed": line["passed"], "mean": mean, "t": t}
         # THE EXTENSION HOLD (R11-4's swarm rule): a version that met `researcher.extension_hold_checks` of the line's checks
-        # waits for its 2017-19 extension result, exempt from the dormancy clause, until the operator clears the flag.
-        if mark_extension(self.store, fid, n, line, self.settings, clock=self.clock):
+        # waits for its 2017-19 extension result, exempt from the dormancy clause, until the operator clears the flag. A
+        # validation of the held version below the checks ends its hold (`judge_extension`); the verdict row says which.
+        change = judge_extension(self.store, fid, n, line, self.settings, clock=self.clock)
+        if change == "held":
             out["extension_hold"] = True
+        elif change == "lapsed":
+            out["extension_lapsed"] = True
         return out
 
     def gate_spent(self, fid: str, n: int, state: Mapping[str, Any]) -> bool:
@@ -361,14 +451,17 @@ class Tournament:
     def retirements(self, fams: list[dict[str, Any]]) -> list[dict[str, Any]]:
         out = []
         current = self.identity()
+        kept = self.incubator_keep()  # read once, before any store transaction
         for fam in sorted(fams, key=lambda f: (f.get("weight") or 0.0)):
-            why = self._retire_if(fam["id"], lambda fam: self._why(fam, current))
+            why = self._retire_if(fam["id"], lambda fam: self._why(fam, current, kept))
             if why:
                 out.append({"family": fam["id"], "why": why})
         return out
 
-    def _why(self, fam: Mapping[str, Any], current: tuple[Any, Any]) -> str | None:
-        """The hourly round's reason to retire a family (its rules in order, the idle rule last), or None."""
+    def _why(self, fam: Mapping[str, Any], current: tuple[Any, Any], kept: frozenset[str] | None = None) -> str | None:
+        """The hourly round's reason to retire a family (its rules in order, the idle rule last), or None. A family THE
+        COHORT KEEP holds (`kept`, else `incubator_keep`) answers to the deflated-Sharpe rule alone; the rule it was
+        spared is recorded (`keep_spared`)."""
         if fam["band"] != "gym":
             return None  # a Candidate or better is judged by its forward record, not here
         state = fam.get("state") or {}
@@ -377,22 +470,108 @@ class Tournament:
             # The operator holds its validated version at the gate: no rule retires it until the hold is cleared (the
             # look it holds must still happen; `SwarmStore.retire_gym` refuses it too).
             return None
-        why = None
+        clock: tuple[str, str] | None = None
         if int(fam.get("since_val_revisions") or 0) >= int(self.cfg.get("retire_revisions", 30)):
-            why = f"no validation improvement in {fam['since_val_revisions']} revisions"
+            clock = ("revisions", f"no validation improvement in {fam['since_val_revisions']} revisions")
         elif int(fam.get("since_val_trials") or 0) >= int(self.cfg.get("retire_evaluations", 2000)):
-            why = f"no validation improvement in {fam['since_val_trials']} Gym evaluations"
-        else:
-            line = (fam.get("state") or {}).get("validation_line") or {}
-            dsr = (line.get("numbers") or {}).get("dsr")
-            if int(fam.get("validations") or 0) >= int(self.cfg.get("retire_min_validations", 6)) and dsr is not None \
-                    and dsr < float(self.cfg.get("retire_dsr_below", 0.05)):
-                # No figure in the reason: it becomes a graveyard lesson researchers read (D2a).
-                why = "its trial-adjusted evidence fell below the line (the deflated Sharpe probability)"
+            clock = ("evaluations", f"no validation improvement in {fam['since_val_trials']} Gym evaluations")
+        dsr = None
+        line = (fam.get("state") or {}).get("validation_line") or {}
+        figure = (line.get("numbers") or {}).get("dsr")
+        if int(fam.get("validations") or 0) >= int(self.cfg.get("retire_min_validations", 6)) and figure is not None \
+                and figure < float(self.cfg.get("retire_dsr_below", 0.05)):
+            # No figure in the reason: it becomes a graveyard lesson researchers read (D2a).
+            dsr = "its trial-adjusted evidence fell below the line (the deflated Sharpe probability)"
+        if fam["id"] in (self.incubator_keep() if kept is None else kept):
+            # THE COHORT KEEP (L1): its practice cohort is still running and not losing. Evidence still retires it.
+            if dsr is None:
+                spared = clock[0] if clock else ("idle" if idle_dead(fam, self.settings, current=current) else None)
+                if spared:
+                    self.keep_spared[fam["id"]] = spared
+            return dsr
+        why = clock[1] if clock else dsr
         if not why:
             # The fallback for a dead family that never called retire (R3): Train figures only in the reason.
-            why = self.idle_why(fam, current=current)
+            why = self.idle_why(fam, current=current, kept=frozenset())
         return why
+
+    # ------------------------------------------------------------------ 5a. the cohort keep (L1)
+    def keep_max(self) -> int:
+        """`tournament.incubator_keep_max`: absent, `KEEP_MAX` (12); a number, its whole part, at most `KEEP_CEILING`; 0 or
+        below, or anything that is not a finite number (null, a boolean, a string), 0: THE COHORT KEEP off."""
+        raw = self.cfg.get("incubator_keep_max", KEEP_MAX)
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not math.isfinite(raw):
+            return 0
+        return max(0, min(KEEP_CEILING, int(raw)))
+
+    def incubator_keep(self) -> frozenset[str]:
+        """THE COHORT KEEP (L1, the module docstring): the living Gym families the revision, evaluation and idle rules
+        spare now (`keep_order` over `practice.cohort_status`, at most `keep_max`). Reads the practice record read-only and
+        saves what it keeps (`practice.KEEP_KV`, for the researchers' status); never raises. When the practice record or
+        the swarm's families cannot be read, the last good keep stands for `KEEP_STALE_SECONDS`, then none does."""
+        cap = self.keep_max()
+        now = self.clock()
+        if cap <= 0:
+            self._keep_set(now, [], "off")
+            return self.kept
+        rows, chosen, error = None, None, None
+        try:
+            rows = practice.cohort_status(getattr(self.store, "root", None), today=practice.session_day(now))
+        except Exception as exc:  # noqa: BLE001 - a retirement pass never fails on the keep
+            error = f"the practice record (observe.sqlite) could not be read ({type(exc).__name__})"
+        if rows is None:
+            error = error or "the practice record (observe.sqlite) could not be read"
+        else:
+            try:
+                alive = {f["id"] for f in self.store.families(alive=True) if f.get("band") == "gym"} if rows else set()
+                chosen = keep_order(rows, alive, cap)
+            except Exception as exc:  # noqa: BLE001
+                error = f"the swarm's families could not be read or ordered ({type(exc).__name__})"
+        if chosen is None:
+            self.keep_error = error
+            if now - self.kept_at <= KEEP_STALE_SECONDS:
+                self.keep_read = "stale"
+                return self.kept
+            self._keep_set(now, [], "failed")
+            return self.kept
+        self.kept_at, self.keep_error = now, None
+        self._keep_set(now, chosen, "ok")
+        return self.kept
+
+    def _keep_set(self, now: float, chosen: list[dict[str, Any]], read: str) -> None:
+        """The keep in memory, and saved for the researchers (`practice.KEEP_KV`; a store error only loses the save)."""
+        self.kept, self.kept_rows, self.keep_read = frozenset(r["family"] for r in chosen), list(chosen), read
+        try:
+            self.store.put(practice.KEEP_KV, {"at": now, "families": {r["family"]: int(r["version"]) for r in chosen}})
+        except Exception:  # noqa: BLE001 - the researchers' status line is a courtesy; the keep itself stands
+            pass
+
+    def keep_event(self) -> dict[str, Any] | None:
+        """The round's one private `swarm.status` event of THE COHORT KEEP (action `incubator_keep`): the kept families in
+        order (version, whether the sample is met, whether the record so far is negative, completed sessions, program
+        closes before today), the rule each family it spared since the last event would have retired it by (`spared`),
+        the cap, how the record read and, when it did not, why (`error`). None when the keep is off, or keeps and spares
+        nothing and read well. An unreadable record alerts once until it reads again."""
+        spared, self.keep_spared = dict(sorted(self.keep_spared.items())), {}
+        if self.keep_read == "ok":
+            self._keep_told = False
+        if self.keep_read == "off" or (self.keep_read == "ok" and not self.kept_rows and not spared):
+            return None
+        alive = {f["id"] for f in self.store.families(alive=True)} if self.kept_rows else set()
+        payload: dict[str, Any] = {
+            "action": "incubator_keep", "cap": self.keep_max(), "read": self.keep_read,
+            "kept": [{"family": r["family"], "version": r["version"], "sample": r["sample"], "negative": r["negative"],
+                      "sessions": r["sessions"], "closes": r["closes_program"]}
+                     for r in self.kept_rows if r["family"] in alive],
+            "spared": spared}
+        if self.keep_read != "ok" and self.keep_error:
+            payload["error"] = self.keep_error
+        if self.keep_read == "failed" and not self._keep_told:
+            self._keep_told = True
+            payload.update(alert=True, text=f"{self.keep_error or 'the cohort keep could not be read'}: the cohort keep "
+                                            "(L1) spares no family until it can")
+        self.store.event("swarm.status", None, payload)
+        return payload
 
     def identity(self) -> tuple[Any, Any]:
         """(the Gym image, its engine bundle) the pool runs now, as `validate` reads them; what could not be read is None
@@ -406,15 +585,20 @@ class Tournament:
             pass
         return image, bundle
 
-    def idle_why(self, fam: Mapping[str, Any], *, current: tuple[Any, Any] | None = None) -> str | None:
+    def idle_why(self, fam: Mapping[str, Any], *, current: tuple[Any, Any] | None = None,
+                 kept: frozenset[str] | None = None) -> str | None:
         """THE IDLE RULE's reason to retire a living Gym family (`researcher.idle_dead`), or None: never outside the Gym
         band nor while the operator holds its validated version at the gate (`held_at_gate`); `idle_dead` itself exempts
         a version at the gate, a look out, a passing validation owed again on the Gym running now (`current`, R4) and,
-        from its dormancy clause, a best that awaits validation."""
+        from its dormancy clause, a best that awaits validation. Never for a family THE COHORT KEEP holds (`kept`, else
+        `incubator_keep`, read only for a dead family); the spared rule is recorded (`keep_spared`)."""
         if fam.get("band") != "gym" or fam.get("retired_at") or held_at_gate(fam):
             return None
         dead = idle_dead(fam, self.settings, current=current if current is not None else self.identity())
         if not dead:
+            return None
+        if fam["id"] in (self.incubator_keep() if kept is None else kept):
+            self.keep_spared[fam["id"]] = "idle"
             return None
         # THE IDLE RULE'S VERDICT (R11-1): the death is filed under what its Train record shows; only an untested family
         # (it never traded on Train) is "a time limit, not a finding". Train figures only (D2).
@@ -461,12 +645,13 @@ class Tournament:
         model call and no Gym job."""
         self.idle_at = self.clock()
         current = self.identity()
+        kept = self.incubator_keep()  # THE COHORT KEEP, read once, before any store transaction
         retired, skipped = [], []
         for fam in sorted(self.store.families(alive=True), key=lambda f: (f.get("weight") or 0.0, f["id"])):
             if busy is not None and busy(fam["id"]):
                 skipped.append(fam["id"])
                 continue
-            why = self._retire_if(fam["id"], lambda fam: self.idle_why(fam, current=current))
+            why = self._retire_if(fam["id"], lambda fam: self.idle_why(fam, current=current, kept=kept))
             if why:
                 retired.append({"family": fam["id"], "why": why})
         return {"retired": retired, "busy": len(skipped), "alive": len(self.store.families(alive=True))}
@@ -492,6 +677,7 @@ class Tournament:
         fams = self.store.families(alive=True)
         self.allocate(fams)  # the shares retirements rank by (the least favoured go first)
         retired = self.retirements(self.store.families(alive=True))
+        self.keep_event()  # THE COHORT KEEP's one private event a round
         born = self.forks(self.store.families(alive=True))
         fams = self.store.families(alive=True)
         self.allocate(fams)  # again, so a newborn fork has its share at once
@@ -546,4 +732,5 @@ def json_safe(value: Any) -> str:
         return str(value)[:400]
 
 
-__all__ = ["Tournament", "IDLE_CAUSE"]
+__all__ = ["Tournament", "IDLE_CAUSE", "keep_order", "KEEP_MAX", "KEEP_CEILING", "KEEP_SAMPLE_SESSIONS", "KEEP_SAMPLE_TRADES",
+           "KEEP_UNPRACTICED", "KEEP_STALE_SECONDS"]
