@@ -1803,6 +1803,13 @@ def judge_verdict(lane: Lane, bottleneck: Bottleneck, trees: Mapping[str, Mappin
                                        "the held-out split cannot show a fall (a judge defect, not the candidate's)"))
         elif b > (1.0 - bottleneck.judge_effect) * a:
             reasons.append(("heldout", f"{primary} {a} -> {b}, less than the predeclared {bottleneck.judge_effect:.0%} fall"))
+        # The motivating failures must fall too, wherever the baseline has any: a change written from the public
+        # held-out classes alone, which leaves the failures that captured the bottleneck, is not the improvement.
+        a = (metrics(base, "dev") or {}).get(primary)
+        b = (metrics(judged, "dev") or {}).get(primary)
+        if isinstance(a, (int, float)) and isinstance(b, (int, float)) and a > 0 and b > (1.0 - bottleneck.judge_effect) * a:
+            reasons.append(("dev", f"{primary} {a} -> {b} on the dev split (the motivating failures), less than the "
+                                   f"predeclared {bottleneck.judge_effect:.0%} fall"))
     public = [text if split != "heldout" else "held-out split: not passed (its cases and figures stay private)"
               for split, text in reasons]
     return {"passed": not reasons, "reasons": [f"{split}: {text}" if split != "all" else text for split, text in reasons],

@@ -462,6 +462,10 @@ class Decisions(unittest.TestCase):
         leaky = lanes.judge_verdict(self.lane, self.bottleneck, self.trees(base, self.research(20, 5.6),
                                                                            closed=self.research(25, 5.6)))
         self.assertIn("gate closed", " ".join(leaky["reasons"]), "a closed gate must be the baseline exactly")
+        heldout_only = self.trees(base, self.research(20, 5.6))
+        heldout_only["open"]["splits"]["dev"]["metrics"] = dict(base)
+        tuned = lanes.judge_verdict(self.lane, self.bottleneck, heldout_only)
+        self.assertIn("dev split", " ".join(tuned["public_reasons"]), "the motivating failures must fall too")
         floor = lanes.judge_verdict(self.lane, self.bottleneck, self.trees(self.research(3, 0.1), self.research(0, 1.0)))
         self.assertIn("floor", " ".join(floor["reasons"]))
         self.assertTrue(all("heldout" not in r or "private" in r for r in floor["public_reasons"]))
@@ -679,7 +683,8 @@ class LaneCycle(unittest.TestCase):
                 wasted = 2600.0 if closed_wasted is None or tree.name == "base" else closed_wasted
                 screen = 0.1
             else:
-                wasted, screen = head_wasted, 3.0
+                # a held-out figure the author must never see, distinct from the dev one
+                wasted, screen = head_wasted + (7.0 if split == "heldout" else 0.0), 3.0
             body = {"protocol": "research-workflow-v2", "split": split, "provider_calls": 0, "gym_seconds_wasted": wasted,
                     "broken_reaching_gym": wasted / 130.0, "broken_cases": 31, "cases": 45, "false_refusals": 0,
                     "screen_seconds": screen, "gate": gate_state, "nonce": kwargs["stdin"].decode().strip(),
@@ -704,7 +709,8 @@ class LaneCycle(unittest.TestCase):
         self.assertEqual(self.lab.worklist.get(self.key).state, "revising")
         note = self.lab.worklist.get(self.key).note
         self.assertIn("private", note)
-        self.assertNotIn("2500", note, "held-out figures never reach the author")
+        self.assertNotIn("2507", note, "held-out figures never reach the author")
+        self.assertIn("2500", note, "dev figures are the author's to see")
         held = receipt["trees"]["open"]["splits"]["heldout"]
         self.assertNotIn("stdout", held["benchmark"])
         self.assertNotIn("missed", held["metrics"], "no per-class detail of the held-out split is kept")
