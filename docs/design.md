@@ -297,6 +297,25 @@ diagnostician.
 
 - **Every Gym evaluation is a trial**, counted per lineage (forks inherit their parent's count and
   holdout looks) and in total on the ledger.
+- **Family cards** (release B, league/swarm/cards.py). Every family the architect bears carries an immutable card: its
+  economic hypothesis, a mechanism class from a small vocabulary drawn from the graveyard, the inputs it conditions on,
+  its holding horizon, its cost hurdle (spread and fees as a share of maximum loss), the naive comparison it must beat,
+  the PARAMS switch that turns its signal into that comparison, and a pre-declared falsification. A proposal without a
+  complete card is not born (`architect.require_card`, on by default); the refusal names each field. Researchers read
+  their card in every brief. A card falls in a cell (class, inputs, structure family, holding); a proposal in a cell
+  holding a graveyard row killed by a mechanism verdict (the operator's tests, refuted, self-refuted, diagnosed,
+  trial-adjusted, drift, stress, a failed mechanism test) is born only with a rebirth that names one of those rows, the
+  mechanism-level change and the new evidence, at most two rebirths a row; otherwise it is refused and the row's lesson
+  goes back to the architect (`architect.card_rebirth`, "refuse" by default). Rows from before cards are read into
+  cells from their text. The check is deterministic, and a card never changes lineage accounting except to join a
+  rebirth to the lineage of the row it names on the same slice.
+- **The mechanism test** (release B, league/swarm/mechanism.py). Before a carded family's first broad Train replay, its
+  program runs with the signal on and with its card's ablation over a pre-registered sample (one window of about 25
+  sessions a Train year, at most five), through the Gym's existing batch API. It passes only when the signal's
+  per-entry-day return on maximum loss beats the comparison's by t of at least 0.5, and the bound rises by 0.5 for each
+  version of the family that already failed. Every arm is a trial of the lineage; the verdict is recorded on the card.
+  Broad replay and sweeps wait for a pass; three failed versions retire the family with the MECHANISM verdict, which the
+  rebirth refusal then reads. A pass made on another Gym image or engine is asked for again.
 - **The validation line** (a family's best program): at least 50 trades on at least 25 distinct
   days in Validation; mean P&L per dollar of maximum loss above zero after fees with a one-sided t of
   at least 2; a deflated Sharpe probability of at least 0.95 on the traded-day Sharpe, against the

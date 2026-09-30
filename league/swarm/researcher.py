@@ -106,6 +106,18 @@ reads) and the five-year run is skipped; the same program asked again is answere
 fails or times out says nothing and the full run follows. `gym_run` with full=true skips it (a program that trades only in
 other years or on other roots); sweeps are never probed.
 
+THE MECHANISM TEST (release B, league/swarm/mechanism.py). A family born with a card (league/swarm/cards.py) that has not
+passed its mechanism test takes it before its next broad Train run (`_mechanism_test`): its program with the signal on and
+with its card's ablation (PARAMS[param] = off) over a pre-registered sample of Train windows, unsplit, every arm a trial
+recorded as a `window="mechanism"` row. Broad replay proceeds only on a pass (the signal's entries beat the comparison's
+by t >= `mechanism.bound`, which rises with each failed version); gym_sweep waits for a pass. A program without the card's
+switch, with it of another type, never reading it, or run with the signal off is refused before any version
+(`_mechanism_plan`). The verdict goes on the card (`card_evidence`), in the state (`mechanism`) and in the notebook; the
+same test asked again is answered from it, and a pass made on another Gym is asked for again. `max_failures` failed
+versions retire the family with the MECHANISM verdict. The brief shows the card; the status, the test's state. Families
+born before cards run as before. Cycle events carry the test's `box_seconds` and a broad run's `gym_box_seconds`: the
+Gym time each costs.
+
 ROOTS. A family holds one to five roots of the admitted list (`gym.roots`). A program whose NEEDS names other
 admitted roots changes the family's roots (a Gym family only); its validation and holdout runs use the version's own
 NEEDS roots (`needs_roots`).
@@ -166,7 +178,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from . import diagnostics, evidence, inputs, public
+from . import cards, diagnostics, evidence, inputs, mechanism, public
 from . import settings as settings_mod
 from .claude_research import ClaudeSession, ClaudeTurn, anthropic_tools, sail_items, tool_calls
 from .pool import ROBUSTNESS_PRIORITY, GymJob, PoolError
@@ -1163,6 +1175,9 @@ class Researcher:
         if lessons:
             lines.append("Lessons from the graveyard when you were born:")
             lines += [f"- {diagnostics.scrub(x)}" for x in lessons[:3]]
+        card = cards.brief_text(cards.card_of(self.store, str(fam["id"])))  # "" for a family born before cards
+        if card:
+            lines.append(card)
         return "\n".join(lines)
 
     def status(self, fam: Mapping[str, Any]) -> str:
@@ -1189,6 +1204,9 @@ class Researcher:
         drift = self.drift_text(fam)
         if drift:
             parts.append(drift)
+        tested = self.mechanism_text(fam)
+        if tested:
+            parts.append(tested)
         parts.append(f"The validation line requires at least {evidence.MIN_TRADES} trades on at least {evidence.MIN_DAYS} days, "
                      "daily t >= 2, a deflated Sharpe probability >= 0.95 on traded days, 3 of 4 quarters positive, and positive "
                      "P&L at 1.5x spread. Seek mechanisms that produce enough independent opportunities to measure; never force "
@@ -1686,6 +1704,11 @@ class Researcher:
         refused, roots, change = self._admit(fam, code, out)
         if refused is not None:
             return self._refusal(out, refused)
+        # THE MECHANISM TEST (release B): a carded family that has not passed takes it before this broad run; a program that
+        # cannot take it (no ablation switch, ...) is refused here, before any version.
+        plan = self._mechanism_plan(fam, code, params, stress)
+        if plan is not None and plan.get("refused"):
+            return self._refusal(out, plan["refused"])
         # NO DUPLICATE RUNS: the evaluation this run would be, on the roots it would run on.
         key = self.eval_key(code, params, stress=stress, window="train", roots=roots if change else fam["roots"])
         stored = None
@@ -1702,6 +1725,13 @@ class Researcher:
                 version = self.store.add_version(fam["id"], code, params, author=author, note=str(args.get("why") or "")[:300])
         if stored is not None:
             return self._stored_run(fam, stored, out, code=code, stress=stress)
+        passed_test = None
+        if plan is not None:
+            tested = self._mechanism_test(fam, version["n"], code, params, plan, out)
+            if tested is not None:
+                return tested  # the mechanism test did not pass: no broad Train run
+            passed_test = dict(out.get("mechanism_test") or {})
+            fam = self.store.family(fam["id"]) or fam
         probed = self._probe(fam, version["n"], code, params, stress=stress, full=full_run(args), out=out)
         if probed is not None:
             return probed  # THE ZERO-TRADE PROBE: no trade in the probe year, so the full Train run was skipped
@@ -1726,6 +1756,9 @@ class Researcher:
             return {"status": "gym_error", "version": version["n"], "error": str(exc)[:500],
                     "hint": "the Gym could not run it now; your version is saved: rerun it next cycle"}
         out["gym_seconds"] = round(self.clock() - began, 2)
+        batch = getattr(job, "batch", None)  # the box time this run took (its batch's wall over its programs): the cost measure
+        if isinstance(batch, Mapping) and batch.get("wall_seconds") is not None:
+            out["gym_box_seconds"] = round(float(batch["wall_seconds"]) / max(1, int(batch.get("programs_in_batch") or 1)), 2)
         years = float((result.get("summary") or {}).get("days") or 0) / 252.0 * max(1, len(fam["roots"]))
         recorded, robust = self._with_score(result, stress)  # the run's row keeps its score (`submit` reads it)
         run = self.store.add_run(fam["id"], version["n"], recorded, window="train", stress=stress, purpose="train",
@@ -1739,6 +1772,8 @@ class Researcher:
         view["run_id"] = run["run_id"]
         score = self._scored(fam, version["n"], run["run_id"], robust, view, out, code=code, params=params, span=span_of(result))
         out["score"] = None if score is None else round(score, 3)
+        if passed_test is not None:
+            view["mechanism_test"] = {k: passed_test.get(k) for k in ("verdict", "t", "method", "stored") if k in passed_test}
         return view
 
     # ------------------------------------------------------------------ THE ZERO-TRADE PROBE (R11-6)
@@ -1835,6 +1870,268 @@ class Researcher:
         out["probe"] = {"year": year, "root": root, "trades": 0, "status": result.get("status"), "seconds": seconds,
                         "skipped_full": True}
         return self._probe_view(run, n, year, root)
+
+    # ------------------------------------------------------------------ THE MECHANISM TEST (release B)
+    def mechanism_record(self, fam: Mapping[str, Any]) -> dict[str, Any]:
+        """The family's test record (its state's `mechanism`): {passed: {...} or absent, failed: [versions], untestable:
+        [versions]}."""
+        rec = (fam.get("state") or {}).get(mechanism.STATE_KEY)
+        return dict(rec) if isinstance(rec, Mapping) else {}
+
+    def mechanism_passed(self, fam: Mapping[str, Any]) -> bool:
+        """Has the family passed its mechanism test on the Gym running now? A pass is Gym evidence: one made on another
+        image or engine is asked for again (never carried across evaluators)."""
+        passed = self.mechanism_record(fam).get("passed")
+        if not isinstance(passed, Mapping):
+            return False
+        image, bundle = self._gym_identity()
+        return not (image and bundle) or (passed.get("image"), passed.get("bundle")) == (str(image), str(bundle))
+
+    def _mechanism_plan(self, fam: Mapping[str, Any], code: str, params: Mapping[str, Any], stress: float) -> dict[str, Any] | None:
+        """None when no mechanism test comes before this run: the test is off (`researcher.mechanism_test.enabled`), a
+        1.5x run, a family outside the Gym band, one born before cards, or one that passed. Else the plan ({entry, param,
+        off, off_params, cfg}), or {"refused": answer} when the program cannot take the test (its ablation switch is
+        missing, of another type, never read, or this run already has the signal off): no version, job or trial."""
+        cfg = mechanism.config(self.settings)
+        if not cfg["enabled"] or float(stress) != 1.0:
+            return None
+        fam = self.store.family(str(fam["id"])) or fam  # a pass earlier in this cycle counts
+        if fam.get("band") != "gym":
+            return None
+        entry = cards.card_of(self.store, str(fam["id"]))
+        if entry is None or self.mechanism_passed(fam):
+            return None
+        ablation = entry["card"].get("ablation") or cards.DEFAULT_ABLATION
+        param, off = str(ablation["param"]), ablation["off"]
+        hint = (f"declare {param!r} in PARAMS (on by default) and read it in decide: with {param}={off!r} the program must trade "
+                "your card's comparison (skip only the signal's condition); no version, job or trial was created")
+        defaults = params_of(code)
+        if defaults is None or param not in defaults:
+            return {"refused": {"status": "refused", "reason": f"your card's ablation switch {param!r} is not in PARAMS, so the "
+                                                               "mechanism test cannot run before broad replay", "hint": hint}}
+        base = defaults[param]
+        if isinstance(base, bool):
+            off = bool(off)
+        elif isinstance(base, (int, float)) and isinstance(off, bool):
+            off = int(off)
+        why = check_params(defaults, {param: off})
+        if why:
+            return {"refused": {"status": "refused", "reason": f"your card's ablation {param}={off!r}: {why}", "hint": hint}}
+        merged = {**defaults, **dict(params or {})}
+        if json.dumps(merged.get(param), default=str) == json.dumps(off, default=str):
+            return {"refused": {"status": "refused", "reason": f"this run has the signal off ({param}={off!r}): the mechanism test "
+                                                               "compares your program with the signal on against that",
+                                "hint": f"run it with {param} on; the test runs the ablation itself"}}
+        off_params = {**dict(params or {}), param: off}
+        from ..gym.experiment import check_experiment
+        from ..gym.safety import CodeRefused
+        try:
+            check_experiment(code, off_params)
+        except (CodeRefused, ValueError, TypeError) as exc:
+            return {"refused": {"status": "refused", "reason": f"the ablation {param}={off!r} cannot run: {str(exc)[:400]}",
+                                "hint": hint}}
+        return {"entry": entry, "param": param, "off": off, "off_params": off_params, "cfg": cfg}
+
+    def _stored_mechanism(self, fid: str, key: str) -> dict[str, Any] | None:
+        """A recorded mechanism-test arm of this evaluation (its key), in full, or None."""
+        for row in self.store._all("SELECT run_id, summary FROM runs WHERE family=? AND window='mechanism' AND summary LIKE ? "
+                                   "ORDER BY at DESC, rowid DESC", (fid, f'%"eval_key":"{key}"%')):
+            if (json.loads(row["summary"] or "{}") or {}).get("eval_key") == key:
+                full = self.store.run_result(row["run_id"])
+                if full is not None:
+                    return {**full, "run_id": row["run_id"]}
+        return None
+
+    def _mechanism_test(self, fam: Mapping[str, Any], n: int, code: str, params: Mapping[str, Any], plan: Mapping[str, Any],
+                        out: dict[str, Any]) -> dict[str, Any] | None:
+        """THE MECHANISM TEST (league/swarm/mechanism.py) before this version's broad Train run: None when it passed (the
+        broad run follows), else the answer (a failed, thin, invalid or untestable verdict; a Gym error; a retirement).
+        Every arm the Gym evaluates is a trial, recorded as it lands (late too); an arm already recorded is read back, and
+        the same test asked again is answered from its verdict."""
+        fid, cfg, entry = str(fam["id"]), plan["cfg"], plan["entry"]
+        windows = mechanism.sample_windows(self.train_first_year(), settings_mod.TRAIN_END.year, max_windows=cfg["max_windows"],
+                                           window_days=cfg["window_days"])
+        wid = mechanism.windows_id(windows)
+        roots = tuple(fam["roots"])
+        arms = {"on": dict(params or {}), "off": dict(plan["off_params"])}
+        ablation = {"param": plan["param"], "off": plan["off"]}
+        test_key = hashlib.sha256(json.dumps({arm: self.eval_key(code, p, stress=1.0, window=f"mechanism:{wid}", roots=roots)
+                                              for arm, p in arms.items()}, sort_keys=True).encode()).hexdigest()[:32]
+        for row in reversed(cards.evidence(self.store, fid, kind="mechanism_test")):
+            if row["detail"].get("test_key") == test_key and row["verdict"] in mechanism.VERDICTS:
+                out["stored"] = out.get("stored", 0) + 1
+                out["mechanism_test"] = {"verdict": row["verdict"], "stored": True}
+                if row["verdict"] == "passed":
+                    self._mechanism_state(fid, n, "passed", row["detail"], test_key)
+                    return None
+                return mechanism.view(row["detail"], version=n, windows=windows, ablation=ablation,
+                                      arms=row["detail"].get("arms") or {}, stored=True)
+        image, bundle = self._gym_identity()
+        results: dict[tuple[str, str], dict[str, Any]] = {}
+        jobs: list[tuple[str, str, str, str, GymJob]] = []
+        for arm, p in arms.items():
+            for start, end in windows:
+                key = self.eval_key(code, p, stress=1.0, window=f"mechanism:{start}:{end}", roots=roots)
+                stored = self._stored_mechanism(fid, key) if self.reuse else None
+                if stored is not None:
+                    results[(arm, start)] = stored
+                    continue
+                jobs.append((arm, start, end, key, GymJob(family=fid, version=n, code=code, params=dict(p), window="train",
+                                                          roots=roots, stress=1.0, purpose="mechanism", split=1, start=start,
+                                                          end=end, priority=float(fam.get("weight") or 0.0))))
+        run_ids: list[str] = []
+
+        def record(arm: str, start: str, end: str, key: str, result: Mapping[str, Any]) -> dict[str, Any]:
+            days = float((result.get("summary") or {}).get("days") or 0)
+            summary = {**dict(result.get("summary") or {}), "arm": arm, "mechanism_window": [start, end],
+                       "mechanism_test": test_key, "ablation": ablation}
+            run = self.store.add_run(fid, n, {**result, "summary": summary}, window="mechanism", stress=1.0, purpose="mechanism",
+                                     program_years=days / 252.0 * max(1, len(roots)), key=key)
+            self._restart_dormancy(fid, result)
+            return run
+
+        began = self.clock()
+        failed: list[str] = []
+        box_seconds = 0.0
+        if jobs:
+            out["gym_asked"] = True  # new evaluations asked of the Gym (DORMANCY)
+            submit, wait = getattr(self.pool, "submit", None), getattr(self.pool, "wait", None)
+            if callable(submit) and callable(wait):
+                for *_, job in jobs:  # queued together: each window's jobs batch with every family's test of that window
+                    submit(job)
+            deadline = began + float(cfg["timeout_seconds"])
+            for arm, start, end, key, job in jobs:
+                late = (lambda result, a=arm, s=start, e=end, k=key: record(a, s, e, k, result))  # a trial whenever it lands
+                try:
+                    if callable(submit) and callable(wait):
+                        result = wait(job, max(0.0, deadline - self.clock()), late=late)
+                    else:
+                        result = self.pool.run(job, timeout=max(1.0, deadline - self.clock()), late=late)
+                except PoolError as exc:
+                    failed.append(str(exc))
+                    continue
+                run = record(arm, start, end, key, result)
+                run_ids.append(run["run_id"])
+                out["trials"] = out.get("trials", 0) + int(result.get("trials", 0) or 0)
+                results[(arm, start)] = result
+                batch = getattr(job, "batch", None)
+                if isinstance(batch, Mapping) and batch.get("wall_seconds") is not None:
+                    box_seconds += float(batch["wall_seconds"]) / max(1, int(batch.get("programs_in_batch") or 1))
+        seconds = round(self.clock() - began, 2)
+        out["mechanism_test"] = {"jobs": len(jobs), "reused": len(windows) * 2 - len(jobs), "gym_seconds": seconds,
+                                 "box_seconds": round(box_seconds, 2)}
+        if failed:
+            out["gym_error"] = failed[0][:300]
+            return {"status": "gym_error", "version": n, "error": failed[0][:500],
+                    "hint": "the Gym could not finish your mechanism test now; your version is saved and the parts that ran are "
+                            "kept: run it again next cycle"}
+        on = [results[("on", s)] for s, _ in windows]
+        off = [results[("off", s)] for s, _ in windows]
+        usable = [i for i, (a, b) in enumerate(zip(on, off)) if a.get("status") != "no_data" and b.get("status") != "no_data"]
+        bad_on = [r for r in on if r.get("status") not in ("ok", "no_data")]
+        bad_off = [r for r in off if r.get("status") not in ("ok", "no_data")]
+
+        def why_of(r: Mapping[str, Any]) -> str:
+            messages = ((r.get("runtime") or {}).get("messages") or [])[:2]
+            return f"{r.get('status')}: {str(r.get('reason') or '; '.join(str(m) for m in messages))[:300]}"
+
+        if bad_on:
+            verdict: dict[str, Any] = {"verdict": "untestable", "why": f"the signal arm {why_of(bad_on[0])}"}
+        elif bad_off:
+            verdict = {"verdict": "invalid_ablation", "why": f"the ablation arm {why_of(bad_off[0])}"}
+        elif not usable:
+            verdict = {"verdict": "untestable", "why": f"no data for {', '.join(roots)} in the sample's windows"}
+        else:
+            # The bound rises with each version of the family that already failed: a retry is another look (mechanism.py).
+            failed_before = len(self.mechanism_record(self.store.family(fid) or fam).get("failed") or [])
+            verdict = mechanism.compare(mechanism.day_returns(t for i in usable for t in (on[i].get("trades") or [])),
+                                        mechanism.day_returns(t for i in usable for t in (off[i].get("trades") or [])),
+                                        min_t=mechanism.bound(cfg, failed_before), min_on_days=cfg["min_on_days"],
+                                        min_off_days=cfg["min_off_days"])
+        name = str(verdict["verdict"])
+        arm_figures = {"on": mechanism.arm_summary(on), "off": mechanism.arm_summary(off)}
+        detail = {**verdict, "test_key": test_key, "version": n, "windows": [list(w) for w in windows], "ablation": ablation,
+                  "arms": arm_figures, "run_ids": run_ids, "trials": sum(int(r.get("trials", 0) or 0) for r in [*on, *off]),
+                  "jobs": len(jobs), "gym_seconds": seconds, "box_seconds": round(box_seconds, 2), "roots": list(roots),
+                  "image": None if image is None else str(image), "bundle": None if bundle is None else str(bundle),
+                  "card_sha": entry["sha"], "hurdle": (entry["card"].get("cost") or {}).get("hurdle")}
+        with self.store.atomic():
+            if self._terminal(fid, out):
+                return {"status": "retired", "reason": "the family is retired; the mechanism test is not recorded"}
+            cards.add_evidence(self.store, fid, entry["sha"], n, "mechanism_test", name, detail)
+            rec = self._mechanism_state(fid, n, name, detail, test_key)
+        out["mechanism_test"].update(verdict=name, t=verdict.get("t"), method=verdict.get("method"))
+        words = (f"Mechanism test of version {n}: {name}" + (f" (t {verdict['t']:+.2f}, {verdict.get('method')})"
+                                                              if verdict.get("t") is not None else "")
+                 + (f": {verdict['why']}" if verdict.get("why") else "."))
+        self.store.note(fid, words[:600])
+        if name == "passed":
+            return None
+        answer = mechanism.view(detail, version=n, windows=windows, ablation=ablation, arms=arm_figures)
+        retired = self._mechanism_retire(fam, rec, cfg, out)
+        if retired:
+            answer["retired"] = retired
+        return answer
+
+    def _mechanism_state(self, fid: str, n: int, verdict: str, detail: Mapping[str, Any], test_key: str) -> dict[str, Any]:
+        """The family's test record after a verdict (its state's `mechanism`)."""
+        with self.store.atomic():
+            rec = self.mechanism_record(self.store.family(fid) or {})
+            if verdict == "passed":
+                rec["passed"] = {"version": int(n), "t": detail.get("t"), "method": detail.get("method"), "at": self.store.now(),
+                                 "image": detail.get("image"), "bundle": detail.get("bundle"), "test": test_key[:12]}
+            else:
+                name = "failed" if verdict == "failed" else "untestable"
+                rec[name] = sorted({*[int(v) for v in rec.get(name) or [] if isinstance(v, int)], int(n)})
+            rec["last"] = {"version": int(n), "verdict": verdict, "t": detail.get("t")}
+            self.store.set_state(fid, **{mechanism.STATE_KEY: rec})
+        return rec
+
+    def _mechanism_retire(self, fam: Mapping[str, Any], rec: Mapping[str, Any], cfg: Mapping[str, Any], out: dict[str, Any]) -> str | None:
+        """Retire a family whose `max_failures` versions failed the test (MECHANISM, a tested finding) or whose
+        `max_untestable` versions could not take it (untested: the idle rule's words). The store's floor and gate hold
+        apply. The retirement's cause, or None."""
+        failed, untestable = len(rec.get("failed") or []), len(rec.get("untestable") or [])
+        if failed >= int(cfg["max_failures"]):
+            reason = mechanism.MECHANISM_CAUSE.format(n=failed)
+        elif untestable >= int(cfg["max_untestable"]):
+            reason = mechanism.UNTESTABLE_CAUSE.format(n=untestable)
+        else:
+            return None
+        with self.store.atomic():
+            current = self.store.family(str(fam["id"])) or fam
+            result = self.store.retire_gym(str(fam["id"]), reason, floor=self.retire_floor(current), source="the mechanism test")
+        if result.get("status") != "retired" or result.get("already_retired"):
+            out["mechanism_retire_deferred"] = result.get("deferred") or result.get("reason")
+            return None
+        out["retired"] = True
+        try:
+            self.pool.cancel_family(str(fam["id"]))
+        except Exception:  # noqa: BLE001 - queued work is also refused by the durable state on the next cycle
+            pass
+        return reason
+
+    def mechanism_text(self, fam: Mapping[str, Any]) -> str:
+        """The status line of a carded family's mechanism test ("" for a family born before cards or with the test off)."""
+        cfg = mechanism.config(self.settings)
+        if not cfg["enabled"] or fam.get("band") != "gym" or cards.card_of(self.store, str(fam["id"])) is None:
+            return ""
+        rec = self.mechanism_record(fam)
+        if self.mechanism_passed(fam):
+            p = rec["passed"]
+            return (f"Your mechanism test passed (version {p.get('version')}, t {p.get('t')}): broad Train runs and sweeps are "
+                    "open.")
+        failed, untestable = len(rec.get("failed") or []), len(rec.get("untestable") or [])
+        last = rec.get("last") or {}
+        windows = mechanism.sample_windows(self.train_first_year(), settings_mod.TRAIN_END.year, max_windows=cfg["max_windows"],
+                                           window_days=cfg["window_days"])
+        days = len(windows) * round(cfg["window_days"] * 5 / 7)
+        return ("Your mechanism test has not passed: your next gym_run first runs the program with the signal on and with your "
+                f"card's ablation over ~{days} pre-registered Train days (every arm counts as a trial); broad replay and gym_sweep "
+                f"wait for a pass, which needs your signal's entries to beat the comparison's by t >= "
+                f"{mechanism.bound(cfg, failed):g}. Failed versions {failed} of {cfg['max_failures']} (then the family retires with "
+                f"the MECHANISM verdict); untestable {untestable} of {cfg['max_untestable']}."
+                + (f" Last: version {last.get('version')} {last.get('verdict')}." if last else ""))
 
     def _scored(self, fam: Mapping[str, Any], n: int, run_id: str, robust: Mapping[str, Any] | None, view: dict[str, Any],
                 out: dict[str, Any], *, code: str, params: Mapping[str, Any], span: str | None = None) -> float | None:
@@ -2012,6 +2309,12 @@ class Researcher:
         if refused is not None:
             return self._refusal(out, refused)
         base = args.get("params") if isinstance(args.get("params"), dict) else {}
+        plan = self._mechanism_plan(fam, code, base, 1.0)
+        if plan is not None:  # THE MECHANISM TEST: a sweep is broad replay, so it waits for a pass
+            return self._refusal(out, plan.get("refused") or {
+                "status": "refused", "reason": "your family's mechanism test has not passed yet, and a sweep is broad replay",
+                "hint": "call gym_run with your program: its mechanism test runs first (signal on against your card's ablation "
+                        "on a small pre-registered sample), and sweeps open once it passes"})
         variants, dropped, why = sweep_variants(code, args.get("variants"), args.get("params"), limit=self.max_variants)
         if why:
             return self._refusal(out, {"status": "refused", "reason": why[:600],
@@ -2688,6 +2991,10 @@ class Researcher:
                 current.append({"role": "user", "content": f"The {tool} you queued last cycle ran:\n"
                                                            f"{json.dumps(result, default=str)[:12000]}"})
                 gym_done = True
+            elif result.get("mechanism_test"):  # THE MECHANISM TEST did not pass: the broad Train run was skipped
+                current.append({"role": "user", "content": f"The {tool} you queued last cycle took its mechanism test first and did "
+                                                           f"not pass, so its broad Train run was skipped:\n"
+                                                           f"{json.dumps(result, default=str)[:12000]}"})
             elif result.get("probe"):  # THE ZERO-TRADE PROBE: no trade in the probe year, the full run skipped
                 current.append({"role": "user", "content": f"The {tool} you queued last cycle made no trade in its probe year, so "
                                                            f"its full Train run was skipped:\n{json.dumps(result, default=str)[:12000]}"})
