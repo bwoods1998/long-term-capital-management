@@ -796,6 +796,9 @@ class SwarmStore:
         trials = int(result.get("trials", 0) or 0)
         status = str(result.get("status") or "unknown")
         summary = dict(result.get("summary") or {})
+        # Evaluator identity survives pruning of full Train results. It is stamped by the actual
+        # worker result, never inferred from the process recording a possibly late result.
+        summary.update({name: result[name] for name in ("gym_image", "gym_bundle") if name in result})
         if status == "refused":
             summary = {"reason": result.get("reason")}
         elif window == "train" and drift_numbers(result.get("drift")) is not None:
@@ -816,7 +819,7 @@ class SwarmStore:
                 old = loads(existing["summary"], {}) or {}
                 if key:
                     new = {**old, **{k: summary[k] for k in ("train_score", "train_eligible") if k in summary and k not in old},
-                           **{k: summary[k] for k in ("eval_key", "fill_model") if k in summary}}
+                           **{k: summary[k] for k in ("eval_key", "fill_model", "gym_image", "gym_bundle") if k in summary}}
                     if new != old:
                         self._exec("UPDATE runs SET summary=? WHERE run_id=?", (dumps(new), existing["run_id"]))
                 return self._one("SELECT * FROM runs WHERE run_id=?", (existing["run_id"],))  # type: ignore[return-value]

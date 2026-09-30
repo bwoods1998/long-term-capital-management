@@ -81,6 +81,22 @@ _bundle_cache: tuple[float, str] | None = None
 _bundle_lock = threading.Lock()
 
 
+def current_banded_evaluator(state: dict[str, Any], sha: str) -> bool:
+    """A band label alone cannot carry old PARAMS semantics into current execution.
+
+    Pin semantic engine/parameter versions as well as the exact program. A doc-only bundle change
+    does not erase a genuine forward band; an engine semantic change requires new qualification.
+    """
+    from ..gym import ENGINE_VERSION
+    from ..gym.experiment import CONTRACT_VERSION
+
+    proof = state.get("banded_evaluator") or {}
+    return (proof.get("engine") == ENGINE_VERSION and proof.get("parameter_contract") == CONTRACT_VERSION and
+            proof.get("run_sha") == sha and bool(proof.get("holdout_bundle")) and
+            str(proof["holdout_bundle"]).startswith(ENGINE_VERSION + "-") and
+            proof.get("validation_bundle") == proof.get("holdout_bundle"))
+
+
 def _bundle() -> str | None:
     """The Gym bundle's version (`league.gym.driver.build_bundle`), built at most once per `BUNDLE_TTL` seconds a process:
     it tars and hashes every file of the Gym's code, and the live path asks once a minute per live instance. A failed
@@ -153,6 +169,8 @@ def read(root: str | Path, *, family: str | None = None) -> list[dict[str, Any]]
         from .gate import run_sha
 
         sha = run_sha({"sha": v["sha"], "params": params})
+        if fam["band"] in LIVE_BANDS and not current_banded_evaluator(state, sha):
+            continue  # preserved historical band/positions, but no new entry under unqualified semantics
         if fam["band"] == "gym":
             if not image or state.get("validation_image") != image or not bundle or state.get("validation_bundle") != bundle:
                 continue
@@ -162,6 +180,10 @@ def read(root: str | Path, *, family: str | None = None) -> list[dict[str, Any]]
             review = state.get("review") or {}
             outcome = state.get("gate_outcome") or {}
             if review.get("sha") != sha or review.get("verdict") != "pass" or (review.get("audit") or {}).get("verdict") != "pass":
+                continue
+            from ..gym.review_contract import review_contract
+
+            if review.get("contract_sha") != review_contract()["sha256"] or (review.get("audit") or {}).get("contract_sha") != review_contract()["sha256"]:
                 continue
             if outcome.get("sha") == sha and outcome.get("result") in ("refused", "failed", "demoted"):
                 continue

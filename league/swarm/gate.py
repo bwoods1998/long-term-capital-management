@@ -425,7 +425,13 @@ class Gate:
                            and (not has_bundle or (bundle is not None and result.get("gym_bundle") == bundle)))
         if line["passed"] and fam["band"] == "gym" and not fam.get("retired_at") and validation_image == image \
                 and validation_bundle == bundle and current_holdout:
-            self.store.set_state(fid, banded_version=n, banded_sha=version["sha"], banded_at=self.clock())
+            from ..gym import ENGINE_VERSION
+            from ..gym.experiment import CONTRACT_VERSION
+
+            self.store.set_state(fid, banded_version=n, banded_sha=version["sha"], banded_at=self.clock(),
+                                 banded_evaluator={"engine": ENGINE_VERSION, "parameter_contract": CONTRACT_VERSION,
+                                                   "run_sha": sha, "validation_bundle": bundle,
+                                                   "holdout_bundle": result.get("gym_bundle"), "holdout_image": result.get("gym_image")})
             self.store.set_band(fid, "candidate", reason="passed its holdout look")
         return bool(line["passed"])
 

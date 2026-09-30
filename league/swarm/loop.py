@@ -667,6 +667,16 @@ class Swarm:
                     f"{moved['failed']} emptied after an error")
         except Exception:  # noqa: BLE001 - the migration never keeps the swarm from starting; it runs again next start
             log(f"train objective migration failed: {traceback.format_exc()[-800:]}")
+        # Derived Train/validation views must change with the code/data that evaluates them. Run
+        # this before any researcher/tournament thread; historical trials and looks are untouched.
+        from .evaluator import adopt, identity
+
+        evaluator = identity(self.pool.image("gym"), self.pool.bundle())
+        if evaluator is None:
+            raise RuntimeError("the swarm cannot select research without a known evaluator image and bundle")
+        adopted_evaluator = adopt(self.store, evaluator)
+        if adopted_evaluator["adopted"]:
+            log(f"evaluator adopted: {adopted_evaluator['families']} families owe fresh evidence")
         adopted = self.pool.adopt() if hasattr(self.pool, "adopt") else 0
         self.store.event("swarm.status", None, {"action": "started", "pid": os.getpid(), "release": str(CODE_DIR), "adopted": adopted,
                                                 "families": len(self.store.families(alive=True))})
