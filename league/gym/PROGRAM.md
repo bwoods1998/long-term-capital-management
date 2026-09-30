@@ -45,7 +45,18 @@ Smaller slices and slower cadences run faster. Legs you open may lie outside the
 
 A dict of numbers, booleans, strings or short lists. A run may override any of them (same type), so a
 parameter sweep needs no new code; each distinct (code, PARAMS) is a separate trial. Read them as
-`ctx.params`.
+`ctx.params`. The runtime also binds the merged values to `PARAMS` **at its declaration**, before
+subsequent aliases, derived module values or helper-function defaults are evaluated. Thus
+`p = PARAMS` and `def helper(p=PARAMS)` see the requested variant too. Declare PARAMS exactly once
+with a simple top-level assignment; do not rebind or shadow it, or mutate it in the module body.
+Keep changing run memory in STATE. Every `program.start()` executes a fresh module: state persists
+between decisions within that run, including across its sessions, but never across independent runs.
+Both default and override lists are copied so one runner cannot mutate the next runner's parameters.
+
+The research interface checks literal PARAMS and NEEDS before replay, and refuses a changed override
+when static analysis proves its key is never read. Dynamic parameter access remains inconclusive,
+not a refusal. An accepted check does not prove the parameter changes behavior, a signal is useful,
+or a strategy trades; no-trade results remain valid observations to diagnose.
 
 ## ctx
 

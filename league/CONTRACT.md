@@ -64,6 +64,18 @@ you get its stored result and no trial. PARAMS must be a literal dict at the top
 Give your signal a switch in PARAMS (an on/off flag, or a sign that inverts it) so a sweep can carry a
 placebo row.
 
+Overrides bind to both `ctx.params` and the global `PARAMS` at its declaration, before aliases,
+derived module values and helper defaults capture them. Declare PARAMS once with a simple top-level
+assignment; never rebind/shadow it or mutate it in the module body. Keep changing memory in STATE.
+Each independent run gets a fresh module and fresh parameter lists. STATE persists across that
+run's decisions and sessions, but cannot carry observations from another run.
+
+Before replay, static experiment checks refuse malformed literal NEEDS/PARAMS and changed overrides
+whose keys are provably never read. Dynamic keys are inconclusive and remain eligible. Passing this
+check is not proof that a parameter affects decisions: verify the intended ablation in your results.
+Zero trades alone is not invalid code or evidence of no economic edge; diagnose coverage, order
+rejections and signal frequency separately.
+
 ## ctx
 
 Time: `ctx.minute` (minutes since midnight ET; 570 = 09:30), `ctx.open_minute`, `ctx.close_minute`

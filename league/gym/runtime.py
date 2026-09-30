@@ -19,6 +19,8 @@ numpy is imported only when a program imports it. Python 3.11+.
 
 from __future__ import annotations
 
+import ast
+import copy
 import hashlib
 import json
 import math
@@ -29,7 +31,7 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from .safety import CodeRefused, check_program
+from .safety import CodeRefused, check_program, params_declaration
 
 PROGRAM_FILENAME = "<gym-program>"
 MAX_ROOTS = 5
@@ -122,7 +124,7 @@ def merge_params(defaults: Any, overrides: Mapping[str, Any] | None) -> dict[str
     for key, value in defaults.items():
         if not isinstance(key, str) or not _json_scalar(value):
             raise NeedsRefused(f"PARAMS[{key!r}] must be a number, boolean, string or short list")
-        out[key] = list(value) if isinstance(value, tuple) else value
+        out[key] = list(value) if isinstance(value, (list, tuple)) else value
     for key, value in (overrides or {}).items():
         if key not in out:
             raise NeedsRefused(f"parameter {key!r} is not in the program's PARAMS")
@@ -133,7 +135,7 @@ def merge_params(defaults: Any, overrides: Mapping[str, Any] | None) -> dict[str
         if (numeric(base) != numeric(value)) or (isinstance(base, bool) != isinstance(value, bool)) or \
                 (isinstance(base, str) != isinstance(value, str)) or (isinstance(base, list) != isinstance(value, (list, tuple))):
             raise NeedsRefused(f"parameter {key!r} keeps the type of its default ({type(base).__name__})")
-        out[key] = list(value) if isinstance(value, tuple) else value
+        out[key] = list(value) if isinstance(value, (list, tuple)) else value
     return out
 
 
@@ -256,8 +258,14 @@ class Program:
 def load_program(code: str, *, name: str = "program", params: Mapping[str, Any] | None = None) -> Program:
     """Check, compile and read a program's NEEDS and PARAMS (CodeRefused / NeedsRefused say why not)."""
     check_program(code)
-    compiled = compile(code, PROGRAM_FILENAME, "exec")
-    namespace = _fresh_namespace()
+    # Bind at the declaration, not after exec: global aliases, derived values and helper-function
+    # defaults must all see the requested variant. The injected name cannot occur in checked code.
+    tree = ast.parse(code)
+    declaration = params_declaration(tree)
+    declaration.value = ast.copy_location(ast.Call(func=ast.Name(id="__gym_bind_params", ctx=ast.Load()),
+                                                   args=[declaration.value], keywords=[]), declaration.value)
+    compiled = compile(ast.fix_missing_locations(tree), PROGRAM_FILENAME, "exec")
+    namespace = _fresh_namespace(params)
     try:
         _limited(lambda: exec(compiled, namespace), LOAD_TIMEOUT)  # noqa: S102 - checked code, short builtins
     except ProgramTimeout:
@@ -265,14 +273,24 @@ def load_program(code: str, *, name: str = "program", params: Mapping[str, Any] 
     except Exception as exc:  # the module body itself failed
         raise CodeRefused(f"{_where(exc)}: the program fails to load: {type(exc).__name__}: {str(exc)[:160]}") from None
     needs = parse_needs(namespace.get("NEEDS"))
-    merged = merge_params(namespace.get("PARAMS"), params)
+    merged = namespace["__gym_bound_params"]
+    if canonical(namespace.get("PARAMS")) != canonical(merged):
+        raise CodeRefused("the module body mutates PARAMS after its declaration; keep run memory in STATE")
     sha = hashlib.sha256(code.encode("utf-8")).hexdigest()
     run_sha = hashlib.sha256((sha + canonical(merged)).encode("utf-8")).hexdigest()
     return Program(name=str(name), code=code, needs=needs, params=merged, sha=sha, run_sha=run_sha, _compiled=compiled)
 
 
-def _fresh_namespace() -> dict[str, Any]:
-    return {"__builtins__": _safe_builtins(), "__name__": "gym_program"}
+def _fresh_namespace(params: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    namespace = {"__builtins__": _safe_builtins(), "__name__": "gym_program"}
+
+    def bind(defaults: Any) -> dict[str, Any]:
+        merged = merge_params(defaults, params)
+        namespace["__gym_bound_params"] = copy.deepcopy(merged)
+        return merged
+
+    namespace["__gym_bind_params"] = bind
+    return namespace
 
 
 class Runner:
@@ -291,7 +309,7 @@ class Runner:
         self.seconds = 0.0
         self.messages: list[str] = []
         self.disqualified: str | None = None
-        self._namespace = _fresh_namespace()
+        self._namespace = _fresh_namespace(program.params)
         _limited(lambda: exec(program._compiled, self._namespace), LOAD_TIMEOUT)  # noqa: S102
         self._decide = self._namespace["decide"]
         self._alarm = _can_alarm()
