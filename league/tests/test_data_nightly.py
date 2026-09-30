@@ -232,6 +232,60 @@ class Night(unittest.TestCase):
         self.assertNotIn(("run", "backfill.py", "run"), data.calls)  # the day was already pulled
         self.assertEqual(len(checkpoints), 1)
 
+    def test_cached_pulled_marker_cannot_bypass_current_sip_coverage(self):
+        data, gate, images = FakeData(self.DAY), FakeGate(), {}
+        nightly, _, checkpoints = job(data, gate, images, now=self.NOW)
+        nightly.state(self.DAY)['pulled'] = 'legacy source-only marker'
+        def incomplete(day, handle):
+            self.assertEqual(day, self.DAY)
+            self.assertIs(handle, data)
+            raise RuntimeError('forward SIP coverage is incomplete')
+        nightly.sip_check = incomplete
+        with self.assertRaisesRegex(RuntimeError, 'coverage is incomplete'):
+            nightly.run()
+        self.assertNotIn('pulled', nightly.state(self.DAY))
+        self.assertEqual(checkpoints, [])
+        self.assertEqual(gate.uploads, {})
+
+    def test_nightly_coverage_receipt_binds_the_exact_copied_hashes_and_roots(self):
+        for alteration in ('none', 'hash', 'roots'):
+            with self.subTest(alteration=alteration):
+                data, gate, images = FakeData(self.DAY), FakeGate(), {}
+                nightly, _, checkpoints = job(data, gate, images, now=self.NOW)
+                def verified(day, handle):
+                    pairs = sorted((sl.parse_rel_path(path.removeprefix(sl.STORE_ROOT + '/'))[1],
+                                    hashlib.sha256(blob).hexdigest()) for path, blob in data.files.items()
+                                   if '/underlying/' in path and '/XSP/' not in path)
+                    proof = {'schema': sl.SIP_COVERAGE_SCHEMA, 'status': 'complete', 'day': str(day),
+                             'roots': [r for r, _ in pairs],
+                             'files_sha256': hashlib.sha256(json.dumps(pairs, sort_keys=True).encode()).hexdigest()}
+                    if alteration == 'hash':
+                        proof['files_sha256'] = 'hash-of-other-files'
+                    if alteration == 'roots':
+                        proof['roots'] = ['OTHER']
+                    return proof
+                nightly.sip_check = verified
+                if alteration == 'none':
+                    result = nightly.run()
+                    self.assertEqual(result['sip_coverage']['status'], 'complete')
+                    self.assertEqual(nightly.run()['sip_coverage'], result['sip_coverage'])
+                    self.assertEqual(len(checkpoints), 1)
+                else:
+                    with self.assertRaisesRegex(RuntimeError, 'proof differs'):
+                        nightly.run()
+                    self.assertEqual(checkpoints, [])
+                    self.assertEqual(gate.uploads, {})
+                    self.assertNotIn('sip_coverage', nightly.state(self.DAY))
+
+    def test_legacy_checkpoint_never_gets_retroactive_current_source_proof(self):
+        data, gate, images = FakeData(self.DAY), FakeGate(), {}
+        nightly, _, _ = job(data, gate, images, now=self.NOW)
+        nightly.state(self.DAY)['checkpoint'] = 'sbcp_legacy'
+        nightly.sip_check = lambda *_: self.fail('a later source read cannot certify an old checkpoint')
+        result = nightly.run()
+        self.assertEqual(result['sip_coverage'], {'status': 'legacy_unverified'})
+        self.assertEqual(result['checkpoint'], 'sbcp_legacy')
+
     def test_a_changed_file_is_refused(self):
         data, gate, images = FakeData(self.DAY), FakeGate(), {}
         nightly, _, _ = job(data, gate, images, now=self.NOW)
