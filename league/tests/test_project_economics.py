@@ -347,6 +347,18 @@ class CollectReadOnly(unittest.TestCase):
             out = economics.report(state, boxes(), app_id=APP, external=external())
             self.assertFalse(out["complete"])
             self.assertFalse(out["trading"]["broker_reconciled"])
+            # RealBook writes a reason string, including an explicit empty string for a healthy account.
+            state["sources"]["broker_activity"] = evidence()["sources"]["broker_activity"]
+            for frozen, expected in (("", False), ("venue/book mismatch", True), (False, False), (None, None)):
+                db = sqlite3.connect(root / "live.sqlite")
+                db.execute("UPDATE kv SET value=? WHERE key='recon'", (json.dumps({
+                    "at": economics.epoch(AT), "good": 2, "frozen": frozen, "problems": []}),))
+                db.commit()
+                db.close()
+                state["sources"]["options"] = economics.collect(root, clock=lambda: economics.epoch(AT))["sources"]["options"]
+                self.assertIs(state["sources"]["options"]["recon"]["frozen"], expected)
+                out = economics.report(state, boxes(), app_id=APP, external=external())
+                self.assertEqual(out["complete"], expected is False, frozen)
 
     def test_provider_receipt_uses_request_time_and_never_counts_reservations_as_cost(self):
         with tempfile.TemporaryDirectory() as td:

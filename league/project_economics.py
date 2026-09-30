@@ -252,7 +252,8 @@ def collect(root: Path, *, clock=time.time) -> dict:
                                   "pending_orders": sum(r["status"] in ("pending", "unknown") for r in orders),
                                   "last_book_change_at": iso(last_change),
                                   "recon": {"as_of": iso(recon["at"]) if epoch(recon.get("at")) is not None else None,
-                                            "frozen": recon.get("frozen") if isinstance(recon.get("frozen"), bool) else None,
+                                            # RealBook persists its reason string ("" means clear); missing is distinct.
+                                            "frozen": bool(recon["frozen"]) if isinstance(recon.get("frozen"), (str, bool)) else None,
                                             "problems": len(recon["problems"]) if isinstance(recon.get("problems"), list) else None,
                                             "good": recon.get("good")},
                                   "basis": "all closed real positions opened since the financial basis; cash already net of execution fees"}
