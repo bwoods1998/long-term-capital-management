@@ -42,6 +42,14 @@ by their own unit):
   at most `house_test.open` held or working, its realized loss plus what is held or working at most
   `house_test.envelope_usd`, no new open once its realized loss reaches `house_test.stop_usd`, after `house_test.sessions`
   sessions or `house_test.round_trips` round trips; its own module applies them.
+- The incubator (`league/live/incubator.py`, the owner's terms of Sept 29-30, 2026; `plan_incubator`): exactly
+  `incubator.contracts` (one) lot of a structure whose unit is at most `incubator.max_loss_usd`; the family's held and
+  working incubator maximum loss plus the new unit at most that too; at most `incubator.max_open` held or working; the
+  weekly ENVELOPE (this ISO week's net realized incubator loss R, plus what is held H, plus what is working W, plus the
+  new unit, at most `incubator.week_loss_usd`: once R alone reaches it the route stops for the week); at most
+  `INCUBATOR_DAY_LEGS` order legs a day and `INCUBATOR_DAY_OPEN_SHARE` of the gateway's day cap; and it keeps room in
+  the book's and the day's caps for the families' Probe floors and the House live test. Its eligibility is the practice
+  rule (`practice_ok`: the first look, pre-registered). Never evidence, never a band, never a promotion.
 - Every open: the book's open maximum loss at most `book_share x E`; the gateway's caps (one order's maximum loss at
   most min(`gateway.order_max_loss_usd`, `gateway.order_equity_share x E`), today's opening maximum loss at most
   `gateway.day_equity_share x E`) are checked here first so the House refuses before the gateway does. Today's opening
@@ -140,6 +148,13 @@ class Table:
     house_test_stop: Decimal
     house_test_sessions: int
     house_test_round_trips: int
+    incubator_max_loss: Decimal
+    incubator_contracts: int
+    incubator_max_open: int
+    incubator_week_loss: Decimal
+    incubator_min_sessions: int
+    incubator_min_trades: int
+    incubator_min_coverage: Decimal
     max_orders_day: int
     max_requests_minute: int
     bp_buffer: Decimal
@@ -161,6 +176,7 @@ class Table:
             raise ValueError("the options money table is refused: " + "; ".join(problems))
         t = rules["options_money"]
         probe, sized, path, gate, house = t["probe"], t["sized"], t["order_path"], t["gateway"], t["house_test"]
+        inc = t["incubator"]
         return cls(
             real_types=tuple(t["real_types"]), credit_types=tuple(t["credit_types"]),
             credit_min_equity=D(t["credit_min_equity_usd"]),
@@ -177,6 +193,10 @@ class Table:
             house_test_structure=D(house["structure_usd"]), house_test_open=int(house["open"]),
             house_test_envelope=D(house["envelope_usd"]), house_test_stop=D(house["stop_usd"]),
             house_test_sessions=int(house["sessions"]), house_test_round_trips=int(house["round_trips"]),
+            incubator_max_loss=D(inc["max_loss_usd"]), incubator_contracts=int(inc["contracts"]),
+            incubator_max_open=int(inc["max_open"]), incubator_week_loss=D(inc["week_loss_usd"]),
+            incubator_min_sessions=int(inc["min_sessions"]), incubator_min_trades=int(inc["min_trades"]),
+            incubator_min_coverage=D(inc["min_coverage"]),
             max_orders_day=int(path["max_orders_day"]), max_requests_minute=int(path["max_requests_minute"]),
             bp_buffer=D(path["bp_buffer"]), near_money_share=D(path["near_money_share"]),
             expiry_close_lead_minutes=int(path["expiry_close_lead_minutes"]),
@@ -472,6 +492,143 @@ def plan_open(table: Table, *, band: str, tuition: bool, equity: Decimal, unit: 
     return Plan(qty, cap, why)
 
 
+# ---------------------------------------------------------------------------------------------------- the incubator
+#: The incubator's own day limits (code constants, not table rows: they only tighten what the table allows): at most this
+#: many order legs and cancels of its own a day, and at most this share of the gateway's day cap opened by it a day.
+INCUBATOR_DAY_LEGS = 40
+INCUBATOR_DAY_OPEN_SHARE = Decimal("0.25")
+
+
+@dataclass(frozen=True)
+class IncubatorTally:
+    """The incubator's own numbers, read from the live state's rows (`RealBook.incubator_tally`): dollars of maximum loss
+    and realized loss, with fees. `realized_loss` R is this ISO week's net realized loss (floored at zero); `held` H and
+    `working` W every held position's and working open's possible loss; `family_held` and `family_working` the same for
+    one family; `open_n` the structures held or working; `legs_today` today's order legs and cancels; `opened_today`
+    today's dispatched opens' maximum loss."""
+
+    realized_loss: Decimal = ZERO
+    held: Decimal = ZERO
+    working: Decimal = ZERO
+    family_held: Decimal = ZERO
+    family_working: Decimal = ZERO
+    open_n: int = 0
+    legs_today: int = 0
+    opened_today: Decimal = ZERO
+
+    @property
+    def possible(self) -> Decimal:
+        """R + H + W: what the week could already have lost."""
+        return self.realized_loss + self.held + self.working
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"realized_loss_usd": str(cents(self.realized_loss)), "held_usd": str(cents(self.held)),
+                "working_usd": str(cents(self.working)), "possible_usd": str(cents(self.possible)), "open": self.open_n,
+                "legs_today": self.legs_today, "opened_today_usd": str(cents(self.opened_today))}
+
+
+def _positive(value: Any) -> bool:
+    """Above $0 (to the millionth: a float sum's noise is not a profit)."""
+    try:
+        x = float(value)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(x) and round(x, 6) > 0
+
+
+def practice_ok(table: Table, record: Mapping[str, Any] | None, *, exit_check: bool = False) -> tuple[bool, str]:
+    """THE PRACTICE RULE (pre-registered; `league/live/incubator.py`): whether a practice cohort's record (`observe.
+    practice_record`) is positive live practice, and why. P1 at least `incubator.min_sessions` completed sessions; P2 at
+    least `incubator.min_trades` program-closed trades; P3 decision coverage at least `incubator.min_coverage`; P4 program
+    P&L above $0; P5 all closes' P&L above $0; P6 all closes' P&L plus the open mark above $0. `exit_check`: the re-check
+    of a cohort that passed its first look, on its extended record (P3-P6 only: it can only refuse)."""
+    if not isinstance(record, Mapping):
+        return False, "no practice record"
+    if not exit_check:
+        sessions = record.get("sessions")
+        if sessions is None:
+            return False, "P1: its practice record began before its cohort (ineligible)"
+        if int(sessions) < table.incubator_min_sessions:
+            return False, f"P1: {int(sessions)} completed sessions, under {table.incubator_min_sessions}"
+        closes = int(record.get("closes_program") or 0)
+        if closes < table.incubator_min_trades:
+            return False, f"P2: {closes} program-closed trades, under {table.incubator_min_trades}"
+    due, made = record.get("decisions_due"), record.get("decisions_made")
+    coverage = record.get("coverage")
+    if isinstance(due, int) and isinstance(made, int) and not isinstance(due, bool) and due > 0:
+        covered = D(made) >= table.incubator_min_coverage * D(due)
+        shown = f"{made}/{due}"
+    elif coverage is not None:
+        try:
+            covered = D(coverage) >= table.incubator_min_coverage
+        except (ValueError, ArithmeticError):
+            covered = False
+        shown = str(coverage)
+    else:
+        return False, "P3: no decision was due (coverage unknown)"
+    if not covered:
+        return False, f"P3: decision coverage {shown}, under {table.incubator_min_coverage}"
+    if not _positive(record.get("pnl_program")):
+        return False, f"P4: program-closed P&L {record.get('pnl_program')} is not above $0"
+    if not _positive(record.get("pnl_all")):
+        return False, f"P5: all closes' P&L {record.get('pnl_all')} is not above $0"
+    try:
+        marked = float(record.get("pnl_all") or 0.0) + float(record.get("open_mark") or 0.0)
+    except (TypeError, ValueError):
+        marked = float("nan")
+    if not _positive(marked):
+        return False, f"P6: all closes' P&L with the open mark {round(marked, 2)} is not above $0"
+    return True, "positive live practice (P1-P6)" if not exit_check else "still positive (P3-P6)"
+
+
+def plan_incubator(table: Table, *, unit: Decimal, equity: Decimal | None, tally: IncubatorTally, exposure: Exposure,
+                   room: Decimal) -> Plan:
+    """One lot of an incubator open whose maximum loss with its open and close fees is `unit`, or none and why: the first
+    of these that fails refuses (the module docstring): (1) equity and unit, (2) the unit cap, (3) the family's held and
+    working, (4) the open count, (5) the weekly envelope, (6) its day's legs, (7) its day's dispatch, (8) the book's cap
+    less `room`, (9) the gateway's per-order cap, (10) the gateway's day cap less `room`. `room` is what it leaves the
+    families' Probe floors and the House live test."""
+    cap = table.incubator_max_loss
+    if equity is None or equity <= 0:
+        return Plan(0, cap, "incubator: no sizing equity")
+    if unit <= 0:
+        return Plan(0, cap, "incubator: the structure's maximum loss is not positive")
+    if unit > cap:
+        return Plan(0, cap, f"incubator: one lot risks ${cents(unit)} with fees, over its ${cap} cap")
+    fam = tally.family_held + tally.family_working
+    if fam + unit > cap:
+        return Plan(0, cap, f"incubator: the family already holds or works ${cents(fam)}; with this ${cents(unit)} it "
+                            f"would pass its ${cap}")
+    if tally.open_n >= table.incubator_max_open:
+        return Plan(0, cap, f"incubator: {tally.open_n} structures held or working, the most it holds is "
+                            f"{table.incubator_max_open}")
+    if tally.realized_loss >= table.incubator_week_loss:
+        return Plan(0, cap, f"incubator: stopped for the week (its net realized loss ${cents(tally.realized_loss)} "
+                            f"reached ${table.incubator_week_loss})")
+    if tally.possible + unit > table.incubator_week_loss:
+        return Plan(0, cap, f"incubator: the week's envelope: ${cents(tally.possible)} could already be lost (realized "
+                            f"${cents(tally.realized_loss)}, held ${cents(tally.held)}, working ${cents(tally.working)}) "
+                            f"and this risks ${cents(unit)}, over ${table.incubator_week_loss}")
+    if tally.legs_today >= INCUBATOR_DAY_LEGS:
+        return Plan(0, cap, f"incubator: {tally.legs_today} order legs today, its most is {INCUBATOR_DAY_LEGS}")
+    day_cap = table.gateway_day_share * equity
+    own = INCUBATOR_DAY_OPEN_SHARE * day_cap
+    if tally.opened_today + unit > own:
+        return Plan(0, cap, f"incubator: ${cents(tally.opened_today)} opened today; with this ${cents(unit)} it would "
+                            f"pass its ${cents(own)} ({INCUBATOR_DAY_OPEN_SHARE:%} of the day cap)")
+    book = table.book_share * equity
+    if exposure.book_loss + unit + room > book:
+        return Plan(0, cap, f"the book's cap: ${cents(exposure.book_loss)} of ${cents(book)} open maximum loss, and "
+                            f"${cents(room)} is kept for the families' Probe floors and the House live test")
+    order_cap = min(table.gateway_order_max_loss, table.gateway_order_share * equity)
+    if unit > order_cap:
+        return Plan(0, cap, f"the gateway's per-order cap ${cents(order_cap)} is under one structure's ${cents(unit)}")
+    if exposure.day_opened + unit + room > day_cap:
+        return Plan(0, cap, f"the gateway's day cap: ${cents(exposure.day_opened)} of ${cents(day_cap)} opened today, and "
+                            f"${cents(room)} is kept for the families' Probe floors and the House live test")
+    return Plan(table.incubator_contracts, cap, "incubator: one lot (never evidence)")
+
+
 # -------------------------------------------------------------------------------------------------------- stops
 @dataclass
 class Stops:
@@ -705,4 +862,5 @@ class FlowBook:
 
 
 __all__ = ["Table", "DECLARED_TYPES", "order_types", "Forward", "forward_stats", "one_record", "kelly_cap", "sizing_band", "REAL_MIN_TRADES", "band_for", "fits_probe", "probe_cap", "structure_cap", "family_cap",
-           "Exposure", "Plan", "plan_open", "Stops", "FlowBook", "D", "cents", "sized_ok"]
+           "Exposure", "Plan", "plan_open", "Stops", "FlowBook", "D", "cents", "sized_ok", "IncubatorTally", "practice_ok",
+           "plan_incubator", "INCUBATOR_DAY_LEGS", "INCUBATOR_DAY_OPEN_SHARE"]

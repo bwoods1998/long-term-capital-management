@@ -797,6 +797,23 @@ SITE_SCHEMA = Path(__file__).resolve().parent / "fixtures" / "site_schema.js"
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 
+class IncubatorRowsTest(Case):
+    """Release B (Oct 1, 2026): an agent's position on the incubator route (`<family>@<version>:i`) is its own source,
+    keeps its agent, and the table still adds up to Profit to the cent."""
+
+    def test_an_incubator_position_keeps_its_agent_and_the_rows_still_add_up(self):
+        ids = self.the_week()
+        self.account.db.execute("UPDATE positions SET instance='orb-4@1:i' WHERE pid=?", (ids["orb"],))
+        body = self.table()
+        rows = {row["id"]: row for row in body["positions"]["rows"]}
+        self.assertEqual((rows[f"real:{ids['orb']}"]["source"], rows[f"real:{ids['orb']}"]["agent"]), ("incubator", "orb-4"))
+        self.assertEqual(rows[f"real:{ids['gap']}"]["source"], "agent")
+        self.assert_adds_up(body)
+        if "'incubator'" not in SITE_SCHEMA.read_text(encoding="utf-8"):
+            self.skipTest("the site schema copy predates the incubator route (release A's site refresh brings it)")
+        self.assertEqual(site_accepts([ReviewOf408Test.full(self, body)]), [True])
+
+
 class ReviewOf408Test(Case):
     """The two reviews of #408 (Sept 28, 2026): the site's shape and rules, the not-listed line, fees in their rows,
     assignments, exercises and cash settlements, broker liquidations, the reset's orders, times to the minute."""

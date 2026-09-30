@@ -163,6 +163,8 @@ KINDS: dict[str, bool] = {
     "live.observe": False,      # the observe band's cap held families back (`live.observe_max`)
     "live.calibration": False,  # a D3 calibration round trip's order, or why a slot sent none
     "live.expiry_reconciliation": False,  # an expired position's liquidation reconciled from the venue's fills
+    # The incubator (release B, Oct 1, 2026; league/live/incubator.py). Private: first looks carry practice P&L.
+    "live.incubator": False,    # a first look, an ended incubation, the session's pins, a yield or the weekly stop
     # The options swarm (Sept 26, 2026; league/swarm/): its own append-only events, mirrored here by the House's swarm
     # step (`league/swarm/hook.py`), idempotent by id `swarm:<seq>`. Never the House's own agent.* or eval.* kinds: its
     # roster and evaluator read those. Public: the site's tape reads a family's birth, retirement, band move and notes

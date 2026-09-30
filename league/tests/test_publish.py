@@ -237,6 +237,33 @@ class LedgerCase(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------- cleaning
+class IncubatorLabelTest(unittest.TestCase):
+    """Release B (Oct 1, 2026): the incubator's positions are the agent's with the source "incubator", and a real
+    structure may carry its route; nothing else changes."""
+
+    AT = "2026-10-06T15:00:00.000Z"
+
+    def test_the_incubator_source_keeps_its_agent(self):
+        self.assertIn("incubator", publish.POSITION_SOURCES)
+        row = {"pid": 3, "source": "incubator", "family": "fam-1", "underlying": "SPY", "structure": "debit_vertical",
+               "right": "call", "legs": 2, "quantity": 1, "open_quantity": 1, "status": "open", "expiry": "2026-10-07",
+               "opened_at": "2026-10-06T13:31:00Z", "pnl_usd": "1.00"}
+        self.assertEqual({k: publish.site_position(row, self.AT)[k] for k in ("source", "agent")},
+                         {"source": "incubator", "agent": "fam-1"})
+        self.assertIsNone(publish.site_position(dict(row, family=""), self.AT), "an incubator row needs its agent")
+        self.assertIsNone(publish.site_position(dict(row, source="house"), self.AT)["agent"])
+
+    def test_a_real_structure_carries_its_route_and_nothing_else_does(self):
+        value = {"agent": "fam-1", "underlying": "SPY", "structure": "debit_vertical", "legs": 2, "expiry": "2026-10-07",
+                 "quantity": 1, "real": True, "opened_at": "2026-10-06T13:31:00Z", "max_loss_usd": 30.0, "pnl_usd": 1.0,
+                 "route": "incubator"}
+        self.assertEqual(publish.site_structure(value, self.AT)["route"], "incubator")
+        self.assertNotIn("route", publish.site_structure(dict(value, real=False), self.AT))
+        self.assertNotIn("route", publish.site_structure(dict(value, route="tuition"), self.AT))
+        plain = {k: v for k, v in value.items() if k != "route"}
+        self.assertEqual(len(publish.site_structure(plain, self.AT)), 11, "the site's eleven fields, unchanged")
+
+
 class CleaningTest(unittest.TestCase):
     def test_text_the_site_would_refuse_is_made_safe(self):
         self.assertEqual(clean_text("see https://www.reuters.com/x and https://www.sec.gov/y"), "see [link removed] and https://www.sec.gov/y")

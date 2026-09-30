@@ -95,7 +95,12 @@ MAX_DEAD_SHOWN = 24
 MAX_STRUCTURES = 100
 #: The positions table's rows; older closed positions fold into one line (`site_positions`).
 MAX_POSITIONS = 300
-POSITION_SOURCES = ("agent", "calibration", "house")
+#: `incubator` (release B, Oct 1, 2026): an agent's position on the incubator route (real money at tuition size, never
+#: evidence), with the agent's id as an agent's.
+POSITION_SOURCES = ("agent", "calibration", "house", "incubator")
+AGENT_SOURCES = ("agent", "incubator")
+#: A real structure's optional route (the site's `STRUCTURE_ROUTES`): only the incubator's so far.
+STRUCTURE_ROUTES = ("incubator",)
 RIGHTS = ("call", "put", "both")
 #: Which side each structure can be on (the site's `STRUCTURE_RIGHTS`, `capital/schema.js`): a vertical, a butterfly,
 #: a calendar or a diagonal is all calls or all puts; a condor, an iron butterfly, a straddle and a strangle are both.
@@ -441,7 +446,7 @@ def site_position(value: Any, published_at: str) -> dict[str, Any] | None:
     pid = _count(value.get("pid"))
     pnl = value.get("pnl_usd")
     pnl = None if pnl is None else _money(pnl, signed=True)
-    if (source not in POSITION_SOURCES or (source == "agent" and not _SLUG.match(agent)) or kind not in STRUCTURE_TYPES
+    if (source not in POSITION_SOURCES or (source in AGENT_SOURCES and not _SLUG.match(agent)) or kind not in STRUCTURE_TYPES
             or right not in STRUCTURE_RIGHTS.get(kind, ()) or not _UNDERLYING.match(under) or legs is None or not 1 <= legs <= 4
             or quantity is None or not 1 <= quantity <= 10_000 or held is None or held > quantity or status not in ("open", "closed")
             or expiry is None or pid is None or opened is None or not _not_after(opened, published_at)
@@ -454,7 +459,7 @@ def site_position(value: Any, published_at: str) -> dict[str, Any] | None:
         if held < 1:
             return None
         closed = None
-    return {"id": f"real:{pid}", "source": source, "agent": agent if source == "agent" else None, "underlying": under,
+    return {"id": f"real:{pid}", "source": source, "agent": agent if source in AGENT_SOURCES else None, "underlying": under,
             "structure": kind, "right": right, "legs": legs, "quantity": quantity, "open_quantity": held, "status": status,
             "expiry": expiry, "opened_at": opened, "closed_at": closed, "pnl_usd": pnl}
 
@@ -594,7 +599,8 @@ def site_agent(value: Any, published_at: str) -> dict[str, Any] | None:
 
 
 def site_structure(value: Any, published_at: str) -> dict[str, Any] | None:
-    """One open structure, exactly the site's eleven fields. Never a strike, a leg's price, a mark or
+    """One open structure, exactly the site's eleven fields (and a real one's `route` when it has one: "incubator", from
+    Oct 1, 2026). Never a strike, a leg's price, a mark or
     anything else the quote feed said: what it is, whose, its maximum loss and its P&L."""
     if not isinstance(value, Mapping):
         return None
@@ -609,9 +615,12 @@ def site_structure(value: Any, published_at: str) -> dict[str, Any] | None:
     if opened is None or not _not_after(opened, published_at):
         opened = published_at  # an open structure is never hidden for want of a time: unknown or ahead reads as now
     raw = str(value.get("id") or f"{agent}:{under}:{kind}:{expiry}:{opened}")
-    return {"id": event_id(raw) or "structure", "agent": agent, "underlying": under, "structure": kind, "legs": legs, "expiry": expiry,
-            "quantity": quantity, "real": value.get("real") is True, "opened_at": opened, "max_loss_usd": loss,
-            "pnl_usd": _money(value.get("pnl_usd"), signed=True)}
+    out = {"id": event_id(raw) or "structure", "agent": agent, "underlying": under, "structure": kind, "legs": legs,
+           "expiry": expiry, "quantity": quantity, "real": value.get("real") is True, "opened_at": opened,
+           "max_loss_usd": loss, "pnl_usd": _money(value.get("pnl_usd"), signed=True)}
+    if value.get("route") in STRUCTURE_ROUTES and out["real"]:
+        out["route"] = value["route"]      # a real structure's route (the incubator's: real money, never evidence)
+    return out
 
 
 PRACTICE_TIERS = ("validated", "train")
