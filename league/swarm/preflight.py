@@ -293,8 +293,9 @@ def _rng(root: str, salt: int) -> Any:
 class Market:
     """Synthetic sessions for a program's NEEDS (the module docstring) on each root's chain (`listing`, `strikes`) with
     the numbers of `regime` (`REGIMES`: "listed" first; `sparse` is the "sparse" one). Its sessions fall on the weekdays
-    of the listing's (`session_weekdays`), the dense one's too, so its chain holds every expiry and strike the listing's
-    does on each. Deterministic: the same roots, NEEDS and regime make the same market."""
+    of the listing's (`session_weekdays`), the dense one's too, so on each session the dense chain lists every expiry the
+    listing does and, about its own open, the listing's strikes with the finer step's beside them. Deterministic: the
+    same roots, NEEDS and regime make the same market."""
 
     def __init__(self, roots: Sequence[str], needs: Mapping[str, Any], *, sparse: bool = False, regime: str = "listed"):
         import numpy as np
