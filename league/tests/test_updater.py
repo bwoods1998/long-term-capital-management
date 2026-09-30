@@ -489,6 +489,20 @@ class ThePinsFollowTheRepository(unittest.TestCase):
                 self.assertIn(f'"{name[len("tests ("):-1]}"', text)
         self.assertIn("workflow_dispatch", text)
 
+    def test_the_tests_job_is_never_cut_off_by_its_own_time_limit(self):
+        """A run its own limit cancels is no verdict (`judge_workflow_runs`), so a head whose tests outrun the limit is
+        never attested. Sept 29-30, 2026: the league's tests alone took up to 17m49s and two 3.11 jobs hit the
+        20-minute limit (PR run 36578499862; push run 36689802805 on f082cf5e). The limit keeps a wide margin."""
+        import re
+
+        path = self.ROOT / ".github" / "workflows" / "checks.yml"
+        if not path.exists():
+            self.skipTest("a release tree carries no .github")
+        job = path.read_text().split("\n  tests:\n", 1)[1].split("\n    steps:\n", 1)[0]
+        limit = re.search(r"^    timeout-minutes: (\d+)$", job, re.MULTILINE)
+        self.assertIsNotNone(limit, "the tests job states its own time limit")
+        self.assertGreaterEqual(int(limit.group(1)), 30)
+
     def test_the_head_is_read_from_a_ref_advertisement(self):
         from league.updater import resolve_head
 

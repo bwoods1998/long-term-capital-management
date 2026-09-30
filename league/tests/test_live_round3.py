@@ -616,10 +616,13 @@ class BandRace(LiveCase):
 class Deadline(unittest.TestCase):
     def test_production_child_refuses_to_start_without_its_network_namespace(self):
         d = Decider()
-        d.isolated, d.netns = True, False
+        d.isolated = True
         try:
-            with self.assertRaisesRegex(DeciderError, "requires a network namespace"):
-                d.ping()
+            with patch("league.live.decider._netns_available", return_value=False) as probe, \
+                    patch("league.live.decider.subprocess.Popen") as popen:
+                with self.assertRaisesRegex(DeciderError, "requires a network namespace"):
+                    d.ping()
+            self.assertEqual((probe.call_count, popen.call_count), (1, 0))
             self.assertIsNone(d.proc)
         finally:
             d.close()
@@ -627,7 +630,7 @@ class Deadline(unittest.TestCase):
     def test_no_input_reader_cannot_hold_the_house_beyond_the_deadline(self):
         child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], stdin=subprocess.PIPE,
                                  stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        d = Decider()
+        d = Decider(allow_unisolated=True)
         d.proc = child
         started = time.monotonic()
         try:
