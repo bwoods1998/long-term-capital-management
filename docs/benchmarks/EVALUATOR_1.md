@@ -6,30 +6,52 @@ Gym engine and the real evidence lines, so it tests the execution contract (what
 survives between runs) as well as the statistics. It is a benchmark of the harness, never evidence about a strategy:
 every world is invented, every edge is planted, and no model, market data, sealed day or production state is read.
 
-This report scores main's evaluator (`gym-engine-4`, the tree of release B's base) and measures five threshold
-variants on the same outcomes. **No threshold was changed.** The owner's rule (Sept 30) allows an eligibility or scoring
-change only when fixed benchmarks show false promotions do not rise and missed signals fall; the sealed holdout, the
-multiple-testing control and the forward requirement never loosen. The last section is the measured proposal.
+This report scores main's evaluator (`gym-engine-4`, the tree of release B's base) on two independent cohorts: the
+development cohort, on which the threshold variants were chosen, and a confirmation cohort drawn afterwards from
+independent streams. **No threshold was changed, and none is recommended for adoption now** (the last section says
+why). The owner's rule (Sept 30) allows an eligibility or scoring change only when fixed benchmarks show false
+promotions do not rise and missed signals fall; the sealed holdout, the multiple-testing control and the forward
+requirement never loosen.
 
-The [machine-readable receipt](evaluator_1.json) holds the suite hash, the tree fingerprint and every aggregate below.
+The machine-readable receipts are [evaluator_1.json](evaluator_1.json) (development) and
+[evaluator_1_confirmation.json](evaluator_1_confirmation.json): the suite hash, the tree and fixture fingerprints, the
+library versions, every aggregate below and a digest of every world's figures. The CLI writes them (`--receipt`).
 
 ## Running it
 
 ```sh
-python -m league.swarm.benchmarks --suite evaluator --json --output report.json
-python -m league.swarm.benchmarks --suite evaluator --json --tree /path/to/candidate/checkout
+python -m league.swarm.benchmarks --suite evaluator --json --output full.json --receipt receipt.json
+python -m league.swarm.benchmarks --suite evaluator --cohort confirmation --frozen receipt.json --json --output conf.json
+python -m league.swarm.benchmarks --suite evaluator --json --compare docs/benchmarks/evaluator_1.json
 ```
 
-The suite takes about ten minutes on one laptop core (583 s for this report): eight engine worlds (about 40 s each) and 128 search lineages for each of
-seven search cases. `--tree` runs this trusted suite file against another checkout's `league` package in a child
-process, so a harness candidate is judged by cases it cannot edit (`playbooks/harness-improvement.md`). The report's
-`headline` is what releases are compared on: the two rates, the failed proofs, the contradicted contract facts, the
-ablation detection rates and the tree's execution fingerprint.
+One run takes 11 to 15 minutes on one laptop core: eight engine worlds and 128 search lineages for each of ten search
+cases. What releases are compared on is the report's `headline`, a per-case vector: promotions of each negative,
+misses of each positive, the cases the static check refuses, impossible fills, stress-contaminated runs, each proof's
+held count, each ablation's detections and each variant's owner-rule verdict. `--compare OLD` lists regressions and
+improvements case by case and exits 4 when there is a regression or the runs are not comparable (a different suite,
+cohort or world fixture, or a run off the full protocol). A different Python, numpy or pyarrow is noted, since the
+synthetic streams may shift with them. Exit 3 means the suite file is not the pinned suite; exit 5 means the tree lacks
+an interface the suite calls (main at `f082cf5e` is the oldest tree that has them all; production's release before it
+cannot be scored); exit 2 means a confirmation run named no admissible development report.
 
-**Pinned.** `PINNED_SUITE_SHA` is the hash of the protocol, the world, the channels, every case and template, the search
-tier, the variants and the module's own source. A run whose hash differs reports `pinned: false` and exits 3, so the
-cases cannot be quietly redefined; a new question is a new suite id with a new report. A run at other than the default
-replication counts reports `full_protocol: false` and is not comparable either.
+`--tree CHECKOUT` runs this suite file against another checkout's `league` package in a child process. It guards
+against accidental drift of the cases (a tree's own copy of the suite is never used), not against a hostile tree: the
+tree's code runs in the suite's interpreter with the operator's environment. It is an operator tool for trusted trees,
+not a harness-lane judge.
+
+**Pinned.** `PINNED_SUITE_SHA` is the hash of the protocol, the world, the channels, every case and template, the
+search tier, the variants and the module's own source, read from the file on disk. A run whose hash differs reports
+`pinned: false` and exits 3, so the cases cannot be quietly redefined; a new question is a new suite id with a new
+report. The world's option prices (Bachelier with the Abramowitz-Stegun normal) and the Clopper-Pearson bounds are
+computed inside the suite, not by the scored tree. The store writer and the fill model must match the tree's own store
+and engine, so they come from its `league/gym/synth.py`; that file's hash is the report's `fixture_sha`, and runs with
+different fixtures are not compared.
+
+**Cohorts.** Development's worlds and search streams are the suite's first ones. Confirmation's hash the cohort's name
+in, and a confirmation run is admitted only against the frozen development receipt of the same pinned suite,
+execution fingerprint, evaluator sources, fixture and sample counts. A variant chosen on development is then judged on
+data it was not chosen on.
 
 ## What the suite runs
 
@@ -43,7 +65,8 @@ planted edge, the price drifts further in its tell's direction by a fixed amount
 (one-day expiry, 21 strikes around the 10:45 price) are quoted from 10:45 at a fixed half-spread around the Bachelier
 price of the rest of the path, which is exactly fair when nothing is planted: any profit beyond the spread is the
 planted edge or a leak. After the last window the world plants impossible prices: a stale quote at a jump, a vertical's
-leg blown out so its natural leaves the payoff range on a close and on an open, and crossed quotes.
+leg blown out so its natural leaves the payoff range on a close and on an open, and crossed quotes. The world writes
+no open interest.
 
 A passive fill model with a uniform hazard is on, so patient orders can fill and the adverse-selection and stress rules
 are exercised. Runs are made in one process (as a one-worker batch makes them).
@@ -68,10 +91,20 @@ right rejection (a grounded finding stays a failure, the same claim without a re
   Validation floor short), sparse (about 13 a year), a conditional regime (only after a large overnight gap), and a
   year regime (absent in the first Train year).
 - **Leakage**: each probe trades the absent window, taking its direction from what it tried to read of the future,
-  else from a coin. Paths: indexing past now, an array's base, a private attribute, a date literal, the greeks (solved
-  in blocks that include later minutes), next-session event flags, historical bar volume without publication receipts
-  (the world writes a volume column that encodes the day's later move), a process-global numpy dict carrying one run's
-  realized moves into a later run of the same days, and a memorized table keyed by the session's opening price level.
+  else from a coin, and each would profit if its route were open. Paths: indexing past now; an array's base; the
+  engine's greek cache (it holds the whole day's underlying) behind a private attribute; a date table reached by
+  reconstructing each session's date (a recognized window start plus a session count); the greeks (solved in blocks
+  that include later minutes); prior-session bars (closes, highs, lows and opens join the history together at a day's
+  close, so one probe on the last close covers the mechanism); historical bar volume without publication receipts (the
+  world writes a volume column that encodes the day's later move); and a process-global numpy dict carrying one run's
+  realized moves into a later run of the same days. Next-session event flags are a **smoke test**, kept out of the
+  rates: the world's moves do not depend on the calendar, so that probe cannot profit whatever the engine does.
+- **Memorized tables** (review-dependent negatives): a program that carries the realized direction of every session
+  keyed by the session's opening price level; the same table kept only for the sessions whose window moved most (about
+  13 a year, trading nowhere else); and a direction list indexed by a session counter from a recognized window start
+  (the up/down signs of the day's first twenty minutes and its tells), which has no date literal and nothing keyed to
+  the price level. The sparse table is the suite's **sensitivity control**: a negative today's activity floors are known
+  to stop, so a variant that lowers them shows what it lets through.
 - **Invalid fills**: buying the stale quote at the jump minute, closing a vertical while its long leg's bid is blown
   out above the width, opening one while its short leg's bid makes it pay a credit, buying a crossed ask to sell the
   crossed bid, and passive spread capture at the touch.
@@ -84,70 +117,87 @@ right rejection (a grounded finding stays a failure, the same claim without a re
 - **Search tier**: generated daily outcomes (no Gym, no drift figures) through the same lines with lineage selection:
   thirty-two noise variants per lineage ranked on Train, up to five candidates validated in rank order with the
   lineage's validated-version count feeding the deflated Sharpe, and the holdout with Holm. Noise is net zero after base
-  costs (a demanding null), including one fat-tailed (Student-t, three degrees of freedom) sparse case; positives carry
-  a fixed net edge at 12, 48 and 126 trades a year.
+  costs (a demanding null), Gaussian and fat-tailed (Student-t, three degrees of freedom), in every band a floor variant
+  opens: 12, 42 and 48 trades a year sit under today's floors (Train 40 a year, Validation 50), 126 above them. Planted
+  lineages carry a fixed net edge at 12, 48 and 126 trades a year.
 
 ## Results: main's evaluator
 
-Tree: `gym-engine-4`, execution fingerprint `f1515bd98bfb`, evaluator sources `0c4cc7ad582a` (the evidence, gate, researcher,
-review-contract, experiment, results and stats modules), suite `c853a5cff1a0`, eight worlds and 128 search lineages per case.
+Tree: `gym-engine-4`, execution fingerprint `f1515bd98bfb` (unchanged by this branch), evaluator sources `0c4cc7ad582a`
+(the evidence, gate, researcher, review-contract, experiment, results and stats modules), fixture `1ee0e716bc8d`, suite
+`292b84723078`; Python 3.14.7, numpy 2.5.3, pyarrow 25.0.1. Each cohort: eight worlds and 128 search lineages per
+search case. Development took 659 s and confirmation 876 s on one core of a shared machine.
 
 ### Headline
 
-| Rate | Count | Rate | Exact 95% interval |
-| --- | ---: | ---: | --- |
-| False promotion, every negative case | 8/144 | 5.6% | 2.4%–10.7% |
-| False promotion, the cases the mechanical stages are meant to stop | 0/136 | 0% | 0%–2.7% (one-sided 2.2%) |
-| Missed signal, planted edges | 23/40 | 57.5% | 40.9%–73.0% |
+| Rate | Development | Confirmation |
+| --- | ---: | ---: |
+| False promotion, every negative case-world | 16/160 (10.0%; 95% 5.8–15.7%) | 16/160 (10.0%; 95% 5.8–15.7%) |
+| False promotion, what the mechanical stages are meant to stop | 0/136 (95% upper 2.7%) | 0/136 (95% upper 2.7%) |
+| Negative cases promoted in any world | 2/20 | 2/20 |
+| Negative cases promoted, mechanical scope | 0/17 (one-sided 95% upper 16.2%) | 0/17 (one-sided 95% upper 16.2%) |
+| Missed signal, planted case-worlds | 23/40 (57.5%; 95% 40.9–73.0%) | 22/40 (55.0%; 95% 38.5–70.7%) |
+| Planted cases missed in at least one world | 4/5 | 4/5 |
 
-All eight false promotions are one case, the memorized price-level table: a program that carries the realized direction
-of every session keyed by the session's opening level passes every mechanical stage in every world, with a 99% hit rate.
-Nothing mechanical can stop it by design; the review contract names it (`calendar`: hard-coded absolute price regimes),
-and a grounded rejection of it survives the contract's check. It is the load the review carries. Every other negative
-case is stopped in every world.
+Read the case counts, not only the case-world counts. Outcomes cluster by case: every negative goes 0/8 or 8/8, so
+the 136 case-worlds behave like 17 trials, and the Clopper-Pearson interval on 136 assumes an independence they do not
+have. What the suite supports is that none of the 17 negatives the mechanical stages are meant to stop was promoted in
+any world of either cohort (one-sided 95% bound 16% per case), conditional on this fixed case mix.
 
-Most missed signals are the activity floors, not weak evidence: planted edges that reach Validation show a t of about 2
-to 6.
+All 16 false promotions in each cohort are two review-dependent memorized tables, each promoted in every world with a
+99-100% hit rate: the table keyed by opening price level and the session-indexed list. Nothing mechanical can stop a
+dense memorized table by design. The review contract names both (`calendar`: hard-coded absolute price regimes and
+reconstructed historical dates), and a grounded rejection of each survives the contract's check. That is the load the
+review carries. The sparse memorized table is stopped in every world, by the Train activity floors alone: it trades
+about 13 sessions a year.
 
-| Case | Answer | Promoted | Stopped at |
-| --- | --- | ---: | --- |
-| `absent_signal` | no edge | 0/8 | Train stress 8 |
-| `cost_erased` | no edge | 0/8 | Train stress 6, drift 2 |
-| `drift_only` | no edge | 0/8 | drift 7, Validation 1 |
-| `edge_disappears` | no edge | 0/8 | holdout 8 |
-| `planted_dense` | edge | 7/8 | Validation 1 (t 1.90) |
-| `planted_medium` | edge | 2/8 | Validation 4 (the 50-trade floor alone, at 39-49 trades), holdout 2 (Holm) |
-| `planted_regime_gap` | edge | 0/8 | Train eligibility 8 (the per-year floor) |
-| `planted_regime_years` | edge | 8/8 | none |
-| `planted_sparse` | edge | 0/8 | Train eligibility 8 (the per-year floor) |
+| Case | Answer | Development | Confirmation |
+| --- | --- | --- | --- |
+| `absent_signal` | no edge | 0/8 (Train stress 8) | 0/8 (Train stress 8) |
+| `cost_erased` | no edge | 0/8 (Train stress 6, drift 2) | 0/8 (Train stress 7, drift 1) |
+| `drift_only` | no edge | 0/8 (drift 7, Validation 1) | 0/8 (drift 8) |
+| `edge_disappears` | no edge | 0/8 (holdout 8) | 0/8 (holdout 8) |
+| `planted_dense` | edge | 7/8 (Validation 1, t 1.90) | 6/8 (holdout 2) |
+| `planted_medium` | edge | 2/8 (Validation 4, holdout 2) | 4/8 (Validation 3, holdout 1) |
+| `planted_regime_gap` | edge | 0/8 (Train eligibility 8) | 0/8 (Train eligibility 8) |
+| `planted_regime_years` | edge | 8/8 | 8/8 |
+| `planted_sparse` | edge | 0/8 (Train eligibility 8) | 0/8 (Train eligibility 8) |
 
-The year-regime edge, absent in the first Train year, is promoted in every world: the robust Train objective (worst
-year's t) only ranks a family's versions, and a single version's negative score does not stop it. Among several
-versions it would rank below any version with a positive worst year.
+Most missed signals are the activity floors, not weak evidence: the sparse and gap-regime edges never pass Train's
+per-year floor (6 to 28 trades in a Train year), and every Validation stop of the medium edge is the trade floor alone,
+at 39-49 trades. Planted edges that reach Validation show a t of about 2 to 6. The year-regime
+edge, absent in the first Train year, is promoted in every world: the robust Train objective (the worst year's t) only
+ranks a family's versions, and a single version's negative score does not stop it. Among several versions it would rank
+below any version with a positive worst year.
 
 ### Leakage
 
-| Path | Result |
+| Path | Result (both cohorts) |
 | --- | --- |
-| An array's `.base`, a private attribute, a date literal | refused by the static check (8/8 each) |
-| Indexing past now, the greeks, next-session events, bar volume without receipts | no information: direction hit rate 0.51-0.52; stopped at Train stress |
-| A process-global numpy dict carrying one run's moves into a later run of the same days | normal runs learn nothing (hit 0.52; stopped by the drift screen), but the 1.5x-stress runs, made after the normal runs over the same days, are contaminated in 8/8 worlds |
-| A memorized table keyed by the opening price level | promoted 8/8 (review-dependent, above) |
+| An array's `.base`; the greek cache behind a private attribute; a date table reached by reconstructing the date | refused by the static check, 8/8 each |
+| Indexing past now, the greeks, prior-session bars, bar volume without receipts | no information: direction hit rates 0.48–0.52; stopped at Train stress (the greeks once at drift) |
+| A process-global numpy dict carrying one run's moves into a later run of the same days | normal runs learn nothing (hit 0.51–0.52; stopped by the drift screen), but the 1.5x-stress runs, made after the normal runs over the same days, are contaminated in 8/8 worlds |
+| Memorized tables: by price level; session-indexed; sparse by price level | promoted 8/8; promoted 8/8; stopped at Train eligibility 8/8 (review-dependent, above) |
+| Next-session event flags (smoke test, out of the rates) | hit 0.51–0.52; never promoted |
 
-Nothing in the ctx leaks the future: the arrays end at the current minute, the greeks are handed out one row at a time,
-and historical bar volume without first-observation receipts is hidden even when the file holds it. The holes the suite
-found let programs or runs pass information to each other instead: see State.
+On the paths tested, nothing in the ctx leaks the future: the arrays end at the current minute, the greeks are handed
+out one row at a time, the prior-session bars end yesterday, and historical bar volume without first-observation
+receipts is hidden even when the file holds it. Three probes would profit if the static check let them through (the
+greek cache holds the whole day's prices; the date table holds every session's answer); it does not. Not tested: open
+interest (the world writes none), and highs, lows and opens separately (they join the history on the same path as the
+closes). The holes the suite found let programs or runs pass information to each other instead: see State.
 
 ### Invalid fills
 
-Zero impossible fills in 40 program-worlds, each over five runs: no stale quote bought at the decision minute (orders
-meet the next minute's quotes), no crossed quote filled (the store drops them), no vertical opened at or below zero or
-closed above its width while a leg was blown out (the package's payoff bounds hold on open and close), and passive spread
-capture at the touch loses under adverse selection. Every probe loses money and stops at the Train stress run.
+Zero impossible fills in 32 checked program-worlds per cohort (four probes with a detector, each over five runs): no
+stale quote bought at the decision minute (orders meet the next minute's quotes), no crossed quote filled (the store
+drops them), no vertical opened at or below zero or closed above its width while a leg was blown out (the package's
+payoff bounds hold on open and close). The passive spread-capture probe has no fill detector and is judged on P&L: it
+loses under adverse selection. Every fill probe loses money and stops at the Train stress run.
 
 ### State and the review contract's facts
 
-| Proof | Fact | Held | Observed (trades: alone or first run, then mated or second run) |
+| Proof | Fact | Held (both cohorts) | Observed (trades: alone or first run, then mated or second run) |
 | --- | --- | ---: | --- |
 | Module STATE starts fresh every run | state | 8/8 | 5, 5 |
 | Parameter lists are copied per run | parameters | 8/8 | 1, 1 |
@@ -167,11 +217,13 @@ concrete route and is right.
 
 Scope: production Gym boxes run each batch unit in its own process, which isolates runs from each other but not the
 programs of one unit. The House's live decider holds every live program instance in one child process
-(`league/live/decider.py`), so the batch-mate channels exist between whatever programs it runs together. The fixes are
-small but belong to `league/gym` (a Gym change resets evidence): refuse numpy's mutable module attributes in the safety
-check (an allowlist of numpy names is the robust form) and make the view's coverage mapping read-only. They are listed
-for release B, the planned reset, and are not in this change. When either lands, its probes are refused or hold, and
-the suite reports the proof as held without any change to the suite.
+(`league/live/decider.py`), so the batch-mate channels exist between whatever programs it runs together. Release A's
+batch isolation contains a failing program's errors; it does not separate this state. The fixes are small but belong to
+`league/gym` (a Gym change resets evidence): refuse numpy's mutable module attributes in the safety check (an allowlist
+of numpy names is the robust form) and make the view's coverage mapping read-only. They are listed for release B, the
+planned reset, and are not in this change. When either lands, its probes are refused (or the writer's write fails) and
+the proofs hold; a unit test runs the refused path through the whole report, so the suite needs no edit and keeps its
+pin.
 
 ### Broken ablations
 
@@ -184,78 +236,84 @@ the suite reports the proof as held without any change to the suite.
 | read, then defeated by a wrong comparison | yes | 0/8 | 8/8 |
 | a computed key with a wrong test | yes | 0/8 | 8/8 |
 
-The static contract detects 8/24 broken switches (33%, 95% 16%-55%) with no false alarm; a behavioral probe (does the off
-variant still trade?) detects 24/24 (95% lower bound 86%) with no false alarm in 24 working ones. Engine-4's binding
-works: every correctly wired switch removes every trade.
+Identical in both cohorts. The static contract detects 8/24 broken switches (33%, 95% 16%–55%) with no false alarm;
+the behavioral probe (does the off variant still trade over the 65-session Validation?) detects 24/24 (95% lower bound
+86%) with no false alarm in 24 working ones. Engine-4's binding works: every correctly wired switch removes every trade.
 
 ### The review contract
 
-For both cases with a known defect line, a grounded rejection (a real excerpt, a contract fact, a counterexample) stays a
-failure through `grounded_answer`, and the same claim with an excerpt not in the program falls to unclear, which can
-never open a holdout. That checks the receipt's shape; whether a model finds the defect is not measured here.
+For all four cases with a known defect line (the numpy memo and the three memorized tables), a grounded rejection (a
+real excerpt, a contract fact, a counterexample) stays a failure through `grounded_answer`, and the same claim with an
+excerpt not in the program falls to unclear, which can never open a holdout. That checks the receipt's shape; whether a
+model finds the defect is not measured here.
 
-## A measured proposal (not applied)
+## The owner's rule, measured (no change proposed)
 
-Each variant re-judges the same recorded outcomes. The engine tier holds the eight worlds' single-version cases; the
-search tier adds selection: 512 noise lineages (sparse, fat-tailed sparse, medium, dense; 32 variants each) and 384
-planted lineages (sparse, medium, dense). "Noise looks" counts noise lineages that passed Validation and spent a
-holdout look: a leading indicator, since the holdout is the last guard and every look is charged in Holm.
+Each variant re-judges the same recorded outcomes. It meets the owner's rule only if, against `current`: engine false
+promotions are not higher; search false promotions are not higher; engine negatives that pass Validation (and would
+spend a holdout look) are not higher; noise lineages that spend a holdout look are not higher in ANY of the seven noise
+bands; and missed signals fall. The look counts carry the power. End-to-end false promotion on noise cannot see a floor
+change at all: the holdout with Holm stops every noise lineage even under two-trade floors. The verdict must reject the
+`no_floors` reference, and it does in both cohorts, on the engine promotions (the sparse memorized table), the engine
+looks and the noise looks.
 
-| Variant | Rule | Engine false (mech.) | Engine missed | Search false | Noise looks | Search missed |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| `current` | Train 40 trades on 20 days every year; Validation 50 on 25 | 8/144 (0/136) | 23/40 | 0/512 | 3/512 | 269/384 |
-| `aligned_floors` | Validation 40 on 20, Train's own yearly rate | 8/144 (0/136) | 20/40 | 0/512 | 3/512 | 165/384 |
-| `sparse_floors` | Train 6 on 5 every year and 30 on 20 pooled; Validation 10 on 8 | 8/144 (0/136) | 7/40 | 0/512 | 13/512 | 64/384 |
-| `pooled_train` | sparse floors, ranked on the pooled Train t | 8/144 (0/136) | 7/40 | 0/512 | 10/512 | 64/384 |
-| `pooled_validation` | Validation over the last Train year and Validation, floors unchanged | 8/144 (0/136) | 18/40 | 0/512 | 12/512 | 141/384 |
-| `no_floors` | reference: two trades | 8/144 (0/136) | 6/40 | 0/512 | 13/512 | 64/384 |
+| Variant | Rule | Engine false (sparse table) | Engine missed | Search false | Noise looks | Search missed | Verdict |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `current` | Train 40 trades on 20 days every year; Validation 50 on 25 | 16 (0) / 16 (0) | 23 / 22 | 0 / 0 | 3 / 2 | 269 / 263 | reference |
+| `aligned_floors` | Validation 40 on 20 | 16 (0) / 16 (0) | 20 / 19 | 0 / 0 | 14 / 26 | 165 / 161 | not met: looks rise |
+| `sparse_floors` | Train 6 on 5 every year and 30 on 20 pooled; Validation 10 on 8 | 21 (5) / 23 (7) | 7 / 9 | 0 / 0 | 24 / 41 | 64 / 62 | not met |
+| `pooled_train` | sparse floors, ranked on the pooled Train t | 21 (5) / 23 (7) | 7 / 9 | 1 / 1 | 26 / 40 | 64 / 62 | not met |
+| `pooled_validation` | Validation over the last Train year and Validation | 16 (0) / 16 (0) | 18 / 19 | 2 / 0 | 47 / 68 | 141 / 149 | not met |
+| `no_floors` | reference: two trades | 23 (7) / 24 (8) | 6 / 8 | 0 / 0 | 24 / 41 | 64 / 62 | not met (sensitivity) |
 
-Search false promotions are 0/512 under every variant (one-sided 95% bound 0.6%). By search case (promoted, then noise
-looks spent):
+Each cell is development / confirmation. Engine counts are of 160 negative and 40 planted case-worlds; search counts
+are of 896 noise and 384 planted lineages.
 
-| Variant | Noise dense | Noise medium | Noise sparse | Noise sparse, fat tails | Signal dense | Signal medium | Signal sparse |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `current` | 0 (3) | 0 (0) | 0 (0) | 0 (0) | 115/128 | 0/128 | 0/128 |
-| `aligned_floors` | 0 (3) | 0 (0) | 0 (0) | 0 (0) | 115/128 | 104/128 | 0/128 |
-| `sparse_floors` | 0 (3) | 0 (0) | 0 (4) | 0 (6) | 115/128 | 104/128 | 101/128 |
-| `pooled_train` | 0 (2) | 0 (1) | 0 (3) | 0 (4) | 115/128 | 104/128 | 101/128 |
-| `pooled_validation` | 0 (9) | 0 (3) | 0 (0) | 0 (0) | 123/128 | 120/128 | 0/128 |
-| `no_floors` | 0 (3) | 0 (0) | 0 (4) | 0 (6) | 115/128 | 104/128 | 101/128 |
+Noise lineages that spent a holdout look, by band (of 128), and the planted 48-a-year class promoted:
 
-**Recommendation 1: `aligned_floors` now.** Ask Validation for 40 trades on 20 days, the rate Train already requires in
-every year. On these fixed benchmarks false promotions do not rise (0/136 mechanical, 0/512 search), the noise look spend
-does not rise (3/512), and missed signals fall (engine 23 to 20 of 40; search 269 to 165 of 384, the medium class
-recovered from 0/128 to 104/128). It removes a mismatch rather than loosening a guard: a version Train accepts at 40 a
-year can today fail Validation at the same rate for the floor alone (4 of the 6 engine-tier medium misses). It satisfies
-the owner's rule of Sept 30 as written. The deflated Sharpe, t >= 2, the quarters, the stress, the drift screen, the
-holdout line, Holm and the look rations are unchanged; prior verdicts stand.
+| Band | `current` dev | `aligned_floors` dev | `current` conf | `aligned_floors` conf |
+| --- | ---: | ---: | ---: | ---: |
+| noise, 12 a year (Gaussian; t3) | 0; 0 | 0; 0 | 0; 0 | 0; 0 |
+| noise, 42 a year (Gaussian; t3) | 0; 0 | 3; 2 | 0; 0 | 5; 5 |
+| noise, 48 a year (Gaussian; t3) | 0; 0 | 0; 6 | 0; 0 | 4; 10 |
+| noise, 126 a year (Gaussian) | 3 | 3 | 2 | 2 |
+| planted, 48 a year: promoted | 0 | 104 | 0 | 102 |
 
-**Recommendation 2: `sparse_floors` only after a larger search benchmark.** It meets the rule as written (no false
-promotion; engine misses 23 to 7, search 269 to 64) but spends more holdout looks on noise: 13/512 lineages against 3,
-most in the sparse and fat-tailed sparse cases. The holdout caught every one here, but each look is charged in Holm for
-every later look and uses a lineage's ration, so the cost falls on real signals. It should be judged by a pinned
-`evaluator-suite-2` with more variants per lineage, serial dependence and heavier tails before it is proposed.
+**No variant meets the rule in either cohort, and no threshold change is proposed from this suite.**
 
-**Not recommended.** `pooled_train` gives the same misses as `sparse_floors` on these cases (the objective only ranks).
-`pooled_validation` triples the dense-noise look spend (3 to 9): the last Train year was selection data, so pooling it
-into Validation reuses the evidence that chose the version. `no_floors` is a reference.
-
-Mechanics, if adopted: `MIN_TRADES` 50 to 40 and `MIN_DAYS` 25 to 20 in `league/swarm/evidence.py` (D2c's numbers;
-the researcher's text and the progress counts read the constants). That module is research-side, but the live path loads
-it through `gate.py`, so it deploys after a close (D8); it is not under `league/gym` or `league/live` and moves no
-evaluator fingerprint. Validations already judged keep their verdicts. Re-run this suite on the changed tree: its
-headline rates (which use the tree's own lines) must then equal this report's `aligned_floors` engine row, while the
-variant rows, whose floors are fixed in the suite, stay as they are.
+- **`aligned_floors`: withdrawn.** An earlier draft of this report recommended it, on the development cohort's four
+  original noise bands, where its look spend did not rise. With nulls in the band it opens (42 and 48 trades a year,
+  Gaussian and fat-tailed), the look spend rises on development (3 to 14 of 896) and on the independent confirmation
+  cohort (2 to 26); a reviewer's own fresh seeds showed the same (Gaussian 48-a-year noise, 0 to 8 of 128). It is a
+  loosening of a Validation guard (50 trades on 25 days to 40 on 20), not only the removal of a mismatch with Train.
+  What it buys is real: the 48-a-year planted class goes from 0 to about 103 of 128 lineages, and engine misses fall by
+  3. What it costs: noise in the opened band spends a holdout look in up to 8% of lineages (0 to 10 of 128 per band),
+  against 2–3 of 128 for dense noise today, and each look is charged in Holm for every later one. The rule as written is not met;
+  whether the trade is worth making anyway is the owner's decision, and this benchmark does not certify it.
+- **`sparse_floors`, `pooled_train`, `no_floors`.** Beyond the look spend in every band under today's floors, they let
+  the sparse memorized table reach and pass the holdout in 5–8 of 8 worlds. Today the Train floors are the only
+  mechanical stop for a sparse memorized strategy; lowering them moves that load onto the review. `pooled_train` also
+  promoted one noise lineage in each cohort.
+- **`pooled_validation`** spends the most looks (47 and 68 of 896) and promoted two noise lineages on development:
+  pooling the last Train year, which chose the version, into Validation reuses selection data.
+- A change that could meet the rule would need a compensating guard that holds the look spend flat in the band it
+  opens (for example, a stricter Validation t for versions under the current floor), designed on development and
+  confirmed on a fresh cohort under a new suite id. None is measured here.
 
 ### Cheap stages the suite measured (proposals, not applied)
 
-- **Behavioral ablation before replay:** run a changed switch's off variant over a few Train days and refuse it when the
-  trades do not change. 24/24 broken switches caught, 0/24 false alarms; the static contract catches 8/24.
-- **Level-invariance probe:** replay Validation on a store with every price scaled. It caught the memorized table in 8/8
-  worlds, with 1 false alarm in 40 planted-edge runs (a program with a dollar threshold); it needs a Gym-side transform.
-- **Stress-contamination flag:** a version that does better at 1.5x the spread than at 1x over the same days learned
-  something between the runs (8/8 on the numpy memo, 0 elsewhere). A flag, not proof: a program whose losses come from
-  passive fills can gain when the stress run halves them.
+- **Behavioral ablation.** Measured as the off variant over the full 65-session Validation, with switches that remove
+  every trade when off: 24/24 broken switches caught, 0/24 false alarms (the static contract catches 8/24). A cheaper
+  probe over a few Train days, on real filters that often do not bind on a given day, is not measured; its false-alarm
+  rate would be higher.
+- **Level-invariance probe.** Replay Validation on a store with every price scaled. It flags the level-keyed tables in
+  every world, with 1 false alarm in 40 planted-edge runs (a program with a dollar threshold), and misses the
+  session-indexed list by construction: it detects 8 of the 16 promoted memorized runs in each cohort. Cost: one extra
+  Validation replay per candidate, plus a scaled store the Gym must build (a `league/gym` change, so an evidence reset).
+  A session-permutation or calendar-shift replay would target session-indexed memory; it is not measured.
+- **Stress-contamination flag.** A version that does better at 1.5x the spread than at 1x over the same days learned
+  something between the runs: 8/8 on the numpy memo in both cohorts, 0 elsewhere. A flag, not proof: a program whose
+  losses come from passive fills can gain when the stress run halves them.
 
 ## Limitations
 
@@ -265,19 +323,24 @@ variant rows, whose floors are fixed in the suite, stay as they are.
   the review carries.
 - Runs are made in one process, as a one-worker batch makes them; production units each have their own process.
 - The synthetic holdout is the suite's own (48 sessions); its Holm history is fixed at two failed looks.
-- The search tier has no drift figures, Gaussian or Student-t noise with no serial dependence, and a fixed five-candidate
-  schedule. It is not a simulation of model research.
-- Eight worlds and 128 lineages per case: a zero count supports an exact bound, not a claim of zero.
+- The search tier has no drift figures, Gaussian or Student-t noise with no serial dependence, and a fixed
+  five-candidate schedule. It is not a simulation of model research.
+- Eight worlds and 128 lineages per case: a zero count supports an exact bound, not a claim of zero. Case-worlds
+  cluster by case, and every bound is conditional on this case mix.
+- These figures score main at `f082cf5e`. Release A changes `league/gym` (batch error isolation, a compile check) but not
+  the world's fixture, so the integrated release B tree should be scored with the same pinned suite before it deploys
+  (`--compare docs/benchmarks/evaluator_1.json`); main at `f082cf5e` is the oldest tree the suite can score.
 
 ## Reproduction
 
 ```sh
-python -m league.swarm.benchmarks --suite evaluator --json --output evaluator_1_full.json
+python -m league.swarm.benchmarks --suite evaluator --cohort development --json --output dev.json --receipt evaluator_1.json
+python -m league.swarm.benchmarks --suite evaluator --cohort confirmation --frozen evaluator_1.json --json \
+  --output conf.json --receipt evaluator_1_confirmation.json
 python -m unittest league.tests.test_swarm_evaluator_benchmarks league.tests.test_swarm_benchmarks
 ```
 
-The run is deterministic for a pinned suite on the same Python and numpy (3.14 and 2.5.3 here): worlds, fills and
-bootstraps are seeded by hashes, and two runs of the
-suite here (before and after an edit that changed only its fingerprinting code) gave identical figures. The receipt
-beside this file keeps the aggregates, the tree fingerprint, the suite hash and a digest of every world's figures
-(`replication_rows_sha256`, per-world timings excluded); the full report is reproduced by the command above.
+A pinned suite is deterministic on the same Python, numpy and pyarrow: worlds, fills and bootstraps are seeded by
+hashes. The development cohort reproduced the first draft's figures exactly on every case and search band the two
+share. Each receipt's `replication_rows_sha256` is the digest of every world's figures (per-world seconds excluded),
+recomputed from a saved full report by `receipt()`.
