@@ -326,7 +326,9 @@ class BandRace(LiveCase):
         store.add_family({"id": "vert", "mechanism": "An invented mechanism for concurrency tests.", "structure": "debit_vertical",
                           "roots": ["SPY"], "dte": [0, 2]}, origin="test")
         version = store.add_version("vert", VERTICAL, {"hold": 600}, author="test")
-        store.set_state("vert", banded_version=1, banded_sha=version["sha"], typical_by_version={"1": 50},
+        from league.tests.evaluator_fakes import band_proof
+
+        store.set_state("vert", banded_version=1, banded_sha=version["sha"], banded_evaluator=band_proof(version), typical_by_version={"1": 50},
                         forward={"negative": False},
                         live_promoted_at=at(MONDAY - dt.timedelta(days=3), 16, 1) if band == "probe" else None)
         store.set_band("vert", band, reason="synthetic pass")
@@ -345,9 +347,11 @@ class BandRace(LiveCase):
                                                           "live": {"calibration": False}}))
         version = store.add_version("vert", VERTICAL, {"hold": hold}, author="synthetic")
         sha = run_sha(version)
+        from league.tests.evaluator_fakes import reviewed
+
         store.set_state("vert", validation_version=version["n"], validation_line={"passed": True},
                         validation_image="synthetic-image", validation_bundle=build_bundle()[1],
-                        review={"sha": sha, "verdict": "pass", "audit": {"verdict": "pass"}})
+                        review=reviewed(sha))
         return live, store, other, f"vert@{version['n']}:t"
 
     def on_decision(self, live, key, change):

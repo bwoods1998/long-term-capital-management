@@ -83,6 +83,48 @@ checkout's `.data` (the box record and the admin token): never `ln -sfn` over it
 - Never chain a deploy on another command's exit code (a grep, a filter): run the tests, read the
   result, then deploy.
 
+### Evaluator adoption and `gym-engine-4`
+
+Engine 4 binds parameter overrides to module `PARAMS` at its declaration, before aliases and helper
+defaults capture values; `ctx.params` starts with the same values. Each independent run still executes
+the module in a fresh namespace. Persistent module state within one run is permitted. This changes
+execution semantics for old programs that read global `PARAMS` with nondefault overrides, so prior
+results cannot qualify them under the new runtime.
+
+At swarm startup, before any research or tournament worker, `research_evaluator` records the current
+data image, full Gym bundle and execution fingerprint. An identity change archives and clears derived
+Train bests, candidates, submissions, stress/drift views, validation and review. Runs, versions, lineage
+trial counts, refusals, notebooks and consumed holdout looks remain. Late old-evaluator results are
+still counted but cannot refill current selection or forward evidence. Full result pruning retains
+each worker's actual image and bundle in its run summary. The replay key and standalone engine hash
+also change, so the old cache cannot supply a new result.
+
+An old contract's pre-holdout refusal is archived and its active veto cleared, allowing a fresh review
+only after new-evaluator qualification. The refusal record stays; an actually consumed look remains
+in `looks` and cannot be reopened for that same program hash.
+
+Candidate, Probe and Sized entry authority additionally pins the program hash and the executable
+Gym/live/shared-source fingerprint in `banded_evaluator`. An old/missing fingerprint denies new opens
+and band confirmation; startup returns that family to Gym so researchers can requalify it. Frozen
+live instances and their positions keep their exit/reconciliation path, and historical band/forward
+records remain. A docs-only bundle change does not erase a band whose executable fingerprint still
+matches. A runtime, fill or context change does, even if an engine-version bump was missed. A new
+qualification still needs all existing Train, validation, independent review and holdout requirements;
+an identical code+parameter hash cannot acquire another sealed look because the evaluator changed.
+
+New practice cohorts require a current-image/current-bundle eligible Train or completed Validation
+replay; an old `best_train_version` or `validation_version` label alone is insufficient. A zero-trade or
+failed validation line remains information, not an automatic experiment-contract failure. Existing
+immutable cohorts separately pin their bundle, fill-model label and executable fingerprint: a changed evaluator makes them close-only, with
+forced wind-down outcomes excluded from strategy feedback. Their `(family, version)` identity cannot
+be reused for a new evaluator; re-entry requires a newly eligible source version.
+
+Adoption needs a new code release, not a new data checkpoint solely for this parameter fix: GymDriver
+uploads the content-addressed engine bundle to sealed workers, and results identify both bundle and
+data image. Verify the deployed `research_evaluator`, adoption events, unchanged total trials/looks,
+worker `gym_bundle`, real entry proof and practice evaluator before treating new observations as
+current evidence. Evaluator adoption is not a strategy promotion or a claim of profitability.
+
 ## Pause, resume, stop
 
 ```sh

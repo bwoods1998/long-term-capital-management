@@ -135,6 +135,10 @@ class SwarmFamilies:
                 selected = store.version(fam["id"], version)
                 if selected is None or run_sha(selected) != expected.get("run_sha"):
                     return False
+                from ..swarm.bands import current_banded_evaluator
+
+                if not current_banded_evaluator(state, run_sha(selected)):
+                    return False
                 typical = (state.get("typical_by_version") or {}).get(str(version),
                     state.get("typical_max_loss_usd") if state.get("validation_version") == version else None)
                 if (typical != expected.get("typical_max_loss_usd")

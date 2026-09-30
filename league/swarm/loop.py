@@ -672,8 +672,11 @@ class Swarm:
         from .evaluator import adopt, identity
 
         evaluator = identity(self.pool.image("gym"), self.pool.bundle())
-        if evaluator is None:
+        if evaluator is None and getattr(self.pool, "driver_factory", None) is None:
+            self.release_lock()
             raise RuntimeError("the swarm cannot select research without a known evaluator image and bundle")
+        # An explicitly injected driver may have no bundle before its first fake box exists.
+        # Production GymPool always builds its local bundle without a network call.
         adopted_evaluator = adopt(self.store, evaluator)
         if adopted_evaluator["adopted"]:
             log(f"evaluator adopted: {adopted_evaluator['families']} families owe fresh evidence")

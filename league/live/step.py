@@ -225,7 +225,9 @@ class OptionsLive:
         self.budget_spent: dict[str, int] = {}
         self.state = LiveState(self.root / STATE_FILE, clock=clock)
         self.shadow = ShadowBook(self.root / SHADOW_FILE, fill_model=fill_model or F.FillModel.load())
-        self.observe_store.evaluator = f"{evaluator_bundle()}:{self.shadow.fill_model.version}"
+        from ..swarm.evaluator import execution_fingerprint
+
+        self.observe_store.evaluator = f"{evaluator_bundle()}:{self.shadow.fill_model.version}:{execution_fingerprint()}"
         self.book = RealBook(self.state, real, self.table, clock=clock, record=self.record) if real is not None else None
         self.proof = PaperProof(self.state, paper, record=self.record, clock=clock) if paper is not None else None
         # The single-leg route's own proof (a long call), once the vertical's has passed: real long calls and puts wait

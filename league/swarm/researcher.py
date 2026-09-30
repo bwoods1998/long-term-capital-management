@@ -961,19 +961,22 @@ def version_drift(store: SwarmStore, fam: Mapping[str, Any], n: Any) -> dict[str
     if n is None:
         return None
     n = int(n)
+    from .evaluator import KEY, matches, row_matches
+
+    evaluator = store.get(KEY)
     span = running_span(store)
     state = fam.get("state") or {}
     again = ((state.get("robustness") or {}).get(str(n)) or {}).get("drift")
-    if landed(again) and evidence.drift_numbers(again) is not None:
+    if landed(again) and matches(again, evaluator) and evidence.drift_numbers(again) is not None:
         return evidence.drift_numbers(again)
     for key, of in (("best_train_run", state.get("best_train_version")), ("submitted_run", fam.get("best_version"))):
         if state.get(key) and of == n:
             row = store.run(str(state[key]))
-            numbers = drift_row(row, n) if row_span(row) == span else None
+            numbers = drift_row(row, n) if row_span(row) == span and row_matches(store, row, evaluator) else None
             if numbers is not None:
                 return numbers
     for row in store.version_runs(fam["id"], n, window="train", stress=1.0, limit=20):
-        numbers = drift_row(row, n) if row_span(row) == span else None
+        numbers = drift_row(row, n) if row_span(row) == span and row_matches(store, row, evaluator) else None
         if numbers is not None:
             return numbers
     return None
@@ -1839,7 +1842,10 @@ class Researcher:
         nothing its run already changed. A version whose drift figures fail the screen is not eligible (`drift_blocks`). A
         run over another Train span than the running swarm's (a job queued before a switch, an image adopted early) is
         shown but never enters the candidates or the best."""
-        other = not self._counts_now(span)
+        from .evaluator import identity, row_matches
+
+        old_evaluator = not row_matches(self.store, self.store.run(run_id), identity(*self._gym_identity()))
+        other = not self._counts_now(span) or old_evaluator
         score = (robust["score"] if robust is not None and robust["eligible"] and robust["score"] is not None and not other
                  else None)
         blocked = self.drift_blocks(fam["id"], n, version_drift(self.store, fam, n)) if score is not None else None
@@ -1862,7 +1868,10 @@ class Researcher:
             view["train_score"] = {"score": robust["score"], "eligible": bool(robust["eligible"]) and not failed and not blocked,
                                    "worst_year": robust.get("worst_year"), "quarters_positive": robust.get("quarters"),
                                    "by_year": robust.get("years")}
-            if other:
+            if old_evaluator:
+                view["train_score"]["eligible"] = False
+                view["train_score"]["why_not_eligible"] = "this run used another evaluator; rerun it on the current Gym"
+            elif other:
                 view["train_score"]["eligible"] = False
                 view["train_score"]["why_not_eligible"] = (f"this run covered Train from {span or CORE_SPAN}, and Train now "
                                                            f"starts {self.train_span()}: run it again")
@@ -2131,8 +2140,13 @@ class Researcher:
                                          "sweep again (no trial)")
             return answer
         demoted = {int(v) for v in (((self.store.family(fid) or {}).get("state") or {}).get("robust_failed") or [])}
+        from .evaluator import identity, row_matches
 
-        blocked = {int(r["job"].version or 0): why for r in rows if r["status"] == "ok" and r["eligible"]
+        evaluator = identity(*self._gym_identity())
+        for row in rows:
+            row["evaluator_current"] = row_matches(self.store, self.store.run(row["run_id"]), evaluator)
+
+        blocked = {int(r["job"].version or 0): why for r in rows if r["status"] == "ok" and r["eligible"] and r["evaluator_current"]
                    for why in [self.drift_blocks(fid, int(r["job"].version or 0), r.get("figures"))] if why}
 
         def counts(row: Mapping[str, Any]) -> bool:
@@ -2140,7 +2154,7 @@ class Researcher:
             row may be the best or head the table."""
             version = int(row["job"].version or 0)
             return row["status"] == "ok" and row["eligible"] and row["score"] is not None and version not in demoted \
-                and version not in blocked and self._counts_now(row["span"])
+                and version not in blocked and self._counts_now(row["span"]) and row["evaluator_current"]
 
         rows.sort(key=lambda r: (r["status"] != "ok", not counts(r), -(r["score"] if r["score"] is not None else -math.inf),
                                  r["job"].id))
@@ -2180,7 +2194,9 @@ class Researcher:
                 "trades": r["trades"], "days": r["days"], "pnl": r["pnl"], "fill_rate": r["fill_rate"], "years": r["years"]}
             if r.get("drift"):
                 row["drift"] = r["drift"]
-            if r["eligible"] and r["status"] == "ok" and not ok and not self._counts_now(r["span"]):
+            if not r["evaluator_current"]:
+                row["why_not"] = "it used another evaluator; rerun it on the current Gym"
+            elif r["eligible"] and r["status"] == "ok" and not ok and not self._counts_now(r["span"]):
                 row["why_not"] = f"it covered Train from {r['span']}, and Train now starts {self.train_span()}"
             elif r["eligible"] and r["status"] == "ok" and not ok:
                 version = int(job.version or 0)
@@ -2317,6 +2333,10 @@ class Researcher:
         eligible (its row's score, else its kept full result), of a version that has not lost at 1.5x the half-spread."""
         if run.get("stress") is None or float(run["stress"]) != 1.0 or run.get("purpose") not in (None, "train", "drift"):
             return False, "only a Train run of yours at the normal spread counts"
+        from .evaluator import identity, row_matches
+
+        if not row_matches(self.store, run, identity(*self._gym_identity())):
+            return False, "it used another evaluator; rerun the version on the current Gym before submitting"
         current = self.store.family(fam["id"]) or fam
         state = current.get("state") or {}
         if int(run["version"]) in (state.get("robust_failed") or []):
@@ -2423,10 +2443,12 @@ class Researcher:
                 continue
             job = GymJob(family=fid, version=int(n), code=code, params=dict(params or {}), window="train", roots=tuple(roots),
                          stress=stress, purpose="robustness", priority=ROBUSTNESS_PRIORITY)
+            image, bundle = self._gym_identity()
             # Keyed like a researcher's run (NO DUPLICATE RUNS): a gym_run of this version at 1.5x reads it back.
             job.late = lambda result, label=label, stress=stress, job=job: self.robust_landed(
                 fid, int(n), label, stress, result, key=self._result_key(job, result))
-            job.late_fail = lambda why, label=label: self.robust_landed(fid, int(n), label, None, {"status": "failed", "reason": why})
+            job.late_fail = lambda why, label=label, image=image, bundle=bundle: self.robust_landed(
+                fid, int(n), label, None, {"status": "failed", "reason": why, "gym_image": image, "gym_bundle": bundle})
             submit(job)
         return True
 
@@ -2476,8 +2498,12 @@ class Researcher:
                 ok = ok and numbers is not None
                 view = {"status": "ok", **numbers} if ok else {"status": "failed", "reason": (reason or "no drift figures came back")[:200]}
             self._robust.discard((fid, int(n), label))  # landed or failed: a failure is queued again later, up to the attempts
-            if stress is not None and not self._counts_now(span_of(result)):
-                return  # run over another Train span (queued before a switch): a trial, never this span's robustness
+            from .evaluator import KEY, identity, matches
+
+            if not matches(result, identity(*self._gym_identity()) or self.store.get(KEY)) or \
+                    (stress is not None and not self._counts_now(span_of(result))):
+                return  # another span/evaluator: a historical trial, never current robustness or drift
+            view.update({name: result[name] for name in ("gym_image", "gym_bundle") if name in result})
             demoted = None
             with self.store.atomic():
                 fam = self.store.family(fid) or fam
@@ -3005,6 +3031,10 @@ def migrate_objective(store: SwarmStore, *, beat: Callable[[], None] | None = No
             rows: list[list[Any]] = []
             for run in store.runs(fid, window="train", limit=1000):
                 if run["status"] != "ok" or float(run["stress"] or 1.0) != 1.0 or run.get("purpose") == "robustness" or not run.get("path"):
+                    continue
+                from .evaluator import row_matches
+
+                if not row_matches(store, run):
                     continue
                 if beat is not None and time.monotonic() - last >= beat_seconds:
                     beat()

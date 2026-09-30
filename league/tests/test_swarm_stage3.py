@@ -477,9 +477,11 @@ class ReadyForwardTests(R.RoundCase):
         return {"day": day, "checkpoint": checkpoint}
 
     def banded(self, fid="a"):
+        from league.tests.evaluator_fakes import band_proof
+
         self.family(fid)
         self.store.set_band(fid, "candidate", reason="synthetic test")
-        self.store.set_state(fid, banded_version=1)
+        self.store.set_state(fid, banded_version=1, banded_evaluator=band_proof(self.store.version(fid, 1)))
 
     def good(self, job):
         target = self.gate.forward_target()

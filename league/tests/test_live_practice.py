@@ -15,6 +15,7 @@ import unittest
 from pathlib import Path
 
 from league.tests.test_live_step import HAVE, LiveCase
+from league.tests.evaluator_fakes import band_proof, seed_current_run
 
 if HAVE:
     from league.live.decider import BudgetSpent, InlineDecider
@@ -110,6 +111,9 @@ class Eligibility(unittest.TestCase):
                                "roots": list(roots), "dte": [0, 2]}, origin="test")
         for n in range(versions):
             self.store.add_version(fid, f"# {fid} v{n + 1}\n" + code_on(roots[0]), {"hold": 600}, author="test")
+            seed_current_run(self.store, fid, n + 1, window="validation" if validated is not None else "train")
+        if state.get("banded_version"):
+            state["banded_evaluator"] = band_proof(self.store.version(fid, state["banded_version"]))
         if validated is not None:
             state.update(validation_version=validated, validation_line={"passed": False}, validation_numbers={"t": t})
         if best_train_version is not None:
@@ -350,6 +354,7 @@ class Isolation(PracticeCase):
                               "roots": ["SPY"], "dte": [0, 2]}, origin="test")
             store.add_version(fid, f"# {fid}\n" + VERTICAL, {"hold": 3, "opens": 3}, author="test")
             store.set_state(fid, **state)
+            seed_current_run(store, fid, 1, window="validation" if state.get("validation_version") else "train")
         families = SwarmFamilies(self.root)
         self.addCleanup(lambda: families._store.close() if families._store is not None else None)
         self.build(families=families, real_money=True)

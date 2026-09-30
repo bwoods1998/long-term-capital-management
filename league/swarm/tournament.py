@@ -115,6 +115,18 @@ class Tournament:
             if n is None:
                 continue
             state = fam.get("state") or {}
+            from .evaluator import KEY, row_matches
+
+            # A startup adoption clears cached bests. Defense in depth for an old submission
+            # restored or arriving late: no current validation is bought with stale Train evidence.
+            current_evaluator = self.store.get(KEY)
+            if current_evaluator is not None:
+                run_ids = [state.get("submitted_run"), state.get("best_train_run")]
+                eligible_train = any(row is not None and row.get("version") == n and row_matches(self.store, row, current_evaluator)
+                                     for row in (self.store.run(str(rid)) for rid in run_ids if rid))
+                if not eligible_train:
+                    waiting.append(fam["id"])
+                    continue
             if self.cfg.get("require_robustness", True) and not robust_at_stress(state, n):
                 waiting.append(fam["id"])  # its robustness run at 1.5x has not landed (or lost): not validated yet
                 continue

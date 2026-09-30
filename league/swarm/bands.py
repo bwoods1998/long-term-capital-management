@@ -30,11 +30,12 @@ orders that measure multi-leg fills and are never evidence). Each row:
 THE PRACTICE LEAGUE (the observe band: the sprint, B4, Sept 26, 2026; the Train tier Sept 29, 2026): `observe(root)` ->
 one SHADOW-ONLY row per alive Gym-band family that has a version to practise, in one of two tiers:
 
-- "validated": its state's `validation_version` (the current best version the tournament validated), whatever the
-  validation line or the bundle said (the rule of Sept 26, unchanged);
+- "validated": its state's `validation_version` (the current best version the tournament validated), with an actual
+  successful replay on the current image and bundle, whatever the validation line said;
 - "train": no validated version, but an ELIGIBLE TRAIN VERSION: the version the tournament validates next
   (`Tournament.candidate_version`: the submitted best, else the best by Train score) that was not demoted (a loss at 1.5x,
-  `robust_failed`, or a failed drift screen, `drift_failed`; a demotion also clears the best, so this is a belt).
+  `robust_failed`, or a failed drift screen, `drift_failed`; a demotion also clears the best, so this is a belt), backed
+  by an eligible Train replay or completed Validation replay on the current image and bundle.
 
 The live path runs each row in the shadow book (`<family>@<version>:o`) with the version pinned for a session: never
 real, never tuition, never a forward row, never a band move. A version whose own program review failed, or that the
@@ -64,6 +65,8 @@ Standard library only.
 from __future__ import annotations
 
 import functools
+import gzip
+import json
 import math
 import sqlite3
 import threading
@@ -84,14 +87,16 @@ _bundle_lock = threading.Lock()
 def current_banded_evaluator(state: dict[str, Any], sha: str) -> bool:
     """A band label alone cannot carry old PARAMS semantics into current execution.
 
-    Pin semantic engine/parameter versions as well as the exact program. A doc-only bundle change
+    Pin execution source and engine/parameter versions as well as the exact program. A doc-only bundle change
     does not erase a genuine forward band; an engine semantic change requires new qualification.
     """
     from ..gym import ENGINE_VERSION
     from ..gym.experiment import CONTRACT_VERSION
+    from .evaluator import execution_fingerprint
 
     proof = state.get("banded_evaluator") or {}
     return (proof.get("engine") == ENGINE_VERSION and proof.get("parameter_contract") == CONTRACT_VERSION and
+            proof.get("execution_sha256") == execution_fingerprint() and
             proof.get("run_sha") == sha and bool(proof.get("holdout_bundle")) and
             str(proof["holdout_bundle"]).startswith(ENGINE_VERSION + "-") and
             proof.get("validation_bundle") == proof.get("holdout_bundle"))
@@ -255,6 +260,29 @@ def _needs_roots(code: str, fallback: tuple[str, ...]) -> tuple[str, ...]:
         return fallback
 
 
+def _current_practice_run(db: sqlite3.Connection, root: Path, fid: str, n: int, tier: str,
+                          image: Any, bundle: Any) -> bool:
+    """New cohorts need real current-evaluator evidence, not a surviving best/validation label."""
+    if not image or not bundle:
+        return False
+    windows = ("validation", "validation") if tier == "validated" else ("train", "validation")
+    rows = db.execute("SELECT summary,path,window FROM runs WHERE family=? AND version=? AND window IN (?,?) "
+                      "AND stress=1.0 AND status='ok' ORDER BY at DESC LIMIT 30", (fid, n, *windows))
+    for row in rows:
+        summary = loads(row["summary"], {}) or {}
+        result = summary
+        if "gym_bundle" not in summary and row["path"]:
+            try:
+                result = json.loads(gzip.decompress((root / row["path"]).read_bytes()))
+            except (OSError, ValueError, TypeError):
+                continue
+        if result.get("gym_image") != image or result.get("gym_bundle") != bundle:
+            continue
+        if row["window"] == "validation" or summary.get("train_eligible") is True:
+            return True
+    return False
+
+
 def observe(root: str | Path, *, family: str | None = None, version: int | None = None) -> list[dict[str, Any]]:
     """The practice league's rows (the module docstring), in its admission order (`priority`). `family` narrows to one
     family; with `version`, that family's version `version` (a pinned one) instead of its current one. [] when there is no
@@ -264,6 +292,7 @@ def observe(root: str | Path, *, family: str | None = None, version: int | None 
     path = Path(root) / DB_NAME
     if not path.exists() or (version is not None and family is None):
         return []
+    image, bundle = settings.load(root)["gym"]["image_checkpoint"], _bundle()
     db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1.0)
     db.row_factory = sqlite3.Row
     try:
@@ -282,6 +311,8 @@ def observe(root: str | Path, *, family: str | None = None, version: int | None 
                 name = "validated" if n == _count(state.get("validation_version")) else "train"
                 if name == "train" and demoted(state, n):
                     continue  # the pinned Train version was demoted since: it winds down
+            if not _current_practice_run(db, Path(root), fam["id"], n, name, image, bundle):
+                continue
             row = db.execute("SELECT n, sha, params, path FROM versions WHERE family=? AND n=?", (fam["id"], n)).fetchone()
             if row is not None:
                 versions[fam["id"]], tiers[fam["id"]] = dict(row), name

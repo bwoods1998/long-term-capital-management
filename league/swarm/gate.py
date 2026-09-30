@@ -427,15 +427,27 @@ class Gate:
                 and validation_bundle == bundle and current_holdout:
             from ..gym import ENGINE_VERSION
             from ..gym.experiment import CONTRACT_VERSION
+            from .evaluator import execution_fingerprint
 
             self.store.set_state(fid, banded_version=n, banded_sha=version["sha"], banded_at=self.clock(),
                                  banded_evaluator={"engine": ENGINE_VERSION, "parameter_contract": CONTRACT_VERSION,
+                                                   "execution_sha256": execution_fingerprint(),
                                                    "run_sha": sha, "validation_bundle": bundle,
                                                    "holdout_bundle": result.get("gym_bundle"), "holdout_image": result.get("gym_image")})
             self.store.set_band(fid, "candidate", reason="passed its holdout look")
         return bool(line["passed"])
 
     # ------------------------------------------------------------------ the nightly forward
+    def _current_forward_version(self, fam: Mapping[str, Any]) -> bool:
+        """Never mix a pre-upgrade band's forward record with decisions under new semantics."""
+        if not callable(getattr(self.pool, "bundle", None)):
+            return True  # identity-less synthetic pools; production always ships a named bundle
+        from .bands import current_banded_evaluator
+
+        state = fam.get("state") or {}
+        version = self.store.version(fam["id"], state.get("banded_version"))
+        return version is not None and current_banded_evaluator(state, run_sha(version))
+
     def forward_target(self) -> dict[str, str] | None:
         ready = self.settings.get("forward", {}).get("ready") or {}
         if ready.get("day") and ready.get("gate_checkpoint") == self.settings.get("gym", {}).get("gate_checkpoint"):
@@ -448,6 +460,7 @@ class Gate:
 
     def forward_pending(self, target: Mapping[str, Any]) -> list[dict[str, Any]]:
         return [f for f in self.store.families(alive=True) if f["band"] in ("candidate", "probe", "sized")
+                and self._current_forward_version(f)
                 and (f.get("state") or {}).get("forward_replay") !=
                 {"target": target, "version": (f.get("state") or {}).get("banded_version") or f.get("best_version")}]
 
@@ -461,7 +474,8 @@ class Gate:
         today = dt.datetime.fromtimestamp(now, dt.timezone.utc)
         after = int(self.settings.get("forward", {}).get("after_hour_utc", 7))
         attempted = self.store.get("forward_legacy_attempt") or {}
-        banded = any(f["band"] in ("candidate", "probe", "sized") for f in self.store.families(alive=True))
+        banded = any(f["band"] in ("candidate", "probe", "sized") and self._current_forward_version(f)
+                     for f in self.store.families(alive=True))
         return bool(banded and self.settings.get("gym", {}).get("gate_checkpoint")) and today.hour >= after and \
             self.store.get("forward_day") != today.date().isoformat() and (attempted.get("day") != today.date().isoformat() or
             now - float(attempted.get("at") or 0) >= float(self.settings.get("forward", {}).get("every_seconds", 3600)))
@@ -473,7 +487,8 @@ class Gate:
         now = self.clock()
         today = dt.datetime.fromtimestamp(now, dt.timezone.utc).date().isoformat()
         self.store.put("forward_legacy_attempt", {"day": today, "at": now})
-        banded = [f for f in self.store.families(alive=True) if f["band"] in ("candidate", "probe", "sized")]
+        banded = [f for f in self.store.families(alive=True) if f["band"] in ("candidate", "probe", "sized")
+                  and self._current_forward_version(f)]
         out: dict[str, Any] = {"families": len(banded), "trades": 0, "moves": []}
         if not banded or not self.settings.get("gym", {}).get("gate_checkpoint"):
             return out
@@ -568,6 +583,13 @@ class Gate:
         erred, found no data or was disqualified leaves the record as it was (None, and a `forward_failed` event)."""
         if record:
             self.store.add_run(fid, n, result, window="forward", stress=1.0, purpose="forward")
+        fam = self.store.family(fid)
+        has_bundle = callable(getattr(self.pool, "bundle", None))
+        if has_bundle and (fam is None or (fam.get("state") or {}).get("banded_version") != n or
+                           not self._current_forward_version(fam) or result.get("gym_bundle") != self.pool.bundle()):
+            self.store.event("swarm.gate", fid, {"action": "forward_failed", "version": n,
+                                                 "why": "the replay or qualified band uses another evaluator"})
+            return None
         if result.get("status") != "ok":
             self.store.event("swarm.gate", fid, {"action": "forward_failed", "version": n, "status": result.get("status")})
             return None

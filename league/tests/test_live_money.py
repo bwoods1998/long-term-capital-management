@@ -449,6 +449,7 @@ class TheSwarmsStore(unittest.TestCase):
         from league.live.families import SwarmFamilies
         from league.swarm.store import SwarmStore
         from league.tests.swarm_fakes import Clock as SwarmClock
+        from league.tests.evaluator_fakes import band_proof
 
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
@@ -457,7 +458,7 @@ class TheSwarmsStore(unittest.TestCase):
                               "roots": ["SPY"], "dte": [0, 2]}, origin="seed")
             store.add_version("vert", "# vert\nNEEDS = {}\n", {"k": 1}, author="seed")
             store.set_state("vert", banded_version=1, validation_version=1, validation_line={"passed": True},
-                            typical_max_loss_usd=60.0)
+                            typical_max_loss_usd=60.0, banded_evaluator=band_proof(store.version("vert", 1)))
             store.set_band("vert", "candidate", reason="passed the holdout")
             store.close()
             families = SwarmFamilies(root)

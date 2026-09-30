@@ -454,10 +454,14 @@ class TheSwarmsStore(unittest.TestCase):
         self.dir.cleanup()
 
     def add(self, fid, *, validated=True, t=1.0, versions=1):
+        from league.tests.evaluator_fakes import seed_current_run
+
         self.store.add_family({"id": fid, "mechanism": "An invented mechanism.", "structure": "debit_vertical",
                                "roots": ["SPY"], "dte": [0, 2]}, origin="test")
         for n in range(versions):
             self.store.add_version(fid, f"# {fid} v{n + 1}\n" + VERTICAL, {"hold": 600}, author="test")
+            if validated:
+                seed_current_run(self.store, fid, n + 1)
         if validated:
             self.store.set_state(fid, validation_version=versions, validation_line={"passed": False},
                                  validation_numbers={"t": t})
@@ -469,7 +473,9 @@ class TheSwarmsStore(unittest.TestCase):
         self.add("gym-b", t=2.5, versions=2)
         self.add("never", validated=False)
         self.add("cand")
-        self.store.set_state("cand", banded_version=1)
+        from league.tests.evaluator_fakes import band_proof
+
+        self.store.set_state("cand", banded_version=1, banded_evaluator=band_proof(self.store.version("cand", 1)))
         self.store.set_band("cand", "candidate", reason="passed")
         self.add("dead")
         self.store.retire_gym("dead", "finished", floor=0, source="test")
@@ -529,6 +535,9 @@ class Capacity(ObserveCase):
                               "roots": ["SPY"], "dte": [0, 2]}, origin="test")
             store.add_version(fid, f"# {fid}\n" + VERTICAL, {"hold": 5, "opens": 3}, author="test")
             store.set_state(fid, validation_version=1, validation_numbers={"t": float(i)})
+            from league.tests.evaluator_fakes import seed_current_run
+
+            seed_current_run(store, fid, 1)
         self.live = self.make([], real_money=False)
         self.families = self.live.families = SwarmFamilies(self.root)
         self.addCleanup(lambda: self.families._store.close() if self.families._store is not None else None)
@@ -590,10 +599,13 @@ class Capacity(ObserveCase):
         self.addCleanup(store.close)
 
         def add(fid, root, **state):
+            from league.tests.evaluator_fakes import seed_current_run
+
             store.add_family({"id": fid, "mechanism": "An invented mechanism.", "structure": "debit_vertical", "roots": [root],
                               "dte": [0, 2]}, origin="test")
             store.add_version(fid, f"# {fid}\n" + VERTICAL.replace('"SPY"', f'"{root}"'), {"hold": 5, "opens": 3}, author="test")
             store.set_state(fid, **state)
+            seed_current_run(store, fid, 1, window="validation" if state.get("validation_version") else "train")
 
         for i in range(32):                                                 # validated, on the first 16 roots
             add(f"v{i:02d}", roots[i // 2], validation_version=1, validation_numbers={"t": 100.0 - i})

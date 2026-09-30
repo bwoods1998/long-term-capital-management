@@ -11,6 +11,25 @@ from league.live.observe import ObserveStore
 
 
 class Cohorts(PracticeCase):
+    def test_live_only_semantic_upgrade_winds_down_an_existing_cohort_after_restart(self):
+        with patch("league.swarm.evaluator.execution_fingerprint", return_value="old-live-code"):
+            self.build(observed=[trained("f", params={"hold": 600, "opens": 2})])
+            self.run_to(9, 34)
+        old_evaluator = self.live.observe_store.evaluator
+        self.assertTrue(self.live.shadow.accounts["f@1:o"].positions)
+        with patch("league.swarm.evaluator.execution_fingerprint", return_value="new-live-code"):
+            self.restart()
+            self.assertNotEqual(self.live.observe_store.evaluator, old_evaluator)
+            self.live.sync_families(self.clock(), force=True)
+            self.assertEqual(self.observing(), [])
+            self.assertEqual(self.live.shadow.accounts["f@1:o"].practice_evaluator, old_evaluator)
+            self.run_to(9, 39)
+            self.assertGreater(self.row("f")["forced"], 0, "the restored orphan account closes without new decisions")
+            self.assertEqual(self.row("f")["program"]["trades"], 0)
+        snapshot = self.live.observe_store._connect().execute("SELECT snapshot FROM cohorts").fetchone()[0]
+        self.assertEqual(json.loads(snapshot)["practice_evaluator"], old_evaluator)
+        self.assertEqual(self.venue.sent, [])
+
     def test_retired_snapshot_survives_restart_with_open_positions_and_rejects_identity_changes(self):
         self.build(observed=[trained("f", params={"hold": 600, "opens": 2})])
         self.run_to(9, 35)
