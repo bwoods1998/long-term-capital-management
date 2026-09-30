@@ -523,7 +523,7 @@ class Reads(KeepCase):
                 self.assertNotIn(word, text, f"{name}: {word}")
 
 
-# ------------------------------------------------------------------------------------------------ its researcher's retire
+# ------------------------------------------------------------------------------------------------ its researcher
 class OwnRetire(ResearcherCase):
     def test_a_researchers_own_retire_still_retires_a_kept_family(self):
         self.settings["population"].update(floor=0, start=0)
@@ -541,6 +541,27 @@ class OwnRetire(ResearcherCase):
                                             {"reason": "Costs defeated the mechanism."}, out, author="test")
         self.assertEqual(result["status"], "retired")
         self.assertIsNotNone(self.store.family(self.fam["id"])["retired_at"])
+
+    def test_a_kept_familys_researcher_is_not_urged_to_retire_it_and_may_still(self):
+        # Review of Sept 30: the status line urged a kept, idle family's researcher to retire it every cycle.
+        self.settings["population"].update(floor=0, start=0)
+        fid = self.fam["id"]
+        self.store.update_family(fid, since_val_trials=idle_limit(self.settings), trials=idle_limit(self.settings))
+        r = self.researcher()
+        fam = self.store.family(fid)
+        self.assertTrue(r.dead(fam))
+        self.assertIn("If its mechanism is dead, call retire", r.status(fam))
+        self.store.put(practice.KEEP_KV, {"at": self.clock(), "families": {fid: 1}})
+        text = r.status(self.store.family(fid))
+        self.assertNotIn("If its mechanism is dead", text)
+        self.assertIn("Your family is in a live practice cohort", text)
+        self.assertTrue(r.can_retire(self.store.family(fid)), "the retire tool stays offered")
+        self.assertIn("If you abandon the entire mechanism, call retire with your reason.", text)
+        self.clock.advance(practice.KEEP_KV_SECONDS + 1)
+        self.assertIn("If its mechanism is dead, call retire", r.status(self.store.family(fid)), "a lapsed keep")
+        self.store.put(practice.KEEP_KV, "not a keep")
+        self.assertIn("If its mechanism is dead, call retire", r.status(self.store.family(fid)), "never raises")
+
 
 if __name__ == "__main__":
     unittest.main()
