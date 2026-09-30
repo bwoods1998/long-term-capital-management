@@ -119,8 +119,27 @@ class Preflight(unittest.TestCase):
         self.assertEqual(out["calls"], 1)
 
     def test_a_slow_call_is_inconclusive_not_refused(self):
-        out = self.check(program("t = 0\nfor i in range(10 ** 8):\n    t += i\nreturn []"), timeout=0.05)
+        # A call past its limit on this box says nothing about a Gym box. (A stand-in decider reports the timeout: the
+        # real limit is SIGALRM in the decider's child, which other tests in this process may have claimed.)
+        from league.swarm.preflight import run
+
+        class Slow:
+            restarts = 0
+
+            def load(self, key, code, params, name):
+                return {"needs": {"roots": ["SPY"], "dte": [0, 7], "band": 0.05, "cadence": 5, "history": 10,
+                                  "start": 571, "end": 958}}
+
+            def decide(self, snaps, unders, jobs):
+                return {jobs[0]["key"]: {"intents": [], "stats": {"calls": 1, "errors": 1, "timeouts": 1,
+                                                                  "messages": ["decide ran past 1.00 s"]}}}
+
+            def drop(self, key):
+                pass
+
+        out = run(program("return []"), {}, Slow())
         self.assertEqual(out["status"], "inconclusive", out)
+        self.assertEqual(out["calls"], 1)
 
     def test_a_numpy_api_error_is_inconclusive(self):
         # The House's numpy is not the Gym boxes' (requirements-gym.txt): an API one has and the other lacks says nothing.
