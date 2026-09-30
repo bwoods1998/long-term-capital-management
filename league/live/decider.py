@@ -11,13 +11,18 @@ decisions a minute. What that buys:
   budget, never as unbounded cleanup after the deadline. Program memory starts again.
 - **Memory.** The child's address space is capped (`RLIMIT_AS`), shared by all its programs. One program can exhaust
   that shared allowance and cost the other programs their decision for this minute.
+- **Disk and processes.** No file the child writes (its stderr log, anything in /tmp) grows past `FILE_MB`
+  (`RLIMIT_FSIZE`; a write past it fails, it does not kill the child), and the child can start no process or thread
+  (`RLIMIT_NPROC` 0). The House moves a log past half that cap aside before each spawn, so the child can always log.
 - **Secrets.** The child starts with an empty environment (no GATEWAY_TOKEN, no SAIL_API_KEY) and `-E -s`; the House
-  process is undumpable (its `/proc/<pid>/environ` is root's); the child runs in its own network namespace (loopback
-  only) wherever the box allows one; answers are JSON, never pickle. These measures are defense in depth, not an OS
-  security boundary on an ordinary-user developer machine, where an escape retains that user's filesystem access.
-  On the root production House the child uses uid/gid 65534, no supplementary groups, a mandatory private network
-  namespace and a dedicated root-owned read-only runtime. No namespace means no child. The secret env must stay
-  root-owned mode 0600; the state and deployment directories must not allow group/other writes.
+  process is undumpable (its `/proc/<pid>/environ` is root's); answers are JSON, never pickle. A `Decider` starts a
+  child only on the root production House: there the child uses uid/gid 65534, no supplementary groups, a mandatory
+  private network namespace (loopback only) and a dedicated root-owned read-only runtime. No namespace means no child;
+  a namespace probe that failed or timed out is not remembered, it is tried again at a spawn `NETNS_RETRY_SECONDS`
+  later. The secret env must stay root-owned mode 0600; the state and deployment directories must not allow
+  group/other writes. Off a root House (an ordinary user) a `Decider` refuses to start a child, since an escape
+  would keep that user's files; only a test or a developer's machine passes `allow_unisolated=True`, and then the child
+  gets its own network namespace wherever the box allows one.
 
 The parent sends each minute's `Snapshot`s once (pickled; the House is the trusted side), keyed by (root, minute
 index), and each instance's account rows with the minute index it decides on; the child slices each instance's chain with the Gym's own `Snapshot.view(slice_index(...))`, builds the ctx with
@@ -32,6 +37,7 @@ import os
 import pickle
 import select
 import shutil
+import signal
 import struct
 import subprocess
 import sys
@@ -45,6 +51,14 @@ REPO = Path(__file__).resolve().parents[2]
 HEADER = struct.Struct(">I")
 MAX_FRAME = 256 * 1024 * 1024
 MEMORY_MB = 2048
+#: The largest file the child may write (`RLIMIT_FSIZE`): its stderr log, anything in /tmp.
+FILE_MB = 64
+#: The network-namespace probe's timeout: at least the minimum whatever is left of the minute's budget (a probe cut
+#: short by a nearly spent minute says nothing about the box), at most the maximum.
+NETNS_PROBE_MIN_SECONDS, NETNS_PROBE_MAX_SECONDS = 3.0, 10.0
+#: After a failed probe, spawns within this many seconds do not probe again (a root House refuses them): one probe a
+#: window, never one for each load in a minute.
+NETNS_RETRY_SECONDS = 30.0
 
 
 class DeciderError(RuntimeError):
@@ -183,19 +197,45 @@ def _plain_default(value: Any) -> Any:
     return str(value)
 
 
-def child_main() -> None:  # pragma: no cover - run as a subprocess
-    if sys.platform.startswith("linux"):
+def limit_child() -> None:
+    """The child's own limits, set before it reads its first message (the module docstring): no privilege gains
+    (`PR_SET_NO_NEW_PRIVS`), the address space (`RLIMIT_AS`), the size of any file it writes (`RLIMIT_FSIZE`) and no
+    new process or thread (`RLIMIT_NPROC` 0: that limit counts every process of the uid, so only 0 means "no fork"
+    for this one). A lower limit already in place is kept. On Linux a file-size or process limit that cannot be set
+    ends the child before any program loads."""
+    linux = sys.platform.startswith("linux")
+    if linux:
         import ctypes
 
         if ctypes.CDLL(None, use_errno=True).prctl(38, 1, 0, 0, 0) != 0:  # PR_SET_NO_NEW_PRIVS
             raise RuntimeError("the decider could not disable privilege gains")
     try:
         import resource
-
+    except ImportError:
+        if linux:
+            raise
+        return
+    try:
         limit = int(os.environ.get("LIVE_DECIDER_MEMORY_MB") or MEMORY_MB) * 1024 * 1024
         resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
-    except (ImportError, ValueError, OSError):
+    except (ValueError, OSError):
         pass
+    if hasattr(signal, "SIGXFSZ"):
+        # A write past the file-size cap then fails (EFBIG, a lost log line) instead of killing the child.
+        signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+    for name, cap in (("RLIMIT_FSIZE", FILE_MB * 1024 * 1024), ("RLIMIT_NPROC", 0)):
+        try:
+            which = getattr(resource, name)
+            hard = resource.getrlimit(which)[1]
+            value = cap if hard == resource.RLIM_INFINITY else min(cap, hard)
+            resource.setrlimit(which, (value, value))
+        except (AttributeError, ValueError, OSError) as exc:
+            if linux:
+                raise RuntimeError(f"the decider could not set {name}: {exc}") from None
+
+
+def child_main() -> None:  # pragma: no cover - run as a subprocess
+    limit_child()
     try:
         os.nice(5)
     except OSError:
@@ -215,7 +255,8 @@ def batch_deadline(timeout: float, jobs: int, budget_seconds: float | None = Non
 
 
 def _netns_available(timeout: float = 10.0, *, credentials: Mapping[str, Any] | None = None) -> bool:
-    """Whether this box lets an unprivileged process make a network namespace (probed once)."""
+    """Whether this box lets an unprivileged process make a network namespace (`Decider._namespace` keeps only a
+    success: False may be a busy box's timeout)."""
     if not shutil.which("unshare"):
         return False
     try:
@@ -223,6 +264,18 @@ def _netns_available(timeout: float = 10.0, *, credentials: Mapping[str, Any] | 
                                **dict(credentials or {})).returncode == 0
     except (OSError, subprocess.SubprocessError):
         return False
+
+
+def rotate_log(path: str | Path, limit: int = FILE_MB * 1024 * 1024 // 2) -> None:
+    """A child's stderr log at `limit` bytes or more becomes `<log>.1` (replacing the one before) before the next
+    child starts, so that child has at least `FILE_MB - limit` to log into under its file-size cap and the two files
+    never hold more than twice the cap. A log that cannot be moved stays: the child's writes past the cap then fail."""
+    path = Path(path)
+    try:
+        if path.stat().st_size >= limit:
+            os.replace(path, path.with_name(path.name + ".1"))
+    except OSError:
+        pass
 
 
 def protect_house_process() -> bool:
@@ -301,27 +354,50 @@ class Decider(_Base):
     """The child process (the module docstring)."""
 
     def __init__(self, *, timeout: float = 1.0, max_errors: int = 25, memory_mb: int = MEMORY_MB,
-                 python: str = sys.executable, log: str | Path | None = None):
+                 python: str = sys.executable, log: str | Path | None = None, allow_unisolated: bool = False):
         super().__init__(timeout=timeout, max_errors=max_errors)
         self.memory_mb, self.python, self.log = int(memory_mb), python, log
         self.proc: subprocess.Popen | None = None
         self.pid: int | None = None
         self._ready: set[str] = set()
         self.isolated = os.geteuid() == 0
+        #: Off a root House a child would keep this user's files: it starts only when a test or a developer's machine
+        #: says so (the module docstring).
+        self.allow_unisolated = bool(allow_unisolated)
         self._runtime: Path | None = None
         #: The child runs in its own network namespace (`unshare --net --map-root-user`: loopback only, no route to the
-        #: gateway, Sail or anywhere) wherever the box allows an unprivileged one; decided once, at the first spawn.
+        #: gateway, Sail or anywhere); mandatory on a root House. True once a probe succeeded (kept); False after a
+        #: probe that failed or timed out, which is tried again at a spawn from `_netns_retry_at` on (`_namespace`).
         self.netns: bool | None = None
+        self._netns_retry_at = float("-inf")
+
+    def _namespace(self, budget_seconds: float, credentials: Mapping[str, Any]) -> bool:
+        """Whether this spawn's child gets its own network namespace. Only a success is kept: a probe that failed or
+        timed out (a busy box) is tried again at the first spawn `NETNS_RETRY_SECONDS` later, so a minute's loads never
+        each wait on a probe, and a nearly spent minute cannot cut one short (its timeout is at least
+        `NETNS_PROBE_MIN_SECONDS`)."""
+        if self.netns:
+            return True
+        if time.monotonic() < self._netns_retry_at:
+            return False
+        timeout = min(NETNS_PROBE_MAX_SECONDS, max(NETNS_PROBE_MIN_SECONDS, float(budget_seconds)))
+        self.netns = bool(_netns_available(timeout=timeout, credentials=credentials))
+        if not self.netns:
+            self._netns_retry_at = time.monotonic() + NETNS_RETRY_SECONDS
+        return self.netns
 
     def _spawn(self, budget_seconds: float = 10.0) -> None:
+        if not self.isolated and not self.allow_unisolated:
+            raise DeciderError("generated programs run only as uid 65534 in a private network namespace (a root House)")
         protect_house_process()
         credentials = {"user": 65534, "group": 65534, "extra_groups": []} if self.isolated else {}
         env = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "HOME": "/tmp", "LIVE_DECIDER_MEMORY_MB": str(self.memory_mb),
                "OPENBLAS_NUM_THREADS": "1", "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1"}
-        if self.netns is None:
-            self.netns = _netns_available(timeout=max(0.001, min(10.0, budget_seconds)), credentials=credentials)
-        if self.isolated and not self.netns:
-            raise DeciderError("the production decider requires a network namespace under its separate uid")
+        netns = self._namespace(budget_seconds, credentials)
+        if self.isolated and not netns:
+            raise DeciderError("the production decider requires a network namespace under its separate uid; the "
+                               f"namespace probe failed and is retried at a spawn at least {NETNS_RETRY_SECONDS:.0f} s "
+                               "after it")
         cwd = REPO
         if self.isolated:
             if self._runtime is None:
@@ -340,8 +416,10 @@ class Decider(_Base):
                 self._runtime.chmod(0o555)
             cwd = self._runtime
         command = [self.python, "-E", "-s", "-m", "league.live.decider"]
-        if self.netns:
+        if netns:
             command = ["unshare", "--net", "--map-root-user", *command]
+        if self.log:
+            rotate_log(self.log)
         err = open(self.log, "ab") if self.log else subprocess.DEVNULL  # noqa: SIM115
         try:
             self.proc = subprocess.Popen(command, cwd=str(cwd), env=env, **credentials,

@@ -47,7 +47,7 @@ def job(key):
 @unittest.skipUnless(HAVE, "numpy not installed")
 class TheChild(unittest.TestCase):
     def setUp(self):
-        self.decider = Decider(timeout=0.5, python=sys.executable)
+        self.decider = Decider(timeout=0.5, python=sys.executable, allow_unisolated=True)
 
     def tearDown(self):
         self.decider.close()
@@ -136,7 +136,7 @@ class AHungChild(unittest.TestCase):
                 else:
                     super()._spawn(budget_seconds=budget_seconds)
 
-        decider = Stuck(timeout=0.2, python=sys.executable)
+        decider = Stuck(timeout=0.2, python=sys.executable, allow_unisolated=True)
         try:
             decider.load("v", VERTICAL, {}, "vert")
             decider._kill()
@@ -164,10 +164,196 @@ class ASpentBudget(unittest.TestCase):
     def test_nothing_is_sent_and_the_child_is_not_killed(self):
         from league.live.decider import BudgetSpent, Decider, DeciderError
 
-        d = Decider()
+        d = Decider(allow_unisolated=True)
         killed = []
         d._kill = lambda: killed.append(True)
         with self.assertRaises(BudgetSpent) as caught:
             d._ask(("decide", {}, {}, []), 0.0)
         self.assertIsInstance(caught.exception, DeciderError, "the House's minute treats it as any decider trouble")
         self.assertEqual((killed, d.restarts, d.proc), ([], 0, None), "no child was spawned, killed or restarted")
+
+
+@unittest.skipUnless(HAVE, "numpy not installed")
+class OffARootHouse(unittest.TestCase):
+    """The scan of Sept 30 (scan-a section 3): off a root House a child would keep the House user's files and, without a
+    namespace, its network. A `Decider` there refuses before it probes or spawns anything."""
+
+    def test_a_non_root_decider_refuses_before_it_spawns(self):
+        from unittest.mock import patch
+
+        from league.live import decider as D
+
+        with patch.object(D.os, "geteuid", return_value=1000):
+            d = D.Decider()
+        try:
+            self.assertEqual((d.isolated, d.allow_unisolated), (False, False))
+            with patch.object(D, "_netns_available") as probe, patch.object(D.subprocess, "Popen") as popen:
+                with self.assertRaisesRegex(DeciderError, "only as uid 65534 in a private network namespace"):
+                    d.ping()
+                with self.assertRaisesRegex(DeciderError, "only as uid 65534"):
+                    d.load("v", VERTICAL, {}, "vert")
+            self.assertEqual((probe.call_count, popen.call_count), (0, 0))
+            self.assertIsNone(d.proc)
+        finally:
+            d.close()
+
+
+@unittest.skipUnless(HAVE, "numpy not installed")
+class ANamespaceProbe(unittest.TestCase):
+    """The scan of Sept 30: a probe that timed out (its timeout was whatever was left of the minute) was kept as False,
+    and the root House refused every later spawn until a restart. Only a success is kept now; a failure is probed again
+    at a spawn `NETNS_RETRY_SECONDS` later (never once for each load in a minute), with a timeout of at least
+    `NETNS_PROBE_MIN_SECONDS`."""
+
+    def test_a_probe_that_times_out_once_lets_a_later_spawn_proceed(self):
+        import tempfile
+        import time
+        from pathlib import Path
+        from unittest.mock import patch
+
+        from league.live import decider as D
+
+        timeouts, answers, spawned = [], [False, True], []
+        real_popen = subprocess.Popen
+
+        def probe(timeout, *, credentials=None):
+            timeouts.append(timeout)
+            self.assertEqual(credentials, {"user": 65534, "group": 65534, "extra_groups": []})
+            return answers.pop(0)
+
+        def popen(command, **kw):
+            # This test is not root: the uid drop and the namespace the root House asks for are recorded, and the same
+            # child is started without them, from the checkout.
+            isolation = {k: kw.pop(k) for k in ("user", "group", "extra_groups")}
+            spawned.append((list(command), isolation))
+            if command[:3] == ["unshare", "--net", "--map-root-user"]:
+                command = command[3:]
+            kw["cwd"] = str(D.REPO)
+            return real_popen(command, **kw)
+
+        with patch.object(D.os, "geteuid", return_value=0):
+            d = D.Decider(timeout=0.5, python=sys.executable)  # as the root House builds it
+        d._runtime = Path(tempfile.mkdtemp(prefix="ltcm-decider-test-"))  # no root-owned read-only copy off root
+        try:
+            self.assertTrue(d.isolated)
+            with patch.object(D, "_netns_available", side_effect=probe), patch.object(D.subprocess, "Popen", side_effect=popen), \
+                    patch.object(D, "NETNS_RETRY_SECONDS", 0.3):
+                # A nearly spent minute: the probe still gets its minimum timeout, and it times out.
+                with self.assertRaisesRegex(DeciderError, "requires a network namespace"):
+                    d._ask(("ping",), 0.05)
+                self.assertEqual(timeouts, [D.NETNS_PROBE_MIN_SECONDS])
+                self.assertFalse(d.netns)
+                # Inside the retry window: refused again at once, without another probe.
+                with self.assertRaisesRegex(DeciderError, "requires a network namespace"):
+                    d.ping()
+                self.assertEqual((len(timeouts), spawned), (1, []))
+                time.sleep(0.35)
+                # The next spawn probes again, succeeds, and the child answers.
+                ping = d.ping()
+                self.assertEqual(ping["pid"], d.pid)
+                self.assertTrue(d.netns)
+                self.assertEqual(timeouts[1], D.NETNS_PROBE_MAX_SECONDS)
+                self.assertEqual(spawned[0][0][:3], ["unshare", "--net", "--map-root-user"])
+                self.assertEqual(spawned[0][1], {"user": 65534, "group": 65534, "extra_groups": []})
+                # A success is kept: a restarted child is not probed for again.
+                d._kill()
+                d.ping()
+                self.assertEqual((len(timeouts), len(spawned)), (2, 2))
+        finally:
+            d.close()
+
+    def test_off_root_a_failed_probe_is_retried_too(self):
+        from unittest.mock import patch
+
+        from league.live import decider as D
+
+        d = D.Decider(allow_unisolated=True)
+        with patch.object(D, "_netns_available", side_effect=[False, True]) as probe:
+            self.assertFalse(d._namespace(0.001, {}))
+            self.assertFalse(d._namespace(10.0, {}))       # inside the window: no probe
+            d._netns_retry_at = float("-inf")               # the window has passed
+            self.assertTrue(d._namespace(0.001, {}))
+            self.assertTrue(d._namespace(0.001, {}))       # kept
+        self.assertEqual([c.kwargs["timeout"] for c in probe.call_args_list], [D.NETNS_PROBE_MIN_SECONDS] * 2)
+
+
+@unittest.skipUnless(HAVE, "numpy not installed")
+@unittest.skipUnless(sys.platform.startswith("linux"), "Linux rlimits and /proc")
+class TheChildsLimits(unittest.TestCase):
+    """The scan of Sept 30: the child sets a file-size cap and no new process or thread, beside `RLIMIT_AS` and
+    `PR_SET_NO_NEW_PRIVS`, and still runs a normal program and logs to stderr."""
+
+    def test_a_normal_program_runs_under_the_limits(self):
+        import tempfile
+        from pathlib import Path
+
+        from league.live.decider import FILE_MB
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "live-decider.log"
+            d = Decider(timeout=0.5, python=sys.executable, log=log, allow_unisolated=True)
+            try:
+                d.load("v", VERTICAL, {}, "vert")
+                limits = {line[:26].strip(): line[26:].split() for line in
+                          Path(f"/proc/{d.pid}/limits").read_text().splitlines()[1:]}
+                self.assertEqual(limits["Max file size"][:2], [str(FILE_MB * 1024 * 1024)] * 2)
+                self.assertEqual(limits["Max processes"][:2], ["0", "0"])
+                self.assertEqual(limits["Max address space"][:2], [str(2048 * 1024 * 1024)] * 2)
+                answer = d.decide({("SPY", 30): snapshot()}, {("SPY", 2, 30): underlying_view("SPY", [600.0, 600.1])},
+                                  [job("v")])
+                self.assertTrue(answer["v"]["intents"])
+                self.assertEqual(d.restarts, 0)
+            finally:
+                d.close()
+
+    @unittest.skipIf(os.geteuid() == 0, "root is exempt from RLIMIT_NPROC; the House's child is uid 65534")
+    def test_no_fork_a_capped_file_and_stderr_still_works(self):
+        import tempfile
+
+        from league.live.decider import REPO
+
+        script = (
+            "import os, sys\n"
+            "from league.live.decider import FILE_MB, limit_child\n"
+            "limit_child()\n"
+            "import numpy\n"
+            "assert float(numpy.linalg.inv(numpy.eye(3)).sum()) == 3.0\n"
+            "try:\n"
+            "    os.fork()\n"
+            "    os._exit(0)\n"
+            "except OSError:\n"
+            "    print('fork refused')\n"
+            "try:\n"
+            "    with open('big', 'wb') as f:\n"
+            "        f.seek(FILE_MB * 1024 * 1024)\n"
+            "        f.write(b'x')\n"
+            "except OSError as exc:\n"
+            "    print('file capped', exc.errno)\n"
+            "sys.stderr.write('logged\\n')\n"
+            "sys.stderr.flush()\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "HOME": tmp, "PYTHONPATH": str(REPO),
+                   "OPENBLAS_NUM_THREADS": "1", "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1"}
+            done = subprocess.run([sys.executable, "-s", "-c", script], cwd=tmp, env=env, capture_output=True, text=True,
+                                  timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout.split("\n")[:2], ["fork refused", "file capped 27"])     # EFBIG, not SIGXFSZ
+        self.assertIn("logged", done.stderr)
+
+    def test_a_log_past_half_the_cap_is_moved_aside_before_a_spawn(self):
+        import tempfile
+        from pathlib import Path
+
+        from league.live.decider import rotate_log
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "live-decider.log"
+            rotate_log(log, 10)                                 # no log yet: nothing to do
+            log.write_bytes(b"x" * 5)
+            rotate_log(log, 10)
+            self.assertEqual(log.read_bytes(), b"x" * 5)
+            log.write_bytes(b"y" * 10)
+            rotate_log(log, 10)
+            self.assertFalse(log.exists())
+            self.assertEqual((Path(tmp) / "live-decider.log.1").read_bytes(), b"y" * 10)
