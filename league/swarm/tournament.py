@@ -14,11 +14,15 @@
 2. THE LINE (`evidence.validation_line`, as the owner's decision D2 amended it): its deflated Sharpe is on traded
    days with N = the lineage's validated versions (`SwarmStore.lineage_validated`). A family that meets it goes to
    the gate's queue.
-3. THE BANDIT (`evidence.thompson`): each family's share of researcher cycles and Gym priority from its
-   validation evidence, with at least 25% for the explore pool; a validated version that failed the drift screen earns
-   nothing by its validation (the family counts as unvalidated). R11-5: only an old family whose latest validation mean
-   is positive is exploited, each earning at most `exploit_per_positive` (0.15) of the share; an old family at zero or
-   below competes in the explore pool with the new ones. THE PRACTICE BONUS (`practice.apply_bonus`): a family
+3. THE ALLOCATION (Release B, league/swarm/allocation.py; `allocation.mode` "value"): each family's share of researcher
+   turns and Gym priority by its expected information value (the variance of its next validation's pass or fail under
+   an empirical-Bayes posterior, discounted by its own trials and by exhaustion: its lineage's holdout looks spent, a
+   drift-failed validation, a hold streak), with a floor for every family, an explicit exploration share split across
+   mechanism classes first, and caps on one family's and one class's share. A validated version that failed the drift
+   screen earns nothing by its validation (the family counts as unvalidated). "bandit" restores THE BANDIT
+   (`evidence.thompson`, `Tournament.bandit`): R11-5's Thompson sampling, at least 25% for the explore pool, only an old
+   family whose latest validation mean is positive exploited, each earning at most `exploit_per_positive` (0.15) of the
+   share. THE PRACTICE BONUS (`practice.apply_bonus`), on either: a family
    with a positive practice record on live quotes gains at most `practice.bonus` (25%) of its share, and the bonus moves
    at most `practice.bonus_total` (10%) of all share; it changes research attention only, never what is validated, the
    gate, the bands or money. The round's event records it (`practice_bonus`, private).
@@ -78,6 +82,7 @@ class Tournament:
         self.rng = rng or random.Random()
         self.idle_at = float("-inf")  # the last idle pass (`idle_due`); in memory: a restarted swarm runs one at once
         self.practice_bonus: dict[str, float] = {}  # the last allocation's practice bonus by family (`allocate`)
+        self.allocation: dict[str, Any] = {}  # the last allocation's report (`allocate`; allocation.py's `value_shares`)
 
     @property
     def cfg(self) -> Mapping[str, Any]:
@@ -260,8 +265,31 @@ class Tournament:
         sha = run_sha(version)
         return bool(self.store.looked(sha) or state.get("gated_sha") == sha)
 
-    # ------------------------------------------------------------------ 3. the bandit
+    # ------------------------------------------------------------------ 3. the allocation
     def allocate(self, fams: list[dict[str, Any]]) -> dict[str, float]:
+        """Each living family's share of researcher turns and Gym priority (`families.weight`). THE ALLOCATOR
+        (league/swarm/allocation.py, Release B; `allocation.mode` "value"): expected information value with an explicit
+        exploration share split by mechanism class, and caps on a family's and a class's share; "bandit" is R11-5's
+        Thompson bandit below. The practice bonus rides on either. The round's event records the report (`allocation`)."""
+        from . import allocation
+
+        if allocation.cfg(self.settings)["mode"] == "value":
+            try:
+                shares, report = allocation.allocate_from_store(self.store, fams, self.settings, now=self.clock())
+            except Exception as exc:  # noqa: BLE001 - a round never fails on its allocation: the bandit answers, and says why
+                self.allocation = {"mode": "bandit", "fallback": f"{type(exc).__name__}: {str(exc)[:200]}"}
+                return self.bandit(fams)
+            shares, self.practice_bonus = practice.apply_bonus(shares, self.store, self.settings)
+            report["practice_bonus"] = dict(self.practice_bonus)
+            self.allocation = report
+            for fid, share in shares.items():
+                self.store.update_family(fid, weight=share)
+            return shares
+        self.allocation = {"mode": "bandit"}
+        return self.bandit(fams)
+
+    def bandit(self, fams: list[dict[str, Any]]) -> dict[str, float]:
+        """R11-5's Thompson bandit (`allocation.mode` "bandit"): the allocation before Release B."""
         rows = []
         for fam in fams:
             # A validated version that failed the drift screen earns no share by its validation: it counts as unvalidated.
@@ -499,7 +527,8 @@ class Tournament:
         last_hour = {"cycles": int(cycles["n"] or 0), "cycle_errors": int(cycles["errors"] or 0),
                      "usd": {k: round(self.store.spent([k], since=began - 3600), 4) for k in ("sail_model", "gym_box", "openai")}}
         row = {"at": began, "seconds": round(self.clock() - began, 1), "validation": validation, "retired": retired, "born": born,
-               "board": board, "totals": totals, "last_hour": last_hour, "practice_bonus": dict(self.practice_bonus)}
+               "board": board, "totals": totals, "last_hour": last_hour, "practice_bonus": dict(self.practice_bonus),
+               "allocation": dict(self.allocation)}
         self.store.event("swarm.tournament", None, row)
         self.store.put("leaderboard", {"at": began, "board": board, "totals": totals})
         return row

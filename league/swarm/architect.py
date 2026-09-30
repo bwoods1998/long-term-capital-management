@@ -45,6 +45,15 @@ one mechanism class (structure x root group, the strategist's own `mechanism_cla
 proposal past it is not born, whatever the agenda says, and the request names the full classes. The pass's event counts
 the refused proposals by class (`class_capped`).
 
+THE BIRTH QUOTA (Release B, Oct 2026; league/swarm/allocation.py `BirthQuota`: on Sept 30 100% of eight hours' births were
+debit verticals, 532 of 730 in the day). One STRUCTURE FAMILY (single = long_single, long_call and long_put; butterfly;
+vertical; straddle; condor; calendar) may hold at most `allocation.births.max_share` (40%) of the last
+`allocation.births.window_hours` (24) of births, once there were `allocation.births.min_window` (10), and at most that share of
+the pass's want; its first `allocation.births.per_pass_min` (1) in a pass is always allowed, and below
+`allocation.births.min_alive` living families (half of `population.start`) the day's rule rests. The request lists every structure
+family's births and which are full; a proposal past its quota is not born, and the pass's event counts the refusals by
+structure family (`structure_capped`). Forks and reseeds are not held to it.
+
 TRUNCATION SALVAGE (R11-3, Sept 29: 6 of 28 Sonnet passes were cut at the 32k output cap, and each cut fell to a Kimi-K3
 refill of 19-24 births). A Claude answer cut at max_tokens comes back to the pass (`ModelRouter.ask(claude_keep_truncated)`)
 instead of falling to Sail: the complete objects of its `families` array are admitted (`salvage_families`), and fewer than
@@ -1027,12 +1036,27 @@ class Architect:
         # R11-2: a class at `architect.max_alive_per_class` living families bears nothing more (`admit`); say which.
         full_text = ("\n\nFULL MECHANISM CLASSES (structure x root group: index, etf, names; each already has the most living "
                      "families one class may have, so a proposal in one is not born):\n" + json.dumps(full)) if full else ""
+        # Release B: THE BIRTH QUOTA (allocation.py `BirthQuota`): the structure families' births in the window, and which are full.
+        quota = self.birth_quota()
+        quota_text = f"{quota.text()}\n\n" if quota is not None else ""
         return (f"Propose {number} new families, on these roots only (the Gym "
-                f"holds their data): {roots}.\n\n{available}\n\nLIVING FAMILIES "
+                f"holds their data): {roots}.\n\n{available}\n\n{quota_text}LIVING FAMILIES "
                 f"(leaderboard):\n{json.dumps(living)}\n\n{graveyard}\n\n"
                 f"RESEARCH COVERAGE (effort, not profitability; validated means evaluated, not passed):\n{coverage}\n\n{practice}"
                 f"GAPS (uncovered structure types by root; [] means all covered):\n{gaps}" + full_text
                 + (f"\n\n{title}:\n{agenda}" if agenda else ""))
+
+    def birth_quota(self) -> Any:
+        """THE BIRTH QUOTA for a pass now (league/swarm/allocation.py `BirthQuota`: at most `allocation.births.max_share` of
+        the window's births and of the pass's want in one structure family), or None when the window cannot be read (the
+        pass goes without it: a quota is a diversity pressure, never a reason to stop births)."""
+        from .allocation import BirthQuota
+
+        try:
+            return BirthQuota(self.store, self.settings, now=self.clock(), want=self.want(),
+                              alive=len(self.store.families(alive=True)))
+        except Exception:  # noqa: BLE001
+            return None
 
     def admit(self, rows: Any, *, digest: bool = False) -> list[str]:
         """Birth the well-formed proposals (the module docstring). Each birth's `differs_from` rows (the digest route's
@@ -1047,6 +1071,8 @@ class Architect:
         living = {(f["mechanism"].lower()[:80], tuple(f["roots"]), f["structure"]) for f in alive}
         per_class, classes = self.class_cap(), self.classes()
         self.capped: dict[str, int] = {}
+        quota = self.birth_quota()
+        self.structure_capped: dict[str, int] = {}
         allowed_roots = set(self.settings.get("gym", {}).get("roots", ["SPY", "QQQ", "IWM", "XSP", "SPXW"]))
         born = []
         for row in rows if isinstance(rows, list) else []:
@@ -1078,6 +1104,11 @@ class Architect:
                 continue
             cited = self.differs(row, known)
             if strict and not cited:
+                continue
+            # THE BIRTH QUOTA (Release B): past its structure family's share of the window's births (or of this pass), a
+            # proposal is not born; counted by structure family in the pass's event (`structure_capped`).
+            if quota is not None and not quota.admits(structure):
+                self.structure_capped = dict(quota.refused)
                 continue
             try:
                 lo, hi = sorted((max(0, min(45, int(dte[0]))), max(0, min(45, int(dte[1])))))
@@ -1118,6 +1149,8 @@ class Architect:
                     for line in dict.fromkeys(f["lineage"] for f in twins):
                         self.store.link_lineages(str(home.get("lineage") or ""), line)
                 fam = self.store.add_family(spec, origin="architect", parent=parent, prior_lineage=prior)
+                if quota is not None:
+                    quota.born(structure)
                 living.add((mechanism.lower()[:80], tuple(roots), structure))
                 classes[cls] = classes.get(cls, 0) + 1
                 alive.append(fam)
@@ -1209,6 +1242,7 @@ class Architect:
         on_digest = bool(extra) and answer.get("route") == "claude"
         born = self.admit(rows, digest=on_digest)
         capped = dict(getattr(self, "capped", {}) or {})
+        structure_capped = dict(getattr(self, "structure_capped", {}) or {})
         out = {"born": born, "proposed": len(rows) if isinstance(rows, list) else 0, "route": answer.get("route"),
                "model": answer.get("model"), "cost_usd": answer.get("cost_usd"), "seconds": round(self.clock() - began, 1)}
         if answer.get("route") == "claude":
@@ -1235,10 +1269,14 @@ class Architect:
                 out["born"] = born + retry.pop("born_ids")
                 for cls, n in (getattr(self, "capped", {}) or {}).items():
                     capped[cls] = capped.get(cls, 0) + n
+                for bucket, n in (getattr(self, "structure_capped", {}) or {}).items():
+                    structure_capped[bucket] = structure_capped.get(bucket, 0) + n
                 out["truncated"]["retry"] = retry
                 out["seconds"] = round(self.clock() - began, 1)
         if capped:
             out["class_capped"] = capped  # proposals refused by the class cap, by class
+        if structure_capped:
+            out["structure_capped"] = structure_capped  # proposals refused by the birth quota, by structure family
         self.store.event("swarm.architect", None, out)
         return out
 

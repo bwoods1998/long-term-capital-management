@@ -239,9 +239,23 @@ Agent count and simulated years measure activity; passing unseen evidence measur
   term-structure and skew mean reversion, post-event volatility crush, weekly-expiry dynamics).
 - **Population:** by default 48 researchers at the start, a ceiling of 96 and a floor of 16; the
   live settings (Sept 29) start at 96, the ceiling, with a floor of 12. Families compete for Gym time
-  and model calls through a bandit over their validation evidence (Thompson sampling). Since R11b only
-  an old family whose latest validation mean is positive is exploited, each earning at most 15% of the
-  share; new families and old ones at zero or below share the rest, never less than 25%. A family
+  and researcher turns by **expected information value** (Release B, `league/swarm/allocation.py`): a
+  family's value is the variance of its next validation's pass or fail under an empirical-Bayes
+  posterior (the swarm's recent validation looks, pooled by mechanism class, a family's own latest look
+  updating its class's prior), discounted by its own trials (breadth beats depth), by exhaustion (its
+  lineage's holdout looks spent, a drift-failed validation, a hold streak) and by half for a structure
+  the account cannot open for real. Every family keeps a 10% floor share; 35% is an explicit exploration
+  share for families without their own validation, split across mechanism classes before families; the
+  rest follows value; no family holds more than 5% and no class more than 30% (a cap's excess goes to
+  other families by value, at most tripling any one's share, and a cap gives way rather than feed a
+  family worth nothing). Shares buy turns: the researchers' scheduler is start-time fair queueing, so
+  under contention a family's turns follow its share, and the number of researchers expands above
+  `researcher.concurrency` (up to `allocation.max_concurrency`) while useful experiments wait and spend
+  is under the plan, and contracts when research spend runs over it. Births carry a **structure quota**:
+  one structure family (single, butterfly, vertical, straddle, condor, calendar) at most 40% of a day's
+  births and of a pass. `allocation.mode` "bandit" restores the R11b bandit (Thompson sampling in which
+  only an old family whose latest validation mean is positive is exploited, each earning at most 15%).
+  A family
   retires when its best program has not improved on validation in 30
   revisions or 2,000 evaluations by default (200 and 4,000 live), or its trial-adjusted evidence falls
   below the line, or by the idle rule: evaluations without an eligible Train version (150 by default,
@@ -260,7 +274,7 @@ Agent count and simulated years measure activity; passing unseen evidence measur
 | Loop | Cadence | Who | What happens | Output |
 |---|---|---|---|---|
 | Inner | seconds to minutes | each researcher | revise the program, run it on Train, read the diagnostics, revise again | a better program or a lesson |
-| Tournament | hourly | the House | validation runs of each family's best versions, the bandit's reallocation, forks and retirements, the leaderboard | Gym time and model calls follow evidence |
+| Tournament | hourly | the House | validation runs of each family's best versions, the reallocation by expected information value, forks and retirements, the leaderboard | Gym time and researcher turns follow the value of the next evidence |
 | Architect | every 4 hours by default, refilling hourly below the start; every 10 minutes live, refilling every 20 | Claude (Claude-only live: `architect.openai_model` null); Kimi-K3 on Sail as the fallback when Claude has no room or line (never after a cut answer: R11b salvages its complete families and retries once on Claude at medium effort) | reads the leaderboard, the graveyard and the gaps; writes families with a mechanism, a structure and a rejection test; at most 12 living families a mechanism class (R11b) | 3-6 new families by default; the gap to the start, up to 24 a pass live |
 | Diagnostician | every 5 minutes | Claude | reads a stuck or nearly-there family's Train diagnostics (never Validation's numbers); rewrites its mechanism or writes its lesson; live: 6 a round, a family every 3 hours, $60 a day | a new mechanism, or a lesson and a retirement |
 | Gate | when a family meets the validation line | review: Claude when "review" is in `claude.roles` (live: Sonnet 5.5), else GPT-6 Sol while the OpenAI month has room and `gate.review_openai_model` names it (null live), else DeepSeek-V4-Pro on Sail; audit: Claude (live: Opus 5.5, `claude.role_model`), then GPT-6 Astra on the same terms (null live), then a second Sail model; the gate box | review for lookahead, leakage and fill abuse; the audit; one holdout look | a Candidate, or a recorded refusal |

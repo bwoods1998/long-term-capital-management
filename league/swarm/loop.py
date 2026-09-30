@@ -2,9 +2,11 @@
 
 One process beside the House loop, niced. Its threads:
 
-- RESEARCHERS: `researcher.concurrency` workers, each taking the next family (the bandit's share first,
-  then the longest-waiting) and running one cycle, while the guard allows; a family that held waits out its hold
-  (`Scheduler`'s durable event-driven holds);
+- RESEARCHERS: up to THE CONCURRENCY's workers (allocation.py, Release B: `researcher.concurrency` as the spend plan's
+  level, expanded up to `allocation.max_concurrency` while useful experiments wait and spend is under the plan,
+  contracted while it runs over), each taking the next family (THE TURNS: the lowest stride pass among the ready, so a
+  family's turns follow its share under contention) and running one cycle, while the guard allows; a family that held
+  waits out its hold (`Scheduler`'s durable event-driven holds);
 - THE GYM POOL's dispatchers (one per box) and forks (`pool.py`);
 - ROUNDS on their own threads so none blocks another: the tournament (hourly), the idle pass between its rounds (every
   five minutes, the idle rule's retirements alone: `Tournament.idle_pass`), the gate (every few
@@ -38,7 +40,7 @@ import traceback
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from . import HEARTBEAT, LOCK_FILE, LOG_FILE, PID_FILE, settings as settings_mod
+from . import HEARTBEAT, LOCK_FILE, LOG_FILE, PID_FILE, allocation as allocation_mod, settings as settings_mod
 from .architect import Architect, GraveyardDigest
 from .diagnostician import Diagnostician
 from .gate import Gate
@@ -107,7 +109,11 @@ def hold_wait(settings: Mapping[str, Any], dormant: int) -> float:
 
 
 class Scheduler:
-    """Which family runs next: the bandit's share first, then the longest wait; one cycle per family at a time.
+    """Which family runs next: THE TURNS (allocation.py's `StrideTurns`, Release B): among the families ready now, the one
+    whose stride pass is lowest, so under contention a family's turns follow its share; a ready family that has had no
+    turn for `allocation.max_wait_seconds` first; one cycle per family at a time (`allocation.scheduler` "legacy": the
+    bandit's share first as a minute's head start per unit of relative share, then the longest wait). Each take counts
+    the useful experiments left waiting (`queued_useful`), which the swarm's concurrency reads.
 
     By default a hold is persisted in family state and resumes only when its evidence/context key changes.
     Time, weight changes and process restarts never buy another model call. Trials, gate state, rewrites,
@@ -135,6 +141,9 @@ class Scheduler:
         #: family -> (since, until, trials, gate_ready, band, dormant) while it waits out a hold (HOLD BACKOFF).
         self.held: dict[str, tuple[float, float, int, bool, Any, int]] = {}
         self.soon = float("-inf")  # when the last `take` that found nothing saw the next family ready (`pause`)
+        self.turns = allocation_mod.StrideTurns()  # THE TURNS' passes (in memory: a restarted swarm starts them afresh)
+        #: Useful experiments (allocation.useful) ready and left waiting at the last take: THE CONCURRENCY's queue.
+        self.queued_useful = 0
 
     @property
     def event_holds(self) -> bool:
@@ -215,6 +224,7 @@ class Scheduler:
         alive = {f["id"] for f in fams}
         for fid in [fid for fid in self.held if fid not in alive]:
             del self.held[fid]
+        self.turns.forget(alive)
 
     def pause(self) -> float:
         """How long a worker that found nothing to take sleeps: until the next family could be ready as the last such
@@ -243,15 +253,22 @@ class Scheduler:
                     soon = min(soon, at)
             if not ready:
                 self.soon = soon
+                self.queued_useful = 0
                 return None
             n = max(1, len(fams))
-            # A family's share (the bandit's) buys it an earlier turn: a share at the average is worth nothing, twice it
-            # is worth a minute of waiting.
-            ready.sort(key=lambda f: (self.last.get(f["id"], 0) - 60.0 * (float(f.get("weight") or (1.0 / n)) * n - 1.0), f["id"]))
-            fid = ready[0]["id"]
+            c = allocation_mod.cfg(self.settings)
+            if c["scheduler"] == "legacy":
+                ordered = allocation_mod.legacy_order(ready, n, last=self.last)
+            else:
+                ordered = self.turns.order(ready, n, now=now, last=self.last, max_wait=c["max_wait_seconds"])
+            chosen = ordered[0]
+            fid = chosen["id"]
+            if c["scheduler"] != "legacy":
+                self.turns.took(fid, chosen.get("weight"), n)
+            self.queued_useful = sum(1 for f in ordered[1:] if allocation_mod.useful(f, n, self.settings))
             self.running.add(fid)
             self.last[fid] = now
-            self.began[fid] = self.seen(ready[0])
+            self.began[fid] = self.seen(chosen)
             return fid
 
     def busy(self, fid: str) -> bool:
@@ -361,6 +378,8 @@ class Swarm:
         self.why_stopped = ""
         self._beat = float("-inf")
         self._pace = (float("-inf"), "", 0.0)
+        self._concurrency: tuple[float, dict[str, Any]] | None = None  # THE CONCURRENCY, cached for 10 s
+        self._threads = False  # run() started the researcher threads (step() may add workers up to the ceiling)
 
     # ------------------------------------------------------------------ the population
     def seed(self) -> list[str]:
@@ -437,7 +456,7 @@ class Swarm:
                 "totals": self.store.totals(), "spend_last_hour": spend, "usd_per_hour": round(sum(spend.values()), 4),
                 "median_cycle_seconds": seconds[len(seconds) // 2] if seconds else None, "cycles_last_hour": len(recent),
                 "cycle_errors_last_hour": sum(1 for p in recent if p.get("error")),
-                "researcher_pace": self.pace_status(),
+                "researcher_pace": self.pace_status(), "concurrency": self.concurrency_status(),
                 "guard": getattr(self.guard, "last", {}), "braked": not self.guard.allows(), "pool": self.pool.status(),
                 "rounds": sorted(k for k, t in self.rounds.items() if t.is_alive())}
 
@@ -502,10 +521,42 @@ class Swarm:
         """No new cycles/rewrites above their configured model pace (spend reads cached for at most 10 s)."""
         return self.pace_status()["paused"]
 
+    def concurrency_status(self) -> dict[str, Any]:
+        """THE CONCURRENCY (allocation.py `effective_concurrency`), read at most every 10 s: `researcher.concurrency` as the
+        spend plan's level, expanded up to `allocation.max_concurrency` while useful experiments wait and the research spend
+        is under the plan, contracted in proportion while it runs over it. `workers`: the researcher threads that may take a
+        family now (the others sleep)."""
+        now = self.clock()
+        cached = self._concurrency
+        if cached is not None and 0.0 <= now - cached[0] < 10.0:
+            return cached[1]
+        try:
+            pace = self.pace_status()
+            out = allocation_mod.effective_concurrency(self.settings, queued_useful=self.scheduler.queued_useful,
+                                                       running=len(self.scheduler.running),
+                                                       spent_usd_hour=float(pace["spent_last_hour_usd"]),
+                                                       pace_limit=pace["limit_usd_per_hour"])
+        except Exception as exc:  # noqa: BLE001 - a misread never stops research: the plan's level
+            base = allocation_mod.concurrency_bounds(self.settings)[0]
+            out = {"workers": base, "base": base, "why": f"unread ({type(exc).__name__}): the plan's level"}
+        self._concurrency = (now, out)
+        return out
+
+    def _grow_workers(self) -> None:
+        """Start researcher threads up to the concurrency's ceiling when the operator raised it (`allocation.max_concurrency`
+        or `researcher.concurrency`) after the start: only once run() started them."""
+        if not self._threads or self.stop.is_set():
+            return
+        ceiling = allocation_mod.concurrency_bounds(self.settings)[1]
+        for i in range(len(self.workers), ceiling):
+            t = threading.Thread(target=self._worker, args=(i,), name=f"researcher-{i}", daemon=True)
+            t.start()
+            self.workers.append(t)
+
     def _worker(self, index: int) -> None:
         idle = float(self.settings.get("researcher", {}).get("idle_seconds", 5))
         while not self.stop.is_set():
-            if not self.guard.allows() or not self.gym_ready() or index >= int(self.settings.get("researcher", {}).get("concurrency", 48)):
+            if not self.guard.allows() or not self.gym_ready() or index >= int(self.concurrency_status()["workers"]):
                 self.sleep(5.0)
                 continue
             if self.over_pace():
@@ -645,6 +696,7 @@ class Swarm:
                     log(f"reseeded {len(born)}: {', '.join(born)}")
             if self.diagnostician.due():  # Claude's own funded line and daily budget, not the researchers' pace
                 self._round("diagnostician", self.diagnostician.run)
+        self._grow_workers()
         if self.clock() - self._beat >= float(self.settings.get("heartbeat_seconds", 20)):
             self._beat = self.clock()
             self.heartbeat()
@@ -697,11 +749,14 @@ class Swarm:
         self.store.event("swarm.status", None, {"action": "started", "pid": os.getpid(), "release": str(CODE_DIR), "adopted": adopted,
                                                 "families": len(self.store.families(alive=True))})
         log(f"started: pid {os.getpid()}, release {CODE_DIR}, {len(self.store.families(alive=True))} families, {adopted} boxes adopted")
-        n = int(self.settings.get("researcher", {}).get("concurrency", 48))
+        # Every worker THE CONCURRENCY's ceiling allows (`researcher.concurrency`, or `allocation.max_concurrency` above it);
+        # those above the effective level sleep.
+        n = allocation_mod.concurrency_bounds(self.settings)[1]
         for i in range(max(n, 1) if not once else 0):
             t = threading.Thread(target=self._worker, args=(i,), name=f"researcher-{i}", daemon=True)
             t.start()
             self.workers.append(t)
+        self._threads = not once
         try:
             while not self.stop.is_set():
                 why = self.should_stop()
