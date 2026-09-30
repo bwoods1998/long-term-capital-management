@@ -27,33 +27,53 @@ session was Monday September 28 (13:30Z); no family had passed the holdout, so i
 orders were the House's own calibration round trips. Profitable production trading is the goal, not an
 outcome established by more agents, more trials, or a successful backtest.
 
-## Current state — September 29, 04:55Z
+## Current state: September 30, 18:00Z
 
-- **Real money is on** (since Sept 27): the grant `options-swarm-20260928` is active on money digest
-  `a3e2aa7c` with capital $1,473.11 after the owner's deposit. No family has passed the holdout, so no
-  family trades real money yet. The real trades so far are the House's D3 calibration round trips:
-  three on Sept 28, 5 of 6 orders filled at the mid, Profit -$8.68 (market moves and the broker's
-  fees). The House live test (one frozen, pre-registered program at tuition size, never evidence) was
-  armed at 00:17Z Sept 29 and has not traded yet. Both paper route proofs passed on Sept 28.
-- At 04:33Z: 92 families alive, 774 retired, 67,882 recorded trials, **2 holdout looks and 0
-  passes**, no living family over the validation line. The swarm trains on 25 roots with Train
-  2020-2024 (2022-2024 for the 20 added names), and the gate is on. Alpaca's asset lookup returned
-  6,177 tradable optionable equity/ETF assets: discovery is much broader than training readiness.
-- Real money opens four debit types under $2,000 of equity. The simulator supports 11 types; covered
-  calls and cash-secured puts still need inventory/collateral support, and there is no general agent
-  paper book (the paper proofs check the route).
-- Models: the owner decided on Sept 29 to use Claude Sonnet 5.5 throughout and to top up only Sail and
-  Claude from now on. Since 04:53Z Sept 29 Claude takes every paid role: Sonnet 5.5 is the architect
-  (with no OpenAI pass), the diagnostician, the stall rewrite and the program review, and Opus 5.5 the gate's audit, so
-  a program's two reads stay two different models. OpenAI is no longer used; Sail models remain the
-  inner loop and the fallback of every role but the diagnostician.
-- The House runs R8 (#414 graveyard ranking, #415 Sonnet 5.5 prices, #416 Claude on the rewrite and
-  review roles), promoted 04:42Z Sept 29 with its watch passed. In progress, not merged: longer history
-  (#413), the top families' research on Sonnet 5.5 (#417), and an architect that reads the whole
-  graveyard plus a strategist.
-- The live site shows the agents' own thoughts, clickable dots with each agent's evidence-based
-  progress, and a positions table that adds up exactly to Profit (the "House calibration" and "House
-  live test" rows are labelled). Project Net is negative: the inputs cost money.
+- **Real money is on** (since Sept 27). The grant `options-swarm-20260928` is active on money digest `a3e2aa7c`. No
+  family has passed the holdout (2 looks, 0 passes), so no family trades real money yet. The real trades so far are
+  the House's own:
+  - ten D3 calibration round trips, realized -$16.29 (market moves and the broker's fees);
+  - the House live test, one frozen, pre-registered program at tuition size and never evidence, which had sent no order
+    by 14:28Z Sept 30.
+
+  Known input costs since the Sept 26 reset were about $505 by Sept 30 14:17Z, so project Net is about -$521.
+- **The House** runs the restoration fix of Sept 30: #429 restores real instances by keyword.
+- **Release A** deploys after the Sept 30 session, at 20:05Z or later. It is the Sept 30 foundation (#431-#436) plus:
+  - live guards, so no practice instance can reach the real order path;
+  - a hardened program sandbox;
+  - Gym batches in which one bad program fails alone;
+  - funding-cliff alerts;
+  - CI that its own time limit no longer cancels;
+  - an honest public cost.
+
+  The foundation (#431-#436) brings engine 4, evaluator adoption, R11b, research that waits for news, and the live
+  practice league.
+
+  Release A resets the research evidence once (a planned reset). Release B, the incubator (one lot, $150 a week net,
+  never evidence), follows overnight and resets it again. Then the Gym and live code freeze. The
+  [run record](docs/runs/2026-09-30-continuous-learning.md) has the plan.
+- **Research, at the Sept 30 reconciliation:** about 90 families alive, every birth a debit vertical. The swarm trains
+  on 25 roots, with Train 2020-2024 (2022-2024 for the 20 added names), and the gate is on. Alpaca's asset lookup
+  returned 6,177 tradable optionable equity/ETF assets: discovery is much broader than training readiness.
+- **Real money** opens four debit types under $2,000 of equity. The simulator supports 11 types. Covered calls and
+  cash-secured puts still need inventory and collateral support, and there is no general agent paper book (the paper
+  proofs check the route).
+- **Models** (the owner, Sept 30: cut burn to evidence, roughly halving it). Since 16:41Z Sept 30:
+  - Claude (Sonnet 5.5 for the review, Opus 5.5 for the audit) reads programs at the gate, and Claude writes the
+    strategist's section;
+  - architect births run on Kimi-K3 on Sail, which yielded as many strong validations per birth at about a quarter of
+    the cost;
+  - the Sail researchers (DeepSeek) do the inner loop;
+  - stall rewrites and the diagnostician are off: their rewrites produced no strong validation in 48 hours.
+
+  OpenAI is not used, and its month ends Oct 1.
+- **The live site** shows:
+  - the agents' own thoughts;
+  - clickable dots with each agent's evidence-based progress;
+  - a positions table that adds up exactly to Profit, with the "House calibration" and "House live test" rows labelled.
+
+  With Release A and the site's own update, it also shows Net and every input cost by service: Sail as billed, and
+  Claude as its own part.
 
 The [goal](docs/goals/LTCM_OPTIONS_SWARM.md) and [the sprint that amends it](docs/goals/LTCM_SWARM_SPRINT.md)
 record the direction and remaining work; [operations](docs/operations.md) distinguishes merged code from
@@ -91,11 +111,12 @@ The full design is [docs/design.md](docs/design.md); the run that is building it
   the sealed holdout cannot be recognized. Programs live in the House's state, never in git.
 - **The loops.** Inner (a researcher revises and reruns on Train, in minutes); tournament (hourly:
   validation runs, a bandit that moves Gym time and model calls to evidence, forks and retirements);
-  architect (Claude; every ten minutes on the live settings, every four hours by default: new families
-  from the leaderboard and the graveyard); diagnostician (Claude on the stuck and nearly-there
-  families); gate (review, audit and one holdout look when a family meets the validation line);
-  nightly forward (each new trading day, for Candidates only); live (market hours: every alive
-  family's validated version in observe shadow, every Candidate in shadow, Probes and Sized families on
+  architect (Claude by default; Kimi-K3 on Sail on the live settings since Sept 30; every 15 minutes on the live
+  settings, every four hours by default: new families from the leaderboard and the graveyard); diagnostician (Claude
+  on the stuck and nearly-there families; off on the live settings since Sept 30); gate (review, audit and one holdout look when a family meets the validation line);
+  nightly forward (each new trading day, for Candidates only); live (market hours: the practice
+  league, every alive family's validated or eligible Train version in observe shadow from Release A; every Candidate
+  in shadow; Probes and Sized families on
   real money, and the House's own calibration round trips and live test); post-mortem (after each
   close; the operator's for now, no scheduled one is built). General agent paper trading is
   unfinished; the paper proofs check the route only.
@@ -106,10 +127,14 @@ The full design is [docs/design.md](docs/design.md); the run that is building it
   least 50 trades on 25 days, a t of 2 on P&L per dollar of maximum loss, a deflated Sharpe
   probability of 0.95 on traded days for its lineage's validated versions, 3 of 4 quarters positive and
   a profit at 1.5x the half-spread (the owner's decision D2, Sept 26, 2026); then one holdout look per version, corrected for every look the swarm has made, and
-  researchers hear only pass or fail. The forward record sizes money.
+  researchers hear only pass or fail. The forward record sizes money. From Release A, a change to the Gym or live
+  code, the fill model or the image archives the derived selection evidence (a planned evidence reset). Trials and
+  consumed holdout looks are kept, and evidence is never compared across such a change.
 - **Bands.** Gym, Candidate (live shadow only), Probe (real, small), Sized (real, by evidence),
-  Retired. (Every alive Gym family's validated version also trades an observe shadow, never real: at
-  most `live.observe_max`, 8 on the box.)
+  Retired. (The practice league: every alive Gym family's validated version, and from Release A its eligible Train
+  version, trades an observe shadow on live quotes, never real, never evidence. At most `live.observe_max` (48)
+  instances and, from Release A, `live.observe_roots_max` (24) roots. Code guards keep practice instances off the real
+  order path.)
 - **Money rules, in a paragraph** (the owner's decision D4, Sept 26). Everything is sized by maximum
   loss, never by premium: a Probe risks 5% of equity a structure (one contract when its maximum loss is
   at most $100), three open structures and 15% per family; a Sized family risks by quarter-Kelly on its
@@ -134,17 +159,17 @@ The full design is [docs/design.md](docs/design.md); the run that is building it
 | The House | the loop, the ledger, the books, the tournament, the gate, the live tick, the publisher | one Sailbox (size s) |
 | The gateway | the account's, OpenAI's and Anthropic's keys, caps by order, the OpenAI month, Claude's funded total, the kill switch, an outside watchdog | a Cloudflare Worker |
 | The data box | ThetaData downloads into the Gym store; the nightly forward day | one Sailbox (size l), asleep when idle |
-| The Gym | sealed forks of the Gym image (Train and Validation only), 4-8 at a time by default (up to 16 on the live settings) | Sailboxes (size l) |
+| The Gym | sealed forks of the Gym image (Train and Validation only), 4-8 at a time by default (at most 4 on the live settings since Sept 30's spend cut) | Sailboxes (size l) |
 | The gate | a sealed fork with the holdout and forward days | one Sailbox, used by the gate only |
 | The site | the public page | `personal-site`, a Cloudflare Worker |
 
 Vendors: **Alpaca** (the account, level 3; live OPRA quotes and SIP bars through Algo Trader Plus;
 a paper account for the multi-leg route), **ThetaData** Options Standard (historical option quotes),
 **Sail** (the boxes, and open models for the researchers and the roles' fallbacks: DeepSeek, Kimi),
-**Anthropic** through the gateway (Claude answers every paid role on the live settings: Sonnet 5.5,
-`claude-sonnet-5-5`, is the architect, the diagnostician, the stall rewrite and the program review; Opus
-5.5 is the gate's audit; and, from the release after PR #417, Sonnet 5.5 runs the research cycles of the
-bandit's top 12 families, with every failed turn finished on Sail), **OpenAI** through the gateway (GPT-6
+**Anthropic** through the gateway (Claude answers first for the roles the live settings give it. Since Sept 30's spend
+cut those are the gate's program review (Sonnet 5.5, `claude-sonnet-5-5`), its audit (Opus 5.5) and the strategist.
+The architect's Claude line is $0, so its births run on Kimi-K3 on Sail. The top-band research, the stall rewrite and
+the diagnostician are off on Claude; the code still supports each), **OpenAI** through the gateway (GPT-6
 Sol and Astra, the code's defaults for the review and the audit's fallback, are switched off in the live
 settings since Sept 29). From Sept 29 only Sail and Claude are topped up; the gateway's OpenAI cap is $0
 from Oct 1.
@@ -159,13 +184,13 @@ As it will stand after the prune (#375, still a draft); until it merges the lega
 | `league/` | the House: `house.py` (the tick), `ledger.py`, `book.py`, `allocator.py`, `constitution.py` (the money rules and their digest), `live_trading.py` (the grant), `publish.py`, `trading_profit.py` and `account_activity.py` (Profit and the positions table), `claude.py` and `frontier.py` (the Claude and OpenAI clients, through the gateway), `service.py`, `watchdog.py`, `stats.py`, `config.json` |
 | `league/live/` | the live path: the shadow and observe books, the real book, the paper route proofs, the D3 calibration round trips, the House live test |
 | `league/gym/` | the Gym: the store reader, the engine, fills, the venue's rules, greeks, the batch runner, the sealed-box driver; the program contract in `PROGRAM.md` |
-| `league/swarm/` | the swarm: researchers, the tournament and bandit, the architect, the diagnostician, the gate, the model router, the Sail guard, the Gym pool |
+| `league/swarm/` | the swarm: researchers, the tournament and bandit, the architect, the diagnostician, the gate, the model router, the Sail guard, the funding-cliff alerts, the Gym pool, the evaluator record |
 | `league/CONTRACT.md` | the options strategy contract every researcher reads (under 20 KB) |
 | `league/tests/` | the tests |
 | `gateway/` | the Worker ([its README](gateway/README.md)) |
 | `scripts/` | `floor_box.py` (the House's box), `gateway_admin.py` (the kill switch), `live_trading.py` (the grant), `scripts/data/` (the data box, the backfill, the images, the nightly job, the store checks) |
 | `deploy/` | [how the House runs on its box](deploy/README.md) |
-| `docs/` | [design.md](docs/design.md), [operations.md](docs/operations.md), `goals/` (the run's plan and the sprint that amends it); the run record is `docs/runs/` on branch `run/options-swarm-2026-09-26`, not on main |
+| `docs/` | [design.md](docs/design.md), [operations.md](docs/operations.md), `goals/` (the run's plan and the sprint that amends it); `runs/` (the Sept 30 continuous-learning run record; the Sept 26 run's record is on branch `run/options-swarm-2026-09-26`) |
 | `archive/` | the history and the documents of earlier generations |
 | `CHANGELOG.md` | one entry per deploy |
 
@@ -181,7 +206,9 @@ python3 -m league.ci --no-tests                     # content checks: strategies
 (cd gateway && npm run check && npm test)           # the gateway
 ```
 
-CI (`.github/workflows/checks.yml`) runs all of it on every pull request and is the source of truth.
+CI (`.github/workflows/checks.yml`) runs all of it on every pull request and is the source of truth. It runs the suites
+with `TMPDIR` on `/dev/shm` when it can, because the live state's SQLite commits (`synchronous=FULL`) dominate the live
+tests on a disk, and its tests job has a 35-minute limit. A cancelled run is not green.
 On the owner's laptop (8 cores, 7 GiB shared with other work) run one test process at a time, only
 the modules a change touches, with `TMPDIR` on a scratch directory on disk rather than the small
 `/tmp` tmpfs (agents filled it on Sept 26-27 and every shell failed), and delete it afterwards.

@@ -276,3 +276,180 @@ qualified forward rows. The old historical completion controller reported a rest
 and was waiting for it. A fresh brokerage read at
 07:56:52 UTC reports an active account, no open orders and no options positions. The goal remains
 unmet; merged code and synthetic checks do not establish deployed behavior or profitability.
+
+## Sept 30 afternoon: Claude takes over
+
+Codex ran this goal from 04:29 to 08:46 UTC, then reached its usage limit. A Claude session took over at about 15:00
+UTC under the same objective and completion criteria. The owner is asked to clear the Codex goal, so that two runs
+never operate the House at once.
+
+Nothing below is deployed yet, and every figure is a snapshot. Private details (prices, programs, parameters, account
+identifiers) stay in the operator's private goal folder.
+
+### Reconciliation at 14:28 UTC (read-only)
+
+Sources: git, GitHub, the House (SQLite opened read-only), the gateway and the prior transcripts. Nothing in production
+was changed.
+
+**Releases**
+- **The House** runs the restoration fix, `20260930T045038Z-cb6035693ef4`, built from `87af7a62`: R11a plus #429.
+- **Main** is `f082cf5e`. Its 69 commits since that release (#431-#436) are undeployed.
+- **Money:** the money digest is `a3e2aa7c`, unchanged by main, and the grant is active.
+
+**Research**
+- About 90 living families, all in the Gym band. None holds a validation pass.
+- Two holdout looks, both failed.
+- Births are 100% debit verticals.
+- About 80% of allocation weight sits on three families, none with a validation t of 1 or more.
+
+**Real orders**
+- **Calibration:** ten D3 round trips, realized −$16.29. Calibration only, never strategy evidence.
+- **The House live test:** real and `observe false`, 2 of its 20 sessions used, no order.
+
+**Cost**
+- Known input costs since T0 were $504.64 at 14:17 UTC, a partial list. That puts project Net at about −$521.
+- The public site understated cost by about $85. It published no Claude spend, and it booked Sail from the Gym's box
+  estimate, not the bill.
+
+**Findings**
+1. #427's two money-path guards were not on main.
+2. The live path loads Gym and swarm modules, so the D8 money path is wider than `league/live`.
+   [operations](../operations.md) has the import-traced list.
+3. At 14:03 UTC one program that parsed but did not compile failed a whole eight-program Gym batch, twice.
+4. The Python 3.11 CI push job on main was cut off by its 20-minute limit. A cancelled run is not a verdict.
+5. Most dormancy deaths in the graveyard were still worded "idle": 1,517 of 1,927 rows, awaiting R11b's migration.
+6. **Pre-deploy scan:**
+   - engine 4 loads all 106 programs: the alive families, the practice tier and the House test;
+   - the House test program's intents were identical under engines 3 and 4 on synthetic data;
+   - the live decider's sandbox does not fail open on the root House;
+   - but the decider cached a timed-out namespace probe as a permanent failure. That would have refused every spawn
+     until a restart, and after five minutes the House would have closed the positions of real instances. #443 fixes
+     it.
+
+**The owner's answers** (about 14:35-14:45 UTC):
+- **The incubator:** one lot, $150 a week net.
+- **Thresholds:** eligibility and scoring rules may change only with fixed-benchmark proof that false promotions do not
+  rise and missed signals fall. The sealed holdout, the multiple-testing control and the forward requirement never
+  loosen.
+- **Spend:** cut burn to evidence, roughly halving $84-104 a day.
+- **Net:** counted from the Sept 26 reset.
+
+### Release A
+
+Branch `release/a-20260930` (PR #450) is main `f082cf5e` plus six pull requests, each with adversarial reviews (two for
+each money-path change):
+- **#437:** #427's live guards on main. A real instance is never an observe one, and the order path refuses any
+  instance that is not real.
+- **#443:** the decider retries a failed namespace probe, fails closed off a root House, and caps the child's file size
+  and processes.
+- **#440:** one bad program no longer fails its Gym batch.
+- **#439:** funding alerts before the Claude, OpenAI, Sail and burst cliffs.
+- **#442:** CI's tests job gets 35 minutes, the hourly run no longer cancels a push run, and the workflow pin is
+  re-pinned.
+- **#441:** the public cost books Sail as billed and Claude as its own part. Personal-site PR #17 adds Net, the practice
+  league and the Incubator label.
+
+The money digest is unchanged. Release A deploys after the session, at 20:05 UTC or later.
+
+**Held back:** #438, an API-misuse preflight. Its review left two should-fix findings. It is swarm-side and ships
+separately once clean.
+
+**What Release A resets.** It is the planned evidence reset 1: engine 4 and the Gym and live changes move the
+evaluator's execution fingerprint.
+- **Cleared:** at its first start, every alive family's derived selection evidence is archived and cleared.
+- **Kept:** trials, lineages and consumed holdout looks.
+- **Practice:** it starts under the new fingerprint, so the practice league is expected to start nearly empty.
+
+**After promotion:** the operator's steps and checks are in [operations](../operations.md) ("Release A: after
+promotion"). This record will log their results.
+
+### The spend decision (16:07 and 16:41 UTC)
+
+The spend review read 48 hours of House records, read-only. All counts below are from that review.
+
+**What paid:**
+- The Sail researchers wrote every strong validation: 13 at a validation t of 1.5 or more, 7 of them at 2 or more, and
+  one full-line pass, which the audit refused.
+- All 13 came from families under three hours old. Breadth beat depth.
+
+**What did not:**
+- **Stall rewrites:** 1,002 Train runs of rewritten versions produced 2 validation attempts, neither of them strong.
+- **The diagnostician:** 19 rewrites led to 21 Train runs and no validation. It rewrote 10 strong families after they
+  validated, and none validated again.
+- **Architect births on Claude Sonnet 5.5:** 3 of 841 Sonnet-born families reached a real-type validation at t of 1.5
+  or more. 2 of 329 Kimi-K3-born families did. Kimi-K3 is level or better per birth, at about a quarter of the cost.
+
+**What changed.** The settings are in [CHANGELOG.md](../../CHANGELOG.md), Sept 30:
+- architect births moved to Kimi-K3 on Sail;
+- stall rewrites and the diagnostician were switched off;
+- the researcher Sail pace went from $12 an hour (an interim $4 from 16:07) to $1.1;
+- the Gym pool went to at most four boxes until Release A.
+
+The gate's review and audit and the strategist stay on Claude. They are cheap, and they are the last reads before a
+holdout look.
+
+**The target:** about $2.10 an hour, about $50 a day, against about $4.30 an hour ($103 a day) over the prior six hours.
+- Claude's funded room should then last to about Oct 10.
+- The Sail guard's brake should move to about Oct 3.
+
+These are projections, not measurements. Top-ups are asked for only when the evidence per dollar after the resets
+justifies them. Claude's is $0 for now.
+
+**Near misses.** All twelve families that validated strongly in those 48 hours were retired by the dormancy clause
+within one to four hours. None got a second look.
+- **The only full-line pass:** the audit refused it for leaking state across runs. That reason was wrong: the runtime
+  gives each run a fresh module. But the program read its default parameters instead of its overrides, and engine 4's
+  binding fixes that behavior.
+- **Planned after Release A:**
+  - the extension hold keeps near misses out of the dormancy clause;
+  - the operator may revive near misses as lineage continuations. A revival inherits its lineage's trials and holdout
+    looks, its re-validation under engine 4 is a new, counted trial, and the holdout still judges it;
+  - this record will name the revivals and say that the operator chose them from the validation line.
+
+### Planned Release B: the incubator
+
+**Approval.** The owner approved the incubator on Sept 29, 14:51 UTC. The reading was settled Sept 30:
+- **Size:** one lot of an approved real structure, with at most $50 of maximum loss each and at most four open.
+- **Weekly stop:** the route stops for the week after $150 of net realized loss.
+- **Eligibility:**
+  - the family passes Train;
+  - it passes the drift screen on its own;
+  - its live practice is positive (the captain's reading: at least three sessions, ten closes and 80% coverage);
+  - the gate's review and audit stay required.
+
+**What it is not.** Incubator trades are real P&L, but never strategy evidence and never a path to Probe or Sized: only
+D2 leads there. The plan is that no second family trades real money on any route, the incubator included, before
+exposure-aware allocation exists. Until then, the incubator's caps are its only exposure bound.
+
+**How it ships.** It is a new shadow-to-real route with a new money digest:
+1. Release B ships it switched off;
+2. the grant is re-ratified at once after promotion;
+3. the site's Incubator label goes live (personal-site PR #17);
+4. only then is the route switched on.
+
+**When.** Release B deploys overnight, before 13:25 UTC Oct 1, with any Gym or live change left out of Release A. The
+earliest possible incubator open is Oct 6, for cohorts that start practice on Oct 1.
+
+**Research-side builds** (family cards, evaluator benchmarks, harness lanes, information-value allocation) do not move
+the fingerprint. They ship as soon as they are reviewed.
+
+### The evidence-reset plan
+
+- **Reset 1:** Release A, tonight.
+- **Reset 2:** Release B, overnight, before the Oct 1 open. Practice then starts Oct 1 on the final fingerprint, and
+  B's reset costs only a few hours of overnight Train evidence instead of a day of research.
+- **Until then:** the 16:07 UTC research throttle holds Gym and model spend down, because Train evidence from before B
+  is archived at B.
+- **After B, the Gym and live paths freeze** (`league/gym`, `league/live`, `LEAGUE_FILES`, the fill model, the Gym
+  image) for at least five sessions, and for as long as any family holds Candidate, Probe or Sized or has an
+  incubator-bound cohort.
+  - The only exceptions are rollbacks and fixes for bugs that block or endanger real orders.
+  - Everything else waits for planned releases between evidence windows: harness-lane changes, the fill-model refit
+    and new images.
+- **Every reset is logged here.** Evidence is never compared across fingerprints, and consumed holdout looks never
+  reopen.
+
+Evidence resets so far: 0.
+
+The goal remains unmet. No qualified strategy has traded real money, no harness improvement has been retained, and
+project Net is negative.
