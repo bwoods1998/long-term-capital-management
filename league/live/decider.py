@@ -21,7 +21,7 @@ decisions a minute. What that buys:
   a namespace probe that failed or timed out is not remembered, it is tried again at a spawn `NETNS_RETRY_SECONDS`
   later. The secret env must stay root-owned mode 0600; the state and deployment directories must not allow
   group/other writes. Off a root House (an ordinary user) a `Decider` refuses to start a child, since an escape
-  would keep that user's files; only a test or a developer's machine passes `allow_unisolated=True`, and then the child
+  would keep that user's files; only a test passes `allow_unisolated=True` (in code; there is no switch), and then the child
   gets its own network namespace wherever the box allows one.
 
 The parent sends each minute's `Snapshot`s once (pickled; the House is the trusted side), keyed by (root, minute
@@ -223,6 +223,10 @@ def limit_child() -> None:
     if hasattr(signal, "SIGXFSZ"):
         # A write past the file-size cap then fails (EFBIG, a lost log line) instead of killing the child.
         signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+    # With RLIMIT_NPROC 0 a BLAS thread pool cannot start: OpenBLAS then raises SIGINT at `import numpy`. _spawn's env
+    # sets these; the child sets them too so that no caller can leave them out.
+    for var in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
+        os.environ.setdefault(var, "1")
     for name, cap in (("RLIMIT_FSIZE", FILE_MB * 1024 * 1024), ("RLIMIT_NPROC", 0)):
         try:
             which = getattr(resource, name)
