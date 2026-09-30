@@ -706,6 +706,20 @@ class Reads(HookCase):
         self.assertEqual(record["forward"], {"trades": 1, "wins": 0, "pnl_usd": -2.0}, "the banded version's record")
         self.assertEqual((record["trials"], agents["condor-on-qqq"]["record"]["trials"]), (4, 4))
 
+    def test_published_compute_keeps_claude_and_historical_provider_costs(self):
+        """A provider switch cannot make historical costs disappear or omit the current provider from Net."""
+        store = SwarmStore(self.root, clock=self.clock)
+        for kind, usd in (("sail_model", 1.25), ("gym_box", 2.75), ("openai", 3.0), ("claude", 4.0)):
+            store.add_spend(kind, usd)
+        store.close()
+        inputs = sitefeed.site_inputs(self.root)
+        checkpoint = publish.build_checkpoint({**inputs, "started_at": None}, "2026-09-26T12:00:00Z")
+        compute = checkpoint["compute"]
+        self.assertEqual(compute["sail_usd"], "4.00")
+        self.assertEqual(compute["openai_usd"], "3.00")
+        self.assertEqual(compute["other_usd"], "4.00")
+        self.assertEqual(sum(float(compute[k]) for k in ("sail_usd", "openai_usd", "other_usd")), 11.0)
+
 
 class SwarmHouse(BuildCase):
     def build_on(self, **kw):
