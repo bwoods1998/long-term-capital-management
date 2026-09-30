@@ -77,6 +77,24 @@ Underlying: `ctx.underlyings[root]` (and `ctx.under`): `price` now, `prices` (to
 prices from the open to now), `open`, `high`, `low` (today so far), `prior_close`, and the prior
 sessions oldest first: `closes`, `opens`, `highs`, `lows`.
 
+Stock/ETF volume is optional, in unadjusted shares from **completed regular-session bars**:
+`minute_volumes[k]` is the bar starting `ctx.open_minute + k`; its length is
+`ctx.minute - ctx.open_minute`. The 09:30 bar first becomes visible at 09:31, and a live bar
+first observed late cannot appear in an earlier decision. Gaps remain `NaN`, including a
+price-only data image; explicit zero-volume bars remain zero. These arrays retain the minute
+grid even when price observations are missing. `volume` is today's sum only when every completed
+bar is known (otherwise `NaN`, also at the open). `daily_volumes` aligns with `closes`, oldest
+first; `prior_volume` is its final value. A daily total is `NaN` unless every regular-session bar
+is present. `volume_coverage` reports `basis="completed_regular_session_bars"`, `minute_bars`
+(known), `minute_expected`, `history_sessions` (known), and `history_expected`. Check coverage
+or `np.isfinite` before using volume; do not replace unknowns with zero.
+
+Live volume uses the stock snapshots already read by the House and retains completed bars across
+restarts. Its prior daily totals accumulate from complete sessions it observed; unverified daily
+endpoint totals are not substituted. Thus live history can initially be missing even where replay
+has SIP minute data. Index parity does not borrow SPY's volume: XSP/SPXW volume is unavailable.
+Volume arrays, like prices, are immutable copies of only what is known at that decision.
+
 Account: `ctx.positions` (list of dicts: `id`, `type`, `root`, `qty`, `legs` [each `id` (-1 when not
 in today's chain), `dte`, `strike`, `is_call`, `side`, `ratio`], `entry`, `mark`, `natural`, `pnl`,
 `max_loss`, `credit`, `held_minutes`, `held_days`, `tag`), `ctx.orders` (working orders: `id`, `kind`

@@ -242,6 +242,7 @@ class OptionsLive:
         self.stops = M.Stops.from_state(self.state.get("stops"), start_equity)
         self.instances: dict[str, Instance] = {}
         self.day: LiveDay | None = None
+        self._volume_dirty = False
         self.house_open = True
         self.summary: dict[str, Any] = {"state": "idle"}
         self.account_row: dict[str, Any] | None = None
@@ -454,6 +455,12 @@ class OptionsLive:
         return self._done(out)
 
     def _done(self, out: dict) -> dict:
+        if self._volume_dirty and self.day is not None:
+            try:
+                self._save_volume(self.day)
+                self._volume_dirty = False
+            except Exception as exc:  # noqa: BLE001 - missing persistence never fabricates volume after a restart
+                out["volume_error"] = f"volume checkpoint: {type(exc).__name__}"
         with self._lock:
             self.summary = out
         return out
@@ -473,10 +480,36 @@ class OptionsLive:
             self._export_shadow()
         days = trading_days_around(today)
         self.day = LiveDay(today, open_min, close_min, trading_days=days, session=lambda d: session_minutes(d) or (570, 960))
+        saved = self.state.get("underlying_volume_session", {}) or {}
+        if saved.get("day") == today.isoformat():
+            for root, rows in (saved.get("roots") or {}).items():
+                if uses_parity(root):
+                    continue
+                under = self.day.chain(root).underlying
+                for item in rows:
+                    try:
+                        index, value, available = int(item[0]), float(item[1]), int(item[2])
+                        if not (1 <= index <= available < self.day.minutes and math.isfinite(value) and value >= 0):
+                            continue
+                        under.volume[index], under.volume_available_at[index] = value, available
+                    except (TypeError, ValueError, IndexError, OverflowError):
+                        continue
         self.shadow.day_ordinal = ordinal(today)
         self._missed_close(today)
         self.shadow.save()
         return self.day
+
+    def _save_volume(self, day: LiveDay) -> None:
+        """Persist only observed completed bars and their first-availability minute; no data requests or imputation."""
+        roots = {}
+        for root, chain in day.chains.items():
+            if uses_parity(root):
+                continue
+            u = chain.underlying
+            known = np.flatnonzero(np.isfinite(u.volume) & np.isfinite(u.volume_available_at))
+            if known.size:
+                roots[root] = [[int(i), float(u.volume[i]), int(u.volume_available_at[i])] for i in known]
+        self.state.put("underlying_volume_session", {"day": day.day.isoformat(), "roots": roots})
 
     def _missed_close(self, today: dt.date) -> None:
         """Real positions whose expiry passed while the House was not there to see the close: an index structure is
@@ -510,8 +543,22 @@ class OptionsLive:
                 start = (day.day - dt.timedelta(days=100)).isoformat()
                 bars = self.market.bars([source], timeframe="1Day", start=start,
                                         end=(day.day - dt.timedelta(days=1)).isoformat())
-                day.history[source] = [(float(r["o"]), float(r["h"]), float(r["l"]), float(r["c"])) for r in bars.get(source) or []
-                                       if all(k in r for k in ("o", "h", "l", "c"))][-60:]
+                records = [r for r in bars.get(source) or [] if all(k in r for k in ("o", "h", "l", "c"))][-60:]
+                day.history[source] = [(float(r["o"]), float(r["h"]), float(r["l"]), float(r["c"])) for r in records]
+                totals = (self.state.get("underlying_volume_history", {}) or {}).get(source, {})
+                # The daily endpoint's session basis is not verified here. Use only our own complete regular-session
+                # totals, which match historical SIP minute sums; never substitute its dailyBar.v or a missing zero.
+                day.history_volumes[source] = []
+                for row in records:
+                    session = _new_york_day(row.get("t"))
+                    total = (totals.get(session) or {}) if session and session < day.day.isoformat() else {}
+                    try:
+                        value = float(total.get("volume"))
+                        complete = int(total.get("expected") or 0) > 0 and total.get("known") == total.get("expected")
+                        value = value if complete and math.isfinite(value) and value >= 0 else math.nan
+                    except (TypeError, ValueError, OverflowError):
+                        value = math.nan
+                    day.history_volumes[source].append(value)
             except Exception as exc:  # noqa: BLE001 - programs then see no history for it today
                 self.alert("warning", f"live: {source}'s daily history could not be read ({type(exc).__name__})")
         if uses_parity(root):
@@ -519,6 +566,7 @@ class OptionsLive:
                 return
             ratio = level / spy
             day.history[root] = [tuple(x * ratio for x in row) for row in day.history.get("SPY", [])]
+            day.history_volumes[root] = [math.nan] * len(day.history[root])  # index parity never borrows SPY's volume
 
     # ------------------------------------------------------------------ families and instances
     def _restore_real_instances(self) -> None:
@@ -1149,14 +1197,16 @@ class OptionsLive:
         wanted = [r for r in roots if r not in priced]
         stocks = [r for r in wanted if not uses_parity(r)] + (["SPY"] if any(uses_parity(r) for r in wanted) and "SPY" not in wanted else [])
         prices: dict[str, float] = {}
+        stock_rows: dict[str, Any] = {}
         if stocks:
             try:
-                rows = self.market.stocks(stocks)
-                prices = {s: stock_price(rows.get(s) or {}, not_before=open_epoch) for s in stocks}
+                stock_rows = self.market.stocks(stocks)
+                prices = {s: stock_price(stock_rows.get(s) or {}, not_before=open_epoch) for s in stocks}
             except Exception as exc:  # noqa: BLE001
+                stock_rows = {}
                 out.setdefault("data_errors", []).append(f"stocks: {type(exc).__name__}: {str(exc)[:120]}")
         held = self._held_symbols(phase)
-        changed = recorded = False
+        changed = recorded = volume_changed = False
         levels = dict(self.state.get("levels", {}) or {})
         pages = ({"max_pages": int(self.settings["observe_read_pages"]),
                   "timeout": float(self.settings["observe_read_timeout_seconds"])} if observe else {})
@@ -1166,6 +1216,9 @@ class OptionsLive:
                 out["observe_reads_skipped"] = out.get("observe_reads_skipped", 0) + 1
                 continue  # the minute's data or time budget is spent: the observe band reads this root next minute
             chain = day.chain(root)
+            snapshot = stock_rows.get(root)
+            if chain.record_volume(mi, snapshot.get("minuteBar") if isinstance(snapshot, Mapping) else None):
+                volume_changed = self._volume_dirty = True
             if root in priced:
                 spot = float(chain.underlying.price[mi])
             elif not uses_parity(root):
@@ -1202,7 +1255,7 @@ class OptionsLive:
             self.state.put("levels", levels)
         if changed:
             day.remap(self.shadow.accounts.values())
-        elif observe and recorded:
+        elif (observe and recorded) or volume_changed:
             day.invalidate()  # the minute's snapshots were built before these quotes merged in
         out["data_calls"] = self.market.minute_calls.used()
 
@@ -2410,6 +2463,20 @@ class OptionsLive:
                                (int(row["pid"]), self.clock()))
 
     # ------------------------------------------------------------------ the close and the quiet hours
+    def _end_volume(self, day: LiveDay) -> None:
+        """Prior-session share totals have the same completed regular-session basis as replay."""
+        volumes = self.state.get("underlying_volume_history", {}) or {}
+        for root, chain in day.chains.items():
+            if uses_parity(root):
+                continue
+            values = chain.underlying.completed_volumes(day.minutes - 1)
+            total = chain.underlying.session_volume()
+            history = dict(volumes.get(root) or {})
+            history[day.day.isoformat()] = {"volume": total if math.isfinite(total) else None,
+                "known": int(np.isfinite(values).sum()), "expected": len(values)}
+            volumes[root] = {d: history[d] for d in sorted(history)[-60:]}
+        self.state.put("underlying_volume_history", volumes)
+
     def _end_of_day(self, day: LiveDay, out: dict) -> None:
         if self.state.get("ended_day") == day.day.isoformat():
             return
@@ -2444,6 +2511,10 @@ class OptionsLive:
                     if itm:
                         self.alert("warning", f"live: {pos.family}'s {pos.type} expired with a leg in the money: awaiting venue events or liquidation fills")
             self._export_real()
+        try:
+            self._end_volume(day)
+        except Exception as exc:  # noqa: BLE001 - this optional input must not interrupt expiry bookkeeping
+            out["volume_error"] = f"volume history: {type(exc).__name__}"
         self.state.put("ended_day", day.day.isoformat())
         self.shadow.save()
         out["ended"] = day.day.isoformat()

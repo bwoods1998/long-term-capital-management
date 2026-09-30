@@ -26,6 +26,7 @@ import datetime as dt
 import math
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Sequence
+from zoneinfo import ZoneInfo
 
 import numpy as np
 
@@ -36,6 +37,7 @@ from ..gym.events import EventCalendar, rate_on
 from .venue import occ_parts, quote_of
 
 EPOCH = dt.date(1970, 1, 1)
+NEW_YORK = ZoneInfo("America/New_York")
 
 
 def uses_parity(root: str) -> bool:
@@ -62,7 +64,8 @@ class LiveChain:
         self.bid_size = np.zeros((self.m, 0), dtype=np.int32)
         self.ask_size = np.zeros((self.m, 0), dtype=np.int32)
         self.oi = np.zeros(0, dtype=np.int64)
-        self.underlying = Underlying(price=np.full(self.m, np.nan))
+        self.underlying = Underlying(price=np.full(self.m, np.nan), volume=np.full(self.m, np.nan),
+                                     volume_available_at=np.full(self.m, np.nan))
         self._col: dict[str, int] = {}
         self.generation = 0          # bumped at every rebuild (indices change)
         self.quote_revision = 0      # one writer: odd during record(), even once every quote write has ended
@@ -181,6 +184,30 @@ class LiveChain:
     def mids(self, mi: int) -> np.ndarray:
         return 0.5 * (self.bid[mi] + self.ask[mi])
 
+    def record_volume(self, mi: int, bar: Mapping[str, Any] | None) -> bool:
+        """Accept a completed SIP stock bar from an already-paid snapshot. No incomplete, extended-session, index,
+        negative, missing or future volume; no backward revisions to a bar already observed by the program."""
+        if uses_parity(self.root) or not isinstance(bar, Mapping) or not 0 <= mi < self.m:
+            return False
+        try:
+            stamp = dt.datetime.fromisoformat(str(bar["t"]).replace("Z", "+00:00"))
+            if stamp.tzinfo is None or stamp.second or stamp.microsecond or isinstance(bar.get("v"), bool):
+                return False
+            local = stamp.astimezone(NEW_YORK)
+            start = local.hour * 60 + local.minute
+            completed = start + 1 - self.open_min
+            value = float(bar["v"])
+            if (local.date() != self.day or not self.open_min <= start < self.close_min or completed > mi
+                    or not math.isfinite(value) or value < 0):
+                return False
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return False
+        if np.isfinite(self.underlying.volume[completed]):
+            return False
+        self.underlying.volume[completed] = value
+        self.underlying.volume_available_at[completed] = mi
+        return True
+
     def parity(self, mi: int, near: float) -> float:
         """The root's own level from put-call parity at minute `mi` (NaN when no strike has both sides quoted)."""
         if self.contracts == 0:
@@ -226,6 +253,7 @@ class LiveDay:
         self.events = calendar.flags(day)
         self.events_next = calendar.flags(calendar.next_day(day))
         self.history: dict[str, list[tuple[float, float, float, float]]] = {}  # root -> prior sessions (o, h, l, c)
+        self.history_volumes: dict[str, list[float]] = {}  # same sessions; unknown totals remain NaN
         self._snaps: dict[tuple[str, int], Snapshot] = {}
         self._unders: dict[tuple[str, int, int], Any] = {}
         self._minute = -1
@@ -276,8 +304,10 @@ class LiveDay:
             chain = self.chains[root]
             rows = self.history.get(root, [])[-history:] if history > 0 else []
             a = np.array(rows, dtype=np.float64) if rows else np.zeros((0, 4))
+            volumes = self.history_volumes.get(root, [])[-len(rows):] if rows else []
+            volumes = [float("nan")] * (len(rows) - len(volumes)) + volumes
             found = underlying_view(root, chain.underlying.price[: mi + 1], opens=a[:, 0], highs=a[:, 1], lows=a[:, 2],
-                                    closes=a[:, 3])
+                                    closes=a[:, 3], minute_volumes=chain.underlying.completed_volumes(mi), daily_volumes=volumes)
             self._unders[key] = found
         return found
 

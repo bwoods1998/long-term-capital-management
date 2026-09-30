@@ -57,7 +57,8 @@ def from_ordinal(value: int) -> dt.date:
 @dataclass
 class Underlying:
     """One root's underlying for one day: `price[i]` at minute index i (NaN where none), plus the
-    optional one-minute bars (a bar stamped at index i closes at i + 1)."""
+    optional completed one-minute bars. SIP ingestion places a bar at its availability minute: the bar beginning
+    at 09:30 occupies index 1 (09:31). Index 0 has no completed regular-session bar. Missing volume stays NaN."""
 
     price: np.ndarray
     open: np.ndarray | None = None
@@ -66,6 +67,30 @@ class Underlying:
     close: np.ndarray | None = None
     volume: np.ndarray | None = None
     settle: np.ndarray | None = None     # a recorded settlement level (optional column `settle`)
+    volume_available_at: np.ndarray | None = None  # live first-observed minute; historical grids use their own index
+
+    def completed_volumes(self, mi: int) -> np.ndarray:
+        """Completed regular-session bars visible by minute `mi`, aligned from the open; never forward filled.
+        Live bars observed late remain unavailable to an earlier decision, including a delayed shadow decision."""
+        n = max(0, min(int(mi), len(self.price) - 1))
+        out = np.full(n, np.nan)
+        if self.volume is None:
+            return out
+        count = min(n, max(0, len(self.volume) - 1))
+        values = np.asarray(self.volume[1:count + 1], dtype=np.float64)
+        known = np.isfinite(values) & (values >= 0)
+        if self.volume_available_at is not None:
+            available = np.asarray(self.volume_available_at[1:count + 1], dtype=np.float64)
+            if len(available) != count:
+                return out
+            known &= np.isfinite(available) & (available <= mi)
+        out[:count] = np.where(known, values, np.nan)
+        return out
+
+    def session_volume(self) -> float:
+        """A complete regular session's total only; a partial or absent series is unknown, including missing zeros."""
+        values = self.completed_volumes(len(self.price) - 1)
+        return float(values.sum()) if values.size and np.isfinite(values).all() else float("nan")
 
 
 @dataclass

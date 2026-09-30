@@ -101,6 +101,24 @@ Underlying: `ctx.underlyings[root]` (and `ctx.under`): `price` now, `prices` (to
 prices from the open to now), `open`, `high`, `low` (today so far), `prior_close`, and the prior
 sessions oldest first: `closes`, `opens`, `highs`, `lows`.
 
+Optional stock/ETF share volume has the same completed regular-session basis live and in replay.
+`minute_volumes[k]` belongs to the bar starting `ctx.open_minute + k`, and the array has
+`ctx.minute - ctx.open_minute` entries. The 09:30 bar is first eligible at 09:31; a bar first
+observed late live stays unavailable to an earlier decision. Missing bars are `NaN` and retain
+their place in the minute grid; they are never forward filled or replaced with zero. An explicit
+zero is known volume. `volume` sums today only when every completed bar is known; otherwise it
+is `NaN` (also at the open). `daily_volumes` aligns with prior-session `closes`; `prior_volume`
+is the last value. Each daily total requires every regular-session bar, or it is `NaN`.
+`volume_coverage` has `basis="completed_regular_session_bars"`, `minute_bars` (known),
+`minute_expected`, `history_sessions` (known), and `history_expected`. Use those counts or
+`np.isfinite` to check availability. Arrays are immutable copies through the current decision.
+
+Price-only images expose unknown volume. Live uses existing stock snapshots and persists observed
+bars across restarts; complete prior-session totals accumulate only from sessions it observed.
+Daily endpoint totals have not been verified against that session basis and are not substituted.
+XSP/SPXW parity inputs never borrow SPY volume. Volume availability is data coverage, not evidence
+of a strategy's edge, and can differ between the replay image and the live observation history.
+
 Account: `ctx.positions` (dicts: `id`, `type`, `root`, `qty`, `legs` [`id` (-1 when not in today's
 chain), `dte`, `strike`, `is_call`, `side`, `ratio`], `entry`, `mark`, `natural`, `pnl`, `max_loss`,
 `credit`, `held_minutes`, `held_days`, `tag`), `ctx.orders` (working: `id`, `kind` open/close, `type`,
