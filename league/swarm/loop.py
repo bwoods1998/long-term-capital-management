@@ -43,7 +43,8 @@ import traceback
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from . import HEARTBEAT, LOCK_FILE, LOG_FILE, PID_FILE, allocation as allocation_mod, settings as settings_mod
+from . import allocation as allocation_mod
+from . import HEARTBEAT, LOCK_FILE, LOG_FILE, PID_FILE, settings as settings_mod
 from .architect import Architect, GraveyardDigest
 from .diagnostician import Diagnostician
 from .funding import FundingWatch
@@ -472,9 +473,10 @@ class Swarm:
                 "totals": self.store.totals(), "spend_last_hour": spend, "usd_per_hour": round(sum(spend.values()), 4),
                 "median_cycle_seconds": seconds[len(seconds) // 2] if seconds else None, "cycles_last_hour": len(recent),
                 "cycle_errors_last_hour": sum(1 for p in recent if p.get("error")),
-                "researcher_pace": self.pace_status(), "concurrency": self.concurrency_status(),
+                "researcher_pace": self.pace_status(),
                 "guard": getattr(self.guard, "last", {}), "braked": not self.guard.allows(), "pool": self.pool.status(),
                 "rounds": sorted(k for k, t in self.rounds.items() if t.is_alive()),
+                "concurrency": self.concurrency_status(),
                 "funding": getattr(getattr(self, "funding", None), "last", {})}
 
     def heartbeat(self, extra: Mapping[str, Any] | None = None) -> None:

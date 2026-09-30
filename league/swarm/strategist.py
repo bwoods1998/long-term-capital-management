@@ -54,6 +54,7 @@ from typing import Any, Callable, Mapping, NamedTuple, Sequence
 
 from . import diagnostics
 from . import settings as settings_mod
+from .allocation import SHARE_LEGEND
 from .architect import (AGENDA_KEY, ASCII_MAP, OPERATOR_SQL, SECTION_MAX, USAGE_KEYS, Architect, GraveyardDigest, lesson_view,
                         locked_text, operator_ids, tag_of, to_ascii)
 from .researcher import train_record
@@ -466,7 +467,7 @@ class Strategist:
         for fid in order[:60]:
             f = alive[fid]
             out.append({"family": fid, "band": f["band"], "structure": f["structure"], "roots": f["roots"], "val": _val(f),
-                        "share": shares.get(fid), "best_train": f.get("best_train"), "trials": f.get("trials"),
+                        "research_share": shares.get(fid), "best_train": f.get("best_train"), "trials": f.get("trials"),
                         "mechanism": lesson_view(f["mechanism"])[:300]})
         return out
 
@@ -565,7 +566,7 @@ class Strategist:
             f"THE CURRENT {SECTION_TITLE} SECTION ({whose}):\n" + (str(current.get("text") or "") or "(none)"),
             "WHAT BECAME OF THE FAMILIES THE ARCHITECT BORE UNDER IT (outcome; screen, what its Train record showed: scored, "
             "drift, stress, thin or untested; the sign of its best Train score; val as D2a allows):\n" + json.dumps(self._since_section(current, fams)),
-            "THE BOARD (alive families):\n" + json.dumps(self._board(fams)),
+            f"THE BOARD (alive families; {SHARE_LEGEND}):\n" + json.dumps(self._board(fams)),
             "VALIDATION CHECKS FAILED, BY CHECK (counts across every validated family; never a number):\n"
             + json.dumps(self._checks(fams)),
             "THE LAST 24 HOURS (mechanism class = structure x root group: index, etf, names):\n" + json.dumps(self._day(fams)),

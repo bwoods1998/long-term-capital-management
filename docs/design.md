@@ -247,16 +247,20 @@ Agent count and simulated years measure activity; passing unseen evidence measur
   posterior (the swarm's recent validation looks on the running evaluator, pooled by mechanism class
   and blended with the Sept 30 fit, a family's own latest look updating its class's prior; a family
   past the t check but failing another counts as on the line), discounted by the idea's trials (its
-  own and those it inherited at birth: breadth beats depth), by exhaustion (its lineage's holdout
-  looks spent, a drift-failed validation, a hold streak) and by half for a structure the account
-  cannot open for real. Every family keeps a 10% floor share; 35% is an explicit exploration share
+  lineage's, as the deflated Sharpe counts them, never fewer than its own and those it inherited at
+  birth: breadth beats depth), by exhaustion (its lineage's holdout looks spent, a drift-failed
+  validation, a validated version the gate is done with, a hold streak; a failed holdout look or a
+  refusal at review also ends that validation's say, so the family reads as unvalidated) and by
+  half for a structure the account cannot open for real. Every family keeps a 10% floor share; 35% is an explicit exploration share
   for breadth across mechanism classes (a class's slice is its families' value over the root of
   their number, then by value within it); the rest follows value. No family holds more than 5%, and
   no class more than 30% while other classes hold families worth the attention (a cap's excess goes
-  only to families worth at least what the average unit of share buys, at most tripling any one's
-  share; otherwise the class cap gives way, which it mostly does while one or two classes are most
-  of the population, and the round's report says so). Families at the gate or beyond get the floor
-  share and lead the leaderboard. Shares buy turns: the researchers' scheduler is start-time fair
+  to families worth at least what the average unit of share buys, at most tripling any one's share;
+  what the family cap cuts beyond that goes to every family by value, and the class cap gives way
+  only for what it adds, which it mostly does while one or two classes are most of the population;
+  the round's report says which). Families at the gate or beyond get the floor share and lead the
+  leaderboard; the architect and the strategist read the share as `research_share`, told that it
+  measures how undecided a family is, not its evidence. Shares buy turns: the researchers' scheduler is start-time fair
   queueing, so under contention a family's turns follow its share. With an explicit
   `allocation.plan_usd_per_hour`, the number of researchers contracts when research spend (Sail
   models and Gym boxes) runs over it and expands above `researcher.concurrency` (up to

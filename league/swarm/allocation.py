@@ -23,11 +23,14 @@ Gym priority is the sum of three parts:
   CLASSES CAN TAKE THE EXCESS. The excess goes to the families under both caps that are worth at least what the average
   unit of share buys (`relief`: the value-weighted mean value), in proportion to their values, none past `cap_boost` (3)
   times its own share (water-filling: a cap moves attention to other classes' families only where that does not dilute
-  the information it funds, never into one its value does not justify). A cap relaxes when it cannot hold: at least 2/n
-  a family and 1/k a class; and when those families cannot take a class cap's excess, the class cap rises to the lowest
-  level at which it holds, the same level for every class (`class_cap_in_force` in the report, `class_cap_relaxed`).
-  So the class cap binds at 30% only as far as other classes hold families worth the attention: while one or two
-  classes are most of the population it rises (the Sept 30 replay: two classes held 70 of 78 living families).
+  the information it funds). A cap relaxes when it cannot hold: at least 2/n a family and 1/k a class. What the family
+  cap cuts that those families cannot take even with no class cap (they are the capped ones, or at their boost) is its
+  SPILL (`family_cap_spill` in the report): it goes to every family under the family cap by value, the decision share's
+  rule. When the class cap adds to what cannot be placed, it rises to the lowest level at which it adds nothing, the
+  same level for every class (`class_cap_relaxed`); `class_cap_in_force` is that level, or the largest class's share
+  when the spill took it past, and `largest_class` sets that class's share beside its share of the families. So the
+  class cap binds at 30% only as far as other classes hold families worth the attention: while one or two classes are
+  most of the population it rises (the Sept 30 replay: two classes held 70 of 78 living families).
   Exact ties are broken by value, then id, by a few parts in 10^12, so a "top N by weight" band holds N families.
 
 THE VALUE of a family is the variance of its NEXT validation's pass or fail (the line's t check, `evidence.MIN_T`)
@@ -44,24 +47,30 @@ under an empirical-Bayes posterior, times three discounts:
     line has p near 0.5 and the most value; a family far below it has almost none (R11-5's lesson without its rank
     weighting: an old family at zero or below never earns a large share); a young family draws its class's prior, and an
     UNEXPLORED class (no look) draws the swarm's mean with the widest spread. A family whose t check would pass but that
-    is not at the gate (another check failed it) is as undecided as one on the line: q = min(p, 1/2), the most value.
-  - DEPTH = 1 / (1 + trials / `depth_trials` (80)), TRIALS BEING THE IDEA'S: its own plus those it inherited at birth
-    (`inherited_trials`: a fork's lineage, or the dead lineages a new family was born on the slice of; the N the deflated
-    Sharpe already divides by), so a reborn mechanism is not a young one. Sept 30 (40 hours of the House's runs): the
-    chance per trial of a family's first positive eligible Train version fell from 0.35% over its first ten trials to
-    0.20% at 40-80 and none past 80, and first validations were 12.6% at t >= 1 against 5% for second looks and 0 of 6
-    after (breadth beats depth; the Sept 29 ROI study: heavily worked versions validate weaker).
+    is not at the gate and that the gate has not decided (another check of the line failed it) is as undecided as one
+    on the line: q = min(p, 1/2), the most value. (Its look stays in its class's pool, as a drift-failed one's does.)
+  - DEPTH = 1 / (1 + trials / `depth_trials` (80)), TRIALS BEING THE IDEA'S: its lineage set's now
+    (`store.lineage_trials`: a fork's lineage, the dead lineages a new family was born on the slice of, and any lineage
+    linked to it since, as a long_single's twins are; the count the deflated Sharpe records), and never fewer than its
+    own plus those it inherited at birth (`inherited_trials`), so a reborn mechanism is not a young one. Sept 30 (40
+    hours of the House's runs): the chance per trial of a family's first positive eligible Train version fell from
+    0.35% over its first ten trials to 0.20% at 40-80 and none past 80, and first validations were 12.6% at t >= 1
+    against 5% for second looks and 0 of 6 after (breadth beats depth; the Sept 29 ROI study: heavily worked versions
+    validate weaker).
   - EXHAUSTION = 0 when the lineage has spent its holdout looks (`evidence.LOOKS_PER_LINEAGE`: the gate can never look
-    again), 0.5 when its validated version failed the drift screen, 0.5 while its researcher holds in a streak
-    (`hold_streak` >= 3: it says it has nothing to run). A family at the gate, with a look out, or outside the Gym band
-    gets the floor only: the gate or its forward record decides it next, not research (the leaderboard lists such
-    families first, so the architect's and strategist's first 60 rows always hold them).
+    again), 0.5 when its validated version failed the drift screen, 0.5 when THE GATE IS DONE WITH ITS VALIDATED
+    VERSION (`gate_spent`: its holdout look failed, or the review refused it for lookahead, leakage or fill abuse; its t
+    is then no evidence of the next look, so the family reads as an unvalidated one of its class, at half), 0.5 while
+    its researcher holds in a streak (`hold_streak` >= 3: it says it has nothing to run). A family at the gate, with a
+    look out, or outside the Gym band gets the floor only: the gate or its forward record decides it next, not research
+    (the leaderboard lists such families first, so the architect's and strategist's first 60 rows always hold them).
   - EXECUTION: a family whose declared structure the account cannot open for real (`real_structures`, the constitution's
     `options_money.real_types` and `long_single`, whose every order is one of them) is worth `shadow_value` (0.5) of one
     it can: its pass could not trade real money until the owner's equity and grant change.
 The allocation reads Validation's numbers exactly as the bandit did (into the weight only; researchers still see pass or
-fail and a count of checks, D2a). The architect and the strategist see each family's `share` on the leaderboard, as they
-did under the bandit: it is a function of the validation t among validated families (it was then too), never the t
+fail and a count of checks, D2a). The architect and the strategist see each family's share on the leaderboard, as they
+did under the bandit, as `research_share` with a legend (it measures how undecided a family is and how fresh its idea,
+not its evidence): among validated families it is a function of the validation t (it was then too), never the t
 itself. Nothing on the way to validation, the gate, the bands or money reads the weight (practice.py's CannotPromote
 test). The practice bonus (practice.py) rides on top of the caps as it rode on the bandit (at most +25% of a family's
 share and 10% of all share: a capped family may sit up to a quarter above its cap). `allocation.mode` "bandit" restores
@@ -134,6 +143,11 @@ DEFAULTS: dict[str, Any] = {
     # min_alive null: three quarters of population.start (72 of 96 live); below it the whole quota rests.
     "births": {"max_share": 0.6, "window_hours": 24, "min_window": 10, "per_pass_min": 1, "min_alive": None},
 }
+#: What the planners (the architect's LIVING FAMILIES, the strategist's BOARD) are told a family's `research_share` is:
+#: under Release B it measures how undecided a family is, not how well it did (verification of #448).
+SHARE_LEGEND = ("research_share is the family's share of research turns: how undecided its next validation is and how "
+                "untried its idea, never a measure of its evidence or success; families at the gate or beyond hold the "
+                "floor share and lead the list")
 #: The spend kinds the researchers' concurrency drives (a cycle's Sail model calls and the Gym boxes its Train jobs keep
 #: busy): THE CONCURRENCY's plan is measured against their sum over the last hour.
 RESEARCH_SPEND = ("sail_model", "gym_box")
@@ -166,6 +180,7 @@ def clip_t(t: Any) -> float | None:
 
 #: What the value discounts a family by (EXHAUSTION in the module docstring).
 DRIFT_FAILED = 0.5
+GATE_DONE = 0.5
 HOLDING = 0.5
 
 
@@ -310,8 +325,10 @@ class Posterior:
 
 
 # ------------------------------------------------------------------------------------------------------------ the rows
-def row_of(fam: Mapping[str, Any], *, cls: str, looks_spent: bool) -> dict[str, Any]:
-    """What the allocation reads of a family row (`store.families`)."""
+def row_of(fam: Mapping[str, Any], *, cls: str, looks_spent: bool, gate_done: bool = False,
+           lineage_trials: int | None = None) -> dict[str, Any]:
+    """What the allocation reads of a family row (`store.families`). `gate_done`: the gate is done with its validated
+    version (`gate_spent`). `lineage_trials`: its lineage set's trials now (`store.lineage_trials`), when read."""
     from .researcher import validation_drift_failed  # the tournament's own rule: a drift-failed validation earns nothing
 
     state = fam.get("state") or {}
@@ -320,15 +337,40 @@ def row_of(fam: Mapping[str, Any], *, cls: str, looks_spent: bool) -> dict[str, 
     drift = bool(validation_drift_failed(fam))
     usable = int(fam.get("validations") or 0) > 0 and isinstance(t, (int, float)) and not isinstance(t, bool) \
         and math.isfinite(float(t)) and not drift
+    # A validated version the gate is done with (its holdout look made, or refused at review) says nothing more of the
+    # line: its t is no longer the next look's evidence (the holdout refuted it, or the reviewer found it unsound).
+    gate_done = bool(gate_done) and usable
     streak = state.get("hold_streak")
     own = int(fam.get("trials") or 0)
-    # DEPTH reads the idea's trials: its own and those it inherited at birth (a fork's lineage, or the dead lineages it
-    # was born on the slice of), never only its own (a reborn mechanism is not a young one).
-    return {"id": str(fam["id"]), "cls": cls, "structure": fam.get("structure"), "t": float(t) if usable else None,
-            "drift_failed": drift, "trials": own + max(0, int(fam.get("inherited_trials") or 0)), "own_trials": own,
-            "looks_spent": bool(looks_spent),
+    # DEPTH reads the idea's trials: its lineage set's now (`store.lineage_trials`: every member's, and every lineage it
+    # was born on the slice of or was linked to since, the N the deflated Sharpe counts), and never fewer than its own and
+    # those it inherited at birth (a fork's lineage, or the dead lineages it was born on the slice of): a reborn
+    # mechanism is not a young one.
+    idea = own + max(0, int(fam.get("inherited_trials") or 0))
+    if isinstance(lineage_trials, int) and not isinstance(lineage_trials, bool):
+        idea = max(idea, lineage_trials)
+    return {"id": str(fam["id"]), "cls": cls, "structure": fam.get("structure"),
+            "t": float(t) if usable and not gate_done else None, "drift_failed": drift, "gate_done": gate_done,
+            "trials": idea, "own_trials": own, "looks_spent": bool(looks_spent),
             "hold_streak": int(streak) if isinstance(streak, int) and not isinstance(streak, bool) else 0,
             "gate": bool(state.get("gate_ready") or state.get("look_inflight") or (fam.get("band") or "gym") != "gym")}
+
+
+def gate_spent(store: Any, fam: Mapping[str, Any]) -> bool:
+    """The gate is done with the family's validated version (`Tournament.gate_spent`'s rule, R4): its holdout look was
+    made (`store.looked`) or the gate refused it (`gated_sha`, the review's refusals and a failed look's mark alike), so
+    it never goes back to `gate_ready`."""
+    from .gate import run_sha  # a local import: the allocation only reads the gate's mark
+
+    state = fam.get("state") or {}
+    n = state.get("validation_version")
+    if n is None or isinstance(n, bool):
+        return False
+    version = store.version(str(fam["id"]), n)
+    if version is None or not version.get("sha"):
+        return False
+    sha = run_sha(version)
+    return bool(state.get("gated_sha") == sha or store.looked(sha))
 
 
 def value_of(row: Mapping[str, Any], post: Posterior, c: Mapping[str, Any]) -> dict[str, Any]:
@@ -347,6 +389,9 @@ def value_of(row: Mapping[str, Any], post: Posterior, c: Mapping[str, Any]) -> d
         if row.get("drift_failed"):
             ex *= DRIFT_FAILED
             why.append("drift-failed validation")
+        elif row.get("gate_done"):  # (the gate refuses a drift-failed version too: one discount for one verdict)
+            ex *= GATE_DONE
+            why.append("gate done with its validated version")
         if c["hold_streak"] and int(row.get("hold_streak") or 0) >= int(c["hold_streak"]):
             ex *= HOLDING
             why.append("holding")
@@ -433,14 +478,15 @@ def _cap_pass(shares: dict[str, float], cls_of: Mapping[str, str], weights: Mapp
 
 
 def _water_fill(shares: dict[str, float], cls_of: Mapping[str, str], weights: Mapping[str, float], family_cap: float,
-                class_cap: float, boost: float, floor: float, relief: float = 0.0) -> tuple[set[str], bool, float]:
+                class_cap: float, boost: float, floor: float, relief: float = 0.0) -> tuple[set[str], bool, float, float]:
     """THE CAPS, in place (THE SHARE in the module docstring): each family at most `family_cap` and each class at most
     `class_cap`, never below `floor`; the excess to the families under both caps worth at least `relief` (what the
-    average unit of share buys: a cap moves attention to other classes' families only where it buys at least that, never
-    into one its value does not justify), in proportion to their values, none past `boost` times its own share. When they
-    cannot take it, the class cap RELAXES to the lowest level at which it holds (bisection), every class held to that
-    same level; what even no class cap leaves room for goes to every family by value up to the family cap, then evenly.
-    (the classes capped, whether the class cap relaxed, the class cap in force)"""
+    average unit of share buys: a cap moves attention to other classes' families only where it buys at least that), in
+    proportion to their values, none past `boost` times its own share. What they cannot take even with no class cap is
+    THE FAMILY CAP'S SPILL (the families worth the relief are the capped ones, or at their boost): it goes to every family
+    under the family cap by value (never to one worth nothing while any is worth something), then evenly. When the class
+    cap adds to what cannot be placed, it RELAXES to the lowest level at which it adds nothing (bisection), every class
+    held to that same level. (the classes capped, whether the class cap relaxed, the class cap's level, the spill)"""
     original = dict(shares)
     limit = {f: max(s, min(family_cap, boost * s)) for f, s in original.items()}
 
@@ -452,23 +498,28 @@ def _water_fill(shares: dict[str, float], cls_of: Mapping[str, str], weights: Ma
     trial, capped, left = attempt(class_cap)
     level, relaxed = class_cap, False
     if left > 1e-9:
-        relaxed = True
-        lo, hi = class_cap, 1.0
-        for _ in range(40):
-            mid = 0.5 * (lo + hi)
-            if attempt(mid)[2] > 1e-9:
-                lo = mid
-            else:
-                hi = mid
-        level = hi
-        trial, capped, left = attempt(level)
-    if left > 1e-12:
+        # With no class cap (level 1) nothing is cut by class: what is left then is the family cap's alone, and the class
+        # cap relaxes only for what it adds to that (verification of #448: the family cap's spill read as the class cap's).
+        family_left = attempt(1.0)[2]
+        if left > family_left + 1e-9:
+            relaxed = True
+            lo, hi = class_cap, 1.0
+            for _ in range(40):
+                mid = 0.5 * (lo + hi)
+                if attempt(mid)[2] > family_left + 1e-9:
+                    lo = mid
+                else:
+                    hi = mid
+            level = hi
+            trial, capped, left = attempt(level)
+    spill = left if left > 1e-12 else 0.0
+    if spill:
         left = _fill(trial, list(trial), left, weights, {f: family_cap for f in trial}, evenly=True)
         if left > 1e-12:  # the family cap cannot hold either (it is at least 2/n, so this never happens): evenly
             for f in trial:
                 trial[f] += left / len(trial)
     shares.update(trial)
-    return capped, relaxed, level
+    return capped, relaxed, level, spill
 
 
 #: THE SHARE's tie step (`_break_ties`): far below any share that matters, far above a float's resolution at one.
@@ -547,14 +598,17 @@ def value_shares(rows: Sequence[Mapping[str, Any]], post: Posterior,
     # so that is the value-weighted mean value): moving it never dilutes the information it funds.
     mass = sum(values[r["id"]]["value"] for r in eligible)
     relief = sum(values[r["id"]]["value"] ** 2 for r in eligible) / mass if mass > 0 else 0.0
-    capped, relaxed, level = _water_fill(shares, cls_of, {f: v["value"] for f, v in values.items()}, family_cap, class_cap,
-                                         c["cap_boost"], base, relief)
+    capped, relaxed, level, spill = _water_fill(shares, cls_of, {f: v["value"] for f, v in values.items()}, family_cap,
+                                                class_cap, c["cap_boost"], base, relief)
     total = sum(shares.values())
     shares = {f: s / total for f, s in shares.items()} if total > 0 else {f: 1.0 / n for f in shares}
     _break_ties(shares, values)
     by_cls: dict[str, float] = {}
+    heads: dict[str, int] = {}
     for fid, s in shares.items():
         by_cls[cls_of[fid]] = by_cls.get(cls_of[fid], 0.0) + s
+        heads[cls_of[fid]] = heads.get(cls_of[fid], 0) + 1
+    largest = max(sorted(by_cls), key=lambda k: by_cls[k])
     top = sorted(shares, key=lambda f: (-shares[f], f))[:5]
     reference = fresh_value(post)
     useful_ids = sorted(r["id"] for r in eligible if values[r["id"]]["value"] >= c["useful_value"] * reference > 0)
@@ -562,7 +616,10 @@ def value_shares(rows: Sequence[Mapping[str, Any]], post: Posterior,
               "unvalidated_families": sum(1 for r in eligible if r.get("t") is None),
               "pools": {k: round(v, 4) for k, v in pools.items()}, "posterior": post.summary(),
               "family_cap": round(family_cap, 4), "class_cap": round(class_cap, 4), "capped_classes": sorted(capped),
-              "class_cap_relaxed": relaxed, "class_cap_in_force": round(level, 4),
+              # The class cap in force: its level, or the largest class's share when the family cap's spill took it past.
+              "class_cap_relaxed": relaxed, "class_cap_in_force": round(max(level, by_cls[largest]), 4),
+              "family_cap_spill": round(spill, 4),
+              "largest_class": {"class": largest, "share": round(by_cls[largest], 4), "head_share": round(heads[largest] / n, 4)},
               "classes": {k: round(v, 4) for k, v in sorted(by_cls.items(), key=lambda kv: -kv[1])[:12]},
               "exhausted": sorted(f for f, v in values.items() if v["exhaustion"] == 0.0 and v["why"] != "gate")[:20],
               "fresh_value": round(reference, 5), "useful": len(useful_ids), "useful_ids": useful_ids,
@@ -613,11 +670,24 @@ def allocate_from_store(store: Any, fams: Sequence[Mapping[str, Any]], settings:
     post = Posterior(looks_from_store(store, since=now - c["lookback_hours"] * 3600.0, class_of=classes.get))
     rows = []
     for fam in fams:
+        fid = str(fam["id"])
         try:
-            spent = store.lineage_looks(str(fam["id"]), include_inflight=True) >= evidence.LOOKS_PER_LINEAGE
+            spent = store.lineage_looks(fid, include_inflight=True) >= evidence.LOOKS_PER_LINEAGE
         except Exception:  # noqa: BLE001 - an unreadable lineage is not a spent one
             spent = False
-        rows.append(row_of(fam, cls=classes[str(fam["id"])], looks_spent=spent))
+        try:
+            trials: int | None = int(store.lineage_trials(fid))
+        except Exception:  # noqa: BLE001 - its own and inherited trials still count
+            trials = None
+        state = fam.get("state") or {}
+        done = False
+        if int(fam.get("validations") or 0) > 0 and (fam.get("band") or "gym") == "gym" \
+                and not (state.get("gate_ready") or state.get("look_inflight")):
+            try:
+                done = gate_spent(store, fam)
+            except Exception:  # noqa: BLE001 - an unreadable version: its validation reads as it stands
+                done = False
+        rows.append(row_of(fam, cls=classes[fid], looks_spent=spent, gate_done=done, lineage_trials=trials))
     return value_shares(rows, post, settings)
 
 
@@ -807,6 +877,6 @@ class BirthQuota:
                 + "\n".join(lines))
 
 
-__all__ = ["DEFAULTS", "RESEARCH_SPEND", "cfg", "Posterior", "row_of", "value_of", "fresh_value", "value_shares",
-           "allocate_from_store", "looks_from_store", "classes_from_store", "StrideTurns", "legacy_order", "queued_useful",
+__all__ = ["DEFAULTS", "RESEARCH_SPEND", "SHARE_LEGEND", "cfg", "Posterior", "row_of", "value_of", "fresh_value", "value_shares",
+           "allocate_from_store", "gate_spent", "looks_from_store", "classes_from_store", "StrideTurns", "legacy_order", "queued_useful",
            "effective_concurrency", "concurrency_bounds", "STRUCTURE_BUCKETS", "bucket_of", "BirthQuota", "mechanism_class"]

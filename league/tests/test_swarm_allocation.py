@@ -141,6 +141,33 @@ class Value(unittest.TestCase):
         young = A.row_of({**fam, "inherited_trials": 0}, cls="debit_vertical x etf", looks_spent=False)
         self.assertLess(A.value_of(r, self.post, self.c)["value"] * 10, A.value_of(young, self.post, self.c)["value"])
 
+    def test_depth_reads_the_lineages_trials_now_not_the_snapshot_at_birth(self):
+        """Verification of #448: a lineage linked after birth (a long_single's twins) grew its N while depth stayed put."""
+        fam = {"id": "twin", "structure": "long_single", "trials": 12, "inherited_trials": 30, "validations": 0,
+               "state": {}, "band": "gym"}
+        self.assertEqual(A.row_of(fam, cls="long_single x etf", looks_spent=False, lineage_trials=900)["trials"], 900)
+        self.assertEqual(A.row_of(fam, cls="long_single x etf", looks_spent=False, lineage_trials=20)["trials"], 42,
+                         "never fewer than its own and inherited trials")
+        self.assertEqual(A.row_of(fam, cls="long_single x etf", looks_spent=False)["trials"], 42, "unread: the snapshot")
+
+    def test_a_validated_version_the_gate_is_done_with_is_no_evidence_of_the_next_look(self):
+        """Verification of #448: a family refused at review or failed at its holdout look kept its validation t >= 2 and
+        took the most value there is (q = min(p, 1/2)), so the swarm would fund the lineage the holdout just refuted."""
+        fam = {"id": "refuted", "structure": "debit_vertical", "trials": 10, "inherited_trials": 0, "validations": 2,
+               "state": {"validation_numbers": {"t": 2.7}, "gated_sha": "x", "gate_ready": False}, "band": "gym"}
+        live = A.row_of(fam, cls="debit_vertical x etf", looks_spent=False)
+        done = A.row_of(fam, cls="debit_vertical x etf", looks_spent=False, gate_done=True)
+        self.assertEqual((live["t"], done["t"], done["gate_done"]), (2.7, None, True))
+        unvalidated = self.v(trials=10)
+        self.assertGreater(A.value_of(live, self.post, self.c)["value"], unvalidated["value"], "its t read as it stood")
+        judged = A.value_of(done, self.post, self.c)
+        self.assertAlmostEqual(judged["value"], unvalidated["value"] * A.GATE_DONE)
+        self.assertEqual(judged["why"], "gate done with its validated version")
+        # One verdict, one discount: the gate refuses a drift-failed version too.
+        self.assertAlmostEqual(self.v(drift_failed=True, gate_done=True)["value"], unvalidated["value"] * A.DRIFT_FAILED)
+        never = A.row_of({**fam, "validations": 0}, cls="debit_vertical x etf", looks_spent=False, gate_done=True)
+        self.assertFalse(never["gate_done"], "no validation: nothing for the gate to be done with")
+
 
 # ----------------------------------------------------------------------------------------------------------- the share
 def sept30(n_new=60):
@@ -195,6 +222,8 @@ class Share(unittest.TestCase):
         d = sum(s for f, s in shares.items() if f.startswith("d"))
         self.assertAlmostEqual(d, 0.30, places=6, msg="half the families, at most 30% of the share")
         self.assertFalse(report["class_cap_relaxed"])
+        self.assertEqual(report["family_cap_spill"], 0.0)
+        self.assertEqual(report["largest_class"], {"class": "d", "share": 0.3, "head_share": 0.5})
 
     def test_a_capped_class_never_takes_a_family_below_its_floor(self):
         rows = [row(f"big{i}", cls="big", t=1.5) for i in range(5)] + [row(f"s{i}", cls=f"small{i}") for i in range(20)]
@@ -213,6 +242,24 @@ class Share(unittest.TestCase):
         self.assertGreaterEqual(shares["strong"] * n, 1.99, "worth more: the cap moves attention to it (to the family cap)")
         self.assertGreater(report["class_cap_in_force"], 0.30, "the cap rose to the lowest level that holds")
         self.assertTrue(report["class_cap_relaxed"], "the rest could go nowhere worth it: the cap gave way")
+
+    def test_the_family_caps_spill_is_not_read_as_the_class_caps(self):
+        """Verification of #448: when the families worth the relief were the capped ones, the family cap's excess had
+        nowhere to go at any class level, so the class cap "relaxed" to 1.0 and `class_cap_in_force` could never flag."""
+        rows = [row(f"hot{i}", cls=f"hot{i}", t=1.8, trials=0) for i in range(3)] + \
+               [row(f"cold{i}", cls=f"cold{i}", t=-2.5, trials=400) for i in range(22)]
+        shares, report = A.value_shares(rows, self.post, {})
+        self.assertFalse(report["class_cap_relaxed"], "every class is one family: the class cap never binds")
+        self.assertGreater(report["family_cap_spill"], 0.1)
+        self.assertEqual(report["class_cap_in_force"], 0.30)
+        self.assertLessEqual(max(shares.values()), max(0.05, 2 / 25) + 1e-9)
+        self.assertAlmostEqual(sum(shares.values()), 1.0)
+        self.assertEqual(report["largest_class"]["head_share"], 0.04)
+        self.assertLessEqual(report["largest_class"]["share"], report["class_cap_in_force"])
+        # The spill goes by value: never to a family worth nothing while any is worth something.
+        rows[-1] = row("cold21", cls="cold21", looks_spent=True)
+        shares, _ = A.value_shares(rows, self.post, {})
+        self.assertAlmostEqual(shares["cold21"], 0.10 / 25, places=9)
 
     def test_the_caps_excess_never_flows_to_a_family_worth_nothing(self):
         rows = [row(f"big{i}", cls="big") for i in range(30)] + [row("spent", cls="small", looks_spent=True),
@@ -344,6 +391,64 @@ class TournamentAllocates(RoundCase):
         self.assertEqual([r["family"] for r in row["board"][:2]], ["cand", "ready"])
         living = Architect(self.store, self.router, self.settings, clock=self.clock).prompt()
         self.assertIn('"family": "ready"', living.split("LIVING FAMILIES", 1)[1].split("THE GRAVEYARD", 1)[0])
+
+    def test_a_family_the_gate_is_done_with_gets_no_more_than_an_unvalidated_one(self):
+        """Verification of #448: refused at review, or failed at its holdout look, a family kept its validation t and sat
+        at the family cap. Now the gate's verdict ends that t's say: it reads as an unvalidated family, at half."""
+        from league.swarm.gate import run_sha
+
+        for fid in ("refused", "failed", "open"):
+            self.validated(fid, 2.7, 0.04, trials=10)
+            n = self.store.family(fid)["best_version"]
+            self.store.set_state(fid, validation_version=n, gate_ready=False)
+        for i in range(40):
+            self.family(f"new{i}")
+            self.store.update_family(f"new{i}", trials=10)
+        sha = run_sha(self.store.version("refused", self.store.family("refused")["best_version"]))
+        self.store.set_state("refused", gated_sha=sha, gate_outcome={"sha": sha, "result": "refused"})
+        version = self.store.version("failed", self.store.family("failed")["best_version"])
+        self.store.add_look("failed", version["n"], run_sha(version), passed=False, p_value=0.4, detail={})
+        fams = self.store.families(alive=True)
+        self.assertTrue(A.gate_spent(self.store, next(f for f in fams if f["id"] == "failed")), "a look made is spent")
+        self.assertFalse(A.gate_spent(self.store, next(f for f in fams if f["id"] == "open")))
+        shares = Tournament(self.store, None, self.settings, clock=self.clock).allocate(fams)
+        unvalidated = sum(shares[f"new{i}"] for i in range(40)) / 40
+        for fid in ("refused", "failed"):
+            self.assertLessEqual(shares[fid], unvalidated, fid)
+        self.assertGreater(shares["open"], shares["refused"] * 2, "a t the gate has not judged still counts")
+
+    def test_depth_reads_a_lineage_linked_after_birth(self):
+        """Verification of #448: `link_lineages` (a long_single continuing one twin) grew a living family's N while its
+        depth read the trials it inherited at birth."""
+        self.family("old")
+        self.store.update_family("old", trials=800)
+        for fid in ("twin", "fresh"):
+            self.family(fid)
+            self.store.update_family(fid, trials=5)
+        for i in range(10):
+            self.family(f"pad{i}")
+        self.assertTrue(self.store.link_lineages(self.store.family("old")["lineage"], self.store.family("twin")["lineage"]))
+        self.assertEqual(self.store.family("twin")["inherited_trials"], 0)
+        shares = Tournament(self.store, None, self.settings, clock=self.clock).allocate(self.store.families(alive=True))
+        self.assertLess(shares["twin"] * 3, shares["fresh"], "its lineage's 805 trials, not its own 5")
+
+    def test_the_planners_read_research_share_with_its_meaning(self):
+        """Verification of #448: the planners' `share` changed meaning (how undecided a family is, not its evidence)
+        and nothing told them."""
+        from league.swarm.strategist import Strategist
+
+        for i in range(4):
+            self.family(f"f{i}")
+        Tournament(self.store, self.pool, self.settings, clock=self.clock).run()
+        architect = Architect(self.store, self.router, self.settings, clock=self.clock)
+        prompt = architect.prompt()
+        living = json.loads(prompt.split("(leaderboard):\n", 1)[1].split("\n\nTHE GRAVEYARD", 1)[0])
+        self.assertTrue(living and all("research_share" in r and "share" not in r for r in living))
+        self.assertIn(f"In LIVING FAMILIES, {A.SHARE_LEGEND}.", prompt)
+        strategist = Strategist(self.store, self.router, self.settings, clock=self.clock, architect=architect)
+        board = strategist._board(self.store.families())
+        self.assertTrue(board and all("research_share" in r and "share" not in r for r in board))
+        self.assertIn(f"THE BOARD (alive families; {A.SHARE_LEGEND}):", strategist.packet())
 
     def test_a_lineage_with_its_looks_spent_gets_the_floor(self):
         self.validated("spent", 1.5, 0.02, trials=10)
@@ -632,6 +737,10 @@ class BirthQuota(RoundCase):
         out = a.run()
         self.assertEqual(out["structure_capped"], {"vertical": 2})
         self.assertEqual(len(out["born"]), 1)
+        self.assertIsNone(a.pass_quota, "the pass's quota ends with the pass")
+        a.router = type("R", (), {"ask": lambda self, **kw: (_ for _ in ()).throw(RuntimeError("no route"))})()
+        self.assertIn("no route", a.run()["error"])
+        self.assertIsNone(a.pass_quota, "and with a pass that failed")
 
 
 class QuotaAcrossTheRetry(RouteCase):

@@ -83,11 +83,11 @@ class Tournament:
         self.settings = settings
         self.clock = clock
         self.rng = rng or random.Random()
-        self.idle_at = float("-inf")  # the last idle pass (`idle_due`); in memory: a restarted swarm runs one at once
-        self.practice_bonus: dict[str, float] = {}  # the last allocation's practice bonus by family (`allocate`)
         self.allocation: dict[str, Any] = {}  # the last allocation's report (`allocate`; allocation.py's `value_shares`)
         #: The families the last allocation named useful experiments (THE CONCURRENCY, allocation.py): none under the bandit.
         self.useful: frozenset[str] = frozenset()
+        self.idle_at = float("-inf")  # the last idle pass (`idle_due`); in memory: a restarted swarm runs one at once
+        self.practice_bonus: dict[str, float] = {}  # the last allocation's practice bonus by family (`allocate`)
 
     @property
     def cfg(self) -> Mapping[str, Any]:
