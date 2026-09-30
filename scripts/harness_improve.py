@@ -165,6 +165,9 @@ def step(lab, args):
     if args.command == "rank":
         doc = load_json(args.measurement) if args.measurement else lanes.measure(args.swarm, seconds=args.seconds)
         ranked = lab.capture_lanes(doc, base=args.base)
+        # The capture records the document's hash; the journal keeps the document itself for the receipts.
+        from league.swarm.improvement import sha
+        write_private(args.root / "measurements" / f"{sha(doc)[:16]}.json", doc)
         out = {"window": doc.get("window"), "source": {k: (doc.get("source") or {}).get(k) for k in ("release", "digest")},
                "policy": lanes.POLICY, "candidates": ranked}
         if args.out:
@@ -276,7 +279,7 @@ def main() -> int:
                     lanes_last = time.time()
                     try:
                         lanes_state = lanes_snapshot(args.root, args.swarm)
-                    except (ValueError, OSError, sqlite3.Error) as exc:
+                    except Exception as exc:  # noqa: BLE001 - odd House data never stops the observer; it is reported
                         lanes_state = {"lanes_error": f"{type(exc).__name__}: {str(exc)[:200]}"}
                 result["lanes"] = lanes_state
                 heartbeat(args, identity, result)

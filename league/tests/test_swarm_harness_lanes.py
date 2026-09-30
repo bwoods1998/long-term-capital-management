@@ -543,6 +543,21 @@ class Cli(unittest.TestCase):
             self.assertEqual(oct((root / "m.json").stat().st_mode & 0o777), "0o600")
             doc = json.loads((root / "m.json").read_text())
             self.assertEqual(sorted(doc["lanes"]), ["data", "execution", "memory", "research"])
+            base = "a" * 40
+            refused = subprocess.run([sys.executable, str(script), "--root", str(root / "j"), "rank", "--measurement",
+                                      str(root / "m.json"), "--base", base], capture_output=True, text=True, timeout=120)
+            self.assertIn("digest", json.loads(refused.stdout)["error"])
+            doc["source"]["digest"] = "d" * 64
+            (root / "m.json").write_text(json.dumps(doc))
+            ranked = subprocess.run([sys.executable, str(script), "--root", str(root / "j"), "rank", "--measurement",
+                                     str(root / "m.json"), "--base", base, "--out", str(root / "c.json")],
+                                    capture_output=True, text=True, timeout=120)
+            self.assertEqual(ranked.returncode, 0, ranked.stdout + ranked.stderr)
+            self.assertFalse(any(c["captured"] for c in json.loads((root / "c.json").read_text())["candidates"]))
+            self.assertEqual(len(list((root / "j" / "measurements").iterdir())), 1)
+            steps = subprocess.run([sys.executable, str(script), "--root", str(root / "j"), "next"], capture_output=True,
+                                   text=True, timeout=120)
+            self.assertEqual(json.loads(steps.stdout), {"next": []})
 
     def test_the_observer_writes_its_ranked_lanes_to_its_own_directory_only(self):
         from scripts import harness_improve as cli

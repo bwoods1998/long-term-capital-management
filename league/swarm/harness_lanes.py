@@ -423,7 +423,8 @@ LANES: dict[str, Lane] = {
         judge_no_worse=("valid_rejected", "restart_divergences"), judge_cost="cpu_seconds", judge_cost_rule="ratio",
         regressions=("league.tests.test_shadow_restart", "league.tests.test_live_practice", "league.tests.test_live_paper",
                      "league.tests.test_live_observe"),
-        canary={"mode": "practice", "unit": "family", "fraction": 0.5, "observe_seconds": 5 * 6.5 * 3600,
+        # Five trading sessions of practice: a calendar week of wall-clock time (the measurement's longest window).
+        canary={"mode": "practice", "unit": "family", "fraction": 0.5, "observe_seconds": 7 * 86400,
                 "min_units_per_arm": 8, "planned_release": True},
     ),
 }
