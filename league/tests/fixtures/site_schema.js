@@ -476,7 +476,7 @@ export const PRACTICE_STATUSES = ['alive', 'retired'];
 export const PRACTICE_FIELDS = ['as_of', 'sessions', 'capital_usd', 'totals', 'rows'];
 export const PRACTICE_TOTALS = ['families', 'trades', 'wins', 'pnl_usd'];
 export const PRACTICE_ROW_FIELDS = ['agent', 'family', 'structure', 'tier', 'status', 'sessions', 'trades', 'wins', 'pnl_usd', 'return_on_risk'];
-const returnOnRisk = value => decimal(value, { signed: true, fraction: 2 }) && Math.abs(Number(value)) < 1000;
+const returnOnRisk = value => decimal(value, { signed: true, fraction: 2 }) && Math.abs(Number(value)) <= 1000;
 export function validPracticeRow(value, { publicRead = false } = {}) {
   if (!plainObject(value)) return false;
   const named = publicRead && Object.hasOwn(value, 'display_name');

@@ -120,7 +120,7 @@ that the positions table below adds up to it to the cent (`league/trading_profit
 The owner's line of sight into what the agents trade: every real-options position on the Brokerage Account since
 `performance.start_at`, open and closed, with its dollar P&L after fees. `site_checkpoint_positions.json` beside this
 file is `site_checkpoint.json` plus `trading` and `positions` (`build_checkpoint`, pinned by `test_publish.py`).
-`site_schema.js` beside it is a copy of the site's `capital/schema.js` (personal-site commit 2e5d61c, branch
+`site_schema.js` beside it is a copy of the site's `capital/schema.js` (personal-site commit b8cf77b, branch
 capital/cost-net-practice: the itemized bill, the practice league and the incubator route of Sept 30, 2026): `test_positions_ledger.py` runs the site's own `validCheckpoint` over both fixtures and over the tables
 the House builds, in node (the review of #408 found the two sides' blocks disagreeing because each tested only its own
 fixture). Copy the site's file here whenever its schema changes.
