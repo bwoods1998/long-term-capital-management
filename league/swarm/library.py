@@ -6,13 +6,19 @@ LIBRARY: arXiv's quantitative finance, econometrics, statistics and machine lear
 2025-01-01, read by the gateway (`GET /v1/research/*`, gateway/lib/library.mjs), which enforces the date rule in code on
 every answer. This module is the House's side, and checks every answer AGAIN (`check_item`, `check_read`): the ids, both
 dates against `CUTOFF`, and the post-cutoff date scan `POST_CUTOFF` (the gateway's pattern, tested against the same
-cases: gateway/test/library-date-cases.json). An answer that fails is dropped, never shown. The swarm has no other
-research path: nothing in league/swarm/ names the gateway's open-web reader (a test holds it).
+cases: gateway/test/library-date-cases.json). An answer that fails is dropped, never shown. The gateway serves a paper as
+it stood at the end of 2024 (its newest version before the cutoff); a read that names a version gets that version or
+"no such paper", the same words for a version dated after 2024 as for one that does not exist, and `check_read` holds a
+served id to the one asked (review of #428, look-ahead F3: a quiet v1 in place of a 2025 v4 told an agent the paper was
+revised after 2024). The swarm has no other research path: nothing in league/swarm/ names the gateway's open-web reader
+(a test holds it, and the gateway's web reader refuses arXiv).
 
 THE CLIENT (`LibraryClient`): `search` and `read`, GET with the bearer token. A failure is `LibraryError`: `busy` (the
 gateway's queue, arXiv read one request at a time), `cap` (its day's upstream budget), `refused` (the date rule, a bad
 query or id, not found, off topic) or an error. A 4xx or busy never reached arXiv for us: it counts as no call. A 5xx or
-a timeout may have: it counts.
+a timeout may have: it counts. The client waits at least CLIENT_FLOOR_SECONDS, longer than the gateway's longest
+request (`WORST_MS`), so it never abandons a request mid-flight: an abandoned request can leave the gateway's lease held
+and its in-flight place taken (review of #428, gateway F7).
 
 THE POLICY (`Library`). Off until `research.enabled`. Three lines, counted from today's (UTC) `swarm.research` events:
 `research.requests_day` (300 calls a day, every role together: the line the owner's spend report names),
@@ -67,6 +73,11 @@ BLOCK_KEY = "library_block"
 SEED_KEY = "library_seed_cursor"
 #: The largest tool output (JSON characters): the researcher's loop keeps 12,000 of a tool's output.
 MAX_OUTPUT_CHARS = 11500
+#: The least the client waits for the gateway: its longest library request (gateway/lib/library.mjs `WORST_MS`, 35 s:
+#: no upstream request starts after REQUEST_BUDGET_MS, 20 s, and one takes at most 15 s) plus a margin. A test pins it.
+CLIENT_FLOOR_SECONDS = 40.0
+#: What an agent is told of a paper or version the library does not have, a version dated after 2024 included.
+NO_SUCH_PAPER = "no such paper"
 MAX_SECTIONS = 25
 
 _YEAR = r"(?:20(?:2[5-9]|[3-9][0-9]))"
@@ -246,7 +257,7 @@ class LibraryClient:
         request = urllib.request.Request(f"{self.url}{path}?{query}", method="GET",
                                          headers={"Authorization": "Bearer " + self.token_source(), "Accept": "application/json",
                                                   "User-Agent": "ltcm-floor/1.0"})
-        limit = self.timeout if timeout is None else max(5.0, min(float(timeout), self.timeout))
+        limit = max(CLIENT_FLOOR_SECONDS, self.timeout if timeout is None else min(float(timeout), self.timeout))
         try:
             with self.opener(request, timeout=limit) as response:
                 data = json.loads(response.read(4_000_000))
@@ -453,14 +464,15 @@ class Library:
         else:
             return refusal("action must be search or read")
         left = deadline - self.clock()
-        if left < self._number("min_seconds_left", 45, 0, 600):
+        if left < max(self._number("min_seconds_left", 45, 0, 600), CLIENT_FLOOR_SECONDS + 5.0):
             return refusal("too little of this cycle is left for the library; use it next cycle")
         why = self.room("researcher", fid, calls)
         if why:
             return refusal(why)
         out["literature_calls"] = calls + 1
         began = self.clock()
-        timeout = max(10.0, min(self._number("timeout_seconds", 60, 5, 300), left - 15.0))
+        # Never shorter than the gateway's longest request (CLIENT_FLOOR_SECONDS), and done 5 s before the cycle's end.
+        timeout = max(CLIENT_FLOOR_SECONDS, min(self._number("timeout_seconds", 60, 5, 300), left - 5.0))
         try:
             if action == "search":
                 items, info = self._search(query, category=category, max_items=int(self._number("search_max", 5, 1, 10)),
@@ -477,7 +489,7 @@ class Library:
                                         chars=int(self._number("read_chars", 8000, 500, 10000)), agent=fid, role="researcher",
                                         timeout=timeout)
                 answer = check_read(data, read_chars=int(self._number("read_chars", 8000, 500, 10000)),
-                                    abstract_chars=int(self._number("search_abstract_chars", 900, 100, 2000)))
+                                    abstract_chars=int(self._number("search_abstract_chars", 900, 100, 2000)), asked=parsed)
                 ids = [answer["id"]] if answer.get("status") == "ok" else []
                 self._event(role="researcher", family=fid, action="read", status=str(answer.get("status")), counted=True,
                             began=began, item_id=str(args.get("id") or ""), ids=ids, cached=data.get("cached"),
@@ -534,8 +546,9 @@ class Library:
                 break
             called = self.clock()
             try:
+                # The last search may run past the budget by up to CLIENT_FLOOR_SECONDS: never abandoned mid-flight.
                 items, info = self._search(query, category="all", max_items=per_query, role=role, family=None,
-                                           timeout=max(10.0, left), abstract_chars=chars)
+                                           timeout=max(CLIENT_FLOOR_SECONDS, left), abstract_chars=chars)
             except LibraryError as exc:
                 complete = False
                 self._event(role=role, family=None, action="search", status="busy" if exc.busy else "cap" if exc.cap else "error",
@@ -599,19 +612,28 @@ def _why(exc: LibraryError) -> str:
     if exc.refused == "off_topic":
         return "that item is outside the library (quantitative finance, econometrics, statistics, machine learning on markets)"
     if exc.refused == "not_found":
-        return "no such paper"
+        return NO_SUCH_PAPER
     if exc.refused in ("query", "id"):
         return "the library could not read that request: plain keywords for a search, an id a search returned for a read"
     return "the library could not answer now; continue without it"
 
 
-def check_read(data: Mapping[str, Any], *, read_chars: int = 8000, abstract_chars: int = 900) -> dict[str, Any]:
+def check_read(data: Mapping[str, Any], *, read_chars: int = 8000, abstract_chars: int = 900,
+               asked: tuple[str, int | None] | None = None) -> dict[str, Any]:
     """A read from the gateway as the model may see it: the item checked (`check_item`), the text's source, its window
     (emails redacted; arXiv's own HTML scrubbed of post-cutoff dates; ar5iv's dropped whole on any), at most MAX_SECTIONS
-    sections, and nothing else: under MAX_OUTPUT_CHARS of JSON in all. A refusal dict when the item fails."""
+    sections, and nothing else: under MAX_OUTPUT_CHARS of JSON in all. A refusal dict when the item fails. `asked` (the
+    (base, version) the agent named): another paper is refused, and another version than a named one is NO_SUCH_PAPER,
+    the words a version that does not exist gets, so no answer shows that a paper was revised after 2024."""
     item = check_item(data, abstract_chars=abstract_chars)
     if item is None:
         return {"status": "refused", "reason": "the library's answer failed the House's date check; continue without it"}
+    if asked is not None:
+        served = ITEM_ID.fullmatch(item["id"])
+        if served is None or served.group(1).lower() != str(asked[0]).lower():
+            return {"status": "refused", "reason": "the library's answer was not the paper asked for; continue without it"}
+        if asked[1] is not None and int(served.group(2)) != asked[1]:
+            return {"status": "refused", "reason": NO_SUCH_PAPER}
     source = data.get("text_source") if data.get("text_source") in TEXT_SOURCES else "none"
     text = data.get("text") if isinstance(data.get("text"), str) else ""
     text = redact_emails(text)
@@ -662,5 +684,6 @@ def build_library(root: Any, store: SwarmStore, settings: Mapping[str, Any], *, 
 
 
 __all__ = ["Library", "LibraryClient", "LibraryError", "LibraryBlock", "LITERATURE_TOOL", "LIBRARY_RULE", "BLOCK_HEADER", "CUTOFF",
+           "CLIENT_FLOOR_SECONDS", "NO_SUCH_PAPER",
            "CUTOFF_DAY", "POST_CUTOFF", "POST_CUTOFF_BRANCHES", "TOOL_NAME", "EVENT", "BLOCK_KEY", "SEED_KEY", "build_library", "check_item", "check_read",
            "check_query", "has_post_cutoff", "scrub", "redact_emails", "parse_id", "base_of", "id_after_cutoff"]

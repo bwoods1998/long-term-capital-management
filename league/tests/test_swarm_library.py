@@ -47,7 +47,8 @@ ITEMS = [item(), item("2207.00949", 1, "2022-07-03", title="Stochastic arbitrage
 def search_answer(items=None, **more):
     return {"query": ["variance", "risk", "premium"], "category": "all", "last_day": "2024-12-31",
             "items": copy.deepcopy(ITEMS if items is None else items),
-            "withheld": {"after_cutoff": 4, "revised_to_v1": 1, "v1_unmatched": 1, "off_topic": 0, "no_date": 0, "unresolved": 0},
+            "withheld": {"after_cutoff": 4, "revised_earlier": 1, "revised_unmatched": 1, "off_topic": 0, "no_date": 0, "unresolved": 0,
+                         "too_many_versions": 0},
             "cached": False, **more}
 
 
@@ -73,6 +74,7 @@ class FakeClient:
         self.raises = list(raises or [])
         self.during = during
         self.calls: list[tuple] = []
+        self.timeouts: list[float | None] = []
 
     def _step(self):
         if self.during:
@@ -84,11 +86,13 @@ class FakeClient:
 
     def search(self, query, *, category="all", max_items=5, agent=None, role=None, timeout=None):
         self.calls.append(("search", query, category, max_items, agent, role))
+        self.timeouts.append(timeout)
         self._step()
         return copy.deepcopy(self.searches.get(query, self.searches.get("*")))
 
     def read(self, item_id, *, start=0, chars=8000, agent=None, role=None, timeout=None):
         self.calls.append(("read", item_id, start, chars, agent, role))
+        self.timeouts.append(timeout)
         self._step()
         return copy.deepcopy(self.reads.get(item_id, self.reads.get("*")))
 
@@ -134,7 +138,7 @@ class Client(unittest.TestCase):
         self.assertEqual(request.full_url, f"{GATEWAY}/v1/research/search?q=variance+risk+premium&cat=q-fin&max=4&agent=condor-vrp&role=researcher")
         self.assertEqual(opener.headers()["authorization"], f"Bearer {SECRET}")
         self.assertIsNone(request.data)
-        self.assertEqual(timeout, 30)
+        self.assertEqual(timeout, L.CLIENT_FLOOR_SECONDS, "never less than the gateway's longest request")
         client.read("arXiv:2409.06496v1", start=8000, chars=4000)
         self.assertEqual(opener.calls[1][0].full_url, f"{GATEWAY}/v1/research/read?id=arXiv%3A2409.06496v1&start=8000&chars=4000")
         self.assertEqual(opener.calls[1][1], 60)
@@ -234,6 +238,28 @@ class DateRule(unittest.TestCase):
         self.assertNotIn("abstract", later, "the abstract comes with the first window only")
         none = L.check_read(read_answer(source="none", text="", text_note="busy"))
         self.assertIn("ask again later", none["note"])
+
+    def test_a_read_that_names_a_version_gets_that_version_or_no_such_paper(self):
+        """Review of #428, look-ahead F3: a gateway that served v1 for a named v4 dated 2025 told the agent the paper was
+        revised after 2024. The House holds the served id to the one asked, whatever the gateway does."""
+        asked = L.check_read(read_answer("2409.06496", 1), asked=("2409.06496", 1))
+        self.assertEqual((asked["status"], asked["id"]), ("ok", "arXiv:2409.06496v1"))
+        self.assertEqual(L.check_read(read_answer("2409.06496", 1), asked=("2409.06496", None))["status"], "ok", "unversioned: any")
+        swapped = L.check_read(read_answer("2409.06496", 1), asked=("2409.06496", 4))
+        self.assertEqual(swapped, {"status": "refused", "reason": L.NO_SUCH_PAPER})
+        self.assertEqual(swapped["reason"], L._why(L.LibraryError("x", status=404, refused="not_found")),
+                         "the same words as a version that does not exist")
+        other = L.check_read(read_answer("2409.06496", 1), asked=("1602.00865", None))
+        self.assertEqual(other["status"], "refused")
+        self.assertEqual(L.check_read(read_answer("cond-mat/0601001", 1), asked=("Cond-Mat/0601001", 1))["status"], "ok")
+
+    def test_the_client_outwaits_the_gateways_longest_request(self):
+        js = (REPO / "gateway" / "lib" / "library.mjs").read_text()
+        budget = int(re.search(r"export const REQUEST_BUDGET_MS = (\d+);", js).group(1))
+        fetch = max(int(x) for x in re.findall(r"\[\w+_HOST\]: (\d+)", re.search(r"export const FETCH_TIMEOUT_MS = \{([^}]*)\}", js).group(1)))
+        self.assertIn("export const WORST_MS = REQUEST_BUDGET_MS + 15000;", js)
+        self.assertEqual(fetch, 15000)
+        self.assertGreaterEqual(L.CLIENT_FLOOR_SECONDS * 1000, budget + fetch + 5000, "a margin past the gateway's WORST_MS")
 
     def test_the_ids_an_agent_may_write(self):
         self.assertEqual(L.parse_id("arXiv:1602.00865v1"), ("1602.00865", 1))
@@ -355,6 +381,28 @@ class Tool(LibraryCase):
         self.assertEqual((event["action"], event["id"], event["ids"]), ("read", "arXiv:2409.06496v1", ["arXiv:2409.06496v1"]))
         self.assertNotIn("premium is large", json.dumps(event))
 
+    def test_a_version_served_in_place_of_the_one_named_is_no_such_paper(self):
+        self.client.reads = {"*": read_answer("2212.06888", 1)}  # a gateway that still served v1 for a later version
+        swapped, out = self.call({"action": "read", "id": "arXiv:2212.06888v3"})
+        self.client.reads = {}
+        self.client.raises = [L.LibraryError("gone", status=404, refused="not_found")]
+        missing, out = self.call({"action": "read", "id": "arXiv:2212.06888v9"}, out)
+        self.assertEqual(swapped, missing, "a later version and a missing one read the same")
+        self.assertEqual(swapped, {"status": "refused", "reason": "no such paper"})
+        self.assertEqual(out["literature_refused"], 2)
+        self.assertNotIn("literature_ids", out)
+
+    def test_every_call_waits_at_least_the_client_floor_and_ends_before_the_cycle(self):
+        self.call({"action": "search", "query": "tail risk"}, left=170)
+        self.call({"action": "read", "id": "2409.06496"}, left=45)
+        self.assertEqual(self.client.timeouts, [60, L.CLIENT_FLOOR_SECONDS])
+        refused, _ = self.call({"action": "search", "query": "skew"}, left=L.CLIENT_FLOOR_SECONDS + 4)
+        self.assertIn("too little of this cycle", refused["reason"])
+        self.settings["research"]["min_seconds_left"] = 0
+        refused, _ = self.call({"action": "search", "query": "skew"}, left=L.CLIENT_FLOOR_SECONDS)
+        self.assertIn("too little of this cycle", refused["reason"], "a setting of 0 never cuts under the floor")
+        self.assertEqual(len(self.client.calls), 2)
+
     def test_the_semantics_search_needs_a_query_and_read_an_id(self):
         for args, why in (({"action": "search"}, "needs a query"), ({"action": "search", "query": "vol 2025"}, "no year"),
                           ({"action": "search", "query": "cat:q-fin.PR"}, "plain words"), ({"action": "read"}, "needs an id"),
@@ -416,6 +464,17 @@ class Retrieval(LibraryCase):
         self.library.retrieve(["variance risk premium", "overnight returns index options"])
         self.assertEqual(len(self.client.calls), 4, "past its life: asked again")
         self.assertEqual([e["role"] for e in self.events()], ["architect"] * 4)
+
+    def test_a_retrieval_search_waits_at_least_the_client_floor(self):
+        clock = self.clock
+
+        def slow():
+            clock.advance(55)
+
+        self.client.during = slow
+        self.library.retrieve(["variance risk premium", "tail risk", "skew"])
+        self.assertEqual(self.client.timeouts, [60, L.CLIENT_FLOOR_SECONDS], "the second search had 5 s of the budget left")
+        self.assertIsNone(self.store.get(L.BLOCK_KEY), "past the budget: the third is not asked, and the block is not kept")
 
     def test_cited_ids_resolve_to_the_block_by_paper(self):
         block = self.library.retrieve(["variance risk premium"])

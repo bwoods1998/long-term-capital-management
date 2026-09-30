@@ -261,10 +261,17 @@ Agent count and simulated years measure activity; passing unseen evidence measur
   statistics and machine learning on markets, served by the gateway (`GET /v1/research/search`, `/read`;
   [gateway/lib/library.mjs](../gateway/lib/library.mjs)). The date rule is enforced there, in code: an item is
   served only if its first-posted date and the date of the version served are both before 2025-01-01 (arXiv's
-  own `published` and `updated`), a paper revised after 2024 is served as its pinned v1 (in a search only when
-  v1's own words match), anything without a reliable date is refused, every text is scanned for dates after
-  2024 (replaced in version-pinned text, withheld whole in text not pinned to a version), and nothing unpinned
-  is ever served. The House checks every answer again ([league/swarm/library.py](../league/swarm/library.py)).
+  own `published` and `updated`); a paper is served as it stood at the end of 2024 (its newest version before
+  the cutoff, in a search and a read alike), and a version dated after 2024 is answered as one that does not
+  exist; a search matches titles and abstracts only, and a paper revised after 2024 must hold every query term
+  in its served version's own words; anything without a reliable date is refused, every text is scanned for
+  dates after 2024 (replaced in version-pinned text, withheld whole in text not pinned to a version), and
+  nothing unpinned is ever served. The House checks every answer again
+  ([league/swarm/library.py](../league/swarm/library.py)). What it does not do: the models' weights already
+  hold 2025 and the first half of 2026, so the library adds nothing later than 2024 but removes nothing a model
+  already knows, and a pre-2025 citation does not show that an idea was chosen without that knowledge. The
+  holdout is not sealed from the models either (their training runs to June 2026), so forward results are the
+  clean judge.
   The Claude researchers get a `literature` tool (search, read), Sail's profiles never see it; the architect
   and the strategist get a retrieved block of abstracts before their calls, and the strategist names the next
   searches. Every agent cites the ids it relied on. A paper's finding is a hypothesis: whatever is built from
