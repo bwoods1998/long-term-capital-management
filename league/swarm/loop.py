@@ -323,7 +323,7 @@ class Swarm:
 
     def __init__(self, root: str | Path, *, settings: Mapping[str, Any] | None = None, config: Mapping[str, Any] | None = None,
                  store: SwarmStore | None = None, router: Any = None, pool: Any = None, guard: Any = None, client: Any = None,
-                 clock: Callable[[], float] = time.time, sleep: Callable[[float], None] = time.sleep):
+                 clock: Callable[[], float] = time.time, sleep: Callable[[float], None] = time.sleep, preflight: Any = None):
         self.root = Path(root)
         self.config = dict(config) if config is not None else None
         self.settings = dict(settings) if settings is not None else settings_mod.load(self.root, config=self.config)
@@ -342,10 +342,16 @@ class Swarm:
             if client is None:
                 client = _sail_client()
             pool = GymPool(self.store, client, self.settings, clock=clock, allowed=lambda kind: self.guard.allows(kind))
+            if preflight is None:
+                # THE PREFLIGHT goes with the Gym's pool it saves (`preflight.py`): a program that cannot run is refused
+                # on a synthetic session in the decider's sandbox, before a Train job is made. Tests hand in their pool.
+                from .preflight import Preflight
+
+                preflight = Preflight()
         self.pool = pool
         self.scheduler = Scheduler(self.store, clock=clock, settings=self.settings)
         self.researcher = Researcher(self.store, self.router, self.pool, self.settings, clock=clock,
-                                     starter=lambda spec: program_for(spec))
+                                     starter=lambda spec: program_for(spec), preflight=preflight)
         self.researcher.pace = self.over_pace
         self.tournament = Tournament(self.store, self.pool, self.settings, clock=clock)
         self.gate = Gate(self.store, self.pool, self.router, self.settings, clock=clock)

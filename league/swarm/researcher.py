@@ -164,7 +164,7 @@ import re
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
 from . import diagnostics, evidence, inputs, public
 from . import settings as settings_mod
@@ -1098,7 +1098,7 @@ class Researcher:
 
     def __init__(self, store: SwarmStore, router: Any, pool: Any, settings: Mapping[str, Any], *, contract: str | None = None,
                  clock: Callable[[], float] = time.time, starter: Callable[[Mapping[str, Any]], tuple[str, dict]] | None = None,
-                 background: bool = True):
+                 background: bool = True, preflight: Callable[..., Mapping[str, Any]] | None = None):
         self.store = store
         self.router = router
         self.pool = pool
@@ -1108,6 +1108,10 @@ class Researcher:
         self.system = ROLE + self.contract
         self.starter = starter
         self.background = background
+        #: THE PREFLIGHT (`league/swarm/preflight.py`): a new Train run's program on a synthetic session in the decider's
+        #: sandbox first; None (tests, a House without the Gym's pool) runs none. `researcher.preflight: false` switches
+        #: it off.
+        self.preflight = preflight
         self._rewriting: dict[str, Any] = {}
         #: (family, version, label) robustness runs this process has in flight (a restart loses queued jobs: they are
         #: queued again; a run that failed leaves the set, so a later cycle queues it again).
@@ -1650,6 +1654,41 @@ class Researcher:
                                                        "changes its roots"}, roots, change
         return None, roots, change
 
+    def _preflight(self, fam: Mapping[str, Any], code: str, variants: Sequence[Mapping[str, Any]], roots: Sequence[str],
+                   out: dict[str, Any]) -> dict[str, Any] | None:
+        """THE PREFLIGHT (`league/swarm/preflight.py`): each variant about to become a Train job, on a synthetic session in
+        the decider's sandbox. A refusal is the researcher's own doing (`_refusal`): no version, no Gym job, no trial; it is
+        written in the family's notebook with the error and the API the program should have used. None: go on to the
+        Gym (it passed, or the preflight could not say: it never blocks on its own failure)."""
+        check = self.preflight
+        if check is None or self.cfg.get("preflight", True) is False:
+            return None
+        for n, params in enumerate(variants):
+            try:
+                verdict = dict(check(code, dict(params or {}), roots=list(roots), name=str(fam["id"])))
+            except Exception as exc:  # noqa: BLE001 - the preflight's own failure never costs the researcher a run
+                out["preflight_error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
+                return None
+            out["preflight"] = int(out.get("preflight") or 0) + 1
+            out["preflight_seconds"] = round(float(out.get("preflight_seconds") or 0) + float(verdict.get("seconds") or 0), 3)
+            if verdict.get("status") != "refused":
+                continue
+            out["preflight_refused"] = int(out.get("preflight_refused") or 0) + 1
+            where = f"line {verdict['line']}: " if verdict.get("line") and not str(verdict.get("error") or "").startswith("line") else ""
+            error = where + str(verdict.get("error") or "")
+            which = f" (variant {n + 1} of {len(variants)}: {json.dumps(dict(params or {}), sort_keys=True, default=str)[:200]})" \
+                if len(variants) > 1 else ""
+            self.store.note(fam["id"], f"Preflight refused a program before any Train run{which}: {verdict.get('why')}: "
+                                       f"{error[:300]}. Fix: {str(verdict.get('hint') or '')[:600]} (no version, job or trial)")
+            answer = {"status": "refused", "stage": "preflight", "reason": f"{verdict.get('why')}: {error}"[:600],
+                      "error": error[:500], "line": verdict.get("line"), "source": verdict.get("source") or None,
+                      "hint": verdict.get("hint"),
+                      "next": "no version, job or trial was created: fix the line (the ctx API above) and run again"}
+            if which:
+                answer["variant"] = dict(params or {})
+            return self._refusal(out, {k: v for k, v in answer.items() if v is not None})
+        return None
+
     def _gym_run(self, fam: Mapping[str, Any], args: Mapping[str, Any], out: dict[str, Any], *, author: str) -> dict[str, Any]:
         if self._terminal(fam["id"], out):
             return {"status": "retired", "reason": "the family is retired; no run started"}
@@ -1688,6 +1727,10 @@ class Researcher:
             return self._refusal(out, refused)
         # NO DUPLICATE RUNS: the evaluation this run would be, on the roots it would run on.
         key = self.eval_key(code, params, stress=stress, window="train", roots=roots if change else fam["roots"])
+        if not (self.reuse and self._reusable(self.store.evaluated(fam["id"], key), stress=stress)):
+            failed = self._preflight(fam, code, [params], roots if change else fam["roots"], out)
+            if failed is not None:
+                return failed
         stored = None
         with self.store.atomic():
             if self._terminal(fam["id"], out):
@@ -2035,6 +2078,10 @@ class Researcher:
                 if run is not None:
                     stored[i] = run
         fresh = len(variants) - len(stored)
+        if fresh:
+            failed = self._preflight(fam, code, [p for i, p in enumerate(variants) if i not in stored], run_roots, out)
+            if failed is not None:
+                return failed
         if fresh and not self._reserve_sweep(fid, fresh):  # the pool's room for sweeps (SWEEP LOAD): a plain refusal, no backoff
             room = self.sweep_room()
             out["sweep_busy"] = True
