@@ -154,13 +154,25 @@ class LegacyCells(unittest.TestCase):
         self.assertEqual(cards.infer_key("Pays when it pays.", "iron_condor", [0, 1]), None)
         self.assertEqual(cards.infer_key("A trend that persists.", "long_put", [0, 1])["holding"], "days_1_3", "from the dte")
 
-    def test_legacy_rows_match_without_inputs(self):
+    def test_legacy_rows_match_without_inputs_and_carded_rows_on_overlapping_inputs(self):
         new = cards.key_of(cards.validate(CARD)[0], "long_call")
         self.assertTrue(cards.matches(new, {"class": "reversal_liquidity", "family": "directional", "holding": "days_1_3",
                                             "inputs": None}))
         self.assertTrue(cards.matches(new, {**new, "inputs": ["clock", "share_volume", "underlying_price"]}))
-        self.assertFalse(cards.matches(new, {**new, "inputs": ["underlying_price"]}), "a new input is a new information set")
+        self.assertTrue(cards.matches(new, {**new, "inputs": ["underlying_price"]}),
+                        "an input added to a dead card's never escapes it (review of #446)")
+        self.assertFalse(cards.matches(new, {**new, "inputs": ["iv_skew"]}), "disjoint inputs are another information set")
         self.assertFalse(cards.matches(new, {**new, "holding": "intraday"}))
+
+    def test_a_row_text_is_read_for_its_inputs(self):
+        self.assertEqual(cards.infer_inputs("Oversold closes rebound over the next session after FOMC."),
+                         ["event_calendar", "underlying_price"])
+        self.assertEqual(cards.infer_inputs("Pays when it pays."), [])
+
+
+GOOD = {"different": "conditions on dealer inventory imbalance measured from quote size asymmetry, which the dead family "
+                     "never read",
+        "evidence": "option_liquidity: its lesson shows entries lost only on days quote sizes were balanced"}
 
 
 class Rebirth(Case):
@@ -176,23 +188,57 @@ class Rebirth(Case):
         self.assertEqual((refused["row"], refused["tag"]), (dead, "MECHANISM"))
         self.assertIn("needs card.rebirth", refused["reason"])
         self.assertIn("Mechanism verdict MECHANISM", refused["lesson"])
-        self.assertTrue(index.check({**card, "inputs": ["clock", "share_volume", "underlying_price"]}, "debit_vertical")["ok"],
-                        "a new input is outside the dead card's cell")
+        self.assertFalse(index.check({**card, "inputs": ["clock", "share_volume", "underlying_price"]}, "debit_vertical")["ok"],
+                         "an unused input added to the dead card's never escapes its cell")
+        self.assertTrue(index.check({**card, "inputs": ["iv_skew"]}, "debit_vertical")["ok"], "disjoint inputs: another cell")
         self.assertTrue(index.check(card, "iron_condor")["ok"], "another structure family is another cell")
-        restated = {**card, "rebirth": {"row": dead, "different": "the same late day selling and rebound now on QQQ calls "
-                                                                  "with a wider strike and two weeks", "evidence": "e" * 50}}
+        wider = {**card, "inputs": ["clock", "option_liquidity", "underlying_price"]}
+        restated = {**wider, "rebirth": {"row": dead, "different": "the same late day selling and rebound now on QQQ calls "
+                                                                   "with a wider strike and two weeks", "evidence": "e" * 50}}
         self.assertIn("restates", index.check(restated, "debit_vertical", MECH)["reason"])
-        wrong = {**card, "rebirth": {"row": "someone-else", "different": "d" * 50, "evidence": "e" * 50}}
+        wrong = {**wider, "rebirth": {"row": "someone-else", "different": "d" * 50, "evidence": "e" * 50}}
         self.assertIn("not one of the rows", index.check(wrong, "debit_vertical")["reason"])
-        good = {**card, "rebirth": {"row": dead, "different": "conditions on dealer inventory imbalance measured from quote "
-                                                              "size asymmetry, which the dead family never read",
-                                    "evidence": "its lesson shows entries lost only on days quote sizes were balanced"}}
-        self.assertTrue(index.check(good, "debit_vertical", MECH)["ok"])
-        index.note_birth(good)
-        index.note_birth(good)
+        same_inputs = {**card, "rebirth": {"row": dead, **GOOD}}
+        self.assertIn("adds no input", index.check(same_inputs, "debit_vertical", MECH)["reason"],
+                      "new words on the same information are not a new idea")
+        vague = {**wider, "rebirth": {"row": dead, **GOOD, "evidence": "our research strongly suggests that this is different now"}}
+        self.assertIn("cites nothing checkable", index.check(vague, "debit_vertical", MECH)["reason"])
+        good = {**wider, "rebirth": {"row": dead, **GOOD}}
+        verdict = index.check(good, "debit_vertical", MECH)
+        self.assertTrue(verdict["ok"], verdict)
+        self.assertEqual(verdict["new_inputs"], ["option_liquidity"])
+        index.note_birth(good, "debit_vertical")
+        index.note_birth(good, "debit_vertical")
         self.assertIn("already backed 2", index.check(good, "debit_vertical", MECH)["reason"])
-        self.assertTrue(any(line.startswith("reversal_liquidity / directional / days_1_3: 1 rows (1 carded)")
+        self.assertTrue(any(line.startswith("reversal_liquidity / directional / days_1_3: 1 rows (1 carded), rebirth room 1")
                             for line in index.cells()))
+
+    def test_a_cell_has_a_rebirth_budget_its_new_rows_never_refill(self):
+        card, _ = cards.validate(CARD)
+        rows = [self.bury(f"rebound-{i}", card, reason=mechanism.MECHANISM_CAUSE.format(n=3), roots=(r,))
+                for i, r in enumerate(("SPY", "QQQ"))]
+        wider = {**card, "inputs": ["clock", "option_liquidity", "underlying_price"]}
+        a = self.arch()
+        born = a.admit([proposal(f"reborn-{i}", card={**wider, "rebirth": {"row": rows[i // 2], **GOOD}}, roots=["IWM"],
+                                 mechanism=f"Dealer inventory imbalance after late selling predicts rebound {i} next session.")
+                        for i in range(4)])
+        self.assertEqual(len(born), 3, "three rebirths a cell a week, whichever of its rows they name")
+        self.assertIn("rebirth(s) in the last 7 days", a.card_refused[-1]["why"])
+        self.clock.t += 8 * 86400
+        later = self.arch().admit([proposal("reborn-late", card={**wider, "rebirth": {"row": rows[1], **GOOD}}, roots=["IWM"],
+                                            mechanism="Dealer inventory imbalance after late selling predicts rebounds a week on.")])
+        self.assertEqual(later, ["reborn-late"], "the budget is a rolling window")
+
+    def test_a_relabeled_class_is_read_by_its_own_text(self):
+        card, _ = cards.validate(CARD)
+        dead = self.bury("rebound-old", card, reason=mechanism.MECHANISM_CAUSE.format(n=3))
+        relabeled = {**card, "mechanism_class": "calendar_flow"}
+        index = cards.RebirthIndex(self.store, self.settings)
+        self.assertTrue(index.check(relabeled, "debit_vertical")["ok"], "without text the declared class decides")
+        refused = index.check(relabeled, "debit_vertical", "Oversold late-day selling rebounds over the next session.")
+        self.assertFalse(refused["ok"])
+        self.assertEqual((refused["row"], refused["text_class"]), (dead, "reversal_liquidity"))
+        self.assertIn("reversal_liquidity cell its own mechanism text reads as", refused["reason"])
 
     def test_a_legacy_row_is_read_by_its_text(self):
         self.bury("old-dip", reason="The dip-bounce mechanism is conclusively refuted on every root tested",
@@ -200,7 +246,18 @@ class Rebirth(Case):
         index = cards.RebirthIndex(self.store, self.settings)
         [row] = index.rows
         self.assertEqual((row["tag"], row["legacy"], row["key"]["class"]), ("REFUTED", True, "reversal_liquidity"))
+        self.assertEqual(row["inputs"], ["underlying_price"], "a legacy row's inputs are read from its text")
         self.assertFalse(index.check(cards.validate(CARD)[0], "debit_vertical")["ok"])
+
+
+class FlatComparison(unittest.TestCase):
+    def test_only_a_structure_that_is_not_directional_may_compare_flat(self):
+        flat = {**CARD, "mechanism_class": "volatility_risk_premium", "ablation": {"flat": True}}
+        card, errors = cards.validate(flat, "iron_condor")
+        self.assertEqual((card["ablation"], errors), ({"flat": True}, []))
+        self.assertIsNone(cards.validate(flat, "debit_vertical")[0])
+        self.assertIn("only for a structure that is not directional", cards.validate(flat, "long_call")[1][0])
+        self.assertIn("Comparison mode: flat", cards.brief_text({"card": card}))
 
 
 class TheArchitect(Case):
@@ -236,9 +293,7 @@ class TheArchitect(Case):
         for text in ("FAMILY CARD VOCABULARY", "REFUTED CELLS", "reversal_liquidity / directional / days_1_3",
                      "YOUR LAST PASS'S PROPOSALS REFUSED", f"Lesson of {dead}"):
             self.assertIn(text, block)
-        reborn = {**CARD, "rebirth": {"row": dead, "different": "conditions on dealer inventory imbalance measured from quote "
-                                                                  "size asymmetry, which the dead family never read",
-                                      "evidence": "its lesson shows entries lost only on days quote sizes were balanced"}}
+        reborn = {**CARD, "inputs": ["clock", "option_liquidity", "underlying_price"], "rebirth": {"row": dead, **GOOD}}
         born = a.admit([proposal("rebound-new", card=reborn, mechanism="Dealer inventory imbalance after late selling "
                                                                         "predicts which rebounds complete next session.")])
         self.assertEqual(born, ["rebound-new"])
@@ -252,6 +307,27 @@ class TheArchitect(Case):
         self.assertEqual(self.arch().admit([proposal("rebound-free", mechanism="Another late-day selling rebound on the "
                                                                              "ETF, with the refusal switched off.")]),
                          ["rebound-free"])
+
+    def test_a_rebirth_on_another_slice_counts_the_named_rows_lineage(self):
+        card, _ = cards.validate(CARD)
+        dead = self.bury("rebound-old", card, reason=mechanism.MECHANISM_CAUSE.format(n=3))
+        self.store.bump(dead, trials=7)
+        reborn = {**CARD, "inputs": ["clock", "option_liquidity", "underlying_price"], "rebirth": {"row": dead, **GOOD}}
+        born = self.arch().admit([proposal("rebound-qqq", card=reborn, roots=["QQQ"],
+                                           mechanism="Dealer inventory imbalance after late selling predicts which QQQ "
+                                                     "rebounds complete next session.")])
+        self.assertEqual(born, ["rebound-qqq"])
+        fam = self.store.family("rebound-qqq")
+        self.assertIsNone(fam["parent"], "another slice: a new lineage")
+        self.assertEqual(fam["spec"]["prior_lineage"], self.store.family(dead)["lineage"])
+        self.assertIn(self.store.family(dead)["lineage"], self.store.lineages("rebound-qqq"))
+        self.assertEqual(self.store.lineage_trials("rebound-qqq"), 7, "the named row's trials count: never a fresh count")
+
+    def test_a_flat_comparison_on_a_directional_structure_is_refused(self):
+        a = self.arch()
+        flat = {**CARD, "ablation": {"flat": True}}
+        self.assertEqual(a.admit([proposal("flat-dir", card=flat)]), [])
+        self.assertIn("not directional", a.card_refused[0]["why"])
 
     def test_the_system_prompt_and_tags_know_the_card(self):
         self.assertIn('"card": {"hypothesis"', SYSTEM)

@@ -15,7 +15,10 @@ card, naming each missing or invalid field):
 - `comparison`: the naive baseline it must beat, normally the same structure entered on the same schedule without the
   signal's condition;
 - `ablation`: the PARAMS switch that turns the signal into that baseline (`param`, and the `off` value; `signal_on` = 0
-  by default, the contract's convention). The mechanism test (league/swarm/mechanism.py) runs the program both ways;
+  by default, the contract's convention). The mechanism test (league/swarm/mechanism.py) runs the program both ways. A
+  card whose structure is not directional (`STRUCTURE_FAMILIES`) may declare `{"flat": true}` instead: the structure
+  itself is the edge (unconditional premium selling, say), so the comparison is not trading; a directional structure
+  never may (its comparison is its conditioning, or a drift-long exposure would pass);
 - `falsification`: a concrete, pre-declared result that kills it;
 - `rebirth` (only when the card falls in a refuted cell, below): the graveyard `row` it re-enters, what is `different`,
   and the new `evidence` that justifies it.
@@ -29,24 +32,32 @@ version and the card's sha. Both tables are created on first use by this module 
 `store.py` (loaded by the live path) is unchanged.
 
 THE CELL. A card's key is (mechanism class, inputs, structure family, holding bucket). `STRUCTURE_FAMILIES` groups the
-twelve structures by the exposure they sell or buy: a new structure in the same group is not a new idea.
+twelve structures by the exposure they sell or buy: a new structure in the same group is not a new idea. The cell of a
+refusal and of a budget is (class, structure family, holding).
 
 CARD-BASED REBIRTH REFUSAL (`RebirthIndex`). A proposal whose cell matches a graveyard row killed by a MECHANISM VERDICT
 (`MECHANISM_VERDICTS`: the operator's pre-registered tests, refuted, self-refuted, diagnosed, trial-adjusted, drift,
-stress, and a failed mechanism test) is born only with a `rebirth` that names one of those rows, says what is different
-(`different`) and cites new evidence (`evidence`), and only while that row has backed fewer than
-`architect.max_rebirths_per_row` (2) births. Otherwise it is refused and the refusal quotes the row's lesson, which the
-architect reads in its next request. A carded row matches on the whole key (the new card's inputs no wider than the
-dead card's). A row from before cards has no declared key: `infer_key` reads one from its mechanism text, structure and
-days to expiry (a deterministic keyword reading, deliberately coarse), and such a row matches on class, structure family
-and holding alone, since inputs cannot be read reliably from prose. A false match costs a justification, never a birth
-outright. The check is deterministic and makes no model call.
+stress, and a failed mechanism test) is refused unless its `rebirth` makes a valid case, and the refusal quotes the row's
+lesson, which the architect reads in its next request. MATCHING: a carded row matches on class, structure family and
+holding when the input sets overlap (an unused input added to a dead card never escapes it); a row from before cards has
+no declared key, so `infer_key` reads one from its mechanism text, structure and days to expiry (a deterministic keyword
+reading, deliberately coarse) and it matches on class, structure family and holding alone. The proposal's own mechanism
+text is read the same way (`infer_key`): when it reads as another class than the one declared, the rows of that class's
+cell match too (a refuted idea relabeled into an open class never escapes). A VALID REBIRTH names one of the matched rows
+(`row`), says what is different (`different`: words beyond the dead row's own mechanism, a new root, structure or horizon
+never counting) and adds at least one input the dead row did not read (its card's inputs, or `infer_inputs` of its text):
+new words alone are never a new idea. Its `evidence` cites something checkable: a new input by name, a run id or a
+`card_evidence` seq in the store. It is born only while its row has backed fewer than `architect.max_rebirths_per_row`
+(2) births and the row's cell has had fewer than `architect.max_rebirths_per_cell` (3) rebirths in the last
+`architect.rebirth_window_days` (7): a cell whose rows multiply never refills its own budget. A false match costs a
+justification and a budget slot, never an idea outright. The check is deterministic and makes no model call.
 
 Standard library only.
 """
 
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
 import json
 import re
@@ -166,9 +177,10 @@ def _sized(card: dict[str, Any], errors: list[str], raw: Mapping[str, Any], name
         card[name] = text[:hi]
 
 
-def validate(raw: Any) -> tuple[dict[str, Any] | None, list[str]]:
+def validate(raw: Any, structure: Any = None) -> tuple[dict[str, Any] | None, list[str]]:
     """(the canonical card, []) or (None, every problem named). The card's fields are the module docstring's; `ablation`
-    defaults to `DEFAULT_ABLATION`, and `rebirth` is kept only when given (its rows are checked by `RebirthIndex`)."""
+    defaults to `DEFAULT_ABLATION` (a flat one, `{"flat": true}`, only for a `structure` that is not directional), and
+    `rebirth` is kept only when given (its rows are checked by `RebirthIndex`)."""
     if not isinstance(raw, Mapping):
         return None, ["card: missing (every family needs one: hypothesis, mechanism_class, inputs, holding, cost, comparison, "
                       "ablation, falsification)"]
@@ -215,13 +227,21 @@ def validate(raw: Any) -> tuple[dict[str, Any] | None, list[str]]:
     ablation = raw.get("ablation")
     if ablation is None:
         card["ablation"] = dict(DEFAULT_ABLATION)
+    elif ablation == "flat" or (isinstance(ablation, Mapping) and ablation.get("flat") is True):
+        if structure is not None and structure_family(structure) == "directional":
+            errors.append(f"ablation: a flat comparison is only for a structure that is not directional ({structure} is): its "
+                          "comparison is the same structure without the signal's condition (default {\"param\": \"signal_on\", "
+                          "\"off\": 0})")
+        else:
+            card["ablation"] = {"flat": True}
     else:
         param = str(ablation.get("param") or "") if isinstance(ablation, Mapping) else ""
         off = ablation.get("off") if isinstance(ablation, Mapping) else None
         scalar = isinstance(off, (bool, int, str)) or (isinstance(off, float) and off == off and abs(off) != float("inf"))
         if not _PARAM.match(param) or not scalar or (isinstance(off, str) and len(off) > 40):
             errors.append("ablation: {\"param\": the PARAMS key that switches the signal, \"off\": the value that turns it "
-                          "into the comparison} (default {\"param\": \"signal_on\", \"off\": 0})")
+                          "into the comparison} (default {\"param\": \"signal_on\", \"off\": 0}; {\"flat\": true} when the "
+                          "structure itself is the edge and is not directional)")
         else:
             if isinstance(off, float) and off.is_integer():
                 off = int(off)
@@ -357,15 +377,21 @@ def brief_text(entry: Mapping[str, Any] | None) -> str:
         return ""
     c = entry["card"]
     ab = c.get("ablation") or DEFAULT_ABLATION
+    if ab.get("flat"):
+        switch = ("- Comparison mode: flat (your structure itself is the edge): the mechanism test runs your program alone, and its "
+                  "entries must earn more than nothing after the Gym's spread and fees.")
+    else:
+        switch = (f"- Ablation: PARAMS[{ab['param']!r}] = {ab['off']!r} must turn your signal into that comparison: skip ONLY the "
+                  "signal's condition and keep the structure, tenor, strikes, entry time, sizing and exits, so the program still "
+                  f"trades (the test checks that both arms trade the same structure, tenor, strikes, time and hold). Declare "
+                  f"{ab['param']!r} in PARAMS (default on) and read it in decide.")
     lines = ["YOUR FAMILY CARD (fixed at birth; you research and are judged under it):",
              f"- Hypothesis: {c.get('hypothesis')}",
              f"- Mechanism class: {c.get('mechanism_class')}. Inputs: {', '.join(c.get('inputs') or [])}. Holding: "
              f"{c.get('holding')} ({HOLDING.get(str(c.get('holding')), '')}).",
-             f"- Cost hurdle: about {c.get('cost', {}).get('hurdle')} of maximum loss a round trip ({c.get('cost', {}).get('why')}).",
-             f"- Comparison it must beat: {c.get('comparison')}",
-             f"- Ablation: PARAMS[{ab['param']!r}] = {ab['off']!r} must turn your signal into that comparison: skip ONLY the "
-             "signal's condition and keep the structure, schedule, sizing and exits, so the program still trades. Declare "
-             f"{ab['param']!r} in PARAMS (default on) and read it in decide.",
+             f"- Cost hurdle (your estimate; the Gym's fills already charge it): about {c.get('cost', {}).get('hurdle')} of "
+             f"maximum loss a round trip ({c.get('cost', {}).get('why')}).",
+             f"- Comparison it must beat: {c.get('comparison')}", switch,
              f"- Falsification: {c.get('falsification')}"]
     reb = c.get("rebirth")
     if reb:
@@ -429,12 +455,46 @@ def infer_key(mechanism: Any, structure: Any, dte: Any = None) -> dict[str, Any]
 
 def matches(new: Mapping[str, Any], dead: Mapping[str, Any]) -> bool:
     """Does a proposal's cell `new` fall in a dead row's cell `dead`: the same class, structure family and holding, and (a
-    carded row) inputs no wider than the dead card's. A legacy row (`inputs` None) matches on the first three."""
+    carded row, when the proposal's inputs are known) inputs that overlap the dead card's. A legacy row (`inputs` None)
+    matches on the first three."""
     if (new.get("class"), new.get("family"), new.get("holding")) != (dead.get("class"), dead.get("family"), dead.get("holding")):
         return False
-    if dead.get("inputs") is None:
+    if dead.get("inputs") is None or new.get("inputs") is None:
         return True
-    return set(new.get("inputs") or []) <= set(dead.get("inputs") or [])
+    return bool(set(new.get("inputs") or []) & set(dead.get("inputs") or []))
+
+
+def cell_of(key: Mapping[str, Any]) -> tuple[str, str, str]:
+    """A key's refusal and budget cell: (class, structure family, holding)."""
+    return (str(key.get("class")), str(key.get("family")), str(key.get("holding")))
+
+
+#: What a row's mechanism text says it read (`infer_inputs`: legacy rows, whose inputs no card declared). Coarse on purpose:
+#: a rebirth must add an input outside this reading.
+_INPUT_WORDS: dict[str, re.Pattern[str]] = {
+    "underlying_price": re.compile(r"\b(?:price\w*|returns?|moves?|gaps?|clos(?:e|es|ing)|highs?|lows?|trend\w*|rall\w*|"
+                                   r"sell[- ]?offs?|drops?|declin\w*|breakouts?|momentum|revers\w*|rebound\w*|dips?|drawdowns?|"
+                                   r"moving averages?|vwap|oversold|overbought)\b", re.I),
+    "realized_vol": re.compile(r"\b(?:realized (?:vol\w*|variance)|ranges?|atr|true range)\b", re.I),
+    "implied_vol": re.compile(r"\b(?:implied vol\w*|iv|vix|rich (?:premium|iv|implied)|cheap (?:premium|iv|implied|vol\w*))\b", re.I),
+    "iv_term_structure": re.compile(r"\b(?:term structure|front[- ](?:month|expiry|week)|back[- ]month|contango|backwardation)\b",
+                                    re.I),
+    "iv_skew": re.compile(r"\b(?:skew\w*|risk reversals?|smile|wings?)\b", re.I),
+    "option_liquidity": re.compile(r"\b(?:bid[- ]ask|quotes?|liquidity|order book|depth|spread widening)\b", re.I),
+    "open_interest": re.compile(r"\b(?:open interest|max pain|pin\w*|gamma)\b", re.I),
+    "share_volume": re.compile(r"\b(?:share volume|volume)\b", re.I),
+    "event_calendar": re.compile(r"\b(?:fomc|cpi|payrolls?|nfp|earnings|auctions?|opex|expiration|macro|events?|announcements?)\b",
+                                 re.I),
+    "clock": re.compile(r"\b(?:minutes?|morning|afternoon|opening|last hour|first hour|time of day|weekdays?|mondays?|fridays?|"
+                        r"weekends?|overnight|month[- ]end|quarter[- ]end|intraday)\b", re.I),
+    "cross_asset": re.compile(r"\b(?:lead\w*|lag\w*|cross[- ]asset|relative|pairs?|ratio|another root|other roots?|sector)\b", re.I),
+}
+
+
+def infer_inputs(mechanism: Any) -> list[str]:
+    """The inputs a row's mechanism text names (`_INPUT_WORDS`), sorted."""
+    text = str(mechanism or "")
+    return sorted(k for k, p in _INPUT_WORDS.items() if p.search(text))
 
 
 def _stem(word: str) -> str:
@@ -449,10 +509,23 @@ def _content(text: Any) -> set[str]:
     return {_stem(w) for w in _WORD.findall(str(text or "").lower()) if len(w) > 2 and w not in _STOP}
 
 
+def _parse_at(value: Any) -> dt.datetime | None:
+    try:
+        out = dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return out if out.tzinfo else out.replace(tzinfo=dt.timezone.utc)
+
+
+_SEQ = re.compile(r"card[_ ]evidence\s*(?:seq\s*)?#?\s*(\d+)", re.I)
+_RUN_ID = re.compile(r"\b[0-9a-f][0-9a-f-]{15,63}\b")
+
+
 # ------------------------------------------------------------------------------------------ the rebirth refusal
 class RebirthIndex:
-    """The graveyard's rows killed by a mechanism verdict, each with its cell (its card's, else `infer_key`'s), read once
-    for an architect pass. `check(card, structure, mechanism)` answers a proposal."""
+    """The graveyard's rows killed by a mechanism verdict, each with its cell (its card's, else `infer_key`'s), and the
+    rebirths already born by row and by cell, read once for an architect pass. `check(card, structure, mechanism)`
+    answers a proposal."""
 
     def __init__(self, store: Any, settings: Mapping[str, Any] | None = None):
         from .architect import lesson_view, tag_of  # a local import: the architect imports this module
@@ -461,15 +534,9 @@ class RebirthIndex:
         self.settings = settings or {}
         self.cfg = self.settings.get("architect", {}) or {}
         cards: dict[str, dict[str, Any]] = {}
-        backed: dict[str, int] = {}
         if _tables(store):
-            for r in store._all("SELECT family, card, key FROM family_cards"):
-                card = json.loads(r["card"])
-                cards[r["family"]] = {"key": json.loads(r["key"]), "card": card}
-                reb = card.get("rebirth") if isinstance(card, Mapping) else None
-                if isinstance(reb, Mapping) and reb.get("row"):
-                    backed[str(reb["row"])] = backed.get(str(reb["row"]), 0) + 1
-        self.backed = backed
+            for r in store._all("SELECT family, card, key, at FROM family_cards ORDER BY at, family"):
+                cards[r["family"]] = {"key": json.loads(r["key"]), "card": json.loads(r["card"]), "at": r["at"]}
         families = {f["id"]: f for f in store._all("SELECT id, lineage, retire_reason, spec FROM families")}
         self.rows: list[dict[str, Any]] = []
         for g in store._all("SELECT family, at, mechanism, structure, roots, lesson FROM graveyard ORDER BY at, family"):
@@ -489,48 +556,110 @@ class RebirthIndex:
             if key is None:
                 continue
             self.rows.append({"row": g["family"], "at": g["at"], "tag": tag, "key": key, "legacy": legacy,
+                              "inputs": sorted(key["inputs"]) if key.get("inputs") is not None else infer_inputs(g["mechanism"]),
                               "structure": g["structure"], "mechanism": _text(g["mechanism"])[:300],
                               "lesson": lesson_view(g["lesson"])[:400]})
+        self.by_id = {r["row"]: r for r in self.rows}
+        # The rebirths born so far: by the row each named (for ever) and by that row's cell (within the window).
+        cutoff = None
+        now = _parse_at(store.now()) if hasattr(store, "now") else None
+        if now is not None:
+            cutoff = now - dt.timedelta(days=self.window_days)
+        self.backed: dict[str, int] = {}
+        self.cell_births: dict[tuple[str, str, str], int] = {}
+        for c in cards.values():
+            reb = c["card"].get("rebirth") if isinstance(c["card"], Mapping) else None
+            if not (isinstance(reb, Mapping) and reb.get("row")):
+                continue
+            row = str(reb["row"])
+            self.backed[row] = self.backed.get(row, 0) + 1
+            at = _parse_at(c.get("at"))
+            if cutoff is None or (at is not None and at >= cutoff):
+                cell = self._cell_of_rebirth(row, c["key"])
+                self.cell_births[cell] = self.cell_births.get(cell, 0) + 1
+
+    def _setting(self, name: str, default: int) -> int:
+        raw = self.cfg.get(name, default)
+        try:
+            return max(0, int(raw)) if raw is not None and not isinstance(raw, bool) else default
+        except (TypeError, ValueError):
+            return default
 
     @property
     def per_row(self) -> int:
-        raw = self.cfg.get("max_rebirths_per_row", 2)
-        try:
-            return max(0, int(raw)) if raw is not None and not isinstance(raw, bool) else 2
-        except (TypeError, ValueError):
-            return 2
+        return self._setting("max_rebirths_per_row", 2)
 
-    def matched(self, card: Mapping[str, Any], structure: Any) -> list[dict[str, Any]]:
+    @property
+    def per_cell(self) -> int:
+        return self._setting("max_rebirths_per_cell", 3)
+
+    @property
+    def window_days(self) -> int:
+        return max(1, self._setting("rebirth_window_days", 7))
+
+    def _cell_of_rebirth(self, row: str, key: Mapping[str, Any]) -> tuple[str, str, str]:
+        """A rebirth counts against the cell of the row it named (its own declared cell when that row is gone)."""
+        named = self.by_id.get(row)
+        return cell_of(named["key"] if named else key)
+
+    def matched(self, card: Mapping[str, Any], structure: Any, mechanism: Any = "", dte: Any = None) -> tuple[list[dict[str, Any]], str | None]:
+        """(the matched rows, oldest first; the class the proposal's own text reads as when that adds rows): the rows in its
+        declared cell, and the rows of the cell its mechanism text reads as (`infer_key`'s class, with its declared
+        inputs, structure family and holding) when that is another class."""
         key = key_of(card, structure)
-        return [r for r in self.rows if matches(key, r["key"])]
+        hit = [r for r in self.rows if matches(key, r["key"])]
+        text = infer_key(mechanism, structure, dte) if mechanism else None
+        text_class = None
+        if text is not None and text["class"] != key["class"]:
+            other = {**key, "class": text["class"]}
+            extra = [r for r in self.rows if matches(other, r["key"]) and r not in hit]
+            if extra:
+                text_class = text["class"]
+                hit = sorted(hit + extra, key=lambda r: (r["at"], r["row"]))
+        return hit, text_class
 
     def text_cell(self, mechanism: Any, structure: Any, dte: Any = None) -> dict[str, Any] | None:
-        """The AUDIT of a declared card: the cell the proposal's own mechanism text reads as (`infer_key`) and how many
-        mechanism-verdict rows share it (class, structure family and holding). Recorded at birth, never a refusal (the
-        keyword reading is too coarse to refuse on): a card declared outside a refuted cell whose text reads inside one is
-        what a later audit looks at."""
+        """The cell the proposal's own mechanism text reads as (`infer_key`) and how many mechanism-verdict rows share it
+        (class, structure family and holding): recorded at birth for the audit of declared classes."""
         key = infer_key(mechanism, structure, dte)
         if key is None:
             return None
-        rows = [r for r in self.rows if matches(key, {**r["key"], "inputs": None})]
+        rows = [r for r in self.rows if matches({**key, "inputs": None}, {**r["key"], "inputs": None})]
         return {"class": key["class"], "holding": key["holding"], "rows": len(rows)}
 
-    def check(self, card: Mapping[str, Any], structure: Any, mechanism: Any = "") -> dict[str, Any]:
+    def _cites(self, text: str, new_inputs: set[str]) -> bool:
+        """Does a rebirth's evidence cite something checkable: a new input by name, a run id or a card_evidence seq in the
+        store."""
+        low = text.lower()
+        if any(name in low or name.replace("_", " ") in low for name in new_inputs):
+            return True
+        for seq in _SEQ.findall(text):
+            if _tables(self.store) and self.store._one("SELECT 1 AS ok FROM card_evidence WHERE seq=?", (int(seq),)):
+                return True
+        for token in set(_RUN_ID.findall(low)):
+            if self.store._one("SELECT 1 AS ok FROM runs WHERE run_id=? OR run_id LIKE ?", (token, f"{token}-%")):
+                return True
+        return False
+
+    def check(self, card: Mapping[str, Any], structure: Any, mechanism: Any = "", dte: Any = None) -> dict[str, Any]:
         """{"ok": bool, "matched": [row ids], "reason": why refused, "row": the row the refusal points at, "lesson": its
-        lesson}. ok with no match; ok with a match only through a valid `rebirth` (a matched row, a `different` that says
-        more than the dead row's own mechanism, and a row with room under `max_rebirths_per_row`)."""
-        hit = self.matched(card, structure)
+        lesson}. ok with no match; ok with a match only through a valid `rebirth` (the module docstring)."""
+        hit, text_class = self.matched(card, structure, mechanism, dte)
         if not hit:
             return {"ok": True, "matched": []}
         ids = [r["row"] for r in hit]
         newest = hit[-1]
         out = {"ok": False, "matched": ids[-12:], "count": len(hit), "row": newest["row"], "lesson": newest["lesson"],
                "tag": newest["tag"], "key": key_text(key_of(card, structure))}
+        if text_class:
+            out["text_class"] = text_class
+        where = (f"its cell ({out['key']})" + (f", and the {text_class} cell its own mechanism text reads as," if text_class else "")
+                 + f" hold{'s' if not text_class else ''} {len(hit)} graveyard row(s) killed by a mechanism verdict, the newest "
+                 f"{newest['row']} ({newest['tag']})")
         reb = card.get("rebirth") if isinstance(card, Mapping) else None
         if not isinstance(reb, Mapping):
-            out["reason"] = (f"its cell ({out['key']}) holds {len(hit)} graveyard row(s) killed by a mechanism verdict, the "
-                             f"newest {newest['row']} ({newest['tag']}): a birth there needs card.rebirth naming one of them, "
-                             "what is different and the new evidence")
+            out["reason"] = (f"{where}: a birth there needs card.rebirth naming one of them, what is different, an input the dead "
+                             "row did not read and the new evidence")
             return out
         row = next((r for r in hit if r["row"] == reb.get("row")), None)
         if row is None:
@@ -544,32 +673,52 @@ class RebirthIndex:
             out["reason"] = (f"card.rebirth.different restates {row['row']}'s mechanism or its own: name the mechanism-level "
                              "change (a new root, structure or horizon of a refuted idea is not one)")
             return out
+        new_inputs = set(card.get("inputs") or []) - set(row["inputs"])
+        if not new_inputs:
+            out["reason"] = (f"card.rebirth adds no input {row['row']} did not read (it read "
+                             f"{', '.join(row['inputs']) or 'nothing the text names'}{', by its text' if row['legacy'] else ''}): "
+                             "new words on the same information are not a new idea")
+            return out
+        if not self._cites(str(reb.get("evidence") or ""), new_inputs):
+            out["reason"] = (f"card.rebirth.evidence cites nothing checkable: name the new input ({', '.join(sorted(new_inputs))}) "
+                             "and what it shows, or a run id or card_evidence seq in the store")
+            return out
         if self.backed.get(row["row"], 0) >= self.per_row:
             out["reason"] = (f"{row['row']} has already backed {self.backed[row['row']]} rebirth(s) (the most one row may): its "
                              "lesson stands")
             return out
-        return {"ok": True, "matched": ids[-12:], "count": len(hit), "row": row["row"], "rebirth": True}
+        cell = cell_of(row["key"])
+        if self.cell_births.get(cell, 0) >= self.per_cell:
+            out["reason"] = (f"the cell {' / '.join(cell)} has had {self.cell_births[cell]} rebirth(s) in the last "
+                             f"{self.window_days} days (the most a cell may): look in another cell")
+            return out
+        return {"ok": True, "matched": ids[-12:], "count": len(hit), "row": row["row"], "rebirth": True,
+                "new_inputs": sorted(new_inputs), **({"text_class": text_class} if text_class else {})}
 
-    def note_birth(self, card: Mapping[str, Any]) -> None:
-        """Count a rebirth born in this pass against its row (the cap binds within a pass too)."""
+    def note_birth(self, card: Mapping[str, Any], structure: Any = None) -> None:
+        """Count a rebirth born in this pass against its row and its row's cell (the caps bind within a pass too)."""
         reb = card.get("rebirth") if isinstance(card, Mapping) else None
         if isinstance(reb, Mapping) and reb.get("row"):
-            self.backed[str(reb["row"])] = self.backed.get(str(reb["row"]), 0) + 1
+            row = str(reb["row"])
+            self.backed[row] = self.backed.get(row, 0) + 1
+            cell = self._cell_of_rebirth(row, key_of(card, structure))
+            self.cell_births[cell] = self.cell_births.get(cell, 0) + 1
 
     def cells(self, limit: int = 40) -> list[str]:
-        """The refuted cells, most rows first: one line each for the architect's request."""
+        """The refuted cells, most rows first: one line each for the architect's request (with the cell's rebirth room)."""
         groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
         for r in self.rows:
-            k = r["key"]
-            groups.setdefault((k["class"], k["family"], k["holding"]), []).append(r)
+            groups.setdefault(cell_of(r["key"]), []).append(r)
         ranked = sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))[:limit]
         out = []
-        for (cls, fam, hold), rows in ranked:
+        for cell, rows in ranked:
             carded = sum(1 for r in rows if not r["legacy"])
-            out.append(f"{cls} / {fam} / {hold}: {len(rows)} rows ({carded} carded), newest {', '.join(r['row'] for r in rows[-3:])}")
+            room = max(0, self.per_cell - self.cell_births.get(cell, 0))
+            out.append(f"{' / '.join(cell)}: {len(rows)} rows ({carded} carded), rebirth room {room}, newest "
+                       f"{', '.join(r['row'] for r in rows[-3:])}")
         return out
 
 
 __all__ = ["MECHANISM_CLASSES", "INPUTS", "HOLDING", "STRUCTURE_FAMILIES", "MECHANISM_VERDICTS", "DEFAULT_ABLATION", "validate",
            "canonical", "card_sha", "structure_family", "key_of", "key_text", "ensure", "put", "card_of", "add_evidence",
-           "evidence", "vocabulary_text", "brief_text", "infer_key", "matches", "RebirthIndex"]
+           "evidence", "vocabulary_text", "brief_text", "infer_key", "infer_inputs", "matches", "cell_of", "RebirthIndex"]
