@@ -91,6 +91,8 @@ class Boundary(unittest.TestCase):
                                ("\ndef g(o):\n    return o.__dict__\n", "reflective"),
                                ("\ndef g():\n    return sys.exc_info()\n", "plumbing"),
                                ("\ndef g(e):\n    return e.tb_frame.f_back.f_locals\n", "reflective"),
+                               ("\nclass C:\n    def g(self):\n        self.settings['gym'] = {}\n", "another object"),
+                               ("\nclass C:\n    def g(self):\n        self.settings.update(gym={})\n", "another object"),
                                ("\ndef g(m):\n    m.value = 3\n", "another object"),
                                ("\nclass C:\n    def run(self):\n        return 1\n    def swap(self):\n        self.run = None\n",
                                 "another object"),

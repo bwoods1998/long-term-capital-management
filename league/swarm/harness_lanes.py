@@ -254,6 +254,16 @@ def _fingerprinted(path: str) -> bool:
     return path.startswith(("league/gym/", "league/live/")) or path in LEAGUE_FILES
 
 
+def _collaborator(node: ast.AST) -> bool:
+    """`self.settings`, `self.store._x`, ...: an object's shared collaborators, or anything reached through them."""
+    while isinstance(node, (ast.Attribute, ast.Subscript)):
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id in ("self", "cls") \
+                and node.attr in COLLABORATORS:
+            return True
+        node = node.value
+    return False
+
+
 def _facts(source: str | None) -> dict[str, Any]:
     """What `content_guard` compares, counted: call names, imported modules, sys/os plumbing and dunder accesses,
     attribute-assignment targets on anything but `self`/`cls`, mentions of the judges' override, gate members."""
@@ -308,7 +318,13 @@ def _facts(source: str | None) -> dict[str, Any]:
             targets = [n.target]
         elif isinstance(n, ast.Delete):
             targets = list(n.targets)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in MUTATORS \
+                and _collaborator(n.func.value):
+            # `self.settings.update(...)`: state every unit shares (an arm's change would reach the control).
+            out["attr_targets"][ast.dump(n.func)] += 1
         for t in targets:
+            if isinstance(t, ast.Subscript) and _collaborator(t.value):
+                out["attr_targets"][ast.dump(t.value)] += 1
             for sub in ast.walk(t):
                 if not isinstance(sub, ast.Attribute) or not isinstance(sub.ctx, (ast.Store, ast.Del)):
                     continue

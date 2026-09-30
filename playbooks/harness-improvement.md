@@ -214,16 +214,20 @@ Inside the files it may change, three more guards (`harness_lanes.py`):
   admitted birth keeps (its text, slice, lineage and trials) are the baseline's.
 - **Content** (`content_guard`, counted per name, so moving existing code is allowed): no new
   process, network, reflection, file write, print, exit, interpreter plumbing (`sys.modules`,
-  `sys.argv`, `os.environ`, ...), dunder access, assignment to another object's attribute (or to one
-  of an object's own methods or collaborators), import of a spend, capital or release module, or
-  mention of the judges' override. No gate may sit in the evaluator fingerprint's files.
+  `sys.argv`, `os.environ`, `sys.exc_info`, ...), dunder or frame access, assignment to another
+  object's attribute (or to one of an object's own methods or collaborators), mutation of the shared
+  collaborators (`self.settings[...] = ...`: an arm's change would reach the control), import of a
+  spend, capital or release module, or mention of the judges' override. No gate may sit in the
+  evaluator fingerprint's files.
 - **Gate coverage** (`gate_coverage`, arms lanes): with its gate closed the module must be exactly
   the baseline's. Every change sits in `if canary.enabled("<key>", <unit>, root=<state dir>): new
   else: old` (or the `new if <gate> else old` expression), with the old branch the baseline's code
   byte for byte, or is a new definition with no load-time effect, a new plain constant or a new
-  import. A changed existing constant or prose cannot be gated per unit: put new text in a new
-  constant chosen under the gate. An architect prompt is per pass, not per mechanism, so it cannot
-  be a memory-lane arms candidate.
+  import. The gate is asked about the lane's unit, the one its observer splits: a name for the family
+  (`fam["id"]`) in the research lane, `canary.mechanism_unit(<mechanism>)` in the memory lane. A
+  changed existing constant or prose cannot be gated per unit: put new text in a new constant chosen
+  under the gate. An architect prompt is per pass, not per mechanism, so it cannot be a memory-lane
+  arms candidate.
 
 The staging receipt classifies the change against the live path's import closure (D8's method:
 every import of `league/live`, then module-level imports) and states its deploy rule: research-side,
