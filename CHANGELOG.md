@@ -167,6 +167,9 @@ The House runs Release A, `20260930T200604Z-3bf48c3f8f9f` (main `777b894f`).
   - **Its record:** one private `swarm.status` event a round (`incubator_keep`).
   - **The researcher's status line.** The keep is saved (`cohort_keep`), so a kept family's researcher is told that
     idleness is no reason to retire it. The retire tool stays offered.
+  - **An unreadable record** leaves the last good keep standing for an hour, then none. A fresh swarm process whose
+    first read fails takes the keep the last process saved for the rest of that hour, and does not overwrite it
+    before then (the release review's restart finding; swarm side, no evidence reset).
   - **Research attention only:** no trial count, look, validation, gate, band or money rule reads it.
 - **The research library** (#447, supersedes #428; `gateway/lib/library.mjs`, `league/swarm/library.py`). It is off on
   the House until `research.enabled`.

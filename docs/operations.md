@@ -1070,6 +1070,11 @@ completes, fails or reaches its session window.
   spared.
 - **The researcher's status line.** The keep is saved (`cohort_keep` in the swarm's kv), so a kept family's researcher
   is told that idleness is no reason to retire it. The retire tool stays offered.
+- **An unreadable record.** When `observe.sqlite` or the swarm's families cannot be read, the last good keep stands for
+  an hour (`KEEP_STALE_SECONDS`), then none does, with one alert in the round's event. A fresh swarm process (a deploy,
+  a restart, the induced-failure kill test) runs its idle pass at once; if its first read fails, it takes the keep the
+  last process saved (`cohort_keep`, read `stale` in the event) for the rest of that hour and does not overwrite it
+  before then, so a restart never retires a kept family on one failed read.
 - **Research attention only:** no trial count, look, validation, gate, band or money rule reads it.
 
 **Turning real money on** (M4b; the sprint's R2; done: the grant was enabled at 00:30:15Z Sept 27, re-ratified at
