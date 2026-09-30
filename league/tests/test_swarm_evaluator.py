@@ -155,6 +155,24 @@ class Adoption(StoreCase):
         old_row = self.store.add_run("a", 1, old, window="train", stress=1, purpose="train")
         self.assertFalse(row_matches(self.store, self.store.run(old_row["run_id"])))
 
+    def test_colliding_worker_ids_keep_separate_results_and_metrics_for_each_evaluator(self):
+        self.family()
+        old = result("collision", pnl=600)
+        old.update(gym_image="image", gym_bundle=ENGINE_VERSION + "-old-source")
+        older = self.store.add_run("a", 1, old, window="train", stress=1, purpose="train", key="old-evaluation")
+        current = {**old, "gym_bundle": bands._bundle(), "summary": {**old["summary"], "pnl": -600}, "status": "disqualified"}
+        newer = self.store.add_run("a", 1, current, window="train", stress=1, purpose="train", key="new-evaluation")
+        self.assertNotEqual(older["run_id"], newer["run_id"])
+        self.assertEqual(self.store.run(older["run_id"])["summary"]["pnl"], 600)
+        self.assertEqual(self.store.run(newer["run_id"])["summary"]["pnl"], -600)
+        self.assertEqual(self.store.run(newer["run_id"])["status"], "disqualified")
+        self.assertEqual(self.store.run_result(newer["run_id"])["gym_bundle"], current["gym_bundle"])
+        repeated = self.store.add_run("a", 1, current, window="train", stress=1, purpose="train", key="new-evaluation")
+        self.assertEqual(repeated["run_id"], newer["run_id"])
+        self.assertEqual(self.store.run(older["run_id"])["trials"], 1)
+        self.assertEqual(self.store.run(newer["run_id"])["trials"], 2)
+        self.assertEqual(self.store.family("a")["trials"], 3, "every actual evaluation still counts")
+
     def test_new_practice_requires_current_actual_evidence_not_cached_labels_or_profit(self):
         self.family()
         self.store.set_state("a", best_train_version=1)

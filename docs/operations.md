@@ -98,6 +98,8 @@ trial counts, refusals, notebooks and consumed holdout looks remain. Late old-ev
 still counted but cannot refill current selection or forward evidence. Full result pruning retains
 each worker's actual image and bundle in its run summary. The replay key and standalone engine hash
 also change, so the old cache cannot supply a new result.
+If two different evaluator identities return the same standalone worker run ID, the store keeps
+separate result rows and files; it never relabels old metrics as new evidence.
 
 An old contract's pre-holdout refusal is archived and its active veto cleared, allowing a fresh review
 only after new-evaluator qualification. The refusal record stays; an actually consumed look remains

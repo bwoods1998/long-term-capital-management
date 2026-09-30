@@ -895,6 +895,20 @@ class SwarmStore:
             mine = f"{run_id}-{fid}"[:64]
             existing = self._one("SELECT * FROM runs WHERE (run_id=? OR run_id=?) AND family=?", (run_id, mine, fid))
             if existing is not None:
+                # The worker's standalone run hash includes ENGINE_VERSION, not the full deployed
+                # bundle. A source-only upgrade (or a forgotten version bump) can therefore reuse
+                # it for different results. Never relabel the old metrics/path with the new bundle.
+                names = ("gym_image", "gym_bundle")
+                current_identity = tuple(result.get(name) for name in names)
+                previous = loads(existing["summary"], {}) or {}
+                if not any(previous.get(name) for name in names) and any(current_identity):
+                    previous = self.run_result(existing["run_id"]) or previous
+                previous_identity = tuple(previous.get(name) for name in names)
+                if current_identity != previous_identity and (any(current_identity) or any(previous_identity)):
+                    scope = code_sha(dumps({"worker_run_id": run_id, "family": fid, "evaluator": current_identity}))
+                    run_id = f"{run_id[:31]}-{scope[:32]}"
+                    existing = self._one("SELECT * FROM runs WHERE run_id=? AND family=?", (run_id, fid))
+            if existing is not None:
                 if trials:
                     self._exec("UPDATE runs SET trials=trials+?, program_years=program_years+? WHERE run_id=?",
                                (trials, float(program_years), existing["run_id"]))
