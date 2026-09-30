@@ -166,20 +166,29 @@ class CompletionReadiness(unittest.TestCase):
                 self.calls.append(("sip", start, end))
                 if self.failed:
                     raise RuntimeError("missing SIP day")
-                return {"start": start.isoformat(), "end": end.isoformat()}
-            def build(self, kind, version):
+                return {"start": start.isoformat(), "end": end.isoformat(), 'complete': True}
+            def sip_ready(self):
+                return {'complete': True, 'receipt_sha256': 'a' * 64, 'forward_excluded': True,
+                        'scope': 'historical_stock_underlying_completed_grid', 'start': str(sl.TRAIN[0]), 'end': str(sl.HOLDOUT[1])}
+            def build(self, kind, version, **kwargs):
+                self_box.assertIn('-sip2-aaaaaaaaaaaa', version)
+                self_box.assertEqual(kwargs['sip_receipt'], 'a' * 64)
                 self.calls.append(("build", kind))
-                return {"box_id": "sb_" + kind, "checkpoints": ["sbcp_" + kind, "sbcp_" + kind + "_backup"]}
-            def calibrate(self, version):
+                return {"box_id": "sb_" + kind, "checkpoints": ["sbcp_" + kind, "sbcp_" + kind + "_backup"],
+                        'source_evidence': {'sip_receipt': 'a' * 64}, 'roots': ['SPY'], 'windows': ['train']}
+            def calibrate(self, version, **kwargs):
                 self.calls.append(("fit", version))
                 return {"checkpoints": {k: ["sbcp_" + k, "sbcp_" + k + "_backup"] for k in ("gym", "gate")},
-                        "sha256": "abc", "model_version": "fm_test", "samples": {"days": 5}}
+                        "sha256": "abc", "model_version": "fm_test", "samples": {"days": 5}, 'roots': ['SPY'],
+                        'source_evidence': {k: {'sip_receipt': 'a' * 64, 'source_box_id': 'sb_data',
+                                                'verified_at': '2026-09-30T06:00:00Z'} for k in ('gym', 'gate')}}
             def schedule(self):
                 return "2026-09-29T06:00:00Z"
+        self_box = self
         with tempfile.TemporaryDirectory() as tmp, bl.using_state(Path(tmp)):
             state = Path(tmp)
             bl.write_json(state / "completion-config.json", {"enabled": True})
-            bl.write_json(state / "completion.json", {"phase": "sip", "next_day": sl.HOLDOUT[1].isoformat()})
+            bl.write_json(state / "completion.json", {"schema": complete.SCHEMA, "phase": "sip", "next_day": sl.HOLDOUT[1].isoformat()})
             bl.write_json(bl.UNIVERSE, {"roots": ["SPY"]})
             now = [1000.0]
             ops = Ops()
@@ -197,6 +206,9 @@ class CompletionReadiness(unittest.TestCase):
             ready = bl.read_json(state / "images-ready.json")
             self.assertEqual(ready["gate_checkpoint"], "sbcp_gate")
             self.assertEqual(ready["calibration"]["model_version"], "fm_test")
+            self.assertEqual(ready['scope'], 'immutable_staged_checkpoint_pair')
+            self.assertTrue(ready['sip']['forward_excluded'])
+            self.assertEqual(ready['sip']['end'], str(sl.HOLDOUT[1]))
             count = len(ops.calls)
             self.assertEqual(complete.Completion(state, operations=ops).tick()["phase"], "complete")
             self.assertEqual(len(ops.calls), count)
@@ -210,6 +222,7 @@ class CompletionReadiness(unittest.TestCase):
             bl.write_json(bl.UNIVERSE, {"roots": ["SPY"]})
             ops = object.__new__(complete.Operations)
             ops.state = state
+            ops.data, ops.api = SimpleNamespace(box_id='sb_data'), object()
             signature = inspect.signature(images.build)
             def build(kind, **kwargs):
                 # Bind the real function's required keywords, even though Sail calls are mocked.
@@ -220,10 +233,35 @@ class CompletionReadiness(unittest.TestCase):
                 bl.write_json(bl.IMAGES, {kind: {"current": entry}})
                 return entry
             with patch.object(images, "build", build):
-                ops.build("gate", "new")
+                ops.build("gate", "new", sip_receipt='a' * 64)
             self.assertEqual(bl.STATE_DIR, state)
             self.assertEqual(bl.read_json(bl.IMAGES), active)
             self.assertEqual(bl.read_json(state / "next-images" / "images.json")["gate"]["current"]["box_id"], "sb_new_gate")
+
+    def test_stale_staging_source_never_verifies_one_box_and_checkpoints_another(self):
+        with tempfile.TemporaryDirectory() as tmp, bl.using_state(Path(tmp)):
+            state = Path(tmp)
+            bl.write_json(bl.DATA_BOX, {'box_id': 'sb_new_data'})
+            bl.write_json(state / 'next-images' / 'data_box.json', {'box_id': 'sb_old_data'})
+            ops = object.__new__(complete.Operations)
+            ops.state, ops.data, ops.api = state, SimpleNamespace(box_id='sb_new_data'), object()
+            with patch.object(images, 'build') as build:
+                with self.assertRaisesRegex(RuntimeError, 'source differs'):
+                    ops.build('gym', 'candidate', sip_receipt='a' * 64)
+            build.assert_not_called()
+
+    def test_stale_staging_universe_cannot_prune_away_requested_roots(self):
+        with tempfile.TemporaryDirectory() as tmp, bl.using_state(Path(tmp)):
+            state = Path(tmp)
+            bl.write_json(bl.DATA_BOX, {'box_id': 'sb_data'})
+            bl.write_json(bl.UNIVERSE, {'roots': ['SPY', 'PLTR']})
+            bl.write_json(state / 'next-images' / 'universe.json', {'roots': ['SPY']})
+            ops = object.__new__(complete.Operations)
+            ops.state, ops.data, ops.api = state, SimpleNamespace(box_id='sb_data'), object()
+            with patch.object(images, 'build') as build:
+                with self.assertRaisesRegex(RuntimeError, 'universe differs'):
+                    ops.build('gym', 'candidate', sip_receipt='a' * 64)
+            build.assert_not_called()
 
     def test_disabled_completion_opens_no_vendor_client(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(complete, "Operations", side_effect=AssertionError("no API")):

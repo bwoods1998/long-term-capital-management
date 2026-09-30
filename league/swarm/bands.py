@@ -10,28 +10,45 @@ orders that measure multi-leg fills and are never evidence). Each row:
 
     family                the family's id
     band                  gym | candidate | probe | sized
-    structure, roots      its structure type and roots
+    structure, roots      its DECLARED structure type and roots (`long_single` too: the live path reads it through
+                          `league.live.money.order_types`, real only while both singles are real types)
     holdout_passed        it passed its holdout look (Candidate or better)
     validation_passed     its validated version met the validation line
     version, code, params, run_sha
                           the program the row stands for: the version that holds the band (holdout passed),
                           else the version that met the validation line
     typical_max_loss_usd  the median maximum loss of ONE structure in that version's validation run (None when
-                          it opened none)
+                          it opened none; a `long_single`'s calls and puts together): the Probe fit only, since each
+                          real order is sized by its own unit
     seed_era              the program was written by a model that knows 2024-2026 (every program in this swarm
                           is): it needs a forward record before it is Sized
     forward               its forward record (nightly + shadow + real): trades, wins, pnl_usd, mean_rom, lcb80,
                           negative (>= 20 trades and P&L below zero)
+    version_created_at    when that version was written (UTC ISO): a Sized move counts only the forward record of
+                          sessions after it (the forward embargo, Sept 29, 2026; `league/live/step.py` `_move_band`)
+    version_selected_at   when the gate selected the banded version (UTC epoch); fresh forward also starts after this
+                          so practice cannot select an old version and reuse its selection period as evaluation
 
-THE OBSERVE BAND (the sprint, B4, Sept 26, 2026): `observe(root)` -> one SHADOW-ONLY row per alive Gym-band family that
-has a validated version (its state's `validation_version`: the current best version the tournament validated), whatever
-the validation line or the bundle said. The live path runs it in the shadow book (`<family>@<version>:o`) with the version
-pinned for a session: never real, never tuition, never a forward row, never a band move. A family never validated has no
-row until it is; a version whose own program review failed, or that the gate refused, has none. Each row says
-`observe: True`, `holdout_passed: False` and `validation_passed: False`, so nothing that reads it can take it for a
-Candidate. `observe(root, family=f, version=n)` is the pinned version `n` of
-`f` while `f` is alive and still in the Gym band ([] otherwise): what the live path admits a pinned instance's shadow
-opens against.
+THE PRACTICE LEAGUE (the observe band: the sprint, B4, Sept 26, 2026; the Train tier Sept 29, 2026): `observe(root)` ->
+one SHADOW-ONLY row per alive Gym-band family that has a version to practise, in one of two tiers:
+
+- "validated": its state's `validation_version` (the current best version the tournament validated), with an actual
+  successful replay on the current image and bundle, whatever the validation line said;
+- "train": no validated version, but an ELIGIBLE TRAIN VERSION: the version the tournament validates next
+  (`Tournament.candidate_version`: the submitted best, else the best by Train score) that was not demoted (a loss at 1.5x,
+  `robust_failed`, or a failed drift screen, `drift_failed`; a demotion also clears the best, so this is a belt), backed
+  by an eligible Train replay or completed Validation replay on the current image and bundle.
+
+The live path runs each row in the shadow book (`<family>@<version>:o`) with the version pinned for a session: never
+real, never tuition, never a forward row, never a band move. A version whose own program review failed, or that the
+gate refused, has no row. Each row says `observe: True`, `holdout_passed: False` and `validation_passed: False`, so
+nothing that reads it can take it for a Candidate, and carries its `tier`, `lineage`, `best_train` and `needs_roots`
+(the roots its program's NEEDS names: what the live path reads for it). THE ORDER (the live path admits in it, under its
+caps): the validated tier by validation t (highest first, unknown last), then the Train tier by Train score (highest
+first, unknown last), ties by family id. The validation t orders the House's admissions only; it is never shown to
+research. `observe(root, family=f, version=n)` is the pinned version `n` of `f` while `f` is alive, still in the Gym
+band and has a version in either tier, and `n` (when it is not the validated version) was not demoted ([] otherwise):
+what the live path admits a pinned instance's shadow opens against.
 
 `read(root, family=f)` and `observe(root, family=f)` read one family only (the live path's per-minute admissions). The
 Gym bundle's version is built once per `BUNDLE_TTL` seconds a process, not once per call (it reads and hashes every file
@@ -49,12 +66,15 @@ Standard library only.
 
 from __future__ import annotations
 
+import functools
+import gzip
+import json
 import math
 import sqlite3
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from . import DB_NAME, settings
 from .store import loads
@@ -64,6 +84,24 @@ LIVE_BANDS = ("candidate", "probe", "sized")
 BUNDLE_TTL = 300.0
 _bundle_cache: tuple[float, str] | None = None
 _bundle_lock = threading.Lock()
+
+
+def current_banded_evaluator(state: dict[str, Any], sha: str) -> bool:
+    """A band label alone cannot carry old PARAMS semantics into current execution.
+
+    Pin execution source and engine/parameter versions as well as the exact program. A doc-only bundle change
+    does not erase a genuine forward band; an engine semantic change requires new qualification.
+    """
+    from ..gym import ENGINE_VERSION
+    from ..gym.experiment import CONTRACT_VERSION
+    from .evaluator import execution_fingerprint
+
+    proof = state.get("banded_evaluator") or {}
+    return (proof.get("engine") == ENGINE_VERSION and proof.get("parameter_contract") == CONTRACT_VERSION and
+            proof.get("execution_sha256") == execution_fingerprint() and
+            proof.get("run_sha") == sha and bool(proof.get("holdout_bundle")) and
+            str(proof["holdout_bundle"]).startswith(ENGINE_VERSION + "-") and
+            proof.get("validation_bundle") == proof.get("holdout_bundle"))
 
 
 def _bundle() -> str | None:
@@ -89,8 +127,8 @@ def _bundle() -> str | None:
 
 def _families(db: sqlite3.Connection, family: str | None, *, gym_only: bool = False) -> list[dict[str, Any]]:
     where = "retired_at IS NULL" + (" AND band='gym'" if gym_only else "") + (" AND id=?" if family is not None else "")
-    return [dict(r) for r in db.execute(f"SELECT id, band, structure, roots, state FROM families WHERE {where} ORDER BY id",
-                                        (() if family is None else (str(family),)))]
+    return [dict(r) for r in db.execute(f"SELECT id, band, structure, roots, state, lineage, best_version, best_train FROM "
+                                        f"families WHERE {where} ORDER BY id", (() if family is None else (str(family),)))]
 
 
 def read(root: str | Path, *, family: str | None = None) -> list[dict[str, Any]]:
@@ -116,7 +154,8 @@ def read(root: str | Path, *, family: str | None = None) -> list[dict[str, Any]]
                     wanted[fam["id"]] = int(state["validation_version"])  # tuition: checked against its review below
             versions = {}
             for fid, n in wanted.items():
-                row = db.execute("SELECT n, sha, params, path FROM versions WHERE family=? AND n=?", (fid, n)).fetchone()
+                row = db.execute("SELECT n, sha, params, path, created_at FROM versions WHERE family=? AND n=?",
+                                 (fid, n)).fetchone()
                 if row is not None:
                     versions[fid] = dict(row)
         finally:
@@ -137,6 +176,8 @@ def read(root: str | Path, *, family: str | None = None) -> list[dict[str, Any]]
         from .gate import run_sha
 
         sha = run_sha({"sha": v["sha"], "params": params})
+        if fam["band"] in LIVE_BANDS and not current_banded_evaluator(state, sha):
+            continue  # preserved historical band/positions, but no new entry under unqualified semantics
         if fam["band"] == "gym":
             if not image or state.get("validation_image") != image or not bundle or state.get("validation_bundle") != bundle:
                 continue
@@ -146,6 +187,10 @@ def read(root: str | Path, *, family: str | None = None) -> list[dict[str, Any]]
             review = state.get("review") or {}
             outcome = state.get("gate_outcome") or {}
             if review.get("sha") != sha or review.get("verdict") != "pass" or (review.get("audit") or {}).get("verdict") != "pass":
+                continue
+            from ..gym.review_contract import review_contract
+
+            if review.get("contract_sha") != review_contract()["sha256"] or (review.get("audit") or {}).get("contract_sha") != review_contract()["sha256"]:
                 continue
             if outcome.get("sha") == sha and outcome.get("result") in ("refused", "failed", "demoted"):
                 continue
@@ -157,34 +202,122 @@ def read(root: str | Path, *, family: str | None = None) -> list[dict[str, Any]]
             "typical_max_loss_usd": (state.get("typical_by_version") or {}).get(str(v["n"]),
                 state.get("typical_max_loss_usd") if state.get("validation_version") == v["n"] else None),
             "seed_era": True, "forward": state.get("forward"),
+            # When the version was written (UTC): the live path's Sized move counts only the forward record of sessions
+            # after it (the forward embargo, Sept 29, 2026: `OptionsLive._move_band`).
+            "version_created_at": v.get("created_at"),
+            "version_selected_at": state.get("banded_at"),
         })
     return out
 
 
+TIERS = ("validated", "train")
+
+
+def _count(value: Any) -> int | None:
+    """A positive int (a version number), else None."""
+    return int(value) if isinstance(value, int) and not isinstance(value, bool) and value >= 1 else None
+
+
+def _finite(value: Any) -> float | None:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) else None
+
+
+def demoted(state: Mapping[str, Any], n: int) -> bool:
+    """Version `n` lost at 1.5x (`robust_failed`) or failed the drift screen (`drift_failed`)."""
+    robust = {int(v) for v in (state.get("robust_failed") or []) if isinstance(v, int) and not isinstance(v, bool)}
+    return int(n) in robust or str(int(n)) in (state.get("drift_failed") or {})
+
+
+def practice_tier(fam: Mapping[str, Any], state: Mapping[str, Any]) -> tuple[str, int] | None:
+    """(tier, version) of a family's practice row (the module docstring), or None: its validated version, else its
+    eligible Train version (the tournament's candidate, `Tournament.candidate_version`, not demoted)."""
+    validated = _count(state.get("validation_version"))
+    if validated is not None:
+        return "validated", validated
+    n = _count(fam.get("best_version")) if fam.get("best_version") else _count(state.get("best_train_version"))
+    if n is not None and not demoted(state, n):
+        return "train", n
+    return None
+
+
+def priority(row: Mapping[str, Any]) -> tuple:
+    """The practice league's admission order (the module docstring): validated by validation t, then Train by Train
+    score, each highest first with unknown last, then by family id."""
+    if row.get("tier", "validated") == "validated":
+        t = _finite(row.get("validation_t"))
+        return (0, t is None, -(t or 0.0), str(row.get("family")))
+    b = _finite(row.get("best_train"))
+    return (1, b is None, -(b or 0.0), str(row.get("family")))
+
+
+@functools.lru_cache(maxsize=1024)
+def _needs_roots(code: str, fallback: tuple[str, ...]) -> tuple[str, ...]:
+    try:
+        from .researcher import needs_roots
+    except Exception:  # noqa: BLE001 - the House can always fall back to the family's roots
+        return fallback
+    try:
+        return tuple(needs_roots(code, fallback))
+    except Exception:  # noqa: BLE001
+        return fallback
+
+
+def _current_practice_run(db: sqlite3.Connection, root: Path, fid: str, n: int, tier: str,
+                          image: Any, bundle: Any) -> bool:
+    """New cohorts need real current-evaluator evidence, not a surviving best/validation label."""
+    if not image or not bundle:
+        return False
+    windows = ("validation", "validation") if tier == "validated" else ("train", "validation")
+    rows = db.execute("SELECT summary,path,window FROM runs WHERE family=? AND version=? AND window IN (?,?) "
+                      "AND stress=1.0 AND status='ok' ORDER BY at DESC LIMIT 30", (fid, n, *windows))
+    for row in rows:
+        summary = loads(row["summary"], {}) or {}
+        result = summary
+        if "gym_bundle" not in summary and row["path"]:
+            try:
+                result = json.loads(gzip.decompress((root / row["path"]).read_bytes()))
+            except (OSError, ValueError, TypeError):
+                continue
+        if result.get("gym_image") != image or result.get("gym_bundle") != bundle:
+            continue
+        if row["window"] == "validation" or summary.get("train_eligible") is True:
+            return True
+    return False
+
+
 def observe(root: str | Path, *, family: str | None = None, version: int | None = None) -> list[dict[str, Any]]:
-    """The observe band's rows (the module docstring), the likeliest first (validation t, then id). `family` narrows to
-    one family; with `version`, that family's version `version` (a pinned one) instead of its current validated version.
-    [] when there is no store. A store that cannot be read within a second RAISES (`sqlite3.Error`), unlike `read`: the
-    live path then keeps the observe instances and pins it has, rather than taking an unreadable store for an empty band
-    and pinning afresh in the middle of a session."""
+    """The practice league's rows (the module docstring), in its admission order (`priority`). `family` narrows to one
+    family; with `version`, that family's version `version` (a pinned one) instead of its current one. [] when there is no
+    store. A store that cannot be read within a second RAISES (`sqlite3.Error`), unlike `read`: the live path then keeps
+    the observe instances and pins it has, rather than taking an unreadable store for an empty band and pinning afresh in
+    the middle of a session."""
     path = Path(root) / DB_NAME
     if not path.exists() or (version is not None and family is None):
         return []
+    image, bundle = settings.load(root)["gym"]["image_checkpoint"], _bundle()
     db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1.0)
     db.row_factory = sqlite3.Row
     try:
         fams = _families(db, family, gym_only=True)
-        versions = {}
+        versions, tiers = {}, {}
         for fam in fams:
             state = loads(fam["state"], {}) or {}
             fam["state"] = state
-            validated = state.get("validation_version")
-            if isinstance(validated, bool) or not isinstance(validated, int) or validated < 1:
-                continue  # never validated: no row until it is
-            n = validated if version is None else int(version)
+            tier = practice_tier(fam, state)
+            if tier is None:
+                continue  # no validated and no eligible Train version: no row until it has one
+            if version is None:
+                name, n = tier
+            else:
+                n = int(version)
+                name = "validated" if n == _count(state.get("validation_version")) else "train"
+                if name == "train" and demoted(state, n):
+                    continue  # the pinned Train version was demoted since: it winds down
+            if not _current_practice_run(db, Path(root), fam["id"], n, name, image, bundle):
+                continue
             row = db.execute("SELECT n, sha, params, path FROM versions WHERE family=? AND n=?", (fam["id"], n)).fetchone()
             if row is not None:
-                versions[fam["id"]] = dict(row)
+                versions[fam["id"]], tiers[fam["id"]] = dict(row), name
     finally:
         db.close()
     from .gate import run_sha
@@ -205,16 +338,18 @@ def observe(root: str | Path, *, family: str | None = None, version: int | None 
         if (review.get("sha") == sha and review.get("verdict") == "fail") or (
                 outcome.get("sha") == sha and outcome.get("result") == "refused"):
             continue  # this exact version's program review failed, or the gate refused it: not even shadow
-        t = (state.get("validation_numbers") or {}).get("t")
-        t = float(t) if isinstance(t, (int, float)) and not isinstance(t, bool) and math.isfinite(t) else None
+        t = _finite((state.get("validation_numbers") or {}).get("t"))
+        roots = [str(r).upper() for r in loads(fam["roots"], []) or []]
         out.append({
-            "family": fam["id"], "band": "gym", "observe": True, "structure": fam["structure"], "roots": loads(fam["roots"], []),
+            "family": fam["id"], "band": "gym", "observe": True, "tier": tiers[fam["id"]], "lineage": fam.get("lineage"),
+            "structure": fam["structure"], "roots": roots, "needs_roots": list(_needs_roots(code, tuple(roots))),
             "holdout_passed": False, "validation_passed": False, "version": int(v["n"]), "code": code, "params": params,
-            "run_sha": sha, "typical_max_loss_usd": None, "seed_era": True,
-            "forward": None, "validated_version": int(state["validation_version"]), "validation_t": t,
+            "run_sha": sha, "typical_max_loss_usd": None, "seed_era": True, "forward": None,
+            "validated_version": _count(state.get("validation_version")), "validation_t": t,
+            "best_train": _finite(fam.get("best_train")),
         })
-    out.sort(key=lambda r: (r["validation_t"] is None, -(r["validation_t"] or 0.0), r["family"]))
+    out.sort(key=priority)
     return out
 
 
-__all__ = ["read", "observe", "LIVE_BANDS", "BUNDLE_TTL"]
+__all__ = ["read", "observe", "priority", "practice_tier", "demoted", "LIVE_BANDS", "TIERS", "BUNDLE_TTL"]

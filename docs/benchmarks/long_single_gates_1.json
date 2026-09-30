@@ -1,0 +1,1061 @@
+{
+  "title": "Frozen long-single statistical gate diagnostic, not a real qualification",
+  "frozen_source_commit": "2fe5037cd555e99f8c9c537c1046c0d88281ebc6",
+  "base_commit": "54bbcdea",
+  "protocol_sha": "926265775017ab8279a8a79f03059a72283370dc242b7b9b306c3405457cf9a2",
+  "generator_sha": "f1a0906c448779d80ab242c137f131de67c6fcf927838c259d2b0d30b78aeebd",
+  "evaluator_sha": "22f90c4f3fbdb9e3b5d5528474331b77fc85091fdedd74f267088bf8c3cfb005",
+  "evaluator_sources": {
+    "league/stats.py": "866ecda27a79bbeaba033ef92847093e182a0dbe2bd1041a568c2dbf81a302d3",
+    "league/gym/results.py": "1ad0ca4dc21ff3a758971a7092b058d014550d7e8f03a88666abf712062f3fc5",
+    "league/swarm/benchmarks.py": "f430c9532a70d5e0dcf7cad49094ac814a30eac89630d2c6b2d1e55550474692",
+    "league/swarm/evidence.py": "fee30d80b9a6afac99045b777d455a7284bdec21a466a4a6b9a012e88c2e64c9",
+    "league/swarm/researcher.py": "dd08bda7dfca5df9892a4c24891e6e5490429066ca34481d57ea8ebf0449d3d6",
+    "league/swarm/store.py": "543fde8d39eff0c3b938092608e7fb292c7f5c3dc11ac3dd37819acffead9202"
+  },
+  "runtime": {
+    "python": "3.14.7 (main, Aug 10 2026, 07:46:56) [GCC 16.1.1 20260728]"
+  },
+  "replications": 64,
+  "protocol": {
+    "id": "long-single-gates-1",
+    "train_years": [
+      2020,
+      2021,
+      2022,
+      2023,
+      2024
+    ],
+    "validation_year": 2025,
+    "holdout_year": 2026,
+    "sessions": 252,
+    "capital_usd": 1500.0,
+    "premium_cap_usd": 75.0,
+    "spot_and_strike": 100.0,
+    "contract_multiplier": 100,
+    "round_trip_spread_usd": 1.5,
+    "round_trip_fees_usd": 1.3,
+    "market_drift": 0.001,
+    "market_noise_sd": 0.006,
+    "prior_global_failed_looks": 2,
+    "adaptive_variants": 64,
+    "candidate_limit": 5,
+    "selection": "rank eligible drift-passing Train versions; stress/mid top candidates; continue after validation/holdout failure",
+    "cases": {
+      "sparse_planted_edge": {
+        "trades_per_year": 12,
+        "signal": 0.007,
+        "policy": "forecast",
+        "positive": true
+      },
+      "train_validation_frequency_gap": {
+        "trades_per_year": 48,
+        "signal": 0.007,
+        "policy": "forecast",
+        "positive": true
+      },
+      "incremental_after_drift": {
+        "trades_per_year": 126,
+        "signal": 0.007,
+        "policy": "forecast",
+        "positive": true
+      },
+      "drift_only_directional": {
+        "trades_per_year": 252,
+        "signal": 0.0,
+        "policy": "call",
+        "positive": false
+      },
+      "cost_erased_signal": {
+        "trades_per_year": 126,
+        "signal": 0.0004,
+        "policy": "forecast",
+        "positive": false
+      },
+      "unselected_noise": {
+        "trades_per_year": 126,
+        "signal": 0.0,
+        "policy": "forecast",
+        "positive": false,
+        "noise_control": true
+      },
+      "adaptive_noise": {
+        "trades_per_year": 126,
+        "signal": 0.0,
+        "policy": "forecast",
+        "positive": false,
+        "noise_control": true,
+        "adaptive": true
+      }
+    }
+  },
+  "limitations": [
+    "Invented ATM same-day option terminal payoffs and uniform root returns, not calibrated option chains or market opportunities.",
+    "One contract at a time, same-day closure, no overlap, gap/assignment risk, partial fills, exercise or liquidity failures.",
+    "The strong positive controls deliberately implant a large causal signal; this is a sensitivity test, not a return forecast.",
+    "Positive means positive expected incremental trading P&L after synthetic costs; project/service costs are not recovered here.",
+    "Noise controls include invented carry exactly offsetting base trading costs, making a demanding zero-net-edge control.",
+    "The cash test has known same-day debits and liquidation payoffs; settlement constraints and brokerage permissions are not modeled.",
+    "Independent Monte Carlo worlds do not share Holm history; all looks within each world do. Two synthetic prior failed looks are seeded.",
+    "The frozen five-candidate attempt schedule is a statistical diagnostic, not a simulation of model research or asynchronous scheduling.",
+    "Synthetic holdout is generated data, never the sealed market holdout. Model review, execution and independent forward evidence are excluded.",
+    "Finite false-pass counts and confidence bounds do not establish calibration for real markets, dependence or nonstationarity.",
+    "Frequency-only diagnostic probes cannot qualify a strategy or affect its ranking; they are separately recorded and counted."
+  ],
+  "cohorts": {
+    "development": {
+      "full_report_file_sha256": "dfc7a82ddbffdc548c2245ebc0f844318c09c925094d4e11adb5ec58d7ef3049",
+      "cases_sha256": "22bb40183f061031e5ed5d6f8a2ac26c0237e8fb5d8741d5ebe2a28ffd2ddb03",
+      "elapsed_seconds": 160.206,
+      "frozen_development_sha": null,
+      "cases": {
+        "sparse_planted_edge": {
+          "oracle_positive_incremental_edge": true,
+          "oracle_net_incremental_per_trade": 43.98756799595487,
+          "oracle_gross_directional_drift_per_trade": 0.0,
+          "pipeline_passes": 0,
+          "missed_positive_controls": 64,
+          "false_passes": null,
+          "pass_rate": 0.0,
+          "pass_rate_upper_95": 0.045729702330762456,
+          "train_frequency_rejections": 64,
+          "no_train_eligible_variant": 64,
+          "no_candidate_after_train_and_drift": 64,
+          "frequency_only_diagnostic_rejections": 46,
+          "validation_failed_checks": {},
+          "holdout_failed_checks": {},
+          "train_cash_constrained_variants": 0,
+          "lineage_trials": 192,
+          "holdout_looks": 0,
+          "replication_outcomes_sha256": "631c56f2dd1a21bd67acf02d368be4682b807e1ac3d6fc7e61fdc0bd55484bb2",
+          "train_eligible_worlds": 0,
+          "train_drift_passing_worlds": 64,
+          "candidate_worlds": 0,
+          "candidate_attempts": 0,
+          "validation_attempts": 0,
+          "validation_passes": 0,
+          "train_stress_failures": 0,
+          "baseline_train_pnl_positive_worlds": 64,
+          "baseline_train_pnl_median": 2597.7349999999997,
+          "baseline_score_median": 1.316865,
+          "best_candidate_score_median": null,
+          "validated_versions_histogram": {
+            "0": 64
+          },
+          "lineage_looks_histogram": {
+            "0": 64
+          },
+          "trial_accounting": {
+            "normal_train": 64,
+            "train_robustness": 0,
+            "validation": 0,
+            "holdout": 0,
+            "diagnostic": 128
+          },
+          "diagnostic_failed_checks": {
+            "trades": 64,
+            "days": 64,
+            "t": 17,
+            "dsr": 5,
+            "quarters": 5
+          }
+        },
+        "train_validation_frequency_gap": {
+          "oracle_positive_incremental_edge": true,
+          "oracle_net_incremental_per_trade": 43.98756799595487,
+          "oracle_gross_directional_drift_per_trade": 0.0,
+          "pipeline_passes": 0,
+          "missed_positive_controls": 64,
+          "false_passes": null,
+          "pass_rate": 0.0,
+          "pass_rate_upper_95": 0.045729702330762456,
+          "train_frequency_rejections": 0,
+          "no_train_eligible_variant": 0,
+          "no_candidate_after_train_and_drift": 0,
+          "frequency_only_diagnostic_rejections": 64,
+          "validation_failed_checks": {
+            "trades": 64
+          },
+          "holdout_failed_checks": {},
+          "train_cash_constrained_variants": 0,
+          "lineage_trials": 448,
+          "holdout_looks": 0,
+          "replication_outcomes_sha256": "3723e6b3d0735517ca1d93b0c205aa7ad825b8e2830a951956431253fda05e08",
+          "train_eligible_worlds": 64,
+          "train_drift_passing_worlds": 64,
+          "candidate_worlds": 64,
+          "candidate_attempts": 64,
+          "validation_attempts": 64,
+          "validation_passes": 0,
+          "train_stress_failures": 0,
+          "baseline_train_pnl_positive_worlds": 64,
+          "baseline_train_pnl_median": 10474.05,
+          "baseline_score_median": 4.2092,
+          "best_candidate_score_median": 4.2092,
+          "validated_versions_histogram": {
+            "1": 64
+          },
+          "lineage_looks_histogram": {
+            "0": 64
+          },
+          "trial_accounting": {
+            "normal_train": 64,
+            "train_robustness": 128,
+            "validation": 128,
+            "holdout": 0,
+            "diagnostic": 128
+          },
+          "diagnostic_failed_checks": {
+            "trades": 64
+          }
+        },
+        "incremental_after_drift": {
+          "oracle_positive_incremental_edge": true,
+          "oracle_net_incremental_per_trade": 43.98756799595487,
+          "oracle_gross_directional_drift_per_trade": 0.0,
+          "pipeline_passes": 64,
+          "missed_positive_controls": 0,
+          "false_passes": null,
+          "pass_rate": 1.0,
+          "pass_rate_upper_95": 1.0,
+          "train_frequency_rejections": 0,
+          "no_train_eligible_variant": 0,
+          "no_candidate_after_train_and_drift": 0,
+          "frequency_only_diagnostic_rejections": 0,
+          "validation_failed_checks": {},
+          "holdout_failed_checks": {},
+          "train_cash_constrained_variants": 0,
+          "lineage_trials": 512,
+          "holdout_looks": 64,
+          "replication_outcomes_sha256": "1399ff5ea4eee72aa1665aea8d28e8243e8d02d65ab5a68bd4d94ebeb726633c",
+          "train_eligible_worlds": 64,
+          "train_drift_passing_worlds": 64,
+          "candidate_worlds": 64,
+          "candidate_attempts": 64,
+          "validation_attempts": 64,
+          "validation_passes": 64,
+          "train_stress_failures": 0,
+          "baseline_train_pnl_positive_worlds": 64,
+          "baseline_train_pnl_median": 27757.555,
+          "baseline_score_median": 7.59915,
+          "best_candidate_score_median": 7.59915,
+          "validated_versions_histogram": {
+            "1": 64
+          },
+          "lineage_looks_histogram": {
+            "1": 64
+          },
+          "trial_accounting": {
+            "normal_train": 64,
+            "train_robustness": 128,
+            "validation": 128,
+            "holdout": 64,
+            "diagnostic": 128
+          },
+          "diagnostic_failed_checks": {}
+        },
+        "drift_only_directional": {
+          "oracle_positive_incremental_edge": false,
+          "oracle_net_incremental_per_trade": -2.8,
+          "oracle_gross_directional_drift_per_trade": 5.240562612162336,
+          "pipeline_passes": 0,
+          "missed_positive_controls": null,
+          "false_passes": 0,
+          "pass_rate": 0.0,
+          "pass_rate_upper_95": 0.045729702330762456,
+          "train_frequency_rejections": 0,
+          "no_train_eligible_variant": 0,
+          "no_candidate_after_train_and_drift": 64,
+          "frequency_only_diagnostic_rejections": 0,
+          "validation_failed_checks": {},
+          "holdout_failed_checks": {},
+          "train_cash_constrained_variants": 0,
+          "lineage_trials": 192,
+          "holdout_looks": 0,
+          "replication_outcomes_sha256": "35eaa673d439bc618ea449bf7245eebf0ebb1173af652772613fd5166f776d09",
+          "train_eligible_worlds": 64,
+          "train_drift_passing_worlds": 0,
+          "candidate_worlds": 0,
+          "candidate_attempts": 0,
+          "validation_attempts": 0,
+          "validation_passes": 0,
+          "train_stress_failures": 0,
+          "baseline_train_pnl_positive_worlds": 64,
+          "baseline_train_pnl_median": 3015.4849999999997,
+          "baseline_score_median": -0.2453775,
+          "best_candidate_score_median": null,
+          "validated_versions_histogram": {
+            "0": 64
+          },
+          "lineage_looks_histogram": {
+            "0": 64
+          },
+          "trial_accounting": {
+            "normal_train": 64,
+            "train_robustness": 0,
+            "validation": 0,
+            "holdout": 0,
+            "diagnostic": 128
+          },
+          "diagnostic_failed_checks": {
+            "t": 54,
+            "dsr": 42,
+            "quarters": 16,
+            "mean_positive": 7,
+            "stress": 11
+          }
+        },
+        "cost_erased_signal": {
+          "oracle_positive_incremental_edge": false,
+          "oracle_net_incremental_per_trade": -0.7615099820540214,
+          "oracle_gross_directional_drift_per_trade": 0.0,
+          "pipeline_passes": 0,
+          "missed_positive_controls": null,
+          "false_passes": 0,
+          "pass_rate": 0.0,
+          "pass_rate_upper_95": 0.045729702330762456,
+          "train_frequency_rejections": 7,
+          "no_train_eligible_variant": 7,
+          "no_candidate_after_train_and_drift": 64,
+          "frequency_only_diagnostic_rejections": 0,
+          "validation_failed_checks": {},
+          "holdout_failed_checks": {},
+          "train_cash_constrained_variants": 11,
+          "lineage_trials": 192,
+          "holdout_looks": 0,
+          "replication_outcomes_sha256": "f5e3d16154041b3acb514a07dd30486689e14215384636f1b12dc698a8b5cdc9",
+          "train_eligible_worlds": 57,
+          "train_drift_passing_worlds": 0,
+          "candidate_worlds": 0,
+          "candidate_attempts": 0,
+          "validation_attempts": 0,
+          "validation_passes": 0,
+          "train_stress_failures": 0,
+          "baseline_train_pnl_positive_worlds": 29,
+          "baseline_train_pnl_median": -144.4,
+          "baseline_score_median": -1.8313375,
+          "best_candidate_score_median": null,
+          "validated_versions_histogram": {
+            "0": 64
+          },
+          "lineage_looks_histogram": {
+            "0": 64
+          },
+          "trial_accounting": {
+            "normal_train": 64,
+            "train_robustness": 0,
+            "validation": 0,
+            "holdout": 0,
+            "diagnostic": 128
+          },
+          "diagnostic_failed_checks": {
+            "mean_positive": 34,
+            "t": 62,
+            "dsr": 62,
+            "quarters": 43,
+            "stress": 37
+          }
+        },
+        "unselected_noise": {
+          "oracle_positive_incremental_edge": false,
+          "oracle_net_incremental_per_trade": 0.0,
+          "oracle_gross_directional_drift_per_trade": 0.0,
+          "pipeline_passes": 0,
+          "missed_positive_controls": null,
+          "false_passes": 0,
+          "pass_rate": 0.0,
+          "pass_rate_upper_95": 0.045729702330762456,
+          "train_frequency_rejections": 4,
+          "no_train_eligible_variant": 4,
+          "no_candidate_after_train_and_drift": 59,
+          "frequency_only_diagnostic_rejections": 0,
+          "validation_failed_checks": {
+            "t": 5,
+            "dsr": 5,
+            "quarters": 5,
+            "mean_positive": 3,
+            "stress": 3
+          },
+          "holdout_failed_checks": {},
+          "train_cash_constrained_variants": 5,
+          "lineage_trials": 212,
+          "holdout_looks": 0,
+          "replication_outcomes_sha256": "328a007e48a5cda90e01b45b71691f11182c01321ab2a253e7e01d4189e058a7",
+          "train_eligible_worlds": 60,
+          "train_drift_passing_worlds": 5,
+          "candidate_worlds": 5,
+          "candidate_attempts": 5,
+          "validation_attempts": 5,
+          "validation_passes": 0,
+          "train_stress_failures": 0,
+          "baseline_train_pnl_positive_worlds": 34,
+          "baseline_train_pnl_median": 18.064999999999998,
+          "baseline_score_median": -1.6634525,
+          "best_candidate_score_median": -0.19684,
+          "validated_versions_histogram": {
+            "0": 59,
+            "1": 5
+          },
+          "lineage_looks_histogram": {
+            "0": 64
+          },
+          "trial_accounting": {
+            "normal_train": 64,
+            "train_robustness": 10,
+            "validation": 10,
+            "holdout": 0,
+            "diagnostic": 128
+          },
+          "diagnostic_failed_checks": {
+            "mean_positive": 33,
+            "t": 64,
+            "dsr": 61,
+            "quarters": 49,
+            "stress": 39
+          }
+        },
+        "adaptive_noise": {
+          "oracle_positive_incremental_edge": false,
+          "oracle_net_incremental_per_trade": 0.0,
+          "oracle_gross_directional_drift_per_trade": 0.0,
+          "pipeline_passes": 0,
+          "missed_positive_controls": null,
+          "false_passes": 0,
+          "pass_rate": 0.0,
+          "pass_rate_upper_95": 0.045729702330762456,
+          "train_frequency_rejections": 0,
+          "no_train_eligible_variant": 0,
+          "no_candidate_after_train_and_drift": 16,
+          "frequency_only_diagnostic_rejections": 0,
+          "validation_failed_checks": {
+            "t": 133,
+            "dsr": 134,
+            "quarters": 90,
+            "mean_positive": 59,
+            "stress": 69
+          },
+          "holdout_failed_checks": {},
+          "train_cash_constrained_variants": 313,
+          "lineage_trials": 4640,
+          "holdout_looks": 0,
+          "replication_outcomes_sha256": "7e76f92fe05adf706e5a22a2d5638f1257d49f3d93e3ed2b4002acd850056e2d",
+          "train_eligible_worlds": 64,
+          "train_drift_passing_worlds": 48,
+          "candidate_worlds": 48,
+          "candidate_attempts": 136,
+          "validation_attempts": 136,
+          "validation_passes": 0,
+          "train_stress_failures": 0,
+          "baseline_train_pnl_positive_worlds": 34,
+          "baseline_train_pnl_median": 18.064999999999998,
+          "baseline_score_median": -1.6634525,
+          "best_candidate_score_median": 0.0903225,
+          "validated_versions_histogram": {
+            "0": 16,
+            "1": 11,
+            "2": 11,
+            "3": 11,
+            "4": 5,
+            "5": 10
+          },
+          "lineage_looks_histogram": {
+            "0": 64
+          },
+          "trial_accounting": {
+            "normal_train": 4096,
+            "train_robustness": 272,
+            "validation": 272,
+            "holdout": 0,
+            "diagnostic": 0
+          },
+          "diagnostic_failed_checks": {}
+        }
+      }
+    },
+    "confirmation": {
+      "full_report_file_sha256": "c3605edd6e9f389c9fb261a62c9f86040dccbfe65e3b36e5bc76bd98b08fcae3",
+      "cases_sha256": "5dc06463c0c398c38c896e8a37ff34eea257d661d37fe337e10053aba33c14dc",
+      "elapsed_seconds": 159.861,
+      "frozen_development_sha": "5482d0907fa3e0942f621feb3e21871b25bea822b4a9a1ccbfaf39be2399bdc8",
+      "cases": {
+        "sparse_planted_edge": {
+          "oracle_positive_incremental_edge": true,
+          "oracle_net_incremental_per_trade": 43.98756799595487,
+          "oracle_gross_directional_drift_per_trade": 0.0,
+          "pipeline_passes": 0,
+          "missed_positive_controls": 64,
+          "false_passes": null,
+          "pass_rate": 0.0,
+          "pass_rate_upper_95": 0.045729702330762456,
+          "train_frequency_rejections": 64,
+          "no_train_eligible_variant": 64,
+          "no_candidate_after_train_and_drift": 64,
+          "frequency_only_diagnostic_rejections": 55,
+          "validation_failed_checks": {},
+          "holdout_failed_checks": {},
+          "train_cash_constrained_variants": 0,
+          "lineage_trials": 192,
+          "holdout_looks": 0,
+          "replication_outcomes_sha256": "564bfd37b5fa9f141c43a80ac9c6233c8d44aaf1dd1658346bd0d80829ae0fd2",
+          "train_eligible_worlds": 0,
+          "train_drift_passing_worlds": 64,
+          "candidate_worlds": 0,
+          "candidate_attempts": 0,
+          "validation_attempts": 0,
+          "validation_passes": 0,
+          "train_stress_failures": 0,
+          "baseline_train_pnl_positive_worlds": 64,
+          "baseline_train_pnl_median": 2690.5699999999997,
+          "baseline_score_median": 1.4572875,
+          "best_candidate_score_median": null,
+          "validated_versions_histogram": {
+            "0": 64
+          },
+          "lineage_looks_histogram": {
+            "0": 64
+          },
+          "trial_accounting": {
+            "normal_train": 64,
+            "train_robustness": 0,
+            "validation": 0,
+            "holdout": 0,
+            "diagnostic": 128
+          },
+          "diagnostic_failed_checks": {
+            "trades": 64,
+            "days": 64,
+            "quarters": 3,
+            "t": 7,
+            "dsr": 2
+          }
+        },
+        "train_validation_frequency_gap": {
+          "oracle_positive_incremental_edge": true,
+          "oracle_net_incremental_per_trade": 43.98756799595487,
+          "oracle_gross_directional_drift_per_trade": 0.0,
+          "pipeline_passes": 0,
+          "missed_positive_controls": 64,
+          "false_passes": null,
+          "pass_rate": 0.0,
+          "pass_rate_upper_95": 0.045729702330762456,
+          "train_frequency_rejections": 0,
+          "no_train_eligible_variant": 0,
+          "no_candidate_after_train_and_drift": 0,
+          "frequency_only_diagnostic_rejections": 64,
+          "validation_failed_checks": {
+            "trades": 64
+          },
+          "holdout_failed_checks": {},
+          "train_cash_constrained_variants": 0,
+          "lineage_trials": 448,
+          "holdout_looks": 0,
+          "replication_outcomes_sha256": "0205681af45718d41301544abec9ee9c50d0e3db36b78b5b70543561ffe50c2a",
+          "train_eligible_worlds": 64,
+          "train_drift_passing_worlds": 64,
+          "candidate_worlds": 64,
+          "candidate_attempts": 64,
+          "validation_attempts": 64,
+          "validation_passes": 0,
+          "train_stress_failures": 0,
+          "baseline_train_pnl_positive_worlds": 64,
+          "baseline_train_pnl_median": 10606.345000000001,
+          "baseline_score_median": 4.3365,
+          "best_candidate_score_median": 4.3365,
+          "validated_versions_histogram": {
+            "1": 64
+          },
+          "lineage_looks_histogram": {
+            "0": 64
+          },
+          "trial_accounting": {
+            "normal_train": 64,
+            "train_robustness": 128,
+            "validation": 128,
+            "holdout": 0,
+            "diagnostic": 128
+          },
+          "diagnostic_failed_checks": {
+            "trades": 64
+          }
+        },
+        "incremental_after_drift": {
+          "oracle_positive_incremental_edge": true,
+          "oracle_net_incremental_per_trade": 43.98756799595487,
+          "oracle_gross_directional_drift_per_trade": 0.0,
+          "pipeline_passes": 64,
+          "missed_positive_controls": 0,
+          "false_passes": null,
+          "pass_rate": 1.0,
+          "pass_rate_upper_95": 1.0,
+          "train_frequency_rejections": 0,
+          "no_train_eligible_variant": 0,
+          "no_candidate_after_train_and_drift": 0,
+          "frequency_only_diagnostic_rejections": 0,
+          "validation_failed_checks": {},
+          "holdout_failed_checks": {},
+          "train_cash_constrained_variants": 0,
+          "lineage_trials": 512,
+          "holdout_looks": 64,
+          "replication_outcomes_sha256": "9c7a7dfb9d2358f8ac22a898d6b5869146cffb9c2addc567cd23705d683c1aab",
+          "train_eligible_worlds": 64,
+          "train_drift_passing_worlds": 64,
+          "candidate_worlds": 64,
+          "candidate_attempts": 64,
+          "validation_attempts": 64,
+          "validation_passes": 64,
+          "train_stress_failures": 0,
+          "baseline_train_pnl_positive_worlds": 64,
+          "baseline_train_pnl_median": 28018.254999999997,
+          "baseline_score_median": 7.5474,
+          "best_candidate_score_median": 7.5474,
+          "validated_versions_histogram": {
+            "1": 64
+          },
+          "lineage_looks_histogram": {
+            "1": 64
+          },
+          "trial_accounting": {
+            "normal_train": 64,
+            "train_robustness": 128,
+            "validation": 128,
+            "holdout": 64,
+            "diagnostic": 128
+          },
+          "diagnostic_failed_checks": {}
+        },
+        "drift_only_directional": {
+          "oracle_positive_incremental_edge": false,
+          "oracle_net_incremental_per_trade": -2.8,
+          "oracle_gross_directional_drift_per_trade": 5.240562612162336,
+          "pipeline_passes": 0,
+          "missed_positive_controls": null,
+          "false_passes": 0,
+          "pass_rate": 0.0,
+          "pass_rate_upper_95": 0.045729702330762456,
+          "train_frequency_rejections": 1,
+          "no_train_eligible_variant": 1,
+          "no_candidate_after_train_and_drift": 64,
+          "frequency_only_diagnostic_rejections": 0,
+          "validation_failed_checks": {},
+          "holdout_failed_checks": {},
+          "train_cash_constrained_variants": 1,
+          "lineage_trials": 192,
+          "holdout_looks": 0,
+          "replication_outcomes_sha256": "cb0fccc97e1febf815ee60c465c83b1d5dbf1ede09f33b2619bc53c7863fade2",
+          "train_eligible_worlds": 63,
+          "train_drift_passing_worlds": 0,
+          "candidate_worlds": 0,
+          "candidate_attempts": 0,
+          "validation_attempts": 0,
+          "validation_passes": 0,
+          "train_stress_failures": 0,
+          "baseline_train_pnl_positive_worlds": 63,
+          "baseline_train_pnl_median": 3189.5950000000003,
+          "baseline_score_median": -0.047385,
+          "best_candidate_score_median": null,
+          "validated_versions_histogram": {
+            "0": 64
+          },
+          "lineage_looks_histogram": {
+            "0": 64
+          },
+          "trial_accounting": {
+            "normal_train": 64,
+            "train_robustness": 0,
+            "validation": 0,
+            "holdout": 0,
+            "diagnostic": 128
+          },
+          "diagnostic_failed_checks": {
+            "mean_positive": 14,
+            "t": 54,
+            "dsr": 48,
+            "quarters": 18,
+            "stress": 18
+          }
+        },
+        "cost_erased_signal": {
+          "oracle_positive_incremental_edge": false,
+          "oracle_net_incremental_per_trade": -0.7615099820540214,
+          "oracle_gross_directional_drift_per_trade": 0.0,
+          "pipeline_passes": 0,
+          "missed_positive_controls": null,
+          "false_passes": 0,
+          "pass_rate": 0.0,
+          "pass_rate_upper_95": 0.045729702330762456,
+          "train_frequency_rejections": 5,
+          "no_train_eligible_variant": 5,
+          "no_candidate_after_train_and_drift": 64,
+          "frequency_only_diagnostic_rejections": 0,
+          "validation_failed_checks": {},
+          "holdout_failed_checks": {},
+          "train_cash_constrained_variants": 13,
+          "lineage_trials": 192,
+          "holdout_looks": 0,
+          "replication_outcomes_sha256": "534869ddb2bc40f9b7d3387f24cfe479a04803e8b14d834367689b8a5cf090c6",
+          "train_eligible_worlds": 59,
+          "train_drift_passing_worlds": 0,
+          "candidate_worlds": 0,
+          "candidate_attempts": 0,
+          "validation_attempts": 0,
+          "validation_passes": 0,
+          "train_stress_failures": 0,
+          "baseline_train_pnl_positive_worlds": 24,
+          "baseline_train_pnl_median": -416.36,
+          "baseline_score_median": -2.17496,
+          "best_candidate_score_median": null,
+          "validated_versions_histogram": {
+            "0": 64
+          },
+          "lineage_looks_histogram": {
+            "0": 64
+          },
+          "trial_accounting": {
+            "normal_train": 64,
+            "train_robustness": 0,
+            "validation": 0,
+            "holdout": 0,
+            "diagnostic": 128
+          },
+          "diagnostic_failed_checks": {
+            "mean_positive": 30,
+            "t": 64,
+            "dsr": 61,
+            "quarters": 46,
+            "stress": 37
+          }
+        },
+        "unselected_noise": {
+          "oracle_positive_incremental_edge": false,
+          "oracle_net_incremental_per_trade": 0.0,
+          "oracle_gross_directional_drift_per_trade": 0.0,
+          "pipeline_passes": 0,
+          "missed_positive_controls": null,
+          "false_passes": 0,
+          "pass_rate": 0.0,
+          "pass_rate_upper_95": 0.045729702330762456,
+          "train_frequency_rejections": 1,
+          "no_train_eligible_variant": 1,
+          "no_candidate_after_train_and_drift": 63,
+          "frequency_only_diagnostic_rejections": 0,
+          "validation_failed_checks": {
+            "t": 1,
+            "dsr": 1
+          },
+          "holdout_failed_checks": {},
+          "train_cash_constrained_variants": 2,
+          "lineage_trials": 196,
+          "holdout_looks": 0,
+          "replication_outcomes_sha256": "c41798732ed1b7c7ff2a083b47a20e301f12908f2d13d1bbfee8d917f2e30381",
+          "train_eligible_worlds": 63,
+          "train_drift_passing_worlds": 1,
+          "candidate_worlds": 1,
+          "candidate_attempts": 1,
+          "validation_attempts": 1,
+          "validation_passes": 0,
+          "train_stress_failures": 0,
+          "baseline_train_pnl_positive_worlds": 34,
+          "baseline_train_pnl_median": 65.07,
+          "baseline_score_median": -1.538305,
+          "best_candidate_score_median": 0.08304,
+          "validated_versions_histogram": {
+            "0": 63,
+            "1": 1
+          },
+          "lineage_looks_histogram": {
+            "0": 64
+          },
+          "trial_accounting": {
+            "normal_train": 64,
+            "train_robustness": 2,
+            "validation": 2,
+            "holdout": 0,
+            "diagnostic": 128
+          },
+          "diagnostic_failed_checks": {
+            "mean_positive": 40,
+            "t": 62,
+            "dsr": 61,
+            "quarters": 49,
+            "stress": 43
+          }
+        },
+        "adaptive_noise": {
+          "oracle_positive_incremental_edge": false,
+          "oracle_net_incremental_per_trade": 0.0,
+          "oracle_gross_directional_drift_per_trade": 0.0,
+          "pipeline_passes": 0,
+          "missed_positive_controls": null,
+          "false_passes": 0,
+          "pass_rate": 0.0,
+          "pass_rate_upper_95": 0.045729702330762456,
+          "train_frequency_rejections": 0,
+          "no_train_eligible_variant": 0,
+          "no_candidate_after_train_and_drift": 13,
+          "frequency_only_diagnostic_rejections": 0,
+          "validation_failed_checks": {
+            "t": 135,
+            "dsr": 134,
+            "quarters": 99,
+            "stress": 84,
+            "mean_positive": 67
+          },
+          "holdout_failed_checks": {
+            "bootstrap": 1,
+            "holm": 1
+          },
+          "train_cash_constrained_variants": 284,
+          "lineage_trials": 4649,
+          "holdout_looks": 1,
+          "replication_outcomes_sha256": "c9e849ffdd61acab63bbc02eee0006a145b27d882378032dcc52b0e113dc8c52",
+          "train_eligible_worlds": 64,
+          "train_drift_passing_worlds": 51,
+          "candidate_worlds": 51,
+          "candidate_attempts": 138,
+          "validation_attempts": 138,
+          "validation_passes": 1,
+          "train_stress_failures": 0,
+          "baseline_train_pnl_positive_worlds": 34,
+          "baseline_train_pnl_median": 65.07,
+          "baseline_score_median": -1.538305,
+          "best_candidate_score_median": 0.08304,
+          "validated_versions_histogram": {
+            "0": 13,
+            "1": 14,
+            "2": 10,
+            "3": 12,
+            "4": 7,
+            "5": 8
+          },
+          "lineage_looks_histogram": {
+            "0": 63,
+            "1": 1
+          },
+          "trial_accounting": {
+            "normal_train": 4096,
+            "train_robustness": 276,
+            "validation": 276,
+            "holdout": 1,
+            "diagnostic": 0
+          },
+          "diagnostic_failed_checks": {}
+        }
+      }
+    }
+  },
+  "confirmation_selected_noise_holdout_counterexample": {
+    "replication": 14,
+    "case": "adaptive_noise",
+    "statistical_pipeline_passed": false,
+    "stopped": null,
+    "variants": 64,
+    "train_eligible": 64,
+    "train_frequency_eligible": 64,
+    "train_drift_passed": 5,
+    "candidate_count": 5,
+    "baseline_score": -1.26224,
+    "best_candidate_score": 0.38213,
+    "normal_train_pnl": 5.89,
+    "train": null,
+    "train_cash_constrained_variants": 1,
+    "attempts": [
+      {
+        "variant": 11,
+        "train_stress_passed": true,
+        "train_stress_pnl": 1775.46,
+        "validation": {
+          "passed": true,
+          "checks": {
+            "status_ok": true,
+            "trades": true,
+            "days": true,
+            "mean_positive": true,
+            "t": true,
+            "dsr": true,
+            "quarters": true,
+            "stress": true
+          },
+          "numbers": {
+            "trades": 126,
+            "days": 126,
+            "mean": 0.340923,
+            "t": 2.9084,
+            "dsr": 0.998960508527801,
+            "quarters": "4/4",
+            "stress_pnl": 1081.73,
+            "lineage_trials": 68,
+            "validated_versions": 1,
+            "sharpe_traded": 0.25910086532603166,
+            "sharpe_daily": 0.17345,
+            "pnl": 1176.23
+          }
+        },
+        "holdout": {
+          "passed": false,
+          "checks": {
+            "status_ok": true,
+            "pnl": true,
+            "bootstrap": false,
+            "holm": false,
+            "sharpe": true
+          },
+          "p": 0.051,
+          "numbers": {
+            "pnl": 657.89,
+            "mean_daily": 2.6106897177504456,
+            "lcb95": -0.014328220450532237,
+            "p": 0.051,
+            "holm_threshold": 0.016666666666666666,
+            "looks_before": 2,
+            "sharpe_daily": 0.10102626095456693,
+            "draws": 2000,
+            "holm_reachable": true,
+            "validation_sharpe_daily": 0.17345,
+            "days": 252
+          }
+        }
+      },
+      {
+        "variant": 50,
+        "train_stress_passed": true,
+        "train_stress_pnl": 1305.16,
+        "validation": {
+          "passed": false,
+          "checks": {
+            "status_ok": true,
+            "trades": true,
+            "days": true,
+            "mean_positive": true,
+            "t": false,
+            "dsr": false,
+            "quarters": true,
+            "stress": true
+          },
+          "numbers": {
+            "trades": 126,
+            "days": 126,
+            "mean": 0.139413,
+            "t": 1.2212,
+            "dsr": 0.7334807997308082,
+            "quarters": "3/4",
+            "stress_pnl": 434.39,
+            "lineage_trials": 73,
+            "validated_versions": 2,
+            "sharpe_traded": 0.10879314287448422,
+            "sharpe_daily": 0.07883,
+            "pnl": 528.89
+          }
+        },
+        "holdout": null
+      },
+      {
+        "variant": 16,
+        "train_stress_passed": true,
+        "train_stress_pnl": 988.56,
+        "validation": {
+          "passed": false,
+          "checks": {
+            "status_ok": true,
+            "trades": true,
+            "days": true,
+            "mean_positive": true,
+            "t": false,
+            "dsr": false,
+            "quarters": true,
+            "stress": true
+          },
+          "numbers": {
+            "trades": 126,
+            "days": 126,
+            "mean": 0.113513,
+            "t": 1.0112,
+            "dsr": 0.5509888647567612,
+            "quarters": "3/4",
+            "stress_pnl": 314.87,
+            "lineage_trials": 77,
+            "validated_versions": 3,
+            "sharpe_traded": 0.09008485594061452,
+            "sharpe_daily": 0.06331,
+            "pnl": 409.37
+          }
+        },
+        "holdout": null
+      },
+      {
+        "variant": 59,
+        "train_stress_passed": true,
+        "train_stress_pnl": 1083.24,
+        "validation": {
+          "passed": false,
+          "checks": {
+            "status_ok": true,
+            "trades": true,
+            "days": true,
+            "mean_positive": false,
+            "t": false,
+            "dsr": false,
+            "quarters": false,
+            "stress": false
+          },
+          "numbers": {
+            "trades": 126,
+            "days": 126,
+            "mean": -0.096723,
+            "t": -0.9633,
+            "dsr": 0.0062191639240660665,
+            "quarters": "2/4",
+            "stress_pnl": -416.47,
+            "lineage_trials": 81,
+            "validated_versions": 4,
+            "sharpe_traded": -0.08581758477807948,
+            "sharpe_daily": -0.05524,
+            "pnl": -321.97
+          }
+        },
+        "holdout": null
+      },
+      {
+        "variant": 49,
+        "train_stress_passed": true,
+        "train_stress_pnl": 1685.02,
+        "validation": {
+          "passed": false,
+          "checks": {
+            "status_ok": true,
+            "trades": true,
+            "days": true,
+            "mean_positive": true,
+            "t": false,
+            "dsr": false,
+            "quarters": true,
+            "stress": true
+          },
+          "numbers": {
+            "trades": 126,
+            "days": 126,
+            "mean": 0.043218,
+            "t": 0.4112,
+            "dsr": 0.10110436259765776,
+            "quarters": "3/4",
+            "stress_pnl": 3.75,
+            "lineage_trials": 85,
+            "validated_versions": 5,
+            "sharpe_traded": 0.03663260755812964,
+            "sharpe_daily": 0.01642,
+            "pnl": 98.25
+          }
+        },
+        "holdout": null
+      }
+    ],
+    "diagnostic_validation": null,
+    "accounting": {
+      "lineage_trials": 85,
+      "validated_versions": 5,
+      "lineage_looks": 1,
+      "global_looks": 3,
+      "diagnostic_trials": 0,
+      "trial_rows": 85
+    }
+  }
+}

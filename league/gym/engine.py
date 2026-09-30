@@ -230,13 +230,14 @@ class RunConfig:
 
 # --------------------------------------------------------------------------- one day of data
 class History:
-    """Each root's prior sessions (open, high, low, close), oldest first, as the run moves on."""
+    """Each root's prior sessions (OHLC and complete regular-session share volume), oldest first."""
 
     def __init__(self, depth: int):
         self.depth = max(0, int(depth))
         self.rows: dict[str, list[tuple[float, float, float, float]]] = {}
+        self.volumes: dict[str, list[float]] = {}
 
-    def add(self, root: str, prices: np.ndarray) -> bool:
+    def add(self, root: str, prices: np.ndarray, *, volume: float = math.nan) -> bool:
         """Add one session (True when it had a price to add)."""
         p = prices[np.isfinite(prices)]
         if p.size == 0 or self.depth == 0:
@@ -244,7 +245,15 @@ class History:
         rows = self.rows.setdefault(root, [])
         rows.append((float(p[0]), float(p.max()), float(p.min()), float(p[-1])))
         del rows[:-self.depth]
+        volumes = self.volumes.setdefault(root, [])
+        volumes.append(float(volume) if math.isfinite(volume) and volume >= 0 else math.nan)
+        del volumes[:-self.depth]
         return True
+
+    def volume_array(self, root: str, n: int) -> np.ndarray:
+        count = len(self.rows.get(root, [])[-n:]) if n > 0 else 0
+        values = self.volumes.get(root, [])[-count:] if count else []
+        return np.asarray([math.nan] * (count - len(values)) + values, dtype=np.float64)
 
     def arrays(self, root: str, n: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         rows = self.rows.get(root, [])[-n:] if n > 0 else []
@@ -420,7 +429,11 @@ class DayData:
         if found is None:
             chain = self.chains[root]
             opens, highs, lows, closes = self.history.arrays(root, history)
-            found = underlying_view(root, chain.underlying.price[: mi + 1], closes=closes, opens=opens, highs=highs, lows=lows)
+            volumes = self.history.volume_array(root, history)
+            found = underlying_view(root, chain.underlying.price[: mi + 1], closes=closes, opens=opens, highs=highs, lows=lows,
+                                    minute_volumes=chain.underlying.completed_volumes(mi),
+                                    daily_volumes=volumes, volume_provenance=chain.underlying.volume_provenance,
+                                    daily_volume_provenance="first_observed_session_sum" if np.isfinite(volumes).any() else "unavailable")
             self._unders[key] = found
         return found
 
@@ -1564,7 +1577,7 @@ def _close_day(data: DayData, history: History, seen: dict[str, dt.date] | None 
     day is closed (`DayData.close`). A function of its own so no loop variable of `run` keeps one of the day's chains
     alive into the next."""
     for root, chain in data.chains.items():
-        if history.add(root, chain.underlying.price) and seen is not None:
+        if history.add(root, chain.underlying.price, volume=chain.underlying.session_volume()) and seen is not None:
             seen[root] = data.day
     data.close()
 
@@ -1617,7 +1630,8 @@ def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Se
         for prior in store.history_days((warm or days)[0], depth):
             for root in all_roots:
                 if store.has("underlying", root, prior):
-                    if history.add(root, store.underlying(root, prior).price):
+                    underlying = store.underlying(root, prior)
+                    if history.add(root, underlying.price, volume=underlying.session_volume()):
                         seen[root] = prior
     events = EventCalendar(store.trading_days(), store.session)
     regimes: dict[str, dict[str, dict[str, float]]] = {}

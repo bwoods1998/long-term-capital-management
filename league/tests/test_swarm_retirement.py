@@ -6,7 +6,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 from league.swarm.architect import Architect
 from league.swarm.gate import Gate
-from league.swarm.researcher import RETIRE_IDLE_EVALUATIONS, Researcher, idle_dead, idle_evaluations, idle_limit
+from league.swarm.researcher import (RETIRE_IDLE_EVALUATIONS, SCREENED, SELF_REFUTED, Researcher, idle_cause, idle_dead,
+                                     idle_evaluations, idle_limit)
 from league.swarm.seeds import family_spec
 from league.swarm.store import SwarmStore
 from league.swarm.tournament import IDLE_CAUSE, Tournament
@@ -128,22 +129,22 @@ class ResearcherRetirement(ResearcherCase):
     def tools_of(self, body):
         return [t["name"] for t in body["tools"]]
 
-    def test_a_retire_on_the_revise_turn_is_refused_and_the_revision_runs(self):
+    def test_a_tested_family_can_retire_on_revise_without_buying_another_run(self):
         self.researcher().cycle(self.fam["id"])
         self.steps = [{"calls": [self.final_call(), ("gym_run", {"params": {"vrp_min": 1.3}})]}, {"text": "read it"}]
         out = self.researcher().cycle(self.fam["id"])
-        self.assertNotIn("retired", out)
+        self.assertTrue(out["retired"])
         self.assertNotIn("error", out, "a refused retire is never a cycle error")
-        self.assertEqual(self.tools_of(self.sail.bodies[0]), ["gym_run", "gym_sweep"], "REVISE never offers retire")
-        self.assertEqual(len(self.pool.jobs), 2, "the revision ran")
+        self.assertEqual(self.tools_of(self.sail.bodies[0]), ["gym_run", "gym_sweep", "retire"])
+        self.assertEqual(len(self.pool.jobs), 1, "the abandoned family's queued revision never runs")
         outputs = [json.loads(i["output"]) for i in self.store.convo(self.fam["id"])[0][-1]["items"]
                    if i.get("type") == "function_call_output"]
-        self.assertEqual(outputs[0]["status"], "refused")
-        self.assertEqual(self.store.family(self.fam["id"])["band"], "gym")
+        self.assertEqual(outputs[0]["status"], "retired")
+        self.assertEqual(self.store.family(self.fam["id"])["band"], "retired")
 
-    def test_retire_is_offered_on_read_only_above_the_start_with_two_validations(self):
+    def test_retire_uses_the_floor_not_the_start_with_two_validations(self):
         self.researcher().cycle(self.fam["id"])
-        for start, validations, offered in ((0, 2, True), (1, 2, False), (0, 1, False)):
+        for start, validations, offered in ((0, 2, True), (96, 2, True), (0, 1, False)):
             self.settings["population"]["start"] = start
             self.store.update_family(self.fam["id"], validations=validations)
             self.steps = [{"calls": [("gym_run", {"params": {"vrp_min": 1.3 + validations / 10 + start}})]}, {"text": "read it"}]
@@ -314,7 +315,8 @@ class ResearcherIdleRetirement(ResearcherCase):
         [lesson] = self.store.graveyard()
         self.assertIn(reason, lesson["lesson"])
         self.assertIn("Tried 2 versions", lesson["lesson"])
-        self.assertIn(f"Retired by researcher: {reason}", self.store.notebook(self.fam["id"])[-1]["text"])
+        self.assertIn(f"Retired by researcher: {SELF_REFUTED}: {reason}", self.store.notebook(self.fam["id"])[-1]["text"],
+                      "its own researcher's retirement is SELF-REFUTED in the graveyard (R11-1)")
         [event] = [e for e in self.store.events_after(0) if e["kind"] == "swarm.retired"]
         self.assertEqual(event["payload"]["cause"], "Condors on this root are dead.", "a figure never reaches the public cause")
 
@@ -478,7 +480,8 @@ class TournamentIdleRetirement(RoundCase):
         self.assertEqual([r["family"] for r in out], ["f0", "f1", "f2"])
         self.assertEqual(sorted(f["id"] for f in self.store.families(alive=True)), ["f3", "f4", "f5", "f6"])
         self.assertEqual(out[0]["why"], f"It made no eligible Train version in 150 Gym evaluations since its birth. {IDLE_CAUSE}")
-        self.assertIn("kept its best Train score below zero over 450 Gym evaluations", out[1]["why"])
+        self.assertEqual(out[1]["why"], "It kept its best Train score below zero over 450 Gym evaluations since its birth. "
+                                        f"{idle_cause('scored')}", "a Train score: a tested verdict (R11-1)")
         self.assertIn("f0", self.pool.cancelled)
         lesson = self.store.graveyard("placeholder")[0]
         self.assertEqual(lesson["family"], "f0")
@@ -487,7 +490,7 @@ class TournamentIdleRetirement(RoundCase):
         self.assertIn("not a finding that the mechanism has no edge", lesson["lesson"], "a clock, not a refutation")
         self.assertNotIn("found no Train edge", lesson["lesson"])
         causes = [e["payload"]["cause"] for e in self.store.events_after(0) if e["kind"] == "swarm.retired"]
-        self.assertEqual(causes, [IDLE_CAUSE] * 3, "the public cause carries no figure")
+        self.assertEqual(causes, [IDLE_CAUSE, f"{SCREENED}.", IDLE_CAUSE], "the public cause carries no figure")
         # f4 is dead too, but the floor (4) holds it.
         self.assertIsNotNone(idle_dead(self.store.family("f4"), self.settings))
         self.assertEqual(t.retirements(self.store.families(alive=True)), [])
@@ -535,6 +538,8 @@ class TournamentIdleRetirement(RoundCase):
             self.store.update_family(fid, best_train=-0.5)
             self.store.bump(fid, trials=450, since_val_trials=450)
         self.store.set_state("b", gate_ready=False)  # the gate refused b's version
+        self.assertEqual(t.retirements(self.store.families(alive=True)), [], "the extension evidence is still held")
+        self.store.set_state("b", extension_hold=None)  # its outstanding extension was also resolved
         self.assertEqual([r["family"] for r in t.retirements(self.store.families(alive=True))], ["b"])
         self.assertIsNone(self.store.family("a")["retired_at"])
 

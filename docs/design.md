@@ -210,6 +210,17 @@ Agent count and simulated years measure activity; passing unseen evidence measur
 - **An agent is one family**: a mechanism (why the trade should make money), a structure type and a
   universe slice, owned by a researcher model with a notebook, a lineage of program versions and a
   record. Two agents never share a family; forks start new families.
+- **A two-sided single is one family** (`long_single`, not yet released): one program that opens one
+  long call or one long put at a time, the side chosen by its rule, stated with why its calls and puts
+  balance. It is only as drift-neutral as that rule: the drift screen charges whatever net exposure it
+  holds, as for any family. It replaces the call/put twins, which each carried the market's drift and
+  doubled the births where 600 of 674 births had died untested under the idle rule (the strategist,
+  Sept 29); a twin beside a living `long_single` or the other side of the same idea is refused, and a
+  `long_single` that merges a twin pair carries both twins' trials and looks. It is a declared
+  structure, never an order type: each order is a `long_call` or a `long_put`, checked, sized and
+  published as one, and the family is real only while both are real types. The live path refuses a
+  real open of any other type from it; the Gym and the shadow book judge each order by its own type,
+  as for every family. The money table, its digest, the gateway, the verifier and the Gym are unchanged.
 - **The program** is one Python file with `NEEDS`, `PARAMS` and `decide(ctx)`, run at a cadence it
   declares (1 to 30 minutes). `ctx` gives the time of day, weekday, days to each expiry, event flags
   (FOMC, CPI, jobs, earnings, monthly expiry, index rebalances), recent underlying bars, the chain
@@ -228,11 +239,18 @@ Agent count and simulated years measure activity; passing unseen evidence measur
   term-structure and skew mean reversion, post-event volatility crush, weekly-expiry dynamics).
 - **Population:** by default 48 researchers at the start, a ceiling of 96 and a floor of 16; the
   live settings (Sept 29) start at 96, the ceiling, with a floor of 12. Families compete for Gym time
-  and model calls through a bandit over their validation evidence (Thompson sampling, 25% exploration
-  for new families). A family retires when its best program has not improved on validation in 30
+  and model calls through a bandit over their validation evidence (Thompson sampling). Since R11b only
+  an old family whose latest validation mean is positive is exploited, each earning at most 15% of the
+  share; new families and old ones at zero or below share the rest, never less than 25%. A family
+  retires when its best program has not improved on validation in 30
   revisions or 2,000 evaluations by default (200 and 4,000 live), or its trial-adjusted evidence falls
   below the line, or by the idle rule: evaluations without an eligible Train version (150 by default,
-  500 live) or cycles with no new evaluation (40 by default, 12 live), checked every five minutes. Its
+  500 live) or cycles with no new evaluation (40 by default, 12 live), checked every five minutes. An
+  idle-rule death is filed under the verdict of its Train record (R11b): DRIFT, STRESS, THIN or
+  EXHAUSTED are tested findings, and only a family that never traded on Train is IDLE, a time limit.
+  A family that holds three cycles in a row with a Train record behind it is offered `retire`, and its
+  researcher's own retirement is SELF-REFUTED. A family whose latest validation met six of the eight
+  checks is exempt from the dormancy clause until its 2017-19 extension result lands. Its
   lessons go to the graveyard, which every new family's researcher reads first. The graveyard is ranked
   by BM25, a new family is born with three distinct lessons, and it also holds the operator's own
   experiments as `op-` lessons.
@@ -260,11 +278,11 @@ Agent count and simulated years measure activity; passing unseen evidence measur
 |---|---|---|---|---|
 | Inner | seconds to minutes | each researcher | revise the program, run it on Train, read the diagnostics, revise again | a better program or a lesson |
 | Tournament | hourly | the House | validation runs of each family's best versions, the bandit's reallocation, forks and retirements, the leaderboard | Gym time and model calls follow evidence |
-| Architect | every 4 hours by default, refilling hourly below the start; every 10 minutes live, refilling every 20 | Claude (Claude-only live: `architect.openai_model` null); Kimi-K3 on Sail as the fallback | reads the leaderboard, the graveyard and the gaps; writes families with a mechanism, a structure and a rejection test | 3-6 new families by default; the gap to the start, up to 24 a pass live |
+| Architect | every 4 hours by default, refilling hourly below the start; every 10 minutes live, refilling every 20 | Claude (Claude-only live: `architect.openai_model` null); Kimi-K3 on Sail as the fallback when Claude has no room or line (never after a cut answer: R11b salvages its complete families and retries once on Claude at medium effort) | reads the leaderboard, the graveyard and the gaps; writes families with a mechanism, a structure and a rejection test; at most 12 living families a mechanism class (R11b) | 3-6 new families by default; the gap to the start, up to 24 a pass live |
 | Diagnostician | every 5 minutes | Claude | reads a stuck or nearly-there family's Train diagnostics (never Validation's numbers); rewrites its mechanism or writes its lesson; live: 6 a round, a family every 3 hours, $60 a day | a new mechanism, or a lesson and a retirement |
 | Gate | when a family meets the validation line | review: Claude when "review" is in `claude.roles` (live: Sonnet 5.5), else GPT-6 Sol while the OpenAI month has room and `gate.review_openai_model` names it (null live), else DeepSeek-V4-Pro on Sail; audit: Claude (live: Opus 5.5, `claude.role_model`), then GPT-6 Astra on the same terms (null live), then a second Sail model; the gate box | review for lookahead, leakage and fill abuse; the audit; one holdout look | a Candidate, or a recorded refusal |
 | Nightly forward | after 01:45 ET each trading night | the data box, the gate box | the new day goes to the gate image only; every Candidate is re-run on it | one unseen day a night for every Candidate |
-| Live | 09:30-16:00 ET | the House | every alive family's validated version in observe shadow; Candidates in live shadow; Probes and Sized on real money; the House's D3 calibration round trips and its live test; no general agent paper book yet | separate paper, shadow and real records |
+| Live | 09:30-16:00 ET | the House | the practice league: every alive family's validated or eligible Train version in observe shadow (two caps: 48 instances, 24 roots); Candidates in live shadow; Probes and Sized on real money; the House's D3 calibration round trips and its live test; no general agent paper book yet | separate paper, shadow, practice and real records |
 | Post-mortem | after each close; weekly | the operator for now (no scheduled post-mortem is built; it would run on Claude, whose `reserve_usd` is kept for it) | compare captured executions with the Gym; diagnose gaps and propose repairs | private reports; calibration only through the recalibration protocol |
 
 **Models** (Sept 29, 2026; only Sail and Claude are topped up from now on). The inner loop runs on
@@ -314,6 +332,26 @@ diagnostician.
 - **The forward record** (nightly replays, live shadow and real trades) is what sizes money. A
   Candidate whose forward record turns negative over 20 trades loses its band. Families whose code
   was written with knowledge of 2024-2026 need a forward record before they are Sized.
+- **Practice is a research signal, never evidence** (the practice league, Sept 29, 2026). Every alive
+  Gym-band family with a validated or eligible Train version trades live quotes in the House's shadow book
+  under the Gym's own fill rules: live days from Sept 29 on are the one period no model behind the
+  researchers has seen. Its record (`observe.sqlite`, private) is never a forward row and never reaches the
+  verifier, the gate, the holdout, the bands or the money table. Research reads it: the strategist a
+  PRACTICE table (by mechanism class and family: sessions, trades, the sign of realized P&L, a t; never
+  dollars, dates, versions or code), the architect PRACTICE BY CLASS lines, and the bandit a capped bonus
+  (a family gains at most 25% of its share, all bonuses move at most 10% of share; the weight only orders
+  research, Train jobs, retirements and the Claude band). Promotion to real money is D2 exactly:
+  Validation, the holdout, then the money table.
+- **Immutable practice cohorts.** A program survives research retirement and newer revisions long enough to collect
+  observations: three observed sessions and ten program closes while flat, or a bounded horizon that accommodates its
+  declared DTE. Snapshots, coverage, decisions, quotes, rejected orders and fill receipts survive restarts in the private
+  practice ledger. Completed snapshots never re-enter. Researcher feedback becomes actionable at ten program closes
+  over three close-session days; a new feedback revision wakes an idle researcher without paying for idle polling.
+- **The forward embargo.** Because practice now lets forward-window days select among Gym programs, a Sized
+  move also needs the forward record of the sessions after both the banded version's creation and selection to meet Sized on
+  its own; demotion and every other rule still read the whole record. This only makes Sized harder; the
+  Validation and holdout periods end before any practice day and are untouched, and the money digest does
+  not move.
 - **The leakage alarm:** once there are at least 10 holdout looks, if more than 30% pass, the gate
   stops until leakage is ruled out.
 - The lines may be tightened on evidence; loosening one is the owner's decision.

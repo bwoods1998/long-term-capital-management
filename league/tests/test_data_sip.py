@@ -5,7 +5,8 @@ import json
 import unittest
 from urllib.parse import parse_qs, urlsplit
 
-from scripts.data.sip import GatewayBars, NY, SIPError, SOURCE, completed_rows, relay_day
+from scripts.data.sip import GatewayBars, NY, SIPError, SOURCE, completed_rows, relay_day, packet_digest
+from scripts.data.storelib import sip_coverage
 
 DAY = dt.date(2024, 1, 3)
 HOURS = (570, 960)
@@ -72,17 +73,25 @@ class Client(unittest.TestCase):
 
 class Data:
     def __init__(self, roots=('SPY', 'XSP')):
-        self.records = [{'type': 'file', 'kind': 'nbbo', 'root': root, 'date': str(DAY)} for root in roots]
+        self.roots = [r for r in roots if r not in ('XSP', 'SPXW')]
+        self.canonical = {}
         self.uploads = []
         self.confirm = True
+        self.ingests = 0
 
     def run(self, command, timeout):
-        if command.startswith('backfill.py records'):
-            return True, '\n'.join(json.dumps(row) for row in self.records)
+        if command.startswith('backfill.py sip-status'):
+            rows = [self.canonical.get(root) or {'root': root, 'day': str(DAY), 'status': 'pending',
+                    **sip_coverage([], HOURS)} for root in self.roots]
+            return True, json.dumps({'day': str(DAY), 'roots': rows})
         if command.startswith('backfill.py ingest-underlying'):
+            self.ingests += 1
             if self.confirm:
-                self.records += [{'type': 'file', 'kind': 'underlying', 'root': row['root'], 'source': SOURCE}
-                                 for row in json.loads(self.uploads[-1][1])]
+                for packet in json.loads(self.uploads[-1][1]):
+                    self.canonical[packet['root']] = {'root': packet['root'], 'day': str(DAY), 'source': SOURCE,
+                        'source_symbol': packet['source_symbol'], 'packet_sha256': packet_digest(packet),
+                        'file_sha256': 'a' * 64, 'status': 'complete', 'verification': 'current_file_hash_and_grid',
+                        **sip_coverage([r['minute'] for r in packet['rows']], HOURS)}
             return True, 'ok'
         raise AssertionError(command)
 
@@ -106,11 +115,14 @@ class Calendar:
 
 
 class Relay(unittest.TestCase):
-    def relay(self, data, gateway, mapping=lambda root, day: root):
-        return relay_day(DAY, data, gateway=gateway, calendar=Calendar(), source_root=mapping)
+    def relay(self, data, gateway, mapping=lambda root, day: root, **kwargs):
+        return relay_day(DAY, data, gateway=gateway, calendar=Calendar(), source_root=mapping, **kwargs)
+
+    def full(self):
+        return [bar(m) for m in range(*HOURS)]
 
     def test_only_data_crosses_to_box_and_indices_keep_their_own_source(self):
-        data, gateway = Data(), Gateway({'SPY': [bar()]})
+        data, gateway = Data(), Gateway({'SPY': self.full()})
         result = self.relay(data, gateway)
         self.assertEqual(result['roots'], ['SPY'])
         self.assertEqual(gateway.symbols, [['SPY']])
@@ -118,7 +130,7 @@ class Relay(unittest.TestCase):
         self.assertEqual(path, '/data/work/sip-2024-01-03.json')
         self.assertEqual(mode, 0o600)
         packet = json.loads(payload)[0]
-        self.assertEqual(set(packet), {'root', 'day', 'completed_minutes', 'rows'})
+        self.assertEqual(set(packet), {'root', 'day', 'completed_minutes', 'rows', 'source_symbol', 'decoded_response_sha256'})
         self.assertTrue(packet['completed_minutes'])
         self.assertEqual(packet['rows'][0]['minute'], 571)
         self.assertTrue(self.relay(data, gateway)['already'])
@@ -127,11 +139,46 @@ class Relay(unittest.TestCase):
     def test_missing_root_bars_prevent_partial_success(self):
         data = Data(('SPY', 'QQQ'))
         with self.assertRaises(SIPError):
-            self.relay(data, Gateway({'SPY': [bar()]}))
-        self.assertEqual(data.uploads, [])
+            self.relay(data, Gateway({'SPY': self.full()}))
+        self.assertEqual(data.ingests, 0)
+        self.assertEqual(len(data.uploads), 1)  # only the unresolved QQQ quarantine
+        self.assertIn('/sip-partial-', data.uploads[0][0])
+
+    def test_historical_peers_progress_but_sparse_root_stays_quarantined_idempotently(self):
+        data, gateway = Data(('SPY', 'PLTR')), Gateway({'SPY': self.full(), 'PLTR': [bar(960)]})
+        result = self.relay(data, gateway, allow_gaps=True)
+        self.assertFalse(result['complete'])
+        self.assertEqual(set(data.canonical), {'SPY'})
+        gap = next(r for r in result['coverage'] if r['root'] == 'PLTR')
+        self.assertEqual((gap['status'], gap['known'], gap['expected']), ('empty', 0, 390))
+        self.assertEqual(gap['missing_minutes'], list(range(571, 961)))
+        self.relay(data, gateway, allow_gaps=True)
+        quarantines = [u for u in data.uploads if '/sip-partial-' in u[0]]
+        self.assertEqual(quarantines[0], quarantines[1])
+        self.assertEqual(data.ingests, 1)
+        self.assertEqual(gateway.symbols[-1], ['PLTR'])
+
+    def test_sparse_or_invalid_packet_never_reaches_canonical_ingest(self):
+        for bars in ([bar()], [dict(bar(), v=-1)]):
+            data = Data()
+            result = self.relay(data, Gateway({'SPY': bars}), allow_gaps=True)
+            self.assertFalse(result['complete'])
+            self.assertEqual(data.ingests, 0)
+            packet = json.loads(data.uploads[0][1])
+            self.assertEqual(packet['coverage']['provenance'], 'finalized_without_publication_receipts')
+
+    def test_lost_lease_prevents_quarantine_and_canonical_writes(self):
+        for bars in ([bar()], self.full()):
+            data = Data()
+            def lost():
+                raise RuntimeError('lost lease')
+            with self.assertRaisesRegex(RuntimeError, 'lost lease'):
+                self.relay(data, Gateway({'SPY': bars}), allow_gaps=True, check_lease=lost)
+            self.assertEqual(data.uploads, [])
+            self.assertEqual(data.ingests, 0)
 
     def test_symbol_alias_is_queried_but_packet_remains_canonical(self):
-        data, gateway = Data(('META',)), Gateway({'FB': [bar()]})
+        data, gateway = Data(('META',)), Gateway({'FB': self.full()})
         self.relay(data, gateway, lambda root, day: 'FB')
         self.assertEqual(gateway.symbols, [['FB']])
         self.assertEqual(json.loads(data.uploads[0][1])[0]['root'], 'META')
@@ -140,4 +187,4 @@ class Relay(unittest.TestCase):
         data = Data()
         data.confirm = False
         with self.assertRaises(SIPError):
-            self.relay(data, Gateway({'SPY': [bar()]}))
+            self.relay(data, Gateway({'SPY': self.full()}))

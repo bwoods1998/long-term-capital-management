@@ -64,6 +64,31 @@ def _date_int(value: int) -> bool:
     return False
 
 
+def params_declaration(tree: ast.Module) -> ast.Assign | ast.AnnAssign:
+    """One unambiguous binding, so overrides take effect before aliases/default captures.
+
+    Rebinding PARAMS, including a local shadow, is refused instead of silently selecting a different
+    configuration. Mutable run memory belongs in STATE. Ordinary aliases to PARAMS are supported.
+    """
+    declarations = [node for node in tree.body if
+                    isinstance(node, ast.Assign) and len(node.targets) == 1 and
+                    isinstance(node.targets[0], ast.Name) and node.targets[0].id == "PARAMS" or
+                    isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == "PARAMS"]
+    if len(declarations) != 1 or declarations[0].value is None:
+        raise CodeRefused("PARAMS needs exactly one simple top-level assignment (PARAMS = {...})")
+    declaration = declarations[0]
+    target = declaration.targets[0] if isinstance(declaration, ast.Assign) else declaration.target
+    for node in ast.walk(tree):
+        rebound = (isinstance(node, ast.Name) and node.id == "PARAMS" and
+                   isinstance(node.ctx, (ast.Store, ast.Del)) and node is not target)
+        rebound = rebound or isinstance(node, ast.arg) and node.arg == "PARAMS"
+        rebound = rebound or isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == "PARAMS"
+        rebound = rebound or isinstance(node, ast.alias) and (node.asname or node.name) == "PARAMS"
+        if rebound:
+            raise CodeRefused(f"line {node.lineno}: PARAMS cannot be rebound or shadowed; keep run memory in STATE")
+    return declaration
+
+
 def check_program(code: str) -> None:
     """Raise `CodeRefused` (naming the line and the rule) unless `code` is an admissible program:
     safe, date-free, and defining `NEEDS`, `PARAMS` and one `decide(ctx)` at the top level."""
@@ -170,6 +195,7 @@ def check_program(code: str) -> None:
     for name in ("NEEDS", "PARAMS"):
         if name not in assigned:
             raise CodeRefused(f"a program assigns {name} at the top level (PROGRAM.md)")
+    params_declaration(tree)
 
 
-__all__ = ["check_program", "CodeRefused", "NUMPY_BANNED", "ALLOWED_IMPORTS"]
+__all__ = ["check_program", "params_declaration", "CodeRefused", "NUMPY_BANNED", "ALLOWED_IMPORTS"]

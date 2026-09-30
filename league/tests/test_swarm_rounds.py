@@ -24,6 +24,12 @@ SPEC = {"id": "condor-vrp", "mechanism": "Index options price more movement than
         "structure": "iron_condor", "roots": ["SPY"], "dte": [0, 2]}
 
 
+def review_failure(reason):
+    """A scripted review receipt for state-machine tests, not a test of the mock model's judgment."""
+    return {"verdict": "fail", "reasons": [reason], "findings": [{"code_excerpt": "def decide(ctx):",
+            "contract_reference": "calendar", "counterexample": "Synthetic reviewer finding for this gate transition: " + reason}]}
+
+
 class FakeGymPool:
     """submit / wait / run: `answer(job)` makes each result; `fail` names families whose jobs fail."""
 
@@ -509,7 +515,7 @@ class GateTests(RoundCase):
 
     def test_a_failed_review_is_a_refusal_and_costs_no_look(self):
         self.ready()
-        self.replies = [{"text": json.dumps({"verdict": "fail", "reasons": ["counts sessions to known events"]})}]
+        self.replies = [{"text": json.dumps(review_failure("counts sessions to known events"))}]
         Gate(self.store, self.pool, self.router, self.settings).run()
         self.assertEqual(self.store.looks(), [])
         self.assertEqual(self.store.refusals("a")[0]["stage"], "review")
@@ -537,7 +543,7 @@ class GateTests(RoundCase):
     def test_an_audit_that_fails_costs_no_look(self):
         self.ready()
         self.month.value = 100
-        answers = iter([json.dumps({"verdict": "pass"}), json.dumps({"verdict": "fail", "reasons": ["counts sessions to the year"]})])
+        answers = iter([json.dumps({"verdict": "pass"}), json.dumps(review_failure("counts sessions to the year"))])
         self.router.frontier_factory = lambda model: FakeFrontier(model, text=next(answers), asked=self.asked)
         Gate(self.store, self.pool, self.router, self.settings).run()
         self.assertEqual(self.store.looks(), [])
@@ -559,7 +565,7 @@ class GateTests(RoundCase):
 
     def test_a_sail_audit_that_refuses_costs_no_look(self):
         self.ready()
-        self.replies = [{"text": json.dumps({"verdict": "pass"})}, {"text": json.dumps({"verdict": "fail", "reasons": ["a level"]})}]
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}, {"text": json.dumps(review_failure("a level"))}]
         Gate(self.store, self.pool, self.router, self.settings).run()
         self.assertEqual(self.store.looks(), [])
         self.assertEqual(self.store.refusals("a")[0]["stage"], "audit")
@@ -708,6 +714,7 @@ class ArchitectTests(RoundCase):
 
     def test_below_the_start_population_the_architect_refills_hourly_up_to_the_gap(self):
         self.populate(40)
+        self.settings["architect"]["max_alive_per_class"] = 0  # one class throughout: the cadence, not R11-2's class cap
         arch = Architect(self.store, self.router, self.settings, clock=self.clock)
         self.store.put("architect_at", self.clock())
         self.clock.advance(3600)
@@ -719,6 +726,7 @@ class ArchitectTests(RoundCase):
 
     def test_at_the_start_population_it_grows_every_four_hours_three_to_six_at_a_time(self):
         self.populate(50)
+        self.settings["architect"]["max_alive_per_class"] = 0  # one class throughout: the cadence, not R11-2's class cap
         arch = Architect(self.store, self.router, self.settings, clock=self.clock)
         self.store.put("architect_at", self.clock())
         self.clock.advance(3600)
@@ -873,7 +881,7 @@ class ArchitectTests(RoundCase):
         self.assertEqual(coverage["long_put"]["trials"], 7, "an unloaded root is outside this image's effort")
         self.assertEqual(coverage["debit_vertical"]["validated_families"], 1)
         self.assertEqual(sum(row["trials"] for row in coverage.values()), 40)
-        self.assertEqual(len(coverage), 11, "unexplored types are visible as zero effort")
+        self.assertEqual(len(coverage), 12, "unexplored types are visible as zero effort (long_single among them)")
         self.assertEqual(self.store.families(), before, "coverage does not mutate evidence or retirement")
         self.settings["gym"]["roots"].append("SOXL")
         self.assertEqual(arch.coverage()["long_put"]["trials"], 907)
@@ -893,8 +901,11 @@ class ArchitectTests(RoundCase):
         self.assertIn("Propose 12 new families", prompt, "refill asks for the bounded gap, not a minimum of three")
 
     def test_simple_call_and_put_proposals_are_admitted_without_a_promotion_shortcut(self):
-        proposals = [{"slug": kind, "structure": kind, "roots": ["SPY"], "dte": [0, 2],
-                      "mechanism": "A synthetic directional research hypothesis with a single option and capped premium."}
+        # Two different mechanisms: the same idea on both sides is one long_single family, and its twin is refused
+        # (review of #425; `test_swarm_long_single`).
+        mechanisms = {"long_call": "A synthetic upside research hypothesis: buy a single call after a breakout with capped premium.",
+                      "long_put": "Dealer hedging flows lag an intraday selloff; a single put captures the continuation at capped cost."}
+        proposals = [{"slug": kind, "structure": kind, "roots": ["SPY"], "dte": [0, 2], "mechanism": mechanisms[kind]}
                      for kind in ("long_call", "long_put")]
         arch = Architect(self.store, self.router, self.settings, clock=self.clock)
         born = arch.admit(proposals)
@@ -921,17 +932,20 @@ class ArchitectTests(RoundCase):
         for root in ("XSP", "SPXW"):
             self.assertFalse({"calendar", "diagonal"} & set(gaps[root]))
         for root in self.FINAL_ROOTS[5:]:
-            self.assertEqual(len(gaps[root]), 11, root)
-            self.assertTrue({"calendar", "diagonal", "debit_vertical"} <= set(gaps[root]), root)
+            # Twelve types less the two one-sided singles: a single option's gap is `long_single` alone (Sept 29, 2026).
+            self.assertEqual(len(gaps[root]), 10, root)
+            self.assertTrue({"calendar", "diagonal", "debit_vertical", "long_single"} <= set(gaps[root]), root)
+            self.assertFalse({"long_call", "long_put"} & set(gaps[root]), root)
         return gaps
 
     def test_empty_expanded_universe_prompt_exposes_every_gap_including_the_last_root(self):
         gaps = self.expanded_prompt(seeded=False)
-        self.assertEqual(sum(map(len, gaps.values())), 271)
+        self.assertEqual(sum(map(len, gaps.values())), 246)  # 23 equity roots x 10, and XSP, SPXW x 8 (no calendars)
 
     def test_seeded_expanded_universe_prompt_preserves_all_new_roots_and_existing_coverage(self):
         gaps = self.expanded_prompt(seeded=True)
-        self.assertEqual(sum(map(len, gaps.values())), 241)
+        # The 48 seeds cover 30 (root, type) slices; 3 are one-sided singles, which are no gaps: 246 - 27.
+        self.assertEqual(sum(map(len, gaps.values())), 219)
         self.assertNotIn("iron_condor", gaps["SPY"])
 
 

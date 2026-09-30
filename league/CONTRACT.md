@@ -64,6 +64,25 @@ you get its stored result and no trial. PARAMS must be a literal dict at the top
 Give your signal a switch in PARAMS (an on/off flag, or a sign that inverts it) so a sweep can carry a
 placebo row.
 
+Overrides bind to both `ctx.params` and the global `PARAMS` at its declaration, before aliases,
+derived module values and helper defaults capture them. Declare PARAMS once with a simple top-level
+assignment; never rebind/shadow it or mutate it in the module body. Keep changing memory in STATE.
+Each independent run gets a fresh module and fresh parameter lists. STATE persists across that
+run's decisions and sessions, but cannot carry observations from another run.
+
+Before replay, static experiment checks refuse malformed literal NEEDS/PARAMS and changed overrides
+whose keys are provably never read. Dynamic keys are inconclusive and remain eligible. Passing this
+check is not proof that a parameter affects decisions: verify the intended ablation in your results.
+Zero trades alone is not invalid code or evidence of no economic edge; diagnose coverage, order
+rejections and signal frequency separately.
+
+Gate readers receive the actual runtime source fingerprint, state-initialization excerpts and
+available context fields. A rejection must locate the submitted code, name the relevant contract
+rule and describe a causal counterexample. Missing grounding requires another review; it never
+becomes a pass. Neither a model's claim nor a well-formed receipt substitutes for an executable
+test of a disputed runtime fact. Review approval is bound to that runtime contract. Historical
+trial counts and holdout looks survive runtime upgrades; an upgrade grants no extra looks.
+
 ## ctx
 
 Time: `ctx.minute` (minutes since midnight ET; 570 = 09:30), `ctx.open_minute`, `ctx.close_minute`
@@ -81,6 +100,32 @@ mid): `iv`, `delta`, `gamma`, `theta` (a calendar day), `vega` (a vol point). Al
 Underlying: `ctx.underlyings[root]` (and `ctx.under`): `price` now, `prices` (today's one-minute
 prices from the open to now), `open`, `high`, `low` (today so far), `prior_close`, and the prior
 sessions oldest first: `closes`, `opens`, `highs`, `lows`.
+
+Optional stock/ETF share volume requires completed regular-session bars and first-observation receipts.
+`minute_volumes[k]` belongs to the bar starting `ctx.open_minute + k`, and the array has
+`ctx.minute - ctx.open_minute` entries. The 09:30 bar is first eligible at 09:31; a bar first
+observed late live stays unavailable to an earlier decision. Missing bars are `NaN` and retain
+their place in the minute grid; they are never forward filled or replaced with zero. An explicit
+zero is known volume. `volume` sums today only when every completed bar is known; otherwise it
+is `NaN` (also at the open). `daily_volumes` aligns with prior-session `closes`; `prior_volume`
+is the last value. Each daily total requires every regular-session bar observed by the close, or it is `NaN`.
+`volume_coverage` has `basis="completed_regular_session_bars"`, `minute_bars` (known),
+`minute_expected`, `history_sessions` (known), and `history_expected`; `minute_provenance` names
+`first_observed` or `historical_without_asof`, and `history_provenance` names
+`first_observed_session_sum` or `unavailable`. Use those counts or `np.isfinite` to check availability.
+Arrays are immutable copies through the current decision.
+
+Historical bars without per-value publication receipts expose unknown minute volume and unknown
+daily totals, even with complete files. Current SIP imports hold finalized history without those
+receipts; later revisions cannot be backdated to the first live decision. Time-grid parity alone
+does not establish information parity. Live persists first observations across restarts and sums
+complete prior sessions; those sums are not labeled finalized exchange totals. Daily endpoint totals
+include extended-hours volume and are not substituted. XSP/SPXW inputs never borrow SPY volume.
+Volume availability is data coverage, not evidence of edge; it can differ between replay and live.
+Before choosing a hypothesis, read INPUT AVAILABILITY in your family brief. It describes locally
+cached Train metadata for the exact running Gym image; raw column coverage is separate from usable
+point-in-time inputs. A missing, invalid or different-image card means unknown coverage, never zero
+or permission to use finalized history. Current historical strategy volume remains unavailable.
 
 Account: `ctx.positions` (dicts: `id`, `type`, `root`, `qty`, `legs` [`id` (-1 when not in today's
 chain), `dte`, `strike`, `is_call`, `side`, `ratio`], `entry`, `mark`, `natural`, `pnl`, `max_loss`,

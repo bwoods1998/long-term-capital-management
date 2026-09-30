@@ -508,33 +508,50 @@ def forward_record(trades: Sequence[Mapping[str, Any]], *, version: Any = None) 
 PRIOR_SD = 0.05
 
 
+#: R11-5: each old family with a positive latest validation mean earns at most this much of the exploit share.
+EXPLOIT_PER_POSITIVE = 0.15
+
+
 def thompson(families: Sequence[Mapping[str, Any]], *, explore_share: float = 0.25, new_validations: int = 2,
-             rng: random.Random | None = None) -> dict[str, float]:
+             rng: random.Random | None = None, exploit_per_positive: float | None = EXPLOIT_PER_POSITIVE) -> dict[str, float]:
     """Each family's share of researcher cycles and Gym time: Thompson sampling over validation
     evidence (a normal posterior on the mean return on maximum loss, its standard error from the t
-    statistic), with `explore_share` reserved for NEW families (fewer than `new_validations` looks).
+    statistic), with at least `explore_share` reserved for the EXPLORE pool.
+
+    THE EXPLOIT POOL (R11-5, Sept 29: the four old families held 75% of the share with validation t of +0.16, -0.53,
+    -1.95 and -1.67) holds only OLD families (at least `new_validations` looks) whose latest validation mean is positive.
+    Every other family is in the explore pool: the new ones draw from the prior, and an old one whose mean is zero or
+    less draws from its own posterior among them. The explore pool's share is at least `1 - exploit_per_positive x` the
+    number of positive old families (never below `explore_share`), so the exploit share grows only with positive evidence;
+    `exploit_per_positive` None keeps `explore_share` alone. Within each pool the shares are rank-weighted.
 
     `families`: [{id, validations, mean, t}] (mean/t of its latest validation; None when there is none).
     Returns {id: share}, summing to 1 (0 each for an empty list)."""
     rng = rng or random.Random()
     new = [f for f in families if int(f.get("validations") or 0) < new_validations or _num(f.get("mean")) is None]
     old = [f for f in families if f not in new]
+    exploit = [f for f in old if float(f["mean"]) > 0]
+    explore = new + [f for f in old if f not in exploit]
     shares: dict[str, float] = {}
     if not families:
         return shares
-    new_share = explore_share if new and old else (1.0 if new else 0.0)
-    old_share = 1.0 - new_share
-    if new:
-        draws = {f["id"]: rng.gauss(0.0, PRIOR_SD) for f in new}
-        _allocate(draws, new_share, shares)
-    if old:
-        draws = {}
-        for f in old:
-            mean = float(f["mean"])
-            t = _num(f.get("t"))
-            se = abs(mean / t) if t not in (None, 0.0) and mean != 0 else PRIOR_SD
-            draws[f["id"]] = rng.gauss(mean, max(se, 1e-6))
-        _allocate(draws, old_share, shares)
+    floor = explore_share
+    per = _num(exploit_per_positive)
+    if per is not None and per > 0:
+        floor = max(explore_share, 1.0 - per * len(exploit))
+    explore_total = min(1.0, max(0.0, floor)) if explore and exploit else (1.0 if explore else 0.0)
+
+    def posterior(f: Mapping[str, Any]) -> float:
+        mean = float(f["mean"])
+        t = _num(f.get("t"))
+        se = abs(mean / t) if t not in (None, 0.0) and mean != 0 else PRIOR_SD
+        return rng.gauss(mean, max(se, 1e-6))
+
+    if explore:
+        draws = {f["id"]: rng.gauss(0.0, PRIOR_SD) if f in new else posterior(f) for f in explore}
+        _allocate(draws, explore_total, shares)
+    if exploit:
+        _allocate({f["id"]: posterior(f) for f in exploit}, 1.0 - explore_total, shares)
     return shares
 
 
@@ -550,4 +567,4 @@ def _allocate(draws: Mapping[str, float], total: float, out: dict[str, float]) -
 __all__ = ["validation_line", "holdout_line", "block_bootstrap", "holm_passes", "leakage_alarm", "forward_record", "thompson",
            "train_score", "years_of", "robustness_view", "traded_sharpe", "checks_passed", "quarters_positive", "daily_pnl",
            "one_record", "MIN_TRADES", "MIN_DAYS", "MIN_T", "MIN_DSR", "STRESS", "LOOKS_PER_LINEAGE", "TRAIN_YEAR_MIN_TRADES",
-           "TRAIN_YEAR_MIN_DAYS", "drift_numbers", "drift_screen", "DRIFT_MIN_T"]
+           "TRAIN_YEAR_MIN_DAYS", "drift_numbers", "drift_screen", "DRIFT_MIN_T", "EXPLOIT_PER_POSITIVE"]
