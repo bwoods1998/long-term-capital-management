@@ -23,6 +23,10 @@ from league.swarm.store import SwarmStore
 from league.tests.swarm_fakes import Clock
 
 REPO = Path(__file__).resolve().parents[2]
+# researcher.py's module import line, where the lane tests add a candidate's imports. It must exist exactly once:
+# a test that silently failed to insert would pass staging for the wrong reason.
+RESEARCHER_IMPORTS = "from . import cards, diagnostics, evidence, inputs, mechanism, public\n"
+assert (REPO / "league/swarm/researcher.py").read_text().count(RESEARCHER_IMPORTS) == 1, "researcher.py's import line moved"
 try:
     import numpy  # noqa: F401
     HAVE_NUMPY = True
@@ -344,8 +348,8 @@ class FourthReview(unittest.TestCase):
 
     def setUp(self):
         self.researcher = (REPO / "league/swarm/researcher.py").read_text()
-        self.gated_r = self.researcher.replace("from . import diagnostics, evidence, inputs, public\n",
-                                               "from . import diagnostics, evidence, inputs, public\nfrom . import canary\n", 1)
+        self.gated_r = self.researcher.replace(RESEARCHER_IMPORTS,
+                                               RESEARCHER_IMPORTS + "from . import canary\n", 1)
         self.assertNotEqual(self.gated_r, self.researcher)
 
     def admit(self, body):
@@ -557,8 +561,8 @@ class FifthReview(unittest.TestCase):
 
     def setUp(self):
         self.researcher = (REPO / "league/swarm/researcher.py").read_text()
-        self.gated = self.researcher.replace("from . import diagnostics, evidence, inputs, public\n",
-                                             "from . import diagnostics, evidence, inputs, public\nfrom . import canary\n", 1)
+        self.gated = self.researcher.replace(RESEARCHER_IMPORTS,
+                                             RESEARCHER_IMPORTS + "from . import canary\n", 1)
 
     def admit(self, imports, body):
         """The gated branch in `_admit` running `body`, with `imports` added at the top of the module."""
@@ -625,8 +629,8 @@ class FifthReview(unittest.TestCase):
             path = REPO / rel
             return path.read_text() if path.is_file() else None
 
-        after = self.researcher.replace("from . import diagnostics, evidence, inputs, public\n",
-                                        "from . import diagnostics, evidence, inputs, public\nfrom .architect import CFG\n", 1)
+        after = self.researcher.replace(RESEARCHER_IMPORTS,
+                                        RESEARCHER_IMPORTS + "from .architect import CFG\n", 1)
         with self.assertRaisesRegex(labmod.ImprovementError, "league.swarm.settings"):
             lanes.content_guard("league/swarm/researcher.py", self.researcher, after, read_after=read_after)
         with self.assertRaisesRegex(labmod.ImprovementError, "hands out"):
