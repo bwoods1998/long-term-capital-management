@@ -616,3 +616,112 @@ Evidence resets so far: 1 (release A). Release B is reset 2.
 
 The goal remains unmet. No qualified strategy has traded real money, no harness improvement has been retained, and
 project Net is −$568.74.
+
+## Oct 1 early: release B live
+
+All times UTC, Oct 1. Every figure below is a read-only snapshot from the House, the gateway and the broker's records.
+Private details (prices, strikes, programs, parameters, account identifiers) stay in the operator's goal folder.
+
+### What release B carried
+
+Release B grew overnight beyond the plan above. It merged to main as `3eaf4d06` (PR #454) with nine reviewed pull
+requests and the gateway's KV binding:
+- #451, the incubator's live route and money row (B1), shipped switched off;
+- #444, B2: the incubator's facts (the Train-and-drift mark, and the incubator's own review and audit) and the reader's
+  own belt. A failed review or audit is a bar on the program (its code and params), kept for good: no evaluator
+  adoption clears it, and every family that holds the same program reads it;
+- #445, L1, the cohort keep, and #455, which makes a restarted swarm whose first read fails keep the saved keep;
+- #456, L2', the incubator's keep. A failed read never ends an incubation, and every first look and re-check reads the
+  record before today only: the practice row's coverage and open mark are copied at the session day's roll, so today's
+  values never decide a check;
+- #447, the research library, off on the House until `research.enabled`;
+- #453, the evaluator-adoption fixes;
+- #448, research compute by expected information value, with structure and mechanism diversity;
+- #438, the preflight. It refuses only market-independent misuse of the ctx API, and it refused none of 300 programs
+  that ran OK in the Gym. It flags a program that cannot load on the House's Python 3.11
+  (`preflight_house_unloadable`).
+
+### The deploy
+
+- **The gateway first:** version `dafcfa05` at 03:48, with the research library and its KV binding. The order routes
+  are unchanged. The kill switch stayed false, `/v1/health` answered 200 and the library's health read OK.
+- **The House:** release `20261001T034829Z-d823e014ce16`, staged at 03:48:34 and promoted at 03:49:07. The watch's
+  verdict was PROMOTED.
+- **The ratification** came at about 03:59, after the verdict, on the new money digest `42c4a3af` (the incubator's row):
+  the grant's third ratification, active, with capital read afresh at $1,246.73. No real entry was due before the 13:30
+  open.
+
+### The checks after promotion (all passed)
+
+- **Evidence reset 2.** The execution fingerprint moved; the Gym bundle and image did not. Each of the 51 families alive
+  at the start adopted the new evaluator. A lineage snapshot before and after compared 1,690 lineages and found 0
+  violations: trials, inherited trials and consumed holdout looks unchanged, with 2 looks in all.
+- **The B2 backfill** read 14 gate events and barred 1 program, before the adoption could clear anything.
+- **The live guards.** Real money on; no failures; no working order. The House live test's instance is real and live,
+  the tuition instance real and exits-only with its position open, and no incubator (`:i`) instance exists. The
+  incubator's block showed the committed table, 0 verdicts and a zero tally.
+- **The harness observer** was re-pointed at B's base and release digest.
+
+### Criterion 1 under release B
+
+- **The restart test** (04:00:11-04:00:24, `floor_box.py stop` then `start`) ran with the tuition position open. Both
+  real instances came back as before, the position was restored, real money stayed on and health listed no failure.
+- **The induced failure** (about 04:00:31): the swarm process was killed with SIGKILL. The House's swarm step started a
+  new one within 15 s, with a fresh heartbeat. The alive families (36) and the stored runs (77,027) were unchanged.
+
+Both halves of criterion 1 now hold under the running release.
+
+### The incubator on, and the freeze
+
+The incubator was switched on at 04:01 (`live.incubator` true). Nothing trades on it yet: no family can be pinned
+before its cohort's first look, which needs 3 completed sessions and 10 program closes in the record before today. For
+cohorts admitted at the Oct 1 open, the earliest first look is the Oct 6 open.
+
+From now on `league/live` and `league/gym` are frozen. Any change there moves the evaluator, which ends every practice
+cohort and every incubation. Such changes are batched into planned releases.
+
+### What did not work, honestly
+
+- **The revived near-misses** re-validated under engine 4 with identical numbers, but they fail the deflated-Sharpe
+  check: their lineages hold 3 to 8 validated versions (Sept 30 night, above). This is the multiple-testing control
+  working, not a defect.
+- **The harness's scheduler lane.** Its controller's built-in retention rule proved uninformative: on 291 windows with
+  no patch at all, 93% counted as "improved". A rule that passes nearly everything cannot tell a real improvement from
+  none. Retained harness improvements must come from the new harness lanes (#449, in review), with private held-out
+  pools and real canaries.
+- **A runtime skew.** The House runs Python 3.11 with numpy 2.4; the Gym runs Python 3.12 with numpy 2.5. A program can
+  load and train in the Gym and still fail to load on the live path. The preflight now flags it; the fix is to align
+  the runtimes in a planned release.
+
+### Spend
+
+At 02:47, before the deploy, two settings changed in `swarm.json`:
+- `architect.every_seconds` 900 → 1800;
+- `researcher.sail_usd_per_hour` 1.1 → 1.3.
+
+With the architect's Claude line at 0, its passes fell back to Sail and used 73% of the $1.10 research pace ($4.14 of
+$5.67 since 20:00 Sept 30). Research cycles were starved: no worker was running at 02:43. The architect now runs half as
+often and research gets the room, at about the same total Sail draw. Train runs and validation attempts an hour are
+re-checked about four hours after B.
+
+### Scoreboard
+
+| Measure | Value |
+|---|---|
+| Release running | B, `20261001T034829Z-d823e014ce16` (main `3eaf4d06`), gateway `dafcfa05` |
+| Net since the Sept 26 reset, at the Sept 30 close | −$568.74 |
+| Validation passes alive | 0 |
+| Holdout looks | 2, 0 passed |
+| Retained harness improvements | 0 |
+| Evidence resets | 2 (releases A and B) |
+| Incubator | on since 04:01; nothing pinned; earliest first look Oct 6 |
+
+### Next
+
+- **13:31-13:35, the first session under B:** the incubator's pins dated Oct 1, no incubator error, and practice
+  cohorts admitted at the open.
+- **After the Oct 1 close:** the close's economics, and B' (swarm side, no evidence reset).
+- **The library** stays off until the order route's p99 is measured with it under load.
+
+The goal remains unmet. No qualified strategy has traded real money, no harness improvement has been retained, and
+project Net at the last close is −$568.74.
