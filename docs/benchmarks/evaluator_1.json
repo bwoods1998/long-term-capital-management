@@ -80,6 +80,21 @@
  "cases": {
   "absent_signal": {
    "family": "signal",
+   "figures": {
+    "train_trades_per_year": [
+     65,
+     65
+    ],
+    "validation_t": [
+     -2.2588,
+     1.4627
+    ],
+    "validation_t_median": -1.3098,
+    "validation_trades": [
+     65,
+     65
+    ]
+   },
    "kind": "negative",
    "level_flagged": 0,
    "of": 8,
@@ -93,6 +108,21 @@
   },
   "cost_erased": {
    "family": "signal",
+   "figures": {
+    "train_trades_per_year": [
+     65,
+     65
+    ],
+    "validation_t": [
+     -1.7922,
+     0.8547
+    ],
+    "validation_t_median": -0.3417,
+    "validation_trades": [
+     65,
+     65
+    ]
+   },
    "kind": "negative",
    "level_flagged": 0,
    "of": 8,
@@ -107,6 +137,33 @@
   },
   "drift_only": {
    "family": "signal",
+   "figures": {
+    "train_trades_per_year": [
+     65,
+     65
+    ],
+    "validation_stops": {
+     "failed_checks": {
+      "dsr": 1,
+      "t": 1
+     },
+     "t": [
+      1.0078
+     ],
+     "trades": [
+      65
+     ]
+    },
+    "validation_t": [
+     -0.6919,
+     1.5837
+    ],
+    "validation_t_median": 0.9466,
+    "validation_trades": [
+     65,
+     65
+    ]
+   },
    "kind": "negative",
    "level_flagged": 0,
    "of": 8,
@@ -121,6 +178,21 @@
   },
   "edge_disappears": {
    "family": "signal",
+   "figures": {
+    "train_trades_per_year": [
+     65,
+     65
+    ],
+    "validation_t": [
+     2.8954,
+     5.407
+    ],
+    "validation_t_median": 3.5278,
+    "validation_trades": [
+     65,
+     65
+    ]
+   },
    "kind": "negative",
    "level_flagged": 0,
    "of": 8,
@@ -134,6 +206,21 @@
   },
   "fill_close_above_width": {
    "family": "fill",
+   "figures": {
+    "train_trades_per_year": [
+     61,
+     65
+    ],
+    "validation_t": [
+     -20.2676,
+     -16.6445
+    ],
+    "validation_t_median": -17.9881,
+    "validation_trades": [
+     62,
+     65
+    ]
+   },
    "impossible_fills": 0,
    "kind": "negative",
    "level_flagged": 0,
@@ -148,6 +235,21 @@
   },
   "fill_crossed_quotes": {
    "family": "fill",
+   "figures": {
+    "train_trades_per_year": [
+     65,
+     65
+    ],
+    "validation_t": [
+     -13.9747,
+     -9.6455
+    ],
+    "validation_t_median": -12.1259,
+    "validation_trades": [
+     65,
+     65
+    ]
+   },
    "impossible_fills": 0,
    "kind": "negative",
    "level_flagged": 0,
@@ -162,6 +264,21 @@
   },
   "fill_open_below_zero": {
    "family": "fill",
+   "figures": {
+    "train_trades_per_year": [
+     62,
+     65
+    ],
+    "validation_t": [
+     -34.6129,
+     -27.0388
+    ],
+    "validation_t_median": -32.2873,
+    "validation_trades": [
+     62,
+     65
+    ]
+   },
    "impossible_fills": 0,
    "kind": "negative",
    "level_flagged": 0,
@@ -176,6 +293,21 @@
   },
   "fill_passive_spread": {
    "family": "fill",
+   "figures": {
+    "train_trades_per_year": [
+     186,
+     228
+    ],
+    "validation_t": [
+     -5.1604,
+     -3.4329
+    ],
+    "validation_t_median": -4.5261,
+    "validation_trades": [
+     204,
+     231
+    ]
+   },
    "impossible_fills": 0,
    "kind": "negative",
    "level_flagged": 0,
@@ -190,6 +322,21 @@
   },
   "fill_stale_quote": {
    "family": "fill",
+   "figures": {
+    "train_trades_per_year": [
+     64,
+     65
+    ],
+    "validation_t": [
+     -3.821,
+     -1.002
+    ],
+    "validation_t_median": -2.645,
+    "validation_trades": [
+     64,
+     65
+    ]
+   },
    "impossible_fills": 0,
    "kind": "negative",
    "level_flagged": 0,
@@ -207,6 +354,18 @@
    "kind": "negative",
    "level_flagged": 0,
    "of": 8,
+   "opened": {
+    "direction_hit_rate": 0.4808,
+    "hits": 250,
+    "loaded": 8,
+    "profitable_worlds": 1,
+    "t_daily": [
+     -3.1209,
+     1.0026
+    ],
+    "trades": 520,
+    "worlds": 8
+   },
    "promoted": 0,
    "promoted_and_level_flagged": 0,
    "refused": "line 30: .base is not allowed",
@@ -220,6 +379,21 @@
   "leak_daily_bars": {
    "direction_hit_rate": 0.4833,
    "family": "leakage",
+   "figures": {
+    "train_trades_per_year": [
+     65,
+     65
+    ],
+    "validation_t": [
+     -2.6603,
+     0.7044
+    ],
+    "validation_t_median": -0.9937,
+    "validation_trades": [
+     65,
+     65
+    ]
+   },
    "kind": "negative",
    "level_flagged": 0,
    "of": 8,
@@ -236,6 +410,18 @@
    "kind": "negative",
    "level_flagged": 0,
    "of": 8,
+   "opened": {
+    "direction_hit_rate": 1.0,
+    "hits": 520,
+    "loaded": 8,
+    "profitable_worlds": 8,
+    "t_daily": [
+     6.4937,
+     10.2764
+    ],
+    "trades": 520,
+    "worlds": 8
+   },
    "promoted": 0,
    "promoted_and_level_flagged": 0,
    "refused": "line 7: a string naming a year or a date is not allowed; a program never names the calendar",
@@ -249,6 +435,21 @@
   "leak_events_next": {
    "direction_hit_rate": 0.5218,
    "family": "leakage",
+   "figures": {
+    "train_trades_per_year": [
+     65,
+     65
+    ],
+    "validation_t": [
+     -2.511,
+     2.4466
+    ],
+    "validation_t_median": -1.102,
+    "validation_trades": [
+     65,
+     65
+    ]
+   },
    "kind": "smoke",
    "level_flagged": 0,
    "of": 8,
@@ -263,6 +464,21 @@
   "leak_future_index": {
    "direction_hit_rate": 0.5244,
    "family": "leakage",
+   "figures": {
+    "train_trades_per_year": [
+     65,
+     65
+    ],
+    "validation_t": [
+     -2.2588,
+     1.4627
+    ],
+    "validation_t_median": -1.3098,
+    "validation_trades": [
+     65,
+     65
+    ]
+   },
    "kind": "negative",
    "level_flagged": 0,
    "of": 8,
@@ -277,6 +493,21 @@
   "leak_greeks_block": {
    "direction_hit_rate": 0.5135,
    "family": "leakage",
+   "figures": {
+    "train_trades_per_year": [
+     65,
+     65
+    ],
+    "validation_t": [
+     -4.7859,
+     -0.2954
+    ],
+    "validation_t_median": -1.0215,
+    "validation_trades": [
+     65,
+     65
+    ]
+   },
    "kind": "negative",
    "level_flagged": 0,
    "of": 8,
@@ -291,6 +522,21 @@
   "leak_memorized_levels": {
    "direction_hit_rate": 0.9917,
    "family": "leakage",
+   "figures": {
+    "train_trades_per_year": [
+     65,
+     65
+    ],
+    "validation_t": [
+     5.6935,
+     10.2764
+    ],
+    "validation_t_median": 7.5745,
+    "validation_trades": [
+     65,
+     65
+    ]
+   },
    "kind": "negative",
    "level_flagged": 8,
    "of": 8,
@@ -309,6 +555,21 @@
   "leak_memorized_sessions": {
    "direction_hit_rate": 1.0,
    "family": "leakage",
+   "figures": {
+    "train_trades_per_year": [
+     65,
+     65
+    ],
+    "validation_t": [
+     6.4937,
+     10.2764
+    ],
+    "validation_t_median": 7.5745,
+    "validation_trades": [
+     65,
+     65
+    ]
+   },
    "kind": "negative",
    "level_flagged": 0,
    "of": 8,
@@ -327,6 +588,21 @@
   "leak_memorized_sparse": {
    "direction_hit_rate": 0.9881,
    "family": "leakage",
+   "figures": {
+    "train_trades_per_year": [
+     6,
+     22
+    ],
+    "validation_t": [
+     4.6718,
+     14.3614
+    ],
+    "validation_t_median": 10.8221,
+    "validation_trades": [
+     8,
+     19
+    ]
+   },
    "kind": "negative",
    "level_flagged": 8,
    "of": 8,
@@ -345,6 +621,21 @@
   "leak_numpy_memo": {
    "direction_hit_rate": 0.5244,
    "family": "leakage",
+   "figures": {
+    "train_trades_per_year": [
+     65,
+     65
+    ],
+    "validation_t": [
+     -3.2572,
+     0.5633
+    ],
+    "validation_t_median": -0.8435,
+    "validation_trades": [
+     65,
+     65
+    ]
+   },
    "kind": "negative",
    "level_flagged": 0,
    "of": 8,
@@ -365,6 +656,18 @@
    "kind": "negative",
    "level_flagged": 0,
    "of": 8,
+   "opened": {
+    "direction_hit_rate": 1.0,
+    "hits": 520,
+    "loaded": 8,
+    "profitable_worlds": 8,
+    "t_daily": [
+     6.4937,
+     10.2764
+    ],
+    "trades": 520,
+    "worlds": 8
+   },
    "promoted": 0,
    "promoted_and_level_flagged": 0,
    "refused": "line 30: getattr takes a literal attribute name here",
@@ -378,6 +681,21 @@
   "leak_volume_bars": {
    "direction_hit_rate": 0.5244,
    "family": "leakage",
+   "figures": {
+    "train_trades_per_year": [
+     65,
+     65
+    ],
+    "validation_t": [
+     -2.2588,
+     1.4627
+    ],
+    "validation_t_median": -1.3098,
+    "validation_trades": [
+     65,
+     65
+    ]
+   },
    "kind": "negative",
    "level_flagged": 0,
    "of": 8,
@@ -391,6 +709,32 @@
   },
   "planted_dense": {
    "family": "signal",
+   "figures": {
+    "train_trades_per_year": [
+     65,
+     65
+    ],
+    "validation_stops": {
+     "failed_checks": {
+      "t": 1
+     },
+     "t": [
+      1.901
+     ],
+     "trades": [
+      65
+     ]
+    },
+    "validation_t": [
+     1.901,
+     4.4839
+    ],
+    "validation_t_median": 3.1858,
+    "validation_trades": [
+     65,
+     65
+    ]
+   },
    "kind": "positive",
    "level_flagged": 0,
    "of": 8,
@@ -405,6 +749,38 @@
   },
   "planted_medium": {
    "family": "signal",
+   "figures": {
+    "train_trades_per_year": [
+     42,
+     55
+    ],
+    "validation_stops": {
+     "failed_checks": {
+      "trades": 4
+     },
+     "t": [
+      3.5653,
+      3.7433,
+      4.27,
+      4.6162
+     ],
+     "trades": [
+      39,
+      47,
+      47,
+      49
+     ]
+    },
+    "validation_t": [
+     3.5506,
+     6.0097
+    ],
+    "validation_t_median": 4.0066,
+    "validation_trades": [
+     39,
+     54
+    ]
+   },
    "kind": "positive",
    "level_flagged": 0,
    "of": 8,
@@ -420,6 +796,21 @@
   },
   "planted_regime_gap": {
    "family": "signal",
+   "figures": {
+    "train_trades_per_year": [
+     14,
+     32
+    ],
+    "validation_t": [
+     2.5099,
+     5.4717
+    ],
+    "validation_t_median": 4.217,
+    "validation_trades": [
+     16,
+     28
+    ]
+   },
    "kind": "positive",
    "level_flagged": 1,
    "of": 8,
@@ -433,6 +824,21 @@
   },
   "planted_regime_years": {
    "family": "signal",
+   "figures": {
+    "train_trades_per_year": [
+     65,
+     65
+    ],
+    "validation_t": [
+     2.9194,
+     4.498
+    ],
+    "validation_t_median": 4.0712,
+    "validation_trades": [
+     65,
+     65
+    ]
+   },
    "kind": "positive",
    "level_flagged": 0,
    "of": 8,
@@ -446,6 +852,21 @@
   },
   "planted_sparse": {
    "family": "signal",
+   "figures": {
+    "train_trades_per_year": [
+     6,
+     19
+    ],
+    "validation_t": [
+     3.2713,
+     6.6164
+    ],
+    "validation_t_median": 4.6671,
+    "validation_trades": [
+     7,
+     16
+    ]
+   },
    "kind": "positive",
    "level_flagged": 0,
    "of": 8,
@@ -534,7 +955,7 @@
    }
   },
   "cohort": "development",
-  "elapsed_seconds": 1200.0,
+  "elapsed_seconds": 1215.7,
   "facts_contradicted": [
    "context",
    "state"
@@ -727,8 +1148,10 @@
   "proofs_failed": [
    "state_numpy_runs",
    "state_numpy_runs_sctypedict",
+   "state_numpy_runs_polynomial",
    "state_numpy_batchmates",
    "state_numpy_batchmates_sctypedict",
+   "state_numpy_batchmates_polynomial",
    "state_numpy_reachable",
    "state_ctx_batchmates"
   ],
@@ -736,9 +1159,11 @@
    "state_ctx_batchmates": 0,
    "state_fresh_runs": 8,
    "state_numpy_batchmates": 0,
+   "state_numpy_batchmates_polynomial": 0,
    "state_numpy_batchmates_sctypedict": 0,
    "state_numpy_reachable": 0,
    "state_numpy_runs": 0,
+   "state_numpy_runs_polynomial": 0,
    "state_numpy_runs_sctypedict": 0,
    "state_params_copied": 8,
    "state_split_segments": 8
@@ -776,13 +1201,13 @@
   },
   "stress_contaminated_total": 8,
   "suite": "evaluator-suite-1",
-  "suite_sha": "ce1617764510c9963edc2ead3ad5a12f6a31876d747afb5ba1529ace847f4094",
+  "suite_sha": "0e9badba6821b28f738ae40adb59dc00f969b717a939a35d7a16cfd11494b2fe",
   "tree": {
    "engine": "gym-engine-4",
-   "evaluator_sha": "7305b9e199b307c9f754af6b4bb32a999fc9b6353f0f39440d71d28805a8848f",
-   "execution_sha256": "2d3d02847e7d3b04689c159504d6080e37c81f81628a26535c50410102d031fa",
+   "evaluator_sha": "771b675df22a7683f666cea08fec471eafb9dd9052085f17d19ba3c30f09c047",
+   "execution_sha256": "3e90a6cc1c91683237e8784ad52d0048985f8623b7ee1534db8d984971ec5523",
    "fixture_sha": "1ee0e716bc8d8f0ed7dc12377c44420ca1643064468d1985a18de715dab101b1",
-   "git_head": "118a8239ed8c9e9bba763e9f379780dd580accbf",
+   "git_head": "1e63b497fcf55d0d1ec1e141668f76feba7bc919",
    "league_uncommitted_changes": false
   },
   "verdict_sensitivity": {
@@ -817,11 +1242,12 @@
   "The search tier has no drift figures, no serial dependence and a fixed five-candidate schedule; it is not a simulation of model research.",
   "Finite counts: an exact 95% upper bound, not a point estimate, is the claim a zero count supports. Run-level bounds treat each case-world as an independent trial; outcomes cluster by case (most go 0/8 or 8/8), so the case-level counts are the effective sample, and every bound is conditional on this fixed case mix.",
   "End-to-end false promotions cannot tell floor variants apart on noise: the holdout with Holm stops every noise lineage under any floors. The owner-rule verdict therefore also compares the holdout looks noise spends in every frequency band, and the sparse memorized table is a negative the floors are known to stop.",
-  "--tree runs the candidate's code in the suite's interpreter with the operator's environment: it guards against accidental drift of the cases, not against a hostile tree."
+  "--tree runs the candidate's code in the suite's interpreter with the operator's environment: it guards against accidental drift of the cases, not against a hostile tree.",
+  "The numpy reach proof covers what a program reaches from `import numpy` and `import math` without a call (public attributes, mapping values and keys, elements), in the scored process's numpy and the static check's own answer. Not covered: objects a program reaches only through a call's result, and state a call changes through a function not named as a setter (set_*, register_*, seterr*, setbufsize)."
  ],
  "owner_rule_confirmation": null,
  "pinned": true,
- "pinned_sha": "ce1617764510c9963edc2ead3ad5a12f6a31876d747afb5ba1529ace847f4094",
+ "pinned_sha": "0e9badba6821b28f738ae40adb59dc00f969b717a939a35d7a16cfd11494b2fe",
  "proofs": {
   "state_ctx_batchmates": {
    "claim": "a batch-mate cannot write into the ctx objects another program is handed",
@@ -856,6 +1282,17 @@
    "of": 8,
    "refused": null
   },
+  "state_numpy_batchmates_polynomial": {
+   "claim": "a batch-mate cannot change what another program computes (np.polynomial.Polynomial.domain)",
+   "fact": "state",
+   "held": 0,
+   "observed": [
+    65,
+    0
+   ],
+   "of": 8,
+   "refused": null
+  },
   "state_numpy_batchmates_sctypedict": {
    "claim": "a program's result does not depend on the batch-mates it shares a process with (np.sctypeDict)",
    "fact": "state",
@@ -868,19 +1305,96 @@
    "refused": null
   },
   "state_numpy_reachable": {
-   "claim": "the static check refuses every mutable public numpy container (a program cannot hold one)",
+   "attribute_writes": [],
+   "channels": {
+    "batchmates": true,
+    "runs": true
+   },
+   "claim": "nothing reachable from `import numpy` or `import math` without a call (public attributes, mapping values, elements) carries a program's write past its run or to a batch-mate; no attribute write is admitted on a reached object, and no global setter (set_*, register_*) is reachable",
    "fact": "state",
+   "foreign_modules": {
+    "functools": "np.polynomial.polyutils.functools"
+   },
    "held": 0,
    "observed": [
+    "np.polynomial.Chebyshev.domain",
+    "np.polynomial.Chebyshev.window",
+    "np.polynomial.Hermite.domain",
+    "np.polynomial.Hermite.window",
+    "np.polynomial.HermiteE.domain",
+    "np.polynomial.HermiteE.window",
+    "np.polynomial.Laguerre.domain",
+    "np.polynomial.Laguerre.window",
+    "np.polynomial.Legendre.domain",
+    "np.polynomial.Legendre.window",
+    "np.polynomial.Polynomial.domain",
+    "np.polynomial.Polynomial.window",
+    "np.polynomial.chebyshev.chebdomain",
+    "np.polynomial.chebyshev.chebone",
+    "np.polynomial.chebyshev.chebx",
+    "np.polynomial.chebyshev.chebzero",
+    "np.polynomial.hermite.hermdomain",
+    "np.polynomial.hermite.hermone",
+    "np.polynomial.hermite.hermx",
+    "np.polynomial.hermite.hermzero",
+    "np.polynomial.hermite_e.hermedomain",
+    "np.polynomial.hermite_e.hermeone",
+    "np.polynomial.hermite_e.hermex",
+    "np.polynomial.hermite_e.hermezero",
+    "np.polynomial.laguerre.lagdomain",
+    "np.polynomial.laguerre.lagone",
+    "np.polynomial.laguerre.lagx",
+    "np.polynomial.laguerre.lagzero",
+    "np.polynomial.legendre.legdomain",
+    "np.polynomial.legendre.legone",
+    "np.polynomial.legendre.legx",
+    "np.polynomial.legendre.legzero",
+    "np.polynomial.polynomial.polydomain",
+    "np.polynomial.polynomial.polyone",
+    "np.polynomial.polynomial.polyx",
+    "np.polynomial.polynomial.polyzero",
     "np.sctypeDict",
     "np.typecodes"
    ],
    "of": 8,
    "refused": null,
-   "refused_containers": []
+   "refused_containers": [
+    "np.set_printoptions",
+    "np.setbufsize",
+    "np.seterr",
+    "np.seterrcall"
+   ],
+   "setters": [
+    "np.dtypes.register_dlpack_dtype",
+    "np.polynomial.set_default_printstyle"
+   ],
+   "trades": [
+    65,
+    0,
+    0
+   ],
+   "unverified": [],
+   "walk": {
+    "complete": true,
+    "depth": 5,
+    "edges": 5567,
+    "numpy": "2.5.3",
+    "objects": 1245
+   }
   },
   "state_numpy_runs": {
    "claim": "no process-global object (np.typecodes) carries one run's decisions into the next run",
+   "fact": "state",
+   "held": 0,
+   "observed": [
+    65,
+    0
+   ],
+   "of": 8,
+   "refused": null
+  },
+  "state_numpy_runs_polynomial": {
+   "claim": "no process-global object (np.polynomial.polynomial.polyx) carries one run's decisions into the next run",
    "fact": "state",
    "held": 0,
    "observed": [
@@ -974,37 +1488,37 @@
    "upper_95_one_sided": 0.9898
   }
  },
- "replication_rows_sha256": "1c3f84f074bcf3ef59791532fb24a4f5eefb53c3f635da2a578a8c6df181cb3b",
+ "replication_rows_sha256": "a67bbfbf8c439f61afb67be2416e2e063157fa5d00ed1eab557775cd192c7cef",
  "replications": 8,
  "reproduce": "python -m league.swarm.benchmarks --suite evaluator --cohort development --json --output FULL.json --receipt RECEIPT.json (the rows digest excludes per-world seconds)",
  "runtime": {
-  "elapsed_seconds": 1200.0,
+  "elapsed_seconds": 1215.7,
   "numpy": "2.5.3",
   "pyarrow": "25.0.1",
   "python": "3.14.7"
  },
  "search_replications": 128,
  "suite": "evaluator-suite-1",
- "suite_sha": "ce1617764510c9963edc2ead3ad5a12f6a31876d747afb5ba1529ace847f4094",
+ "suite_sha": "0e9badba6821b28f738ae40adb59dc00f969b717a939a35d7a16cfd11494b2fe",
  "title": "evaluator-suite-1, development cohort: a synthetic known-answer benchmark of the evaluator, not a qualification",
  "tree": {
   "engine": "gym-engine-4",
-  "evaluator_sha": "7305b9e199b307c9f754af6b4bb32a999fc9b6353f0f39440d71d28805a8848f",
+  "evaluator_sha": "771b675df22a7683f666cea08fec471eafb9dd9052085f17d19ba3c30f09c047",
   "evaluator_sources": {
    "league/gym/experiment.py": "9f48f8a776c79a9f6c10ecf67956e010274130c9b9c355df7662d8d082dd3b9f",
    "league/gym/results.py": "d29ed18d37a234238ef02fb1bc6f1abc32ad3360b747501ccefd2785a9851ae1",
    "league/gym/review_contract.py": "92f03273b68667cc92dd95736b47fb1ebc9f11bab3ae5ff48a7637d375e2f013",
    "league/stats.py": "866ecda27a79bbeaba033ef92847093e182a0dbe2bd1041a568c2dbf81a302d3",
    "league/swarm/evidence.py": "fee30d80b9a6afac99045b777d455a7284bdec21a466a4a6b9a012e88c2e64c9",
-   "league/swarm/gate.py": "aec33d9b741ec9fa02fb245113b696ec3f0b2ffee4553c6f55b5e1d1c8a083d8",
-   "league/swarm/researcher.py": "f23e16633e12f9e2c792fad205029e43f0440d1b0bd28830b8f79c8815889d18"
+   "league/swarm/gate.py": "7e30040562186f08d6b79aabb9f31631d3bbab712e64fe23c0e42eda481a14a1",
+   "league/swarm/researcher.py": "c509b2cc201d89ea8cbceb52143760c54ab8d803b98776f140f20fae1860655a"
   },
-  "execution_sha256": "2d3d02847e7d3b04689c159504d6080e37c81f81628a26535c50410102d031fa",
+  "execution_sha256": "3e90a6cc1c91683237e8784ad52d0048985f8623b7ee1534db8d984971ec5523",
   "fixture_sha": "1ee0e716bc8d8f0ed7dc12377c44420ca1643064468d1985a18de715dab101b1",
   "fixture_sources": {
    "league/gym/synth.py": "d48f0d9d71388c133ee3ac08e7ee7b144060b2f661e2055a2c60ffbe5339638d"
   },
-  "git_head": "118a8239ed8c9e9bba763e9f379780dd580accbf",
+  "git_head": "1e63b497fcf55d0d1ec1e141668f76feba7bc919",
   "league_uncommitted_changes": false
  },
  "variants": {
@@ -2182,5 +2696,10 @@
   "false_promotions_see_no_floors": true,
   "no_floors_rejected": true,
   "noise_looks_see_no_floors": true
+ },
+ "world_sessions": {
+  "holdout": 48,
+  "train": 195,
+  "validation": 65
  }
 }
