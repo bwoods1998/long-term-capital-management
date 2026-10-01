@@ -1193,7 +1193,7 @@ def demote_version(store: SwarmStore, fam: Mapping[str, Any], n: int, *, why: st
                clock: Callable[[], float] = time.time) -> dict[str, Any]:
     """Version `n` lost at 1.5x, its 1.5x or drift run failed every attempt, or it fails the drift screen: never the best
     again; the family's next eligible candidate becomes its best (under the store's transaction). `robust_why` keeps the
-    reason for the status."""
+    reason for the status. Its Train and drift mark for the incubator (`train_passed`, `incubator.facts`) goes too."""
     fid = fam["id"]
     state = fam.get("state") or {}
     failed = list(state.get("robust_failed") or [])
@@ -1204,6 +1204,9 @@ def demote_version(store: SwarmStore, fam: Mapping[str, Any], n: int, *, why: st
     fields: dict[str, Any] = {}
     values: dict[str, Any] = {"robust_failed": failed[-50:], "robust_why": {k: v for k, v in whys.items() if int(k) in failed[-50:]},
                               "train_candidates": rest}
+    marks = state.get("train_passed")
+    if isinstance(marks, Mapping) and str(int(n)) in marks:
+        values["train_passed"] = {k: v for k, v in marks.items() if k != str(int(n))}
     nxt: dict[str, Any] = {"version": None}
     if state.get("best_train_version") == n:
         if rest:
