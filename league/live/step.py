@@ -735,6 +735,10 @@ class OptionsLive:
         self._families_at = now
         if self._in_session(now):
             self._session_pass_day = ny(now).date().isoformat()   # `_observe_repin_due`: this session day's pass ran
+            if self.incubator is not None:
+                # Before any read that can fail: the session day's pass is counted, durably (the incubator's retries).
+                with contextlib.suppress(Exception):
+                    self.incubator.begin(self._session_pass_day)
             if self.switches()["observe"]:
                 self._observe_pass_day = self._session_pass_day
         try:
@@ -747,8 +751,9 @@ class OptionsLive:
         # then the D2 and tuition rows, then its pins (which yield to them).
         # A read that fails leaves today's checks untaken: `keep` then carries the last keep's cohorts (never pinned on
         # it) and is not settled (`checked`), so the next families pass takes the checks again. While the cohorts are
-        # unread (`holding`), or when the keep cannot be taken at all, no cohort is completed at its observation target
-        # this pass (`HOLD`): fail open for practising only, since a pin still needs today's check passed.
+        # unread (`holding`), or when the keep cannot be taken at all (`fallback`), no cohort is completed at its
+        # observation target this pass (`HOLD`): fail open for practising only, since a pin still needs today's check
+        # passed; and only while the day's retries remain (then the carried or last saved keep alone).
         keep: frozenset = frozenset()
         if self.incubator is not None:
             today, in_session = ny(now).date().isoformat(), self._in_session(now)
@@ -762,7 +767,7 @@ class OptionsLive:
                 if in_session and self.incubator.holding(today):
                     keep = HOLD
             except Exception as exc:  # noqa: BLE001 - practising goes on, and no kept cohort is completed on it
-                keep = HOLD
+                keep = self.incubator.fallback(today)     # never raises: HOLD, then the last saved keep
                 with contextlib.suppress(Exception):
                     self.incubator._alert_once(f"keep:{today}:{type(exc).__name__}",
                                                f"live: the incubator's keep failed ({type(exc).__name__}: "

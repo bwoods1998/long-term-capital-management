@@ -299,7 +299,8 @@ class ThePracticeRule(unittest.TestCase):
         self.assertEqual((record["closes_program"], record["pnl_program"]), (2, 13.0),
                          "program closes under this evaluator before today; forced and other evaluators left out")
         self.assertEqual((record["closes_all"], record["pnl_all"]), (3, 9.0), "forced closes count in P5")
-        self.assertEqual((record["open_mark"], record["coverage"]), (-3.5, 0.9))
+        self.assertEqual((record["open_mark"], record["coverage"], record["intraday"]), (-3.5, 0.9, True),
+                         "stepped today with nothing kept from before it: today's values, said so")
         self.assertEqual(record["feasible"], 1, "40 + 2 x 1 fits $50; 120 / 2 + 2 x 2 / 2 does not")
         self.assertEqual(record["return_on_risk"], round(9.0 / 200.0, 6))
         self.assertEqual(practice_record(root, "fam", 1, before="2026-09-28", evaluator="OLD")["closes_program"], 1)
@@ -318,6 +319,55 @@ class ThePracticeRule(unittest.TestCase):
                 pass
         self.assertIsNone(practice_record(root, "fam", 1, before="2026-09-28", evaluator="E"))
         self.assertIsNone(cohort_rows(root))
+
+
+    def test_the_record_before_today_never_reads_todays_coverage_or_mark(self):
+        import tempfile
+
+        from league.live import observe as O
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        # A file from before release B's columns gains them when the House opens it.
+        old = sqlite3.connect(root / "observe.sqlite")
+        old.executescript(O.SCHEMA.replace("    prior_day TEXT, prior_due INTEGER, prior_made INTEGER, prior_open_mark REAL,\n", ""))
+        self.assertNotIn("prior_day", {r[1] for r in old.execute("PRAGMA table_info(practice)")})
+        old.close()
+        store = ObserveStore(root, clock=lambda: 200000.0)
+        store.evaluator = "E"
+        self.addCleanup(store.close)
+        db = store._connect()
+        self.assertTrue({"prior_day", "prior_due", "prior_made", "prior_open_mark"}
+                        <= {r[1] for r in db.execute("PRAGMA table_info(practice)")})
+        db.execute("INSERT INTO cohorts(family, version, admitted_at, first_day, snapshot) VALUES('fam', 1, 1, '2026-09-23', ?)",
+                   (json.dumps({"practice_evaluator": "E"}),))
+
+        def minute(day, t, *, made=True, mark=0.0):
+            self.assertTrue(store.practice([{"family": "fam", "version": 1, "tier": "train", "capital": 1e4, "account": "a",
+                                             "at": t, "day": day, "equity": 1e4, "open_positions": 1,
+                                             "open_mark_pnl": mark, "due": True, "made": made, "status": "live"}]))
+
+        def read(before):
+            r = practice_record(root, "fam", 1, before=before, evaluator="E")
+            return r["decisions_due"], r["decisions_made"], r["open_mark"], r["intraday"]
+
+        minute("2026-09-23", 60.0, mark=1.0)
+        self.assertEqual(read("2026-09-23"), (0, 0, 0.0, False), "first stepped today: nothing before it")
+        minute("2026-09-23", 120.0, made=False, mark=2.0)
+        self.assertEqual(read("2026-09-24"), (2, 1, 2.0, False), "not stepped since: all before today")
+        minute("2026-09-24", 86460.0, made=False, mark=-50.0)
+        minute("2026-09-24", 86520.0, made=False, mark=-60.0)
+        self.assertEqual(read("2026-09-24"), (2, 1, 2.0, False), "today's two missed decisions and mark left out")
+        self.assertEqual(practice_record(root, "fam", 1, before="2026-09-24", evaluator="E")["coverage"], 0.5)
+        self.assertEqual(db.execute("SELECT decisions_due, open_mark_pnl, prior_day, prior_due, prior_made, prior_open_mark "
+                                    "FROM practice").fetchone(), (4, -60.0, "2026-09-23", 2, 1, 2.0))
+        self.assertEqual(read("2026-09-25"), (4, 1, -60.0, False))
+        minute("2026-09-25", 172860.0, mark=7.0)
+        self.assertEqual(read("2026-09-25"), (4, 1, -60.0, False), "the roll keeps the last session's values")
+        # A row stepped today before the columns existed: what it held before today is not known, and said so.
+        db.execute("UPDATE practice SET prior_day=NULL, prior_due=NULL, prior_made=NULL, prior_open_mark=NULL")
+        self.assertEqual(read("2026-09-25"), (5, 2, 7.0, True))
 
 
 # ======================================================================================================== the caps
@@ -1585,21 +1635,22 @@ class L2PrimeSecondReview(Base):
         keep = self.live.state.get(INC.KEEP)
         self.assertEqual((keep["cohorts"], keep["carried"], keep["unread"]), ([["fam", 1]], [["fam", 1]], True))
 
-    def test_a_retried_recheck_failing_on_the_live_mark_alone_is_deferred_never_ended(self):
+    def test_a_retried_recheck_reads_the_mark_before_today_never_todays(self):
         self.monday()
         with mock.patch.object(INC, "practice_record", return_value=None):
             self.run_to(9, 31)
-        with self.marked():
+        with L2PrimeRecordBeforeToday.today_mark(self.live, -1000.0):
             self.run_to(9, 36)
+        self.assertEqual(L2PrimeRecordBeforeToday.row(self.live)["open_mark_pnl"], -1000.0, "today's mark")
         verdict = self.verdicts()["fam@1"]
         self.assertNotIn("ended", verdict)
-        self.assertTrue(verdict["latest"]["why"].startswith("P6"), verdict["latest"])
-        self.assertEqual((verdict["latest"]["ok"], verdict["latest"]["deferred"]), (False, True))
-        keep = self.live.state.get(INC.KEEP)
-        self.assertEqual(keep, {"day": "2026-09-29", "cohorts": [["fam", 1]], "carried": [["fam", 1]]})
-        self.assertTrue(self.live.incubator.checked("2026-09-29"), "settled: checked at the next session's first pass")
+        self.assertEqual((verdict["latest"]["ok"], verdict["latest"]["record"]["open_mark"]), (True, 0.0),
+                         "the retry decides on the mark before today, as the first pass would have")
+        self.assertEqual(self.live.state.get(INC.KEEP), {"day": "2026-09-29", "cohorts": [["fam", 1]]})
+        self.assertTrue(self.live.incubator.checked("2026-09-29"))
         self.assertEqual(self.status(), ("active", None))
-        self.assertTrue([p for p, _ in self.ledger.of("live.incubator") if p.get("deferred") == "fam@1"])
+        self.assertEqual(self.pins()["order"], [], "no mid-session join")
+        self.run_to(9, 37)                                # the session ends with the engine's own mark
         self.clock.set(at(TUESDAY, 9, 31) + 86400)
         self.run_to(9, 31)
         self.assertEqual(self.pins()["order"], ["fam@1:i"])
@@ -1611,20 +1662,22 @@ class L2PrimeSecondReview(Base):
             self.run_to(9, 31)
         self.assertTrue(self.verdicts()["fam@1"]["ended"]["why"].startswith("P6"))
 
-    def test_a_retried_first_look_failing_on_the_live_mark_alone_is_not_taken(self):
+    def test_a_retried_first_look_reads_the_mark_before_today_never_todays(self):
         self.first()
         with mock.patch.object(INC, "practice_record", return_value=None):
             self.run_to(9, 31)
-        with self.marked():
+        with L2PrimeRecordBeforeToday.today_mark(self.live, -1000.0):
             self.run_to(9, 36)
-        self.assertEqual(self.verdicts(), {}, "a first look is final: not taken on the live mark")
-        self.assertEqual(self.live.state.get(INC.KEEP), {"day": "2026-09-28", "cohorts": [["fam", 1]],
-                                                          "carried": [["fam", 1]]})
+        verdict = self.verdicts()["fam@1"]
+        self.assertEqual((verdict["passed"], verdict["day"], verdict["record"]["open_mark"]), (True, "2026-09-28", 0.0),
+                         "taken once, on the record before today (the mark its last session left), never today's")
+        self.assertEqual(self.live.state.get(INC.KEEP), {"day": "2026-09-28", "cohorts": [["fam", 1]]})
         self.assertTrue(self.live.incubator.checked("2026-09-28"))
         self.assertEqual(self.status(), ("active", None))
+        self.assertEqual(self.pins()["order"], [], "no mid-session join")
+        self.run_to(9, 37)                                # the session ends with the engine's own mark
         self.clock.set(at(TUESDAY, 9, 31))
         self.run_to(9, 31)
-        self.assertTrue(self.verdicts()["fam@1"]["passed"])
         self.assertEqual(self.pins()["order"], ["fam@1:i"])
 
     def test_a_read_that_never_recovers_is_retried_at_most_retries_times(self):
@@ -1639,6 +1692,302 @@ class L2PrimeSecondReview(Base):
         self.assertEqual(self.kept(), [("fam", 1)])
         self.assertEqual(len([t for _, t in self.alerts if "after 2 retries" in t]), 1)
         self.assertNotIn("ended", self.verdicts()["fam@1"])
+
+
+@unittest.skipUnless(HAVE, "numpy not installed")
+class L2PrimeRecordBeforeToday(Base):
+    """The verification of the second review (Sept 30 - Oct 1): every first look and re-check reads the record BEFORE
+    TODAY (`observe.practice_record`: the practice row's coverage and open mark as its last session before today left
+    them, `prior_*`), at the session's first pass or a retry alike, so a first pass that read nothing (the bands
+    unreadable, `keep` raised) never lets a later pass decide on today's values, either way. A record that cannot say
+    what it held before today decides nothing on P3 or P6, and never masks P4 or P5; a first look waiting for the next
+    session's record is never taken again that day; the day's passes are counted durably from the START of each pass;
+    and the HOLD is bounded by the day's retries."""
+
+    def setUp(self):
+        super().setUp()
+        self.switch(True, observe=True)
+
+    status = L2Prime.status
+    kept = L2PrimeSecondReview.kept
+    new_cohort = L2PrimeSecondReview.new_cohort
+    unread_for = staticmethod(L2PrimeSecondReview.unread_for)
+
+    @staticmethod
+    def today_mark(live, mark, fid="fam"):
+        """The practice row's open mark TODAY, through the engine's own minute upserts: `mark`."""
+        store = live.observe_store
+        real = store.practice
+
+        def practice(rows):
+            return real([dict(r, open_mark_pnl=mark) if r.get("family") == fid else r for r in rows])
+        return mock.patch.object(store, "practice", side_effect=practice)
+
+    @staticmethod
+    def row(live, fid="fam"):
+        names = ("last_day", "decisions_due", "decisions_made", "open_mark_pnl", "prior_day", "prior_due", "prior_made",
+                 "prior_open_mark")
+        values = live.observe_store._connect().execute(f"SELECT {', '.join(names)} FROM practice WHERE family=?",
+                                                       (fid,)).fetchone()
+        return dict(zip(names, values))
+
+    def bands_fail(self):
+        return mock.patch.object(self.families, "read", side_effect=sqlite3.OperationalError("database is locked"))
+
+    def unknown_before(self, fid="fam"):
+        """A row stepped today before release B's `prior_*` columns: what it held before today is not known."""
+        self.live.observe_store._connect().execute(
+            "UPDATE practice SET prior_day=NULL, prior_due=NULL, prior_made=NULL, prior_open_mark=NULL WHERE family=?",
+            (fid,))
+
+    def todays_coverage_collapses(self, fid="fam"):
+        self.live.observe_store._connect().execute(
+            "UPDATE practice SET decisions_due=decisions_due+1000 WHERE family=?", (fid,))
+
+    def losing_close(self, fid="fam", day="2026-09-28"):
+        """A program close before today that leaves its program P&L below $0 (P4, P5)."""
+        self.live.observe_store._connect().execute(
+            "INSERT INTO trades(instance, account, family, version, trade_id, day, pnl, max_loss, recorded_at, body, "
+            "exit_day, reason, forced, evaluator) VALUES(?, 'a', ?, 1, 'loss', ?, -80, 30, 1, '{}', ?, 'program', 0, ?)",
+            (f"{fid}@1:o", fid, day, day, self.live.observe_store.evaluator))
+
+    def monday(self, mark=None):
+        """Monday: fam@1's first look passes and it is pinned; its session ends with the open mark `mark`."""
+        self.first()
+        self.run_to(9, 31)
+        self.assertEqual(self.pins()["order"], ["fam@1:i"])
+        if mark is not None:
+            self.live.observe_store._connect().execute("UPDATE practice SET open_mark_pnl=? WHERE family='fam'", (mark,))
+        self.clock.set(at(TUESDAY, 9, 31))
+
+    def wednesday(self):
+        self.clock.set(at(TUESDAY, 9, 31) + 86400)
+        self.run_to(9, 31)
+
+    # ------------------------------------------------------------------ the record before today, at any pass
+    def test_bands_unread_at_the_first_pass_then_todays_mark_never_ends_it(self):
+        self.monday()
+        with self.today_mark(self.live, -1000.0):
+            with self.bands_fail():
+                self.run_to(9, 31)
+            session = self.live.state.get(INC.SESSION)
+            self.assertEqual((session["day"], session["passes"]), ("2026-09-29", 1), "counted before the bands were read")
+            self.run_to(9, 36)
+        row = self.row(self.live)
+        self.assertEqual((row["last_day"], row["open_mark_pnl"]), ("2026-09-29", -1000.0), "today's mark fails P6")
+        self.assertEqual(row["prior_day"], "2026-09-28")
+        verdict = self.verdicts()["fam@1"]
+        self.assertNotIn("ended", verdict)
+        self.assertEqual((verdict["latest"]["day"], verdict["latest"]["ok"]), ("2026-09-29", True), verdict["latest"])
+        self.assertEqual(verdict["latest"]["record"]["open_mark"], row["prior_open_mark"])
+        self.assertEqual(self.pins()["order"], ["fam@1:i"], "pinned on the record before today, as at the first pass")
+        self.assertEqual(self.status(), ("active", None))
+
+    def test_bands_unread_at_the_first_pass_then_todays_mark_never_pins_it(self):
+        self.monday(mark=-1000.0)
+        with self.today_mark(self.live, 0.0):
+            with self.bands_fail():
+                self.run_to(9, 31)
+            self.run_to(9, 36)
+        self.assertEqual(self.row(self.live)["prior_open_mark"], -1000.0)
+        verdict = self.verdicts()["fam@1"]
+        self.assertTrue(verdict["ended"]["why"].startswith("P6"), verdict)
+        self.assertIn("-950.0", verdict["ended"]["why"], "the mark its last session left, never today's 0")
+        self.assertEqual(self.pins()["order"], [])
+        inst = self.live.instances.get("fam@1:i")
+        self.assertTrue(inst is None or inst.mode != "live", "no real money on today's mark")
+
+    def test_the_first_pass_decides_the_same_on_the_mark_before_today(self):
+        self.monday(mark=-1000.0)
+        with self.today_mark(self.live, 0.0):
+            self.run_to(9, 31)
+        self.assertTrue(self.verdicts()["fam@1"]["ended"]["why"].startswith("P6"))
+        self.assertEqual(self.pins()["order"], [])
+
+    def test_a_keep_that_raised_at_the_first_pass_then_todays_mark_never_ends_it(self):
+        self.monday()
+        with self.today_mark(self.live, -1000.0):
+            with mock.patch.object(INC.Incubator, "keep", side_effect=RuntimeError("boom")), \
+                    mock.patch.object(INC, "practice_record", return_value=None):
+                self.run_to(9, 31)
+            self.assertEqual(self.status(), ("active", None))
+            self.run_to(9, 36)
+        verdict = self.verdicts()["fam@1"]
+        self.assertNotIn("ended", verdict)
+        self.assertEqual((verdict["latest"]["ok"], verdict["latest"]["record"]["open_mark"]),
+                         (True, self.row(self.live)["prior_open_mark"]))
+        self.assertEqual(self.pins()["order"], ["fam@1:i"])
+
+    def test_todays_coverage_is_never_read_at_a_retry(self):
+        self.monday()
+        with mock.patch.object(INC, "practice_record", return_value=None):
+            self.run_to(9, 31)
+        self.todays_coverage_collapses()
+        self.run_to(9, 36)
+        verdict = self.verdicts()["fam@1"]
+        self.assertNotIn("ended", verdict)
+        self.assertTrue(verdict["latest"]["ok"], verdict["latest"])
+        row = self.row(self.live)
+        self.assertEqual((verdict["latest"]["record"]["decisions_due"], verdict["latest"]["record"]["decisions_made"]),
+                         (row["prior_due"], row["prior_made"]))
+        self.assertGreater(row["decisions_due"], 1000)
+
+    # ------------------------------------------------------------------ a record that cannot say what it held before today
+    def test_without_its_values_before_today_a_recheck_failing_p6_is_deferred_never_ended(self):
+        self.monday()
+        with self.today_mark(self.live, -1000.0):
+            with self.bands_fail():
+                self.run_to(9, 31)
+            self.run_to(9, 35)
+            self.unknown_before()
+            self.run_to(9, 36)
+        verdict = self.verdicts()["fam@1"]
+        self.assertNotIn("ended", verdict)
+        latest = verdict["latest"]
+        self.assertEqual((latest["ok"], latest["deferred"], latest["intraday"]), (False, True, True))
+        self.assertIn("P6", latest["why"])
+        self.assertEqual(self.pins()["order"], [], "never pinned on today's values")
+        self.assertIn("today's", self.pins()["refused"]["fam@1"])
+        keep = self.live.state.get(INC.KEEP)
+        self.assertEqual(keep, {"day": "2026-09-29", "cohorts": [["fam", 1]], "carried": [["fam", 1]]})
+        self.assertTrue(self.live.incubator.checked("2026-09-29"))
+        self.run_to(9, 41)
+        self.assertEqual(self.status(), ("active", None))
+        self.assertTrue(self.verdicts()["fam@1"]["latest"]["deferred"], "re-checked at the next session only")
+        self.wednesday()
+        self.assertEqual(self.pins()["order"], ["fam@1:i"])
+        self.assertTrue(self.verdicts()["fam@1"]["latest"]["ok"])
+
+    def test_without_its_values_before_today_a_recheck_that_passes_is_not_pinned(self):
+        self.monday()
+        with self.bands_fail():
+            self.run_to(9, 31)
+        self.run_to(9, 35)
+        self.unknown_before()
+        self.run_to(9, 36)
+        latest = self.verdicts()["fam@1"]["latest"]
+        self.assertEqual((latest["ok"], latest["deferred"]), (False, True))
+        self.assertEqual(self.pins()["order"], [])
+        self.assertNotIn("fam@1:i", [k for k, i in self.live.instances.items() if i.mode == "live"])
+        self.assertEqual(self.status(), ("active", None))
+
+    def test_without_its_values_before_today_p4_still_ends_it_whatever_p3_says(self):
+        self.monday()
+        with self.bands_fail():
+            self.run_to(9, 31)
+        self.run_to(9, 35)
+        self.unknown_before()
+        self.todays_coverage_collapses()
+        self.losing_close()
+        self.run_to(9, 36)
+        verdict = self.verdicts()["fam@1"]
+        self.assertTrue(verdict["ended"]["why"].startswith("P4"), verdict.get("ended"))
+        self.assertFalse(verdict["latest"].get("deferred"))
+        self.assertEqual(self.live.state.get(INC.KEEP), {"day": "2026-09-29", "cohorts": []})
+
+    def test_without_its_values_before_today_a_first_look_waits_for_the_next_session(self):
+        self.first()
+        with mock.patch.object(INC, "practice_record", return_value=None):
+            self.run_to(9, 31)
+        with self.today_mark(self.live, -1000.0):
+            self.run_to(9, 35)
+            self.unknown_before()
+            self.run_to(9, 36)
+        self.assertEqual(self.verdicts(), {}, "no look on today's mark")
+        self.assertEqual(self.live.state.get(INC.SESSION)["deferred"], [["fam", 1]])
+        self.assertEqual(self.kept(), [("fam", 1)])
+        self.assertTrue([p for p, _ in self.ledger.of("live.incubator") if p.get("deferred") == "fam@1"])
+        # Never taken again that day, even on a record that would pass.
+        real = INC.practice_record
+        good = mock.patch.object(INC, "practice_record",
+                                 side_effect=lambda *a, **kw: dict(real(*a, **kw), intraday=False, open_mark=5.0))
+        with mock.patch.object(self.live.incubator, "checked", return_value=False), good as read:
+            self.run_to(9, 41)
+        self.assertEqual(self.verdicts(), {})
+        self.assertFalse([c for c in read.call_args_list if c.args[1] == "fam"], "not even read again today")
+        self.assertEqual(self.status(), ("active", None))
+        self.clock.set(at(TUESDAY, 9, 31))
+        self.run_to(9, 31)
+        verdict = self.verdicts()["fam@1"]
+        self.assertEqual((verdict["passed"], verdict["day"]), (True, "2026-09-29"), "the next session's record")
+        self.assertEqual(self.pins()["order"], ["fam@1:i"])
+
+    def test_without_its_values_before_today_a_first_look_fails_on_p4_whatever_p3_says(self):
+        self.first(trades=winning(10, pnl=-1.0))
+        with mock.patch.object(INC, "practice_record", return_value=None):
+            self.run_to(9, 31)
+        self.run_to(9, 35)
+        self.unknown_before()
+        self.todays_coverage_collapses()
+        self.run_to(9, 36)
+        verdict = self.verdicts()["fam@1"]
+        self.assertFalse(verdict["passed"])
+        self.assertTrue(verdict["why"].startswith("P4"), verdict["why"])
+
+    def test_a_deferred_first_look_is_never_taken_on_a_later_pass_that_day(self):
+        self.monday()
+        self.new_cohort("z")
+        self.new_cohort("y")
+        with self.unread_for("z", "y"):
+            self.run_to(9, 31)
+        with self.today_mark(self.live, -1000.0, "z"), self.unread_for("y"):
+            self.run_to(9, 35)
+            self.unknown_before("z")
+            self.run_to(9, 36)
+        self.assertNotIn("z@1", self.verdicts())
+        self.assertFalse(self.live.incubator.checked("2026-09-29"), "y still unread: judged again")
+        with self.unread_for("y"):
+            self.run_to(9, 41)
+        self.assertNotIn("z@1", self.verdicts(), "never taken on a later pass that day")
+        self.assertIn(("z", 1), self.kept())
+        self.assertEqual(self.status("z"), ("active", None))
+        self.run_to(9, 46)
+        self.assertTrue(self.verdicts()["y@1"]["passed"])
+        self.assertNotIn("z@1", self.verdicts())
+        self.wednesday()
+        self.assertTrue(self.verdicts()["z@1"]["passed"])
+        self.assertEqual(self.verdicts()["z@1"]["day"], "2026-09-30")
+
+    # ------------------------------------------------------------------ the day's passes, durable, and the bounded HOLD
+    def test_the_days_passes_are_counted_at_the_start_of_each_pass_and_a_restart_keeps_them(self):
+        self.monday()
+        with self.bands_fail():
+            self.run_to(9, 31)
+        self.assertEqual(self.live.incubator.passes("2026-09-29"), 1)
+        live = self.restart()
+        with mock.patch.object(self.families, "read", side_effect=sqlite3.OperationalError("database is locked")):
+            self.run_to(9, 32)
+        self.assertEqual(live.incubator.passes("2026-09-29"), 2, "the restart's first pass, counted on the saved count")
+        self.assertEqual(self.live.state.get(INC.SESSION)["passes"], 2)
+
+    def test_unreadable_cohorts_hold_the_league_for_the_days_retries_only(self):
+        with mock.patch.object(INC, "RETRIES", 2):
+            self.monday()
+            self.new_cohort("z")
+            with mock.patch.object(INC, "cohort_rows", return_value=None):
+                self.run_to(9, 41)
+                self.assertTrue(self.live.incubator.holding("2026-09-29"), "the first pass and two retries")
+                self.assertEqual(self.status("z"), ("active", None))
+                self.run_to(9, 46)
+                self.assertFalse(self.live.incubator.holding("2026-09-29"))
+            self.assertEqual(self.status("z"), ("complete", "observation target reached"),
+                             "the league's own rule again once the retries are spent")
+            self.assertEqual(self.status(), ("active", None), "the carried keep stays kept")
+            self.assertEqual(self.kept(), [("fam", 1)])
+            errors = [t for lvl, t in self.alerts if lvl == "error" and "after 2 retries" in t]
+            self.assertEqual(len(errors), 1)
+
+    def test_a_keep_that_keeps_raising_holds_the_league_for_the_days_retries_only(self):
+        with mock.patch.object(INC, "RETRIES", 2):
+            self.monday()
+            self.new_cohort("z", pnl=-1.0)
+            with mock.patch.object(INC.Incubator, "keep", side_effect=RuntimeError("boom")):
+                self.run_to(9, 41)
+                self.assertEqual(self.status("z"), ("active", None), "HOLD while the retries remain")
+                self.run_to(9, 46)
+            self.assertEqual(self.status("z"), ("complete", "observation target reached"))
+            self.assertEqual(self.status(), ("active", None), "the last saved keep stays kept")
+            self.assertEqual(len([t for lvl, t in self.alerts if lvl == "error" and "keep still fails" in t]), 1)
 
 
 @unittest.skipUnless(HAVE, "numpy not installed")

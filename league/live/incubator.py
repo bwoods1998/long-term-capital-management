@@ -11,10 +11,12 @@ THE UNIT is one practice COHORT `(family, version)` of the practice league (`lea
 snapshot is the program the incubator trades, byte for byte, never the family's current row.
 
 THE FIRST LOOK (pre-registered; `money.practice_ok`): taken ONCE per cohort, at the first session pin (the session's first
-families pass) at which its record before today (`observe.practice_record(before=today)`, trades under the running
-evaluator only) has at least `incubator.min_sessions` completed sessions and `incubator.min_trades` program-closed
-trades. It passes only with decision coverage at least `incubator.min_coverage` and realized practice P&L above $0 over
-program closes, over all closes, and over all closes plus the open mark. Recorded in the live state
+families pass, or the day's next pass that can read it when a read failed there) at which its record BEFORE TODAY
+(`observe.practice_record(before=today)`, trades under the running evaluator only; its coverage and open mark as its
+last session before today left them, never today's, at whichever pass it is read) has at least
+`incubator.min_sessions` completed sessions and `incubator.min_trades` program-closed trades. It passes only with
+decision coverage at least `incubator.min_coverage` and realized practice P&L above $0 over program closes, over all
+closes, and over all closes plus the open mark. Recorded in the live state
 (`incubator_verdicts`, key `<family>@<version>`, with every value and the fill model's version) and a private
 `live.incubator` event WHETHER OR NOT the switch is on, so a first look is never taken again. A failed first look is
 final. After a pass, each later session's first pass re-checks P3-P6 on the extended record; a failure ends the
@@ -27,14 +29,19 @@ shadow (`:o`) and real (`:i`) decisions continue. Off, the practice league's own
 never ends an incubation: when today's checks could not be taken (the cohorts could not be read, a first look's or a
 re-check's record could not be read, or the first looks raised), the last keep's cohorts that no re-check ended stay
 kept (as does an active cohort whose first look could not read its record, first look or not), today's keep is not
-settled (`checked`), and the next families pass takes the checks again (at most `RETRIES` times a day). While the
-cohorts themselves are unread, the practice league completes no cohort at its target (`observe.HOLD`). Within a day
-the keep only grows: a cohort kept at an earlier pass leaves it only when a check ends it or its cohort is no longer
-active, and a cohort kept on an untaken check never takes a checked one's place. A check retried after the session's
-first pass reads the record before today but the practice row's coverage and open mark at the retry, so a retried
-re-check that fails on P3 or P6 alone is no end (`deferred`: kept, and checked at the next session's first pass), nor
-is a retried first look of an active cohort taken on them. It fails open for keeping a cohort practising only: a pin
-still needs today's check taken and passed (`_passing`), so no `:i` trades on an unread check.
+settled (`checked`), and the next families pass takes the checks again (for at most `RETRIES` passes after the day's
+first, counted durably from the START of each in-session families pass, `begin`/`SESSION`, so a pass whose bands could
+not be read counts and a restart keeps the count). While the cohorts themselves are unread, the practice league
+completes no cohort at its target (`observe.HOLD`), for at most those passes (`holding`, `fallback`: then the carried
+keep alone, alerted as an error). Within a day the keep only grows: a cohort kept at an earlier pass leaves it only when
+a check ends it or its cohort is no longer active, and a cohort kept on an untaken check never takes a checked one's
+place. A retried check reads the same record before today as the first pass would have (never the practice row's
+values at the retry), so it decides what the first pass would have. A record that cannot say what its row held before
+today (`intraday`: a row stepped today before its `prior_*` were kept) decides nothing on P3 or P6: a re-check then ends
+only on P4 or P5 (evaluated whatever P3 says, `_settled`) and is otherwise `deferred` (kept, not pinned, re-checked at
+the next session's first pass), and a first look fails only on P4 or P5 and otherwise waits, kept, for the next
+session's record (`SESSION`'s `deferred`: never taken again that day). It fails open for keeping a cohort practising
+only: a pin still needs today's check taken and passed (`_passing`), so no `:i` trades on an unread or deferred check.
 
 THE PINS, at the session's first families pass (a restart reuses them; no mid-session join), at most `MAX_PINS`, by
 first-look return on risk then family id, and only from that day's L2' cohorts (`keep`: a pinned cohort always keeps
@@ -79,18 +86,20 @@ from typing import Any, Iterator, Mapping
 
 from . import calibration as C
 from . import money as M
-from .observe import cohort_rows, practice_record
+from .observe import HOLD, cohort_rows, practice_record
 from .real import INCUBATOR_SUFFIX, is_incubator
 
 SUFFIX = INCUBATOR_SUFFIX
 DAY_LEGS = M.INCUBATOR_DAY_LEGS
 DAY_OPEN_SHARE = M.INCUBATOR_DAY_OPEN_SHARE
 MAX_PINS = 8
-#: Families passes a day that take today's checks again after a read failed (`checked`); then the day's keep stands, and
-#: the next session's first pass reads again.
+#: Families passes a session day after its first that may take today's checks again after a read failed (`checked`),
+#: counted durably (`SESSION`: a restart keeps the count); then the day's keep stands, `holding` ends, and the next
+#: session's first pass reads again.
 RETRIES = 12
-#: A check retried after the session's first pass: the rules that read the practice row's live values (decision coverage
-#: and the open mark), never the rule's first-pass values. A retried failure on these alone is no end (`_judge`).
+#: The rules that read the practice row's decision coverage and open mark (P3, P6): the values a record whose row was
+#: stepped today may hold only as TODAY's (`observe.practice_record`'s `intraday`). Nothing is decided on them then
+#: (`_settled`: P1, P2, P4 and P5 alone, on the closes and sessions before today).
 INTRADAY = ("P3", "P6")
 #: The cohorts a first look may be taken on: active, or completed by the league's own rule (never failed, never closed by
 #: an evaluator change).
@@ -98,8 +107,10 @@ COMPLETE_OK = ("observation target reached", "maximum session window reached")
 #: Days after its completion a cohort's first look may still be taken (its completion day's own session counts the day
 #: after; a weekend and a holiday between).
 RECENT_DAYS = 7
-#: The live state's keys.
+#: The live state's keys. `SESSION`: the session day's families passes ({day, passes, at, deferred}), written at the START
+#: of each in-session families pass (`begin`), before any read that can fail.
 VERDICTS, PINS, KEEP, WEEK = "incubator_verdicts", "incubator_pins", "incubator_keep", "incubator_week"
+SESSION = "incubator_session"
 YIELDED = "yielded: a D2 family's real order was refused on its contracts"
 #: The record's values a verdict keeps (never a price, a strike or code).
 RECORD_FIELDS = ("sessions", "decisions_due", "decisions_made", "coverage", "closes_program", "pnl_program", "closes_all",
@@ -144,10 +155,11 @@ class Incubator:
         self._book_seen: frozenset | None = None
         # Today's checks (`judge`): {day, read (False until the pass read the cohorts and finished), active (the active
         # cohorts it read), first (the active cohorts whose first look could not read its record), deferred (the active
-        # cohorts whose retried first look failed on P3 or P6 alone)}. In memory: `keep` is only re-taken after a `judge`
-        # of the same families pass (`checked`), a restart's included.
+        # cohorts whose first look waits for the next session: its record held today's coverage or mark)}. In memory:
+        # `keep` is only re-taken after a `judge` of the same families pass (`checked`), a restart's included.
         self._checks: dict[str, Any] | None = None
-        self._passes: tuple[str, int] = ("", 0)      # (day, `judge`s that day): the retries (`RETRIES`)
+        # (day, families passes that day) in this process: `SESSION`'s count when the live state cannot be written.
+        self._passes: tuple[str, int] = ("", 0)
 
     # ------------------------------------------------------------------ state
     def _get(self, key: str) -> dict:
@@ -162,10 +174,10 @@ class Incubator:
     def on(self) -> bool:
         return bool(self.live.switches().get("incubator"))
 
-    def _alert_once(self, key: str, text: str) -> None:
+    def _alert_once(self, key: str, text: str, level: str = "warning") -> None:
         if key not in self._told:
             self._told.add(key)
-            self.live.alert("warning", text)
+            self.live.alert(level, text)
 
     def closed(self) -> str | None:
         """Why the route can open nothing whatever the family (the switch, real money, the table), or None."""
@@ -185,35 +197,93 @@ class Incubator:
 
     def checked(self, today: str) -> bool:
         """Today's checks are taken and today's keep is settled; False while the switch is on and today's keep was not
-        taken yet, or was taken on a failed read (`keep`): the next families pass takes the checks again (`judge`), at
-        most `RETRIES` times a day (then the day's keep stands, carried)."""
+        taken yet, or was taken on a failed read (`keep`): the next families pass takes the checks again (`judge`), for
+        at most `RETRIES` passes after the day's first (`SESSION`, durable; then the day's keep stands, carried)."""
         if not self.on():
             return True
         cached = self._get(KEEP)
-        return cached.get("day") == today and (not cached.get("unread") or self._retried_out(today))
+        if cached.get("day") == today and not cached.get("unread"):
+            return True
+        return self._retried_out(today)
+
+    # ------------------------------------------------------------------ the session day's passes
+    def begin(self, today: str) -> None:
+        """An in-session families pass starts (`OptionsLive.sync_families`, before the bands or anything else is read):
+        today's pass is counted in the live state (`SESSION`), so that a pass whose reads all failed still counts, and a
+        restart keeps the count. The day's first writes {day, passes: 1}. Never raises (the count is kept in memory
+        too)."""
+        day, n = self._passes
+        self._passes = (today, n + 1 if day == today else 1)
+        with contextlib.suppress(Exception):
+            st = self._get(SESSION)
+            if st.get("day") == today:
+                st["passes"] = int(st.get("passes") or 0) + 1
+            else:
+                st = {"day": today, "passes": 1, "at": self.live.clock(), "deferred": []}
+            self.live.state.put(SESSION, st)
+
+    def passes(self, today: str) -> int:
+        """Today's in-session families passes so far (`begin`), the day's first included; 0 before it."""
+        n = self._passes[1] if self._passes[0] == today else 0
+        with contextlib.suppress(Exception):
+            st = self._get(SESSION)
+            if st.get("day") == today:
+                n = max(n, int(st.get("passes") or 0))
+        return n
 
     def _retried_out(self, today: str) -> bool:
-        return self._passes[0] == today and self._passes[1] > RETRIES
+        """The day's first pass and `RETRIES` passes after it have run: the day's keep stands until the next session."""
+        return self.passes(today) > RETRIES + 1
 
     def holding(self, today: str) -> bool:
         """This pass's checks could not read the cohorts (or could not finish): which cohorts the keep must hold is not
         known, so the practice league completes none at its observation target this pass (`observe.HOLD`, practising
-        only: no pin without `_passing`). While the switch is on."""
+        only: no pin without `_passing`). While the switch is on, and BOUNDED: once the day's retries are spent
+        (`_retried_out`) it holds no more (alerted once a day as an error), so a read that keeps failing holds the
+        league for at most `RETRIES` + 1 passes a day; the carried keep still keeps the cohorts it kept."""
         checks = self._checks
-        return checks is not None and checks.get("day") == today and not checks.get("read") and self.on()
+        if checks is None or checks.get("day") != today or checks.get("read") or not self.on():
+            return False
+        if self._retried_out(today):
+            self._alert_once(f"hold:{today}", f"live: the incubator still could not read the practice cohorts (or finish "
+                                              f"its checks) after {RETRIES} retries: the practice league completes "
+                                              "cohorts at their target by its own rule again today (the carried keep "
+                                              "stays kept; nothing is pinned on it)", "error")
+            return False
+        return True
+
+    def fallback(self, today: str) -> frozenset:
+        """What the practice league keeps when `keep` raised: `observe.HOLD` while the day's retries remain, then the last
+        saved keep's cohorts (whatever its day; alerted once a day as an error), so a keep that keeps failing never holds
+        the whole league past them. Never raises (HOLD)."""
+        try:
+            if not self.on():
+                return frozenset()
+            if not self._retried_out(today):
+                return HOLD
+            saved = frozenset((str(f), int(n)) for f, n in self._get(KEEP).get("cohorts") or [])
+            self._alert_once(f"fallback:{today}", f"live: the incubator's keep still fails after {RETRIES} retries: the "
+                                                  "practice league keeps the last saved keep's cohorts and completes the "
+                                                  "rest by its own rule today; nothing is pinned on it", "error")
+            return saved
+        except Exception:  # noqa: BLE001 - nothing better is known: practising only, while the day's retries remain
+            return frozenset() if self._retried_out(today) else HOLD
 
     # ------------------------------------------------------------------ the first look
     def judge(self, today: str) -> None:
         """First looks for the cohorts not yet judged, and the re-checks of those that passed (the module docstring).
         Recorded whether or not the switch is on. At the session's first families pass, and again at a later pass
-        while today's checks are not all taken (`checked`). A later pass's check reads the closes and sessions before
-        today, as the first pass's does, but the practice row's decision coverage and open mark at that pass (P3, P6):
-        a retried re-check that fails on those alone is `deferred`, not ended, and a retried first look of an active
-        cohort that fails on those alone is not taken (both kept, and checked at the next session's first pass).
+        while today's checks are not all taken (`checked`). Every check, at the first pass or a later one, reads the
+        record BEFORE TODAY only (`observe.practice_record`: its sessions and closes before today, and its decision
+        coverage and open mark as its last session before today left them), never today's values; so a retried check
+        decides exactly what the first pass would have. A record that cannot say what its row held before today
+        (`intraday`) decides nothing on P3 or P6 (`_settled`): a re-check then ends only on P4 or P5 and is otherwise
+        `deferred` (kept, not pinned, re-checked at the next session's first pass), and a first look fails only on P4
+        or P5 and otherwise waits for the next session (kept; never taken again that day, `SESSION`'s `deferred`).
         Never raises: a failure leaves today's checks untaken (`keep` carries the last keep forward, and `holding`),
         alerted once a day."""
-        day, n = self._passes
-        self._passes = (today, n + 1 if day == today else 1)
+        if self._passes[0] != today:
+            self.begin(today)                             # called without `sync_families`'s pass: counted here
         self._checks = {"day": today, "read": False, "active": set(), "first": set(), "deferred": set()}
         try:
             self._judge(today)
@@ -231,9 +301,6 @@ class Incubator:
         live, table = self.live, self.live.table
         checks = self._checks if self._checks is not None else {"day": today, "read": False, "active": set(),
                                                                 "first": set(), "deferred": set()}
-        # A keep already taken today: an earlier families pass took (or could not take) today's checks, so this pass's
-        # are retries (P3 and P6 read the practice row at this pass, not the first pass's values).
-        retry = self._get(KEEP).get("day") == today
         evaluator = live.observe_store.evaluator
         # A cohort completed more than `RECENT_DAYS` ago can no longer newly meet the sample (its program closes stopped
         # with its practice): only the active ones and the recently completed are read.
@@ -254,6 +321,10 @@ class Incubator:
             changed = True
         fill_model = str(getattr(live.shadow.fill_model, "version", ""))
         cap = float(table.incubator_max_loss)
+        # First looks that waited today for a record without today's values: never taken again before the next session.
+        session = self._get(SESSION)
+        waiting = {(str(f), int(n)) for f, n in session.get("deferred") or []} if session.get("day") == today else set()
+        waited: list[tuple[str, int]] = []
         for c in cohorts:
             snap = c["snapshot"]
             f, n = c["family"], int(c["version"])
@@ -272,6 +343,10 @@ class Incubator:
             if c["status"] != "active" and c.get("reason") not in COMPLETE_OK:
                 continue
             if verdict is None:
+                if (f, n) in waiting:
+                    if c["status"] == "active":
+                        checks["deferred"].add((f, n))    # kept today (`keep`); its look at the next session
+                    continue
                 record = practice_record(live.root, f, n, before=today, evaluator=evaluator, unit_cap=cap)
                 if record is None and c["status"] == "active":
                     # Unread, not ineligible: kept today (`keep`) so the league does not complete it at its target
@@ -283,13 +358,20 @@ class Incubator:
                 if record["sessions"] < table.incubator_min_sessions or record["closes_program"] < table.incubator_min_trades:
                     continue                              # not yet the pre-registered sample: no look
                 passed, why = M.practice_ok(table, record)
-                if not passed and retry and c["status"] == "active" and why.startswith(INTRADAY):
-                    # A retried first look on the practice row's live coverage or mark: not taken (a first look is final),
-                    # kept today (`keep`), and taken at the next session's first pass.
-                    checks["deferred"].add((f, n))
-                    self._said(f"deferred:{vk}:{today}", {"deferred": vk, "first_look": True, "why": why, "day": today},
-                               f)
-                    continue
+                if record.get("intraday") is not False:
+                    settled = self._settled(table, record)
+                    if settled is None:
+                        # Its coverage and mark are today's: no look on them (a first look is final). Kept today
+                        # (`keep`), never looked at again today, and looked at on the next session's record.
+                        if c["status"] == "active":
+                            checks["deferred"].add((f, n))
+                        waited.append((f, n))
+                        self._said(f"deferred:{vk}:{today}",
+                                   {"deferred": vk, "first_look": True, "day": today,
+                                    "why": f"its record's coverage and open mark are today's ({why}): looked at on the "
+                                           "next session's record"}, f)
+                        continue
+                    passed, why = False, settled          # failed on its closes before today, whatever today's values
                 verdict = {"family": f, "version": n, "evaluator": evaluator, "day": today, "at": live.clock(),
                            "passed": passed, "why": why, "fill_model": fill_model, "run_sha": snap.get("run_sha"),
                            "program": program_sha(snap), "structure": snap.get("structure"),
@@ -314,12 +396,19 @@ class Incubator:
                     self._said_unread(vk, f, today, f"its re-check: {why}")
                 else:
                     ok, why = M.practice_ok(table, record, exit_check=True)
+                    settled = None
+                    if record.get("intraday") is not False:
+                        settled = self._settled(table, record, exit_check=True)
+                        if settled is not None:
+                            ok, why = False, settled      # P4 or P5 on its closes before today: never masked by P3
                     verdict["latest"] = {"day": today, "ok": ok, "why": why,
                                          "record": {k: record.get(k) for k in RECORD_FIELDS}}
-                    if not ok and retry and why.startswith(INTRADAY):
-                        # Retried on the practice row's live coverage or mark: not passing today (no pin), never an end;
-                        # kept (`keep`) and re-checked at the next session's first pass.
-                        verdict["latest"]["deferred"] = True
+                    if record.get("intraday") is not False and settled is None:
+                        # Its coverage and mark are today's: not passing today (no pin), never an end; kept (`keep`)
+                        # and re-checked at the next session's first pass, on a record without today's values.
+                        why = (f"its record's coverage and open mark are today's ({why}): re-checked at the next "
+                               "session's first pass")
+                        verdict["latest"].update(ok=False, deferred=True, intraday=True, why=why)
                         self._said(f"deferred:{vk}:{today}", {"deferred": vk, "why": why, "day": today}, f)
                     elif not ok:
                         verdict["ended"] = {"day": today, "why": why}
@@ -329,7 +418,23 @@ class Incubator:
                 changed = True
         if changed:
             live.state.put(VERDICTS, verdicts)
+        if waited:
+            session = self._get(SESSION)
+            if session.get("day") != today:
+                session = {"day": today, "passes": self.passes(today), "at": live.clock(), "deferred": []}
+            known = [list(c) for c in session.get("deferred") or []]
+            session["deferred"] = known + [[f, n] for f, n in waited if [f, n] not in known]
+            live.state.put(SESSION, session)
         checks["read"] = True
+
+    @staticmethod
+    def _settled(table: Any, record: Mapping[str, Any], *, exit_check: bool = False) -> str | None:
+        """The practice rule on what a record holds from before today whatever its row: P1 and P2 (its sessions and
+        program closes), P4 and P5 (its closes' P&L); never P3 or P6 (coverage and the open mark, `INTRADAY`). Each is
+        evaluated whatever P3 says, so a failure on these is never masked. Why it fails, or None."""
+        ok, why = M.practice_ok(table, dict(record, decisions_due=None, decisions_made=None, coverage=1, open_mark=0.0),
+                                exit_check=exit_check)
+        return None if ok else why
 
     def _said(self, key: str, payload: dict, family: str) -> None:
         """One private `live.incubator` event a key (a ledger failure never changes a check)."""
@@ -361,7 +466,8 @@ class Incubator:
 
     @staticmethod
     def _deferred(verdict: Mapping[str, Any], today: str) -> bool:
-        """Today's re-check was retried after the session's first pass and failed on P3 or P6 alone (never an end)."""
+        """Today's re-check read a record whose coverage and open mark are today's (`intraday`) and P4 and P5 held: not
+        passing today, never an end, re-checked at the next session's first pass."""
         latest = verdict.get("latest") or {}
         return latest.get("day") == today and latest.get("deferred") is True and not verdict.get("ended")
 
@@ -391,7 +497,8 @@ class Incubator:
         counted against the cap, never pinned without `_passing`):
           - the last keep's cohorts that no check ended: a passed one whose check today is unread or `deferred`, and,
             while the cohorts are unread, every one (first look or not);
-          - an active cohort whose first look could not read its record, or was `deferred`;
+          - an active cohort whose first look could not read its record, or waits for the next session's record
+            (`deferred`: its record held today's coverage or mark);
           - on a later pass the same day, every cohort already kept today unless a check ended it (or failed its first
             look) or its cohort is no longer active: within a day the keep only grows, so no pinned cohort is completed
             mid-session."""
@@ -524,8 +631,8 @@ class Incubator:
                 if (verdict.get("passed") and not verdict.get("ended") and not self._passing(verdict, today)
                         and (str(verdict.get("family")), int(verdict.get("version") or 0)) in keep):
                     pins["refused"][vk] = (
-                        "today's re-check was retried after the session's first pass and failed on P3 or P6 alone: kept "
-                        "practising (L2'), re-checked at the next session's first pass" if self._deferred(verdict, today)
+                        "today's re-check read a record whose coverage and open mark are today's: kept practising (L2'), "
+                        "re-checked at the next session's first pass" if self._deferred(verdict, today)
                         else "today's check of its record could not be taken (a read failed): kept practising (L2'), "
                              "never pinned on an untaken check")
             families: set[str] = set()
@@ -762,4 +869,4 @@ class Incubator:
 
 
 __all__ = ["Incubator", "SUFFIX", "DAY_LEGS", "DAY_OPEN_SHARE", "MAX_PINS", "RETRIES", "INTRADAY", "VERDICTS", "PINS",
-           "KEEP", "WEEK", "YIELDED", "key_of", "cohort_key", "program_sha", "week_start_of", "is_incubator"]
+           "KEEP", "WEEK", "SESSION", "YIELDED", "key_of", "cohort_key", "program_sha", "week_start_of", "is_incubator"]
