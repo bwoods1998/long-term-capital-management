@@ -9,7 +9,10 @@ evidence, no band). The practice league (Sept 29, 2026) keeps a record of it her
 - `practice`: one row per (family, version) from its first live minute, kept after the family retires (families live
   hours; the record outlives them): its tier, lineage, structure and roots at its first pin, the session days and
   minutes it was live, its decision coverage (due, made, missed for want of quotes, missed for want of the minute's
-  budget), its marked P&L path (per minute, across a remade account) and its open positions at the engine's mark.
+  budget), its marked P&L path (per minute, across a remade account) and its open positions at the engine's mark; and
+  (`prior_*`) its coverage and open mark as its last session before the current one left them, rolled at the current
+  session day's first minute (`prior_day`: that day, the roll's) (the incubator reads the record before today, never
+  today's values).
 - `cohorts`: immutable admitted program snapshots, retained through research retirement and revision until the
   observation target or bounded session window completes; shadow-only entry authority.
 - `events`: private decision, coverage, intent, rejection, order, quote and fill/slippage receipts, idempotent across
@@ -51,6 +54,15 @@ MAX_ROWS = 50_000
 KEEP_DAYS = 120
 PRUNE_EVERY = 3600.0
 
+
+class Hold(frozenset):
+    """`cohort_candidates(keep=HOLD)`: this pass completes no cohort at its observation target."""
+
+
+#: The incubator's keep could not be taken this pass (the cohorts unread, or `keep` raised): fail open for practising
+#: only, for that pass (its window, an evaluator change or a failure still end a cohort; pins still need `_passing`).
+HOLD = Hold()
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS trades (
     seq INTEGER PRIMARY KEY AUTOINCREMENT, instance TEXT NOT NULL, account TEXT NOT NULL, family TEXT NOT NULL,
@@ -72,6 +84,7 @@ CREATE TABLE IF NOT EXISTS practice (
     pnl_marked REAL NOT NULL DEFAULT 0, peak_marked REAL NOT NULL DEFAULT 0, drawdown_marked REAL NOT NULL DEFAULT 0,
     open_positions INTEGER NOT NULL DEFAULT 0, open_mark_pnl REAL NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'live',
+    prior_day TEXT, prior_due INTEGER, prior_made INTEGER, prior_open_mark REAL,
     PRIMARY KEY (family, version));
 CREATE TABLE IF NOT EXISTS cohorts (
     family TEXT NOT NULL, version INTEGER NOT NULL, admitted_at REAL NOT NULL, first_day TEXT NOT NULL,
@@ -86,6 +99,13 @@ CREATE INDEX IF NOT EXISTS events_day ON events(day);
 """
 #: Columns the practice league added to `trades` (Sept 29, 2026), backfilled from `body` on first open.
 TRADE_COLUMNS = (("exit_day", "TEXT"), ("reason", "TEXT"), ("forced", "INTEGER"), ("evaluator", "TEXT"))
+#: Columns release B added to `practice` (Oct 1, 2026): the row's decision coverage and open mark as its last session
+#: before `last_day` left them, copied at the first minute of each new session day, with `prior_day` THAT day (the
+#: roll's, never the day the values came from), so the incubator's record before today never reads today's values
+#: (`practice_record` takes them only when `prior_day` is today: a row a release without these columns stepped today,
+#: release A after a rollback, has an older `prior_day`, and its record is `intraday`). NULL until the row's next new
+#: session day.
+PRIOR_COLUMNS = (("prior_day", "TEXT"), ("prior_due", "INTEGER"), ("prior_made", "INTEGER"), ("prior_open_mark", "REAL"))
 
 
 @functools.lru_cache(maxsize=1)
@@ -164,7 +184,8 @@ class ObserveStore:
         calendar-session window; capacity/pressure switches still apply in the caller. This is shadow authority only.
         `keep` (L2', the incubator's: (family, version) of cohorts whose first look passed, while `live.incubator` is on):
         such a cohort is not completed at its observation target; its window, an evaluator change or a failure still
-        end it. Empty, this is exactly the league's own rule."""
+        end it. Empty, this is exactly the league's own rule. `HOLD`: no cohort is completed at its target this pass."""
+        hold = keep is HOLD
         keep = {(str(f), int(n)) for f, n in keep}
         from datetime import date, timedelta
         from .chains import session_minutes
@@ -195,7 +216,7 @@ class ObserveStore:
                     elapsed += session_minutes(cursor) is not None
                     cursor += timedelta(days=1)
                 if (completed >= max(1, min_sessions) and trades >= max(1, min_trades) and evidence and evidence[2] == 0
-                        and (family, int(version)) not in keep):
+                        and not hold and (family, int(version)) not in keep):
                     reason = "observation target reached"
                 elif elapsed >= max(min_sessions, min(60, horizon)):
                     reason = "maximum session window reached"
@@ -320,7 +341,8 @@ class ObserveStore:
         capital = float(r.get("capital") or 0.0)
         account = str(r.get("account") or "")
         counts = [int(bool(r.get(k))) for k in ("due", "made", "missed_quotes", "missed_budget", "missed_errors")]
-        old = db.execute("SELECT sessions, minutes, last_day, account, base_pnl, peak_marked, drawdown_marked, tier, last_at "
+        old = db.execute("SELECT sessions, minutes, last_day, account, base_pnl, peak_marked, drawdown_marked, tier, last_at, "
+                         "decisions_due, decisions_made, open_mark_pnl, prior_day, prior_due, prior_made, prior_open_mark "
                          "FROM practice WHERE family=? AND version=?", (family, version)).fetchone()
         if old is not None and old[3] == account and int(float(old[8]) // 60) == int(at // 60):
             return  # a repeated minute/retry must not inflate session coverage
@@ -347,14 +369,19 @@ class ObserveStore:
             return
         peak = max(float(old[5]), marked)
         drawdown = max(float(old[6]), peak - marked)
+        # A new session day: the coverage and open mark its last session left, before this minute adds to them, stamped
+        # with THIS day, the roll's (the incubator's record before today, `practice_record`, takes them only when the
+        # roll is today's; a release that never rolls them leaves an older stamp, and the record says `intraday`).
+        prior = (day, old[9], old[10], old[11]) if day != old[2] else tuple(old[12:16])
         db.execute("UPDATE practice SET last_at=?, last_day=?, sessions=sessions+?, minutes=minutes+1, "
                    "decisions_due=decisions_due+?, decisions_made=decisions_made+?, missed_quotes=missed_quotes+?, "
                    "missed_budget=missed_budget+?, missed_errors=missed_errors+?, account=?, base_pnl=?, pnl_marked=?, peak_marked=?, drawdown_marked=?, "
-                   "open_positions=?, open_mark_pnl=?, status=?, tier=? WHERE family=? AND version=?",
+                   "open_positions=?, open_mark_pnl=?, status=?, tier=?, prior_day=?, prior_due=?, prior_made=?, "
+                   "prior_open_mark=? WHERE family=? AND version=?",
                    (at, day, int(day != old[2]), *counts, account, float(base or 0.0), marked, peak, drawdown,
                     int(r.get("open_positions") or 0), float(_num(r.get("open_mark_pnl")) or 0.0),
                     str(r.get("status") or "live"), "validated" if "validated" in (tier, old[7]) else "train",
-                    family, version))
+                    *prior, family, version))
 
     def close(self) -> None:
         try:
@@ -367,8 +394,12 @@ class ObserveStore:
 
 def _migrate(db: sqlite3.Connection) -> None:
     """The practice league's trade columns on a file written before them, filled from each trade's own row."""
-    if "missed_errors" not in {row[1] for row in db.execute("PRAGMA table_info(practice)")}:
+    columns = {row[1] for row in db.execute("PRAGMA table_info(practice)")}
+    if "missed_errors" not in columns:
         db.execute("ALTER TABLE practice ADD COLUMN missed_errors INTEGER NOT NULL DEFAULT 0")
+    for name, kind in PRIOR_COLUMNS:
+        if name not in columns:
+            db.execute(f"ALTER TABLE practice ADD COLUMN {name} {kind}")
     have = {row[1] for row in db.execute("PRAGMA table_info(trades)")}
     missing = [(name, kind) for name, kind in TRADE_COLUMNS if name not in have]
     if not missing:
@@ -427,15 +458,24 @@ def practice_record(root: str | Path, family: str, version: int, *, before: str,
                     unit_cap: float = 50.0) -> dict[str, Any] | None:
     """One practice cohort's record for the incubator's first look and its re-checks (`money.practice_ok`): read-only
     (`mode=ro`, a one-second timeout), standard library only, NEVER raising (None on any error, or without the cohort).
-    Everything is before `before` (a session day, ISO): today's closes and today's session are left out.
+    Everything is before `before` (a session day, ISO): today's closes and today's session are left out, and so are
+    today's decisions and today's mark, whenever in the session it is read.
 
         sessions        the practice row's completed sessions (less today's); None (ineligible) when the practice row
                         began before the cohort did
-        coverage        decisions made / due over the practice row (None before any was due); decisions_due, _made
+        coverage        decisions made / due over the practice row before today (None before any was due);
+                        decisions_due, _made
         closes_program  closed trades under `evaluator`, program-closed (not forced), exited before `before`
         pnl_program     their P&L (the engine's, after its fees and the House's shadow fill model)
         closes_all, pnl_all   the same with forced (wind-down) closes included
-        open_mark       the practice row's open positions' P&L at the engine's mark (its last stepped minute)
+        open_mark       the practice row's open positions' P&L at the engine's mark at its last stepped minute before
+                        today (a row stepped today: as its last session before today left it, `prior_*`, only when
+                        they were rolled TODAY, `prior_day == before`)
+        intraday        True when the row was stepped today and what it held before today is not known: no `prior_*`
+                        (a row last rolled before release B's columns), or `prior_*` rolled on an earlier day (a
+                        release without these columns, release A after a rollback, stepped it today: its `prior_*`
+                        are an older session's); its coverage and open mark are then TODAY's, and no check may be
+                        decided on them (the incubator's `_judge`: fail closed, deferred); False otherwise
         return_on_risk  pnl_all over the same trades' maximum loss (None without one)
         feasible        program closes whose one-lot unit (maximum loss a lot plus twice the fees a lot) is at most
                         `unit_cap`: whether it could ever open at the incubator's size
@@ -460,8 +500,7 @@ def practice_record(root: str | Path, family: str, version: int, *, before: str,
                 sessions = None
             else:
                 sessions = int(live["sessions"]) - int(str(live["last_day"]) == str(before))
-            due = int(live["decisions_due"]) if live else 0
-            made = int(live["decisions_made"]) if live else 0
+            due, made, mark, intraday = _before(live, str(before))
             trades = [dict(r) for r in db.execute(
                 "SELECT pnl, max_loss, forced, body FROM trades WHERE family=? AND version=? AND evaluator=? "
                 "AND exit_day IS NOT NULL AND exit_day<? ORDER BY seq", (str(family), int(version), str(evaluator), str(before)))]
@@ -492,10 +531,31 @@ def practice_record(root: str | Path, family: str, version: int, *, before: str,
                 "coverage": round(made / due, 4) if due else None,
                 "closes_program": len(program), "pnl_program": total(program),
                 "closes_all": len(trades), "pnl_all": pnl_all,
-                "open_mark": round(float((live or {}).get("open_mark_pnl") or 0.0), 6),
+                "open_mark": round(mark, 6), "intraday": intraday,
                 "return_on_risk": round(pnl_all / losses, 6) if losses > 0 else None, "feasible": feasible}
     except Exception:  # noqa: BLE001 - no record is no eligibility
         return None
+
+
+def _before(live: Mapping[str, Any] | None, before: str) -> tuple[int, int, float, bool]:
+    """(decisions due, made, open mark, intraday) of a practice row as they stood before the session day `before`."""
+    if live is None:
+        return 0, 0, 0.0, False
+    last = str(live["last_day"])
+    if last < before:                                       # not stepped since: its values are all before today
+        return (int(live["decisions_due"] or 0), int(live["decisions_made"] or 0),
+                float(live.get("open_mark_pnl") or 0.0), False)
+    if last == before and str(live["first_day"]) == before:
+        return 0, 0, 0.0, False                             # first stepped today: nothing before it
+    prior = live.get("prior_day")
+    if last == before and prior is not None and str(prior) == before:
+        # Rolled today, at today's first minute: its last session before today, whatever day that was.
+        return (int(live.get("prior_due") or 0), int(live.get("prior_made") or 0),
+                float(live.get("prior_open_mark") or 0.0), False)
+    # Stepped today (or after `before`) with no value from before it, or with `prior_*` rolled on an earlier day (a
+    # release that never rolls them stepped it today: they are an older session's): today's, said so.
+    return (int(live["decisions_due"] or 0), int(live["decisions_made"] or 0), float(live.get("open_mark_pnl") or 0.0),
+            True)
 
 
 # ------------------------------------------------------------------------------------------------ the summary
@@ -672,4 +732,5 @@ def _num(value: Any) -> float | None:
     return out if math.isfinite(out) else None
 
 
-__all__ = ["ObserveStore", "practice_summary", "practice_record", "cohort_rows", "t_stat", "FILE", "MAX_ROWS", "KEEP_DAYS"]
+__all__ = ["ObserveStore", "practice_summary", "practice_record", "cohort_rows", "t_stat", "FILE", "MAX_ROWS", "KEEP_DAYS",
+           "HOLD"]
