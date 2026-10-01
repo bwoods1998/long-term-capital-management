@@ -1817,7 +1817,11 @@ LANES: dict[str, Lane] = {
         surface=("league/swarm/architect.py", "league/swarm/strategist.py", "league/swarm/diagnostician.py",
                  "league/swarm/researcher.py", "league/swarm/seeds.py", NEW_TEST),
         release_classes=("research", "money_path"),
-        judge="memory", protocol="memory-rebirth-v3", judge_zero=("trials_uncounted", "mechanism_rewritten"),
+        # v4 (release B', family cards): the judge's cases carry cards and admission runs as production runs it; a
+        # restatement of a row a mechanism verdict buried must meet the card check (`card_path_admitted`, 0), which the
+        # lever may not loosen however far it cuts the idea rows' rebirths.
+        judge="memory", protocol="memory-rebirth-v4",
+        judge_zero=("trials_uncounted", "mechanism_rewritten", "card_path_admitted"),
         judge_no_worse=("novel_refused", "rebirths_fresh_lineage"),
         judge_cost="sqlite_statements", judge_cost_rule="ratio",
         # The researcher, the strategist and the diagnostician are in this surface: their tests run too (the fourth

@@ -1088,12 +1088,18 @@ class Decisions(unittest.TestCase):
         memory = lanes.LANES["memory"]
         hold = memory.bottleneck("validation_attempts_per_usd")
         base = {"rebirths_admitted": 8, "novel_refused": 0, "sqlite_statements": 240, "trials_uncounted": 0,
-                "mechanism_rewritten": 0, "rebirths_fresh_lineage": 3}
+                "mechanism_rewritten": 0, "rebirths_fresh_lineage": 3, "card_path_admitted": 0}
         self.assertTrue(lanes.judge_verdict(memory, hold, self.trees(base, base))["passed"])
         self.assertFalse(lanes.judge_verdict(memory, memory.bottleneck("graveyard_rebirth_rate"), self.trees(base, base))["passed"])
-        for field in ("trials_uncounted", "mechanism_rewritten"):
+        for field in ("trials_uncounted", "mechanism_rewritten", "card_path_admitted"):
             bad = lanes.judge_verdict(memory, hold, self.trees(base, {**base, field: 1}))
             self.assertIn(field, " ".join(bad["reasons"]))
+        # A lever that cuts the idea rows' rebirths past the predeclared fall while the card path's get through (the card
+        # check loosened) fails on the card path alone.
+        loosened = lanes.judge_verdict(memory, memory.bottleneck("graveyard_rebirth_rate"),
+                                       self.trees(base, {**base, "rebirths_admitted": 2, "card_path_admitted": 2}))
+        self.assertEqual([r for r in loosened["reasons"] if "rebirths_admitted" in r], [])
+        self.assertIn("card_path_admitted", " ".join(loosened["reasons"]))
         data = lanes.LANES["data"]
         window = {"base": self.trees({}, {})["base"], "head": self.trees({}, {})["open"]}
         window["base"]["splits"] = {s: {"metrics": {"failed_transient": 9, "retried_permanent": 0, "requests": 200}}
@@ -2012,6 +2018,9 @@ class GatedMemoryCandidate(unittest.TestCase):
                     self.assertLess(opened["rebirths_admitted"], base_m["rebirths_admitted"], split)
                     self.assertEqual((opened["trials_uncounted"], opened["mechanism_rewritten"], opened["novel_refused"]),
                                      (0, 0, 0), split)
+                    # The card check refuses the card path's restatements before the gated branch, open or closed.
+                    self.assertGreater(base_m["card_path_proposed"], 0, split)
+                    self.assertEqual((base_m["card_path_admitted"], opened["card_path_admitted"]), (0, 0), split)
                 self.assertTrue(receipt["passed"], json.dumps(receipt["verdict"], indent=1))
                 # Every regression passes the three ways; open, the superseded tests (which pin the admission of a
                 # restated dead idea) are the only ones not run.
@@ -2034,15 +2043,60 @@ class Judges(unittest.TestCase):
         self.assertEqual(out.returncode, 0, out.stderr[-2000:])
         return json.loads(out.stdout.strip().splitlines()[-1])
 
+    def judge_patched(self, name, patch, split="dev", seed="dev"):
+        """The judge run on the tree with `patch` applied first in its process (a tree whose code differs there)."""
+        script = str(REPO / "league/swarm/harness_judges" / f"{name}.py")
+        argv = [script, "--split", split, "--seed", seed] + (["--pool-stdin"] if split == "heldout" else [])
+        code = (f"import runpy, sys\nsys.path.insert(0, {str(Path(script).parent)!r})\n{patch}\n"
+                f"sys.argv = {argv!r}\nrunpy.run_path({script!r}, run_name='__main__')\n")
+        stdin = json.dumps(TEST_POOLS[name]) + "\n" if split == "heldout" else None
+        return subprocess.run([sys.executable, "-c", code], input=stdin, capture_output=True, text=True, env=self.ENV,
+                              cwd=str(REPO), timeout=300)
+
     def test_memory_judge_labels_by_construction(self):
+        """Release B' (family cards): every case carries a complete card and admission runs as production runs it. The
+        card path's restatements (rows a mechanism verdict buried) are refused by the card check; every novel card is
+        admitted; the idea rows' restatements reach idea admission, where the held-out baseline clears the floor."""
         dev = self.judge("memory")
-        self.assertEqual((dev["rebirths_proposed"], dev["novel_proposed"], dev["provider_calls"]), (8, 8, 0))
+        self.assertEqual(dev["protocol"], lanes.LANES["memory"].protocol)
+        self.assertEqual((dev["rebirths_proposed"], dev["novel_proposed"], dev["provider_calls"]), (10, 8, 0))
+        self.assertEqual((dev["card_path_proposed"], dev["card_path_admitted"]), (2, 0))
         self.assertEqual(dev["novel_refused"], 0)
         self.assertEqual((dev["trials_uncounted"], dev["mechanism_rewritten"]), (0, 0))
         held = self.judge("memory", "heldout", "00aa11bb22cc33dd")
-        self.assertEqual(held, {**held, "rebirths_proposed": 8, "novel_proposed": 6, "trials_uncounted": 0})
+        self.assertEqual(held, {**held, "rebirths_proposed": 10, "novel_proposed": 6, "trials_uncounted": 0,
+                                "novel_refused": 0, "card_path_proposed": 2, "card_path_admitted": 0})
         self.assertEqual(held["seed"], "00aa11bb22cc33dd")
         self.assertGreaterEqual(held["rebirths_admitted"], lanes.LANES["memory"].bottlenecks[0].judge_floor)
+        # The pool carries no card: the judge derives every card from the drawn cases, and the card path takes bank
+        # texts only while each novel proposal keeps a text of its own.
+        self.assertFalse(any("card" in k for k in TEST_POOLS["memory"]))
+        sys.path.insert(0, str(REPO / "league/swarm/harness_judges"))
+        self.addCleanup(sys.path.remove, str(REPO / "league/swarm/harness_judges"))
+        import memory as memory_judge
+        buried, proposals = memory_judge.cases("heldout", "s1", TEST_POOLS["memory"])
+        novel = [p["mechanism"] for p in proposals if p["label"] == "novel" and "source" not in p]
+        self.assertEqual(len(novel), len(set(novel)))
+        self.assertFalse({b["mechanism"] for b in buried} & set(novel))
+        tight = {**TEST_POOLS["memory"], "novel_count": 6}
+        self.assertEqual([b["path"] for b in memory_judge.cases("heldout", "s1", tight)[0]].count("card"), 0)
+
+    def test_the_memory_judge_sees_the_card_check(self):
+        """A tree whose admission skips the card check lets the card path's restatements be born, and they count as
+        rebirths; a tree whose tags read the judge's graveyard otherwise gets no answer (the judge could not say what it
+        measured)."""
+        skipped = self.judge_patched("memory", "from league.swarm import architect\n"
+                                               "architect.Architect.rebirth_mode = lambda self: 'off'")
+        self.assertEqual(skipped.returncode, 0, skipped.stderr[-2000:])
+        out = json.loads(skipped.stdout.strip().splitlines()[-1])
+        base = self.judge("memory")
+        self.assertEqual(out["card_path_admitted"], 2)
+        self.assertEqual(out["rebirths_admitted"], base["rebirths_admitted"] + 2)
+        self.assertEqual(out["novel_refused"], 0)
+        retagged = self.judge_patched("memory", "from league.swarm import architect\n"
+                                                "architect.tag_of = lambda row, family: 'REFUTED'")
+        self.assertNotEqual(retagged.returncode, 0)
+        self.assertIn("as built", retagged.stderr)
 
     def test_the_heldout_split_needs_its_private_pool(self):
         for name in ("research", "memory", "data", "execution"):
