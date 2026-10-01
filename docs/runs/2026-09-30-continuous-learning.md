@@ -906,3 +906,60 @@ validation. The stop rule is fixed in advance.
 
 The goal remains unmet: no D2-qualified strategy trades real money, no harness improvement is retained, and project
 Net at the last close is −$568.74.
+
+## Oct 1 evening: the close, the Claude top-up, the H1 release
+
+### The close and the economics
+
+- **The Oct 1 close report** (20:31, one cutoff at 20:00, read-only): realized options P&L since T0 is −$37.81, all of
+  it calibration (19 closed round trips, −$36.28) and regulatory fees; strategy routes have closed nothing. Input costs
+  since T0 are $579.00 on the conservative basis (Sail $331.82, Claude $166.14, OpenAI $50.23 including $20.16 of holds
+  that may yet bill, ThetaData and Alpaca data pro rata $29.87, TypeSafe $0.94). **Net −$616.81**; with the open tuition
+  lot at its conservative mark (−$133.16) it is −$749.97. Broker fills, fees and the book reconcile; no order was
+  working at the cutoff.
+- **Burn:** $37.28 over the last 24 hours (Sail models $22.49, Gym boxes $6.11, Claude $3.31, data $5.37). Sail balance
+  $138.72.
+
+### The Claude top-up and the H1 release
+
+- **20:32, gateway `4471596a`:** the Claude funded total rises from $200 to $265, exactly the owner's top-up. **20:33:**
+  the architect's Claude line goes from $0 to $5 a day inside it (the swarm's cap $263); reviews and audits keep theirs.
+- **20:35, House release `20261001T203426Z-6fa69bfcda55` (main `665a9e8d`):** a family whose best Train version awaits
+  validation can no longer retire itself (on Oct 1 seven of ten families with a drift-passing version retired before the
+  tournament judged it, four of them holding a positive best); the research lane's held-out pool pin after a rotation;
+  and the architect's recovery of an answer with a stray brace. No evidence reset (the evaluator's execution
+  fingerprint, bundle and image are unchanged), no money digest change, the practice cohorts intact.
+- **A harness-loop slip, recorded:** the first capture on the new base was measured 40 seconds after the promote, while
+  the swarm still ran the old release, so the research candidate's key was bound to the old tree and its first stage was
+  refused (one of its three attempts). The fix is procedural: capture only once the swarm's heartbeat names the new
+  release. The candidate is re-captured on the next base.
+
+### Agenda v16c, five hours in (an interim look; the pre-registered read is at 15:22 Oct 2)
+
+Since the 15:22 apply: 43 architect births in 16 passes (31 debit verticals, 12 long singles, no long butterflies),
+2.7 births a pass. Of the births at least two hours old, 18% passed the Train drift screen (the 24 hours before: 8%),
+and 20-33% of the multi-root relative-state shape did. Drift-passing families ran at about 45 a day and validation runs
+at about 58 a day, against targets of 20 each. Two checks fail so far: the same root set was born more than twice (SPY
+alone five times) and four births sat entirely inside a crowded root triangle. Most architect proposals that were
+refused were rebirths in a buried cell whose claim cited nothing checkable. A drift pass is a cheap filter, not
+evidence of edge: these numbers say the funnel is working again, not that a profitable strategy exists.
+
+### Scoreboard (20:45 Oct 1)
+
+| Measure | Value |
+|---|---|
+| Release running | `20261001T203426Z-6fa69bfcda55` (main `665a9e8d`), gateway `4471596a` |
+| Real orders since T0 | calibration: 19 round trips closed (4 today); tuition: 1 open (GOOGL, exit-only to its programmed exit Oct 7); House test, incubator, Probe, Sized: 0 |
+| Realized options P&L since T0 | −$37.81 (calibration −$36.28, fees −$1.53; strategy routes $0.00) |
+| Input costs since T0 | $579.00 (the owner's external costs not yet declared) |
+| Net since T0, Oct 1 close | −$616.81; −$749.97 with the open lot at its conservative mark |
+| Families alive / in practice | 17 (start 96, floor 12; the idle rule cleared about 54 parked families woken by the agenda change) / 9 cohorts active, 7 after the two withdrawals leave at the next open |
+| Holdout looks | 3, 0 passed |
+| Births since 15:22 | 43: 31 debit verticals, 12 long singles |
+| Train disqualification rate, last 24 h | 12.4% of 3,788 Train runs |
+| Evidence resets | 2 (releases A and B) |
+| Retained harness improvements | 0; the research candidate (a static screen for programs that cannot run, gated to a quarter of families) is being re-captured for its 6-hour canary |
+| Spend and runway | about $37/day; Sail $138.72 (to the brake line at $32 in about 3.7 days at the current pace), Claude $98.86 of $265, OpenAI $0 by rule |
+
+The goal remains unmet: no D2-qualified strategy trades real money, no harness improvement is retained, and project
+Net is −$616.81.

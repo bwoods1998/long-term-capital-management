@@ -21,8 +21,11 @@ on branch `run/options-swarm-2026-09-26`) has the detail.
 
 ## Not yet deployed
 
-Main `3eaf4d06` is Release B, deployed Oct 1 (below). Under the freeze (Oct 1, "The freeze"), a change to
-`league/live` or `league/gym` waits for a planned release. Merged since and waiting for a release:
+Main `665a9e8d` is the H1 release, deployed Oct 1 at 20:35Z (below); the releases between B and H1 (B' 07:11Z,
+09:16Z, the site feed 10:19Z, 11:45Z, the lanes release 13:34Z) are recorded in the run record and get their entries in a
+follow-up docs pass. Under the freeze (Oct 1, "The freeze"), a change to
+`league/live` or `league/gym` waits for a planned release. Nothing merged is waiting for a release. Deployed at 10:19Z with the
+site-feed release `20261001T101853Z-466bca70278a` (#463), its dated entry to follow:
 
 - **The swarm window** (branch `b/site-rationale`): the publisher sends `levels` (each agent's level and the levels
   funnel since the reset) and `rationale` (each agent's thesis, and each real position's route, reasons, exit and maximum
@@ -45,42 +48,69 @@ Main `3eaf4d06` is Release B, deployed Oct 1 (below). Under the freeze (Oct 1, "
   refused the swarm window" warning, and `curl -s
   'https://blakewoods.us/api/capital/checkpoint?progress=1&positions=1&practice=1&window=1'` shows `levels` and
   `rationale`.
-- **No retire while the best Train version awaits validation** (H1, PR #475, branch
-  `b/h1-no-retire-awaiting-validation`;
-  `league/swarm/researcher.py`, `league/swarm/diagnostician.py`, `league/swarm/harness_lanes.py`; the money path:
-  `researcher.py` is loaded by the live path through `gate`, so it deploys 20:05-13:25Z only, after two adversarial
-  reviews and green CI). On Oct 1 seven of the ten families that made a drift-passing Train version retired themselves
-  before the tournament validated it, four of them holding a positive best whose 1.5x run had landed with a profit:
-  `Researcher.can_retire` never asked `awaiting_validation`, which the dormancy clause and the status already honoured.
-  Now a Gym family whose best Train version awaits validation (not validated, not lost at 1.5x, not failed by the drift
-  screen) is not offered `retire`, a call is refused with the reason (on Sail and on Claude; the cycle's record carries
-  `retire_awaiting`), the status says so in place of any offer, and the diagnostician's retire defers as it does behind
-  the gate; the tournament's verdict, pass or fail, ends it, and so does a demotion. Nothing else moves: no threshold,
-  `retire_min_trials`, floor, eligibility or score; the tournament's own rules and `SwarmStore.retire_gym` are
-  unchanged (a store-level refusal would let a 1.5x run that never lands make a family no rule could retire). Not
-  done, a follow-up: queueing the validation when a new best lands. Nothing in `league/live`, `league/gym` or
-  `LEAGUE_FILES`, no evaluator adoption, no money digest. To verify after the deploy: `swarm.cycle` events carrying
-  `retire_refused` with `retire_awaiting` (the version the tournament owes a verdict), and no `swarm.retired` event
-  whose cause begins "Self-refuted" for a family whose `best_version` differs from its `validated_version` and sits in
-  neither `robust_failed` nor `drift_failed`.
-- **Architect lenient read 2** (branch `b/architect-lenient-json-2`): a complete architect answer whose `families`
-  array does not parse whole is read object by object (`recover_families`): each family decoded from its own `{`,
-  the stray closers and commas between the families skipped, an object that does not decode passed over to its own
-  closing brace (never entered), a card a stray `}` inside it closed early passed over too (never born truncated),
-  the walk never leaving the array (anything else between two cards ends it), nothing inside a family changed beyond
-  #472's trailing-comma strip; the pass's `swarm.architect` event says `recovered` (how many, why, and `passed`),
-  beside #472's `lenient`. At 15:59:36Z Oct 1 a Kimi-K3 pass answered six families in 16,008 characters with a stray
-  `}` after the fourth and after the fifth; the strict read failed (`Expecting ',' delimiter` at char 10,897), #472's
-  trailing-comma read did not apply, the router's reader fell back to the first family card, and the pass read as 0
-  proposals (population 42 against a start of 96; about $0.15 and 20 minutes of births lost). On the saved answer the
-  new read recovers 6 of 6, each byte for byte (no strip ran). The parse that feeds `admit` (`read_families`,
-  `recover_families`, `_from_families`, `without_trailing_commas`, `_past_object`, `_CARD`, `CARD_KEY`) joins
-  `salvage_families` in the memory lane's `FROZEN_SYMBOLS` (`league/swarm/harness_lanes.py`). Research-class:
-  `league/swarm/architect.py` is not loaded by the live path (verified Oct 1); nothing in `league/live`, `league/gym`
-  or `LEAGUE_FILES`, no evaluator adoption, no money digest. To verify after the deploy: a `swarm.architect` event
-  whose answer failed the strict read says `recovered` with `proposed` > 0.
-
 ## 2026-10-01
+
+### 20:35Z, the H1 release: House release `20261001T203426Z-6fa69bfcda55` (main `665a9e8d`; PRs #475, #476, #477)
+
+- **Contents.** No retire while the best Train version awaits validation (H1, #475); the research lane's held-out pool
+  pin after the operator's rotation r8 (#476, `league/swarm/harness_lanes.py`: the research lane's hash moves, so every
+  research candidate captured before it is re-captured); the architect's lenient read 2 (#477). The two items as
+  merged:
+  - **No retire while the best Train version awaits validation** (H1, PR #475, branch
+    `b/h1-no-retire-awaiting-validation`;
+    `league/swarm/researcher.py`, `league/swarm/diagnostician.py`, `league/swarm/harness_lanes.py`; the money path:
+    `researcher.py` is loaded by the live path through `gate`, so it deploys 20:05-13:25Z only, after two adversarial
+    reviews and green CI). On Oct 1 seven of the ten families that made a drift-passing Train version retired themselves
+    before the tournament validated it, four of them holding a positive best whose 1.5x run had landed with a profit:
+    `Researcher.can_retire` never asked `awaiting_validation`, which the dormancy clause and the status already honoured.
+    Now a Gym family whose best Train version awaits validation (not validated, not lost at 1.5x, not failed by the drift
+    screen) is not offered `retire`, a call is refused with the reason (on Sail and on Claude; the cycle's record carries
+    `retire_awaiting`), the status says so in place of any offer, and the diagnostician's retire defers as it does behind
+    the gate; the tournament's verdict, pass or fail, ends it, and so does a demotion. Nothing else moves: no threshold,
+    `retire_min_trials`, floor, eligibility or score; the tournament's own rules and `SwarmStore.retire_gym` are
+    unchanged (a store-level refusal would let a 1.5x run that never lands make a family no rule could retire). Not
+    done, a follow-up: queueing the validation when a new best lands. Nothing in `league/live`, `league/gym` or
+    `LEAGUE_FILES`, no evaluator adoption, no money digest. To verify after the deploy: `swarm.cycle` events carrying
+    `retire_refused` with `retire_awaiting` (the version the tournament owes a verdict), and no `swarm.retired` event
+    whose cause begins "Self-refuted" for a family whose `best_version` differs from its `validated_version` and sits in
+    neither `robust_failed` nor `drift_failed`.
+  - **Architect lenient read 2** (branch `b/architect-lenient-json-2`): a complete architect answer whose `families`
+    array does not parse whole is read object by object (`recover_families`): each family decoded from its own `{`,
+    the stray closers and commas between the families skipped, an object that does not decode passed over to its own
+    closing brace (never entered), a card a stray `}` inside it closed early passed over too (never born truncated),
+    the walk never leaving the array (anything else between two cards ends it), nothing inside a family changed beyond
+    #472's trailing-comma strip; the pass's `swarm.architect` event says `recovered` (how many, why, and `passed`),
+    beside #472's `lenient`. At 15:59:36Z Oct 1 a Kimi-K3 pass answered six families in 16,008 characters with a stray
+    `}` after the fourth and after the fifth; the strict read failed (`Expecting ',' delimiter` at char 10,897), #472's
+    trailing-comma read did not apply, the router's reader fell back to the first family card, and the pass read as 0
+    proposals (population 42 against a start of 96; about $0.15 and 20 minutes of births lost). On the saved answer the
+    new read recovers 6 of 6, each byte for byte (no strip ran). The parse that feeds `admit` (`read_families`,
+    `recover_families`, `_from_families`, `without_trailing_commas`, `_past_object`, `_CARD`, `CARD_KEY`) joins
+    `salvage_families` in the memory lane's `FROZEN_SYMBOLS` (`league/swarm/harness_lanes.py`). Research-class:
+    `league/swarm/architect.py` is not loaded by the live path (verified Oct 1); nothing in `league/live`, `league/gym`
+    or `LEAGUE_FILES`, no evaluator adoption, no money digest. To verify after the deploy: a `swarm.architect` event
+    whose answer failed the strict read says `recovered` with `proposed` > 0.
+- **Deploy.** From a clean detached checkout of `665a9e8d`, with the nightly forward daemon stopped idle (lock free
+  20:34:16Z) and a lineage snapshot taken first: staged 20:34:29Z, promoted 20:35:07Z over `20261001T133355Z-67c841b645ca`.
+- **No evidence reset, verified** (read-only, 20:37Z): `research_evaluator.execution` still `47587e22…`, bundle
+  `gym-engine-4-e1c896f8d304`, image `sbcp_13c5a61d`; the 9 practice cohorts active; the money digest unchanged
+  (`42c4a3af`), so no ratify. `real_money` true, `failures` []; the swarm restarted on the new release; the House test
+  instance live and `googl-lags-msft-ai-cloud-qqq-flat@27:t` exit-only with position 14 open; no working order;
+  `live.incubator` on.
+
+### 20:33Z, operator change (no deploy): the architect back on Claude
+
+- `claude.usd_cap` 198 → 263 and `claude.role_usd_day.architect` 0 → 5 in `swarm.json` (`set_swarm.py`, dry run then
+  `--apply`), within the owner's $100 Claude balance; reviews, audits, the strategist and the diagnostician keep their
+  lines.
+
+### 20:32Z, gateway `4471596a` (main `07ab60d3`; PR #473)
+
+- **`CLAUDE_USD` 200 → 265:** the owner topped the Anthropic account up to a $100 balance against $165.26 metered
+  spent (Oct 1 about 14:35Z), so the funded total is raised by exactly that, rounded down. `npx wrangler deploy` from a
+  clean detached checkout; the deployed version's `CLAUDE_USD` reads 265 and every money cap still matches the
+  constitution (pre-open check 3). Rollback: `dafcfa05`.
+
 
 ### 04:01Z, operator change (no deploy): the incubator switched on
 
