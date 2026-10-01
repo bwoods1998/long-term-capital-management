@@ -73,6 +73,18 @@ Every path uses the atomic `population.floor`; `population.start` is the archite
 additional floor. Gate work in flight, gate-ready versions and extension/operator holds are protected. Retirement
 preserves the program, lineage, trials, results and explanation. It never turns a research decision into an order.
 
+THE VALIDATED-FAMILY GUARD (Oct 1). On Sept 30 the swarm's only D2-tuition family (8 of 8 checks on Validation, review
+and audit passed, tuition traded) was retired by its own researcher 17 seconds after an evaluator adoption, because "the
+evaluator changed" and its validated version "must be re-evaluated". An evaluator change re-evaluates; it never refutes.
+So `retire` is refused (`retire_guard`, a plain refusal that says why and, for an archived version, hands back its
+program to re-run) while the family holds a version that passed the validation line, in its state or in the selection an
+adoption archived (`previous_evaluator_selection`), last validated within `researcher.retire_guard_days` (14) days,
+unless the family's latest validation of that version under the current evaluator failed the line (`validation_refuted`:
+the tournament's record of each version's latest verdict and the evaluator it was judged under, `VERDICTS_KEY`, else the
+family's own validation line, which an adoption clears). The status says so in place of any offer to retire. The tool
+stays offered (`can_retire` is unchanged). Operator retirements, the tournament's rules (the deflated-Sharpe rule among
+them), the diagnostician and the population floor are unaffected.
+
 EVENT-DRIVEN HOLDS (Sept 30). A held family is parked durably by `loop.Scheduler` until a result, rewrite, guidance,
 research agenda, data image or release changes. Elapsed time and process restarts alone never buy another call.
 The researcher should retire an exhausted mechanism when offered, and hold when a specific input is missing.
@@ -280,7 +292,9 @@ TOOLS: list[dict[str, Any]] = [
                                      "Gym evaluations since its birth or last validation without an eligible Train version "
                                      "(or far more with a best Train score below zero), or many cycles in a row with only "
                                      "holds and stored results, or a few holds in a row once your family has an eligible "
-                                     "Train run or enough trials behind it.",
+                                     "Train run or enough trials behind it. Refused while your family holds a version that "
+                                     "passed the validation line, unless that version fails the line under the current "
+                                     "evaluator: an evaluator change is never a reason to retire.",
      "parameters": {"type": "object", "properties": {"reason": {"type": "string", "description": "Why the entire mechanism "
                     "is abandoned; retained in the private notebook and graveyard."}}, "required": ["reason"]}},
 ]
@@ -324,6 +338,11 @@ results, or a few holds in a row once your family has an eligible Train run or e
 when you abandon the entire mechanism, not one rejected version; a dead mechanism is better
 retired than kept on holds, since its slot goes to a new idea. Retirement is final for the family and preserves its best
 program and all evidence.
+AN EVALUATOR CHANGE IS NEVER A REASON TO RETIRE. When the Gym's evaluator changes, your best and your validation are
+archived and re-evaluated, never refuted: a version that passed the validation line keeps that evidence, and the
+tournament validates it again under the current evaluator by itself once you re-run it unchanged on Train (the same
+program and params) and it is your best (submit it). While your family holds a version that passed the line, the retire
+tool refuses, unless that version's validation under the current evaluator fails the line.
 Holding parks your researcher without further paid calls until new evidence, guidance, data or a harness change arrives.
 Use it to wait for a specific missing input. If your evidence has exhausted the mechanism, retire when offered instead.
 Your notes (the notebook and gym_run's note) are PUBLIC: they may appear on the public site. Write the mechanism and your
@@ -941,6 +960,126 @@ RETIRE_HOLD_CYCLES = 3
 RETIRE_HOLD_TRIALS = 10
 
 
+# ------------------------------------------------------------------------------------ THE VALIDATED-FAMILY GUARD (Oct 1)
+#: `researcher.retire_guard_days`' default: how long a passed validation line keeps its family from its researcher's own
+#: `retire`, counted from that version's latest validation.
+RETIRE_GUARD_DAYS = 14.0
+#: The tournament's record of each validated version's latest verdict (`record_verdict`), in the family's state:
+#: {str(n): {"passed", "at", "evaluator"}}. It is no selection key of an adoption (`evaluator.SELECTION_KEYS`): it
+#: outlives one, and the evaluator each verdict was judged under says whether that verdict is current.
+VERDICTS_KEY = "validation_verdicts"
+#: At most this many versions' verdicts are kept (the newest).
+VERDICTS_KEPT = 64
+
+
+def retire_guard_days(settings: Mapping[str, Any]) -> float:
+    """`researcher.retire_guard_days` (14). A number at or below zero turns the guard off; anything else that is not a
+    finite number (null, a boolean, a string) reads as the default: a misread setting never unguards a validated family."""
+    raw = (settings.get("researcher") or {}).get("retire_guard_days", RETIRE_GUARD_DAYS)
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return RETIRE_GUARD_DAYS
+    try:
+        days = float(raw)
+    except OverflowError:
+        return RETIRE_GUARD_DAYS
+    return max(0.0, days) if math.isfinite(days) else RETIRE_GUARD_DAYS
+
+
+def record_verdict(state: Mapping[str, Any], n: int, passed: bool, *, evaluator: Any, at: str) -> dict[str, Any]:
+    """The family's `VERDICTS_KEY` with version `n`'s latest verdict (`Tournament._verdict`, counted or re-judged): whether
+    it passed the line (D2a's own answer, never a number), when, and the evaluator in force (`evaluator.KEY`'s value; None
+    in a store that never adopted one). The newest `VERDICTS_KEPT` versions are kept."""
+    old = state.get(VERDICTS_KEY)
+    kept = {str(k): v for k, v in old.items() if isinstance(v, Mapping)} if isinstance(old, Mapping) else {}
+    kept.pop(str(n), None)
+    kept[str(n)] = {"passed": bool(passed), "at": at, "evaluator": evaluator}
+    if len(kept) > VERDICTS_KEPT:
+        kept = dict(sorted(kept.items(), key=lambda kv: str(kv[1].get("at") or ""))[-VERDICTS_KEPT:])
+    return kept
+
+
+def _epoch(text: Any) -> float | None:
+    """An ISO time of the store (`2026-09-30T16:30:22Z`) in seconds, or None."""
+    try:
+        return dt.datetime.fromisoformat(str(text).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def validation_refuted(state: Mapping[str, Any], n: int, current: Any) -> bool:
+    """Version `n`'s latest validation under the current evaluator (`current`: `evaluator.KEY`'s value, None in a store
+    that never adopted one) failed the line: the tournament's record of its latest verdict (`VERDICTS_KEY`) when that was
+    judged under `current`, else the family's own validation line when it judged `n` (an adoption clears that line, so a
+    line there was judged under the evaluator in force since, and so is a family's born after the adoption)."""
+    records = state.get(VERDICTS_KEY)
+    record = records.get(str(n)) if isinstance(records, Mapping) else None
+    if isinstance(record, Mapping) and record.get("evaluator") == current:
+        return record.get("passed") is False
+    line = state.get("validation_line")
+    return _plain_int(state.get("validation_version")) == n and isinstance(line, Mapping) and line.get("passed") is False
+
+
+def validated_at(store: SwarmStore, fid: str, n: int, state: Mapping[str, Any]) -> float | None:
+    """When version `n` was last validated (seconds): its newest validation run at the normal spread, or its verdict's
+    record (`VERDICTS_KEY`, a re-judged result's too), whichever is later; None when neither says."""
+    records = state.get(VERDICTS_KEY)
+    record = records.get(str(n)) if isinstance(records, Mapping) else None
+    times = [_epoch(record.get("at"))] if isinstance(record, Mapping) else []
+    times += [_epoch(row.get("at")) for row in store.version_runs(fid, n, window="validation", stress=1.0, limit=1)]
+    known = [t for t in times if t is not None]
+    return max(known) if known else None
+
+
+def retire_guard(store: SwarmStore, fam: Mapping[str, Any], settings: Mapping[str, Any], *, now: float) -> dict[str, Any] | None:
+    """THE VALIDATED-FAMILY GUARD (the module docstring): why the family's researcher may not retire it, or None. The
+    family holds a version that passed the validation line, in its state or in the selection an adoption archived
+    (`previous_evaluator_selection`), and that version's latest validation under the current evaluator did not fail the
+    line (`validation_refuted`), and it was last validated (`validated_at`) within `researcher.retire_guard_days`; a
+    version whose validation time is unknown counts as recent. A version validated only by a failed line never protects
+    (`validated_version` alone records any validation, passed or failed). Returns {"version", "archived", "days"}: the
+    state's own line first."""
+    days = retire_guard_days(settings)
+    if days <= 0:
+        return None
+    from .evaluator import KEY
+
+    state = fam.get("state") or {}
+    archive = state.get("previous_evaluator_selection")
+    sources = [(state, False)] + ([(archive, True)] if isinstance(archive, Mapping) else [])
+    current: Any = None
+    read = False
+    for source, archived in sources:
+        line = source.get("validation_line")
+        n = _plain_int(source.get("validation_version"))
+        if n is None or not isinstance(line, Mapping) or line.get("passed") is not True:
+            continue
+        if not read:
+            current, read = store.get(KEY), True
+        if validation_refuted(state, n, current):
+            continue
+        at = validated_at(store, str(fam["id"]), n, state)
+        if at is not None and now - at > days * 86400.0:
+            continue
+        return {"version": n, "archived": archived, "days": days}
+    return None
+
+
+def guard_words(guard: Mapping[str, Any]) -> str:
+    """The researcher's words for `retire_guard`'s answer: the status line and the retire tool's refusal."""
+    n = guard["version"]
+    if guard.get("archived"):
+        head = (f"Your family holds version {n}, which passed the validation line before the evaluator changed. The change "
+                "archived that verdict and owes it re-evaluation; it did not refute it, and an evaluator change is never a "
+                "reason to retire.")
+        then = (f" Re-run version {n} unchanged on Train (gym_run with its whole program in `code` and its params) and "
+                "submit it: the tournament then validates it again under the current evaluator by itself.")
+    else:
+        head = f"Your family holds version {n}, which passed the validation line."
+        then = " Keep researching beside it, or hold for a specific missing input."
+    return (head + f" The retire tool refuses while that stands: only a validation of version {n} under the current "
+            f"evaluator that fails the line, or {guard['days']:g} days since its last validation, ends it." + then)
+
+
 # ------------------------------------------------------------------------------------ THE EXTENSION HOLD (R11-4's swarm rule)
 #: `researcher.extension_hold_checks`: a family whose latest validation met at least this many of the line's checks is
 #: exempt from the dormancy clause until its 2017-19 extension result lands (the operator clears the flag).
@@ -1335,10 +1474,14 @@ class Researcher:
             parts.append(f"Cycles in a row without a new Gym evaluation (only stored results, holds and refused runs): {dormant}.")
         if notes:
             parts.append("Your notebook (latest):\n" + "\n".join(f"- {diagnostics.scrub(n['text'])[:300]}" for n in notes))
-        may_retire = self.can_retire(fam)
+        guard = self.guarded(fam)
+        # THE VALIDATED-FAMILY GUARD: its family is never urged to retire (the tool would refuse); it hears why instead.
+        may_retire = guard is None and self.can_retire(fam)
         dead = self.dead(fam) if may_retire else None
         from .practice import kept_version
-        if kept_version(self.store, str(fam["id"]), now=self.clock()) is not None:
+        if guard is not None:
+            parts.append(guard_words(guard))
+        elif kept_version(self.store, str(fam["id"]), now=self.clock()) is not None:
             # THE COHORT KEEP (L1, `tournament.py`): the tournament holds the family alive while its practice cohort runs,
             # so idleness is not urged as a reason to retire it; the retire tool stays offered (`can_retire`).
             parts.append("Your family is in a live practice cohort, so the tournament keeps it alive while the cohort runs: "
@@ -1579,6 +1722,11 @@ class Researcher:
         need = _count_setting(self.settings, "retire_min_trials", 10)
         tested = int(fam.get("validations") or 0) >= 2 or (need > 0 and int(fam.get("trials") or 0) >= need)
         return alive > int(pop.get("floor", 16)) and bool(tested or self.dead(fam) or self.hold_offer(fam))
+
+    def guarded(self, fam: Mapping[str, Any]) -> dict[str, Any] | None:
+        """THE VALIDATED-FAMILY GUARD (`retire_guard`) on this researcher's clock: why `retire` refuses, or None. It leaves
+        `can_retire` (the tool's offer) alone; the tool's answer and the status carry it."""
+        return retire_guard(self.store, fam, self.settings, now=float(self.clock()))
 
     def retire_floor(self, fam: Mapping[str, Any]) -> int:
         """The single population floor, checked atomically by ``retire_gym`` even for concurrent retirements."""
@@ -2523,10 +2671,24 @@ class Researcher:
 
     def _execute(self, fam: Mapping[str, Any], name: str, args: Mapping[str, Any], out: dict[str, Any], *, author: str) -> Any:
         if name == "retire":
-            # Refused unless offered (`can_retire`); a refusal is a tool answer, never a cycle error (no backoff). The
-            # family is read, judged and retired in one transaction, so its floor follows the state it retires in.
+            # Refused unless offered (`can_retire`) and unguarded; a refusal is a tool answer, never a cycle error (no
+            # backoff). The family is read, judged and retired in one transaction, so its floor follows the state it
+            # retires in.
             with self.store.atomic():
                 current = self.store.family(fam["id"]) or fam
+                guard = self.guarded(current)
+                if guard is not None:
+                    # THE VALIDATED-FAMILY GUARD first (it says why, whatever else would refuse): for a version an
+                    # adoption archived, the answer hands back its program so the researcher can re-run it unchanged.
+                    out["retire_refused"] = True
+                    out["retire_guarded"] = guard["version"]
+                    answer: dict[str, Any] = {"status": "refused", "guard": "validated_version", "version": guard["version"],
+                                              "reason": guard_words(guard)}
+                    version = self.store.version(fam["id"], guard["version"]) if guard["archived"] else None
+                    if version and version.get("code"):
+                        answer["program"] = {"version": guard["version"], "code": version["code"],
+                                             "params": version.get("params") or {}}
+                    return answer
                 if not self.can_retire(current):
                     out["retire_refused"] = True
                     return {"status": "refused", "reason": "retire is not available to your family now (it needs at least two "
@@ -3392,4 +3554,5 @@ __all__ = ["Researcher", "TOOLS", "TOOLS_READ", "TOOLS_REVISE", "RUNS", "needs_o
            "sweep_variants", "sweep_tool", "merged_key", "MAX_SWEEP_VARIANTS", "MAX_SWEEP_JOBS_IN_FLIGHT", "idle_dead",
            "idle_evaluations", "idle_limit", "RETIRE_IDLE_EVALUATIONS", "NEGATIVE_FACTOR", "DORMANT_CYCLES", "ALREADY_RUN",
            "dormant_limit", "dormant_count", "awaiting_validation", "holding", "held_at_gate", "new_run", "revalidation_owed",
-           "objective_for", "span_of", "CORE_SPAN"]
+           "objective_for", "span_of", "CORE_SPAN", "RETIRE_GUARD_DAYS", "VERDICTS_KEY", "retire_guard", "retire_guard_days",
+           "record_verdict", "validation_refuted", "validated_at", "guard_words"]

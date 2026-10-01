@@ -6,8 +6,11 @@ from concurrent.futures import ThreadPoolExecutor
 
 from league.swarm.architect import Architect
 from league.swarm.gate import Gate
-from league.swarm.researcher import (RETIRE_IDLE_EVALUATIONS, SCREENED, SELF_REFUTED, Researcher, idle_cause, idle_dead,
-                                     idle_evaluations, idle_limit)
+from league.swarm import bands
+from league.swarm.evaluator import KEY, adopt, identity
+from league.swarm.researcher import (RETIRE_GUARD_DAYS, RETIRE_IDLE_EVALUATIONS, SCREENED, SELF_REFUTED, VERDICTS_KEY, Researcher,
+                                     idle_cause, idle_dead, idle_evaluations, idle_limit, record_verdict, retire_guard,
+                                     validated_at)
 from league.swarm.seeds import family_spec
 from league.swarm.store import SwarmStore
 from league.swarm.tournament import IDLE_CAUSE, Tournament
@@ -692,3 +695,209 @@ class PoolRetirement(PoolCase):
         pool.run_batch(box, batch)
         self.assertEqual(pool.wait(job, 0)["status"], "ok")
         self.assertEqual(self.store.family(fid)["band"], "retired")
+
+
+# ------------------------------------------------------------------------------------ THE VALIDATED-FAMILY GUARD (Oct 1)
+#: The words googl-lags-msft-ai-cloud-qqq-flat's researcher retired it with on Sept 30, 17 seconds after the adoption.
+GOOGL_REASON = ("The mechanism is proven and validated (v27, 8/8 validation checks) but every attempt to extend or "
+                "re-express it failed the drift screen or volume requirements. The evaluator has changed, meaning my "
+                "validated v27 must be re-evaluated under the new evaluator before it can count, and holding further only "
+                "accumulates idle cycles.")
+
+
+def line_of(met, total=8):
+    return {"passed": met == total, "checks": {f"c{i}": i < met for i in range(total)}}
+
+
+class ValidatedFamilyGuard(ResearcherCase):
+    """Oct 1: googl-lags-msft-ai-cloud-qqq-flat, the swarm's only D2-tuition family (8 of 8 on Validation, review and
+    audit passed, tuition traded), was retired by its own researcher's `retire` 17 seconds after an evaluator adoption
+    archived its validation, "because the evaluator changed". Its researcher may not retire it while it holds a version
+    that passed the line, archived or not, unless that version fails the line under the current evaluator."""
+
+    def setUp(self):
+        super().setUp()
+        self.settings["population"].update(start=0, floor=0)
+        self.cancelled = []
+        self.pool.cancel_family = self.cancelled.append
+        self.fid = self.fam["id"]
+        self.researcher().cycle(self.fid)  # the starter: version 1 on Train
+
+    def validate(self, n=1, *, met=8, image="old-image", bundle="gym-engine-3-old"):
+        """Version n validated as the tournament recorded it before Oct 1 (its run row and its line; no verdict record).
+        One validation and 73 trials, as googl had: the retire tool is offered (`retire_min_trials`)."""
+        row = result(f"val-{n}", window="validation")
+        row.update(gym_image=image, gym_bundle=bundle)
+        self.store.add_run(self.fid, n, row, window="validation", stress=1.0, purpose="validation")
+        self.store.update_family(self.fid, validated_version=n, best_validation=0.46, validations=1, trials=73)
+        self.store.set_state(self.fid, validation_line=line_of(met), validation_version=n, validation_image=image,
+                             validation_bundle=bundle)
+
+    def googl(self):
+        """Validated 8 of 8 at 16:30Z; the evaluator adopted at 20:08:57Z (archived and cleared); retire at 20:09:14Z."""
+        self.validate(1)
+        self.clock.advance(3 * 3600 + 38 * 60 + 35)
+        self.assertTrue(adopt(self.store, identity("new-image", bands._bundle()))["adopted"])
+        self.clock.advance(17)
+
+    def retire_cycle(self, reason=GOOGL_REASON):
+        """A REVISE turn that calls retire, then a run; then a READ turn. (out, the tool outputs, the REVISE request)."""
+        first = len(self.sail.bodies)
+        self.steps = [{"calls": [("retire", {"reason": reason}), ("gym_run", {"params": {"vrp_min": 1.3}})]},
+                      {"text": "read it"}]
+        out = self.researcher().cycle(self.fid)
+        outputs = [json.loads(i["output"]) for i in self.store.convo(self.fid)[0][-1]["items"]
+                   if i.get("type") == "function_call_output"]
+        return out, outputs, self.sail.bodies[first]
+
+    @staticmethod
+    def status_of(body):
+        return next(i["content"] for i in reversed(body["input"])
+                    if i.get("role") == "user" and "Now: if a run just came back" in str(i.get("content")))
+
+    def alive(self):
+        fam = self.store.family(self.fid)
+        return fam["band"] == "gym" and fam["retired_at"] is None
+
+    def test_the_googl_scenario_is_refused_with_its_reason_and_its_program(self):
+        self.googl()
+        state = self.store.family(self.fid)["state"]
+        self.assertIsNone(state["validation_line"], "the adoption cleared the line")
+        self.assertTrue(state["previous_evaluator_selection"]["validation_line"]["passed"], "and archived it")
+        out, outputs, body = self.retire_cycle()
+        self.assertIn("retire", [t["name"] for t in body["tools"]], "the offer is unchanged (`can_retire`)")
+        self.assertTrue(out["retire_refused"])
+        self.assertEqual(out["retire_guarded"], 1)
+        self.assertNotIn("retired", out)
+        self.assertNotIn("error", out, "a refusal is a tool answer, never a cycle error (no backoff)")
+        answer = outputs[0]
+        self.assertEqual((answer["status"], answer["guard"], answer["version"]), ("refused", "validated_version", 1))
+        self.assertIn("passed the validation line before the evaluator changed", answer["reason"])
+        self.assertIn("an evaluator change is never a reason to retire", answer["reason"])
+        self.assertIn("Re-run version 1 unchanged", answer["reason"])
+        version = self.store.version(self.fid, 1)
+        self.assertEqual(answer["program"], {"version": 1, "code": version["code"], "params": version.get("params") or {}})
+        self.assertTrue(self.alive())
+        self.assertEqual((self.store.graveyard(), self.cancelled), ([], []))
+        self.assertEqual([e for e in self.store.events_after(0) if e["kind"] == "swarm.retired"], [])
+        self.assertFalse(any("Retired by" in n["text"] for n in self.store.notebook(self.fid)))
+        status = self.status_of(body)
+        self.assertIn("passed the validation line before the evaluator changed", status)
+        self.assertNotIn("call retire", status, "a guarded family is never urged to retire")
+
+    def test_the_prompt_and_the_tool_say_an_evaluator_change_is_never_a_reason_to_retire(self):
+        from league.swarm.researcher import ROLE, TOOLS
+
+        self.assertIn("AN EVALUATOR CHANGE IS NEVER A REASON TO RETIRE", ROLE)
+        self.assertIn("validates it again under the current evaluator by itself", ROLE)
+        [tool] = [t for t in TOOLS if t["name"] == "retire"]
+        self.assertIn("an evaluator change is never a reason to retire", tool["description"])
+        self.googl()
+        self.retire_cycle()
+        self.assertIn("AN EVALUATOR CHANGE IS NEVER A REASON TO RETIRE", self.sail.bodies[-1]["input"][0]["content"])
+
+    def test_a_failed_validation_of_that_version_under_the_current_evaluator_is_a_refutation(self):
+        self.googl()
+        self.store.update_family(self.fid, best_version=1)  # its researcher re-ran version 1 unchanged: its best again
+        failed = result("val-again", window="validation", mean=-0.01, t=-0.5, quarters="1/4", pnl=-100.0)
+        row = Tournament(self.store, self.pool, self.settings, clock=self.clock).judge(self.fid, 1, failed)
+        self.assertFalse(row["passed"])
+        record = self.store.family(self.fid)["state"][VERDICTS_KEY]["1"]
+        self.assertEqual((record["passed"], record["evaluator"]), (False, self.store.get(KEY)))
+        self.assertIsNone(self.researcher().guarded(self.store.family(self.fid)))
+        out, outputs, _ = self.retire_cycle("Version 1 failed the validation line under the current evaluator.")
+        self.assertTrue(out["retired"])
+        self.assertFalse(self.alive())
+        self.assertIn(SELF_REFUTED, self.store.family(self.fid)["retire_reason"])
+
+    def test_the_refutation_survives_another_version_replacing_the_line(self):
+        """The tournament's per-version record: version 1 fails under the current evaluator, then version 2's validation
+        replaces the family's line. Version 1's archived pass is refuted all the same; a pass of 2 would guard it."""
+        self.googl()
+        tournament = Tournament(self.store, self.pool, self.settings, clock=self.clock)
+        failed = result("val-1", window="validation", mean=-0.01, t=-0.5, quarters="1/4", pnl=-100.0)
+        self.store.update_family(self.fid, best_version=1)
+        self.assertFalse(tournament.judge(self.fid, 1, failed)["passed"])
+        self.store.add_version(self.fid, self.code + "\n# another version\n", {}, author="test")
+        self.store.update_family(self.fid, best_version=2)
+        self.assertFalse(tournament.judge(self.fid, 2, dict(failed, run_id="val-2"))["passed"])
+        state = self.store.family(self.fid)["state"]
+        self.assertEqual((state["validation_version"], sorted(state[VERDICTS_KEY])), (2, ["1", "2"]))
+        self.assertIsNone(retire_guard(self.store, self.store.family(self.fid), self.settings, now=self.clock()))
+        # Without the record (a verdict written before Oct 1) the archived pass of 1 stands unrefuted.
+        self.store.set_state(self.fid, **{VERDICTS_KEY: None})
+        self.assertEqual(retire_guard(self.store, self.store.family(self.fid), self.settings, now=self.clock())["version"], 1)
+
+    def test_a_pass_recorded_under_an_old_evaluator_is_no_refutation_nor_a_failure_under_one(self):
+        self.validate(1)
+        old = {"image": "old-image", "bundle": "gym-engine-3-old", "execution": "x"}
+        self.store.set_state(self.fid, **{VERDICTS_KEY: record_verdict({}, 1, False, evaluator=old, at=self.store.now())})
+        adopt(self.store, identity("new-image", bands._bundle()))
+        guard = retire_guard(self.store, self.store.family(self.fid), self.settings, now=self.clock())
+        self.assertEqual((guard["version"], guard["archived"]), (1, True),
+                         "a failure under another evaluator refutes nothing now")
+
+    def test_a_passed_line_under_the_current_evaluator_guards_too(self):
+        self.validate(1, image=None, bundle=None)
+        out, outputs, body = self.retire_cycle()
+        self.assertTrue(out["retire_refused"])
+        self.assertTrue(self.alive())
+        self.assertEqual(outputs[0]["version"], 1)
+        self.assertNotIn("program", outputs[0], "no archived version to re-run")
+        self.assertIn("Keep researching beside it", self.status_of(body))
+
+    def test_a_failed_validation_alone_never_guards(self):
+        """googl's fork (-on): its only validation failed 5 of 8 checks, then the adoption archived it."""
+        self.validate(1, met=3)
+        adopt(self.store, identity("new-image", bands._bundle()))
+        self.assertIsNone(self.researcher().guarded(self.store.family(self.fid)))
+        out, _, body = self.retire_cycle("The mechanism is exhausted: version 1 failed 5 of 8 checks.")
+        self.assertTrue(out["retired"])
+        self.assertIn("call retire", self.status_of(body))
+
+    def test_the_guard_lapses_retire_guard_days_after_the_last_validation(self):
+        self.googl()
+        fam = self.store.family(self.fid)
+        at = validated_at(self.store, self.fid, 1, fam["state"])
+        self.assertEqual(self.settings["researcher"].get("retire_guard_days", RETIRE_GUARD_DAYS), 14.0)
+        self.clock.advance(at + 14 * 86400 - 60 - self.clock())
+        self.assertIsNotNone(self.researcher().guarded(self.store.family(self.fid)))
+        self.clock.advance(120)
+        self.assertIsNone(self.researcher().guarded(self.store.family(self.fid)))
+        self.assertTrue(self.retire_cycle()[0]["retired"])
+
+    def test_the_setting(self):
+        self.googl()
+        for value, guarded in ((0, False), (-3, False), (None, True), (True, True), ("off", True), (float("nan"), True),
+                               (1, True), (0.0001, False)):
+            with self.subTest(value=value):
+                self.settings["researcher"]["retire_guard_days"] = value
+                self.assertEqual(self.researcher().guarded(self.store.family(self.fid)) is not None, guarded)
+        self.settings["researcher"]["retire_guard_days"] = 0
+        self.assertTrue(self.retire_cycle()[0]["retired"], "0 turns the guard off")
+
+    def test_operator_retirement_is_unaffected(self):
+        self.googl()
+        self.assertEqual(self.store.retire_gym(self.fid, "The operator retires it.", floor=0, source="operator")["status"],
+                         "retired")
+
+    def test_the_tournaments_rules_are_unaffected(self):
+        self.googl()
+        self.settings["tournament"].update(retire_revisions=10 ** 6, retire_evaluations=10 ** 6)
+        trials = self.store.family(self.fid)["trials"] + RETIRE_IDLE_EVALUATIONS
+        self.store.update_family(self.fid, trials=trials, since_val_trials=trials)
+        self.assertIsNotNone(self.researcher().guarded(self.store.family(self.fid)))
+        [row] = Tournament(self.store, self.pool, self.settings, clock=self.clock).retirements(self.store.families(alive=True))
+        self.assertEqual(row["family"], self.fid)
+        self.assertFalse(self.alive())
+
+    def test_record_verdict_keeps_the_newest_versions(self):
+        state: dict = {}
+        for n in range(1, 70):
+            at = f"2026-10-01T00:{n // 60:02d}:{n % 60:02d}Z"
+            state[VERDICTS_KEY] = record_verdict(state, n, n % 2 == 0, evaluator=None, at=at)
+        kept = state[VERDICTS_KEY]
+        self.assertEqual(len(kept), 64)
+        self.assertEqual(min(int(k) for k in kept), 6)
+        state[VERDICTS_KEY] = record_verdict(state, 6, True, evaluator={"image": "i"}, at="2026-10-02T00:00:00Z")
+        self.assertEqual(state[VERDICTS_KEY]["6"], {"passed": True, "at": "2026-10-02T00:00:00Z", "evaluator": {"image": "i"}})

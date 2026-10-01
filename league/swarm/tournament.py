@@ -49,7 +49,11 @@
    refutation. A validation that meets `researcher.extension_hold_checks` (6) of the line's checks sets the family's
    extension hold (R11-4's swarm rule, `researcher.judge_extension`); a validation of the held version below them ends
    it. Each counted verdict records the family's trials (`validated_trials`), from which the idle rule counts, and
-   restarts its dormant cycles. THE IDLE PASS (R4, `idle_pass`) retires by the idle rule alone every
+   restarts its dormant cycles. Each verdict, counted or re-judged, is also kept per version with the evaluator it was
+   judged under (`validation_verdicts`, Oct 1): THE VALIDATED-FAMILY GUARD (`researcher.retire_guard`) reads it, so a
+   researcher may not retire a family that holds a version which passed the line (archived by an adoption or not)
+   unless that version fails the line under the current evaluator. No rule here reads it. THE IDLE PASS (R4,
+   `idle_pass`) retires by the idle rule alone every
    `tournament.retire_every_seconds` (300) between the rounds.
    THE COHORT KEEP (L1, release B, Sept 30, `incubator_keep`): a Gym family with an ACTIVE practice cohort (the House's
    frozen program, `practice.cohort_status`) is spared the revision, evaluation and idle rules until its cohort completes,
@@ -90,7 +94,8 @@ from typing import Any, Callable, Mapping
 from . import diagnostics, evidence, incubator, practice
 from .pool import GymJob, PoolError
 from .researcher import (IDLE_CAUSE, MAX_ROOTS, drift_verdict, held_at_gate, idle_cause, idle_dead, judge_extension,
-                         needs_roots, robust_at_stress, screen_best, train_record, validation_drift_failed, with_roots)
+                         needs_roots, record_verdict, robust_at_stress, screen_best, train_record, validation_drift_failed,
+                         with_roots)
 from .store import CLOSEABLE, SwarmStore
 
 UNIVERSE_ROTATION = ("SPY", "QQQ", "IWM", "SPXW")
@@ -338,7 +343,14 @@ class Tournament:
         loss = typical_max_loss(result)
         if loss is not None:
             typical[str(n)] = loss
+        from .evaluator import KEY
+
+        # THE VALIDATED-FAMILY GUARD's record (`researcher.retire_guard`): this version's latest verdict and the evaluator
+        # it was judged under, kept across adoptions, so a version's pass archived by one is known refuted only by a
+        # failure under the evaluator in force, even after another version's validation replaced the line below.
+        verdicts = record_verdict(state, n, bool(line["passed"]), evaluator=self.store.get(KEY), at=self.store.now())
         self.store.set_state(fid, validation_view=view, validation_line=line, validation_version=n,
+                             validation_verdicts=verdicts,
                              validation_image=result.get("gym_image"),
                              validation_bundle=result.get("gym_bundle"),
                              typical_max_loss_usd=loss, typical_by_version=typical,
