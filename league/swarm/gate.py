@@ -2,7 +2,8 @@
 
 THE GATE (when a family's validated best meets the validation line):
 1. RATIONS: one holdout look per program version (code + parameters), at most three per LINEAGE (a fork
-   inherits its parent's looks); the leakage alarm (>= 10 looks, > 30% passing) stops the gate. THE DRIFT SCREEN
+   inherits its parent's looks); the leakage alarm (>= 10 looks, > 30% passing) stops the gate. THE DUPLICATE LOOK
+   (H3a, Oct 1, 2026; `duplicate_look`) comes first: a look that would repeat an earlier one is refused. THE DRIFT SCREEN
    (Sept 27, `evidence.drift_screen`) again, in depth: a version whose Train drift-adjusted alpha fails it is refused
    (stage "drift screen": no review is paid, no look is spent); one whose figures are owed waits.
 2. THE REVIEW: GPT-6 Sol through the gateway when OpenAI has room (`review_openai_model`; null skips it), else
@@ -16,6 +17,24 @@ THE GATE (when a family's validated best meets the validation line):
    made). The researcher is told PASS or FAIL, never a number.
 4. A pass makes the family a Candidate (live shadow). Candidate <-> Probe <-> Sized is the LIVE PATH's
    (the Money table), written through `SwarmStore.set_band`; the swarm never makes a Probe or a Sized.
+
+THE DUPLICATE LOOK (H3a, Oct 1, 2026; the edge study's "a duplicate adds no signal"). Every look raises the Holm bar of
+every later one, and the three looks since the Sept 26 reset covered two programs: the two Sept 27 looks had identical
+Train and Validation results under different run shas. So before anything else is asked of a version (the experiment
+contract, the drift screen, the rations, a paid review, a sealed read), `duplicate_look` compares it with every look the
+swarm has made, in any family and lineage. It repeats one when (1) it is the same program (`run_sha`: code and
+parameters), or (2) its Validation run says the same as a Validation run of the looked version (`validation_identity`:
+the Gym's own run sha, the code with its PARAMS merged over the defaults, so an override restating a default is no new
+program; or the same evaluation, the engine, its code, tables, fill model, roots, window, stress and capital, with the
+same outcome: summary, fills, breakdowns and the 1.5x twin). It reads the looks table, the families' in-flight markers
+and stored Validation results, never a holdout file. A repeat is refused as every gate refusal is (`refuse`, stage
+"duplicate look": the refusal row, the program's incubator bar, `gated_sha` with `gate_ready` cleared, so the tournament
+never makes the version gate-ready again, and the outcome "refused"), plus one private `swarm.gate` event
+(`duplicate_look`) naming the earlier look; no look row, no try, no review. The researcher hears the earlier look's
+number and why, never a figure or that look's verdict (D2a). A version whose look of its own already landed is only
+closed (`gated_sha`), and one that repeats a look still in flight in another family waits for it. A genuinely new
+version compares with nothing and goes on as before. Tightening only: no threshold, no Holm or deflated-Sharpe rule,
+no forward rule moves.
 
 MISSING DATA IS THE GATE IMAGE'S, NOT THE PROGRAM'S (Oct 1, 2026). Before a look the gate checks that its image holds a
 holdout for every root the program needs (`holdout_gap`: the gate boxes' file-name listing and the Gym's own "missing
@@ -119,6 +138,48 @@ def run_sha(version: Mapping[str, Any]) -> str:
     return hashlib.sha256((str(version["sha"]) + dumps(version.get("params") or {})).encode()).hexdigest()
 
 
+#: THE DUPLICATE LOOK's refusal stage (the module docstring).
+DUPLICATE_STAGE = "duplicate look"
+#: A Validation run's evaluation and outcome, as the Gym's validation view carries them: two runs that agree on all of
+#: these made the same trades with the same results under the same engine, engine code, tables and fill model. Left out:
+#: the program's own identity (`run_id`, `program`, `program_sha`, `run_sha`, `params`, `needs`), the swarm's labels
+#: (`gym_image`, `gym_bundle`) and the runtime's counters (a wall-clock timeout that changed nothing is no new program).
+VALIDATION_IDENTITY = ("window", "roots", "engine", "code", "tables", "fill_model", "stress", "capital", "status", "summary",
+                       "fills", "breakdown", "stress_1.5")
+
+
+def validation_identity(result: Mapping[str, Any] | None) -> frozenset[tuple[str, str]]:
+    """What a stored Validation result says its run was, for THE DUPLICATE LOOK: ("program", the Gym's own `run_sha`, the
+    code with its PARAMS merged over the declared defaults) when it carries one, and ("outcome", a hash of its
+    `VALIDATION_IDENTITY`) for a finished run ("ok", at least one trade) that names its engine and the engine's code.
+    Empty when it says neither. Hashes only: no figure leaves here."""
+    if not isinstance(result, Mapping):
+        return frozenset()
+    out: set[tuple[str, str]] = set()
+    program = result.get("run_sha")
+    if isinstance(program, str) and program:
+        out.add(("program", program))
+    summary = result.get("summary")
+    trades = summary.get("trades") if isinstance(summary, Mapping) else None
+    if result.get("status") == "ok" and result.get("engine") and result.get("code") and isinstance(trades, int) \
+            and not isinstance(trades, bool) and trades > 0:
+        body = {key: result.get(key) for key in VALIDATION_IDENTITY}
+        if isinstance(body["roots"], (list, tuple)):
+            body["roots"] = sorted(str(r).upper() for r in body["roots"])
+        out.add(("outcome", hashlib.sha256(dumps(body).encode()).hexdigest()))
+    return frozenset(out)
+
+
+def duplicate_words(duplicate: Mapping[str, Any]) -> str:
+    """The refusal's reason, which the researcher reads (D2a): the earlier look's number and why it is a repeat; never a
+    figure of Validation or the holdout, nor the earlier look's verdict."""
+    what = {"run_sha": "the same program (its code and parameters)",
+            "program": "the same program (its code, with parameters that resolve to the same values)"}.get(
+        str(duplicate.get("match")), "a version whose Validation run this one repeats exactly")
+    return (f"a duplicate of holdout look #{duplicate.get('seq')}, made on {what}: a second look adds no information and "
+            "raises the bar for every later look, so only a genuinely different version can be looked at")
+
+
 def incubator_stage(stage: str, fid: str, *, incubator: bool = False) -> tuple[str, str]:
     """(the stage's name in its attempt count and model-call key, the Sail desk its fuse is on): the gate's own
     ("review" or "audit", desk "<family>:review"), or the incubator's ("incubator_review" or "incubator_audit", desk
@@ -153,6 +214,9 @@ class Gate:
             pass
         #: No Gym job survives its process: a look marked in flight before this moment is owed again.
         self.started_at = clock()
+        #: THE DUPLICATE LOOK: each stored Validation result's identity (`validation_identity`), by run id, once read (a
+        #: run's stored result never changes).
+        self._identities: dict[str, frozenset[tuple[str, str]]] = {}
 
     @property
     def cfg(self) -> Mapping[str, Any]:
@@ -241,6 +305,71 @@ class Gate:
         self.tell(fam["id"], f"fail (the {stage}: " + "; ".join(reasons)[:400] + ")", verdict=True)
         out["refused"].append(fam["id"])
 
+    # ------------------------------------------------------------------ THE DUPLICATE LOOK (H3a)
+    def duplicate_look(self, fam: Mapping[str, Any], n: Any, sha: str) -> dict[str, Any] | None:
+        """The earlier holdout look that a look at version `n` of `fam` (program `sha`) would repeat, or None (the module
+        docstring): {"seq" (None for a look still in flight), "family", "version", "match" ("run_sha", "program" or
+        "validation"), "inflight"}. Every look the swarm has made counts, in any family and lineage, and so does a look in
+        flight in ANOTHER family (`inflight` True: the caller waits for it). Reads the looks table, the in-flight markers and
+        stored Validation results (`validation_identity`), never a holdout file. A version's own earlier look is found by
+        its run sha alone (the caller closes it); the Validation comparison is with the other looked versions."""
+        fid, n = str(fam["id"]), int(n)
+        looks = self.store.looks()
+        inflight = [(other, marker) for other, marker in self.store.looks_inflight() if other != fid]
+
+        def found(seq: Any, other: str, m: Any, match: str, flying: bool) -> dict[str, Any]:
+            return {"seq": None if flying else int(seq), "family": str(other), "version": int(m) if m is not None else None,
+                    "match": match, "inflight": flying}
+
+        for look in looks:
+            if look["run_sha"] == sha:
+                return found(look["seq"], look["family"], look["version"], "run_sha", False)
+        for other, marker in inflight:
+            if marker.get("sha") == sha:
+                return found(None, other, marker.get("n"), "run_sha", True)
+        mine = self._validation_identities(fid, n)
+        if not mine:
+            return None
+        earlier = [(look["seq"], look["family"], look["version"], False) for look in looks]
+        earlier += [(None, other, marker.get("n"), True) for other, marker in inflight]
+        for seq, other, m, flying in earlier:
+            if m is None or (str(other) == fid and int(m) == n):
+                continue
+            common = mine & self._validation_identities(str(other), m)
+            if common:
+                match = "program" if any(kind == "program" for kind, _ in common) else "validation"
+                return found(seq, other, m, match, flying)
+        return None
+
+    def _validation_identities(self, fid: str, n: Any) -> frozenset[tuple[str, str]]:
+        """Every identity (`validation_identity`) of the stored Validation runs of version `n` of family `fid` at the normal
+        spread (finished ones; the Validation results are never pruned). Each result is read once a process."""
+        try:
+            n = int(n)
+        except (TypeError, ValueError):
+            return frozenset()
+        out: set[tuple[str, str]] = set()
+        for row in self.store.version_runs(fid, n, window="validation", stress=1.0, limit=50):
+            if row.get("status") != "ok" or not row.get("path"):
+                continue
+            run_id = str(row["run_id"])
+            if run_id not in self._identities:
+                result = self.store.run_result(run_id)
+                if result is None:
+                    continue  # unreadable now: read again next time, never remembered as saying nothing
+                self._identities[run_id] = validation_identity(result)
+            out |= self._identities[run_id]
+        return frozenset(out)
+
+    def refuse_duplicate(self, fam: Mapping[str, Any], n: int, sha: str, duplicate: Mapping[str, Any],
+                         out: dict[str, Any]) -> None:
+        """THE DUPLICATE LOOK's refusal, recorded as every gate refusal is (`refuse`, stage "duplicate look"), then one
+        private `swarm.gate` event naming the earlier look. No look row, no try, no review, no sealed read."""
+        self.refuse(fam, n, sha, DUPLICATE_STAGE, [duplicate_words(duplicate)], out)
+        self.store.event("swarm.gate", fam["id"], {"action": "duplicate_look", "version": n, "sha": sha[:12],
+                                                   "of_look": duplicate.get("seq"), "of_family": duplicate.get("family"),
+                                                   "of_version": duplicate.get("version"), "match": duplicate.get("match")})
+
     # ------------------------------------------------------------------ one round
     def run(self) -> dict[str, Any]:
         self.store.put("gate_at", self.clock())
@@ -284,10 +413,20 @@ class Gate:
             if version is None or not version.get("code"):
                 continue
             sha = run_sha(version)
-            if self.store.looked(sha) or state.get("gated_sha") == sha:
-                continue
+            if state.get("gated_sha") == sha:
+                continue  # the gate is done with it (its look landed, or it was refused)
             if (state.get("look_inflight") or {}).get("sha") == sha:
                 continue  # its look is in flight
+            duplicate = self.duplicate_look(fam, n, sha)
+            if duplicate is not None:  # THE DUPLICATE LOOK, before anything is asked of the version
+                if duplicate["inflight"]:
+                    out["waiting"].append(fam["id"])  # the same program's look is out in another family: judged once it lands
+                elif duplicate["family"] == fam["id"] and duplicate["version"] == int(n):
+                    # This version's own look (its mark lost to a newer validation meanwhile): the gate is done with it.
+                    self.store.compare_and_set_state(fam["id"], {"validation_version": n}, gated_sha=sha, gate_ready=False)
+                else:
+                    self.refuse_duplicate(fam, n, sha, duplicate, out)
+                continue
             try:
                 check_experiment(version["code"], version.get("params") or {})
             except CodeRefused as exc:
@@ -637,8 +776,11 @@ class Gate:
         with self.store.atomic():
             current = self.store.family(fam["id"]) or {}
             if current.get("retired_at") or (current.get("state") or {}).get("gate_hold") or self.store.looked(sha) or \
-                    self.store.lineage_looks(fam["id"], include_inflight=True) >= evidence.LOOKS_PER_LINEAGE:
-                return None  # (held by the operator meanwhile: no look is spent, gate_ready stays)
+                    self.store.lineage_looks(fam["id"], include_inflight=True) >= evidence.LOOKS_PER_LINEAGE or \
+                    self.duplicate_look(current, n, sha) is not None:
+                # (held by the operator meanwhile: no look is spent, gate_ready stays; a look it would repeat landed or went
+                # out meanwhile: THE DUPLICATE LOOK refuses it next round, or waits for it)
+                return None
             if not self.store.compare_and_set_state(fam["id"], {"validation_version": n, "validation_image": image, "validation_bundle": bundle,
                                                                "look_inflight": None}, gate_ready=False, look_inflight=marker):
                 return None
@@ -998,4 +1140,5 @@ class Gate:
         return None
 
 
-__all__ = ["Gate", "run_sha", "incubator_stage", "REVIEW"]
+__all__ = ["Gate", "run_sha", "incubator_stage", "REVIEW", "DUPLICATE_STAGE", "VALIDATION_IDENTITY", "validation_identity",
+           "duplicate_words"]

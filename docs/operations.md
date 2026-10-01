@@ -1684,6 +1684,33 @@ the third wrote a stage "gym" refusal that bars the program from the incubator, 
   (above). Whether the refusal row and the bar stand is the owner's call: should an infrastructure refusal bar a
   program from the incubator?
 
+The duplicate look (H3a, Oct 1, 2026; `league/swarm/gate.py` `duplicate_look`). Every holdout look raises the Holm bar
+for every later one (the 4th look must reach p <= 0.0125, the 10th 0.005), and the three looks after the Sept 26 reset
+covered two programs: the two Sept 27 looks had identical Train and Validation results under different run shas. The
+gate now compares each gate-ready version, before anything else (the experiment contract, the drift screen, the
+rations, the paid review and audit, the gate image's coverage, the look), with every look in the `looks` table, in any
+family and lineage, and with any look in flight in another family.
+- **A repeat** is (1) the same program: the same `run_sha` (code and parameters); or (2) the same Validation run, read
+  from the stored Validation results of the looked version and of the candidate (`validation_identity`, hashes only):
+  the Gym's own `run_sha` (the code with its PARAMS merged over the declared defaults, so an override that restates a
+  default is the same program), or the same evaluation (`engine`, the engine's `code`, `tables`, `fill_model`, roots,
+  window, stress, capital) with the same outcome (`summary`, `fills`, `breakdown`, `stress_1.5`). The program's own
+  identity, the image and bundle labels and the runtime counters are left out. A result that names no engine or
+  engine code, or has no trade, is never compared on its outcome.
+- **The refusal** is recorded as every gate refusal is (stage "duplicate look": a `refusals` row, the program's
+  incubator bar, `gated_sha` with `gate_ready` cleared, `gate_outcome` "refused", the researcher's status line), plus
+  one private `swarm.gate` event, action `duplicate_look`, with `of_look` (the earlier look's seq), `of_family`,
+  `of_version` and `match` (`run_sha`, `program` or `validation`). No look row, no `look_tries`, no review, no holdout
+  read. The researcher reads "a duplicate of holdout look #N" and why, never a figure or that look's verdict. The
+  tournament never makes the version gate-ready again (`gate_spent` reads `gated_sha`); an evaluator adoption clears
+  `gated_sha`, so after one the gate refuses it once more.
+- **A repeat of a look still in flight** in another family is listed under `waiting` (no refusal, `gate_ready` stays)
+  and refused once that look lands. A version whose own look already landed is only closed (`gated_sha`), never refused.
+- **To see it**: `swarm.gate` events with action `duplicate_look`, and `refusals` rows with stage "duplicate look".
+  Expect none for a genuinely new version. A refusal that should not have been made (two different programs with
+  byte-identical Validation outcomes) would show as `match` "validation" on programs whose code differs in more than
+  comments; report it, and the owner decides whether to clear its `gated_sha`, refusal row and incubator bar.
+
 Deploy impact (R3): the rule applies at once to every family that is already past it. On Sept 27 (start 72, floor
 44, 74 alive) about 29 families were past it, nearly all long-refuted placeholders, so the first tournament round and
 the dead researchers retiring themselves take the population to about 45 within minutes, and the architect's refill
