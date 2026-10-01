@@ -120,6 +120,25 @@ test('health reports the caps, the counters, the kill switch and the watchdog', 
   assert.deepEqual(Object.keys(body.watchdog).sort(),
     ['age_seconds', 'last_action', 'last_action_at', 'last_check_at', 'last_restart_at', 'published_at']);
   assert.ok('sail' in body && 'alerts' in body);
+  // The research library's block (Sept 29, 2026): read from the Gate's own row, no call to arXiv.
+  assert.deepEqual(Object.keys(body.library).sort(), ['backoff_until', 'backoff_why', 'by_host', 'by_role', 'cap', 'day', 'in_flight',
+    'served_through', 'spacing_ms', 'terms', 'upstream']);
+  assert.equal(body.library.upstream, 0);
+  assert.equal(body.library.served_through, '2024-12-31');
+});
+
+test('the research library\'s routes are GET only behind the runtime token, and a POST reaches no upstream', async () => {
+  for (const path of ['/v1/research/search', '/v1/research/read', '/v1/research/health']) {
+    const refused = await call(ask('POST', path, { body: '{}' }));
+    assert.equal(refused.response.status, 405, path);
+    assert.equal(refused.calls.length, 0);
+    const stranger = await call(ask('GET', path, { token: 'wrong' }));
+    assert.equal(stranger.response.status, 401, path);
+  }
+  const health = await call(ask('GET', '/v1/research/health'));
+  assert.equal(health.response.status, 200);
+  assert.equal(health.body.library.cap, 600);
+  assert.equal(health.calls.length, 0);
 });
 
 test('a kalshi read is signed and forwarded verbatim, query and all', async () => {

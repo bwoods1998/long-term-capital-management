@@ -15,10 +15,14 @@ evidence, no band). The practice league (Sept 29, 2026) keeps a record of it her
 - `events`: private decision, coverage, intent, rejection, order, quote and fill/slippage receipts, idempotent across
   restarts. Unwritten receipts live in the saved shadow account and retry; the bounded outage buffer reports drops.
 
-WHO READS IT. Nothing that feeds promotion evidence or money: not the gate, the verifier, the bands, the money table, tuition or
+WHO READS IT. Nothing that feeds promotion evidence: not the gate, the verifier, the bands, the forward record, D2 or
 Profit. The swarm reads `practice_summary` (read-only) as a RESEARCH signal (`league/swarm/practice.py`: the strategist's
 table, the architect's lines, the bandit's capped bonus), and the publisher shows its aggregates (the site's practice
-block: never a price, strike, leg, expiry, minute, trade date, version or code).
+block: never a price, strike, leg, expiry, minute, trade date, version or code). THE INCUBATOR (release B, Oct 1, 2026;
+`league/live/incubator.py`) reads one cohort's record (`practice_record`, read-only) as a pre-registered sign test of
+positive live practice: its eligibility for one-lot real money within the owner's caps. That is money, and never a
+promotion, a band, a forward row or evidence of any kind. While the incubator is on, a cohort whose first look passed
+keeps practising past its observation target to its bounded window (`cohort_candidates(keep=)`, at most eight).
 
 HONEST ACCOUNTING. The fills are the engine's (`ShadowAccount`, the House's shadow fill model, the Candidates' own); a
 trade's P&L is the engine's after fees. The headline is REALIZED P&L; open positions are reported apart, at the engine's
@@ -153,10 +157,15 @@ class ObserveStore:
             return False
 
     def cohort_candidates(self, current: Iterable[Mapping[str, Any]], *, day: str, in_session: bool,
-                          min_sessions: int = 3, min_trades: int = 10, max_sessions: int = 10) -> list[dict]:
+                          min_sessions: int = 3, min_trades: int = 10, max_sessions: int = 10,
+                          keep: Iterable[tuple[str, int]] = frozenset()) -> list[dict]:
         """Keep admitted immutable snapshots across research revisions and retirement. Completed snapshots never
         re-enter. A cohort finishes between sessions after enough observed days and program closes, or its bounded
-        calendar-session window; capacity/pressure switches still apply in the caller. This is shadow authority only."""
+        calendar-session window; capacity/pressure switches still apply in the caller. This is shadow authority only.
+        `keep` (L2', the incubator's: (family, version) of cohorts whose first look passed, while `live.incubator` is on):
+        such a cohort is not completed at its observation target; its window, an evaluator change or a failure still
+        end it. Empty, this is exactly the league's own rule."""
+        keep = {(str(f), int(n)) for f, n in keep}
         from datetime import date, timedelta
         from .chains import session_minutes
         from ..swarm.bands import priority
@@ -185,7 +194,8 @@ class ObserveStore:
                 while cursor < end:
                     elapsed += session_minutes(cursor) is not None
                     cursor += timedelta(days=1)
-                if completed >= max(1, min_sessions) and trades >= max(1, min_trades) and evidence and evidence[2] == 0:
+                if (completed >= max(1, min_sessions) and trades >= max(1, min_trades) and evidence and evidence[2] == 0
+                        and (family, int(version)) not in keep):
                     reason = "observation target reached"
                 elif elapsed >= max(min_sessions, min(60, horizon)):
                     reason = "maximum session window reached"
@@ -235,6 +245,16 @@ class ObserveStore:
         frozen = json.loads(row[0])
         return (frozen.get("practice_evaluator") == self.evaluator and frozen["code"] == expected.get("code")
                 and frozen.get("params", {}) == expected.get("params", {}))
+
+    def cohort_snapshot(self, family: str, version: int) -> dict | None:
+        """The ACTIVE cohort's snapshot of (family, version) under the running evaluator, or None (the incubator's
+        identity check: its real program is exactly this one)."""
+        row = self._connect().execute("SELECT snapshot FROM cohorts WHERE family=? AND version=? AND status='active'",
+                                     (str(family), int(version))).fetchone()
+        if row is None:
+            return None
+        frozen = json.loads(row[0])
+        return frozen if frozen.get("practice_evaluator") == self.evaluator else None
 
     def fail_cohort(self, family: str, version: int, *, day: str, reason: str) -> None:
         """A refused/disqualified program cannot benefit from more practice; preserve the reason and free its slot."""
@@ -365,6 +385,117 @@ def _migrate(db: sqlite3.Connection) -> None:
             db.execute("UPDATE trades SET exit_day=?, reason=?, forced=?, evaluator=? WHERE seq=?",
                        (_day_of(t.get("exit_day")), str(t.get("exit_reason") or "") or None,
                         1 if t.get("forced") is True else 0, t.get("evaluator"), seq))
+
+
+# ------------------------------------------------------------------------------------------------ the incubator's reads
+def _read_only(root: str | Path) -> sqlite3.Connection | None:
+    path = Path(root) / FILE
+    if not path.exists():
+        return None
+    db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1.0)
+    db.row_factory = sqlite3.Row
+    return db
+
+
+def cohort_rows(root: str | Path, *, since: str | None = None) -> list[dict[str, Any]] | None:
+    """Every practice cohort, read-only (`mode=ro`, a one-second timeout), standard library only, never raising: [{family,
+    version, first_day, status, reason, completed_day, snapshot (its immutable program row)}], oldest first; `since`: only
+    the active ones and those completed on or after that day. [] without a record; None when it cannot be read."""
+    try:
+        db = _read_only(root)
+        if db is None:
+            return []
+        try:
+            if "cohorts" not in {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}:
+                return []
+            out = []
+            where = "" if since is None else "WHERE status='active' OR completed_day>=? "
+            for r in db.execute("SELECT family, version, first_day, status, reason, completed_day, snapshot FROM cohorts "
+                                f"{where}ORDER BY admitted_at, family, version", () if since is None else (str(since),)):
+                snapshot = json.loads(r["snapshot"])
+                out.append({"family": str(r["family"]), "version": int(r["version"]), "first_day": str(r["first_day"]),
+                            "status": str(r["status"]), "reason": r["reason"], "completed_day": r["completed_day"],
+                            "snapshot": snapshot if isinstance(snapshot, dict) else {}})
+            return out
+        finally:
+            db.close()
+    except Exception:  # noqa: BLE001 - the incubator takes no new pin on an unreadable record
+        return None
+
+
+def practice_record(root: str | Path, family: str, version: int, *, before: str, evaluator: str,
+                    unit_cap: float = 50.0) -> dict[str, Any] | None:
+    """One practice cohort's record for the incubator's first look and its re-checks (`money.practice_ok`): read-only
+    (`mode=ro`, a one-second timeout), standard library only, NEVER raising (None on any error, or without the cohort).
+    Everything is before `before` (a session day, ISO): today's closes and today's session are left out.
+
+        sessions        the practice row's completed sessions (less today's); None (ineligible) when the practice row
+                        began before the cohort did
+        coverage        decisions made / due over the practice row (None before any was due); decisions_due, _made
+        closes_program  closed trades under `evaluator`, program-closed (not forced), exited before `before`
+        pnl_program     their P&L (the engine's, after its fees and the House's shadow fill model)
+        closes_all, pnl_all   the same with forced (wind-down) closes included
+        open_mark       the practice row's open positions' P&L at the engine's mark (its last stepped minute)
+        return_on_risk  pnl_all over the same trades' maximum loss (None without one)
+        feasible        program closes whose one-lot unit (maximum loss a lot plus twice the fees a lot) is at most
+                        `unit_cap`: whether it could ever open at the incubator's size
+        first_day, status, reason, tier, structure, run_sha   the cohort's (and its snapshot's)
+
+    The P&L is from the evaluator-filtered trades, never `practice.pnl_marked` (which rebases on any evaluator's)."""
+    try:
+        db = _read_only(root)
+        if db is None:
+            return None
+        try:
+            cohort = db.execute("SELECT first_day, status, reason, snapshot FROM cohorts WHERE family=? AND version=?",
+                                (str(family), int(version))).fetchone()
+            if cohort is None:
+                return None
+            snapshot = json.loads(cohort["snapshot"]) or {}
+            live = db.execute("SELECT * FROM practice WHERE family=? AND version=?", (str(family), int(version))).fetchone()
+            live = dict(live) if live is not None else None
+            if live is None:
+                sessions: int | None = 0
+            elif str(live["first_day"]) < str(cohort["first_day"]):
+                sessions = None
+            else:
+                sessions = int(live["sessions"]) - int(str(live["last_day"]) == str(before))
+            due = int(live["decisions_due"]) if live else 0
+            made = int(live["decisions_made"]) if live else 0
+            trades = [dict(r) for r in db.execute(
+                "SELECT pnl, max_loss, forced, body FROM trades WHERE family=? AND version=? AND evaluator=? "
+                "AND exit_day IS NOT NULL AND exit_day<? ORDER BY seq", (str(family), int(version), str(evaluator), str(before)))]
+        finally:
+            db.close()
+        program = [t for t in trades if not t["forced"]]
+
+        def total(rows: list[dict]) -> float:
+            return round(sum(float(t["pnl"] or 0.0) for t in rows), 6)
+
+        losses = sum(float(t["max_loss"] or 0.0) for t in trades)
+        feasible = 0
+        for t in program:
+            body = _body(t)
+            qty = int(body.get("qty") or 0)
+            if qty < 1:
+                continue
+            unit = float(t["max_loss"] or 0.0) / qty + 2 * float(body.get("fees") or 0.0) / qty
+            if math.isfinite(unit) and 0 < unit <= float(unit_cap) + 1e-9:
+                feasible += 1
+        pnl_all = total(trades)
+        return {"family": str(family), "version": int(version), "before": str(before), "evaluator": str(evaluator),
+                "first_day": str(cohort["first_day"]), "status": str(cohort["status"]), "reason": cohort["reason"],
+                "tier": snapshot.get("tier") or (live or {}).get("tier"),
+                "structure": snapshot.get("structure") or (live or {}).get("structure"),
+                "run_sha": snapshot.get("run_sha"), "practice_evaluator": snapshot.get("practice_evaluator"),
+                "sessions": sessions, "decisions_due": due, "decisions_made": made,
+                "coverage": round(made / due, 4) if due else None,
+                "closes_program": len(program), "pnl_program": total(program),
+                "closes_all": len(trades), "pnl_all": pnl_all,
+                "open_mark": round(float((live or {}).get("open_mark_pnl") or 0.0), 6),
+                "return_on_risk": round(pnl_all / losses, 6) if losses > 0 else None, "feasible": feasible}
+    except Exception:  # noqa: BLE001 - no record is no eligibility
+        return None
 
 
 # ------------------------------------------------------------------------------------------------ the summary
@@ -541,4 +672,4 @@ def _num(value: Any) -> float | None:
     return out if math.isfinite(out) else None
 
 
-__all__ = ["ObserveStore", "practice_summary", "t_stat", "FILE", "MAX_ROWS", "KEEP_DAYS"]
+__all__ = ["ObserveStore", "practice_summary", "practice_record", "cohort_rows", "t_stat", "FILE", "MAX_ROWS", "KEEP_DAYS"]

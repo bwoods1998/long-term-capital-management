@@ -74,6 +74,41 @@ class Cohorts(PracticeCase):
         self.assertEqual(self.live.observe_store.cohort_candidates([self.families.observed["f"][1]],
                          day="2026-10-01", in_session=True), [])
 
+    def test_a_kept_cohort_is_not_completed_at_its_target_but_still_at_its_window(self):
+        """L2' (release B): `keep` holds a cohort the incubator passed past its observation target; its window, an evaluator
+        change or a failure still end it. Empty, the league's own rule, byte for byte."""
+        self.build(observed=[validated("f", params={"hold": 600})])
+        self.run_to(9, 34)
+        db = self.live.observe_store._connect()
+        db.execute("UPDATE practice SET sessions=3, last_day='2026-09-30', open_positions=0 WHERE family='f'")
+        self.live.observe_store.add("f@1:o", "f", 1, [
+            {"id": n, "day": "2026-09-30", "exit_day": "2026-09-30", "pnl": 2, "max_loss": 50,
+             "evaluator": self.live.observe_store.evaluator}
+            for n in range(10)], account="synthetic")
+        kept = self.live.observe_store.cohort_candidates(self.families.observe(), day="2026-10-01", in_session=True,
+                                                         keep={("f", 1)})
+        self.assertEqual(kept[0]["version"], 1)
+        self.assertEqual(db.execute("SELECT status FROM cohorts").fetchone()[0], "active")
+        later = self.live.observe_store.cohort_candidates(self.families.observe(), day="2026-10-13", in_session=True,
+                                                         keep={("f", 1)})
+        self.assertNotIn(1, [r["version"] for r in later if r["family"] == "f" and r.get("practice_frozen")])
+        self.assertEqual(db.execute("SELECT status, reason FROM cohorts").fetchone(),
+                         ("complete", "maximum session window reached"))
+
+    def test_an_empty_keep_is_the_leagues_own_rule(self):
+        self.build(observed=[validated("f", params={"hold": 600})])
+        self.run_to(9, 34)
+        db = self.live.observe_store._connect()
+        db.execute("UPDATE practice SET sessions=3, last_day='2026-09-30', open_positions=0 WHERE family='f'")
+        self.live.observe_store.add("f@1:o", "f", 1, [
+            {"id": n, "day": "2026-09-30", "exit_day": "2026-09-30", "pnl": 2, "max_loss": 50,
+             "evaluator": self.live.observe_store.evaluator}
+            for n in range(10)], account="synthetic")
+        self.live.observe_store.cohort_candidates(self.families.observe(), day="2026-10-01", in_session=True,
+                                                  keep=frozenset({("other", 1)}))
+        self.assertEqual(db.execute("SELECT status, reason FROM cohorts").fetchone(),
+                         ("complete", "observation target reached"))
+
     def test_nontrading_cohort_expires_at_bounded_session_window(self):
         self.build(observed=[trained("f")])
         self.run_to(9, 32)

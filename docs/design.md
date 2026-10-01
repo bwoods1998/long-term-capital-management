@@ -10,7 +10,7 @@ disagree, the code is right and this page is fixed. How to operate it is in
 
 | Part | Code | State |
 |---|---|---|
-| The House, options only | `league/` | running the restoration fix, release `20260930T045038Z-cb6035693ef4` (main `87af7a62`: R11a plus #429); real money on since Sept 27; the grant active on money digest `a3e2aa7c`. Release A (main `f082cf5e` with #431-#436, plus #437, #443, #440, #439, #442, #441) deploys after the Sept 30 session; the money digest does not move |
+| The House, options only | `league/` | running Release A, `20260930T200604Z-3bf48c3f8f9f` (main `777b894f`: #431-#436 plus #437, #443, #440, #439, #442, #441; promoted 20:06Z Sept 30, evidence reset 1); real money on since Sept 27; the grant active on money digest `a3e2aa7c`. Release B (the incubator, shipped switched off; L1; the research library) deploys overnight, moves the money digest to `42c4a3af` and is evidence reset 2 |
 | The data store and images | `scripts/data/` | the core five from 2020 and the 20 added names from 2022, 0-14 days to expiry, SPY/QQQ back months to 45; ThetaData Options Standard's history reaches 2016; Train from 2017 is released (R11a), and its image is still to be built; longer history arrives as private blocks (#413) |
 | The Gym | `league/gym/` | 25 roots, Train 2020-2024 on a sealed image adopted Sept 28 (2022-2024 for the added names); 11 types including long calls and puts; the honest fill model from Train samples; engine 4 and per-program batch failures from Release A |
 | The swarm | `league/swarm/`, `league/CONTRACT.md` | at the Sept 30 reconciliation: about 90 alive, all in the Gym band; 2 holdout looks, 0 passes; every birth a debit vertical; since Sept 30's spend cut, the architect on Kimi-K3 and Claude only at the gate and for the strategist; OpenAI unused |
@@ -18,7 +18,8 @@ disagree, the code is right and this page is fixed. How to operate it is in
 | The public page | blakewoods.us/capital | deployed: genuine thoughts first, Profit/Running, clickable agent dots with evidence-based progress, a positions table that adds up to Profit (an opt-in read); Net and costs by service arrive with Release A and personal-site PR #17 |
 
 This is observed state, not completion of the design below. Broad universe discovery, covered strategies, the
-general paper environment, the incubator (Release B) and exposure-aware allocation are still to build.
+general paper environment and exposure-aware allocation are still to build. The incubator is built (Release B, switched
+off until after its ratification), and its swarm-side facts (B2) are still to ship.
 
 ## The goal and the one number
 
@@ -242,9 +243,35 @@ Agent count and simulated years measure activity; passing unseen evidence measur
   term-structure and skew mean reversion, post-event volatility crush, weekly-expiry dynamics).
 - **Population:** by default 48 researchers at the start, a ceiling of 96 and a floor of 16; the
   live settings (Sept 29) start at 96, the ceiling, with a floor of 12. Families compete for Gym time
-  and model calls through a bandit over their validation evidence (Thompson sampling). Since R11b only
-  an old family whose latest validation mean is positive is exploited, each earning at most 15% of the
-  share; new families and old ones at zero or below share the rest, never less than 25%. A family
+  and researcher turns by **expected information value** (Release B, `league/swarm/allocation.py`): a
+  family's value is the variance of its next validation's pass or fail under an empirical-Bayes
+  posterior (the swarm's recent validation looks on the running evaluator, pooled by mechanism class
+  and blended with the Sept 30 fit, a family's own latest look updating its class's prior; a family
+  past the t check but failing another counts as on the line), discounted by the idea's trials (its
+  lineage's, as the deflated Sharpe counts them, never fewer than its own and those it inherited at
+  birth: breadth beats depth), by exhaustion (its lineage's holdout looks spent, a drift-failed
+  validation, a validated version the gate is done with, a hold streak; a failed holdout look or a
+  refusal at review also ends that validation's say, so the family reads as unvalidated) and by
+  half for a structure the account cannot open for real. Every family keeps a 10% floor share; 35% is an explicit exploration share
+  for breadth across mechanism classes (a class's slice is its families' value over the root of
+  their number, then by value within it); the rest follows value. No family holds more than 5%, and
+  no class more than 30% while other classes hold families worth the attention (a cap's excess goes
+  to families worth at least what the average unit of share buys, at most tripling any one's share;
+  what the family cap cuts beyond that goes to every family by value, and the class cap gives way
+  only for what it adds, which it mostly does while one or two classes are most of the population;
+  the round's report says which). Families at the gate or beyond get the floor share and lead the
+  leaderboard; the architect and the strategist read the share as `research_share`, told that it
+  measures how undecided a family is, not its evidence. Shares buy turns: the researchers' scheduler is start-time fair
+  queueing, so under contention a family's turns follow its share. With an explicit
+  `allocation.plan_usd_per_hour`, the number of researchers contracts when research spend (Sail
+  models and Gym boxes) runs over it and expands above `researcher.concurrency` (up to
+  `allocation.max_concurrency`) while useful experiments wait and spend is under 80% of it; with no
+  plan it is `researcher.concurrency`. Births carry a **structure quota**: one structure family
+  (single, butterfly, vertical, straddle, condor, calendar) at most 60% of a day's births and of a
+  pass, resting below three quarters of the start population. `allocation.mode` "bandit" restores
+  the R11b bandit (Thompson sampling in which only an old family whose latest validation mean is
+  positive is exploited, each earning at most 15%).
+  A family
   retires when its best program has not improved on validation in 30
   revisions or 2,000 evaluations by default (200 and 4,000 live), or its trial-adjusted evidence falls
   below the line, or by the idle rule: evaluations without an eligible Train version (150 by default,
@@ -257,18 +284,42 @@ Agent count and simulated years measure activity; passing unseen evidence measur
   lessons go to the graveyard, which every new family's researcher reads first. The graveyard is ranked
   by BM25, a new family is born with three distinct lessons, and it also holds the operator's own
   experiments as `op-` lessons.
+- **The research library** (Sept 29, not yet released; off until `research.enabled`): the agents read the
+  literature as a firm's analysts do, but only literature posted before 2025. Open web access would let a
+  model read about the Validation year (2025) and the sealed holdout (2026) and select on them, which fakes
+  the verifier, so the swarm gets a LIBRARY instead of the web: arXiv's quantitative finance, econometrics,
+  statistics and machine learning on markets, served by the gateway (`GET /v1/research/search`, `/read`;
+  [gateway/lib/library.mjs](../gateway/lib/library.mjs)). The date rule is enforced there, in code: an item is
+  served only if its first-posted date and the date of the version served are both before 2025-01-01 (arXiv's
+  own `published` and `updated`); a paper is served as it stood at the end of 2024 (its newest version before
+  the cutoff, in a search and a read alike), and a version dated after 2024 is answered as one that does not
+  exist; a search matches titles and abstracts only, and a paper revised after 2024 must hold every query term
+  in its served version's own words; anything without a reliable date is refused, every text is scanned for
+  dates after 2024 (replaced in version-pinned text, withheld whole in text not pinned to a version), and
+  nothing unpinned is ever served. The House checks every answer again
+  ([league/swarm/library.py](../league/swarm/library.py)). What it does not do: the models' weights already
+  hold 2025 and the first half of 2026, so the library adds nothing later than 2024 but removes nothing a model
+  already knows, and a pre-2025 citation does not show that an idea was chosen without that knowledge. The
+  holdout is not sealed from the models either (their training runs to June 2026), so forward results are the
+  clean judge.
+  The Claude researchers get a `literature` tool (search, read), Sail's profiles never see it; the architect
+  and the strategist get a retrieved block of abstracts before their calls, and the strategist names the next
+  searches. Every agent cites the ids it relied on. A paper's finding is a hypothesis: whatever is built from
+  it faces the Train score, the 1.5x stress, the drift screen, the verifier and the holdout exactly as any
+  idea. arXiv's terms bind the pace (one request every 3 s, one connection at a time; arxiv.org's crawl delay
+  of 15 s), and three lines bound the use: 300 calls a day, 12 a family, 2 a research cycle.
 
 ## The loops
 
 | Loop | Cadence | Who | What happens | Output |
 |---|---|---|---|---|
 | Inner | seconds to minutes | each researcher | revise the program, run it on Train, read the diagnostics, revise again | a better program or a lesson |
-| Tournament | hourly | the House | validation runs of each family's best versions, the bandit's reallocation, forks and retirements, the leaderboard | Gym time and model calls follow evidence |
+| Tournament | hourly | the House | validation runs of each family's best versions, the reallocation by expected information value, forks and retirements, the leaderboard | Gym time and researcher turns follow the value of the next evidence |
 | Architect | every 4 hours by default, refilling hourly below the start; every 15 minutes live, refilling every 20 | Claude by default (`architect.openai_model` null live); Kimi-K3 on Sail when Claude has no room or line: live since Sept 30, when the architect's Claude line was set to $0 (never after a cut answer: R11b salvages its complete families and retries once on Claude at medium effort) | reads the leaderboard, the graveyard and the gaps; writes families with a mechanism, a structure and a rejection test; at most 12 living families a mechanism class (R11b) | 3-6 new families by default; the gap to the start, up to 24 a pass live |
 | Diagnostician | every 5 minutes | Claude | reads a stuck or nearly-there family's Train diagnostics (never Validation's numbers); rewrites its mechanism or writes its lesson; off live since Sept 30 (`diagnostician.enabled` false: its rewrites produced no validation in 48 hours) | a new mechanism, or a lesson and a retirement |
 | Gate | when a family meets the validation line | review: Claude when "review" is in `claude.roles` (live: Sonnet 5.5), else GPT-6 Sol while the OpenAI month has room and `gate.review_openai_model` names it (null live), else DeepSeek-V4-Pro on Sail; audit: Claude (live: Opus 5.5, `claude.role_model`), then GPT-6 Astra on the same terms (null live), then a second Sail model; the gate box | review for lookahead, leakage and fill abuse; the audit; one holdout look | a Candidate, or a recorded refusal |
 | Nightly forward | after 01:45 ET each trading night | the data box, the gate box | the new day goes to the gate image only; every Candidate is re-run on it | one unseen day a night for every Candidate |
-| Live | 09:30-16:00 ET | the House | the practice league (from Release A): every alive family's validated or eligible Train version in observe shadow (two caps: 48 instances, 24 roots); Candidates in live shadow; Probes and Sized on real money; the House's D3 calibration round trips and its live test; no general agent paper book yet | separate paper, shadow, practice and real records |
+| Live | 09:30-16:00 ET | the House | the practice league (from Release A): every alive family's validated or eligible Train version in observe shadow (two caps: 48 instances, 24 roots); Candidates in live shadow; Probes and Sized on real money; the House's D3 calibration round trips and its live test; from Release B, the incubator (one real lot for a cohort whose practice passed its first look; never evidence); no general agent paper book yet | separate paper, shadow, practice and real records |
 | Post-mortem | after each close; weekly | the operator for now (no scheduled post-mortem is built; it would run on Claude, whose `reserve_usd` is kept for it) | compare captured executions with the Gym; diagnose gaps and propose repairs | private reports; calibration only through the recalibration protocol |
 
 **Models** (Sept 29, 2026; only Sail and Claude are topped up from now on). The inner loop runs on
@@ -406,6 +457,7 @@ diagnostician.
 | Execution tuition: 1-lot real orders before the holdout, to measure multi-leg fills (never evidence) | $200 max loss a day, $300 a week | $0-200 a day |
 | D3 calibration: the House's own 1-lot round trips on SPY, QQQ and IWM (never evidence) | $50 of possible loss a day | - |
 | The House live test: one frozen, pre-registered program as the House's own instance (never evidence) | a structure at most $100, 3 open, $300 at risk, no new open after a $150 loss, 20 sessions, 30 round trips | - |
+| The incubator (Release B): one lot of a real structure for a family that passed Train and the drift screen, the gate's review and audit, and a pre-registered first look at its live practice (3 sessions, 10 program closes, coverage 0.80, P&L above $0 three ways); never evidence, never a promotion | $50 max loss a structure, 4 held or working, stopped for the ISO week once its net realized loss reaches $150 | $0-50, 0-4, $0-150 (0 stops it) |
 
 - **Sizing is by maximum loss**, never by premium.
 - **The order path:** the House nets every agent's intents into one order stream per contract;

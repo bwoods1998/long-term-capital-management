@@ -98,6 +98,21 @@ class RestoredRealInstances(LiveCase):
         self.assertIs(Instance(HT.INSTANCE, HT.FAMILY, 0, "real", VERTICAL, {}, observe="live").observe, False)
         self.assertIs(Instance(C.INSTANCE, C.FAMILY, 0, "real", VERTICAL, {}, observe=True).observe, False)
 
+    def test_a_restored_incubator_instance_stays_real_and_tuition_with_its_mode(self):
+        """Release B: an incubator row (`:i`) restores real, tuition-flagged, incubator and never observe, whatever its row's
+        tuition column or the arguments say, and keeps its saved mode."""
+        live = self.make([])
+        live.state.upsert("instances", {"id": "inc@1:i", "family": "inc", "version": 1, "run_sha": "s", "code": VERTICAL,
+                                        "params": "{}", "band": "gym", "tuition": 0, "mode": "exit_only",
+                                        "created_at": 1.0, "retired_at": None, "why": None}, "id")
+        live = self.restart()
+        inst = live.instances["inc@1:i"]
+        self.assertEqual((inst.kind, inst.tuition, inst.incubator, inst.observe, inst.mode),
+                         ("real", True, True, False, "exit_only"))
+        self.assertIn("inc@1:i", self.main.loaded, "its program is in the real child")
+        self.assertIs(Instance("inc@1:i", "inc", 1, "real", VERTICAL, {}, incubator=False).incubator, True)
+        self.assertIs(Instance("inc@1:t", "inc", 1, "real", VERTICAL, {}, tuition=True, incubator=True).incubator, False)
+
     def test_the_order_path_refuses_any_instance_that_is_not_real(self):
         live = self.make([family("vert", VERTICAL, band="probe")])
         self.run_to(9, 31)

@@ -133,6 +133,9 @@ export function ownDomains(host) {
   return name.endsWith('.workers.dev') && labels.length > 3 ? [name, labels.slice(-3).join('.')] : [name];
 }
 
+//: Hosts the web reader refuses because the research library reads them (arxiv.org and every subdomain; ar5iv.org).
+export const ARXIV_NAMES = ['arxiv.org', 'ar5iv.org'];
+
 /**
  * The URL rules. Answers `{ url }` (a parsed URL, fragment dropped) or `{ error }` naming the rule.
  * Checked on the request and again on every redirect's target.
@@ -169,6 +172,11 @@ export function checkUrl(raw, own = []) {
     return { error: `The url names a local or internal host (${host}).` };
   }
   if (!host.includes('.')) return { error: `The url names a host with no domain (${host}).` };
+  // arXiv is read only through the research library (lib/library.mjs, GET /v1/research/*): its date rule, and arXiv's
+  // pace, which binds "all of the machines under your control as a whole" (review of #428, gateway F4).
+  if (ARXIV_NAMES.some(name => host === name || host.endsWith('.' + name))) {
+    return { error: 'arXiv is read through the research library (/v1/research), not the web reader.' };
+  }
   if (own.some(domain => host === domain || host.endsWith('.' + domain))) {
     return { error: 'The url names the gateway\'s own domain.' };
   }
@@ -336,13 +344,13 @@ function collapse(text) {
 }
 
 /** At most `limit` UTF-16 units, never ending in half a surrogate pair. */
-function cut(text, limit) {
+export function cut(text, limit) {
   if (text.length <= limit) return text;
   const code = text.charCodeAt(limit - 1);
   return text.slice(0, code >= 0xd800 && code <= 0xdbff ? limit - 1 : limit);
 }
 
-function decode(bytes, header) {
+export function decode(bytes, header) {
   const charset = /;\s*charset\s*=\s*"?([^";\s]+)/i.exec(String(header || ''))?.[1];
   try {
     return new TextDecoder(charset || 'utf-8').decode(bytes);
@@ -352,7 +360,7 @@ function decode(bytes, header) {
 }
 
 /** The body, at most `limit` bytes: `{ bytes, size, cut }`. Reading stops at the limit or the deadline. */
-async function readCapped(response, limit, signal) {
+export async function readCapped(response, limit, signal) {
   if (!response.body) return { bytes: new Uint8Array(0), size: 0, cut: false };
   const reader = response.body.getReader();
   const aborted = new Promise((_, reject) => {
@@ -388,7 +396,7 @@ async function readCapped(response, limit, signal) {
   return { bytes, size, cut: over };
 }
 
-const discard = response => response.body?.cancel().catch(() => {});
+export const discard = response => response.body?.cancel().catch(() => {});
 
 // --- the route ----------------------------------------------------------------------------------
 
