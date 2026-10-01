@@ -1455,6 +1455,205 @@ class DurableBarsAndTheBelt(BarCase):
         self.assertIn(live_rows(self.root, "a", n), (None, []))
 
 
+class TheProgramAndTheAdoption(BarCase):
+    """The round-3 verification's findings (probes Q1, Q1b, Q1c, Q2 and the legacy gap): an evaluator adoption first records
+    as bars the failures that only what it clears holds (the gate's `review` and `gate_outcome`, and the bars the gate
+    owes, which outlive a restart beside the store); a verdict is on the PROGRAM (its run_sha) in every family; and a
+    verdict that release B's gate left only in its event log is recorded at the swarm's start (`incubator.backfill`)."""
+
+    NEW = {**EVALUATOR, "image": "sbcp_gym_c"}  # an image-only adoption: the House's cohort stays current
+    d2 = VerdictFirst.d2
+    newer_validation_mid_read = VerdictFirst.newer_validation_mid_read
+    no_sweep = VerdictFirst.no_sweep
+
+    def retrain(self, fid: str, n: int) -> None:
+        """The new image's Train and 1.5x runs land for the version (the tournament's normal work under it)."""
+        self.train(fid, n, identity=self.NEW)
+        self.store.set_state(fid, robustness={str(n): {"stress_1.5": {"status": "ok", "pnl": 40.0, "gym_image": self.NEW["image"],
+                                                                      "gym_bundle": self.NEW["bundle"]}}})
+
+    def never_after_adoption(self, n: int, sha: str, words: str) -> None:
+        """After the adoption and the new image's runs: the bar stands, the program is never marked or read again, and
+        B1's reader refuses it."""
+        self.assertEqual(self.state("a")["incubator_barred"][sha]["why"], words, "the adoption recorded the bar first")
+        self.retrain("a", n)
+        self.assertEqual(I.facts(self.store, self.settings, self.root, clock=self.clock)["written"], [], "never marked again")
+        self.assertEqual(I.due_reviews(self.store, self.settings, self.root, clock=self.clock), [])
+        asked = len(self.sail.bodies)
+        self.replies = [PASS, PASS]
+        self.assertNotIn("incubator", self.gate().run(), "never read again")
+        self.assertEqual(len(self.sail.bodies), asked)
+        self.assertEqual(live_rows(self.root, "a", n), [], "B1's own reader refuses it")
+
+    def test_q1_an_adoption_records_a_failed_gate_review_before_it_clears_review(self):
+        n, sha = self.passed()
+        self.store.set_state("a", incubator_reviews={}, review={"sha": sha, "version": n, "verdict": "fail", "reasons": ["x"],
+                                                              "contract_sha": review_contract()["sha256"]})
+        self.assertEqual((self.store.refusals("a"), self.state("a").get("incubator_barred")), ([], None), "no row, no bar")
+        out = E.adopt(self.store, self.NEW)  # the loop's start: before any gate round or sweep
+        self.assertTrue(out["adopted"])
+        self.assertIsNone(self.state("a")["review"], "the adoption cleared the review")
+        [event] = [e["payload"] for e in self.store.events_after(0) if e["payload"].get("action") == "evaluator_adopted"]
+        self.assertEqual(event["incubator_barred"], [sha[:12]])
+        self.never_after_adoption(n, sha, "the gate's reviewer failed it")
+
+    def test_q1b_an_adoption_records_a_failed_gate_audit_before_it_clears_review(self):
+        n, sha = self.passed()
+        contract = review_contract()["sha256"]
+        self.store.set_state("a", incubator_reviews={}, review={
+            "sha": sha, "version": n, "verdict": "fail", "stage": "audit", "reasons": ["x"], "contract_sha": contract,
+            "audit": {"verdict": "fail", "contract_sha": contract}})
+        E.adopt(self.store, self.NEW)
+        self.never_after_adoption(n, sha, "the gate's audit failed it")
+
+    def test_an_adoption_records_a_bad_outcome_and_a_failed_incubator_review_and_keeps_what_is_recorded(self):
+        n, sha = self.passed()
+        self.store.set_state("a", review=None, gate_outcome={"sha": "demoted-sha", "result": "demoted"},
+                             incubator_reviews={sha: {**self.state("a")["incubator_reviews"][sha], "verdict": "fail",
+                                                      "contract_sha": "0" * 64},
+                                                "passed-sha": {"sha": "passed-sha", "verdict": "pass"}},
+                             incubator_barred={"old-sha": {"why": "kept", "at": 1.0}})
+        E.adopt(self.store, self.NEW)
+        barred = self.state("a")["incubator_barred"]
+        self.assertEqual(set(barred), {"old-sha", "demoted-sha", sha})
+        self.assertEqual(barred["old-sha"], {"why": "kept", "at": 1.0}, "an entry is kept as it was")
+        self.assertEqual(barred["demoted-sha"]["why"], "the gate's outcome for it was demoted")
+        self.assertEqual(barred[sha]["why"], "the incubator's reviewer failed it", "whatever its contract")
+        self.never_after_adoption(n, sha, "the incubator's reviewer failed it")
+
+    def test_an_adoption_leaves_an_unreadable_incubator_barred_alone(self):
+        n, sha = self.passed()
+        self.store.set_state("a", incubator_barred="garbled", review={"sha": sha, "version": n, "verdict": "fail"})
+        E.adopt(self.store, self.NEW)
+        self.assertEqual(self.state("a")["incubator_barred"], "garbled", "never written over")
+        self.assertEqual(live_rows(self.root, "a", n), [], "fail-closed")
+
+    def test_q1c_release_bs_failed_review_under_a_hold_survives_bs_own_adoption(self):
+        """The verification's probe Q1c: release B's gate (no verdict-first bar, no sweep) fails the review while the
+        operator holds the family during the read, so no refusal row is written; B's deploy then adopts at its start."""
+        n, sha = self.passed()
+        self.store.set_state("a", gate_ready=True, validation_version=n, validation_line={"passed": True},
+                             validation_image=None, validation_bundle=None, incubator_reviews={})
+        real, probe = Gate.review, self
+
+        def read(gate, fam, version, **kw):
+            answer = real(gate, fam, version, **kw)
+            if not kw.get("incubator"):
+                probe.store.hold_gate("a", True, reason="operator")
+            return answer
+
+        self.replies = [fail_reply("the gate's reviewer finds a flaw")]
+        with patch.object(Gate, "review", read), patch.object(Gate, "_incubator_bar", lambda *a, **k: None), \
+                patch.object(Gate, "_incubator_sweep", lambda *a, **k: {}), patch.object(Gate, "_incubator_round", lambda *a, **k: {}):
+            self.gate().run()  # release B's gate, without B2's bar and sweep
+        state = self.state("a")
+        self.assertEqual((state["review"]["verdict"], self.store.refusals("a"), state.get("incubator_barred")), ("fail", [], None))
+        self.store.hold_gate("a", False)
+        self.store.set_state("a", validation_line={"passed": False})
+        E.adopt(self.store, self.NEW)  # B's swarm start
+        self.never_after_adoption(n, sha, "the gate's reviewer failed it")
+
+    def test_a_bar_owed_across_a_restart_is_recorded_by_the_adoption_and_refused_meanwhile(self):
+        n, sha = self.passed()
+        self.d2(n)
+        self.replies = [fail_reply("the gate's reviewer finds a flaw")]
+        gate = self.gate()
+        with patch.object(I, "record_bar", side_effect=sqlite3.OperationalError("database is locked")), \
+                self.newer_validation_mid_read("review"), self.no_sweep():
+            gate.run()
+        self.assertEqual(set(gate.bars_owed), {("a", sha)})
+        self.assertIsNone(self.state("a").get("incubator_barred"), "the store holds nothing of the fail")
+        self.assertIn(str(n), self.state("a")["train_passed"], "the mark stands: the bar never landed")
+        self.assertEqual(I.load_owed(self.root), {("a", sha): (n, "the gate's reviewer failed it")}, "kept beside the store")
+        self.assertEqual(live_rows(self.root, "a", n), [], "the reader refuses a program the gate owes a bar")
+        # The process dies (the in-memory bar with it); B's deploy restarts the swarm into an adoption.
+        E.adopt(self.store, self.NEW)
+        self.assertEqual(self.state("a")["incubator_barred"][sha]["version"], n)
+        restarted = self.gate()
+        self.assertEqual(set(restarted.bars_owed), {("a", sha)}, "read back at the gate's start")
+        self.never_after_adoption(n, sha, "the gate's reviewer failed it")
+        self.assertEqual(I.load_owed(self.root), {}, "recorded by the next gate's start, then no longer owed")
+        self.assertFalse((self.root / bands.BARS_OWED_FILE).exists(), "nothing owed: no file")
+
+    def test_q2_a_program_failed_in_one_family_is_never_marked_reviewed_or_read_in_another(self):
+        n, sha = self.passed()
+        I.record_bar(self.store, "a", sha, "the gate's reviewer failed it", version=n, clock=self.clock)
+        self.store.set_state("a", review={"sha": sha, "version": n, "verdict": "fail", "reasons": ["x"],
+                                          "contract_sha": review_contract()["sha256"]})
+        self.store.refuse("a", n, "review", "the gate's reviewer failed it")
+        self.store.add_family({"id": "b", "mechanism": "Another invented mechanism for the incubator's facts.",
+                               "structure": "debit_vertical", "roots": ["SPY"], "dte": [0, 5]}, origin="test")
+        m = int(self.store.add_version("b", CODE.format(fid="a"), {"hold": 3}, author="test")["n"])
+        self.assertEqual(run_sha(self.store.version("b", m)), sha, "the same program")
+        self.assertEqual(I.twins(self.store, "b", m), [("a", n), ("b", m)])
+        self.train("b", m)
+        self.robust("b", m)
+        self.cohort("b", m)
+        self.practised("b", m, [(SESSIONS[i % 2], 3.0, False) for i in range(5)], days=SESSIONS[:2])
+        out = I.facts(self.store, self.settings, self.root, clock=self.clock)
+        self.assertNotIn(f"b@{m}", out["written"], "never marked")
+        self.assertEqual(I.gate_bar(self.store, self.store.family("b"), m), f"the gate refused it in a@{n} (the review)")
+        self.assertEqual(I.due_reviews(self.store, self.settings, self.root, clock=self.clock), [], "no review is paid for it")
+        # Even with a mark and passed reviews written straight into b's state, the reader refuses it.
+        contract = review_contract()["sha256"]
+        self.store.set_state("b", train_passed={str(m): {"evaluator": EVALUATOR, "objective": OBJECTIVE, "run": "r",
+                                                         "robust_pnl": 5.0, "drift": {"t": 1.0}, "at": 1.0}},
+                             incubator_reviews={sha: {"sha": sha, "version": m, "verdict": "pass", "contract_sha": contract,
+                                                      "audit": {"verdict": "pass", "contract_sha": contract}}})
+        self.assertEqual(live_rows(self.root, "b", m), [], "a program the gate's reviewer failed (in a) never trades")
+        self.assertFalse(I.reviewable(self.store, "b", m, sha))
+        swept = I.sweep(self.store, self.settings, clock=self.clock)
+        self.assertEqual((swept["removed"], swept["revoked"]), ([f"b@{m}"], [f"b@{m}"]), "the sweep takes them too")
+
+    def test_q2_another_familys_failed_review_alone_refuses_the_program(self):
+        """Only `review` in a names the fail (no bar, no row: release B's gate under a hold): b's program is refused."""
+        n, sha = self.passed()
+        self.store.add_family({"id": "b", "mechanism": "Another invented mechanism for the incubator's facts.",
+                               "structure": "debit_vertical", "roots": ["SPY"], "dte": [0, 5]}, origin="test")
+        m = int(self.store.add_version("b", CODE.format(fid="a"), {"hold": 3}, author="test")["n"])
+        contract = review_contract()["sha256"]
+        self.store.set_state("b", train_passed={str(m): {"evaluator": EVALUATOR, "objective": OBJECTIVE, "run": "r",
+                                                         "robust_pnl": 5.0, "drift": {"t": 1.0}, "at": 1.0}},
+                             incubator_reviews={sha: {"sha": sha, "version": m, "verdict": "pass", "contract_sha": contract,
+                                                      "audit": {"verdict": "pass", "contract_sha": contract}}})
+        self.assertEqual(len(live_rows(self.root, "b", m)), 1, "nothing against the program yet")
+        self.store.set_state("a", review={"sha": sha, "version": n, "verdict": "fail", "contract_sha": contract})
+        self.assertEqual(live_rows(self.root, "b", m), [])
+        self.store.set_state("a", review=None, incubator_reviews={})
+        self.assertEqual(len(live_rows(self.root, "b", m)), 1)
+        self.store.update_family("a", retired_at="2026-10-06T00:00:00Z", state={**self.state("a"), "incubator_barred": {sha: {}}})
+        self.assertEqual(live_rows(self.root, "b", m), [], "a retired family's bar on the program stands")
+
+    def test_the_backfill_records_release_bs_fails_that_only_the_event_log_holds(self):
+        n, sha = self.passed()
+        m = self.family("c")
+        other = self.sha("c", m)
+        # Release B's gate: a failed review whose compare-and-set lost to a newer validation (the event alone), a third
+        # unclear audit whose write-back lost too (its attempt count alone), and an unrelated passed review.
+        self.store.event("swarm.gate", "a", {"action": "review", "version": n, "verdict": "fail", "reasons": ["x"]})
+        self.store.event("swarm.gate", "a", {"action": "review", "version": 99, "verdict": "fail"})  # no such version
+        self.store.event("swarm.gate", "c", {"action": "review", "version": m, "verdict": "pass"})
+        self.store.put(f"audit_attempt:{review_contract()['sha256'][:12]}:{other}", 3)
+        self.assertEqual(len(live_rows(self.root, "a", n)), 1, "the reader never reads the event log")
+        out = I.backfill(self.store, clock=self.clock)
+        self.assertEqual(sorted(out["barred"]), sorted([f"a:{sha[:12]}", f"c:{other[:12]}"]))
+        self.assertEqual(self.state("a")["incubator_barred"][sha], {"why": "the gate's reviewer failed it", "at": self.clock(),
+                                                                    "version": n})
+        self.assertEqual(self.state("c")["incubator_barred"][other]["why"], "the gate's audit could not reach a verdict three times")
+        self.assertNotIn(str(n), self.state("a").get("train_passed") or {}, "its mark went with the bar")
+        self.assertEqual(live_rows(self.root, "a", n), [])
+        self.assertEqual(len(self.actions("incubator_backfill")), 1)
+        self.assertEqual(I.backfill(self.store, clock=self.clock)["barred"], [], "idempotent: from where it stopped")
+        self.assertEqual(self.store.get(I.BACKFILL_KEY), max(e["seq"] for e in self.store.events_after(0, limit=10**6)
+                                                             if e["kind"] == "swarm.gate"))
+        E.adopt(self.store, self.NEW)
+        self.never_after_adoption(n, sha, "the gate's reviewer failed it")
+
+    def test_the_swarm_start_backfills_before_the_adoption(self):
+        text = (REPO / "league" / "swarm" / "loop.py").read_text(encoding="utf-8")
+        self.assertLess(text.index("backfill(self.store)"), text.index("adopt(self.store, evaluator)"))
+
+
 # ---------------------------------------------------------------------------------------------------- never evidence
 class NeverEvidence(unittest.TestCase):
     TOKENS = ("live.sqlite", "RealBook", "incubator_tally", '":i"', "':i'")

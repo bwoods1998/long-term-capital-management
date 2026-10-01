@@ -46,10 +46,13 @@ class FactsCase(unittest.TestCase):
         return {"sha": sha, "verdict": verdict, "contract_sha": contract or self.contract,
                 "audit": {"verdict": audit, "contract_sha": audit_contract or self.contract}}
 
-    def eligible(self, fid: str = "fam", *, structure: str = "debit_vertical", review_in: str = "review") -> str:
+    def eligible(self, fid: str = "fam", *, structure: str = "debit_vertical", review_in: str = "review",
+                 params: dict | None = None) -> str:
+        """Version 1 of `fid`, eligible. Every family here holds the same program (the same code and params, so the same
+        run_sha) unless `params` gives it another."""
         self.store.add_family({"id": fid, "mechanism": "An invented mechanism.", "structure": structure, "roots": ["SPY"],
                                "dte": [0, 5]}, origin="test")
-        self.store.add_version(fid, CODE, {"hold": 3}, author="test")
+        self.store.add_version(fid, CODE, params or {"hold": 3}, author="test")
         sha = self.sha(fid)
         state = {"train_passed": {"1": {"evaluator": EVALUATOR, "objective": OBJECTIVE, "run": "r1", "robust_pnl": 12.0,
                                         "drift": {"t": 1.1, "positive": 4, "years": 5}, "at": 1.0}}}
@@ -243,12 +246,12 @@ class TheBelt(FactsCase):
 
     def test_a_refused_version_refuses_even_after_every_record_moved_on(self):
         self.eligible()
-        self.eligible("other")
+        self.eligible("other", params={"hold": 4})  # another program
         self.store.refuse("fam", 1, "rations", "the lineage's three holdout looks are spent")
         self.assertNoRow("a refusal row, with no outcome, review or bar naming it")
         self.store.refuse("other", 2, "review", "another version's refusal")
         self.store.refuse("other", None, "rations", "a refusal of no version")
-        self.assertEqual(len(self.row("other")), 1, "another version's or family's refusal is not this one's")
+        self.assertEqual(len(self.row("other")), 1, "another program's refusal, or a refusal of no version, is not this one's")
 
     def test_a_failed_holdout_look_on_the_program_refuses_in_any_family(self):
         sha = self.eligible()
@@ -278,6 +281,61 @@ class TheBelt(FactsCase):
         self.assertEqual(len(self.row()), 1, "an empty review is no review: the incubator's own pass counts")
         self.store.update_family("fam", state=family["state"])
         self.assertEqual(len(self.row()), 1)
+
+
+class TheProgram(FactsCase):
+    """The round-3 verification's probe Q2: a verdict is on the PROGRAM (the same code and params, the same run_sha), so
+    the belt refuses it in every family when any family, alive or retired, holds a refusal of it, a bar, a failed review
+    or audit or a bad outcome, or a record that cannot be read; and while the gate owes a bar on it (`BARS_OWED_FILE`)."""
+
+    def setUp(self):
+        super().setUp()
+        self.sha_ = self.eligible("fam", review_in="incubator_reviews")
+        self.assertEqual(self.eligible("twin", review_in="incubator_reviews"), self.sha_, "the same program")
+        self.eligible("else", review_in="incubator_reviews", params={"hold": 4})
+        self.assertEqual([len(self.row(f)) for f in ("fam", "twin", "else")], [1, 1, 1])
+        self.clean = self.store.family("fam")["state"]
+
+    def assertOnlyTwinsRefused(self, why: str):
+        self.assertEqual((self.row("fam"), self.row("twin")), ([], []), why)
+        self.assertEqual(len(self.row("else")), 1, f"another program is not refused: {why}")
+
+    def test_a_refusal_bar_or_failed_verdict_in_one_family_refuses_the_program_in_every_family(self):
+        sha = self.sha_
+        for values, why in (({"incubator_barred": {sha: {"why": "the gate's audit failed it"}}}, "a recorded bar"),
+                            ({"review": {"sha": sha, "verdict": "fail"}}, "the gate's failed review"),
+                            ({"review": self.review(sha, audit="fail")}, "the gate's failed audit"),
+                            ({"incubator_reviews": {sha: dict(self.review(sha), verdict="fail")}}, "the incubator's fail"),
+                            ({"gate_outcome": {"sha": sha, "result": "demoted"}}, "a bad outcome"),
+                            ({"review": "garbled"}, "a review record that cannot be read"),
+                            ({"incubator_barred": ["x"]}, "bars that cannot be read")):
+            self.store.update_family("fam", state={**self.clean, **values})
+            self.assertOnlyTwinsRefused(why)
+        self.store.update_family("fam", state="not a record")
+        self.assertOnlyTwinsRefused("a state that cannot be read")
+        self.store._exec("UPDATE families SET state=? WHERE id=?", ("{not json", "fam"))
+        self.assertOnlyTwinsRefused("a state that is not JSON")
+        self.store.update_family("fam", state=self.clean)
+        self.assertEqual(len(self.row("twin")), 1)
+
+    def test_a_refusal_of_the_program_in_a_retired_family_refuses_it(self):
+        self.store.retire_gym("fam", "finished", floor=0, source="test")
+        self.assertEqual(len(self.row("twin")), 1, "retiring is no verdict")
+        self.store.refuse("fam", 1, "review", "the gate's reviewer failed it")
+        self.assertEqual(self.row("twin"), [], "a refusal of the same program, in a retired family")
+        self.assertEqual(len(self.row("else")), 1)
+
+    def test_a_bar_the_gate_owes_refuses_the_program_and_an_unreadable_record_of_them_refuses_every_program(self):
+        path = self.root / bands.BARS_OWED_FILE
+        path.write_text('{"bars": [{"family": "fam", "sha": "%s", "version": 1, "why": "x"}]}' % self.sha_)
+        self.assertOnlyTwinsRefused("a bar owed")
+        path.write_text('{"bars": [{"family": "fam", "sha": "another", "version": 1, "why": "x"}]}')
+        self.assertEqual(len(self.row("twin")), 1, "another program's owed bar")
+        for garbage in ("{not json", '{"bars": "x"}', '{"bars": [{"sha": 7}]}', "[]"):
+            path.write_text(garbage)
+            self.assertEqual([self.row(f) for f in ("fam", "twin", "else")], [[], [], []], f"fail-closed: {garbage!r}")
+        path.unlink()
+        self.assertEqual(len(self.row("else")), 1)
 
 
 if __name__ == "__main__":

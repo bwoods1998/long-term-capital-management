@@ -49,10 +49,14 @@ else is written, and the program's incubator mark goes in the same transaction. 
 `validation_version` (a newer validation landing during the model read), nor an operator's hold, nor an error after the
 read can lose it, whatever the family's `gate_outcome` or `review` says later. A bar an error kept from the store is
 owed (`bars_owed`): recorded again when the gate's own write-back fails, and at the start and the end of every round
-until it lands, and no incubator read of its program starts meanwhile. A bar is for good: an evaluator adoption keeps
-`incubator_barred`. THE INCUBATOR'S SWEEP (`incubator.sweep`) still runs at the start and the end of every round (the
-leakage alarm's too), and again after an incubator read that failed, and records what it finds. Both only remove marks
-and passes and record bars, which nothing of the gate reads.
+until it lands, and no incubator read of its program starts meanwhile; it is kept beside the store too
+(`incubator.save_owed`), so a restart reads it back, the evaluator adoption at the start records it and the reader
+refuses its program meanwhile. A bar is for good: an evaluator adoption keeps `incubator_barred`, and first records there
+every failure that only what it clears holds (`incubator.adoption_bars`). A bar is on the PROGRAM (its `run_sha`): a
+verdict made in one family bars the same code and params in every other (`incubator.program_bar`, and the reader's own
+belt). THE INCUBATOR'S SWEEP (`incubator.sweep`) still runs at the start and the end of every round (the leakage
+alarm's too), and again after an incubator read that failed, and records what it finds. Both only remove marks and
+passes and record bars, which nothing of the gate reads.
 
 Every step is a `swarm.gate` event; band moves are `swarm.band` events (the site's news).
 Standard library only.
@@ -124,8 +128,18 @@ class Gate:
         self.incubator_tried: dict[str, float] = {}
         #: THE VERDICT FIRST's bars not yet recorded (an error, such as a lock held past the store's busy timeout), by
         #: (family, program): (version, why). Recorded again when the gate's own write-back of the verdict fails, and at
-        #: the start and the end of every round, before any incubator read, until one lands (`_incubator_owed`).
+        #: the start and the end of every round, before any incubator read, until one lands (`_incubator_owed`). Kept
+        #: beside the store too (`incubator.save_owed`), so a restart reads them back here, the evaluator adoption at
+        #: its start records them, and the reader refuses their programs meanwhile.
         self.bars_owed: dict[tuple[str, str], tuple[int | None, str]] = {}
+        self._owed_saved: dict[tuple[str, str], tuple[int | None, str]] = {}
+        try:
+            from . import incubator
+
+            self.bars_owed = incubator.load_owed(store.root)
+            self._owed_saved = dict(self.bars_owed)
+        except Exception:  # noqa: BLE001 - nothing owed is read back; the file stays until the next write
+            pass
         #: No Gym job survives its process: a look marked in flight before this moment is owed again.
         self.started_at = clock()
 
@@ -405,6 +419,7 @@ class Gate:
         try:
             incubator.record_bar(self.store, str(fid), str(sha), why, version=n, clock=self.clock)
         except Exception as exc:  # noqa: BLE001
+            self._save_owed()  # kept beside the store before anything else can fail
             try:
                 self.store.event("swarm.gate", str(fid), {"action": "incubator_bar_error", "version": n, "sha": str(sha)[:12],
                                                           "bar": why, "error": f"{type(exc).__name__}: {str(exc)[:300]}"})
@@ -412,7 +427,25 @@ class Gate:
                 pass
             return False
         self.bars_owed.pop((str(fid), str(sha)), None)
+        self._save_owed()
         return True
+
+    def _save_owed(self) -> None:
+        """The bars owed, kept beside the store when they changed since last kept (`incubator.save_owed`); an error is
+        one private event (the bars stay owed in this process all the same)."""
+        from . import incubator
+
+        if self.bars_owed == self._owed_saved:
+            return
+        try:
+            incubator.save_owed(self.store.root, self.bars_owed)
+            self._owed_saved = dict(self.bars_owed)
+        except Exception as exc:  # noqa: BLE001
+            try:
+                self.store.event("swarm.gate", None, {"action": "incubator_owed_error", "owed": len(self.bars_owed),
+                                                      "error": f"{type(exc).__name__}: {str(exc)[:300]}"})
+            except Exception:  # noqa: BLE001
+                pass
 
     def _incubator_owed(self) -> None:
         """Every bar still owed (`bars_owed`), recorded again; never failing the gate's round."""

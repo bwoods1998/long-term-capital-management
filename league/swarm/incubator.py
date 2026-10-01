@@ -46,8 +46,23 @@ family's state. Each is bound to the evaluator it was made under, so no stale fa
      a `review` that is not a mapping or names no program, an `incubator_barred` or `incubator_reviews` that is not a
      mapping). The latter bars every program of the family while it stays so, and is never recorded or revoked.
    Nothing here is ever cleared: the rows are kept, and so is `incubator_barred`, which an evaluator adoption keeps
-   too (it clears `gate_outcome`, `review`, the marks and the incubator's reviews, never a bar). A bar is as durable as
-   a refusal row: a program whose review or audit failed never trades the incubator, under any later evaluator.
+   too (it clears `gate_outcome`, `review`, the marks and the incubator's reviews, never a bar), after first recording
+   there every verdict that only what it clears holds, and every bar the gate owes (`adoption_bars`, `load_owed`). A
+   bar is as durable as a refusal row: a program whose review or audit failed never trades the incubator, under any
+   later evaluator.
+
+   THE PROGRAM (Oct 1, 2026). A verdict is on the program, its `gate.run_sha` (the code and the params), not on the
+   family it was made in: the store links the lineages of identical code (`SwarmStore._link_code`), and the gate's and
+   the incubator's review keys name the family, so the same program in another family would otherwise be read and
+   passed afresh. `program_bar` (part of `gate_bar`, so no mark is made and no review is paid) bars a program when a
+   refusal row names another version of it (`twins`) in any family, alive or retired, or another family holding it
+   has a recorded bar, a bad `gate_outcome`, a failed gate or incubator review or audit, or (fail-closed) records that
+   cannot be read. The live side's reader reads the same in its own read-only connection.
+
+   THE BACKFILL (`backfill`, at every swarm start before the evaluator adoption). Before the verdict-first bar (release B
+   and earlier), a failed review or audit whose compare-and-set lost to a newer validation was written only to the
+   append-only `swarm.gate` event log, and a third unclear answer only to its attempt count. The backfill reads both
+   (the log from where it last stopped, `BACKFILL_KEY`) and records each as its program's bar.
 
    THE VERDICT FIRST (`record_verdict`, `record_bar`). The gate writes its own verdicts only while the version is still
    its to judge: its review and audit with a compare-and-set on `validation_version`, its refusal row and outcome after
@@ -100,7 +115,7 @@ from typing import Any, Callable, Mapping
 
 from .bands import demoted
 from .researcher import drift_settings, drift_verdict, robust_at_stress, row_span, running_span
-from .store import SwarmStore
+from .store import SwarmStore, dumps, loads
 
 #: Marks and incubator reviews kept per family (the newest versions' marks; the newest reviews by time). The gate's bars
 #: (`incubator_barred`) are all kept for good (an adoption keeps them too): a bar dropped would let its program be marked
@@ -265,6 +280,58 @@ def gate_bar(store: SwarmStore, fam: Mapping[str, Any], n: int, *, sha: str | No
     if isinstance(recorded, Mapping) and sha in recorded:
         entry = recorded[sha]
         return str(entry.get("why") or "the gate barred it") if isinstance(entry, Mapping) else "the gate barred it"
+    return program_bar(store, fid, int(n), sha, program_only=program_only)
+
+
+def twins(store: SwarmStore, fid: str, n: int) -> list[tuple[str, int]]:
+    """Every version, in any family (alive or retired), of the same PROGRAM as version `n` of family `fid`: the same code
+    and the same params, so the same `gate.run_sha` (the store links such lineages, `SwarmStore._link_code`), itself
+    included. [] when the version cannot be read."""
+    row = store._one("SELECT sha, params FROM versions WHERE family=? AND n=?", (str(fid), int(n)))
+    if row is None:
+        return []
+    params = dumps(loads(row["params"], {}) or {})
+    return [(str(r["family"]), int(r["n"])) for r in store._all("SELECT family, n, params FROM versions WHERE sha=? "
+                                                                "ORDER BY family, n", (row["sha"],))
+            if dumps(loads(r["params"], {}) or {}) == params]
+
+
+def program_bar(store: SwarmStore, fid: str, n: int, sha: str, *, program_only: bool = False) -> str | None:
+    """THE PROGRAM (the module docstring, 1): why program `sha` (version `n` of family `fid`) is barred by a verdict made
+    on the same program elsewhere, or None: a refusal of another version of it (`twins`) in any family, alive or
+    retired, or, in another family holding it, a recorded bar, a bad `gate_outcome`, the gate's review or audit failing
+    it (`gate_review_bar`) or the incubator's (`incubator_review_bar`); FAIL-CLOSED (unless `program_only`, as
+    `gate_bar`): another such family's state or records cannot be read (`family_bar`). The reader (`bands.incubator`)
+    reads the same, so no review is paid for a program it would refuse."""
+    for other, m in twins(store, fid, n):
+        if (other, m) == (str(fid), int(n)):
+            continue
+        refused = store._one("SELECT stage FROM refusals WHERE family=? AND version=? LIMIT 1", (other, m))
+        if refused is not None:
+            return f"the gate refused it in {other}@{m} (the {refused['stage']})"
+        if other == str(fid):
+            continue
+        row = store._one("SELECT state FROM families WHERE id=?", (other,))
+        if row is None:
+            continue
+        state = loads(row["state"], None)
+        if not isinstance(state, Mapping):
+            if program_only:
+                continue
+            return f"the state of {other}, which holds the same program, cannot be read"
+        why = None if program_only else family_bar(state)
+        outcome = state.get("gate_outcome")
+        if why is None and isinstance(outcome, Mapping) and outcome.get("sha") == sha and outcome.get("result") in BAD_OUTCOMES:
+            why = f"the gate's outcome for it is {outcome['result']}"
+        why = why or gate_review_bar(state.get("review"), sha)
+        reviews = state.get("incubator_reviews")
+        why = why or (incubator_review_bar(reviews.get(sha), sha) if isinstance(reviews, Mapping) else None)
+        recorded = state.get("incubator_barred")
+        if why is None and isinstance(recorded, Mapping) and sha in recorded:
+            entry = recorded[sha]
+            why = str(entry.get("why") or "the gate barred it") if isinstance(entry, Mapping) else "the gate barred it"
+        if why is not None:
+            return f"{why} (in {other}, which holds the same program)"
     return None
 
 
@@ -286,6 +353,148 @@ def unrecorded_bars(state: Mapping[str, Any]) -> dict[str, str]:
         if why is not None:
             out.setdefault(review["sha"], why)
     return {sha: why for sha, why in out.items() if sha not in (recorded or {})}
+
+
+def adoption_bars(state: Mapping[str, Any]) -> dict[str, str]:
+    """What an evaluator adoption must record in `incubator_barred` before it clears the selection (`evaluator.adopt`),
+    {sha: why}: `unrecorded_bars` (the gate's `review` and `gate_outcome`, which the adoption clears) and every incubator
+    review that fails its program whatever its contract (`incubator_reviews`, cleared too). {} while `incubator_barred`
+    cannot be read (it is left alone, and `family_bar` bars the whole family)."""
+    recorded = state.get("incubator_barred")
+    if recorded is not None and not isinstance(recorded, Mapping):
+        return {}
+    out = unrecorded_bars(state)
+    reviews = state.get("incubator_reviews")
+    for sha, record in (reviews.items() if isinstance(reviews, Mapping) else ()):
+        if isinstance(record, Mapping) and record.get("sha") == sha and sha not in (recorded or {}) and sha not in out:
+            why = _audit_bar(record, "the incubator's")
+            if why is not None:
+                out[str(sha)] = why
+    return out
+
+
+def save_owed(root: str | Path, owed: Mapping[tuple[str, str], tuple[int | None, str]]) -> None:
+    """Keep the gate's bars owed (`gate.Gate.bars_owed`) beside the store (`bands.BARS_OWED_FILE`, written whole and
+    replaced at once), so a restart cannot lose them: the gate reads them back at its start (`load_owed`), the evaluator
+    adoption records them (`evaluator.adopt`) and the reader refuses their programs meanwhile. No file when none is owed."""
+    import os
+
+    from .bands import BARS_OWED_FILE
+
+    path = Path(root) / BARS_OWED_FILE
+    if not owed:
+        path.unlink(missing_ok=True)
+        return
+    bars = [{"family": fid, "sha": sha, "version": n, "why": why} for (fid, sha), (n, why) in sorted(owed.items())]
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps({"bars": bars}, sort_keys=True), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def load_owed(root: str | Path) -> dict[tuple[str, str], tuple[int | None, str]]:
+    """The bars owed kept beside the store (`save_owed`), {(family, sha): (version, why)}; {} when none (or unreadable:
+    the reader then refuses every program, fail-closed, until the gate writes the file again)."""
+    from .bands import owed_bars
+
+    out: dict[tuple[str, str], tuple[int | None, str]] = {}
+    for bar in owed_bars(root) or []:
+        version = bar.get("version")
+        out[(str(bar.get("family")), str(bar["sha"]))] = (int(version) if isinstance(version, int) else None,
+                                                          str(bar.get("why") or "the gate barred it"))
+    return out
+
+
+#: THE BACKFILL's place in the event log (`backfill`): the last `swarm.gate` event it read.
+BACKFILL_KEY = "incubator_backfill_seq"
+_FAILS = {"review": "the gate's reviewer failed it", "audit": "the gate's audit failed it",
+          "incubator_review": "the incubator's reviewer failed it", "incubator_audit": "the incubator's audit failed it"}
+_THIRD_UNCLEAR = {"review_attempt": "the gate's reviewer could not reach a verdict three times",
+                  "audit_attempt": "the gate's audit could not reach a verdict three times",
+                  "incubator_review_attempt": "the incubator's reviewer could not reach a verdict three times",
+                  "incubator_audit_attempt": "the incubator's audit could not reach a verdict three times"}
+
+
+def backfill(store: SwarmStore, *, clock: Callable[[], float] = time.time) -> dict[str, Any]:
+    """THE BACKFILL (Oct 1, 2026), at every swarm start before the evaluator adoption: a verdict the gate made before the
+    verdict-first bar existed (release B and earlier) but wrote nowhere the reader reads (its compare-and-set lost to a
+    newer validation, so only its `swarm.gate` event holds it), recorded as its program's bar (`incubator_barred`, in the
+    family the verdict was made in, alive or retired). It reads the append-only event log from where it last stopped
+    (`BACKFILL_KEY`): a failed review or audit (the gate's or the incubator's) and a bar an error kept from the store
+    (`incubator_bar_error`); and every third unclear answer (the attempt counts in the key-values, which no event
+    records as a fail). Each (family, version) is read as its program (`gate.run_sha`). Idempotent: a recorded bar is
+    kept as it is. Returns {"read", "barred"}; anything recorded is one private `swarm.gate` event (`incubator_backfill`)."""
+    from .gate import run_sha
+
+    raw = store.get(BACKFILL_KEY, 0)
+    last = int(raw) if isinstance(raw, int) and not isinstance(raw, bool) else 0
+    found: dict[str, dict[str, tuple[int | None, str]]] = {}
+    shas: dict[tuple[str, int], str | None] = {}
+
+    def program(fid: str, n: Any) -> str | None:
+        if isinstance(n, bool) or not isinstance(n, int):
+            return None
+        if (fid, n) not in shas:
+            row = store._one("SELECT sha, params FROM versions WHERE family=? AND n=?", (fid, n))
+            shas[(fid, n)] = None if row is None else run_sha({"sha": row["sha"], "params": loads(row["params"], {}) or {}})
+        return shas[(fid, n)]
+
+    top = int((store._one("SELECT MAX(seq) AS seq FROM events WHERE kind='swarm.gate'") or {}).get("seq") or 0)
+    read = int((store._one("SELECT COUNT(*) AS n FROM events WHERE kind='swarm.gate' AND seq>? AND seq<=?", (last, top))
+                or {}).get("n") or 0)
+    # Only the rows that can hold a fail are loaded (payloads are compact JSON with sorted keys: `store.dumps`).
+    rows = store._all("SELECT seq, family, payload FROM events WHERE kind='swarm.gate' AND seq>? AND seq<=? AND "
+                      "(payload LIKE '%\"verdict\":\"fail\"%' OR payload LIKE '%\"action\":\"incubator_bar_error\"%') "
+                      "ORDER BY seq", (last, top))
+    for row in rows:
+        payload, fid = loads(row["payload"], None), row["family"]
+        if not isinstance(payload, Mapping) or not fid:
+            continue
+        action, n = payload.get("action"), payload.get("version")
+        if action in _FAILS and payload.get("verdict") == "fail":
+            sha = program(str(fid), n)
+            if sha is not None:
+                found.setdefault(str(fid), {}).setdefault(sha, (n, _FAILS[action]))
+        elif action == "incubator_bar_error" and isinstance(payload.get("sha"), str) and payload["sha"]:
+            numbers = [n] if isinstance(n, int) else [int(v["n"]) for v in store._all(
+                "SELECT n FROM versions WHERE family=?", (str(fid),))]
+            for m in numbers:
+                sha = program(str(fid), m)
+                if sha is not None and sha.startswith(payload["sha"]):
+                    found.setdefault(str(fid), {}).setdefault(sha, (m, str(payload.get("bar") or "the gate barred it")))
+    by_sha: dict[str, list[tuple[str, int]]] | None = None
+    for row in store._all("SELECT key, value FROM kv WHERE key LIKE '%_attempt:%'"):
+        stage, _, rest = str(row["key"]).partition(":")
+        count = loads(row["value"], 0)
+        if stage not in _THIRD_UNCLEAR or isinstance(count, bool) or not isinstance(count, int) or count < 3:
+            continue
+        parts = rest.split(":")
+        if stage.endswith("review_attempt") and len(parts) == 3 and parts[2].isdigit():
+            sha = program(parts[1], int(parts[2]))
+            if sha is not None:
+                found.setdefault(parts[1], {}).setdefault(sha, (int(parts[2]), _THIRD_UNCLEAR[stage]))
+        elif stage.endswith("audit_attempt") and len(parts) == 2:
+            if by_sha is None:
+                by_sha = {}
+                for v in store._all("SELECT family, n, sha, params FROM versions"):
+                    key = run_sha({"sha": v["sha"], "params": loads(v["params"], {}) or {}})
+                    by_sha.setdefault(key, []).append((str(v["family"]), int(v["n"])))
+            for fid, n in by_sha.get(parts[1], []):
+                found.setdefault(fid, {}).setdefault(parts[1], (n, _THIRD_UNCLEAR[stage]))
+    barred: list[str] = []
+    for fid, bars in sorted(found.items()):
+        with store.atomic():
+            recorded = ((store.family(fid) or {}).get("state") or {}).get("incubator_barred")
+            if recorded is not None and not isinstance(recorded, Mapping):
+                continue  # never written over (`family_bar` bars every program of the family while it stays so)
+            for sha, (n, why) in sorted(bars.items()):
+                if sha not in (recorded or {}):
+                    _record_bar(store, fid, sha, why, n, clock)
+                    barred.append(f"{fid}:{sha[:12]}")
+    if top > last:
+        store.put(BACKFILL_KEY, top)
+    if barred:
+        store.event("swarm.gate", None, {"action": "incubator_backfill", "barred": barred, "read": read})
+    return {"read": read, "barred": barred}
 
 
 def verdict_bar(record: Any, whose: str) -> str | None:
@@ -736,6 +945,7 @@ def put_review(store: SwarmStore, fid: str, sha: str, record: Mapping[str, Any],
 
 __all__ = ["facts", "sweep", "due_reviews", "practice_cohorts", "practice_current", "current_mark", "final_review",
            "mark_of", "gate_bar", "gate_review_bar", "incubator_review_bar", "family_bar", "unrecorded_bars", "verdict_bar",
-           "record_verdict", "record_bar", "BAD_OUTCOMES",
+           "record_verdict", "record_bar", "BAD_OUTCOMES", "twins", "program_bar", "adoption_bars", "save_owed", "load_owed",
+           "backfill", "BACKFILL_KEY",
            "eligible_train_run", "reviewable", "put_review", "reviews_per_round", "session_day", "MARKS_KEPT",
            "REVIEWS_KEPT", "REVIEW_MIN_SESSIONS", "REVIEW_MIN_CLOSES", "REVIEWS_PER_ROUND", "REVIEWS_CEILING", "OBSERVE_FILE"]

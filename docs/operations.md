@@ -993,7 +993,12 @@ never evidence.
   row for a program the swarm barred (`incubator_barred`: bars are kept for good, and no evaluator adoption clears
   them), one the gate's `review` names without a readable pass and a passed audit (a pass whose audit is still owed
   waits), one whose incubator review or audit failed or was revoked, a version the gate refused at any stage, a program
-  whose holdout look failed, or a family whose verdict records cannot be read.
+  whose holdout look failed, or a family whose verdict records cannot be read. These are read for the PROGRAM (the
+  same code and params, so the same run sha) in every family that holds it, alive or retired, and a program the gate
+  owes a bar is refused too (`incubator-bars-owed.json` beside the swarm store, written only when the store errs; if it
+  cannot be read, every incubator row is refused until the gate writes it again). The swarm start backfills bars from
+  release B's gate events (log line `incubator backfill: N programs barred`), and an evaluator adoption records every
+  failure it would clear before it clears it.
 
   An unreadable store refuses: no pin and no open, while exits go on. **Release B writes none of these marks.** B2
   (#444) writes the Train-and-drift pass and the incubator's reviews, so until it ships no family is eligible, even
