@@ -243,9 +243,35 @@ Agent count and simulated years measure activity; passing unseen evidence measur
   term-structure and skew mean reversion, post-event volatility crush, weekly-expiry dynamics).
 - **Population:** by default 48 researchers at the start, a ceiling of 96 and a floor of 16; the
   live settings (Sept 29) start at 96, the ceiling, with a floor of 12. Families compete for Gym time
-  and model calls through a bandit over their validation evidence (Thompson sampling). Since R11b only
-  an old family whose latest validation mean is positive is exploited, each earning at most 15% of the
-  share; new families and old ones at zero or below share the rest, never less than 25%. A family
+  and researcher turns by **expected information value** (Release B, `league/swarm/allocation.py`): a
+  family's value is the variance of its next validation's pass or fail under an empirical-Bayes
+  posterior (the swarm's recent validation looks on the running evaluator, pooled by mechanism class
+  and blended with the Sept 30 fit, a family's own latest look updating its class's prior; a family
+  past the t check but failing another counts as on the line), discounted by the idea's trials (its
+  lineage's, as the deflated Sharpe counts them, never fewer than its own and those it inherited at
+  birth: breadth beats depth), by exhaustion (its lineage's holdout looks spent, a drift-failed
+  validation, a validated version the gate is done with, a hold streak; a failed holdout look or a
+  refusal at review also ends that validation's say, so the family reads as unvalidated) and by
+  half for a structure the account cannot open for real. Every family keeps a 10% floor share; 35% is an explicit exploration share
+  for breadth across mechanism classes (a class's slice is its families' value over the root of
+  their number, then by value within it); the rest follows value. No family holds more than 5%, and
+  no class more than 30% while other classes hold families worth the attention (a cap's excess goes
+  to families worth at least what the average unit of share buys, at most tripling any one's share;
+  what the family cap cuts beyond that goes to every family by value, and the class cap gives way
+  only for what it adds, which it mostly does while one or two classes are most of the population;
+  the round's report says which). Families at the gate or beyond get the floor share and lead the
+  leaderboard; the architect and the strategist read the share as `research_share`, told that it
+  measures how undecided a family is, not its evidence. Shares buy turns: the researchers' scheduler is start-time fair
+  queueing, so under contention a family's turns follow its share. With an explicit
+  `allocation.plan_usd_per_hour`, the number of researchers contracts when research spend (Sail
+  models and Gym boxes) runs over it and expands above `researcher.concurrency` (up to
+  `allocation.max_concurrency`) while useful experiments wait and spend is under 80% of it; with no
+  plan it is `researcher.concurrency`. Births carry a **structure quota**: one structure family
+  (single, butterfly, vertical, straddle, condor, calendar) at most 60% of a day's births and of a
+  pass, resting below three quarters of the start population. `allocation.mode` "bandit" restores
+  the R11b bandit (Thompson sampling in which only an old family whose latest validation mean is
+  positive is exploited, each earning at most 15%).
+  A family
   retires when its best program has not improved on validation in 30
   revisions or 2,000 evaluations by default (200 and 4,000 live), or its trial-adjusted evidence falls
   below the line, or by the idle rule: evaluations without an eligible Train version (150 by default,
@@ -288,7 +314,7 @@ Agent count and simulated years measure activity; passing unseen evidence measur
 | Loop | Cadence | Who | What happens | Output |
 |---|---|---|---|---|
 | Inner | seconds to minutes | each researcher | revise the program, run it on Train, read the diagnostics, revise again | a better program or a lesson |
-| Tournament | hourly | the House | validation runs of each family's best versions, the bandit's reallocation, forks and retirements, the leaderboard | Gym time and model calls follow evidence |
+| Tournament | hourly | the House | validation runs of each family's best versions, the reallocation by expected information value, forks and retirements, the leaderboard | Gym time and researcher turns follow the value of the next evidence |
 | Architect | every 4 hours by default, refilling hourly below the start; every 15 minutes live, refilling every 20 | Claude by default (`architect.openai_model` null live); Kimi-K3 on Sail when Claude has no room or line: live since Sept 30, when the architect's Claude line was set to $0 (never after a cut answer: R11b salvages its complete families and retries once on Claude at medium effort) | reads the leaderboard, the graveyard and the gaps; writes families with a mechanism, a structure and a rejection test; at most 12 living families a mechanism class (R11b) | 3-6 new families by default; the gap to the start, up to 24 a pass live |
 | Diagnostician | every 5 minutes | Claude | reads a stuck or nearly-there family's Train diagnostics (never Validation's numbers); rewrites its mechanism or writes its lesson; off live since Sept 30 (`diagnostician.enabled` false: its rewrites produced no validation in 48 hours) | a new mechanism, or a lesson and a retirement |
 | Gate | when a family meets the validation line | review: Claude when "review" is in `claude.roles` (live: Sonnet 5.5), else GPT-6 Sol while the OpenAI month has room and `gate.review_openai_model` names it (null live), else DeepSeek-V4-Pro on Sail; audit: Claude (live: Opus 5.5, `claude.role_model`), then GPT-6 Astra on the same terms (null live), then a second Sail model; the gate box | review for lookahead, leakage and fill abuse; the audit; one holdout look | a Candidate, or a recorded refusal |
