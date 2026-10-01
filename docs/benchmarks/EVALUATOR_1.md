@@ -6,12 +6,12 @@ Gym engine and the real evidence lines, so it tests the execution contract (what
 survives between runs) as well as the statistics. It is a benchmark of the harness, never evidence about a strategy:
 every world is invented, every edge is planted, and no model, market data, sealed day or production state is read.
 
-This report scores release B's evaluator (release B at `5f2c4282` merged into this branch, `1e63b497`) on two
-independent cohorts: the development cohort, on which the threshold variants were chosen, and a confirmation cohort
-drawn afterwards from independent streams. **No threshold was changed, and none is recommended for adoption now** (the
-last section says why). The owner's rule (Sept 30) allows an eligibility or scoring change only when fixed benchmarks
-show false promotions do not rise and missed signals fall; the sealed holdout, the multiple-testing control and the
-forward requirement never loosen, and prior evidence keeps its prior verdicts.
+This report scores release B's evaluator (main at `3eaf4d06`, release B as it deploys, merged into this branch as
+`2d028fa8`) on two independent cohorts: the development cohort, on which the threshold variants were chosen, and a
+confirmation cohort drawn afterwards from independent streams. **No threshold was changed, and none is recommended for
+adoption now** (the last section says why). The owner's rule (Sept 30) allows an eligibility or scoring change only when
+fixed benchmarks show false promotions do not rise and missed signals fall; the sealed holdout, the multiple-testing
+control and the forward requirement never loosen, and prior evidence keeps its prior verdicts.
 
 The machine-readable receipts are [evaluator_1.json](evaluator_1.json) (development) and
 [evaluator_1_confirmation.json](evaluator_1_confirmation.json): the suite hash, the tree and fixture fingerprints, the
@@ -28,12 +28,12 @@ python -m league.swarm.benchmarks --suite evaluator --cohort confirmation --froz
 python -m league.swarm.benchmarks --suite evaluator --json --compare docs/benchmarks/evaluator_1.json
 ```
 
-One run takes 20 to 23 minutes here (development 1216 s, confirmation 1375 s) on one core of a shared laptop, depending
-on load: eight engine worlds and 128 search lineages for each of ten search cases. What releases are compared on is the
-report's `headline`, a per-case vector: promotions of each negative, misses of each positive, the cases the static check
-refuses, impossible fills and stress-contaminated runs per case, the review contract's two answers per case, each
-proof's held count, each ablation's detections and each variant's owner-rule verdict. `--compare OLD` lists regressions
-and improvements case by case (a review-contract answer that stops holding is a regression) and exits 4 when there is a
+One run takes 16 minutes here (development 930 s, confirmation 973 s) on one core of a shared laptop, depending on load:
+eight engine worlds and 128 search lineages for each of ten search cases. What releases are compared on is the report's
+`headline`, a per-case vector: promotions of each negative, misses of each positive, the cases the static check refuses,
+impossible fills and stress-contaminated runs per case, the review contract's two answers per case, each proof's held
+count, each ablation's detections and each variant's owner-rule verdict. `--compare OLD` lists regressions and
+improvements case by case (a review-contract answer that stops holding is a regression) and exits 4 when there is a
 regression or the runs are not comparable (a different suite, cohort or world fixture, or a run off the full protocol).
 A different Python, numpy or pyarrow is noted, since the synthetic streams may shift with them. Exit 3 means the suite
 file is not the pinned suite; exit 5 means the tree lacks an interface the suite calls (main at `f082cf5e` is the oldest
@@ -116,9 +116,10 @@ rejection (a grounded finding stays a failure, the same claim without a real exc
 - **State** (contract proofs): module STATE starts fresh each run; parameter lists are copied per run; a split Train run
   matches the unsplit one day for day and Validation is never split; no process-global object carries a run's decisions
   into the next run, and a batch-mate cannot change what another program sees or computes, each proved separately
-  through `np.typecodes`, `np.sctypeDict` and np.polynomial's arrays (`polyx`; `Polynomial.domain`); the **reach proof**
-  (below), which walks everything a program can reach from its imports and writes every writable object it finds; and a
-  batch-mate cannot write into the ctx objects another program is handed.
+  through `np.typecodes`, `np.sctypeDict` and np.polynomial's arrays (`polyx`; `Polynomial.domain`); a program's
+  decisions repeat on two runs of the same days (a program that draws its side from `np.matlib.rand`); the **reach
+  proof** (below), which walks everything a program can reach from its imports and writes every writable object it
+  finds; and a batch-mate cannot write into the ctx objects another program is handed.
 - **Broken ablations**: a `signal_on` switch wired six ways (through `ctx.params`, a helper default capturing `PARAMS`,
   a module alias, a shadow copy that never reads `PARAMS`, a read defeated by a wrong comparison, and a computed key
   with a wrong test). Detection by the static contract and by a behavioral probe (the off variant over Validation).
@@ -131,14 +132,16 @@ rejection (a grounded finding stays a failure, the same claim without a real exc
 
 ## Results: release B's evaluator
 
-Tree: release B (origin/release/b-20261001 at `5f2c4282`) merged into this branch and committed as `1e63b497`;
-`gym-engine-4`, execution fingerprint `3e90a6cc1c91`, evaluator sources `771b675df22a` (the evidence, gate, researcher,
-review-contract, experiment, results and stats modules), fixture `1ee0e716bc8d`, suite `0e9badba6821`; Python 3.14.7,
+Tree: main at `3eaf4d06` (release B, #454, with #456) merged into this branch and committed as `2d028fa8`;
+`gym-engine-4`, execution fingerprint `47587e22c5af`, evaluator sources `771b675df22a` (the evidence, gate, researcher,
+review-contract, experiment, results and stats modules), fixture `1ee0e716bc8d`, suite `c78a85148343`; Python 3.14.7,
 numpy 2.5.3, pyarrow 25.0.1 (each receipt's `tree` and `runtime`). Each cohort: 8 worlds and 128 search lineages per
-search case. Development took 1216 s and confirmation 1375 s on one core of a loaded shared machine. Against this
-suite's previous receipts (suite `ce161776` on release A, `777b894f`; in this file's history at `cb9fac40`), every case,
-search band, ablation and variant figure the two runs share is identical in both cohorts: release B moved none of them.
-This run adds the two np.polynomial proofs, the walk-based reach proof, the opened routes and the per-case figures.
+search case. Development took 930 s and confirmation 973 s on one core of a shared machine. Against this suite's
+previous receipts (suite `0e9badba` on release B at `5f2c4282`, in this file's history at `bfc01650`; suite `ce161776`
+on release A, `777b894f`, at `cb9fac40`), every case, search band, ablation and variant figure the runs share is
+identical in both cohorts: neither release B nor this revision's walk moved any of them. This revision adds the draws
+proof and widens the reach proof's walk to the names no `dir()` lists; the previous one added the two np.polynomial
+proofs, the walk-based reach proof, the opened routes and the per-case figures.
 
 ### Headline
 
@@ -241,45 +244,65 @@ money (Validation t at most -1.0 in any world) and stops at the Train stress run
 | `state_numpy_batchmates_sctypedict` | state | 0/8 | 0/8 | 65, 0 |
 | `state_numpy_runs_polynomial` | state | 0/8 | 0/8 | 65, 0 |
 | `state_numpy_batchmates_polynomial` | state | 0/8 | 0/8 | 65, 0 |
-| `state_numpy_reachable` | state | 0/8 | 0/8 | 38 reachable: `np.sctypeDict`, `np.typecodes`, 36 `np.polynomial` arrays; setters `np.dtypes.register_dlpack_dtype`, `np.polynomial.set_default_printstyle` |
+| `state_numpy_draws` | state | 0/8 | 0/8 | 65, 65 |
+| `state_numpy_reachable` | state | 0/8 | 0/8 | 52 reachable: 14 through `np.matrixlib`, 36 through `np.polynomial`, `np.sctypeDict`, `np.typecodes`; setters `np.dtypes.register_dlpack_dtype`, 3 through `np.matrixlib`, `np.polynomial.set_default_printstyle`; draws `np.matlib.rand`, `np.matlib.randn` |
 | `state_ctx_batchmates` | context | 0/8 | 0/8 | 65, 0 |
 | `state_split_segments` | state | 8/8 | 8/8 | 195, 195 |
 
 `state_fresh_runs`, `state_params_copied` and `state_split_segments` rebuild the state-reset proof Codex ran on Sept 30
 and lost: STATE resets between runs, the engine-4 parameter binding holds (see Ablations), and splitting Train does not
-change an intraday program's days. The rest are three defects, proved eight ways, and release B does not fix them.
+change an intraday program's days. The other nine proofs fail in every world of both cohorts, and release B fixes none
+of them. They are three defects: numpy objects a program can write (seven proofs, the reach proof among them), numpy's
+shared generator a program can draw from (`state_numpy_draws`), and the ctx view batch-mates share
+(`state_ctx_batchmates`).
 
 **What a program can reach and write.** The reach proof walks everything a program can reach from `import numpy` and
-`import math` without calling anything: every public attribute (numpy's lazily imported submodules included), mapping
-value and key, and sequence and set element, through modules, classes and instances, transitively, as the scored tree's
-own static check admits each read. On numpy 2.5.3 that is 1,245 objects, 5,567 reads, 5 deep, and the walk finished
-(`complete`) (`walk` in the receipt's reach proof). Every writable object it finds (a dict, list, set or bytearray, a
-writable numeric array, anything with item assignment) is written by one loaded program through the engine, and the
-suite checks what the write left behind after the run and whether a reader sees it on a later run and beside the writer
-in one batch. The proof also requires the check to refuse attribute writes (assignment, `del`, `setattr`, `delattr`) on
-every reached object, and no global setter (a callable named `set_*`, `register_*`, `seterr*` or `setbufsize`) to be
-reachable. It holds only when all of that does, so it holds for a fix that refuses the reads and for one that keeps the
-writes from outliving a program (a unit test runs an engine that isolates each program: the proof holds with every
-object still reachable).
+`import math` without calling anything: every public attribute, mapping value and key, and sequence and set element,
+through modules, classes and instances, transitively, as the scored tree's own static check admits each read. A module's
+names are not only what `dir()` lists. The walk also reads the module's own dict (numpy's `__dir__` hides `matrixlib`),
+its package's submodules as importlib finds them, and every name its module `__getattr__` can resolve (numpy's resolves
+`np.matlib`, which no `dir()` lists), and it repeats until a pass imports nothing new. On numpy 2.5.3 that is 1,913
+objects, 9,377 reads, 8 deep, and the walk finished (`complete`; `walk` in the receipt's reach proof). Every writable
+object it finds (a dict, list, set or bytearray, a writable numeric array, anything with item assignment) is written by
+one loaded program through the engine, and the suite checks what the write left behind after the run and whether a
+reader sees it on a later run and beside the writer in one batch. The proof also requires the check to refuse attribute
+writes (assignment, `del`, `setattr`, `delattr`) on every reached object, no global setter (a callable named `set_*`,
+`register_*`, `seterr*` or `setbufsize`) to be reachable, and no function that draws from numpy.random's process-global
+generator (`draws`). It holds only when all of that does. A fix that refuses the reads makes it hold. So does one that
+keeps the writes from outliving a program, provided the setters and the draws are still refused: a unit test runs an
+engine that isolates each program, and the proof holds with every writable object still reachable once the setters and
+draws are refused, and fails without that.
 
-It finds 38 writable objects, and a program's write to every one of them is still there after its run (`reachable`); a
+It finds 52 writable objects, and a program's write to every one of them is still there after its run (`reachable`); a
 reader that checks every mark trades 65 sessions alone, 0 after the writer's run and 0 beside the writer in one batch
-(`trades`). The 38:
+(`trades`). The 52:
 - two module-level dicts, `np.typecodes` and `np.sctypeDict`;
 - 36 arrays in `np.polynomial`: each basis module's `*domain`, `*one`, `*x` and `*zero` constants (`polyx`, `chebx`,
-  `hermdomain`, ...) and the six classes' default `domain` and `window` (`Polynomial.domain`, ...).
+  `hermdomain`, ...) and the six classes' default `domain` and `window` (`Polynomial.domain`, ...);
+- 14 registries of numpy's core, through `np.matrixlib`: its `defmatrix` module binds `numpy._core.numeric` as `N`, and
+  through it a program reaches `multiarray.typeinfo`, `numerictypes.allTypes`, `numerictypes.genericTypeRank`,
+  `numerictypes.sctypes` and the five lists in it, `overrides.ARRAY_FUNCTIONS`, and the `keywords` dicts of four of
+  numpy's dispatch decorators (`array_function_dispatch` and its kin).
 
 numpy itself consults `sctypeDict` when it resolves dtype names, and a polynomial built with the defaults is evaluated
 through its class's `domain`, so a write there changes what another program computes, not only what it knows: the
 polynomial batch-mate proof's reader stands aside whenever `Polynomial([0, 1])(0.5)` is not 0.5, and it trades 65
-sessions alone and 0 beside a writer that sets `Polynomial.domain[1] = 3.0` (`state_numpy_batchmates_polynomial`). Two
-reachable functions change state every caller shares, by their names and documentation (the suite lists them and does
-not call them): `np.polynomial.set_default_printstyle` (how every polynomial prints) and
+sessions alone and 0 beside a writer that sets `Polynomial.domain[1] = 3.0` (`state_numpy_batchmates_polynomial`).
+
+Five reachable functions change state every caller shares (`setters`), by their names and documentation (the suite lists
+them and does not call them): `np.polynomial.set_default_printstyle` (how every polynomial prints),
 `np.dtypes.register_dlpack_dtype` (a process-wide registry that, its documentation says, raises on a conflicting second
-registration of a key). The four setters numpy has at its top level (`seterr`, `seterrcall`, `setbufsize`,
-`set_printoptions`) are refused today (`refused_containers`). And `np.polynomial.polyutils.functools` hands a program
-the standard library's `functools`, a module outside the import allowlist (`foreign_modules`; nothing in it is writable,
-and the walk follows it).
+registration of a key), and, through np.matrixlib, `set_typeDict` (it replaces the dictionary numpy's C code looks array
+types up in), `set_datetimeparse_function` (undocumented) and `set_module`, a decorator that rewrites a function's
+`__module__`. Two more draw from numpy.random's process-global generator: `np.matlib.rand` and `np.matlib.randn`
+(`draws`). numpy seeds that generator from the operating system and every caller advances it, which is what
+`NUMPY_BANNED`'s `random` exists to close (a program is deterministic). The draws proof's program takes each session's
+side from `np.matlib.rand`: in the first world it trades 65 sessions on each of two runs of the same days, and the two
+runs' trades differ in every world of both cohorts (`state_numpy_draws`). The four setters numpy has at its top level
+(`seterr`, `seterrcall`, `setbufsize`, `set_printoptions`) are refused today (`refused_containers`). And the walk
+reaches seven standard-library modules outside the import allowlist without an import (`foreign_modules`): `functools`
+through `np.polynomial.polyutils`, and `abc`, `ast`, `collections`, `collections.abc`, `contextlib` and `itertools`
+through np.matrixlib. Nothing in them is writable, and the walk follows them.
 
 The underlying's view is built once a minute and shared by every batch-mate with the same history, with a plain dict
 inside it (`state_ctx_batchmates`). These contradict two of the review contract's facts (`state`: never across
@@ -291,18 +314,26 @@ programs of one unit. The House's live decider holds every live program instance
 (`league/live/decider.py`), so the batch-mate channels exist between whatever programs it runs together. Release A's
 batch isolation contains a failing program's errors; it does not separate this state. The fixes belong to `league/gym`
 (a Gym change resets evidence) and are not in this change:
-- **numpy.** Refusing `typecodes` and `sctypeDict` is not a whole fix: it leaves np.polynomial's 36 arrays and both
-  setters open, and the suite says so (the dicts' four proofs hold, the two polynomial proofs and the reach proof still
-  fail; a unit test simulates it). The smallest denylist that closes everything the walk finds adds `typecodes`,
-  `sctypeDict`, `polynomial` and `register_dlpack_dtype` to `NUMPY_BANNED` (a unit test simulates it on both CI jobs'
-  numpy, 2.4.4 and 2.5.3: every numpy proof holds). `NUMPY_BANNED`'s `polynomial_utils` names nothing numpy has (the
-  module is `polyutils`). The robust form is an allowlist of the numpy names programs use, since a numpy upgrade can add
-  objects a denylist has never seen; the reach proof re-checks whatever numpy the scored process has.
+- **numpy.** Refusing `typecodes` and `sctypeDict` is not a whole fix: it leaves np.polynomial's arrays, np.matrixlib's
+  registries, the setters and np.matlib's draws open, and the suite says so (the dicts' four proofs hold; the two
+  polynomial proofs, the draws proof and the reach proof still fail; a unit test simulates it). This report's previous
+  revision recommended four names (the two dicts, `polynomial` and `register_dlpack_dtype`); its walk read only what
+  `dir()` lists, and those four still leave np.matrixlib's registries and setters and np.matlib's draws open (a unit
+  test simulates it). The smallest denylist that closes everything the walk finds adds six names to `NUMPY_BANNED`:
+  `typecodes`, `sctypeDict`, `polynomial`, `register_dlpack_dtype`, `matlib` (its `rand` and `randn` read numpy.random's
+  process-global generator, so two runs of the same days differ) and `matrixlib` (its `defmatrix` module hands out
+  numpy's core and modules outside the import allowlist). A unit test simulates it on both CI jobs' numpy, 2.4.4 and
+  2.5.3: every numpy proof holds, and the walk reaches nothing writable, no setter, no draw and no module outside the
+  allowlist. Refusing a name is not refusing an object: with `sctypeDict` refused, the same dict is still reachable as
+  `numerictypes.typeDict` through np.matrixlib, which is why `matrixlib` has to go with it. `NUMPY_BANNED`'s
+  `polynomial_utils` names nothing numpy has (the module is `polyutils`). The robust form is an allowlist of the numpy
+  names programs use, since a numpy upgrade can add objects a denylist has never seen; the reach proof re-checks
+  whatever numpy the scored process has.
 - **ctx.** Make the view's coverage mapping read-only.
 
 When they land, the probes are refused (or the writes stop outliving a program) and the proofs hold with no edit to the
 suite; a unit test runs the refused path through the whole report. The pipeline's numpy memo probe reaches `typecodes`
-only, so its refusal alone says nothing about the other 37 objects.
+only, so its refusal alone says nothing about the other 51 objects.
 
 ### Broken ablations
 
@@ -421,11 +452,12 @@ variant is met and confirmed (0 of 6).
 - Eight worlds and 128 lineages per case: a zero count supports an exact bound, not a claim of zero. Case-worlds cluster
   by case, and every bound is conditional on this case mix.
 - The reach proof covers what a program reaches without a call, in the scored process's numpy (2.5.3 here; a unit test
-  checks the same 38 objects on numpy 2.4.4, which the CI's Python 3.11 job runs). Objects reachable only through a
-  call's result, and state a call changes through a function not named as a setter, are not covered.
-- These figures score release B at `5f2c4282`. If release B moves again before it deploys, or carries a Gym fix, score
-  the deploying tree with the same pinned suite and `--compare docs/benchmarks/evaluator_1.json`; main at `f082cf5e` is
-  the oldest tree the suite can score.
+  checks the same 52 objects and the same draws on numpy 2.4.4, which the CI's Python 3.11 job runs). Objects reachable
+  only through a call's result, names a class or instance resolves only in its own `__getattr__`, and state a call
+  changes through a function neither named as a setter nor reading numpy.random, are not covered.
+- These figures score main at `3eaf4d06`, the release B that is deploying. If main moves, or carries a Gym fix, score it
+  with the same pinned suite and `--compare docs/benchmarks/evaluator_1.json`; main at `f082cf5e` is the oldest tree the
+  suite can score.
 
 ## Reproduction
 

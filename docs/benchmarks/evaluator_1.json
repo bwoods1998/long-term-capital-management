@@ -955,7 +955,7 @@
    }
   },
   "cohort": "development",
-  "elapsed_seconds": 1215.7,
+  "elapsed_seconds": 930.3,
   "facts_contradicted": [
    "context",
    "state"
@@ -1152,6 +1152,7 @@
    "state_numpy_batchmates",
    "state_numpy_batchmates_sctypedict",
    "state_numpy_batchmates_polynomial",
+   "state_numpy_draws",
    "state_numpy_reachable",
    "state_ctx_batchmates"
   ],
@@ -1161,6 +1162,7 @@
    "state_numpy_batchmates": 0,
    "state_numpy_batchmates_polynomial": 0,
    "state_numpy_batchmates_sctypedict": 0,
+   "state_numpy_draws": 0,
    "state_numpy_reachable": 0,
    "state_numpy_runs": 0,
    "state_numpy_runs_polynomial": 0,
@@ -1201,13 +1203,13 @@
   },
   "stress_contaminated_total": 8,
   "suite": "evaluator-suite-1",
-  "suite_sha": "0e9badba6821b28f738ae40adb59dc00f969b717a939a35d7a16cfd11494b2fe",
+  "suite_sha": "c78a851483432ee400dd6c9cc6622bee0710f8e41520464338c3964028e10311",
   "tree": {
    "engine": "gym-engine-4",
    "evaluator_sha": "771b675df22a7683f666cea08fec471eafb9dd9052085f17d19ba3c30f09c047",
-   "execution_sha256": "3e90a6cc1c91683237e8784ad52d0048985f8623b7ee1534db8d984971ec5523",
+   "execution_sha256": "47587e22c5af1a38bc4e0c766d2dc333b75e8a4b576c0ccc89342a06900a70e1",
    "fixture_sha": "1ee0e716bc8d8f0ed7dc12377c44420ca1643064468d1985a18de715dab101b1",
-   "git_head": "1e63b497fcf55d0d1ec1e141668f76feba7bc919",
+   "git_head": "2d028fa85c6f82303091afc9f868cd40b44e3406",
    "league_uncommitted_changes": false
   },
   "verdict_sensitivity": {
@@ -1243,11 +1245,11 @@
   "Finite counts: an exact 95% upper bound, not a point estimate, is the claim a zero count supports. Run-level bounds treat each case-world as an independent trial; outcomes cluster by case (most go 0/8 or 8/8), so the case-level counts are the effective sample, and every bound is conditional on this fixed case mix.",
   "End-to-end false promotions cannot tell floor variants apart on noise: the holdout with Holm stops every noise lineage under any floors. The owner-rule verdict therefore also compares the holdout looks noise spends in every frequency band, and the sparse memorized table is a negative the floors are known to stop.",
   "--tree runs the candidate's code in the suite's interpreter with the operator's environment: it guards against accidental drift of the cases, not against a hostile tree.",
-  "The numpy reach proof covers what a program reaches from `import numpy` and `import math` without a call (public attributes, mapping values and keys, elements), in the scored process's numpy and the static check's own answer. Not covered: objects a program reaches only through a call's result, and state a call changes through a function not named as a setter (set_*, register_*, seterr*, setbufsize)."
+  "The numpy reach proof covers what a program reaches from `import numpy` and `import math` without a call (public attributes, the names a module's dict, its package's submodules and its module __getattr__ can resolve, mapping values and keys, elements), in the scored process's numpy and the static check's own answer. Not covered: objects a program reaches only through a call's result, names a class or instance resolves only in a __getattr__, and state a call changes through a function neither named as a setter (set_*, register_*, seterr*, setbufsize) nor reading numpy.random's shared generator."
  ],
  "owner_rule_confirmation": null,
  "pinned": true,
- "pinned_sha": "0e9badba6821b28f738ae40adb59dc00f969b717a939a35d7a16cfd11494b2fe",
+ "pinned_sha": "c78a851483432ee400dd6c9cc6622bee0710f8e41520464338c3964028e10311",
  "proofs": {
   "state_ctx_batchmates": {
    "claim": "a batch-mate cannot write into the ctx objects another program is handed",
@@ -1304,19 +1306,54 @@
    "of": 8,
    "refused": null
   },
+  "state_numpy_draws": {
+   "claim": "a program's decisions repeat on two runs of the same days (np.matlib.rand draws from numpy.random's process-global generator)",
+   "fact": "state",
+   "held": 0,
+   "observed": [
+    65,
+    65
+   ],
+   "of": 8,
+   "refused": null
+  },
   "state_numpy_reachable": {
    "attribute_writes": [],
    "channels": {
     "batchmates": true,
     "runs": true
    },
-   "claim": "nothing reachable from `import numpy` or `import math` without a call (public attributes, mapping values, elements) carries a program's write past its run or to a batch-mate; no attribute write is admitted on a reached object, and no global setter (set_*, register_*) is reachable",
+   "claim": "nothing reachable from `import numpy` or `import math` without a call (public attributes, mapping values, elements) carries a program's write past its run or to a batch-mate; no attribute write is admitted on a reached object, and no global setter (set_*, register_*) and no function that draws from numpy.random's shared generator is reachable",
+   "draws": [
+    "np.matlib.rand",
+    "np.matlib.randn"
+   ],
    "fact": "state",
    "foreign_modules": {
-    "functools": "np.polynomial.polyutils.functools"
+    "abc": "np.matrixlib.defmatrix.N.arrayprint.contextlib.abc",
+    "ast": "np.matrixlib.defmatrix.ast",
+    "collections": "np.matrixlib.defmatrix.N.overrides.collections",
+    "collections.abc": "np.matrixlib.defmatrix.N.overrides.collections.abc",
+    "contextlib": "np.matrixlib.defmatrix.N.arrayprint.contextlib",
+    "functools": "np.polynomial.polyutils.functools",
+    "itertools": "np.matrixlib.defmatrix.N.itertools"
    },
    "held": 0,
    "observed": [
+    "list(np.matrixlib.defmatrix.N.numerictypes.sctypes.values())[0]",
+    "list(np.matrixlib.defmatrix.N.numerictypes.sctypes.values())[1]",
+    "list(np.matrixlib.defmatrix.N.numerictypes.sctypes.values())[2]",
+    "list(np.matrixlib.defmatrix.N.numerictypes.sctypes.values())[3]",
+    "list(np.matrixlib.defmatrix.N.numerictypes.sctypes.values())[4]",
+    "np.matrixlib.defmatrix.N.array_function_dispatch.keywords",
+    "np.matrixlib.defmatrix.N.fromnumeric.array_function_dispatch.keywords",
+    "np.matrixlib.defmatrix.N.multiarray.array_function_from_c_func_and_dispatcher.keywords",
+    "np.matrixlib.defmatrix.N.multiarray.typeinfo",
+    "np.matrixlib.defmatrix.N.numerictypes.allTypes",
+    "np.matrixlib.defmatrix.N.numerictypes.genericTypeRank",
+    "np.matrixlib.defmatrix.N.numerictypes.sctypes",
+    "np.matrixlib.defmatrix.N.overrides.ARRAY_FUNCTIONS",
+    "np.matrixlib.defmatrix.N.shape_base.array_function_dispatch.keywords",
     "np.polynomial.Chebyshev.domain",
     "np.polynomial.Chebyshev.window",
     "np.polynomial.Hermite.domain",
@@ -1366,6 +1403,9 @@
    ],
    "setters": [
     "np.dtypes.register_dlpack_dtype",
+    "np.matrixlib.defmatrix.N.multiarray.set_datetimeparse_function",
+    "np.matrixlib.defmatrix.N.multiarray.set_typeDict",
+    "np.matrixlib.defmatrix.set_module",
     "np.polynomial.set_default_printstyle"
    ],
    "trades": [
@@ -1376,10 +1416,10 @@
    "unverified": [],
    "walk": {
     "complete": true,
-    "depth": 5,
-    "edges": 5567,
+    "depth": 8,
+    "edges": 9377,
     "numpy": "2.5.3",
-    "objects": 1245
+    "objects": 1913
    }
   },
   "state_numpy_runs": {
@@ -1488,18 +1528,18 @@
    "upper_95_one_sided": 0.9898
   }
  },
- "replication_rows_sha256": "a67bbfbf8c439f61afb67be2416e2e063157fa5d00ed1eab557775cd192c7cef",
+ "replication_rows_sha256": "c4db174c9e674984ebaf4f08adb54feb8000fd58558270909f29a6849decd15f",
  "replications": 8,
  "reproduce": "python -m league.swarm.benchmarks --suite evaluator --cohort development --json --output FULL.json --receipt RECEIPT.json (the rows digest excludes per-world seconds)",
  "runtime": {
-  "elapsed_seconds": 1215.7,
+  "elapsed_seconds": 930.3,
   "numpy": "2.5.3",
   "pyarrow": "25.0.1",
   "python": "3.14.7"
  },
  "search_replications": 128,
  "suite": "evaluator-suite-1",
- "suite_sha": "0e9badba6821b28f738ae40adb59dc00f969b717a939a35d7a16cfd11494b2fe",
+ "suite_sha": "c78a851483432ee400dd6c9cc6622bee0710f8e41520464338c3964028e10311",
  "title": "evaluator-suite-1, development cohort: a synthetic known-answer benchmark of the evaluator, not a qualification",
  "tree": {
   "engine": "gym-engine-4",
@@ -1513,12 +1553,12 @@
    "league/swarm/gate.py": "7e30040562186f08d6b79aabb9f31631d3bbab712e64fe23c0e42eda481a14a1",
    "league/swarm/researcher.py": "c509b2cc201d89ea8cbceb52143760c54ab8d803b98776f140f20fae1860655a"
   },
-  "execution_sha256": "3e90a6cc1c91683237e8784ad52d0048985f8623b7ee1534db8d984971ec5523",
+  "execution_sha256": "47587e22c5af1a38bc4e0c766d2dc333b75e8a4b576c0ccc89342a06900a70e1",
   "fixture_sha": "1ee0e716bc8d8f0ed7dc12377c44420ca1643064468d1985a18de715dab101b1",
   "fixture_sources": {
    "league/gym/synth.py": "d48f0d9d71388c133ee3ac08e7ee7b144060b2f661e2055a2c60ffbe5339638d"
   },
-  "git_head": "1e63b497fcf55d0d1ec1e141668f76feba7bc919",
+  "git_head": "2d028fa85c6f82303091afc9f868cd40b44e3406",
   "league_uncommitted_changes": false
  },
  "variants": {
