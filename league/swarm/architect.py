@@ -947,6 +947,61 @@ def sail_usage(usage: Any) -> dict[str, int]:
     return {k: v for k, v in pairs if isinstance(v, int) and not isinstance(v, bool)}
 
 
+def without_trailing_commas(text: Any) -> str:
+    """`text` with every comma that only closes an object or array (`,}` or `,]`, whitespace between allowed) removed,
+    outside JSON strings. Sail's k3 sometimes writes such commas into an otherwise complete answer (Oct 1, 2026: a
+    medium-effort pass's whole `families` array failed to parse and read as no proposals). Nothing else is changed."""
+    text = str(text or "")
+    out: list[str] = []
+    in_string = escaped = False
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if in_string:
+            out.append(ch)
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+        elif ch == '"':
+            in_string = True
+            out.append(ch)
+        elif ch == ",":
+            j = i + 1
+            while j < n and text[j] in " \t\r\n":
+                j += 1
+            if j < n and text[j] in "}]":
+                i += 1
+                continue
+            out.append(ch)
+        else:
+            out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def read_families(answer: Mapping[str, Any]) -> tuple[list[dict[str, Any]] | None, bool]:
+    """(the answer's proposals, whether a lenient read found them). A cut answer keeps its complete families (R11-3,
+    `salvage_families`); a complete one is read whole; when a complete answer's JSON has no `families` array (a stray
+    trailing comma makes the whole object unreadable, so the first readable inner object is taken instead), the text is
+    read again without trailing commas, whole or else object by object."""
+    text = answer.get("text")
+    if answer.get("truncated"):
+        return salvage_families(without_trailing_commas(text)), False
+    rows = (answer.get("json") or {}).get("families")
+    if rows is not None or not text:
+        return rows, False
+    from .models import extract_json  # the router's own reader (models.py is not on the live path)
+    lenient = without_trailing_commas(text)
+    whole = (extract_json(lenient) or {}).get("families")
+    if isinstance(whole, list):
+        return whole, True
+    some = salvage_families(lenient)
+    return (some, True) if some else (None, False)
+
+
 def salvage_families(text: Any) -> list[dict[str, Any]]:
     """The complete family objects of a cut answer's `families` array, in order (R11-3: a truncated architect answer keeps
     what it finished); [] when the array never opened or no object in it completed."""
@@ -1567,7 +1622,7 @@ class Architect:
         # A cut answer, on Claude (R11-3) or on Sail (`ModelRouter.ask`'s `truncated`, Oct 1, 2026), keeps its complete
         # families; a complete one is read whole.
         truncated = bool(answer.get("truncated"))
-        rows = salvage_families(answer.get("text")) if truncated else (answer.get("json") or {}).get("families")
+        rows, lenient = read_families(answer)
         on_digest = bool(extra) and answer.get("route") == "claude"
         born = self.admit(rows, digest=on_digest, library=library)
         proposed = len(rows) if isinstance(rows, list) else 0  # this pass's proposals, its retry's added below
@@ -1580,6 +1635,8 @@ class Architect:
         refused_cards = list(getattr(self, "card_refused", []) or [])
         out = {"born": born, "proposed": proposed, "route": answer.get("route"),
                "model": answer.get("model"), "cost_usd": answer.get("cost_usd"), "seconds": round(self.clock() - began, 1)}
+        if lenient:
+            out["lenient"] = True  # the families were read without the answer's stray trailing commas
         if library is not None:
             cited = [library.resolve(r.get("literature"))[0] for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
             out["library"] = {"queries": list(library.queries), "ids": list(library.ids), "cited": sum(1 for c in cited if c),
