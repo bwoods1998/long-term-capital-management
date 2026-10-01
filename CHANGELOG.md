@@ -45,7 +45,8 @@ Main `3eaf4d06` is Release B, deployed Oct 1 (below). Under the freeze (Oct 1, "
   refused the swarm window" warning, and `curl -s
   'https://blakewoods.us/api/capital/checkpoint?progress=1&positions=1&practice=1&window=1'` shows `levels` and
   `rationale`.
-- **No retire while the best Train version awaits validation** (H1, branch `b/h1-no-retire-awaiting-validation`;
+- **No retire while the best Train version awaits validation** (H1, PR #475, branch
+  `b/h1-no-retire-awaiting-validation`;
   `league/swarm/researcher.py`, `league/swarm/diagnostician.py`, `league/swarm/harness_lanes.py`; the money path:
   `researcher.py` is loaded by the live path through `gate`, so it deploys 20:05-13:25Z only, after two adversarial
   reviews and green CI). On Oct 1 seven of the ten families that made a drift-passing Train version retired themselves
