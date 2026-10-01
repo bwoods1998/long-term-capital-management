@@ -78,6 +78,18 @@ Never a refill on Kimi-K3 after a cut: a retry Claude has no room or line for le
 routes as usual (to Sail when Claude still has none). The event's `truncated` says what was salvaged and retried.
 `claude.role_effort["architect"]` sets the pass's own effort (models.py).
 
+ON SAIL (Oct 1, 2026: from 08:15Z every pass on Kimi-K3 at "high" effort spent the whole 32,000-token output on reasoning
+and came back cut, most with no text at all, and the cut was silent, so each read as no proposals; the same request at
+"medium" completed in 66 s with 12 carded families). The pass's effort on Sail and OpenAI is `architect.sail_effort`
+("medium" by default, SAIL_EFFORT; "high" or any of SAIL_EFFORTS may be set; anything else reads as the default, so a
+typo never stops births); Claude's stays `claude.role_effort` / `claude.effort`. A Sail answer cut short
+(`ModelRouter.ask`'s `truncated`, the Provider's `incomplete`) is salvaged exactly as a Claude one: its complete families
+are admitted, and fewer than SALVAGE_MIN buy the same one retry on Claude alone (never Sail or OpenAI again; while the
+architect's Claude line is $0 it is refused unbilled). A Sail pass's event says its effort, its usage (`sail_usage`:
+input, cached, output and reasoning tokens) and, when cut, its `incomplete_reason`. A pass that proposed nothing (an
+empty, cut-to-nothing or failed answer) leaves the last pass's card and structure refusals as they are, so their lessons
+reach the next request.
+
 FAMILY CARDS (release B, league/swarm/cards.py). Every proposal carries a card: its hypothesis, a mechanism class from
 the card vocabulary, its inputs, holding, cost hurdle, comparison, ablation switch (or a flat comparison, not for a
 directional structure) and falsification. `admit` refuses a proposal without a complete card (`architect.require_card`,
@@ -915,6 +927,24 @@ class GraveyardDigest:
 #: R11-3: fewer families than this salvaged from a cut answer buys one retry on Claude at medium effort.
 SALVAGE_MIN = 3
 _FAMILIES = re.compile(r'"families"\s*:\s*\[')
+#: The pass's effort on Sail and OpenAI (`architect.sail_effort`, ON SAIL in the module docstring): "medium" by default,
+#: since Kimi-K3 at "high" spent the whole output on reasoning (Oct 1, 2026); any of SAIL_EFFORTS may be set ("high"
+#: included), and anything else reads as the default. Claude's effort is `claude.role_effort` / `claude.effort`.
+SAIL_EFFORT = "medium"
+SAIL_EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
+
+
+def sail_usage(usage: Any) -> dict[str, int]:
+    """A Sail answer's usage as the pass's event keeps it: input, cached input, output and reasoning tokens, those the
+    Provider gave as whole numbers (a cut answer's reasoning tokens show where its output went)."""
+    usage = usage if isinstance(usage, Mapping) else {}
+    given = usage.get("input_tokens_details")
+    spent = usage.get("output_tokens_details")
+    given = given if isinstance(given, Mapping) else {}
+    spent = spent if isinstance(spent, Mapping) else {}
+    pairs = (("input_tokens", usage.get("input_tokens")), ("cached_tokens", given.get("cached_tokens")),
+             ("output_tokens", usage.get("output_tokens")), ("reasoning_tokens", spent.get("reasoning_tokens")))
+    return {k: v for k, v in pairs if isinstance(v, int) and not isinstance(v, bool)}
 
 
 def salvage_families(text: Any) -> list[dict[str, Any]]:
@@ -990,6 +1020,11 @@ class Architect:
     @property
     def cfg(self) -> Mapping[str, Any]:
         return self.settings.get("architect", {})
+
+    def sail_effort(self) -> str:
+        """The pass's effort on Sail and OpenAI (`architect.sail_effort`): one of SAIL_EFFORTS, else SAIL_EFFORT."""
+        raw = self.cfg.get("sail_effort")
+        return raw if isinstance(raw, str) and raw in SAIL_EFFORTS else SAIL_EFFORT
 
     def refilling(self) -> bool:
         """Fewer families live than the swarm starts with."""
@@ -1174,7 +1209,8 @@ class Architect:
 
     def remember_refusals(self, rows: Sequence[Mapping[str, Any]], at: float) -> None:
         """Keep the pass's structure refusals for the next request (kv STRUCTURE_REFUSALS_KEY); a pass with none clears
-        the last pass's, and no row is written while there never were any."""
+        the last pass's, and no row is written while there never were any. `run` calls it only for a pass that proposed
+        something: an empty or failed answer keeps the last pass's."""
         last = self.store.get(STRUCTURE_REFUSALS_KEY)
         if rows or (isinstance(last, dict) and last.get("rows")):
             self.store.put(STRUCTURE_REFUSALS_KEY, {"at": iso(at), "rows": [dict(r) for r in rows][:STRUCTURE_REFUSALS_MAX]})
@@ -1512,11 +1548,13 @@ class Architect:
             system = settings_mod.train_span_text(SYSTEM, settings_mod.objective_span(self.store.get("train_objective")))
             system += LIBRARY_RULE if library is not None else ""
             extra, info = self._digest_call(system, paired, library)
-            # A cut Claude answer comes back to be salvaged (R11-3), never falling to a full refill on Sail.
+            # A cut Claude answer comes back to be salvaged (R11-3), never falling to a full refill on Sail. `effort` is
+            # Sail's and OpenAI's (`architect.sail_effort`); Claude's is `claude.role_effort` / `claude.effort`.
+            effort = self.sail_effort()
             answer = self.router.ask(role="architect", system=system, user=self.prompt(library=library), family=None,
                                      key=f"swarm:architect:{int(began)}", openai_model=self.cfg.get("openai_model"),
                                      sail_profile=str(self.cfg.get("sail_profile", "k3_balanced")),
-                                     max_output=int(self.cfg.get("max_output_tokens", 12000)), effort="high", need_usd=2.0,
+                                     max_output=int(self.cfg.get("max_output_tokens", 12000)), effort=effort, need_usd=2.0,
                                      claude=True, rotate=True, claude_keep_truncated=True,
                                      **extra)  # Claude first; Astra every other pass if openai_model
         except Exception as exc:  # noqa: BLE001
@@ -1526,15 +1564,21 @@ class Architect:
                 out["digest"] = info
             self.store.event("swarm.architect", None, out)
             return out
+        # A cut answer, on Claude (R11-3) or on Sail (`ModelRouter.ask`'s `truncated`, Oct 1, 2026), keeps its complete
+        # families; a complete one is read whole.
         truncated = bool(answer.get("truncated"))
         rows = salvage_families(answer.get("text")) if truncated else (answer.get("json") or {}).get("families")
         on_digest = bool(extra) and answer.get("route") == "claude"
         born = self.admit(rows, digest=on_digest, library=library)
+        proposed = len(rows) if isinstance(rows, list) else 0  # this pass's proposals, its retry's added below
         refused, self.not_allowed = list(getattr(self, "not_allowed", []) or []), []  # a retry's admit fills it anew
-        self.remember_refusals(refused, began)  # THE STRUCTURES: a truncated answer's retry reads them too
+        if proposed:
+            # THE STRUCTURES: a truncated answer's retry reads them too. A pass that proposed nothing (an empty,
+            # cut-to-nothing or failed answer) keeps the last pass's refusals for the next request.
+            self.remember_refusals(refused, began)
         capped = dict(getattr(self, "capped", {}) or {})
         refused_cards = list(getattr(self, "card_refused", []) or [])
-        out = {"born": born, "proposed": len(rows) if isinstance(rows, list) else 0, "route": answer.get("route"),
+        out = {"born": born, "proposed": proposed, "route": answer.get("route"),
                "model": answer.get("model"), "cost_usd": answer.get("cost_usd"), "seconds": round(self.clock() - began, 1)}
         if library is not None:
             cited = [library.resolve(r.get("literature"))[0] for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
@@ -1543,6 +1587,13 @@ class Architect:
         if answer.get("route") == "claude":
             usage = answer.get("usage") or {}
             out["usage"] = {k: usage[k] for k in USAGE_KEYS if k in usage}
+        elif answer.get("route") in ("sail", "openai"):
+            out["effort"] = effort  # `architect.sail_effort`, as sent
+        if answer.get("route") == "sail":
+            # ON SAIL: its usage (reasoning tokens included) and, when cut, why, so a pass that ran out of output says so.
+            out["usage"] = sail_usage(answer.get("usage"))
+            if truncated:
+                out["incomplete_reason"] = answer.get("incomplete_reason")
         if info is not None:
             out["digest"] = {**info, "used": on_digest}
         if on_digest and self.digest is not None:
@@ -1555,18 +1606,23 @@ class Architect:
             known = self.graveyard_ids()
             out["cited"] = sum(1 for r in rows if self.differs(r, known)) if isinstance(rows, list) else 0
         if truncated:
-            # TRUNCATION SALVAGE (R11-3): the complete families of the cut answer were admitted above; fewer than SALVAGE_MIN
-            # buys ONE retry on Claude at medium effort, Claude only (no OpenAI, no Sail), for what is still wanted. A retry
-            # Claude cannot make (no room, no line) leaves the pass as it is: the next pass routes as usual.
+            # TRUNCATION SALVAGE (R11-3): the complete families of the cut answer (Claude's or Sail's) were admitted
+            # above; fewer than SALVAGE_MIN buys ONE retry on Claude at medium effort, Claude only (no OpenAI, no Sail),
+            # for what is still wanted. A retry Claude cannot make (no room, no line) leaves the pass as it is: the next
+            # pass routes as usual.
             out["truncated"] = {"salvaged": len(rows), "born": len(born)}
             if len(rows) < SALVAGE_MIN and self.want() > 0:
+                # The retry's own refusals (one that never reaches `admit`, as when Claude has no line, adds none: the cut
+                # answer's are not counted twice).
+                self.card_refused, self.capped = [], {}
                 retry = self._salvage_retry(system, paired, began, library)
                 out["born"] = born + retry.pop("born_ids")
                 for cls, n in (getattr(self, "capped", {}) or {}).items():
                     capped[cls] = capped.get(cls, 0) + n
                 refused_cards += list(getattr(self, "card_refused", []) or [])
-                if getattr(self, "not_allowed", None):
-                    refused += self.not_allowed
+                refused += list(getattr(self, "not_allowed", None) or [])
+                proposed += int(retry.get("proposed") or 0)
+                if refused or retry.get("proposed"):
                     self.remember_refusals(refused, began)
                 out["truncated"]["retry"] = retry
                 out["seconds"] = round(self.clock() - began, 1)
@@ -1580,7 +1636,10 @@ class Architect:
             out["card_refused"] = {"incomplete": sum(1 for r in refused_cards if str(r["why"]).startswith("incomplete card")),
                                    "rebirth": sum(1 for r in refused_cards if not str(r["why"]).startswith("incomplete card")),
                                    "items": [{k: r.get(k) for k in ("slug", "why", "row", "matched")} for r in refused_cards[:12]]}
-            self.store.put(CARD_REFUSALS_KEY, {"at": iso(self.clock()), "items": refused_cards[:12]})
+            if proposed:
+                # Only a pass that proposed something replaces them: an empty, cut-to-nothing or failed answer (Oct 1,
+                # 2026: nine empty Sail passes in a row wrote []) keeps the last real refusals and their lessons.
+                self.store.put(CARD_REFUSALS_KEY, {"at": iso(self.clock()), "items": refused_cards[:12]})
         # THE STRUCTURES: the allowed types while `architect.structures` leaves any out, the proposals refused for a type
         # outside them (by type), and a setting that was set but could not be used.
         if self.restricted():
@@ -1596,7 +1655,7 @@ class Architect:
 
 
 __all__ = ["Architect", "SYSTEM", "GraveyardDigest", "Digest", "lesson_view", "parse_lesson", "tag_of", "compose", "salvage_families",
-           "SALVAGE_MIN",
+           "SALVAGE_MIN", "SAIL_EFFORT", "SAIL_EFFORTS", "sail_usage",
            "locked_text", "fit", "AGENDA_KEY", "SEAL_KEY", "CPT_KEY", "LAST_KEY", "DIGEST_HEADER", "FULL_GRAVEYARD_RULE",
            "GRAVEYARD_POINTER", "SECTION_MAX", "AGENDA_LOCKED_MAX", "MAX_DIGEST_BYTES", "COMPOSED_AGENDA_TITLE",
            "LEGACY_AGENDA_TITLE", "USAGE_KEYS", "ASCII_MAP", "is_operator", "operator_ids", "operator_scale", "LEVELS",
