@@ -18,16 +18,18 @@ before it; the registered window is judged once, after it ends, motivating units
 the gate back (the old behavior at the next read); a supported one retains it until it graduates into main without its
 gate; another release inside the window voids it.
 
-What is machine-checked and what is only defense in depth (`harness_lanes` module docstring): staging refuses, exactly,
-a diff that touches a protected path (`git diff --no-renames --name-status`, deletions and renames included) or adds an
-import of a protected, process, file or loader module; every candidate needs an ADVERSARIAL REVIEW of its exact patch
-recorded here with the verdict approve (`review`) before its canary starts (lanes) or its observation window opens (the
-scheduler lane); and capture, staging, evaluation, the judges, the benchmarks and the retain/revert decision run from the
-PINNED BASE commit: this controller refuses to run unless its own code is that commit's (`pinned`; the CLI re-executes
-itself from a separate checkout of the base), takes the judges and the benchmark from the base tree, judges the base
-tree with only the candidate's staged files laid over it, and accepts a House measurement only when the code that took
-it is the base's (`measured_by_base`). The per-name content and symbol guards are static analysis of arbitrary Python:
-they refuse the routes reviewers found and are never a guarantee.
+What the controller refuses and what is only defense in depth (`harness_lanes` module docstring): staging refuses a diff
+that touches a protected path (`git diff --no-renames --name-status`, deletions and renames included); every candidate
+needs an ADVERSARIAL REVIEW of its exact patch and evaluated tree recorded here with the verdict approve (`review`)
+before the loop's deploy step (`deploy`) issues the ticket the tree is deployed under, and registering its canary
+(lanes) or opening its observation window (the scheduler lane) voids it, with a rollback asked for, when the watchdog's
+receipts show the tree on the House before that approval and ticket (`unreviewed`); and capture, staging, evaluation,
+the judges, the benchmarks and the retain/revert decision run from the PINNED BASE commit: this controller refuses to run
+unless its own code is that commit's (`pinned`; the CLI re-executes itself from a separate checkout of the base), takes
+the judges and the benchmark from the base tree, judges the base tree with only the candidate's staged files laid over
+it, and accepts a House measurement only when the code that took it is the base's (`measured_by_base`). The import and
+state rule and the per-name content and symbol guards are static analysis of arbitrary Python: they refuse the routes
+reviewers found and are never a guarantee.
 """
 from __future__ import annotations
 
@@ -125,6 +127,19 @@ def git(repo: Path, *args: str, binary: bool = False) -> Any:
     if result.returncode:
         raise ImprovementError(f"git {args[0]}: {result.stderr.decode(errors='replace')[-600:]}")
     return result.stdout if binary else result.stdout.decode().strip()
+
+
+def commit_reader(repo: Path, commit: str) -> Any:
+    """`read(repo-relative path) -> source or None` over one commit's blobs (cached): the tree a guard resolves names in."""
+    cache: dict[str, str | None] = {}
+
+    def read(rel: str) -> str | None:
+        if rel not in cache:
+            result = subprocess.run(["git", "-C", str(repo), "cat-file", "blob", f"{commit}:{rel}"], capture_output=True,
+                                    check=False)
+            cache[rel] = result.stdout.decode(errors="replace") if result.returncode == 0 else None
+        return cache[rel]
+    return read
 
 
 def snapshot(swarm: Path, *, since: float, until: float) -> dict[str, Any]:
@@ -285,6 +300,18 @@ def in_session(epoch: float) -> bool:
         local = dt.datetime.fromtimestamp(epoch, dt.timezone(dt.timedelta(hours=-4)))
     minute = local.hour * 60 + local.minute
     return local.weekday() < 5 and 9 * 60 + 30 <= minute < 16 * 60 + 5
+
+
+def house_test_hours(epoch: float) -> bool:
+    """15:30-16:00 New York on a weekday, while the House test runs (D8: no research-side deploy then)."""
+    try:
+        from zoneinfo import ZoneInfo
+
+        local = dt.datetime.fromtimestamp(epoch, ZoneInfo("America/New_York"))
+    except Exception:  # noqa: BLE001 - no tz database: New York's summer offset
+        local = dt.datetime.fromtimestamp(epoch, dt.timezone(dt.timedelta(hours=-4)))
+    minute = local.hour * 60 + local.minute
+    return local.weekday() < 5 and 15 * 60 + 30 <= minute < 16 * 60
 
 
 def archive(repo: Path, head: str, target: Path) -> None:
@@ -477,21 +504,103 @@ class HarnessImprovement:
                                    "differ): measure with the base release's scripts/harness_improve.py")
 
     def approved(self, proposal: Mapping[str, Any]) -> dict[str, Any] | None:
-        """The latest adversarial review of exactly this patch, when its verdict is approve (`review`)."""
+        """The latest adversarial review of exactly this patch and this evaluated tree (its release digest), when its
+        verdict is approve (`review`)."""
         reviews = [r for r in proposal.get("reviews") or [] if r.get("patch_sha") == proposal.get("patch_sha")
-                   and r.get("head") == proposal.get("head")]
+                   and r.get("head") == proposal.get("head") and proposal.get("release_digest")
+                   and r.get("release_digest") == proposal.get("release_digest")]
         return reviews[-1] if reviews and reviews[-1].get("verdict") == "approve" else None
 
-    def review(self, key: str, *, report: Path, reviewer: str, patch_sha: str, review_usd: float | None = None) -> dict:
-        """Record an ADVERSARIAL REVIEW of a staged candidate's exact patch (`<artifact>/candidate.patch`). The report
-        must name the patch's sha256 (`patch_sha`) and end its findings with `VERDICT: approve` or `VERDICT: reject`;
-        the reviewer is a separate agent, never the patch's author. It is kept beside the candidate and recorded in the
-        journal. An approval is what lets the canary start (lanes) or the observation window open (the scheduler lane);
-        a rejection sends the candidate back to revising (or rejects it on its last attempt)."""
+    @staticmethod
+    def exposure(proposal: Mapping[str, Any], rows: list[dict]) -> float | None:
+        """When the evaluated tree first reached the House: the earliest watchdog row (`start`, before staging) of any
+        deploy attempt that staged that exact tree (`stage` ok with its digest), or None when none did."""
+        digest = proposal.get("release_digest")
+        attempts = {r.get("deploy") for r in rows if r.get("stage") == "stage" and r.get("ok") is True
+                    and digest and r.get("digest") == digest and r.get("deploy")}
+        times = [lanes.epoch_of(r.get("at")) for r in rows if r.get("deploy") in attempts]
+        times = [t for t in times if t is not None]
+        return min(times) if times else None
+
+    def unreviewed(self, proposal: Mapping[str, Any], rows: list[dict]) -> str | None:
+        """MACHINE-CHECKED: why the evaluated tree's exposure on the House is not covered, or None. Every deploy of it
+        must come after an approving adversarial review of that exact tree was recorded and after the loop's deploy step
+        (`deploy`) issued its ticket, both on the journal's clock before the watchdog's first row for it."""
+        first = self.exposure(proposal, rows)
+        if first is None:
+            return None
+        digest = str(proposal.get("release_digest"))[:12]
+        review = self.approved(proposal)
+        approvals = [float(r["at"]) for r in proposal.get("reviews") or [] if r.get("verdict") == "approve"
+                     and r.get("release_digest") == proposal.get("release_digest") and r.get("head") == proposal.get("head")]
+        if review is None or not approvals or min(approvals) >= first:
+            return (f"the evaluated tree {digest} reached the House ({iso(first)}) before an adversarial review approving "
+                    "it was recorded")
+        tickets = [float(t["at"]) for t in proposal.get("deploys") or [] if t.get("release_digest") == proposal.get(
+            "release_digest")]
+        if not tickets or min(tickets) >= first:
+            return (f"the evaluated tree {digest} reached the House ({iso(first)}) without the loop's deploy step "
+                    "(`deploy KEY`, which checks the approval) before it")
+        return None
+
+    def deploy(self, key: str) -> dict:
+        """THE LOOP'S DEPLOY STEP (machine-checked): the only sanctioned route of an evaluated candidate's tree to the
+        House. It refuses unless the journal holds an adversarial review approving exactly this patch and this evaluated
+        tree (`approved`), and outside the hours its release class allows (a money-path or evidence-reset tree never in
+        New York's session; a research-side one never 15:30-16:00 New York, while the House test runs). It records a
+        deploy ticket and names the exact commit and tree to send through the watchdog. The release train itself
+        (`scripts/floor_box.py`, the watchdog) does not read this journal: a deploy made around this step, or before the
+        approval, is caught when the canary is registered (`canary_start`, the scheduler lane's `reconcile`), which
+        voids the candidate and asks for a rollback."""
         job = self.worklist.get(key)
-        if job is None or job.state not in ("testing", "canary"):
-            raise ImprovementError("a review is of a staged candidate (testing, or awaiting its canary)")
+        if job is None or job.state != "canary":
+            raise ImprovementError("only an evaluated candidate awaiting its canary is deployed (its evaluation passed)")
+        proposal = dict(job.carry["_proposal"])
+        if proposal.get("canary") or proposal.get("observation"):
+            raise ImprovementError("this candidate's canary has already started")
+        self.pinned(proposal["base"])
+        review = self.approved(proposal)
+        if review is None:
+            raise ImprovementError(f"no deploy without an adversarial review approving exactly patch "
+                                   f"{str(proposal.get('patch_sha'))[:16]} and tree {str(proposal.get('release_digest'))[:12]} "
+                                   "(`review`); the journal has none")
+        release_class = (proposal.get("classification") or {}).get("release_class") or "research"
+        now = self.clock()
+        if release_class in ("money_path", "evidence_reset") and in_session(now):
+            raise ImprovementError(f"a {release_class} tree deploys only outside New York's session (09:30-16:05)")
+        if release_class == "research" and house_test_hours(now):
+            raise ImprovementError("no deploy 15:30-16:00 New York, while the House test runs")
+        ticket = {"n": len(proposal.get("deploys") or []) + 1, "at": now, "release_digest": proposal["release_digest"],
+                  "head": proposal["head"], "review": review["n"], "release_class": release_class}
+        proposal["deploys"] = list(proposal.get("deploys") or []) + [ticket]
+        rule = (proposal.get("classification") or {}).get("deploy_rule") or lanes.DEPLOY_RULES.get(release_class)
+        self.worklist.transition(key, "canary", commit=proposal["head"], attempt=job.attempt,
+                                 note=f"Deploy step {ticket['n']}: review {review['n']} approves tree "
+                                      f"{proposal['release_digest'][:12]}; deploy commit {proposal['head'][:12]} exactly "
+                                      "through the watchdog.", extra={"_proposal": proposal, "deploy_ticket": ticket})
+        return {"ticket": ticket, "commit": proposal["head"], "release_digest": proposal["release_digest"],
+                "deploy_rule": rule,
+                "deploy": (f"from a clean checkout of commit {proposal['head']} (nothing else in league/, ltcm/, playbooks/, "
+                           "scripts/ or deploy/), `python3 scripts/floor_box.py deploy`; the watchdog's stage receipt "
+                           f"must show digest {proposal['release_digest']}")}
+
+    def review(self, key: str, *, report: Path, reviewer: str, patch_sha: str, review_usd: float | None = None) -> dict:
+        """Record an ADVERSARIAL REVIEW of an evaluated candidate's exact patch (`<artifact>/candidate.patch`) and tree
+        (its release digest, known once `evaluate` passed). The report must name the patch's sha256 (`patch_sha`) and
+        state `VERDICT: approve` or `VERDICT: reject`; the reviewer is a separate agent, never the patch's author
+        (`stage --author`). It is kept beside the candidate and recorded in the journal. An approval is what lets the
+        deploy step run (`deploy`), and the canary start (lanes) or the observation window open (the scheduler lane); a
+        rejection sends the candidate back to revising (or rejects it on its last attempt), with a rollback asked for
+        when a deploy ticket was already issued."""
+        job = self.worklist.get(key)
+        if job is None or job.state != "canary":
+            raise ImprovementError("a review is of an evaluated candidate awaiting its deploy (`evaluate` passed): its "
+                                   "exact tree is known then")
         proposal = dict(job.carry.get("_proposal") or {})
+        if proposal.get("canary") or proposal.get("observation"):
+            raise ImprovementError("this candidate's canary has already started: a review comes before the deploy")
+        if not proposal.get("release_digest"):
+            raise ImprovementError("the candidate has no evaluated tree to review")
         if not proposal.get("patch_sha") or patch_sha != proposal["patch_sha"]:
             raise ImprovementError("the review must name the staged patch's sha256 (`--patch-sha`, the brief's and "
                                    "`next`'s `patch_sha`): it reviewed another diff")
@@ -513,18 +622,21 @@ class HarnessImprovement:
         kept = artifact / f"review-{n}.md"
         kept.write_text(text)
         row = {"n": n, "reviewer": reviewer[:120], "verdict": verdict, "patch_sha": patch_sha, "head": proposal.get("head"),
-               "report": str(kept), "report_sha": sha(text.encode()), "at": self.clock()}
+               "release_digest": proposal["release_digest"], "report": str(kept), "report_sha": sha(text.encode()),
+               "at": self.clock()}
         proposal["reviews"] = list(proposal.get("reviews") or []) + [row]
+        ticketed = bool(proposal.get("deploys"))
         if verdict == "approve":
-            state, note = job.state, (f"Adversarial review {n} by {reviewer[:60]} approved patch {patch_sha[:16]}"
-                                      + ("; the canary may start once the evaluated tree is deployed."
-                                         if job.state == "canary" else "; the evaluation is still owed."))
+            state, note = job.state, (f"Adversarial review {n} by {reviewer[:60]} approved patch {patch_sha[:16]} (tree "
+                                      f"{proposal['release_digest'][:12]}); the deploy step (`deploy`) may run.")
         else:
             state = "revising" if job.attempt < self.MAX_ATTEMPTS else "rejected"
-            note = f"Adversarial review {n} by {reviewer[:60]} rejected patch {patch_sha[:16]}: see {kept}"
+            note = (f"Adversarial review {n} by {reviewer[:60]} rejected patch {patch_sha[:16]}: see {kept}"
+                    + ("; a deploy ticket was issued: if the tree reached the House, roll it back through the watchdog."
+                       if ticketed else ""))
         extra: dict[str, Any] = {"_proposal": proposal, "review": row}
         if verdict == "reject":
-            extra["_failure"] = {"phase": "review", "reason": f"rejected by review {n}: {kept}"}
+            extra["_failure"] = {"phase": "review", "reason": f"rejected by review {n}: {kept}", "rollback": ticketed}
         self.worklist.transition(key, state, commit=proposal.get("head"), attempt=job.attempt, cost_usd=review_usd or 0,
                                  note=note, extra=extra)
         return row
@@ -577,6 +689,10 @@ class HarnessImprovement:
         job = self.worklist.get(key)
         if job is None or job.state not in ("proposed", "admitted", "patching", "revising"):
             raise ImprovementError("candidate needs an open measured bottleneck")
+        if not str(author or "").strip():
+            # The review's reviewer-is-not-the-author check needs a name to compare (refused before an attempt counts).
+            raise ImprovementError("name the patch's author (`stage --author AGENT`): its adversarial reviewer must be "
+                                   "another agent")
         if job.details.get("lane"):
             return self._stage_lane(job, candidate, authoring_usd=authoring_usd, author=author)
         base = str(job.details["base"])
@@ -710,7 +826,8 @@ class HarnessImprovement:
             measurement.update(deploys=rows, current=current_release)
             return self.reconcile_lane(key, measurement=measurement)
         proposal = dict(job.carry["_proposal"])
-        receipts = watchdog(read_deploys(deploy_log), proposal["release_digest"])
+        rows = read_deploys(deploy_log)
+        receipts = watchdog(rows, proposal["release_digest"])
         if "waiting" in receipts:
             return receipts
         stage, attempt, final = receipts["stage"], receipts["attempt"], receipts["final"]
@@ -720,6 +837,16 @@ class HarnessImprovement:
             self.worklist.transition(key, "rejected", commit=proposal["head"], attempt=job.attempt, note="The exact-tree watchdog rejected or reverted the candidate.",
                                      extra={"_proposal": proposal, **result})
             return result
+        if not proposal.get("observation"):
+            # MACHINE-CHECKED: the tree reached the House only after an approving review and the loop's deploy step.
+            problem = self.unreviewed(proposal, rows)
+            if problem:
+                result = {"decision": "rollback_required", "reason": problem, "release": stage.get("release")}
+                proposal["observation"] = result
+                self.worklist.transition(key, "rejected", commit=proposal["head"], attempt=job.attempt,
+                                         note=f"{problem}: roll it back through the watchdog; no observation window opens.",
+                                         extra={"_proposal": proposal, **result})
+                return result
         if not receipts["complete"]:
             return {"waiting": "a complete successful watchdog canary and watch are required"}
         if current_release != stage.get("release"):
@@ -727,9 +854,10 @@ class HarnessImprovement:
         if proposal.get("observation"):
             return proposal["observation"]  # one registered observation window; later favorable peeks cannot reverse it
         if self.approved(proposal) is None:
-            # MACHINE-CHECKED: the observation window opens only for a patch an adversarial review approved.
+            # MACHINE-CHECKED: the observation window opens only for a tree an adversarial review approved before its
+            # deploy (`unreviewed` above); a review recorded later never opens it.
             return {"waiting": f"an adversarial review approving patch {str(proposal.get('patch_sha'))[:16]} is required "
-                               "before the observation window opens (`review`)"}
+                               "before the deploy and the observation window (`review`, then `deploy`)"}
         at = dt.datetime.fromisoformat(final["at"].replace("Z", "+00:00")).timestamp()
         source = running_evidence(swarm, None, now=self.clock())
         if Path(source["release"]).name != current_release or source["digest"] != proposal["release_digest"]:
@@ -903,22 +1031,30 @@ class HarnessImprovement:
                 "payback": job.details.get("payback"),
                 "motivating_examples": job.evidence[:12],
                 "surface": list(lane.surface),
-                "protected": "machine-checked: every path in league/swarm/harness_lanes.py PROTECTED (the objective and "
-                             "this loop, sealed data and the evaluator, spend limits, capital permissions including the "
-                             "real-money order path, the release train) and every path outside the surface, whatever the "
-                             "status (git diff --no-renames --name-status: deletions and renames included); no mode change "
-                             "and no edit of an existing test; no added import of the store, evaluator, gate, bands, "
-                             "settings or constitution, or of os, subprocess, shutil, socket, pathlib, io, logging, "
-                             "tempfile, importlib or ctypes. Static defense in depth on top (not a guarantee; the review "
-                             "checks what it cannot): no new use (aliased, held as a reference or called) of a process, "
-                             "network, reflection, file-write (constructors included) or file-move, print, exit or "
-                             "dynamic-access name, `os` member beyond the path helpers, interpreter plumbing, assignment "
-                             "to another object's attribute, store writer, reader of the holdout, Validation or forward "
-                             "evidence, key naming Validation, raw SQL statement, collaborator's private attribute, call "
-                             "through an expression, or new path to a function that writes records; no definition under a "
-                             "name existing code uses, no new dunder, no new member of an existing class with bases",
-                "review": "an adversarial review of your exact patch by a separate agent, recorded with the verdict "
-                          "approve, is required before the canary (playbooks/harness-improvement.md, the review checklist)",
+                "protected": "machine-checked on the diff's file list: every path in league/swarm/harness_lanes.py "
+                             "PROTECTED (the objective and this loop, sealed data and the evaluator, spend limits, capital "
+                             "permissions including the real-money order path, the release train) and every path outside "
+                             "the surface, whatever the status (git diff --no-renames --name-status: deletions and renames "
+                             "included); no mode change and no edit of an existing test. Static defense in depth on top "
+                             "(not a guarantee; the review checks what it cannot): no new route to the store, evaluator, "
+                             "gate, bands, settings or constitution (an import of one, of a name from or re-exported from "
+                             "one, of their parent packages `league` and `league.swarm`, `import league.<anything>`, any "
+                             "star import, or an imported module's attribute that reaches one), no mutation or bare "
+                             "hand-out of their state (`settings_mod.DEFAULTS[...] = ...`, `.clear()`, `d = "
+                             "settings_mod.DEFAULTS`, `f(settings_mod.TRAIN_STARTS)`; read a setting inline), no import of "
+                             "os, subprocess, shutil, socket, pathlib, io, logging, tempfile, importlib or ctypes; no new use "
+                             "(aliased, held as a reference or called) of a process, network, reflection, file-write "
+                             "(constructors included) or file-move, print, exit or dynamic-access name, `os` member beyond "
+                             "the path helpers, interpreter plumbing, assignment to another object's attribute, store writer "
+                             "or reader of the holdout, Validation or forward evidence (counted by NAME on any object: a new "
+                             f"`.{'`, `.'.join(sorted(lanes.GENERIC_SEALED))}` on anything is refused, so name your own "
+                             "methods otherwise), key naming Validation, raw SQL statement, collaborator's private "
+                             "attribute, call through an expression, or new path to a function that writes records; no "
+                             "definition under a name existing code uses, no new dunder, no new member of an existing class "
+                             "with bases",
+                "review": "an adversarial review of your exact patch and evaluated tree by a separate agent, recorded with "
+                          "the verdict approve, is required before the deploy step and the canary "
+                          "(playbooks/harness-improvement.md, the review checklist)",
                 "frozen": {"symbols": frozen,
                            "rule": "every function that writes trial, lineage, look or graveyard records "
                                    f"({', '.join(sorted(lanes.TRIAL_WRITES))}) is frozen whole, except "
@@ -979,13 +1115,15 @@ class HarnessImprovement:
             paths = [path for _, path, _, _ in entries]
             lanes.surface_check(lane, paths)
             gates = 0
+            # Re-exports resolve over each side's own tree: the base's for the baseline, the candidate's for the change.
+            read_base, read_head = commit_reader(self.repo, base), commit_reader(self.repo, head)
             for path in paths:
                 after = git(self.repo, "show", f"{head}:{path}")
                 try:
                     before = git(self.repo, "show", f"{base}:{path}")
                 except ImprovementError:
                     before = None
-                lanes.content_guard(path, before, after)
+                lanes.content_guard(path, before, after, read_before=read_base, read_after=read_head)
                 lanes.symbol_guard(path, before, after)
                 if mode == "arms" and not fnmatch.fnmatchcase(path, lanes.NEW_TEST):
                     gates += lanes.gate_coverage(path, before, after, key, canary.get("unit"))
@@ -1177,7 +1315,9 @@ class HarnessImprovement:
         """Start the registered observation once the exact evaluated tree is deployed and promoted by the watchdog: open
         the gate for `fraction` of the lane's units (arms), or date the before/after window against `control`, a fresh
         measurement of the base release over the observation length just before the deploy that does not overlap the
-        capture (window)."""
+        capture (window). First, in every lane, the watchdog's receipts must show the tree reaching the House only after
+        an approving review and the deploy step's ticket (`unreviewed`): otherwise the candidate is voided and its
+        release must be rolled back."""
         job = self.worklist.get(key)
         if job is None or not job.details.get("lane") or job.state != "canary":
             raise ImprovementError("the candidate is not awaiting its canary")
@@ -1185,16 +1325,25 @@ class HarnessImprovement:
         lane = lanes.LANES[proposal["lane"]]
         bottleneck = lane.bottleneck(proposal["metric"])
         canary = lane.canary_for(bottleneck)
-        # MACHINE-CHECKED: no canary without an adversarial review approving exactly this patch (`review`).
-        if self.approved(proposal) is None:
-            raise ImprovementError(f"the canary needs an adversarial review of patch {str(proposal.get('patch_sha'))[:16]} "
-                                   "recorded with the verdict approve (`review KEY --report R --reviewer NAME "
-                                   "--patch-sha SHA`); none is")
         self.pinned(proposal["base"])
         self.measured_by_base(measurement, proposal["base"])
         if control is not None:
             self.measured_by_base(control, proposal["base"], "the control measurement")
-        receipts = watchdog(list(measurement.get("deploys") or []), proposal["release_digest"])
+        rows = list(measurement.get("deploys") or [])
+        # MACHINE-CHECKED, in every lane: the evaluated tree reached the House only after an adversarial review approving
+        # exactly it was recorded and the loop's deploy step issued its ticket (`unreviewed`). A deploy before either
+        # voids the candidate, and its release must be rolled back: no canary is registered on unreviewed code.
+        problem = self.unreviewed(proposal, rows)
+        if problem:
+            return self._void(job, proposal, f"{problem}: roll it back through the watchdog", gated=False, rollback=True)
+        if self.approved(proposal) is None:
+            raise ImprovementError(f"the canary needs an adversarial review of patch {str(proposal.get('patch_sha'))[:16]} "
+                                   "recorded with the verdict approve (`review KEY --report R --reviewer NAME "
+                                   "--patch-sha SHA`), then the deploy step (`deploy KEY`); none is")
+        if not proposal.get("deploys"):
+            raise ImprovementError("the canary needs the loop's deploy step first (`deploy KEY`: it checks the approval "
+                                   "and issues the ticket the tree is deployed under)")
+        receipts = watchdog(rows, proposal["release_digest"])
         if "waiting" in receipts:
             return receipts
         final = receipts["final"] or {}
@@ -1291,14 +1440,15 @@ class HarnessImprovement:
                               "directory, replace that file atomically (mode 0600) with this one within two minutes")
         return out
 
-    def _void(self, job: Any, proposal: dict, reason: str, *, gated: bool) -> dict:
+    def _void(self, job: Any, proposal: dict, reason: str, *, gated: bool, rollback: bool = False) -> dict:
         """Record that the registered comparison cannot be judged (`voided`): a gate flips back; a window lane's code
-        stays deployed for the operator to roll back or keep through a new capture. The next capture reopens the
-        bottleneck without counting the attempt (`capture_lanes`)."""
+        stays deployed for the operator to roll back or keep through a new capture (`rollback`: it must be rolled
+        back, whatever the lane: it reached the House unreviewed). The next capture reopens the bottleneck without
+        counting the attempt (`capture_lanes`)."""
         arm = proposal.get("canary") or {}
         if gated and arm:
             self._write_arm(job.key, {**arm, "state": "reverted"})
-        result = {"decision": "voided", "reason": reason}
+        result = {"decision": "voided", "reason": reason, **({"rollback": True} if rollback else {})}
         proposal["observation"] = result
         self.worklist.transition(job.key, "rejected", commit=proposal.get("head"), attempt=job.attempt,
                                  note=f"Voided: {reason}. " + ("The gate is flipped back. " if gated and arm else "")
@@ -1496,33 +1646,42 @@ class HarnessImprovement:
             if job.state in ("proposed", "admitted"):
                 step["next"] = f"{cli} prepare {job.key} --worktree <a new directory>"
             elif job.state in ("patching", "revising"):
-                why = (job.carry.get("_failure") or {}).get("reason") if job.state == "revising" else None
+                failure = job.carry.get("_failure") or {}
+                why = failure.get("reason") if job.state == "revising" else None
                 step["next"] = (f"write and commit the patch in {p.get('worktree') or '<the worktree>'} within the brief; then "
-                                f"{cli} stage {job.key} --candidate <full commit sha> --authoring-usd <the agent's $>")
+                                f"{cli} stage {job.key} --candidate <full commit sha> --author <the agent> "
+                                "--authoring-usd <the agent's $>")
                 if why:
                     step["last_refusal"] = why[:400]
+                if job.state == "revising" and failure.get("rollback"):
+                    step["rollback"] = ("a review rejected a tree the deploy step had ticketed: if it reached the House, roll "
+                                        "it back through the watchdog first")
             elif job.state == "testing":
                 step["next"] = f"{cli} evaluate {job.key} --python <a venv python with numpy>"
             elif job.state == "canary" and not p.get("canary") and self.approved(p) is None:
-                step["next"] = (f"adversarial review (required before the deploy and the canary): give an agent other than "
-                                f"the author {p.get('artifact')}/candidate.patch (sha256 {p.get('patch_sha')}), the brief and "
-                                "the playbook's review checklist; its report cites that sha and ends `VERDICT: approve` or "
-                                f"`VERDICT: reject`; then `{cli} review {job.key} --report <report.md> --reviewer <agent> "
-                                f"--patch-sha {p.get('patch_sha')}`")
+                step["next"] = (f"adversarial review (required before the deploy step and the canary): give an agent other "
+                                f"than the author {p.get('artifact')}/candidate.patch (sha256 {p.get('patch_sha')}), the "
+                                "brief and the playbook's review checklist; its report cites that sha and states `VERDICT: "
+                                f"approve` or `VERDICT: reject`; then `{cli} review {job.key} --report <report.md> --reviewer "
+                                f"<agent> --patch-sha {p.get('patch_sha')}`")
                 step["patch_sha"] = p.get("patch_sha")
+            elif job.state == "canary" and not p.get("canary") and not p.get("deploys"):
+                step["next"] = (f"the deploy step: `{cli} deploy {job.key}` (it checks the approving review of tree "
+                                f"{str(p.get('release_digest'))[:12]} and the deploy hours, and issues the ticket); only then "
+                                "send the tree through the watchdog")
             elif job.state == "canary" and not p.get("canary"):
                 rule = (p.get("classification") or {}).get("deploy_rule")
                 digest = str(p.get("release_digest"))[:12]
                 if mode == "window":
                     earliest = float((p.get("baseline") or {}).get("until") or 0.0) + obs
-                    step["next"] = (f"deploy exactly the evaluated tree {digest} through the watchdog ({rule}), no earlier "
-                                    f"than {iso(earliest)} (the control window must not overlap the capture); just before, "
-                                    f"on the House `{house} --since <deploy - {obs:.0f}> --until <deploy> > control.json`; "
-                                    f"after the promotion `{house} --seconds 900 > m.json` and here "
-                                    f"`{cli} canary {job.key} --measurement m.json --control control.json`")
+                    step["next"] = (f"deploy exactly the evaluated tree {digest} (commit {p.get('head')}) through the "
+                                    f"watchdog ({rule}), no earlier than {iso(earliest)} (the control window must not "
+                                    f"overlap the capture); just before, on the House `{house} --since <deploy - {obs:.0f}> "
+                                    f"--until <deploy> > control.json`; after the promotion `{house} --seconds 900 > m.json` "
+                                    f"and here `{cli} canary {job.key} --measurement m.json --control control.json`")
                 else:
-                    step["next"] = (f"deploy exactly the evaluated tree {digest} through the watchdog ({rule}); then on the "
-                                    f"House `{house} --seconds 900 > m.json` and here "
+                    step["next"] = (f"deploy exactly the evaluated tree {digest} (commit {p.get('head')}) through the "
+                                    f"watchdog ({rule}); then on the House `{house} --seconds 900 > m.json` and here "
                                     f"`{cli} canary {job.key} --measurement m.json`, and install canary.json")
             elif job.state == "observing" and p.get("canary") and not p.get("observation"):
                 since = float(p["canary"]["since"])
@@ -1551,6 +1710,9 @@ class HarnessImprovement:
             elif decision == "voided":
                 why = str((p.get("observation") or {}).get("reason") or "")
                 step["next"] = (f"voided ({why[:300]}): " + (
+                    "the tree reached the House without an approving review and the deploy step before it: roll it back "
+                    "through the watchdog now; then measure and rank again (a new capture may register it)"
+                    if (p.get("observation") or {}).get("rollback") else
                     "measure and rank again on the running release (a new capture may register it)" if mode == "arms" else
                     "the candidate's release is still deployed: roll it back through the watchdog, or keep it through a "
                     "new capture (measure and rank again on the running release)"))

@@ -35,10 +35,12 @@ has been achieved.
    or reduce SQLite operations by at least 20%, without a material fixture CPU regression.
    Namespace support is mandatory; there is no unsandboxed fallback. Each subprocess has a
    600-second wall limit, a 240-second CPU limit, 2 GiB address-space limit and 32 MiB file limit.
-4. **Canary.** A separate agent reviews the concrete patch adversarially and the review is
-   recorded (`review`, verdict approve; see [The adversarial review](#the-adversarial-review)):
-   the observation window does not open without it. Deploy through the existing deployment
-   watchdog. The controller follows its append-only receipts: the exact evaluated upload tree,
+4. **Canary.** A separate agent reviews the concrete patch and evaluated tree adversarially and
+   the review is recorded (`review`, verdict approve; see [The adversarial review](#the-adversarial-review)).
+   Then the loop's deploy step (`deploy`) checks that approval and issues the ticket the tree is
+   deployed under; only then deploy through the existing deployment watchdog. A tree the watchdog
+   shows on the House before the approval or the ticket gets no observation window: `reconcile`
+   records `rollback_required`. The controller follows its append-only receipts: the exact evaluated upload tree,
    at least three passing canary ticks, a watch configured for at least 600 seconds, passing
    non-grace readings, and a promoted verdict. It also requires the real `current` symlink and
    the swarm heartbeat to identify that tree. Offline success alone never means retained.
@@ -64,8 +66,8 @@ A candidate may change only the `Scheduler` class body in `league/swarm/loop.py`
 module definitions and the class's execution context remain fixed; added reflection, global
 mutation, reflective attributes and new persistent-store capabilities are refused. This is a
 narrow structural guard plus a sandbox, not a proof that arbitrary Python is safe to deploy.
-The adversarial review of the exact patch is mandatory and recorded in the journal before the
-observation window opens.
+The adversarial review of the exact patch and evaluated tree is mandatory and recorded in the
+journal before the deploy step issues its ticket, and both precede the tree's first watchdog row.
 
 Every other path is protected, including tests, this controller and judge, settings and model
 budgets, capital controls, provider routing, the evaluator, goal criteria, data access, and the
@@ -97,11 +99,15 @@ python scripts/harness_improve.py --root /private/harness --repo /owner/repo pre
 
 # The authorized agent writes and commits the patch in that isolated worktree.
 python scripts/harness_improve.py --root /private/harness --repo /owner/repo stage \
-  CANDIDATE_KEY --candidate FULL_CANDIDATE_COMMIT_SHA
+  CANDIDATE_KEY --candidate FULL_CANDIDATE_COMMIT_SHA --author AGENT
 python scripts/harness_improve.py --root /private/harness --repo /owner/repo evaluate \
   CANDIDATE_KEY --python /owner/test-venv/bin/python
 
-# Review and deploy exactly that tree through the existing watchdog, then observe.
+# Another agent reviews exactly that patch and tree; the deploy step checks the approval and issues
+# the ticket; then deploy exactly that tree through the existing watchdog, and observe.
+python scripts/harness_improve.py --root /private/harness --repo /owner/repo review \
+  CANDIDATE_KEY --report review.md --reviewer AGENT2 --patch-sha PATCH_SHA256
+python scripts/harness_improve.py --root /private/harness --repo /owner/repo deploy CANDIDATE_KEY
 python scripts/harness_improve.py --root /private/harness reconcile CANDIDATE_KEY \
   --swarm /workspace/state --deploy-base /workspace
 python scripts/harness_improve.py --root /private/harness status
@@ -172,13 +178,15 @@ controller and every existing test are protected paths. `python scripts/harness_
 prints the definitions and each lane's hash; staging refuses a candidate whose lane changed after
 its capture.
 
-What keeps a candidate from changing its own score is, in order of strength: the paths it may
-touch and the imports it may add (exact, machine-checked); the adversarial review of its diff
-(mandatory, recorded in the journal, checked before the canary); judging and deciding from the
-pinned base commit (the candidate's tree never runs the judge, the rules or the decision); the
-judges' and regressions' runtime checks, the D2a sentinels among them; and the concurrent canary.
-The per-name content and symbol guards come last: static analysis of arbitrary Python, defense in
-depth that refuses the routes reviewers have found, never a guarantee.
+What keeps a candidate from changing its own score: the paths it may touch (the diff's file list,
+checked by the controller); the adversarial review of its patch and evaluated tree (mandatory,
+recorded in the journal, checked by the deploy step, and checked again against the watchdog's
+receipts when the canary is registered); judging and deciding with the pinned base commit's code
+(the judge, the rules and the decision are the base's; the candidate's modules still run inside
+the judge's interpreter, which imports the tree); the judges' and regressions' runtime checks, the
+D2a sentinels among them; and the concurrent canary. The import and state rule and the per-name
+content and symbol guards are static analysis of arbitrary Python: defense in depth that refuses
+the routes reviewers have found, never a guarantee.
 
 | Lane | Bottleneck (primary metric, lower is better unless noted) | Must not worsen | Surface a candidate may change | Release class | Fixed judge | Canary |
 |---|---|---|---|---|---|---|
@@ -204,9 +212,9 @@ days, must cover the estimated cycle ($10 research-side, $25 money path, $40 evi
 authoring, adversarial reviews, a deploy and its verification). Staging checks it again with the
 candidate's actual release class. Execution is ranked by severity instead (real orders and evidence).
 
-### What a candidate can never touch (machine-checked)
+### What the controller refuses (machine-checked steps)
 
-These checks are exact: they read file names, statuses and import statements, not what code means.
+These read file names, statuses, journal rows and the watchdog's receipts, not what code means.
 
 - **Paths.** Staging lists the diff with `git diff --no-renames --name-status` and refuses a candidate
   that touches any path in `PROTECTED`, with any status: a modification, a deletion, a type change,
@@ -219,23 +227,37 @@ These checks are exact: they read file names, statuses and import statements, no
   state and paper orders) and the release train. A candidate may add a test file named
   `league/tests/test_harness_candidate_*.py` but never edit or delete an existing test, an earlier
   candidate's included.
-- **Imports.** No candidate file may add an import of the store, the evaluator, the gate, the bands,
-  the settings or the constitution (`league.swarm.{store,evaluator,gate,bands,settings}`,
-  `league.constitution`: absolute or relative, the module or a name from it), or of `os`,
-  `subprocess`, `shutil`, `socket`, `pathlib`, `io`, `logging`, `tempfile`, `importlib` or `ctypes`.
-  Counted per import statement: a second `import os` inside a function is one more, even where the
-  file imports os at the top (`harness_lanes.restricted_imports`). A candidate's new test file is
-  held to the same rule.
-- **The adversarial review** (below) is recorded before any canary starts.
-- **The pinned base** (below): the candidate never runs its own judge, rules or decision.
+- **The adversarial review and the deploy step** (below): an approving review of the exact patch and
+  evaluated tree, then the deploy step's ticket, both before the watchdog's first row for that tree.
+  The release train does not read the journal: a deploy around the loop is caught when the canary is
+  registered (void, rollback), not prevented.
+- **The pinned base** (below): the judge, the rules and the decision are the base commit's code.
 
 ### Static guards (defense in depth, never a guarantee)
 
-Inside the files it may change, three more guards (`harness_lanes.py`). They are static analysis of
+Inside the files it may change, four guards (`harness_lanes.py`). They are static analysis of
 arbitrary Python: each refuses a route a reviewer found, none proves that a candidate cannot change
 trial counts, read sealed data or write files by a route nobody listed. The review checks for those
 routes, and the judges' runtime checks catch what they can.
 
+- **Imports and protected state** (`protected_routes`, in `content_guard`). No new route to the
+  store, the evaluator, the gate, the bands, the settings or the constitution
+  (`league.swarm.{store,evaluator,gate,bands,settings}`, `league.constitution`): an import of one or
+  of a name from it (absolute or relative); an import of their parent packages (`import league`,
+  `import league.<anything>`, which binds `league`, `from league import swarm`, `from .. import
+  swarm`); any star import; a name another module re-exports or computes from one (`from .architect
+  import SwarmStore`, a `CFG = settings_mod.DEFAULTS` the candidate adds elsewhere: resolved over the
+  base tree for the baseline and the candidate's tree for the change); an imported module's attribute
+  that reaches one (`researcher.settings_mod`). No import of `os`, `subprocess`, `shutil`, `socket`,
+  `pathlib`, `io`, `logging`, `tempfile`, `importlib` or `ctypes`. Counted per import statement and
+  per attribute read: a second `import os` inside a function is one more, even where the file
+  imports os at the top. And through the names a file already binds to a protected module or its
+  tables (`settings_mod`, `from .store import STRUCTURES`): no new item or attribute assignment or
+  deletion, no mutator (`.clear()`, `.update(...)`, called or held), and no bare hand-out of the
+  module or a part of it (`d = settings_mod.DEFAULTS`, `f(settings_mod.TRAIN_STARTS)`, a return, a
+  container) where other code could mutate it: read a setting inline. An object handed over at run
+  time (an instance's attribute, a function's result) is not followed. A candidate's new test file is
+  held to the same rule.
 - **Frozen symbols** (`FROZEN_SYMBOLS`, `symbol_guard`). Every function that writes trial, lineage,
   look, graveyard, state or receipt records is frozen whole: the trial writers (`add_run`,
   `add_family`, `link_lineages`, `retire_gym`, ...), the store's general writers (`update_family`,
@@ -269,7 +291,9 @@ routes, and the judges' runtime checks catch what they can.
   (`subprocess.run`), aliased import of such a module, dunder or frame access, assignment to another
   object's attribute (or to one of an object's own methods or collaborators), mutation of the shared
   collaborators (`self.settings[...] = ...`: an arm's change would reach the control), store writer
-  named anywhere (called or held), reader of the holdout, Validation or forward evidence (`looks`,
+  named anywhere (called or held; the everyday names among them, `run`, `runs`, `note`, `put`,
+  `event`, `refuse`, `retire`, `bump` and `forward`, count on any object, so a new `runner.run(...)`
+  or `result.note` is refused too: name new methods otherwise), reader of the holdout, Validation or forward evidence (`looks`,
   `lineage_validated`, and `runs`, `run`, `run_result`, which return a Validation run's row or full
   result as readily as a Train one's), a key naming Validation, the holdout or a line's figures
   (`state["validation_line"]["numbers"]`, `window="validation"`), new or changed raw SQL statement,
@@ -279,8 +303,8 @@ routes, and the judges' runtime checks catch what they can.
   fingerprint's files. The judges' override counts only inside the judges' sandbox
   (`LTCM_HARNESS_JUDGE=1`): on the House a candidate's code cannot force a gate however it reaches
   the override.
-- **Gate coverage** (`gate_coverage`, arms lanes): with its gate closed the module must be exactly
-  the baseline's. Every change sits in `if canary.enabled("<key>", <unit>, root=<state dir>): new
+- **Gate coverage** (`gate_coverage`, arms lanes): with its gate closed the module must reduce to
+  the baseline's (statically: its AST with every gated branch replaced by the old one). Every change sits in `if canary.enabled("<key>", <unit>, root=<state dir>): new
   else: old` (or the `new if <gate> else old` expression), with the old branch the baseline's code
   byte for byte, or is a new definition with no load-time effect, a new plain constant or a new
   import, each under a name no existing code uses (a new `def round`, `LONG_SINGLE = ...` or
@@ -298,14 +322,27 @@ routes, and the judges' runtime checks catch what they can.
 
 ### The adversarial review
 
-Every candidate, in every lane, gets an adversarial review of its exact diff by an agent other than
-its author before its canary starts (lanes) or its observation window opens (the scheduler lane).
-The controller checks it: `canary` refuses, and the scheduler lane's `reconcile` waits, until the
-journal holds a review of exactly the staged patch (its sha256 and commit) whose verdict is approve.
+Every candidate, in every lane, gets an adversarial review of its exact patch and evaluated tree by
+an agent other than its author BEFORE the tree can reach the House. The controller checks it three
+times:
 
-1. `next` prints the step with the patch's sha256 once the candidate is staged (after `evaluate`,
-   before the deploy). Give the reviewing agent `<journal>/candidates/<id>/candidate.patch`, the
-   brief (`brief KEY`) and this checklist; never the held-out directory or the journal.
+- `review` is accepted only once `evaluate` passed (the tree's release digest is then known); the row
+  records the patch's sha256, the commit and that digest.
+- The loop's deploy step, `deploy KEY`, refuses unless the journal's latest review of exactly that
+  patch and tree approves, and outside its release class's hours (a money-path or evidence-reset tree
+  never in New York's session; a research-side one never 15:30-16:00 New York). It records a ticket and
+  names the exact commit and digest to send through the watchdog. Deploy only after it.
+- `canary` (lanes) and the scheduler lane's `reconcile` read the watchdog's receipts: when the tree's
+  first watchdog row (the `start` of any attempt that staged it) is earlier than the first approving
+  review or the first deploy ticket on the journal's clock, the candidate is voided
+  (`rollback_required` on the scheduler lane), no canary or window opens, and `next` asks to roll the
+  release back through the watchdog. A review recorded after the exposure never makes it acceptable.
+  The release train (`floor_box.py`, the watchdog) does not read the journal, so a deploy around the
+  loop is caught here rather than prevented: keep the laptop's and the House's clocks on NTP.
+
+1. `next` prints the review step with the patch's sha256 once `evaluate` passes. Give the reviewing
+   agent `<journal>/candidates/<id>/candidate.patch`, the brief (`brief KEY`) and this checklist;
+   never the held-out directory or the journal.
 2. The reviewer tries to break the candidate. At least:
    - Does it change, by any route, a trial count, a lineage, an eligibility mark, a look, the
      graveyard, the cycle record or a practice receipt (a writer reached through a helper, a
@@ -322,8 +359,14 @@ journal holds a review of exactly the staged patch (its sha256 and commit) whose
    line: `VERDICT: approve` or `VERDICT: reject`. Record it:
    `python scripts/harness_improve.py --root $J --repo $R review KEY --report review.md --reviewer
    <agent> --patch-sha <sha256> [--review-usd 2]`. The report is kept beside the patch. A reject
-   sends the candidate back to revising (on its last attempt, rejected), and the author may read it.
-   `stage --author <agent>` records the author; the controller refuses a review by the same name.
+   sends the candidate back to revising (on its last attempt, rejected), and the author may read it;
+   a reject after a deploy ticket also asks for the tree's rollback. `stage --author <agent>` is
+   required and records the author; the controller refuses a review by the same name.
+4. Then `deploy KEY` (the deploy step), and deploy exactly the named commit through the watchdog
+   (from a clean checkout of it, `python3 scripts/floor_box.py deploy`; the watchdog's stage
+   receipt must show the evaluated digest). A data-lane candidate changes `league/sailbox.py`, which
+   `floor_box.py` itself imports: run from the candidate checkout, its transport runs on the
+   laptop too, and the review covers that.
 
 ### The pinned base
 
@@ -334,7 +377,7 @@ candidate's PINNED BASE commit, never from the candidate's tree or an unreviewed
   `improvement.py`: the lanes module, this controller, the gate, the judges, the benchmark, the
   journal, the watchdog's digest, the CLI) is the base commit's, blob for blob
   (`HarnessImprovement.pinned`). `scripts/harness_improve.py` re-executes `rank`, `stage`,
-  `evaluate`, `review`, `canary` and `reconcile` from a separate read-only checkout of the base
+  `evaluate`, `review`, `deploy`, `canary` and `reconcile` from a separate read-only checkout of the base
   (`<journal>/controllers/<base>`, `git archive` of league/ and scripts/, made once), with `--repo`
   naming the owner repository. A flip by hand (`canary --revert`, `--retain`, `--graduated`) needs
   no checkout.
@@ -370,7 +413,10 @@ load on the live path whenever the gate does: changes there are money path.
    anything the run printed, and the revising note and the brief carry only the public reasons. An "improve" rule also asks the dev split's count (the motivating failures) to fall by the
    same effect wherever its baseline has any. The patch author works in its worktree only: never give
    it the held-out directory (or the journal). A lost pool is restored from its backup, never
-   regenerated (a new pool is a new lane hash; every open capture must be taken again). The concurrent
+   regenerated (a new pool is a new lane hash; every open capture must be taken again). A pooled
+   case named in any public text (a PR body, whose edit history GitHub keeps, a commit, a docstring,
+   a test fixture) is burned: it is rotated out for a case never shown, and the owner's private notes
+   beside the pools record which. Public text describes the pools only by their count and hash. The concurrent
    canary (or the window after a release) is the held-out test of the House itself.
 2. **Gate open and closed.** An arms-lane candidate is judged twice more than the baseline: with its
    gate forced open (`canary._FORCED`, set only by the judges in their sandboxed process, honored only
@@ -470,10 +516,12 @@ python scripts/harness_improve.py --root $J brief KEY
 #    (arms lanes: every change in a gated branch whose else is the baseline's code).
 python scripts/harness_improve.py --root $J --repo $R stage KEY --candidate FULL_CANDIDATE_SHA --author AGENT --authoring-usd 1.40
 python scripts/harness_improve.py --root $J --repo $R evaluate KEY --python ~/Work/.ltcm-main/scratch/venv-a/bin/python
-# 5. The adversarial review of the exact patch by another agent (the checklist above), then record it:
+# 5. The adversarial review of the exact patch and tree by another agent (the checklist above), then record it:
 python scripts/harness_improve.py --root $J --repo $R review KEY --report review.md --reviewer AGENT2 --patch-sha PATCH_SHA256
-# 6. Deploy exactly the evaluated tree through the watchdog under the receipt's deploy rule. Measure on the House with the
-#    BASE release's script (B=/workspace/releases/<base release>; `next` prints it).
+#    The deploy step: refuses without that approval (and outside the class's deploy hours); issues the ticket.
+python scripts/harness_improve.py --root $J --repo $R deploy KEY
+# 6. Only now deploy exactly the named commit through the watchdog under the receipt's deploy rule. Measure on the House
+#    with the BASE release's script (B=/workspace/releases/<base release>; `next` prints it).
 #    Window lanes: just before the deploy (no earlier than `next` says), measure the control on the House:
 python -B $B/scripts/harness_improve.py measure --swarm /workspace/state --since S --until U > control.json   # House
 #    After the promotion:
@@ -494,14 +542,18 @@ the scheduler lane. The research and memory lanes' regressions include the D2a s
 (`league/tests/test_swarm_d2a_sentinel.py`): Validation runs, lines, views and a leaderboard seeded
 with sentinel figures, and every text a model reads (the researcher's cycle, status, brief, prompt
 and `read_run` tool, the architect's prompt, the strategist's and the diagnostician's packets)
-checked for them, with the gate forced open as well as closed. A gated leak fails there whatever
-route it took. A failed evaluation leaves the candidate `revising`; a bottleneck gets three
+checked for them at any printed precision (each figure and its 1.5x twin's rounded to 1-6 decimals,
+as a percent, with separators, in scientific notation, the large ones whole), with the gate forced
+open as well as closed. A gated leak that prints a sealed figure fails there whatever route it took,
+a key built at run time included; a figure the model sees only after arithmetic of its own (a ratio
+of two sealed figures, a rank) is not a printed form, and the review checks for that. A failed evaluation leaves the candidate `revising`; a bottleneck gets three
 attempts on one base (each with a fresh held-out seed), then it is `rejected` until a new capture on
 a new base.
 
 The loop never changes the objective, sealed data, spend limits or capital permissions: those files
 are outside every surface, and the controller writes only its journal, its candidates' artifacts and
-its own `canary.json`. It never places an order, funds a service or deploys; the gate never raises a
+its own `canary.json`. It never places an order, funds a service or deploys (its deploy step issues a ticket and
+names the tree; the operator sends it through the watchdog); the gate never raises a
 cap, because every lane's surface excludes the code that holds caps.
 
 ### Before release B runs

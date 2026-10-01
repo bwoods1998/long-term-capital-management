@@ -29,18 +29,26 @@ THE LANES (`LANES`; the operator's procedure is `playbooks/harness-improvement.m
 
 WHAT NO LANE MAY CHANGE, AND HOW IT IS CHECKED. Two kinds of check, which must not be confused:
 
-- MACHINE-CHECKED BOUNDARY (exact, no analysis of the code's meaning). Staging refuses a candidate whose diff, listed
-  with `git diff --no-renames --name-status` (deletions and renames included), touches a protected path (`PROTECTED`:
-  the objective and this loop, sealed data and the evaluator, spend limits, capital permissions, the release train) or
-  any path outside its lane's surface, and one that adds an import of the store, evaluator, gate, bands, settings or
-  constitution modules or of a process, file, network or loader module (`NO_NEW_IMPORTS`, `PROTECTED_MODULES`). Every
-  candidate needs an ADVERSARIAL REVIEW of its exact diff, recorded in the journal with the verdict approve, before its
-  canary starts (`HarnessImprovement.review`, `canary_start`). Capture, staging, evaluation, the judges, the benchmarks
-  and the retain/revert decision run from the PINNED BASE commit (a separate checkout the CLI re-executes from; the
-  controller refuses to run any other code, `HarnessImprovement.pinned`), the candidate is judged as the base tree with
-  only its staged surface files laid over it, and a House measurement must carry the blob hashes of the base's
-  measuring code (`measure`'s `code`): a candidate cannot change its own judge, rules or score.
-- DEFENSE IN DEPTH (static analysis of arbitrary Python: useful, never complete). Inside the surface files, the frozen
+- MACHINE-CHECKED STEPS (the controller refuses; no analysis of what code means). Staging refuses a candidate whose diff,
+  listed with `git diff --no-renames --name-status` (deletions and renames included), touches a protected path
+  (`PROTECTED`: the objective and this loop, sealed data and the evaluator, spend limits, capital permissions, the release
+  train) or any path outside its lane's surface. Every candidate needs an ADVERSARIAL REVIEW of its exact patch and
+  evaluated tree, recorded in the journal with the verdict approve, before the loop's deploy step issues the ticket the
+  tree is deployed under (`HarnessImprovement.review`, `deploy`); registering its canary (`canary_start`; the scheduler
+  lane's `reconcile`) voids it, and asks for a rollback, when the watchdog shows the tree on the House before that
+  approval and ticket (`unreviewed`). The release train itself does not read the journal, so a deploy made around the
+  loop is caught there, not prevented. The judges, the benchmarks, the rules and the retain/revert decision are the
+  PINNED BASE commit's code (a separate checkout the CLI re-executes from; the controller refuses to run any other code,
+  `HarnessImprovement.pinned`), the candidate is judged as the base tree with only its staged surface files laid over
+  it, and a House measurement must carry the blob hashes of the base's measuring code (`measure`'s `code`). The
+  candidate's own modules still run inside the judge's interpreter, which imports the tree: between them and the judge's
+  answer stand the per-run nonce, the static guards below, the review and the canary, not a process boundary.
+- DEFENSE IN DEPTH (static analysis of arbitrary Python: useful, never complete). The import and state rule
+  (`protected_routes`, `content_guard`): no new route to the store, evaluator, gate, bands, settings or constitution (an
+  import of one, of a name from or re-exported from one, of their parent packages, any star import, an imported module's
+  attribute that reaches one: resolved statically over the base and candidate trees) or to a process, file, network or
+  loader module (`NO_NEW_IMPORTS`), and no new mutation or bare hand-out of a protected module's state through the
+  names a file already binds. Inside the surface files, the frozen
   symbols (`FROZEN_SYMBOLS`, `symbol_guard`): every function that writes or holds a reference to a writer of trial,
   lineage, look, graveyard, state or receipt records (the store's general writers and raw SQL that writes included),
   Train eligibility, the idle and drift screens, the evaluation key, the cycle record the research lane's metrics come
@@ -176,13 +184,14 @@ DANGEROUS_MODULES = frozenset({"subprocess", "socket", "urllib", "http", "ctypes
                                "fileinput", "codecs"})
 #: A file that already speaks to the network (the Sailbox transport) may import more of the network family.
 NETWORK_MODULES = frozenset({"http", "urllib", "socket", "ssl"})
-#: MACHINE-CHECKED (the module docstring): modules a candidate may never add an import of, counted per import statement
-#: (a second `import os` inside a function is one more, even where the file already imports os at the top), whatever
-#: the file already imports. Their members a file already reaches stay governed by the per-name counts.
+#: Modules a candidate may never add an import of, counted per import statement (a second `import os` inside a function
+#: is one more, even where the file already imports os at the top), whatever the file already imports. Their members a
+#: file already reaches stay governed by the per-name counts. Defense in depth (`protected_routes`).
 NO_NEW_IMPORTS = frozenset({"os", "subprocess", "shutil", "socket", "pathlib", "io", "logging", "tempfile", "importlib",
                             "ctypes"})
-#: MACHINE-CHECKED: the store, the evaluator, the gate, the bands, the settings and the constitution: a candidate may
-#: never add an import of them (absolute or relative, the module or a name from it).
+#: The store, the evaluator, the gate, the bands, the settings and the constitution: a candidate may never add a route
+#: to them (absolute or relative, the module, a name from it or re-exported from it, a parent package, a star import, a
+#: module attribute that reaches it), nor mutate their state. Defense in depth (`protected_routes`).
 PROTECTED_MODULES = ("league.swarm.store", "league.swarm.evaluator", "league.swarm.gate", "league.swarm.bands",
                      "league.swarm.settings", "league.constitution")
 #: `os` members a candidate may start using (pure path and identity helpers); any other `os.<name>` or `from os import
@@ -206,6 +215,10 @@ STORE_WRITES = frozenset({"put", "update_family", "bump", "set_state", "compare_
 #: its full result as readily as a Train one's (the fourth review), so any new use of them counts.
 SEALED_READS = frozenset({"looks", "looked", "lineage_looks", "lineage_validated", "lineage_trial_sharpes", "forward",
                           "version_runs", "runs", "run", "run_result"})
+#: Store writers and sealed readers with everyday names: counted on ANY object (an over-approximation, defense in depth),
+#: so a new `runner.run(...)` or `result.note` is refused too. The brief tells the author.
+GENERIC_SEALED = frozenset({"run", "runs", "note", "put", "event", "refuse", "retire", "bump", "forward"}) & (
+    STORE_WRITES | SEALED_READS)
 #: A string in a key position (a subscript, a call's argument, a keyword's value, a comparison) that names Validation, the
 #: holdout or a line's figures (`fam["state"]["validation_line"]["numbers"]`, `runs(fid, window="validation")`): a
 #: candidate may not add one (counted per text). Prose in a new prompt constant is not a key position.
@@ -565,53 +578,324 @@ def _absolute(module: str, level: int, package: Sequence[str]) -> str:
     return ".".join(anchor + ([module] if module else []))
 
 
-def restricted_imports(source: str | None, path: str) -> Counter:
-    """MACHINE-CHECKED (the module docstring): per import statement, each restricted module it brings in
-    (`NO_NEW_IMPORTS`, by its top-level name, any submodule included; `PROTECTED_MODULES`, the module or a name from it),
-    resolved from the importing file's package. A count, so a second import of `os` is one more."""
-    out: Counter = Counter()
-    if not source:
+#: The packages the protected modules live in (`league`, `league.swarm`). Importing one (`import league`, `import
+#: league.live.decider`, which binds `league`, `from league import swarm`, `from .. import swarm`) reaches every protected
+#: module that has loaded as an attribute (`league.swarm.settings.DEFAULTS`): it counts as an import of a protected module.
+PROTECTED_PARENTS = frozenset(".".join(m.split(".")[:n]) for m in PROTECTED_MODULES for n in range(1, m.count(".") + 1))
+
+
+def protected_module(module: str) -> str | None:
+    """The protected module `module` is or lies under (`PROTECTED_MODULES`), or the protected parent package it is."""
+    for m in PROTECTED_MODULES:
+        if module == m or module.startswith(m + "."):
+            return m
+    return module if module in PROTECTED_PARENTS else None
+
+
+def tree_reader(root: Path) -> Any:
+    """`read(repo-relative path) -> source or None` over a directory tree (a checkout, an archived commit)."""
+    def read(rel: str) -> str | None:
+        try:
+            return (Path(root) / rel).read_text()
+        except (OSError, UnicodeDecodeError):
+            return None
+    return read
+
+
+class _Exports:
+    """Where a module's names come from, resolved statically from a tree's sources (`read`): a name is PROTECTED when it
+    is a protected module or parent package, comes from one (`from .store import SwarmStore`), or is re-exported or
+    computed from one in another module (`researcher.settings_mod`, `from .architect import SwarmStore`, `CFG =
+    settings_mod.DEFAULTS` in a module a candidate then imports CFG from), followed through every module's own imports,
+    star imports and module-level assignments. Defense in depth: a name reached through an object at run time (an
+    instance's attribute, a function's return value) is not followed."""
+
+    def __init__(self, read: Any) -> None:
+        self.read, self.trees, self.memo, self.modules = read, {}, {}, {}
+
+    def source(self, module: str) -> tuple[list[str], ast.Module] | None:
+        """(the module's package as path parts, its AST), or None when the tree has no such module."""
+        if module not in self.trees:
+            found = None
+            base = module.replace(".", "/")
+            for rel in (f"{base}.py", f"{base}/__init__.py"):
+                text = self.read(rel) if module else None
+                if text is not None:
+                    try:
+                        found = (rel.split("/")[:-1], ast.parse(text))
+                    except (SyntaxError, ValueError):
+                        found = None
+                    break
+            self.trees[module] = found
+        return self.trees[module]
+
+    def is_module(self, module: str) -> bool:
+        return bool(module) and self.source(module) is not None
+
+    def member(self, module: str, name: str, depth: int = 0) -> str | None:
+        """The protected module (or parent) that `module`'s attribute `name` is, comes from or is computed from."""
+        hit = protected_module(module)
+        if hit and module not in PROTECTED_PARENTS:
+            return hit  # anything from a protected module
+        hit = protected_module(f"{module}.{name}")
+        if hit:
+            return hit  # a protected module or parent package itself
+        key = (module, name)
+        if key in self.memo:
+            return self.memo[key]
+        self.memo[key] = None  # an import cycle resolves to nothing new
+        out = self._binding(module, name, depth + 1) if depth < 16 else None
+        self.memo[key] = out
         return out
-    package = path[:-3].split("/")[:-1]
-    for n in ast.walk(ast.parse(source)):
-        names: list[str] = []
+
+    def module_of(self, module: str, name: str, depth: int = 0) -> str | None:
+        """The (unprotected) module `module`'s attribute `name` is, when it is one: a submodule or an imported module."""
+        if self.is_module(f"{module}.{name}"):
+            return f"{module}.{name}"
+        key = (module, name)
+        if key in self.modules or depth > 16:
+            return self.modules.get(key)
+        self.modules[key] = None
+        src = self.source(module)
+        out = None
+        for node in _scope(src[1].body) if src else ():
+            if isinstance(node, ast.Import):
+                for a in node.names:
+                    if (a.asname or a.name.split(".")[0]) == name:
+                        target = a.name if a.asname else a.name.split(".")[0]
+                        out = target if self.is_module(target) else out
+            elif isinstance(node, ast.ImportFrom):
+                base = _absolute(node.module or "", node.level, src[0])
+                for a in node.names:
+                    if a.name != "*" and (a.asname or a.name) == name and base:
+                        out = self.module_of(base, a.name, depth + 1) or out
+        self.modules[key] = out
+        return out
+
+    def chain(self, module: str, node: ast.AST, depth: int = 0) -> str | None:
+        """The protected module an expression evaluated in `module` reaches through its names and module attributes."""
+        if isinstance(node, ast.Name):
+            return self.member(module, node.id, depth)
+        if isinstance(node, ast.Attribute):
+            inner = self.chain(module, node.value, depth)
+            if inner:
+                return inner
+            owner = self.chain_module(module, node.value, depth)
+            return self.member(owner, node.attr, depth) if owner else None
+        if isinstance(node, (ast.Subscript, ast.Starred)):
+            return self.chain(module, node.value, depth)
+        return None
+
+    def chain_module(self, module: str, node: ast.AST, depth: int = 0) -> str | None:
+        """The module an expression evaluated in `module` denotes (`pkg`, `pkg.sub`), when it denotes one."""
+        if isinstance(node, ast.Name):
+            return self.module_of(module, node.id, depth)
+        if isinstance(node, ast.Attribute):
+            owner = self.chain_module(module, node.value, depth)
+            return self.module_of(owner, node.attr, depth) if owner else None
+        return None
+
+    def _binding(self, module: str, name: str, depth: int) -> str | None:
+        src = self.source(module)
+        if src is None:
+            return None
+        package, tree = src
+        for node in _scope(tree.body):
+            if isinstance(node, ast.ImportFrom):
+                base = _absolute(node.module or "", node.level, package)
+                for a in node.names:
+                    if a.name == "*" and base:
+                        hit = protected_module(base) or self.member(base, name, depth)
+                        if hit:
+                            return hit
+                    elif (a.asname or a.name) == name and base:
+                        hit = self.member(base, a.name, depth)
+                        if hit:
+                            return hit
+            elif isinstance(node, ast.Import):
+                for a in node.names:
+                    if (a.asname or a.name.split(".")[0]) == name:
+                        hit = protected_module(a.name if a.asname else a.name.split(".")[0])
+                        if hit:
+                            return hit
+            elif _binds(node, name) and not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                value = getattr(node, "value", None) or getattr(node, "iter", None)
+                for item in getattr(node, "items", None) or []:
+                    value = item.context_expr
+                for sub in ast.walk(value) if value is not None else ():
+                    if isinstance(sub, (ast.Name, ast.Attribute)) and isinstance(getattr(sub, "ctx", None), ast.Load):
+                        hit = self.chain(module, sub, depth)
+                        if hit:
+                            return hit
+        return None
+
+
+def _root_name(node: ast.AST) -> ast.Name | None:
+    """The name an attribute or item chain starts from (`settings_mod` in `settings_mod.DEFAULTS["gym"]`)."""
+    while isinstance(node, (ast.Attribute, ast.Subscript, ast.Starred)):
+        node = node.value
+    return node if isinstance(node, ast.Name) else None
+
+
+def protected_routes(source: str | None, path: str, read: Any = None) -> tuple[Counter, Counter]:
+    """What a file's imports reach of the protected modules, and what it does to them, counted (`content_guard`
+    compares the candidate's counts with the baseline's: moving code is allowed, one more is not).
+
+    ROUTES, per import statement and per module attribute read: each restricted module an import brings in
+    (`NO_NEW_IMPORTS` by top-level name; a protected module, a name from one, a protected parent package; every star
+    import, whatever it names; a name another module re-exports or computes from a protected module, `_Exports`), and
+    each protected module reached through an attribute of an imported module (`researcher.settings_mod`, `pkg.store`).
+
+    MUTATIONS of the names the file binds to protected modules or to their non-function members (`settings_mod`,
+    `from .settings import DEFAULTS`): an item or attribute assigned or deleted on them, a mutator named on them
+    (`settings_mod.TRAIN_STARTS.clear()`, called or not), and the module object or a part of it handed out bare (`d =
+    settings_mod.DEFAULTS`, `f(settings_mod.DEFAULTS["gym"])`, a return, a container) where other code could mutate it.
+
+    Static resolution over `read` (repo-relative path -> source, default the running checkout): DEFENSE IN DEPTH, never a
+    proof that no route exists (an object handed over at run time is not followed; the review checks)."""
+    routes: Counter = Counter()
+    mutations: Counter = Counter()
+    if not source:
+        return routes, mutations
+    exports = _Exports(read or tree_reader(Path(__file__).resolve().parents[2]))
+    package = path.split("/")[:-1]
+    tree = ast.parse(source)
+    modules: dict[str, str] = {}      # names the file binds by import to an unprotected module
+    protected: dict[str, bool] = {}   # names bound to a protected module or member: True when they may be mutable
+    for n in ast.walk(tree):
+        found: set[str] = set()
         if isinstance(n, ast.Import):
-            names = [a.name for a in n.names]
+            for a in n.names:
+                top = a.name.split(".")[0]
+                bound, target = a.asname or top, a.name if a.asname else top
+                if top in NO_NEW_IMPORTS:
+                    found.add(top)
+                hit = protected_module(a.name) or protected_module(target)
+                if hit:
+                    found.add(hit)
+                    protected[bound] = True
+                elif exports.is_module(target):
+                    modules[bound] = target
         elif isinstance(n, ast.ImportFrom):
             base = _absolute(n.module or "", n.level, package)
-            # `from league.swarm import store` names the module in the alias: the base and every base.name.
-            names = [base] + [f"{base}.{a.name}" if base else a.name for a in n.names]
-        found = set()
-        for name in names:
-            top = name.split(".")[0]
+            top = base.split(".")[0]
             if top in NO_NEW_IMPORTS:
                 found.add(top)
-            for module in PROTECTED_MODULES:
-                if name == module or name.startswith(module + "."):
-                    found.add(module)
-        out.update(found)
-    return out
+            for a in n.names:
+                bound = a.asname or a.name
+                if a.name == "*":
+                    found.add(f"from {base or '.'} import *")
+                    continue
+                if not base or top in NO_NEW_IMPORTS:
+                    continue
+                hit = exports.member(base, a.name)
+                if hit:
+                    found.add(hit)
+                    # A function or class of a protected module is not mutable state; the module, a parent package,
+                    # a constant, a table or a re-export may be.
+                    src = exports.source(base) if protected_module(base) and base not in PROTECTED_PARENTS else None
+                    kinds = [type(x) for x in _scope(src[1].body) if _binds(x, a.name)] if src else []
+                    protected[bound] = not kinds or any(k not in (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+                                                        for k in kinds)
+                else:
+                    sub = exports.module_of(base, a.name)
+                    if sub:
+                        modules[bound] = sub
+        routes.update(found)
+    # A protected module reached through an attribute of an imported module (`researcher.settings_mod.DEFAULTS`).
+    def module_expr(node: ast.AST) -> str | None:
+        if isinstance(node, ast.Name):
+            return modules.get(node.id)
+        if isinstance(node, ast.Attribute):
+            owner = module_expr(node.value)
+            return exports.module_of(owner, node.attr) if owner else None
+        return None
+
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Attribute):
+            owner = module_expr(n.value)
+            hit = exports.member(owner, n.attr) if owner else None
+            if hit:
+                routes[f"{hit} (through {ast.unparse(n)[:60]})"] += 1
+    # Mutations of the names bound to protected modules or their mutable members.
+    mutable = {name for name, may in protected.items() if may}
+
+    def rooted(node: ast.AST, *, bare: bool) -> bool:
+        root = _root_name(node)
+        if root is None:
+            return False
+        if root.id in mutable:
+            return True
+        # A protected class or function, handed out bare, is no table; an item or attribute of one may be.
+        return root.id in protected and not (bare and isinstance(node, ast.Name))
+
+    for n in ast.walk(tree):
+        targets: list[ast.AST] = []
+        if isinstance(n, (ast.Assign, ast.Delete)):
+            targets = list(n.targets)
+        elif isinstance(n, (ast.AugAssign, ast.AnnAssign)):
+            targets = [n.target]
+        for t in targets:
+            for sub in ast.walk(t):
+                if isinstance(sub, (ast.Attribute, ast.Subscript)) and isinstance(sub.ctx, (ast.Store, ast.Del)) \
+                        and rooted(sub, bare=False):
+                    mutations[f"assigns {ast.unparse(sub)[:80]}"] += 1
+        if isinstance(n, ast.Attribute) and n.attr in MUTATORS and rooted(n.value, bare=False):
+            mutations[f"mutates {ast.unparse(n)[:80]}"] += 1
+        escapes: list[ast.AST] = []
+        if isinstance(n, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.NamedExpr, ast.Return, ast.Yield,
+                          ast.YieldFrom)) and getattr(n, "value", None) is not None:
+            escapes.append(n.value)
+        elif isinstance(n, ast.Call):
+            escapes += list(n.args) + [k.value for k in n.keywords]
+        elif isinstance(n, (ast.List, ast.Tuple, ast.Set)):
+            escapes += list(n.elts)
+        elif isinstance(n, ast.Dict):
+            escapes += [v for v in n.values if v is not None]
+        elif isinstance(n, ast.Lambda):
+            escapes.append(n.body)
+        elif isinstance(n, (ast.For, ast.AsyncFor, ast.withitem)):
+            escapes.append(n.iter if isinstance(n, (ast.For, ast.AsyncFor)) else n.context_expr)
+        for e in escapes:
+            e = e.value if isinstance(e, ast.Starred) else e
+            if isinstance(e, (ast.Name, ast.Attribute, ast.Subscript)) and rooted(e, bare=True):
+                mutations[f"hands out {ast.unparse(e)[:80]}"] += 1
+    return routes, mutations
 
 
-def content_guard(path: str, before: str | None, after: str) -> None:
-    """Refuse a Python change that adds an import of a protected or process, file, network or loader module (exact and
-    machine-checked), and, as DEFENSE IN DEPTH (static analysis cannot be complete: the module docstring), one that
-    introduces reflection, processes, network, file writes (calls and constructors), output or exits a judge could mistake
-    for its answer, interpreter plumbing, attribute assignment on another object, a store writer or sealed reader named
-    anywhere (called or held), a Validation key, a call through an expression, the judges' gate override, or a gate in
-    the evaluator fingerprint's files. Every comparison is a count per name, so moving an existing call is allowed and one
-    more is not. Never a proof of safety: the adversarial review, the base-pinned judges and regressions, and the canary
-    remain."""
+def restricted_imports(source: str | None, path: str, read: Any = None) -> Counter:
+    """The routes `protected_routes` counts: per import statement each restricted module it brings in (a protected
+    module, a name from or re-exported from one, a protected parent package, every star import, `NO_NEW_IMPORTS`), and
+    each protected module reached through an imported module's attribute. Defense in depth (static resolution)."""
+    return protected_routes(source, path, read)[0]
+
+
+def content_guard(path: str, before: str | None, after: str, *, read_before: Any = None, read_after: Any = None) -> None:
+    """DEFENSE IN DEPTH (static analysis of arbitrary Python cannot be complete: the module docstring). Refuse a Python
+    change that adds a route to a protected module or a process, file, network or loader module (`protected_routes`: an
+    import of one, of a name from or re-exported from one, of a parent package, a star import, a module attribute that
+    reaches one), a mutation or bare hand-out of a protected module's state, and one that introduces reflection,
+    processes, network, file writes (calls and constructors), output or exits a judge could mistake for its answer,
+    interpreter plumbing, attribute assignment on another object, a store writer or sealed reader named anywhere (called
+    or held), a Validation key, a call through an expression, the judges' gate override, or a gate in the evaluator
+    fingerprint's files. Every comparison is a count, so moving existing code is allowed and one more is not. Re-exports
+    resolve over `read_before` (the base tree) and `read_after` (the candidate tree), each repo-relative path -> source.
+    Never a proof of safety: the adversarial review, the base-pinned judges and regressions, and the canary remain."""
     if not path.endswith(".py"):
         return
     from .improvement import ImprovementError  # local: improvement imports this module
 
-    was, now = restricted_imports(before, path), restricted_imports(after, path)
+    (was, held), (now, done) = protected_routes(before, path, read_before), protected_routes(after, path, read_after)
     added = sorted(m for m, v in now.items() if v > was.get(m, 0))
     if added:
-        raise ImprovementError(f"{path}: candidate adds an import of {added}: no candidate may import the store, evaluator, "
-                               "gate, bands, settings or constitution, or os, subprocess, shutil, socket, pathlib, io, "
-                               "logging, tempfile, importlib or ctypes")
+        raise ImprovementError(f"{path}: candidate adds a route to {added[:4]}: no candidate may import the store, "
+                               "evaluator, gate, bands, settings or constitution (nor a name from or re-exported from one, "
+                               "their parent packages `league` and `league.swarm`, or anything by a star import), or os, "
+                               "subprocess, shutil, socket, pathlib, io, logging, tempfile, importlib or ctypes")
+    touched = sorted(m for m, v in done.items() if v > held.get(m, 0))
+    if touched:
+        raise ImprovementError(f"{path}: candidate mutates or hands out a protected module's state {touched[:4]}: read a "
+                               "setting inline, never assign, mutate or pass on the module or its tables")
     old, new = _facts(before), _facts(after)
 
     def more(field: str) -> list[str]:
@@ -1339,11 +1623,13 @@ class Lane:
 COST_RATIO, COST_FLOOR, PAYS_SHARE = 1.25, 2.0, 0.25
 #: Pinned private held-out pools (`Lane.heldout_pool`): SHA-256 of `<held-out directory>/<judge>.json`. The files live
 #: outside the repo (`~/Work/.ltcm-main/harness-heldout/` on the owner's machine, mode 0600 in a 0700 directory, backed
-#: up with the journal); a lost pool is restored from its backup, never regenerated (a new pool is a new lane hash).
+#: up with the journal); a lost pool is restored from its backup, never regenerated (a new pool is a new lane hash). A
+#: case named in any public text (a PR body and its edit history, a commit, a docstring) is burned: it is replaced in a
+#: rotated pool, never reused, and the owner's private notes beside the pools record which.
 HELDOUT_POOLS = {
     "research": "c67e699af2a077fafb9f957b98c88dbc95bc6c6ff040d8c5f69b56d1334c0c63",
-    "memory": "913af78057f5898d05d88b081eed7f47c9a4e6d0098e042a0844a0ed45c353da",
-    "data": "9cba19f92612d76ee7af56091723464b6ba33fea1a9a7184e120f8b574efcf3b",
+    "memory": "50e857f3bce8bbab327b6b863d8b75c034d7cd339d22ad36f9d3ca2669139d1c",
+    "data": "6427a6babe206e037ad34780007318619e1bc760be81b23ba60b763c0b5f9acf",
     "execution": "46e65fbb329d8fce1117f524521b97f77a795017d5aab0cf0433f6020dfea8cd",
 }
 #: The research judge's "pays" rule in House terms (Sept 30, 2026, 24 hours read-only): 14.2% of Train runs were

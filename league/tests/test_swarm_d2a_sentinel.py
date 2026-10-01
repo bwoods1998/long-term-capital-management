@@ -4,25 +4,58 @@ A family is given Validation runs (normal spread and the 1.5x twin, full results
 numbers, and a leaderboard row, every figure a SENTINEL no other code produces. Then every text a model reads is built
 the way the swarm builds it: the researcher's cycle (its request bodies), status, brief and prompt, its `read_run` tool
 asked for the Validation run, the architect's prompt, the strategist's packet and the diagnostician's packet. None may
-carry a sentinel. The harness lanes run this module with a candidate's gate forced OPEN as well as closed
-(`harness_lanes.CORE_REGRESSIONS`), so a gated change that shows Validation figures to a model fails here whatever
-route it took (a store reader, a state key, a tool), which the static guards can never promise. Every figure here is
-invented."""
+carry a sentinel AT ANY PRINTED PRECISION: each figure (and its 1.5x twin's) is looked for rounded to 1-6 decimals, as
+`round()` and `repr` print it, as a percent, with thousands separators, in scientific notation, and the large ones as a
+whole number (`printed_forms`), each between non-digits. The harness lanes run this module with a candidate's gate forced
+OPEN as well as closed (`harness_lanes.CORE_REGRESSIONS`), so a gated change that shows Validation figures to a model
+fails here whatever route it took (a store reader, a state key built at run time, a tool), which the static guards can
+never promise. A figure a model sees only after arithmetic of its own (a ratio of two sealed figures, a rank) is not a
+printed form of a sentinel: the review checks for that. Every figure here is invented."""
 from __future__ import annotations
 
 import json
+import re
+from unittest.mock import patch
 
 from league.swarm.architect import Architect
 from league.swarm.diagnostician import Diagnostician, standing
+from league.swarm.researcher import Researcher
 from league.swarm.strategist import Strategist
 from league.tests.swarm_fakes import result
 from league.tests.test_swarm_researcher import ResearcherCase
 
-#: Validation's figures, chosen so nothing else in a prompt could print them.
-T, MEAN, DSR, SHARPE, PNL, TRADES = 7.318093, 0.0461773, 0.0918273, 2.718061, 6174.29, 917
-SENTINELS = ("7.318093", "0.0461773", "0.0918273", "2.718061", "6174.29", "917 trades", '"trades": 917', "5.122665")
+#: Validation's figures: three-digit (or four-digit) whole parts no prompt prints, so every rounding of each, down to one
+#: decimal, is distinctive; the 1.5x twin holds each times 0.7.
+T, MEAN, DSR, SHARPE, PNL, TRADES = 738.6417, 612.9483, 853.7129, 394.7261, 6174.29, 917
+FIGURES = (T, MEAN, DSR, SHARPE, PNL)
+TWIN = 0.7
+#: Texts that name the trade count (a bare 917 could be anything).
+LITERALS = ("917 trades", '"trades": 917', "trades: 917", "trades=917")
 CHECKS = {"status_ok": True, "trades": True, "days": True, "mean_positive": True, "t": False, "dsr": False,
           "quarters": True, "stress": True}
+
+
+def printed_forms(value: float, *, whole: bool = True) -> set[str]:
+    """Every way a figure is commonly printed: 1-6 decimals (fixed, `round` and `repr`), a percent at 0-4 decimals,
+    thousands separators, scientific notation at 1-4 digits, and (`whole`) the whole number for a figure of 100 or more."""
+    forms = {repr(value), str(value)}
+    for d in range(1, 7):
+        forms.update({f"{value:.{d}f}", str(round(value, d))})
+    for d in range(0, 5):
+        forms.add(f"{value * 100:.{d}f}")
+    if abs(value) >= 1000:
+        forms.update(f"{value:,.{d}f}" for d in range(0, 3))
+    forms.update(f"{value:.{d}e}" for d in range(1, 5))
+    if whole and abs(value) >= 100:
+        forms.add(f"{value:.0f}")
+    return {f for f in forms if len(f.replace("-", "").replace(".", "")) >= 3}
+
+
+#: One pattern for every form of every figure and its twin, each between non-digits (`7.39` in `17.391` is no match).
+FORMS = sorted({f for v in FIGURES for f in printed_forms(v)} | {f for v in FIGURES for f in printed_forms(v * TWIN,
+                                                                                                         whole=False)},
+               key=lambda f: (-len(f), f))
+PATTERN = re.compile("|".join(rf"(?<![\d]){re.escape(f)}(?![\d])" for f in FORMS))
 
 
 class ValidationSentinels(ResearcherCase):
@@ -34,10 +67,10 @@ class ValidationSentinels(ResearcherCase):
                    "trades": TRADES}
         normal = result("sentinel-validation", window="validation")
         normal["summary"].update(figures)
-        normal["stress_1.5"].update(t_daily=T * 0.7, sharpe_daily=SHARPE * 0.7, pnl=PNL * 0.7, trades=TRADES)
+        normal["stress_1.5"].update(t_daily=T * TWIN, sharpe_daily=SHARPE * TWIN, pnl=PNL * TWIN, trades=TRADES)
         self.val_run = self.store.add_run(self.fid, 1, normal, window="validation", stress=1.0, purpose="validation")
         twin = result("sentinel-validation-twin", window="validation")
-        twin["summary"].update({k: v * 0.7 if isinstance(v, float) else v for k, v in figures.items()})
+        twin["summary"].update({k: v * TWIN if isinstance(v, float) else v for k, v in figures.items()})
         self.store.add_run(self.fid, 1, twin, window="validation", stress=1.5, purpose="validation")
         numbers = {"t": T, "mean": MEAN, "dsr": DSR, "trades": TRADES, "pnl": PNL, "sharpe": SHARPE}
         self.store.set_state(self.fid, validation_line={"passed": False, "checks": CHECKS, "numbers": numbers},
@@ -49,15 +82,41 @@ class ValidationSentinels(ResearcherCase):
                                                   "roots": ["SPY"], "validation": numbers, "share": 1.0}]})
 
     def clean(self, text, where):
-        for sentinel in SENTINELS:
-            self.assertNotIn(sentinel, text, f"{where} shows a Validation figure ({sentinel}): D2a")
+        for literal in LITERALS:
+            self.assertNotIn(literal, text, f"{where} shows a Validation figure ({literal}): D2a")
+        found = PATTERN.search(text)
+        self.assertIsNone(found, f"{where} shows a Validation figure ({found.group(0) if found else ''}): D2a")
 
     def test_the_seeded_figures_are_there_to_leak(self):
         """The store really holds them: a reader that showed them would fail every test below."""
         rows = self.store.runs(self.fid, window="validation")
         self.assertEqual(len(rows), 2)
-        self.assertIn("7.318093", json.dumps([r["summary"] for r in rows], default=str))
-        self.assertIn("7.318093", json.dumps(self.store.family(self.fid)["state"], default=str))
+        self.assertIn("738.6417", json.dumps([r["summary"] for r in rows], default=str))
+        self.assertIn("738.6417", json.dumps(self.store.family(self.fid)["state"], default=str))
+
+    def test_every_printed_precision_of_every_figure_is_caught(self):
+        """The detector itself: a figure (or its twin's) printed at any precision, as a percent, with separators or in
+        scientific notation is caught; a figure that merely shares digits is not."""
+        for value in FIGURES + tuple(v * TWIN for v in FIGURES):
+            for text in (f"t {value:.2f}", f"t={round(value, 1)}", f"t {value:.3f}.", f"({value:.4f})",
+                         f"{value * 100:.1f}%", f"{value:.2e}", json.dumps({"t": round(value, 2)})):
+                with self.assertRaises(AssertionError, msg=text):
+                    self.clean(text, "a leak")
+        self.clean("t 1738.64 and 38.64, 2 of 8 checks passed, 600 seconds, 0.7 stress, 7.3 on Train", "no leak")
+
+    def test_a_rounded_leak_through_a_computed_key_is_caught(self):
+        """The reviewer's probe (round 4): a gated status line that reads `validation_numbers` through a key built at run
+        time (no static guard sees it) and prints two decimals. It must fail here."""
+        original = Researcher.status
+
+        def leaky(researcher, fam):
+            seen = (fam.get("state") or {}).get("valid" + "ation_numbers") or {}
+            return original(researcher, fam) + f"\nt {seen['t']:.2f}, dsr {seen['dsr']:.2f}"
+
+        with patch.object(Researcher, "status", leaky):
+            fam = self.store.family(self.fid)
+            with self.assertRaisesRegex(AssertionError, "D2a"):
+                self.clean(self.researcher().status(fam), "Researcher.status")
 
     def test_the_researchers_cycle_status_brief_and_prompt_show_a_verdict_and_a_count_only(self):
         self.steps = [{"text": "ok"}]

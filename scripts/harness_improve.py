@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """Operate the persistent, no-provider-call harness lab. See playbooks/harness-improvement.md.
 
-The scheduler lane: capture, prepare, stage, evaluate, review, reconcile, watch. The research, memory, data and execution
-lanes (`league/swarm/harness_lanes.py`), one command per step: `measure` (read-only, on the House, with the base
-release's copy of this script) -> `rank` -> `prepare` -> `stage` -> `evaluate` -> `review` (an adversarial review of the
-exact patch, approve or reject) -> deploy through the watchdog -> `canary` -> `reconcile`; `next` prints each candidate's
-next command, `brief` what its patch author may see, `lanes` the predeclared definitions.
+The scheduler lane: capture, prepare, stage, evaluate, review, deploy, reconcile, watch. The research, memory, data and
+execution lanes (`league/swarm/harness_lanes.py`), one command per step: `measure` (read-only, on the House, with the
+base release's copy of this script) -> `rank` -> `prepare` -> `stage` -> `evaluate` -> `review` (an adversarial review
+of the exact patch and evaluated tree, approve or reject) -> `deploy` (the loop's deploy step: refuses without that
+approval, issues the ticket) -> the exact tree through the watchdog -> `canary` -> `reconcile`; `next` prints each
+candidate's next command, `brief` what its patch author may see, `lanes` the predeclared definitions.
 
-THE PINNED BASE. `rank`, `stage`, `evaluate`, `review`, `canary` and `reconcile` compute a candidate's fate from its
-base commit's code: when this script is not that commit's (`HarnessImprovement.pinned`), it re-executes itself from a
-separate read-only checkout of the base, `<journal>/controllers/<base>` (`git archive` of league/ and scripts/, made
-once), with `--repo` naming the owner repository.
+THE PINNED BASE. `rank`, `stage`, `evaluate`, `review`, `deploy`, `canary` and `reconcile` compute a candidate's fate
+from its base commit's code: when this script is not that commit's (`HarnessImprovement.pinned`), it re-executes itself
+from a separate read-only checkout of the base, `<journal>/controllers/<base>` (`git archive` of league/ and scripts/,
+made once), with `--repo` naming the owner repository.
 """
 from __future__ import annotations
 
@@ -42,7 +43,7 @@ from league.watchdog import tree_digest
 #: Commands that never open a journal (read-only, or definitions only).
 NO_JOURNAL = ("measure", "lanes")
 #: Journal commands that compute a candidate's fate: they run from a checkout of its base commit (the module docstring).
-PINNED_COMMANDS = ("rank", "stage", "evaluate", "review", "canary", "reconcile")
+PINNED_COMMANDS = ("rank", "stage", "evaluate", "review", "deploy", "canary", "reconcile")
 #: Set in a re-executed process: the base it was re-executed for (a second mismatch is an error, never a loop).
 PINNED_ENV = "LTCM_HARNESS_PINNED"
 #: The supervised observer's lane measurement: the last day, read only, at most this often (about 1.5 CPU seconds on the
@@ -79,7 +80,7 @@ def parser() -> argparse.ArgumentParser:
     part.add_argument("key")
     part.add_argument("--candidate", required=True)
     part.add_argument("--authoring-usd", type=float, help="what writing this attempt cost (the agent's dollars), recorded")
-    part.add_argument("--author", help="the patch author's name (its reviewer must be another agent)")
+    part.add_argument("--author", required=True, help="the patch author's name (its reviewer must be another agent)")
     part = sub.add_parser("review", help="record an adversarial review of a staged candidate's exact patch")
     part.add_argument("key")
     part.add_argument("--report", type=Path, required=True,
@@ -87,6 +88,9 @@ def parser() -> argparse.ArgumentParser:
     part.add_argument("--reviewer", required=True, help="the reviewing agent (never the patch's author)")
     part.add_argument("--patch-sha", required=True, help="the sha256 of the candidate.patch reviewed (`next` prints it)")
     part.add_argument("--review-usd", type=float, help="what the review cost, recorded")
+    part = sub.add_parser("deploy", help="the loop's deploy step: refuses without an approving review of the exact "
+                                         "evaluated tree; issues the ticket the tree is deployed under")
+    part.add_argument("key")
     part = sub.add_parser("evaluate")
     part.add_argument("key")
     part.add_argument("--python", type=Path, default=Path(sys.executable))
@@ -202,6 +206,8 @@ def step(lab, args):
                           review_usd=args.review_usd)
     if args.command == "evaluate":
         return lab.evaluate(args.key, python=args.python)
+    if args.command == "deploy":
+        return lab.deploy(args.key)
     if args.command == "reconcile":
         return reconcile(lab, args, args.key)
     if args.command == "rank":

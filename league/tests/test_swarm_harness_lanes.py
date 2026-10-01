@@ -167,7 +167,8 @@ class Boundary(unittest.TestCase):
                                ("\ndef g(c):\n    c._FORCED['k'] = True\n", "override"),
                                ("\nfrom league.swarm import canary\n\ndef g():\n    return canary.decide({}, 'k', 'u')\n", "canary"),
                                ("\nfrom league.swarm.canary import _CACHE\n", "canary"),
-                               ("\nimport league.swarm.canary\n", "canary")):
+                               # `import league.swarm.canary` binds `league`: a route to every protected module.
+                               ("\nimport league.swarm.canary\n", r"route to \['league'\]")):
             with self.assertRaisesRegex(labmod.ImprovementError, pattern, msg=added):
                 lanes.content_guard(path, before, before + added)
         lanes.content_guard(path, before, before + "\nfrom league.swarm import canary\n\ndef g(u):\n"
@@ -184,9 +185,9 @@ class Boundary(unittest.TestCase):
                   "        return os.path.join('a', json.dumps(rows))\n")
         lanes.content_guard(path, before, before.replace("text.replace('a', 'b')", "text.replace('b', 'c')"))
         for added, pattern in (
-                # A new import of os is refused outright now (machine-checked), before any name is counted.
-                ("from os import system as _sh, write as _emit\n", r"import of \['os'\]"),
-                ("from os import environ as _env\n", r"import of \['os'\]"),
+                # A new import of os is refused outright now (the import rule), before any name is counted.
+                ("from os import system as _sh, write as _emit\n", r"route to \['os'\]"),
+                ("from os import environ as _env\n", r"route to \['os'\]"),
                 ("from operator import attrgetter as _ag\n", "attrgetter"),
                 ("import operator\nX = operator.attrgetter('_FOR' + 'CED')\n", "attrgetter"),
                 ("F = os.system\n", "system"),
@@ -199,7 +200,7 @@ class Boundary(unittest.TestCase):
                 ("def g(a):\n    return os.execv('/bin/sh', a)\n", "execv"),
                 ("def g(a):\n    return os.posix_spawn('/bin/sh', a, {})\n", "posix_spawn"),
                 ("def g(a):\n    return subprocess.run(a)\n", "members"),
-                ("import os as o\n", r"import of \['os'\]"),
+                ("import os as o\n", r"route to \['os'\]"),
                 ("import operator as op\n", "alias"),
                 ("class S:\n    def g(self, fid):\n        self.store.set_state(fid, robust_failed=[], drift_failed={})\n",
                  "store writes"),
@@ -417,14 +418,14 @@ class FourthReview(unittest.TestCase):
 
     def test_file_writes_through_constructors_and_new_file_module_imports_are_refused(self):
         """P3, P3b, P3c: a logging FileHandler rewriting the House's gate file, io.FileIO truncating the store, an archive
-        written: refused as a new import (machine-checked) and, where the module was already imported, by name."""
+        written: refused as a new import (the import rule) and, where the module was already imported, by name."""
         write = ('            sink = logging.getLogger("probe")\n'
                  '            sink.addHandler(logging.FileHandler(str(self.store.root) + "/harness/canary.json", mode="w"))\n'
                  f'            sink.error(json.dumps({{"schema": 1, "arms": {{"{self.KEY_R}": {{"state": "retained"}}}}}}))\n')
         self.refused(self.admit(write).replace("import json\n", "import json\nimport logging\n", 1),
-                     r"adds an import of \['logging'\]")
+                     r"adds a route to \['logging'\]")
         self.refused(self.admit('            io.FileIO(str(self.store.root) + "/swarm.sqlite", "w").close()\n')
-                     .replace("import json\n", "import json\nimport io\n", 1), r"adds an import of \['io'\]")
+                     .replace("import json\n", "import json\nimport io\n", 1), r"adds a route to \['io'\]")
         self.refused(self.admit('            zipfile.ZipFile(str(self.store.root) + "/x.zip", "w").writestr("x", "y")\n')
                      .replace("import json\n", "import json\nimport zipfile\n", 1), r"ZipFile")
         already = "import io\nimport json\nimport logging\n\n\ndef f(x):\n    return json.dumps(x)\n"
@@ -449,7 +450,7 @@ class FourthReview(unittest.TestCase):
                               ("    from ..constitution import C\n", "league.constitution"),
                               ("    import league.constitution\n", "league.constitution")):
             after = before.replace("def f(x):\n", "def f(x):\n" + added)
-            with self.assertRaisesRegex(labmod.ImprovementError, f"adds an import of \\['{module}'\\]", msg=added):
+            with self.assertRaisesRegex(labmod.ImprovementError, f"adds a route to \\['{module}'\\]", msg=added):
                 lanes.content_guard("league/swarm/researcher.py", before, after)
         self.assertEqual(lanes.restricted_imports("from . import canary, diagnostics\n", "league/swarm/researcher.py"), {})
 
@@ -545,6 +546,97 @@ class FourthReview(unittest.TestCase):
                          ["D league/swarm/guard.py (spend)", "M league/tests/test_harness_candidate_old.py (objective: an "
                           "existing test)", "D league/tests/test_harness_candidate_old.py (objective: an existing test)",
                           "T league/swarm/canary.py (objective)"])
+
+
+class FifthReview(unittest.TestCase):
+    """The fifth review's probes (round 4): research-lane candidates, gated per family in `Researcher._admit`, that reach
+    the constitution or the settings through a parent package, a star import or a re-export, or through a name the file
+    already binds. Each passed every staging check; each is now refused (defense in depth: `protected_routes`)."""
+
+    KEY = "harness:research:train_dq_rate:0123456789abcdef"
+
+    def setUp(self):
+        self.researcher = (REPO / "league/swarm/researcher.py").read_text()
+        self.gated = self.researcher.replace("from . import diagnostics, evidence, inputs, public\n",
+                                             "from . import diagnostics, evidence, inputs, public\nfrom . import canary\n", 1)
+
+    def admit(self, imports, body):
+        """The gated branch in `_admit` running `body`, with `imports` added at the top of the module."""
+        anchor = "        why = check_code(code)\n"
+        self.assertEqual(self.gated.count(anchor), 1)
+        text = self.gated.replace(anchor, f'        if canary.enabled("{self.KEY}", fam["id"], root=self.store.root):\n'
+                                  + body + anchor, 1)
+        return text.replace("from . import canary\n", "from . import canary\n" + imports, 1)
+
+    def refused(self, after, pattern):
+        why = staged("league/swarm/researcher.py", self.researcher, after, self.KEY, "family", "research")
+        self.assertIsNotNone(why, f"staging passed:\n{after[-400:]}")
+        self.assertRegex(why, pattern)
+
+    def test_parent_packages_star_imports_and_reexports_are_routes_to_protected_modules(self):
+        """I1, I1b, I1c, I2: `import league`, `from .. import swarm`, `from league import swarm`, `import league.live.decider`
+        (it binds `league`), a bare star import, and a protected name re-exported by another module."""
+        for imports, label in (("import league\n", "'league'"), ("import league.swarm\n", "'league.swarm'"),
+                               ("from .. import swarm as pkg\n", "'league.swarm'"),
+                               ("from league import swarm\n", "'league.swarm'"),
+                               ("import league.live.decider\n", "'league'"), ("from . import *\n", "import \\*"),
+                               ("from .architect import *\n", "import \\*"),
+                               ("from .architect import SwarmStore as Store2\n", "'league.swarm.store'"),
+                               ("from .strategist import settings_mod as S2\n", "'league.swarm.settings'"),
+                               ("from .diagnostician import SwarmStore\n", "'league.swarm.store'")):
+            with self.subTest(imports=imports):
+                self.refused(self.admit(imports, "            pass\n"), f"adds a route to .*{label}")
+
+    def test_the_constitution_and_the_settings_cannot_be_mutated_through_any_route(self):
+        """M1-M3 (through a parent package), the same through a module attribute or a name the file already binds, and
+        an alias handed out for later mutation."""
+        for imports, body, pattern in (
+                ("import league\n", '            league.constitution.CONSTITUTION["budgets"] = {}\n', "route to"),
+                ("from .. import swarm as pkg\n", '            pkg.settings.DEFAULTS["gym"].update(max_runs=10 ** 6)\n',
+                 "route to"),
+                ("from .. import swarm as pkg\n", "            pkg.settings.TRAIN_STARTS.clear()\n", "route to"),
+                ("from . import architect as arch\n", "            arch.settings_mod.TRAIN_STARTS.clear()\n", "route to"),
+                ("", '            settings_mod.DEFAULTS["gym"]["max_runs"] = 10 ** 6\n', "mutates or hands out"),
+                ("", "            settings_mod.TRAIN_STARTS.clear()\n", "mutates or hands out"),
+                ("", "            forget = settings_mod.TRAIN_STARTS.clear\n            forget()\n", "mutates or hands out"),
+                ("", "            table = settings_mod.DEFAULTS\n            table.clear()\n", "mutates or hands out"),
+                ("", "            del settings_mod.TRAIN_END\n", "mutates or hands out|another object")):
+            with self.subTest(body=body.strip()):
+                self.refused(self.admit(imports, body), pattern)
+
+    def test_reading_a_setting_inline_the_gate_import_and_a_type_check_still_pass(self):
+        for body in ("            if settings_mod.TRAIN_END.year < 2000:\n                pass\n",
+                     "            if isinstance(self.store, SwarmStore):\n                pass\n",
+                     "            pass\n"):
+            with self.subTest(body=body.strip()):
+                after = self.admit("", body)
+                self.assertIsNone(staged("league/swarm/researcher.py", self.researcher, after, self.KEY, "family",
+                                         "research"))
+
+    def test_reexports_resolve_over_the_candidates_own_tree(self):
+        """A re-export the candidate adds in another surface file is followed in the candidate's tree (`read_after`):
+        `CFG = settings_mod.DEFAULTS` in the architect, then `from .architect import CFG` in the researcher."""
+        architect = (REPO / "league/swarm/architect.py").read_text() + "\nCFG = settings_mod.DEFAULTS\n"
+        tree = {"league/swarm/architect.py": architect}
+
+        def read_after(rel):
+            if rel in tree:
+                return tree[rel]
+            path = REPO / rel
+            return path.read_text() if path.is_file() else None
+
+        after = self.researcher.replace("from . import diagnostics, evidence, inputs, public\n",
+                                        "from . import diagnostics, evidence, inputs, public\nfrom .architect import CFG\n", 1)
+        with self.assertRaisesRegex(labmod.ImprovementError, "league.swarm.settings"):
+            lanes.content_guard("league/swarm/researcher.py", self.researcher, after, read_after=read_after)
+        with self.assertRaisesRegex(labmod.ImprovementError, "hands out"):
+            lanes.content_guard("league/swarm/architect.py", (REPO / "league/swarm/architect.py").read_text(), architect)
+
+    def test_every_surface_file_counts_the_same_before_and_after_an_unrelated_edit(self):
+        """No surface file of the baseline trips the rule against itself (the counts compare like with like)."""
+        for path in sorted({p for lane in lanes.LANES.values() for p in lane.surface if "*" not in p}):
+            source = (REPO / path).read_text()
+            lanes.content_guard(path, source, source + "\n# an unrelated comment\n")
 
 
 class GateCoverage(unittest.TestCase):
@@ -985,6 +1077,7 @@ class Decisions(unittest.TestCase):
 
 SOURCE = "import json\n\n\ndef preflight(code, family=None):\n    return {'status': 'passed'}\n"
 SAILBOX = "RETRIES = 2\n\n\ndef retries():\n    return RETRIES\n"
+OBSERVE = "STALE_SECONDS = 90\n\n\ndef stale():\n    return STALE_SECONDS\n"
 
 
 class LaneCycle(unittest.TestCase):
@@ -1000,6 +1093,7 @@ class LaneCycle(unittest.TestCase):
         (self.repo / "league" / "swarm" / "preflight.py").write_text(SOURCE)
         (self.repo / "league" / "swarm" / "guard.py").write_text("CAP = 1\n")
         (self.repo / "league" / "sailbox.py").write_text(SAILBOX)
+        (self.repo / "league" / "live" / "observe.py").write_text(OBSERVE)
         controller_into(self.repo)
         labmod.git(self.repo, "init", "-q")
         self.base = commit(self.repo, "baseline")
@@ -1093,14 +1187,14 @@ class LaneCycle(unittest.TestCase):
         worktree = Path(proposal["worktree"])
         (worktree / "league" / "swarm" / "guard.py").write_text("CAP = 100\n")
         with self.assertRaisesRegex(labmod.ImprovementError, "protected"):
-            self.lab.stage(self.key, commit(worktree, "raise a spend cap"))
+            self.lab.stage(self.key, commit(worktree, "raise a spend cap"), author="author-agent")
         labmod.git(worktree, "checkout", "-q", "HEAD~1", "--", "league/swarm/guard.py")
         (worktree / "league" / "swarm" / "preflight.py").write_text(SOURCE.replace("'passed'", "'refused'"))
         with self.assertRaisesRegex(labmod.ImprovementError, "gated"):
-            self.lab.stage(self.key, commit(worktree, "ungated"))
+            self.lab.stage(self.key, commit(worktree, "ungated"), author="author-agent")
         self.assertEqual(self.lab.worklist.get(self.key).state, "revising")
         (worktree / "league" / "swarm" / "preflight.py").write_text(self.gated())
-        staged = self.lab.stage(self.key, commit(worktree, "gated"), authoring_usd=1.25)
+        staged = self.lab.stage(self.key, commit(worktree, "gated"), authoring_usd=1.25, author="author-agent")
         self.assertEqual(staged["classification"]["release_class"], "research")
         self.assertEqual((staged["canary_mode"], staged["gates"]), ("arms", 1))
         job = self.lab.worklist.get(self.key)
@@ -1152,7 +1246,7 @@ class LaneCycle(unittest.TestCase):
                     f"from league.swarm import canary\n\nX = canary.enabled('{key}', 'u', root='.')\n")
                 pattern = "gated"
             with self.assertRaisesRegex(labmod.ImprovementError, pattern, msg=change):
-                self.lab.stage(key, commit(worktree, change))
+                self.lab.stage(key, commit(worktree, change), author="author-agent")
 
     def evaluated(self, head_wasted=1000.0, closed_wasted=None, forge=False, *, wt="wt", capture=True):
         if capture:
@@ -1222,8 +1316,17 @@ class LaneCycle(unittest.TestCase):
     def test_a_gate_that_leaks_when_closed_is_refused(self):
         self.assertFalse(self.evaluated(closed_wasted=1500.0)["passed"])
 
-    def deploy_rows(self, release="cand-release", promoted_at=90000.0, digest=None):
-        digest = digest or self.lab.worklist.get(self.key).carry["_proposal"]["release_digest"]
+    def go_live(self):
+        """The watchdog sends the evaluated tree: its rows (`deploy_rows`) start 100 s after now on the journal's clock,
+        so whatever was recorded before (a review, the deploy step) precedes the exposure; then the clock moves a week on,
+        past every registered window, keeping its time of day (after New York's close)."""
+        self.promoted = self.clock() + 1000.0
+        self.clock.advance(7 * 86400 + 1000.0)
+        return self.promoted
+
+    def deploy_rows(self, release="cand-release", promoted_at=None, digest=None, key=None):
+        digest = digest or self.lab.worklist.get(key or self.key).carry["_proposal"]["release_digest"]
+        promoted_at = self.promoted if promoted_at is None else promoted_at
         common = {"deploy": f"{release}@1", "release": release}
         return [{**common, "stage": "start", "watch_seconds": 600, "at": lanes.iso(promoted_at - 900)},
                 {**common, "stage": "stage", "ok": True, "digest": digest, "at": lanes.iso(promoted_at - 800)},
@@ -1235,13 +1338,21 @@ class LaneCycle(unittest.TestCase):
         self.assertEqual(self.lab.worklist.get(self.key).state, "canary")
         digest = self.lab.worklist.get(self.key).carry["_proposal"]["release_digest"]
         review(self.lab, self.key)
-        waiting = self.lab.canary_start(self.key, measurement=self.measurement({}, since=89000, until=90100, digest=digest))
+        self.lab.deploy(self.key)
+        self.go_live()
+        waiting = self.lab.canary_start(self.key, measurement=self.measurement(
+            {}, since=self.promoted - 1000, until=self.promoted + 100, digest=digest))
         self.assertIn("waiting", waiting)
-        started = self.lab.canary_start(self.key, measurement=self.measurement(
-            {}, since=89000, until=90100, digest=digest, deploys=self.deploy_rows(), current="cand-release"))
+        started = self.lab.canary_start(self.key, measurement=self.now_doc(digest))
         arm = started["started"]
         self.assertEqual(gate.read(self.temp / "journal" / "canary.json")[self.key]["state"], "canary")
         return arm, digest
+
+    def now_doc(self, digest, **kw):
+        """`measure` just after the promotion: the watchdog's rows and the running release."""
+        return self.measurement({}, since=self.promoted - 1000, until=self.promoted + 100, digest=digest,
+                                deploys=kw.pop("deploys", None) or self.deploy_rows(digest=digest, key=kw.pop("key", None)),
+                                current="cand-release", **kw)
 
     def arms(self, arm, treated_dq, control_dq):
         units = {}
@@ -1339,10 +1450,11 @@ class LaneCycle(unittest.TestCase):
     def test_the_canary_needs_an_approving_adversarial_review_of_the_exact_patch(self):
         self.assertTrue(self.evaluated()["passed"])
         p = self.lab.worklist.get(self.key).carry["_proposal"]
-        now = self.measurement({}, since=89000, until=90100, digest=p["release_digest"], deploys=self.deploy_rows(),
-                               current="cand-release")
+        quiet = self.measurement({}, since=self.clock() - 900, until=self.clock(), digest=p["release_digest"])
         with self.assertRaisesRegex(labmod.ImprovementError, "adversarial review"):
-            self.lab.canary_start(self.key, measurement=now)
+            self.lab.canary_start(self.key, measurement=quiet)
+        with self.assertRaisesRegex(labmod.ImprovementError, "no deploy without an adversarial review"):
+            self.lab.deploy(self.key)
         step = self.lab.next_steps()[0]
         self.assertIn("adversarial review", step["next"])
         self.assertEqual(step["patch_sha"], p["patch_sha"])
@@ -1360,10 +1472,54 @@ class LaneCycle(unittest.TestCase):
                 self.lab.review(self.key, report=report, reviewer=reviewer, patch_sha=patch_sha)
         self.assertEqual(self.lab.worklist.get(self.key).state, "canary", "a refused review records nothing")
         row = review(self.lab, self.key)
-        self.assertEqual((row["verdict"], row["n"]), ("approve", 1))
+        self.assertEqual((row["verdict"], row["n"], row["release_digest"]), ("approve", 1, p["release_digest"]))
         self.assertTrue(Path(row["report"]).is_file())
+        self.assertIn("the deploy step", self.lab.next_steps()[0]["next"])
+        with self.assertRaisesRegex(labmod.ImprovementError, "deploy step"):
+            self.lab.canary_start(self.key, measurement=quiet)
+        ticket = self.lab.deploy(self.key)["ticket"]
+        self.assertEqual((ticket["review"], ticket["release_digest"], ticket["head"]), (1, p["release_digest"], p["head"]))
         self.assertIn("deploy exactly", self.lab.next_steps()[0]["next"])
-        self.assertIn("started", self.lab.canary_start(self.key, measurement=now))
+        self.go_live()
+        self.assertIn("started", self.lab.canary_start(self.key, measurement=self.now_doc(p["release_digest"])))
+
+    def test_a_tree_deployed_before_its_review_is_voided_and_rolled_back(self):
+        """The reviewer's scenario (round 4), arms lane: the watchdog shows the evaluated tree on the House before any
+        approving review was recorded. However the review and the deploy step come later, no canary starts: the
+        candidate is voided and the release must be rolled back."""
+        self.assertTrue(self.evaluated()["passed"])
+        digest = self.lab.worklist.get(self.key).carry["_proposal"]["release_digest"]
+        self.go_live()  # the watchdog's rows, dated before the review below
+        self.clock.t = self.promoted - 500  # the review is recorded after the deploy began
+        review(self.lab, self.key)
+        self.lab.deploy(self.key)
+        result = self.lab.canary_start(self.key, measurement=self.now_doc(digest))
+        self.assertEqual((result["decision"], result.get("rollback")), ("voided", True), result)
+        self.assertIn("before an adversarial review", result["reason"])
+        self.assertEqual(self.lab.worklist.get(self.key).state, "rejected")
+        self.assertNotIn(self.key, gate.read(self.temp / "journal" / "canary.json"), "no arm opens on unreviewed code")
+        self.assertIn("roll it back", self.lab.next_steps()[0]["next"])
+
+    def test_a_tree_deployed_around_the_deploy_step_is_voided_and_rolled_back(self):
+        self.assertTrue(self.evaluated()["passed"])
+        digest = self.lab.worklist.get(self.key).carry["_proposal"]["release_digest"]
+        review(self.lab, self.key)
+        self.go_live()  # approved, but sent without the loop's deploy step
+        result = self.lab.canary_start(self.key, measurement=self.now_doc(digest))
+        self.assertEqual((result["decision"], result.get("rollback")), ("voided", True), result)
+        self.assertIn("without the loop's deploy step", result["reason"])
+
+    def test_a_review_rejecting_a_ticketed_tree_asks_for_its_rollback(self):
+        self.assertTrue(self.evaluated()["passed"])
+        review(self.lab, self.key)
+        self.lab.deploy(self.key)
+        review(self.lab, self.key, verdict="reject", reviewer="second-reviewer")
+        job = self.lab.worklist.get(self.key)
+        self.assertEqual(job.state, "revising")
+        self.assertIn("roll it back", job.note)
+        self.assertIn("roll it back", self.lab.next_steps()[0]["rollback"])
+        with self.assertRaisesRegex(labmod.ImprovementError, "evaluated candidate"):
+            self.lab.deploy(self.key)
 
     def test_a_rejecting_review_sends_the_candidate_back(self):
         self.assertTrue(self.evaluated()["passed"])
@@ -1387,10 +1543,13 @@ class LaneCycle(unittest.TestCase):
         candidate = commit(worktree, "gated")
         with patch.object(labmod, "CONTROLLER", labmod.CONTROLLER + ("league/swarm/preflight.py",)):
             with self.assertRaisesRegex(labmod.ImprovementError, "pinned base commit"):
-                self.lab.stage(self.key, candidate)
+                self.lab.stage(self.key, candidate, author="author-agent")
         job = self.lab.worklist.get(self.key)
         self.assertEqual((job.state, job.attempt), ("patching", 0), "the operator's checkout is no attempt of the author's")
-        self.lab.stage(self.key, candidate)
+        with self.assertRaisesRegex(labmod.ImprovementError, "author"):
+            self.lab.stage(self.key, candidate)
+        self.assertEqual(self.lab.worklist.get(self.key).attempt, 0, "a missing author is no attempt either")
+        self.lab.stage(self.key, candidate, author="author-agent")
 
     def test_the_candidate_is_judged_as_the_base_tree_with_its_staged_files_only(self):
         worktree = self.temp / "cand"
@@ -1408,8 +1567,10 @@ class LaneCycle(unittest.TestCase):
     def test_only_the_base_code_may_measure_a_canary(self):
         self.assertTrue(self.evaluated()["passed"])
         review(self.lab, self.key)
+        self.lab.deploy(self.key)
+        self.go_live()
         digest = self.lab.worklist.get(self.key).carry["_proposal"]["release_digest"]
-        now = self.measurement({}, since=89000, until=90100, digest=digest, deploys=self.deploy_rows(), current="cand-release")
+        now = self.now_doc(digest)
         for code, pattern in ((None, "which code"), ({**now["code"], "league/swarm/harness_lanes.py": "0" * 40}, "not taken by"),
                               ({**now["code"], "league/swarm/preflight.py": lanes.blob_sha(self.gated().encode())},
                                "not taken by")):
@@ -1429,7 +1590,7 @@ class LaneCycle(unittest.TestCase):
         self.capture()
         worktree = Path(self.lab.prepare(self.key, self.temp / "wt")["worktree"])
         (worktree / "league" / "swarm" / "preflight.py").write_text(self.gated())
-        self.lab.stage(self.key, commit(worktree, "gated"))
+        self.lab.stage(self.key, commit(worktree, "gated"), author="author-agent")
         self.lab.heldout = None
         with patch.object(labmod, "sandbox", side_effect=AssertionError("no judge runs without its pool")):
             with self.assertRaisesRegex(labmod.ImprovementError, "held-out pools"):
@@ -1444,12 +1605,13 @@ class LaneCycle(unittest.TestCase):
         self.assertTrue(self.evaluated()["passed"])
         digest = self.lab.worklist.get(self.key).carry["_proposal"]["release_digest"]
         review(self.lab, self.key)
+        self.lab.deploy(self.key)
+        self.go_live()
         newer = [{"deploy": "newer@1", "release": "newer", "stage": "stage", "ok": True, "digest": "e" * 64,
-                  "at": lanes.iso(80000.0)}]
+                  "at": lanes.iso(self.promoted - 86400)}]
         rows = self.deploy_rows()
         rows[0] = {**rows[0], "current": "newer"}
-        result = self.lab.canary_start(self.key, measurement=self.measurement(
-            {}, since=89000, until=90100, digest=digest, deploys=newer + rows, current="cand-release"))
+        result = self.lab.canary_start(self.key, measurement=self.now_doc(digest, deploys=newer + rows))
         self.assertEqual(result["decision"], "voided", result)
         self.assertIn("roll back to newer", result["reason"])
         self.assertEqual(self.lab.worklist.get(self.key).state, "rejected")
@@ -1485,36 +1647,52 @@ class LaneCycle(unittest.TestCase):
         self.assertFalse(labmod.in_session(lanes.epoch_of("2026-10-03T15:00:00Z")), "a Saturday")
         self.assertTrue(labmod.in_session(lanes.epoch_of("2026-11-02T20:30:00Z")), "New York winter: the session ends 21:05Z")
 
-    def window_started(self):
-        """A data-lane candidate captured, staged, judged, deployed and started against a fresh control day."""
-        key = f"harness:data:slot_failure_rate:{self.base[:16]}"
-        boxes = {f"sb{n}": {"gym_usd": 10.0, "gym_seconds": 10000.0, "slots": 200.0, "slots_failed": 4.0, "ok_slots": 196.0}
-                 for n in range(5)}
-        measured = self.measurement(boxes, lane="data")
-        measured["lanes"]["data"]["run_totals"] = {"runs": 100.0, "error_runs": 0.0}
+    def window_candidate(self, lane):
+        """A data- or execution-lane candidate (window mode: no gate) captured, staged and judged; (key, digest)."""
+        if lane == "data":
+            key = f"harness:data:slot_failure_rate:{self.base[:16]}"
+            units = {f"sb{n}": {"gym_usd": 10.0, "gym_seconds": 10000.0, "slots": 200.0, "slots_failed": 4.0,
+                                "ok_slots": 196.0} for n in range(5)}
+            path, text = "league/sailbox.py", SAILBOX.replace("RETRIES = 2", "RETRIES = 3")
+            answer = {"protocol": "data-retry-v3", "retried_permanent": 0, "requests": 200}
+        else:
+            key = f"harness:execution:harness_reject_rate:{self.base[:16]}"
+            units = {f"fam{n}": {"intents": 20.0, "rejects": 2.0, "harness_rejects": 2.0} for n in range(5)}
+            path, text = "league/live/observe.py", OBSERVE.replace("90", "150")
+            answer = {"protocol": "execution-recovery-v2", "invalid_accepted": 0, "valid_rejected": 0,
+                      "restart_divergences": 0, "cpu_seconds": 1.0}
+        measured = self.measurement(units, lane=lane)
+        measured["lanes"][lane]["run_totals"] = {"runs": 100.0, "error_runs": 0.0}
+        measured["lanes"][lane]["restart_totals"] = {"restarts": 0.0, "restart_failures": 0.0, "live_errors": 0.0,
+                                                     "restarts_or_one": 1.0}
         self.lab.capture_lanes(measured, base=self.base)
-        self.assertIsNotNone(self.lab.worklist.get(key), "the data lane's bottleneck is captured")
-        worktree = Path(self.lab.prepare(key, self.temp / "wt-data")["worktree"])
-        (worktree / "league" / "sailbox.py").write_text(SAILBOX.replace("RETRIES = 2", "RETRIES = 3"))
-        staged = self.lab.stage(key, commit(worktree, "retry more"))
+        self.assertIsNotNone(self.lab.worklist.get(key), f"the {lane} lane's bottleneck is captured")
+        worktree = Path(self.lab.prepare(key, self.temp / f"wt-{lane}")["worktree"])
+        (worktree / path).write_text(text)
+        staged = self.lab.stage(key, commit(worktree, f"a {lane} change"), author="author-agent")
         self.assertEqual(staged["canary_mode"], "window")
 
         def judge(tree, _judge, command, **kwargs):
             if command[0] == "-m":
                 return {"exit": 0, "stdout": "", "stderr": "", "seconds": 0.1, "cpu_seconds": 0.1, "error": None}
             split = command[command.index("--split") + 1]
-            body = {"protocol": "data-retry-v3", "split": split, "provider_calls": 0, "gate": "none",
-                    "nonce": kwargs["stdin"].decode().splitlines()[0], "failed_transient": 9 if tree.name == "base" else 0,
-                    "retried_permanent": 0, "requests": 200}
+            body = {**answer, "split": split, "provider_calls": 0, "gate": "none",
+                    "nonce": kwargs["stdin"].decode().splitlines()[0], "failed_transient": 9 if tree.name == "base" else 0}
             return {"exit": 0, "stdout": json.dumps(body), "stderr": "", "seconds": 0.1, "cpu_seconds": 0.1, "error": None}
 
         with patch.object(labmod, "sandbox", side_effect=judge):
             self.assertTrue(self.lab.evaluate(key, python=Path(sys.executable))["passed"])
-        digest = self.lab.worklist.get(key).carry["_proposal"]["release_digest"]
+        return key, self.lab.worklist.get(key).carry["_proposal"]["release_digest"]
+
+    def window_started(self):
+        """A data-lane candidate captured, staged, judged, reviewed, deployed and started against a fresh control day."""
+        key, digest = self.window_candidate("data")
+        boxes = {f"sb{n}": {"gym_usd": 10.0, "gym_seconds": 10000.0, "slots": 200.0, "slots_failed": 4.0, "ok_slots": 196.0}
+                 for n in range(5)}
         review(self.lab, key)
-        promoted = 86400.0 * 3
-        rows = [{**r, "digest": digest} if r.get("stage") == "stage" else r
-                for r in self.deploy_rows(promoted_at=promoted, digest=digest)]
+        self.lab.deploy(key)
+        promoted = self.go_live()
+        rows = self.deploy_rows(promoted_at=promoted, digest=digest, key=key)
         now = self.measurement({}, since=promoted, until=promoted + 900, digest=digest, deploys=rows, current="cand-release",
                                lane="data")
         self.assertIn("control", self.lab.canary_start(key, measurement=now)["waiting"])
@@ -1528,6 +1706,39 @@ class LaneCycle(unittest.TestCase):
         started = self.lab.canary_start(key, measurement=now, control=control)
         self.assertEqual(started["started"]["mode"], "window")
         return key, promoted, rows, digest
+
+    def test_window_lanes_void_a_tree_deployed_before_its_review_and_ask_for_its_rollback(self):
+        """The reviewer's scenario (round 4) in both window lanes, with real timestamps: the deploy is the exposure, so
+        a tree the watchdog staged before an approving review (or without the deploy step) never gets its canary."""
+        for lane in ("data", "execution"):
+            with self.subTest(lane=lane):
+                key, digest = self.window_candidate(lane)
+                self.go_live()
+                self.clock.t = self.promoted - 500  # the review and the deploy step come after the watchdog's first row
+                review(self.lab, key)
+                self.lab.deploy(key)
+                now = self.measurement({}, since=self.promoted, until=self.promoted + 900, digest=digest, lane=lane,
+                                       deploys=self.deploy_rows(key=key), current="cand-release")
+                result = self.lab.canary_start(key, measurement=now)
+                self.assertEqual((result["decision"], result.get("rollback")), ("voided", True), result)
+                self.assertIn("before an adversarial review", result["reason"])
+                self.assertEqual(self.lab.worklist.get(key).state, "rejected")
+                step = next(s for s in self.lab.next_steps() if s["key"] == key)
+                self.assertIn("roll it back", step["next"])
+                self.clock.advance(7 * 86400)
+
+    def test_an_execution_tree_reviewed_and_ticketed_first_reaches_its_control_step(self):
+        key, digest = self.window_candidate("execution")
+        review(self.lab, key)
+        with patch.object(self.lab, "clock", lambda: lanes.epoch_of("2026-10-01T15:00:00Z")):
+            with self.assertRaisesRegex(labmod.ImprovementError, "outside New York's session"):
+                self.lab.deploy(key)
+        ticket = self.lab.deploy(key)["ticket"]
+        self.assertEqual(ticket["release_class"], "evidence_reset")
+        self.go_live()
+        now = self.measurement({}, since=self.promoted, until=self.promoted + 900, digest=digest, lane="execution",
+                               deploys=self.deploy_rows(key=key), current="cand-release")
+        self.assertIn("control", self.lab.canary_start(key, measurement=now)["waiting"])
 
     def after(self, key, promoted, rows, digest, *, failed=0.0, slots=200.0, **starts):
         end = promoted + 86400
@@ -1631,10 +1842,10 @@ class GatedMemoryCandidate(unittest.TestCase):
                 source.write_text(text + RESTATES)
                 with self.assertRaisesRegex(labmod.ImprovementError, "gate"):
                     # `canary` joined an existing import line: the gate must come in by its own import
-                    lab.stage(key, commit(worktree, "gate import on a shared line"))
+                    lab.stage(key, commit(worktree, "gate import on a shared line"), author="author-agent")
                 text = text.replace("from . import canary, diagnostics, inputs\n", "from . import diagnostics, inputs\nfrom . import canary\n", 1)
                 source.write_text(text + RESTATES)
-                staged = lab.stage(key, commit(worktree, "refuse restated buried ideas, gated per mechanism"))
+                staged = lab.stage(key, commit(worktree, "refuse restated buried ideas, gated per mechanism"), author="author-agent")
                 self.assertEqual((staged["canary_mode"], staged["gates"], staged["classification"]["release_class"]),
                                  ("arms", 1, "research"))
                 receipt = lab.evaluate(key, python=Path(sys.executable))
