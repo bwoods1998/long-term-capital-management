@@ -417,7 +417,8 @@ class Schedule(unittest.TestCase):
                 calls.append(day)
                 if len(calls) == 1:
                     raise RuntimeError("vendor unavailable")
-                return {"day": day.isoformat(), "checkpoint": "sbcp_new", "roots": ["SPY"]}
+                return {"day": day.isoformat(), "checkpoint": "sbcp_new", "roots": ["SPY"], "base_checkpoint": "sbcp_gate",
+                        "holdout_roots": ["SPY"]}
             controller = nt.Controller(root, root / "ready.json", calendar(), run=run, clock=lambda: now[0])
             self.assertEqual(controller.tick()["phase"], "retry")
             self.assertFalse((root / "ready.json").exists())
@@ -444,3 +445,87 @@ class Schedule(unittest.TestCase):
             with self.assertRaises(ValueError):
                 nt.publish_ready(root / "ready.json", {"day": "2026-09-28"}, controller.clock())
             self.assertFalse((root / "ready.json").exists())
+
+
+class ChainIdentity(unittest.TestCase):
+    """THE CHAIN'S RULE (Oct 1, 2026): the forward chain names the gate image it extends, and the nightly never extends a
+    gate whose holdout lacks a root of the swarm. Sept 29-30: the chain extended the five-root gate while swarm.json named
+    the 25-root one, and its ready file silently replaced it."""
+
+    NOW = dt.datetime(2026, 9, 29, 6, 5, tzinfo=UTC)
+    DAY = dt.date(2026, 9, 28)
+
+    def test_each_day_names_the_gate_image_it_extends_and_the_swarm_takes_only_that_chain(self):
+        from league.swarm import settings as S
+
+        images = {"gate": {"current": {"box_id": "sb_gate", "version": "bm-25", "checkpoints": ["sbcp_base25", "sbcp_b"],
+                                       "roots": ["SPY", "XSP", "googl"]}}}
+        nightly, _, checkpoints = job(FakeData(self.DAY), FakeGate(), images, now=self.NOW)
+        result = nightly.run()
+        self.assertEqual((result["base_checkpoint"], result["holdout_roots"]), ("sbcp_base25", ["GOOGL", "SPY", "XSP"]))
+        self.assertEqual(images["gate"]["forward_days"]["2026-09-28"]["base_checkpoint"], "sbcp_base25")
+        self.assertEqual(images["gate"]["checkpoints"][-1], {"id": checkpoints[-1], "day": "2026-09-28",
+                                                             "at": self.NOW.isoformat(), "base": "sbcp_base25"})
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ready = nt.publish_ready(root / "gym-forward.json", result, self.NOW)
+            written = json.loads((root / "gym-forward.json").read_text())
+            self.assertEqual(written, ready)
+            self.assertEqual((written["base_checkpoint"], written["holdout_roots"]), ("sbcp_base25", ["GOOGL", "SPY", "XSP"]))
+            # The swarm takes the chain while swarm.json names its base, and not when it names another gate.
+            (root / "swarm.json").write_text(json.dumps({"gym": {"gate_checkpoint": "sbcp_base25", "roots": ["SPY", "GOOGL"]}}))
+            self.assertEqual(S.load(root, config={})["gym"]["gate_checkpoint"], checkpoints[-1])
+            (root / "swarm.json").write_text(json.dumps({"gym": {"gate_checkpoint": "sbcp_other", "roots": ["SPY"]}}))
+            self.assertEqual(S.load(root, config={})["gym"]["gate_checkpoint"], "sbcp_other")
+
+    def test_a_day_finished_without_its_gate_image_is_complete_but_never_published(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            controller = nt.Controller(root, root / "ready.json", calendar(),
+                                       run=lambda day: {"day": day.isoformat(), "checkpoint": "sbcp_legacy", "roots": ["SPY"]},
+                                       clock=lambda: dt.datetime(2026, 9, 29, 6, 5, tzinfo=UTC))
+            out = controller.tick()
+            self.assertEqual((out["phase"], out["published"]), ("complete", False))
+            self.assertFalse((root / "ready.json").exists(), "the swarm never sees a checkpoint it cannot place")
+            record = json.loads((root / "nightly.json").read_text())
+            self.assertEqual(record["completed"], {"2026-09-28": "sbcp_legacy"})
+            self.assertEqual(record["unpublished"]["day"], "2026-09-28")
+
+    def records(self, root, gate, swarm_roots):
+        (root / "data").mkdir(exist_ok=True)
+        (root / "data" / "images.json").write_text(json.dumps({"gate": {"current": gate}}))
+        (root / "data" / "data_box.json").write_text(json.dumps({"box_id": "sb_data"}))
+        (root / "swarm.json").write_text(json.dumps({"gym": {"roots": swarm_roots}}))
+
+    def test_the_job_refuses_to_extend_a_gate_whose_holdout_lacks_a_root_of_the_swarm(self):
+        import boxlib as bl
+
+        class Touched(Exception):
+            pass
+
+        class NoBoxes:
+            def __getattr__(self, name):
+                raise Touched(name)
+
+        with tempfile.TemporaryDirectory() as tmp, bl.using_state(Path(tmp) / "data"):
+            root = Path(tmp)
+            core = {"box_id": "sb_core", "version": "core-five", "checkpoints": ["sbcp_core"]}
+            # Sept 29-30: images.json's gate was the core-five image `images.py finish` recorded without its roots.
+            self.records(root, {**core, "roots": None}, ["SPY", "GOOGL", "MSFT"])
+            with self.assertRaises(RuntimeError) as caught:
+                nt.real_job(api=NoBoxes())
+            self.assertIn("refused to extend the gate", str(caught.exception))
+            self.records(root, {**core, "roots": ["SPY", "QQQ", "IWM", "XSP", "SPXW"]}, ["SPY", "GOOGL", "MSFT"])
+            with self.assertRaises(RuntimeError) as caught:
+                nt.real_job(api=NoBoxes(), swarm_root=root)
+            self.assertIn("no holdout for GOOGL, MSFT", str(caught.exception))
+            # A gate that holds them is extended (the job goes on to the boxes); so is any gate for a rehearsal, and
+            # `schedule`, which extends nothing, is never refused.
+            self.records(root, {**core, "roots": ["SPY", "GOOGL", "MSFT", "QQQ"]}, ["SPY", "GOOGL", "MSFT"])
+            with self.assertRaises(Touched):
+                nt.real_job(api=NoBoxes(), swarm_root=root)
+            self.records(root, {**core, "roots": None}, ["SPY", "GOOGL", "MSFT"])
+            with self.assertRaises(Touched):
+                nt.real_job(api=NoBoxes(), extending=False)
+            with self.assertRaises(Touched):
+                nt.real_job(api=NoBoxes(), rehearsal_gate="sb_rehearsal")

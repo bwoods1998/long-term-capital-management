@@ -572,6 +572,10 @@ def load(root: str | Path | None = None, *, config: Mapping[str, Any] | None = N
         if isinstance(local, Mapping):
             out = _merge(out, local)
         try:
+            named = out["gym"].get("gate_checkpoint")
+        except Exception:  # noqa: BLE001 - a malformed "gym" block: no gate to stand in for
+            named = None
+        try:
             ready = json.loads((Path(root) / "gym-forward.json").read_text())
             day = dt.date.fromisoformat(ready["day"])
             at = dt.datetime.fromisoformat(ready["ready_at"].replace("Z", "+00:00"))
@@ -580,14 +584,79 @@ def load(root: str | Path | None = None, *, config: Mapping[str, Any] | None = N
                      and day < at.date() and re.fullmatch(r"sbcp_[A-Za-z0-9-]+", checkpoint)
                      and isinstance(ready.get("roots"), list) and bool(ready["roots"])
                      and all(isinstance(r, str) and re.fullmatch(r"[A-Z][A-Z0-9.]{0,9}", r) for r in ready["roots"]))
-            if valid and out["gym"].get("gate_checkpoint"):
-                out["gym"]["gate_checkpoint"] = checkpoint
-                out["forward"]["ready"] = ready
-        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            if named:
+                why = ready_refusal(root, ready, named, out["gym"].get("roots")) if valid else "the ready file is malformed"
+                if why is None:
+                    out["gym"]["gate_checkpoint"] = checkpoint
+                    out["forward"]["ready"] = ready
+                else:
+                    out["forward"]["ready_ignored"] = {"why": why, "day": str(ready.get("day")),
+                                                       "gate_checkpoint": str(checkpoint), "named": named}
+        except FileNotFoundError:
             pass
+        except Exception as error:  # noqa: BLE001 - THE CHAIN'S RULE: a ready file that cannot be read never moves the gate
+            try:
+                if named:
+                    out["gym"]["gate_checkpoint"] = named
+                    out["forward"].pop("ready", None)
+                    out["forward"]["ready_ignored"] = {"why": f"the ready file cannot be read ({type(error).__name__})",
+                                                       "named": named}
+            except Exception:  # noqa: BLE001 - a malformed "forward" block: the settings as merged
+                pass
     return out
 
 
-__all__ = ["DEFAULTS", "load", "train_from", "train_from_note", "parse_train_from", "objective_span", "span_years",
+def _roots_lacking(held: Any, wanted: Any) -> list[str] | None:
+    """The swarm's roots (`wanted`) a gate holds no holdout for (`held`: a list of roots); None when `held` is no list."""
+    if not isinstance(held, list) or not all(isinstance(r, str) for r in held):
+        return None
+    have = {r.upper() for r in held}
+    return sorted({str(r).upper() for r in (wanted or [])} - have)
+
+
+def ready_refusal(root: str | Path, ready: Mapping[str, Any], named: str, roots: Any) -> str | None:
+    """THE CHAIN'S RULE (Oct 1, 2026): why the nightly's ready file (`gym-forward.json`) may NOT stand in for the gate
+    `swarm.json` names (`named`), or None when it may. The nightly extends the gate image its own record
+    (`<root>/data/images.json`) names; that record and `swarm.json` were once apart (the 25-root gate was adopted through
+    `swarm.json` alone), and the ready file's checkpoint silently replaced the 25-root gate with a five-root chain.
+
+    A ready file stands only when it extends the named gate and that gate holds a holdout for every root of the swarm
+    (`gym.roots`): its `base_checkpoint` (the gate image's first checkpoint, written by the nightly) is `named`, and its
+    `holdout_roots` cover `roots`. A LEGACY file (written before the nightly wrote `base_checkpoint`) stands only when
+    `<root>/data/images.json` proves the same: its current gate image is `named` (first checkpoint), its recorded roots
+    cover `roots`, and the file's checkpoint is the chain's tip (`current_checkpoint`) and the day's own recorded
+    checkpoint (`forward_days`). Anything else, or anything unreadable, is a refusal: the swarm then uses `named`
+    itself (no forward days) and the loop raises one alert (`Swarm.gate_chain_notice`)."""
+    if "base_checkpoint" in ready:
+        base = ready.get("base_checkpoint")
+        if base != named:
+            return f"the forward chain extends {base}, not the gate swarm.json names"
+        lacking = _roots_lacking(ready.get("holdout_roots"), roots)
+        if lacking is None:
+            return "the ready file does not list the roots its gate holds a holdout for"
+        if lacking:
+            return f"the forward chain's gate holds no holdout for {', '.join(lacking)}"
+        return None
+    try:
+        images = json.loads((Path(root) / "data" / "images.json").read_text())
+        gate = images.get("gate") or {}
+        current = gate.get("current") or {}
+        first = (current.get("checkpoints") or [None])[0]
+        recorded = ((gate.get("forward_days") or {}).get(str(ready["day"])) or {}).get("checkpoint")
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, IndexError):
+        return "a ready file without base_checkpoint, and no readable data/images.json to prove its chain"
+    if first != named:
+        return "a ready file without base_checkpoint, and data/images.json's gate is not the gate swarm.json names"
+    if ready["gate_checkpoint"] != gate.get("current_checkpoint") or ready["gate_checkpoint"] != recorded:
+        return "a ready file without base_checkpoint whose checkpoint is not the tip of the named gate's chain"
+    lacking = _roots_lacking(current.get("roots"), roots)
+    if lacking is None:
+        return "a ready file without base_checkpoint, and data/images.json does not list the gate's roots"
+    if lacking:
+        return f"the forward chain's gate holds no holdout for {', '.join(lacking)}"
+    return None
+
+
+__all__ = ["DEFAULTS", "load", "ready_refusal", "train_from", "train_from_note", "parse_train_from", "objective_span", "span_years",
            "train_years", "train_split", "run_timeout", "train_span_text", "TRAIN_CORE_START", "TRAIN_EARLIEST", "TRAIN_END",
            "TRAIN_STARTS"]
