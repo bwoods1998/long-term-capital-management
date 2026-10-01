@@ -8,7 +8,12 @@
 An agent is a family (its id); `family` is its lineage (the founder a fork descends from). Never a program,
 a parameter, a quote, a spread, an implied vol or a result of the Gym beyond counts: the publisher's own
 allowlist (`league/publish.py`) enforces it again. The newest retired families are kept for the page's
-retired list; the publisher caps the list.
+retired list; the publisher caps the list. `agent_rows(root, ids)` gives the same rows for any families, alive or
+retired: the publisher pins every agent a real position names, so its card always has a name, a mechanism and a record.
+
+A mechanism is `public.news_text` filtered against its family's parameter names (`param_names`: every version's PARAMS
+overrides and every version's program's PARAMS keys, cached by the newest version), so a parameter named in a mechanism
+never publishes (the swarm window's review, C8, Oct 1, 2026).
 
 Standard library only.
 """
@@ -54,31 +59,112 @@ def sail_billed(spend: dict[str, float], metered: Any, started: Any) -> float:
     return max(metered + PRE_METER_SAIL_USD, booked)
 
 
-def site_inputs(root: str | Path, *, retired_shown: int = 24) -> dict[str, Any]:
-    """{"gym": ..., "agents": [...]} from the swarm's store (read-only); {} when there is no store."""
+#: Each family's parameter names, by (store, family, newest version, its sha): read again only when a version is added.
+_NAMES: dict[tuple[str, str, int, str], tuple[str, ...]] = {}
+#: A program's PARAMS keys, by its code's sha (a program is immutable once stored).
+_CODE_NAMES: dict[str, tuple[str, ...]] = {}
+_CACHE_CAP = 20_000
+
+
+def _remember(cache: dict, key: Any, value: Any) -> Any:
+    if len(cache) >= _CACHE_CAP:
+        cache.clear()
+    cache[key] = value
+    return value
+
+
+def code_names(sha: str, read: Any) -> tuple[str, ...] | None:
+    """The PARAMS keys of the program whose code has `sha` (`read()` gives the code), cached by `sha`; None when the code
+    cannot be read (never cached: it is tried again)."""
+    if sha and sha in _CODE_NAMES:
+        return _CODE_NAMES[sha]
+    try:
+        names = tuple(public.param_names_of(read()))
+    except (OSError, UnicodeDecodeError, ValueError):
+        return None
+    return _remember(_CODE_NAMES, sha, names) if sha else names
+
+
+def param_names(db: sqlite3.Connection, root: str | Path, ids: Any) -> dict[str, tuple[tuple[str, ...], bool]]:
+    """{family: (its parameter names, known)}: the keys of every version's PARAMS overrides and of every version's
+    program's PARAMS (read from the store's files, each program cached by its sha), from an open read-only connection to
+    the store, so a name a family ever used is never published. A family with no version has none, known. When its
+    newest program cannot be read, `known` is False and the rest is given: its mechanism is filtered against it, and it
+    gets no thesis (`league/site_window.py`). Cached by the newest version, so a publish reads a family's versions again
+    only when one was added."""
+    out: dict[str, tuple[tuple[str, ...], bool]] = {}
+    for fid in ids:
+        newest = db.execute("SELECT n, sha FROM versions WHERE family=? ORDER BY n DESC LIMIT 1", (fid,)).fetchone()
+        if newest is None:
+            out[fid] = ((), True)
+            continue
+        key = (str(root), str(fid), int(newest["n"]), str(newest["sha"]))
+        if key in _NAMES:
+            out[fid] = (_NAMES[key], True)
+            continue
+        versions = list(db.execute("SELECT n, sha, params, path FROM versions WHERE family=? ORDER BY n", (fid,)))
+        names: set[str] = set()
+        known = True
+        for v in versions:
+            given = loads(v["params"], {})
+            names.update(str(k) for k in (given if isinstance(given, dict) else {}))
+        for v in {str(v["sha"]): v for v in versions}.values():  # each program once
+            found = code_names(str(v["sha"]), lambda v=v: (Path(root) / str(v["path"])).read_text(encoding="utf-8"))
+            if found is not None:
+                names.update(found)
+            elif v["sha"] == newest["sha"]:
+                known = False  # the program the family runs now cannot be read: its names are not all known
+        out[fid] = (_remember(_NAMES, key, tuple(sorted(names))) if known else tuple(sorted(names)), known)
+    return out
+
+
+def _read(root: str | Path, ids: Any = None, *, retired_shown: int = 24) -> dict[str, Any] | None:
+    """What the site's agents and the Gym's pace are made of, read once from the store (read-only); None when there is no
+    store or it cannot be read. `ids`: whose parameter names to read (default: the families `site_inputs` shows)."""
     path = Path(root) / DB_NAME
     if not path.exists():
-        return {}
+        return None
     try:
         db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1.0)
         db.row_factory = sqlite3.Row
         try:
             fams = [dict(r) for r in db.execute("SELECT id, lineage, mechanism, structure, band, born_at, retired_at, trials,"
                                                 " revisions, spec FROM families")]
+            chosen = list(ids) if ids is not None else [f["id"] for f in _shown(fams, retired_shown)]
             totals = dict(db.execute("SELECT COALESCE(SUM(trials),0) AS trials, COALESCE(SUM(program_years),0) AS years FROM runs").fetchone())
             spend = {r["kind"]: float(r["usd"] or 0.0) for r in db.execute("SELECT kind, SUM(usd) AS usd FROM spend GROUP BY kind")}
             meter = {r["key"]: loads(r["value"], None) for r in db.execute(
                 "SELECT key, value FROM kv WHERE key IN ('metered_spent', 'burst_started_at')")}
             rows: dict[str, list[dict[str, Any]]] = {}
-            for r in db.execute("SELECT family, source, day, pnl, max_loss, version FROM forward"):
-                rows.setdefault(r["family"], []).append(dict(r))
-            banded = {r["id"]: (loads(r["state"], {}) or {}).get("banded_version") for r in db.execute("SELECT id, state FROM families")}
+            banded: dict[str, Any] = {}
+            for start in range(0, len(chosen), 500):  # only the families shown: their records and banded versions
+                chunk = chosen[start:start + 500]
+                marks = ",".join("?" * len(chunk))
+                for r in db.execute(f"SELECT family, source, day, pnl, max_loss, version FROM forward WHERE family IN ({marks})", chunk):
+                    rows.setdefault(r["family"], []).append(dict(r))
+                for r in db.execute(f"SELECT id, state FROM families WHERE id IN ({marks})", chunk):
+                    banded[r["id"]] = (loads(r["state"], {}) or {}).get("banded_version")
             links = list(db.execute("SELECT a,b FROM lineage_links")) if db.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='lineage_links'").fetchone() else []
+            names = param_names(db, root, chosen)
         finally:
             db.close()
     except sqlite3.Error:
-        return {}
+        return None
+    return {"fams": fams, "totals": totals, "spend": spend, "meter": meter, "rows": rows, "banded": banded, "links": links,
+            "names": names}
+
+
+def _shown(fams: list[dict[str, Any]], retired_shown: int = 24) -> list[dict[str, Any]]:
+    """The families `site_inputs` shows: every alive one, then the newest retired."""
+    alive = [f for f in fams if not f["retired_at"]]
+    dead = sorted((f for f in fams if f["retired_at"]), key=lambda f: f["retired_at"], reverse=True)[:retired_shown]
+    return alive + dead
+
+
+def _agents(data: dict[str, Any], chosen: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The site's agent rows for `chosen` (rows of `data["fams"]`)."""
+    fams, rows, banded, links = data["fams"], data["rows"], data["banded"], data["links"]
     # A family's trials are its lineage's (`SwarmStore.lineage_trials`: every member, and any lineage its root was born
     # on the slice of), the count its evidence is deflated by.
     by_line: dict[str, int] = {}
@@ -104,10 +190,8 @@ def site_inputs(root: str | Path, *, retired_shown: int = 24) -> dict[str, Any]:
             pending.extend(prior.get(line, ()))
         return sum(by_line.get(x, 0) for x in seen)
 
-    alive = [f for f in fams if not f["retired_at"]]
-    dead = sorted((f for f in fams if f["retired_at"]), key=lambda f: f["retired_at"], reverse=True)[:retired_shown]
     agents = []
-    for f in alive + dead:
+    for f in chosen:
         # The same record the bands are judged on (`evidence.one_record`: the banded version's rows, one source a day).
         counted = evidence.one_record(rows.get(f["id"], []), version=banded.get(f["id"]))
         fwd = real = None
@@ -119,10 +203,36 @@ def site_inputs(root: str | Path, *, retired_shown: int = 24) -> dict[str, Any]:
         if reals:
             real = {"trades": len(reals), "wins": sum(1 for r in reals if float(r["pnl"]) > 0),
                     "pnl_usd": round(sum(float(r["pnl"]) for r in reals), 2)}
-        agents.append({"id": f["id"], "family": f["lineage"], "mechanism": public.news_text(f["mechanism"]), "structure": f["structure"],
-                       "band": "retired" if f["retired_at"] else f["band"], "born_at": f["born_at"], "retired_at": f["retired_at"],
+        names, _known = data["names"].get(f["id"], ((), True))
+        agents.append({"id": f["id"], "family": f["lineage"],
+                       "mechanism": public.news_text(f["mechanism"], param_names=public.unspelled(names, f["id"])),
+                       "structure": f["structure"], "band": "retired" if f["retired_at"] else f["band"], "born_at": f["born_at"],
+                       "retired_at": f["retired_at"],
                        "record": {"trials": lineage_trials(f["lineage"]), "revisions": int(f["revisions"]),
                                   "forward": fwd, "real": real}})
+    return agents
+
+
+def agent_rows(root: str | Path, ids: Any) -> list[dict[str, Any]]:
+    """The site's agent rows (`site_inputs`' shape) for the families `ids`, alive or retired ([] when there is no store
+    or it cannot be read; an id the store does not hold has no row)."""
+    wanted = {str(i) for i in ids or ()}
+    if not wanted:
+        return []
+    data = _read(root, sorted(wanted))
+    if data is None:
+        return []
+    return _agents(data, [f for f in data["fams"] if f["id"] in wanted])
+
+
+def site_inputs(root: str | Path, *, retired_shown: int = 24) -> dict[str, Any]:
+    """{"gym": ..., "agents": [...], "compute": ...} from the swarm's store (read-only); {} when there is no store."""
+    data = _read(root, retired_shown=retired_shown)
+    if data is None:
+        return {}
+    agents = _agents(data, _shown(data["fams"], retired_shown))
+    fams, totals, spend, meter = data["fams"], data["totals"], data["spend"], data["meter"]
+    alive = [f for f in fams if not f["retired_at"]]
     gym = {"as_of": _iso(time.time()), "trials": int(totals["trials"]), "market_years": round(float(totals["years"]), 1),
            "families_alive": len(alive), "families_retired": len(fams) - len(alive)}
     # The project's input costs since the reset, by service. Sail as Sail billed it (`sail_billed`), never the Gym's booked
@@ -135,4 +245,4 @@ def site_inputs(root: str | Path, *, retired_shown: int = 24) -> dict[str, Any]:
     return {"gym": gym, "agents": agents, "compute": compute}
 
 
-__all__ = ["PRE_METER_SAIL_USD", "sail_billed", "site_inputs"]
+__all__ = ["PRE_METER_SAIL_USD", "agent_rows", "param_names", "sail_billed", "site_inputs"]

@@ -21,8 +21,19 @@ on branch `run/options-swarm-2026-09-26`) has the detail.
 
 ## Not yet deployed
 
-Nothing: main `3eaf4d06` is Release B, deployed Oct 1 (below). Under the freeze (Oct 1, "The freeze"), a change to
-`league/live` or `league/gym` waits for a planned release.
+Main `3eaf4d06` is Release B, deployed Oct 1 (below). Under the freeze (Oct 1, "The freeze"), a change to
+`league/live` or `league/gym` waits for a planned release. Merged since and waiting for a release:
+
+- **The swarm window** (branch `b/site-rationale`): the publisher sends `levels` (each agent's level and the levels
+  funnel since the reset) and `rationale` (each agent's thesis, and each real position's route, reasons, exit and maximum
+  loss), pins every agent a real position names to the roster, and filters every mechanism against its program's
+  parameter names. Publisher and swarm-feed files only (`league/publish.py`, `league/site_window.py`,
+  `league/trading_profit.py`, `league/swarm/public.py`, `league/swarm/sitefeed.py`): nothing in `league/live`,
+  `league/gym` or `LEAGUE_FILES`, no evaluator adoption, no money digest. Site first (personal-site
+  `capital/swarm-window`); an older site gets the checkpoint without the window. To verify after the deploy: no "the site
+  refused the swarm window" warning, and `curl -s
+  'https://blakewoods.us/api/capital/checkpoint?progress=1&positions=1&practice=1&window=1'` shows `levels` and
+  `rationale`.
 
 ## 2026-10-01
 

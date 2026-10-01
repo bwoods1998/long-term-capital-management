@@ -349,6 +349,18 @@ A, #441) are the second exception, handled together.
   then shows Net as a dash until the House sends `claude_usd`. The site must be live before the incubator is switched
   on.
 
+The swarm window (`levels` and `rationale`, Oct 1, 2026: each agent's level and the levels funnel, each agent's thesis,
+and why each real position opened and closed) is the third exception.
+- **The order it tries:** a site that refuses a checkpoint carrying the window is sent it again without the window first
+  (`publish.windowless`). Refused again, the ladder above goes on without the window.
+- **What gets marked:** the window, only when the windowless checkpoint was taken; it is offered again after 30 minutes.
+  A site that refuses the table too is told the window's refusal on the next publish.
+- **The warning,** one per distinct reply: "the site refused the swarm window (levels and rationale: old site, or an
+  entry it rejects) ... (the site said: ...)".
+- **The site that takes it:** personal-site branch `capital/swarm-window`. Its Worker serves the window only to
+  `?progress=1&positions=1&practice=1&window=1`; every older read gets exactly the keys it validated. Site first is
+  preferred; either order works.
+
 **Checkpoint the House box before risky work:** `python3 scripts/floor_box.py checkpoint --name why
 --ttl-days 30` (`checkpoints` lists them). A checkpoint holds the box's `.env`. Sail's checkpoint
 API failed twice on Sept 26 (06:35Z and 07:00Z, HTTP 503); the old state's archive is a tarball
@@ -582,7 +594,9 @@ cd /workspace/previous && /workspace/.venv/bin/python -m league.watchdog rollbac
   bill is not yet known; `kv claude_band` is the breaker (`trouble`, `paused_until`, `why`).
 - **The public page:** `curl -s https://blakewoods.us/api/capital/checkpoint` (its `published_at`);
   `curl -s 'https://blakewoods.us/api/capital/checkpoint?progress=1&positions=1'` adds the positions
-  table, which the default read omits.
+  table, which the default read omits; `...&practice=1&window=1` adds the practice league and the swarm window
+  (`levels`: each agent's level and the funnel since the reset; `rationale`: each agent's thesis and each real
+  position's route, reasons, exit and maximum loss).
 - **The public cost and Net** (Release A, #441, with personal-site PR #17).
   - **`compute` is the bill since the reset, by service.**
     - `sail_usd` is what Sail billed. It is the Sail guard's balance meter (`swarm.sqlite` kv `metered_spent`, since the
@@ -1326,6 +1340,11 @@ From Release A:
 - **"the site refused the practice league block or Claude's own compute part ..."** (#441). The site predates
   personal-site PR #17. The House sent it the older shape: no practice block, and Claude inside `other_usd`. It offers
   the newer shape again in 30 minutes. Deploy the site; nothing is lost.
+- **"the site refused the swarm window ..."** (the swarm window, Oct 1, 2026). The site predates the window (personal-site
+  `capital/swarm-window`), or it refused an entry. The House sent the checkpoint without `levels` and `rationale` and
+  offers them again in 30 minutes. Deploy the site; nothing is lost. If the deployed site should take it, read the reply
+  the warning quotes; `curl -s 'https://blakewoods.us/api/capital/checkpoint?progress=1&positions=1&practice=1&window=1'`
+  shows what the site serves.
 
 From Release B:
 

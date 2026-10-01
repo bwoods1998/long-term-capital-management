@@ -209,6 +209,69 @@ code, a parameter or a Validation figure. A site that refuses a checkpoint carry
 without it, and is offered it again half an hour later; the House warns once per distinct reply of the site. So either
 repository may deploy first.
 
+## The swarm window (optional; Oct 1, 2026)
+
+The owner asked that anyone can see why an agent traded, every trade's result, and the agents' progress through the
+game's levels without the page explaining itself in prose. Two blocks, which the House sends together or not at all
+(`league/site_window.py` reads them read-only from the swarm's store, the live book and `observe.sqlite`;
+`publish.site_levels` and `publish.site_rationale` allowlist them). `site_checkpoint_window.json` beside this file is
+`site_checkpoint.json` plus `trading`, `positions`, `practice`, `levels` and `rationale`, after hours (the open GOOGL
+vertical unpriced, so Profit is null), with a retired agent pinned at Tuition, an incubator row and a calibration row
+(`window_checkpoint` in `test_site_window.py`; `LTCM_WRITE_SITE_FIXTURES=1` rewrites it). The site validates it with
+`validLevels` and `validRationale` (personal-site branch `capital/swarm-window`); until `site_schema.js` here is refreshed
+from that branch, `test_site_window.py` checks that the copy refuses the window and takes the windowless checkpoint, and
+`LTCM_SITE_SCHEMA=<the branch's capital/schema.js>` runs the full check against the site's own rules.
+
+```
+levels: {
+  as_of: instant,                       // not after published_at (+60 s)
+  agents: [{id, level}],                // <= 160, ids unique and on the roster; level one of train practice validation
+                                        // incubator tuition candidate probe sized retired, and one the agent's band allows:
+                                        // gym: train practice validation incubator tuition; candidate|probe|sized: itself;
+                                        // retired: retired, or the step of the open real money it still holds
+  funnel: {since: instant,              // performance.start_at (the reset)
+           born, practice, validation, tuition, incubator, looks, looks_passed, candidate, probe, sized, retired,
+           calibration, live_test}      // each a counter or null (its source could not be read)
+}
+rationale: {
+  as_of: instant,
+  agents: [{id, thesis}],               // <= 160, ids unique and on the roster; thesis null or thesisWords(280)
+  trades: [{id, route, open_why, close_why, exit, max_loss_usd}]   // ids unique and in positions.rows ([] with no table)
+}
+```
+
+- **The level now** (the first rule that holds): the agent holds open real money (the highest route of its open
+  positions: tuition < incubator < probe < sized, so a retired agent with an open position stands on its step); its band
+  is Candidate, Probe or Sized; it is retired; it has an active tuition instance (`mode` live, not retired); an active
+  incubator instance (`:i`); a validation on the current evaluator (`state.validation_version`); it practises now (the
+  practice row's `live`); else Train. A level its band rules out is never sent.
+- **The funnel** counts families since `since`, each a union up its track (a family counts at a level when it reached
+  that level or any higher one), so each chain narrows, and the site checks it: `sized <= probe <= candidate <= tuition
+  <= validation <= born`, `incubator <= practice <= born`, `retired <= born`, `looks_passed <= looks`. `looks` count
+  holdout looks, not families; `calibration` and `live_test` count the House's own real positions. A chain the House
+  could not make narrow is sent as nulls, never wrong.
+- **A thesis** is the family's full mechanism (the swarm store keeps every family, so a retired agent keeps its reason),
+  in whole sentences only (a fragment a cut left never shows), each with no digit, no number written as a word except the
+  pronoun "one", no colon, no bracket, no code mark (`= _ { } [ ] < > backtick # | \`) and no name of a parameter of any
+  version of its program or of its live instances' programs; at most 280 characters; then the publisher's `words`. A
+  family whose current program cannot be read gets none. `thesisWords` is `words` with no digit and none of those marks.
+- **A trade's reasons**: `open_why` is the opening order's stored tag, `close_why` the reason the agent's own program
+  gave its close (only when `exit` is "agent"), each under the same rules at most 80 characters (a tag of exactly 80 was
+  cut and is null). Both are null on the House's rows (`calibration`, `house`); `close_why` is null on an open row.
+  `route` fits the row's source (`calibration` -> calibration, `house` -> house, `incubator` -> incubator, `agent` ->
+  tuition, probe, sized or null). `exit` is null on an open row, else null or `agent` (its own program closed it),
+  `house` (a forced exit, a broken structure's legs, any House row) or `expiry` (a settlement, the broker's expiry,
+  assignment or exercise). `max_loss_usd` is whole cents: the position's maximum loss at open, the figure
+  `structures[].max_loss_usd` publishes while it is open and whole.
+- **Never**: a price, a strike, a mark, a fill, a maximum gain, a parameter's value, a threshold, code, a sketch, a
+  private note, `positions.note` or the raw `positions.reason`.
+
+Every agent a real position names (a row of the table, an incubator row, an open real structure) is **pinned** to the
+roster, alive or retired, outside the 24 newest retired, and is the last to leave the byte limit: its card always has a
+name, a mechanism and a record (an older site takes it, since only the 160 cap applies). A site that refuses a checkpoint
+carrying the window gets it again without it first (and when that is refused too, the older shapes' ladder goes on
+without it), and is offered it again half an hour later; the House warns once per distinct reply of the site.
+
 The account chart separately shows recorded Brokerage Account balances, which include funding flows.
 The chart has its own start: it may begin after an owner's deposit, so its first point need not be the
 account's starting balance, and a later deposit or withdrawal moves the line. **Profit** never moves

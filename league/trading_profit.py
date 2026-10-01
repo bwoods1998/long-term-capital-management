@@ -210,13 +210,67 @@ def _minute(epoch: float | None) -> float | None:
     return None if epoch is None else float(int(epoch // 60) * 60)
 
 
+#: The contract multiplier (`league.gym.venue.MULTIPLIER`, held equal by its test; spelled here so this module imports
+#: nothing live): a position's maximum loss is its maximum loss a share times this times its contracts.
+MULTIPLIER = 100
+#: The routes a real position may have been opened on (the site's `ROUTES`), lowest first on the main stairs.
+ROUTE_RANK = {'tuition': 0, 'incubator': 1, 'probe': 2, 'sized': 3}
+#: How a closed position ended (the site's `EXITS`): its own program closed it, the House did (a forced exit, a broken
+#: structure's legs, any House family's position), or its expiry did (a settlement, the broker's expiry, assignment or
+#: exercise, or an expiry the book could not price yet).
+EXITS = ('agent', 'house', 'expiry')
+_EXPIRY_REASONS = ('settled', 'expired', 'assigned', 'exercised', 'venue liquidation', 'expired contracts absent')
+
+
+def route_of(row: Mapping[str, Any], bands: Mapping[str, Any] | None = None) -> str | None:
+    """The route a real position was opened on: "calibration" or "house" for the House's own (`source_of`), "incubator"
+    for an incubator instance (`:i`, real money at tuition size, never evidence; restored tuition-flagged, so it comes
+    first), "tuition" for a D2 tuition position (`positions.tuition`), else its instance's band when that is "probe" or
+    "sized"; None when none of these says."""
+    source = source_of(row.get('family'), row.get('instance'))
+    if source in ('calibration', 'house', 'incubator'):
+        return source
+    if source != 'agent':
+        return None
+    if int(row.get('tuition') or 0):
+        return 'tuition'
+    band = (bands or {}).get(str(row.get('instance') or ''))
+    return band if band in ('probe', 'sized') else None
+
+
+def exit_of(row: Mapping[str, Any], closes: Sequence[Mapping[str, Any]]) -> str | None:
+    """How a position ended (`EXITS`), from its status, the book's own close reason (`real.py`: "program", "forced",
+    "settled...", "expired", "assigned", "exercised", "broken: ...", "venue liquidation ...") and its filled closing
+    orders; None while it is open, or when nothing says."""
+    status = str(row.get('status') or '')
+    if status in ('open', 'awaiting_expiry'):
+        return None
+    reason = str(row.get('reason') or '').strip().lower()
+    if status == 'unpriced_close' or reason.startswith(_EXPIRY_REASONS):
+        return 'expiry'
+    if source_of(row.get('family'), row.get('instance')) not in ('agent', 'incubator'):
+        return 'house'
+    if reason == 'forced' or reason.startswith('broken') or any(int(o.get('forced') or 0) for o in closes):
+        return 'house'
+    if reason == 'program':
+        return 'agent'
+    return None
+
+
 def position_rows(positions: Sequence[Mapping[str, Any]], orders: Sequence[Mapping[str, Any]],
-                  marks: Mapping[int, Any]) -> list[dict[str, Any]]:
+                  marks: Mapping[int, Any], bands: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
     """Each position as the table's row, before the publisher's allowlist: what it is, whose, when, its P&L. The
     opening and closing times are the broker's fill times where the book kept them (`answer.filled_at`), else the
     book's own, down to the minute; a close the broker made at expiry with no fill the book priced (`unpriced_close`)
     closed at 16:00 New York time on its expiry. The legs' contracts and strikes stay here: only their count and their
-    right leave."""
+    right leave.
+
+    The site's rationale (Oct 1, 2026) reads keys of the publisher's own, which start with "_" and never leave (the
+    allowlist `site_position` builds the row's fourteen fields by name, and `clean` drops them anyway): `_instance` (whose
+    program's parameter names a reason is filtered against), `_tag` (the opening order's reason as the book stored it),
+    `_close_why` (the reason of its newest filled closing order its own program sent, only when that program closed it),
+    `_exit` (`exit_of`), `_route` (`route_of`; `bands` maps an instance id to its band) and `_max_loss` (its maximum loss
+    at open, to the cent: what `structures[].max_loss_usd` publishes while it is whole)."""
     by_oid = {int(o['oid']): o for o in orders if o.get('oid') is not None}
     by_pid: dict[int, list[Mapping[str, Any]]] = {}
     for order in orders:
@@ -250,6 +304,14 @@ def position_rows(positions: Sequence[Mapping[str, Any]], orders: Sequence[Mappi
             if closed is None:
                 closed = _expiry_close(max(expiries) if expiries and all(expiries) else None)
         value = row_value(row, marks)
+        closes = sorted((o for o in mine if o.get('action') in ('close', 'close_leg') and int(o.get('filled_qty') or 0) > 0),
+                        key=lambda o: (float(o.get('placed_at') or 0.0), int(o.get('oid') or 0)), reverse=True)
+        exit_kind = exit_of(row, closes)
+        own = next((o for o in closes if not int(o.get('forced') or 0)), None) if exit_kind == 'agent' else None
+        try:
+            max_loss = usd(Decimal(str(round(float(row['max_loss_share']) * MULTIPLIER * int(row.get('opened_qty') or 0), 2))))
+        except (KeyError, TypeError, ValueError, InvalidOperation, OverflowError):
+            max_loss = None
         out.append({
             'pid': pid, 'family': str(row.get('family') or ''), 'source': source_of(row.get('family'), row.get('instance')),
             'underlying': str(row.get('root') or ''), 'structure': str(row.get('type') or ''), 'right': _right(legs),
@@ -260,6 +322,8 @@ def position_rows(positions: Sequence[Mapping[str, Any]], orders: Sequence[Mappi
             'expiry': expiry,
             'opened_at': _iso(_minute(opened)), 'closed_at': _iso(_minute(closed)),
             'pnl_usd': usd(value) if value is not None else None,
+            '_instance': str(row.get('instance') or ''), '_tag': row.get('tag'), '_close_why': own.get('why') if own else None,
+            '_exit': exit_kind, '_route': route_of(row, bands), '_max_loss': max_loss,
         })
     return out
 
@@ -298,6 +362,10 @@ def _read(path: Path, live: Any, *, at: str, never_traded: bool, since: float | 
         everything = [dict(row) for row in db.execute('SELECT * FROM positions')]
         orders = [dict(row) for row in db.execute('SELECT * FROM orders')]
         recon = db.execute("SELECT value FROM kv WHERE key='recon'").fetchone()
+        try:  # each instance's band only (never its program): a position's route (`route_of`)
+            bands = {str(r['id']): r['band'] for r in db.execute('SELECT id, band FROM instances')}
+        except sqlite3.Error:
+            bands = {}
         frozen = (json.loads(recon[0]) or {}).get('frozen') if recon else None
         rows = [row for row in everything if since is None or (_epoch(row.get('opened_at')) or 0.0) >= since]
         uncertain = any(order.get('status') in ('pending', 'unknown') for order in orders)
@@ -317,7 +385,7 @@ def _read(path: Path, live: Any, *, at: str, never_traded: bool, since: float | 
         if db.execute('PRAGMA data_version').fetchone()[0] != version:
             return None  # a fill/freeze changed while quote columns were being copied
     pnl = total(rows, marks) if certain else None
-    return {'as_of': valued_at, 'pnl_usd': pnl, 'rows': position_rows(rows, orders, marks)}
+    return {'as_of': valued_at, 'pnl_usd': pnl, 'rows': position_rows(rows, orders, marks, bands)}
 
 
 def snapshot(root: str | Path, live: Any, *, at: str, never_traded: bool = False, start_at: Any = None) -> dict[str, Any]:

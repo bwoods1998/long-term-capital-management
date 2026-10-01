@@ -499,6 +499,20 @@ A positions table (Sept 28) lists every closed and open position and adds up exa
 rows labelled "House calibration" and "House live test". It is an opt-in read
 (`/api/capital/checkpoint?progress=1&positions=1`), and the default read omits it.
 
+**The swarm window** (Oct 1, 2026; `league/site_window.py`) lets anyone see why an agent traded and how far each agent
+has climbed, with no prose on the page:
+- **Levels:** where each agent stands now on the game's map (Train, Validation, Tuition, Candidate, Probe, Sized on the
+  main stairs; Practice and the Incubator on the side path that never reaches the top; Retired off the map; a retired
+  agent still holding real money stands on that money's step), and a funnel of how many families reached each level
+  since the reset.
+- **Rationale:** each agent's thesis (its family's mechanism in whole sentences: no digit, no number word, no colon,
+  bracket or code mark, no parameter name) and, for each real position, its route, why it opened and why its agent closed
+  it (the orders' own short reasons under the same rules), how it ended (agent, House or expiry) and its maximum loss at
+  open.
+- **Pinning:** every agent a real position names stays on the public roster, retired or not.
+
+It is an opt-in read (`...&practice=1&window=1`), and a site that predates it gets the checkpoint without it.
+
 **Never quotes, spreads, implied-volatility surfaces or fitted parameters**, on the site, in the
 public JSON or in this repository: the data licenses forbid it. The publisher strips every quote
 field and a test proves it. Programs and fitted parameters stay in the House's state and on Sail.

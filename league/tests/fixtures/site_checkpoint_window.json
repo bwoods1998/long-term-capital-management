@@ -1,0 +1,713 @@
+{
+  "schema_version": 2,
+  "published_at": "2026-09-28T14:58:00.000Z",
+  "run": {
+    "started_at": "2026-09-26T07:02:18.000Z"
+  },
+  "account": {
+    "equity": "5694.37",
+    "cash": "5210.12",
+    "as_of": "2026-09-28T14:57:58.000Z",
+    "stale": false
+  },
+  "performance": {
+    "start_at": "2026-09-26T06:25:30.000Z",
+    "start_equity": "481.65",
+    "net_flows": "5000.00",
+    "verified_at": "2026-09-28T14:55:02.000Z"
+  },
+  "compute": {
+    "as_of": "2026-09-28T14:57:00.000Z",
+    "sail_usd": "212.40",
+    "claude_usd": "41.20",
+    "openai_usd": "64.10",
+    "thetadata_usd": "5.43",
+    "market_data_usd": "5.66",
+    "other_usd": "0.00"
+  },
+  "gym": {
+    "as_of": "2026-09-28T14:50:00.000Z",
+    "trials": 48213,
+    "market_years": "51240.5",
+    "families_alive": 11,
+    "families_retired": 37
+  },
+  "agents": [
+    {
+      "id": "condor-vrp-3",
+      "family": "condor-vrp",
+      "mechanism": "Sells short-dated index premium when realized volatility runs under the level the options price in.",
+      "structure": "iron_condor",
+      "band": "sized",
+      "born_at": "2026-09-26T09:14:00.000Z",
+      "retired_at": null,
+      "record": {
+        "trials": 5812,
+        "revisions": 41,
+        "forward": {
+          "trades": 64,
+          "wins": 45,
+          "pnl_usd": "1284.20"
+        },
+        "real": {
+          "trades": 22,
+          "wins": 16,
+          "pnl_usd": "212.40"
+        }
+      }
+    },
+    {
+      "id": "orb-4",
+      "family": "orb",
+      "mechanism": "Trades the break of the opening range in the direction of the break, with a vertical sized by its maximum loss.",
+      "structure": "debit_vertical",
+      "band": "probe",
+      "born_at": "2026-09-26T10:02:00.000Z",
+      "retired_at": null,
+      "record": {
+        "trials": 2877,
+        "revisions": 22,
+        "forward": {
+          "trades": 40,
+          "wins": 23,
+          "pnl_usd": "310.10"
+        },
+        "real": {
+          "trades": 3,
+          "wins": 2,
+          "pnl_usd": "21.80"
+        }
+      }
+    },
+    {
+      "id": "putspread-dip-2",
+      "family": "putspread-dip",
+      "mechanism": "Buys a put debit vertical after a gap down that the first hour does not recover, and exits before the close.",
+      "structure": "debit_vertical",
+      "band": "probe",
+      "born_at": "2026-09-26T09:20:00.000Z",
+      "retired_at": null,
+      "record": {
+        "trials": 3390,
+        "revisions": 28,
+        "forward": {
+          "trades": 31,
+          "wins": 18,
+          "pnl_usd": "402.75"
+        },
+        "real": {
+          "trades": 4,
+          "wins": 2,
+          "pnl_usd": "-18.30"
+        }
+      }
+    },
+    {
+      "id": "butterfly-pin",
+      "family": "butterfly-pin",
+      "mechanism": "Buys a long butterfly around the strike with the largest open interest on expiry afternoons, where prices tend to pin.",
+      "structure": "long_butterfly",
+      "band": "candidate",
+      "born_at": "2026-09-26T16:02:11.000Z",
+      "retired_at": null,
+      "record": {
+        "trials": 1988,
+        "revisions": 15,
+        "forward": {
+          "trades": 9,
+          "wins": 4,
+          "pnl_usd": "-22.00"
+        },
+        "real": null
+      }
+    },
+    {
+      "id": "ironfly-quiet",
+      "family": "ironfly-quiet",
+      "mechanism": "Sells an at-the-money iron butterfly on quiet mornings when the overnight range was narrow.",
+      "structure": "iron_butterfly",
+      "band": "candidate",
+      "born_at": "2026-09-26T16:02:11.000Z",
+      "retired_at": null,
+      "record": {
+        "trials": 2410,
+        "revisions": 19,
+        "forward": {
+          "trades": 18,
+          "wins": 11,
+          "pnl_usd": "96.40"
+        },
+        "real": null
+      }
+    },
+    {
+      "id": "trend-vertical",
+      "family": "trend-vertical",
+      "mechanism": "Rides trend days: once the first two hours close far from the open, it buys a vertical in that direction.",
+      "structure": "debit_vertical",
+      "band": "candidate",
+      "born_at": "2026-09-26T16:02:11.000Z",
+      "retired_at": null,
+      "record": {
+        "trials": 1760,
+        "revisions": 13,
+        "forward": {
+          "trades": 12,
+          "wins": 7,
+          "pnl_usd": "58.90"
+        },
+        "real": null
+      }
+    },
+    {
+      "id": "calendar-term",
+      "family": "calendar-term",
+      "mechanism": "Buys a calendar when near-dated options are rich against the month behind them.",
+      "structure": "calendar",
+      "band": "gym",
+      "born_at": "2026-09-26T16:02:11.000Z",
+      "retired_at": null,
+      "record": {
+        "trials": 611,
+        "revisions": 7,
+        "forward": null,
+        "real": null
+      }
+    },
+    {
+      "id": "eod-drift",
+      "family": "eod-drift",
+      "mechanism": "Buys the last hour's drift into the close on days the index is up from the open.",
+      "structure": "long_call",
+      "band": "gym",
+      "born_at": "2026-09-26T16:02:11.000Z",
+      "retired_at": null,
+      "record": {
+        "trials": 88,
+        "revisions": 1,
+        "forward": null,
+        "real": null
+      }
+    },
+    {
+      "id": "gap-drift",
+      "family": "gap-drift",
+      "mechanism": "Fades opening gaps that the premarket did not confirm, with a single long option.",
+      "structure": "long_call",
+      "band": "gym",
+      "born_at": "2026-09-26T16:02:11.000Z",
+      "retired_at": null,
+      "record": {
+        "trials": 1204,
+        "revisions": 17,
+        "forward": null,
+        "real": null
+      }
+    },
+    {
+      "id": "skew-revert",
+      "family": "skew-revert",
+      "mechanism": "Sells the side of the smile that has steepened most against its own recent history.",
+      "structure": "credit_vertical",
+      "band": "gym",
+      "born_at": "2026-09-26T16:02:11.000Z",
+      "retired_at": null,
+      "record": {
+        "trials": 940,
+        "revisions": 9,
+        "forward": null,
+        "real": null
+      }
+    },
+    {
+      "id": "strangle-cheap",
+      "family": "strangle-cheap",
+      "mechanism": "Buys a strangle into scheduled news when the move the options expect is small beside past moves.",
+      "structure": "long_strangle",
+      "band": "gym",
+      "born_at": "2026-09-26T16:02:11.000Z",
+      "retired_at": null,
+      "record": {
+        "trials": 402,
+        "revisions": 4,
+        "forward": null,
+        "real": null
+      }
+    },
+    {
+      "id": "googl-lags-msft-ai-cloud-qqq-flat",
+      "family": "googl-lags-msft-ai-cloud-qqq-flat",
+      "mechanism": "MSFT and GOOGL sell competing AI-cloud and search products, and investors reprice one on the other's capex or product news with a delay. When MSFT moves strongly over several sessions, QQQ is flat and GOOGL has not followed, GOOGL is expect",
+      "structure": "debit_vertical",
+      "band": "retired",
+      "born_at": "2026-09-27T02:10:00.000Z",
+      "retired_at": "2026-09-27T20:05:00.000Z",
+      "record": {
+        "trials": 3120,
+        "revisions": 27,
+        "forward": null,
+        "real": null
+      }
+    },
+    {
+      "id": "reversal-1",
+      "family": "reversal",
+      "mechanism": "Bought reversals after three down days; it never beat the fill cost on validation.",
+      "structure": "debit_vertical",
+      "band": "retired",
+      "born_at": "2026-09-26T16:02:11.000Z",
+      "retired_at": "2026-09-27T21:40:00.000Z",
+      "record": {
+        "trials": 2000,
+        "revisions": 30,
+        "forward": null,
+        "real": null
+      }
+    }
+  ],
+  "structures": [
+    {
+      "id": "st-condor-vrp-3-0928a",
+      "agent": "condor-vrp-3",
+      "underlying": "XSP",
+      "structure": "iron_condor",
+      "legs": 4,
+      "expiry": "2026-09-28",
+      "quantity": 1,
+      "real": true,
+      "opened_at": "2026-09-28T14:02:40.000Z",
+      "max_loss_usd": "184.00",
+      "pnl_usd": "12.50"
+    },
+    {
+      "id": "st-orb-4-0928a",
+      "agent": "orb-4",
+      "underlying": "SPY",
+      "structure": "debit_vertical",
+      "legs": 2,
+      "expiry": "2026-09-28",
+      "quantity": 2,
+      "real": true,
+      "opened_at": "2026-09-28T14:02:40.000Z",
+      "max_loss_usd": "96.00",
+      "pnl_usd": "-8.00"
+    },
+    {
+      "id": "st-putspread-dip-2-0928a",
+      "agent": "putspread-dip-2",
+      "underlying": "QQQ",
+      "structure": "debit_vertical",
+      "legs": 2,
+      "expiry": "2026-09-30",
+      "quantity": 1,
+      "real": true,
+      "opened_at": "2026-09-28T14:02:40.000Z",
+      "max_loss_usd": "61.00",
+      "pnl_usd": null
+    },
+    {
+      "id": "st-ironfly-quiet-0928a",
+      "agent": "ironfly-quiet",
+      "underlying": "SPY",
+      "structure": "iron_butterfly",
+      "legs": 4,
+      "expiry": "2026-09-28",
+      "quantity": 1,
+      "real": false,
+      "opened_at": "2026-09-28T14:02:40.000Z",
+      "max_loss_usd": "312.00",
+      "pnl_usd": "41.00"
+    }
+  ],
+  "trading": {
+    "as_of": "2026-09-28T14:57:00.000Z",
+    "pnl_usd": null
+  },
+  "positions": {
+    "as_of": "2026-09-28T14:57:00.000Z",
+    "rows": [
+      {
+        "id": "real:13",
+        "source": "agent",
+        "agent": "orb-4",
+        "underlying": "SPY",
+        "structure": "debit_vertical",
+        "right": "call",
+        "legs": 2,
+        "quantity": 2,
+        "open_quantity": 2,
+        "status": "open",
+        "expiry": "2026-10-02",
+        "opened_at": "2026-09-28T14:40:00.000Z",
+        "closed_at": null,
+        "pnl_usd": "-8.00"
+      },
+      {
+        "id": "real:14",
+        "source": "agent",
+        "agent": "condor-vrp-3",
+        "underlying": "XSP",
+        "structure": "iron_condor",
+        "right": "both",
+        "legs": 4,
+        "quantity": 1,
+        "open_quantity": 1,
+        "status": "open",
+        "expiry": "2026-09-28",
+        "opened_at": "2026-09-28T14:02:00.000Z",
+        "closed_at": null,
+        "pnl_usd": "12.50"
+      },
+      {
+        "id": "real:15",
+        "source": "agent",
+        "agent": "googl-lags-msft-ai-cloud-qqq-flat",
+        "underlying": "GOOGL",
+        "structure": "debit_vertical",
+        "right": "call",
+        "legs": 2,
+        "quantity": 1,
+        "open_quantity": 1,
+        "status": "open",
+        "expiry": "2026-10-07",
+        "opened_at": "2026-09-28T13:31:00.000Z",
+        "closed_at": null,
+        "pnl_usd": null
+      },
+      {
+        "id": "real:12",
+        "source": "agent",
+        "agent": "orb-4",
+        "underlying": "SPY",
+        "structure": "debit_vertical",
+        "right": "call",
+        "legs": 2,
+        "quantity": 2,
+        "open_quantity": 0,
+        "status": "closed",
+        "expiry": "2026-10-02",
+        "opened_at": "2026-09-28T14:10:00.000Z",
+        "closed_at": "2026-09-28T14:30:00.000Z",
+        "pnl_usd": "31.00"
+      },
+      {
+        "id": "real:16",
+        "source": "incubator",
+        "agent": "gap-drift",
+        "underlying": "SPY",
+        "structure": "long_call",
+        "right": "call",
+        "legs": 1,
+        "quantity": 1,
+        "open_quantity": 0,
+        "status": "closed",
+        "expiry": "2026-10-02",
+        "opened_at": "2026-09-28T13:45:00.000Z",
+        "closed_at": "2026-09-28T14:20:00.000Z",
+        "pnl_usd": "4.10"
+      },
+      {
+        "id": "real:10",
+        "source": "calibration",
+        "agent": null,
+        "underlying": "SPY",
+        "structure": "debit_vertical",
+        "right": "call",
+        "legs": 2,
+        "quantity": 1,
+        "open_quantity": 0,
+        "status": "closed",
+        "expiry": "2026-10-02",
+        "opened_at": "2026-09-28T13:40:00.000Z",
+        "closed_at": "2026-09-28T14:10:00.000Z",
+        "pnl_usd": "-2.20"
+      },
+      {
+        "id": "real:11",
+        "source": "agent",
+        "agent": "putspread-dip-2",
+        "underlying": "QQQ",
+        "structure": "debit_vertical",
+        "right": "put",
+        "legs": 2,
+        "quantity": 1,
+        "open_quantity": 0,
+        "status": "closed",
+        "expiry": "2026-09-30",
+        "opened_at": "2026-09-27T14:35:00.000Z",
+        "closed_at": "2026-09-28T13:55:00.000Z",
+        "pnl_usd": "-18.30"
+      },
+      {
+        "id": "real:9",
+        "source": "agent",
+        "agent": "reversal-1",
+        "underlying": "SPY",
+        "structure": "long_call",
+        "right": "call",
+        "legs": 1,
+        "quantity": 1,
+        "open_quantity": 0,
+        "status": "closed",
+        "expiry": "2026-10-02",
+        "opened_at": "2026-09-27T15:10:00.000Z",
+        "closed_at": "2026-09-27T19:40:00.000Z",
+        "pnl_usd": "-4.10"
+      }
+    ],
+    "earlier": null,
+    "other": {
+      "as_of": "2026-09-28T14:55:02.000Z",
+      "fees_usd": "0.08",
+      "crypto_usd": "-0.08",
+      "interest_usd": "0.00",
+      "misc_usd": "0.00"
+    },
+    "unreconciled_usd": "0.00"
+  },
+  "practice": {
+    "as_of": "2026-09-28T14:57:00.000Z",
+    "sessions": 2,
+    "capital_usd": "10000.00",
+    "totals": {
+      "families": 3,
+      "trades": 15,
+      "wins": 6,
+      "pnl_usd": "17.30"
+    },
+    "rows": [
+      {
+        "agent": "condor-vrp-3",
+        "family": "condor-vrp",
+        "structure": "iron_condor",
+        "tier": "validated",
+        "status": "alive",
+        "sessions": 3,
+        "trades": 9,
+        "wins": 5,
+        "pnl_usd": "42.50",
+        "return_on_risk": "0.12"
+      },
+      {
+        "agent": "orb-4",
+        "family": "orb",
+        "structure": "debit_vertical",
+        "tier": "train",
+        "status": "alive",
+        "sessions": 3,
+        "trades": 4,
+        "wins": 1,
+        "pnl_usd": "-18.20",
+        "return_on_risk": "-0.09"
+      },
+      {
+        "agent": "gone-2",
+        "family": "gone",
+        "structure": "long_straddle",
+        "tier": "validated",
+        "status": "retired",
+        "sessions": 3,
+        "trades": 2,
+        "wins": 0,
+        "pnl_usd": "-7.00",
+        "return_on_risk": "-0.05"
+      }
+    ]
+  },
+  "levels": {
+    "as_of": "2026-09-28T14:57:00.000Z",
+    "agents": [
+      {
+        "id": "condor-vrp-3",
+        "level": "sized"
+      },
+      {
+        "id": "putspread-dip-2",
+        "level": "probe"
+      },
+      {
+        "id": "orb-4",
+        "level": "probe"
+      },
+      {
+        "id": "ironfly-quiet",
+        "level": "candidate"
+      },
+      {
+        "id": "butterfly-pin",
+        "level": "candidate"
+      },
+      {
+        "id": "trend-vertical",
+        "level": "candidate"
+      },
+      {
+        "id": "gap-drift",
+        "level": "incubator"
+      },
+      {
+        "id": "skew-revert",
+        "level": "validation"
+      },
+      {
+        "id": "calendar-term",
+        "level": "practice"
+      },
+      {
+        "id": "strangle-cheap",
+        "level": "train"
+      },
+      {
+        "id": "eod-drift",
+        "level": "train"
+      },
+      {
+        "id": "reversal-1",
+        "level": "retired"
+      },
+      {
+        "id": "googl-lags-msft-ai-cloud-qqq-flat",
+        "level": "tuition"
+      }
+    ],
+    "funnel": {
+      "since": "2026-09-26T06:25:30.000Z",
+      "born": 48,
+      "practice": 4,
+      "validation": 9,
+      "tuition": 7,
+      "incubator": 1,
+      "looks": 6,
+      "looks_passed": 3,
+      "candidate": 6,
+      "probe": 3,
+      "sized": 1,
+      "retired": 37,
+      "calibration": 1,
+      "live_test": 0
+    }
+  },
+  "rationale": {
+    "as_of": "2026-09-28T14:57:00.000Z",
+    "agents": [
+      {
+        "id": "condor-vrp-3",
+        "thesis": "Sells short-dated index premium when realized volatility runs under the level the options price in."
+      },
+      {
+        "id": "putspread-dip-2",
+        "thesis": null
+      },
+      {
+        "id": "orb-4",
+        "thesis": "Trades the break of the opening range in the direction of the break, with a vertical sized by its maximum loss."
+      },
+      {
+        "id": "ironfly-quiet",
+        "thesis": "Sells an at-the-money iron butterfly on quiet mornings when the overnight range was narrow."
+      },
+      {
+        "id": "butterfly-pin",
+        "thesis": "Buys a long butterfly around the strike with the largest open interest on expiry afternoons, where prices tend to pin."
+      },
+      {
+        "id": "trend-vertical",
+        "thesis": null
+      },
+      {
+        "id": "gap-drift",
+        "thesis": "Fades opening gaps that the premarket did not confirm, with a single long option."
+      },
+      {
+        "id": "skew-revert",
+        "thesis": "Sells the side of the smile that has steepened most against its own recent history."
+      },
+      {
+        "id": "calendar-term",
+        "thesis": "Buys a calendar when near-dated options are rich against the month behind them."
+      },
+      {
+        "id": "strangle-cheap",
+        "thesis": "Buys a strangle into scheduled news when the move the options expect is small beside past moves."
+      },
+      {
+        "id": "eod-drift",
+        "thesis": "Buys the last hour's drift into the close on days the index is up from the open."
+      },
+      {
+        "id": "reversal-1",
+        "thesis": null
+      },
+      {
+        "id": "googl-lags-msft-ai-cloud-qqq-flat",
+        "thesis": "MSFT and GOOGL sell competing AI-cloud and search products, and investors reprice one on the other's capex or product news with a delay. When MSFT moves strongly over several sessions, QQQ is flat and GOOGL has not followed, GOOGL is expected to close part of the gap."
+      }
+    ],
+    "trades": [
+      {
+        "id": "real:13",
+        "route": "probe",
+        "open_why": "range broke up early",
+        "close_why": null,
+        "exit": null,
+        "max_loss_usd": "96.00"
+      },
+      {
+        "id": "real:14",
+        "route": "sized",
+        "open_why": "the condor fits the quiet tape",
+        "close_why": null,
+        "exit": null,
+        "max_loss_usd": "184.00"
+      },
+      {
+        "id": "real:15",
+        "route": "tuition",
+        "open_why": "msft leads googl, qqq flat",
+        "close_why": null,
+        "exit": null,
+        "max_loss_usd": "157.00"
+      },
+      {
+        "id": "real:12",
+        "route": "probe",
+        "open_why": "range broke up",
+        "close_why": "the break failed by noon",
+        "exit": "agent",
+        "max_loss_usd": "96.00"
+      },
+      {
+        "id": "real:16",
+        "route": "incubator",
+        "open_why": "the gap was not confirmed",
+        "close_why": "filled the gap",
+        "exit": "agent",
+        "max_loss_usd": "38.00"
+      },
+      {
+        "id": "real:10",
+        "route": "calibration",
+        "open_why": null,
+        "close_why": null,
+        "exit": "house",
+        "max_loss_usd": "40.00"
+      },
+      {
+        "id": "real:11",
+        "route": "probe",
+        "open_why": "gap down held",
+        "close_why": null,
+        "exit": "house",
+        "max_loss_usd": "61.00"
+      },
+      {
+        "id": "real:9",
+        "route": null,
+        "open_why": null,
+        "close_why": null,
+        "exit": "expiry",
+        "max_loss_usd": "66.00"
+      }
+    ]
+  }
+}

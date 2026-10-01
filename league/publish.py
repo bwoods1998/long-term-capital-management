@@ -39,6 +39,8 @@ with any of these keys, and anything not yet available as None or an empty list.
     practice     {as_of, sessions, capital_usd, rows: [{family, lineage, structure, tier, sessions, trades, wins,
                    pnl_usd, return_on_risk, last_day, live}]}      the practice league (the live path's; `site_practice`)
 
+The swarm window (`levels`, `rationale`) is the publisher's own read (`league/site_window.py`), never the hook's.
+
 **The practice league** (Sept 29, 2026). `practice {as_of, sessions, capital_usd, totals, rows}`: every family that
 practised on live quotes in the shadow book under the Gym's fill rules (never real money), one row each: its tier
 (validated or Train), sessions, closed trades, wins, realized P&L and return on maximum loss. It is never part of
@@ -67,6 +69,26 @@ opened and closed, to the minute) and its dollar P&L after fees, never a strike,
 refuses a checkpoint carrying the block (an older site, or a row it rejects) gets it again without the block, and is
 offered it again half an hour later, with a warning that quotes the site's reply; so the House may deploy before the
 site.
+
+**The swarm window** (Oct 1, 2026: the owner asked that anyone can see why an agent traded, every trade's result, and the
+agents' progress through the game's levels). Two blocks, sent together or not at all, each an allowlist
+(`site_levels`, `site_rationale`) over what `league/site_window.py` reads, read-only, from the swarm's store, the live
+book and the practice record:
+
+    levels     {as_of, agents: [{id, level}], funnel: {since, born, practice, validation, tuition, incubator, looks,
+                looks_passed, candidate, probe, sized, retired, calibration, live_test}}
+    rationale  {as_of, agents: [{id, thesis}], trades: [{id, route, open_why, close_why, exit, max_loss_usd}]}
+
+A level is where an agent stands now (Train, Validation, Practice, Incubator, Tuition, Candidate, Probe, Sized, Retired),
+never one its band rules out; the funnel counts the families that reached each level since the reset (unions, so each
+chain only narrows; a count it cannot read is null). A thesis is the family's own mechanism in whole sentences with no
+digit, no number word, no colon, bracket or code mark and no parameter name (`swarm/public.py` `thesis_text`, then
+`thesis_words` here); a trade's reasons are its orders' tags under the same rules (`tag_text`), none on the House's rows;
+`exit` is "agent", "house" or "expiry", never text; `max_loss_usd` is its maximum loss at open. Never a price, a strike,
+a mark, a parameter's value, a threshold, code, a sketch or a private note. Entries name only agents the page shows and
+rows the table lists. Every agent a real position names is pinned to the roster (alive or retired: `Publisher._pinned`),
+outside the retired list's 24. A site that refuses a checkpoint carrying the window gets it again without it (tried
+first) and is offered it again half an hour later (`WINDOW_RETRY_SECONDS`), with a warning that quotes the site's reply.
 
 The tape is made from ledger rows (`to_events`): `agent.thought` (and a research summary) is an agent's
 note; a `book.fill` of an option or a structure held as one instrument is a trade (a buy opens it, a sale
@@ -121,6 +143,25 @@ POSITIONS_RETRY_SECONDS = 1800
 PRACTICE_RETRY_SECONDS = POSITIONS_RETRY_SECONDS
 #: The practice league's rows on the page (`site_practice`).
 MAX_PRACTICE_ROWS = 48
+#: The swarm window (Oct 1, 2026; `site_levels`, `site_rationale`): the site's `LEVELS`, `LEVELS_BY_BAND`, `ROUTES`,
+#: `ROUTES_BY_SOURCE`, `EXITS`, `FUNNEL_KEYS` and the funnel's chains (`capital/schema.js`).
+LEVELS = ("train", "practice", "validation", "incubator", "tuition", "candidate", "probe", "sized", "retired")
+LEVELS_BY_BAND = {"gym": ("train", "practice", "validation", "incubator", "tuition"), "candidate": ("candidate",),
+                  "probe": ("probe",), "sized": ("sized",), "retired": ("retired", "tuition", "incubator", "probe", "sized")}
+ROUTES = ("tuition", "incubator", "probe", "sized", "calibration", "house")
+ROUTES_BY_SOURCE = {"calibration": ("calibration",), "house": ("house",), "incubator": ("incubator",),
+                    "agent": ("tuition", "probe", "sized")}
+EXITS = ("agent", "house", "expiry")
+FUNNEL_KEYS = ("since", "born", "practice", "validation", "tuition", "incubator", "looks", "looks_passed", "candidate", "probe",
+               "sized", "retired", "calibration", "live_test")
+#: Each chain only narrows, lowest count first (a family counts at a level when it reached it or any higher one).
+FUNNEL_CHAINS = (("sized", "probe", "candidate", "tuition", "validation", "born"), ("incubator", "practice", "born"),
+                 ("retired", "born"), ("looks_passed", "looks"))
+#: A thesis (whole sentences) and an order's reason, at most (`site_rationale`).
+THESIS_CHARS = 280
+WHY_CHARS = 80
+#: A site that refused the swarm window is offered it again after this long (`Publisher.publish`).
+WINDOW_RETRY_SECONDS = 1800
 MAX_CHECKPOINT_BYTES = 512 * 1024
 #: A profit is only as good as its funding check: the site shows none on a check older than ten minutes.
 FLOWS_EVERY_SECONDS = 300
@@ -369,6 +410,8 @@ class SiteInputs:
     trading: Mapping[str, Any] | None = None
     positions: Mapping[str, Any] | None = None
     practice: Mapping[str, Any] | None = None
+    levels: Mapping[str, Any] | None = None
+    rationale: Mapping[str, Any] | None = None
 
     @classmethod
     def of(cls, value: "SiteInputs | Mapping[str, Any]") -> "SiteInputs":
@@ -695,22 +738,155 @@ def site_practice(value: Any, agents: list[Mapping[str, Any]], published_at: str
             "rows": shown}
 
 
+# --------------------------------------------------------------------------- the swarm window
+_THESIS_MARKS = re.compile(r"[:()\[\]{}<>=_`#|\\]")
+_DIGIT = re.compile(r"[0-9]")
+
+
+def thesis_words(value: Any, limit: int) -> str | None:
+    """`value` as the site's `thesisWords(value, limit)` takes it, or None, never a partial string: the publisher's `words`
+    (no markup, no venue, quote-free, not blank), then no digit, no colon, no bracket and no mark only code or a formula
+    uses, at most `limit` long as JavaScript counts it, and (the swarm's rule, `public.thesis_text`) no number written as a
+    word but the pronoun "one". The swarm filtered it first, against the program's parameter names too."""
+    from .swarm.public import SENTENCE, numbered
+
+    if not isinstance(value, str) or any(ch.isdigit() for ch in value) or _THESIS_MARKS.search(value):
+        return None  # refused before `words` could mask it into a partial string
+    text = words(value, 8000)
+    if (not text or js_length(text) > limit or _DIGIT.search(text) or _THESIS_MARKS.search(text) or not quote_free(text)
+            or _VENUE.search(text) or any(numbered(sentence) for sentence in SENTENCE.split(text))):
+        return None
+    return text
+
+
+def _counter(value: Any, limit: int = 1_000_000_000) -> int | None:
+    """A JSON counter (a whole number from 0 to `limit`), never clamped: anything else is unknown."""
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= limit:
+        return None
+    return value
+
+
+def site_funnel(value: Any, published_at: str) -> dict[str, Any] | None:
+    """{since, born, practice, validation, tuition, incubator, looks, looks_passed, candidate, probe, sized, retired,
+    calibration, live_test}: how many families reached each level since the reset (`since`), each a counter or None
+    (unknown). A chain that does not narrow (`FUNNEL_CHAINS`; never expected: the House counts unions) is unknown whole,
+    never shown wrong. None without a `since`."""
+    if not isinstance(value, Mapping):
+        return None
+    since = site_instant(value.get("since"))
+    if since is None or not _not_after(since, published_at):
+        return None
+    out: dict[str, Any] = {"since": since, **{key: _counter(value.get(key)) for key in FUNNEL_KEYS if key != "since"}}
+    for chain in FUNNEL_CHAINS:
+        known = [out[key] for key in chain if out[key] is not None]
+        if any(a > b for a, b in zip(known, known[1:])):
+            for key in chain:
+                out[key] = None
+    return out
+
+
+def site_levels(value: Any, agents: list[Mapping[str, Any]], published_at: str) -> dict[str, Any] | None:
+    """{as_of, agents: [{id, level}], funnel}: where each agent on the page stands in the game (the swarm window, Oct 1,
+    2026; `league/site_window.py`). An entry names an agent the page shows, once, at a level its band allows
+    (`LEVELS_BY_BAND`); any other entry is left out, never sent. None when the block cannot be shown honestly."""
+    if not isinstance(value, Mapping):
+        return None
+    at = site_instant(value.get("as_of"))
+    if at is None or not _not_after(at, published_at):
+        return None
+    bands = {a["id"]: a["band"] for a in agents}
+    rows, seen = [], set()
+    for raw in value.get("agents") or []:
+        if not isinstance(raw, Mapping):
+            continue
+        agent_id, level = str(raw.get("id") or ""), raw.get("level")
+        if agent_id in bands and agent_id not in seen and level in LEVELS_BY_BAND.get(bands[agent_id], ()):
+            seen.add(agent_id)
+            rows.append({"id": agent_id, "level": level})
+    funnel = site_funnel(value.get("funnel"), published_at)
+    if funnel is None:
+        return None
+    return {"as_of": at, "agents": rows[:MAX_AGENTS], "funnel": funnel}
+
+
+def site_rationale(value: Any, agents: list[Mapping[str, Any]], positions: Mapping[str, Any] | None,
+                   published_at: str) -> dict[str, Any] | None:
+    """{as_of, agents: [{id, thesis}], trades: [{id, route, open_why, close_why, exit, max_loss_usd}]}: why each agent
+    trades, in its family's own whole sentences, and why each real position in the table opened and closed (the swarm
+    window, Oct 1, 2026). A thesis is `thesis_words` at most 280, a reason at most 80, else None; a route fits the row's
+    source (`ROUTES_BY_SOURCE`); the House's rows carry no reason, an open row no close reason and no exit; `exit` is one
+    of `EXITS`; `max_loss_usd` whole cents. An entry for an agent the page does not show, or a row the table does not
+    list (it folded into `earlier`), is left out; `trades` is [] without a table. None when the block cannot be shown."""
+    if not isinstance(value, Mapping):
+        return None
+    at = site_instant(value.get("as_of"))
+    if at is None or not _not_after(at, published_at):
+        return None
+    roster = {a["id"] for a in agents}
+    theses, seen = [], set()
+    for raw in value.get("agents") or []:
+        if not isinstance(raw, Mapping):
+            continue
+        agent_id = str(raw.get("id") or "")
+        if agent_id in roster and agent_id not in seen:
+            seen.add(agent_id)
+            theses.append({"id": agent_id, "thesis": thesis_words(raw.get("thesis"), THESIS_CHARS)})
+    listed = {row["id"]: row for row in (positions or {}).get("rows") or []} if isinstance(positions, Mapping) else {}
+    given = {str(raw.get("id")): raw for raw in value.get("trades") or [] if isinstance(raw, Mapping)}
+    trades = []
+    for row_id, row in listed.items():  # the table's own order: open first, then the most recently closed
+        raw = given.get(row_id)
+        if raw is None:
+            continue
+        house = row["source"] not in AGENT_SOURCES
+        is_open = row["status"] == "open"
+        route = raw.get("route") if raw.get("route") in ROUTES_BY_SOURCE.get(row["source"], ()) else None
+        loss = _money(raw.get("max_loss_usd"))
+        trades.append({"id": row_id, "route": route,
+                       "open_why": None if house else thesis_words(raw.get("open_why"), WHY_CHARS),
+                       "close_why": None if house or is_open else thesis_words(raw.get("close_why"), WHY_CHARS),
+                       "exit": None if is_open or raw.get("exit") not in EXITS else raw.get("exit"),
+                       "max_loss_usd": loss})
+    return {"as_of": at, "agents": theses[:MAX_AGENTS], "trades": trades[:MAX_POSITIONS]}
+
+
+def _prune_window(body: dict[str, Any]) -> None:
+    """The window's entries for agents the page still shows and rows the table still lists, only."""
+    roster = {a["id"] for a in body["agents"]}
+    listed = {row["id"] for row in ((body.get("positions") or {}).get("rows") or [])}
+    if isinstance(body.get("levels"), dict):
+        body["levels"]["agents"] = [row for row in body["levels"]["agents"] if row["id"] in roster]
+    if isinstance(body.get("rationale"), dict):
+        body["rationale"]["agents"] = [row for row in body["rationale"]["agents"] if row["id"] in roster]
+        body["rationale"]["trades"] = [row for row in body["rationale"]["trades"] if row["id"] in listed]
+
+
+def windowless(body: Mapping[str, Any]) -> dict[str, Any]:
+    """The checkpoint without the swarm window (a site before Oct 1, 2026 refuses it)."""
+    return {key: item for key, item in body.items() if key not in ("levels", "rationale")}
+
+
 def build_checkpoint(inputs: "SiteInputs | Mapping[str, Any]", published_at: str) -> dict[str, Any]:
     """The checkpoint the site takes (schema 2), from explicit inputs, every block allowlisted. The agents
-    are ordered for the page (Sized, Probe, Candidate, Gym, then the newest retired), at most 160 with at
-    most 24 retired among them; structures real first, at most 100. Then it is fitted under 512 KiB."""
+    are ordered for the page (Sized, Probe, Candidate, Gym, then the retired an open or closed real position names, then
+    the newest other retired), at most 160 with at most 24 other retired among them; structures real first, at most
+    100. The swarm window (`levels` and `rationale`, together or neither) is checked against the agents and the table
+    the page gets. Then it is fitted under 512 KiB."""
     given = SiteInputs.of(inputs)
     started = site_instant(given.started_at)
-    agents, seen = [], set()
+    agents, seen, pinned = [], set(), set()
     for raw in given.agents or []:
         row = site_agent(raw, published_at)
         if row is not None and row["id"] not in seen:
             seen.add(row["id"])
             agents.append(row)
+            if raw.get("pinned") is True:
+                pinned.add(row["id"])  # a real position names it: its card keeps a name and a record (never the 24 cap)
     living = sorted((a for a in agents if a["band"] != "retired"), key=lambda a: (BAND_RANK[a["band"]], a["id"]))
     dead = sorted((a for a in agents if a["band"] == "retired"), key=lambda a: a["retired_at"] or "", reverse=True)
     shown = living[:MAX_AGENTS]
-    shown += dead[:max(0, min(MAX_DEAD_SHOWN, MAX_AGENTS - len(shown)))]
+    shown += [a for a in dead if a["id"] in pinned][:max(0, MAX_AGENTS - len(shown))]
+    shown += [a for a in dead if a["id"] not in pinned][:max(0, min(MAX_DEAD_SHOWN, MAX_AGENTS - len(shown)))]
     structures, ids = [], set()
     for raw in given.structures or []:
         row = site_structure(raw, published_at)
@@ -737,24 +913,37 @@ def build_checkpoint(inputs: "SiteInputs | Mapping[str, Any]", published_at: str
     practice = site_practice(given.practice, shown, published_at) if given.practice is not None else None
     if practice is not None:
         body["practice"] = practice
-    return fit(body)
+    if given.levels is not None and given.rationale is not None:
+        levels = site_levels(given.levels, shown, published_at)
+        rationale = site_rationale(given.rationale, shown, body.get("positions"), published_at)
+        if levels is not None and rationale is not None:
+            body["levels"], body["rationale"] = levels, rationale
+    return fit(body, pinned)
 
 
-def fit(body: dict[str, Any]) -> dict[str, Any]:
+def fit(body: dict[str, Any], pinned: Any = ()) -> dict[str, Any]:
     """The body inside the site's byte limit: the oldest retired agents, then the lowest band's, then the
     shadow book's smallest structures leave first, then the positions table's oldest rows fold into its
     `earlier` line, the oldest closed first (a row never simply leaves: the table must still add up to Profit;
-    the publisher alerts on an open one folded). The totals the page shows are the House's, not a count."""
+    the publisher alerts on an open one folded). An agent a real position names (`pinned`) leaves only after every
+    other. The swarm window keeps entries only for the agents and rows that stay. The totals the page shows are the
+    House's, not a count."""
     size = lambda: len(canonical(body).encode("utf-8"))  # noqa: E731
     positions = body.get("positions")
+    pinned = set(pinned or ())
     while size() > MAX_CHECKPOINT_BYTES and (body["agents"] or body["structures"] or (positions and positions["rows"])):
         if body["agents"]:
-            body["agents"].pop()
+            spare = [i for i, agent in enumerate(body["agents"]) if agent["id"] not in pinned]
+            body["agents"].pop(spare[-1] if spare else -1)
         elif body["structures"]:
             body["structures"].pop()
         else:
             _fold(positions, [positions["rows"].pop()["pnl_usd"] for _ in range(min(10, len(positions["rows"])))],
                   (body.get("trading") or {}).get("pnl_usd"))
+        _prune_window(body)
+    if "levels" in body and size() > MAX_CHECKPOINT_BYTES:
+        body.pop("levels"), body.pop("rationale")
+    _prune_window(body)
     return body
 
 
@@ -1020,6 +1209,8 @@ class Publisher:
         self._positions_refusal: str | None = None
         self._practice_refused: float | None = None
         self._practice_refusal: str | None = None
+        self._window_refused: float | None = None
+        self._window_refusal: str | None = None
         self._activity_error: str | None = None
         self._inputs_positions: Mapping[str, Any] | None = None
 
@@ -1087,14 +1278,22 @@ class Publisher:
             self._state["cursor"] = batch[-1].seq
             self._save()
         body = checkpoint = self.checkpoint(house)
-        # Two older shapes a site may need, each offered again half an hour after the site refused it; either repository
-        # may deploy first. `older`: without the practice league and with Claude inside `other_usd` (a site before Sept 30,
-        # 2026: `legacy_compute`). `tableless`: without the positions table (a site before Sept 28, or a row or a sum it
-        # rejects). On a refusal each is tried alone (the table first, so a bad row never costs the newer shape), then both;
-        # only what the site then took is marked refused, and the warning quotes the site's reply.
+        # Three older shapes a site may need, each offered again half an hour after the site refused it; either repository
+        # may deploy first. `windowless`: without the swarm window (`levels` and `rationale`, a site before Oct 1, 2026),
+        # tried first on any refusal: a site that then takes it refused the window. `older`: without the practice league
+        # and with Claude inside `other_usd` (a site before Sept 30, 2026: `legacy_compute`). `tableless`: without the
+        # positions table (a site before Sept 28, or a row or a sum it rejects; the window then names no trade). When the
+        # site refuses the windowless checkpoint too, the ladder goes on without the window: each older shape alone (the
+        # table first, so a bad row never costs the newer shape), then both; only the shapes the site then took are marked
+        # refused (the window is offered again next time), and the warning quotes the site's reply.
         newer = lambda value: "practice" in value or "claude_usd" in (value.get("compute") or {})  # noqa: E731
         older = lambda value: legacy_compute({key: item for key, item in value.items() if key != "practice"})  # noqa: E731
-        tableless = lambda value: {key: item for key, item in value.items() if key != "positions"}  # noqa: E731
+        tableless = lambda value: {key: ({**item, "trades": []} if key == "rationale" and isinstance(item, Mapping) else item)  # noqa: E731
+                                   for key, item in value.items() if key != "positions"}
+        windowed = lambda value: "levels" in value or "rationale" in value  # noqa: E731
+        refused = self._window_refused
+        if windowed(body) and refused is not None and self.clock() - refused < WINDOW_RETRY_SECONDS:
+            body = windowless(body)
         refused = self._practice_refused
         if newer(body) and refused is not None and self.clock() - refused < PRACTICE_RETRY_SECONDS:
             body = older(body)
@@ -1103,6 +1302,19 @@ class Publisher:
             body = tableless(body)
         status, reply = self.post("/checkpoint", body)
         dropped = (False, False)
+        window_dropped = False
+        if status == 400 and windowed(body):
+            plain = windowless(body)
+            retried, again = self.post("/checkpoint", plain)
+            if retried in (200, 409):
+                why = " ".join(str(reply).split())[:200]
+                if why != self._window_refusal:
+                    self._warn(house, f"the site refused the swarm window (levels and rationale: old site, or an entry it "
+                                      f"rejects): the checkpoint went without it, and it is offered again in half an hour "
+                                      f"(the site said: {why})")
+                self._window_refused, self._window_refusal = self.clock(), why
+                window_dropped = True
+            body, status, reply = plain, retried, again
         if status == 400:
             tries = [(False, True)] if "positions" in body else []
             tries += [(True, False)] if newer(body) else []
@@ -1130,6 +1342,8 @@ class Publisher:
                 break
         if status in (200, 409):
             # Taken with a shape: it is offered every publish again.
+            if not window_dropped and windowed(body):
+                self._window_refused = self._window_refusal = None
             if not dropped[0] and newer(body):
                 self._practice_refused = self._practice_refusal = None
             if not dropped[1] and "positions" in body:
@@ -1273,11 +1487,38 @@ class Publisher:
         )
         swarm = getattr(house, "swarm", None)
         if getattr(swarm, "root", None) is not None:
+            from .site_window import site_window
             from .swarm.progress import attach as attach_progress
 
+            inputs.agents = self._guard(lambda: self._pinned(inputs.agents, swarm.root, positions, inputs.structures), inputs.agents)
             inputs.agents = self._guard(lambda: attach_progress(inputs.agents, swarm.root,
                 live=getattr(house, "options_live", None), account=inputs.account, now=self.clock()), inputs.agents)
+            practice = inputs.practice.get("rows") if isinstance(inputs.practice, Mapping) else None
+            window = self._guard(lambda: site_window(swarm.root, self.state_path.parent, agents=inputs.agents,
+                                                     positions_rows=(positions or {}).get("rows"), practice_rows=practice,
+                                                     start_at=self.performance.get("start_at"), at=now), None)
+            if window:
+                inputs.levels, inputs.rationale = window.get("levels"), window.get("rationale")
         return inputs
+
+    @staticmethod
+    def _pinned(agents: list[Mapping[str, Any]], root: Any, positions: Mapping[str, Any] | None,
+                structures: list[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+        """The roster with every agent a real position names pinned (`pinned=True`: never the retired list's 24, and the
+        last to leave the byte limit), so its card always has a name, a mechanism and a record: the families of the table's
+        rows (an agent's or the incubator's; the newest the table can list) and of the open real structures, alive or
+        retired. One the roster does not hold is read from the swarm's store (`sitefeed.agent_rows`)."""
+        from .swarm.sitefeed import agent_rows
+
+        rows = [r for r in (positions or {}).get("rows") or [] if isinstance(r, Mapping)]
+        listed = [r for r in rows if r.get("status") == "open"]
+        listed += sorted((r for r in rows if r.get("status") != "open"), key=lambda r: str(r.get("closed_at") or ""), reverse=True)
+        named = {str(r.get("family") or "") for r in listed[:MAX_POSITIONS] if r.get("source") in AGENT_SOURCES}
+        named |= {str(s.get("agent") or "") for s in structures or [] if isinstance(s, Mapping) and s.get("real") is True}
+        named = {name for name in named if _SLUG.match(name)}
+        have = {str(a.get("id") or "") for a in agents}
+        extra = agent_rows(root, sorted(named - have)) if named - have else []
+        return [dict(a, pinned=True) if str(a.get("id") or "") in named else a for a in agents] + [dict(a, pinned=True) for a in extra]
 
     @staticmethod
     def _guard(read: Callable[[], Any], fallback: Any) -> Any:
