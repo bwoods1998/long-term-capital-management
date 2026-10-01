@@ -27,6 +27,9 @@ REPO = Path(__file__).resolve().parents[2]
 # a test that silently failed to insert would pass staging for the wrong reason.
 RESEARCHER_IMPORTS = "from . import cards, diagnostics, evidence, inputs, mechanism, public\n"
 assert (REPO / "league/swarm/researcher.py").read_text().count(RESEARCHER_IMPORTS) == 1, "researcher.py's import line moved"
+# architect.py's, where the memory-lane tests add `canary` (release B' added cards and mechanism to it), guarded the same way.
+ARCHITECT_IMPORTS = "from . import cards, diagnostics, inputs, mechanism\n"
+assert (REPO / "league/swarm/architect.py").read_text().count(ARCHITECT_IMPORTS) == 1, "architect.py's import line moved"
 try:
     import numpy  # noqa: F401
     HAVE_NUMPY = True
@@ -491,7 +494,7 @@ class FourthReview(unittest.TestCase):
         """P6: `forget = dead.clear; forget()` inside Architect.admit (a birth on a dead slice would start a fresh
         lineage), under a House-only condition the judge never meets."""
         architect = (REPO / "league/swarm/architect.py").read_text()
-        gated = architect.replace("from . import diagnostics, inputs\n", "from . import diagnostics, inputs\nfrom . import canary\n", 1)
+        gated = architect.replace(ARCHITECT_IMPORTS, ARCHITECT_IMPORTS + "from . import canary\n", 1)
         anchor = "            prior = slice_priors(dead, structure) if dead and not parent else None\n"
         self.assertEqual(gated.count(anchor), 1)
         key = "harness:memory:graveyard_rebirth_rate:0123456789abcdef"
@@ -537,7 +540,7 @@ class FourthReview(unittest.TestCase):
                                    "root=self.store.root):\n"
                                    '                if any(_restates(g["mechanism"], mechanism) for g in dead):\n'
                                    "                    continue\n" + anchor, 1).replace(
-            "from . import diagnostics, inputs\n", "from . import diagnostics, inputs\nfrom . import canary\n", 1) + RESTATES
+            ARCHITECT_IMPORTS, ARCHITECT_IMPORTS + "from . import canary\n", 1) + RESTATES
         self.assertIsNone(staged("league/swarm/architect.py", architect, memory, key, "mechanism", "memory"))
 
     def test_protected_touches_are_listed_by_name_status_whatever_the_status(self):
@@ -1988,12 +1991,14 @@ class GatedMemoryCandidate(unittest.TestCase):
                          "                       if f[\"structure\"] == structure and sorted(f[\"roots\"]) == sorted(roots)):\n"
                          "                    continue\n")
                 text = text.replace(anchor, gated + anchor, 1)
-                text = text.replace("from . import diagnostics, inputs\n", "from . import canary, diagnostics, inputs\n", 1)
+                shared = ARCHITECT_IMPORTS.replace("import cards, ", "import canary, cards, ", 1)
+                self.assertNotEqual(shared, ARCHITECT_IMPORTS)
+                text = text.replace(ARCHITECT_IMPORTS, shared, 1)
                 source.write_text(text + RESTATES)
                 with self.assertRaisesRegex(labmod.ImprovementError, "gate"):
                     # `canary` joined an existing import line: the gate must come in by its own import
                     lab.stage(key, commit(worktree, "gate import on a shared line"), author="author-agent")
-                text = text.replace("from . import canary, diagnostics, inputs\n", "from . import diagnostics, inputs\nfrom . import canary\n", 1)
+                text = text.replace(shared, ARCHITECT_IMPORTS + "from . import canary\n", 1)
                 source.write_text(text + RESTATES)
                 staged = lab.stage(key, commit(worktree, "refuse restated buried ideas, gated per mechanism"), author="author-agent")
                 self.assertEqual((staged["canary_mode"], staged["gates"], staged["classification"]["release_class"]),
