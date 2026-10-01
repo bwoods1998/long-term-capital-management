@@ -27,11 +27,11 @@ def program(body: str, head: str = HEAD) -> str:
 
 @unittest.skipUnless(HAVE, "numpy not installed")
 class Preflight(unittest.TestCase):
-    def check(self, code, params=None, roots=None, timeout=1.0):
+    def check(self, code, params=None, roots=None, timeout=1.0, capital=None):
         from league.live.decider import InlineDecider
         from league.swarm.preflight import run
 
-        return run(code, params or {}, InlineDecider(timeout=timeout, max_errors=10 ** 9), universe=roots)
+        return run(code, params or {}, InlineDecider(timeout=timeout, max_errors=10 ** 9), universe=roots, capital=capital)
 
     def refused(self, code, stage="decide", **kw):
         out = self.check(code, **kw)
@@ -110,11 +110,55 @@ class Preflight(unittest.TestCase):
         # A PARAMS the program writes to could hold it by then: advisory.
         self.advisory(program('if ctx.events["fomc"]:\n    PARAMS["window"] = 3\nx = PARAMS["window"]\nreturn []'))
 
-    def test_a_module_body_that_fails_to_load(self):
+    def test_a_module_body_that_fails_to_load_is_left_to_the_gym(self):
+        # Only the static code check refuses at load: a module body runs here on the House's Python and numpy, not the
+        # Gym's, so even one that fails on every version is advisory (the Gym's load refuses it, on its own runtime).
         code = HEAD + 'TABLE = {"a": 1}\nFIRST = TABLE["b"]\ndef decide(ctx):\n    return []\n'
-        out = self.refused(code, stage="load")
+        out = self.advisory(code)
+        self.assertEqual((out["stage"], out["calls"]), ("load", 0))
         self.assertIn("fails to load", out["error"])
         self.assertEqual(out["line"], 5)
+        self.assertIn("Gym", out["warnings"][0]["may_be"])
+        self.assertIn("static code check", out["why"])
+
+    def test_only_the_static_code_check_refuses_at_load(self):
+        from league.swarm.preflight import static_refusal
+
+        for head, why in (("import os\n", "import os is not allowed"), ("X = 2024\n", "reads as a year"),
+                          ("X = eval('1')\n", "eval is not allowed")):
+            code = head + program("return []")
+            out = self.refused(code, stage="load")
+            self.assertIn(why, out["error"])
+            self.assertEqual(out["error"], static_refusal(code))
+            self.assertEqual(out["calls"], 0)
+            self.assertIn("nothing of the program ran", out["hint"])
+        self.assertIsNone(static_refusal(program("return []")))
+
+    def test_a_load_that_differs_by_runtime_is_never_refused(self):
+        # Module bodies that load on the Gym's Python 3.12+ and numpy 2.5 and not on the House's 3.11 and numpy 2.4: a
+        # float sum (compensated from 3.12), a slice as a dict key (hashable from 3.12), math.nextafter(steps=) (3.12),
+        # and the same float sum turned into a size. On 3.11 each is advisory at load; on 3.12+ each passes.
+        import sys
+
+        bodies = ("WEIGHTS = [0.1] * 10\nassert sum(WEIGHTS) == 1.0\n",
+                  "WINDOWS = {slice(0, 30): 'open', slice(30, 390): 'day'}\n",
+                  "import math\nEPS = math.nextafter(0.0, 1.0, steps=4)\n",
+                  "STEPS = int(sum([0.1] * 10))\nSIZE = 1.0 / STEPS\n",
+                  "X = true\n",  # a name never bound: the Gym's load refuses it, and judges it
+                  )
+        for body in bodies:
+            code = HEAD + body + "def decide(ctx):\n    return []\n"
+            out = self.check(code)
+            self.assertIn(out["status"], ("advisory", "passed"), (body, out))
+            if out["status"] == "advisory":
+                self.assertEqual(out["stage"], "load", out)
+                self.assertTrue(out["warnings"][0]["may_be"], out)
+            elif body != "X = true\n":
+                self.assertGreaterEqual(sys.version_info[:2], (3, 12), out)
+        # NEEDS a load refuses (check_experiment refuses a literal one before the researcher's preflight): advisory here.
+        bad = HEAD.replace('"cadence": 5', '"cadence": 0') + "def decide(ctx):\n    return []\n"
+        out = self.advisory(bad)
+        self.assertIn("NEEDS['cadence']", out["error"])
 
     # ------------------------------------------------------------------ what it must never refuse
     def test_every_seed_and_example_program_passes(self):
@@ -187,7 +231,14 @@ class Preflight(unittest.TestCase):
                         "line 5: AttributeError: 'numpy.ndarray' object has no attribute 'to_device'",
                         "line 5: MemoryError: Unable to allocate 2.24 GiB for an array with shape (20000, 15000)",
                         "line 5: MemoryError: ", "decide recursed too deep",
-                        "line 5: TypeError: sort() got an unexpected keyword argument 'stable'"):
+                        "line 5: TypeError: sort() got an unexpected keyword argument 'stable'",
+                        # Every keyword complaint, whatever the version's words: keywords are what newer versions add.
+                        "line 5: TypeError: str.replace() takes no keyword arguments",
+                        "line 5: TypeError: replace() takes no keyword arguments",
+                        "line 5: TypeError: math.nextafter() takes no keyword arguments",
+                        "line 5: TypeError: 'cmp' is an invalid keyword argument for sort()",
+                        "line 5: TypeError: f() missing 1 required keyword-only argument: 'k'",
+                        "line 5: TypeError: f() got some positional-only arguments passed as keyword arguments: 'a'"):
             self.assertTrue(environmental(message), message)
         for message in ("line 5: AttributeError: 'list' object has no attribute 'items'",
                         "line 5: AttributeError: 'UnderlyingView' object has no attribute 'get'",
@@ -720,6 +771,45 @@ class Preflight(unittest.TestCase):
         self.assertIsNone(misuse("x = min(ctx.chain.strike[ctx.chain.strike < 0])",
                                  "ValueError: min() arg is an empty sequence"))
         self.assertIsNone(api_misuse("line 1: AttributeError: 'list' object has no attribute 'items'", "def (:", roots=[]))
+        # A ctx method's wrong argument count only without keywords: `str.replace(count=)` is valid from Python 3.13.
+        self.assertIsNone(misuse('x = ctx.root.replace("W", "", count=1)', "TypeError: str.replace() takes no keyword "
+                                                                           "arguments"))
+        self.assertIsNone(misuse('x = ctx.positions.index(1, start=0)', "TypeError: list.index() takes at least 1 "
+                                                                         "argument (0 given)"))
+        self.assertTrue(misuse('x = ctx.positions.append()', "TypeError: list.append() takes exactly one argument "
+                                                             "(0 given)"))
+
+    def test_the_receivers_scopes_are_pythons(self):
+        # `_Source` resolves a name as Python does: a comprehension's targets are its own (not the function's), its first
+        # iterable and a function's default values belong to the scope around it, and a name a nested function rebinds
+        # with `nonlocal` is unknown in the scope it rebinds.
+        from league.swarm.preflight import api_misuse
+
+        def misuse(code, message):
+            return api_misuse(message, code, roots=["SPY"], params={})
+
+        mean = "AttributeError: 'dict' object has no attribute 'mean'"
+        items = "AttributeError: 'list' object has no attribute 'items'"
+        glob = HEAD + 'p = {}\ndef decide(ctx):\n    ids = [p["id"] for p in ctx.positions]\n    m = p.mean()\n    return []\n'
+        self.assertIsNone(misuse(glob, f"line 7: {mean}"))  # the module's `p`, not the comprehension's
+        own = program("ids = [p.mean() for p in ctx.positions]\nreturn []")
+        self.assertTrue(misuse(own, f"line 5: {mean}"))  # inside it, its own target: a position row
+        nested = program("rows = [q for p in ctx.positions for q in p.mean()]\nreturn []")
+        self.assertTrue(misuse(nested, f"line 5: {mean}"))  # a later iterable sees the comprehension's targets
+        first = program("p = ctx.positions\nx = [p for p in p.items()]\nreturn []")
+        self.assertTrue(misuse(first, f"line 6: {items}"))  # the first iterable is the function's: its `p`
+        walrus = program("ys = [(rows := ctx.positions) for _ in range(1)]\nx = rows.items()\nreturn []")
+        self.assertTrue(misuse(walrus, f"line 6: {items}"))  # an assignment expression binds in the function
+        swap = program('rows = ctx.positions\ndef swap():\n    nonlocal rows\n    rows = STATE.get("book", [])\nswap()\n'
+                       "n = rows.items()\nreturn []")
+        self.assertIsNone(misuse(swap, f"line 10: {items}"))
+        deep = program('rows = ctx.positions\ndef outer():\n    def inner():\n        nonlocal rows\n        rows = {}\n'
+                       "    inner()\nouter()\nn = rows.items()\nreturn []")
+        self.assertIsNone(misuse(deep, f"line 12: {items}"))
+        default = program('rows = STATE.get("b", [])\ndef f(rows=ctx.positions):\n    return rows.items()\nreturn f()')
+        self.assertIsNone(misuse(default, f"line 7: {items}"))  # `rows` in f is a parameter: unknown
+        late = program('p = ctx.positions\ndef f(p=None, q=p.items()):\n    return q\nreturn []')
+        self.assertTrue(misuse(late, f"line 6: {items}"))  # a default value runs in decide: decide's `p`, not f's
 
     def test_the_saturated_market(self):
         # Every calendar day of the dte range lists an expiry; every listed strike is there with half the finer step
@@ -751,6 +841,16 @@ class Preflight(unittest.TestCase):
         self.assertGreater(int(c.bid_size.max()), 100_000)
         self.assertTrue(numpy.isfinite(market.under("SPY", 1, 30).volume))
         self.assertTrue(numpy.isnan(listed.under("SPY", 1, 30).volume))
+
+    def test_the_account_is_the_runs_capital(self):
+        # A program that sizes by its account takes, here, the branch the run's capital (`gym.capital`) opens in the Gym.
+        code = program("if ctx.cash > 50000 and ctx.equity > 50000 and ctx.budget > 50000 and ctx.buying_power > 50000:\n"
+                       "    for pid, p in ctx.positions.items():\n        pass\nreturn []")
+        self.assertEqual(self.check(code)["status"], "passed")
+        self.refused(code, capital=100_000)
+        self.refused(code, capital="100000")
+        for unusable in ("x", -5.0, 0, float("nan"), float("inf")):  # the default account
+            self.assertEqual(self.check(code, capital=unusable)["status"], "passed", unusable)
 
     def test_roots_outside_the_run_are_not_decided_on(self):
         out = self.check(program('u = ctx.under.get("price")\nreturn []'), roots=["QQQ"])
@@ -1073,16 +1173,65 @@ class ResearcherPreflight(unittest.TestCase):
         self.assertEqual([r["variant"] for r in rows], [{"k": 2.0}, {"k": 5.0}])
         self.assertIn("KeyError: 'never'", rows[0]["warnings"][0]["error"])
 
-    def test_a_sweep_with_a_failing_variant_is_refused_whole(self):
+    def test_a_sweep_drops_only_its_refused_variants(self):
+        # One variant misuses the ctx API on a branch only it takes: it alone is dropped (no version, job or trial) and
+        # reported; the others run.
         code = program('if ctx.params["k"] > 1:\n    for pid, p in ctx.positions.items():\n        pass\nreturn []')
-        self.steps = [{"calls": [("gym_sweep", {"code": code, "variants": [{"k": 0.0}, {"k": 5.0}]})]}, {"text": "ok"}]
+        revisions, versions = self.store.family(self.fam["id"])["revisions"], len(self.store.versions(self.fam["id"]))
+        self.steps = [{"calls": [("gym_sweep", {"code": code, "variants": [{"k": 0.0}, {"k": 5.0}, {"k": 0.5}]})]},
+                      {"text": "ok"}]
+        out = self.make().cycle(self.fam["id"])
+        answer = self.answer()
+        self.assertEqual(answer.get("status"), "ok", answer)
+        self.assertEqual(sorted(job.params["k"] for job in self.pool.jobs[1:]), [0.0, 0.5])
+        self.assertEqual((answer["variants"], len(answer["table"])), (2, 2))
+        self.assertEqual(self.store.family(self.fam["id"])["revisions"], revisions + 1, "the sweep that ran is one revision")
+        self.assertEqual(len(self.store.versions(self.fam["id"])), versions + 2, "a version per variant that ran")
+        [row] = answer["refused_variants"]
+        self.assertEqual(row["params"], {"k": 5.0})
+        self.assertIn("'list' object has no attribute 'items'", row["error"])
+        self.assertEqual(row["source"], "for pid, p in ctx.positions.items():")
+        self.assertIn("LISTS", row["hint"])
+        self.assertTrue(row["misuse"])
+        self.assertIn("refused 1 variant", answer["refused_note"])
+        self.assertEqual(out.get("preflight_refused"), 1)
+        self.assertNotIn("run_refused", out, "the sweep ran: not a refusal of the researcher's doing")
+        notes = [n["text"] for n in self.store.notebook(self.fam["id"])]
+        self.assertTrue(any(n.startswith("Preflight refused") and "variant 2 of 3" in n for n in notes), notes)
+
+    def test_a_sweep_whose_every_new_variant_is_refused_is_refused(self):
+        code = program('if ctx.params["k"] > 1:\n    for pid, p in ctx.positions.items():\n        pass\nreturn []')
+        self.steps = [{"calls": [("gym_sweep", {"code": code, "variants": [{"k": 5.0}, {"k": 7.0}]})]}, {"text": "ok"}]
         out = self.make().cycle(self.fam["id"])
         answer = self.answer()
         self.assertEqual((answer.get("status"), answer.get("stage")), ("refused", "preflight"), answer)
         self.assertEqual(answer["variant"], {"k": 5.0})
         self.assertIn("'list' object has no attribute 'items'", answer["error"])
+        self.assertEqual([r["params"] for r in answer["refused_variants"]], [{"k": 5.0}, {"k": 7.0}])
+        self.assertIn("every new variant", answer["reason"])
         self.assertEqual(len(self.pool.jobs), 1)
+        self.assertEqual((out.get("preflight_refused"), out.get("run_refused")), (2, 1))
+
+    def test_the_runs_capital_reaches_the_preflight(self):
+        # The run's capital (`gym.capital`), not the default 10k: a misuse only an account over 50k reaches is refused.
+        bad = program('if ctx.cash > 50000:\n    for pid, p in ctx.positions.items():\n        pass\nreturn []')
+        self.assertEqual(self.check(bad)["status"], "passed", "at 10k the branch is never taken")
+        self.settings["gym"]["capital"] = 100_000.0
+        self.steps = [{"calls": [("gym_run", {"code": bad})]}, {"text": "ok"}]
+        out = self.make().cycle(self.fam["id"])
         self.assertEqual(out.get("preflight_refused"), 1)
+        self.assertEqual(len(self.pool.jobs), 1, "no Gym job")
+
+    def test_a_load_only_the_house_fails_rides_along(self):
+        # A module body the House's Python cannot load (whatever the reason) is the Gym's to judge: the run goes ahead,
+        # with the load's warning.
+        code = HEAD + 'TABLE = {"a": 1}\nFIRST = TABLE.get("b", {})["c"]\ndef decide(ctx):\n    return []\n'
+        self.steps = [{"calls": [("gym_run", {"code": code})]}, {"text": "ok"}]
+        out = self.make().cycle(self.fam["id"])
+        answer = self.answer()
+        self.assertEqual(len(self.pool.jobs), 2)
+        self.assertEqual(out.get("preflight_advisory"), 1)
+        self.assertIn("fails to load", answer["preflight"]["warnings"][0]["error"])
 
 
 if __name__ == "__main__":

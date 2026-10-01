@@ -21,7 +21,8 @@ half, and it runs nowhere near the Gym:
   step, $1 for the index ETFs, $5 for SPX/SPXW, a stock's by its price; mids priced by Black-Scholes on the root's own
   vol with a skew, `VOLS`, and quoted as the market quotes them, `quote`: tight near the money, wider away from it, never
   under one tick of the venue's), the underlying's prices from the open, NEEDS['history'] prior sessions, volume
-  unknown (NaN, as in the replay), the Gym's venue rules, and a flat account of the Gym's capital. It is called at the
+  unknown (NaN, as in the replay), the Gym's venue rules, and a flat account of the run's capital (`swarm.json`
+  `gym.capital`, which the researcher passes; `CAPITAL` otherwise). It is called at the
   Gym's own decision minutes (`engine.Account.decision_minutes`). The market is made up; nothing here reads recorded
   data, so it is no trial and says nothing about profit.
 - **What it says.** One of four answers. The Train run goes ahead on every one but `refused`:
@@ -53,14 +54,23 @@ half, and it runs nowhere near the Gym:
        million contracts, known volumes); a sparser and a denser listing, which bracket each admitted root's store on
        every Train day (`LISTING`); the listing quoted one tick wide on deep books at twice the vol; and quoted three
        times as wide on thin books at a lower vol, each on its own price paths.
-  A load the Gym's worker would refuse identically (`load_program`) is also refused: loading reads no market. A load
-  that ran out of time is inconclusive and one that failed on an `environmental` error is advisory. A clean program
-  costs one session plus `STREAK` calls of the next (a streak that begins later could only be confirmed by yet another
-  session, and is left to the Gym); the first intent ends the preflight (a flat account no longer mirrors the Gym's).
+  At load, only the Gym's static code check refuses (`static_refusal`: `league.gym.safety.check_program`, which
+  `load_program` runs first and the researcher's `check_experiment` has already run on this box). Every other load
+  failure is advisory, whatever it says: the module body, NEEDS and PARAMS run here on the House's Python 3.11 and
+  numpy 2.4, and the Gym's boxes run 3.12+ with numpy 2.5 (a float `sum`, a slice used as a key and
+  `math.nextafter(steps=)` each load there and not here), so the Gym, on its own runtime, judges them. A load that ran
+  out of time is inconclusive. The risk left, accepted: decide runs here on the House's runtime too, so a value only
+  3.12+ computes the Gym's way (`sum(W) != 1.0` on a float list) could steer every call into a misuse line the Gym's
+  run never reaches. It is contrived, and none of the 300 sampled House programs that ran OK in the Gym is refused here.
+  A clean program costs one session plus `STREAK` calls of the next (a streak that begins later could only be confirmed
+  by yet another session, and is left to the Gym); the first intent ends the preflight (a flat account no longer mirrors
+  the Gym's).
   The preflight never blocks on its own failure.
 - **What the researcher gets.** On a refusal: the exception, the line and its source, the call it began at, and the
   ctx API it should have used (`advice`): no Gym job, no version and no trial are made, and the refusal is written in
-  the family's notebook. On an advisory: the same for each error (`warnings`), beside the Gym's own answer.
+  the family's notebook. A sweep drops only the variants refused and runs the others, reporting each refused one; it
+  is refused whole only when every new variant is. On an advisory: the same for each error (`warnings`), beside the
+  Gym's own answer.
 
 numpy on the calling side (the House has it; the Gym's store and pyarrow are not needed). Python 3.11+.
 """
@@ -79,7 +89,7 @@ import time
 import zlib
 from typing import Any, Callable, Mapping, NamedTuple, Sequence
 
-VERSION = "preflight-v6"
+VERSION = "preflight-v7"
 #: Consecutive erring calls that refuse: the Gym's own disqualification count (`league.gym.runtime.DEFAULT_MAX_ERRORS`).
 STREAK = 25
 #: Synthetic sessions at most (a third only to confirm a streak that began in the second).
@@ -88,8 +98,9 @@ SESSIONS = 3
 RUNNER_MESSAGES = 10
 #: Errors an advisory answer describes at most (`warnings`).
 WARNINGS = 4
-#: The account's capital: the Gym's default (`swarm.json` `gym.capital` overrides it for real runs; a flat account's
-#: numbers are the same either way up to scale).
+#: The account's capital when the caller names none: the Gym's default. The researcher passes the run's own
+#: (`swarm.json` `gym.capital`, as the Gym's pool does), so a program that sizes by ctx.cash or ctx.budget takes the
+#: branch here that it takes in the Gym.
 CAPITAL = 10_000.0
 #: The preflight's wall-clock budget; past it the program is not refused (inconclusive, or advisory with what it saw).
 DEADLINE_SECONDS = 20.0
@@ -571,14 +582,21 @@ _STABLE_TYPES = frozenset({"list", "tuple", "dict", "set", "frozenset", "NoneTyp
                            "Ctx", "Snapshot"})
 
 
+#: Every complaint about a keyword argument, on any version's wording ("got an unexpected keyword argument", "takes no
+#: keyword arguments", "is an invalid keyword argument for", "positional-only arguments passed as keyword arguments", a
+#: keyword-only argument): keywords are what newer Pythons and numpys add (`str.replace(count=)` from 3.13,
+#: `math.nextafter(steps=)` from 3.12), so no such error says the same thing on every runtime.
+_KEYWORD_ERRORS = re.compile(r"keyword(?:-only)? arguments?")
+
+
 def environmental(message: str) -> bool:
     """An error that could be this box's and not the Gym's: the House runs Python 3.11 with numpy 2.4 and caps the
     decider child at 2 GB, the Gym's boxes run 3.12+ with numpy 2.5 (requirements-gym.txt) and give a worker 6 GB. So a
-    module attribute one version has and the other lacks (`math.sumprod`, a numpy function), a keyword, a method a
-    newer Python gave a number, a string or a numpy value (`int.is_integer`), memory, or recursion depth says nothing
-    about the program. Such an error never refuses."""
+    module attribute one version has and the other lacks (`math.sumprod`, a numpy function), a keyword argument
+    (`_KEYWORD_ERRORS`, whatever the version's wording), a method a newer Python gave a number, a string or a numpy value
+    (`int.is_integer`), memory, or recursion depth says nothing about the program. Such an error never refuses."""
     text = str(message or "")
-    if ("unexpected keyword argument" in text or "No module named" in text or "MemoryError" in text
+    if (_KEYWORD_ERRORS.search(text) or "No module named" in text or "MemoryError" in text
             or "Unable to allocate" in text or "recursed too deep" in text or "RecursionError" in text):
         return True
     if re.search(r"module '[\w.]+' has no attribute", text):
@@ -703,6 +721,9 @@ class _Source:
     or a helper's parameter named `ctx`); anything else is unknown, and an unknown receiver never refuses."""
 
     SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+    #: Python 3's comprehensions are scopes of their own: their targets are theirs, not the enclosing function's (only
+    #: an assignment expression inside one binds in the function around it, PEP 572).
+    COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
 
     def __init__(self, code: str, roots: Sequence[str], params: Mapping[str, Any] | None):
         import builtins
@@ -801,19 +822,35 @@ class _Source:
 
     # -------------------------------------------------------------- names
     def scope(self, node: ast.AST) -> ast.AST | None:
-        """The function (or lambda) whose local names `node` sees first; None: the module."""
-        parent = self.parents.get(node)
-        while parent is not None and not isinstance(parent, self.SCOPES):
-            parent = self.parents.get(parent)
-        return parent
+        """The function, lambda or comprehension whose local names `node` sees first; None: the module. As Python
+        evaluates them: a comprehension's first iterable and a function's or lambda's default values in the scope around
+        it."""
+        inner, child, parent = None, node, self.parents.get(node)
+        while parent is not None:
+            if isinstance(parent, self.SCOPES):
+                if not (child is parent.args and inner is not None and
+                        any(inner is d for d in [*parent.args.defaults, *parent.args.kw_defaults])):
+                    return parent
+            elif isinstance(parent, self.COMPREHENSIONS):
+                if not (parent.generators and child is parent.generators[0] and inner is parent.generators[0].iter):
+                    return parent
+            inner, child, parent = child, parent, self.parents.get(parent)
+        return None
 
     def bindings(self, scope: ast.AST) -> dict[str, list[tuple]]:
         """Every binding of every name local to `scope`, as ("ctx",), ("expr", node), ("item", iterable),
-        ("key", mapping), ("value", mapping), ("int",) or ("unknown",)."""
+        ("key", mapping), ("value", mapping), ("int",) or ("unknown",). A comprehension binds its targets only; a
+        function binds none of its comprehensions' targets, and a name a function nested in it declares `nonlocal` is
+        rebound there, so it is unknown here too."""
         if scope in self._bindings:
             return self._bindings[scope]
         out: dict[str, list[tuple]] = {}
         add = lambda name, how: out.setdefault(name, []).append(how)  # noqa: E731
+        if isinstance(scope, self.COMPREHENSIONS):
+            for generator in scope.generators:
+                self._loop(generator.target, generator.iter, add)
+            self._bindings[scope] = out
+            return out
         args = scope.args
         positional = [*args.posonlyargs, *args.args]
         first = positional[0].arg if positional else None
@@ -826,11 +863,18 @@ class _Source:
         todo = list(body)
         while todo:
             node = todo.pop()
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                add(node.name, ("unknown",))
-                todo.extend(node.decorator_list)
-                continue
-            if isinstance(node, ast.Lambda):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+                # Its body is its own scope; what runs here is its decorators and default values. A `nonlocal` anywhere
+                # inside it may rebind one of this scope's names (or a scope's between): unknown here.
+                if not isinstance(node, ast.Lambda):
+                    add(node.name, ("unknown",))
+                    todo.extend(node.decorator_list)
+                if not isinstance(node, ast.ClassDef):
+                    todo.extend([*node.args.defaults, *(d for d in node.args.kw_defaults if d is not None)])
+                for inner in ast.walk(node):
+                    if isinstance(inner, ast.Nonlocal):
+                        for name in inner.names:
+                            add(name, ("unknown",))
                 continue
             if isinstance(node, ast.Assign):
                 for target in node.targets:
@@ -838,8 +882,10 @@ class _Source:
             elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)) and isinstance(node.target, ast.Name):
                 if getattr(node, "value", None) is not None:
                     add(node.target.id, ("expr", node.value))
-            elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+            elif isinstance(node, (ast.For, ast.AsyncFor)):
                 self._loop(node.target, node.iter, add)
+            elif isinstance(node, ast.comprehension):
+                pass  # its targets are the comprehension's own (`COMPREHENSIONS`); a walrus inside it is still this scope's
             else:
                 for name in self._bound_names(node):
                     if not (isinstance(node, ast.Name) and self._handled(node)):
@@ -1074,7 +1120,8 @@ def _misuse(message: str, code: str, *, roots: Sequence[str] = (), params: Mappi
     ctx.underlyings and ctx.rules can hold); `params`: the run's overrides. Only an AttributeError, a TypeError, a
     KeyError or an IndexError; never one raised on a None or an empty value (`market_dependent`) or one this box may cause
     (`environmental`); and only when the failing expression is found on the line and its receiver is a ctx object of the
-    type the error names (a ctx class by the error's own words; a list, a dict or a number by `_Source.kind`). A KeyError
+    type the error names (a ctx class by the error's own words; a list, a dict or a number by `_Source.kind`). A wrong
+    argument count only on a call without keywords (a keyword is version-dependent, `environmental`). A KeyError
     only on a ctx dict the program never writes to or hands on (`_Source.readonly`), and nothing at all in a program that
     assigns an attribute anywhere (it could have replaced a ctx field on some markets only)."""
     text = str(message or "")
@@ -1170,12 +1217,14 @@ def _misuse(message: str, code: str, *, roots: Sequence[str] = (), params: Mappi
         return f"{what} is indexed by position" if what else None
     m = re.match(r"(?:([\w.]+)\.)?(\w+)\(\) (?:takes|missing|got)", said) or \
         re.match(r"()(\w+) expected (?:at least |at most )?\d+ arguments?, got \d+", said)
-    if m:  # a ctx container's method called with the wrong arguments
+    if m:  # a ctx container's method called with the wrong number of positional arguments
         owner, method = m.groups()
         calls = [n for n in nodes if isinstance(n, ast.Call) and (
             isinstance(n.func, ast.Attribute) and n.func.attr == method or isinstance(n.func, ast.Name) and n.func.id == method)]
         if not calls or not all(isinstance(c.func, ast.Attribute) for c in calls):
             return None
+        if any(c.keywords for c in calls):
+            return None  # a keyword a newer Python may take (`str.replace(count=)` from 3.13): never the same everywhere
         kinds = [src.kind(c.func.value) for c in calls]
         if any(k is None or (owner and _base(k) != owner) for k in kinds):
             return None
@@ -1233,33 +1282,70 @@ def _advisory(why: str, messages: Sequence[str], code: str, roots: Sequence[str]
                    **fields)
 
 
+def static_refusal(code: str) -> str | None:
+    """Why the Gym's static code check refuses `code` (`league.gym.safety.check_program`: the imports, names and
+    attributes it allows, no date, NEEDS, PARAMS and one decide(ctx), it compiles), or None. The only refusal at load:
+    the check reads the source and runs none of it, and it is what the Gym's `load_program` runs first. None too when
+    the check itself fails: the preflight never refuses on its own failure."""
+    from ..gym.safety import CodeRefused, check_program
+
+    try:
+        check_program(code)
+    except CodeRefused as exc:
+        return str(exc) or "the program fails the code check"
+    except Exception:  # noqa: BLE001 - the check's own failure is no refusal
+        return None
+    return None
+
+
+#: What a load-stage advisory's warnings say the load failure may be (`run`).
+LOAD_MAY_BE = ("this box's Python 3.11 and numpy 2.4 (the Gym's boxes run 3.12+ with numpy 2.5): the Gym loads it on its "
+               "own runtime and judges it")
+
+
 def run(code: str, params: Mapping[str, Any] | None, decider: Any, *, universe: Sequence[str] | None = None,
-        name: str = "preflight", deadline: float = DEADLINE_SECONDS, clock: Callable[[], float] = time.monotonic) -> dict:
+        name: str = "preflight", deadline: float = DEADLINE_SECONDS, clock: Callable[[], float] = time.monotonic,
+        capital: float | None = None) -> dict:
     """The preflight of one (code, params) on `decider` (a `league.live.decider` Decider or InlineDecider). `universe`: the
-    run's roots (a program trades its NEEDS roots within them). {"status": "passed" | "advisory" | "refused" |
-    "inconclusive", "why": ..., ...}: only "refused" stops the Train run."""
+    run's roots (a program trades its NEEDS roots within them). `capital`: the run's (`gym.capital`; CAPITAL when None).
+    {"status": "passed" | "advisory" | "refused" | "inconclusive", "why": ..., ...}: only "refused" stops the Train run.
+    At load only the static code check refuses (`static_refusal`); any other load failure is advisory."""
     from ..live.decider import DeciderError, ProgramRefused
 
     began = clock()
     key = f"preflight:{hashlib.sha256((code + repr(sorted((params or {}).items()))).encode()).hexdigest()[:16]}:{began:.6f}"
     try:
+        capital = float(capital) if capital is not None else CAPITAL
+    except (TypeError, ValueError):
+        capital = CAPITAL
+    if not math.isfinite(capital) or capital <= 0:
+        capital = CAPITAL
+    try:
         info = decider.load(key, code, dict(params or {}), name)
     except ProgramRefused as exc:
         message = str(exc)
+        static = static_refusal(code)
+        if static is not None:  # the same source, the same check, on every box
+            line, source = _located(static, code)
+            return _answer("refused", "the program fails the Gym's static code check (league/gym/safety.py), which refuses "
+                                      "it the same way on every box", stage="load", error=static[:500], line=line,
+                           source=source, calls=0, hint="fix the rule the check names (league/CONTRACT.md and PROGRAM.md "
+                                                        "say what a program may contain); nothing of the program ran")
         if "ran past" in message:
-            return _answer("inconclusive", f"the load says nothing on this box: {message[:300]}")
-        if environmental(message):
-            return _advisory("the program did not load on this box, whose Python, numpy and memory are not the Gym "
-                             "boxes': the run goes ahead", [message], code, (), params, stage="load", calls=0)
-        line, source = _located(message, code)
-        return _answer("refused", "the program does not load (the Gym's worker would refuse it the same way)", stage="load",
-                       error=message[:500], line=line, source=source, calls=0,
-                       hint=advice(message, params=_declared(code, params), source=source))
+            return _answer("inconclusive", f"the load says nothing on this box: {message[:300]}", stage="load", calls=0)
+        # The module body, NEEDS or PARAMS failed on this box's runtime, not the Gym's: the Gym judges them.
+        out = _advisory("the program did not load on this box, but only the Gym's static code check refuses at load (it "
+                        "passes it): its module body, NEEDS and PARAMS ran here on the House's Python 3.11 and numpy 2.4, "
+                        "and the Gym loads it on its own runtime and judges it, so the run goes ahead", [message], code,
+                        (), params, stage="load", calls=0)
+        for warning in out["warnings"]:  # a load reads no market: what differs is the runtime
+            warning["may_be"] = LOAD_MAY_BE
+        return out
     except DeciderError as exc:
         return _answer("inconclusive", f"the sandbox failed: {str(exc)[:300]}")
     needs = info["needs"]
     try:
-        verdict = _decide_loop(code, params or {}, decider, key, needs, universe, began, deadline, clock)
+        verdict = _decide_loop(code, params or {}, decider, key, needs, universe, began, deadline, clock, capital=capital)
     except DeciderError as exc:
         return _answer("inconclusive", f"the sandbox failed: {str(exc)[:300]}")
     finally:
@@ -1277,7 +1363,7 @@ def run(code: str, params: Mapping[str, Any] | None, decider: Any, *, universe: 
         try:
             decider.load(again_key, code, dict(params or {}), name)
             again = _decide_loop(code, params or {}, decider, again_key, needs, universe, began, deadline, clock,
-                                 regime=regime)
+                                 regime=regime, capital=capital)
         except (ProgramRefused, DeciderError) as exc:
             return _advisory(f"decide raised a misuse of the ctx API on every call, but the sandbox failed on {label}, so "
                              f"it could not be confirmed there: {str(exc)[:200]}; the run goes ahead", first, code, roots,
@@ -1321,7 +1407,7 @@ def _same(again: Any, first: Any) -> bool:
 
 def _decide_loop(code: str, params: Mapping[str, Any], decider: Any, key: str, needs: Mapping[str, Any],
                  universe: Sequence[str] | None, began: float, deadline: float, clock: Callable[[], float], *,
-                 regime: str = "listed") -> dict:
+                 regime: str = "listed", capital: float = CAPITAL) -> dict:
     from ..gym import venue as V
     from ..gym.events import EVENT_NAMES
 
@@ -1363,8 +1449,8 @@ def _decide_loop(code: str, params: Mapping[str, Any], decider: Any, key: str, n
             snaps = {(r, token): market.snapshot(r, s, mi) for r in roots}
             unders = {(r, int(needs["history"]), token): market.under(r, s, mi) for r in roots}
             job = {"key": key, "mi": token, "roots": roots, "minute": OPEN + mi, "open_minute": OPEN, "close_minute": CLOSE,
-                   "weekday": market.weekdays[s], "positions": [], "orders": [], "cash": CAPITAL, "equity": CAPITAL,
-                   "budget": CAPITAL, "buying_power": CAPITAL, "rules": rules, "events": quiet, "events_next": quiet,
+                   "weekday": market.weekdays[s], "positions": [], "orders": [], "cash": capital, "equity": capital,
+                   "budget": capital, "buying_power": capital, "rules": rules, "events": quiet, "events_next": quiet,
                    "closed": [], "rejects": []}
             answer = decider.decide(snaps, unders, [job]).get(key) or {}
             stats = answer.get("stats")
@@ -1530,12 +1616,12 @@ class Preflight:
         return self._decider
 
     def __call__(self, code: str, params: Mapping[str, Any] | None = None, *, roots: Sequence[str] | None = None,
-                 name: str = "preflight") -> dict:
+                 name: str = "preflight", capital: float | None = None) -> dict:
         began = time.monotonic()
         if not self._lock.acquire(timeout=self.wait):
             return _answer("inconclusive", "another preflight held the sandbox", seconds=0.0)
         try:
-            out = run(code, params, self.decider(), universe=roots, name=name, deadline=self.deadline)
+            out = run(code, params, self.decider(), universe=roots, name=name, deadline=self.deadline, capital=capital)
         finally:
             self._lock.release()
         out["seconds"] = round(time.monotonic() - began, 3)
@@ -1549,4 +1635,4 @@ class Preflight:
 __all__ = ["VERSION", "STREAK", "SESSIONS", "PREFLIGHT_UID", "PREFLIGHT_NICE", "LISTING", "REGIMES", "CONFIRMATIONS", "CTX_CLASSES",
            "Market", "Preflight", "Regime", "advice", "decision_minutes", "environmental", "equity_step", "expiries",
            "listing", "market_dependent", "quote", "run", "saturated_strikes", "session_weekdays", "strikes", "vol_of",
-           "api_misuse", "warnings_for"]
+           "api_misuse", "static_refusal", "warnings_for"]
