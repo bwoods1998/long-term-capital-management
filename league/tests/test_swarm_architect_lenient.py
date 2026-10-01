@@ -1,6 +1,8 @@
 """The architect reads a complete answer whose JSON has stray trailing commas (Oct 1, 2026: Sail k3 at medium effort), and
-one whose families array still does not parse whole (15:59Z: a stray `}` after two of its six families) object by object."""
+one whose families array still does not parse whole (15:59Z: a stray `}` after two of its six families) object by object,
+never outside the array."""
 import json
+import time
 import unittest
 
 from league.swarm.architect import read_families, recover_families, salvage_families, without_trailing_commas
@@ -114,7 +116,8 @@ class StrayBrace(unittest.TestCase):
         rows, lenient, recovered = self.read(text)
         self.assertEqual((rows, lenient), ([self.cards[0], self.cards[2]], False))
         self.assertEqual((recovered["count"], recovered["passed"]), (2, 1))
-        self.assertIn("1 object that did not decode passed over", recovered["why"])
+        self.assertIn("1 object that did not decode whole passed over", recovered["why"])
+        self.assertEqual(recover_families(text)[1], {"stray": "", "passed": 1, "dropped": 0})  # its separator is no stray
 
     def test_a_decoded_object_that_is_no_family_is_dropped(self):
         text = '{"families": [{"param": "signal_on", "off": 0}, }' + json.dumps(self.cards[1]) + "]}"
@@ -140,6 +143,68 @@ class StrayBrace(unittest.TestCase):
         rows, lenient, recovered = self.read(text)
         self.assertEqual((rows, lenient, recovered["count"]), (self.cards, False, 3))
         self.assertIn("parses from its own `{`", recovered["why"])
+
+
+EXAMPLE = {"slug": "example", "mechanism": "An example mechanism, long enough to be born if it ever reached admit."}
+
+
+class ArrayBound(unittest.TestCase):
+    """The review of #477: every recovered row is byte for byte a top-level element of the answer's families array, and
+    nothing outside that array is ever admitted. The walk never leaves the array, never enters a card that does not
+    decode, and never keeps a card a stray `}` inside it closed early."""
+
+    cards = StrayBrace.cards
+
+    def read(self, text: str):
+        return read_families({"text": text, "json": extract_json(text)})
+
+    def test_prose_with_a_families_key_and_an_example_card_before_the_real_object(self):  # B1, B2
+        prose = 'Reply with "families": [ holding cards like ' + json.dumps(EXAMPLE) + ". Here it is:\n"
+        for real in (json.dumps({"families": self.cards}), between(self.cards[0], self.cards[1:], "}, ")):
+            self.assertEqual(self.read(prose + real), (None, False, None))  # as main: the walk stops at the prose
+
+    def test_a_cut_array_followed_by_prose_with_an_example_card(self):  # C
+        text = ('{"families": [' + json.dumps(self.cards[0]) + ", " + json.dumps(self.cards[1])
+                + "\n\nFor reference the example was " + json.dumps(EXAMPLE))
+        rows, _, recovered = self.read(text)
+        self.assertEqual((rows, recovered["count"]), (self.cards[:2], 2))
+        self.assertNotIn("passed", recovered)
+
+    def test_a_failed_card_then_a_restated_array_reads_the_first_arrays_good_cards_once(self):  # D1, D2
+        first = '{"families": [' + json.dumps(self.cards[0]) + ', {"slug": "fam-1" "mechanism": "no colon"}]}'
+        edited = {**self.cards[0], "mechanism": self.cards[0]["mechanism"] + " Edited."}
+        for restated in (self.cards[:2], [edited, self.cards[1]]):
+            rows, _, recovered = self.read(first + "\nCorrected:\n" + json.dumps({"families": restated}))
+            self.assertEqual((rows, recovered["count"], recovered["passed"]), (self.cards[:1], 1, 1))
+
+    def test_an_example_card_after_the_array_or_inside_a_failed_card_is_never_admitted(self):  # E, E2
+        text = ('{"families": [' + json.dumps(self.cards[0]) + ', {"slug": "fam-1" "bad"}], "example": '
+                + json.dumps(EXAMPLE) + "}")
+        rows, _, recovered = self.read(text)
+        self.assertEqual((rows, recovered["passed"]), (self.cards[:1], 1))
+        failed = '{"slug": "fam-1" "mechanism": "no colon", "card": {"rebirth": ' + json.dumps(EXAMPLE) + "}}"
+        text = '{"families": [' + json.dumps(self.cards[0]) + ", " + failed + ", " + json.dumps(self.cards[2]) + "]}"
+        rows, _, recovered = self.read(text)
+        self.assertEqual((rows, recovered["passed"]), ([self.cards[0], self.cards[2]], 1))
+        self.assertEqual(recover_families(text)[1], {"stray": "", "passed": 1, "dropped": 0})
+
+    def test_a_card_a_stray_brace_inside_closed_early_is_passed_over_not_kept_truncated(self):  # A1, A2
+        head = ('{"slug": "fam-1", "mechanism": "' + FAMILY["mechanism"].replace('"', '\\"')
+                + '", "structure": "debit_vertical", "roots": ["SLV"], "dte": [0, 5]')
+        card = '"card": {"hypothesis": "h", "falsification": "f"}'
+        a1 = head + '}, "rejection": "r", "sketch": "s", ' + card + "}"  # closed before its rejection, sketch and card
+        a2 = head + ", " + card + '}, "rejection": "r", "sketch": "s"}'  # closed after its card: born blank on d52facea
+        for early in (a1, a2):
+            text = '{"families": [' + json.dumps(self.cards[0]) + ", " + early + ", " + json.dumps(self.cards[2]) + "]}"
+            rows, _, recovered = self.read(text)
+            self.assertEqual((rows, recovered["count"], recovered["passed"]), ([self.cards[0], self.cards[2]], 2, 1))
+            self.assertEqual(recover_families(text)[1], {"stray": "", "passed": 1, "dropped": 0})
+
+    def test_a_deep_chain_of_card_starts_is_read_in_linear_time(self):  # finding 2: no re-entry after a failed decode
+        chain = '{"families": [' + '{"slug": "a", "x": ' * 20000
+        started = time.perf_counter()
+        self.assertEqual(read_families({"text": chain, "json": None}), (None, False, None))
+        self.assertLess(time.perf_counter() - started, 1.0)
 
 
 if __name__ == "__main__":
@@ -178,7 +243,7 @@ class LenientPass(SailCase):
         self.assertEqual((out["proposed"], out["born"]), (1, ["idea-0"]))  # #472: 0, the whole answer unread
         self.assertNotIn("lenient", out)
         self.assertEqual((out["recovered"]["count"], out["recovered"]["passed"]), (1, 1))
-        self.assertIn("1 object that did not decode passed over", out["recovered"]["why"])
+        self.assertIn("1 object that did not decode whole passed over", out["recovered"]["why"])
 
     def test_an_answer_with_no_readable_family_stays_unread(self):
         self.replies = [{"text": "```json\n{\"families\": [{\"slug\": \"x\" \"bad\"}]}\n```"}]

@@ -931,8 +931,8 @@ class GraveyardDigest:
 #: R11-3: fewer families than this salvaged from a cut answer buys one retry on Claude at medium effort.
 SALVAGE_MIN = 3
 _FAMILIES = re.compile(r'"families"\s*:\s*\[')
-#: Where a family card starts (the schema's first key): the resync point after an object that did not decode, and what
-#: tells a stray `]` between two cards from the array's end (`recover_families`).
+#: Where a family card starts (the schema's first key): what tells a stray `]` between two cards from the array's end
+#: (`recover_families`).
 _CARD = re.compile(r'\{\s*"slug"\s*:')
 #: The key every proposal in the schema carries: `admit` derives a slug from it and births nothing without it, so a
 #: decoded object without it (a card's inner object, reached after a resync) is no family.
@@ -994,6 +994,34 @@ def without_trailing_commas(text: Any) -> str:
     return "".join(out)
 
 
+def _past_object(text: str, i: int, depth: int = 0) -> int | None:
+    """The index just past the `}` that closes the object opening at `text[i]` (with `depth`, the one that closes the
+    `depth` objects still open at `i`), strings and escapes tracked as `without_trailing_commas` tracks them; None when
+    the text ends first (a cut object). One linear scan: `recover_families` passes a failed or early-closed card over
+    without entering it."""
+    in_string = escaped = False
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+        elif ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth <= 0:
+                return i + 1
+        i += 1
+    return None
+
+
 def read_families(answer: Mapping[str, Any]) -> tuple[list[dict[str, Any]] | None, bool, dict[str, Any] | None]:
     """(the answer's proposals, whether they were read without stray trailing commas, what a read from the `families`
     object recovered: its `count` and `why`, else None). A cut answer keeps its complete families (R11-3,
@@ -1002,7 +1030,8 @@ def read_families(answer: Mapping[str, Any]) -> tuple[list[dict[str, Any]] | Non
     string tracking): without stray trailing commas (`,}` or `,]`; `lenient`, #472, whole when that is enough), whole
     from that `{` (the router's reader took an earlier object), and else object by object (`recover_families`: Oct 1,
     2026, 15:59Z, a stray `}` after the fourth and the fifth of six families, and the pass read as no proposals).
-    Nothing inside a family is changed. An answer with no readable family reads as before (None)."""
+    Nothing inside a family is changed beyond that strip, and nothing outside the array is read. An answer with no
+    readable family reads as before (None)."""
     text = str(answer.get("text") or "")
     if answer.get("truncated"):
         return salvage_families(_from_families(text, strip=True)), False, None
@@ -1017,13 +1046,14 @@ def read_families(answer: Mapping[str, Any]) -> tuple[list[dict[str, Any]] | Non
     try:
         whole, _ = json.JSONDecoder().raw_decode(lenient)
         error = None
-    except ValueError as exc:
-        whole, error = None, f"{exc.msg} at char {exc.pos}"
+    except (ValueError, RecursionError) as exc:
+        whole, error = None, (f"{exc.msg} at char {exc.pos}" if isinstance(exc, ValueError) else "nested too deep")
     if isinstance(whole, dict) and isinstance(whole.get("families"), list):
-        if stripped:
-            return whole["families"], True, None
+        rows = whole["families"]
+        if stripped or not rows:
+            return rows, stripped, None
         why = "the families object parses from its own `{`; the router's reader took an earlier object"
-        return whole["families"], False, {"count": len(whole["families"]), "why": why}
+        return rows, False, {"count": len(rows), "why": why}
     some, tally = recover_families(lenient)
     if not some:
         return None, False, None
@@ -1044,12 +1074,14 @@ def _from_families(text: str, *, strip: bool) -> str:
 def recover_families(text: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """The families of a complete answer whose `families` array does not parse as a whole, decoded one at a time from
     each object's `{` (`json.JSONDecoder.raw_decode`), the stray closers and commas between them skipped, until the
-    array's `]` (one that another card follows after whitespace or commas is stray too) or the text's end. Nothing inside
-    an object is changed: one that does not decode is passed over to the next card start (`{"slug"`, the schema's first
-    key), and only an object carrying CARD_KEY is kept. Returns (the rows, the tally: `stray`, the characters skipped
-    between the families, at most STRAY_MAX; `passed`, the objects that did not decode; `dropped`, the decoded objects
-    that were no family). Oct 1, 2026, 15:59Z: a stray `}` after the fourth and the fifth of six families, and the pass read
-    as no proposals."""
+    array's `]` (one that another card follows after whitespace or commas is stray too), the text's end, or anything
+    else between two cards: the walk never leaves the array. Every row is byte for byte a top-level element of it: an
+    object that does not decode is passed over to its own closing brace (`_past_object`), never entered or repaired; a
+    card that a stray `}` inside it closed early (a key follows the brace) is passed over the same way, not kept
+    truncated; a cut object ends the walk. Only an object carrying CARD_KEY is kept. Returns (the rows, the tally:
+    `stray`, the characters skipped between the families, at most STRAY_MAX; `passed`, the objects passed over;
+    `dropped`, the decoded objects that were no family). Oct 1, 2026, 15:59Z: a stray `}` after the fourth and the fifth
+    of six families, and the pass read as no proposals."""
     text = str(text or "")
     tally: dict[str, Any] = {"stray": "", "passed": 0, "dropped": 0}
     found = _FAMILIES.search(text)
@@ -1087,12 +1119,28 @@ def recover_families(text: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         elif ch == "{":
             try:
                 value, end = decoder.raw_decode(text, i)
-            except ValueError:
-                tally["passed"] += 1  # not repaired: the next card start, if any
-                after = _CARD.search(text, i + 1)
-                if after is None:
+            except (ValueError, RecursionError):
+                tally["passed"] += 1  # not repaired, not entered: the walk resumes past its own closing brace
+                past = _past_object(text, i)
+                if past is None:
+                    break  # a cut object ends the walk, as it ends the salvage
+                i, comma_due = past, True
+                continue
+            j = end
+            while j < n and text[j] in " \t\r\n":
+                j += 1
+            if j < n and text[j] == ",":
+                j += 1
+                while j < n and text[j] in " \t\r\n":
+                    j += 1
+            if j < n and text[j] == '"':
+                # A key follows the brace: a stray `}` inside the card closed it early. Not kept truncated (its later
+                # fields lost): passed over to its real end, the brace that closes what is still open.
+                tally["passed"] += 1
+                past = _past_object(text, end, depth=1)
+                if past is None:
                     break
-                i, comma_due = after.start(), False
+                i, comma_due = past, True
                 continue
             if isinstance(value, dict) and CARD_KEY in value:
                 out.append(value)
@@ -1100,11 +1148,7 @@ def recover_families(text: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
                 tally["dropped"] += 1
             i, comma_due = end, True
         else:
-            after = _CARD.search(text, i)  # something that is no object between the cards: the next card start, if any
-            if after is None:
-                break
-            stray(ch)
-            i, comma_due = after.start(), False
+            break  # anything else between two cards (prose, a bare value): the walk never leaves the array
     return out, tally
 
 
@@ -1116,7 +1160,7 @@ def recovered_detail(count: int, error: str | None, tally: Mapping[str, Any]) ->
     if tally.get("stray"):
         done.append(f"stray {str(tally['stray'])!r} between the families skipped")
     if tally.get("passed"):
-        done.append(f"{tally['passed']} object{'s' if tally['passed'] != 1 else ''} that did not decode passed over")
+        done.append(f"{tally['passed']} object{'s' if tally['passed'] != 1 else ''} that did not decode whole passed over")
     if tally.get("dropped"):
         done.append(f"{tally['dropped']} object{'s' if tally['dropped'] != 1 else ''} without a {CARD_KEY} dropped")
     out = {"count": count, "why": f"{why}: {', '.join(done)}"[:400]}
