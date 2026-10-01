@@ -7,16 +7,17 @@ from unittest.mock import patch
 
 from league.gym import ENGINE_VERSION
 from league.swarm import bands, evidence
-from league.swarm.evaluator import KEY, adopt, execution_fingerprint, gym_changed, identity, row_matches
+from league.swarm.evaluator import (KEY, LIVE_KEYS, SELECTION_KEYS, adopt, execution_fingerprint, gym_changed, identity,
+                                    row_matches)
 from league.swarm.gate import Gate, run_sha
 from league.swarm.researcher import (extension_held, idle_dead, idle_evaluations, judge_extension, mark_extension,
-                                     migrate_objective, version_drift)
+                                     migrate_objective, robust_at_stress, version_drift)
 from league.swarm.tournament import Tournament
-from league.tests.evaluator_fakes import band_proof, seed_current_run
+from league.tests.evaluator_fakes import band_proof, reviewed, seed_current_run
 from league.tests.swarm_fakes import result
 from league.tests.test_swarm_researcher import ResearcherCase
 from league.tests.test_swarm_rounds import RoundCase, strong, weak
-from league.tests.test_swarm_search import yearly
+from league.tests.test_swarm_search import QueueingPool, yearly
 from league.tests.test_swarm_store import StoreCase, SPEC
 
 CODE = "NEEDS = {'roots': ['SPY']}\nPARAMS = {}\ndef decide(ctx):\n    return []\n"
@@ -306,6 +307,7 @@ class AdoptionAndTheExtensionHold(RoundCase):
     def operator_cleared(self, fid="a"):
         """Version 1 held at 7/8, then cleared the way `scripts/extension_hold.py --clear` clears it."""
         self.family(fid)
+        self.store.update_family(fid, validated_version=1)  # as the tournament's verdict writes it (`_verdict`)
         self.store.set_state(fid, validation_version=1, validation_line=self.line(7))
         self.assertTrue(mark_extension(self.store, fid, 1, self.line(7), self.settings))
         hold = self.store.family(fid)["state"]["extension_hold"]
@@ -332,12 +334,12 @@ class AdoptionAndTheExtensionHold(RoundCase):
         a, b = (self.store.family(fid)["state"] for fid in ("a", "b"))
         self.assertEqual((a["extension_versions"], a["extension_cleared"]["version"]), ([1], 1))
         self.assertEqual((b["extension_hold"]["version"], b["extension_versions"]), (1, [1]))
-        self.assertNotIn("extension_versions", a["previous_evaluator_selection"])
-        self.assertIsNone(a["validation_version"], "the selection is still owed again")
+        self.assertNotIn("previous_evaluator_selection", a, "a league/live-only adoption archives no research selection")
+        self.assertEqual(a["validation_version"], 1, "the selection stands: its Gym rows are all still current")
         self.assertIsNone(self.revalidated("a", 7))
         self.assertFalse(extension_held(self.store.family("a")), "cleared stays cleared")
         self.assertIn("made no new Gym evaluation in its last 99 cycles", self.dormant("a"))
-        self.assertFalse(extension_held(self.store.family("b")), "inert until its version is validated again")
+        self.assertTrue(extension_held(self.store.family("b")), "its validation stands, and so does its hold")
         self.assertIsNone(self.revalidated("b", 7))
         self.assertTrue(extension_held(self.store.family("b")), "a standing hold stands")
         self.assertIsNone(self.dormant("b"))
@@ -411,6 +413,190 @@ class AdoptionAndTheIdleRule(RoundCase):
             with self.subTest(state=state):
                 self.assertIn(words, since(state))
         self.assertIn("700 Gym evaluations since its birth", since({}, validations=0))
+
+
+class IdentifiedPool(QueueingPool):
+    """The researcher's queueing pool that names the Gym it runs (`Researcher._gym_identity`)."""
+
+    def __init__(self, image, bundle):
+        super().__init__()
+        self._image, self._bundle = image, bundle
+
+    def image(self, kind="gym"):
+        return self._image
+
+    def bundle(self):
+        return self._bundle
+
+
+class LeagueLiveAdoption(ResearcherCase):
+    """RELEASE B'S STALL (Oct 1, 2026). Release B changed league/live alone: the execution fingerprint moved, the Gym image
+    and bundle did not. Its adoption still cleared every family's Train best, robustness views and validation, although
+    every row they rested on stayed current (`matches`), so robustness, validation and Train-tier practice had nothing
+    to start from; the families holding bests retired themselves minutes later. A league/live-only adoption now keeps
+    the research selection; a new Gym image or bundle still clears it."""
+
+    IMAGE = "synthetic-image"
+
+    def setUp(self):
+        super().setUp()
+        self.bundle = bands._bundle()
+        self.pool = IdentifiedPool(self.IMAGE, self.bundle)
+        self.settings["tournament"]["drift_screen"] = False
+        (self.root / "swarm.json").write_text(json.dumps({"gym": {"image_checkpoint": self.IMAGE}}))
+        self.release_a = {"image": self.IMAGE, "bundle": self.bundle, "execution": "release A's league/live"}
+        self.store.put(KEY, self.release_a)
+        self.fid = self.fam["id"]
+        self.store.add_version(self.fid, self.code, {}, author="test")
+
+    def answer(self, *, stress=1.0, pnl=500.0):
+        row = yearly(stress=stress, pnl=pnl)
+        row.update(gym_image=self.IMAGE, gym_bundle=self.bundle)
+        return row
+
+    def best_with_robustness(self, researcher):
+        """Version 1's eligible Train run makes it the best, which queues its robustness runs; both land with a profit."""
+        answer = self.answer()
+        score = evidence.train_score(answer)
+        answer["summary"].update(train_eligible=True, train_score=score["score"])
+        row = self.store.add_run(self.fid, 1, answer, window="train", stress=1, purpose="train")
+        researcher._scored(self.store.family(self.fid), 1, row["run_id"], score, {}, {}, code=self.code, params={})
+        self.assertEqual(sorted(job.stress for job in self.pool.queued), [0.0, 1.5], "the best's robustness runs")
+        for job in list(self.pool.queued):
+            self.pool.land(job, self.answer(stress=job.stress, pnl=300.0))
+        self.pool.queued.clear()
+        return score["score"]
+
+    def test_a_league_live_only_adoption_keeps_the_best_its_robustness_and_its_practice_row(self):
+        researcher = self.researcher()
+        score = self.best_with_robustness(researcher)
+        self.store.set_state(self.fid, drift_failed={"7": "a weaker version's mark"}, robust_failed=[7],
+                             train_passed={"1": {"evaluator": self.release_a}})
+        before = self.store.family(self.fid)
+        self.assertTrue(robust_at_stress(before["state"], 1))
+        self.assertEqual([(r["family"], r["tier"], r["version"]) for r in bands.observe(self.root)], [(self.fid, "train", 1)])
+
+        release_b = {**self.release_a, "execution": "release B's league/live"}
+        out = adopt(self.store, release_b)
+        fam = self.store.family(self.fid)
+        state = fam["state"]
+        self.assertEqual(fam["best_train"], score, "the Train best stands: its run is on the same image and bundle")
+        self.assertEqual((out["adopted"], out["families"], out.get("gym_changed")), (True, 1, False))
+        self.assertEqual((state["best_train_version"], state["best_train_run"]),
+                         (before["state"]["best_train_version"], before["state"]["best_train_run"]))
+        self.assertEqual(state["train_candidates"], before["state"]["train_candidates"])
+        self.assertEqual(state["robustness"], before["state"]["robustness"], "its robustness figures stand")
+        self.assertTrue(robust_at_stress(state, 1), "so the tournament can validate it")
+        self.assertEqual((state["drift_failed"], state["robust_failed"]), ({"7": "a weaker version's mark"}, [7]),
+                         "a demotion stands too")
+        self.assertEqual(state["train_passed"], {}, "the live route's mark is made again under the new fingerprint")
+        self.assertEqual(state["evaluator"], release_b)
+        self.assertNotIn("evaluator_trials", state, "nothing is owed again, so the idle count goes on")
+        self.assertNotIn("previous_evaluator_selection", state)
+        researcher.ensure_robustness(fam)
+        self.assertEqual(self.pool.queued, [], "nothing is owed again: no robustness run is bought twice")
+        self.assertEqual([(r["family"], r["tier"], r["version"]) for r in bands.observe(self.root)], [(self.fid, "train", 1)],
+                         "the practice league still has its Train-tier row at the next open")
+        self.assertFalse(any("The evaluator changed" in n["text"] for n in self.store.notebook(self.fid, limit=20)),
+                         "no note tells the researcher its validated work is void")
+        [event] = [e["payload"] for e in self.store.events_after(0) if e["payload"].get("action") == "evaluator_adopted"]
+        self.assertEqual((event["gym_changed"], event["_previous_selection"]),
+                         (False, {"train_passed": {"1": {"evaluator": self.release_a}}}))
+
+        # A new Gym image still clears the selection: its rows are no longer current.
+        out = adopt(self.store, {**release_b, "image": "a new image"})
+        self.assertTrue(out["gym_changed"])
+        fam = self.store.family(self.fid)
+        self.assertIsNone(fam["best_train"])
+        self.assertEqual(fam["state"]["robustness"], {})
+        self.assertEqual(fam["state"]["previous_evaluator_selection"]["best_train"], score)
+
+    def test_after_a_league_live_only_adoption_a_new_best_still_queues_its_robustness_runs(self):
+        researcher = self.researcher()
+        adopt(self.store, {**self.release_a, "execution": "release B's league/live"})
+        self.best_with_robustness(researcher)
+        self.assertTrue(robust_at_stress(self.store.family(self.fid)["state"], 1))
+
+    def test_the_live_keys_are_the_only_selection_keys_a_league_live_only_adoption_clears(self):
+        self.assertTrue(set(LIVE_KEYS) <= set(SELECTION_KEYS))
+        everything = {key: {"1": "x"} for key in SELECTION_KEYS}
+        self.store.set_state(self.fid, **everything)
+        self.store.update_family(self.fid, best_train=1.5, best_version=1, best_validation=0.2, validated_version=1)
+        adopt(self.store, {**self.release_a, "execution": "release B's league/live"})
+        fam = self.store.family(self.fid)
+        for key in SELECTION_KEYS:
+            with self.subTest(key=key):
+                self.assertEqual(fam["state"][key], {} if key in LIVE_KEYS else {"1": "x"})
+        self.assertEqual((fam["best_train"], fam["best_version"], fam["best_validation"], fam["validated_version"]),
+                         (1.5, 1, 0.2, 1))
+
+
+class LeagueLiveAdoptionRounds(RoundCase):
+    """Release B's stall through the rounds: after a league/live-only adoption a validated family keeps its verdict and its
+    gate place (no new trial, no new look), and a family whose best predates the adoption is validated at the next round."""
+
+    IMAGE = "synthetic-image"
+
+    def setUp(self):
+        super().setUp()
+        self.bundle = bands._bundle()
+        self.pool.image = lambda kind="gym": self.IMAGE
+        self.pool.bundle = lambda: self.bundle
+        stamped = self.answer
+        self.answer = lambda job: {**stamped(job), "gym_image": self.IMAGE, "gym_bundle": self.bundle}
+        (self.root / "swarm.json").write_text(json.dumps({"gym": {"image_checkpoint": self.IMAGE}}))
+        self.release_a = {"image": self.IMAGE, "bundle": self.bundle, "execution": "release A's league/live"}
+        self.store.put(KEY, self.release_a)
+
+    def with_train_best(self, fid):
+        self.family(fid)
+        row = seed_current_run(self.store, fid, 1, window="train")
+        self.store.update_family(fid, best_train=1.2)
+        self.store.set_state(fid, best_train_run=row["run_id"], best_train_version=1)
+
+    def test_a_validated_family_keeps_its_verdict_and_gate_place_and_an_unvalidated_best_is_validated(self):
+        tournament = Tournament(self.store, self.pool, self.settings, clock=self.clock)
+        self.with_train_best("a")
+        tournament.validate(self.store.families(alive=True))
+        before = self.store.family("a")
+        self.assertTrue(before["state"]["gate_ready"])
+        sha = run_sha(self.store.version("a", 1))
+        self.store.set_state("a", review=reviewed(sha), incubator_reviews={sha: reviewed(sha)})
+        self.with_train_best("b")  # its best came before the deploy; its validation is due at the next round
+        ahead = self.store.family("a")
+        jobs = len(self.pool.jobs)
+
+        adopt(self.store, {**self.release_a, "execution": "release B's league/live"})
+        a = self.store.family("a")
+        for key in ("validation_version", "validation_line", "validation_view", "validation_image", "validation_bundle",
+                    "validation_numbers", "gate_ready", "typical_max_loss_usd", "typical_by_version", "review"):
+            with self.subTest(key=key):
+                self.assertIsNotNone(ahead["state"][key])
+                self.assertEqual(a["state"][key], ahead["state"][key])
+        self.assertEqual(a["state"]["review"], reviewed(sha), "the gate's review under the same contract stands")
+        self.assertEqual(a["state"]["incubator_reviews"], {}, "the live route's review is owed again")
+        self.assertEqual((a["validated_version"], a["best_validation"]), (1, before["best_validation"]))
+        self.assertEqual(self.store.family("b")["best_train"], 1.2)
+
+        out = tournament.validate(self.store.families(alive=True))
+        self.assertEqual(out["waiting_robustness"], [], "no best is left waiting for evidence it already had")
+        self.assertEqual(sorted(out["judged"]), ["b"], "the validated family is not validated again")
+        self.assertEqual([job.family for job in self.pool.jobs[jobs:]], ["b"])
+        self.assertEqual(self.store.family("a")["trials"], ahead["trials"], "no new trial")
+        self.assertTrue(self.store.family("a")["state"]["gate_ready"], "its gate place stands")
+
+    def test_a_stale_money_band_still_returns_to_the_gym_and_its_family_is_told(self):
+        self.with_train_best("a")
+        version = self.store.version("a", 1)
+        self.store.set_band("a", "probe", reason="qualified")
+        self.store.set_state("a", banded_version=1, banded_evaluator={**band_proof(version), "execution_sha256": "release A"})
+        adopt(self.store, {**self.release_a, "execution": "release B's league/live"})
+        fam = self.store.family("a")
+        self.assertEqual(fam["band"], "gym", "a band is entry authority only under the fingerprint that granted it")
+        self.assertEqual(fam["best_train"], 1.2)
+        self.assertEqual(bands.read(self.root), [])
+        [note] = [n["text"] for n in self.store.notebook("a", limit=20) if "league/live" in n["text"]]
+        self.assertIn("returned to the Gym", note)
 
 
 class LateResearch(ResearcherCase):

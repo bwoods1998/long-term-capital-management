@@ -411,8 +411,12 @@ diagnostician.
 - **The evaluator is part of the evidence** (Release A).
   - The swarm records its evaluator: the data image, the Gym bundle, and a fingerprint of the Gym and live code and
     their shared modules.
-  - A change archives every family's derived selection evidence (Train bests, validation, review) and returns a banded
-    family whose evaluator no longer matches to the Gym. Its frozen live instances keep their exits.
+  - A change of the Gym (its image or bundle) archives every family's derived selection evidence (Train bests,
+    validation, review). Any change returns a banded family whose evaluator no longer matches to the Gym. Its frozen
+    live instances keep their exits.
+  - A change of `league/live` alone keeps the selection, because every Gym row it rests on is still current. It clears
+    only the incubator's marks and reviews (Oct 1, 2026: clearing the rest left release B with no Train best and no
+    robustness run for hours).
   - Trials, lineages and consumed holdout looks are kept, so the multiple-testing control never forgets and no look
     reopens.
   - Changes to those paths are batched into planned evidence resets, and evidence is never compared across one.

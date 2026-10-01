@@ -771,7 +771,7 @@ def holding(args: Any) -> bool:
 
 #: The marks that restart the idle count (`idle_evaluations`), each the family's trials when it was set, with the words the
 #: idle rule's clause gives it (`_idle_since`): `migrate_objective` sets the first when Train's span changes, and
-#: `evaluator.adopt` the second when the evaluator does.
+#: `evaluator.adopt` the second when the evaluator's Gym does (`evaluator.gym_changed`: never for league/live alone).
 IDLE_RESTARTS = (("span_trials", "Train's span changed"), ("evaluator_trials", "the evaluator changed"))
 
 
@@ -786,8 +786,8 @@ def idle_evaluations(fam: Mapping[str, Any]) -> int:
     A change of Train's span (the 2020-21 switch: `migrate_objective` records the trials then as `span_trials`) starts
     the count again: every best was chosen anew over the new span, most of them empty, and evaluations over the old span
     say nothing about whether the family can make an eligible version over the new one. So does a change of the
-    evaluator (`evaluator.adopt` records the trials then as `evaluator_trials`): its selection was cleared, and is owed
-    again under the current Gym."""
+    evaluator's Gym (`evaluator.adopt` records the trials then as `evaluator_trials`): its selection was cleared, and is
+    owed again under the current Gym. A league/live-only adoption keeps the selection, so the count goes on."""
     since = int(fam.get("since_val_trials") or 0)
     state = fam.get("state") or {}
     trials = int(fam.get("trials") or 0)
