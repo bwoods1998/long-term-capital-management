@@ -33,7 +33,9 @@
 4. FORKS: the top families with a positive validation t fork (never one whose validated version failed the drift screen) (a new family on the parent's roots plus one more
    root of the rotation, same mechanism and structure; it inherits the lineage's trial count and holdout looks),
    while the population is under its ceiling. XSP is out of the rotation: its $0.50 a contract makes a narrow
-   structure uneconomic.
+   structure uneconomic. Only a family of a type `architect.structures` allows forks (THE STRUCTURES, Oct 1, 2026:
+   league/swarm/architect.py `allowed_structures`; every type while it is unset); one of another type is never retired
+   for it and keeps researching until a rule retires it.
 5. RETIREMENTS: no validation improvement in `retire_revisions` (30) or `retire_evaluations` (2,000; the defaults,
    swarm.json may set others) Gym evaluations, or trial-adjusted
    evidence below the line (the deflated Sharpe probability under `retire_dsr_below` after
@@ -95,6 +97,7 @@ import time
 from typing import Any, Callable, Mapping
 
 from . import diagnostics, evidence, incubator, practice
+from .architect import allowed_structures
 from .pool import GymJob, PoolError
 from .researcher import (IDLE_CAUSE, MAX_ROOTS, drift_verdict, held_at_gate, idle_cause, idle_dead, judge_extension,
                          needs_roots, robust_at_stress, screen_best, train_record, validation_drift_failed, with_roots)
@@ -494,9 +497,12 @@ class Tournament:
         now = self.clock()
         cooldown = float(self.cfg.get("fork_cooldown_hours", 6)) * 3600
         scored = []
+        allowed = allowed_structures(self.settings)
         for fam in fams:
             if validation_drift_failed(fam):
                 continue  # its validated version failed the drift screen: nothing to fork
+            if fam["structure"] not in allowed:
+                continue  # THE STRUCTURES (`architect.structures`): a type no birth may be does not breed; it researches on
             nums = (fam.get("state") or {}).get("validation_numbers") or {}
             t = nums.get("t")
             if isinstance(t, (int, float)) and t >= float(self.cfg.get("fork_min_t", 1.0)) and (nums.get("mean") or 0) > 0:
@@ -518,9 +524,9 @@ class Tournament:
     def fork(self, fam: Mapping[str, Any]) -> str | None:
         """A child on the parent's roots plus the next root of the rotation the parent does not trade (never XSP; index
         roots only for types allowed there; at most five roots), with the parent's best program, its NEEDS widened to
-        the child's roots, as its first version."""
+        the child's roots, as its first version. None for a parent of a type `architect.structures` leaves out."""
         fam = self.store.family(fam["id"]) or fam
-        if fam.get("retired_at") or len(fam["roots"]) >= MAX_ROOTS:
+        if fam.get("retired_at") or len(fam["roots"]) >= MAX_ROOTS or fam["structure"] not in allowed_structures(self.settings):
             return None
         roots = [str(r).upper() for r in self.settings.get("gym", {}).get("roots", UNIVERSE_ROTATION) if str(r).upper() not in NOT_ROTATED]
         taken = {tuple(sorted(f["roots"])) for f in self.store.families(alive=True) if f["mechanism"] == fam["mechanism"]}

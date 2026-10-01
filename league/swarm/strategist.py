@@ -14,7 +14,9 @@ fail each Validation check (counts by check name only: never a family's checks, 
 last 24 hours' births and retirements by mechanism class, THE PRACTICE LEAGUE (league/swarm/practice.py: shadow trades on
 live quotes under the Gym's fill rules, by class and by family: sessions, trades, the sign of realized P&L and a t; a
 research signal, never evidence; none while practice feedback is off), the drift note and the operator lessons on drift
-and costs, and the coverage and gaps. On the Sail fallback (no Claude) the packet carries the 20 newest graveyard rows and every
+and costs, and the coverage and gaps. While `architect.structures` leaves any type out (THE STRUCTURES, Oct 1, 2026),
+the coverage and gaps are of the allowed types only and the packet names them, asking a direction that names a
+structure to name one of them. On the Sail fallback (no Claude) the packet carries the 20 newest graveyard rows and every
 operator row instead of the digest.
 
 WHAT IT WRITES. One JSON object: `where_to_look` (at most `strategist.max_chars`, 1,600; the code's ceiling is 2,000),
@@ -614,9 +616,16 @@ class Strategist:
             *self._practice(),
             "DRIFT AND COSTS (the drift note every researcher reads; the operator rows about drift and costs are in the "
             "graveyard):\n" + json.dumps(self._drift_and_costs()),
-            "RESEARCH COVERAGE (effort, not profitability):\n" + json.dumps(self.architect.coverage(), separators=(",", ":")),
+            "RESEARCH COVERAGE (effort, not profitability):\n"
+            + json.dumps(self.architect.coverage(allowed_only=True), separators=(",", ":")),
             "GAPS (uncovered structure types by root):\n" + json.dumps(self.architect.gaps()),
         ]
+        if self.architect.restricted():
+            # THE STRUCTURES (`architect.structures`): the architect births only these types, so a direction names one of
+            # them. No money words here: the section's validator refuses them, and a model echoes what it reads.
+            parts.append("STRUCTURE TYPES THE ARCHITECT MAY PROPOSE (a proposal of any other type is not born; the coverage "
+                         "and the gaps above are of these types only): " + ", ".join(self.architect.structures())
+                         + ". When a direction names a structure, name one of these.")
         if sample:
             parts.append("THE GRAVEYARD (the 20 newest rows and every operator row; the rest is not shown):\n"
                          + json.dumps(self._sample()))
