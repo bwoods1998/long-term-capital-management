@@ -1088,6 +1088,8 @@ FROZEN_SYMBOLS: dict[str, tuple[str, ...]] = {
     # The architect's pass: the model call and its spend reservation, the parse of the answer into proposals and the
     # hand-off to `admit` (a proposal's text reaches the store unchanged: the rebirth detector reads what was proposed).
     "league/swarm/architect.py": ("SAME_IDEA", "_STOP", "words", "same_idea", "salvage_families", "_FAMILIES",
+                                  "read_families", "recover_families", "_from_families", "without_trailing_commas",
+                                  "_past_object", "_CARD", "CARD_KEY",
                                   "SALVAGE_MIN", "Architect.run", "Architect._digest_call", "Architect._salvage_retry"),
     # The model's tool calls parsed into the arguments `Researcher._execute` receives (the program among them).
     "league/swarm/claude_research.py": ("ToolCall", "tool_calls", "validate", "check_input", "_type_error", "resolve_name",
@@ -1725,7 +1727,7 @@ COST_RATIO, COST_FLOOR, PAYS_SHARE = 1.25, 2.0, 0.25
 #: families no public text names, checked by a scan of every public text; the owner's private notes beside the pools
 #: record which families are burned. Public text gives the pools by count and hash only.
 HELDOUT_POOLS = {
-    "research": "594e8e70d7dd6a91c7bbc163b37127bdf5dbfc5c6b8c39dc8556fe3c5070d86e",
+    "research": "6067920a0e8dc5baa325f529b87557599333a75093d03045430f07bbf04c01fb",
     "memory": "2cbaea0004457b96969f8ac9a01224d301892045ba71c07e339a273d77ec89b5",
     "data": "aa17f07ef5befd661aa850ea7372bb4ec4dbd926551f935d0fff0fcf9673df4a",
     "execution": "eecc352b864c624c7913b3b037892a9a099afc4530e21b329ece2f96c1d692d1",

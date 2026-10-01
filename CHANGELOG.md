@@ -63,6 +63,22 @@ Main `3eaf4d06` is Release B, deployed Oct 1 (below). Under the freeze (Oct 1, "
   `retire_refused` with `retire_awaiting` (the version the tournament owes a verdict), and no `swarm.retired` event
   whose cause begins "Self-refuted" for a family whose `best_version` differs from its `validated_version` and sits in
   neither `robust_failed` nor `drift_failed`.
+- **Architect lenient read 2** (branch `b/architect-lenient-json-2`): a complete architect answer whose `families`
+  array does not parse whole is read object by object (`recover_families`): each family decoded from its own `{`,
+  the stray closers and commas between the families skipped, an object that does not decode passed over to its own
+  closing brace (never entered), a card a stray `}` inside it closed early passed over too (never born truncated),
+  the walk never leaving the array (anything else between two cards ends it), nothing inside a family changed beyond
+  #472's trailing-comma strip; the pass's `swarm.architect` event says `recovered` (how many, why, and `passed`),
+  beside #472's `lenient`. At 15:59:36Z Oct 1 a Kimi-K3 pass answered six families in 16,008 characters with a stray
+  `}` after the fourth and after the fifth; the strict read failed (`Expecting ',' delimiter` at char 10,897), #472's
+  trailing-comma read did not apply, the router's reader fell back to the first family card, and the pass read as 0
+  proposals (population 42 against a start of 96; about $0.15 and 20 minutes of births lost). On the saved answer the
+  new read recovers 6 of 6, each byte for byte (no strip ran). The parse that feeds `admit` (`read_families`,
+  `recover_families`, `_from_families`, `without_trailing_commas`, `_past_object`, `_CARD`, `CARD_KEY`) joins
+  `salvage_families` in the memory lane's `FROZEN_SYMBOLS` (`league/swarm/harness_lanes.py`). Research-class:
+  `league/swarm/architect.py` is not loaded by the live path (verified Oct 1); nothing in `league/live`, `league/gym`
+  or `LEAGUE_FILES`, no evaluator adoption, no money digest. To verify after the deploy: a `swarm.architect` event
+  whose answer failed the strict read says `recovered` with `proposed` > 0.
 
 ## 2026-10-01
 

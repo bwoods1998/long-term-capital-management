@@ -840,3 +840,69 @@ honest no.
 | Spend, last hour | $1.89/h; Sail balance $150.57 |
 
 The goal remains unmet.
+
+## Oct 1 afternoon: the lanes release, the edge study, agenda v16c
+
+### Releases, candidates and the site
+
+- **13:34, the lanes release (#466):** harness improvement lanes (#449), the evaluator benchmarks (#452), the memory
+  judge's fourth hardening round and the architect's lenient read of a cut Sail answer (#472). Research-class; no
+  evidence reset. Harness cycle 2 then registered two candidates on this base: a research-lane change against the
+  Train disqualification rate, and a memory-lane change against validation attempts per research dollar. Both touch
+  a module the live path loads, so each deploys after a close and runs a canary window during which no other House
+  release is allowed.
+- **The site.** The owner rejected the swarm-window redesign of the morning, and the prior page was restored at
+  13:58 (personal-site #19). His ideas (trade reasons, the swarm's profit line, the live thought queue, performance
+  over time, per-trade results, the game's levels) are being added to that prior design as small additions. The House
+  already publishes the levels funnel and each trade's filtered reason.
+- **14:43, seven operator revivals for practice, not D2:** six re-passed Train and the drift screen with their
+  earlier numbers exactly (the revival fix of #465 at work); one failed the drift screen. They are lineage-counted.
+- **PR #473 merged:** the gateway's Claude funded total rises to $265 after the owner's top-up. It deploys after the
+  close, and the architect returns to Claude within that balance.
+- **15:10, handoff:** the owner asked for a stopping point; a new session took the goal over at 15:14 and re-verified
+  production (8 of 9 pre-open checks; the ninth is the OpenAI line at $0 by his rule).
+
+### The edge study
+
+Five read-only analyses (cells, structures and fills, deaths, births by route, forward predictiveness), a synthesis
+and an adversarial critique. They are operator-only documents because they aggregate Validation and holdout results;
+the public-safe conclusions:
+
+- No out-of-sample edge has been shown. Train results predict 2025 weakly, and a Validation pass in 2025 has mostly
+  measured the roots' own drift. The three holdout looks since the reset covered two programs, both long-delta.
+- The Oct 1 yield collapse was mostly machinery, not the market: the strategist had closed the productive design
+  shape on a handful of drift deaths, the architect ran on Sail only and its answers were cut, card refusals pushed
+  births into long butterflies (0 drift passes in 40), and researchers retired families before validation.
+- The critique corrected the proposed agenda. The corrected text (v16c) carries no cross-family holdout outcomes, caps
+  the default shape at half of a pass's births, names the crowded root triangles, and admits a rebirth claim only for
+  a real change in inputs. It also split the levers into settings the operator may change now and look-eligibility
+  rules that need the owner.
+
+**15:22, applied as settings, no deploy:** v16c is the locked preamble and the fallback agenda (the old fallback
+carried Validation figures and is gone); births are limited to debit verticals and two-sided long singles; the cell
+rebirth budget rises from 3 to 6 with the row budget and the rebirth rule unchanged; the strategist's single-lineage
+section was cleared; and the two practice families of the GOOGL lineage, whose program failed its holdout look this
+morning, were withdrawn from practice and the incubator by operator retirement. The open tuition lot stays exit-only to
+its programmed exit. A pre-registered 24-hour read runs from 15:22: births of the default shape against the card
+budget with refusals counted by cause, drift passes per birth and per shape birth, no root set born more than twice,
+zero long butterflies, drift-passing families and validation runs per day, and self-retirements of families awaiting
+validation. The stop rule is fixed in advance.
+
+### Scoreboard (15:30 Oct 1)
+
+| Measure | Value |
+|---|---|
+| Release running | `20261001T133355Z-67c841b645ca` (main `a7542c1c`; main is now `a5a52090` with #473), gateway `dafcfa05` |
+| Real orders since T0 | calibration: 15 round trips closed; tuition: 1 open (GOOGL, exit-only); House test, incubator, Probe, Sized: 0; none today |
+| Net since T0, at the Sept 30 close | −$568.74 (realized −$27.02; costs $541.72); today's close report follows after 20:05 |
+| Families alive / validation passed / in practice | 66 / 1 (then failed its holdout) / 9 rows pinned at the open (7 once the two withdrawals take effect at the next open) |
+| Holdout looks | 3, 0 passed |
+| Births since 07:11 | 24 (11 long butterflies, 8 debit verticals, 4 long singles, 1 long call); the last three architect passes bore none; the first pass under v16c is due about 15:41 |
+| Train disqualification rate since 07:11 | 21 of 496 (4.2%) |
+| Validation runs since 07:11 | 12 |
+| Evidence resets | 2 (releases A and B) |
+| Retained harness improvements | 0 (cycle 2: the research candidate is in verification; the no-retire-while-awaiting-validation fix is in build) |
+| Spend, last hour (15:21) | $1.48/h: Sail models $0.99, Gym boxes $0.49, Claude $0, OpenAI $0. Sail balance $145.81, about 4.4 days at $31/day; Claude $34.74 of $200 left until the gateway deploy |
+
+The goal remains unmet: no D2-qualified strategy trades real money, no harness improvement is retained, and project
+Net at the last close is −$568.74.
