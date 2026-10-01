@@ -976,10 +976,13 @@ never evidence.
   - above $0 over all closes;
   - above $0 over all closes plus the open mark.
 
-  The look is recorded in the live state (`incubator_verdicts`) and as a private `live.incubator` row, whether or not
-  the switch is on. A failed look is final. After a pass, each later session re-checks coverage and the three P&L
-  tests on the longer record, and a failure ends the incubation for good. A program with no edge passes roughly a third
-  to a half of the time: the weekly envelope bounds the cost, not the screen.
+  The look is saved in the live state (`incubator_verdicts`) first, and only then recorded as a private `live.incubator`
+  `first_look` row (with the program and run sha it judged), whether or not the switch is on. A failed look is final. A
+  cohort with a `first_look` row under the running evaluator is never looked at again, even if its saved verdict were
+  lost: the verdict is restored from the row as recorded, and a recorded `ended` row still ends it. After a pass, each
+  later session re-checks coverage and the three P&L tests on the longer record, and a failure ends the incubation for
+  good. A program with no edge passes roughly a third to a half of the time: the weekly envelope bounds the cost, not
+  the screen.
 - **The swarm's facts** (`league.swarm.bands.incubator`). The family must be:
   - alive, in the Gym band, with the version not demoted (at 1.5x or by drift);
   - carrying a Train-and-drift pass for the version under the current evaluator and Train objective, with a positive
@@ -1017,6 +1020,49 @@ never evidence.
   `health.json` `options_live.incubator.pins.refused` says why each passing cohort was not pinned.
 - **Keep (L2').** While the switch is on, a cohort whose first look passed keeps practising past its observation target
   to its bounded window (at most 8), so its re-checks go on. Off, the practice league's own rule is unchanged.
+  - **A failed read never ends an incubation.** Sometimes today's check cannot be taken: the cohorts or a cohort's
+    record cannot be read, or the first looks raise. Then the last keep's cohorts that no re-check ended stay kept, and
+    so does an active cohort whose first look could not read its record (first look or not, and across a restart).
+    A cohort kept without a verdict (its first look unread, or waiting for the next session's record) stays kept for
+    the rest of the day, a restart after the day's retries included. It is never a pin candidate, and its look is
+    taken at the next session's first pass.
+  - While the cohorts themselves cannot be read, and on a pass where the keep raises, the practice league completes
+    no cohort at its observation target (`observe.HOLD`). That is practising only, for that pass, and only while the
+    day's retries remain. After them the carried keep (or, if the keep still raises, the last saved keep) alone is kept
+    and the rest of the league completes by its own rule; one error alert a day says so. If the saved keep cannot be
+    read either, the House keeps the last keep it took itself, or, if it has taken none since it started, completes no
+    cohort at its target. It never falls back to keeping nothing, which would complete pinned cohorts.
+  - Such a cohort is never pinned on the untaken check. `pins.refused` says so, and a private `live.incubator` event
+    (`unread`, `keep_carried`) and one alert a day record it. A failed ledger write never changes the keep.
+  - The keep is marked `unread` (health `keep_carried`), and the next families pass, 5 minutes later, takes the checks
+    again, for at most 12 counted passes after the day's first. After that the day's keep stands and the next
+    session's first pass reads again. Pins are still taken once a session.
+  - The day's passes are counted durably in the live state (`incubator_session`: day, passes, the last counted pass's
+    time, the day's waiting first looks), written at the START of each in-session families pass, before the bands or
+    anything else is read. A pass whose reads all fail still counts, and a restart keeps the count.
+  - A pass counts only 5 minutes (`FAMILIES_EVERY`) or more after the last counted one. A pass forced sooner (a forward
+    read that fails, a band not confirmed, the decider losing a program, a restart) reads again but spends no retry, so
+    the 12 retries span at least an hour.
+  - Within a day the keep only grows. A cohort kept at an earlier pass leaves it only when a check ends it (or its first
+    look fails) or its cohort is no longer active, so a pinned cohort is never completed mid-session. A cohort held on
+    an untaken check is kept beyond the 8 and never takes the place of one checked that day.
+  - **Every first look and re-check reads the record before today, never today's values**, at the session's first
+    pass or at a retry alike, whatever failed before it. `observe.practice_record` leaves out today's closes and
+    today's session, and it reads the practice row's decision coverage and open mark as its last session before today
+    left them. The practice row keeps those (`prior_due`, `prior_made`, `prior_open_mark`), copied at the first minute
+    of each new session day and stamped with that day (`prior_day`, the day of the copy, not the day the values came
+    from). They are read only when `prior_day` is today. So a retry reads the same before-today record as the first
+    pass, plus any before-today closes recorded since (a trade written again after a failed write, a missed expiry
+    settled on its day): today's mark can neither end an incubation nor pin one.
+  - A record that cannot say what its row held before today (`intraday`) decides nothing on P3 or P6. That is a row
+    stepped today before those columns were kept (only around the release), or one stepped today by a release that never
+    copies them, as after a rollback to release A: its `prior_day` is then an earlier day, and its values an older
+    session's. A re-check then ends only on P4 or P5, evaluated whatever P3 says, and is otherwise `deferred`: kept, not
+    pinned, and re-checked at the next session's first pass. A first look then fails only on P4 or P5, and otherwise
+    waits, kept, for the next session's record. It is never taken again that day.
+  - The first pass of a session day that cannot pin is retried every 5 minutes, not every minute. That covers the bands,
+    the observe band or its cohorts being unreadable, and the incubator's pins raising. A restart asks again at once,
+    and switching the observe band on mid-session still pins it at the next minute.
 - **The caps** (`money.plan_incubator`, with the tally read afresh from `live.sqlite` at every open). They live in the
   House only: the gateway cannot tell routes apart, so its caps are the backstop.
   - One lot; at most $50 a structure; at most $50 held or working per family.
