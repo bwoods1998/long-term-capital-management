@@ -57,3 +57,48 @@ class LenientRead(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+from league.tests.test_swarm_architect_sail import SailCase, families  # noqa: E402
+
+
+def sloppy_answer(n: int) -> str:
+    """A complete fenced Sail answer of n families with a stray comma closing each family and the array."""
+    body = ",\n".join(json.dumps(f)[:-1] + ",}" for f in families(n))
+    return "```json\n{\"families\": [\n" + body + ",\n]}\n```"
+
+
+class LenientPass(SailCase):
+    def test_a_complete_answer_with_trailing_commas_is_born_and_the_event_says_lenient(self):
+        self.replies = [{"text": sloppy_answer(3)}]
+        out = self.arch().run()
+        self.assertEqual(out["proposed"], 3)
+        self.assertEqual(out["born"], ["idea-0", "idea-1", "idea-2"])
+        self.assertTrue(out.get("lenient"))
+        self.assertTrue(self.event().get("lenient"))
+
+    def test_a_valid_answer_is_not_marked_lenient(self):
+        self.replies = [{"text": "```json\n" + json.dumps({"families": families(2)}) + "\n```"}]
+        out = self.arch().run()
+        self.assertEqual(out["proposed"], 2)
+        self.assertNotIn("lenient", out)
+
+    def test_an_unreadable_answer_without_stray_commas_stays_unread(self):
+        broken = "```json\n{\"families\": [" + json.dumps(families(1)[0]) + ", {\"slug\": \"x\" \"bad\"}]}\n```"
+        self.replies = [{"text": broken}]
+        out = self.arch().run()
+        self.assertEqual(out["proposed"], 0)
+        self.assertNotIn("lenient", out)
+
+
+class PreambleQuotes(unittest.TestCase):
+    def test_prose_before_the_json_cannot_flip_the_string_tracking(self):
+        text = 'Use the 2" rule.\n' + sloppy(2).replace("Commas, and", "buy the 5, ] wing; commas, and")
+        rows, lenient = read_families({"text": text, "json": extract_json(text)})
+        self.assertTrue(lenient)
+        self.assertEqual(len(rows), 2)
+        self.assertIn("buy the 5, ] wing", rows[0]["mechanism"])
+
+    def test_a_valid_answer_after_an_example_object_reads_as_before(self):
+        text = 'Example: {"slug": "example"}\n' + json.dumps({"families": [FAMILY]})
+        self.assertEqual(read_families({"text": text, "json": extract_json(text)}), (None, False))

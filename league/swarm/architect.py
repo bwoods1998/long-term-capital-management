@@ -983,23 +983,39 @@ def without_trailing_commas(text: Any) -> str:
 
 
 def read_families(answer: Mapping[str, Any]) -> tuple[list[dict[str, Any]] | None, bool]:
-    """(the answer's proposals, whether a lenient read found them). A cut answer keeps its complete families (R11-3,
-    `salvage_families`); a complete one is read whole; when a complete answer's JSON has no `families` array (a stray
-    trailing comma makes the whole object unreadable, so the first readable inner object is taken instead), the text is
-    read again without trailing commas, whole or else object by object."""
-    text = answer.get("text")
+    """(the answer's proposals, whether they were read without stray trailing commas). A cut answer keeps its complete
+    families (R11-3, `salvage_families`); a complete one is read whole. Only when a complete answer's JSON has no
+    `families` array AND its `families` object carries a stray trailing comma (`,}` or `,]`: the whole object is then
+    unreadable, so the first readable inner object was taken instead) is it read again without them, whole or else object
+    by object. The strip starts at the `{` that opens the `families` object, so prose before it cannot flip the string
+    tracking. Any other unreadable answer reads as before (None)."""
+    text = str(answer.get("text") or "")
     if answer.get("truncated"):
-        return salvage_families(without_trailing_commas(text)), False
+        return salvage_families(_from_families(text, strip=True)), False
     rows = (answer.get("json") or {}).get("families")
     if rows is not None or not text:
         return rows, False
+    body = _from_families(text, strip=False)
+    lenient = without_trailing_commas(body)
+    if not body or lenient == body:
+        return None, False
     from .models import extract_json  # the router's own reader (models.py is not on the live path)
-    lenient = without_trailing_commas(text)
     whole = (extract_json(lenient) or {}).get("families")
     if isinstance(whole, list):
         return whole, True
     some = salvage_families(lenient)
     return (some, True) if some else (None, False)
+
+
+def _from_families(text: str, *, strip: bool) -> str:
+    """`text` from the `{` that opens the object holding the `families` array ("" when there is none), its stray trailing
+    commas removed when `strip`."""
+    found = _FAMILIES.search(text)
+    if not found:
+        return ""
+    start = text.rfind("{", 0, found.start())
+    body = text[start:] if start >= 0 else text[found.start():]
+    return without_trailing_commas(body) if strip else body
 
 
 def salvage_families(text: Any) -> list[dict[str, Any]]:
@@ -1575,7 +1591,7 @@ class Architect:
         except Exception as exc:  # noqa: BLE001 - the pass keeps what it salvaged
             return {"born_ids": [], "effort": "medium", "error": f"{type(exc).__name__}: {str(exc)[:300]}"}
         cut = bool(answer.get("truncated"))
-        rows = salvage_families(answer.get("text")) if cut else (answer.get("json") or {}).get("families")
+        rows, _ = read_families(answer)  # the retry is read as the pass is (a cut one salvaged, stray commas dropped)
         on_digest = bool(extra) and answer.get("route") == "claude"
         born = self.admit(rows, digest=on_digest, library=library)
         if on_digest and self.digest is not None and info is not None:
@@ -1711,7 +1727,7 @@ class Architect:
         return out
 
 
-__all__ = ["Architect", "SYSTEM", "GraveyardDigest", "Digest", "lesson_view", "parse_lesson", "tag_of", "compose", "salvage_families",
+__all__ = ["Architect", "SYSTEM", "GraveyardDigest", "Digest", "lesson_view", "parse_lesson", "tag_of", "compose", "salvage_families", "read_families", "without_trailing_commas",
            "SALVAGE_MIN", "SAIL_EFFORT", "SAIL_EFFORTS", "sail_usage",
            "locked_text", "fit", "AGENDA_KEY", "SEAL_KEY", "CPT_KEY", "LAST_KEY", "DIGEST_HEADER", "FULL_GRAVEYARD_RULE",
            "GRAVEYARD_POINTER", "SECTION_MAX", "AGENDA_LOCKED_MAX", "MAX_DIGEST_BYTES", "COMPOSED_AGENDA_TITLE",
