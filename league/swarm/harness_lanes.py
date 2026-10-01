@@ -1075,7 +1075,8 @@ FROZEN_SYMBOLS: dict[str, tuple[str, ...]] = {
         "Researcher.train_span", "Researcher.train_first_year", "Researcher._robust_of", "Researcher._gym_identity",
         "Researcher.eval_key", "Researcher._result_key", "Researcher._reusable", "Researcher._restart_dormancy",
         "Researcher._with_score", "Researcher.dead", "Researcher.hold_offer", "Researcher.can_retire",
-        "Researcher.retire_floor", "Researcher._scored", "Researcher.eligible_run", "Researcher.screen",
+        "Researcher.retire_earned", "Researcher.retire_floor", "Researcher._scored", "Researcher.eligible_run",
+        "Researcher.screen",
         "Researcher.drift_blocks", "Researcher._demote", "Researcher._terminal", "Researcher.cycle",
         "Researcher._count_dormancy", "Researcher._count_holds",
         # A program's path from the model's tool call to the Gym: the arguments a tool call carries, the program text

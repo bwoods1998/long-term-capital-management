@@ -314,19 +314,22 @@ class DeadExit(ResearcherCase):
         cases = {
             "gate_ready": ({"gate_ready": True}, {}),
             "held at the gate": ({"gate_ready": True, "gate_hold": True}, {}),
-            "awaiting validation": ({}, {"best_version": 2}),          # its best not validated, its 1.5x run not back
+            # Its best not validated, its 1.5x run not back; tested (`retire_min_trials`), so only THE VALIDATION WAIT
+            # withholds the offer (Oct 1, H1: seven of ten such families retired themselves before their validation).
+            "awaiting validation": ({}, {"best_version": 2, "trials": 12}),
             "a candidate": ({}, {"band": "candidate"}),
         }
         for name, (state, fields) in cases.items():
             with self.subTest(name):
                 self.store.set_state(self.fid, **{"gate_ready": False, "gate_hold": False, "dormant_cycles": DORMANT_CYCLES * 3,
                                                   **state})
-                self.store.update_family(self.fid, **{"band": "gym", "best_version": None, **fields})
+                self.store.update_family(self.fid, **{"band": "gym", "best_version": None, "trials": 1, **fields})
                 fam = self.store.family(self.fid)
                 self.assertIsNone(idle_dead(fam, self.settings) if not held_at_gate(fam) else None)
                 self.assertFalse(self.researcher().can_retire(fam))
                 if name == "awaiting validation":
                     self.assertTrue(awaiting_validation(fam))
+                    self.assertTrue(self.researcher().retire_earned(fam), "only the wait withholds the offer")
                 if name != "a candidate":
                     self.steps = [{"calls": [("retire", {"reason": "Dead."}), ("gym_run", {"hold": True, "note": "Waiting."})]}]
                     out = self.researcher().cycle(self.fid)

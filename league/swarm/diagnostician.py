@@ -24,7 +24,9 @@ WHAT IT ANSWERS (one JSON object, a structured output): `decision` "rewrite" or 
   family's next Train run (`rewrite_ready`, profile "diagnostician"), so the researcher's next cycle runs it through
   the same safety check and Gym run as any revision, as a new version authored "diagnostician".
 - A RETIRE is honored only while more families live than `population.start` (`retire_gym` with that as its floor, checked
-  in its own transaction); otherwise it is written to the family's notebook as a recommendation.
+  in its own transaction); otherwise it is written to the family's notebook as a recommendation. Never while independent
+  evidence is pending (a version at the gate, a look out, the extension hold or, from Oct 1, a best Train version that
+  awaits validation: researcher.py's THE VALIDATION WAIT): the recommendation goes to the notebook, to be read after it.
 - A call BILLED WITHOUT AN ANSWER (a refusal, a truncation) counts as a diagnosis: the family waits for new evidence. A
   truncation is asked once more at medium effort with a tighter brief when the day's budget holds it. A call that cost
   nothing is asked again after half an hour.
@@ -366,11 +368,13 @@ class Diagnostician:
             # Start is the architect's refill target, not a second floor (start == ceiling otherwise makes this
             # decision unreachable). The store serializes concurrent retirements against the actual floor.
             floor = int(population.get("floor", 16))
-            from .researcher import extension_held
+            from .researcher import awaiting_validation, extension_held
             with self.store.atomic():
                 current = self.store.family(fid) or fam
                 state = current.get("state") or {}
-                if extension_held(current) or state.get("gate_ready") or state.get("look_inflight"):
+                # THE VALIDATION WAIT (researcher.py): a best the tournament owes a verdict is pending evidence too.
+                if (extension_held(current) or state.get("gate_ready") or state.get("look_inflight")
+                        or awaiting_validation(current)):
                     out.update(outcome="retire_refused", reason="independent evidence is pending or held")
                     self.store.note(fid, f"The diagnostician recommends retiring this family after its pending evidence: {lesson}")
                     return self._record(out, began)

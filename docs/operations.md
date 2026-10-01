@@ -1726,7 +1726,14 @@ promotion threshold:
 - `researcher.retire_min_trials: 10`: a researcher may retire after this many counted trials, or after two validations,
   on either its REVISE or READ turn. It need not spend three holding cycles to receive the tool. All researcher and
   diagnostician retirements use the atomic `population.floor`. `population.start` only governs refilling. Pending gate
-  work and extension/operator holds remain protected; the floor prevents concurrent retirements from draining the
+  work and extension/operator holds remain protected, and so is a best Train version that awaits validation (Oct 1, H1;
+  `awaiting_validation`, the dormancy clause's own exemption: not validated, not lost at 1.5x, not failed by the drift
+  screen): the tool is not offered, a call is refused with the reason (the cycle's record carries `retire_awaiting`),
+  the status says so in place of any offer, and the diagnostician's retire defers the same way; the tournament's
+  verdict, pass or fail, ends it, and so does a demotion. On Oct 1 seven of the ten families that made a drift-passing
+  Train version had retired themselves before the tournament validated it. The tournament's own rules, operator
+  retirements and `SwarmStore.retire_gym` are unchanged (a 1.5x run that never lands must not make a family no rule
+  can retire). The floor prevents concurrent retirements from draining the
   population. The agent must explain abandonment, and all prior evidence remains.
 - The validated-family guard (Oct 1, `researcher.retire_guard_days`, default 14): the retire tool refuses while the
   family holds a version whose latest validation passed the line, last validated within that many days (the
