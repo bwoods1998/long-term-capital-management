@@ -170,9 +170,9 @@ class LegacyCells(unittest.TestCase):
         self.assertEqual(cards.infer_inputs("Pays when it pays."), [])
 
 
-GOOD = {"different": "conditions on dealer inventory imbalance measured from quote size asymmetry, which the dead family "
-                     "never read",
-        "evidence": "option_liquidity: its lesson shows entries lost only on days quote sizes were balanced"}
+GOOD = {"different": "conditions on dealer inventory imbalance measured from open interest at the nearby strikes, which the "
+                     "dead family never read",
+        "evidence": "open_interest: its lesson shows entries lost only on days dealer open interest was balanced"}
 
 
 class Rebirth(Case):
@@ -196,7 +196,7 @@ class Rebirth(Case):
         self.assertFalse(index.check({**card, "inputs": ["iv_skew"]}, "debit_vertical")["ok"],
                          "declared iv_skew, but its hypothesis reads the close and liquidity: the dead card's information")
         self.assertTrue(index.check(card, "iron_condor")["ok"], "another structure family is another cell")
-        wider = {**card, "inputs": ["clock", "option_liquidity", "underlying_price"]}
+        wider = {**card, "inputs": ["clock", "open_interest", "underlying_price"]}
         restated = {**wider, "rebirth": {"row": dead, "different": "the same late day selling and rebound now on QQQ calls "
                                                                    "with a wider strike and two weeks", "evidence": "e" * 50}}
         self.assertIn("restates", index.check(restated, "debit_vertical", MECH)["reason"])
@@ -210,7 +210,7 @@ class Rebirth(Case):
         good = {**wider, "rebirth": {"row": dead, **GOOD}}
         verdict = index.check(good, "debit_vertical", MECH)
         self.assertTrue(verdict["ok"], verdict)
-        self.assertEqual(verdict["new_inputs"], ["option_liquidity"])
+        self.assertEqual(verdict["new_inputs"], ["open_interest"], "the dead row's words named liquidity: not new")
         index.note_birth(good, "debit_vertical")
         index.note_birth(good, "debit_vertical")
         self.assertIn("already backed 2", index.check(good, "debit_vertical", MECH)["reason"])
@@ -221,7 +221,7 @@ class Rebirth(Case):
         card, _ = cards.validate(CARD)
         rows = [self.bury(f"rebound-{i}", card, reason=mechanism.MECHANISM_CAUSE.format(n=3), roots=(r,))
                 for i, r in enumerate(("SPY", "QQQ"))]
-        wider = {**card, "inputs": ["clock", "option_liquidity", "underlying_price"]}
+        wider = {**card, "inputs": ["clock", "open_interest", "underlying_price"]}
         a = self.arch()
         born = a.admit([proposal(f"reborn-{i}", card={**wider, "rebirth": {"row": rows[i // 2], **GOOD}}, roots=["IWM"],
                                  mechanism=f"Dealer inventory imbalance after late selling predicts rebound {i} next session.")
@@ -245,6 +245,33 @@ class Rebirth(Case):
         self.assertEqual(refused["row"], dead)
         relabeled = {**same_idea, "mechanism_class": "calendar_flow"}
         self.assertFalse(index.check(relabeled, "debit_vertical", MECH, [0, 5])["ok"], "in the text-class check too")
+
+    def test_a_dead_card_is_matched_on_the_inputs_its_own_words_name(self):
+        """Review of #446 (P4): the dead side is read as the proposal's is. A dead card that declared skew only, while its
+        hypothesis and mechanism read the close and its liquidity, is matched on those too, so the same hypothesis word for
+        word declaring the price alone does not escape it."""
+        card, _ = cards.validate({**CARD, "inputs": ["iv_skew"]})
+        dead = self.bury("dead-under", card, reason=mechanism.MECHANISM_CAUSE.format(n=3))
+        index = cards.RebirthIndex(self.store, self.settings)
+        [row] = index.rows
+        self.assertEqual(row["inputs"], ["iv_skew", "option_liquidity", "underlying_price"])
+        bounce = ("After a session that closes at its low the next session's open retraces part of the fall, so a bullish "
+                  "vertical bought at the close is paid by the bounce.")
+        new = {**card, "inputs": ["underlying_price"], "hypothesis": bounce}
+        refused = index.check(new, "debit_vertical", bounce, [0, 5])
+        self.assertFalse(refused["ok"])
+        self.assertEqual(refused["row"], dead)
+        self.assertFalse(index.check({**card, "inputs": ["underlying_price"]}, "debit_vertical", "", [0, 5])["ok"],
+                         "the dead card's own words with its declared input swapped")
+        reborn = {**new, "inputs": ["underlying_price", "open_interest"],
+                  "rebirth": {"row": dead, "different": "dealer open interest pins decide which closing lows retrace",
+                              "evidence": "open_interest concentration at the close's strike"}}
+        self.assertEqual(index.check(reborn, "debit_vertical", bounce, [0, 5])["new_inputs"], ["open_interest"],
+                         "a new input is one the dead row neither declared nor named")
+        liquidity = {**reborn, "inputs": ["underlying_price", "option_liquidity"],
+                     "rebirth": {**reborn["rebirth"], "evidence": "option_liquidity at the close"}}
+        self.assertIn("adds no input", index.check(liquidity, "debit_vertical", bounce, [0, 5])["reason"],
+                      "the liquidity its words named is not new")
 
     def test_a_relabeled_class_is_read_by_its_own_text(self):
         card, _ = cards.validate(CARD)
@@ -314,7 +341,7 @@ class TheArchitect(Case):
         for text in ("FAMILY CARD VOCABULARY", "REFUTED CELLS", "reversal_liquidity / directional / days_1_3",
                      "YOUR LAST PASS'S PROPOSALS REFUSED", f"Lesson of {dead}"):
             self.assertIn(text, block)
-        reborn = {**CARD, "inputs": ["clock", "option_liquidity", "underlying_price"], "rebirth": {"row": dead, **GOOD}}
+        reborn = {**CARD, "inputs": ["clock", "open_interest", "underlying_price"], "rebirth": {"row": dead, **GOOD}}
         born = a.admit([proposal("rebound-new", card=reborn, mechanism="Dealer inventory imbalance after late selling "
                                                                         "predicts which rebounds complete next session.")])
         self.assertEqual(born, ["rebound-new"])
@@ -333,7 +360,7 @@ class TheArchitect(Case):
         card, _ = cards.validate(CARD)
         dead = self.bury("rebound-old", card, reason=mechanism.MECHANISM_CAUSE.format(n=3))
         self.store.bump(dead, trials=7)
-        reborn = {**CARD, "inputs": ["clock", "option_liquidity", "underlying_price"], "rebirth": {"row": dead, **GOOD}}
+        reborn = {**CARD, "inputs": ["clock", "open_interest", "underlying_price"], "rebirth": {"row": dead, **GOOD}}
         born = self.arch().admit([proposal("rebound-qqq", card=reborn, roots=["QQQ"],
                                            mechanism="Dealer inventory imbalance after late selling predicts which QQQ "
                                                      "rebounds complete next session.")])

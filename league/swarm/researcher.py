@@ -114,20 +114,25 @@ about 250 sessions), unsplit, the first window first; every arm a trial recorded
 The bound rises with each failed test of the same hypothesis across its lineage (`mechanism_lineage`: the rebirth
 refusal's notion of the same hypothesis; forks and rebirths never reset it). SHADOW mode (the default,
 `researcher.mechanism_test.mode`): a `sample` share of carded families take one BLIND test each, at the first run that
-can take it (a run with the signal off or a program without the switch is skipped, not recorded); the verdict goes on the
-card and in the state, never to the researcher (not in the run's view, the status line or the notebook), and the broad
-run goes ahead whatever it says, so `mechanism.calibration_rows` can measure what the verdict predicts. GATE mode: the
+can take it (a run with the signal off or a program without the switch is skipped, not recorded) while it is still the
+gate's test: never once the family, or a family of its lineage with its card, has broad Train runs (a program already
+fitted to Train; such a run happens in shadow whatever any verdict said, so the skip stays blind); the verdict goes on the
+card and in the state, never to the researcher (not in the run's view, the status line or the notebook), with `exposed`
+(such a broad run had landed by the time it was recorded), and the broad run goes ahead whatever it says, so
+`mechanism.calibration_rows` (blind, unexposed rows) can measure what the verdict predicts. GATE mode: the
 broad run and gym_sweep wait for a pass (or broad Train runs) by a family of the lineage with the same card, which opens
 broad replay for all of them on any later Gym; a program without the card's switch, with it of another type, never
 reading it, or run with the signal off is refused before any version (`_mechanism_plan`); a test failed below the base
 bound retires the family with the MECHANISM verdict once its card holds `max_failures` such failures, and no other
 verdict does (`_mechanism_retire`). Gate verdicts go on the card, in the state and in the notebook, and the same test
 asked again is answered from them. A pool error that says the Gym has no data for a window drops that window (never a Gym
-error asked again every cycle); an arm the Gym failed for its own reasons (a dead worker, a unit past its deadline) makes
-the test a Gym error and is never reused. A version that just passed in gate mode is not probed (it traded); a mechanism
-row never counts as a version's Train run for the probe. The brief shows the card; the status, the test's state. Families
-born before cards run as before. Cycle events carry the test's verdict, `box_seconds` and a broad run's
-`gym_box_seconds`: the Gym time each costs.
+error asked again every cycle); an arm the Gym failed for its own reasons (a dead worker, a unit past its deadline)
+makes the test a Gym error and is never reused, until the family's tests meet the same failure `max_infrastructure` (3)
+times in a row: then it is the program's (a runaway, a segfault), so the arm erred and the test is untestable or an
+invalid ablation (the family's state's `mechanism.infra` counts the run; a test whose arms all ran clears it). A version
+that just passed in gate mode is not probed (it traded); a mechanism row never counts as a version's Train run for the
+probe. The brief shows the card; the status, the test's state. Families born before cards run as before. Cycle events
+carry the test's verdict, `box_seconds` and a broad run's `gym_box_seconds`: the Gym time each costs.
 
 ROOTS. A family holds one to five roots of the admitted list (`gym.roots`). A program whose NEEDS names other
 admitted roots changes the family's roots (a Gym family only); its validation and holdout runs use the version's own
@@ -2002,8 +2007,8 @@ class Researcher:
                 tested_view = {"mode": "shadow", "recorded": done, "note": (
                     "a mechanism test of this version ran and is recorded on your card, its arms charged as trials; its verdict "
                     "is withheld until your family's outcome is known, and it did not stop this run" if done else
-                    "the Gym could not finish this version's mechanism test (the arms that ran are kept as trials); it runs "
-                    "again before a later run, and it did not stop this one")}
+                    "the Gym could not finish this version's mechanism test (the arms that ran are kept as trials); it did not "
+                    "stop this run")}
             fam = self.store.family(fam["id"]) or fam
         # A version that just passed its mechanism test (gate mode) traded on the sample: the zero-trade probe would say
         # nothing new. In shadow the probe runs as it would without the test (whether it runs would tell the verdict).
@@ -2159,8 +2164,9 @@ class Researcher:
         """The hypothesis's test record across the lineage set (`store.lineages`: forks, parent-named revisions, rebirths
         that join or count the lineage), for the family's card `entry`:
         - "failed": failed tests (distinct family and version) of the SAME HYPOTHESIS, the rebirth refusal's notion of it
-          (`cards.match_keys` of this family's card and words against each lineage family's declared card: the same
-          class, structure family and holding, with overlapping inputs): what raises the noise bound;
+          (`cards.match_keys` of this family's card and words against each lineage family's declared cell, its inputs
+          read the same way, `cards.match_inputs`: the same class, structure family and holding, with overlapping inputs):
+          what raises the noise bound;
         - "hard": failed tests below the base bound by families with this family's card (its own, and its forks', which
           read the same card): what counts toward a MECHANISM retirement;
         - "passed": a family with the same card passed its test; "broad": such a family has broad Train runs;
@@ -2201,7 +2207,9 @@ class Researcher:
                     by_sha[sha] = json.loads(found["card"]) if found else None
                 card = by_sha.get(sha) if sha else None
             if card:
-                theirs = cards.key_of(card, f["structure"])
+                # Their inputs are read as ours are (`cards.match_inputs`: declared, and named by their own words), as the
+                # rebirth refusal reads a dead carded row.
+                theirs = {**cards.key_of(card, f["structure"]), "inputs": cards.match_inputs(card, f["mechanism"])}
                 mine[f["id"]] = (sha, any(cards.matches(k, theirs) for k in keys), cards.cell_of(theirs))
             else:
                 mine[f["id"]] = (sha, False, None)
@@ -2240,8 +2248,11 @@ class Researcher:
     def _mechanism_plan(self, fam: Mapping[str, Any], code: str, params: Mapping[str, Any]) -> dict[str, Any] | None:
         """None when no mechanism test comes before this broad run: the test is off, a family outside the Gym band, one born
         before cards; in gate mode a hypothesis that passed (or was broadly replayed); in shadow a family outside the
-        `sample` share or with a verdict of its own (one blind test a family: a sibling's verdict or broad runs never skip
-        it, so what the researcher sees never depends on a verdict). Else the plan ({entry, cfg, gate, flat, param, off,
+        `sample` share, with a verdict of its own (one blind test a family) or EXPOSED: it, or a family of its lineage with
+        its card (a fork running its parent's program), already has broad Train runs, so the test would not be the gate's
+        first test of an unfitted program (review of #446, P1/P2). In shadow a broad run happens whatever any verdict said,
+        so that skip reads no verdict, and a sibling's verdict never skips a test: what the researcher sees never depends on
+        a verdict. Else the plan ({entry, cfg, gate, flat, param, off,
         off_params, lineage}), or with {"refused": answer} when the program cannot take the test (its ablation switch is
         missing, of another type, never read, or this run already has the signal off): in gate mode the answer (no version,
         job or trial); in shadow the run goes on untested and nothing is recorded, so a later run that can take it does."""
@@ -2258,7 +2269,7 @@ class Researcher:
         if not gate and not mechanism.in_sample(str(fam["id"]), cfg["sample"]):
             return None
         lineage = self.mechanism_lineage(str(fam["id"]), entry)
-        if (lineage["passed"] or lineage["broad"]) if gate else lineage["own"]:
+        if lineage["broad"] or (lineage["passed"] if gate else lineage["own"]):
             return None
         base = {"entry": entry, "cfg": cfg, "gate": gate, "lineage": lineage}
         ablation = entry["card"].get("ablation") or cards.DEFAULT_ABLATION
@@ -2341,6 +2352,11 @@ class Researcher:
         run_ids: list[str] = []
         failed: list[str] = []
         box_seconds, jobs_made = 0.0, 0
+        # The family's identical infrastructure failures in a row (mechanism.py STAGES): from `max_infrastructure` on, the
+        # same failure is the program's. `infra`: this test's (kind, failures in a row), the first one it met.
+        before_infra = self.mechanism_record(self.store.family(fid) or fam).get("infra") or {}
+        max_infra = int(cfg.get("max_infrastructure", 3))
+        infra: tuple[str, int] | None = None
 
         def record(arm: str, start: str, end: str, key: str, result: Mapping[str, Any]) -> dict[str, Any]:
             kept = mechanism.trim(result)
@@ -2393,10 +2409,18 @@ class Researcher:
                     run = record(arm, start, end, key, result)
                     run_ids.append(run["run_id"])
                     out["trials"] = out.get("trials", 0) + int(result.get("trials", 0) or 0)
-                    if mechanism.infrastructure(result):
-                        # The Gym failed this arm for its own reasons (a dead worker, a unit past its deadline): never a
-                        # verdict about the program. The test ends as a Gym error; the arm is not reused (`_stored_mechanism`).
-                        failed.append(f"the Gym could not run the {arm} arm: {str(result.get('reason') or '')[:200]}")
+                    kind = mechanism.infrastructure_kind(result)
+                    if kind is not None:
+                        # The Gym failed this arm for its own reasons (a dead worker, a unit past its deadline): not a
+                        # verdict about the program, so the test ends as a Gym error and the arm is not reused
+                        # (`_stored_mechanism`), until the family's tests met this same failure `max_infrastructure` times in
+                        # a row (review of #446, P3): then it is the program's (a runaway, a segfault), and the arm erred.
+                        in_a_row = int(before_infra.get("n") or 0) + 1 if before_infra.get("kind") == kind else 1
+                        infra = infra or (kind, in_a_row)
+                        if max_infra > 0 and in_a_row >= max_infra:
+                            results[(arm, start)] = {**mechanism.trim(result), "infrastructure": kind, "in_a_row": in_a_row}
+                        else:
+                            failed.append(f"the Gym could not run the {arm} arm: {str(result.get('reason') or '')[:200]}")
                         continue
                     results[(arm, start)] = mechanism.trim(result)
                     batch = getattr(job, "batch", None)
@@ -2411,6 +2435,11 @@ class Researcher:
         seconds = round(self.clock() - began, 2)
         out["mechanism_test"] = {"jobs": jobs_made, "gym_seconds": seconds, "box_seconds": round(box_seconds, 2),
                                  "mode": cfg["mode"]}
+        if infra is not None:  # the run of identical failures goes on (or starts); a test whose arms all ran ends it
+            self._mechanism_infra(fid, {"kind": infra[0], "n": infra[1], "version": int(n), "at": self.store.now()})
+            out["mechanism_test"]["infrastructure"] = {"kind": infra[0], "in_a_row": infra[1]}
+        elif not failed and before_infra:
+            self._mechanism_infra(fid, None)
         if failed:
             error = failed[0][:300]
             out["mechanism_test"]["gym_error"] = error
@@ -2429,6 +2458,7 @@ class Researcher:
                     for t in mechanism.counted(r.get("trades") or [], s, by_start[s], holding)]
 
         profiles: dict[str, Any] = {}
+        audit_skipped: list[str] = []
         failed_before = plan["lineage"]["failed"]
         min_t = mechanism.bound(cfg, failed_before)
         if early is not None:
@@ -2451,8 +2481,10 @@ class Researcher:
                 else:
                     off_trades = kept([results[("off", s)] for s in usable], usable)
                     profiles["off"] = mechanism.profile(off_trades)
-                    # A clock signal's comparison enters at other minutes by design (mechanism.CLOCK_SKIPS).
-                    skip = mechanism.CLOCK_SKIPS if "clock" in (entry["card"].get("inputs") or []) else ()
+                    # A time-of-day card's comparison enters at other minutes by design (`mechanism.clock_skips`; declaring
+                    # the clock alone never skips a check). What it skipped is recorded with the verdict.
+                    skip = mechanism.clock_skips(entry["card"])
+                    audit_skipped = sorted(skip)
                     wrong = mechanism.audit(profiles["on"], profiles["off"], skip=skip)
                     if wrong:
                         verdict = {"verdict": "invalid_ablation", "audit": wrong,
@@ -2463,6 +2495,11 @@ class Researcher:
                                                     min_t=min_t, min_on_days=cfg["min_on_days"], min_off_days=cfg["min_off_days"])
                 if verdict.get("verdict") == "failed":
                     verdict["below_base"] = not (float(verdict.get("diff") or 0.0) > 0 and float(verdict.get("t") or 0.0) >= float(cfg["min_t"]))
+        repeated = [r for r in results.values() if r.get("infrastructure")]
+        if repeated and verdict.get("verdict") in ("untestable", "invalid_ablation"):
+            verdict = {**verdict, "infrastructure": {"kind": repeated[0]["infrastructure"], "in_a_row": repeated[0]["in_a_row"]},
+                       "why": f"{verdict.get('why')} (the same Gym failure {repeated[0]['in_a_row']} times in a row in this "
+                              "family's tests: counted as the program's own)"}
         name = str(verdict["verdict"])
         hurdle = (entry["card"].get("cost") or {}).get("hurdle")
         verdict = {**verdict, "hurdle": hurdle,
@@ -2474,10 +2511,14 @@ class Researcher:
                   "gym_seconds": seconds, "box_seconds": round(box_seconds, 2), "roots": list(roots), "mode": cfg["mode"],
                   "bound": min_t, "failed_before": failed_before, "image": None if image is None else str(image),
                   "bundle": None if bundle is None else str(bundle), "fill_model": self._fill_model, "card_sha": entry["sha"],
-                  "blind": not plan["gate"]}
+                  "blind": not plan["gate"], "audit_skipped": audit_skipped}
         with self.store.atomic():
             if self._terminal(fid, out):
                 return {"status": "retired", "reason": "the family is retired; the mechanism test is not recorded"}
+            # EXPOSED (review of #446, P1/P2): the family, or a family of its lineage with its card, had broad Train runs when
+            # the test began (the plan skips that in shadow) or by now (one that landed while the arms ran). Such a test is
+            # not the gate's first test of an unfitted program, so `mechanism.calibration_rows` never counts it.
+            detail["exposed"] = bool(plan["lineage"].get("broad") or self.mechanism_lineage(fid, entry)["broad"])
             cards.add_evidence(self.store, fid, entry["sha"], n, "mechanism_test", name, detail)
             self._mechanism_state(fid, n, name, detail, test_key)
         # The cycle's event (the operator's record, never the researcher's) carries the verdict in both modes.
@@ -2530,6 +2571,17 @@ class Researcher:
             self.store.set_state(fid, **{mechanism.STATE_KEY: rec})
         return rec
 
+    def _mechanism_infra(self, fid: str, run: Mapping[str, Any] | None) -> None:
+        """The family's run of identical infrastructure failures in its mechanism tests (its state's `mechanism.infra`:
+        {kind, n, version, at}), or None to end it (a test whose arms all ran)."""
+        with self.store.atomic():
+            rec = self.mechanism_record(self.store.family(fid) or {})
+            if run is None:
+                rec.pop("infra", None)
+            else:
+                rec["infra"] = dict(run)
+            self.store.set_state(fid, **{mechanism.STATE_KEY: rec})
+
     def _mechanism_retire(self, fam: Mapping[str, Any], cfg: Mapping[str, Any], entry: Mapping[str, Any], out: dict[str, Any],
                           verdict: Mapping[str, Any]) -> str | None:
         """Gate mode, after this test's `verdict`: retire the family with MECHANISM (a tested finding) only when THIS test
@@ -2581,6 +2633,8 @@ class Researcher:
             if rec.get("last"):
                 return (f"Your mechanism test ran on version {rec['last'].get('version')} (shadow mode): it is recorded on your "
                         "card, its verdict withheld until your family's outcome is known, and it never stops a run.")
+            if self.mechanism_lineage(str(fam["id"]), entry)["broad"]:
+                return ""  # exposed: a program already replayed broadly on Train is not tested in shadow (`_mechanism_plan`)
             return ("Your next gym_run that has your card's switch on first runs your program with the signal on and with your "
                     f"card's ablation over {days} (shadow mode: every arm counts as a trial, the verdict is recorded on your "
                     "card and withheld from you, and the broad run goes ahead whatever it says).")

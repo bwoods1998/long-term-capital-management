@@ -38,22 +38,25 @@ refusal and of a budget is (class, structure family, holding).
 
 CARD-BASED REBIRTH REFUSAL (`RebirthIndex`). A proposal whose cell matches a graveyard row killed by a MECHANISM VERDICT
 (`MECHANISM_VERDICTS`: the operator's pre-registered tests, refuted, self-refuted, diagnosed, trial-adjusted, drift,
-stress, and a failed mechanism test) is refused unless its `rebirth` makes a valid case, and the refusal quotes the row's
-lesson, which the architect reads in its next request. MATCHING (`match_keys`): a carded row matches on class, structure
-family and holding when the input sets overlap (an unused input added to a dead card never escapes it). The proposal's
-inputs for matching are its declared inputs AND those its own mechanism text and hypothesis name (`match_inputs`, the
-`infer_inputs` reading), so declaring inputs that avoid a dead card's while the text reads the same ones never escapes
-it either. A row from before cards has no declared key, so `infer_key` reads one from its mechanism text, structure and
-days to expiry (a deterministic keyword reading, deliberately coarse) and it matches on class, structure family and
-holding alone. The proposal's own mechanism text is read the same way (`infer_key`): when it reads as another class than
-the one declared, the rows of that class's cell match too (a refuted idea relabeled into an open class never escapes). A VALID REBIRTH names one of the matched rows
-(`row`), says what is different (`different`: words beyond the dead row's own mechanism, a new root, structure or horizon
-never counting) and adds at least one input the dead row did not read (its card's inputs, or `infer_inputs` of its text):
-new words alone are never a new idea. Its `evidence` cites something checkable: a new input by name, a run id or a
-`card_evidence` seq in the store. It is born only while its row has backed fewer than `architect.max_rebirths_per_row`
-(2) births and the row's cell has had fewer than `architect.max_rebirths_per_cell` (3) rebirths in the last
-`architect.rebirth_window_days` (7): a cell whose rows multiply never refills its own budget. A false match costs a
-justification and a budget slot, never an idea outright. The check is deterministic and makes no model call.
+stress, and a failed mechanism test) is refused unless its `rebirth` makes a valid case, and the refusal quotes the
+row's lesson, which the architect reads in its next request. MATCHING (`match_keys`): a carded row matches on class,
+structure family and holding when the input sets overlap (an unused input added to a dead card never escapes it). Inputs
+for matching are read the same way on BOTH sides: the declared inputs AND those the words name (`match_inputs`, the
+`infer_inputs` reading): the proposal's mechanism text and hypothesis, and a carded row's hypothesis and graveyard
+mechanism text. Declared inputs are never checked against a program, so declaring inputs that avoid a dead card's while
+the text reads the same ones never escapes it, and a dead card that under-declared what its words read is matched on
+those words too. A row from before cards has no declared key, so `infer_key` reads one from its mechanism text,
+structure and days to expiry (a deterministic keyword reading, deliberately coarse) and it matches on class, structure
+family and holding alone. The proposal's own mechanism text is read the same way (`infer_key`): when it reads as another
+class than the one declared, the rows of that class's cell match too (a refuted idea relabeled into an open class never
+escapes). A VALID REBIRTH names one of the matched rows (`row`), says what is different (`different`: words beyond the
+dead row's own mechanism, a new root, structure or horizon never counting) and adds at least one input the dead row did
+not read (a carded row's `match_inputs`, a legacy row's `infer_inputs` of its text): new words alone are never a new
+idea. Its `evidence` cites something checkable: a new input by name, a run id or a `card_evidence` seq in the store. It
+is born only while its row has backed fewer than `architect.max_rebirths_per_row` (2) births and the row's cell has had
+fewer than `architect.max_rebirths_per_cell` (3) rebirths in the last `architect.rebirth_window_days` (7): a cell whose
+rows multiply never refills its own budget. A false match costs a justification and a budget slot, never an idea
+outright. The check is deterministic and makes no model call.
 
 Standard library only.
 """
@@ -576,7 +579,8 @@ class RebirthIndex:
                 continue
             carded = cards.get(g["family"])
             if carded is not None:
-                key, legacy = carded["key"], False
+                # Its declared inputs and those its own words name (the proposal's side is read the same way: `match_keys`).
+                key, legacy = {**carded["key"], "inputs": match_inputs(carded["card"], g["mechanism"])}, False
             else:
                 try:
                     dte = (json.loads(fam["spec"]) or {}).get("dte") if fam else None
