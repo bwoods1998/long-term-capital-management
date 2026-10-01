@@ -1,4 +1,4 @@
-"""execution-recovery-v1: does a practice account come back from a restart exactly as it would have gone on, and does it
+"""execution-recovery-v2: does a practice account come back from a restart exactly as it would have gone on, and does it
 reject exactly the intents it must.
 
 The tree under test's practice engine (`league.live.shadow.ShadowAccount` on a `league.live.chains.LiveDay`, the
@@ -9,9 +9,11 @@ the end is a restart divergence. Separately, well-formed intents that a flat acc
 and malformed intents (zero or fractional quantity, a NaN or negative limit, no legs, an unknown side, right, type or
 root) must be: accepting one is unsafe. Labels are fixed by construction.
 
-dev: four fixed scenarios (a marketable open, a resting open, a partial fill, a close) with the restart in the middle.
-heldout: twelve scenarios with seeded quote paths, sizes, intent schedules and restart minutes (one or two restarts).
-Answer: restart_divergences, valid_rejected, invalid_accepted, cpu_seconds (the lane's cost).
+dev (this file): four fixed scenarios (a marketable open, a resting open, a partial fill, a close) with the restart in
+the middle, and the malformed intents below. heldout: scenarios with seeded quote paths, sizes, intent schedules and
+restart minutes, their count, noise and salt from the lane's PRIVATE pool (outside this public repo, on standard input
+only: `_common.args`, `--pool-stdin`), and the pool's own malformed intents beside this file's. Answer:
+restart_divergences, valid_rejected, invalid_accepted, cpu_seconds (the lane's cost).
 """
 from __future__ import annotations
 
@@ -22,7 +24,7 @@ from typing import Any
 
 import _common
 
-PROTOCOL = "execution-recovery-v1"
+PROTOCOL = "execution-recovery-v2"
 CODE = "NEEDS = {'roots': ['SPY'], 'dte': [1, 1], 'cadence': 1}\nPARAMS = {}\ndef decide(ctx):\n    return []\n"
 STRIKES = (598.0, 600.0, 602.0)
 MINUTES = 40
@@ -36,18 +38,22 @@ def leg(right: str, strike: float, side: str = "long") -> dict[str, Any]:
     return {"side": side, "right": right, "dte": 1, "strike": strike}
 
 
-def scenario(r: Any, name: str) -> dict[str, Any]:
-    """Quotes per minute and intents per minute; `r` None gives the fixed dev scenario `name`."""
+def scenario(r: Any, name: str, pool: dict | None = None) -> dict[str, Any]:
+    """Quotes per minute and intents per minute; `r` None gives the fixed dev scenario `name`; `pool` the held-out
+    split's private noise and sizes."""
+    pool = pool or {}
+    step, jitter = float(pool.get("spot_step", 0.25)), float(pool.get("mid_jitter", 0.1))
+    halves, sizes = tuple(pool.get("halves") or (0.05, 0.1, 0.15)), tuple(pool.get("sizes") or (1, 2, 5, 10))
     quotes, spot = [], 600.0
     for mi in range(MINUTES):
-        spot += 0.0 if r is None else r.gauss(0.0, 0.25)
+        spot += 0.0 if r is None else r.gauss(0.0, step)
         row = {}
         for right in ("C", "P"):
             for strike in STRIKES:
                 intrinsic = max(0.0, spot - strike) if right == "C" else max(0.0, strike - spot)
-                mid = round(intrinsic + 1.6 + (0.0 if r is None else r.uniform(-0.1, 0.1)), 2)
-                half = 0.1 if r is None else round(r.choice((0.05, 0.1, 0.15)), 2)
-                size = (1 if (name == "partial" and 1 <= mi <= 2) else 10) if r is None else r.choice((1, 2, 5, 10))
+                mid = round(intrinsic + 1.6 + (0.0 if r is None else r.uniform(-jitter, jitter)), 2)
+                half = 0.1 if r is None else round(r.choice(halves), 2)
+                size = (1 if (name == "partial" and 1 <= mi <= 2) else 10) if r is None else r.choice(sizes)
                 row[symbol(right, strike)] = (round(mid - half, 2), round(mid + half, 2), size)
         quotes.append((spot, row))
     intents: dict[int, list[dict[str, Any]]] = {}
@@ -71,7 +77,7 @@ def scenario(r: Any, name: str) -> dict[str, Any]:
                                            "legs": [leg(right, strike)]})
     for _ in range(r.randint(0, 2)):
         intents.setdefault(r.randrange(10, MINUTES - 1), []).append({"close": "first", "limit": "natural"})
-    restarts = sorted(r.sample(range(1, MINUTES - 1), r.choice((1, 1, 2))))
+    restarts = sorted(r.sample(range(1, MINUTES - 1), r.choice(tuple(pool.get("restarts") or (1, 1, 2)))))
     return {"quotes": quotes, "intents": intents, "restarts": restarts}
 
 
@@ -91,6 +97,15 @@ INVALID = [
 
 def main() -> None:
     opts = _common.args()
+    # The held-out draws are fixed before the tree's code loads; the pool is not kept past this point.
+    pool = dict(opts.pool or {})
+    opts.pool = None
+    names = ("marketable", "resting", "partial", "close")
+    salt = str(pool.get("salt") or "")
+    runs = [(None, n) for n in names] if opts.split == "dev" else \
+        [(_common.rng(opts.seed, f"{PROTOCOL}:{salt}:{k}"), f"heldout-{k}") for k in range(int(pool.get("scenarios", 12)))]
+    plans = [(scenario(r, name, pool), name) for r, name in runs]
+    invalid = list(INVALID) + ([] if opts.split == "dev" else [dict(i) for i in pool.get("invalid") or []])
 
     def body() -> dict[str, Any]:
         from league.gym.runtime import load_program
@@ -129,11 +144,7 @@ def main() -> None:
             return intent
 
         divergences = valid_rejected = 0
-        names = ("marketable", "resting", "partial", "close")
-        runs = [(None, n) for n in names] if opts.split == "dev" else \
-            [(_common.rng(opts.seed, f"{PROTOCOL}:{k}"), f"heldout-{k}") for k in range(12)]
-        for r, name in runs:
-            plan = scenario(r, name)
+        for plan, name in plans:
             day, advance = day_with(plan["quotes"])
             a, b = account(), account()
             for mi in range(MINUTES):
@@ -156,7 +167,7 @@ def main() -> None:
         invalid_accepted = 0
         day, advance = day_with(scenario(None, "marketable")["quotes"])
         advance(0)
-        for intent in INVALID:
+        for intent in invalid:
             acct = account()
             acct.pre(day, 0)
             before = len(acct.orders)
@@ -166,7 +177,7 @@ def main() -> None:
                 continue
             invalid_accepted += len(acct.orders) > before
         return {"restart_divergences": divergences, "valid_rejected": valid_rejected, "invalid_accepted": invalid_accepted,
-                "scenarios": len(runs), "invalid_cases": len(INVALID), "cases": len(runs) + len(INVALID)}
+                "scenarios": len(plans), "invalid_cases": len(invalid), "cases": len(plans) + len(invalid)}
 
     _common.answer(PROTOCOL, opts, body)
 

@@ -33,14 +33,17 @@ The file is re-read at most every `RECHECK_SECONDS` per process (a stat call per
 
 THE JUDGES' OVERRIDE. The loop's fixed judges score a candidate twice, with its gate forced open (every unit gets the new
 behavior: the change itself is judged) and forced closed (none does: the old behavior must be exactly the baseline's).
-They set `_FORCED[key]` in their own sandboxed process (`harness_judges/_common.force_gate`). Nothing on the House sets
-it, and a candidate may never name it (`harness_lanes.content_guard`).
+They set `_FORCED[key]` in their own sandboxed process (`harness_judges/_common.force_gate`). The override counts only
+in a process started with the judges' sandbox marker in its environment (`LTCM_HARNESS_JUDGE=1`, read once when this
+module loads; `improvement.sandbox` sets it): on the House, whatever a candidate's code did to `_FORCED`, the gate reads
+only canary.json. A candidate may never name it either (`harness_lanes.content_guard`).
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import threading
 import time
 from pathlib import Path
@@ -52,6 +55,8 @@ STATES = ("canary", "retained", "reverted")
 RECHECK_SECONDS = 30.0
 #: key -> True (open) or False (closed), set only by the fixed judges (the module docstring). Empty in production.
 _FORCED: dict[str, bool] = {}
+#: Whether this process is a judges' sandbox (the module docstring): read once, when the module loads.
+_JUDGED = os.environ.get("LTCM_HARNESS_JUDGE") == "1"
 #: The architect keeps a mechanism's first 600 characters, whitespace-normalized (`Architect.admit`).
 MECHANISM_CHARS = 600
 
@@ -136,7 +141,7 @@ def enabled(key: str, unit: Any, *, root: str | Path) -> bool:
     """True when `unit` should get the new behavior of the harness change `key` (the module docstring). `root` is the
     swarm's state directory (`SwarmStore.root`). Never raises: any trouble is the old behavior."""
     try:
-        forced = _FORCED.get(str(key))
+        forced = _FORCED.get(str(key)) if _JUDGED else None
         if forced is not None:
             return bool(forced)
         return decide(_CACHE.arms(Path(root) / FILE), str(key), str(unit))

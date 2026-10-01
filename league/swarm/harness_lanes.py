@@ -18,8 +18,9 @@ THE LANES (`LANES`; the operator's procedure is `playbooks/harness-improvement.m
   Surface: the architect's admission, the strategist, diagnostician and researcher prompts and retrieval. Canary: 50% of
   mechanisms (families born in the window), concurrent, with the canary arm's share of births held to its fraction.
 - `data` (data processing). Bottleneck: Gym result delivery and data jobs that fail and requeue. Primary
-  `slot_failure_rate`. Surface: the Sailbox transport, the Gym pool's batch handling, the data-job supervisor and the
-  data scripts' retry bookkeeping. Canary: the day after the release against a fresh control day before it.
+  `slot_failure_rate`. Surface: the Sailbox transport, the data-job supervisor and the data scripts' retry bookkeeping;
+  never the Gym pool, which writes this lane's own metric. Canary: the day after the release against a fresh control
+  day before it.
 - `execution` (execution reliability). Bottlenecks: practice intents the harness rejects (`harness_reject_rate`) and
   restarts that do not restore the live instances (`restart_failure_rate`). Surface: the practice engine, its chains,
   its receipts and the decider; never the real-money order path, the brokerage account, the live state or paper orders
@@ -28,11 +29,14 @@ THE LANES (`LANES`; the operator's procedure is `playbooks/harness-improvement.m
 
 WHAT NO LANE MAY CHANGE. The protected paths (`PROTECTED`: the objective and this loop, sealed data and the evaluator,
 spend limits, capital permissions, the release train) and, inside the surface files, the frozen symbols
-(`FROZEN_SYMBOLS`, `symbol_guard`): every function that writes trial, lineage, look or graveyard records, Train
-eligibility, the idle and drift screens, the evaluation key, the cycle record the research lane's metrics come from,
-the architect's same-idea rule and its pass from the model call to `admit`; in `Architect.admit` (the memory lane's
-lever: it may refuse more) what an admitted birth keeps (its text, slice, lineage and trials). So a candidate improves
-its metric by changing the harness, not the records the metric or the multiple-testing control is computed from.
+(`FROZEN_SYMBOLS`, `symbol_guard`): every function that writes trial, lineage, look, graveyard, state or receipt
+records (the store's general writers and raw SQL that writes included), Train eligibility, the idle and drift screens,
+the evaluation key, the cycle record the research lane's metrics come from, a program's path from the model's tool call
+to the Gym, the architect's same-idea rule and its pass from the model call to `admit`; in `Architect.admit` (the memory
+lane's lever: it may refuse more) what an admitted birth keeps (its text, slice, lineage and trials). No new store
+write, sealed read, raw SQL statement or private collaborator access anywhere (`content_guard`), and in the practice
+engine no reject reason reworded. So a candidate improves its metric by changing the harness, not the records the metric
+or the multiple-testing control is computed from.
 
 WHAT THE OBSERVERS READ. Only operational counts, through read-only (`mode=ro`) SQLite opens: run statuses and times
 (never a run's score or summary figures), cycle counters (never the cycle's note or score), births' mechanisms and the
@@ -42,11 +46,13 @@ number or the holdout (`looks`). Error texts are cut to a normalized signature (
 
 HELD-OUT, HONESTLY. A capture names its motivating units (the families, mechanisms or boxes the brief shows the patch
 author); the arms comparison excludes them, and a before/after window is later than all of them. The offline judge's
-held-out split is SEEDED VARIANTS OF CLASSES ITS DEV SPLIT NEVER USES, seeded only after the candidate is committed
-(`heldout_seed`), stratified so every class appears; the author sees only pass or fail for it. Its generator is in the
-public judge file, so it is held out from the brief and the dev split, not from a determined reader. An "improve"
-rule therefore also asks the dev split's count (the motivating failures) to fall wherever its baseline has any, and
-the concurrent canary (or the window after the release) is the held-out test no one can read in advance.
+held-out split is PRIVATE CLASSES ITS DEV SPLIT NEVER USES: each lane's pool lives outside this public repo (the
+owner's `~/Work/.ltcm-main/harness-heldout/<judge>.json`, mode 0600), pinned here by SHA-256 (`HELDOUT_POOLS`), and
+reaches the judge only on standard input in held-out runs, never as a file in the sandbox; its cases are drawn from a
+seed that exists only after the candidate is committed (`heldout_seed`), stratified so every class appears. The author
+sees only pass or fail for it: no class, figure or output of a held-out run is kept. An "improve" rule also asks the
+dev split's count (the motivating failures) to fall wherever its baseline has any, and the concurrent canary (or the
+window after the release) is the held-out test of the House itself.
 
 Standard library only (the observers run on the House, the loop on the owner's machine).
 """
@@ -64,13 +70,16 @@ import random
 import re
 import sqlite3
 import time
+import zlib
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from collections import Counter
 from typing import Any, Iterable, Mapping, Sequence
+import builtins as _builtins
 
 SCHEMA = 1
 POLICY = "harness-lanes-1"
+BUILTIN_NAMES = frozenset(dir(_builtins))
 
 # ------------------------------------------------------------------------------------------------ the protected boundary
 #: The evaluator fingerprint's shared files (`league.gym.driver.LEAGUE_FILES`; a test keeps this copy equal).
@@ -111,21 +120,56 @@ PROTECTED: tuple[tuple[str, str], ...] = (
     ("deploy/*", "release"), (".github/*", "release"), ("league/updater.py", "release"), ("league/watchdog.py", "release"),
     ("scripts/floor_box.py", "release"), ("CHANGELOG.md", "release"),
 )
-#: A candidate may ADD a test file of its own (never edit an existing one): the judges and regressions stay fixed.
+#: A candidate may ADD a test file of its own (a new file only: staging refuses an edit of an existing one, an earlier
+#: candidate's included), never edit an existing test: the judges and regressions stay fixed.
 NEW_TEST = "league/tests/test_harness_candidate_*.py"
-#: Calls and imports a candidate may not introduce anywhere (reflection, process, network, file writes, environment,
-#: output a judge could mistake for its answer, exits). Counted per name: moving an existing call is allowed, one more
-#: is not.
-DANGEROUS_CALLS = frozenset({"eval", "exec", "compile", "__import__", "globals", "locals", "vars", "_getframe",
-                             "setattr", "delattr", "getattr", "open", "system", "popen", "Popen", "check_output",
-                             "check_call", "urlopen", "create_connection", "putenv", "unsetenv", "chmod", "chown", "unlink",
-                             "rmtree", "write_text", "write_bytes", "fork", "kill", "killpg", "print", "write",
-                             "writelines", "exit", "_exit", "abort", "settrace", "setprofile", "register", "breakpoint"})
+#: Names a candidate may not introduce anywhere (reflection, processes, network, file writes and moves, environment,
+#: output a judge could mistake for its answer, exits, dynamic attribute access). Counted per name wherever the name is
+#: used (a call, an attribute read, a plain name or an imported one: `f = os.system` or `from os import system as sh`
+#: counts as much as a call): moving an existing use is allowed, one more is not.
+DANGEROUS_CALLS = frozenset({
+    "eval", "exec", "compile", "__import__", "globals", "locals", "vars", "_getframe", "setattr", "delattr", "getattr",
+    "open", "fdopen", "system", "popen", "Popen", "check_output", "check_call", "urlopen", "create_connection", "putenv",
+    "unsetenv", "chmod", "chown", "unlink", "rmtree", "write_text", "write_bytes", "fork", "forkpty", "kill", "killpg",
+    "print", "write", "writelines", "exit", "_exit", "abort", "settrace", "setprofile", "register", "breakpoint",
+    # file moves and creation, raw databases
+    "rename", "renames", "rmdir", "removedirs", "truncate", "ftruncate", "touch", "mkdir", "makedirs", "symlink",
+    "symlink_to", "hardlink_to", "link_to", "mkfifo", "mknod", "copyfile", "sendfile", "connect", "executescript",
+    # process replacement and spawning
+    "execv", "execve", "execl", "execle", "execlp", "execlpe", "execvp", "execvpe", "spawnl", "spawnle", "spawnlp",
+    "spawnlpe", "spawnv", "spawnve", "spawnvp", "spawnvpe", "posix_spawn", "posix_spawnp", "startfile", "dup2",
+    # dynamic attribute access and module loading by string
+    "attrgetter", "methodcaller", "import_module", "run_path", "run_module", "exec_module", "load_module",
+    "find_spec", "reload"})
 DANGEROUS_MODULES = frozenset({"subprocess", "socket", "urllib", "http", "ctypes", "importlib", "shutil", "pickle",
                                "marshal", "requests", "ssl", "multiprocessing", "atexit", "builtins", "inspect", "gc",
-                               "__main__", "_common", "sys", "signal", "code", "pdb", "traceback", "weakref"})
+                               "__main__", "_common", "sys", "signal", "code", "pdb", "traceback", "weakref", "runpy",
+                               "tempfile", "glob", "types", "zipimport", "pty", "fcntl", "mmap", "resource", "sqlite3",
+                               "threading", "_thread", "concurrent", "asyncio", "select", "selectors", "posix", "nt"})
 #: A file that already speaks to the network (the Sailbox transport) may import more of the network family.
 NETWORK_MODULES = frozenset({"http", "urllib", "socket", "ssl"})
+#: `os` members a candidate may start using (pure path and identity helpers); any other `os.<name>` or `from os import
+#: <name>` is refused (remove, replace, system, exec*, spawn*, environ, ...).
+OS_SAFE = frozenset({"path", "sep", "linesep", "fspath", "fsencode", "fsdecode", "getpid", "cpu_count", "PathLike", "name",
+                     "curdir", "pardir", "extsep", "altsep", "pathsep", "devnull"})
+#: Modules a new `import X as Y` may not alias (an alias hides the module's members from the per-name counts).
+NO_ALIAS = frozenset({"os", "operator", "functools", "pathlib", "io", "shutil", "subprocess", "sqlite3", "sys", "builtins",
+                      "importlib", "inspect", "types", "gc", "ctypes"})
+#: Store methods that write (every `SwarmStore` method but its reads): a candidate may not start calling one
+#: (counted per name: moving an existing call is allowed, one more is not). The lanes' metrics, the lineage's trials,
+#: eligibility marks and the run rows live in what these write.
+STORE_WRITES = frozenset({"put", "update_family", "bump", "set_state", "compare_and_set_state", "hold_gate", "set_band",
+                          "retire", "retire_gym", "link_lineages", "_link_code", "add_family", "add_version",
+                          "add_versions", "add_run", "prune_runs", "note", "bury", "add_look", "refuse", "add_forward",
+                          "replace_forward", "event", "add_spend", "upsert_box", "box_used", "set_box_state", "save_convo",
+                          "_exec", "practice_event", "_reject"})
+#: Store reads of the holdout, Validation and forward evidence (D2a): a candidate may not start reading them.
+SEALED_READS = frozenset({"looks", "looked", "lineage_looks", "lineage_validated", "lineage_trial_sharpes", "forward",
+                          "version_runs"})
+#: Raw SQL calls: the text of every one is frozen (a new or changed statement is refused), and a function whose statement
+#: writes (INSERT, UPDATE, DELETE, ...) or is not a plain string is a record writer, frozen whole (`symbol_guard`).
+RAW_SQL = frozenset({"execute", "executemany", "executescript", "_exec", "_all", "_one"})
+SQL_WRITE = re.compile(r"\b(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|ATTACH|DETACH|PRAGMA|VACUUM|REINDEX)\b", re.I)
 #: `sys`/`os` members a candidate may not start using: the interpreter's plumbing, the process's output and exit.
 PLUMBING = frozenset({"modules", "argv", "stdout", "stderr", "stdin", "exit", "_exit", "_getframe", "settrace",
                       "setprofile", "meta_path", "path_hooks", "path", "displayhook", "excepthook", "environ",
@@ -265,22 +309,51 @@ def _collaborator(node: ast.AST) -> bool:
     return False
 
 
+def _docstrings(tree: ast.AST) -> set[int]:
+    """The ids of every docstring's Constant node (a module's, a class's or a function's first statement)."""
+    out = set()
+    for node in ast.walk(tree):
+        body = getattr(node, "body", None)
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and body \
+                and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) \
+                and isinstance(body[0].value.value, str):
+            out.add(id(body[0].value))
+    return out
+
+
 def _facts(source: str | None) -> dict[str, Any]:
-    """What `content_guard` compares, counted: call names, imported modules, sys/os plumbing and dunder accesses,
-    attribute-assignment targets on anything but `self`/`cls`, mentions of the judges' override, gate members."""
+    """What `content_guard` compares, counted: uses of dangerous names (calls, attribute reads, plain and imported
+    names), imported modules and aliases, sys/os plumbing and other `os` members, dunder accesses, attribute-assignment
+    targets on anything but `self`/`cls`, store writes, sealed reads, private attributes of a collaborator, raw SQL
+    statements, mentions of the judges' override, gate members, reject-reason texts."""
     out: dict[str, Any] = {"calls": Counter(), "modules": set(), "plumbing": Counter(), "dunders": Counter(),
-                           "attr_targets": Counter(), "forced": 0, "gate": Counter(), "global": False, "canary_import": 0}
+                           "attr_targets": Counter(), "forced": 0, "gate": Counter(), "global": False, "canary_import": 0,
+                           "writes": Counter(), "sealed": Counter(), "private": Counter(), "sql": Counter(),
+                           "aliases": Counter(), "os": Counter(), "reasons": Counter()}
     if not source:
         return out
     tree = ast.parse(source)
+    docs = _docstrings(tree)
     methods = {f.name for c in ast.walk(tree) if isinstance(c, ast.ClassDef) for f in c.body
                if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))}
     for n in ast.walk(tree):
         if isinstance(n, ast.Call) and isinstance(n.func, (ast.Name, ast.Attribute)):
-            out["calls"][n.func.id if isinstance(n.func, ast.Name) else n.func.attr] += 1
-        elif isinstance(n, ast.Import):
+            name = n.func.id if isinstance(n.func, ast.Name) else n.func.attr
+            if name in STORE_WRITES:
+                out["writes"][name] += 1
+            if name in SEALED_READS:
+                out["sealed"][name] += 1
+            if name in RAW_SQL:
+                out["sql"][f"{name}:{ast.dump(n.args[0]) if n.args else '<no statement>'}"] += 1
+            if name == "replace" and len(n.args) == 1 and not n.keywords:
+                # `Path.replace(target)` moves a file; `str.replace` always takes two arguments.
+                out["calls"]["replace/1"] += 1
+        if isinstance(n, ast.Import):
             out["modules"].update(a.name for a in n.names)
             out["canary_import"] += sum(a.name.endswith(".canary") or a.name == "canary" for a in n.names)
+            for a in n.names:
+                if a.asname and a.name.split(".")[0] in NO_ALIAS:
+                    out["aliases"][f"import {a.name} as {a.asname}"] += 1
         elif isinstance(n, ast.ImportFrom):
             # `from . import guard` names the module in the alias: record the base and every base.name.
             base = "." * n.level + (n.module or "")
@@ -292,24 +365,52 @@ def _facts(source: str | None) -> dict[str, Any]:
             for a in n.names:
                 if a.name == "canary" and a.asname not in (None, "canary"):
                     out["gate"][f"canary as {a.asname}"] += 1
+                # An imported name counts as a use of that name, whatever it is bound as.
+                if a.name in DANGEROUS_CALLS:
+                    out["calls"][a.name] += 1
+                if a.name in STORE_WRITES:
+                    out["writes"][a.name] += 1
+                if n.level == 0 and n.module in ("os", "sys") and a.name not in (OS_SAFE if n.module == "os" else ()):
+                    out["os"][f"{n.module}.{a.name}"] += 1
+                if a.name in PLUMBING and n.module in ("os", "sys"):
+                    out["plumbing"][f"{n.module}.{a.name}"] += 1
+                if a.asname and (n.module or "").split(".")[0] in NO_ALIAS:
+                    out["aliases"][f"from {n.module} import {a.name} as {a.asname}"] += 1
         elif isinstance(n, (ast.Global, ast.Nonlocal)):
             out["global"] = True
         if isinstance(n, ast.Attribute):
+            if n.attr in DANGEROUS_CALLS:
+                out["calls"][n.attr] += 1
             if isinstance(n.value, ast.Name) and n.value.id in ("sys", "os") and n.attr in PLUMBING:
                 out["plumbing"][f"{n.value.id}.{n.attr}"] += 1
+            if isinstance(n.value, ast.Name) and n.value.id == "os" and n.attr not in OS_SAFE:
+                out["os"][f"os.{n.attr}"] += 1
+            if isinstance(n.value, ast.Name) and n.value.id in DANGEROUS_MODULES - NETWORK_MODULES:
+                # A member of a process, interpreter or file module the file already imports (`subprocess.run`).
+                out["os"][f"{n.value.id}.{n.attr}"] += 1
             if isinstance(n.value, ast.Name) and n.value.id == "canary":
                 out["gate"][f"canary.{n.attr}"] += 1
             if (n.attr.startswith("__") and n.attr.endswith("__") and n.attr not in SAFE_DUNDERS) or n.attr in FRAME_ATTRS:
                 out["dunders"][n.attr] += 1
+            if n.attr.startswith("_") and not n.attr.startswith("__") and (
+                    _collaborator(n.value) or (isinstance(n.value, ast.Name) and n.value.id in COLLABORATORS)):
+                # `self.store._db`, `store._exec`: a collaborator's internals.
+                out["private"][ast.dump(n)] += 1
             if "_FORCED" in n.attr:
                 out["forced"] += 1
         elif isinstance(n, ast.Name):
+            if n.id in DANGEROUS_CALLS:
+                out["calls"][n.id] += 1
             if n.id.startswith("__") and n.id.endswith("__") and n.id not in SAFE_DUNDERS:
                 out["dunders"][n.id] += 1
             if "_FORCED" in n.id:
                 out["forced"] += 1
-        elif isinstance(n, ast.Constant) and isinstance(n.value, str) and "_FORCED" in n.value:
-            out["forced"] += 1
+        elif isinstance(n, ast.Constant) and isinstance(n.value, str):
+            if "_FORCED" in n.value:
+                out["forced"] += 1
+            if id(n) not in docs and reject_class(n.value) != "other":
+                # A text the practice receipts' reject classes read (`REJECT_CLASSES`).
+                out["reasons"][f"{reject_class(n.value)}:{n.value}"] += 1
         elif isinstance(n, ast.alias) and "_FORCED" in (n.name + str(n.asname)):
             out["forced"] += 1
         targets: list[ast.AST] = []
@@ -352,14 +453,27 @@ def content_guard(path: str, before: str | None, after: str) -> None:
     def more(field: str) -> list[str]:
         return sorted(k for k, v in new[field].items() if v > old[field].get(k, 0))
 
-    risky = [k for k in more("calls") if k in DANGEROUS_CALLS]
+    risky = [k for k in more("calls") if k in DANGEROUS_CALLS or k == "replace/1"]
     if risky:
         raise ImprovementError(f"{path}: candidate introduces {risky}")
     for field, what in (("plumbing", "interpreter plumbing"), ("dunders", "reflective attributes"),
-                        ("attr_targets", "assignment to another object's attribute")):
+                        ("attr_targets", "assignment to another object's attribute"),
+                        ("os", "process, file or interpreter module members"),
+                        ("aliases", "an alias of a process, file or dynamic-access module"),
+                        ("writes", "store writes (the lanes' records, the lineage's trials, eligibility marks)"),
+                        ("sealed", "reads of the holdout, Validation or forward evidence"),
+                        ("sql", "a new or changed raw SQL statement"),
+                        ("private", "a collaborator's private attributes")):
         found = more(field)
         if found:
-            raise ImprovementError(f"{path}: candidate introduces {what} {found[:4]}")
+            raise ImprovementError(f"{path}: candidate introduces {what} {[k[:120] for k in found[:4]]}")
+    if path.startswith("league/live/"):
+        # The practice receipts' reject reasons are what the execution lane's metric classifies: a candidate may add a
+        # reason, never reword or drop one (`reject_class` would move its rejects to another class).
+        lost = sorted(k for k, v in old["reasons"].items() if new["reasons"].get(k, 0) < v)
+        if lost:
+            raise ImprovementError(f"{path}: candidate rewords or drops reject reasons the execution lane classifies "
+                                   f"{[k[:80] for k in lost[:4]]}")
     if new["forced"] > old["forced"]:
         raise ImprovementError(f"{path}: the judges' gate override is not a candidate's to name")
     bad_gate = [k for k in more("gate") if k.split(".", 1)[-1] not in GATE_NAMES or " as " in k]
@@ -390,8 +504,14 @@ def content_guard(path: str, before: str | None, after: str) -> None:
 # ------------------------------------------------------------------------------------------------ frozen symbols
 #: Store methods that WRITE the records the multiple-testing control, the lineage, the holdout's looks and the
 #: graveyard live in (every Gym evaluation is a trial: `SwarmStore.add_run`).
+#: The store's general writers are here too (`update_family` writes the lineage, the parent and the trial counters;
+#: `bump` the counters; `set_state` the robustness and drift marks eligibility reads; `add_version` the versions a run is
+#: counted against), and the practice engine's receipts (`practice_event`, `_reject`: the execution lane's metric). A
+#: function that executes raw SQL that writes (or SQL that is not a plain string) is a writer too (`_writes`).
 TRIAL_WRITES = frozenset({"add_run", "add_versions", "add_family", "link_lineages", "retire", "retire_gym", "bury",
-                          "add_look", "add_forward", "replace_forward", "hold_gate", "set_band", "prune_runs", "refuse"})
+                          "add_look", "add_forward", "replace_forward", "hold_gate", "set_band", "prune_runs", "refuse",
+                          "update_family", "bump", "set_state", "compare_and_set_state", "add_version", "_link_code",
+                          "practice_event", "_reject"})
 #: Symbols in lane-surface files no lane may change (their AST, bound once, must be the baseline's): the idle and drift
 #: screens, Train eligibility and the score's objective, the evaluation key and reuse, the cycle record the research
 #: lane's metrics are computed from, the architect's same-idea rule its lineage links use, and the architect's pass
@@ -411,19 +531,33 @@ FROZEN_SYMBOLS: dict[str, tuple[str, ...]] = {
         "Researcher._with_score", "Researcher.dead", "Researcher.hold_offer", "Researcher.can_retire",
         "Researcher.retire_floor", "Researcher._scored", "Researcher.eligible_run", "Researcher.screen",
         "Researcher.drift_blocks", "Researcher._demote", "Researcher._terminal", "Researcher.cycle",
-        "Researcher._count_dormancy", "Researcher._count_holds"),
+        "Researcher._count_dormancy", "Researcher._count_holds",
+        # A program's path from the model's tool call to the Gym: the arguments a tool call carries, the program text
+        # and its parameters, variants and roots. A change here could rewrite the program the Gym evaluates (wrap its
+        # decide in try/except, so a runtime error never reaches the Gym's disqualification rule).
+        "Researcher._model_cycle", "Researcher._first_cycle", "Researcher._execute", "Researcher._gym_sweep",
+        "Researcher._stored_run", "Researcher._sweep_group", "with_roots", "needs_of", "needs_roots",
+        "params_of", "sweep_variants", "check_code", "holding", "date_like"),
     # The architect's pass: the model call and its spend reservation, the parse of the answer into proposals and the
     # hand-off to `admit` (a proposal's text reaches the store unchanged: the rebirth detector reads what was proposed).
     "league/swarm/architect.py": ("SAME_IDEA", "_STOP", "words", "same_idea", "salvage_families", "_FAMILIES",
                                   "SALVAGE_MIN", "Architect.run", "Architect._digest_call", "Architect._salvage_retry"),
+    # The model's tool calls parsed into the arguments `Researcher._execute` receives (the program among them).
+    "league/swarm/claude_research.py": ("ToolCall", "tool_calls", "validate", "check_input", "_type_error", "resolve_name",
+                                        "_object", "_finite"),
+    # The practice engine's receipts: what the execution lane's metric counts and classifies.
+    "league/live/shadow.py": ("ShadowAccount.practice_event", "ShadowAccount._reject"),
 }
 #: Functions that write trial records yet stay a lane's lever (the architect's admission: refusing a restated idea is
 #: the memory lane's improvement). Their trial writes, with every condition around them, and these bindings (the
-#: admitted text, the slice, the lineage a birth joins or counts) must stay the baseline's; nothing may mutate them.
+#: admitted text, the slice, the lineage a birth joins or counts, the lessons a birth reads, and every rule that could
+#: admit MORE: the cap, the duplicate and class checks, the citation rule) must stay the baseline's; nothing may mutate
+#: them. The lever adds refusals (a gated `continue`), never an admission.
 GUARDED_BINDINGS: dict[tuple[str, str], tuple[str, ...]] = {
     ("league/swarm/architect.py", "Architect.admit"): (
         "row", "structure", "named", "roots", "mechanism", "spec", "dead", "same", "declared", "parent", "prior", "home",
-        "ideas", "twins", "fam", "alive", "kin"),
+        "ideas", "twins", "fam", "alive", "kin", "cap", "known", "strict", "living", "allowed_roots", "per_class",
+        "classes", "cls", "cited", "lessons", "lo", "hi", "dte", "born"),
 }
 MUTATORS = frozenset({"update", "pop", "popitem", "clear", "setdefault", "append", "extend", "insert", "remove",
                       "discard", "add", "sort", "reverse", "__setitem__", "__delitem__"})
@@ -494,12 +628,38 @@ def _functions(tree: ast.Module) -> dict[str, ast.AST]:
     return out
 
 
+def _sql_text(node: ast.AST) -> str | None:
+    """A statement's text when it is a plain string (a constant, or constants joined), else None."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        a, b = _sql_text(node.left), _sql_text(node.right)
+        return None if a is None or b is None else a + b
+    if isinstance(node, ast.JoinedStr):
+        # An f-string's literal parts: the statement's verb and tables are there, the values are parameters.
+        return "".join(v.value for v in node.values if isinstance(v, ast.Constant) and isinstance(v.value, str))
+    return None
+
+
+def _record_write(node: ast.AST) -> bool:
+    """A call that writes the records the lanes, the lineage and the evidence live in: a trial or store writer by name
+    (`TRIAL_WRITES`), or raw SQL whose statement writes or cannot be read (not a plain string)."""
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+        return False
+    if node.func.attr in TRIAL_WRITES:
+        return True
+    if node.func.attr in RAW_SQL:
+        text = _sql_text(node.args[0]) if node.args else None
+        return text is None or bool(SQL_WRITE.search(text))
+    return False
+
+
 def _writes(func: ast.AST, *, conditions: bool = True) -> list[str]:
     """The trial writes inside `func`, each with the chain of conditions and loops around it."""
     found: list[str] = []
 
     def walk(node: ast.AST, chain: tuple[str, ...]) -> None:
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in TRIAL_WRITES:
+        if _record_write(node):
             found.append(" > ".join(chain + (ast.dump(node),)) if conditions else ast.dump(node))
         for field_name, value in ast.iter_fields(node):
             children = value if isinstance(value, list) else [value]
@@ -593,41 +753,66 @@ def symbol_guard(path: str, before: str | None, after: str) -> None:
 
 # ------------------------------------------------------------------------------------------------ gate coverage
 #: What a lane's gate must be asked about, so the gate splits the units the observer splits: the family (a name for it
-#: in the unit expression: `fam["id"]`, `fid`, `family`) or the mechanism (`canary.mechanism_unit(...)`).
+#: in the unit expression: `fam["id"]`, `fid`, `family`) or the mechanism: `canary.mechanism_unit(mechanism)`, the
+#: admitted text inside `Architect.admit` (a guarded binding: the text the birth keeps), or `canary.mechanism_unit(
+#: fam["mechanism"])` for a family's stored text. Any other argument (a prompt, a pass, a row's raw text) would split
+#: units the observer does not.
 UNIT_NAMES = frozenset({"fam", "fid", "family", "family_id"})
+MECHANISM_HOMES = {"league/swarm/architect.py": ("Architect.admit",)}
 
 
-def unit_ok(node: ast.AST, unit: str | None) -> bool:
+def _mechanism_arg(node: ast.AST, path: str | None, where: str | None) -> bool:
+    if isinstance(node, ast.Name) and node.id == "mechanism":
+        return path is None or where in MECHANISM_HOMES.get(path, ())
+    return (isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) and node.value.id in ("fam", "family")
+            and isinstance(node.slice, ast.Constant) and node.slice.value == "mechanism")
+
+
+def unit_ok(node: ast.AST, unit: str | None, *, path: str | None = None, where: str | None = None) -> bool:
     if unit == "family":
         return any(isinstance(n, ast.Name) and n.id in UNIT_NAMES for n in ast.walk(node))
     if unit == "mechanism":
         return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "mechanism_unit"
-                and isinstance(node.func.value, ast.Name) and node.func.value.id == "canary")
+                and isinstance(node.func.value, ast.Name) and node.func.value.id == "canary" and len(node.args) == 1
+                and not node.keywords and _mechanism_arg(node.args[0], path, where))
     return True
 
 
-def is_gate(node: ast.AST, key: str, unit: str | None = None) -> bool:
+def is_gate(node: ast.AST, key: str, unit: str | None = None, *, path: str | None = None, where: str | None = None) -> bool:
     """`canary.enabled("<key>", <unit>, root=<state dir>)`, the only gate form a candidate may use, asked about the
     lane's unit (`unit_ok`)."""
     return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "enabled"
             and isinstance(node.func.value, ast.Name) and node.func.value.id == "canary" and len(node.args) == 2
             and isinstance(node.args[0], ast.Constant) and node.args[0].value == key
-            and [kw.arg for kw in node.keywords] == ["root"] and unit_ok(node.args[1], unit))
+            and [kw.arg for kw in node.keywords] == ["root"] and unit_ok(node.args[1], unit, path=path, where=where))
 
 
 class _Ungate(ast.NodeTransformer):
     """Replace every gated branch with its old one: `if <gate>: new else: old` -> old; `new if <gate> else old` -> old."""
 
-    def __init__(self, key: str, unit: str | None = None) -> None:
-        self.key, self.unit, self.gates, self.wrong_unit = key, unit, 0, 0
+    def __init__(self, key: str, unit: str | None = None, path: str | None = None) -> None:
+        self.key, self.unit, self.path, self.gates, self.wrong_unit = key, unit, path, 0, 0
+        self.scope: list[str] = []
+
+    def _nested(self, node: ast.AST) -> Any:
+        self.scope.append(node.name)
+        try:
+            return self.generic_visit(node)
+        finally:
+            self.scope.pop()
+
+    visit_FunctionDef = visit_AsyncFunctionDef = visit_ClassDef = _nested
+
+    def _gate(self, node: ast.AST) -> bool:
+        return is_gate(node, self.key, self.unit, path=self.path, where=".".join(self.scope) or None)
 
     def visit_Call(self, node: ast.Call) -> Any:
-        if is_gate(node, self.key) and not unit_ok(node.args[1], self.unit):
+        if is_gate(node, self.key) and not self._gate(node):
             self.wrong_unit += 1
         return self.generic_visit(node)
 
     def visit_If(self, node: ast.If) -> Any:
-        if is_gate(node.test, self.key, self.unit):
+        if self._gate(node.test):
             self.gates += 1
             out = []
             for stmt in node.orelse:
@@ -644,7 +829,7 @@ class _Ungate(ast.NodeTransformer):
         return node
 
     def visit_IfExp(self, node: ast.IfExp) -> Any:
-        if is_gate(node.test, self.key, self.unit):
+        if self._gate(node.test):
             self.gates += 1
             return self.visit(node.orelse)
         return self.generic_visit(node)
@@ -696,14 +881,45 @@ def _new_plain_assign(node: ast.stmt, bound: set[str]) -> bool:
     return False
 
 
-def _strip_new(head: list[ast.stmt], base: list[ast.stmt]) -> list[ast.stmt]:
-    """`head`'s statements of one scope without what it adds: new inert definitions, new plain constants, new imports.
+def _import_names(node: ast.stmt) -> list[str]:
+    """The names an import statement binds."""
+    if isinstance(node, ast.Import):
+        return [a.asname or a.name.split(".")[0] for a in node.names]
+    if isinstance(node, ast.ImportFrom):
+        return [a.asname or a.name for a in node.names]
+    return []
+
+
+def _referenced(tree: ast.AST) -> set[str]:
+    """Every name `tree` reads or binds: plain names, attribute names, definitions and imports. A new definition,
+    constant or import that takes one of these names would change what existing code (a frozen function included)
+    resolves it to, so it is no new inert definition."""
+    out = set(BUILTIN_NAMES)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            out.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            out.add(node.attr)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            out.add(node.name)
+        elif isinstance(node, ast.arg):
+            out.add(node.arg)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            out.update(_import_names(node))
+    return out
+
+
+def _strip_new(head: list[ast.stmt], base: list[ast.stmt], taken: set[str] = frozenset()) -> list[ast.stmt]:
+    """`head`'s statements of one scope without what it adds: new inert definitions, new plain constants, new imports,
+    each under a name no existing code uses (`taken`: the baseline module's names and the builtins; a new
+    `def round`, `LONG_SINGLE = ...` or `from x import same_slice` rebinds what existing code calls, so it is a change).
     An existing class is compared member by member the same way."""
-    bound = {n.name for n in base if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+    bound = {n.name for n in base if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))} | set(taken)
     for n in base:
         for t in (n.targets if isinstance(n, ast.Assign) else [getattr(n, "target", None)]):
             if isinstance(t, ast.Name):
                 bound.add(t.id)
+        bound.update(_import_names(n))
     imports = {ast.dump(n) for n in base if isinstance(n, (ast.Import, ast.ImportFrom))}
     classes = {n.name: n for n in base if isinstance(n, ast.ClassDef)}
     out: list[ast.stmt] = []
@@ -711,13 +927,14 @@ def _strip_new(head: list[ast.stmt], base: list[ast.stmt]) -> list[ast.stmt]:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name not in bound:
             if _inert_def(node):
                 continue
-        elif isinstance(node, (ast.Import, ast.ImportFrom)) and ast.dump(node) not in imports:
+        elif isinstance(node, (ast.Import, ast.ImportFrom)) and ast.dump(node) not in imports \
+                and not set(_import_names(node)) & bound:
             continue
         elif _new_plain_assign(node, bound):
             continue
         elif isinstance(node, ast.ClassDef) and node.name in classes:
             node = ast.ClassDef(name=node.name, bases=node.bases, keywords=node.keywords,
-                                body=_strip_new(_docless(node.body), _docless(classes[node.name].body)),
+                                body=_strip_new(_docless(node.body), _docless(classes[node.name].body), taken),
                                 decorator_list=node.decorator_list, type_params=getattr(node, "type_params", []))
         out.append(node)
     return out
@@ -741,15 +958,17 @@ def gate_coverage(path: str, before: str | None, after: str, key: str, unit: str
         raise ImprovementError(f"{path}: an arms-mode lane changes only Python: a prose or data change cannot be gated per "
                                "unit (put new text in a new constant chosen under the gate)")
     head = ast.parse(after)
-    ungate = _Ungate(key, unit)
+    ungate = _Ungate(key, unit, path)
     head = ungate.visit(head)
     if ungate.wrong_unit:
         raise ImprovementError(f"{path}: the gate must be asked about the lane's unit ({unit}: "
                                + ('a name for the family, e.g. fam["id"]' if unit == "family" else
-                                  "canary.mechanism_unit(<the mechanism text>)") + "), the unit its observer splits")
+                                  'canary.mechanism_unit(mechanism) inside Architect.admit, or '
+                                  'canary.mechanism_unit(fam["mechanism"])') + "), the unit its observer splits")
     base = ast.parse(before) if before is not None else ast.Module(body=[], type_ignores=[])
+    taken = _referenced(base)
     head, base = _Docless().visit(head), _Docless().visit(base)
-    kept = _strip_new(_docless(head.body), _docless(base.body))
+    kept = _strip_new(_docless(head.body), _docless(base.body), taken)
     if [ast.dump(n) for n in kept] != [ast.dump(n) for n in _docless(base.body)]:
         same = {ast.dump(n) for n in _docless(base.body)}
         changed = sorted({str(getattr(n, "name", f"line {getattr(n, 'lineno', '?')}")) for n in kept if ast.dump(n) not in same})
@@ -759,6 +978,10 @@ def gate_coverage(path: str, before: str | None, after: str, key: str, unit: str
 
 
 # ------------------------------------------------------------------------------------------------ lanes
+#: Tally keys that name no unit a gate routes: cycles with no family (`swarm`), rows with no family or box recorded.
+PSEUDO_UNITS = ("swarm", "None", "", "unknown", "null")
+
+
 @dataclass(frozen=True)
 class Metric:
     """A ratio of sums over units: `numerator` / `denominator` fields of the observer's per-unit tallies."""
@@ -818,8 +1041,16 @@ class Lane:
     population_guards: tuple[Metric, ...] = ()
     priced: bool = True                 # a captured bottleneck must show it repays a cycle (execution: severity instead)
     arm_needs: str | None = None        # arms: only units with this tally (> 0) in the window are compared
-    arm_exclude: tuple[str, ...] = ()   # arms: pseudo-units that are no unit (familyless cycles)
+    arm_exclude: tuple[str, ...] = PSEUDO_UNITS   # arms: pseudo-units that are no unit (familyless cycles, no box)
     birth_balance: bool = False         # arms: the canary arm's share of births must not fall below its fraction
+    # The held-out pool: the private file `<held-out directory>/<judge>.json` (never in this public repo, never in a
+    # patch author's view), pinned by its SHA-256 here. The loop hands it to the judge on standard input, held-out runs
+    # only (`HarnessImprovement._evaluate_lane`).
+    heldout_pool: str = ""
+    # Regression tests the lane's lever is allowed to supersede: run with the gate CLOSED (the old behavior must still
+    # pass them), skipped with it OPEN. Each pins the old admission behavior the lever exists to change, never an
+    # invariant (trial and lineage accounting, looks, eligibility), which the judge's safety counts carry.
+    supersedes: tuple[str, ...] = ()
 
     def bottleneck(self, name: str) -> Bottleneck:
         for b in self.bottlenecks:
@@ -835,11 +1066,21 @@ class Lane:
 
 
 COST_RATIO, COST_FLOOR, PAYS_SHARE = 1.25, 2.0, 0.25
+#: Pinned private held-out pools (`Lane.heldout_pool`): SHA-256 of `<held-out directory>/<judge>.json`. The files live
+#: outside the repo (`~/Work/.ltcm-main/harness-heldout/` on the owner's machine, mode 0600 in a 0700 directory, backed
+#: up with the journal); a lost pool is restored from its backup, never regenerated (a new pool is a new lane hash).
+HELDOUT_POOLS = {
+    "research": "c67e699af2a077fafb9f957b98c88dbc95bc6c6ff040d8c5f69b56d1334c0c63",
+    "memory": "913af78057f5898d05d88b081eed7f47c9a4e6d0098e042a0844a0ed45c353da",
+    "data": "5a6228a6ab6817545db818df99cdd5ed53fb4b31a8fa34a49542ec1c688ecc64",
+    "execution": "46e65fbb329d8fce1117f524521b97f77a795017d5aab0cf0433f6020dfea8cd",
+}
 #: The research judge's "pays" rule in House terms (Sept 30, 2026, 24 hours read-only): 14.2% of Train runs were
 #: disqualified at runtime (2,755 of 19,365), and a Gym job slot took 26 box-seconds (517,618 box-seconds over 19,910
-#: slots; a cycle's 130 Gym seconds are its batch's wall time, shared). A screen pays when its added seconds per program
-#: are at most PAYS_SHARE of the box-seconds it saves per program at the House's rate, and never above
-#: SCREEN_CAP_SECONDS per program (it runs on the House, beside the trading loop, for about 19,000 programs a day).
+#: slots; a cycle's 130 Gym seconds are its batch's wall time, shared). A screen pays when its added CPU seconds per
+#: program are at most PAYS_SHARE of the box-seconds it saves per program at the House's rate, and never above
+#: SCREEN_CAP_SECONDS per program (it runs on the House, beside the trading loop, for about 19,000 programs a day). The
+#: judge measures the screens' process CPU time, not wall time, so a loaded machine does not fail a sound candidate.
 HOUSE_DQ_RATE, BOX_SECONDS_PER_JOB, SCREEN_CAP_SECONDS, SCREEN_FLOOR_SECONDS = 0.142, 26.0, 0.25, 0.01
 #: A cycle's cost before it starts (authoring, adversarial reviews, a deploy and its verification; Sept 30 agent rates,
 #: estimates): a captured bottleneck is worth a cycle only when its dollars a day at the predeclared effect repay this
@@ -853,6 +1094,14 @@ CORE_REGRESSIONS = ("league.tests.test_swarm_long_single", "league.tests.test_sw
                     "league.tests.test_swarm_dedupe", "league.tests.test_swarm_evaluator",
                     "league.tests.test_swarm_graveyard_digest")
 UNATTRIBUTED = Metric("unattributed_usd_per_hour", "unattributed_usd", "hours", min_effect=0.25, abs_tolerance=0.25)
+#: The memory lane's lever (refusing a restated buried idea) supersedes these regressions with its gate open: each admits
+#: a restated dead idea and checks the birth continues its lineage. With the gate closed they still run and must pass;
+#: the memory judge's `trials_uncounted` and `rebirths_fresh_lineage` carry the lineage invariant for what is admitted.
+MEMORY_SUPERSEDES: tuple[str, ...] = (
+    "league.tests.test_swarm_rounds.ArchitectTests.test_a_proposal_on_a_retired_familys_slice_continues_its_lineage",
+    "league.tests.test_swarm_graveyard_digest.ArchitectRoutes.test_every_lesson_a_model_reads_passes_lesson_view",
+    "league.tests.test_swarm_graveyard_digest.ArchitectRoutes.test_proposals_cite_the_rows_they_differ_from",
+)
 
 LANES: dict[str, Lane] = {
     "research": Lane(
@@ -867,16 +1116,20 @@ LANES: dict[str, Lane] = {
                 Metric("cycle_error_rate", "cycle_errors", "cycles", min_effect=0.20),
                 # A cycle that ran the Gym but names no recorded run: the join the lane's own metrics rest on.
                 Metric("unmatched_gym_cycle_rate", "gym_cycles_unmatched", "gym_cycles", min_effect=0.0,
-                       abs_tolerance=0.01)),
+                       abs_tolerance=0.01),
+                # OK Train runs that made no trade: a program whose runtime errors were hidden from the Gym (its decide
+                # wrapped in try/except) stops being disqualified and trades nothing. A screen that stops broken
+                # programs before the Gym leaves this share alone.
+                Metric("zero_trade_ok_rate", "ok_zero_trade_runs", "ok_runs", min_effect=0.10, abs_tolerance=0.02)),
         surface=("league/swarm/researcher.py", "league/swarm/preflight.py", "league/swarm/claude_research.py", NEW_TEST),
         release_classes=("research", "money_path"),
-        judge="research", protocol="research-workflow-v2", judge_zero=("false_refusals",), judge_no_worse=(),
-        judge_cost="screen_seconds", judge_cost_rule="pays",
+        judge="research", protocol="research-workflow-v3", judge_zero=("false_refusals",), judge_no_worse=(),
+        judge_cost="screen_cpu_seconds", judge_cost_rule="pays",
         regressions=("league.tests.test_swarm_researcher", "league.tests.test_swarm_store", "league.tests.test_swarm_loop")
         + CORE_REGRESSIONS,
         canary={"mode": "arms", "unit": "family", "fraction": 0.25, "observe_seconds": 6 * 3600,
                 "min_units_per_arm": 12},
-        population_guards=(UNATTRIBUTED,), arm_exclude=("swarm",),
+        population_guards=(UNATTRIBUTED,), heldout_pool=HELDOUT_POOLS["research"],
     ),
     "memory": Lane(
         id="memory", title="Prompts, memory and retrieval",
@@ -903,14 +1156,15 @@ LANES: dict[str, Lane] = {
         surface=("league/swarm/architect.py", "league/swarm/strategist.py", "league/swarm/diagnostician.py",
                  "league/swarm/researcher.py", "league/swarm/seeds.py", NEW_TEST),
         release_classes=("research", "money_path"),
-        judge="memory", protocol="memory-rebirth-v2", judge_zero=("trials_uncounted", "mechanism_rewritten"),
+        judge="memory", protocol="memory-rebirth-v3", judge_zero=("trials_uncounted", "mechanism_rewritten"),
         judge_no_worse=("novel_refused", "rebirths_fresh_lineage"),
         judge_cost="sqlite_statements", judge_cost_rule="ratio",
         regressions=("league.tests.test_swarm_r11b", "league.tests.test_swarm_verdicts", "league.tests.test_swarm_store")
         + CORE_REGRESSIONS,
         canary={"mode": "arms", "unit": "mechanism", "fraction": 0.5, "observe_seconds": 12 * 3600,
                 "min_units_per_arm": 15},
-        population_guards=(UNATTRIBUTED,), arm_needs="births", birth_balance=True,
+        population_guards=(UNATTRIBUTED,), arm_needs="births", birth_balance=True, heldout_pool=HELDOUT_POOLS["memory"],
+        supersedes=MEMORY_SUPERSEDES,
     ),
     "data": Lane(
         id="data", title="Data processing",
@@ -920,13 +1174,17 @@ LANES: dict[str, Lane] = {
             "Gym batches fail on delivery and requeue: every job slot in the batch waits and may run again.",
             judge_primary="failed_transient", judge_effect=0.50, judge_floor=5),),
         guards=(Metric("gym_usd_per_ok_slot", "gym_usd", "ok_slots", min_effect=0.10),),
-        surface=("league/sailbox.py", "league/swarm/pool.py", "league/data_job.py", "scripts/data/boxlib.py",
+        # Not the Gym pool (`league/swarm/pool.py`): it writes this lane's own metric (its `batch_failed` events and the
+        # job slots it books as Gym box spend), and the judge never runs it. A pool change is a reviewed change outside
+        # the loop.
+        surface=("league/sailbox.py", "league/data_job.py", "scripts/data/boxlib.py",
                  "scripts/data/locking.py", "scripts/data/nightly.py", "scripts/data/sip_progress.py", NEW_TEST),
         release_classes=("research", "money_path"),
-        judge="data", protocol="data-retry-v2", judge_zero=("retried_permanent",), judge_no_worse=(),
+        judge="data", protocol="data-retry-v3", judge_zero=("retried_permanent",), judge_no_worse=(),
         judge_cost="requests", judge_cost_rule="ratio",
         regressions=("league.tests.test_gym_driver", "league.tests.test_gym_download_retry", "league.tests.test_swarm_pool"),
         canary={"mode": "window", "unit": "box", "observe_seconds": 24 * 3600, "min_units_per_arm": 3},
+        heldout_pool=HELDOUT_POOLS["data"],
     ),
     "execution": Lane(
         id="execution", title="Execution reliability",
@@ -946,7 +1204,10 @@ LANES: dict[str, Lane] = {
                        judge_primary="restart_divergences", judge_mode="hold", severity="critical",
                        # Restarts are House-wide: deliberate post-close restart tests after the planned release are the
                        # units, against the restarts of the control window before it (`required_units`).
-                       canary={"unit": "restart", "observe_seconds": 5 * 86400, "min_units_per_arm": 3})),
+                       # At most three deliberate post-close restarts an evening over the five days: a control whose
+                       # counts need more for the exact test voids the canary at its start (`required_units`).
+                       canary={"unit": "restart", "observe_seconds": 5 * 86400, "min_units_per_arm": 3,
+                               "max_units": 15})),
         guards=(Metric("live_error_rate", "live_errors", "restarts_or_one", min_effect=0.0),),
         # The practice engine, its chains, its receipts and the decider. The real-money order path, the brokerage
         # account, the live state and paper orders are capital (`PROTECTED`). Every file here moves the evaluator
@@ -955,20 +1216,55 @@ LANES: dict[str, Lane] = {
         surface=("league/live/shadow.py", "league/live/chains.py", "league/live/observe.py", "league/live/decider.py",
                  NEW_TEST),
         release_classes=("evidence_reset",),
-        judge="execution", protocol="execution-recovery-v1", judge_zero=("invalid_accepted",),
+        judge="execution", protocol="execution-recovery-v2", judge_zero=("invalid_accepted",),
         judge_no_worse=("valid_rejected", "restart_divergences"), judge_cost="cpu_seconds", judge_cost_rule="ratio",
         regressions=("league.tests.test_shadow_restart", "league.tests.test_live_practice", "league.tests.test_live_paper",
                      "league.tests.test_live_observe"),
         # Five trading sessions of practice after the planned release: a calendar week of wall-clock time.
         canary={"mode": "window", "unit": "family", "observe_seconds": 7 * 86400, "min_units_per_arm": 8,
                 "planned_release": True},
-        priced=False,
+        priced=False, heldout_pool=HELDOUT_POOLS["execution"],
     ),
 }
 
 
+#: The module-level rules a lane's capture and registered decision rest on beyond its `Lane` row: the rebirth
+#: detector, the reject classes, the cost and payback constants, the observers, the arms split and the comparison, and
+#: the loop's decision step. They are hashed into `lane_sha`, so a change to any of them after a capture refuses staging
+#: and voids a canary that has not been decided (`HarnessImprovement.canary_start`, `reconcile_lane`).
+RULE_SYMBOLS: dict[str, tuple[str, ...]] = {
+    "league/swarm/harness_lanes.py": (
+        "SAME_IDEA", "FIRST_IDEA", "_STOP", "SINGLES", "words", "jaccard", "first_sentence", "same_idea", "slice_key",
+        "REJECT_CLASSES", "reject_class", "signature", "COST_RATIO", "HOUSE_DQ_RATE", "PAYBACK_DAYS", "CYCLE_USD",
+        "HELDOUT_POOLS", "PSEUDO_UNITS", "RESEARCH_KINDS", "_WASTED", "_num", "_add", "totals", "_spend", "_research",
+        "_read_runtime", "_memory", "_data", "_execution", "measure", "lane_tallies", "lane_metrics", "rank", "payback",
+        "motivating_units", "heldout_seed", "split_arms", "_ratio", "compare", "fisher_less", "judge_counts", "_pays",
+        "judge_verdict", "binomial_low", "required_units", "retention"),
+    "league/swarm/canary.py": ("MECHANISM_CHARS", "in_arm", "mechanism_unit", "decide"),
+    "league/swarm/improvement.py": ("ALPHA", "HarnessImprovement.canary_start", "HarnessImprovement.reconcile_lane"),
+}
+_RULES: dict[str, str] = {}
+
+
+def rules_sha() -> str:
+    """The hash of `RULE_SYMBOLS` as the running code defines them (each symbol's AST, docstrings aside)."""
+    if "sha" not in _RULES:
+        here = Path(__file__).resolve().parents[2]
+        dumps = {}
+        for path, names in RULE_SYMBOLS.items():
+            tree = _Docless().visit(ast.parse((here / path).read_text()))
+            for name in names:
+                found = _symbol(tree, name)
+                if not found:
+                    raise ValueError(f"{path}: the lane rule {name} is not defined")
+                dumps[f"{path}:{name}"] = found
+        _RULES["sha"] = hashlib.sha256(json.dumps(dumps, sort_keys=True).encode()).hexdigest()
+    return _RULES["sha"]
+
+
 def lane_sha(lane: Lane) -> str:
-    return hashlib.sha256(json.dumps(lane.spec(), sort_keys=True).encode()).hexdigest()
+    """The lane's predeclared definition: its row and the rules it is measured and decided by (`RULE_SYMBOLS`)."""
+    return hashlib.sha256(json.dumps({"lane": lane.spec(), "rules": rules_sha()}, sort_keys=True).encode()).hexdigest()
 
 
 def surface_check(lane: Lane, paths: Sequence[str]) -> None:
@@ -1118,12 +1414,15 @@ def _research(db: sqlite3.Connection, root: Path, since: float, until: float, ex
     statuses: dict[str, str] = {}
     dq_paths: list[tuple[str, str, str, str]] = []
     refused: list[tuple[str, str, str]] = []
-    for run_id, family, status, at, path, summary in db.execute(
-            "SELECT run_id, family, status, at, path, CASE WHEN status='refused' THEN summary END FROM runs "
+    # An OK run's trade count only (a count, never its score): the zero-trade guard (`zero_trade_ok_rate`).
+    for run_id, family, status, at, path, summary, trades in db.execute(
+            "SELECT run_id, family, status, at, path, CASE WHEN status='refused' THEN summary END, "
+            "CASE WHEN status='ok' AND json_valid(summary) THEN json_extract(summary,'$.trades') END FROM runs "
             "WHERE window='train' AND purpose='train' AND at>=? AND at<?", (lo, hi)):
         statuses[str(run_id)] = str(status)
         _add(units, family, train_runs=1, dq_runs=status == "disqualified", ok_runs=status == "ok",
-             refused_runs=status == "refused", error_runs=status == "error")
+             refused_runs=status == "refused", error_runs=status == "error",
+             ok_zero_trade_runs=status == "ok" and isinstance(trades, (int, float)) and trades == 0)
         if status == "disqualified" and path:
             dq_paths.append((str(family), str(at), str(path), str(run_id)))
         if status == "refused" and summary:
@@ -1156,14 +1455,16 @@ def _research(db: sqlite3.Connection, root: Path, since: float, until: float, ex
     for fid, usd in by_family.items():
         _add(units, fid, research_usd=usd)
     signatures: dict[str, dict[str, Any]] = {}
-    for family, at, path, run_id in dq_paths[-max(0, examples):]:
+    # The newest `examples` of each (none with 0: a slice `[-0:]` would be the whole list).
+    sampled = dq_paths[len(dq_paths) - examples:] if examples > 0 else []
+    for family, at, path, run_id in sampled:
         result = _read_runtime(root / path)
         text = signature((result or {}).get("disqualified") or ((result or {}).get("messages") or ["unreadable"])[0])
         row = signatures.setdefault(text, {"signature": text, "n": 0, "families": [], "first_at": at})
         row["n"] += 1
         if family not in row["families"] and len(row["families"]) < 8:
             row["families"].append(family)
-    for family, at, reason in refused[-max(0, examples):]:
+    for family, at, reason in (refused[len(refused) - examples:] if examples > 0 else []):
         text = "refused: " + signature(reason)
         row = signatures.setdefault(text, {"signature": text, "n": 0, "families": [], "first_at": at})
         row["n"] += 1
@@ -1172,7 +1473,7 @@ def _research(db: sqlite3.Connection, root: Path, since: float, until: float, ex
     ranked = sorted(signatures.values(), key=lambda r: (-r["n"], r["signature"]))
     return {"units": units, "spend": kinds, "join": {"cycles_with_gym_seconds_matched": matched, "unmatched": unmatched},
             "population": {"unattributed_usd": unattributed, "hours": (until - since) / 3600.0},
-            "examples": ranked[:16], "sampled_disqualified": min(len(dq_paths), max(0, examples)),
+            "examples": ranked[:16], "sampled_disqualified": len(sampled),
             "disqualified_with_result": len(dq_paths)}
 
 
@@ -1180,7 +1481,8 @@ def _read_runtime(path: Path) -> dict[str, Any] | None:
     """Only a retained result's `runtime` block (errors and why it was disqualified); nothing it measured."""
     try:
         doc = json.loads(gzip.decompress(Path(path).read_bytes()))
-    except (OSError, ValueError, EOFError):
+    except (OSError, ValueError, EOFError, zlib.error, RecursionError):
+        # A corrupt or truncated file (a flipped byte in its deflate data raises zlib.error) is one unreadable example.
         return None
     runtime = doc.get("runtime") if isinstance(doc, dict) else None
     if not isinstance(runtime, dict):
@@ -1423,7 +1725,7 @@ def measure(root: Path, *, now: float | None = None, seconds: int = 6 * 3600, si
     wanted = list(lanes or LANES)
     out: dict[str, Any] = {"schema": SCHEMA, "policy": POLICY, "at": now, "taken_at": taken, "since": since, "until": now,
                            "window": {"since": iso(since), "until": iso(now), "seconds": round(now - since, 1)},
-                           "source": running_source(root, now=now), "lanes": {}, "errors": {}}
+                           "source": running_source(root, now=taken), "lanes": {}, "errors": {}}
     db = connect_ro(root / "swarm.sqlite")
     try:
         for name in wanted:
@@ -1436,21 +1738,25 @@ def measure(root: Path, *, now: float | None = None, seconds: int = 6 * 3600, si
                     out["lanes"][name] = _data(db, root, since, now)
                 elif name == "execution":
                     out["lanes"][name] = _execution(root, since, now)
-            except (sqlite3.Error, OSError, ValueError, KeyError, TypeError) as exc:
+            except Exception as exc:  # noqa: BLE001 - one lane's odd data never loses the other lanes' measurement
                 out["errors"][name] = f"{type(exc).__name__}: {str(exc)[:300]}"
     finally:
         db.close()
-    # The swarm's starts in the window (a before/after comparison with a restart inside it is void).
+    # The swarm's starts in the window and the release each ran (a start of another release inside a registered window
+    # voids its comparison; a restart of the same release does not).
     ledger = root / "ledger.sqlite"
     if ledger.exists():
         try:
             db = connect_ro(ledger)
             try:
-                out["starts"] = [e for e in (epoch_of(at) for (at,) in db.execute(
-                    "SELECT at FROM ledger WHERE kind='ops.started' AND at>=? AND at<? ORDER BY seq", (iso(since), iso(now))))
-                    if e is not None]
+                rows = db.execute("SELECT at, CASE WHEN json_valid(payload) THEN json_extract(payload,'$.release') END "
+                                  "FROM ledger WHERE kind='ops.started' AND at>=? AND at<? ORDER BY seq",
+                                  (iso(since), iso(now))).fetchall()
             finally:
                 db.close()
+            out["starts"] = [e for e in (epoch_of(at) for at, _ in rows) if e is not None]
+            out["start_releases"] = [{"at": e, "release": None if r is None else Path(str(r)).name}
+                                     for e, r in ((epoch_of(at), r) for at, r in rows) if e is not None]
         except sqlite3.Error as exc:
             out["errors"]["starts"] = f"{type(exc).__name__}: {str(exc)[:200]}"
     try:
@@ -1464,7 +1770,7 @@ def measure(root: Path, *, now: float | None = None, seconds: int = 6 * 3600, si
                 continue
             if isinstance(row, dict):
                 rows.append({k: row.get(k) for k in ("at", "deploy", "release", "stage", "ok", "digest", "verdict", "ticks",
-                                                     "watch_seconds", "grace", "from", "to")})
+                                                     "watch_seconds", "grace", "from", "to", "current", "previous")})
         out["deploys"] = rows
     except OSError:
         out["deploys"] = None
@@ -1568,7 +1874,7 @@ def rank(measurement: Mapping[str, Any]) -> list[dict[str, Any]]:
             if spec.canary_for(b).get("unit") == "restart":
                 # House-wide events on the exact test: the planned sample must be able to reach alpha against the
                 # capture's own counts (a fresh control replaces them at the canary).
-                need = required_units(tally, b.metric, alpha=0.05)
+                need = required_units(tally, b.metric, alpha=0.05, cap=int(spec.canary_for(b).get("max_units", 60)))
                 if over and need is None:
                     over = False
                     pays = {**pays, "why": "the exact test cannot reach alpha against these counts with any planned sample"}
@@ -1735,10 +2041,10 @@ def _pays(lane: Lane, primary: str, a: Mapping[str, Any], b: Mapping[str, Any]) 
     caught = max(0.0, float(a.get("broken_reaching_gym") or 0) - float(b.get("broken_reaching_gym") or 0)) / broken
     saved = caught * HOUSE_DQ_RATE * BOX_SECONDS_PER_JOB
     if per_program > SCREEN_CAP_SECONDS:
-        return f"screens take {per_program:.3f} s a program, above the {SCREEN_CAP_SECONDS} s cap"
+        return f"screens take {per_program:.3f} CPU s a program, above the {SCREEN_CAP_SECONDS} s cap"
     if added > max(SCREEN_FLOOR_SECONDS, PAYS_SHARE * saved):
-        return (f"the screens add {added:.3f} s a program, more than {PAYS_SHARE:.0%} of the {saved:.3f} Gym box-seconds a "
-                f"program they save at the House's rate")
+        return (f"the screens add {added:.3f} CPU s a program, more than {PAYS_SHARE:.0%} of the {saved:.3f} Gym "
+                "box-seconds a program they save at the House's rate")
     return None
 
 

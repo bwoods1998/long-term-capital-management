@@ -29,6 +29,47 @@ except ImportError:  # pragma: no cover
     HAVE_NUMPY = False
 
 
+#: TEST FIXTURES shaped like the judges' held-out pools. The real pools are private (outside this repo, pinned by hash in
+#: `harness_lanes.HELDOUT_POOLS`); these only exercise the machinery and share no class with them.
+TEST_POOLS = {
+    "research": {"schema": 1, "judge": "research",
+                 "misuse": {"fixture_attr": ['{a} = ctx.fixture_attribute'], "fixture_call": ['{a} = ctx.minute()']},
+                 "wraps": {"fixture_late": ['if ctx.minutes_to_close <= 60:']},
+                 "load": {"fixture_load": {"extra": "{a} = [][1]\n"}},
+                 "valid": {"fixture_valid": ['{a} = ctx.minute', 'STATE["{b}"] = {a}']}},
+    "memory": {"schema": 1, "judge": "memory",
+               "bank": ["Fixture funds rally into the fixture window and fall back once the fixture event passes.",
+                        "Fixture volatility spikes before fixture announcements and collapses after the fixture print.",
+                        "Fixture options on the test root misprice fixture risk around fixture holidays every season.",
+                        "The fixture index drifts toward fixture strikes on fixture afternoons with heavy test interest.",
+                        "Fixture skew widens after fixture selloffs and narrows over the following fixture week.",
+                        "Fixture spreads between the two test funds close within a fixture month of opening wide.",
+                        "Fixture gaps at the open fill within the first fixture hour on light test volume.",
+                        "Fixture premium is rich into fixture reports and cheap after the fixture results.",
+                        "Fixture calls in crowded test names lose value once fixture attention moves elsewhere.",
+                        "Fixture breakouts on heavy test volume continue through the fixture lunch hour."],
+               "novel": ["A test-only claim about lunch hours and nothing else at all in fixture land.",
+                         "Another test-only claim about closing auctions in a fixture market.",
+                         "A third test-only claim about roll weeks in fixture commodity funds.",
+                         "A fourth test-only claim about fixture inflows and implied volatility."],
+               "synonyms": {"rally": "climb", "spikes": "jumps", "drifts": "moves", "widens": "grows"},
+               "seconds": ["The fixture entry waits a session.", "The fixture exit moves to the close."],
+               "hedges": ["The fixture idea is unchanged."],
+               "slices": [["debit_vertical", ["SPY"]], ["credit_vertical", ["QQQ"]], ["long_straddle", ["IWM"]],
+                          ["iron_condor", ["SPY"]], ["long_strangle", ["QQQ"]], ["debit_vertical", ["IWM"]],
+                          ["credit_vertical", ["SPY"]], ["long_butterfly", ["QQQ"]]],
+               "elsewhere_roots": ["DIA"], "buried": 8, "novel_count": 4, "moved_count": 2},
+    "data": {"schema": 1, "judge": "data",
+             "transient": {"fixture_http599": {"type": "http", "code": 599},
+                           "fixture_reset": {"type": "os", "errno": "ECONNRESET", "wrap": "url"},
+                           "fixture_read": {"type": "exc", "cls": "http.client.IncompleteRead", "args": ["x", 3],
+                                            "at": "read"}},
+             "permanent": {"fixture_http418": {"type": "http", "code": 418},
+                           "fixture_denied": {"type": "exc", "cls": "PermissionError", "args": [13, "fixture"]}}},
+    "execution": {"schema": 1, "judge": "execution", "salt": "fixture", "scenarios": 2, "invalid": []},
+}
+
+
 def commit(repo: Path, message: str) -> str:
     labmod.git(repo, "add", ".")
     labmod.git(repo, "-c", "user.name=Harness Test", "-c", "user.email=harness@example.invalid", "commit", "-qm", message)
@@ -61,6 +102,7 @@ class Boundary(unittest.TestCase):
             self.assertEqual(lanes.protected_reason(path), "capital", "the real-money order path and the real book")
             self.assertNotIn(path, lanes.LANES["execution"].surface)
         self.assertNotIn("league/CONTRACT.md", lanes.LANES["research"].surface, "prose cannot be gated per family")
+        self.assertNotIn("league/swarm/pool.py", lanes.LANES["data"].surface, "the pool writes the data lane's own metric")
         with self.assertRaisesRegex(labmod.ImprovementError, "protected"):
             lanes.surface_check(lanes.LANES["research"], ["league/swarm/researcher.py", "league/swarm/guard.py"])
         with self.assertRaisesRegex(labmod.ImprovementError, "outside"):
@@ -107,6 +149,47 @@ class Boundary(unittest.TestCase):
         with self.assertRaisesRegex(labmod.ImprovementError, "fingerprint"):
             lanes.content_guard("league/live/shadow.py", "X = 1\n", "from league.swarm import canary\nX = 1\n")
 
+    def test_content_guard_counts_every_use_of_a_name_so_aliases_and_members_cannot_hide_one(self):
+        """The second review's probes: aliased imports, a reference kept for later, dynamic attribute access, file moves,
+        process replacement, a process module's members, store writes, sealed reads, raw SQL, a collaborator's internals."""
+        path = "league/swarm/researcher.py"
+        before = ("import json\nimport os\nimport subprocess\n\n\nclass R:\n    def f(self, fam, text):\n"
+                  "        self.store.note(fam['id'], text.replace('a', 'b'))\n        rows = self.store._all('SELECT 1')\n"
+                  "        return os.path.join('a', json.dumps(rows))\n")
+        lanes.content_guard(path, before, before.replace("text.replace('a', 'b')", "text.replace('b', 'c')"))
+        for added, pattern in (
+                ("from os import system as _sh, write as _emit\n", "system"),
+                ("from os import environ as _env\n", "plumbing"),
+                ("from operator import attrgetter as _ag\n", "attrgetter"),
+                ("import operator\nX = operator.attrgetter('_FOR' + 'CED')\n", "attrgetter"),
+                ("F = os.system\n", "system"),
+                ("def g(p, q):\n    return os.remove(p)\n", "members"),
+                ("def g(p, q):\n    return os.replace(p, q)\n", "members"),
+                ("def g(p, q):\n    return p.replace(q)\n", "replace/1"),
+                ("def g(p):\n    return p.rename('x')\n", "rename"),
+                ("def g(p):\n    return p.touch()\n", "touch"),
+                ("def g(p):\n    return p.mkdir()\n", "mkdir"),
+                ("def g(a):\n    return os.execv('/bin/sh', a)\n", "execv"),
+                ("def g(a):\n    return os.posix_spawn('/bin/sh', a, {})\n", "posix_spawn"),
+                ("def g(a):\n    return subprocess.run(a)\n", "members"),
+                ("import os as o\n", "alias"),
+                ("class S:\n    def g(self, fid):\n        self.store.set_state(fid, robust_failed=[], drift_failed={})\n",
+                 "store writes"),
+                ("class S:\n    def g(self, fid):\n        self.store.update_family(fid, lineage=None, parent=None)\n",
+                 "store writes"),
+                ("class S:\n    def g(self, fid):\n        self.store.bump(fid, trials=-1)\n", "store writes"),
+                ("class S:\n    def g(self, fid):\n        return self.store.looks()\n", "holdout"),
+                ("class S:\n    def g(self):\n        return self.store._db\n", "private"),
+                ("class S:\n    def g(self):\n        return self.store._all('DELETE FROM runs')\n", "SQL"),
+                ("def g(db):\n    return db.execute('SELECT * FROM looks')\n", "SQL")):
+            with self.assertRaisesRegex(labmod.ImprovementError, pattern, msg=added):
+                lanes.content_guard(path, before, before + "\n" + added)
+        reworded = ("def reject(why):\n    return {'reason': 'no chain for the leg'}\n", "def reject(why):\n    return "
+                    "{'reason': 'the leg is absent'}\n")
+        with self.assertRaisesRegex(labmod.ImprovementError, "reject reasons"):
+            lanes.content_guard("league/live/chains.py", *reworded)
+        lanes.content_guard("league/live/chains.py", reworded[0], reworded[0] + "\nX = 'no quote yet'\n")
+
     def test_live_path_follows_live_imports_and_module_level_closures(self):
         modules = lanes.live_path_modules(REPO)
         for path in ("league/live/step.py", "league/gym/engine.py", "league/swarm/gate.py", "league/swarm/bands.py",
@@ -147,6 +230,43 @@ class Frozen(unittest.TestCase):
         lanes.symbol_guard("league/swarm/researcher.py", researcher, shadowed)  # researcher has no same_idea to shadow
         with self.assertRaisesRegex(labmod.ImprovementError, "frozen"):
             lanes.symbol_guard("league/swarm/architect.py", architect, architect + "\n\ndef same_idea(a, b):\n    return False\n")
+
+    def test_the_stores_general_writers_raw_sql_and_the_programs_path_are_frozen(self):
+        """The third review's probes: a gated `_admit` that detaches a lineage, zeroes or lowers trial counters, clears
+        the robustness and drift marks eligibility reads, or deletes runs with raw SQL; a tool call's program rewritten
+        on its way to the Gym (its decide wrapped so runtime errors never disqualify it)."""
+        researcher = self.source("league/swarm/researcher.py")
+        anchor = "        why = check_code(code)\n"
+        self.assertEqual(researcher.count(anchor), 1)
+        for write in ('self.store.update_family(fam["id"], lineage=fam["id"], parent=None)',
+                      'self.store.update_family(fam["id"], trials=0, since_val_trials=0)',
+                      'self.store.bump(fam["id"], trials=-1)',
+                      'self.store.set_state(fam["id"], robust_failed=[], drift_failed={})',
+                      'self.store._exec("DELETE FROM runs WHERE family=? AND status=\'disqualified\'", (fam["id"],))'):
+            probe = researcher.replace(anchor, "        if canary.enabled('k', canary.mechanism_unit(fam['mechanism']), "
+                                       f"root=self.store.root):\n            {write}\n" + anchor, 1)
+            with self.assertRaisesRegex(labmod.ImprovementError, "new writer", msg=write):
+                lanes.symbol_guard("league/swarm/researcher.py", researcher, probe)
+            with self.assertRaisesRegex(labmod.ImprovementError, "store writes|private|SQL", msg=write):
+                lanes.content_guard("league/swarm/researcher.py", researcher, probe)
+        call = 'result = self._execute(fam, tool, pending.get("arguments") or {}, out, author=pending.get("author") or "model")'
+        self.assertEqual(researcher.count(call), 1)
+        armored = researcher.replace(call, call.replace('pending.get("arguments") or {}',
+                                                        '_armored(pending.get("arguments") or {})'), 1)
+        with self.assertRaisesRegex(labmod.ImprovementError, "_model_cycle"):
+            lanes.symbol_guard("league/swarm/researcher.py", researcher, armored)
+        claude = self.source("league/swarm/claude_research.py")
+        old = "            args, error = validate(schemas[name], use.input)\n"
+        self.assertEqual(claude.count(old), 1)
+        with self.assertRaisesRegex(labmod.ImprovementError, "tool_calls is frozen"):
+            lanes.symbol_guard("league/swarm/claude_research.py", claude,
+                               claude.replace(old, old + "            args = _armored(args)\n", 1))
+        shadow = self.source("league/live/shadow.py")
+        old = '        self.practice_event("rejected", {"reason": str(why)[:1000]})\n'
+        self.assertEqual(shadow.count(old), 1)
+        with self.assertRaisesRegex(labmod.ImprovementError, "_reject"):
+            lanes.symbol_guard("league/live/shadow.py", shadow,
+                               shadow.replace(old, old.replace("str(why)", "str(why).replace('no chain', 'absent')"), 1))
 
     def test_admission_may_refuse_more_but_never_change_what_it_admits(self):
         architect = self.source("league/swarm/architect.py")
@@ -210,6 +330,43 @@ class GateCoverage(unittest.TestCase):
         with self.assertRaisesRegex(labmod.ImprovementError, "mechanism_unit"):
             lanes.gate_coverage("league/swarm/researcher.py", self.BASE, self.gated(), self.KEY, "mechanism")
 
+    def test_a_new_definition_may_not_rebind_a_name_existing_code_uses(self):
+        """The third review's probes: a new top-level def or constant under an imported, builtin or used name changes
+        what existing code (a frozen function included) calls, with the gate closed."""
+        base = ("from .store import LONG_SINGLE, same_slice\n\n\nclass A:\n    def admit(self, fam, a, b):\n"
+                "        why = None\n        return same_slice(a, b) and round(fam['x']) and LONG_SINGLE and why\n")
+        gated = base.replace("        why = None\n", "        why = None\n"
+                             f"        if canary.enabled('{self.KEY}', fam['id'], root=self.store.root):\n"
+                             "            why = _helper(a)\n")
+        self.assertEqual(lanes.gate_coverage("league/swarm/architect.py", base,
+                                             gated + "\n\ndef _helper(a):\n    return a\n", self.KEY), 1)
+        for extra in ("LONG_SINGLE = 'none'\n", "def same_slice(a, b):\n    return a == b\n",
+                      "def round(x, n=0):\n    return x\n", "from .fake import same_slice\n", "import json as same_slice\n",
+                      "def admit(x):\n    return x\n"):
+            with self.assertRaisesRegex(labmod.ImprovementError, "not every change is gated", msg=extra):
+                lanes.gate_coverage("league/swarm/architect.py", base, gated + "\n\n" + extra
+                                    + "\n\ndef _helper(a):\n    return a\n", self.KEY)
+
+    def test_the_mechanism_unit_is_the_admitted_text_or_a_familys(self):
+        base = "class Architect:\n    def admit(self, row):\n        mechanism = row['m']\n        return mechanism\n\n" \
+               "    def brief(self, mechanism):\n        return mechanism\n"
+        key = "harness:memory:graveyard_rebirth_rate:0123456789abcdef"
+
+        def gate(arg, where="admit"):
+            anchor = f"    def {where}(self, " + ("row):\n        mechanism = row['m']\n" if where == "admit" else "mechanism):\n")
+            return base.replace(anchor, anchor + f"        if canary.enabled('{key}', canary.mechanism_unit({arg}), "
+                                "root=self.store.root):\n            return None\n", 1)
+
+        path = "league/swarm/architect.py"
+        self.assertEqual(lanes.gate_coverage(path, base, gate("mechanism"), key, "mechanism"), 1)
+        for head in (gate("row['m']"), gate("mechanism", where="brief"), gate("mechanism + 'x'")):
+            with self.assertRaisesRegex(labmod.ImprovementError, "unit"):
+                lanes.gate_coverage(path, base, head, key, "mechanism")
+        family = "def f(fam):\n    return fam\n"
+        head = family.replace("    return fam\n", f"    if canary.enabled('{key}', canary.mechanism_unit(fam['mechanism']), "
+                              "root='.'):\n        return None\n    return fam\n")
+        self.assertEqual(lanes.gate_coverage("league/swarm/researcher.py", family, head, key, "mechanism"), 1)
+
 
 class Gate(unittest.TestCase):
     def test_arm_split_is_deterministic_and_near_its_fraction(self):
@@ -247,6 +404,12 @@ class Gate(unittest.TestCase):
             self.assertFalse(gate.enabled("k", "u", root=temp))
             gate._FORCED["k"] = True
             self.addCleanup(gate._FORCED.clear)
+            with patch.object(gate, "_JUDGED", False):
+                # On the House (no judges' sandbox marker) nothing a candidate does to the override counts.
+                self.assertFalse(gate.enabled("k", "u", root=temp))
+            patcher = patch.object(gate, "_JUDGED", True)
+            patcher.start()
+            self.addCleanup(patcher.stop)
             self.assertTrue(gate.enabled("k", "u", root=temp))
             gate._FORCED["k"] = False
             (Path(temp) / "harness").mkdir()
@@ -306,6 +469,32 @@ class House(unittest.TestCase):
         text = json.dumps(doc)
         for secret in ("7.7", "9.9", "private words", "train_score"):
             self.assertNotIn(secret, text)
+
+    def test_zero_trade_ok_runs_are_counted_and_odd_results_never_lose_the_measurement(self):
+        self.research()
+        fid = self.family("fam-armored", "Another distinct mechanism about closing auctions and imbalances.")
+        for k in range(4):
+            self.store.add_run(fid, 1, {**run(fid, "ok", k), "summary": {"trades": 0 if k < 3 else 5, "train_score": 1.0}},
+                               window="train", stress=1.0, purpose="train")
+        # Every kept result's deflate data corrupted: an invalid block raises zlib.error, which is no OSError.
+        kept = sorted(self.store.runs_dir.glob("*.json.gz"))
+        self.assertTrue(kept)
+        for path in kept:
+            path.write_bytes(path.read_bytes()[:10] + b"\xff\xff\xff\xff\xff")
+        self.assertIsNone(lanes._read_runtime(kept[0]))
+        self.clock.advance(60)
+        doc = lanes.measure(self.root, now=self.clock(), seconds=3600)
+        self.assertEqual(doc["errors"], {})
+        tallies = doc["lanes"]["research"]["metrics"]["tallies"]
+        self.assertEqual(tallies["ok_zero_trade_runs"], 3.0)
+        self.assertAlmostEqual(doc["lanes"]["research"]["metrics"]["zero_trade_ok_rate"], 3 / (18 + 4), places=5)
+        with patch.object(lanes, "_read_runtime", side_effect=AssertionError("examples=0 reads no result")):
+            quiet = lanes.measure(self.root, now=self.clock(), seconds=3600, examples=0)
+        self.assertEqual((quiet["lanes"]["research"]["sampled_disqualified"], quiet["lanes"]["research"]["examples"]), (0, []))
+        with patch.object(lanes, "_research", side_effect=RuntimeError("odd data")):
+            partial = lanes.measure(self.root, now=self.clock(), seconds=3600)
+        self.assertIn("RuntimeError", partial["errors"]["research"])
+        self.assertIn("memory", partial["lanes"], "one lane's failure never loses the others")
 
     def test_measure_opens_every_database_read_only(self):
         self.research()
@@ -369,6 +558,7 @@ class House(unittest.TestCase):
         self.assertEqual((tallies["intents"], tallies["rejects"], tallies["harness_rejects"], tallies["feasibility_rejects"]),
                          (10.0, 2.0, 1.0, 1.0))
         self.assertEqual((tallies["restarts"], tallies["restart_failures"]), (2.0, 1.0))
+        self.assertEqual([s["release"] for s in doc["start_releases"]], ["r", "r"], "each start names its release")
         self.assertEqual(lanes.reject_class("a malformed intent: TypeError"), "program")
 
 
@@ -445,7 +635,7 @@ class Decisions(unittest.TestCase):
 
     def research(self, reaching, screen):
         return {"gym_seconds_wasted": reaching * 130.0, "broken_reaching_gym": reaching, "broken_cases": 31, "cases": 45,
-                "false_refusals": 0, "screen_seconds": screen}
+                "false_refusals": 0, "screen_cpu_seconds": screen}
 
     def test_offline_verdict_needs_heldout_improvement_safety_and_cost(self):
         base = self.research(29, 0.1)
@@ -517,6 +707,17 @@ class Decisions(unittest.TestCase):
         restart = lanes.LANES["execution"].bottleneck("restart_failure_rate").metric
         self.assertIsNone(lanes.required_units({"restart_failures": 1, "restarts": 30}, restart, alpha=0.05))
         self.assertEqual(lanes.required_units({"restart_failures": 6, "restarts": 12}, restart, alpha=0.05), 6)
+        # One failed restart of one needs 19 clean ones on the exact test: more than the five-day window's deliberate
+        # restarts (`max_units`), so it is never captured (and a control like it voids the canary at its start).
+        self.assertEqual(lanes.required_units({"restart_failures": 1, "restarts": 1}, restart, alpha=0.05), 19)
+        cap = lanes.LANES["execution"].canary_for(lanes.LANES["execution"].bottleneck("restart_failure_rate"))["max_units"]
+        self.assertIsNone(lanes.required_units({"restart_failures": 1, "restarts": 1}, restart, alpha=0.05, cap=cap))
+        doc = {"schema": 1, "policy": lanes.POLICY, "since": 0.0, "until": 86400.0, "source": {},
+               "lanes": {"execution": {"units": {}, "restart_totals": {"restarts": 1.0, "restart_failures": 1.0,
+                                                                        "live_errors": 0.0, "restarts_or_one": 1.0}}}}
+        row = next(r for r in lanes.rank(doc) if r["metric"] == "restart_failure_rate")
+        self.assertFalse(row["captured"])
+        self.assertIn("cannot reach alpha", row["why_not"])
         execution = lanes.LANES["execution"]
         b = execution.bottleneck("restart_failure_rate")
         families = {f"f{n}": {"intents": 10, "rejects": 0} for n in range(20)}  # practice units carry no restarts
@@ -548,7 +749,18 @@ class LaneCycle(unittest.TestCase):
         labmod.git(self.repo, "init", "-q")
         self.base = commit(self.repo, "baseline")
         self.clock = Clock(1_790_000_000.0)
-        self.lab = labmod.HarnessImprovement(self.temp / "journal", repo=self.repo, clock=self.clock)
+        # Private held-out pools in a directory outside the repo, pinned by hash (the real ones never reach a test).
+        self.heldout = self.temp / "heldout"
+        self.heldout.mkdir(mode=0o700)
+        pinned = {}
+        for name in ("research", "data"):
+            raw = json.dumps({"schema": 1, "judge": name, "private": f"test pool {name}"}).encode()
+            (self.heldout / f"{name}.json").write_bytes(raw)
+            pinned[name] = dataclasses.replace(lanes.LANES[name], heldout_pool=labmod.sha(raw))
+        patcher = patch.dict(lanes.LANES, pinned)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.lab = labmod.HarnessImprovement(self.temp / "journal", repo=self.repo, clock=self.clock, heldout=self.heldout)
         self.addCleanup(lambda: self.lab.close())
         with tempfile.TemporaryDirectory() as t:
             tree = Path(t) / "base"
@@ -556,16 +768,22 @@ class LaneCycle(unittest.TestCase):
             self.digest = labmod.release_digest(tree)
         self.key = f"harness:research:train_dq_rate:{self.base[:16]}"
 
-    def measurement(self, units, *, since=0.0, until=86400.0, digest=None, deploys=(), current=None, lane="research", starts=None):
-        doc = {"schema": 1, "policy": lanes.POLICY, "since": since, "until": until, "taken_at": until,
+    def measurement(self, units, *, since=0.0, until=86400.0, digest=None, deploys=(), current=None, lane="research", starts=None,
+                    start_releases=None, taken_at=None):
+        doc = {"schema": 1, "policy": lanes.POLICY, "since": since, "until": until,
+               "taken_at": self.clock() if taken_at is None else taken_at,
                "window": {"since": lanes.iso(since), "until": lanes.iso(until), "seconds": until - since},
-               "source": {"digest": digest or self.digest, "release": "/r/base", "started_at": since - 10},
+               "source": {"digest": digest or self.digest, "release": "/r/base", "started_at": since - 10,
+                          "heartbeat_age": 5.0},
                "current": current, "deploys": list(deploys),
                "lanes": {lane: {"units": units, "spend": {"sail_model": 5.0},
                                 "examples": [{"signature": "AttributeError", "n": 3, "families": ["motive-1"],
                                               "boxes": ["sb_motive"], "first_at": "2026-09-30T00:00:00Z"}]}}}
         if starts is not None:
             doc["starts"] = list(starts)
+        if start_releases is not None:
+            doc["start_releases"] = [{"at": a, "release": r} for a, r in start_releases]
+            doc["starts"] = [a for a, _ in start_releases]
         return doc
 
     def units(self, n, dq, prefix, runs=20):
@@ -601,6 +819,13 @@ class LaneCycle(unittest.TestCase):
             self.lab.capture_lanes({**self.measurement({}), "source": {}}, base=self.base)
         cheap = self.lab.capture_lanes(self.measurement(self.units(30, 3, "g")), base="b" * 40)
         self.assertFalse(next(r for r in cheap if r["lane"] == "research")["captured"], "unpriced waste is not a cycle")
+        # A stale document (another release may run since) or one of a swarm without a fresh heartbeat binds nothing.
+        with self.assertRaisesRegex(labmod.ImprovementError, "not taken in the last"):
+            self.lab.capture_lanes(self.measurement(self.units(30, 3, "h"), taken_at=self.clock() - 2 * 3600), base="c" * 40)
+        silent = self.measurement(self.units(30, 3, "h"))
+        silent["source"]["heartbeat_age"] = 900.0
+        with self.assertRaisesRegex(labmod.ImprovementError, "heartbeat"):
+            self.lab.capture_lanes(silent, base="c" * 40)
 
     def test_brief_hides_the_heldout_split_and_stage_enforces_the_boundary(self):
         self.capture()
@@ -630,11 +855,15 @@ class LaneCycle(unittest.TestCase):
         self.assertIn("evaluate", steps[0]["next"])
 
     def test_renames_deletes_modes_and_test_file_gates_are_refused(self):
-        for n, change in enumerate(("rename", "delete", "mode", "fake gate")):
+        for n, change in enumerate(("rename", "delete", "mode", "fake gate", "edit test")):
             key = self.key
             if n:
                 # a fresh capture on a fresh base for each attempt budget
                 (self.repo / "league" / "swarm" / f"note{n}.py").write_text("X = 1\n")
+                if change == "edit test":
+                    # an earlier candidate's retained test, now in the base
+                    (self.repo / "league" / "tests").mkdir(parents=True, exist_ok=True)
+                    (self.repo / "league" / "tests" / "test_harness_candidate_old.py").write_text("X = 1\n")
                 base = commit(self.repo, f"base {n}")
                 with tempfile.TemporaryDirectory() as t:
                     labmod.archive(self.repo, base, Path(t) / "b")
@@ -657,6 +886,10 @@ class LaneCycle(unittest.TestCase):
             elif change == "mode":
                 (worktree / "league" / "swarm" / "preflight.py").chmod(0o755)
                 pattern = "mode"
+            elif change == "edit test":
+                (worktree / "league" / "swarm" / "preflight.py").write_text(self.gated().replace(self.key, key))
+                (worktree / "league" / "tests" / "test_harness_candidate_old.py").write_text("X = 2\n")
+                pattern = "never edits an existing"
             else:
                 (worktree / "league" / "swarm" / "preflight.py").write_text(SOURCE.replace("'passed'", "'refused'"))
                 (worktree / "league" / "tests").mkdir(parents=True, exist_ok=True)
@@ -685,13 +918,21 @@ class LaneCycle(unittest.TestCase):
             else:
                 # a held-out figure the author must never see, distinct from the dev one
                 wasted, screen = head_wasted + (7.0 if split == "heldout" else 0.0), 3.0
-            body = {"protocol": "research-workflow-v2", "split": split, "provider_calls": 0, "gym_seconds_wasted": wasted,
+            lines = kwargs["stdin"].decode().splitlines()
+            # The private pool rides on standard input for held-out runs only, never on the command line.
+            self.assertEqual(len(lines), 2 if split == "heldout" else 1)
+            self.assertEqual("--pool-stdin" in command, split == "heldout")
+            self.assertFalse(any("test pool" in c for c in command))
+            if split == "heldout":
+                self.assertIn("test pool research", lines[1])
+            body = {"protocol": "research-workflow-v3", "split": split, "provider_calls": 0, "gym_seconds_wasted": wasted,
                     "broken_reaching_gym": wasted / 130.0, "broken_cases": 31, "cases": 45, "false_refusals": 0,
-                    "screen_seconds": screen, "gate": gate_state, "nonce": kwargs["stdin"].decode().strip(),
+                    "screen_cpu_seconds": screen, "gate": gate_state, "nonce": lines[0],
                     "missed": {"secret_class/after_ten": 1}}
             # A line the tree's own code printed after the judge's answer (an exit hook): it cannot know the nonce.
             forged = "\n" + json.dumps({**body, "nonce": "guessed", "gym_seconds_wasted": 0.0}) if forge and gate_state == "open" else ""
-            return {"exit": 0, "stdout": json.dumps(body) + forged, "stderr": "", "seconds": 0.1, "cpu_seconds": 0.1, "error": None}
+            return {"exit": 0, "stdout": json.dumps(body) + forged, "stderr": "printed by the tree", "seconds": 0.1,
+                    "cpu_seconds": 0.1, "error": None}
 
         with patch.object(labmod, "sandbox", side_effect=judge):
             receipt = self.lab.evaluate(self.key, python=Path(sys.executable))
@@ -713,6 +954,7 @@ class LaneCycle(unittest.TestCase):
         self.assertIn("2500", note, "dev figures are the author's to see")
         held = receipt["trees"]["open"]["splits"]["heldout"]
         self.assertNotIn("stdout", held["benchmark"])
+        self.assertNotIn("stderr", held["benchmark"], "nothing a held-out run printed is kept")
         self.assertNotIn("missed", held["metrics"], "no per-class detail of the held-out split is kept")
         self.assertIn("missed", receipt["trees"]["open"]["splits"]["dev"]["metrics"])
 
@@ -823,13 +1065,67 @@ class LaneCycle(unittest.TestCase):
         self.assertEqual((job.state, job.attempt), ("proposed", attempts - 1), "a void reopens and does not use an attempt")
         self.assertIn("prepare", self.lab.next_steps()[0]["next"])
 
+    def test_evaluation_needs_the_pinned_private_pool(self):
+        self.capture()
+        worktree = Path(self.lab.prepare(self.key, self.temp / "wt")["worktree"])
+        (worktree / "league" / "swarm" / "preflight.py").write_text(self.gated())
+        self.lab.stage(self.key, commit(worktree, "gated"))
+        self.lab.heldout = None
+        with patch.object(labmod, "sandbox", side_effect=AssertionError("no judge runs without its pool")):
+            with self.assertRaisesRegex(labmod.ImprovementError, "held-out pools"):
+                self.lab.evaluate(self.key, python=Path(sys.executable))
+            self.lab.heldout = self.heldout
+            (self.heldout / "research.json").write_text(json.dumps({"schema": 1, "regenerated": True}))
+            with self.assertRaisesRegex(labmod.ImprovementError, "not the pinned one"):
+                self.lab.evaluate(self.key, python=Path(sys.executable))
+        self.assertEqual(self.lab.worklist.get(self.key).state, "testing", "a missing pool uses no attempt")
+
+    def test_a_deploy_over_a_newer_release_or_changed_rules_voids_the_canary(self):
+        self.assertTrue(self.evaluated()["passed"])
+        digest = self.lab.worklist.get(self.key).carry["_proposal"]["release_digest"]
+        newer = [{"deploy": "newer@1", "release": "newer", "stage": "stage", "ok": True, "digest": "e" * 64,
+                  "at": lanes.iso(80000.0)}]
+        rows = self.deploy_rows()
+        rows[0] = {**rows[0], "current": "newer"}
+        result = self.lab.canary_start(self.key, measurement=self.measurement(
+            {}, since=89000, until=90100, digest=digest, deploys=newer + rows, current="cand-release"))
+        self.assertEqual(result["decision"], "voided", result)
+        self.assertIn("roll back to newer", result["reason"])
+        self.assertEqual(self.lab.worklist.get(self.key).state, "rejected")
+        self.assertIn("roll back to newer", self.lab.next_steps()[0]["next"])
+
+    def test_the_lane_rules_changing_mid_canary_voids_it(self):
+        arm, digest = self.started()
+        since = arm["since"]
+        with patch.dict(lanes._RULES, {"sha": "a changed rebirth detector"}):
+            result = self.lab.reconcile_lane(self.key, measurement=self.measurement(
+                self.arms(arm, 1, 4), since=since, until=since + 6 * 3600, digest=digest, deploys=self.deploy_rows(),
+                current="cand-release"))
+        self.assertEqual(result["decision"], "voided", result)
+        self.assertIn("rules changed", result["reason"])
+        self.assertEqual(gate.read(self.temp / "journal" / "canary.json")[self.key]["state"], "reverted")
+
+    def test_the_watch_measures_a_registered_window_once(self):
+        arm, digest = self.started()
+        end = arm["since"] + 6 * 3600
+        (self.temp / "deploys.jsonl").write_text("\n".join(json.dumps(r) for r in self.deploy_rows()) + "\n")
+        window = self.measurement(self.arms(arm, 1, 4), since=arm["since"], until=end, digest=digest)
+        with patch.object(lanes, "measure", return_value=window) as measured, \
+                patch.object(self.lab, "reconcile_lane", return_value={"waiting": "the close"}):
+            for _ in range(3):
+                self.lab.reconcile(self.key, deploy_log=self.temp / "deploys.jsonl", current_release="cand-release",
+                                   swarm=self.temp / "state")
+        self.assertEqual(measured.call_count, 1, "a waiting decision re-reads the journal's copy, never the House")
+        self.assertEqual(measured.call_args.kwargs["examples"], 0)
+
     def test_a_money_path_gate_never_turns_on_in_session(self):
         self.assertTrue(labmod.in_session(lanes.epoch_of("2026-10-01T15:00:00Z")))
         self.assertFalse(labmod.in_session(lanes.epoch_of("2026-10-01T20:10:00Z")))
         self.assertFalse(labmod.in_session(lanes.epoch_of("2026-10-03T15:00:00Z")), "a Saturday")
         self.assertTrue(labmod.in_session(lanes.epoch_of("2026-11-02T20:30:00Z")), "New York winter: the session ends 21:05Z")
 
-    def test_a_window_lane_needs_a_fresh_control_and_voids_on_a_restart(self):
+    def window_started(self):
+        """A data-lane candidate captured, staged, judged, deployed and started against a fresh control day."""
         key = f"harness:data:slot_failure_rate:{self.base[:16]}"
         boxes = {f"sb{n}": {"gym_usd": 10.0, "gym_seconds": 10000.0, "slots": 200.0, "slots_failed": 4.0, "ok_slots": 196.0}
                  for n in range(5)}
@@ -846,8 +1142,8 @@ class LaneCycle(unittest.TestCase):
             if command[0] == "-m":
                 return {"exit": 0, "stdout": "", "stderr": "", "seconds": 0.1, "cpu_seconds": 0.1, "error": None}
             split = command[command.index("--split") + 1]
-            body = {"protocol": "data-retry-v2", "split": split, "provider_calls": 0, "gate": "none",
-                    "nonce": kwargs["stdin"].decode().strip(), "failed_transient": 9 if tree.name == "base" else 0,
+            body = {"protocol": "data-retry-v3", "split": split, "provider_calls": 0, "gate": "none",
+                    "nonce": kwargs["stdin"].decode().splitlines()[0], "failed_transient": 9 if tree.name == "base" else 0,
                     "retried_permanent": 0, "requests": 200}
             return {"exit": 0, "stdout": json.dumps(body), "stderr": "", "seconds": 0.1, "cpu_seconds": 0.1, "error": None}
 
@@ -869,13 +1165,47 @@ class LaneCycle(unittest.TestCase):
         control["lanes"]["data"]["run_totals"] = {"runs": 100.0, "error_runs": 0.0}
         started = self.lab.canary_start(key, measurement=now, control=control)
         self.assertEqual(started["started"]["mode"], "window")
+        return key, promoted, rows, digest
+
+    def after(self, key, promoted, rows, digest, *, failed=0.0, slots=200.0, **starts):
         end = promoted + 86400
-        after = {f"sb{n}": {"gym_usd": 10.0, "gym_seconds": 10000.0, "slots": 200.0, "slots_failed": 0.0, "ok_slots": 200.0}
-                 for n in range(5)}
-        restarted = self.measurement(after, since=promoted, until=end, digest=digest, deploys=rows, current="cand-release",
-                                     lane="data", starts=[promoted + 7200])
-        restarted["lanes"]["data"]["run_totals"] = {"runs": 100.0, "error_runs": 0.0}
-        self.assertEqual(self.lab.reconcile_lane(key, measurement=restarted)["decision"], "voided")
+        boxes = {f"sb{n}": {"gym_usd": 10.0, "gym_seconds": 10000.0, "slots": slots, "slots_failed": failed,
+                            "ok_slots": slots - failed} for n in range(5)}
+        doc = self.measurement(boxes, since=promoted, until=end, digest=digest, deploys=rows, current="cand-release",
+                               lane="data", **starts)
+        doc["lanes"]["data"]["run_totals"] = {"runs": 100.0, "error_runs": 0.0}
+        return self.lab.reconcile_lane(key, measurement=doc)
+
+    def test_a_window_lane_restart_of_its_own_release_decides_and_asks_to_merge(self):
+        key, promoted, rows, digest = self.window_started()
+        result = self.after(key, promoted, rows, digest, start_releases=[(promoted + 7200, "cand-release")])
+        self.assertEqual(result["decision"], "retained", result)
+        step = next(s for s in self.lab.next_steps() if s["key"] == key)
+        self.assertIn("merge", step["next"], "a retained window change reaches main or the next release drops it")
+        self.assertEqual(self.lab.gates()["retained_not_graduated"], [key])
+        self.lab.canary_stop(key, state="graduated", commit="d" * 40)
+        self.assertEqual(self.lab.gates()["retained_not_graduated"], [])
+
+    def test_a_window_lane_voids_when_another_release_ran_inside_it(self):
+        key, promoted, rows, digest = self.window_started()
+        self.assertEqual(self.after(key, promoted, rows, digest, start_releases=[(promoted + 7200, "other")])["decision"],
+                         "voided")
+        self.assertIn("roll it back", next(s for s in self.lab.next_steps() if s["key"] == key)["next"])
+
+    def test_an_older_measurement_without_start_releases_voids_on_any_restart(self):
+        key, promoted, rows, digest = self.window_started()
+        self.assertEqual(self.after(key, promoted, rows, digest, starts=[promoted + 7200])["decision"], "voided")
+
+    def test_a_window_lane_without_enough_activity_is_rolled_back(self):
+        key, promoted, rows, digest = self.window_started()
+        result = self.after(key, promoted, rows, digest, slots=10.0, start_releases=[])
+        self.assertEqual(result["decision"], "insufficient_activity", result)
+        self.assertIn("roll back", next(s for s in self.lab.next_steps() if s["key"] == key)["next"])
+        rollback = rows + [{"deploy": "cand-release@1", "release": "cand-release", "stage": "rollback", "ok": True,
+                            "from": "cand-release", "to": "base"}]
+        undone = self.lab.reconcile_lane(key, measurement={"since": 0.0, "until": 1.0, "deploys": rollback})
+        self.assertEqual(undone["decision"], "reverted")
+        self.assertEqual(self.lab.worklist.get(key).state, "rejected")
 
 
 RESTATES = '''
@@ -905,16 +1235,22 @@ class GatedMemoryCandidate(unittest.TestCase):
             with tempfile.TemporaryDirectory() as t:
                 labmod.archive(repo, base, Path(t) / "b")
                 digest = labmod.release_digest(Path(t) / "b")
-            quick = dataclasses.replace(lanes.LANES["memory"], regressions=("league.tests.test_swarm_verdicts",))
+            # The lane as defined (its real regression list, the tests its lever supersedes), with a TEST pool pinned.
+            heldout = root / "heldout"
+            heldout.mkdir(mode=0o700)
+            raw = json.dumps(TEST_POOLS["memory"]).encode()
+            (heldout / "memory.json").write_bytes(raw)
+            quick = dataclasses.replace(lanes.LANES["memory"], heldout_pool=labmod.sha(raw))
+            self.assertEqual(quick.regressions, lanes.LANES["memory"].regressions)
             with patch.dict(lanes.LANES, {"memory": quick}):
                 clock = Clock(1_790_000_000.0)
-                lab = labmod.HarnessImprovement(root / "journal", repo=repo, clock=clock)
+                lab = labmod.HarnessImprovement(root / "journal", repo=repo, clock=clock, heldout=heldout)
                 self.addCleanup(lab.close)
                 units = {f"m{n}": {"births": 1, "rebirths": 1 if n < 8 else 0, "units": 1, "research_usd": 0.1}
                          for n in range(40)}
-                measured = {"schema": 1, "policy": lanes.POLICY, "since": 0.0, "until": 86400.0, "taken_at": 86400.0,
+                measured = {"schema": 1, "policy": lanes.POLICY, "since": 0.0, "until": 86400.0, "taken_at": clock(),
                             "window": {"since": lanes.iso(0), "until": lanes.iso(86400), "seconds": 86400},
-                            "source": {"digest": digest, "release": "/r/base", "started_at": 0.0},
+                            "source": {"digest": digest, "release": "/r/base", "started_at": 0.0, "heartbeat_age": 5.0},
                             "lanes": {"memory": {"units": units, "spend": {"claude": 100.0}, "examples": []}}}
                 lab.capture_lanes(measured, base=base)
                 key = f"harness:memory:graveyard_rebirth_rate:{base[:16]}"
@@ -949,16 +1285,24 @@ class GatedMemoryCandidate(unittest.TestCase):
                     self.assertEqual((opened["trials_uncounted"], opened["mechanism_rewritten"], opened["novel_refused"]),
                                      (0, 0, 0), split)
                 self.assertTrue(receipt["passed"], json.dumps(receipt["verdict"], indent=1))
-                self.assertEqual({t["regressions"]["exit"] for t in trees.values()}, {0})
+                # Every regression passes the three ways; open, the superseded tests (which pin the admission of a
+                # restated dead idea) are the only ones not run.
+                self.assertEqual({t["regressions"]["exit"] for t in trees.values()}, {0},
+                                 {k: t["regressions"].get("stderr", "")[-1500:] for k, t in trees.items()})
 
 
 class Judges(unittest.TestCase):
-    """The fixed judges run as the sandbox runs them: a script importing the tree from PYTHONPATH."""
+    """The fixed judges run as the sandbox runs them: a script importing the tree from PYTHONPATH, the pool on stdin."""
+
+    ENV = {**os.environ, "PYTHONPATH": str(REPO), "PYTHONDONTWRITEBYTECODE": "1", "LTCM_HARNESS_JUDGE": "1"}
 
     def judge(self, name, split="dev", seed="dev"):
-        env = {**os.environ, "PYTHONPATH": str(REPO), "PYTHONDONTWRITEBYTECODE": "1"}
-        out = subprocess.run([sys.executable, str(REPO / "league/swarm/harness_judges" / f"{name}.py"), "--split", split,
-                              "--seed", seed], capture_output=True, text=True, env=env, cwd=str(REPO), timeout=300)
+        command = [sys.executable, str(REPO / "league/swarm/harness_judges" / f"{name}.py"), "--split", split, "--seed", seed]
+        stdin = None
+        if split == "heldout":
+            command.append("--pool-stdin")
+            stdin = json.dumps(TEST_POOLS[name]) + "\n"
+        out = subprocess.run(command, input=stdin, capture_output=True, text=True, env=self.ENV, cwd=str(REPO), timeout=300)
         self.assertEqual(out.returncode, 0, out.stderr[-2000:])
         return json.loads(out.stdout.strip().splitlines()[-1])
 
@@ -968,11 +1312,21 @@ class Judges(unittest.TestCase):
         self.assertEqual(dev["novel_refused"], 0)
         self.assertEqual((dev["trials_uncounted"], dev["mechanism_rewritten"]), (0, 0))
         held = self.judge("memory", "heldout", "00aa11bb22cc33dd")
-        self.assertEqual(held, {**held, "rebirths_proposed": 8, "novel_proposed": 12, "trials_uncounted": 0})
+        self.assertEqual(held, {**held, "rebirths_proposed": 8, "novel_proposed": 6, "trials_uncounted": 0})
         self.assertEqual(held["seed"], "00aa11bb22cc33dd")
         self.assertGreaterEqual(held["rebirths_admitted"], lanes.LANES["memory"].bottlenecks[0].judge_floor)
 
-    def test_heldout_cases_follow_the_seed_and_differ_from_dev(self):
+    def test_the_heldout_split_needs_its_private_pool(self):
+        for name in ("research", "memory", "data", "execution"):
+            out = subprocess.run([sys.executable, str(REPO / "league/swarm/harness_judges" / f"{name}.py"), "--split",
+                                  "heldout", "--seed", "s1"], capture_output=True, text=True, env=self.ENV, cwd=str(REPO),
+                                 timeout=300)
+            self.assertNotEqual(out.returncode, 0, name)
+            self.assertIn("pool", out.stderr + out.stdout, name)
+        for name in ("research", "memory", "data", "execution"):
+            self.assertRegex(lanes.LANES[name].heldout_pool, r"^[0-9a-f]{64}$", "every lane pins its private pool")
+
+    def test_heldout_cases_follow_the_seed_and_the_pool_and_differ_from_dev(self):
         sys.path.insert(0, str(REPO / "league/swarm/harness_judges"))
         self.addCleanup(sys.path.remove, str(REPO / "league/swarm/harness_judges"))
         import data as data_judge
@@ -980,45 +1334,60 @@ class Judges(unittest.TestCase):
 
         import memory as memory_judge
 
-        a, b = research_judge.cases("heldout", "s1"), research_judge.cases("heldout", "s2")
-        self.assertEqual(a, research_judge.cases("heldout", "s1"))
+        pool = TEST_POOLS["research"]
+        a, b = research_judge.cases("heldout", "s1", pool), research_judge.cases("heldout", "s2", pool)
+        self.assertEqual(a, research_judge.cases("heldout", "s1", pool))
         self.assertNotEqual([c["code"] for c in a], [c["code"] for c in b])
         dev = research_judge.cases("dev", "dev")
         self.assertFalse({c["code"] for c in dev} & {c["code"] for c in a})
-        broken = [c["class"] for c in dev if c["label"] == "broken"]
-        self.assertFalse(set(broken) & {c["class"] for c in a}, "held-out failure classes are not the dev split's")
-        self.assertTrue(set(research_judge.VALID_HELD) <= {c["class"] for c in a if c["label"] == "valid"})
-        self.assertEqual(sorted({c["class"] for c in a if c["label"] == "broken"}),
-                         sorted(research_judge.HELD_MISUSE + research_judge.HELD_LOAD), "every held-out class, every seed")
-        self.assertNotEqual(data_judge.cases("heldout", "s1"), data_judge.cases("heldout", "s2"))
-        dev_faults = {k for c in data_judge.cases("dev", "dev") for k in c}
-        self.assertFalse(dev_faults & {k for c in data_judge.cases("heldout", "s1") for k in c})
+        self.assertEqual(sorted({(c["class"], c["wrap"]) for c in a if c["label"] == "broken"}),
+                         [("fixture_attr", "always"), ("fixture_attr", "fixture_late"), ("fixture_call", "always"),
+                          ("fixture_call", "fixture_late"), ("fixture_load", "load")], "every class in every placement")
+        self.assertIn("fixture_valid", {c["class"] for c in a if c["label"] == "valid"})
+        with self.assertRaises(ValueError):
+            research_judge.cases("heldout", "s1", None)
+        held, faults, permanent = data_judge.cases("heldout", "s1", TEST_POOLS["data"])
+        self.assertNotEqual(held, data_judge.cases("heldout", "s2", TEST_POOLS["data"])[0])
+        self.assertEqual(permanent, {"fixture_http418", "fixture_denied"})
+        self.assertFalse({k for c in data_judge.cases("dev", "dev")[0] for k in c} & {k for c in held for k in c})
         dev_buried = {b["mechanism"] for b in memory_judge.cases("dev", "dev")[0]}
-        self.assertFalse(dev_buried & {b["mechanism"] for b in memory_judge.cases("heldout", "s1")[0]})
+        self.assertFalse(dev_buried & {b["mechanism"] for b in memory_judge.cases("heldout", "s1", TEST_POOLS["memory"])[0]})
 
-    def test_data_judge_never_retries_a_permanent_fault(self):
+    def test_data_judge_faults_and_their_labels(self):
         dev = self.judge("data")
-        self.assertEqual((dev["retried_permanent"], dev["failed_transient"]), (0, 0))
+        self.assertEqual(dev["retried_permanent"], 0)
+        self.assertGreaterEqual(dev["failed_transient"], 1, "the truncated read the Sept 30 judge found is a dev case")
+        held = self.judge("data", "heldout", "s1")
+        self.assertEqual(held["retried_permanent"], 0)
+        self.assertGreater(held["failed_transient"], 0, "an HTTP 599 is not retried by the Sept 30 driver")
 
-    def test_a_forced_gate_needs_its_key_and_the_override(self):
-        env = {**os.environ, "PYTHONPATH": str(REPO), "PYTHONDONTWRITEBYTECODE": "1"}
-        out = subprocess.run([sys.executable, str(REPO / "league/swarm/harness_judges/data.py"), "--split", "dev", "--gate",
-                              "open", "--key", "harness:data:k:0", "--nonce-stdin"], input="n0nce\n", capture_output=True,
-                             text=True, env=env, cwd=str(REPO), timeout=300)
+    def test_a_forced_gate_needs_its_key_the_override_and_the_sandbox_marker(self):
+        script = str(REPO / "league/swarm/harness_judges/data.py")
+        out = subprocess.run([sys.executable, script, "--split", "dev", "--gate", "open", "--key", "harness:data:k:0",
+                              "--nonce-stdin"], input="n0nce\n", capture_output=True, text=True, env=self.ENV,
+                             cwd=str(REPO), timeout=300)
         self.assertEqual(out.returncode, 0, out.stderr[-2000:])
         answer = json.loads(out.stdout.strip().splitlines()[-1])
         self.assertEqual((answer["gate"], answer["nonce"]), ("open", "n0nce"))
-        missing = subprocess.run([sys.executable, str(REPO / "league/swarm/harness_judges/data.py"), "--split", "dev", "--gate",
-                                  "open"], capture_output=True, text=True, env=env, cwd=str(REPO), timeout=300)
+        missing = subprocess.run([sys.executable, script, "--split", "dev", "--gate", "open"], capture_output=True, text=True,
+                                 env=self.ENV, cwd=str(REPO), timeout=300)
         self.assertNotEqual(missing.returncode, 0)
+        unmarked = {k: v for k, v in self.ENV.items() if k != "LTCM_HARNESS_JUDGE"}
+        ignored = subprocess.run([sys.executable, script, "--split", "dev", "--gate", "open", "--key", "harness:data:k:0"],
+                                 capture_output=True, text=True, env=unmarked, cwd=str(REPO), timeout=300)
+        self.assertNotEqual(ignored.returncode, 0, "outside the judges' sandbox the override is ignored, so it is refused")
+        self.assertIn("LTCM_HARNESS_JUDGE", ignored.stderr + ignored.stdout)
 
     @unittest.skipUnless(HAVE_NUMPY, "the research and execution judges need numpy")
     def test_research_and_execution_judges_keep_their_safety_counts(self):
         research = self.judge("research")
         self.assertEqual(research["false_refusals"], 0)
         self.assertGreater(research["cases"], 20)
+        self.assertIn("screen_cpu_seconds", research)
         execution = self.judge("execution")
         self.assertEqual(execution["invalid_accepted"], 0)
+        held = self.judge("execution", "heldout", "s1")
+        self.assertEqual((held["scenarios"], held["invalid_accepted"]), (2, 0))
 
 
 @unittest.skipUnless(shutil.which("git"), "git is required")
@@ -1042,7 +1411,7 @@ class Cli(unittest.TestCase):
             refused = subprocess.run([sys.executable, str(script), "--root", str(root / "j"), "rank", "--measurement",
                                       str(root / "m.json"), "--base", base], capture_output=True, text=True, timeout=120)
             self.assertIn("digest", json.loads(refused.stdout)["error"])
-            doc["source"]["digest"] = "d" * 64
+            doc["source"].update(digest="d" * 64, heartbeat_age=5.0)
             (root / "m.json").write_text(json.dumps(doc))
             ranked = subprocess.run([sys.executable, str(script), "--root", str(root / "j"), "rank", "--measurement",
                                      str(root / "m.json"), "--base", base, "--out", str(root / "c.json")],

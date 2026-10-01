@@ -12,6 +12,7 @@ import argparse
 from contextlib import ExitStack
 import fcntl
 import json
+import math
 import os
 from pathlib import Path
 import sqlite3
@@ -39,6 +40,10 @@ def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--root", type=Path, help="private, dedicated harness journal directory (every command but measure/lanes)")
     p.add_argument("--repo", type=Path, default=REPO, help="reviewed owner repository with baseline/candidate commits")
+    p.add_argument("--heldout", type=Path, default=Path(os.environ["LTCM_HARNESS_HELDOUT"]) if os.environ.get(
+                       "LTCM_HARNESS_HELDOUT") else None,
+                   help="the private directory of the judges' held-out pools, outside the repo (evaluate); "
+                        "default $LTCM_HARNESS_HELDOUT")
     sub = p.add_subparsers(dest="command", required=True)
     for name in ("capture", "watch"):
         part = sub.add_parser(name)
@@ -107,14 +112,21 @@ def load_json(path: Path) -> dict:
     return value
 
 
+def plain(value):
+    """`value` as strict JSON: other types as text, a non-finite number (a NaN a table may hold) as null."""
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {str(k): plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [plain(v) for v in value]
+    return value if value is None or isinstance(value, (str, int, bool)) else str(value)
+
+
 def write_private(path: Path, value) -> None:
+    """Mode 0600, whole-file replacement (`harness_runtime.write_json`), its directory created."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    part = path.with_name(path.name + f".{os.getpid()}.part")
-    fd = os.open(part, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as handle:
-        json.dump(value, handle, indent=1, sort_keys=True, default=str)
-        handle.write("\n")
-    os.replace(part, path)
+    write_json(path, plain(value))
 
 
 def measure(args) -> dict:
@@ -203,7 +215,7 @@ def transition(args):
             fcntl.flock(lock, flags)
         except BlockingIOError:
             return {"waiting": "another harness transition holds controller.lock"}
-        lab = HarnessImprovement(args.root, repo=args.repo)
+        lab = HarnessImprovement(args.root, repo=args.repo, heldout=args.heldout)
         try:
             return step(lab, args)
         except (ValueError, OSError, sqlite3.Error) as exc:

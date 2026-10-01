@@ -45,6 +45,7 @@ from ..ledger import Ledger
 from ..watchdog import tree_digest
 from ..worklist import Worklist
 from . import harness_lanes as lanes
+from .harness_runtime import write_json
 
 REPO = Path(__file__).resolve().parents[2]
 BENCHMARK = Path(__file__).with_name("improvement_benchmark.py")
@@ -60,6 +61,13 @@ SCHEDULER_PATH = "league/swarm/loop.py"
 JUDGES = Path(__file__).with_name("harness_judges")
 #: The operational comparison's significance level (one-sided cluster bootstrap), for every lane.
 ALPHA = 0.05
+#: A capture's measurement must have been taken this recently, of a running swarm with a fresh heartbeat: the candidate
+#: is bound to the release that measurement saw, and a stale document (another release running since) would bind it to a
+#: tree the deploy would roll back to.
+FRESH_SECONDS = 3600
+#: The environment marker the judges' sandbox sets: the gate honors its judges' override only where it is present
+#: (`canary.py`), so nothing a candidate's code does on the House can force a gate.
+JUDGE_MARKER = "LTCM_HARNESS_JUDGE"
 
 
 class ImprovementError(ValueError):
@@ -71,9 +79,8 @@ def sha(value: Any) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def iso(epoch: float) -> str:
-    # Match SwarmStore's second-resolution timestamps for SQL text comparisons.
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(epoch))
+#: SwarmStore's second-resolution timestamps, for SQL text comparisons (one definition, the lanes').
+iso = lanes.iso
 
 
 def git(repo: Path, *args: str, binary: bool = False) -> Any:
@@ -308,6 +315,7 @@ def sandbox(tree: Path, judge: Path, command: list[str], *, python: Path, timeou
         raise ImprovementError("use /usr/bin/python3 or an isolated virtual environment")
     argv += ["--ro-bind", str(tree), "/work", "--ro-bind", str(judge), "/judge", "--tmpfs", "/tmp",
              "--proc", "/proc", "--dev", "/dev", "--chdir", "/work", "--setenv", "PYTHONPATH", "/work",
+             "--setenv", JUDGE_MARKER, "1",
              "--setenv", "PYTHONDONTWRITEBYTECODE", "1", "--setenv", "OPENBLAS_NUM_THREADS", "1",
              "--setenv", "OMP_NUM_THREADS", "1", "--setenv", "PATH", "/usr/bin:/bin", "--", interpreter, *command]
     def limits():
@@ -345,8 +353,11 @@ def sandbox(tree: Path, judge: Path, command: list[str], *, python: Path, timeou
 
 
 class HarnessImprovement:
-    def __init__(self, root: Path, *, repo: Path = REPO, clock=time.time):
+    def __init__(self, root: Path, *, repo: Path = REPO, clock=time.time, heldout: Path | None = None):
+        """`heldout`: the private directory of the judges' held-out pools (`harness_lanes.HELDOUT_POOLS`), outside the
+        repo and outside any patch author's view; needed only to evaluate a lane candidate."""
         self.root, self.repo, self.clock = Path(root), Path(repo), clock
+        self.heldout = None if heldout is None else Path(heldout)
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.ledger = Ledger(self.root / "harness.sqlite", clock=clock)
         self.worklist = Worklist(self.ledger, clock=clock)
@@ -503,9 +514,22 @@ class HarnessImprovement:
                 light = {"since": float(arm.get("since") or now), "until": now, "deploys": rows, "current": current_release,
                          "source": {}, "lanes": {}}
                 return self.reconcile_lane(key, measurement=light)
-            measurement = lanes.measure(swarm, since=float(arm["since"]),
-                                        now=float(arm["since"]) + float(proposal["observation_seconds"]),
-                                        lanes=[job.details["lane"]], examples=0)
+            # The registered window is measured once (read only) and kept in the journal: a decision that must wait
+            # (a money-path gate before the close) re-reads the kept measurement on the next tick, never the House.
+            since, until = float(arm["since"]), float(arm["since"]) + float(proposal["observation_seconds"])
+            kept = self.root / "windows" / f"{sha([key, since, until])[:24]}.json"
+            measurement = None
+            try:
+                measurement = json.loads(kept.read_text())
+            except (OSError, ValueError):
+                pass
+            if not isinstance(measurement, dict) or measurement.get("since") != since or measurement.get("until") != until:
+                measurement = lanes.measure(swarm, since=since, now=until, lanes=[job.details["lane"]], examples=0)
+                kept.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                try:
+                    write_json(kept, json.loads(json.dumps(measurement, default=str)))
+                except ValueError:  # a non-finite figure: decide on this copy now, measure again next time
+                    pass
             measurement.update(deploys=rows, current=current_release)
             return self.reconcile_lane(key, measurement=measurement)
         proposal = dict(job.carry["_proposal"])
@@ -590,6 +614,16 @@ class HarnessImprovement:
         source = dict(measurement.get("source") or {})
         if not re.fullmatch(r"[0-9a-f]{64}", str(source.get("digest") or "")):
             raise ImprovementError("the measurement lacks the running release's tree digest")
+        # The candidate is bound to the release this document saw running: only a fresh measurement of a live swarm
+        # (its heartbeat fresh when measured) may register one. A stale document from an earlier release would bind the
+        # candidate to a tree whose deploy rolls the newer release back.
+        taken = measurement.get("taken_at")
+        if not isinstance(taken, (int, float)) or not 0 <= self.clock() - float(taken) <= FRESH_SECONDS:
+            raise ImprovementError(f"the measurement was not taken in the last {FRESH_SECONDS} s: measure the running "
+                                   "House again (a capture binds its candidate to the release running now)")
+        age = source.get("heartbeat_age")
+        if source.get("stopped") or not isinstance(age, (int, float)) or not 0 <= float(age) <= 180:
+            raise ImprovementError("the measured swarm had no fresh heartbeat: its running release is not known")
         for job in self.worklist.jobs().values():
             proposal = job.carry.get("_proposal") or {}
             if job.state == "verified" and proposal.get("release_digest") == source["digest"]:
@@ -655,13 +689,14 @@ class HarnessImprovement:
         canary = lane.canary_for(b)
         arms = canary.get("mode") == "arms"
         unit = {"family": 'the family id (`fam["id"]`)',
-                "mechanism": "canary.mechanism_unit(<the proposal's mechanism text>) (a birth's family id does not exist yet)",
+                "mechanism": "canary.mechanism_unit(mechanism) inside `Architect.admit` (the admitted text: a birth's "
+                             'family id does not exist yet), or canary.mechanism_unit(fam["mechanism"]) for a family',
                 }.get(canary.get("unit")) if arms else None
         where = {"research": "`Researcher._admit` (the check before any Gym run or sweep; the judge screens through it), "
                              "calling new code in preflight.py or new functions",
                  "memory": "`Architect.admit` for admission (refuse a restated idea: never change what an admitted birth "
-                           "keeps), or the researcher's or architect's prompt builders for retrieval (a new constant chosen "
-                           "under the gate)"}.get(lane.id)
+                           "keeps). An architect prompt is per pass, not per mechanism, so it cannot be an arms candidate"
+                 }.get(lane.id)
         gate = ('from league.swarm import canary          # at the top of the module\n'
                 f'if canary.enabled("{key}", <unit>, root=<the swarm state directory, e.g. self.store.root>):\n'
                 "    ... the new behavior\nelse:\n    ... the old behavior, byte for byte the baseline's code") if arms else None
@@ -693,8 +728,8 @@ class HarnessImprovement:
                           "cost": lane.judge_cost, "cost_rule": lane.judge_cost_rule, "regressions": list(lane.regressions),
                           "gate_runs": "gate forced open (judged) and forced closed (must equal the baseline exactly)"
                                        if arms else None},
-                "heldout": "seeded variants of classes the dev split never uses, seeded after your commit is staged; you "
-                           "see only pass or fail for it",
+                "heldout": "private classes the dev split never uses, kept outside the repo and never shown, drawn from "
+                           "a seed that exists only after your commit is staged; you see only pass or fail for it",
                 "canary": {**canary, "unit_in_code": unit, "gate": gate, "where": where if arms else None,
                            "rule": ("every change must sit in a gated branch whose else is the baseline's code, or be a new "
                                     "definition, a new plain constant or a new import; the gate is asked about the lane's "
@@ -728,6 +763,10 @@ class HarnessImprovement:
                                            "rename, copy or type change)")
                 if new_mode != "100644" or (status == "M" and old_mode != new_mode):
                     raise ImprovementError(f"{path}: mode {old_mode} -> {new_mode}: only regular, non-executable files")
+                if fnmatch.fnmatchcase(path, lanes.NEW_TEST) and status != "A":
+                    # An earlier candidate's test guards the behavior it retained: no later candidate may weaken it.
+                    raise ImprovementError(f"{path}: a candidate adds a test file of its own; it never edits an existing "
+                                           "one (an earlier candidate's included)")
             paths = [path for _, path, _, _ in entries]
             lanes.surface_check(lane, paths)
             gates = 0
@@ -787,6 +826,7 @@ class HarnessImprovement:
         if (proposal["judge_sha"] != judges_sha() or proposal["lane_sha"] != lanes.lane_sha(lane)
                 or proposal["policy"] != lanes.POLICY or proposal["regressions"] != list(lane.regressions)):
             raise ImprovementError("the frozen judge or lane changed; register a new candidate under the new protocol")
+        pool = self.heldout_pool(lane)
         artifact = Path(proposal["artifact"])
         judge = artifact / "judge"
         judge.mkdir(exist_ok=True)
@@ -801,9 +841,15 @@ class HarnessImprovement:
         def judged(tree: Path, split: str, gate: str) -> dict[str, Any]:
             nonce = secrets.token_hex(16)
             command = [f"/judge/{lane.judge}.py", "--split", split, "--seed", seed, "--nonce-stdin"]
+            stdin = (nonce + "\n").encode()
+            if split == "heldout":
+                # The private pool rides on standard input, after the nonce, held-out runs only: it is never a file in
+                # the sandbox, the judge reads it before the tree's code loads, and nothing of it is kept.
+                command.append("--pool-stdin")
+                stdin += pool + b"\n"
             if gate != "none":
                 command += ["--gate", gate, "--key", job.key]
-            result = sandbox(tree, judge, command, python=python, stdin=(nonce + "\n").encode())
+            result = sandbox(tree, judge, command, python=python, stdin=stdin)
             try:
                 metrics = json.loads(result["stdout"].splitlines()[-1]) if result["exit"] == 0 else None
             except (ValueError, IndexError):
@@ -813,8 +859,9 @@ class HarnessImprovement:
                     or metrics.get("split") != split or metrics.get("provider_calls") != 0 or metrics.get("gate") != gate:
                 metrics = None
             if split == "heldout":
-                # The author sees only pass or fail for the held-out split: no per-class detail is kept.
-                result = {k: v for k, v in result.items() if k not in ("stdout",)}
+                # The author sees only pass or fail for the held-out split: no per-class detail and no output of the
+                # run (the tree's code could print what it saw) is kept.
+                result = {k: v for k, v in result.items() if k not in ("stdout", "stderr")}
                 if metrics is not None:
                     metrics = {k: v for k, v in metrics.items() if not isinstance(v, (dict, list))}
             return {"benchmark": result, "metrics": metrics}
@@ -822,7 +869,10 @@ class HarnessImprovement:
         def tested(tree: Path, gate: str) -> dict[str, Any]:
             if gate == "none":
                 return sandbox(tree, judge, ["-m", "unittest", *proposal["regressions"], "-q"], python=python)
-            return sandbox(tree, judge, ["/judge/_regress.py", "--gate", gate, "--key", job.key, "--",
+            # With the gate open, the tests the lever supersedes are skipped (they pin the old admission it changes);
+            # closed, every one runs.
+            skips = [x for t in lane.supersedes for x in ("--skip", t)] if gate == "open" else []
+            return sandbox(tree, judge, ["/judge/_regress.py", "--gate", gate, "--key", job.key, *skips, "--",
                                          *proposal["regressions"]], python=python)
 
         runs = [("base", "base", "none")] + ([("head", "closed", "closed"), ("head", "open", "open")] if arms
@@ -843,9 +893,9 @@ class HarnessImprovement:
                   + sum(float(((s.get("benchmark") or {}).get("cpu_seconds")) or 0.0) for s in t["splits"].values())
                   for t in receipt["trees"].values())
         receipt.update(passed=passed, verdict=verdict, release_digest=head_digest,
-                       limitations="Synthetic fixed benchmark; its held-out split is seeded variants of classes the dev "
-                                   "split never uses, in a public file. Retention still needs the exact-tree deployment, the "
-                                   "canary and the registered observation window.",
+                       limitations="Synthetic fixed benchmark; its held-out split is private classes the dev split never "
+                                   "uses, kept outside the repo (pinned by hash), seeded after the commit. Retention still "
+                                   "needs the exact-tree deployment, the canary and the registered observation window.",
                        cost_accounting={"provider_calls": 0, "sandbox_cpu_seconds": round(cpu, 3),
                                         "authoring_usd": (proposal.get("cost") or {}).get("authoring_usd"),
                                         "note": "Authoring and review dollars are what the operator reported at each step "
@@ -864,6 +914,27 @@ class HarnessImprovement:
                                                                          "reason": "; ".join(verdict["public_reasons"])[:1000]}})
         return receipt
 
+    def heldout_pool(self, lane: Any) -> bytes:
+        """The lane's private held-out pool, checked against its pinned hash (`Lane.heldout_pool`)."""
+        if not re.fullmatch(r"[0-9a-f]{64}", lane.heldout_pool or ""):
+            raise ImprovementError(f"the {lane.id} lane has no pinned held-out pool")
+        if self.heldout is None:
+            raise ImprovementError("evaluation needs the private held-out pools (`--heldout DIR`, outside the repo)")
+        path = self.heldout / f"{lane.judge}.json"
+        try:
+            raw = path.read_bytes()
+        except OSError as exc:
+            raise ImprovementError(f"the {lane.id} lane's held-out pool is missing ({path}): restore it from its backup; "
+                                   "never regenerate it (a new pool is a new lane definition)") from exc
+        if sha(raw) != lane.heldout_pool:
+            raise ImprovementError(f"the {lane.id} lane's held-out pool at {path} is not the pinned one: restore it from "
+                                   "its backup; never regenerate it")
+        try:
+            json.loads(raw)
+        except ValueError as exc:
+            raise ImprovementError(f"the {lane.id} lane's held-out pool is not JSON") from exc
+        return b" ".join(raw.split(b"\n"))  # one line on the judge's standard input
+
     def _write_arm(self, key: str, arm: Mapping[str, Any] | None) -> Path:
         """Set (or with None remove) one key's arm in `<root>/canary.json`, the file the gate reads (`canary.FILE`)."""
         from . import canary as gate
@@ -874,14 +945,7 @@ class HarnessImprovement:
             arms.pop(key, None)
         else:
             arms[key] = dict(arm)
-        part = path.with_name(path.name + f".{os.getpid()}.part")
-        fd = os.open(part, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as handle:
-            json.dump({"schema": gate.SCHEMA, "arms": arms}, handle, sort_keys=True)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(part, path)
+        write_json(path, {"schema": gate.SCHEMA, "arms": arms})
         return path
 
     def _session_bound(self, proposal: Mapping[str, Any]) -> bool:
@@ -917,8 +981,20 @@ class HarnessImprovement:
         release = receipts["stage"].get("release")
         if measurement.get("current") != release or (measurement.get("source") or {}).get("digest") != proposal["release_digest"]:
             return {"waiting": "the evaluated release is not the one running", "current": measurement.get("current")}
-        promoted = lanes.epoch_of(final.get("at")) or float(measurement["until"])
         mode = proposal["canary_mode"]
+        if proposal.get("lane_sha") != lanes.lane_sha(lane):
+            return self._void(job, proposal, "the lane's predeclared definition or rules changed after the capture",
+                              gated=False)
+        # The deploy must have replaced the measured base: a candidate captured on an older release (a stale
+        # measurement) and deployed over a newer one rolled that release back.
+        replaced = next((r.get("current") for r in receipts["attempt"] if r.get("stage") == "start"), None)
+        staged = [r for r in measurement.get("deploys") or [] if r.get("stage") == "stage" and r.get("ok") is True
+                  and r.get("release") == replaced and r.get("digest")]
+        if replaced and staged and staged[-1]["digest"] != (proposal.get("source") or {}).get("digest"):
+            return self._void(job, proposal, f"the evaluated tree replaced release {replaced}, not the measured base: "
+                              f"roll back to {replaced} through the watchdog (the candidate was built on an older release)",
+                              gated=False)
+        promoted = lanes.epoch_of(final.get("at")) or float(measurement["until"])
         window = float(proposal["observation_seconds"])
         if mode == "arms":
             if self._session_bound(proposal):
@@ -960,9 +1036,14 @@ class HarnessImprovement:
                                    "population": dict(data.get("population") or {}), "sha": sha(control)}
             need = job.details.get("required_units")
             if canary.get("unit") == "restart":
-                need = lanes.required_units(proposal["control"]["extra"], bottleneck.metric, alpha=ALPHA)
+                cap = int(canary.get("max_units", 60))
+                need = lanes.required_units(proposal["control"]["extra"], bottleneck.metric, alpha=ALPHA, cap=cap)
                 if need is None:
-                    raise ImprovementError("against this control the exact test cannot reach alpha with any planned sample")
+                    extra = proposal["control"]["extra"]
+                    return self._void(job, proposal, f"the control window's restarts ({int(extra.get('restart_failures') or 0)} "
+                                      f"failed of {int(extra.get('restarts') or 0)}) cannot show a fall with at most {cap} "
+                                      "deliberate restarts on the exact test: roll the candidate back or keep it through a "
+                                      "new capture", gated=False)
                 need = max(need, int(canary.get("min_units_per_arm", 1)))
             proposal["required_units"] = need
             arm = {"lane": lane.id, "mode": mode, "since": round(promoted, 3), "release": release,
@@ -982,6 +1063,21 @@ class HarnessImprovement:
                               "directory, replace that file atomically (mode 0600) with this one within two minutes")
         return out
 
+    def _void(self, job: Any, proposal: dict, reason: str, *, gated: bool) -> dict:
+        """Record that the registered comparison cannot be judged (`voided`): a gate flips back; a window lane's code
+        stays deployed for the operator to roll back or keep through a new capture. The next capture reopens the
+        bottleneck without counting the attempt (`capture_lanes`)."""
+        arm = proposal.get("canary") or {}
+        if gated and arm:
+            self._write_arm(job.key, {**arm, "state": "reverted"})
+        result = {"decision": "voided", "reason": reason}
+        proposal["observation"] = result
+        self.worklist.transition(job.key, "rejected", commit=proposal.get("head"), attempt=job.attempt,
+                                 note=f"Voided: {reason}. " + ("The gate is flipped back. " if gated and arm else "")
+                                      + "A new capture may register the bottleneck again.",
+                                 extra={"_proposal": proposal, "decision": "voided"})
+        return result
+
     def canary_stop(self, key: str, *, state: str = "reverted", commit: str | None = None) -> dict:
         """By hand: flip a gate back to the old behavior at once (`reverted`, any time); re-install a gate the
         registered decision retained (`retained`, never instead of that decision); or record that a retained change
@@ -994,7 +1090,7 @@ class HarnessImprovement:
         proposal = dict(job.carry.get("_proposal") or {})
         arm = dict(proposal.get("canary") or {})
         decision = (proposal.get("observation") or {}).get("decision")
-        if arm.get("mode") != "arms":
+        if arm.get("mode") != "arms" and state != "graduated":
             raise ImprovementError("this candidate has no gate to flip: roll it back through the watchdog")
         if state == "retained":
             if decision != "retained":
@@ -1012,11 +1108,13 @@ class HarnessImprovement:
             if not commit or not re.fullmatch(r"[0-9a-f]{40}", commit):
                 raise ImprovementError("graduation names the full main commit that carries the change without its gate")
             proposal["graduated"] = {"commit": commit, "at": self.clock()}
-            path = self._write_arm(key, None)
+            gated = arm.get("mode") == "arms"
+            path = self._write_arm(key, None) if gated else None
             self.worklist.transition(key, "verified", commit=proposal.get("head"), attempt=job.attempt,
-                                     note=f"Graduated into main at {commit[:12]} without its gate; the arm is dropped.",
+                                     note=(f"Graduated into main at {commit[:12]} without its gate; the arm is dropped."
+                                           if gated else f"Merged into main at {commit[:12]}."),
                                      extra={"_proposal": proposal, "decision": "graduated"})
-            return {"gate": "graduated", "commit": commit, "gate_file": str(path)}
+            return {"gate": "graduated", "commit": commit, "gate_file": None if path is None else str(path)}
         arm.update(state="reverted", flipped_at=self.clock())
         proposal["canary"] = arm
         path = self._write_arm(key, arm)
@@ -1062,14 +1160,24 @@ class HarnessImprovement:
         others = sorted({str(r.get("deploy")) for r in measurement.get("deploys") or []
                          if r.get("stage") == "verdict" and r.get("verdict") == "promoted" and r.get("deploy") != arm.get("deploy")
                          and since < (lanes.epoch_of(r.get("at")) or 0.0) < end})
-        restarts_are_units = lane.canary_for(bottleneck).get("unit") == "restart"
-        restarted = [s for s in (measurement.get("starts") or []) if since < float(s) < end]
+        # A start inside the window that ran another release (a switch with no promoted verdict, a manual rollback): the
+        # candidate's code was not what ran. A restart of the candidate's own release changes no code: not a void.
+        starts = measurement.get("start_releases")
+        if starts is not None:
+            foreign = sorted({str(s.get("release")) for s in starts
+                              if since < float(s.get("at") or 0.0) < end and s.get("release") != arm.get("release")})
+        else:
+            # An older measurement names no start's release: any start inside a before/after window voids it, as does a
+            # swarm started inside the window when no start was read at all.
+            began = float((measurement.get("source") or {}).get("started_at") or 0.0)
+            restarted = [s for s in (measurement.get("starts") or []) if since < float(s) < end] or (
+                [began] if measurement.get("starts") is None and since < began < end else [])
+            restarts_are_units = lane.canary_for(bottleneck).get("unit") == "restart"
+            foreign = ["unknown"] if restarted and arm["mode"] == "window" and not restarts_are_units else []
         void = (f"another release ({', '.join(others)[:200]}) was promoted inside the registered window" if others else
-                "the swarm restarted inside a before/after window" if arm["mode"] == "window" and restarted
-                and not restarts_are_units else None)
-        if void is None and arm["mode"] == "window" and float((measurement.get("source") or {}).get("started_at") or 0.0) > since \
-                and not restarts_are_units and measurement.get("starts") is None:
-            void = "the swarm restarted inside a before/after window"
+                f"the swarm ran another release ({', '.join(foreign)[:200]}) inside the registered window" if foreign else
+                "the lane's predeclared definition or rules changed during the canary"
+                if proposal.get("lane_sha") != lanes.lane_sha(lane) else None)
         data = (measurement.get("lanes") or {}).get(lane.id)
         if void is None and not isinstance(data, Mapping):
             return {"waiting": f"the measurement has no {lane.id} lane"}
@@ -1124,11 +1232,14 @@ class HarnessImprovement:
         elif result["decision"] == "revert_recommended":
             state, note = "observing", "Rollback recommended; the operator must execute it and the watchdog confirm it."
         else:
+            # Too little activity: nothing supports the change, so it fails closed (the gate flips back; a window
+            # lane's release is rolled back by the operator through the watchdog).
             if gated:
                 self._write_arm(key, {**arm, "state": "reverted"})
             state, note = ("rejected" if gated else "observing",
                            "Too little activity in the registered window; no retention and no fresh peek"
-                           + (": the gate is flipped back." if gated else "."))
+                           + (": the gate is flipped back." if gated else
+                              ": rollback recommended; the operator must execute it and the watchdog confirm it."))
         proposal["observation"] = result
         self.worklist.transition(key, state, commit=proposal["head"], attempt=job.attempt, note=note,
                                  extra={"_proposal": proposal, "decision": result["decision"]})
@@ -1177,14 +1288,31 @@ class HarnessImprovement:
                 until = since + float(p["observation_seconds"])
                 step["next"] = (f"after {iso(until)}: on the House `{house} --since {since} --until {until} --lanes {lane.id} "
                                 f"> m.json` and here `{cli} reconcile {job.key} --measurement m.json`")
+                if p.get("required_units") and lane.canary_for(b).get("unit") == "restart":
+                    step["next"] = (f"make at least {p['required_units']} deliberate post-close House restarts before "
+                                    f"{iso(until)} (none in session); then " + step["next"])
             elif job.state == "verified" and mode == "arms" and not p.get("graduated"):
                 step["next"] = (f"graduate: from main, apply {p.get('artifact')}/candidate.patch keeping only the new branch "
                                 "(the gate and the old branch removed), open a PR under the same deploy rule, and after it "
                                 f"merges `{cli} canary {job.key} --graduated <main commit>`; until then the House's "
                                 "canary.json must keep this gate retained")
                 step["decision"] = decision
+            elif job.state == "verified" and not p.get("graduated"):
+                step["next"] = (f"merge: open a PR merging the candidate commit {p.get('head')} into main under its deploy "
+                                "rule (the next release built from main drops it otherwise), and after it merges "
+                                f"`{cli} canary {job.key} --graduated <main commit>`")
+                step["decision"] = decision
+            elif job.state == "observing" and decision in ("revert_recommended", "insufficient_activity"):
+                step["next"] = (f"roll back: through the watchdog, back from release {(p.get('canary') or {}).get('release')} "
+                                f"to the base release; then on the House `{house} --seconds 900 > m.json` and here "
+                                f"`{cli} reconcile {job.key} --measurement m.json` records the watchdog's rollback")
+                step["decision"] = decision
             elif decision == "voided":
-                step["next"] = "voided: measure and rank again on the running release (a new capture may register it)"
+                why = str((p.get("observation") or {}).get("reason") or "")
+                step["next"] = (f"voided ({why[:300]}): " + (
+                    "measure and rank again on the running release (a new capture may register it)" if mode == "arms" else
+                    "the candidate's release is still deployed: roll it back through the watchdog, or keep it through a "
+                    "new capture (measure and rank again on the running release)"))
                 step["decision"] = decision
             else:
                 step["next"] = None
@@ -1199,7 +1327,6 @@ class HarnessImprovement:
 
         arms = gate.read(self.root / "canary.json")
         ungraduated = sorted(k for k, j in self.worklist.jobs().items() if j.details.get("lane") and j.state == "verified"
-                             and ((j.carry.get("_proposal") or {}).get("canary") or {}).get("mode") == "arms"
                              and not (j.carry.get("_proposal") or {}).get("graduated"))
         return {"arms": {k: v.get("state") for k, v in arms.items()}, "retained_not_graduated": ungraduated}
 
