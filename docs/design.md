@@ -353,6 +353,46 @@ diagnostician.
 
 - **Every Gym evaluation is a trial**, counted per lineage (forks inherit their parent's count and
   holdout looks) and in total on the ledger.
+- **Family cards** (release B, league/swarm/cards.py). Every family the architect bears carries an immutable card: its
+  economic hypothesis, a mechanism class from a small vocabulary drawn from the graveyard, the inputs it conditions on,
+  its holding horizon, its cost hurdle (the architect's estimate of spread and fees as a share of maximum loss; the Gym's
+  fills already charge them), the naive comparison it must beat, the PARAMS switch that turns its signal into that
+  comparison (or, for a structure that is not directional and carries no drift, a flat comparison: not trading), and a
+  pre-declared falsification. A proposal without a complete card is not born (`architect.require_card`, on by default);
+  the refusal names each field. Researchers read their card in every brief.
+- **Card-based rebirth refusal.** A proposal whose cell (mechanism class, structure family, holding; with inputs that
+  overlap a carded row's, each side's inputs being those it declares and those its own words name: the proposal's
+  mechanism and hypothesis, the dead row's hypothesis and mechanism text) holds a
+  graveyard row killed by a mechanism verdict (the operator's tests, refuted,
+  self-refuted, diagnosed, trial-adjusted, drift, stress, a failed mechanism test) is refused, and the row's lesson goes
+  back to the architect, unless its rebirth names one of those rows, a mechanism-level change, an input the row did not
+  read and checkable evidence (the new input, a run id or a card evidence number), while the row has backed fewer than
+  two rebirths and its cell fewer than three in the last seven days (`architect.card_rebirth`, "refuse" by default). The
+  class the proposal's own mechanism text reads as counts as well as the declared one, so a relabeled idea is caught.
+  Rows from before cards are read into cells from their text. The check is deterministic and makes no model call. A
+  rebirth on the named row's slice continues its lineage; on another slice it counts that lineage's trials.
+- **The mechanism test** (release B, league/swarm/mechanism.py). Before a carded family's first broad Train replay,
+  its program runs with the signal on and with its card's ablation over a pre-registered sample: four windows of three
+  months inside 2022-2024 (the years every Gym image holds for every root), covering every calendar month once,
+  through the Gym's existing batch API, the first window first. An entry counts only when its expected hold fits
+  inside its window. The ablation must trade the same structure, tenor, strikes, entry time and hold as the signal (a
+  deterministic audit). The test passes when the signal's per-entry-day return on maximum loss beats the comparison's
+  by t of at least 0.75, a bound that rises by 0.25 for each failed test of the same hypothesis across its lineage
+  (forks and rebirths never reset it). Every arm is a trial of the lineage; the verdict is recorded on the card. An
+  arm the Gym failed for its own reasons (a dead worker, a unit past its deadline) makes the test a Gym error asked
+  again later, until the family's tests meet the same failure three times in a row: then it is the program's, and the
+  test is untestable. It ships in shadow mode (`researcher.mechanism_test.mode`): a quarter of carded families
+  (`sample`, by a hash of the family id) take one blind test each, and only before the family or a family of its
+  lineage with its card (a fork) has a broad Train run, since a program already fitted to Train is not the gate's
+  first test; the verdict is recorded and never shown to the researcher, and the broad run goes ahead, so the verdict
+  can be checked against Train outcomes before it may stop anything. Only blind tests of programs not yet exposed to
+  Train are counted in that check. Any gate adds missed signals against no test, so switching one on is an exception
+  to the rule that thresholds change only when fixed benchmarks show missed signals fall, and only the owner grants
+  it. In gate mode broad replay (at any stress) and sweeps wait for a pass by the hypothesis, and a test failed below
+  the base bound retires the family with the MECHANISM verdict once its card holds three such failures (no other
+  verdict retires it with MECHANISM), which the rebirth refusal then reads. A thin, invalid or untestable verdict
+  retires the family with the idle rule's words (IDLE, not a finding) once four of its own versions made one. A pass
+  holds for the whole lineage on any later Gym.
 - **The validation line** (a family's best program): at least 50 trades on at least 25 distinct
   days in Validation; mean P&L per dollar of maximum loss above zero after fees with a one-sided t of
   at least 2; a deflated Sharpe probability of at least 0.95 on the traded-day Sharpe, against the
