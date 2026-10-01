@@ -288,6 +288,20 @@ Agent count and simulated years measure activity; passing unseen evidence measur
   lessons go to the graveyard, which every new family's researcher reads first. The graveyard is ranked
   by BM25, a new family is born with three distinct lessons, and it also holds the operator's own
   experiments as `op-` lessons.
+- **The researcher's runs and operator revivals** (Oct 1). A researcher runs its program on Train
+  with `gym_run`, or a small grid of params variants with `gym_sweep`. A `gym_run` with neither code
+  nor params reruns its latest version exactly, its params carried over; explicit params, `{}`
+  included, replace them. The operator may revive a retired family as a lineage fork whose version 1
+  is the old validated program with its params (author `operator-revive`). The harness runs that
+  version itself, with its stored code and params, at the start of the family's next cycle, before
+  any rewrite, queued run or model turn. It goes through `gym_run`'s own path (the same trial count,
+  Train score, drift screen, best and robustness runs) and is recorded as version 1. It runs once on
+  each evaluator and Train span, and that new evaluation is the cycle's one run. A Gym error, or a run
+  the Gym could not finish (status `error`, no trial), is retried for at most three cycles. A job still
+  running on the Gym after its wait gave up is never submitted twice: its result is read back when it
+  lands. The researcher reads that run first, and its status says the revival's evidence decides,
+  never the evaluator change. Before this fix, revivals did not run the revived program: a bare
+  `gym_run` dropped the version's params, and researchers often rewrote the code first.
 - **The research library** (Sept 29, not yet released; off until `research.enabled`): the agents read the
   literature as a firm's analysts do, but only literature posted before 2025. Open web access would let a
   model read about the Validation year (2025) and the sealed holdout (2026) and select on them, which fakes
