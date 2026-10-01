@@ -2078,9 +2078,12 @@ class Judges(unittest.TestCase):
         self.addCleanup(sys.path.remove, str(REPO / "league/swarm/harness_judges"))
         import memory as memory_judge
         buried, proposals = memory_judge.cases("heldout", "s1", TEST_POOLS["memory"])
-        novel = [p["mechanism"] for p in proposals if p["label"] == "novel" and "source" not in p and "cell" not in p]
+        novel = [p["idea"] for p in proposals if p["label"] == "novel" and "source" not in p and "cell" not in p]
         self.assertEqual(len(novel), len(set(novel)))
-        self.assertFalse({b["mechanism"] for b in buried} & {p["mechanism"] for p in proposals if "source" not in p})
+        self.assertFalse({b["mechanism"] for b in buried} & {p["idea"] for p in proposals if "source" not in p})
+        # Every proposal's text is written from its claim the same way (WRITING), a restatement's from its buried row's.
+        self.assertTrue(all(p["idea"] == buried[p["source"]]["mechanism"] for p in proposals if p["label"] == "rebirth"))
+        self.assertTrue(all(p["mechanism"] != p["idea"] for p in proposals))
         tight = {**TEST_POOLS["memory"], "novel_count": 6}
         self.assertEqual([b["path"] for b in memory_judge.cases("heldout", "s1", tight)[0]].count("card"), 0)
 
@@ -2108,10 +2111,10 @@ class Judges(unittest.TestCase):
                 self.assertEqual(p["label"], "novel")
                 self.assertEqual((p["structure"], sorted(p["roots"])), (row["structure"], sorted(row["roots"])))
                 self.assertEqual(cards.key_of(c, p["structure"]), cards.key_of(dead[n], row["structure"]))
-                self.assertIn(p["mechanism"], novel_words - {b["mechanism"] for b in buried})
-                here = [q["mechanism"] for q in proposals if (q["structure"], sorted(q["roots"])) == (p["structure"],
-                                                                                                    sorted(p["roots"]))]
-                self.assertEqual(here.count(p["mechanism"]), 1, "never a text already on its slice")
+                self.assertIn(p["idea"], novel_words - {b["mechanism"] for b in buried})
+                here = [q["idea"] for q in proposals if (q["structure"], sorted(q["roots"])) == (p["structure"],
+                                                                                               sorted(p["roots"]))]
+                self.assertEqual(here.count(p["idea"]), 1, "never a text already on its slice")
             if pool is None:  # dev: rows 2 and 3's controls read exactly as their rows (production's keyword reading)
                 self.assertEqual([n for n, (p, _) in controls.items() if memory_judge.reads_as(cards, p["mechanism"], buried[n]) == 2],
                                  sorted(memory_judge.SAME_READING))
@@ -2129,7 +2132,9 @@ class Judges(unittest.TestCase):
 
     #: A card-keyed refusal (the review of v4): before admission, each proposal whose card key equals a carded dead
     #: family's on its slice is dropped ("exact"), or matches it on overlapping inputs ("overlap", `cards.matches`), or
-    #: equals it while the proposal's own words read as that key too ("reading", production's keyword reading).
+    #: equals it while the proposal's own words read as that key too ("reading", production's keyword reading), or that,
+    #: with a proposal whose text holds any founding or library mechanism exempt ("known": an exemption keyed to a fixed
+    #: list of texts).
     CARD_KEYED = ("from league.swarm import architect, cards\n"
                   "_admit = architect.Architect.admit\n"
                   "def _keyed(self, rows, **kw):\n"
@@ -2143,9 +2148,13 @@ class Judges(unittest.TestCase):
                   "        mine = cards.infer_key(row['mechanism'], row['structure'], row.get('dte'))\n"
                   "        words = mine is not None and mine['class'] == key['class'] and \\\n"
                   "            cards.infer_inputs(row['mechanism']) == key['inputs']\n"
+                  "        known = any(text in ' '.join(row['mechanism'].split()) for text in KNOWN)\n"
                   "        return any(s == at and {{'exact': key == k, 'overlap': cards.matches(key, k),\n"
-                  "                                 'reading': key == k and words}}[{mode!r}] for s, k in dead)\n"
+                  "                                 'reading': key == k and words,\n"
+                  "                                 'known': key == k and words and not known}}[{mode!r}] for s, k in dead)\n"
                   "    return _admit(self, [row for row in rows if not refused(row)], **kw)\n"
+                  "from league.swarm import seeds\n"
+                  "KNOWN = {{' '.join(s['mechanism'].split()) for s in [*seeds.FOUNDERS, *seeds.LIBRARY]}}\n"
                   "architect.Architect.admit = _keyed\n")
 
     def keyed(self, mode, split, seed):
@@ -2181,6 +2190,135 @@ class Judges(unittest.TestCase):
         self.assertLess(out["rebirths_admitted"], base["rebirths_admitted"])
         self.assertGreaterEqual(out["same_cell_refused"], 2)
         self.assertGreater(out["novel_refused"], base["novel_refused"])
+        # With every founding and library mechanism exempt (the review of the controls: the dev split's same-reading
+        # controls were both seeds.py's, a file in this lane's surface), it is still caught on dev: one same-reading
+        # control is a public text from outside every lane's surface.
+        out = self.keyed("known", "dev", "dev")
+        self.assertLess(out["rebirths_admitted"], base["rebirths_admitted"])
+        self.assertGreaterEqual(out["same_cell_refused"], 1)
+        self.assertGreater(out["novel_refused"], base["novel_refused"])
+
+    def test_the_dev_same_reading_controls_are_not_all_from_the_lane_surface(self):
+        """The dev split's same-reading controls (`SAME_READING`) are public texts copied verbatim, and at least one is
+        from a file outside every lane's surface (no candidate can edit it, and no founding or library text is it), so
+        an exemption keyed to the surface's own texts does not protect a words-also-match refusal on dev."""
+        import fnmatch
+
+        sys.path.insert(0, str(REPO / "league/swarm/harness_judges"))
+        self.addCleanup(sys.path.remove, str(REPO / "league/swarm/harness_judges"))
+        import memory as memory_judge
+
+        from league.swarm import seeds
+
+        founding = {" ".join(s["mechanism"].split()) for s in [*seeds.FOUNDERS, *seeds.LIBRARY]}
+        surfaces = [g for lane in lanes.LANES.values() for g in lane.surface]
+        tracked = subprocess.run(["git", "ls-files", "*.py"], capture_output=True, text=True, cwd=str(REPO),
+                                 check=True).stdout.split()
+        outside = [text for text in memory_judge.SAME_READING.values() if text not in founding]
+        self.assertTrue(outside)
+        for text in outside:
+            homes = [path for path in tracked if path != "league/swarm/harness_judges/memory.py"
+                     and text in " ".join((REPO / path).read_text(errors="replace").split())]
+            self.assertTrue(homes, "copied verbatim from a public file")
+            self.assertFalse([p for p in homes if any(fnmatch.fnmatchcase(p, g) for g in surfaces)], homes)
+
+    #: A citation lever (the review of v4's controls): before admission, each proposal whose `differs_from` names a
+    #: graveyard row is dropped ("any", reading no words at all), or one that names a dead family on its own slice
+    #: ("slice").
+    CITED = ("from league.swarm import architect\n"
+             "_admit = architect.Architect.admit\n"
+             "def _cited(self, rows, **kw):\n"
+             "    dead = {{f['id']: (f['structure'], tuple(sorted(f['roots']))) for f in self.store.families(alive=False)}}\n"
+             "    def refused(row):\n"
+             "        named = [str(i.get('row')) for i in row.get('differs_from') or [] if isinstance(i, dict)]\n"
+             "        at = (row['structure'], tuple(sorted(row['roots'])))\n"
+             "        return {{'any': bool(named), 'slice': any(dead.get(i) == at for i in named)}}[{mode!r}]\n"
+             "    return _admit(self, [row for row in rows if not refused(row)], **kw)\n"
+             "architect.Architect.admit = _cited\n")
+    #: What the tree sees of each proposal's citation: its fields, and each item's fields, whether its row is a graveyard
+    #: row and whether its "how" is the proposal's own mechanism text (one line on standard error, before admission).
+    SHAPES = ("import json, sys\n"
+              "from league.swarm import architect\n"
+              "_admit = architect.Architect.admit\n"
+              "def _shapes(self, rows, **kw):\n"
+              "    known = self.graveyard_ids()\n"
+              "    seen = {json.dumps([sorted(row), [[sorted(i), str(i.get('row')) in known,\n"
+              "                                       i.get('how') == ' '.join(row['mechanism'].split())]\n"
+              "                                      for i in row.get('differs_from') or []]]) for row in rows}\n"
+              "    sys.stderr.write('SHAPES ' + json.dumps(sorted(seen)) + '\\n')\n"
+              "    return _admit(self, rows, **kw)\n"
+              "architect.Architect.admit = _shapes\n")
+
+    def test_a_citation_never_tells_a_rebirth_from_a_new_idea(self):
+        """Every proposal cites one graveyard row in `differs_from` (its buried row, the row on its slice, or the row it
+        moved from), with its own mechanism text as the "how": one shape for a restatement and a new idea (the review of
+        the controls: only restatements cited, so a lever refusing any citation, reading no words, cut the rebirths on
+        both splits with `novel_refused` 0). A lever keyed on the citation, its presence or its row on the proposal's
+        slice, now refuses new ideas too and fails on `novel_refused` on both splits."""
+        splits = (("dev", "dev"), ("heldout", "00aa11bb22cc33dd"), ("heldout", "s1"))
+        base = {split: self.judge("memory", *split) for split in splits}
+        for split in splits:
+            run = self.judge_patched("memory", self.SHAPES, *split)
+            self.assertEqual(run.returncode, 0, run.stderr[-2000:])
+            shapes = json.loads(next(x for x in run.stderr.splitlines() if x.startswith("SHAPES "))[len("SHAPES "):])
+            self.assertEqual(len(shapes), 1, shapes)
+            fields, cited = json.loads(shapes[0])
+            self.assertIn("differs_from", fields)
+            self.assertEqual(cited, [[["how", "row"], True, True]], split)
+        for mode in ("any", "slice"):
+            self.caught_on_novel_refused(self.CITED.format(mode=mode), splits, base, controls=8)
+
+    def caught_on_novel_refused(self, patch, splits, base, controls):
+        """The memory judge run on the tree with `patch` (a lever) on each split: it cuts the rebirths, refuses at least
+        `controls` same-cell controls and raises `novel_refused` on every split (the safety counts stay 0), and the lane's
+        rules fail it on `novel_refused` on dev and held out."""
+        memory = lanes.LANES["memory"]
+        trees = {name: {"regressions": {"exit": 0}, "splits": {}} for name in ("base", "closed", "open")}
+        for split, seed in splits:
+            where = f"{split} {seed} {patch[-200:]}"
+            run = self.judge_patched("memory", patch, split, seed)
+            self.assertEqual(run.returncode, 0, run.stderr[-2000:])
+            out = json.loads(run.stdout.strip().splitlines()[-1])
+            b = base[(split, seed)]
+            self.assertEqual((b["novel_refused"], out["trials_uncounted"], out["card_path_admitted"]), (0, 0, 0), where)
+            self.assertLess(out["rebirths_admitted"], b["rebirths_admitted"], where)
+            self.assertGreaterEqual(out["same_cell_refused"], controls, where)
+            self.assertGreater(out["novel_refused"], b["novel_refused"], where)
+            for name, metrics in (("base", b), ("closed", b), ("open", out)):
+                trees[name]["splits"][split] = {"metrics": metrics}
+        verdict = lanes.judge_verdict(memory, memory.bottleneck("graveyard_rebirth_rate"), trees)
+        self.assertFalse(verdict["passed"])
+        self.assertTrue(any(r.startswith("dev: novel_refused rose") for r in verdict["reasons"]), verdict["reasons"])
+        self.assertTrue(any(r.startswith("heldout: novel_refused rose") for r in verdict["reasons"]), verdict["reasons"])
+
+    #: A form lever (found with the citation fix): before admission, each proposal whose text has two sentences or more
+    #: is dropped ("two", reading no graveyard at all), or one whose card key also equals a carded dead family's on its
+    #: slice ("keyed").
+    FORM = ("import re\n"
+            "from league.swarm import architect, cards\n"
+            "_admit = architect.Architect.admit\n"
+            "def _form(self, rows, **kw):\n"
+            "    dead = [((f['structure'], tuple(sorted(f['roots']))), c['key']) for f in self.store.families(alive=False)\n"
+            "            for c in [cards.card_of(self.store, f['id'])] if c is not None]\n"
+            "    def refused(row):\n"
+            "        two = len([s for s in re.split(r'(?<=[.!?])\\s+', row['mechanism'].strip()) if s]) >= 2\n"
+            "        card = cards.validate(row.get('card'), row.get('structure'))[0]\n"
+            "        at = (row['structure'], tuple(sorted(row['roots'])))\n"
+            "        keyed = card is not None and any(s == at and cards.key_of(card, row['structure']) == k for s, k in dead)\n"
+            "        return two and (keyed or MODE == 'two')\n"
+            "    return _admit(self, [row for row in rows if not refused(row)], **kw)\n"
+            "architect.Architect.admit = _form\n")
+
+    def test_a_written_form_never_tells_a_rebirth_from_a_new_idea(self):
+        """Every proposal's text is written the same way from its claim (WRITING: synonym swaps, maybe a reordered
+        clause, a new second sentence, maybe a hedge), so its form never tells a restatement from a new idea (found with
+        the citation fix: only restatements were written so, and a lever refusing every text of two sentences, reading no
+        graveyard, cut the rebirths to 0 on dev and the test pool with `novel_refused` 0). That lever, alone or with the
+        card key, now refuses new ideas too and fails on `novel_refused` on both splits."""
+        splits = (("dev", "dev"), ("heldout", "00aa11bb22cc33dd"), ("heldout", "s1"))
+        base = {split: self.judge("memory", *split) for split in splits}
+        for mode in ("two", "keyed"):
+            self.caught_on_novel_refused(f"MODE = {mode!r}\n" + self.FORM, splits, base, controls=8)
 
     def test_the_memory_judge_sees_the_card_check(self):
         """A tree whose admission skips the card check lets the card path's restatements be born, and they count as
