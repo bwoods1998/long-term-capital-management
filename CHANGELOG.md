@@ -21,46 +21,102 @@ on branch `run/options-swarm-2026-09-26`) has the detail.
 
 ## Not yet deployed
 
-### Release B: planned overnight Sept 30 to Oct 1, before 13:25Z; evidence reset 2
+Nothing: main `3eaf4d06` is Release B, deployed Oct 1 (below). Under the freeze (Oct 1, "The freeze"), a change to
+`league/live` or `league/gym` waits for a planned release.
 
-Release B is branch `release/b-20261001` (PR #454): main `777b894f` (Release A) plus four reviewed pull requests and the
-gateway's KV binding:
-- #451, the incubator's live route and money row (B1; money path: two reviews, a fix round and a verify review);
-- #445, L1, the cohort keep;
-- #447, the research library (it supersedes #428);
-- `aa435f9e`, the library's KV binding;
-- #453, the evaluator-adoption fixes.
+## 2026-10-01
 
-The House runs Release A, `20260930T200604Z-3bf48c3f8f9f` (main `777b894f`).
+### 04:01Z, operator change (no deploy): the incubator switched on
 
-- **When.** B changes `league/live`, the constitution and the gateway, so it is a money-path release under D8. It
-  deploys overnight, before 13:25Z Oct 1, and never 19:30-20:00Z. The gateway deploys first (the library's code and its
-  KV binding), then the House.
-- **The money digest moves** `a3e2aa7c` → `42c4a3af` (`PINNED_DIGEST` `fcf8d735` → `595228a6`): the incubator's row,
-  `options_money.incubator`. **Re-ratify at once** after the House promotes (`python3 scripts/live_trading.py
-  --ratify`). Until then the grant reads inactive and every real entry is refused: the House live test, the calibration
-  and tuition. Exits are not affected.
-- **Planned evidence reset 2.** B changes `league/live`, so the execution fingerprint moves again. `league/gym` and
-  `LEAGUE_FILES` do not change, so the Gym bundle and the image stay Release A's. At B's first start:
-  - **Selection is re-adopted.** As at reset 1, every alive family's derived selection evidence is archived and
+- **`live.incubator`** set to JSON `true` in `swarm.json` (a before-copy kept), outside a session, after the
+  ratification and the checks below. `python3 -m league.live --root /workspace/state --incubator` read `switch.on`
+  true, a zero tally and no instances.
+- **Nothing trades on it yet.** A cohort is pinned only after its first look passes, and a first look needs 3 completed
+  sessions and 10 program closes in the record before today. For cohorts admitted at the Oct 1 open, that is the Oct 6
+  open at the earliest (sessions Oct 1, 2 and 5).
+- **To switch it off:** `live.incubator` false in `swarm.json` ([docs/operations.md](docs/operations.md), "Current
+  operation"). Within a minute its instances go to exits only and their working opens are cancelled.
+
+### 03:49Z, Release B: House release `20261001T034829Z-d823e014ce16` (main `3eaf4d06`; PR #454), gateway `dafcfa05`, evidence reset 2
+
+- **The gateway first: `dafcfa05`,** deployed at 03:48Z from the merge commit after `npm run check && npm test` (338
+  tests pass).
+  - It adds the research library's routes (`/v1/research/search`, `/read`, `/health`) and its KV binding `LIBRARY`
+    (namespace `ltcm-gateway-library`), with `LIBRARY_DAY_UPSTREAM` "600". Its web reader now sends arXiv to the
+    library.
+  - The order routes are unchanged.
+  - The kill switch stayed false, `/v1/health` answered 200, and the library's health read OK.
+  - The rollback target is `ac2779ac`.
+- **The House deploy.** Staged 03:48:34Z; promoted 03:49:07Z over Release A. The watch's verdict was PROMOTED, and the
+  deploy exited 0. The rollback target (`previous`) is Release A, `20260930T200604Z-3bf48c3f8f9f`.
+- **The money digest moved** `a3e2aa7c` → `42c4a3af` (`PINNED_DIGEST` `fcf8d735` → `595228a6`): the incubator's row.
+  - **The grant was re-ratified** at about 03:59Z, after the PROMOTED verdict. No real entry was due before the
+    13:30Z open, and ratifying after the verdict avoids a rollback-after-ratify mismatch.
+  - The grant reads active on policy digest `42c4a3af`, at its third ratification, with micro and scaled entries
+    allowed. Capital was read afresh: $1,246.73, the lower of equity and the ceiling.
+- **Evidence reset 2, verified** (read-only, after promotion).
+  - `research_evaluator`'s execution fingerprint moved (`2d3d0284` → `47587e22`). The Gym bundle
+    (`gym-engine-4-e1c896f8d304`) and the image are unchanged.
+  - Each of the 51 families alive at the start recorded an `evaluator_adopted` event.
+  - A read-only lineage snapshot before and after the deploy compared 1,690 lineages and found 0 violations: trials,
+    inherited trials and consumed holdout looks were unchanged, with 2 looks in all.
+- **The B2 backfill** ran at the first swarm start, before the adoption: "incubator backfill: 1 programs barred from 14
+  gate events". A failure that the gate had recorded only in its event log or its attempt counts is now a durable bar
+  on its program, so B's own adoption could not erase it.
+- **The live guards, verified.** `real_money` true; `failures` empty; no working order.
+  - `house:rebound-live@0:h` is real, `observe` false, mode live, with no error.
+  - The tuition instance is real, tuition and exits-only, with no error, and its position is open.
+  - No `:i` instance exists.
+  - The incubator's health block: the switch off (as deployed), the table as committed (50, 1, 4, 150, 3, 10, 0.80),
+    0 verdicts, a zero tally and no weekly stop.
+- **The harness observer** was re-pointed at B's base (`3eaf4d06`) and release digest. It has retained no improvement.
+- **Criterion 1 under Release B.**
+  - **The restart test,** 04:00:11-04:00:24Z (`floor_box.py stop`, then `start`), with the tuition position open. Both
+    instances came back as above, the position was restored, real money stayed on and health listed no failure.
+  - **The induced failure,** at about 04:00:31Z: the swarm process was killed with SIGKILL. The House's swarm step
+    started a new one within 15 s, with a fresh heartbeat. The alive families (36) and the stored runs (77,027) were
+    unchanged: nothing was lost or duplicated.
+- **The freeze, in force.** `league/live` and `league/gym` now change only in a planned, deliberate release.
+  - A change to either (or to `LEAGUE_FILES`, the fill model or the Gym image) moves the evaluator. Every practice
+    cohort is bound to its evaluator, so such a change ends every practice cohort, and with them every incubation, for
+    good. It also re-adopts selection.
+  - Batch such changes into planned releases. Rollbacks and fixes for bugs that block or endanger real orders are the
+    only exceptions.
+- **A known skew, for a planned release.** The House runs Python 3.11 with numpy 2.4; the Gym runs Python 3.12 with
+  numpy 2.5 (`requirements-gym.txt`). So a program can load and train in the Gym and still fail to load on the live
+  path. The preflight (#438) flags it (`preflight_house_unloadable`). The root fix aligns the runtimes: a Gym image
+  change is an evidence reset, and a House venv upgrade touches the money path, so it is scheduled, not hot-fixed.
+- **The House live test.** Release B changed its order path again: the incubator's route takes its turn after the D2
+  families and before the test, the test yields to an incubator refusal on its contracts as to a family's, and the
+  incubator keeps $100 of room for the test's structure. `house_test.py`, the test's program, bounds and clock are
+  unchanged. Releases A and B are recorded as deviations in the test's private addendum.
+- **Operator steps:** [docs/operations.md](docs/operations.md), "Release B: deploy, ratify, switch on".
+
+Release B was branch `release/b-20261001` (PR #454), merged to main as `3eaf4d06`: main `777b894f` (Release A) plus
+nine reviewed pull requests and the gateway's KV binding:
+- #451, the incubator's live route and money row (B1; money path);
+- #444, the incubator's facts and the reader's belt, with durable bars (B2);
+- #445, L1, the cohort keep, and #455, its restart safety;
+- #456, L2', the incubator's keep (every check reads the record before today; the prior values are copied at the
+  session day's roll);
+- #447, the research library (it supersedes #428), and `aa435f9e`, its KV binding;
+- #453, the evaluator-adoption fixes;
+- #448, information-value allocation;
+- #438, the API-misuse preflight.
+
+- **Evidence reset 2.** B changes `league/live`, so the execution fingerprint moved. `league/gym` and `LEAGUE_FILES` did
+  not change, so the Gym bundle and the image stay Release A's. At B's first start:
+  - **Selection was re-adopted.** As at reset 1, every alive family's derived selection evidence was archived and
     cleared: Train bests, candidates, robustness, drift, validation and review. Runs, versions, lineage trial counts and
     consumed holdout looks stay. A validation already recorded on the same image and bundle may be judged again
     (`Tournament.recorded_validation`).
-  - **Extension holds stay** (#453): only a new Gym image or bundle clears them, and neither changes.
+  - **Extension holds stay** (#453): only a new Gym image or bundle clears them, and neither changed.
   - **Practice restarts.** A practice cohort is bound to its evaluator, which is the bundle, the fill model and the
     execution fingerprint. So every cohort from Release A completes at B's first families pass, with the reason
     "evaluator changed; a new version needs fresh practice". A (family, version) that practised under A never practises
     again: practice after B starts from versions not yet practised.
 
   Evidence from before and after the reset is never compared.
-- **After B, the freeze.** `league/gym`, `league/live`, `LEAGUE_FILES`, the fill model and the Gym image freeze for at
-  least five sessions. The freeze also lasts while any family holds Candidate, Probe or Sized, or has an
-  incubator-bound cohort. The only exceptions are rollbacks and fixes for bugs that block or endanger real orders.
-- **The House live test.** B changes its order path again. A new route (the incubator) takes its turn after the D2
-  families and before the test, and the test yields to an incubator refusal on its contracts, as to a family's. The
-  incubator keeps $100 of room for the test's structure. `house_test.py`, the test's program, bounds and clock are
-  unchanged. The change is to be recorded as a deviation in the private addendum.
-- **Operator steps:** [docs/operations.md](docs/operations.md), "Release B: deploy, ratify, switch on".
 
 #### What Release B carries
 
@@ -107,9 +163,13 @@ The House runs Release A, `20260930T200604Z-3bf48c3f8f9f` (main `777b894f`).
     clears the selection, every failure held only in `review`, `gate_outcome` or the incubator's reviews, and every
     bar the gate owes.
 
-    **In this release no family can meet them.** The Train-and-drift mark and the incubator's reviews are written by B2
-    (#444), which is not in B. Until B2 ships, the route pins nothing even with the switch on. First looks are still
-    taken and recorded.
+    **B2 (#444) writes the facts, in this release.** The Train-and-drift mark (`train_passed`) is made by the
+    tournament's hourly round for a version of an alive Gym family with an active practice cohort under the current
+    evaluator: an eligible Train run, a profitable 1.5x robustness run, no demotion, a passing drift screen, and no bar
+    on its program. The incubator's own review and audit are due once the cohort's practice shows at least 2 sessions,
+    5 program closes and a positive program P&L, so they are ready by the first look. Both are bound to the evaluator
+    they were made under, and an adoption clears them (never a bar). Neither is read by validation, the gate's holdout,
+    the forward record or the bands' moves.
   - **The pins,** at the session's first families pass. At most 8 cohorts, one per family, by first-look return on risk,
     each needing:
     - the switch on and real money on;
@@ -173,8 +233,11 @@ The House runs Release A, `20260930T200604Z-3bf48c3f8f9f` (main `777b894f`).
     and a ratification, but no evidence reset: the constitution is outside the fingerprint.
   - **Earliest possible open:** Tuesday Oct 6, at 13:30Z, for cohorts that begin practice on Oct 1 (sessions Oct 1, 2
     and 5).
-- **L1, the cohort keep** (#445; `league/swarm/tournament.py`, `league/swarm/practice.py`, `league/swarm/researcher.py`;
-  research side).
+- **B2, the incubator's facts** (#444; `league/swarm/incubator.py`, `league/swarm/bands.py`, `league/swarm/gate.py`):
+  the Train-and-drift mark, the incubator's review and audit, the reader's belt, durable bars on the program, and the
+  backfill (all under "The facts", above). Swarm side; the fingerprint does not hash it.
+- **L1, the cohort keep** (#445, with #455's restart fix; `league/swarm/tournament.py`, `league/swarm/practice.py`,
+  `league/swarm/researcher.py`; research side).
   - **What it spares.** A living Gym family with an active practice cohort is spared the tournament's revision,
     evaluation and idle rules, and the idle pass. The keep lasts until the cohort completes, fails or reaches its
     session window. So a family is still alive when its sample is complete and the incubator takes its first look.
@@ -225,16 +288,36 @@ The House runs Release A, `20260930T200604Z-3bf48c3f8f9f` (main `777b894f`).
     validation of it that meets the checks holds it again.
   - **Idle wording.** After an adoption, the idle count restarts from `evaluator_trials`. Retirements then say "since
     the evaluator changed", no longer "since Train's span changed".
+- **Information-value allocation** (#448; `league/swarm/allocation.py`, `loop.py`, `architect.py`; research side).
+  - **The share.** Every living family's share of researcher turns and Gym priority is a floor (0.10, spread evenly), an
+    exploration share (0.35) across mechanism classes (structure x root group), and a decision share (the rest) by its
+    value.
+  - **The value** is the variance of its next validation's pass or fail under an empirical-Bayes posterior, discounted
+    for the depth of its idea's lineage, for exhaustion (spent looks, a drift-failed or gate-spent version, a hold
+    streak) and for a structure the account cannot open for real. So a family near the line earns the most, and an old
+    family at zero or below never earns a large share.
+  - **The caps:** 5% a family and 30% a mechanism class, while the other classes can take the excess. Shares buy turns
+    (stride scheduling, `allocation.scheduler` "stride"), and one structure family may hold at most 60% of the last 24
+    hours' births (`BirthQuota`).
+  - **Research attention only:** nothing on the way to validation, the gate, the bands or money reads the share.
+    `allocation.mode` "bandit" in `swarm.json` restores R11-5's bandit with no deploy.
+- **The preflight** (#438; `league/swarm/preflight.py`, `researcher.py`; research side). Before a Train run is spent, a
+  candidate program meets small synthetic sessions in the live decider's sandbox.
+  - **It refuses only market-independent misuse of the ctx API:** the same misuse at the same line on 25 consecutive
+    calls across two sessions, and again on each of five other made-up markets. Everything else is advisory, and the
+    run goes on to the Gym, which judges it. Of 300 programs that ran OK in the Gym, it refused none.
+  - **The House's runtime.** A program that passes the static code check but does not load on the House's runtime
+    (Python 3.11, numpy 2.4) is advisory, and counted (`preflight_house_unloadable`). Its Train run goes ahead, since
+    the Gym (Python 3.12, numpy 2.5) may load it, but as written it can never practise or trade live.
+  - A refusal costs no Gym job, version or trial. A sweep drops only the refused variants. The preflight never blocks
+    on its own failure.
 - **Not in B.** These ship when their reviews are clean. They change no file the fingerprint hashes, so none is a
   reset:
-  - #444, the incubator's facts (B2);
-  - #438, the API-misuse preflight;
   - #446, family cards;
-  - #448, information-value allocation;
   - #449, harness lanes;
   - #452, evaluator benchmarks.
 
-  B2 and any other change to a module the live path loads still deploy only outside the session.
+  Any change to a module the live path loads still deploys only outside the session.
 
 ## 2026-09-30
 
