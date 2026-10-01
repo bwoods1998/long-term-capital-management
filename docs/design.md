@@ -414,9 +414,9 @@ diagnostician.
   Holm-Bonferroni correction across every holdout look the swarm has made; holdout Sharpe at least
   half the validation Sharpe. **Researchers learn only pass or fail**, never the holdout's numbers.
 - **A look needs the data, and missing data is the image's fault, not the program's.** Before a look the gate checks,
-  from file names only, that its image holds the holdout of every root the program needs. A look it cannot make waits
-  with no try counted, and a look that fails for missing data is owed again the same way. Neither is a refusal or an
-  incubator bar. Only other failures count toward the three tries.
+  from file names only, that its image holds the whole holdout of every root the program needs. A look it cannot make
+  waits with no try counted, and a look that fails because the Gym names a root it lacks is owed again the same way.
+  Neither is a refusal or an incubator bar. Only other failures count toward the three tries.
 - **Forward days never reach a Gym box.** Nightly forward replays run on Candidates only; they move
   bands and never select among Gym programs.
 - **The evaluator is part of the evidence** (Release A).

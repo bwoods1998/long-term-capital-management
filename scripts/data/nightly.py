@@ -31,10 +31,12 @@ a checkpoint-ready manifest for the swarm. Its first due time is Tuesday 2026-09
 THE CHAIN'S RULE (Oct 1, 2026). The chain names the gate image it extends: each day's record and the ready file carry
 `base_checkpoint` (images.json's `gate.current` first checkpoint) and `holdout_roots` (the roots that image was built
 with), and the swarm takes the ready checkpoint only when they are the gate `swarm.json` names and cover its roots
-(league/swarm/settings.py `ready_refusal`). `run` refuses, before any box is woken, to extend a gate image that does not
-list its roots or lacks one of the swarm's `gym.roots` (`--swarm-root`, by default the state directory's parent; the
-daemon's is its ready file's folder). Sept 29-30: the chain extended the five-root image while `swarm.json` named the
-25-root one, and its ready file replaced it.
+(league/swarm/settings.py `ready_refusal`). `run` (and the daemon) refuses, before any box is woken (`preflight`), to
+extend a gate image that does not list its roots or lacks one of the swarm's `gym.roots` (`--swarm-root`, by default
+the state directory's parent; the daemon's is its ready file's folder), or a chain whose tip is not proven on that image
+(`settings.chain_refusal`: the chain records were not reset when the image was adopted). `stamp-ready` names the gate
+image in a ready file written before the release that added these fields. Sept 29-30: the chain extended the five-root
+image while `swarm.json` named the 25-root one, and its ready file replaced it.
 """
 
 from __future__ import annotations
@@ -161,6 +163,19 @@ class Nightly:
         return {"base_checkpoint": (current.get("checkpoints") or [None])[0],
                 "holdout_roots": sorted({str(r).upper() for r in roots}) if isinstance(roots, list) else None}
 
+    def proven_identity(self, checkpoint: str) -> dict[str, Any]:
+        """`gate_identity()` for a checkpoint recorded without one (by a release before Oct 1, 2026) when the chain's
+        records prove it extends the current gate image (`settings.chain_refusal`); nothing otherwise, and the day is then
+        completed but not published (`publish_ready`)."""
+        import boxlib  # noqa: F401 - puts the repository on sys.path
+        from league.swarm import settings as swarm_settings
+
+        try:
+            proven = swarm_settings.chain_refusal(self.images.get("gate") or {}, checkpoint) is None
+        except Exception:  # noqa: BLE001 - unreadable records prove nothing
+            proven = False
+        return self.gate_identity() if proven else {}
+
     def state(self, day: dt.date) -> dict[str, Any]:
         if self.rehearsal:
             key = f"{day.isoformat()}:{self.gate.box_id}"
@@ -183,8 +198,10 @@ class Nightly:
         self.check_lease()
         if state.get("checkpoint"):
             self.log(f"{day}: already done (gate checkpoint {state['checkpoint']})")
-            return {"day": day.isoformat(), "already": True,
-                    'sip_coverage': {'status': 'legacy_unverified'}, **state}
+            done = {"day": day.isoformat(), "already": True, 'sip_coverage': {'status': 'legacy_unverified'}, **state}
+            if not self.rehearsal and not state.get("base_checkpoint"):
+                done.update(self.proven_identity(state["checkpoint"]))  # a day an earlier release checkpointed
+            return done
         if dry_run:
             return {"day": day.isoformat(), "would": ["pull", "copy", "checkpoint"]}
 
@@ -447,12 +464,36 @@ def gate_holdout_gap(gate: Mapping[str, Any], required: Sequence[str]) -> str | 
     return None
 
 
+def preflight(images: Mapping[str, Any], swarm_root: Path | None = None) -> None:
+    """THE CHAIN'S RULE, before any box is woken: raises unless the nightly may extend the gate image images.json records
+    (`images`): one is recorded, it holds a holdout for every root of the swarm (`gate_holdout_gap`, `gym.roots` under
+    `swarm_root`, by default this state directory's parent), and the chain's tip (`current_checkpoint`) is proven on it
+    (`settings.chain_refusal`; a tip on another image means the chain records were not reset when the image was
+    adopted, and a re-fork from it would carry another image's holdout under this one's name)."""
+    import boxlib as bl
+    from league.swarm import settings as swarm_settings
+
+    record = images.get("gate") or {}
+    gate = record.get("current") or {}
+    if not gate.get("box_id"):
+        raise RuntimeError("no gate image recorded in images.json; build it first (images.py build gate)")
+    problem = gate_holdout_gap(gate, swarm_roots(swarm_root if swarm_root is not None else bl.STATE_DIR.parent))
+    if problem:
+        raise RuntimeError(f"refused to extend the gate: {problem}")
+    tip = record.get("current_checkpoint")
+    lineage = swarm_settings.chain_refusal(record, tip) if tip else None
+    if lineage:
+        raise RuntimeError(f"refused to extend the gate: its chain's tip {tip} is not proven on the gate image ({lineage}). "
+                           "Reset the chain records to the image (docs/operations.md, the chain's rule)")
+
+
 def real_job(*, rehearsal_gate: str | None = None, api: Any = None,
              check_lease: Callable[[], None] = lambda: None, swarm_root: Path | None = None,
              extending: bool = True) -> Nightly:
-    """The job over the real boxes. `extending` (every caller but `schedule`): the gate image images.json names must hold a
-    holdout for every root of the swarm (`gym.roots` under `swarm_root`, by default this state directory's parent), or
-    nothing is woken, pulled or copied (THE CHAIN'S RULE: a forward chain on another image would replace the swarm's gate)."""
+    """The job over the real boxes. `extending` (every caller but `schedule`): `preflight` must pass (the gate image holds
+    a holdout for every root of the swarm and the chain is on it), or nothing is woken, pulled or copied (THE CHAIN'S
+    RULE: a forward chain on another image would replace the swarm's gate). `run_real` calls `preflight` before it wakes
+    the data box; this is the backstop for any other caller."""
     import boxlib as bl
 
     api = api or bl.client()
@@ -461,9 +502,7 @@ def real_job(*, rehearsal_gate: str | None = None, api: Any = None,
     if not gate.get("box_id"):
         raise RuntimeError("no gate image recorded in images.json; build it first (images.py build gate)")
     if extending and not rehearsal_gate:
-        problem = gate_holdout_gap(gate, swarm_roots(swarm_root if swarm_root is not None else bl.STATE_DIR.parent))
-        if problem:
-            raise RuntimeError(f"refused to extend the gate: {problem}")
+        preflight(images, swarm_root)
     gym_ids = [e.get("box_id") for e in (images.get("gym") or {}).get("history", []) if e.get("box_id")]
     data = BoxHandle(api, bl.data_box_id(), defer_sleep=True)
     data.wake()
@@ -529,6 +568,8 @@ def run_real(day: dt.date | None = None, *, rehearsal_gate: str | None = None,
              dry_run: bool = False, swarm_root: Path | None = None) -> dict[str, Any]:
     import boxlib as bl
 
+    if not rehearsal_gate:
+        preflight(bl.read_json(bl.IMAGES), swarm_root)  # THE CHAIN'S RULE: a refused night wakes no box
     api = bl.client()
     data_box = bl.data_box_id()
     bl.ensure_running(api, data_box)
@@ -581,6 +622,42 @@ def publish_ready(path: Path, result: Mapping[str, Any], now: dt.datetime) -> di
     if str(previous.get("day", "")) <= day.isoformat():
         bl.write_json(path, document)
     return document
+
+
+def stamp_ready(ready_file: Path, *, apply: bool = False) -> dict[str, Any]:
+    """THE CHAIN'S RULE, the deploy step (Oct 1, 2026): name the gate image in a LEGACY ready file (one written before
+    the nightly wrote `base_checkpoint`), so the swarm never needs images.json to prove it. Only a file the swarm already
+    takes under the legacy proof (`settings.ready_refusal`) is stamped, with that image's first checkpoint and recorded
+    roots; after the write the swarm must take it with the same gate checkpoint, or the old file is put back. Holds the
+    daemon's `nightly.lock` (the daemon holds it while it runs: stop it first), so no publish can race the write. A dry
+    run (`apply` false) says what it would write."""
+    import boxlib as bl
+    from league.swarm import settings as swarm_settings
+    from locking import process_lock
+
+    root = ready_file.parent
+    with process_lock(bl.STATE_DIR / "nightly.lock"):
+        ready = bl.read_json(ready_file)
+        if not ready:
+            raise RuntimeError(f"no readable ready file at {ready_file}")
+        if "base_checkpoint" in ready:
+            return {"stamped": False, "why": "the ready file already names its gate image", "ready": ready}
+        before = swarm_settings.load(root)
+        if (before.get("forward") or {}).get("ready") != ready:
+            why = ((before.get("forward") or {}).get("ready_ignored") or {}).get("why") or "the swarm does not take it"
+            raise RuntimeError(f"refused: the swarm does not take this ready file ({why}); nothing was written")
+        current = (bl.read_json(root / "data" / "images.json").get("gate") or {}).get("current") or {}
+        stamped = {**ready, "base_checkpoint": current["checkpoints"][0],
+                   "holdout_roots": sorted({str(r).upper() for r in current["roots"]})}
+        if not apply:
+            return {"stamped": False, "would_write": stamped}
+        bl.write_json(ready_file, stamped)
+        after = swarm_settings.load(root)
+        if (after["gym"].get("gate_checkpoint") != before["gym"].get("gate_checkpoint")
+                or "ready_ignored" in (after.get("forward") or {})):
+            bl.write_json(ready_file, ready)
+            raise RuntimeError("the stamped ready file did not stand with the same gate; the original was put back")
+        return {"stamped": True, "ready": stamped, "gate_checkpoint": after["gym"].get("gate_checkpoint")}
 
 
 class Controller:
@@ -710,6 +787,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     rh.add_argument("--day", required=True)
     sub.add_parser("schedule")
     sub.add_parser("status")
+    st = sub.add_parser("stamp-ready", help="name the gate image in a legacy ready file (stop the daemon first)")
+    st.add_argument("--ready-file", required=True)
+    st.add_argument("--apply", action="store_true", help="write it (default: say what would be written)")
     d = sub.add_parser("daemon", help="run the autonomous forward controller on the House")
     d.add_argument("--state", default=None, dest="daemon_state")
     d.add_argument("--ready-file", required=True)
@@ -730,6 +810,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps({"forward_days": (bl.read_json(bl.IMAGES).get("gate") or {}).get("forward_days", {}),
                           "controller": bl.read_json(bl.STATE_DIR / "nightly.json"),
                           "heartbeat": bl.read_json(bl.STATE_DIR / "nightly.heartbeat")}, indent=1))
+        return 0
+    if args.cmd == "stamp-ready":
+        print(json.dumps(stamp_ready(Path(args.ready_file), apply=args.apply), indent=1, default=str))
         return 0
     if args.cmd == "rehearse":
         print(json.dumps(run_real(dt.date.fromisoformat(args.day), rehearsal_gate=args.gate_box), indent=1, default=str))

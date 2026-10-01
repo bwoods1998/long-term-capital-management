@@ -26,6 +26,18 @@ NAMED = "sbcp_gate25"
 ROOTS = ["SPY", "QQQ", "GOOGL", "MSFT"]
 READY = {"schema": 1, "day": "2026-09-29", "ready_at": "2026-09-30T06:12:32+00:00", "gate_checkpoint": "sbcp_chain29",
          "roots": ["GOOGL", "MSFT", "QQQ", "SPY"]}
+BUILT = "2026-09-27T12:04:44Z"  # when the named image was built (a staging build, adopted on Oct 1)
+
+
+def rebased():
+    """images.json after the operator's Oct 1 re-base: the named image is current, its chain reset, and the nightly (the
+    release before this one) re-copied 09-28 and 09-29 onto it with no `base` on their records."""
+    return {"gate": {"current": {"checkpoints": [NAMED, "sbcp_gate25b"], "roots": ROOTS + ["TSLA"], "built_at": BUILT},
+                     "current_checkpoint": "sbcp_chain29",
+                     "checkpoints": [{"id": "sbcp_chain28", "day": "2026-09-28", "at": "2026-10-01T06:20:00+00:00"},
+                                     {"id": "sbcp_chain29", "day": "2026-09-29", "at": "2026-10-01T06:31:00+00:00"}],
+                     "forward_days": {"2026-09-28": {"checkpoint": "sbcp_chain28", "adopted": "2026-10-01T06:19:00+00:00"},
+                                      "2026-09-29": {"checkpoint": "sbcp_chain29", "adopted": "2026-10-01T06:30:00+00:00"}}}}
 
 
 class ReadyFile(unittest.TestCase):
@@ -72,17 +84,53 @@ class ReadyFile(unittest.TestCase):
         loaded = self.load(legacy, core)  # Sept 30: images.json's gate was the core-five image
         self.assertEqual(loaded["gym"]["gate_checkpoint"], NAMED)
         self.assertIn("not the gate swarm.json names", loaded["forward"]["ready_ignored"]["why"])
-        rebased = {"gate": {"current": {"checkpoints": [NAMED, "sbcp_gate25b"], "roots": ROOTS + ["TSLA"]},
-                            "current_checkpoint": "sbcp_chain29", "forward_days": {"2026-09-29": {"checkpoint": "sbcp_chain29"}}}}
-        loaded = self.load(legacy, rebased)  # Oct 1, after the operator's re-base: production keeps its chain
+        loaded = self.load(legacy, rebased())  # Oct 1, after the operator's re-base: production keeps its chain
         self.assertEqual(loaded["gym"]["gate_checkpoint"], "sbcp_chain29")
         self.assertNotIn("ready_ignored", loaded["forward"])
-        off_tip = json.loads(json.dumps(rebased))
-        off_tip["gate"]["current_checkpoint"] = "sbcp_chain30"
-        self.assertEqual(self.load(legacy, off_tip)["gym"]["gate_checkpoint"], NAMED, "not the chain's tip: not proven")
-        short = json.loads(json.dumps(rebased))
+        short = rebased()
         short["gate"]["current"]["roots"] = ["SPY", "QQQ"]
         self.assertEqual(self.load(legacy, short)["gym"]["gate_checkpoint"], NAMED)
+        other_day = rebased()
+        other_day["gate"]["forward_days"]["2026-09-29"]["checkpoint"] = "sbcp_chain28"
+        self.assertEqual(self.load(legacy, other_day)["gym"]["gate_checkpoint"], NAMED, "not its day's checkpoint")
+        unlisted = rebased()
+        unlisted["gate"]["checkpoints"] = unlisted["gate"]["checkpoints"][:1]
+        self.assertEqual(self.load(legacy, unlisted)["gym"]["gate_checkpoint"], NAMED, "not on the chain's records")
+
+    def test_a_legacy_file_stands_while_the_nightly_records_the_next_day_before_publishing_it(self):
+        # The first night of this release: the nightly records 09-30's checkpoint (named on its base) and makes it the
+        # chain's tip a minute before it publishes 09-30. The legacy 09-29 file is no longer the tip, and still the gate.
+        night = rebased()
+        night["gate"]["checkpoints"].append({"id": "sbcp_chain30", "day": "2026-09-30", "at": "2026-10-01T07:02:00+00:00",
+                                             "base": NAMED})
+        night["gate"]["current_checkpoint"] = "sbcp_chain30"
+        loaded = self.load(dict(READY), night)
+        self.assertEqual(loaded["gym"]["gate_checkpoint"], "sbcp_chain29", "no switch to the bare gate and back")
+        self.assertNotIn("ready_ignored", loaded["forward"])
+        night["gate"]["checkpoints"][-1]["base"] = "sbcp_core5"  # the chain moved to another image after 09-29
+        loaded = self.load(dict(READY), night)
+        self.assertEqual(loaded["gym"]["gate_checkpoint"], NAMED)
+        self.assertIn("extends sbcp_core5", loaded["forward"]["ready_ignored"]["why"])
+
+    def test_a_stale_chain_never_passes_for_a_gate_adopted_without_its_reset(self):
+        # `images.py build gate` (or `finish`) records the named image as current, built now, and leaves the chain
+        # records of the image before it: a legacy file on that chain is another image's, however its tip looks.
+        stale = rebased()
+        stale["gate"]["current"]["built_at"] = "2026-10-02T09:00:00Z"
+        loaded = self.load(dict(READY), stale)
+        self.assertEqual(loaded["gym"]["gate_checkpoint"], NAMED)
+        self.assertIn("not adopted after", loaded["forward"]["ready_ignored"]["why"])
+        self.assertIsNotNone(S.chain_refusal(stale["gate"], "sbcp_chain29"))
+        undated = rebased()
+        del undated["gate"]["current"]["built_at"]
+        self.assertEqual(self.load(dict(READY), undated)["gym"]["gate_checkpoint"], NAMED, "nothing dates the image")
+        # The lineage itself: the image's own checkpoints, entries named on it, and entries taken after it was recorded.
+        gate = rebased()["gate"]
+        self.assertIsNone(S.chain_refusal(gate, NAMED))
+        self.assertIsNone(S.chain_refusal(gate, "sbcp_chain28"))
+        gate["checkpoints"][1]["at"] = "2026-09-26T06:00:00+00:00"  # a later entry from before the image
+        self.assertIsNotNone(S.chain_refusal(gate, "sbcp_chain28"))
+        self.assertIsNotNone(S.chain_refusal(gate, "sbcp_elsewhere"))
 
     def test_an_unreadable_ready_file_never_moves_the_gate_and_a_missing_one_is_no_news(self):
         loaded = self.load("{not json")
@@ -131,7 +179,7 @@ class GateBoxCoverage(PoolCase):
     def gate_box(self, listing):
         self.sail = ListingSail(listing)
         pool = self.pool(roots=ROOTS)
-        pool.submit(job("g", window="holdout", roots=("GOOGL",), gate="holdout look g v1"))
+        self.look = pool.submit(job("g", window="holdout", roots=("GOOGL",), gate="holdout look g v1"))
         pool.manage()
         return pool, [b for b in pool.boxes.values() if b.kind == "gate"]
 
@@ -154,10 +202,37 @@ class GateBoxCoverage(PoolCase):
         self.assertEqual([a["missing"] for a in alerts], [["GOOGL", "MSFT"]])
         self.assertEqual(self.store.boxes(kind="gate")[0]["detail"]["holdout_roots"], ["QQQ", "SPY"])
 
-    def test_a_gate_box_whose_store_holds_no_holdout_is_not_used(self):
+    def test_a_gate_box_whose_store_holds_no_holdout_is_not_used_and_the_look_waiting_fails_as_missing_data(self):
         pool, boxes = self.gate_box({"SPY": {"nbbo": 0, "underlying": 0}})
         self.assertEqual(boxes, [])
         self.assertEqual(len(self.sail.terminated), 1)
+        self.assertEqual(pool.holdout_coverage()["roots"], [], "the image holds none: the gate refuses looks up front")
+        self.assertEqual(list(pool.queue), [], "not left to be abandoned (a counted try)")
+        look = self.look
+        self.assertEqual(look.missing, ("GOOGL",))
+        with self.assertRaises(PoolError):
+            pool.wait(look, 0)
+
+    def test_a_root_copied_in_part_is_not_taken_for_its_whole_holdout(self):
+        pool, [box] = self.gate_box({"SPY": self.FULL, "QQQ": self.FULL, "MSFT": self.FULL,
+                                     "GOOGL": {"nbbo": 184, "underlying": 97}})
+        self.assertEqual(box.holdout, ("MSFT", "QQQ", "SPY"))
+        self.assertEqual(pool.holdout_coverage()["roots"], ["MSFT", "QQQ", "SPY"])
+
+    def test_a_store_fault_that_names_no_root_is_not_missing_data(self):
+        class GymDataMissing(Exception):
+            pass
+
+        pool = self.pool(roots=ROOTS)
+        box = self.ready_box(pool, "gate")
+        box.roots = tuple(ROOTS)
+        self.failure = GymDataMissing("no store at /data/store (no VERSION file)")
+        look = pool.submit(job("g", window="holdout", roots=("GOOGL", "SPY"), gate="holdout look g v1"))
+        pool.run_batch(box, pool._take(box))
+        with self.assertRaises(PoolError):
+            pool.wait(look, 0)
+        self.assertIsNone(look.missing, "a fault of the box: its look counts a try, as before")
+        self.assertIsNone(pool.holdout_coverage(), "and the image's record is not marked")
 
     def test_the_gyms_own_missing_data_answer_is_kept_for_the_gate_image(self):
         class GymDataMissing(Exception):
@@ -244,6 +319,14 @@ class GateMissingData(RoundCase):
         self.pool.coverage = {"roots": ["QQQ", "SPY"], "missing": []}  # the gate image is fixed: the look runs
         self.rounds(1)
         self.assertEqual(len(self.store.looks()), 1)
+
+    def test_an_image_whose_store_holds_no_holdout_refuses_every_look_up_front(self):
+        self.pool.coverage = {"roots": [], "missing": []}
+        self.rounds(2)
+        self.assertEqual(self.holdout_jobs(), [])
+        self.assert_owed_untouched()
+        [alert] = self.alerts("gate_missing_data")
+        self.assertEqual(alert["missing"], ["SPY"], "every root the program needs")
 
     def test_a_root_the_gym_said_was_missing_is_refused_up_front_too(self):
         self.pool.coverage = {"roots": None, "missing": ["SPY"]}
