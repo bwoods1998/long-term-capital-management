@@ -212,8 +212,9 @@ class StoredResults(DedupeCase):
         self.assertEqual(self.run_({}, me)[0]["already_run"], ALREADY_RUN, "no newer fill model seen yet")
         fill["model"] = "fill-two"
         self.assertNotIn("already_run", self.run_({"params": {"vrp_min": 1.3}}, me)[0])
-        self.assertNotIn("already_run", self.run_({}, me)[0], "stored on the old fill model: runs again")
-        self.assertEqual(self.run_({}, me)[0]["already_run"], ALREADY_RUN)
+        # The program as written, explicitly (a bare `{}` now reruns the latest version, version 2, exactly: Oct 1).
+        self.assertNotIn("already_run", self.run_({"params": {}}, me)[0], "stored on the old fill model: runs again")
+        self.assertEqual(self.run_({"params": {}}, me)[0]["already_run"], ALREADY_RUN)
         self.assertEqual(len(self.pool.jobs), 3)
 
     def test_the_key_sorts_the_roots_as_the_gym_does(self):

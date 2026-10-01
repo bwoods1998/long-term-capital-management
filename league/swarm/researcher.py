@@ -92,6 +92,23 @@ validation refutes here), and the tournament's own rules still apply. The status
 retire. The tool stays offered (`can_retire` is unchanged). Operator retirements, the tournament's rules (the
 deflated-Sharpe rule among them), the diagnostician and the population floor are unaffected.
 
+THE OPERATOR'S RUN (Oct 1). The operator revives a retired family as a lineage fork whose version 1 (author
+"operator-revive", `OPERATOR_AUTHORS`) is the old validated program WITH its params, to be re-run unchanged on the current
+evaluator. Until Oct 1 no revival ran that program: a `gym_run` with no code reran the latest code with no params (`{}`,
+another program), and researchers often wrote new code at once. Now a living Gym family's latest operator-written version
+that has no Train run at the normal spread on the current evaluator and Train span (any status; `row_matches`), and whose
+evaluation no other version made (NO DUPLICATE RUNS), is run by the harness at the start of the cycle, before any rewrite,
+queued run or model turn (`operator_owed`, `_operator_run`): its stored code and params, through gym_run's own path (the
+same refusals, eval key, trial count, Train score, drift screen, candidates, best and robustness runs), never probed, and
+recorded as that version (the store keeps one version for one code and params: no version row, no revision). A new run
+is the cycle's one run: a rewrite and a run queued last cycle wait for the next cycle, and the model's turn is a READ of
+it. A Gym error ends the cycle and the harness tries again next cycle, at most `OPERATOR_RUN_ATTEMPTS` (3) times; a
+refusal, or the third error, gives up with a notebook note (`operator_run` in the family's state keeps the record per
+version and evaluator, so an adoption owes the run again). A run that landed after its wait is read back from the store
+and scored. The status tells the researcher that the revival runs unchanged first and that its evidence decides, never
+the evaluator change. Separately, `gym_run` with neither code nor params reruns the latest version exactly: its params
+carry over (explicit params, `{}` included, still replace them).
+
 EVENT-DRIVEN HOLDS (Sept 30). A held family is parked durably by `loop.Scheduler` until a result, rewrite, guidance,
 research agenda, data image or release changes. Elapsed time and process restarts alone never buy another call.
 The researcher should retire an exhausted mechanism when offered, and hold when a specific input is missing.
@@ -276,8 +293,9 @@ def sweep_tool(limit: int = MAX_SWEEP_VARIANTS) -> dict[str, Any]:
 
 TOOLS: list[dict[str, Any]] = [
     {"name": "gym_run", "description": "Run a version of your program on the Train window in the Gym and get its compact "
-                                       "diagnostic. `code` is the whole program file (omit it to rerun your latest version, e.g. "
-                                       "with other params). One run (or one gym_sweep) per cycle: a second call runs at the start "
+                                       "diagnostic. `code` is the whole program file. Omit it to rerun your latest version: with "
+                                       "no `params` either, exactly as it is (its params carry over); with `params`, those "
+                                       "replace its params. One run (or one gym_sweep) per cycle: a second call runs at the start "
                                        "of your next cycle. A program and params your family already ran (same stress, roots and "
                                        "Gym) are not run again: you get the stored result (already_run), no trial; change "
                                        "something. With nothing new to run, call it with hold=true and no code or params: no run, "
@@ -285,7 +303,8 @@ TOOLS: list[dict[str, Any]] = [
                                        "results count against your family under the idle rule.",
      "parameters": {"type": "object", "properties": {
          "code": {"type": "string", "description": "the complete program: NEEDS, PARAMS, decide(ctx)"},
-         "params": {"type": "object", "description": "PARAMS overrides for this run (keys must exist in PARAMS)"},
+         "params": {"type": "object", "description": "PARAMS overrides for this run (keys must exist in PARAMS); they replace "
+                                                     "the version's params ({} is the program as written)"},
          "stress": {"type": "number", "description": "half-spread multiplier, 1.0 (default) or 1.5 (the gate's stress)"},
          "hold": {"type": "boolean", "description": "true, with no code and no params: skip this cycle honestly because you "
                                                     "have nothing new to run (say why in `note`)"},
@@ -730,6 +749,15 @@ DORMANT_CYCLES = 40
 
 #: What a stored result says (NO DUPLICATE RUNS): its view's `already_run`, and a sweep row's.
 ALREADY_RUN = "the stored result"
+
+#: THE OPERATOR'S RUN (Oct 1): the authors of a version the operator wrote (the operator's revival tool authors
+#: "operator-revive"). A living Gym family's latest such version is run by the harness exactly as stored, its code AND its
+#: params, before its researcher edits it (`Researcher.operator_owed`).
+OPERATOR_AUTHORS = ("operator-revive",)
+#: Gym errors the operator's run may meet, one a cycle, before the harness gives up on it with a note.
+OPERATOR_RUN_ATTEMPTS = 3
+#: The family state's record of it under the current evaluator: {version, evaluator, tries, ran, gave_up}.
+OPERATOR_RUN_KEY = "operator_run"
 
 
 def _count_setting(settings: Mapping[str, Any], name: str, default: int) -> int:
@@ -1572,6 +1600,9 @@ class Researcher:
         if line and state.get("validation_version") is not None:
             # D2a: pass or fail and a count, never a number Validation measured nor which checks failed.
             parts.append(f"Validation of version {state['validation_version']}: it {diagnostics.validation_words(line)}.")
+        operator = self.operator_text(fam)  # THE OPERATOR'S RUN: a revival is run unchanged first, and its evidence decides
+        if operator:
+            parts.append(operator)
         robust = self.robustness_text(fam)
         if robust:
             parts.append(robust)
@@ -2179,14 +2210,19 @@ class Researcher:
         if holding(args):
             return self._hold(fam, args, out)
         code = args.get("code")
+        carried: dict[str, Any] = {}
         if not code:
             latest = self.store.latest_version(fam["id"])
             if latest is None or not latest.get("code"):
                 return self._refusal(out, {"error": "you have no version yet: pass `code`"})
             code = latest["code"]
+            if args.get("params") is None:
+                # Neither code nor params: the latest version EXACTLY, its params carried over (Oct 1: before, its params
+                # were dropped, so "rerun it unchanged" ran another program). Explicit params, `{}` included, replace them.
+                carried = dict(latest.get("params") or {})
         code = str(code)
-        dated = [k for k, v in (args.get("params") or {}).items()] if isinstance(args.get("params"), dict) else []
-        dated = [k for k in dated if date_like(args["params"][k])]
+        params = args.get("params") if isinstance(args.get("params"), dict) else carried
+        dated = [k for k, v in params.items() if date_like(v)]
         if dated:
             return self._refusal(out, {"status": "refused", "reason": f"a date or a year in the parameter overrides "
                                                                       f"({', '.join(dated)}): no program may see the calendar",
@@ -2195,7 +2231,6 @@ class Researcher:
         if note:
             self.store.note(fam["id"], note)
             out["note"] = note
-        params = args.get("params") if isinstance(args.get("params"), dict) else {}
         from ..gym.experiment import check_experiment
         from ..gym.safety import CodeRefused
         try:
@@ -3659,6 +3694,138 @@ class Researcher:
             out["retired"] = True
         return retired
 
+    # ------------------------------------------------------------------ THE OPERATOR'S RUN (Oct 1)
+    def operator_version(self, fid: str) -> int | None:
+        """The family's latest version an operator wrote (`OPERATOR_AUTHORS`), or None."""
+        marks = ",".join("?" * len(OPERATOR_AUTHORS))
+        row = self.store._one(f"SELECT MAX(n) AS n FROM versions WHERE family=? AND author IN ({marks})", (fid, *OPERATOR_AUTHORS))
+        return int(row["n"]) if row and row.get("n") is not None else None
+
+    def _evaluator_now(self) -> Any:
+        """The evaluator the Gym runs now (`evaluator.identity`), else the adopted one: what the operator's record is for."""
+        from .evaluator import KEY, identity
+
+        return identity(*self._gym_identity()) or self.store.get(KEY)
+
+    def operator_record(self, fam: Mapping[str, Any], n: int) -> dict[str, Any]:
+        """The family state's record of version `n`'s exact run under the current evaluator ({} for another version or
+        evaluator: an adoption owes the run again)."""
+        record = (fam.get("state") or {}).get(OPERATOR_RUN_KEY)
+        if isinstance(record, Mapping) and record.get("version") == int(n) and record.get("evaluator") == self._evaluator_now():
+            return dict(record)
+        return {}
+
+    def _operator_landed(self, fam: Mapping[str, Any], n: int) -> dict[str, Any] | None:
+        """Version `n`'s newest Train row at the normal spread on the current evaluator (`row_matches`) and Train span, of
+        any status (the Gym answered it: a refusal or an error is its answer too), or None."""
+        from .evaluator import identity, row_matches
+
+        expected, span = identity(*self._gym_identity()), self.train_span()
+        for row in self.store.version_runs(str(fam["id"]), int(n), window="train", stress=1.0, limit=20):
+            spanned = row.get("status") == "ok" or "train_from" in (row.get("summary") or {})
+            if row.get("purpose") in DRIFT_PURPOSES and (not spanned or row_span(row) == span) \
+                    and row_matches(self.store, row, expected):
+                return row
+        return None
+
+    def operator_owed(self, fam: Mapping[str, Any]) -> dict[str, Any] | None:
+        """THE OPERATOR'S RUN: the version the harness runs exactly this cycle, or None. A living Gym family's latest
+        operator-written version (`operator_version`) is owed while it has no Train run at the normal spread on the current
+        evaluator and Train span (`_operator_landed`), no other version made the same evaluation (NO DUPLICATE RUNS: `{}`
+        and its defaults spelled out are one program), and the harness neither ran it nor gave up on it under this evaluator
+        (`operator_record`). A run the harness asked for that landed after its wait gave up is owed once more, to be read
+        back from the store (no Gym job, no trial) and scored into the family's candidates and best like any run."""
+        fid = str(fam["id"])
+        if fam.get("band") != "gym" or fam.get("retired_at"):
+            return None
+        n = self.operator_version(fid)
+        if n is None:
+            return None
+        record = self.operator_record(fam, n)
+        if record.get("ran") or record.get("gave_up"):
+            return None
+        version = self.store.version(fid, n)
+        if not version or not version.get("code"):
+            return None
+        code, params = str(version["code"]), dict(version.get("params") or {})
+        key = self.eval_key(code, params, stress=1.0, window="train", roots=needs_roots(code, fam["roots"]))
+        stored = self._reusable(self.store.evaluated(fid, key), stress=1.0) if self.reuse else None
+        if stored is not None:
+            return version if record.get("tries") else None  # its own late result, or the same program run already
+        return None if self._operator_landed(fam, n) is not None else version
+
+    def _operator_run(self, fam: Mapping[str, Any], out: dict[str, Any]) -> dict[str, Any] | None:
+        """THE OPERATOR'S RUN at the start of a model cycle: the owed version (`operator_owed`) run exactly as stored, its
+        code and params, through gym_run's own path (`_gym_run`: its refusals, NO DUPLICATE RUNS, the trial counted against
+        the lineage, the Train score, the drift screen, the candidates and best, a new best's robustness runs), never
+        probed (`full`), and recorded as that version: the store keeps one version for one code and params, so no version
+        row is added and no revision counted. None when nothing is owed (or the family retired meanwhile); {"retry": True}
+        after a Gym error the harness tries again next cycle, at most `OPERATOR_RUN_ATTEMPTS` times, then a note and the
+        model goes on; else {"view", "message"}: what the model reads first this cycle."""
+        version = self.operator_owed(fam)
+        if version is None:
+            return None
+        fid, n = str(fam["id"]), int(version["n"])
+        record = {**self.operator_record(fam, n), "version": n, "evaluator": self._evaluator_now()}
+        args = {"code": str(version["code"]), "params": dict(version.get("params") or {}), "full": True,
+                "why": "the operator's version, run exactly as stored"}
+        out["operator_run"] = n
+        view = self._execute(fam, "gym_run", args, out, author=str(version.get("author") or OPERATOR_AUTHORS[0]))
+        view = view if isinstance(view, dict) else {"status": "error", "reason": str(view)[:300]}
+        if view.get("status") == "retired":
+            return None
+        whose = f"the operator's revival of {fam['parent']}'s program" if fam.get("parent") else "the operator's version"
+        if view.get("run_id"):
+            record.update(ran=str(view["run_id"]))
+            with self.store.atomic():
+                self.store.set_state(fid, **{OPERATOR_RUN_KEY: record})
+            how = ("its exact run is already recorded on the current evaluator (read back from the store: no new Gym run, "
+                   "no trial)" if view.get("already_run") else
+                   "the harness ran it exactly as revived (its stored code and params, unchanged; no new version) on Train "
+                   "under the current evaluator, as this cycle's run")
+            return {"view": view, "message": f"Your version {n} is {whose}: {how}. Its evidence decides (its Train score, its "
+                                             f"1.5x and drift runs, then validation), never the fact that the evaluator "
+                                             f"changed.\n{json.dumps(view, default=str)[:12000]}"}
+        why = str(view.get("error") or view.get("reason") or view.get("status") or "no result")[:300]
+        if view.get("status") == "gym_error":
+            record["tries"] = int(record.get("tries") or 0) + 1
+            if record["tries"] < OPERATOR_RUN_ATTEMPTS:
+                with self.store.atomic():
+                    self.store.set_state(fid, **{OPERATOR_RUN_KEY: record})
+                out["error"] = f"gym: {why[:200]}"
+                return {"retry": True}
+            why = f"the Gym erred {record['tries']} times ({why})"
+        record["gave_up"] = why
+        with self.store.atomic():
+            self.store.set_state(fid, **{OPERATOR_RUN_KEY: record})
+            self.store.note(fid, f"The harness could not run version {n} ({whose}) exactly as stored on the current Gym: "
+                                 f"{why}. Its evidence is still owed: an evaluator change is never a reason to retire.")
+        out["operator_gave_up"] = why[:200]
+        return {"view": view, "message": f"Your version {n} is {whose}. The harness could not run it exactly as stored on the "
+                                         f"current Gym: {why}.\n{json.dumps(view, default=str)[:6000]}"}
+
+    def operator_text(self, fam: Mapping[str, Any]) -> str:
+        """The status line of a family holding an operator-written version (THE OPERATOR'S RUN): the harness runs it
+        unchanged first, and its evidence decides; "" for any other family."""
+        if fam.get("band") != "gym":
+            return ""
+        n = self.operator_version(str(fam["id"]))
+        if n is None:
+            return ""
+        whose = f"the operator's revival of {fam['parent']}'s program" if fam.get("parent") else "the operator's version"
+        record = self.operator_record(fam, n)
+        decides = ("Its evidence decides (its Train score, its 1.5x and drift runs, then validation): an evaluator change is "
+                   "never a reason to retire.")
+        if record.get("gave_up"):
+            return (f"Your version {n} is {whose}. The harness could not run it unchanged on the current Gym "
+                    f"({str(record['gave_up'])[:200]}). {decides}")
+        if self.operator_owed(fam) is not None:
+            return (f"Your version {n} is {whose}. The harness runs it first, exactly as revived (its stored code and params, "
+                    f"unchanged), on Train under the current evaluator, before you edit it. {decides}")
+        ran = f" (run {record['ran']})" if record.get("ran") else ""
+        return (f"Your version {n} is {whose}, run unchanged (its stored code and params) on Train under the current "
+                f"evaluator{ran}. {decides}")
+
     # ------------------------------------------------------------------ one cycle
     def cycle(self, fid: str) -> dict[str, Any]:
         began = self.clock()
@@ -3758,8 +3925,19 @@ class Researcher:
         current: list[dict[str, Any]] = []
         deadline = self.clock() + float(self.cfg.get("cycle_seconds", 170))
         gym_done = False
+        # THE OPERATOR'S RUN first: an operator-written version owed its exact run on the current evaluator runs before
+        # anything the model or a rewrite wrote. When it makes a new run, that is this cycle's one run: a rewrite and a
+        # run queued last cycle wait for the next cycle, and the model's turn is a READ.
+        operator = self._operator_run(fam, out)
+        if operator is not None and operator.get("retry"):
+            return  # a Gym error: the harness tries the exact run again next cycle; no model is paid to read that
+        if operator is not None:
+            current.append({"role": "user", "content": operator["message"]})
+            gym_done = new_run(operator["view"])
+            fam = self.store.family(fid) or fam
+        operated = gym_done
         ready = (fam.get("state") or {}).get("rewrite_ready")
-        if ready and ready.get("code"):  # a stronger model's rewrite came back: it is this cycle's run
+        if ready and ready.get("code") and not operated:  # a stronger model's rewrite came back: it is this cycle's run
             self.store.set_state(fid, rewrite_ready=None)
             view = self._gym_run(fam, {"code": ready["code"], "why": f"a rewrite by {ready.get('profile')} after a stall"}, out,
                                  author=str(ready.get("profile") or "rewrite"))
@@ -3808,7 +3986,8 @@ class Researcher:
                 current.append({"role": "user", "content": f"The {tool} you queued last cycle did not complete a Gym run:\n"
                                                            f"{json.dumps(result, default=str)[:12000]}"})
             fam = self.store.family(fid) or fam
-        pending = None  # run, or superseded by the rewrite (its call was answered "queued" last cycle)
+        if not operated:
+            pending = None  # run, or superseded by the rewrite (its call was answered "queued" last cycle)
         if int(fam.get("stall") or 0) >= int(self.cfg.get("stall_revisions", 5)):
             self.request_rewrite(fam, out)
         current.append({"role": "user", "content": self.status(fam)})

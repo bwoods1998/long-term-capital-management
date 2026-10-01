@@ -397,6 +397,25 @@ its main commit.
    - Its re-validation under engine 4 is a new, counted trial, and the holdout still judges it.
    - Run a dry run first. The revived family is held once its re-validation meets the checks.
    - Record in the run record which families were revived, and that the operator chose them from the validation line.
+   - **The harness runs the revived program exactly** (Oct 1, `researcher.py` THE OPERATOR'S RUN). A living Gym
+     family's latest version written by the operator (author `operator-revive`) that has no Train run at the normal
+     spread on the current evaluator (image and bundle) and Train span is run by the harness at the start of its next
+     cycle, before any rewrite, queued run or model turn. It runs with the version's stored code and params, through
+     `gym_run`'s own path: the same refusals, no-duplicate rule, lineage trial, Train score, drift screen, best and
+     robustness runs. It is never probed, and it is recorded as that version (no version row, no revision). That run is
+     the cycle's one run, so the model reads it. A Gym error is retried next cycle, at most 3 times; a refusal, or the
+     third error, gives up with a notebook note. The family state's `operator_run` keeps the record per version and
+     evaluator, so a later adoption owes one more run. The status tells the researcher that its revival runs unchanged
+     first, that its evidence decides, and that an evaluator change is never a reason to retire.
+   - **Before this fix, revivals did not run the revived program.** Between Sept 30 and the fix, no revival ran its
+     version 1. A `gym_run` with no code reran the latest code with params `{}`, so the revived params were dropped and a
+     different program ran. Researchers also often wrote new code at once. A revival's Train, 1.5x and drift evidence
+     on the evaluator in force therefore never landed. Read any run-record claim from that window that a revival
+     "re-validated with identical numbers" against the family's version rows: a run of version 2 or later, or of version
+     1 with other params, is not the revived program. On the first deploy with the fix, each living revived family whose
+     version 1 has no such run gets it in its next cycle. The deploy is a new release, so it also wakes a parked family.
+   - `gym_run` with neither `code` nor `params` now reruns the latest version exactly: its params carry over. Explicit
+     params, `{}` included, still replace them.
 
 **Checks after promotion.** Record each one in the run record.
 - **Evaluator adoption.**
@@ -1817,7 +1836,9 @@ Operator lessons (Sept 29, 2026): the operator's own experiments are in the grav
 04:33Z Sept 29), each dated when its experiment concluded and ending with a "do not re-propose unless ..." line. They
 are compiled from private results, reviewed as public-safe, and inserted by the operator's private tool with a backup.
 Operator revivals are lineage continuations (origin `operator-revive`): a fork that inherits its lineage's trials and
-holdout looks, so the deflated Sharpe and the holdout ration count every version.
+holdout looks, so the deflated Sharpe and the holdout ration count every version. Since Oct 1 the harness runs the
+revived version exactly, with its code and params, before its researcher edits it (**Operator revivals**, above).
+Before that fix, no revival ran its revived program.
 
 The full graveyard and the strategist (Sept 29, 2026; `league/swarm/architect.py`, `league/swarm/strategist.py`), all in
 `swarm.json`. On the Claude route the architect reads every graveyard row as one sealed, cached digest ahead of its own
