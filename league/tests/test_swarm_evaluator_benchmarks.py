@@ -27,6 +27,21 @@ except ImportError:  # pragma: no cover
 #: Probes the static check refuses today. The check may come to refuse more (release B's numpy fix refuses the memo
 #: probe), never fewer: a test of containment, not equality.
 REFUSED = {"leak_array_base", "leak_private_attr", "leak_date_literal"}
+#: The smallest set of names that, added to NUMPY_BANNED, closes everything the reach walk finds on numpy 2.4 and 2.5
+#: (EVALUATOR_1's recommendation): the two dicts, np.polynomial (36 arrays and a setter), np.dtypes' registry, np.matlib
+#: (rand and randn draw from numpy.random's shared generator) and np.matrixlib (its defmatrix module hands out
+#: numpy._core.numeric: 14 writable registries, sctypeDict again as `typeDict`, three setters and standard-library
+#: modules outside the import allowlist).
+SMALLEST_DENYLIST = frozenset({"typecodes", "sctypeDict", "polynomial", "register_dlpack_dtype", "matlib", "matrixlib"})
+
+
+def eval_path(path):
+    """The object a walk path names (`np.` and `math.` paths only), read the way a program reads it."""
+    import math
+
+    import numpy as np
+
+    return eval(path, {"np": np, "math": math})  # noqa: S307 - the walk's own paths, in a test
 
 
 class PinnedDefinition(unittest.TestCase):
@@ -223,23 +238,65 @@ class OneWorld(unittest.TestCase):
             with self.assertRaises(CodeRefused):
                 self.load(name)
 
+    def test_the_walk_reads_the_names_no_dir_lists(self):
+        # np.matrixlib is in numpy's dict but hidden by its __dir__; np.matlib resolves only in its module __getattr__
+        # (and is in numpy's dict only once something has read it). The walk reads both, as a program can.
+        import numpy as np
+
+        self.assertNotIn("matlib", dir(np))
+        self.assertNotIn("matrixlib", dir(np))
+        self.assertTrue({"matlib", "matrixlib", "linalg", "polynomial"} <= EB._module_names(np))
+
+        # any module __getattr__: the names it compares against, and the keys of a module container it reads
+        module = type(np)("ltcm_bench_lazy")
+        exec("CHOICES = {'third': 1}\n"  # noqa: S102 - a fabricated module, in a test
+             "def __getattr__(name):\n"
+             "    if name in ('hidden', 'other') or name in CHOICES:\n"
+             "        return 1\n"
+             "    raise AttributeError(name)\n", vars(module))
+        self.assertTrue({"hidden", "other", "third"} <= EB._module_names(module))
+        self.assertNotIn("hidden", dir(module))
+        # a shared generator: np.matlib.rand reads np.random; numpy.random's own callables and bound methods count too
+        generators = EB.REACH["shared_generators"]
+        self.assertTrue(EB._draws(np.matlib.rand, generators))
+        self.assertTrue(EB._draws(np.matlib.randn, generators))
+        self.assertTrue(EB._draws(np.random.rand, generators))
+        self.assertTrue(EB._draws(np.random.default_rng, generators))
+        self.assertFalse(EB._draws(np.mean, generators))
+        self.assertFalse(EB._draws(np.matlib.zeros, generators))
+        self.assertFalse(EB._draws(np.polynomial.Polynomial, generators))
+
     def test_the_walk_finds_every_writable_object_a_program_reaches(self):
-        # numpy 2.4 and 2.5 (the CI's two) both expose the two dicts and np.polynomial's 36 module and class arrays; the
-        # walk must find them, through the lazily imported submodule and the classes, and refuse every attribute write.
+        # numpy 2.4 and 2.5 (the CI's two) both expose the two dicts, np.polynomial's 36 module and class arrays and 14
+        # registries of numpy's core through np.matrixlib (its defmatrix module binds numpy._core.numeric as `N`); the
+        # walk must find them through the lazily imported submodules, the hidden names and the classes, find np.matlib's
+        # two draws from the shared generator, and refuse every attribute write.
         import numpy as np
         from league.gym.safety import check_program
 
         walk = EB.numpy_walk()
         polynomial = [p for p in walk["writable"] if p.startswith("np.polynomial.")]
+        internal = [p for p in walk["writable"] if p.removeprefix("list(").startswith("np.matrixlib.")]
         self.assertTrue({"np.typecodes", "np.sctypeDict"} <= set(walk["writable"]), walk["writable"])
         self.assertEqual(len(polynomial), 36, polynomial)
+        self.assertEqual(len(internal), 14, internal)
+        self.assertEqual(len(walk["writable"]), 2 + 36 + 14, walk["writable"])
         self.assertIn("np.polynomial.polynomial.polyx", polynomial)
         self.assertIn("np.polynomial.Polynomial.domain", polynomial)
+        self.assertIn("np.matrixlib.defmatrix.N.numerictypes.sctypes", internal)
+        self.assertIn("np.matrixlib.defmatrix.N.overrides.ARRAY_FUNCTIONS", internal)
         self.assertIn("np.polynomial.set_default_printstyle", walk["setters"])
+        self.assertIn("np.matrixlib.defmatrix.set_module", walk["setters"])
+        self.assertIn("np.matrixlib.defmatrix.N.multiarray.set_typeDict", walk["setters"])
         if hasattr(np.dtypes, "register_dlpack_dtype"):  # numpy 2.5
             self.assertIn("np.dtypes.register_dlpack_dtype", walk["setters"])
+        self.assertEqual(len(walk["setters"]), len(set(map(id, (eval_path(p) for p in walk["setters"])))))  # one per callable
+        self.assertEqual(walk["draws"], ["np.matlib.rand", "np.matlib.randn"])
         self.assertIn("np.seterr", walk["refused_containers"])  # a banned setter is seen, and refused
-        self.assertEqual(walk["foreign_modules"], {"functools": "np.polynomial.polyutils.functools"})
+        self.assertEqual(walk["foreign_modules"]["functools"], "np.polynomial.polyutils.functools")
+        self.assertEqual(walk["foreign_modules"]["ast"], "np.matrixlib.defmatrix.ast")
+        self.assertTrue(all(path.startswith("np.matrixlib.") for name, path in walk["foreign_modules"].items()
+                            if name != "functools"), walk["foreign_modules"])
         self.assertEqual(walk["attribute_writes"], [])
         self.assertTrue(walk["walk"]["complete"])
         for target in walk["_targets"]:  # every exact write test is admitted by the check (else it would prove nothing)
@@ -247,9 +304,10 @@ class OneWorld(unittest.TestCase):
             check_program(EB.reach_program(body=f"{write}\nseen = {read}"))
 
     def test_the_numpy_proofs_hold_only_when_every_object_is_closed(self):
-        # A partial fix (refusing np.typecodes only) leaves the sctypeDict and polynomial proofs and the reach proof
-        # failing; refusing both dicts (the old 'whole fix') still leaves np.polynomial's arrays and the setters open;
-        # only refusing everything the walk reports makes every numpy proof hold. The check is patched in-process only.
+        # A partial fix (refusing np.typecodes only) leaves the sctypeDict, polynomial and draws proofs and the reach proof
+        # failing; refusing both dicts (round 2's 'whole fix') leaves np.polynomial, np.matrixlib and np.matlib open;
+        # round 3's four names (the dicts, polynomial, register_dlpack_dtype) still leave np.matrixlib's 14 registries
+        # and np.matlib's draws; only SMALLEST_DENYLIST makes every numpy proof hold. The check is patched in-process only.
         import numpy as np
         from league.gym import safety
 
@@ -258,8 +316,14 @@ class OneWorld(unittest.TestCase):
                     mock.patch.object(EB, "split_proof", lambda root: {"held": True, "claim": "stubbed (no Train here)"}):
                 return EB.proofs(self.store, self.dir)
 
+        def rooted(paths, root):
+            return [p for p in paths if p.removeprefix("list(").startswith(root)]
+
         numpy_proofs = [c["id"] for c in EB.CASES if c["id"].startswith("state_numpy_")]
-        pristine = (np.polynomial.polynomial.polyx.copy(), np.polynomial.Polynomial.domain.copy(), dict(np.typecodes))
+        self.assertIn("state_numpy_draws", numpy_proofs)
+        EB.numpy_walk()  # first, the imports a program's reads make (each adds its functions to ARRAY_FUNCTIONS)
+        pristine = (np.polynomial.polynomial.polyx.copy(), np.polynomial.Polynomial.domain.copy(), dict(np.typecodes),
+                    set(np.matrixlib.defmatrix.N.overrides.ARRAY_FUNCTIONS))
         partial = proofs_with(frozenset({"typecodes"}))
         self.assertTrue(partial["state_numpy_runs"]["held"] and partial["state_numpy_batchmates"]["held"])
         self.assertIn("refused", partial["state_numpy_runs"])
@@ -269,6 +333,10 @@ class OneWorld(unittest.TestCase):
             self.assertEqual(partial[name]["trades"][1], 0, name)
         self.assertFalse(partial["state_numpy_batchmates_sctypedict"]["held"])
         self.assertFalse(partial["state_numpy_batchmates_polynomial"]["held"])
+        # the shared generator: the same program on the same days trades every session both times, on different sides
+        self.assertFalse(partial["state_numpy_draws"]["held"])
+        self.assertEqual(partial["state_numpy_draws"]["trades"][0], partial["state_numpy_draws"]["trades"][1])
+        self.assertGreater(partial["state_numpy_draws"]["trades"][0], 50)
         reach = partial["state_numpy_reachable"]
         self.assertFalse(reach["held"])
         self.assertIn("np.sctypeDict", reach["reachable"])
@@ -283,27 +351,47 @@ class OneWorld(unittest.TestCase):
         self.assertFalse(dicts["state_numpy_runs_polynomial"]["held"])
         self.assertEqual(dicts["state_numpy_runs_polynomial"]["trades"][1], 0)
         self.assertFalse(dicts["state_numpy_batchmates_polynomial"]["held"])
+        self.assertFalse(dicts["state_numpy_draws"]["held"])
         reach = dicts["state_numpy_reachable"]
         self.assertFalse(reach["held"])
-        self.assertEqual(len(reach["reachable"]), 36, reach["reachable"])
-        self.assertTrue(all(p.startswith("np.polynomial.") for p in reach["reachable"]))
+        # np.matrixlib's 14, plus sctypeDict itself under another name: numerictypes binds it as `typeDict` too, so
+        # refusing a name does not refuse the object
+        alias = "np.matrixlib.defmatrix.N.numerictypes.typeDict"
+        self.assertIn(alias, reach["reachable"])
+        self.assertIs(eval_path(alias), np.sctypeDict)
+        self.assertEqual(len(rooted(reach["reachable"], "np.polynomial.")), 36, reach["reachable"])
+        self.assertEqual(len(rooted(reach["reachable"], "np.matrixlib.")), 15, reach["reachable"])
+        self.assertEqual(len(reach["reachable"]), 51, reach["reachable"])
         self.assertIn("np.polynomial.set_default_printstyle", reach["setters"])
 
-        whole = frozenset({"typecodes", "sctypeDict", "polynomial"} | {p.rsplit(".", 1)[-1] for p in reach["setters"]})
-        closed = proofs_with(whole)
+        four = proofs_with(frozenset({"typecodes", "sctypeDict", "polynomial", "register_dlpack_dtype"}))
+        for name in numpy_proofs:
+            self.assertEqual(four[name]["held"], name not in ("state_numpy_draws", "state_numpy_reachable"), name)
+        reach = four["state_numpy_reachable"]
+        self.assertEqual(len(reach["reachable"]), 15, reach["reachable"])
+        self.assertIn(alias, reach["reachable"])
+        self.assertEqual(rooted(reach["reachable"], "np.matrixlib."), reach["reachable"])
+        self.assertEqual(rooted(reach["setters"], "np.matrixlib."), reach["setters"])
+        self.assertEqual(reach["draws"], ["np.matlib.rand", "np.matlib.randn"])
+
+        closed = proofs_with(SMALLEST_DENYLIST)
         self.assertTrue(all(closed[name]["held"] for name in numpy_proofs), {n: closed[n] for n in numpy_proofs})
-        self.assertEqual(closed["state_numpy_reachable"]["reachable"], [])
-        self.assertEqual(closed["state_numpy_reachable"]["writable"], [])
-        self.assertEqual(closed["state_numpy_reachable"]["setters"], [])
+        self.assertIn("refused", closed["state_numpy_draws"])
+        for key in ("reachable", "writable", "setters", "draws"):
+            self.assertEqual(closed["state_numpy_reachable"][key], [], key)
+        self.assertEqual(closed["state_numpy_reachable"]["foreign_modules"], {})
         # every probe's write was put back
         self.assertTrue(np.array_equal(np.polynomial.polynomial.polyx, pristine[0]))
         self.assertTrue(np.array_equal(np.polynomial.Polynomial.domain, pristine[1]))
         self.assertEqual(dict(np.typecodes), pristine[2])
+        self.assertEqual(set(np.matrixlib.defmatrix.N.overrides.ARRAY_FUNCTIONS), pristine[3])
         self.assertEqual(EB.clear_numpy_marks(), 0)
 
     def test_the_reach_proof_is_behavioral(self):
-        # A fix that leaves every object reachable but keeps writes from outliving a program (here: an engine that runs
-        # each program alone and puts numpy back after it) holds without a refusal; the walk still lists the objects.
+        # A fix that leaves every writable object reachable but keeps writes from outliving a program (here: an engine
+        # that runs each program alone and puts numpy back after it) holds without refusing a single object. It must
+        # still refuse the setters and the draws: isolation does not make a call to a process-wide registry, or a draw
+        # from a generator the operating system seeded, repeatable. The walk still lists the objects.
         from league.gym import safety
 
         walk = EB.numpy_walk()
@@ -319,16 +407,22 @@ class OneWorld(unittest.TestCase):
                     kept.reset()
             return out
 
-        setters = frozenset(p.rsplit(".", 1)[-1] for p in walk["setters"])
-        with mock.patch.object(safety, "NUMPY_BANNED", safety.NUMPY_BANNED | setters), mock.patch.object(EB, "run", isolating):
+        calls = frozenset(p.rsplit(".", 1)[-1] for p in walk["setters"] + walk["draws"])
+        with mock.patch.object(safety, "NUMPY_BANNED", safety.NUMPY_BANNED | calls), mock.patch.object(EB, "run", isolating):
             reach = EB.numpy_reach(self.store)
         self.assertTrue(reach["held"], {k: v for k, v in reach.items() if k != "writable"})
         self.assertEqual(reach["writable"], walk["writable"])
         self.assertEqual(reach["reachable"], [])
         self.assertGreater(reach["trades"][0], 50)
         self.assertEqual(len(set(reach["trades"])), 1)
+        # isolation alone, with the setters and draws still reachable, does not hold
+        with mock.patch.object(EB, "run", isolating):
+            reach = EB.numpy_reach(self.store)
+        self.assertFalse(reach["held"])
+        self.assertEqual(reach["reachable"], [])
+        self.assertEqual(reach["draws"], walk["draws"])
         # and without the isolation, the same proof fails on every object, through the run and the batch
-        with mock.patch.object(safety, "NUMPY_BANNED", safety.NUMPY_BANNED | setters):
+        with mock.patch.object(safety, "NUMPY_BANNED", safety.NUMPY_BANNED | calls):
             reach = EB.numpy_reach(self.store)
         self.assertFalse(reach["held"])
         self.assertEqual(reach["reachable"], walk["writable"])
@@ -563,7 +657,8 @@ class Report(unittest.TestCase):
         real = runtime.load_program
 
         def refusing(code, *args, **kwargs):
-            if any(name in code for name in ("np.typecodes", "np.sctypeDict", "np.polynomial", "np.dtypes")):
+            if any(name in code for name in ("np.typecodes", "np.sctypeDict", "np.polynomial", "np.dtypes", "np.matlib",
+                                             "np.matrixlib")):
                 raise CodeRefused("numpy module attributes are not allowed (simulated)")
             return real(code, *args, **kwargs)
 
@@ -577,10 +672,12 @@ class Report(unittest.TestCase):
         self.assertEqual(set(proofs), {c["id"] for c in EB.CASES if c["kind"] == "proof"})
         for name in [c["id"] for c in EB.CASES if c["id"].startswith("state_numpy_")]:
             self.assertTrue(proofs[name]["held"], name)
+        self.assertIn("refused", proofs["state_numpy_draws"])
         reach = proofs["state_numpy_reachable"]
-        self.assertEqual(reach["writable"], [])
+        self.assertEqual((reach["writable"], reach["setters"], reach["draws"]), ([], [], []))
         self.assertTrue({"np.typecodes", "np.sctypeDict", "np.polynomial.polynomial.polyx",
-                         "np.polynomial.set_default_printstyle"} <= set(reach["refused_containers"]))
+                         "np.polynomial.set_default_printstyle", "np.matlib.rand",
+                         "np.matrixlib.defmatrix.N.overrides.ARRAY_FUNCTIONS"} <= set(reach["refused_containers"]))
         rows = self.rows(2)
         for row in rows:
             row["proofs"] = proofs
@@ -794,17 +891,24 @@ def doc_tables(dev, conf):
         [f"`{cid}`" + (" (smoke)" if dev["cases"][cid]["kind"] == "smoke" else ""), *(leak(c["cases"][cid]) for c in cohorts)]
         for cid in leakage])
 
+    def grouped(paths):
+        """Paths by the module attribute they go through (`np.polynomial`): a group of more than two is counted."""
+        groups = {}
+        for path in paths:
+            groups.setdefault(".".join(path.removeprefix("list(").split(".")[:2]), []).append(path)
+        parts = []
+        for root, members in groups.items():
+            parts += [f"`{p}`" for p in members] if len(members) <= 2 else [f"{len(members)} through `{root}`"]
+        return ", ".join(parts)
+
     def observed(proof):
         seen = proof.get("observed")
         if isinstance(proof.get("reachable"), list) or "setters" in proof:
             paths = proof["observed"] or []
-            top = [p for p in paths if p.count(".") == 1]
-            poly = [p for p in paths if p.startswith("np.polynomial.")]
-            rest = [p for p in paths if p not in top and p not in poly]
-            parts = [f"`{p}`" for p in top] + ([f"{len(poly)} `np.polynomial` arrays"] if poly else []) + [f"`{p}`" for p in rest]
-            text = f"{len(paths)} reachable" + (f": {', '.join(parts)}" if parts else "")
-            if proof.get("setters"):
-                text += "; setters " + ", ".join(f"`{p}`" for p in proof["setters"])
+            text = f"{len(paths)} reachable" + (f": {grouped(paths)}" if paths else "")
+            for key in ("setters", "draws"):
+                if proof.get(key):
+                    text += f"; {key} {grouped(proof[key])}"
             return text
         if isinstance(seen, list):
             return ", ".join(str(x) for x in seen)

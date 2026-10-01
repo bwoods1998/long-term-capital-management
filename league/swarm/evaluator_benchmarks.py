@@ -36,9 +36,11 @@ Case families (the suite's pinned `CASES`):
 - STATE: contract proofs that module STATE resets between runs, that parameters are copied, that a split Train run
   matches the unsplit run day for day and Validation is never split, and probes for channels between runs and between
   batch-mates: numpy's two mutable public dicts (`typecodes`, `sctypeDict`) and np.polynomial's module and class arrays
-  (`polyx`, `Polynomial.domain`), each on its own; the reach proof (`numpy_reach`), which walks everything a program can
-  reach from `import numpy` and `import math` without a call and writes every writable object it finds through the
-  engine (so a partial fix shows, whatever object it misses); and a ctx object shared by a batch;
+  (`polyx`, `Polynomial.domain`), each on its own; a program that draws from numpy.random's shared generator through
+  `np.matlib.rand` (it cannot repeat itself on the same days); the reach proof (`numpy_reach`), which walks everything
+  a program can reach from `import numpy` and `import math` without a call (lazily resolved submodules such as
+  `np.matlib`, and names a module's `__dir__` hides such as `np.matrixlib`, included) and writes every writable object
+  it finds through the engine (so a partial fix shows, whatever object it misses); and a ctx object shared by a batch;
 - BROKEN ABLATIONS: switches that work, that the static contract refuses, and that are read but ignored (which only a
   behavioral ablation catches);
 - a SEARCH tier: the same statistical lines on generated outcomes with lineage selection over noise variants, where
@@ -804,27 +806,50 @@ def decide(ctx):
         return []
     return enter(ctx, "C")
 ''',
+    # np.matlib (resolved by numpy's module __getattr__, listed by no dir()) hands a program `rand`, which draws from
+    # numpy.random's process-global generator: seeded by the operating system, advanced by every caller. A program that
+    # takes each session's side from it cannot repeat itself on the same days, and NUMPY_BANNED's `random` exists to
+    # stop exactly that ("a program is deterministic").
+    "state_numpy_draws": '''
+import numpy as np
+NEEDS = {"roots": ["SPY"], "dte": [1, 1], "band": 0.03, "cadence": 30, "history": 0, "start": 859, "end": 889}
+PARAMS = {"probe": 1}
+''' + ENTRY + '''
+def decide(ctx):
+    if ctx.minute != 859:
+        return leave(ctx)
+    return enter(ctx, "C" if float(np.matlib.rand(1)[0, 0]) < 0.5 else "P")
+''',
 }
 #: numpy's mutable public dicts, each proved on its own, so a fix that refuses one leaves the other's proofs failing.
 #: `typecodes` is the first probes' container; `sctypeDict` is the one numpy resolves dtype names with, so a write there
-#: can change what a batch-mate computes, not only what it knows. np.polynomial's arrays have their own proofs (above):
-#: a fix that refuses the two dicts and nothing else leaves those and the reach proof failing.
+#: can change what a batch-mate computes, not only what it knows. np.polynomial's arrays and np.matlib's draws have
+#: their own proofs (above): a fix that refuses the two dicts and nothing else leaves those and the reach proof failing.
 STATE_PROGRAMS.update({name + "_sctypedict": STATE_PROGRAMS[name].replace("MARK = np.typecodes", "MARK = np.sctypeDict")
                        for name in ("state_numpy_runs", "state_numpy_mate_writer", "state_numpy_mate_reader")})
 #: Keys the probes may leave in numpy's process-global dicts; the suite removes them after every run it makes.
 NUMPY_MARK_PREFIX = "ltcm-bench-"
 
 #: The reach proof's walk (`numpy_walk`). It starts from the modules a program may import and follows what a program's
-#: code can follow without calling anything: public attributes (no leading underscore; numpy's lazy submodules
-#: included), mapping values and keys, and sequence and set elements, through every module (numpy's, and any other a
-#: reached module exposes), class and instance it meets. An edge counts only when the scored tree's static check admits
-#: a program that reads it; a read that returns a new object each time (a view, a bound method) carries no state and is
-#: not followed. `setters`: callables on anything reached whose name says they change state every caller shares.
+#: code can follow without calling anything: public attributes (no leading underscore), mapping values and keys, and
+#: sequence and set elements, through every module (numpy's, and any other a reached module exposes), class and instance
+#: it meets. A module's names are not only what `dir()` lists: also its own dict (numpy's `__dir__` hides `matrixlib`
+#: and `version`), its package's submodules as importlib finds them (`pkgutil.iter_modules`), and every name its module
+#: `__getattr__` can resolve (the string constants in its code and the keys of the module containers it reads), so a
+#: lazily imported submodule that no `dir()` lists (`np.matlib`) is read too, once the static check admits the read. An
+#: edge counts only when the scored tree's static check admits a program that reads it; a read that returns a new object
+#: each time (a view, a bound method) carries no state and is not followed. The walk repeats until a pass imports no new
+#: module (a read can import one, which adds names to modules already walked). `setters`: callables on anything reached
+#: whose name says they change state every caller shares. `draws`: functions on anything reached that read a module in
+#: `shared_generators` (numpy.random's process-global generator: every call advances a stream every caller shares, and
+#: its seed is the operating system's, so no run of them repeats).
 REACH: dict[str, Any] = {
     "roots": {"np": "numpy", "math": "math"},
     "mark": NUMPY_MARK_PREFIX + "reach",
     "max_objects": 50_000,
+    "max_passes": 4,
     "setters": r"^(set_|register_|seterr|setbufsize)",
+    "shared_generators": ("numpy.random",),
     "attribute_writes": ("$PATH.ltcm_bench_reach = 1", "del $PATH.ltcm_bench_reach",
                          'setattr($PATH, "ltcm_bench_reach", 1)', 'delattr($PATH, "ltcm_bench_reach")'),
 }
@@ -910,6 +935,8 @@ CASES: list[dict[str, Any]] = [
      "parts": "state_numpy_runs_polynomial", "subs": {}, "fact": "state"},
     {"id": "state_numpy_batchmates_polynomial", "family": "state", "kind": "proof", "template": "STATE",
      "parts": "state_numpy_mate_reader_polynomial", "subs": {}, "fact": "state"},
+    {"id": "state_numpy_draws", "family": "state", "kind": "proof", "template": "STATE", "parts": "state_numpy_draws",
+     "subs": {}, "fact": "state"},
     {"id": "state_numpy_reachable", "family": "state", "kind": "proof", "template": "STATE", "parts": "state_numpy_reach",
      "subs": {"BIND": "REACHED = np.typecodes", "BODY": "pass"}, "fact": "state"},
     {"id": "state_ctx_batchmates", "family": "state", "kind": "proof", "template": "STATE", "parts": "state_ctx_mate_reader",
@@ -1352,6 +1379,8 @@ def proofs(store: Any, root: Path) -> dict[str, Any]:
                    "a program's result does not depend on the batch-mates it shares a process with (np.sctypeDict)")
         batchmates("state_numpy_batchmates_polynomial", "state_numpy_mate_writer_polynomial",
                    "a batch-mate cannot change what another program computes (np.polynomial.Polynomial.domain)")
+        twice("state_numpy_draws", "a program's decisions repeat on two runs of the same days (np.matlib.rand draws "
+              "from numpy.random's process-global generator)", None)
         out["state_numpy_reachable"] = numpy_reach(store, walk, saved)
     finally:
         reset()
@@ -1409,12 +1438,110 @@ def _writable(obj: Any) -> bool:
     return hasattr(type(obj), "__setitem__") or hasattr(type(obj), "__delitem__")
 
 
+def _code_names(code: Any) -> tuple[set[str], set[str]]:
+    """(every name a code object and the code nested in it read, every string constant they hold, tuples and frozensets
+    of constants flattened: `attr in ("a", "b")` compiles to one)."""
+    import types
+
+    names: set[str] = set()
+    strings: set[str] = set()
+    stack = [code]
+    while stack:
+        current = stack.pop()
+        names |= set(current.co_names)
+        consts = list(current.co_consts)
+        while consts:
+            const = consts.pop()
+            if isinstance(const, types.CodeType):
+                stack.append(const)
+            elif isinstance(const, (tuple, frozenset)):
+                consts += list(const)
+            elif isinstance(const, str):
+                strings.add(const)
+    return names, strings
+
+
+def _module_names(module: Any) -> set[str]:
+    """The names a program can read on a module, beyond what its `dir()` lists: its own dict (a module `__dir__` can
+    hide names, as numpy's hides `matrixlib` and `version`), its package's submodules as importlib finds them, and every
+    name its module `__getattr__` can resolve: the string constants in its code and the keys of the module-level
+    containers it reads (`np.matlib` is in none of numpy's `dir()`, `vars()` or `__all__` until something imports it)."""
+    import pkgutil
+
+    own = vars(module)
+    names = set(own)
+    try:
+        names |= {info.name for info in pkgutil.iter_modules(list(getattr(module, "__path__", None) or []))}
+    except Exception:  # noqa: BLE001 - a package whose path cannot be listed has no submodules importlib can find
+        pass
+    code = getattr(own.get("__getattr__"), "__code__", None)
+    if code is not None:
+        read, strings = _code_names(code)
+        names |= strings
+        for name in read:
+            value = own.get(name)
+            if isinstance(value, (dict, set, frozenset, list, tuple)):
+                names |= {key for key in value if isinstance(key, str)}
+    return {name for name in names if isinstance(name, str) and name.isidentifier()}
+
+
+def _draws(obj: Any, modules: Sequence[str]) -> bool:
+    """Does calling `obj` read one of `modules` (`REACH["shared_generators"]`)? A function whose code reads a global
+    bound to one of them, or to its package with the submodule's name read too (`np.random.rand(...)`); anything a
+    module of theirs defines; or a method bound to an instance of a class they define (a generator object)."""
+    import inspect
+    import types
+
+    def ours(name: Any) -> bool:
+        return isinstance(name, str) and any(name == m or name.startswith(m + ".") for m in modules)
+
+    owner = getattr(obj, "__self__", None)
+    for held in (obj, owner):
+        if held is not None and not isinstance(held, (type, types.ModuleType)) and ours(type(held).__module__):
+            return True
+    if ours(getattr(obj, "__module__", None)):
+        return True
+    function = getattr(obj, "__func__", obj)
+    try:
+        function = inspect.unwrap(function)
+    except Exception:  # noqa: BLE001 - a wrapper loop: look at the outer function
+        pass
+    code, scope = getattr(function, "__code__", None), getattr(function, "__globals__", None)
+    if not isinstance(code, types.CodeType) or not isinstance(scope, dict):
+        return False
+    read, _ = _code_names(code)
+    for name in read:
+        value = scope.get(name)
+        if isinstance(value, types.ModuleType):
+            if ours(value.__name__) or any(ours(f"{value.__name__}.{attr}") for attr in read):
+                return True
+        elif callable(value) and (ours(getattr(value, "__module__", None))
+                                  or ours(type(getattr(value, "__self__", None)).__module__)):
+            return True
+    return False
+
+
 def numpy_walk() -> dict[str, Any]:
     """Everything a program can reach from its imports without calling anything (`REACH`), as the scored tree's static
     check decides it: the writable objects (`_targets`, with the objects; `writable`, their first admitted path), the
-    writable objects seen only through refused reads, the global setters (`REACH`), the modules outside numpy and
-    math a program reaches, any attribute write the check admits on a reached object, and the walk's size. Imports only
-    what a program's own reads would import (a module's attribute is checked before it is read)."""
+    writable objects seen only through refused reads, the global setters and the functions that draw from a shared
+    generator (`REACH`), the modules outside numpy and math a program reaches, any attribute write the check admits on a
+    reached object, and the walk's size. Imports only what a program's own reads would import (a module's attribute is
+    checked before it is read, so a module `__getattr__` runs only for a name a program may read)."""
+    import sys
+
+    walk: dict[str, Any] = {}
+    for _ in range(REACH["max_passes"]):
+        modules = len(sys.modules)
+        walk = _walk_pass()
+        if len(sys.modules) == modules:  # this pass imported nothing, so no module it walked gained a name after
+            return walk
+    walk["walk"]["complete"] = False
+    return walk
+
+
+def _walk_pass() -> dict[str, Any]:
+    """One pass of `numpy_walk`."""
     import collections
     import collections.abc as cabc
     import importlib
@@ -1443,12 +1570,14 @@ def numpy_walk() -> dict[str, Any]:
 
     leaves = (str, bytes, int, float, complex, type(None), np.generic)
     setter = re.compile(REACH["setters"])
+    generators = tuple(REACH["shared_generators"])
     roots = {alias: importlib.import_module(name) for alias, name in REACH["roots"].items()}
     expanded: dict[int, str] = {id(obj): alias for alias, obj in roots.items()}
     held = list(roots.values())  # keeps every expanded object alive, so no id is reused during the walk
     queue = collections.deque((alias, obj, 0) for alias, obj in roots.items())
     targets: list[dict[str, Any]] = []
-    setters: dict[str, None] = {}
+    setters: dict[tuple[int, int], str] = {}
+    draws: dict[tuple[int, int], str] = {}
     foreign: dict[str, str] = {}
     refused: dict[int, str] = {}
     edges = depth = 0
@@ -1468,10 +1597,12 @@ def numpy_walk() -> dict[str, Any]:
         elif isinstance(obj, (set, frozenset)):
             children += [(f"list({path})[{i}]", v) for i, v in enumerate(list(obj))]
         try:
-            names = sorted(dir(obj))
+            names = set(dir(obj))
         except Exception:  # noqa: BLE001
-            names = []
-        for name in names:
+            names = set()
+        if isinstance(obj, types.ModuleType):
+            names |= _module_names(obj)
+        for name in sorted(names):
             if name.startswith("_"):
                 continue
             child_path = f"{path}.{name}"
@@ -1479,17 +1610,24 @@ def numpy_walk() -> dict[str, Any]:
                 # Never import what a program cannot read: the module's own dict is looked at, never its __getattr__.
                 peek = vars(obj).get(name)
                 if peek is not None and not isinstance(peek, leaves) and (
-                        _writable(peek) or callable(peek) and setter.search(name)):
+                        _writable(peek) or callable(peek) and (setter.search(name) or _draws(peek, generators))):
                     refused.setdefault(id(peek), child_path)
                 continue
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 try:
                     first, again = getattr(obj, name), getattr(obj, name)
-                except Exception:  # noqa: BLE001
+                except Exception:  # noqa: BLE001 - a name its module cannot resolve (an expired alias, an unimported module)
                     continue
-            if setter.search(name) and callable(first) and not isinstance(obj, leaves):
-                setters.setdefault(child_path, None)  # a bound method too: calling it changes what every caller shares
+            if callable(first) and not isinstance(obj, leaves):
+                # A bound method too: calling it changes (or advances) what every caller shares. One entry per callable
+                # (its first path), however many modules hand it out.
+                key = (id(getattr(first, "__func__", first)), id(getattr(first, "__self__", None)))
+                held.append(first)
+                if setter.search(name) and not isinstance(first, type):  # a class names a kind, not an action
+                    setters.setdefault(key, child_path)
+                if _draws(first, generators):
+                    draws.setdefault(key, child_path)
             if first is again:
                 children.append((child_path, first))
         for child_path, child in children:
@@ -1508,6 +1646,8 @@ def numpy_walk() -> dict[str, Any]:
             refused.pop(id(child), None)
             if _writable(child):
                 targets.append({"path": child_path, "obj": child, "kind": type(child).__name__})
+            if _draws(child, generators):  # an element or value: a generator object, or a function that draws
+                draws.setdefault((id(child), id(None)), child_path)
             if isinstance(child, types.ModuleType):
                 name = child.__name__
                 if name not in REACH["roots"].values() and not name.startswith("numpy."):
@@ -1520,13 +1660,14 @@ def numpy_walk() -> dict[str, Any]:
             loaded_targets.append(target)
         else:
             refused_paths.append(target["path"])
-    open_setters = [path for path in setters if loads(path)]
-    refused_paths += [path for path in setters if path not in open_setters]
+    open_setters = [path for path in setters.values() if loads(path)]
+    open_draws = [path for path in draws.values() if loads(path)]
+    refused_paths += [path for path in [*setters.values(), *draws.values()] if path not in open_setters + open_draws]
     # Attribute writes (assignment, del, setattr, delattr) on every reached object, roots included: each must be refused.
     writes = [Template(form).substitute(PATH=path) for path in sorted(expanded.values()) for form in REACH["attribute_writes"]]
     attribute_writes = [write for write in writes if admitted(reach_program(body=write))]
     return {"_targets": loaded_targets, "writable": sorted(t["path"] for t in loaded_targets),
-            "refused_containers": sorted(set(refused_paths)), "setters": sorted(open_setters),
+            "refused_containers": sorted(set(refused_paths)), "setters": sorted(open_setters), "draws": sorted(open_draws),
             "foreign_modules": dict(sorted(foreign.items())), "attribute_writes": attribute_writes,
             "walk": {"objects": len(expanded), "edges": edges, "depth": depth, "complete": complete,
                      "numpy": getattr(np, "__version__", None)}}
@@ -1594,9 +1735,10 @@ def numpy_reach(store: Any, walk: Mapping[str, Any] | None = None, saved: Restor
     of them (every write guarded), through the engine; the suite looks at what the writes left behind after the run, and
     a reader that checks every mark trades alone, after the writer's run, and beside the writer in one batch. Held only
     when no write outlives its run, the reader's trades never change, no attribute write is admitted on any reached
-    object, no global setter is reachable, and the walk finished. An object the suite has no exact write for counts as
-    reachable whenever it can be bound (a false alarm, never a false certificate). Not covered: objects a program can
-    reach only through a call's result, and hidden state changed by a call to a function not named as a setter."""
+    object, no global setter and no function that draws from a shared generator is reachable (`draws`), and the walk
+    finished. An object the suite has no exact write for counts as reachable whenever it can be bound (a false alarm,
+    never a false certificate). Not covered: objects a program can reach only through a call's result, and hidden state
+    changed by a call to a function neither named as a setter nor reading a shared generator."""
     from league.gym.runtime import load_program
     from league.gym.safety import CodeRefused
 
@@ -1638,12 +1780,13 @@ def numpy_reach(store: Any, walk: Mapping[str, Any] | None = None, saved: Restor
     # A reader that saw a mark the suite cannot attribute (nothing outlived the run, yet a batch-mate saw it) implicates
     # every written object.
     reachable = sorted(set(persisted) | set(unverified) | (set(exact) if any(channels.values()) and not persisted else set()))
-    held = (not reachable and not any(channels.values()) and not walk["setters"] and not walk["attribute_writes"]
-            and walk["walk"]["complete"])
+    held = (not reachable and not any(channels.values()) and not walk["setters"] and not walk["draws"]
+            and not walk["attribute_writes"] and walk["walk"]["complete"])
     return {"held": held, "reachable": reachable, **out, "unverified": unverified, "channels": channels,
             "claim": "nothing reachable from `import numpy` or `import math` without a call (public attributes, mapping "
                      "values, elements) carries a program's write past its run or to a batch-mate; no attribute write is "
-                     "admitted on a reached object, and no global setter (set_*, register_*) is reachable"}
+                     "admitted on a reached object, and no global setter (set_*, register_*) and no function that draws "
+                     "from numpy.random's shared generator is reachable"}
 
 
 def mates(store: Any, writer_name: str, reader_name: str, claim: str) -> dict[str, Any]:
@@ -1943,9 +2086,11 @@ LIMITATIONS = [
     "--tree runs the candidate's code in the suite's interpreter with the operator's environment: it guards against "
     "accidental drift of the cases, not against a hostile tree.",
     "The numpy reach proof covers what a program reaches from `import numpy` and `import math` without a call (public "
-    "attributes, mapping values and keys, elements), in the scored process's numpy and the static check's own answer. "
-    "Not covered: objects a program reaches only through a call's result, and state a call changes through a function "
-    "not named as a setter (set_*, register_*, seterr*, setbufsize).",
+    "attributes, the names a module's dict, its package's submodules and its module __getattr__ can resolve, mapping "
+    "values and keys, elements), in the scored process's numpy and the static check's own answer. Not covered: objects "
+    "a program reaches only through a call's result, names a class or instance resolves only in a __getattr__, and state "
+    "a call changes through a function neither named as a setter (set_*, register_*, seterr*, setbufsize) nor reading "
+    "numpy.random's shared generator.",
 ]
 
 
@@ -2080,8 +2225,8 @@ def aggregate(rows: Sequence[Mapping[str, Any]], search: Mapping[str, Sequence[M
         observed = next((first[key] for key in ("reachable", "trades", "train_days") if key in first), None)
         proofs_out[name] = {"held": held, "of": len(rows), "fact": (kinds.get(name) or {}).get("fact"), "claim": first["claim"],
                             "observed": observed, "refused": first.get("refused")}
-        for key in ("trades", "refused_containers", "setters", "foreign_modules", "attribute_writes", "unverified", "channels",
-                    "walk"):
+        for key in ("trades", "refused_containers", "setters", "draws", "foreign_modules", "attribute_writes", "unverified",
+                    "channels", "walk"):
             if key in first and key not in proofs_out[name] and first[key] is not observed:
                 proofs_out[name][key] = first[key]
     ablation_out: dict[str, Any] = {}
@@ -2568,7 +2713,7 @@ def run_on_tree(tree: Path, args: Any) -> int:
                           env=env, check=False).returncode
 
 
-PINNED_SUITE_SHA = "0e9badba6821b28f738ae40adb59dc00f969b717a939a35d7a16cfd11494b2fe"
+PINNED_SUITE_SHA = "c78a851483432ee400dd6c9cc6622bee0710f8e41520464338c3964028e10311"
 
 
 if __name__ == "__main__":
