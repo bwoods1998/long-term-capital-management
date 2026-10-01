@@ -33,6 +33,7 @@
   "triggers": { "crons": ["*/5 * * * *"] },
   "durable_objects": { "bindings": [{ "name": "GATE", "class_name": "Gate" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Gate"] }],
+  "kv_namespaces": [{ "binding": "LIBRARY", "id": "a10ad6b1d601401293db6040b249b5f6" }],
   "send_email": [
     {
       "name": "EMAIL",
@@ -175,6 +176,19 @@
     // (buy_to_open, closed with sell_to_close). The credit types come back only with a deposit to $2,000, in one
     // deploy with the constitution and a re-ratified grant. league.ci holds this line equal to the constitution.
     "OPTION_STRUCTURES_REAL": "debit_vertical,long_butterfly,long_call,long_put",
+
+    // The research library (Sept 29, 2026; lib/library.mjs, GET /v1/research/*): arXiv papers posted before 2025 for the
+    // swarm's agents. No secret. arXiv's API terms: "make no more than one request every three seconds, and limit
+    // requests to a single connection at a time", for all of the machines under our control as a whole; arxiv.org's
+    // robots.txt: Crawl-delay 15. The Gate paces every request to that and counts them here: at most this many requests
+    // to arXiv a UTC day, the whole floor (about 2% of what the terms allow); "0" stops every request to arXiv, while
+    // cache hits still answer (they are free). The cache is a KV namespace bound as LIBRARY, added at the first deploy that
+    // carries the library (gateway/README.md, "The research library", Deploy): `npx wrangler kv namespace create
+    // ltcm-gateway-library --binding LIBRARY`, then here, as a top-level key after "migrations":
+    //   "kv_namespaces": [{ "binding": "LIBRARY", "id": "<the id it printed>" }],
+    // Without the binding the library answers uncached. Never delete the namespace once a version bound it: that would
+    // block `wrangler rollback` to those versions.
+    "LIBRARY_DAY_UPSTREAM": "600",
 
     // Watchdog.
     "CHECKPOINT_URL": "https://blakewoods.us/api/capital/checkpoint",

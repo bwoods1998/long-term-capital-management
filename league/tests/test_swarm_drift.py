@@ -271,11 +271,18 @@ class Tournaments(RoundCase):
         self.assertEqual([self.store.family(c)["parent"] for c in born], ["b"], "only the family whose validation stands forks")
         seen = []
         real = evidence.thompson
+        self.settings["allocation"] = {"mode": "bandit"}  # R11-5's bandit
         with patch("league.swarm.tournament.evidence.thompson", side_effect=lambda rows, **kw: seen.extend(rows) or real(rows, **kw)):
             t.allocate([self.store.family("a"), self.store.family("b")])
         rows = {r["id"]: r for r in seen}
         self.assertEqual((rows["a"]["mean"], rows["a"]["t"]), (None, None), "counted as unvalidated")
         self.assertEqual(rows["b"]["t"], 3.0)
+        # Release B's value allocation reads it the same way: no validation of its own, and its value halved.
+        from league.swarm import allocation
+
+        value = {f: allocation.row_of(self.store.family(f), cls="c", looks_spent=False) for f in ("a", "b")}
+        self.assertEqual((value["a"]["t"], value["a"]["drift_failed"]), (None, True))
+        self.assertEqual((value["b"]["t"], value["b"]["drift_failed"]), (3.0, False))
 
     def test_the_screen_reads_the_submitted_best_and_a_rerun_of_it(self):
         self.with_train("a", None)  # version 1's only Train run predates the figures

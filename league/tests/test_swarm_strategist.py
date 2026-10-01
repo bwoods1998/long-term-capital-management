@@ -522,6 +522,144 @@ class Pass(StrategistCase):
         self.assertEqual(len(seen), 3, "the architect ran every time")
 
 
+def library_block(queries=("variance risk premium", "dealer gamma hedging intraday")):
+    from league.swarm.library import BLOCK_HEADER, LibraryBlock
+
+    ids = ("arXiv:1602.00865v1", "arXiv:2207.00949v1")
+    titles = ("Tail Risk Premia for Long-Term Equity Investors", "Stochastic arbitrage with market index options")
+    lines = [f"[{i}] {t}. Ada Quill. First posted 2016-02; this version 2016-02. q-fin.PM. An abstract." for i, t in zip(ids, titles)]
+    text = BLOCK_HEADER.format(n=2, queries="; ".join(queries)) + "\n" + "\n".join(lines)
+    return LibraryBlock(text, ids, titles, tuple(queries))
+
+
+class Library(StrategistCase):
+    """THE LIBRARY (Sept 29, 2026): the retrieved block in the strategist's packet and the architect's request, the ids they
+    cite kept only when the block holds them, and the strategist's searches kept beside its accepted section."""
+
+    PROPOSAL = {"slug": "vrp-condor-spy", "mechanism": "Index option sellers earn the variance risk premium when realized volatility "
+                "stays under implied; condors harvest it on calm days.", "structure": "iron_condor", "roots": ["SPY", "QQQ"],
+                "dte": [1, 7], "rejection": "no premium after costs", "sketch": "sell condors after quiet sessions"}
+
+    def architect(self, router):
+        return Architect(self.store, router, self.settings, clock=self.clock)
+
+    def test_the_architect_reads_the_block_after_the_gaps_and_keeps_only_the_ids_it_holds(self):
+        from league.swarm.architect import LIBRARY_RULE
+        from league.swarm.hook import public_payload
+        from league.swarm.researcher import Researcher
+
+        block = library_block()
+        cited = {**self.PROPOSAL, "literature": ["1602.00865", "arXiv:9999.00001v1", "arXiv:2207.00949v4"]}
+        plain = {**self.PROPOSAL, "slug": "gamma-fade-qqq", "mechanism": "Dealers short gamma chase the move late in the day, so a "
+                 "fade of the last hour pays on QQQ.", "structure": "debit_vertical", "literature": []}
+        router = FakeRouter({"text": "", "json": {"families": [cited, plain]}, "route": "claude", "model": "claude-sonnet-5-5",
+                             "cost_usd": 0.3, "usage": {}})
+        out = self.architect(router).run(library=block)
+        user, system = router.calls[0]["user"], router.calls[0]["system"]
+        self.assertIn(block.text, user)
+        self.assertLess(user.index("GAPS (uncovered"), user.index(block.text))
+        self.assertLess(user.index(block.text), user.index("RESEARCH AGENDA"), "after the gaps, before the agenda")
+        self.assertTrue(system.endswith(LIBRARY_RULE))
+        first, second = out["born"]
+        spec = self.store.family(first)["spec"]
+        self.assertEqual(spec["literature"], [{"id": "arXiv:1602.00865v1", "title": block.titles[0]},
+                                              {"id": "arXiv:2207.00949v1", "title": block.titles[1]}])
+        self.assertNotIn("literature", self.store.family(second)["spec"])
+        self.assertIn("The architect built this on: arXiv:1602.00865v1 Tail Risk Premia",
+                      " ".join(n["text"] for n in self.store.notebook(first)))
+        born = [e["payload"] for e in self.store.events_after(0) if e["kind"] == "swarm.born" and e["family"] == first][0]
+        self.assertEqual(born["literature"], ["arXiv:1602.00865v1", "arXiv:2207.00949v1"])
+        self.assertNotIn("literature", public_payload("swarm.born", dict(born), []), "private: the site never sees it")
+        self.assertEqual(out["library"], {"queries": list(block.queries), "ids": list(block.ids), "cited": 1,
+                                          "cited_ids": ["arXiv:1602.00865v1", "arXiv:2207.00949v1"]})
+        brief = Researcher(self.store, router, None, self.settings, contract="").brief(self.store.family(first))
+        self.assertIn("Literature the architect built on: arXiv:1602.00865v1 Tail Risk Premia", brief)
+        self.architect(router).run()
+        self.assertNotIn("THE LIBRARY", router.calls[1]["user"])
+        self.assertNotIn("THE LIBRARY", router.calls[1]["system"], "no block: today's request, byte for byte")
+
+    def test_the_strategist_reads_the_block_and_its_searches_are_kept_with_an_accepted_section(self):
+        from league.swarm.strategist import LIBRARY_SYSTEM
+
+        block = library_block()
+        data = {"where_to_look": CLEAN, "evidence": "tail risk premia", "cites": CITES,
+                "library_queries": ["variance risk premium term structure", "the 2025 crash", "https://example.com", "dealer gamma"],
+                "literature": ["arXiv:1602.00865v1", "arXiv:2501.00001v1"]}
+        router = FakeRouter({**reply(), "json": data, "text": json.dumps(data)})
+        out = self.strategist(router).run(library=block)
+        self.assertTrue(out["accepted"], out.get("reasons"))
+        call = router.calls[0]
+        self.assertIn(block.text, call["claude_user"])
+        self.assertTrue(call["claude_system"].endswith(LIBRARY_SYSTEM))
+        self.assertIn("library_queries and literature.", call["claude_user"])
+        section = self.store.get(AGENDA_KEY)
+        self.assertEqual(section["library_queries"], ["variance risk premium term structure", "dealer gamma"])
+        self.assertEqual(section["literature"], ["arXiv:1602.00865v1"])
+        self.assertNotIn("arXiv", section["text"])
+        event = self.events()[-1]
+        self.assertEqual(len(event["library_queries_refused"]), 2)
+        self.assertEqual(event["literature_dropped"], 1)
+        self.clock.advance(4 * 3600)
+        router = FakeRouter(reply())
+        self.strategist(router).run()
+        self.assertNotIn("THE LIBRARY", router.calls[0]["claude_system"] + router.calls[0]["claude_user"], "no block: today's")
+        self.assertEqual(self.store.get(AGENDA_KEY)["library_queries"], [], "a section without searches: the seeds next")
+
+    def test_check_queries(self):
+        from league.swarm.strategist import check_queries
+
+        self.assertEqual(check_queries(["variance risk premium", "0DTE gamma", "dealer's gamma"]),
+                         (["variance risk premium", "0DTE gamma", "dealer's gamma"], []))
+        for bad in (["returns in 2025"], ["see https://x.test"], ["the holdout year"], ["x"], ["a" * 101], ["cat:q-fin"], [7]):
+            kept, why = check_queries(bad)
+            self.assertEqual(kept, [], bad)
+            self.assertEqual(len(why), 1, bad)
+        self.assertEqual(check_queries(["a b c"] * 5), ([], ["library_queries names 5 searches, more than 4"]))
+        self.assertEqual(check_queries(None), ([], []))
+        self.assertEqual(check_queries("variance")[0], [])
+
+    def test_retrieval_runs_first_and_the_same_block_reaches_the_strategist_and_the_architect(self):
+        seen = []
+        block = library_block()
+
+        class FakeLibrary:
+            def enabled(self):
+                return True
+
+            def queries_for(inner, section):
+                seen.append(("queries", section))
+                return ["variance risk premium"]
+
+            def retrieve(inner, queries, role):
+                seen.append(("retrieve", tuple(queries), role))
+                self.clock.advance(50)  # a slow retrieval, before the strategist's call
+                return block
+
+        def strategist_run(library=None):
+            seen.append(("strategist", library))
+            return {"route": "claude", "primed": True, "primed_at": self.clock()}
+
+        architect = SimpleNamespace(want=lambda: 3, run=lambda paired=False, library=None: seen.append(("architect", paired, library)) or {"born": []})
+        self.store.put(AGENDA_KEY, {"text": "x", "library_queries": ["variance risk premium"]})
+        ns = SimpleNamespace(architect=architect, strategist=SimpleNamespace(due=lambda: True, run=strategist_run), clock=self.clock,
+                             library=FakeLibrary(), store=self.store)
+        Swarm.architect_pass(ns)
+        self.assertEqual([s[0] for s in seen], ["queries", "retrieve", "strategist", "architect"])
+        self.assertEqual(seen[1], ("retrieve", ("variance risk premium",), "architect"))
+        self.assertIs(seen[2][1], block)
+        self.assertEqual(seen[3], ("architect", True, block), "paired: nothing ran between the strategist's call and the architect's")
+        architect.want = lambda: 0
+        seen.clear()
+        Swarm.architect_pass(ns)
+        self.assertEqual([s[0] for s in seen], ["architect"], "no room: no retrieval")
+        architect.want = lambda: 3
+        ns.library = SimpleNamespace(enabled=lambda: True, retrieve=lambda queries, role: block,
+                                     queries_for=lambda section: (_ for _ in ()).throw(RuntimeError("down")))
+        out = Swarm.architect_pass(ns)
+        self.assertEqual(out["library"], {"error": "RuntimeError: down"})
+        self.assertEqual(seen[-1], ("architect", True, None), "a failed retrieval never stops the pass")
+
+
 class Wiring(unittest.TestCase):
     def test_the_swarm_builds_one_digest_for_both_and_runs_the_pass_as_the_architects_round(self):
         from league.tests.test_swarm_loop import LoopCase

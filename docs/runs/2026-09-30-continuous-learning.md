@@ -453,3 +453,166 @@ Evidence resets so far: 0.
 
 The goal remains unmet. No qualified strategy has traded real money, no harness improvement has been retained, and
 project Net is negative.
+
+## Sept 30 night: release A live
+
+All times UTC. Every figure below is a read-only snapshot from the House, the gateway and the broker's records. Private
+details (prices, strikes, programs, parameters, account identifiers) stay in the operator's goal folder.
+
+### The deploy
+
+Release A deployed at 20:06Z, just after the money-path window opened at 20:05: House release
+`20260930T200604Z-3bf48c3f8f9f`, built from main `777b894f` (PR #450).
+- **The watchdog** staged it at 20:06:06, promoted it at 20:06:42 and passed its ten-minute watch with no error alert.
+  The verdict was PROMOTED at 20:16:42.
+- **The money digest** is unchanged (`a3e2aa7c`), so there was no re-ratify.
+- **Evidence reset 1** happened at the first start. The swarm recorded its evaluator (the Gym bundle
+  `gym-engine-4-e1c896f8d304`, the image, and the execution fingerprint) and archived every alive family's derived
+  selection evidence.
+
+**The adoption check.** A read-only snapshot of the swarm store was taken before the deploy and compared after it. It
+covered 1,585 lineages and found **0 violations**: trials, inherited trials and consumed holdout looks were unchanged
+in every lineage, with 2 looks in all. Runs only grew.
+
+**After promotion** (the operator's steps; [CHANGELOG.md](../../CHANGELOG.md), Sept 30):
+- **The graveyard verdict migration** re-headed 1,611 lessons: DRIFT 1,046, THIN 393, EXHAUSTED 145 and STRESS 27. Five
+  IDLE rows remain, for families that never traded on Train. Before, most dormancy deaths still read "idle" (1,517 of
+  1,927 rows at the 14:28 reconciliation).
+- **The Gym pool** went back to 6 boxes, and the architect's refill to 12.
+- **The input capability card** was installed.
+- **The harness observer** was switched on in observe mode at 20:19. It has retained no improvement.
+
+**The population** fell from 41 to the floor of 12 within 10 minutes of the deploy. R11b lets researchers retire
+mechanisms they refuted themselves, down to the floor. The architect then refills up to 12 births every 20 minutes, on
+Kimi-K3.
+
+### Criterion 1 under release A: the restart test and an induced failure
+
+- **The restart test** (20:19:00-20:19:17, `floor_box.py stop` then `start`) ran with a real position open.
+  - The House live test's instance came back real, `observe` false, mode live, with no error.
+  - The tuition instance holding the open position came back real, tuition and exits-only, with no error.
+  - The position was restored.
+  - Real money stayed on, and health listed no failure.
+- **The induced failure** (about 20:50): the swarm process was killed with SIGKILL.
+  - The House's swarm step started a new one within 15 s, with a fresh heartbeat.
+  - The alive families (15) and the stored runs (75,473) were unchanged: nothing was lost and nothing was duplicated.
+
+Both halves of criterion 1 have now been shown under the running release. They count only for the release they ran
+under, so both are repeated after release B.
+
+**The tuition position.** The first swarm D2 tuition trade, opened earlier on Sept 30 (a 1-lot GOOGL call vertical),
+stays open. Release A's adoption dropped the family's tuition row: its validation ran on engine 3, and its review cited
+no runtime contract. So its instance became exits-only by design. The program's own closes manage the position, and the
+family must qualify again under engine 4 to trade tuition again.
+
+### The first hour (20:17-21:21, read-only)
+
+- 0 cycle errors; House load 0.72.
+- 136 Train runs ok, 17 disqualified (11%), 8 validations.
+- **Births diversified:** 7 debit verticals, 3 `long_single` and 2 `long_call`. Before, every birth was a debit
+  vertical.
+- **The tournament** spread its shares at about 10-13% a family. Before, about 80% of the weight sat on three families.
+- No gate event yet.
+
+### The near-miss revivals and their honest outcome
+
+Before the deploy, all twelve families that validated strongly in 48 hours had been retired by the dormancy clause
+within hours. After the deploy, the operator revived five of them from the validation line as lineage continuations.
+Each revival inherits its lineage's trials and holdout looks (none had a look to inherit). Each was asked to re-run its
+validated version unchanged under engine 4:
+- `silver-industrial-cycle-debit-r` (from v58; its audit refusal for leaking state was a wrong claim, so the revival is
+  a deliberate second look at an audit refusal);
+- `etf-implied-move-ratio-follow-debi-3` (from v17);
+- `second-session-assimilation-call-r` (from v31, lineage `positive-earnings-gap-drift-call`);
+- `tlt-realrate-metals-catchup-debit-r` (from v30; it reads module-level parameters with one override, so under engine
+  4 it tests the override's behaviour);
+- `market-distraction-release-call-r-2` (from v11; a second revival of that program).
+
+**The outcome.** Three revivals have re-validated so far, with numbers identical to their original validations. But the
+deflated-Sharpe check (a probability of at least 0.95) now fails for each of them:
+
+| Family | Validation t | Checks met | Validated versions in its lineage | Deflated Sharpe |
+|---|---|---|---|---|
+| `silver-industrial-cycle-debit-r` | 2.71 | 7 of 8 | 8 | about 0 |
+| `second-session-assimilation-call-r` | 2.42 | 7 of 8 | 4 | 0 |
+| `market-distraction-release-call-r-2` | 1.78 | fails the t | 3 | 0.905 |
+
+**This is the multiple-testing control working, not a defect.** The deflated Sharpe counts N as the lineage's validated
+versions and uses their Sharpe spread (`league/swarm/evidence.py`). Silver's lineage kept producing validated variants
+after v58, whose own check had counted N = 1. A heavily mined lineage cannot reach D2 by revival.
+
+The route to D2 is a fresh lineage with few validated versions and a strong t. That is what the breadth-first spend
+plan and architect agenda v15 favour (20:42: "what validated", with no clones of the revivals). The revivals can still
+reach the incubator (Train, drift and positive practice), which is never evidence.
+
+### Post-close economics
+
+Cutoff 20:00, the Sept 30 close. Scope: from T0 (Sept 26, 06:23:14). Realized options P&L and every input cost; deposits
+and equity changes are not P&L.
+
+| Measure | USD |
+|---|---:|
+| Realized options P&L since T0, all routes, fees in | −27.02 |
+| Input costs since T0 | 541.72 |
+| **Net** | **−568.74** |
+| Net with the open tuition position at conservative marks | −725.80 |
+
+- **Realized P&L.** Calibration −25.80 over 15 round trips; order-less regulatory fees −1.19; an estimate of fees not
+  yet posted −0.03. Tuition, the House live test, the incubator and D2 have realized nothing yet.
+- **The open tuition position** is −157.06 at conservative marks (bid and ask, with an intrinsic floor), or −71.66 at
+  the mid.
+- **The broker and the book agree** on option fill cash. Nothing is unreconciled, and the deposit is excluded.
+- **Input costs:**
+
+  | Service | USD |
+  |---|---:|
+  | Sail (billed) | 303.22 |
+  | Claude | 162.83 |
+  | OpenAI (September, open holds included) | 50.23 |
+  | ThetaData (pro rata) | 12.00 |
+  | Alpaca market data (pro rata) | 12.50 |
+  | TypeSafe (upper bound) | 0.94 |
+
+  The owner's external costs (subscriptions, hosting, the domain) are not yet declared, so they are not included.
+- **Burn:** $84.89 over the last 24 hours. At the pace of the last four hours, after the 16:41 cut, it is about $53 a
+  day, near the plan's target of $50.
+- **Runway at 21:04:** the Sail guard's brake about Oct 3, 20:00; Claude's funded room $37.17.
+
+Net is negative, and criterion 5 is not met.
+
+### The release B plan
+
+Release B (branch `release/b-20261001`, PR #454) deploys overnight, before 13:25 Oct 1. It carries:
+- the incubator's live route and money row (#451), shipped switched off;
+- L1, the cohort keep (#445);
+- the research library (#447) and the gateway's KV binding for it;
+- the adoption fixes (#453).
+
+**The order:**
+1. the gateway (the library and its cache);
+2. the House;
+3. at once, the grant's ratification on the new money digest (`a3e2aa7c` → `42c4a3af`). Until then every real entry is
+   refused;
+4. the incubator switched on, outside a session (the site already labels its rows);
+5. the library switched on (`research.enabled`);
+6. the restart test and the induced failure again.
+
+**It is evidence reset 2.** `league/live` changes, so the execution fingerprint moves; the Gym bundle and image do not.
+- Selection is archived and cleared again.
+- Extension holds stand.
+- Every practice cohort from release A closes: a new cohort needs a version never practised before.
+- Practice on the final code starts at the Oct 1 open. So the earliest possible incubator first look is at the Oct 6
+  open, after the sessions of Oct 1, 2 and 5.
+
+**After B, the Gym and live paths freeze** for at least five sessions, and for as long as any family holds Candidate,
+Probe or Sized or has an incubator-bound cohort. Rollbacks and fixes for bugs that block or endanger real orders are
+the only exceptions.
+
+**Not in B:** the incubator's facts (B2, #444), which it needs before any family is eligible. B2 is swarm-side and no
+reset, so it ships after a close once its review is clean. The other research-side builds (#438, #446, #448, #449,
+#452) ship the same way.
+
+Evidence resets so far: 1 (release A). Release B is reset 2.
+
+The goal remains unmet. No qualified strategy has traded real money, no harness improvement has been retained, and
+project Net is −$568.74.

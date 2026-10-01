@@ -382,5 +382,29 @@ class Founders(unittest.TestCase):
             load_program(code, name=s["id"], params=params)
 
 
+class Library(LoopCase):
+    """THE LIBRARY's wiring (Sept 29, 2026): one Library for the process, handed to the researcher; off without a gateway
+    token; in the heartbeat; the pass's block from the seed searches until the strategist names its own."""
+
+    def test_the_swarm_builds_the_library_and_hands_it_to_the_researcher(self):
+        from league.swarm import library as L
+        from league.tests.test_swarm_library import FakeClient
+
+        sw = self.swarm()
+        self.assertIsInstance(sw.library, L.Library)
+        self.assertIs(sw.researcher.library, sw.library)
+        self.assertFalse(sw.library.enabled(), "off by default")
+        self.assertEqual(sw.status()["library"], {"enabled": False})
+        client = FakeClient()
+        sw = Swarm(self.root, settings=self.settings, config={}, store=self.store, router=self.router, pool=self.pool, guard=self.guard,
+                   library=L.Library(self.store, client, self.settings))
+        self.assertIsNone(Swarm.library_block(sw), "not switched on: no retrieval")
+        self.settings["research"]["enabled"] = True
+        block = Swarm.library_block(sw)
+        self.assertEqual(block.queries, tuple(self.settings["research"]["seed_queries"][:4]))
+        self.assertEqual(len(client.calls), 4)
+        self.assertEqual(sw.status()["library"], {"enabled": True, "calls_today": 4, "line": 300, "families_today": 0})
+
+
 if __name__ == "__main__":
     unittest.main()
