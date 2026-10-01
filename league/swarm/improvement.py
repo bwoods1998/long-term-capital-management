@@ -713,9 +713,12 @@ class HarnessImprovement:
                 "surface": list(lane.surface),
                 "protected": "every path in league/swarm/harness_lanes.py PROTECTED (the objective and this loop, sealed data "
                              "and the evaluator, spend limits, capital permissions including the real-money order path, the "
-                             "release train) and every path outside the surface; no delete, rename or mode change; no new "
-                             "process, network, reflection, file-write, print or exit call, interpreter plumbing, assignment to "
-                             "another object's attribute, or spend/capital import",
+                             "release train) and every path outside the surface; no delete, rename or mode change, and no "
+                             "edit of an existing test; no new use (aliased or not) of a process, network, reflection, "
+                             "file-write or file-move, print, exit or dynamic-access name, `os` member beyond the path "
+                             "helpers, interpreter plumbing, assignment to another object's attribute, store write, read of "
+                             "the holdout, Validation or forward evidence, raw SQL statement, collaborator's private "
+                             "attribute, or spend/capital import; no definition under a name existing code uses",
                 "frozen": {"symbols": frozen,
                            "rule": "every function that writes trial, lineage, look or graveyard records "
                                    f"({', '.join(sorted(lanes.TRIAL_WRITES))}) is frozen whole, except "
