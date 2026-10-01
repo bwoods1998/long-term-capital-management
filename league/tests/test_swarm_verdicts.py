@@ -99,9 +99,9 @@ class Tags(StoreCase):
         self.assertEqual(tag_of({"family": "x", "lesson": ""}, {"retire_reason": "The mechanism is refuted"}), "REFUTED")
 
     def test_the_header_says_the_verdicts_are_tested_and_the_format_moved(self):
-        self.assertEqual(arch.DIGEST_FORMAT, 4)
+        self.assertEqual(arch.DIGEST_FORMAT, 5, "4 for R11-1's verdicts, 5 for release B's MECHANISM tag")
         for words in ("DRIFT = its eligible versions failed the drift screen", "THIN = it traded", "EXHAUSTED =",
-                      "SELF-REFUTED =", "TESTED findings", "Only IDLE = never traded on Train: untested"):
+                      "SELF-REFUTED =", "TESTED findings", "Only IDLE = never traded on Train: untested", "MECHANISM ="):
             self.assertIn(words, arch.DIGEST_HEADER)
         self.store.put(SEAL_KEY, {"format": 2, "tokens": 100000, "tail_share": 0.15, "through": ["", ""], "sha": "x",
                                   "level": 0, "op_scale": None})

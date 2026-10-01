@@ -103,7 +103,8 @@ quota a pass, the truncation retry's admits included); the first `births.per_pas
 pass is always allowed, so a pass is never barred outright. THE POPULATION GUARD: below `births.min_alive` living
 families (null: three quarters of `population.start`, 72 of 96 live) the whole quota rests, so proposals that stay one
 structure family can thin the population to the guard but never below it. The architect's request shows the counts and
-which families are full; a refused proposal is counted in the pass's event (`structure_capped`).
+which families are full (while `architect.structures` is set, only the families of its types: `BirthQuota.text(allowed)`);
+a refused proposal is counted in the pass's event (`structure_capped`).
 
 Every knob lives in swarm.json's `allocation` block (read every loop, no deploy; `settings.py` has no entry: this module's
 DEFAULTS are the defaults, and a misread value falls back to its default). Standard library only. Nothing on the live
@@ -858,22 +859,30 @@ class BirthQuota:
         b = bucket_of(structure)
         self.passed[b] = self.passed.get(b, 0) + 1
 
-    def text(self) -> str:
-        """The architect's request's lines: the window's counts, which families are full, the pass's cap."""
+    def text(self, allowed: Iterable[str] | None = None) -> str:
+        """The architect's request's lines: the window's counts, which families are full, the pass's cap. `allowed`
+        (THE STRUCTURES, architect.py `architect.structures`; None: every type, the lines as before): only the structure
+        families with an allowed member, naming only their allowed members, so the quota never invites a type no birth
+        may be. The counts, the shares and FULL stay the window's, every type's births included."""
+        allow = None if allowed is None else set(allowed)
+        buckets = {b: (m if allow is None else tuple(s for s in m if s in allow)) for b, m in STRUCTURE_BUCKETS.items()}
+        buckets = {b: m for b, m in buckets.items() if m}
+        note = ("" if allow is None else " Only the families of the allowed types are shown; a family's count is its births "
+                "of every type in the window.")
         total = sum(self.window.values())
         lines = []
-        for bucket, members in STRUCTURE_BUCKETS.items():
+        for bucket, members in buckets.items():
             n = self.window.get(bucket, 0)
             state = (f"FULL: at most {self.per_pass_min} this pass" if self.full(bucket) else f"open: up to {self.per_pass()} this pass")
             lines.append(f"- {bucket} ({', '.join(members)}): {n} of {total} ({(100.0 * n / total) if total else 0.0:.0f}%), {state}")
         if not self.on:
             return (f"BIRTH QUOTAS (structure families; the last {self.window_hours:g} h of births): they rest in this pass "
                     f"(fewer than {self.min_alive} families live), so every well-formed proposal may be born; still, propose "
-                    f"across the structure families.\n" + "\n".join(f"- {b} ({', '.join(m)}): {self.window.get(b, 0)} of {total}"
-                                                                     for b, m in STRUCTURE_BUCKETS.items()))
+                    f"across the structure families.{note}\n" + "\n".join(f"- {b} ({', '.join(m)}): {self.window.get(b, 0)} of {total}"
+                                                                           for b, m in buckets.items()))
         return (f"BIRTH QUOTAS (structure families; the last {self.window_hours:g} h of births): one structure family may hold at "
                 f"most {self.max_share:.0%} of them once there are {self.min_window}, and at most {self.per_pass()} of one "
-                f"in this pass. A proposal past its family's quota is not born; propose across the open families.\n"
+                f"in this pass. A proposal past its family's quota is not born; propose across the open families.{note}\n"
                 + "\n".join(lines))
 
 

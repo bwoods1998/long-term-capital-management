@@ -444,7 +444,9 @@ def program_refusal(state: Any, sha: str) -> str | None:
     - the incubator's own review of it (`incubator_reviews[sha]`) failed, was revoked, or has an audit that did not
       pass, whatever its contract, or cannot be read as this program's;
     - the gate's `gate_outcome` names it refused, failed or demoted;
-    - FAIL-CLOSED: the state or one of `BELT_RECORDS` cannot be read, or the gate's `review` names no program."""
+    - FAIL-CLOSED: the state or one of `BELT_RECORDS` cannot be read, or the gate's `review` names no program.
+    The swarm reads this same function in every other family holding the program (`incubator.program_bar`), so it
+    never marks, or pays to review, a program refused here for another family's records."""
     if not isinstance(state, Mapping):
         return "the family's state cannot be read"
     for key in BELT_RECORDS:
