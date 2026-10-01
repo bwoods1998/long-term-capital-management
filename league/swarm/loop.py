@@ -805,6 +805,14 @@ class Swarm:
             raise RuntimeError("the swarm cannot select research without a known evaluator image and bundle")
         # An explicitly injected driver may have no bundle before its first fake box exists.
         # Production GymPool always builds its local bundle without a network call.
+        try:  # the incubator's bars from verdicts the event log alone holds (release B and earlier), before the adoption
+            from .incubator import backfill
+
+            filled = backfill(self.store)
+            if filled["barred"]:
+                log(f"incubator backfill: {len(filled['barred'])} programs barred from {filled['read']} gate events")
+        except Exception:  # noqa: BLE001 - never keeps the swarm from starting; it reads the same events next start
+            log(f"incubator backfill failed: {traceback.format_exc()[-800:]}")
         adopted_evaluator = adopt(self.store, evaluator)
         if adopted_evaluator["adopted"]:
             log(f"evaluator adopted: {adopted_evaluator['families']} families owe fresh evidence")

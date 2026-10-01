@@ -93,6 +93,19 @@ The House runs Release A, `20260930T200604Z-3bf48c3f8f9f` (main `777b894f`).
     - not refused, failed or demoted by the gate on that sha;
     - not on D2's route.
 
+    With B2 (#444), the reader also keeps its own belt (`incubator_refusal`), whatever the mark says: no row for a
+    program the swarm barred (`incubator_barred`, which no adoption clears), one the gate's `review` names without a
+    readable pass and a passed audit, one whose incubator review or audit failed, a refused version, a failed look, or
+    a family whose verdict records cannot be read. A verdict is on the program (its run sha), so the belt reads these
+    in every family that holds the same code and params, alive or retired. It also refuses a program while the gate
+    owes it a bar (`incubator-bars-owed.json` beside the store; an unreadable file refuses everything).
+
+    B2 also makes sure B's own evaluator adoption cannot erase a failure. At every swarm start, before the adoption, a
+    backfill records as bars the failed reviews and audits that release B's gate left only in its event log
+    (`swarm.gate` events, and third unclear answers in the attempt counts). The adoption then records, before it
+    clears the selection, every failure held only in `review`, `gate_outcome` or the incubator's reviews, and every
+    bar the gate owes.
+
     **In this release no family can meet them.** The Train-and-drift mark and the incubator's reviews are written by B2
     (#444), which is not in B. Until B2 ships, the route pins nothing even with the switch on. First looks are still
     taken and recorded.
