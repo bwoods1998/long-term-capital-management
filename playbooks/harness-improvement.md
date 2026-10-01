@@ -62,8 +62,11 @@ The separate deployment leg includes ordinary code review by the authorized agen
 
 Every other path is protected, including tests, this controller and judge, settings and model
 budgets, capital controls, provider routing, the evaluator, goal criteria, data access, and the
-fixed synthetic statistical protocol/generator in `league/swarm/benchmarks.py`. Candidates cannot
-edit evaluation or sealed-data definitions as part of improving their own score. Changes to
+fixed synthetic statistical protocol/generator in `league/swarm/benchmarks.py` and the pinned evaluator suite in
+`league/swarm/evaluator_benchmarks.py`. No lane scores the evaluator today: the suite's `--tree` mode is an operator
+tool for trusted trees (the tree's code runs in the suite's interpreter with the operator's environment, and a run needs
+more CPU than a lane's sandbox allows), not a judge of an untrusted candidate. Candidates cannot edit evaluation or
+sealed-data definitions as part of improving their own score. Changes to
 those definitions require a separate reviewed change and new protocol; neither passing this
 lane nor an old receipt authorizes them. No funding limits or model stack change here.
 

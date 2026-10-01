@@ -6,6 +6,11 @@ Development and confirmation cohorts use independent deterministic streams. Prot
 comparable without silently changing the question; this module never changes thresholds or promotes a family.
 
     python -m league.swarm.benchmarks --replications 32 --output /private/path/report.json
+
+`--suite evaluator` runs the evaluator benchmark suite instead (`evaluator_benchmarks.py`: known-answer programs through
+the real Gym engine and evidence lines, with false-promotion and missed-signal rates); its arguments pass through:
+
+    python -m league.swarm.benchmarks --suite evaluator --json [--output PATH] [--tree PATH]
 """
 from __future__ import annotations
 
@@ -14,6 +19,7 @@ import datetime as dt
 import hashlib
 import json
 import random
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -134,11 +140,17 @@ def benchmark(replications: int = 32) -> dict[str, Any]:
     return out
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if "--suite=evaluator" in argv or any(a == "--suite" and b == "evaluator" for a, b in zip(argv, argv[1:])):
+        from .evaluator_benchmarks import main as evaluator_main  # needs numpy and pyarrow, the Gym's
+
+        return evaluator_main(argv)
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--suite", choices=("statistical", "evaluator"), default="statistical")
     parser.add_argument("--replications", type=int, default=32)
     parser.add_argument("--output", type=Path)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     report = benchmark(args.replications)
     text = json.dumps(report, indent=2, allow_nan=False)
     if args.output:
@@ -147,7 +159,8 @@ def main() -> None:
                           "evaluator_sha": report["evaluator_sha"], "elapsed_seconds": report["elapsed_seconds"]}))
     else:
         print(text)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
