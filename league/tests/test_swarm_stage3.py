@@ -562,7 +562,10 @@ class ReadyForwardTests(R.RoundCase):
 
     def test_settings_accept_a_ready_manifest_only_while_the_operator_enabled_the_gate(self):
         self.target()
-        (self.root / "gym-forward.json").write_text(json.dumps(self.settings["forward"]["ready"]))
+        # THE CHAIN'S RULE (Oct 1, 2026; league/tests/test_swarm_gate_chain.py): the chain must extend the gate swarm.json
+        # names (its base) and hold every root of the swarm.
+        (self.root / "gym-forward.json").write_text(json.dumps({**self.settings["forward"]["ready"], "base_checkpoint": "sbcp_old",
+                                                                "holdout_roots": list(S.DEFAULTS["gym"]["roots"])}))
         (self.root / "swarm.json").write_text(json.dumps({"gym": {"gate_checkpoint": "sbcp_old"}}))
         loaded = S.load(self.root, config={})
         self.assertEqual(loaded["gym"]["gate_checkpoint"], "sbcp_ready1")

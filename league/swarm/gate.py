@@ -17,6 +17,17 @@ THE GATE (when a family's validated best meets the validation line):
 4. A pass makes the family a Candidate (live shadow). Candidate <-> Probe <-> Sized is the LIVE PATH's
    (the Money table), written through `SwarmStore.set_band`; the swarm never makes a Probe or a Sized.
 
+MISSING DATA IS THE GATE IMAGE'S, NOT THE PROGRAM'S (Oct 1, 2026). Before a look the gate checks that its image holds a
+holdout for every root the program needs (`holdout_gap`: the gate boxes' file-name listing and the Gym's own "missing
+data" answers, kept per image by the pool, and the nightly ready file's `holdout_roots`; metadata only, never a quote).
+A look whose roots the image lacks is refused up front: no look is marked, no try is counted, `gate_ready` stays, and
+one `swarm.status` alert (`gate_missing_data`) is raised for the program on that image. A look that ran and failed for
+missing data all the same (the box's own check, or the Gym's "no holdout days for ...") is owed again likewise: no try,
+no "gym" refusal, no incubator bar. Any other failure counts a try; the third writes the "gym" refusal, and the alert
+(`look_failed_three_times`) fires at every count from three on, so a fourth failure (the same program in a revived
+family: its tries are kept by program) is never a silent park. Sept 30: three looks failed on a five-root holdout and
+the third barred the program from the incubator for good, although no verdict was made.
+
 THE NIGHTLY FORWARD: once a day (after `forward.after_hour_utc`), every Candidate, Probe and Sized family's
 banded version runs over the forward days the gate image holds; the trades are the family's `nightly`
 forward record (the live path adds `shadow` and `real` through `SwarmStore.add_forward`). Forward records
@@ -370,6 +381,11 @@ class Gate:
                 self.outcome(fam["id"], sha, "waiting")
                 self.tell(fam["id"], "waiting (reviewed; the gate image is not ready yet)")
                 continue
+            if self.holdout_gap(fam, version, sha):
+                out["waiting"].append(fam["id"])  # the image lacks a root's holdout: no look, no try (and one alert)
+                self.outcome(fam["id"], sha, "waiting")
+                self.tell(fam["id"], "waiting (reviewed; the gate image does not hold every root's holdout yet)")
+                continue
             look = self.look(fam, version, sha)
             if look is not None:
                 out["looked"].append({"family": fam["id"], "passed": look})
@@ -609,6 +625,8 @@ class Gate:
         looked at BEFORE the box runs it, so a slow look is never started twice; one that lands after the gate stopped
         waiting is recorded and judged when it lands (`finish`), against the validation it was sent for."""
         n = int(version["n"])
+        if self.holdout_gap(fam, version, sha):
+            return None  # the gate image lacks a root's holdout: refused up front, no try counted
         state = fam.get("state") or {}
         vsharpe = (state.get("validation_numbers") or {}).get("sharpe_daily")
         image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
@@ -631,11 +649,14 @@ class Gate:
             result = self.pool.run(job, timeout=settings_mod.run_timeout(self.settings) + 600,
                                    late=lambda r: self.finish(fam["id"], version, sha, r, validation_sharpe=vsharpe,
                                                               validation_image=image, validation_bundle=bundle, marker=marker),
-                                   late_fail=lambda why: self.owe(fam["id"], n, sha, marker=marker))
+                                   late_fail=lambda why: self.owe(fam["id"], n, sha, marker=marker,
+                                                                  missing=getattr(job, "missing", None)))
         except PoolError as exc:
-            self.store.event("swarm.gate", fam["id"], {"action": "look_failed", "version": n, "error": str(exc)[:300]})
+            missing = getattr(job, "missing", None)
+            self.store.event("swarm.gate", fam["id"], {"action": "look_failed", "version": n, "error": str(exc)[:300],
+                                                       **({"missing_data": list(missing)} if missing else {})})
             if job.result is None and job.late is None:  # it never ran (or the Gym failed it): the look is still owed
-                self.owe(fam["id"], n, sha, marker=marker)
+                self.owe(fam["id"], n, sha, marker=marker, missing=missing)
             return None
         return self.finish(fam["id"], version, sha, result, validation_sharpe=vsharpe, validation_image=image,
                            validation_bundle=bundle, marker=marker)
@@ -647,33 +668,85 @@ class Gate:
             return False
         return self.store.compare_and_set_state(fid, {"look_inflight": marker}, look_inflight=None)
 
-    def owe(self, fid: str, n: int, sha: str, *, marker: Mapping[str, Any] | None = None) -> None:
+    def owe(self, fid: str, n: int, sha: str, *, marker: Mapping[str, Any] | None = None,
+            missing: Any = None) -> None:
         """The look did not happen. Its marker goes; if the version is still the one validated it is owed one again, three
-        tries, and after the third it is refused as the Gym could not look (one refusal and one alert, never forgotten).
-        A superseded version is owed nothing: no try is counted, nothing is refused."""
+        tries, and after the third it is refused as the Gym could not look (one refusal, never forgotten, and an alert at
+        that try and every one after it). A failure for MISSING DATA (`missing`: the roots the gate image lacked) counts no
+        try and is never refused: the image's fault, not the program's (one alert, `holdout_gap`'s). A superseded version
+        is owed nothing: no try is counted, nothing is refused."""
         with self.store.atomic():
             state = (self.store.family(fid) or {}).get("state") or {}
             if marker is not None and state.get("look_inflight") != marker:
                 return  # an old attempt's callback cannot cancel or count a newer attempt
-            self._owe(fid, n, sha)
+            self._owe(fid, n, sha, missing=missing)
 
-    def _owe(self, fid: str, n: int, sha: str) -> None:
+    def _owe(self, fid: str, n: int, sha: str, *, missing: Any = None) -> None:
         self.clear_marker(fid, sha)
         if self.store.looked(sha):
             return
         fam = self.store.family(fid) or {}
         if fam.get("retired_at") or (fam.get("state") or {}).get("validation_version") != n:
             return
+        if missing:
+            self.store.compare_and_set_state(fid, {"validation_version": n}, gated_sha=None, gate_ready=True)
+            self._missing_alert(fid, n, sha, list(missing), "a look failed for missing data")
+            return
         tries = int(self.store.get(f"look_tries:{sha}", 0)) + 1
         self.store.put(f"look_tries:{sha}", tries)
+        parked = (fam.get("state") or {}).get("gated_sha") == sha  # already parked on this program: no new failure
         if tries < 3:
             self.store.compare_and_set_state(fid, {"validation_version": n}, gated_sha=None, gate_ready=True)
         elif self.store.compare_and_set_state(fid, {"validation_version": n}, gated_sha=sha, gate_ready=False,
-                                              dormant_cycles=0) and tries == 3:  # a refusal: news, like `refuse`
-            self.store.refuse(fid, n, "gym", "the gate box could not make this holdout look three times")
-            self._incubator_bar(fid, n, sha, why="the gate refused it (the gym)")
-            self.store.event("swarm.status", fid, {"action": "look_failed_three_times", "alert": True, "version": n,
-                                                   "text": "the gate box could not make a holdout look three times"})
+                                              dormant_cycles=0) and not parked:
+            if tries == 3:  # a refusal: news, like `refuse`
+                self.store.refuse(fid, n, "gym", "the gate box could not make this holdout look three times")
+                self._incubator_bar(fid, n, sha, why="the gate refused it (the gym)")
+            # From three on, every failure that parks the family is an alert: a fourth (the same program in a revived
+            # family, whose tries are kept by program) is never silent.
+            self.store.event("swarm.status", fid, {
+                "action": "look_failed_three_times", "alert": True, "version": n, "tries": tries,
+                "text": "the gate box could not make a holdout look three times" if tries == 3 else
+                        (f"the gate box could not make this program's holdout look ({tries} tries): the version is parked; "
+                         "its program was refused at the third try. Fix the gate, then reset look_tries for it")})
+
+    def holdout_gap(self, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str) -> list[str]:
+        """The roots program `version` needs (its NEEDS, as its look would run) that the gate image is known to lack a
+        holdout for, from metadata only: the pool's record of the image (a gate box's file-name listing, and the roots a
+        Gym "missing data" answer named) and the nightly ready file's `holdout_roots` while that chain is the gate. Empty
+        when nothing says a root is missing (a first look on a new image: its box lists at start, and a miss then is
+        owed with no try). A gap raises one alert per program, image and gap (`_missing_alert`)."""
+        roots = sorted({str(r).upper() for r in needs_roots(version["code"], fam["roots"])})
+        image = str(self.settings.get("gym", {}).get("gate_checkpoint") or "")
+        lacking: set[str] = set()
+        reader = getattr(self.pool, "holdout_coverage", None)
+        record = reader(image) if callable(reader) and image else None
+        if isinstance(record, Mapping):
+            if isinstance(record.get("roots"), list):
+                lacking |= set(roots) - {str(r).upper() for r in record["roots"]}
+            lacking |= set(roots) & {str(r).upper() for r in (record.get("missing") or ())}
+        ready = self.settings.get("forward", {}).get("ready") or {}
+        if ready.get("gate_checkpoint") == image and isinstance(ready.get("holdout_roots"), list):
+            lacking |= set(roots) - {str(r).upper() for r in ready["holdout_roots"]}
+        gap = sorted(lacking)
+        if gap:
+            self._missing_alert(fam["id"], int(version["n"]), sha, gap, "the look was refused before it started")
+        return gap
+
+    def _missing_alert(self, fid: str, n: int, sha: str, missing: list[str], what: str) -> None:
+        """One `swarm.gate` event and one `swarm.status` alert per program, gate image and missing roots (kv
+        `gate_missing:<sha>`), never one a round."""
+        image = str(self.settings.get("gym", {}).get("gate_checkpoint") or "")
+        seen = f"{image}|{','.join(sorted(missing))}"
+        if self.store.get(f"gate_missing:{sha}") == seen:
+            return
+        self.store.put(f"gate_missing:{sha}", seen)
+        self.store.event("swarm.gate", fid, {"action": "look_missing_data", "version": n, "missing": sorted(missing),
+                                             "image": image})
+        self.store.event("swarm.status", fid, {
+            "action": "gate_missing_data", "alert": True, "version": n, "missing": sorted(missing), "image": image,
+            "text": (f"{what}: the gate image {image} holds no holdout for {', '.join(sorted(missing))}. No try was counted "
+                     "and nothing was refused; the look waits until gym.gate_checkpoint names an image that holds them")})
 
     def finish(self, fid: str, version: Mapping[str, Any], sha: str, result: Mapping[str, Any], *,
                validation_sharpe: Any = None, validation_image: Any = None, validation_bundle: Any = None,

@@ -715,12 +715,35 @@ class Swarm:
         log(text)
         return payload
 
+    def gate_chain_notice(self) -> dict[str, Any] | None:
+        """THE CHAIN'S RULE (`settings.ready_refusal`), as the operator sees it: the nightly's ready file was ignored, so
+        the gate is the one `swarm.json` names, without the forward days. One `swarm.status` alert (and a log line) for
+        each distinct ready file and reason, never one a loop. Returns the event's payload when one was raised."""
+        ignored = (self.settings.get("forward") or {}).get("ready_ignored")
+        if not isinstance(ignored, Mapping):
+            return None
+        seen = json.dumps(ignored, sort_keys=True, default=str)
+        if self.store.get("gate_chain_notice") == seen:
+            return None
+        self.store.put("gate_chain_notice", seen)
+        payload = {"action": "gate_chain_ignored", "alert": True, **ignored,
+                   "text": (f"the nightly's forward chain was not used ({ignored.get('why')}): the gate is swarm.json's "
+                            f"{ignored.get('named')} itself, with no forward days, until the nightly publishes a chain that "
+                            "extends it")}
+        self.store.event("swarm.status", None, payload)
+        log(payload["text"])
+        return payload
+
     def step(self) -> None:
         """One pass of the main loop (tests call it directly)."""
         fresh = settings_mod.load(self.root, config=self.config)
         self.settings.update(fresh)  # in place (every piece holds this dict), and no key ever disappears mid-read
         try:
             self.train_span_notice()
+        except Exception:  # noqa: BLE001 - a notice never stops the loop
+            pass
+        try:
+            self.gate_chain_notice()
         except Exception:  # noqa: BLE001 - a notice never stops the loop
             pass
         if getattr(self.guard, "due", lambda: True)():

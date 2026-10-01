@@ -572,6 +572,10 @@ def load(root: str | Path | None = None, *, config: Mapping[str, Any] | None = N
         if isinstance(local, Mapping):
             out = _merge(out, local)
         try:
+            named = out["gym"].get("gate_checkpoint")
+        except Exception:  # noqa: BLE001 - a malformed "gym" block: no gate to stand in for
+            named = None
+        try:
             ready = json.loads((Path(root) / "gym-forward.json").read_text())
             day = dt.date.fromisoformat(ready["day"])
             at = dt.datetime.fromisoformat(ready["ready_at"].replace("Z", "+00:00"))
@@ -580,14 +584,129 @@ def load(root: str | Path | None = None, *, config: Mapping[str, Any] | None = N
                      and day < at.date() and re.fullmatch(r"sbcp_[A-Za-z0-9-]+", checkpoint)
                      and isinstance(ready.get("roots"), list) and bool(ready["roots"])
                      and all(isinstance(r, str) and re.fullmatch(r"[A-Z][A-Z0-9.]{0,9}", r) for r in ready["roots"]))
-            if valid and out["gym"].get("gate_checkpoint"):
-                out["gym"]["gate_checkpoint"] = checkpoint
-                out["forward"]["ready"] = ready
-        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            if named:
+                why = ready_refusal(root, ready, named, out["gym"].get("roots")) if valid else "the ready file is malformed"
+                if why is None:
+                    out["gym"]["gate_checkpoint"] = checkpoint
+                    out["forward"]["ready"] = ready
+                else:
+                    out["forward"]["ready_ignored"] = {"why": why, "day": str(ready.get("day")),
+                                                       "gate_checkpoint": str(checkpoint), "named": named}
+        except FileNotFoundError:
             pass
+        except Exception as error:  # noqa: BLE001 - THE CHAIN'S RULE: a ready file that cannot be read never moves the gate
+            try:
+                if named:
+                    out["gym"]["gate_checkpoint"] = named
+                    out["forward"].pop("ready", None)
+                    out["forward"]["ready_ignored"] = {"why": f"the ready file cannot be read ({type(error).__name__})",
+                                                       "named": named}
+            except Exception:  # noqa: BLE001 - a malformed "forward" block: the settings as merged
+                pass
     return out
 
 
-__all__ = ["DEFAULTS", "load", "train_from", "train_from_note", "parse_train_from", "objective_span", "span_years",
-           "train_years", "train_split", "run_timeout", "train_span_text", "TRAIN_CORE_START", "TRAIN_EARLIEST", "TRAIN_END",
-           "TRAIN_STARTS"]
+def _roots_lacking(held: Any, wanted: Any) -> list[str] | None:
+    """The swarm's roots (`wanted`) a gate holds no holdout for (`held`: a list of roots); None when `held` is no list."""
+    if not isinstance(held, list) or not all(isinstance(r, str) for r in held):
+        return None
+    have = {r.upper() for r in held}
+    return sorted({str(r).upper() for r in (wanted or [])} - have)
+
+
+def _instant(text: Any) -> dt.datetime | None:
+    """An ISO time (a trailing Z or an offset; a naive one is read as UTC), or None."""
+    try:
+        at = dt.datetime.fromisoformat(str(text).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return at if at.tzinfo is not None else at.replace(tzinfo=dt.timezone.utc)
+
+
+def chain_refusal(gate: Mapping[str, Any], checkpoint: Any) -> str | None:
+    """THE CHAIN'S RULE, its lineage: why `checkpoint` is not proven to extend the gate image `<root>/data/images.json`
+    records as current (`gate`: that file's "gate" block), or None when it is. Proven: one of the image's own checkpoints,
+    or a checkpoint the nightly took of it (a `checkpoints` entry) when that entry and every later one name the image as
+    their `base`. An entry written before the nightly named its base (before Oct 1, 2026) counts only when it was taken
+    after the image was recorded (`at` not before `current.built_at`): `images.py build` and `finish` replace `current`
+    without resetting the chain, so an older entry may be another image's (scripts/data/nightly.py refuses to extend
+    such a chain, and the swarm refuses a legacy ready file on it)."""
+    current = gate.get("current") or {}
+    images = [c for c in (current.get("checkpoints") or []) if isinstance(c, str)]
+    if not images:
+        return "data/images.json records no gate image"
+    if checkpoint in images:
+        return None
+    entries = [e for e in (gate.get("checkpoints") or []) if isinstance(e, Mapping)]
+    found = next((i for i, e in enumerate(entries) if e.get("id") == checkpoint), None)
+    if found is None:
+        return f"{checkpoint} is not a checkpoint of the gate image's chain"
+    built = _instant(current.get("built_at"))
+    for entry in entries[found:]:
+        if "base" in entry:
+            if entry.get("base") != images[0]:
+                return f"the chain's checkpoint {entry.get('id')} extends {entry.get('base')}, not the gate image {images[0]}"
+            continue
+        taken = _instant(entry.get("at"))
+        if built is None or taken is None or taken < built:
+            return (f"the chain's checkpoint {entry.get('id')} names no base and was not taken after the gate image "
+                    f"{images[0]} was recorded")
+    return None
+
+
+def ready_refusal(root: str | Path, ready: Mapping[str, Any], named: str, roots: Any) -> str | None:
+    """THE CHAIN'S RULE (Oct 1, 2026): why the nightly's ready file (`gym-forward.json`) may NOT stand in for the gate
+    `swarm.json` names (`named`), or None when it may. The nightly extends the gate image its own record
+    (`<root>/data/images.json`) names; that record and `swarm.json` were once apart (the 25-root gate was adopted through
+    `swarm.json` alone), and the ready file's checkpoint silently replaced the 25-root gate with a five-root chain.
+
+    A ready file stands only when it extends the named gate and that gate holds a holdout for every root of the swarm
+    (`gym.roots`): its `base_checkpoint` (the gate image's first checkpoint, written by the nightly) is `named`, and its
+    `holdout_roots` cover `roots`. A LEGACY file (written before the nightly wrote `base_checkpoint`) stands only when
+    `<root>/data/images.json` proves the same: its current gate image is `named` (first checkpoint) and its recorded roots
+    cover `roots`; the file's checkpoint is its day's recorded checkpoint (`forward_days`), adopted after that image was
+    recorded (`built_at`); and `chain_refusal` finds it on that image's chain. It need not be the chain's tip: the
+    nightly records a new day's checkpoint before it publishes the day. Anything else, or anything unreadable, is a
+    refusal: the swarm then uses `named` itself (no forward days) and the loop raises one alert
+    (`Swarm.gate_chain_notice`). `nightly.py stamp-ready` names the gate image in a legacy file that stands."""
+    if "base_checkpoint" in ready:
+        base = ready.get("base_checkpoint")
+        if base != named:
+            return f"the forward chain extends {base}, not the gate swarm.json names"
+        lacking = _roots_lacking(ready.get("holdout_roots"), roots)
+        if lacking is None:
+            return "the ready file does not list the roots its gate holds a holdout for"
+        if lacking:
+            return f"the forward chain's gate holds no holdout for {', '.join(lacking)}"
+        return None
+    legacy = "a ready file without base_checkpoint"
+    try:
+        images = json.loads((Path(root) / "data" / "images.json").read_text())
+        gate = images.get("gate") or {}
+        current = gate.get("current") or {}
+        first = (current.get("checkpoints") or [None])[0]
+        night = (gate.get("forward_days") or {}).get(str(ready["day"])) or {}
+        recorded, adopted = night.get("checkpoint"), _instant(night.get("adopted"))
+        built = _instant(current.get("built_at"))
+        lineage = chain_refusal(gate, ready["gate_checkpoint"])
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, IndexError):
+        return f"{legacy}, and no readable data/images.json to prove its chain"
+    if first != named:
+        return f"{legacy}, and data/images.json's gate is not the gate swarm.json names"
+    if ready["gate_checkpoint"] != recorded:
+        return f"{legacy} whose checkpoint is not its day's on the named gate's chain"
+    if adopted is None or built is None or adopted < built:
+        return f"{legacy} whose day was not adopted after the named gate image was recorded"
+    if lineage is not None:
+        return f"{legacy}: {lineage}"
+    lacking = _roots_lacking(current.get("roots"), roots)
+    if lacking is None:
+        return f"{legacy}, and data/images.json does not list the gate's roots"
+    if lacking:
+        return f"the forward chain's gate holds no holdout for {', '.join(lacking)}"
+    return None
+
+
+__all__ = ["DEFAULTS", "load", "chain_refusal", "ready_refusal", "train_from", "train_from_note", "parse_train_from",
+           "objective_span", "span_years", "train_years", "train_split", "run_timeout", "train_span_text",
+           "TRAIN_CORE_START", "TRAIN_EARLIEST", "TRAIN_END", "TRAIN_STARTS"]
