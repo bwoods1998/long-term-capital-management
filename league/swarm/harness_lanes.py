@@ -1724,7 +1724,7 @@ COST_RATIO, COST_FLOOR, PAYS_SHARE = 1.25, 2.0, 0.25
 #: families no public text names, checked by a scan of every public text; the owner's private notes beside the pools
 #: record which families are burned. Public text gives the pools by count and hash only.
 HELDOUT_POOLS = {
-    "research": "594e8e70d7dd6a91c7bbc163b37127bdf5dbfc5c6b8c39dc8556fe3c5070d86e",
+    "research": "6067920a0e8dc5baa325f529b87557599333a75093d03045430f07bbf04c01fb",
     "memory": "2cbaea0004457b96969f8ac9a01224d301892045ba71c07e339a273d77ec89b5",
     "data": "aa17f07ef5befd661aa850ea7372bb4ec4dbd926551f935d0fff0fcf9673df4a",
     "execution": "eecc352b864c624c7913b3b037892a9a099afc4530e21b329ece2f96c1d692d1",
