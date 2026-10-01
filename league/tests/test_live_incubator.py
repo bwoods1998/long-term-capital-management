@@ -361,13 +361,29 @@ class ThePracticeRule(unittest.TestCase):
         self.assertEqual(read("2026-09-24"), (2, 1, 2.0, False), "today's two missed decisions and mark left out")
         self.assertEqual(practice_record(root, "fam", 1, before="2026-09-24", evaluator="E")["coverage"], 0.5)
         self.assertEqual(db.execute("SELECT decisions_due, open_mark_pnl, prior_day, prior_due, prior_made, prior_open_mark "
-                                    "FROM practice").fetchone(), (4, -60.0, "2026-09-23", 2, 1, 2.0))
+                                    "FROM practice").fetchone(), (4, -60.0, "2026-09-24", 2, 1, 2.0),
+                         "the values 09-23 left, stamped with the roll's day (09-24), never the day they came from")
         self.assertEqual(read("2026-09-25"), (4, 1, -60.0, False))
         minute("2026-09-25", 172860.0, mark=7.0)
         self.assertEqual(read("2026-09-25"), (4, 1, -60.0, False), "the roll keeps the last session's values")
+        self.assertEqual(db.execute("SELECT prior_day FROM practice").fetchone()[0], "2026-09-25")
         # A row stepped today before the columns existed: what it held before today is not known, and said so.
         db.execute("UPDATE practice SET prior_day=NULL, prior_due=NULL, prior_made=NULL, prior_open_mark=NULL")
         self.assertEqual(read("2026-09-25"), (5, 2, 7.0, True))
+        # The verifiers' PROBE A, in the store: B rolls on 09-28, then release A (a rollback, which never rolls
+        # `prior_*`) steps 09-29. The 09-28 roll holds what 09-25 left, an older session than the record before 09-29:
+        # not known from it, said so (fail closed), never 09-25's values as if they were 09-28's.
+        minute("2026-09-28", 432060.0, mark=3.0)
+        self.assertEqual(db.execute("SELECT prior_day, prior_due, prior_made, prior_open_mark FROM practice").fetchone(),
+                         ("2026-09-28", 5, 2, 7.0))
+        self.assertEqual(read("2026-09-28"), (5, 2, 7.0, False))
+        db.execute("UPDATE practice SET last_day='2026-09-29', sessions=sessions+1, decisions_due=decisions_due+5, "
+                   "open_mark_pnl=-1000.0")                       # release A's minutes on 09-29
+        self.assertEqual(read("2026-09-29"), (11, 3, -1000.0, True), "09-28's roll is not the record before 09-29")
+        minute("2026-09-29", 518460.0, mark=1.0)                  # B back the same day: no roll, still not known
+        self.assertEqual(read("2026-09-29"), (12, 4, 1.0, True))
+        minute("2026-09-30", 604860.0, mark=2.0)                  # the next session day's roll: known again
+        self.assertEqual(read("2026-09-30"), (12, 4, 1.0, False))
 
 
 # ======================================================================================================== the caps
@@ -1775,7 +1791,7 @@ class L2PrimeRecordBeforeToday(Base):
             self.run_to(9, 36)
         row = self.row(self.live)
         self.assertEqual((row["last_day"], row["open_mark_pnl"]), ("2026-09-29", -1000.0), "today's mark fails P6")
-        self.assertEqual(row["prior_day"], "2026-09-28")
+        self.assertEqual(row["prior_day"], "2026-09-29", "rolled at today's first minute: stamped today")
         verdict = self.verdicts()["fam@1"]
         self.assertNotIn("ended", verdict)
         self.assertEqual((verdict["latest"]["day"], verdict["latest"]["ok"]), ("2026-09-29", True), verdict["latest"])
@@ -1956,9 +1972,14 @@ class L2PrimeRecordBeforeToday(Base):
         self.assertEqual(self.live.incubator.passes("2026-09-29"), 1)
         live = self.restart()
         with mock.patch.object(self.families, "read", side_effect=sqlite3.OperationalError("database is locked")):
-            self.run_to(9, 32)
-        self.assertEqual(live.incubator.passes("2026-09-29"), 2, "the restart's first pass, counted on the saved count")
-        self.assertEqual(self.live.state.get(INC.SESSION)["passes"], 2)
+            self.run_to(9, 35)
+            self.assertEqual(live.incubator.passes("2026-09-29"), 1,
+                             "the restart's first pass, sooner than FAMILIES_EVERY after the last counted one, spends "
+                             "no retry")
+            self.run_to(9, 36)
+        self.assertEqual(live.incubator.passes("2026-09-29"), 2, "FAMILIES_EVERY after it: counted on the saved count")
+        session = self.live.state.get(INC.SESSION)
+        self.assertEqual((session["passes"], session["last_at"]), (2, at(TUESDAY, 9, 36)))
 
     def test_unreadable_cohorts_hold_the_league_for_the_days_retries_only(self):
         with mock.patch.object(INC, "RETRIES", 2):
@@ -1988,6 +2009,273 @@ class L2PrimeRecordBeforeToday(Base):
             self.assertEqual(self.status("z"), ("complete", "observation target reached"))
             self.assertEqual(self.status(), ("active", None), "the last saved keep stays kept")
             self.assertEqual(len([t for lvl, t in self.alerts if lvl == "error" and "keep still fails" in t]), 1)
+
+
+@unittest.skipUnless(HAVE, "numpy not installed")
+class L2PrimeThirdVerification(Base):
+    """The third verification (Oct 1): the record before today is taken from `prior_*` only when they were rolled TODAY
+    (a release that never rolls them, release A after a rollback, leaves an older roll: fail closed); a cohort kept
+    without a verdict stays kept for the rest of the day, a restart past the retries included; the fallback never keeps
+    nothing; a first look's event follows its saved verdict and a recorded first look is final; and only passes
+    `FAMILIES_EVERY` apart spend the day's retries."""
+
+    def setUp(self):
+        super().setUp()
+        self.switch(True, observe=True)
+
+    status = L2Prime.status
+    kept = L2PrimeSecondReview.kept
+    new_cohort = L2PrimeSecondReview.new_cohort
+    unread_for = staticmethod(L2PrimeSecondReview.unread_for)
+    row = staticmethod(L2PrimeRecordBeforeToday.row)
+    monday = L2PrimeRecordBeforeToday.monday
+    wednesday = L2PrimeRecordBeforeToday.wednesday
+    unknown_before = L2PrimeRecordBeforeToday.unknown_before
+
+    def release_a_steps(self, day, mark=-1000.0, fid="fam"):
+        """Release A (a rollback: no `prior_*`) steps the practice row on `day`: its session, coverage and mark move on,
+        its `prior_*` never."""
+        self.live.observe_store._connect().execute(
+            "UPDATE practice SET last_day=?, sessions=sessions+1, decisions_due=decisions_due+10, "
+            "decisions_made=decisions_made+10, open_mark_pnl=? WHERE family=?", (day, mark, fid))
+
+    def first_looks(self, vk="fam@1"):
+        """The `first_look` events of `vk`: the ledger's, and the live state's own (which `_recorded` reads)."""
+        ledger = [p for p, _ in self.ledger.of("live.incubator") if p.get("first_look") == vk]
+        state = [e["payload"] for e in self.live.state.events(kinds=["live.incubator"], limit=10000)
+                 if e["payload"].get("first_look") == vk]
+        self.assertEqual(len(ledger), len(state))
+        return ledger
+
+    # ------------------------------------------------------------------ 1. a stale `prior_*` after a release-A day
+    def test_a_release_a_day_then_b_back_the_same_day_never_pins_on_an_older_session(self):
+        # PROBE A: Monday under B ends at a mark of -1000 (P6 ends it at Tuesday's first pass, the control in
+        # `test_the_first_pass_decides_the_same_on_the_mark_before_today`). Release A steps Tuesday, B is back that day.
+        self.monday(mark=-1000.0)
+        self.release_a_steps("2026-09-29", mark=-5.0)
+        self.restart()
+        self.run_to(9, 31)
+        record = practice_record(self.live.root, "fam", 1, before="2026-09-29", evaluator=self.live.observe_store.evaluator)
+        self.assertEqual((self.row(self.live)["prior_day"], record["intraday"]), ("2026-09-28", True),
+                         "rolled Monday: not the record before Tuesday, and said so")
+        verdict = self.verdicts()["fam@1"]
+        self.assertNotIn("ended", verdict, "nothing decided on P3 or P6, and P4 and P5 hold")
+        self.assertEqual((verdict["latest"]["ok"], verdict["latest"]["deferred"]), (False, True))
+        self.assertEqual(self.pins()["order"], [], "never pinned on an older session's mark")
+        self.assertNotIn("fam@1:i", [k for k, i in self.live.instances.items() if i.mode == "live"])
+        self.assertEqual(self.status(), ("active", None), "kept practising, re-checked at the next session")
+
+    def test_a_rollback_across_a_session_day_then_b_mid_session_decides_nothing_on_an_older_mark(self):
+        # The second verifier's PROBE I: B's last roll is Monday's; release A steps Tuesday (ending at -1000) and
+        # Wednesday morning; B is redeployed at 10:00 on Wednesday.
+        self.monday()
+        self.release_a_steps("2026-09-29")
+        self.release_a_steps("2026-09-30")
+        self.clock.set(at(TUESDAY, 10, 0) + 86400)
+        self.restart()
+        self.run_to(10, 0)
+        verdict = self.verdicts()["fam@1"]
+        latest = verdict["latest"]
+        self.assertEqual((latest["day"], latest["ok"], latest.get("deferred"), latest.get("intraday")),
+                         ("2026-09-30", False, True, True), "Monday's roll is not the record before Wednesday")
+        self.assertNotIn("ended", verdict)
+        self.assertEqual(self.pins()["order"], [])
+        self.assertIn("today's", self.pins()["refused"]["fam@1"])
+
+    # ------------------------------------------------------------------ 2. a restart past the retries keeps a cohort with no verdict
+    def test_a_first_look_unread_through_the_retries_then_a_restart_stays_kept_and_is_looked_at_next_session(self):
+        with mock.patch.object(INC, "RETRIES", 2):
+            self.monday()
+            self.new_cohort("z")
+            with self.unread_for("z"):
+                self.run_to(9, 47)
+                self.assertTrue(self.live.incubator._retried_out("2026-09-29"))
+                self.assertIn(("z", 1), self.kept())
+                self.restart()
+                self.run_to(9, 56)
+            self.assertIn(("z", 1), self.kept(), "kept for the rest of the day across the restart")
+            self.assertEqual(self.status("z"), ("active", None), "never completed at its target before its look")
+            self.assertNotIn("z@1", self.verdicts())
+            self.assertNotIn("z@1:i", self.pins()["order"], "never a pin candidate")
+            self.run_to(10, 30)
+            self.assertEqual(self.status("z"), ("active", None))
+            self.wednesday()
+        verdict = self.verdicts()["z@1"]
+        self.assertEqual((verdict["passed"], verdict["day"]), (True, "2026-09-30"), "its look at the next session")
+        self.assertIn("z@1:i", self.pins()["order"])
+
+    def test_a_deferred_first_look_through_the_retries_then_a_restart_stays_kept_and_is_looked_at_next_session(self):
+        with mock.patch.object(INC, "RETRIES", 2):
+            self.monday()
+            self.new_cohort("z")
+            with self.unread_for("z", "fam"):
+                self.run_to(9, 35)
+            self.unknown_before("z")
+            with self.unread_for("fam"):
+                self.run_to(9, 47)
+                self.assertEqual(self.live.state.get(INC.SESSION)["deferred"], [["z", 1]])
+                self.assertTrue(self.live.incubator._retried_out("2026-09-29"))
+                self.restart()
+                self.run_to(9, 56)
+            self.assertIn(("z", 1), self.kept())
+            self.assertEqual(self.status("z"), ("active", None))
+            self.assertNotIn("z@1", self.verdicts())
+            self.wednesday()
+        verdict = self.verdicts()["z@1"]
+        self.assertEqual((verdict["passed"], verdict["day"]), (True, "2026-09-30"))
+        self.assertEqual(self.status("z"), ("active", None))
+
+    # ------------------------------------------------------------------ 3. the fallback never keeps nothing
+    def keep_and_saved_keep_fail(self):
+        real_get = INC.Incubator._get
+
+        def get(inc, key):
+            if key == INC.KEEP:
+                raise sqlite3.OperationalError("disk I/O error")
+            return real_get(inc, key)
+        return (mock.patch.object(INC.Incubator, "keep", side_effect=RuntimeError("boom")),
+                mock.patch.object(INC.Incubator, "_get", get))
+
+    def test_fallback_unreadable_keeps_the_last_keep_this_process_took(self):
+        # The second verifier's PROBE J: `keep` raises and the saved keep cannot be read, past the day's retries.
+        with mock.patch.object(INC, "RETRIES", 2):
+            self.monday()
+            self.new_cohort("z", pnl=-1.0)
+            raising, unreadable = self.keep_and_saved_keep_fail()
+            with raising, unreadable:
+                self.run_to(9, 47)
+            self.assertEqual(self.status(), ("active", None), "kept and pinned on Monday: never completed on it")
+            self.assertEqual(self.status("z"), ("complete", "observation target reached"),
+                             "the rest of the league by its own rule")
+            errors = [t for lvl, t in self.alerts if lvl == "error" and "keep still fails" in t]
+            self.assertEqual(len(errors), 1)
+            self.assertIn("the last keep this process took", errors[0])
+
+    def test_fallback_unreadable_with_no_keep_taken_holds_every_cohort(self):
+        with mock.patch.object(INC, "RETRIES", 2):
+            self.monday()
+            self.restart()                              # this process has taken no keep
+            self.new_cohort("z", pnl=-1.0)
+            raising, unreadable = self.keep_and_saved_keep_fail()
+            with raising, unreadable:
+                self.run_to(9, 47)
+                self.assertIs(self.live.incubator.fallback("2026-09-29"), INC.HOLD)
+            self.assertEqual(self.status(), ("active", None))
+            self.assertEqual(self.status("z"), ("active", None), "HOLD: never nothing")
+
+    # ------------------------------------------------------------------ 4. a first look's event follows its saved verdict
+    def test_a_first_look_whose_verdict_cannot_be_saved_records_no_event_and_is_taken_once(self):
+        self.first()
+        real = self.live.state.put
+
+        def put(key, value):
+            if key == INC.VERDICTS:
+                raise sqlite3.OperationalError("disk I/O error")
+            return real(key, value)
+        with mock.patch.object(self.live.state, "put", side_effect=put):
+            self.run_to(9, 31)
+        self.assertEqual(self.verdicts(), {})
+        self.assertEqual(self.first_looks(), [], "no first_look event behind a verdict that was not saved")
+        self.assertEqual(self.status(), ("active", None))
+        self.run_to(9, 36)
+        self.assertTrue(self.verdicts()["fam@1"]["passed"])
+        looks = self.first_looks()
+        self.assertEqual(len(looks), 1)
+        self.assertEqual((looks[0]["evaluator"], looks[0]["program"], looks[0]["run_sha"]),
+                         (self.live.observe_store.evaluator, self.verdicts()["fam@1"]["program"], "sha-fam-1"))
+
+    def test_a_recorded_first_look_that_failed_is_final_and_never_retaken_and_passed(self):
+        self.first(trades=winning(10, pnl=-1.0))
+        self.run_to(9, 31)
+        self.assertFalse(self.verdicts()["fam@1"]["passed"])
+        self.assertEqual(len(self.first_looks()), 1)
+        self.live.state.put(INC.VERDICTS, {})           # its verdict lost, its event kept (the old order's gap)
+        db = self.live.observe_store._connect()
+        for i in range(10):
+            db.execute("INSERT INTO trades(instance, account, family, version, trade_id, day, pnl, max_loss, recorded_at, "
+                       "body, exit_day, reason, forced, evaluator) VALUES('fam@1:o', 'a', 'fam', 1, ?, '2026-09-28', 100, "
+                       "30, 1, ?, '2026-09-28', 'program', 0, ?)",
+                       (f"win{i}", json.dumps({"qty": 1, "fees": 1.3}), self.live.observe_store.evaluator))
+        record = practice_record(self.live.root, "fam", 1, before="2026-09-29", evaluator=self.live.observe_store.evaluator)
+        self.assertTrue(M.practice_ok(self.live.table, record)[0], "a look taken again now would pass")
+        self.clock.set(at(TUESDAY, 9, 31))
+        self.run_to(9, 31)
+        verdict = self.verdicts()["fam@1"]
+        self.assertEqual((verdict["passed"], verdict["day"], verdict.get("restored")), (False, "2026-09-28", True))
+        self.assertTrue(verdict["why"].startswith("P4"), verdict["why"])
+        self.assertEqual(len(self.first_looks()), 1, "never taken again")
+        self.assertEqual(self.pins()["order"], [])
+        self.assertNotIn(("fam", 1), self.kept())
+
+    def test_a_recorded_first_look_that_passed_is_restored_and_rechecked_that_pass(self):
+        self.first()
+        self.run_to(9, 31)
+        self.assertEqual(self.pins()["order"], ["fam@1:i"])
+        self.live.state.put(INC.VERDICTS, {})
+        self.clock.set(at(TUESDAY, 9, 31))
+        self.run_to(9, 31)
+        verdict = self.verdicts()["fam@1"]
+        self.assertEqual((verdict["passed"], verdict["day"], verdict.get("restored")), (True, "2026-09-28", True))
+        self.assertEqual((verdict["latest"]["day"], verdict["latest"]["ok"]), ("2026-09-29", True), verdict["latest"])
+        self.assertEqual(len(self.first_looks()), 1, "never taken again")
+        self.assertEqual(self.pins()["order"], ["fam@1:i"], "its program and run sha, as recorded")
+        self.assertTrue([p for p, _ in self.ledger.of("live.incubator") if p.get("restored") == "fam@1"])
+
+    def test_a_restored_first_look_never_revives_an_ended_incubation(self):
+        self.first()
+        self.run_to(9, 31)
+        self.clock.set(at(TUESDAY, 9, 31))
+        db = self.live.observe_store._connect()
+        db.execute("INSERT INTO trades(instance, account, family, version, trade_id, day, pnl, max_loss, recorded_at, body, "
+                   "exit_day, reason, forced, evaluator) VALUES('fam@1:o', 'a', 'fam', 1, 'loss', '2026-09-28', -80, 30, 1, "
+                   "'{}', '2026-09-28', 'program', 0, ?)", (self.live.observe_store.evaluator,))
+        self.run_to(9, 31)
+        self.assertTrue(self.verdicts()["fam@1"]["ended"]["why"].startswith("P4"))
+        self.live.state.put(INC.VERDICTS, {})
+        db.execute("DELETE FROM trades WHERE trade_id='loss'")       # a record that would pass again
+        self.clock.set(at(TUESDAY, 9, 31) + 86400)
+        self.run_to(9, 31)
+        verdict = self.verdicts()["fam@1"]
+        self.assertEqual((verdict["passed"], verdict.get("restored")), (True, True))
+        self.assertTrue(verdict["ended"]["why"].startswith("P4"), "its recorded end stands")
+        self.assertEqual(self.pins()["order"], [])
+        self.assertEqual(len(self.first_looks()), 1)
+
+    # ------------------------------------------------------------------ 5. only passes FAMILIES_EVERY apart spend a retry
+    def test_a_pass_counts_only_families_every_after_the_last_counted_one(self):
+        from league.live.step import FAMILIES_EVERY
+
+        self.make()
+        t0, day = at(TUESDAY, 9, 31), "2026-09-29"
+        inc = self.live.incubator
+        for dt_, n in ((0, 1), (60, 1), (FAMILIES_EVERY - 1, 1), (FAMILIES_EVERY, 2), (FAMILIES_EVERY + 60, 2)):
+            inc.begin(day, t0 + dt_)
+            self.assertEqual(inc.passes(day), n, dt_)
+        self.assertEqual(self.live.state.get(INC.SESSION)["last_at"], t0 + FAMILIES_EVERY)
+        inc = self.restart().incubator
+        inc.begin(day, t0 + FAMILIES_EVERY + 120)
+        self.assertEqual(inc.passes(day), 2, "a restart's pass sooner than FAMILIES_EVERY spends no retry")
+        inc.begin(day, t0 + 2 * FAMILIES_EVERY)
+        self.assertEqual(inc.passes(day), 3)
+        inc.begin("2026-09-30", t0 + 86400)
+        self.assertEqual(inc.passes("2026-09-30"), 1, "a new day counts afresh")
+
+    def test_forced_passes_never_spend_the_days_retries(self):
+        # The second verifier's PROBE D, at the production RETRIES: a forward read that fails forces a families pass
+        # every minute.
+        self.first([family("vert", VERTICAL, band="candidate")])
+        self.run_to(9, 31)
+        self.clock.set(at(TUESDAY, 9, 31))
+        self.new_cohort("z")
+        judged = mock.patch.object(INC.Incubator, "judge", wraps=self.live.incubator.judge)
+        forward = mock.patch.object(self.families, "forward_rows", side_effect=sqlite3.OperationalError("locked"))
+        with forward, mock.patch.object(INC, "cohort_rows", return_value=None), judged as judge:
+            self.run_to(9, 44)
+            self.assertEqual(self.live.incubator.passes("2026-09-29"), 3, "09:31, 09:36 and 09:41 only")
+            self.assertGreater(judge.call_count, 3, "the forced passes ran (and read again)")
+            self.assertTrue(self.live.incubator.holding("2026-09-29"))
+        self.assertEqual(self.status("z"), ("active", None), "not completed while the retries remain")
+        self.assertEqual(self.status(), ("active", None))
 
 
 @unittest.skipUnless(HAVE, "numpy not installed")

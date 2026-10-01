@@ -736,9 +736,10 @@ class OptionsLive:
         if self._in_session(now):
             self._session_pass_day = ny(now).date().isoformat()   # `_observe_repin_due`: this session day's pass ran
             if self.incubator is not None:
-                # Before any read that can fail: the session day's pass is counted, durably (the incubator's retries).
+                # Before any read that can fail: the session day's pass is counted, durably (the incubator's retries),
+                # at this pass's `now`, so only passes `FAMILIES_EVERY` apart count (a forced pass spends no retry).
                 with contextlib.suppress(Exception):
-                    self.incubator.begin(self._session_pass_day)
+                    self.incubator.begin(self._session_pass_day, now)
             if self.switches()["observe"]:
                 self._observe_pass_day = self._session_pass_day
         try:

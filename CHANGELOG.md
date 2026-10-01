@@ -82,10 +82,11 @@ The House runs Release A, `20260930T200604Z-3bf48c3f8f9f` (main `777b894f`).
     - above $0 over all closes;
     - above $0 over all closes plus the open mark.
 
-    The look is recorded whether or not the switch is on, and a failed first look is final. After a pass, each later
-    session re-checks coverage and the three P&L tests on the longer record, and a failure ends the incubation for good.
-    A program with no edge passes roughly a third to a half of the time: the weekly envelope bounds the cost, not the
-    screen.
+    The look is recorded whether or not the switch is on, and a failed first look is final. Its verdict is saved before
+    its private `first_look` ledger row, and a cohort with a recorded `first_look` row is never looked at again (its
+    verdict is restored from the row). After a pass, each later session re-checks coverage and the three P&L tests on
+    the longer record, and a failure ends the incubation for good. A program with no edge passes roughly a third to a
+    half of the time: the weekly envelope bounds the cost, not the screen.
   - **The facts** (`bands.incubator`). The family must be:
     - alive, in the Gym band, with the version not demoted;
     - carrying a Train-and-drift pass for the version under the current evaluator and Train objective;
@@ -109,11 +110,15 @@ The House runs Release A, `20260930T200604Z-3bf48c3f8f9f` (main `777b894f`).
   - **Keep (L2').** While the switch is on, a cohort whose first look passed keeps practising past its observation
     target, to its bounded window. That is at most 8 cohorts. A failed read never ends an incubation: the last keep's
     cohorts stay kept (never pinned on the untaken check), and the next families pass takes the checks again. While
-    the cohorts cannot be read, no cohort is completed at its target, for at most the day's 12 retries (counted
-    durably from the start of each pass). Within a day the keep only grows. Every first look and re-check, at the first
-    pass or a retry, reads the record before today: the practice row keeps its coverage and open mark as the last
-    session left them (`prior_*`), so today's values never decide a check. A record without them decides nothing on
-    P3 or P6 (P4 and P5 still end it) and waits for the next session.
+    the cohorts cannot be read, no cohort is completed at its target, for at most the day's 12 retries. The retries are
+    counted durably from the start of each pass, and only for passes 5 minutes apart: a forced pass spends none. If the
+    keep raises and the saved keep cannot be read, the House keeps the last keep it took, never nothing. Within a day
+    the keep only grows, and a cohort kept without a verdict stays kept for the rest of the day, across a restart.
+    Every first look and re-check, at the first pass or a retry, reads the record before today: the practice row keeps
+    its coverage and open mark as the last session left them (`prior_*`, stamped with the day they were copied and read
+    only on that day), so today's values never decide a check. A record without them, or with an older copy (a release
+    that never copies them stepped the row today, as after a rollback), decides nothing on P3 or P6 (P4 and P5 still
+    end it) and waits for the next session.
   - **The caps**, in the House only (`money.plan_incubator`). The gateway cannot tell routes apart, so its own caps are
     the backstop.
     - One lot of at most $50 a structure, and $50 held or working per family.
