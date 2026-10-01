@@ -547,7 +547,10 @@ def public_payload(kind: str, payload: dict[str, Any], names: list[str]) -> dict
         return {**keep, "text": text} if text else None
     for field in ("mechanism", "reason", "cause"):
         if field in payload:
-            text = public.news_text(payload.get(field), param_names=names)
+            # A mechanism keeps no number at all (no entry window, no threshold: `public.mechanism_text`); a band's reason
+            # and a retirement's cause are the swarm's own rules and keep their whole numbers (`public.news_text`).
+            text = (public.mechanism_text(payload.get(field), param_names=names, limit=400) if field == "mechanism"
+                    else public.news_text(payload.get(field), param_names=names))
             if text:
                 keep[field] = text
     return keep
