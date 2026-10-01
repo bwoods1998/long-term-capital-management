@@ -798,3 +798,45 @@ researchers ran new versions and never the revived one: the same defect. No more
 
 The goal remains unmet: no D2-qualified strategy trades real money, no harness improvement is retained, and project
 Net at the last close is −$568.74.
+
+## Oct 1 late morning: three more releases, the first holdout look in four days, the swarm window
+
+### Releases (none reset evidence)
+
+- **09:16, money path (#468):** an operator revival now runs its program exactly, code and stored parameters, before
+  its researcher can edit it (#465); and the gate hardening (#467): the nightly forward chain must name the gate image
+  it extends and cover every root, a gate box checks its holdout coverage before a look, and a look that fails for
+  missing data costs no try and bars nothing.
+- **10:19, the site feed (#469 = #463):** the House now publishes the levels funnel and each trade's reason, filtered
+  so no number, parameter or code reaches the page. The site (personal-site #18) deployed first, at 10:00.
+- **11:45, the architect on Sail (#470):** from 08:15 every architect call on Sail spent its whole output budget on
+  reasoning, so the answer was empty or cut and counted as no proposals. Family cards (release B') had doubled the
+  answer's length. The architect now asks Sail at medium effort, and a cut answer is detected and its complete
+  families are kept. The empty passes cost $4.43 today.
+
+### The GOOGL family's holdout look
+
+The revival fix ran the GOOGL family's validated program (MSFT leads GOOGL) exactly for the first time under the
+current evaluator. It validated again (t 2.60, 335 trades, deflated Sharpe 0.96), passed review and audit, and took
+its one sealed look at the 2026 holdout on the 25-root gate. **It failed:** over 184 sessions it lost $2,968.81 in
+backtest terms, a daily Sharpe of −0.16 against 0.10 in validation (p 0.996). The catch-up did not hold out of sample.
+The gate barred the program from the incubator. Its open tuition position stays exit-only until it closes. This is the
+qualification path working: research, exact re-run, validation, review, audit and a sealed holdout, ending in an
+honest no.
+
+### Scoreboard (11:50 Oct 1)
+
+| Measure | Value |
+|---|---|
+| Release running | `20261001T114505Z-2d791c2ca9e7` (main `9b6d8857`), gateway `dafcfa05` |
+| Real orders since T0 | calibration: 15 round trips closed; tuition: 1 open (GOOGL); House test, incubator, Probe, Sized: 0 |
+| Net since T0, at the Sept 30 close | −$568.74 (realized −$27.02; costs $541.72) |
+| Families alive / validation passed / in practice | 63 / 1 (then failed its holdout) / 3 |
+| Holdout looks | 3, 0 passed |
+| Births since 07:11 | 11, all real-money structures (4 debit verticals, 7 long butterflies); none 08:15-11:45 (fixed) |
+| Train disqualification rate since 07:11 | 19 of 291 (6.5%) |
+| Evidence resets | 2 (releases A and B) |
+| Retained harness improvements | 0 (the lanes release is in its final judge review) |
+| Spend, last hour | $1.89/h; Sail balance $150.57 |
+
+The goal remains unmet.
