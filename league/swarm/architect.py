@@ -86,7 +86,11 @@ typo never stops births); Claude's stays `claude.role_effort` / `claude.effort`.
 (`ModelRouter.ask`'s `truncated`, the Provider's `incomplete`) is salvaged exactly as a Claude one: its complete families
 are admitted, and fewer than SALVAGE_MIN buy the same one retry on Claude alone (never Sail or OpenAI again; while the
 architect's Claude line is $0 it is refused unbilled). A Sail pass's event says its effort, its usage (`sail_usage`:
-input, cached, output and reasoning tokens) and, when cut, its `incomplete_reason`. A pass that proposed nothing (an
+input, cached, output and reasoning tokens) and, when cut, its `incomplete_reason`. A complete answer whose JSON the
+router could not read whole is read again from the `{` that opens its `families` object (`read_families`): without
+stray trailing commas (`lenient`, #472) and, when the array still does not parse, object by object (`recover_families`:
+each family from its own `{`, the stray closers and commas between families skipped, nothing inside a family changed;
+the event's `recovered` says how many and why). A pass that proposed nothing (an
 empty, cut-to-nothing or failed answer) leaves the last pass's card and structure refusals as they are, so their lessons
 reach the next request.
 
@@ -927,6 +931,14 @@ class GraveyardDigest:
 #: R11-3: fewer families than this salvaged from a cut answer buys one retry on Claude at medium effort.
 SALVAGE_MIN = 3
 _FAMILIES = re.compile(r'"families"\s*:\s*\[')
+#: Where a family card starts (the schema's first key): the resync point after an object that did not decode, and what
+#: tells a stray `]` between two cards from the array's end (`recover_families`).
+_CARD = re.compile(r'\{\s*"slug"\s*:')
+#: The key every proposal in the schema carries: `admit` derives a slug from it and births nothing without it, so a
+#: decoded object without it (a card's inner object, reached after a resync) is no family.
+CARD_KEY = "mechanism"
+#: How many of the stray characters skipped between the families the tally keeps (`recovered.why` names them).
+STRAY_MAX = 16
 #: The pass's effort on Sail and OpenAI (`architect.sail_effort`, ON SAIL in the module docstring): "medium" by default,
 #: since Kimi-K3 at "high" spent the whole output on reasoning (Oct 1, 2026); any of SAIL_EFFORTS may be set ("high"
 #: included), and anything else reads as the default. Claude's effort is `claude.role_effort` / `claude.effort`.
@@ -982,29 +994,40 @@ def without_trailing_commas(text: Any) -> str:
     return "".join(out)
 
 
-def read_families(answer: Mapping[str, Any]) -> tuple[list[dict[str, Any]] | None, bool]:
-    """(the answer's proposals, whether they were read without stray trailing commas). A cut answer keeps its complete
-    families (R11-3, `salvage_families`); a complete one is read whole. Only when a complete answer's JSON has no
-    `families` array AND its `families` object carries a stray trailing comma (`,}` or `,]`: the whole object is then
-    unreadable, so the first readable inner object was taken instead) is it read again without them, whole or else object
-    by object. The strip starts at the `{` that opens the `families` object, so prose before it cannot flip the string
-    tracking. Any other unreadable answer reads as before (None)."""
+def read_families(answer: Mapping[str, Any]) -> tuple[list[dict[str, Any]] | None, bool, dict[str, Any] | None]:
+    """(the answer's proposals, whether they were read without stray trailing commas, what a read from the `families`
+    object recovered: its `count` and `why`, else None). A cut answer keeps its complete families (R11-3,
+    `salvage_families`); a complete one is read whole. When a complete answer's JSON has no `families` array but its text
+    holds one, the text is read again from the `{` that opens the `families` object (so prose before it cannot flip the
+    string tracking): without stray trailing commas (`,}` or `,]`; `lenient`, #472, whole when that is enough), whole
+    from that `{` (the router's reader took an earlier object), and else object by object (`recover_families`: Oct 1,
+    2026, 15:59Z, a stray `}` after the fourth and the fifth of six families, and the pass read as no proposals).
+    Nothing inside a family is changed. An answer with no readable family reads as before (None)."""
     text = str(answer.get("text") or "")
     if answer.get("truncated"):
-        return salvage_families(_from_families(text, strip=True)), False
+        return salvage_families(_from_families(text, strip=True)), False, None
     rows = (answer.get("json") or {}).get("families")
     if rows is not None or not text:
-        return rows, False
+        return rows, False, None
     body = _from_families(text, strip=False)
+    if not body:
+        return None, False, None
     lenient = without_trailing_commas(body)
-    if not body or lenient == body:
-        return None, False
-    from .models import extract_json  # the router's own reader (models.py is not on the live path)
-    whole = (extract_json(lenient) or {}).get("families")
-    if isinstance(whole, list):
-        return whole, True
-    some = salvage_families(lenient)
-    return (some, True) if some else (None, False)
+    stripped = lenient != body
+    try:
+        whole, _ = json.JSONDecoder().raw_decode(lenient)
+        error = None
+    except ValueError as exc:
+        whole, error = None, f"{exc.msg} at char {exc.pos}"
+    if isinstance(whole, dict) and isinstance(whole.get("families"), list):
+        if stripped:
+            return whole["families"], True, None
+        why = "the families object parses from its own `{`; the router's reader took an earlier object"
+        return whole["families"], False, {"count": len(whole["families"]), "why": why}
+    some, tally = recover_families(lenient)
+    if not some:
+        return None, False, None
+    return some, stripped, recovered_detail(len(some), error, tally)
 
 
 def _from_families(text: str, *, strip: bool) -> str:
@@ -1016,6 +1039,90 @@ def _from_families(text: str, *, strip: bool) -> str:
     start = text.rfind("{", 0, found.start())
     body = text[start:] if start >= 0 else text[found.start():]
     return without_trailing_commas(body) if strip else body
+
+
+def recover_families(text: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """The families of a complete answer whose `families` array does not parse as a whole, decoded one at a time from
+    each object's `{` (`json.JSONDecoder.raw_decode`), the stray closers and commas between them skipped, until the
+    array's `]` (one that another card follows after whitespace or commas is stray too) or the text's end. Nothing inside
+    an object is changed: one that does not decode is passed over to the next card start (`{"slug"`, the schema's first
+    key), and only an object carrying CARD_KEY is kept. Returns (the rows, the tally: `stray`, the characters skipped
+    between the families, at most STRAY_MAX; `passed`, the objects that did not decode; `dropped`, the decoded objects
+    that were no family). Oct 1, 2026, 15:59Z: a stray `}` after the fourth and the fifth of six families, and the pass read
+    as no proposals."""
+    text = str(text or "")
+    tally: dict[str, Any] = {"stray": "", "passed": 0, "dropped": 0}
+    found = _FAMILIES.search(text)
+    if not found:
+        return [], tally
+    decoder = json.JSONDecoder()
+    out: list[dict[str, Any]] = []
+    i, n = found.end(), len(text)
+    comma_due = False  # the one comma after an object separates it from the next; any other comma is stray
+
+    def stray(ch: str) -> None:
+        tally["stray"] = (tally["stray"] + ch)[:STRAY_MAX]
+
+    while i < n:
+        ch = text[i]
+        if ch in " \t\r\n":
+            i += 1
+        elif ch == ",":
+            if comma_due:
+                comma_due = False
+            else:
+                stray(ch)
+            i += 1
+        elif ch == "}":
+            stray(ch)  # an array item never starts with a closer
+            i += 1
+        elif ch == "]":
+            j = i + 1
+            while j < n and text[j] in " \t\r\n,":
+                j += 1
+            if not _CARD.match(text, j):
+                break  # the array's end (`]}`, or nothing more)
+            stray(ch)
+            i += 1
+        elif ch == "{":
+            try:
+                value, end = decoder.raw_decode(text, i)
+            except ValueError:
+                tally["passed"] += 1  # not repaired: the next card start, if any
+                after = _CARD.search(text, i + 1)
+                if after is None:
+                    break
+                i, comma_due = after.start(), False
+                continue
+            if isinstance(value, dict) and CARD_KEY in value:
+                out.append(value)
+            else:
+                tally["dropped"] += 1
+            i, comma_due = end, True
+        else:
+            after = _CARD.search(text, i)  # something that is no object between the cards: the next card start, if any
+            if after is None:
+                break
+            stray(ch)
+            i, comma_due = after.start(), False
+    return out, tally
+
+
+def recovered_detail(count: int, error: str | None, tally: Mapping[str, Any]) -> dict[str, Any]:
+    """The pass event's `recovered`: how many families the object-by-object read kept (`count`), why it was needed and
+    what it skipped (`why`), and the objects it passed over (`passed`, when any)."""
+    why = f"the families object did not parse whole ({error})" if error else "the families object did not read whole"
+    done = ["read object by object"]
+    if tally.get("stray"):
+        done.append(f"stray {str(tally['stray'])!r} between the families skipped")
+    if tally.get("passed"):
+        done.append(f"{tally['passed']} object{'s' if tally['passed'] != 1 else ''} that did not decode passed over")
+    if tally.get("dropped"):
+        done.append(f"{tally['dropped']} object{'s' if tally['dropped'] != 1 else ''} without a {CARD_KEY} dropped")
+    out = {"count": count, "why": f"{why}: {', '.join(done)}"[:400]}
+    if tally.get("passed"):
+        out["passed"] = int(tally["passed"])
+    return out
 
 
 def salvage_families(text: Any) -> list[dict[str, Any]]:
@@ -1591,13 +1698,14 @@ class Architect:
         except Exception as exc:  # noqa: BLE001 - the pass keeps what it salvaged
             return {"born_ids": [], "effort": "medium", "error": f"{type(exc).__name__}: {str(exc)[:300]}"}
         cut = bool(answer.get("truncated"))
-        rows, _ = read_families(answer)  # the retry is read as the pass is (a cut one salvaged, stray commas dropped)
+        rows, _, recovered = read_families(answer)  # read as the pass is (cut: salvaged; else lenient, recovered)
         on_digest = bool(extra) and answer.get("route") == "claude"
         born = self.admit(rows, digest=on_digest, library=library)
         if on_digest and self.digest is not None and info is not None:
             self.digest.record_call(info["sha"], info["ttl"], called)
         return {"born_ids": born, "born": len(born), "proposed": len(rows) if isinstance(rows, list) else 0, "effort": "medium",
-                "route": answer.get("route"), "cost_usd": answer.get("cost_usd"), "truncated": cut}
+                "route": answer.get("route"), "cost_usd": answer.get("cost_usd"), "truncated": cut,
+                **({"recovered": recovered} if recovered else {})}
 
     def run(self, *, paired: bool = False, library: Any = None) -> dict[str, Any]:
         """One pass. `paired`: the strategist's Claude call just sent (and marked) the same sealed digest, so this call
@@ -1638,7 +1746,7 @@ class Architect:
         # A cut answer, on Claude (R11-3) or on Sail (`ModelRouter.ask`'s `truncated`, Oct 1, 2026), keeps its complete
         # families; a complete one is read whole.
         truncated = bool(answer.get("truncated"))
-        rows, lenient = read_families(answer)
+        rows, lenient, recovered = read_families(answer)
         on_digest = bool(extra) and answer.get("route") == "claude"
         born = self.admit(rows, digest=on_digest, library=library)
         proposed = len(rows) if isinstance(rows, list) else 0  # this pass's proposals, its retry's added below
@@ -1653,6 +1761,8 @@ class Architect:
                "model": answer.get("model"), "cost_usd": answer.get("cost_usd"), "seconds": round(self.clock() - began, 1)}
         if lenient:
             out["lenient"] = True  # the families were read without the answer's stray trailing commas
+        if recovered:
+            out["recovered"] = recovered  # the families were read from their object (`recover_families`): how many, and why
         if library is not None:
             cited = [library.resolve(r.get("literature"))[0] for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
             out["library"] = {"queries": list(library.queries), "ids": list(library.ids), "cited": sum(1 for c in cited if c),
@@ -1728,6 +1838,7 @@ class Architect:
 
 
 __all__ = ["Architect", "SYSTEM", "GraveyardDigest", "Digest", "lesson_view", "parse_lesson", "tag_of", "compose", "salvage_families", "read_families", "without_trailing_commas",
+           "recover_families", "recovered_detail", "CARD_KEY", "STRAY_MAX",
            "SALVAGE_MIN", "SAIL_EFFORT", "SAIL_EFFORTS", "sail_usage",
            "locked_text", "fit", "AGENDA_KEY", "SEAL_KEY", "CPT_KEY", "LAST_KEY", "DIGEST_HEADER", "FULL_GRAVEYARD_RULE",
            "GRAVEYARD_POINTER", "SECTION_MAX", "AGENDA_LOCKED_MAX", "MAX_DIGEST_BYTES", "COMPOSED_AGENDA_TITLE",
