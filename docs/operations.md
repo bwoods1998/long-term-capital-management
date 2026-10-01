@@ -692,7 +692,50 @@ python3 scripts/data/box.py run -- ARGS         # run backfill.py ARGS (or check
   pulls the last trading day (from 01:45 ET) into the data box's store and the gate image only,
   stopping and restarting the backfill around it, re-checkpoints the gate and puts both boxes to
   sleep; `nightly.py schedule` sleeps the data box until the next 06:00Z wake. It is idempotent:
-  rerun it after any failure. It refuses the Gym image's box as a target.
+  rerun it after any failure. It refuses the Gym image's box as a target. On the House the supervised
+  `nightly.py daemon --state <root>/data --ready-file <root>/gym-forward.json` runs it each night and publishes the
+  ready file the swarm reads.
+- **The chain's rule** (Oct 1, 2026). The nightly extends the gate image that `<root>/data/images.json` names
+  (`gate.current`), and the swarm uses the gate that `swarm.json` names (`gym.gate_checkpoint`). On Sept 29-30 the two
+  differed: images.json still named the original five-root gate, the 25-root gate had been adopted through
+  `swarm.json` alone, and the ready file's checkpoint silently replaced it. Every gate box then forked from a five-root
+  holdout. These rules now keep them together:
+  - **Each day names its image.** The nightly records the image it extended with each day (`forward_days[day]`
+    `base_checkpoint` and `holdout_roots`, and `base` on each `gate.checkpoints` entry), and the ready file carries
+    `base_checkpoint` (the image's first checkpoint) and `holdout_roots` (the roots it was built with). A day finished
+    without them (by an earlier release) is completed but not published (`nightly.json` `unpublished`).
+  - **The swarm takes the chain only while it extends the named gate.** `settings.load` replaces `gym.gate_checkpoint`
+    with the ready file's checkpoint only when `base_checkpoint` equals it and `holdout_roots` covers `gym.roots`.
+    Otherwise the swarm uses the named gate itself, with no forward days, and the loop raises one `gate_chain_ignored`
+    alert per ignored file. An unreadable file never moves the gate.
+  - **A legacy ready file** (no `base_checkpoint`, written before this release) stands only when images.json proves
+    the same. Its current gate's first checkpoint must be the named gate, and its recorded roots must cover
+    `gym.roots`. The file's checkpoint must be its day's recorded checkpoint, adopted after the image was recorded
+    (`forward_days[day].adopted` not before `current.built_at`). It must also be on the image's chain
+    (`settings.chain_refusal`): it and every later `gate.checkpoints` entry name the image as `base`, or (an entry
+    written before this release) were taken after `built_at`. It need not be the chain's tip, because the nightly
+    records a new day's checkpoint shortly before it publishes the day. Production's file at this release is such a
+    file (written after the Oct 1 re-base), so the gate does not move at the deploy or at the first publish after it.
+    `nightly.py --state <root>/data stamp-ready --ready-file <root>/gym-forward.json [--apply]` writes
+    `base_checkpoint` and `holdout_roots` into a legacy file that stands. It needs the daemon stopped, because it
+    takes `nightly.lock`. It puts the old file back unless the swarm takes the new one with the same gate.
+  - **The nightly never extends a gate that lacks the swarm's roots, or a chain that is not on it.** `run` (and the
+    daemon) refuses before any box is woken (`preflight`, before the data box is resumed). It refuses when images.json's
+    gate does not list its roots or lacks a root of `gym.roots` (read from `<root>/swarm.json`; the daemon's root is the
+    ready file's folder, `run --swarm-root` for a hand run). It also refuses when the chain's tip (`current_checkpoint`)
+    is not proven on that gate (`settings.chain_refusal`): the chain records were not reset when the image was
+    adopted, and a re-fork of the gate box would carry another image's holdout under this one's name. The refusal is
+    the controller's `error` in `nightly.json`, retried every 300 s with no box woken. `schedule` and rehearsals are
+    not refused.
+  - **A day an earlier release checkpointed** (the daemon was stopped between its checkpoint and its publish) is
+    published with its image's name when the chain's records prove it (`Nightly.proven_identity`), and is completed
+    without a publish otherwise (`nightly.json` `unpublished`); the next day's publish names its chain.
+  - **To adopt a new gate image:** build it (`images.py build gate --roots ...`, which records its roots; or a staging
+    build), then point images.json's gate at it with the chain reset, as the operator's Oct 1 re-base did. The reset
+    sets `current` to the image's record, `current_checkpoint` to its first checkpoint, `checkpoints` to [] and
+    `forward_days` to the `pulled` markers only, and sets `nightly.json` `completed` to {}. Then name the same
+    checkpoint in `swarm.json`. Until the nightly publishes on the new chain, the swarm uses the new image itself.
+    `images.py build` and `finish` do not reset the chain records; until they are reset, the nightly refuses to run.
 - **Gym boxes** are forks of the Gym image checkpoint, sealed, driven through Sail's file and exec
   APIs (`league/gym/driver.py`, `python -m league.gym.batch` on the box). The swarm's pool starts
   `gym.start_boxes` when there is work (4 by default; 2 on the box since Sept 30's throttle), grows to
@@ -1575,6 +1618,47 @@ answers `retire_exempt: true`). Its clocks keep running while it is held, so a f
 retire at a tournament round after the hold is cleared if the gate has not started its look by then (the gate
 round comes every few minutes, the tournament hourly). A hold on a family without `gate_ready` protects nothing.
 The hold does not touch tuition of a version whose review and audit already passed (`bands.read`).
+
+The gate's data (Oct 1, 2026). A look needs the gate image to hold the holdout of every root the program needs. On
+Sept 30, three looks of a GOOGL/MSFT program failed with "no holdout days for GOOGL, MSFT". Each counted as a try, and
+the third wrote a stage "gym" refusal that bars the program from the incubator, although no verdict was made.
+- **Each gate box lists its holdout when it starts**, by file name only (holdout-dated `nbbo/<ROOT>/*.parquet` and
+  `underlying/<ROOT>/*.parquet`; no file is opened and the gate's capability is never minted). Its roots with the
+  image's full count of both (the count most roots have, 184 sessions on the current images) are the box's
+  `holdout_roots` (the `boxes` row and the `box_ready` event); a root copied only in part is not among them. A holdout
+  job needing another root fails at once as missing data. A store with no holdout at all fails the box, records the
+  image as holding none, and fails the holdout looks waiting for a gate box as missing data. The pool keeps the
+  coverage per gate image in kv `gate_coverage`, with the roots any Gym exit-3 answer named since ("no holdout days
+  for GOOGL, MSFT in ..."). An exit-3 answer that names no root (no store, a missing package) is a fault of the box,
+  not missing data: it is not recorded, and its look fails and counts a try as before. An image that lacks a root of
+  `gym.roots` raises one `gate_coverage` alert.
+- **The record is per image**, keyed by `gym.gate_checkpoint`, so each nightly publish starts a fresh one. To clear a
+  record that is wrong (say a Gym fault that named roots the image holds), drop that image's entry from kv
+  `gate_coverage` on the House:
+  `s=SwarmStore('/workspace/state'); c=s.get('gate_coverage') or {}; c.pop('<checkpoint>', None); s.put('gate_coverage', c)`.
+  The next gate box lists the image again.
+- **The gate refuses a look up front** when that record, or the ready file's `holdout_roots` while its chain is the
+  gate, says the image lacks a root the program needs. No look is marked, no try is counted, nothing is refused,
+  `gate_ready` stays, the round lists the family under `waiting`, and one `gate_missing_data` alert is raised per
+  program, image and gap (kv `gate_missing:<run_sha>`). The look runs once `gym.gate_checkpoint` names an image that
+  holds those roots (a new image starts with no record).
+- **A look that fails for missing data all the same** (the first look on an image no gate box has listed yet) is owed
+  again on the same terms: no try, no refusal, no incubator bar, the same alert.
+- **Any other failure counts a try** (kv `look_tries:<run_sha>`, kept by program). The third writes the "gym" refusal
+  and its incubator bar, as before. The `look_failed_three_times` alert now fires at every count from three on (its
+  `tries` field says which). A fourth failure, as when a revived family runs the same program, therefore parks the
+  version loudly instead of silently. After fixing the gate, reset the count: on the House,
+  `SwarmStore('/workspace/state').put('look_tries:<run_sha>', 0)`.
+- **A look that never reached a gate box** (the queue gave up on it after the run timeout because no gate box became
+  ready) still counts a try. The try is the loop's bound: a look holds the gate's round for up to the run timeout, and
+  gate boxes have no probe fork to find the image back. A store with no holdout is the one start-up failure that is
+  missing data (above).
+- **Sept 30's leftovers are not changed by this release.** The GOOGL/MSFT program of
+  `googl-lags-msft-ai-cloud-qqq-flat` v27 still has `look_tries` 3, the stage "gym" refusal row and its incubator bar,
+  from three failures this release treats as missing data. The revived `-r` family runs the same program. A single
+  real failure there makes the count 4 and parks it at once (with the alert). Reset the count once the gate is right
+  (above). Whether the refusal row and the bar stand is the owner's call: should an infrastructure refusal bar a
+  program from the incubator?
 
 Deploy impact (R3): the rule applies at once to every family that is already past it. On Sept 27 (start 72, floor
 44, 74 alive) about 29 families were past it, nearly all long-refuted placeholders, so the first tournament round and

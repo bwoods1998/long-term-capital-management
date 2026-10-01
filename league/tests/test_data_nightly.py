@@ -417,7 +417,8 @@ class Schedule(unittest.TestCase):
                 calls.append(day)
                 if len(calls) == 1:
                     raise RuntimeError("vendor unavailable")
-                return {"day": day.isoformat(), "checkpoint": "sbcp_new", "roots": ["SPY"]}
+                return {"day": day.isoformat(), "checkpoint": "sbcp_new", "roots": ["SPY"], "base_checkpoint": "sbcp_gate",
+                        "holdout_roots": ["SPY"]}
             controller = nt.Controller(root, root / "ready.json", calendar(), run=run, clock=lambda: now[0])
             self.assertEqual(controller.tick()["phase"], "retry")
             self.assertFalse((root / "ready.json").exists())
@@ -444,3 +445,212 @@ class Schedule(unittest.TestCase):
             with self.assertRaises(ValueError):
                 nt.publish_ready(root / "ready.json", {"day": "2026-09-28"}, controller.clock())
             self.assertFalse((root / "ready.json").exists())
+
+
+class ChainIdentity(unittest.TestCase):
+    """THE CHAIN'S RULE (Oct 1, 2026): the forward chain names the gate image it extends, and the nightly never extends a
+    gate whose holdout lacks a root of the swarm. Sept 29-30: the chain extended the five-root gate while swarm.json named
+    the 25-root one, and its ready file silently replaced it."""
+
+    NOW = dt.datetime(2026, 9, 29, 6, 5, tzinfo=UTC)
+    DAY = dt.date(2026, 9, 28)
+
+    def test_each_day_names_the_gate_image_it_extends_and_the_swarm_takes_only_that_chain(self):
+        from league.swarm import settings as S
+
+        images = {"gate": {"current": {"box_id": "sb_gate", "version": "bm-25", "checkpoints": ["sbcp_base25", "sbcp_b"],
+                                       "roots": ["SPY", "XSP", "googl"]}}}
+        nightly, _, checkpoints = job(FakeData(self.DAY), FakeGate(), images, now=self.NOW)
+        result = nightly.run()
+        self.assertEqual((result["base_checkpoint"], result["holdout_roots"]), ("sbcp_base25", ["GOOGL", "SPY", "XSP"]))
+        self.assertEqual(images["gate"]["forward_days"]["2026-09-28"]["base_checkpoint"], "sbcp_base25")
+        self.assertEqual(images["gate"]["checkpoints"][-1], {"id": checkpoints[-1], "day": "2026-09-28",
+                                                             "at": self.NOW.isoformat(), "base": "sbcp_base25"})
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ready = nt.publish_ready(root / "gym-forward.json", result, self.NOW)
+            written = json.loads((root / "gym-forward.json").read_text())
+            self.assertEqual(written, ready)
+            self.assertEqual((written["base_checkpoint"], written["holdout_roots"]), ("sbcp_base25", ["GOOGL", "SPY", "XSP"]))
+            # The swarm takes the chain while swarm.json names its base, and not when it names another gate.
+            (root / "swarm.json").write_text(json.dumps({"gym": {"gate_checkpoint": "sbcp_base25", "roots": ["SPY", "GOOGL"]}}))
+            self.assertEqual(S.load(root, config={})["gym"]["gate_checkpoint"], checkpoints[-1])
+            (root / "swarm.json").write_text(json.dumps({"gym": {"gate_checkpoint": "sbcp_other", "roots": ["SPY"]}}))
+            self.assertEqual(S.load(root, config={})["gym"]["gate_checkpoint"], "sbcp_other")
+
+    def test_a_day_finished_without_its_gate_image_is_complete_but_never_published(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            controller = nt.Controller(root, root / "ready.json", calendar(),
+                                       run=lambda day: {"day": day.isoformat(), "checkpoint": "sbcp_legacy", "roots": ["SPY"]},
+                                       clock=lambda: dt.datetime(2026, 9, 29, 6, 5, tzinfo=UTC))
+            out = controller.tick()
+            self.assertEqual((out["phase"], out["published"]), ("complete", False))
+            self.assertFalse((root / "ready.json").exists(), "the swarm never sees a checkpoint it cannot place")
+            record = json.loads((root / "nightly.json").read_text())
+            self.assertEqual(record["completed"], {"2026-09-28": "sbcp_legacy"})
+            self.assertEqual(record["unpublished"]["day"], "2026-09-28")
+
+    def records(self, root, gate, swarm_roots):
+        (root / "data").mkdir(exist_ok=True)
+        (root / "data" / "images.json").write_text(json.dumps({"gate": {"current": gate}}))
+        (root / "data" / "data_box.json").write_text(json.dumps({"box_id": "sb_data"}))
+        (root / "swarm.json").write_text(json.dumps({"gym": {"roots": swarm_roots}}))
+
+    def test_the_job_refuses_to_extend_a_gate_whose_holdout_lacks_a_root_of_the_swarm(self):
+        import boxlib as bl
+
+        class Touched(Exception):
+            pass
+
+        class NoBoxes:
+            def __getattr__(self, name):
+                raise Touched(name)
+
+        with tempfile.TemporaryDirectory() as tmp, bl.using_state(Path(tmp) / "data"):
+            root = Path(tmp)
+            core = {"box_id": "sb_core", "version": "core-five", "checkpoints": ["sbcp_core"]}
+            # Sept 29-30: images.json's gate was the core-five image `images.py finish` recorded without its roots.
+            self.records(root, {**core, "roots": None}, ["SPY", "GOOGL", "MSFT"])
+            with self.assertRaises(RuntimeError) as caught:
+                nt.real_job(api=NoBoxes())
+            self.assertIn("refused to extend the gate", str(caught.exception))
+            self.records(root, {**core, "roots": ["SPY", "QQQ", "IWM", "XSP", "SPXW"]}, ["SPY", "GOOGL", "MSFT"])
+            with self.assertRaises(RuntimeError) as caught:
+                nt.real_job(api=NoBoxes(), swarm_root=root)
+            self.assertIn("no holdout for GOOGL, MSFT", str(caught.exception))
+            # A gate that holds them is extended (the job goes on to the boxes); so is any gate for a rehearsal, and
+            # `schedule`, which extends nothing, is never refused.
+            self.records(root, {**core, "roots": ["SPY", "GOOGL", "MSFT", "QQQ"]}, ["SPY", "GOOGL", "MSFT"])
+            with self.assertRaises(Touched):
+                nt.real_job(api=NoBoxes(), swarm_root=root)
+            self.records(root, {**core, "roots": None}, ["SPY", "GOOGL", "MSFT"])
+            with self.assertRaises(Touched):
+                nt.real_job(api=NoBoxes(), extending=False)
+            with self.assertRaises(Touched):
+                nt.real_job(api=NoBoxes(), rehearsal_gate="sb_rehearsal")
+
+    def test_a_refused_night_wakes_no_box_not_even_the_data_box(self):
+        import boxlib as bl
+        from unittest import mock
+
+        class Touched(Exception):
+            pass
+
+        def touched(*args, **kwargs):
+            raise Touched("a box was reached")
+
+        with tempfile.TemporaryDirectory() as tmp, bl.using_state(Path(tmp) / "data"):
+            root = Path(tmp)
+            self.records(root, {"box_id": "sb_core", "checkpoints": ["sbcp_core"], "roots": ["SPY", "QQQ"]},
+                         ["SPY", "GOOGL"])
+            with mock.patch.object(bl, "client", touched), mock.patch.object(bl, "ensure_running", touched):
+                # The daemon retries a refused night every 300 s: each retry must leave the data box asleep.
+                with self.assertRaisesRegex(RuntimeError, "refused to extend the gate"):
+                    nt.run_real(dt.date(2026, 9, 28), swarm_root=root)
+                with self.assertRaisesRegex(RuntimeError, "refused to extend the gate"):
+                    nt.run_real(dt.date(2026, 9, 28), swarm_root=root, dry_run=True)
+
+    GATE25 = {"box_id": "sb_gate25", "version": "bm-25", "checkpoints": ["sbcp_base25", "sbcp_base25b"],
+              "roots": ["SPY", "GOOGL"], "built_at": "2026-09-27T12:04:44Z"}
+
+    def test_the_job_refuses_a_chain_whose_tip_is_not_on_the_gate_image(self):
+        import boxlib as bl
+
+        def chain(tip, entries, built_at=self.GATE25["built_at"]):
+            return {"gate": {"current": {**self.GATE25, "built_at": built_at}, "current_checkpoint": tip,
+                             "checkpoints": entries}}
+
+        with tempfile.TemporaryDirectory() as tmp, bl.using_state(Path(tmp) / "data"):
+            root = Path(tmp)
+            (root / "swarm.json").write_text(json.dumps({"gym": {"roots": ["SPY", "GOOGL"]}}))
+            ok = [chain(None, []), chain("sbcp_base25", []),  # a fresh chain: the image itself
+                  chain("sbcp_c29", [{"id": "sbcp_c29", "day": "2026-09-29", "at": "2026-10-01T06:31:00+00:00"}]),
+                  chain("sbcp_c30", [{"id": "sbcp_c30", "day": "2026-09-30", "at": "2026-09-26T06:00:00+00:00",
+                                      "base": "sbcp_base25"}])]
+            for images in ok:
+                nt.preflight(images, root)
+            # images.py replaced `current` and left the chain of the image before it: a re-fork from its tip would
+            # carry the old image's holdout under the new image's name.
+            stale = [chain("sbcp_c29", [{"id": "sbcp_c29", "day": "2026-09-29", "at": "2026-09-30T06:05:00+00:00"}],
+                           built_at="2026-10-02T09:00:00Z"),
+                     chain("sbcp_c30", [{"id": "sbcp_c30", "day": "2026-09-30", "at": "2026-10-02T06:05:00+00:00",
+                                         "base": "sbcp_core5"}]),
+                     chain("sbcp_unrecorded", [])]
+            for images in stale:
+                with self.assertRaisesRegex(RuntimeError, "chain's tip .* is not proven on the gate image"):
+                    nt.preflight(images, root)
+
+    def test_a_day_an_earlier_release_checkpointed_is_published_with_its_proven_image(self):
+        entry = {"id": "sbcp_legacy", "day": "2026-09-28", "at": "2026-10-01T06:31:00+00:00"}
+        images = {"gate": {"current": dict(self.GATE25), "current_checkpoint": "sbcp_legacy", "checkpoints": [entry],
+                           "forward_days": {"2026-09-28": {"checkpoint": "sbcp_legacy", "roots": ["SPY"]}}}}
+        nightly, _, _ = job(FakeData(self.DAY), FakeGate(), images, now=self.NOW)
+        result = nightly.run()
+        self.assertTrue(result["already"])
+        self.assertEqual((result["base_checkpoint"], result["holdout_roots"]), ("sbcp_base25", ["GOOGL", "SPY"]))
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertNotIn("published", nt.publish_ready(Path(tmp) / "ready.json", result, self.NOW))
+        images["gate"]["checkpoints"] = [{**entry, "at": "2026-09-26T06:00:00+00:00"}]  # from before the image: unproven
+        nightly, _, _ = job(FakeData(self.DAY), FakeGate(), images, now=self.NOW)
+        result = nightly.run()
+        self.assertNotIn("base_checkpoint", result)
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIs(nt.publish_ready(Path(tmp) / "ready.json", result, self.NOW)["published"], False)
+
+
+class StampReady(unittest.TestCase):
+    """The deploy step: `stamp-ready` names the gate image in the legacy ready file the swarm already takes."""
+
+    NAMED = "sbcp_base25"
+    LEGACY = {"schema": 1, "day": "2026-09-29", "ready_at": "2026-10-01T06:32:00+00:00", "gate_checkpoint": "sbcp_c29",
+              "roots": ["GOOGL", "SPY"], "sip_coverage": {"status": "legacy_unverified"}}
+
+    def setUp(self):
+        import boxlib as bl
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        state = bl.using_state(self.root / "data")
+        state.__enter__()
+        self.addCleanup(state.__exit__, None, None, None)
+        (self.root / "data").mkdir()
+        (self.root / "swarm.json").write_text(json.dumps({"gym": {"gate_checkpoint": self.NAMED, "roots": ["SPY", "GOOGL"]}}))
+        self.images = {"gate": {"current": {"box_id": "sb_gate25", "checkpoints": [self.NAMED, "sbcp_b"],
+                                            "roots": ["SPY", "googl", "QQQ"], "built_at": "2026-09-27T12:04:44Z"},
+                                "current_checkpoint": "sbcp_c29",
+                                "checkpoints": [{"id": "sbcp_c29", "day": "2026-09-29", "at": "2026-10-01T06:31:00+00:00"}],
+                                "forward_days": {"2026-09-29": {"checkpoint": "sbcp_c29",
+                                                                "adopted": "2026-10-01T06:30:00+00:00"}}}}
+        (self.root / "data" / "images.json").write_text(json.dumps(self.images))
+        self.ready = self.root / "gym-forward.json"
+        self.ready.write_text(json.dumps(self.LEGACY))
+
+    def test_a_legacy_file_that_stands_is_stamped_with_its_image_and_the_gate_does_not_move(self):
+        from league.swarm import settings as S
+
+        dry = nt.stamp_ready(self.ready)
+        self.assertEqual(json.loads(self.ready.read_text()), self.LEGACY, "a dry run writes nothing")
+        self.assertEqual(dry["would_write"]["base_checkpoint"], self.NAMED)
+        out = nt.stamp_ready(self.ready, apply=True)
+        written = json.loads(self.ready.read_text())
+        self.assertEqual((out["stamped"], out["gate_checkpoint"]), (True, "sbcp_c29"))
+        self.assertEqual((written["base_checkpoint"], written["holdout_roots"]), (self.NAMED, ["GOOGL", "QQQ", "SPY"]))
+        self.assertEqual({k: v for k, v in written.items() if k not in ("base_checkpoint", "holdout_roots")}, self.LEGACY)
+        # The swarm now takes it without images.json, and a second stamp has nothing to do.
+        (self.root / "data" / "images.json").unlink()
+        self.assertEqual(S.load(self.root, config={})["gym"]["gate_checkpoint"], "sbcp_c29")
+        self.assertFalse(nt.stamp_ready(self.ready, apply=True)["stamped"])
+
+    def test_a_file_the_swarm_does_not_take_is_never_stamped_and_a_running_daemon_blocks_it(self):
+        from locking import process_lock
+
+        self.images["gate"]["current"]["built_at"] = "2026-10-02T00:00:00Z"  # the chain predates the image
+        (self.root / "data" / "images.json").write_text(json.dumps(self.images))
+        with self.assertRaisesRegex(RuntimeError, "the swarm does not take this ready file"):
+            nt.stamp_ready(self.ready, apply=True)
+        self.assertEqual(json.loads(self.ready.read_text()), self.LEGACY)
+        with process_lock(self.root / "data" / "nightly.lock"):
+            with self.assertRaisesRegex(RuntimeError, "another process holds"):
+                nt.stamp_ready(self.ready, apply=True)

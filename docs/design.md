@@ -178,7 +178,10 @@ Agent count and simulated years measure activity; passing unseen evidence measur
     of it.
   - **The gate image** is a second sealed fork, without the key but with the holdout and forward
     days, used only by the gate and the nightly forward replays of Candidates. Its store carries a
-    `GATE` mark; the Gym opens sealed windows only on a store with that mark.
+    `GATE` mark; the Gym opens sealed windows only on a store with that mark. The swarm's gate is the image
+    `swarm.json` names. The nightly's forward chain stands in for it only while the chain extends that image and the
+    image holds a holdout for every root of the swarm; otherwise the named image is used without forward days
+    (the chain's rule, Oct 1, 2026: on Sept 29-30 a chain on the five-root image had replaced the 25-root gate).
 - **Gym boxes**: size-l forks of the Gym image, no network. Programs go in and results come out
   through Sail's file and exec APIs. Four to start, up to eight while the queue is long, asleep when
   it is short (the defaults; the live settings start six and allow sixteen).
@@ -424,6 +427,10 @@ diagnostician.
   positive; a day-block bootstrap one-sided 95% lower bound on mean daily P&L above zero, with a
   Holm-Bonferroni correction across every holdout look the swarm has made; holdout Sharpe at least
   half the validation Sharpe. **Researchers learn only pass or fail**, never the holdout's numbers.
+- **A look needs the data, and missing data is the image's fault, not the program's.** Before a look the gate checks,
+  from file names only, that its image holds the whole holdout of every root the program needs. A look it cannot make
+  waits with no try counted, and a look that fails because the Gym names a root it lacks is owed again the same way.
+  Neither is a refusal or an incubator bar. Only other failures count toward the three tries.
 - **Forward days never reach a Gym box.** Nightly forward replays run on Candidates only; they move
   bands and never select among Gym programs.
 - **The evaluator is part of the evidence** (Release A).
