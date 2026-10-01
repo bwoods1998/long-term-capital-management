@@ -1102,7 +1102,7 @@ class LaneCycle(unittest.TestCase):
         self.heldout = self.temp / "heldout"
         self.heldout.mkdir(mode=0o700)
         pinned = {}
-        for name in ("research", "data"):
+        for name in ("research", "data", "execution"):
             raw = json.dumps({"schema": 1, "judge": name, "private": f"test pool {name}"}).encode()
             (self.heldout / f"{name}.json").write_bytes(raw)
             pinned[name] = dataclasses.replace(lanes.LANES[name], heldout_pool=labmod.sha(raw))
@@ -1323,6 +1323,11 @@ class LaneCycle(unittest.TestCase):
         self.promoted = self.clock() + 1000.0
         self.clock.advance(7 * 86400 + 1000.0)
         return self.promoted
+
+    def after_close(self):
+        """The clock to 21:00Z of its day at the earliest (after New York's close): an evidence-reset tree's deploy step
+        refuses in session, and the test clock starts on a Monday morning in New York."""
+        self.clock.t = max(self.clock(), (self.clock() // 86400) * 86400 + 21 * 3600)
 
     def deploy_rows(self, release="cand-release", promoted_at=None, digest=None, key=None):
         digest = digest or self.lab.worklist.get(key or self.key).carry["_proposal"]["release_digest"]
@@ -1713,6 +1718,7 @@ class LaneCycle(unittest.TestCase):
         for lane in ("data", "execution"):
             with self.subTest(lane=lane):
                 key, digest = self.window_candidate(lane)
+                self.after_close()
                 self.go_live()
                 self.clock.t = self.promoted - 500  # the review and the deploy step come after the watchdog's first row
                 review(self.lab, key)
@@ -1733,6 +1739,7 @@ class LaneCycle(unittest.TestCase):
         with patch.object(self.lab, "clock", lambda: lanes.epoch_of("2026-10-01T15:00:00Z")):
             with self.assertRaisesRegex(labmod.ImprovementError, "outside New York's session"):
                 self.lab.deploy(key)
+        self.after_close()
         ticket = self.lab.deploy(key)["ticket"]
         self.assertEqual(ticket["release_class"], "evidence_reset")
         self.go_live()

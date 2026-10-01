@@ -186,10 +186,11 @@ class PersistentDecisions(HarnessCase):
         proposal = self.lab.worklist.get(key)
         self.lab.worklist.report(key=key, kind=proposal.kind, summary=proposal.summary, evidence=[], agents=[], source="operator", severity="high",
                                  details={"source": {"digest": "not-the-running-tree"}})
+        head = self.candidate()
         with self.assertRaisesRegex(labmod.ImprovementError, "author"):
-            self.lab.stage(key, self.candidate())
+            self.lab.stage(key, head)
         with self.assertRaisesRegex(labmod.ImprovementError, "baseline commit"):
-            self.lab.stage(key, self.candidate(), author="author-agent")
+            self.lab.stage(key, head, author="author-agent")
         self.lab.worklist.report(key=key, kind=proposal.kind, summary=proposal.summary, evidence=[], agents=[], source="operator", severity="high",
                                  details={"source": {"digest": labmod.tree_digest(self.release)[0]}})
         self.lab.stage(key, "HEAD", author="author-agent")
