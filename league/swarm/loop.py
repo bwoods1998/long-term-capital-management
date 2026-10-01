@@ -2,14 +2,17 @@
 
 One process beside the House loop, niced. Its threads:
 
-- RESEARCHERS: `researcher.concurrency` workers, each taking the next family (the bandit's share first,
-  then the longest-waiting) and running one cycle, while the guard allows; a family that held waits out its hold
-  (`Scheduler`'s durable event-driven holds);
+- RESEARCHERS: up to THE CONCURRENCY's workers (allocation.py, Release B: `researcher.concurrency` as the spend plan's
+  level; only with an explicit `allocation.plan_usd_per_hour`, expanded up to `allocation.max_concurrency` while useful
+  experiments wait and the research spend, Sail and Gym, is under the plan, and contracted while it runs over), each
+  taking the next family (THE TURNS: the lowest start tag among the ready, so a family's turns follow its share under
+  contention) and running one cycle, while the guard allows; a family that held waits out its hold (`Scheduler`'s
+  durable event-driven holds);
 - THE GYM POOL's dispatchers (one per box) and forks (`pool.py`);
 - ROUNDS on their own threads so none blocks another: the tournament (hourly), the idle pass between its rounds (every
   five minutes, the idle rule's retirements alone: `Tournament.idle_pass`), the gate (every few
-  minutes), the nightly forward (once a day), the architect (`architect.every_seconds`, four hours by default), the
-  diagnostician (every few
+  minutes), the nightly forward (once a day), the architect (`architect.every_seconds`, four hours by default; THE
+  LIBRARY's retrieval first, then the strategist, then the architect: `architect_pass`), the diagnostician (every few
   minutes, Claude on the stuck and the nearly-there families);
 - RESEEDS (the sprint, Sept 26): below `population.start` while the architect is not due, the seeds' mechanisms are
   founded again on admitted roots they never tried (`reseed`, at most `population.reseed_max` a pass);
@@ -40,12 +43,14 @@ import traceback
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from . import allocation as allocation_mod
 from . import HEARTBEAT, LOCK_FILE, LOG_FILE, PID_FILE, settings as settings_mod
-from .architect import Architect, GraveyardDigest
+from .architect import AGENDA_KEY, Architect, GraveyardDigest
 from .diagnostician import Diagnostician
 from .funding import FundingWatch
 from .gate import Gate
 from .guard import SailGuard, provider_reader
+from .library import build_library
 from .pool import GymPool
 from .researcher import Researcher, dormant_count, dormant_limit, migrate_objective
 from .seeds import SEEDS, family_spec, program_for
@@ -110,7 +115,12 @@ def hold_wait(settings: Mapping[str, Any], dormant: int) -> float:
 
 
 class Scheduler:
-    """Which family runs next: the bandit's share first, then the longest wait; one cycle per family at a time.
+    """Which family runs next: THE TURNS (allocation.py's `StrideTurns`, Release B): among the families ready now, the one
+    whose start tag is lowest, so under contention a family's turns follow its share; with `allocation.max_wait_seconds`
+    (0, off, by default) a ready family that has had no turn for that long first, out of order; one cycle per family at a
+    time (`allocation.scheduler` "legacy": the bandit's share first as a minute's head start per unit of relative share,
+    then the longest wait). Each take counts the useful experiments left waiting (`queued_useful`: the ready families
+    `useful_ids`, the tournament's last allocation, names), which the swarm's concurrency reads.
 
     By default a hold is persisted in family state and resumes only when its evidence/context key changes.
     Time, weight changes and process restarts never buy another model call. Trials, gate state, rewrites,
@@ -138,6 +148,11 @@ class Scheduler:
         #: family -> (since, until, trials, gate_ready, band, dormant) while it waits out a hold (HOLD BACKOFF).
         self.held: dict[str, tuple[float, float, int, bool, Any, int]] = {}
         self.soon = float("-inf")  # when the last `take` that found nothing saw the next family ready (`pause`)
+        self.turns = allocation_mod.StrideTurns()  # THE TURNS' passes (in memory: a restarted swarm starts them afresh)
+        #: Useful experiments (allocation.queued_useful) ready and left waiting at the last take: THE CONCURRENCY's queue.
+        self.queued_useful = 0
+        #: The families the tournament's last allocation named useful experiments (the Swarm wires it to its tournament).
+        self.useful_ids: Callable[[], Any] = lambda: ()
 
     @property
     def event_holds(self) -> bool:
@@ -218,6 +233,7 @@ class Scheduler:
         alive = {f["id"] for f in fams}
         for fid in [fid for fid in self.held if fid not in alive]:
             del self.held[fid]
+        self.turns.forget(alive)
 
     def pause(self) -> float:
         """How long a worker that found nothing to take sleeps: until the next family could be ready as the last such
@@ -246,15 +262,26 @@ class Scheduler:
                     soon = min(soon, at)
             if not ready:
                 self.soon = soon
+                self.queued_useful = 0
                 return None
             n = max(1, len(fams))
-            # A family's share (the bandit's) buys it an earlier turn: a share at the average is worth nothing, twice it
-            # is worth a minute of waiting.
-            ready.sort(key=lambda f: (self.last.get(f["id"], 0) - 60.0 * (float(f.get("weight") or (1.0 / n)) * n - 1.0), f["id"]))
-            fid = ready[0]["id"]
+            c = allocation_mod.cfg(self.settings)
+            if c["scheduler"] == "legacy":
+                ordered = allocation_mod.legacy_order(ready, n, last=self.last)
+            else:
+                ordered = self.turns.order(ready, n, now=now, last=self.last, max_wait=c["max_wait_seconds"])
+            chosen = ordered[0]
+            fid = chosen["id"]
+            if c["scheduler"] != "legacy":
+                late = allocation_mod.StrideTurns.starving(fid, now=now, last=self.last, max_wait=c["max_wait_seconds"])
+                self.turns.took(fid, chosen.get("weight"), n, out_of_order=late)
+            try:
+                self.queued_useful = allocation_mod.queued_useful(ordered[1:], self.useful_ids())
+            except Exception:  # noqa: BLE001 - a misread queue is an empty one: nothing expands on it
+                self.queued_useful = 0
             self.running.add(fid)
             self.last[fid] = now
-            self.began[fid] = self.seen(ready[0])
+            self.began[fid] = self.seen(chosen)
             return fid
 
     def busy(self, fid: str) -> bool:
@@ -323,7 +350,8 @@ class Swarm:
 
     def __init__(self, root: str | Path, *, settings: Mapping[str, Any] | None = None, config: Mapping[str, Any] | None = None,
                  store: SwarmStore | None = None, router: Any = None, pool: Any = None, guard: Any = None, client: Any = None,
-                 clock: Callable[[], float] = time.time, sleep: Callable[[float], None] = time.sleep):
+                 clock: Callable[[], float] = time.time, sleep: Callable[[float], None] = time.sleep, library: Any = None,
+                 preflight: Any = None):
         self.root = Path(root)
         self.config = dict(config) if config is not None else None
         self.settings = dict(settings) if settings is not None else settings_mod.load(self.root, config=self.config)
@@ -342,12 +370,22 @@ class Swarm:
             if client is None:
                 client = _sail_client()
             pool = GymPool(self.store, client, self.settings, clock=clock, allowed=lambda kind: self.guard.allows(kind))
+            if preflight is None:
+                # THE PREFLIGHT goes with the Gym's pool it saves (`preflight.py`): a program that cannot run is refused
+                # on a synthetic session in the decider's sandbox, before a Train job is made. Tests hand in their pool.
+                from .preflight import Preflight
+
+                preflight = Preflight()
         self.pool = pool
         self.scheduler = Scheduler(self.store, clock=clock, settings=self.settings)
+        # THE LIBRARY (league/swarm/library.py): pre-2025 literature through the gateway, off until `research.enabled`.
+        self.library = library if library is not None else build_library(self.root, self.store, self.settings,
+                                                                         config=self.config or _config(), clock=clock)
         self.researcher = Researcher(self.store, self.router, self.pool, self.settings, clock=clock,
-                                     starter=lambda spec: program_for(spec))
+                                     starter=lambda spec: program_for(spec), library=self.library, preflight=preflight)
         self.researcher.pace = self.over_pace
         self.tournament = Tournament(self.store, self.pool, self.settings, clock=clock)
+        self.scheduler.useful_ids = lambda: self.tournament.useful  # THE CONCURRENCY's useful experiments
         self.gate = Gate(self.store, self.pool, self.router, self.settings, clock=clock)
         # The whole graveyard as one sealed digest, shared by the architect and the strategist (Sept 29, 2026): one pass's
         # two Claude calls send the same bytes, so the second reads the first's cache entry.
@@ -367,6 +405,9 @@ class Swarm:
         self.why_stopped = ""
         self._beat = float("-inf")
         self._pace = (float("-inf"), "", 0.0)
+        self._concurrency: tuple[float, dict[str, Any]] | None = None  # THE CONCURRENCY, cached for 10 s
+        self._concurrency_lock = threading.Lock()  # one refresh at a time (every worker reads it)
+        self._threads = False  # run() started the researcher threads (step() may add workers up to the ceiling)
 
     # ------------------------------------------------------------------ the population
     def seed(self) -> list[str]:
@@ -443,10 +484,21 @@ class Swarm:
                 "totals": self.store.totals(), "spend_last_hour": spend, "usd_per_hour": round(sum(spend.values()), 4),
                 "median_cycle_seconds": seconds[len(seconds) // 2] if seconds else None, "cycles_last_hour": len(recent),
                 "cycle_errors_last_hour": sum(1 for p in recent if p.get("error")),
-                "researcher_pace": self.pace_status(),
+                "researcher_pace": self.pace_status(), "library": self.library_status(),
                 "guard": getattr(self.guard, "last", {}), "braked": not self.guard.allows(), "pool": self.pool.status(),
                 "rounds": sorted(k for k, t in self.rounds.items() if t.is_alive()),
+                "concurrency": self.concurrency_status(),
                 "funding": getattr(getattr(self, "funding", None), "last", {})}
+
+    def library_status(self) -> dict[str, Any] | None:
+        """THE LIBRARY in the heartbeat: on or off, and today's counted calls against `research.requests_day`."""
+        try:
+            if self.library is None or not self.library.enabled():
+                return {"enabled": False}
+            total, by_family = self.library.used()
+            return {"enabled": True, "calls_today": total, "line": self.library.cfg.get("requests_day"), "families_today": len(by_family)}
+        except Exception as exc:  # noqa: BLE001 - the heartbeat never fails on it
+            return {"error": f"{type(exc).__name__}"}
 
     def heartbeat(self, extra: Mapping[str, Any] | None = None) -> None:
         body = {"pid": os.getpid(), "at": self.clock(), "release": str(CODE_DIR), "started_at": self.started_at,
@@ -509,10 +561,43 @@ class Swarm:
         """No new cycles/rewrites above their configured model pace (spend reads cached for at most 10 s)."""
         return self.pace_status()["paused"]
 
+    def concurrency_status(self) -> dict[str, Any]:
+        """THE CONCURRENCY (allocation.py `effective_concurrency`), read at most every 10 s: `researcher.concurrency` as the
+        spend plan's level; with an explicit `allocation.plan_usd_per_hour`, expanded up to `allocation.max_concurrency`
+        while useful experiments wait and the research spend (Sail models and Gym boxes in the last hour) is under the
+        plan, contracted in proportion while it runs over it. `workers`: the researcher threads that may take a family now
+        (the others sleep)."""
+        with self._concurrency_lock:
+            now = self.clock()
+            cached = self._concurrency
+            if cached is not None and 0.0 <= now - cached[0] < 10.0:
+                return cached[1]
+            try:
+                spent = (self.store.spent(list(allocation_mod.RESEARCH_SPEND), since=now - 3600)
+                         if allocation_mod.cfg(self.settings)["plan_usd_per_hour"] is not None else 0.0)
+                out = allocation_mod.effective_concurrency(self.settings, queued_useful=self.scheduler.queued_useful,
+                                                           running=len(self.scheduler.running), spent_usd_hour=float(spent))
+            except Exception as exc:  # noqa: BLE001 - a misread never stops research: the plan's level
+                base = allocation_mod.concurrency_bounds(self.settings)[0]
+                out = {"workers": base, "base": base, "why": f"unread ({type(exc).__name__}): the plan's level"}
+            self._concurrency = (now, out)
+            return out
+
+    def _grow_workers(self) -> None:
+        """Start researcher threads up to the concurrency's ceiling when the operator raised it (`allocation.max_concurrency`
+        or `researcher.concurrency`) after the start: only once run() started them."""
+        if not self._threads or self.stop.is_set():
+            return
+        ceiling = allocation_mod.concurrency_bounds(self.settings)[1]
+        for i in range(len(self.workers), ceiling):
+            t = threading.Thread(target=self._worker, args=(i,), name=f"researcher-{i}", daemon=True)
+            t.start()
+            self.workers.append(t)
+
     def _worker(self, index: int) -> None:
         idle = float(self.settings.get("researcher", {}).get("idle_seconds", 5))
         while not self.stop.is_set():
-            if not self.guard.allows() or not self.gym_ready() or index >= int(self.settings.get("researcher", {}).get("concurrency", 48)):
+            if not self.guard.allows() or not self.gym_ready() or index >= int(self.concurrency_status()["workers"]):
                 self.sleep(5.0)
                 continue
             if self.over_pace():
@@ -534,17 +619,34 @@ class Swarm:
                 except Exception:  # noqa: BLE001 - release never strands the family (it leaves `running` first)
                     log(f"release {fid} failed: {traceback.format_exc()[-800:]}")
 
+    def library_block(self) -> Any:
+        """THE LIBRARY's block for this pass (a `library.LibraryBlock`), or None: the accepted WHERE TO LOOK section's
+        `library_queries`, else the seed searches in rotation (`Library.queries_for`); a kept block inside its life makes
+        no call (`Library.retrieve`)."""
+        library = getattr(self, "library", None)
+        if library is None or not library.enabled():
+            return None
+        return library.retrieve(library.queries_for(self.store.get(AGENDA_KEY)), role="architect")
+
     def architect_pass(self) -> dict[str, Any]:
-        """The architect's round: the strategist first when it is due and this pass may add families (only the architect
-        reads its section, so it never writes one nobody reads), then the architect. The architect's call marks the
-        sealed digest for the five-minute cache only when the strategist's last Claude call just marked it and started
-        less than PAIR_SECONDS ago (the entry lives five minutes from the start of the call that wrote or last read it). A strategist that
+        """The architect's round: THE LIBRARY's retrieval first (a network step between the strategist's call and the
+        architect's could push the architect past the digest's five-minute cache entry), then the strategist when it is
+        due and this pass may add families (only the architect reads its section, so it never writes one nobody reads),
+        then the architect, both given the same block. The architect's call marks the sealed digest for the five-minute
+        cache only when the strategist's last Claude call just marked it and started less than PAIR_SECONDS ago (the
+        entry lives five minutes from the start of the call that wrote or last read it). A retrieval or a strategist that
         fails or raises leaves the agenda as it was and never stops the architect."""
         out: dict[str, Any] = {}
+        block = None
+        try:
+            if self.architect.want() > 0:
+                block = Swarm.library_block(self)
+        except Exception as exc:  # noqa: BLE001 - the pass goes on without the library
+            out["library"] = {"error": f"{type(exc).__name__}: {str(exc)[:200]}"}
         began = self.clock()
         try:
             if self.architect.want() > 0 and self.strategist.due():
-                out["strategist"] = self.strategist.run()
+                out["strategist"] = self.strategist.run(**({"library": block} if block is not None else {}))
         except Exception as exc:  # noqa: BLE001 - run() never raises; this is the belt to its braces
             out["strategist"] = {"error": f"{type(exc).__name__}: {str(exc)[:200]}"}
         ran = out.get("strategist") or {}
@@ -553,8 +655,9 @@ class Swarm:
         primed_at = ran.get("primed_at")
         since = float(primed_at) if isinstance(primed_at, (int, float)) and not isinstance(primed_at, bool) else began
         paired = bool(ran.get("primed")) and self.clock() - since < PAIR_SECONDS
-        return {**self.architect.run(paired=paired), **({"strategist": {k: ran.get(k) for k in (
-            "accepted", "route", "cost_usd", "reasons", "skipped", "error", "primed", "turns", "note")}} if ran else {})}
+        return {**self.architect.run(paired=paired, **({"library": block} if block is not None else {})), **({"strategist": {k: ran.get(k) for k in (
+            "accepted", "route", "cost_usd", "reasons", "skipped", "error", "primed", "turns", "note")}} if ran else {}),
+                **({"library": out["library"]} if "library" in out else {})}
 
     def round_alive(self, name: str) -> bool:
         thread = self.rounds.get(name)
@@ -656,6 +759,7 @@ class Swarm:
                     log(f"reseeded {len(born)}: {', '.join(born)}")
             if self.diagnostician.due():  # Claude's own funded line and daily budget, not the researchers' pace
                 self._round("diagnostician", self.diagnostician.run)
+        self._grow_workers()
         if self.clock() - self._beat >= float(self.settings.get("heartbeat_seconds", 20)):
             self._beat = self.clock()
             self.heartbeat()
@@ -701,6 +805,14 @@ class Swarm:
             raise RuntimeError("the swarm cannot select research without a known evaluator image and bundle")
         # An explicitly injected driver may have no bundle before its first fake box exists.
         # Production GymPool always builds its local bundle without a network call.
+        try:  # the incubator's bars from verdicts the event log alone holds (release B and earlier), before the adoption
+            from .incubator import backfill
+
+            filled = backfill(self.store)
+            if filled["barred"]:
+                log(f"incubator backfill: {len(filled['barred'])} programs barred from {filled['read']} gate events")
+        except Exception:  # noqa: BLE001 - never keeps the swarm from starting; it reads the same events next start
+            log(f"incubator backfill failed: {traceback.format_exc()[-800:]}")
         adopted_evaluator = adopt(self.store, evaluator)
         if adopted_evaluator["adopted"]:
             log(f"evaluator adopted: {adopted_evaluator['families']} families owe fresh evidence")
@@ -708,11 +820,14 @@ class Swarm:
         self.store.event("swarm.status", None, {"action": "started", "pid": os.getpid(), "release": str(CODE_DIR), "adopted": adopted,
                                                 "families": len(self.store.families(alive=True))})
         log(f"started: pid {os.getpid()}, release {CODE_DIR}, {len(self.store.families(alive=True))} families, {adopted} boxes adopted")
-        n = int(self.settings.get("researcher", {}).get("concurrency", 48))
+        # Every worker THE CONCURRENCY's ceiling allows (`researcher.concurrency`, or `allocation.max_concurrency` above it);
+        # those above the effective level sleep.
+        n = allocation_mod.concurrency_bounds(self.settings)[1]
         for i in range(max(n, 1) if not once else 0):
             t = threading.Thread(target=self._worker, args=(i,), name=f"researcher-{i}", daemon=True)
             t.start()
             self.workers.append(t)
+        self._threads = not once
         try:
             while not self.stop.is_set():
                 why = self.should_stop()

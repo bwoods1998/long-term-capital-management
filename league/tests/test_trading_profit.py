@@ -24,6 +24,16 @@ def position(pid, cash, qty=0, status='closed', **extra):
 
 
 class TradingProfitTest(unittest.TestCase):
+    def test_an_incubator_instance_is_its_own_source_and_the_house_keeps_its_own(self):
+        from league.trading_profit import HOUSE_UNLISTED, INCUBATOR_SUFFIX, source_of
+
+        self.assertEqual(INCUBATOR_SUFFIX, ':i')
+        self.assertEqual(source_of('fam', 'fam@3:i'), 'incubator')
+        self.assertEqual(source_of('fam', 'fam@3:t'), 'agent')
+        self.assertEqual(source_of('fam'), 'agent')
+        self.assertEqual(source_of('house:rebound-live', 'house:rebound-live@0:h'), 'house')
+        self.assertEqual(source_of('house:other', 'house:other@0:i'), HOUSE_UNLISTED)
+
     def test_empty_real_record_is_zero_and_retired_history_is_not_clipped(self):
         self.assertEqual(total([], {}), '0.00')
         self.assertEqual(total([position(i, '2.15') for i in range(200)], {}), '430.00')

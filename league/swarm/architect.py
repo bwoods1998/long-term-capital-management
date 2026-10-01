@@ -45,6 +45,16 @@ one mechanism class (structure x root group, the strategist's own `mechanism_cla
 proposal past it is not born, whatever the agenda says, and the request names the full classes. The pass's event counts
 the refused proposals by class (`class_capped`).
 
+THE BIRTH QUOTA (Release B, Oct 2026; league/swarm/allocation.py `BirthQuota`: on Sept 30 100% of eight hours' births were
+debit verticals, 532 of 730 in the day). One STRUCTURE FAMILY (single = long_single, long_call and long_put; butterfly;
+vertical; straddle; condor; calendar) may hold at most `allocation.births.max_share` (60%) of the last
+`allocation.births.window_hours` (24) of births, once there were `allocation.births.min_window` (10), and at most that share of
+the pass's want; its first `allocation.births.per_pass_min` (1) in a pass is always allowed. One quota holds for a whole
+pass (`pass_quota`), a truncated answer's retry included. Below `allocation.births.min_alive` living families (three quarters
+of `population.start`) the whole quota rests, so the population never thins below it for want of diversity. The request
+lists every structure family's births and which are full; a proposal past its quota is not born, and the pass's event
+counts the refusals by structure family (`structure_capped`). Forks and reseeds are not held to it.
+
 TRUNCATION SALVAGE (R11-3, Sept 29: 6 of 28 Sonnet passes were cut at the 32k output cap, and each cut fell to a Kimi-K3
 refill of 19-24 births). A Claude answer cut at max_tokens comes back to the pass (`ModelRouter.ask(claude_keep_truncated)`)
 instead of falling to Sail: the complete objects of its `families` array are admitted (`salvage_families`), and fewer than
@@ -52,6 +62,14 @@ SALVAGE_MIN (3) buys one retry on Claude alone at medium effort for what is stil
 Never a refill on Kimi-K3 after a cut: a retry Claude has no room or line for leaves the pass as it is, and the next pass
 routes as usual (to Sail when Claude still has none). The event's `truncated` says what was salvaged and retried.
 `claude.role_effort["architect"]` sets the pass's own effort (models.py).
+
+THE LIBRARY (Sept 29, 2026; league/swarm/library.py). While `research.enabled`, the pass retrieves a block of pre-2025
+literature first (`loop.Swarm.architect_pass`: the strategist's accepted `library_queries`, else the seed searches) and
+the request carries it after the GAPS, in the user turn (after the sealed digest's cached prefix, so it never touches the
+digest's cache entry). Each proposal may name in "literature" at most three ids from the block that the idea builds on;
+`admit` keeps only ids in the block and stores them in the family's spec (its brief says them), its notebook and its
+private `swarm.born` payload. A paper's finding is a hypothesis: the verifier judges every family alike. The pass's
+event gains `library` (the searches, the ids and how many proposals cited one).
 
 Each pass is a `swarm.architect` event; each birth a `swarm.born` event (the site's news).
 Standard library only.
@@ -844,6 +862,14 @@ difference; name its parent instead. If no row is close, say [] and why in the f
 
 GRAVEYARD_POINTER = "THE GRAVEYARD: every row is in the system prompt's graveyard blocks above; check every proposal against it."
 
+#: THE LIBRARY's addition to the system prompt, sent only with a retrieved block (Sept 29, 2026).
+LIBRARY_RULE = """
+
+THE LIBRARY in the request is research posted by the end of 2024. For each family add "literature": ["arXiv:<id>v<N>"],
+the ids from THE LIBRARY the idea builds on, at most three, [] for none. A paper's finding is a hypothesis for the Gym to
+test, never evidence: the verifier judges an idea from the literature exactly as any other, and published effects often
+shrink after publication or vanish after costs."""
+
 
 class Architect:
     def __init__(self, store: SwarmStore, router: Any, settings: Mapping[str, Any], *, clock: Callable[[], float] = time.time,
@@ -853,6 +879,7 @@ class Architect:
         self.settings = settings
         self.clock = clock
         self.digest = digest
+        self.pass_quota: Any = None  # THE BIRTH QUOTA of the pass `run` is making (one a pass, its retry's admits included)
 
     @property
     def cfg(self) -> Mapping[str, Any]:
@@ -981,6 +1008,21 @@ class Architect:
         cap = self.class_cap()
         return {cls: n for cls, n in sorted(self.classes().items()) if cap and n >= cap}
 
+    def birth_quota(self) -> Any:
+        """THE BIRTH QUOTA for a pass now (league/swarm/allocation.py `BirthQuota`: at most `allocation.births.max_share` of
+        the window's births and of the pass's want in one structure family): the pass's own while `run` makes one (so a
+        truncated pass's retry shares its counts), else a new one; None when the window cannot be read (the pass goes
+        without it: a quota is a diversity pressure, never a reason to stop births)."""
+        from .allocation import BirthQuota
+
+        if self.pass_quota is not None:
+            return self.pass_quota
+        try:
+            return BirthQuota(self.store, self.settings, now=self.clock(), want=self.want(),
+                              alive=len(self.store.families(alive=True)))
+        except Exception:  # noqa: BLE001
+            return None
+
     @staticmethod
     def differs(row: Any, known: set[str]) -> list[dict[str, str]]:
         """The graveyard rows a proposal says it differs from, and how: only rows that exist, at most three."""
@@ -991,17 +1033,19 @@ class Architect:
                 out.append({"row": str(item["row"]), "how": " ".join(str(item.get("how") or "").split())[:300]})
         return out[:3]
 
-    def prompt(self, *, full_graveyard: bool = False) -> str:
+    def prompt(self, *, full_graveyard: bool = False, library: Any = None) -> str:
         """The request. `full_graveyard` (the Claude route with the digest): THE GRAVEYARD is a pointer to the digest in
-        the system prompt; else the 20 newest rows, each lesson as `lesson_view` gives it."""
+        the system prompt; else the 20 newest rows, each lesson as `lesson_view` gives it. `library` (a
+        `library.LibraryBlock`): THE LIBRARY, after the GAPS and before the agenda."""
         alive = self.store.families(alive=True)
         living_ids = {f["id"] for f in alive}
         board = (self.store.get("leaderboard") or {}).get("board") or []
         # Of Validation the architect sees what a researcher sees (D2a): the line met or not and the checks passed.
         lines = {f["id"]: (f.get("state") or {}).get("validation_line") for f in alive}
+        from .allocation import SHARE_LEGEND  # local, as in `birth_quota`: the allocator loads only with a pass
         living = [{"family": r["family"], "band": r["band"], "structure": r["structure"], "roots": r["roots"],
                    "validation": diagnostics.validation_view({}, lines.get(r["family"])) if lines.get(r["family"]) else None,
-                   "share": r.get("share")} for r in board if r["family"] in living_ids][:60]
+                   "research_share": r.get("share")} for r in board if r["family"] in living_ids][:60]
         if not living:
             living = [{"family": f["id"], "structure": f["structure"], "roots": f["roots"], "mechanism": f["mechanism"][:160]}
                       for f in alive][:60]
@@ -1027,17 +1071,22 @@ class Architect:
         # R11-2: a class at `architect.max_alive_per_class` living families bears nothing more (`admit`); say which.
         full_text = ("\n\nFULL MECHANISM CLASSES (structure x root group: index, etf, names; each already has the most living "
                      "families one class may have, so a proposal in one is not born):\n" + json.dumps(full)) if full else ""
+        # Release B: THE BIRTH QUOTA (allocation.py `BirthQuota`): the structure families' births in the window, and which are full.
+        quota = self.birth_quota()
+        quota_text = f"{quota.text()}\n\n" if quota is not None else ""
         return (f"Propose {number} new families, on these roots only (the Gym "
-                f"holds their data): {roots}.\n\n{available}\n\nLIVING FAMILIES "
+                f"holds their data): {roots}.\n\n{available}\n\n{quota_text}In LIVING FAMILIES, {SHARE_LEGEND}.\nLIVING FAMILIES "
                 f"(leaderboard):\n{json.dumps(living)}\n\n{graveyard}\n\n"
                 f"RESEARCH COVERAGE (effort, not profitability; validated means evaluated, not passed):\n{coverage}\n\n{practice}"
                 f"GAPS (uncovered structure types by root; [] means all covered):\n{gaps}" + full_text
+                + (f"\n\n{library.text}" if library is not None and getattr(library, "text", "") else "")
                 + (f"\n\n{title}:\n{agenda}" if agenda else ""))
 
-    def admit(self, rows: Any, *, digest: bool = False) -> list[str]:
+    def admit(self, rows: Any, *, digest: bool = False, library: Any = None) -> list[str]:
         """Birth the well-formed proposals (the module docstring). Each birth's `differs_from` rows (the digest route's
         answer) go into its notebook; with `digest` and `architect.require_differs`, a proposal that names no real
-        graveyard row is refused."""
+        graveyard row is refused. Its "literature" ids that are in `library` (THE LIBRARY's block) go into its spec, its
+        notebook and its `swarm.born` payload; other ids are dropped."""
         from .strategist import mechanism_class  # a local import: the strategist imports this module
 
         cap = self.want()
@@ -1047,6 +1096,9 @@ class Architect:
         living = {(f["mechanism"].lower()[:80], tuple(f["roots"]), f["structure"]) for f in alive}
         per_class, classes = self.class_cap(), self.classes()
         self.capped: dict[str, int] = {}
+        quota = self.birth_quota()
+        before = dict(quota.refused) if quota is not None else {}
+        self.structure_capped: dict[str, int] = {}  # this call's refusals by the quota, by structure family
         allowed_roots = set(self.settings.get("gym", {}).get("roots", ["SPY", "QQQ", "IWM", "XSP", "SPXW"]))
         born = []
         for row in rows if isinstance(rows, list) else []:
@@ -1079,6 +1131,11 @@ class Architect:
             cited = self.differs(row, known)
             if strict and not cited:
                 continue
+            # THE BIRTH QUOTA (Release B): past its structure family's share of the window's births (or of this pass), a
+            # proposal is not born; counted by structure family in the pass's event (`structure_capped`).
+            if quota is not None and not quota.admits(structure):
+                self.structure_capped = {b: k - before.get(b, 0) for b, k in quota.refused.items() if k > before.get(b, 0)}
+                continue
             try:
                 lo, hi = sorted((max(0, min(45, int(dte[0]))), max(0, min(45, int(dte[1])))))
             except (TypeError, ValueError):
@@ -1091,6 +1148,9 @@ class Architect:
             spec = {"id": family_slug(row.get("slug") or mechanism), "mechanism": mechanism, "structure": structure, "roots": roots, "dte": [lo, hi],
                     "rejection": str(row.get("rejection") or "")[:400], "sketch": str(row.get("sketch") or "")[:800],
                     "lessons": lessons}
+            literature = library.resolve(row.get("literature"))[0] if library is not None else []
+            if literature:
+                spec["literature"] = literature
             # A slice a retired family searched (same structure and roots): the same idea again continues its lineage
             # (its trials and holdout looks, so re-proposing never resets the count its evidence is deflated by); another
             # idea is a new lineage that still counts the slice's trials (`prior_lineage`) but not its look ration. A
@@ -1121,16 +1181,21 @@ class Architect:
                 living.add((mechanism.lower()[:80], tuple(roots), structure))
                 classes[cls] = classes.get(cls, 0) + 1
                 alive.append(fam)
+                if quota is not None:
+                    quota.born(structure)
             if spec["sketch"]:
                 self.store.note(fam["id"], f"The architect's sketch: {spec['sketch']}")
             for item in cited:
                 self.store.note(fam["id"], f"The architect: differs from {item['row']}: {item['how']}")
+            if literature:
+                self.store.note(fam["id"], "The architect built this on: " + "; ".join(f"{x['id']} {x['title']}" for x in literature))
             self.store.event("swarm.born", fam["id"], {"parent": parent, "mechanism": mechanism, "structure": structure,
-                                                        "roots": roots, "origin": "architect"})
+                                                        "roots": roots, "origin": "architect",
+                                                        **({"literature": [x["id"] for x in literature]} if literature else {})})
             born.append(fam["id"])
         return born
 
-    def _digest_call(self, system: str, paired: bool) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    def _digest_call(self, system: str, paired: bool, library: Any = None) -> tuple[dict[str, Any], dict[str, Any] | None]:
         """The Claude-only arguments of a digest-route call (`claude_prefix`, `claude_system`, `claude_user`) and what the
         pass's event says of the digest; ({}, None) off the digest route. A digest that cannot be built is reported and the
         call goes without it (the 20 newest rows, as before)."""
@@ -1148,18 +1213,19 @@ class Architect:
                 "ttl": ttl, "ttl_mode": str(self.cfg.get("graveyard_digest_ttl") or "5m"), "paired": paired,
                 "chars": len(snap.sealed) + len(snap.tail), "resealed": snap.resealed}
         return {"claude_prefix": blocks, "claude_system": system + FULL_GRAVEYARD_RULE,
-                "claude_user": self.prompt(full_graveyard=True)}, info
+                "claude_user": self.prompt(full_graveyard=True, library=library)}, info
 
-    def _salvage_retry(self, system: str, paired: bool, began: float) -> dict[str, Any]:
+    def _salvage_retry(self, system: str, paired: bool, began: float, library: Any = None) -> dict[str, Any]:
         """R11-3's one retry after a cut answer: the same question (now counting the salvaged births) on Claude alone at
         medium effort; a second cut is salvaged too, and nothing retries after it. Its `born_ids`, route, cost and why it
-        made nothing, if so (`kind`: "line" or "no_room" when Claude had no room for it)."""
+        made nothing, if so (`kind`: "line" or "no_room" when Claude had no room for it). `library`: the pass's own block
+        (the same request, so the same literature and the same rule in `system`)."""
         from .models import ModelError
 
-        extra, info = self._digest_call(system, paired)
+        extra, info = self._digest_call(system, paired, library)
         called = self.clock()
         try:
-            answer = self.router.ask(role="architect", system=system, user=self.prompt(), family=None,
+            answer = self.router.ask(role="architect", system=system, user=self.prompt(library=library), family=None,
                                      key=f"swarm:architect:{int(began)}:salvage", openai_model=None, sail_profile=None,
                                      max_output=int(self.cfg.get("max_output_tokens", 12000)), effort="high", need_usd=2.0,
                                      claude=True, claude_effort="medium", claude_keep_truncated=True, **extra)
@@ -1170,15 +1236,15 @@ class Architect:
         cut = bool(answer.get("truncated"))
         rows = salvage_families(answer.get("text")) if cut else (answer.get("json") or {}).get("families")
         on_digest = bool(extra) and answer.get("route") == "claude"
-        born = self.admit(rows, digest=on_digest)
+        born = self.admit(rows, digest=on_digest, library=library)
         if on_digest and self.digest is not None and info is not None:
             self.digest.record_call(info["sha"], info["ttl"], called)
         return {"born_ids": born, "born": len(born), "proposed": len(rows) if isinstance(rows, list) else 0, "effort": "medium",
                 "route": answer.get("route"), "cost_usd": answer.get("cost_usd"), "truncated": cut}
 
-    def run(self, *, paired: bool = False) -> dict[str, Any]:
+    def run(self, *, paired: bool = False, library: Any = None) -> dict[str, Any]:
         """One pass. `paired`: the strategist's Claude call just sent (and marked) the same sealed digest, so this call
-        marks it too and reads it from the cache (`digest_ttl`)."""
+        marks it too and reads it from the cache (`digest_ttl`). `library`: THE LIBRARY's block for the request."""
         began = self.clock()
         self.store.put("architect_at", began)
         room = int(self.settings.get("population", {}).get("ceiling", 96)) - len(self.store.families(alive=True))
@@ -1186,13 +1252,18 @@ class Architect:
             out = {"born": [], "why": "the population is at its ceiling"}
             self.store.event("swarm.architect", None, out)
             return out
+        # THE BIRTH QUOTA (Release B): one for the whole pass (`pass_quota`): its request, its admits and a truncated
+        # answer's retry; the pass's event counts its refusals, and the next pass reads its own window.
+        self.pass_quota = None
+        self.pass_quota = self.birth_quota()
         info: dict[str, Any] | None = None
         try:
             # SYSTEM itself while Train is 2022-2024; else the running swarm's span (its store's migrated objective)
             system = settings_mod.train_span_text(SYSTEM, settings_mod.objective_span(self.store.get("train_objective")))
-            extra, info = self._digest_call(system, paired)
+            system += LIBRARY_RULE if library is not None else ""
+            extra, info = self._digest_call(system, paired, library)
             # A cut Claude answer comes back to be salvaged (R11-3), never falling to a full refill on Sail.
-            answer = self.router.ask(role="architect", system=system, user=self.prompt(), family=None,
+            answer = self.router.ask(role="architect", system=system, user=self.prompt(library=library), family=None,
                                      key=f"swarm:architect:{int(began)}", openai_model=self.cfg.get("openai_model"),
                                      sail_profile=str(self.cfg.get("sail_profile", "k3_balanced")),
                                      max_output=int(self.cfg.get("max_output_tokens", 12000)), effort="high", need_usd=2.0,
@@ -1200,6 +1271,7 @@ class Architect:
                                      **extra)  # Claude first; Astra every other pass if openai_model
         except Exception as exc:  # noqa: BLE001
             out = {"born": [], "error": str(exc)[:300]}
+            self.pass_quota = None
             if info is not None:
                 out["digest"] = info
             self.store.event("swarm.architect", None, out)
@@ -1207,10 +1279,14 @@ class Architect:
         truncated = bool(answer.get("truncated"))
         rows = salvage_families(answer.get("text")) if truncated else (answer.get("json") or {}).get("families")
         on_digest = bool(extra) and answer.get("route") == "claude"
-        born = self.admit(rows, digest=on_digest)
+        born = self.admit(rows, digest=on_digest, library=library)
         capped = dict(getattr(self, "capped", {}) or {})
         out = {"born": born, "proposed": len(rows) if isinstance(rows, list) else 0, "route": answer.get("route"),
                "model": answer.get("model"), "cost_usd": answer.get("cost_usd"), "seconds": round(self.clock() - began, 1)}
+        if library is not None:
+            cited = [library.resolve(r.get("literature"))[0] for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+            out["library"] = {"queries": list(library.queries), "ids": list(library.ids), "cited": sum(1 for c in cited if c),
+                              "cited_ids": sorted({x["id"] for c in cited for x in c})}
         if answer.get("route") == "claude":
             usage = answer.get("usage") or {}
             out["usage"] = {k: usage[k] for k in USAGE_KEYS if k in usage}
@@ -1231,12 +1307,15 @@ class Architect:
             # Claude cannot make (no room, no line) leaves the pass as it is: the next pass routes as usual.
             out["truncated"] = {"salvaged": len(rows), "born": len(born)}
             if len(rows) < SALVAGE_MIN and self.want() > 0:
-                retry = self._salvage_retry(system, paired, began)
+                retry = self._salvage_retry(system, paired, began, library)
                 out["born"] = born + retry.pop("born_ids")
                 for cls, n in (getattr(self, "capped", {}) or {}).items():
                     capped[cls] = capped.get(cls, 0) + n
                 out["truncated"]["retry"] = retry
                 out["seconds"] = round(self.clock() - began, 1)
+        quota, self.pass_quota = self.pass_quota, None  # the pass is made (its retry included)
+        if quota is not None and quota.refused:
+            out["structure_capped"] = dict(quota.refused)  # proposals refused by the birth quota, by structure family
         if capped:
             out["class_capped"] = capped  # proposals refused by the class cap, by class
         self.store.event("swarm.architect", None, out)
@@ -1248,4 +1327,4 @@ __all__ = ["Architect", "SYSTEM", "GraveyardDigest", "Digest", "lesson_view", "p
            "locked_text", "fit", "AGENDA_KEY", "SEAL_KEY", "CPT_KEY", "LAST_KEY", "DIGEST_HEADER", "FULL_GRAVEYARD_RULE",
            "GRAVEYARD_POINTER", "SECTION_MAX", "AGENDA_LOCKED_MAX", "MAX_DIGEST_BYTES", "COMPOSED_AGENDA_TITLE",
            "LEGACY_AGENDA_TITLE", "USAGE_KEYS", "ASCII_MAP", "is_operator", "operator_ids", "operator_scale", "LEVELS",
-           "LIST_LEVEL", "WHERE_HEADER", "DIGEST_FORMAT"]
+           "LIST_LEVEL", "WHERE_HEADER", "DIGEST_FORMAT", "LIBRARY_RULE"]

@@ -21,37 +21,303 @@ on branch `run/options-swarm-2026-09-26`) has the detail.
 
 ## Not yet deployed
 
-### Release A: planned for 20:05Z Sept 30 or later, evidence reset 1
+### Release B: planned overnight Sept 30 to Oct 1, before 13:25Z; evidence reset 2
 
-Release A is branch `release/a-20260930` (PR #450):
+Release B is branch `release/b-20261001` (PR #454): main `777b894f` (Release A) plus four reviewed pull requests and the
+gateway's KV binding:
+- #451, the incubator's live route and money row (B1; money path: two reviews, a fix round and a verify review);
+- #445, L1, the cohort keep;
+- #447, the research library (it supersedes #428);
+- `aa435f9e`, the library's KV binding;
+- #453, the evaluator-adoption fixes.
+
+The House runs Release A, `20260930T200604Z-3bf48c3f8f9f` (main `777b894f`).
+
+- **When.** B changes `league/live`, the constitution and the gateway, so it is a money-path release under D8. It
+  deploys overnight, before 13:25Z Oct 1, and never 19:30-20:00Z. The gateway deploys first (the library's code and its
+  KV binding), then the House.
+- **The money digest moves** `a3e2aa7c` → `42c4a3af` (`PINNED_DIGEST` `fcf8d735` → `595228a6`): the incubator's row,
+  `options_money.incubator`. **Re-ratify at once** after the House promotes (`python3 scripts/live_trading.py
+  --ratify`). Until then the grant reads inactive and every real entry is refused: the House live test, the calibration
+  and tuition. Exits are not affected.
+- **Planned evidence reset 2.** B changes `league/live`, so the execution fingerprint moves again. `league/gym` and
+  `LEAGUE_FILES` do not change, so the Gym bundle and the image stay Release A's. At B's first start:
+  - **Selection is re-adopted.** As at reset 1, every alive family's derived selection evidence is archived and
+    cleared: Train bests, candidates, robustness, drift, validation and review. Runs, versions, lineage trial counts and
+    consumed holdout looks stay. A validation already recorded on the same image and bundle may be judged again
+    (`Tournament.recorded_validation`).
+  - **Extension holds stay** (#453): only a new Gym image or bundle clears them, and neither changes.
+  - **Practice restarts.** A practice cohort is bound to its evaluator, which is the bundle, the fill model and the
+    execution fingerprint. So every cohort from Release A completes at B's first families pass, with the reason
+    "evaluator changed; a new version needs fresh practice". A (family, version) that practised under A never practises
+    again: practice after B starts from versions not yet practised.
+
+  Evidence from before and after the reset is never compared.
+- **After B, the freeze.** `league/gym`, `league/live`, `LEAGUE_FILES`, the fill model and the Gym image freeze for at
+  least five sessions. The freeze also lasts while any family holds Candidate, Probe or Sized, or has an
+  incubator-bound cohort. The only exceptions are rollbacks and fixes for bugs that block or endanger real orders.
+- **The House live test.** B changes its order path again. A new route (the incubator) takes its turn after the D2
+  families and before the test, and the test yields to an incubator refusal on its contracts, as to a family's. The
+  incubator keeps $100 of room for the test's structure. `house_test.py`, the test's program, bounds and clock are
+  unchanged. The change is to be recorded as a deviation in the private addendum.
+- **Operator steps:** [docs/operations.md](docs/operations.md), "Release B: deploy, ratify, switch on".
+
+#### What Release B carries
+
+- **The incubator** (#451; `league/live/incubator.py`, `league/live/money.py`, `league/constitution.py`; money path).
+  It ships switched off.
+  - **The owner's terms.** Approved Sept 29, 14:51Z; the reading was settled Sept 30. A family that passes Train and
+    the drift screen on its own, shows positive live practice, and passed the gate's review and audit, trades one lot
+    of an approved real structure:
+    - at most $50 of maximum loss a structure, fees included;
+    - at most 4 structures held or working;
+    - the route stops for the ISO week once its net realized loss reaches $150.
+  - **The unit** is a practice cohort `(family, version)`. The incubator trades the cohort's frozen snapshot byte for
+    byte, never the family's current row, as the REAL, tuition-flagged instance `<family>@<version>:i`.
+  - **The first look** (pre-registered, `money.practice_ok`) is taken once per cohort. It comes at the first session
+    pin at which the cohort's record before today holds at least 3 completed sessions and 10 program-closed trades
+    under the running evaluator. It passes only with:
+    - decision coverage of at least 0.80;
+    - realized practice P&L above $0 over the program's closes;
+    - above $0 over all closes;
+    - above $0 over all closes plus the open mark.
+
+    The look is recorded whether or not the switch is on, and a failed first look is final. Its verdict is saved before
+    its private `first_look` ledger row, and a cohort with a recorded `first_look` row is never looked at again (its
+    verdict is restored from the row). After a pass, each later session re-checks coverage and the three P&L tests on
+    the longer record, and a failure ends the incubation for good. A program with no edge passes roughly a third to a
+    half of the time: the weekly envelope bounds the cost, not the screen.
+  - **The facts** (`bands.incubator`). The family must be:
+    - alive, in the Gym band, with the version not demoted;
+    - carrying a Train-and-drift pass for the version under the current evaluator and Train objective;
+    - reviewed and audited by the gate on the version's run sha, under the current review contract;
+    - not refused, failed or demoted by the gate on that sha;
+    - not on D2's route.
+
+    With B2 (#444), the reader also keeps its own belt (`incubator_refusal`), whatever the mark says: no row for a
+    program the swarm barred (`incubator_barred`, which no adoption clears), one the gate's `review` names without a
+    readable pass and a passed audit, one whose incubator review or audit failed, a refused version, a failed look, or
+    a family whose verdict records cannot be read. A verdict is on the program (its run sha), so the belt reads these
+    in every family that holds the same code and params, alive or retired. It also refuses a program while the gate
+    owes it a bar (`incubator-bars-owed.json` beside the store; an unreadable file refuses everything).
+
+    B2 also makes sure B's own evaluator adoption cannot erase a failure. At every swarm start, before the adoption, a
+    backfill records as bars the failed reviews and audits that release B's gate left only in its event log
+    (`swarm.gate` events, and third unclear answers in the attempt counts). The adoption then records, before it
+    clears the selection, every failure held only in `review`, `gate_outcome` or the incubator's reviews, and every
+    bar the gate owes.
+
+    **In this release no family can meet them.** The Train-and-drift mark and the incubator's reviews are written by B2
+    (#444), which is not in B. Until B2 ships, the route pins nothing even with the switch on. First looks are still
+    taken and recorded.
+  - **The pins,** at the session's first families pass. At most 8 cohorts, one per family, by first-look return on risk,
+    each needing:
+    - the switch on and real money on;
+    - a first look that passed, and a record that still passes;
+    - the facts above, with the snapshot's run sha;
+    - no D2 route for the family (`:r` and `:t` come first);
+    - a real structure;
+    - a sampled program close that one lot could open under the $50 cap.
+
+    Every families pass checks again, and a failure sends the instance to exits only.
+  - **Keep (L2').** While the switch is on, a cohort whose first look passed keeps practising past its observation
+    target, to its bounded window. That is at most 8 cohorts. A failed read never ends an incubation: the last keep's
+    cohorts stay kept (never pinned on the untaken check), and the next families pass takes the checks again. While
+    the cohorts cannot be read, no cohort is completed at its target, for at most the day's 12 retries. The retries are
+    counted durably from the start of each pass, and only for passes 5 minutes apart: a forced pass spends none. If the
+    keep raises and the saved keep cannot be read, the House keeps the last keep it took, never nothing. Within a day
+    the keep only grows, and a cohort kept without a verdict stays kept for the rest of the day, across a restart.
+    Every first look and re-check, at the first pass or a retry, reads the record before today: the practice row keeps
+    its coverage and open mark as the last session left them (`prior_*`, stamped with the day they were copied and read
+    only on that day), so today's values never decide a check. A record without them, or with an older copy (a release
+    that never copies them stepped the row today, as after a rollback), decides nothing on P3 or P6 (P4 and P5 still
+    end it) and waits for the next session.
+  - **The caps**, in the House only (`money.plan_incubator`). The gateway cannot tell routes apart, so its own caps are
+    the backstop.
+    - One lot of at most $50 a structure, and $50 held or working per family.
+    - At most 4 structures held or working.
+    - **The weekly envelope:** this week's net realized loss, plus what is held, plus what is working, plus the new
+      unit, at most $150 at every open. Once the week's net realized loss reaches $150 at any close, the route is
+      stopped for the rest of the ISO week, whatever a later gain does. The stop is a latch, alerted once a week.
+    - 40 order legs a day, and 25% of the gateway's day cap.
+    - Room is kept in the book's and the day's caps for two Probe floors ($200) and, while it can still open, the
+      House live test's structure ($100).
+  - **The order of a minute.** The D2 families' intents go first (`:r`, `:t`), then the incubator's, then the House live
+    test's, then the calibration's. A working incubator open is cancelled ("yielded") when a D2 family's real order is
+    refused on its contracts after that open was placed.
+  - **Never evidence, never a promotion.** Its orders and positions are tuition-flagged. It is never:
+    - a forward row (`_export_real` skips every `:i`);
+    - a band move;
+    - in tuition's own day and week sums.
+
+    D2 stays the only route to Probe and Sized.
+  - **Its belt.** An `:i` instance must be real, tuition-flagged, and on a House with an incubator. Anything else asking
+    for a real order is refused with an error alert: "live: `<key>` is not a real tuition incubator instance and asked
+    for a real order: refused". A restored `:i` instance is tuition-flagged whatever its row says.
+  - **Where it shows:**
+    - `health.json` `options_live.incubator`: the switch, the table, the pins and refusals, the keep, the verdict
+      counts, the tally and the weekly stop;
+    - each instance's `incubator` flag;
+    - `python3 -m league.live --root /workspace/state --incubator`, read-only;
+    - private `live.incubator` ledger rows: first looks, ends, pins, yields and the weekly stop;
+    - on the site, the positions table's `source` "incubator" and a real structure's `route` "incubator"
+      (personal-site #17 is live).
+  - **The switch:** `live.incubator` in `swarm.json`, off by default. Only JSON `true` turns it on; any other value
+    reads off and is alerted once. Off, its instances go to exits only and their working opens are cancelled within a
+    minute. It is switched on outside a session, after the ratification.
+  - **The cost.** Expected value is negative until a family has a real edge: at most about $650 a month on average ($750
+    in a five-week month), plus residuals (broker fees above the book's estimate, a broken structure closed leg by leg).
+  - **The money row** `options_money.incubator`: `max_loss_usd` 50, `contracts` 1, `max_open` 4, `week_loss_usd` 150,
+    `min_sessions` 3, `min_trades` 10, `min_coverage` 0.80. The owner's terms are the loose end of each bound, so a row
+    may only tighten. Setting `max_open`, `week_loss_usd` or `max_loss_usd` to 0 stops the route. That is a new digest
+    and a ratification, but no evidence reset: the constitution is outside the fingerprint.
+  - **Earliest possible open:** Tuesday Oct 6, at 13:30Z, for cohorts that begin practice on Oct 1 (sessions Oct 1, 2
+    and 5).
+- **L1, the cohort keep** (#445; `league/swarm/tournament.py`, `league/swarm/practice.py`, `league/swarm/researcher.py`;
+  research side).
+  - **What it spares.** A living Gym family with an active practice cohort is spared the tournament's revision,
+    evaluation and idle rules, and the idle pass. The keep lasts until the cohort completes, fails or reaches its
+    session window. So a family is still alive when its sample is complete and the incubator takes its first look.
+  - **What it never spares:** the deflated-Sharpe rule, its researcher's or the diagnostician's own retire, the
+    population floor, or the operator's gate hold.
+  - **The record it reads** is the cohort's realized record before today. Until the cohort meets the sample (3 sessions
+    and 10 program closes), it is kept whatever that record says. After that, it is kept only while program-closed P&L
+    and all-closes P&L are both at least 0.
+  - **Not kept:**
+    - a cohort the House has not practised on 2 sessions while it practises others;
+    - a cohort whose practice row began before it.
+  - **At most `tournament.incubator_keep_max` (12) families;** 0 turns it off. Those that meet the sample come first,
+    by return on risk.
+  - **Its record:** one private `swarm.status` event a round (`incubator_keep`).
+  - **The researcher's status line.** The keep is saved (`cohort_keep`), so a kept family's researcher is told that
+    idleness is no reason to retire it. The retire tool stays offered.
+  - **An unreadable record** leaves the last good keep standing for an hour, then none. A fresh swarm process whose
+    first read fails takes the keep the last process saved for the rest of that hour, and does not overwrite it
+    before then (the release review's restart finding; swarm side, no evidence reset).
+  - **Research attention only:** no trial count, look, validation, gate, band or money rule reads it.
+- **The research library** (#447, supersedes #428; `gateway/lib/library.mjs`, `league/swarm/library.py`). It is off on
+  the House until `research.enabled`.
+  - **The gateway** serves `GET /v1/research/search`, `/read` and `/health`: arXiv's quantitative finance,
+    econometrics, statistics and machine learning on markets, posted before 2025 and nothing later. The date rule is
+    code, on every answer, and the House checks every answer again. Details: [gateway/README.md](gateway/README.md),
+    "The research library".
+  - **Pace:** arXiv's terms (one request every 3 s, one connection; arxiv.org's crawl delay of 15 s).
+    `LIBRARY_DAY_UPSTREAM` allows 600 requests to arXiv a UTC day for the whole floor; `"0"` stops them, and cache hits
+    still answer.
+  - **The House:**
+    - the Claude researchers get a `literature` tool;
+    - the architect and the strategist get a retrieved block of abstracts;
+    - the strategist names the next searches;
+    - Sail's profiles never see it.
+
+    Three lines: 300 calls a day for the floor, 12 a family, 2 a research cycle. Each call is a private
+    `swarm.research` event, never mirrored.
+  - **The Claude researcher band is off on the box**, so only the architect's and the strategist's blocks are used when
+    it is switched on.
+- **The gateway's KV cache for the library** (`aa435f9e`). The binding `LIBRARY` is namespace `ltcm-gateway-library`,
+  created 20:25Z Sept 30. Never delete it once a deployed version binds it: that would block `wrangler rollback` to
+  those versions.
+- **Evaluator adoption fixes** (#453; `league/swarm/evaluator.py`, `tournament.py`, `researcher.py`,
+  `scripts/extension_hold.py`).
+  - **Extension holds.** An adoption archives and clears the extension hold's records only when the Gym's image or
+    bundle changes. A `league/live`-only adoption, such as B's, keeps holds and the operator's clears.
+  - **Lapses.** A validation of a held version that falls below the checks ends the hold (`extension_lapsed`). A later
+    validation of it that meets the checks holds it again.
+  - **Idle wording.** After an adoption, the idle count restarts from `evaluator_trials`. Retirements then say "since
+    the evaluator changed", no longer "since Train's span changed".
+- **Not in B.** These ship when their reviews are clean. They change no file the fingerprint hashes, so none is a
+  reset:
+  - #444, the incubator's facts (B2);
+  - #438, the API-misuse preflight;
+  - #446, family cards;
+  - #448, information-value allocation;
+  - #449, harness lanes;
+  - #452, evaluator benchmarks.
+
+  B2 and any other change to a module the live path loads still deploy only outside the session.
+
+## 2026-09-30
+
+### 20:16-21:25Z, after Release A: operator changes (no deploy)
+
+- **20:16Z, the graveyard verdict migration** (R11-1, once; `scripts/graveyard_verdicts.py --apply`). It re-headed
+  1,611 lessons: DRIFT 1,046, THIN 393, EXHAUSTED 145 and STRESS 27, leaving 5 IDLE. The backup of every changed row
+  is in `state/backups/`.
+- **`swarm.json`:** `claude.role_effort.architect` "medium", `gym.max_boxes` 4 → 6 and `architect.max_refill` 4 → 12.
+  These are the settings planned for after Release A.
+- **The input capability card** is installed on the box. It is private and matches the Train image.
+- **The extension hold seed was not run.** Adoption clears `validation_version` first, so its list is empty by design.
+  Families are held when their engine-4 validation meets the checks.
+- **Near-miss revivals** (the operator's choice from the validation line). Five families, each a lineage continuation
+  that inherits its lineage's trials and holdout looks. None had a consumed look to inherit.
+
+  | Revived as | From | Inherited trials |
+  |---|---|---|
+  | `silver-industrial-cycle-debit-r` | `silver-industrial-cycle-debit` v58 | 993 |
+  | `etf-implied-move-ratio-follow-debi-3` | `etf-implied-move-ratio-follow-debit` v17 | 160 |
+  | `second-session-assimilation-call-r` | `second-session-assimilation-call` v31 | 204 |
+  | `tlt-realrate-metals-catchup-debit-r` | `tlt-realrate-metals-catchup-debit` v30 | 1,126 |
+  | `market-distraction-release-call-r-2` | `market-distraction-release-call` v11 | 112 |
+
+  Their notes ask for the validated version to be re-run unchanged under engine 4. The outcome is in the run record: the
+  numbers came back identical, and the deflated-Sharpe check now fails.
+- **The harness observer** has been on since 20:19Z, in observe mode (`state/harness/runtime.json`). No harness
+  improvement has been retained.
+- **20:42Z, architect agenda v15.** It steers only; D2 and every kill test are unchanged, and its text stays private.
+- **Pull requests:** #427 and #430 closed, shipped through Release A; #428 closed, superseded by #447.
+
+### 20:16Z, Release A: House release `20260930T200604Z-3bf48c3f8f9f` (main `777b894f`; PR #450), evidence reset 1
+
+- **The deploy.** Staged 20:06:06Z; promoted 20:06:42Z. The ten-minute watch passed with 0 error alerts, and the
+  verdict was PROMOTED at 20:16:42Z. The rollback target (`previous`) is `20260930T045038Z-cb6035693ef4`.
+- **Money digest unchanged** (`a3e2aa7c`); no re-ratify.
+- **Evidence reset 1, verified.**
+  - The swarm recorded its evaluator (`research_evaluator`: the Gym bundle `gym-engine-4-e1c896f8d304`, the image and
+    the execution fingerprint).
+  - A read-only lineage snapshot before and after the deploy compared 1,585 lineages and found 0 violations:
+    trials, inherited trials and consumed holdout looks were all unchanged, with 2 looks.
+- **The live guards, verified.**
+  - `house:rebound-live@0:h` is real, `observe` false, mode live.
+  - The tuition instance `googl-lags-msft-ai-cloud-qqq-flat@27:t` came back `exit_only` by design. Adoption dropped its
+    engine-3 tuition row: an engine-3 validation bundle, and a review with no `contract_sha`. Its open position is
+    kept, and the program's own closes manage it. The family must qualify again under engine 4 to trade tuition again.
+- **The restart test, passed.** `floor_box.py stop` at 20:19:00Z and `start` at 20:19:17Z, with that real position open.
+  - Both instances came back as above.
+  - The position was restored.
+  - `real_money` was true, and `failures` was empty.
+- **The induced-failure test, passed.** At about 20:50Z the swarm process was killed with SIGKILL.
+  - The House's swarm step restarted it within 15 s, with a fresh heartbeat.
+  - The alive families (15) and the runs (75,473) were unchanged: nothing was lost or duplicated.
+- **The first hour (20:17-21:21Z, read-only).**
+  - 0 cycle errors; House load 0.72.
+  - 136 Train runs ok, 17 disqualified (11%), 8 validations.
+  - Births: 7 debit verticals, 3 `long_single`, 2 `long_call`.
+  - The tournament spread its shares at about 10-13% a family.
+  - The population fell from 41 to the floor of 12 within 10 minutes of the deploy: researchers now retire the
+    mechanisms they refuted (R11b). The architect refills up to 12 births every 20 minutes, on Kimi-K3.
+
+Release A was branch `release/a-20260930` (PR #450), merged to main as `777b894f`:
 - main `f082cf5e`, which carries #431-#436, merged Sept 30 between 05:59 and 08:27Z;
 - plus six reviewed pull requests merged on the branch: #437, #443, #440, #439, #442 and #441.
 
-The House still runs the restoration fix, `20260930T045038Z-cb6035693ef4` (main `87af7a62`, #429).
-
-- **When.** Release A changes `league/live` and `league/gym`, so it is a money-path release under D8. It deploys only
-  after the session, at 20:05Z or later, which is also outside the House live test's pre-registered decision window.
-- **Money digest: unchanged** (`a3e2aa7c`). No re-ratify.
-- **Planned evidence reset 1.** The evaluator's execution fingerprint and the Gym bundle both move:
+- **Evidence reset 1.** The evaluator's execution fingerprint and the Gym bundle both moved:
   - the fingerprint (`league/swarm/evaluator.py`) hashes `league/gym`, `league/live` and `LEAGUE_FILES`;
   - engine 4 (#431), #436's driver, the Gym batch isolation (#440), the live guards (#437) and the decider (#443) all
     change those files.
 
-  The running release predates the evaluator record, so the first start of Release A adopts it for every alive family:
+  The release before it had no evaluator record, so Release A's first start adopted one for every alive family:
   - **Cleared, and archived in the family's state:** Train bests, candidates, robustness, drift, validation and review.
-    A Candidate, Probe or Sized family whose banded evaluator no longer matches returns to the Gym. Every family is in
-    the Gym today.
+    A Candidate, Probe or Sized family whose banded evaluator no longer matches returns to the Gym. Every family was in
+    the Gym.
   - **Kept:** runs, versions, lineage trial counts, refusals, notebooks and consumed holdout looks. Consumed holdout
     looks never reopen.
-  - **Practice** starts under the new evaluator. It needs Train runs under the new bundle, so the practice league is
-    expected to start nearly empty.
+  - **Practice** started under the new evaluator. It needs Train runs under the new bundle, so the practice league
+    started nearly empty.
 
   Evidence from before and after the reset is never compared.
-- **Release B is reset 2.** It carries the incubator and deploys overnight, before 13:25Z Oct 1. After it, the Gym and
-  live paths freeze (the run record, Sept 30).
-- **The House live test.** Release A changes the test's order path: the belt it passes, and the decider child it runs
-  in. The test's own program and bounds are unchanged. The change is to be recorded as a deviation in the test's
-  private pre-registration addendum, a close-out step after the deploy.
+- **The House live test.** Release A changed the test's order path: the belt it passes, and the decider child it runs
+  in. The test's own program and bounds are unchanged. The change is still to be recorded as a deviation in the test's
+  private addendum, with Release B's.
 - **Operator steps after promotion:** [docs/operations.md](docs/operations.md), "Release A: after promotion".
 
 #### On the release branch
@@ -303,7 +569,7 @@ The House still runs the restoration fix, `20260930T045038Z-cb6035693ef4` (main 
   - TLS, permanent DNS, permission and unknown failures are not retried.
   - The driver is part of the Gym bundle, so its version moves.
 
-## 2026-09-30
+### Earlier on Sept 30
 
 **16:41Z, operator change** (no deploy): the spend cut. The owner's Sept 30 answer was to cut burn to evidence, roughly
 halving the $84-104 a day. `swarm.json`:

@@ -76,6 +76,24 @@ check is not proof that a parameter affects decisions: verify the intended ablat
 Zero trades alone is not invalid code or evidence of no economic edge; diagnose coverage, order
 rejections and signal frequency separately.
 
+Then a runtime preflight runs the program in a sandbox on made-up sessions (synthetic quotes on your
+NEEDS, a flat account of the run's capital, the Gym's decision minutes). It refuses the run only when
+the Gym's static code check refuses the program, or when `decide` misuses the ctx API in a way no
+market data could change, on 25 calls in a row before any intent and at the same line on every one of
+several made-up markets (among them one where every selection is filled and any filter keeps
+contracts): a ctx list used as a mapping (`ctx.positions.items()`), a chain, an underlying or ctx
+itself read with `.get` or `[...]`, iterated or called, a field that does not exist, a key a ctx dict
+can never hold (a root outside NEEDS, a PARAMS key you never declared). Then you get the exception, its
+line and the ctx API to use: no version, job or trial, and a note in your notebook. A sweep loses only
+the variants refused, each listed under `refused_variants`, and runs the others. Any other error does
+not stop the run: a module body, NEEDS or PARAMS that fails to load on the House (its Python 3.11 and
+numpy 2.4 are older than the Gym's; the run goes ahead, but the live path loads every program on the House,
+so such a program can never practise or trade live until it loads on 3.11 too), an empty selection, a filter that keeps nothing, a
+None, a STATE key not yet written, a numeric edge case, a keyword argument. Its warnings (the error, its
+line, the API to use) come back with the run's answer under `preflight`. It checks only that the code
+runs; passing it says nothing about a run. The Gym itself is stricter: 25 errors in total over a run
+disqualify it, consecutive or not, so guard every lookup that can come back empty or None.
+
 Gate readers receive the actual runtime source fingerprint, state-initialization excerpts and
 available context fields. A rejection must locate the submitted code, name the relevant contract
 rule and describe a causal counterexample. Missing grounding requires another review; it never
@@ -134,7 +152,9 @@ chain), `dte`, `strike`, `is_call`, `side`, `ratio`], `entry`, `mark`, `natural`
 `id`, `pnl`, `reason`, `tag`), `ctx.rejects` (why your last intents were refused), `ctx.cash`,
 `ctx.equity`, `ctx.budget`, `ctx.buying_power`. Rules: `ctx.rules[root]` (`open_cutoff`,
 `close_cutoff`, `expiry_close`, `liquidation`, `near_money_share`, `types` allowed, `kind`
-equity/index). `ctx.params`.
+equity/index). `ctx.params`. `ctx.positions`, `ctx.orders`, `ctx.closed` and `ctx.rejects` are LISTS
+(`for p in ctx.positions:`), never mappings; a chain and an underlying are read by attribute
+(`ctx.under.price`, `ctx.chain.strike`), never with `.get` or `[...]`.
 
 ## Value: one signed number
 
