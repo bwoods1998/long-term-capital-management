@@ -528,6 +528,11 @@ validated version unchanged under engine 4:
   4 it tests the override's behaviour);
 - `market-distraction-release-call-r-2` (from v11; a second revival of that program).
 
+**Correction (Oct 1, 07:10).** The claim below was wrong for two of the three rows. A revival's researcher re-ran the
+revived code without its stored parameters (or wrote new code), so only `silver-industrial-cycle-debit-r` (and
+`etf-implied-move-ratio-follow-debi-3`) ran the revived program exactly. The `second-session` and `market-distraction`
+rows are validations of different programs: same code, other parameters. See "Oct 1 morning" below.
+
 **The outcome.** Three revivals have re-validated so far, with numbers identical to their original validations. But the
 deflated-Sharpe check (a probability of at least 0.95) now fails for each of them:
 
@@ -682,7 +687,7 @@ cohort and every incubation. Such changes are batched into planned releases.
 
 ### What did not work, honestly
 
-- **The revived near-misses** re-validated under engine 4 with identical numbers, but they fail the deflated-Sharpe
+- **The revived near-misses** (corrected Oct 1: only silver's revival re-ran its exact program) re-validated under engine 4, but they fail the deflated-Sharpe
   check: their lineages hold 3 to 8 validated versions (Sept 30 night, above). This is the multiple-testing control
   working, not a defect.
 - **The harness's scheduler lane.** Its controller's built-in retention rule proved uninformative: on 291 windows with
@@ -725,3 +730,71 @@ re-checked about four hours after B.
 
 The goal remains unmet. No qualified strategy has traded real money, no harness improvement has been retained, and
 project Net at the last close is −$568.74.
+
+## Oct 1 morning: release B', the holdout gate, and two harness defects
+
+### Release B'
+
+B' was promoted at 07:11 as `20261001T071033Z-95efdb353597` (main `03c274c9`). No evaluator adoption followed, and the
+lineage snapshots before and after show no change to any lineage's trials, inherited counts or looks. B' is swarm-side and resets no evidence: the money digest (42c4a3af) and the evaluator's execution fingerprint
+(47587e22) are unchanged, with no change under `league/gym`, `league/live`, the shared league files, the constitution
+or the gateway. It carries:
+- **Family cards** (#446) and the final release-B nits (#458).
+- **The architect's structure allowlist** (#459), switched on with `architect.structures = "real"`. Since release B,
+  47 of 78 births were structures real money cannot trade at this equity (credit spreads, straddles, strangles,
+  condors, calendars, diagonals). Births are now only of debit verticals, long butterflies and single long options.
+- **The retire guard** (#461). Release B's evaluator adoption cleared every family's selection at 03:51. Within
+  seconds, the four families holding validated versions retired themselves, each in a one-call cycle whose reason was
+  the evaluator change. A researcher can no longer retire a family whose version's latest verdict is a pass because the
+  evaluator changed. An evaluator change re-evaluates; it is never a refutation.
+
+### Why research found almost no Train bests under B
+
+Under release B, 76 of 81 Train runs that met the activity bar failed the drift screen: their profit was the market's
+drift, not the signal. Release A passed 141 of 424. The robustness and pool paths were sound. Two causes, both in this
+section: B's births leaned away from the structures that had validated, and the families that had passed were wiped and
+retired themselves. A proposed change that would keep research selections when only live code changes (#462) is
+deferred: the owner's rule treats a live change as an evidence reset.
+
+### The holdout gate held only five roots
+
+The sealed 2026 holdout look for `googl-lags-msft-ai-cloud-qqq-flat` v27 failed three times on Sept 30 with "no holdout
+days for GOOGL, MSFT". These were infrastructure failures, not looks: the looks table still has two rows. The cause was
+the nightly forward-day chain. It extended the original five-root gate image, and its published checkpoint overrode the
+25-root gate named in `swarm.json`, so every gate box since Sept 29 forked from a five-root holdout. The operator
+re-based the chain onto the 25-root gate image (no data fetched, no evidence identity moved, no look consumed).
+Hardening (the ready file must name the base gate it extends; gate boxes check root coverage before a look) follows
+as separate PRs.
+
+### Operator revivals did not run the revived program
+
+A revival makes the retired family's chosen version the new family's version 1, with its stored parameters. The
+researcher was asked to re-run it unchanged. It never did. Re-running without code drops the stored parameters, and
+cheap researchers often wrote new code at once. Of all revivals since Sept 26, only a handful ran their exact program;
+of the Sept 30 night revivals, only silver's and the ETF implied-move family's. The fix (in review) runs an operator
+revival's exact program in the harness before the researcher acts, with the same trial counting.
+
+Three more families were revived at 07:02 for Train-tier practice, not D2: `silver-industrial-cycle-debit-r` v20,
+`rate-lag-flat-index-meta-mara` v33 and `market-distraction-release-call-r-2` v2. Each passed Train at 1.5x and the
+drift screen under release A. Their validation verdicts stand. Two of them (`rate-lag-…-r` and `market-distraction-…-r--2`) retired themselves within 15 minutes, after their
+researchers ran new versions and never the revived one: the same defect. No more revivals until the fix deploys.
+
+### Scoreboard (07:25 Oct 1)
+
+| Measure | Value |
+|---|---|
+| Release running | B', `20261001T071033Z-95efdb353597` (main `03c274c9`), gateway `dafcfa05` |
+| Real orders since T0 | calibration: 15 round trips closed; tuition (D2): 1 open, the GOOGL call vertical; House test: 0; incubator: 0; Probe/Sized: 0 |
+| Realized options P&L since T0, at the Sept 30 close | −$27.02 (calibration −$25.80; regulatory fees −$1.22; strategy routes $0) |
+| Input costs since T0, at the Sept 30 close | $541.72 |
+| Net, at the Sept 30 close | −$568.74 |
+| Families alive / validated / in practice | 83 / 0 / 0 |
+| Holdout looks | 2, 0 passed |
+| Births since release B (03:49), by structure | debit vertical 12, credit vertical 13, long single 11, straddle 11, strangle 11, long butterfly 7, condor 4, diagonal 4, iron butterfly 3, calendar 1, long put 1 |
+| Train disqualification rate since B | 26 of 487 runs (5.3%) |
+| Evidence resets | 2 (releases A and B; B' is not one) |
+| Retained harness improvements | 0 |
+| Spend, last hour | $1.93/h: Sail models $0.99, Gym boxes $0.94, Claude $0, OpenAI $0. Sail balance $155 at about $45/day during the pre-open burst (ends 13:15) |
+
+The goal remains unmet: no D2-qualified strategy trades real money, no harness improvement is retained, and project
+Net at the last close is −$568.74.
