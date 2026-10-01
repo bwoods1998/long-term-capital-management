@@ -17,6 +17,17 @@ after the candidate is committed; the canary gates the change to a deterministic
 before it; the registered window is judged once, after it ends, motivating units excluded. A failed comparison flips
 the gate back (the old behavior at the next read); a supported one retains it until it graduates into main without its
 gate; another release inside the window voids it.
+
+What is machine-checked and what is only defense in depth (`harness_lanes` module docstring): staging refuses, exactly,
+a diff that touches a protected path (`git diff --no-renames --name-status`, deletions and renames included) or adds an
+import of a protected, process, file or loader module; every candidate needs an ADVERSARIAL REVIEW of its exact patch
+recorded here with the verdict approve (`review`) before its canary starts (lanes) or its observation window opens (the
+scheduler lane); and capture, staging, evaluation, the judges, the benchmarks and the retain/revert decision run from the
+PINNED BASE commit: this controller refuses to run unless its own code is that commit's (`pinned`; the CLI re-executes
+itself from a separate checkout of the base), takes the judges and the benchmark from the base tree, judges the base
+tree with only the candidate's staged files laid over it, and accepts a House measurement only when the code that took
+it is the base's (`measured_by_base`). The per-name content and symbol guards are static analysis of arbitrary Python:
+they refuse the routes reviewers found and are never a guarantee.
 """
 from __future__ import annotations
 
@@ -49,6 +60,7 @@ from .harness_runtime import write_json
 
 REPO = Path(__file__).resolve().parents[2]
 BENCHMARK = Path(__file__).with_name("improvement_benchmark.py")
+BENCHMARK_PATH = "league/swarm/improvement_benchmark.py"
 POLICY = "harness-improvement-1"
 MIN_CYCLES = 20
 OBSERVE_SECONDS = 900
@@ -68,6 +80,31 @@ FRESH_SECONDS = 3600
 #: The environment marker the judges' sandbox sets: the gate honors its judges' override only where it is present
 #: (`canary.py`), so nothing a candidate's code does on the House can force a gate.
 JUDGE_MARKER = "LTCM_HARNESS_JUDGE"
+#: The controller's own code: what captures, stages, judges, measures and decides (with every file of the judges'
+#: directory). It must be the pinned base commit's, byte for byte, wherever a candidate's fate is computed (`pinned`).
+CONTROLLER = ("league/swarm/improvement.py", "league/swarm/harness_lanes.py", "league/swarm/canary.py",
+              "league/swarm/harness_runtime.py", "league/swarm/improvement_benchmark.py", "league/ledger.py",
+              "league/worklist.py", "league/watchdog.py", "scripts/harness_improve.py", "scripts/floor_box.py")
+JUDGES_PATH = "league/swarm/harness_judges"
+#: A review report names its verdict on a line of its own: `VERDICT: approve` or `VERDICT: reject`.
+VERDICT_LINE = re.compile(r"^\s*VERDICT:\s*(approve|reject)\s*$", re.I | re.M)
+
+
+def controller_paths(root: Path = REPO) -> list[str]:
+    """The controller's files as this checkout has them (`CONTROLLER` and the judges' Python files)."""
+    judges = sorted(f"{JUDGES_PATH}/{p.name}" for p in (Path(root) / JUDGES_PATH).glob("*.py"))
+    return list(CONTROLLER) + judges
+
+
+def base_blobs(repo: Path, commit: str, paths: list[str]) -> dict[str, str]:
+    """{path: git blob id} of `paths` (files, or directories listed recursively) in `commit`."""
+    out = {}
+    for line in git(repo, "ls-tree", "-r", "--full-tree", commit, "--", *paths).splitlines():
+        meta, _, path = line.partition("\t")
+        parts = meta.split()
+        if len(parts) == 3 and parts[1] == "blob":
+            out[path] = parts[2]
+    return out
 
 
 class ImprovementError(ValueError):
@@ -203,6 +240,11 @@ def judges_sha() -> str:
     return sha([[p.name, sha(p.read_bytes())] for p in sorted(JUDGES.glob("*.py"))])
 
 
+def tree_judges_sha(tree: Path) -> str:
+    """The judges' hash in an archived tree (the base's: the judges a candidate is scored by come from there)."""
+    return sha([[p.name, sha(p.read_bytes())] for p in sorted((Path(tree) / JUDGES_PATH).glob("*.py"))])
+
+
 def watchdog(rows: list[dict], digest: str) -> dict:
     """The watchdog's receipts for the exact evaluated tree `digest`, from deploys.jsonl rows (the module docstring)."""
     stages = [r for r in rows if r.get("stage") == "stage" and r.get("ok") is True and r.get("digest") == digest]
@@ -295,6 +337,41 @@ def changes(repo: Path, base: str, head: str) -> list[tuple[str, str, str, str]]
     return out
 
 
+def name_status(repo: Path, base: str, head: str) -> list[tuple[str, str]]:
+    """(status, path) of every change from `base` to `head` as `git diff --no-renames --name-status` lists it: a rename
+    or copy is a delete and an add, so a moved file never hides its source path."""
+    parts = git(repo, "diff", "--no-renames", "--name-status", "-z", base, head).split("\0")
+    out = []
+    i = 0
+    while i < len(parts) - 1:
+        status = parts[i]
+        if not status:
+            i += 1
+            continue
+        out.append((status, parts[i + 1]))
+        i += 2
+    return out
+
+
+def candidate_tree(repo: Path, base: str, head: str, paths: list[str], target: Path) -> Path:
+    """The tree a candidate is judged as: the BASE commit's archive with only its staged files (`paths`, each added or
+    modified, never protected: staging refused anything else) laid over it from `head`. So every file the candidate did
+    not stage, the judges' imports and the fixed tests included, is the base's by construction; and the result must be
+    `head`'s exact release tree (a commit with any other change cannot be the one deployed)."""
+    archive(repo, base, target)
+    for path in paths:
+        destination = target / path
+        if ".." in Path(path).parts or Path(path).is_absolute():
+            raise ImprovementError(f"{path}: not a path inside the tree")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(git(repo, "show", f"{head}:{path}", binary=True))
+    with tempfile.TemporaryDirectory(prefix="harness-head-") as temp:
+        archive(repo, head, Path(temp) / "head")
+        if release_digest(Path(temp) / "head") != release_digest(target):
+            raise ImprovementError("the candidate commit differs from its base beyond its staged files")
+    return target
+
+
 def sandbox(tree: Path, judge: Path, command: list[str], *, python: Path, timeout: int = 600,
             stdin: bytes | None = None) -> dict:
     """No host home, credentials, production state or network. Refuse when namespace isolation is unavailable.
@@ -365,6 +442,93 @@ class HarnessImprovement:
     def close(self):
         self.ledger.close()
 
+    def pinned(self, base: str) -> None:
+        """Refuse to compute anything about a candidate unless this controller's own code (`CONTROLLER`, the judges)
+        is the pinned base commit's, byte for byte: so neither a candidate's tree nor an unreviewed edit in the
+        operator's checkout decides, judges or measures it. `scripts/harness_improve.py` re-executes itself from a
+        separate checkout of the base (`<journal>/controllers/<base>`) when it is not."""
+        paths = controller_paths()
+        want = base_blobs(self.repo, base, list(CONTROLLER) + [JUDGES_PATH])
+        want = {p: v for p, v in want.items() if p in CONTROLLER or p.endswith(".py")}
+        have = {}
+        for path in sorted(set(paths) | set(want)):
+            try:
+                have[path] = lanes.blob_sha((REPO / path).read_bytes())
+            except OSError:
+                continue
+        differ = sorted(p for p in set(want) | set(have) if want.get(p) != have.get(p))
+        if differ:
+            raise ImprovementError(f"the controller is not running the pinned base commit {base[:12]}'s code ({differ[:6]} "
+                                   "differ): run it from a checkout of the base (scripts/harness_improve.py re-executes "
+                                   "itself from <journal>/controllers/<base>)")
+
+    def measured_by_base(self, measurement: Mapping[str, Any], base: str, what: str = "the measurement") -> None:
+        """Refuse a House measurement unless the code that took it (`measure`'s `code`: the repository modules its
+        process had loaded, by git blob id) is the pinned base commit's: a candidate's tree, or anything that rewrote the
+        measuring code on the House, never measures its own canary."""
+        code = measurement.get("code")
+        if not isinstance(code, Mapping) or "league/swarm/harness_lanes.py" not in code:
+            raise ImprovementError(f"{what} does not say which code took it (`code`): measure again with the base "
+                                   "release's scripts/harness_improve.py")
+        want = base_blobs(self.repo, base, sorted(str(p) for p in code))
+        differ = sorted(str(p) for p, v in code.items() if want.get(str(p)) != v)
+        if differ:
+            raise ImprovementError(f"{what} was not taken by the pinned base commit {base[:12]}'s code ({differ[:6]} "
+                                   "differ): measure with the base release's scripts/harness_improve.py")
+
+    def approved(self, proposal: Mapping[str, Any]) -> dict[str, Any] | None:
+        """The latest adversarial review of exactly this patch, when its verdict is approve (`review`)."""
+        reviews = [r for r in proposal.get("reviews") or [] if r.get("patch_sha") == proposal.get("patch_sha")
+                   and r.get("head") == proposal.get("head")]
+        return reviews[-1] if reviews and reviews[-1].get("verdict") == "approve" else None
+
+    def review(self, key: str, *, report: Path, reviewer: str, patch_sha: str, review_usd: float | None = None) -> dict:
+        """Record an ADVERSARIAL REVIEW of a staged candidate's exact patch (`<artifact>/candidate.patch`). The report
+        must name the patch's sha256 (`patch_sha`) and end its findings with `VERDICT: approve` or `VERDICT: reject`;
+        the reviewer is a separate agent, never the patch's author. It is kept beside the candidate and recorded in the
+        journal. An approval is what lets the canary start (lanes) or the observation window open (the scheduler lane);
+        a rejection sends the candidate back to revising (or rejects it on its last attempt)."""
+        job = self.worklist.get(key)
+        if job is None or job.state not in ("testing", "canary"):
+            raise ImprovementError("a review is of a staged candidate (testing, or awaiting its canary)")
+        proposal = dict(job.carry.get("_proposal") or {})
+        if not proposal.get("patch_sha") or patch_sha != proposal["patch_sha"]:
+            raise ImprovementError("the review must name the staged patch's sha256 (`--patch-sha`, the brief's and "
+                                   "`next`'s `patch_sha`): it reviewed another diff")
+        reviewer = str(reviewer or "").strip()
+        if not reviewer:
+            raise ImprovementError("name the reviewer (an agent separate from the patch's author)")
+        if proposal.get("author") and reviewer.lower() == str(proposal["author"]).strip().lower():
+            raise ImprovementError("the patch's author cannot review it: an adversarial review is a separate agent's")
+        text = Path(report).read_text(errors="replace")
+        if patch_sha not in text and patch_sha[:16] not in text:
+            raise ImprovementError("the report does not cite the patch it reviewed (its sha256, or the first 16 hex)")
+        verdicts = VERDICT_LINE.findall(text)
+        if len(verdicts) != 1:
+            raise ImprovementError("the report states exactly one verdict on its own line: `VERDICT: approve` or "
+                                   "`VERDICT: reject`")
+        verdict = verdicts[0].lower()
+        artifact = Path(proposal["artifact"])
+        n = len(proposal.get("reviews") or []) + 1
+        kept = artifact / f"review-{n}.md"
+        kept.write_text(text)
+        row = {"n": n, "reviewer": reviewer[:120], "verdict": verdict, "patch_sha": patch_sha, "head": proposal.get("head"),
+               "report": str(kept), "report_sha": sha(text.encode()), "at": self.clock()}
+        proposal["reviews"] = list(proposal.get("reviews") or []) + [row]
+        if verdict == "approve":
+            state, note = job.state, (f"Adversarial review {n} by {reviewer[:60]} approved patch {patch_sha[:16]}"
+                                      + ("; the canary may start once the evaluated tree is deployed."
+                                         if job.state == "canary" else "; the evaluation is still owed."))
+        else:
+            state = "revising" if job.attempt < self.MAX_ATTEMPTS else "rejected"
+            note = f"Adversarial review {n} by {reviewer[:60]} rejected patch {patch_sha[:16]}: see {kept}"
+        extra: dict[str, Any] = {"_proposal": proposal, "review": row}
+        if verdict == "reject":
+            extra["_failure"] = {"phase": "review", "reason": f"rejected by review {n}: {kept}"}
+        self.worklist.transition(key, state, commit=proposal.get("head"), attempt=job.attempt, cost_usd=review_usd or 0,
+                                 note=note, extra=extra)
+        return row
+
     def capture(self, swarm: Path, *, base: str, seconds: int = 3600, release: Path | None = None) -> list[str]:
         # The deployed release need not contain .git. The owner's evaluation step resolves this immutable SHA and
         # checks its archived release digest against the actual measured bytes before admitting any candidate.
@@ -409,20 +573,21 @@ class HarnessImprovement:
                                  attempt=job.attempt, extra={"_proposal": proposal})
         return proposal
 
-    def stage(self, key: str, candidate: str, *, authoring_usd: float | None = None) -> dict:
+    def stage(self, key: str, candidate: str, *, authoring_usd: float | None = None, author: str | None = None) -> dict:
         job = self.worklist.get(key)
         if job is None or job.state not in ("proposed", "admitted", "patching", "revising"):
             raise ImprovementError("candidate needs an open measured bottleneck")
         if job.details.get("lane"):
-            return self._stage_lane(job, candidate, authoring_usd=authoring_usd)
+            return self._stage_lane(job, candidate, authoring_usd=authoring_usd, author=author)
         base = str(job.details["base"])
         head = None
         attempt = job.attempt + 1
+        git(self.repo, "rev-parse", "--verify", f"{base}^{{commit}}")
+        self.pinned(base)
         try:
-            git(self.repo, "rev-parse", "--verify", f"{base}^{{commit}}")
             head = git(self.repo, "rev-parse", "--verify", f"{candidate}^{{commit}}")
             git(self.repo, "merge-base", "--is-ancestor", base, head)
-            paths = git(self.repo, "diff", "--name-only", "--no-renames", base, head).splitlines()
+            paths = [path for _, path in name_status(self.repo, base, head)]
             if paths != [SCHEDULER_PATH]:
                 raise ImprovementError("scheduler lane may change only league/swarm/loop.py; every other path is protected")
             patch_guard(git(self.repo, "show", f"{base}:{SCHEDULER_PATH}"), git(self.repo, "show", f"{head}:{SCHEDULER_PATH}"))
@@ -431,6 +596,7 @@ class HarnessImprovement:
                 archive(self.repo, base, tree)
                 if release_digest(tree) != job.details["source"]["digest"]:
                     raise ImprovementError("baseline commit does not match the measured running release")
+                benchmark_sha = sha((tree / BENCHMARK_PATH).read_bytes())
         except (ImprovementError, SyntaxError, OSError) as exc:
             self.worklist.transition(key, "revising", attempt=attempt, commit=head, note=f"Candidate preflight refused: {exc}",
                                      extra={"_failure": {"phase": "stage", "candidate": head or str(candidate)[:100],
@@ -441,8 +607,9 @@ class HarnessImprovement:
         patch = git(self.repo, "diff", "--binary", base, head, binary=True)
         (artifact / "candidate.patch").write_bytes(patch)
         proposal = {"base": base, "head": head, "artifact": str(artifact.resolve()), "patch_sha": sha(patch), "policy": POLICY,
-                    "baseline": job.details["baseline"], "source": job.details["source"], "judge_sha": sha(BENCHMARK.read_bytes()),
-                    "regressions": list(REGRESSIONS), "observation_seconds": OBSERVE_SECONDS}
+                    "baseline": job.details["baseline"], "source": job.details["source"], "judge_sha": benchmark_sha,
+                    "regressions": list(REGRESSIONS), "observation_seconds": OBSERVE_SECONDS,
+                    "author": (author or "").strip()[:120] or None, "reviews": []}
         self.worklist.transition(key, "testing", commit=head, attempt=attempt, note="Patch pinned; protected paths unchanged. Isolated evaluation is owed.",
                                  extra={"_proposal": proposal})
         return proposal
@@ -454,18 +621,26 @@ class HarnessImprovement:
         if job.details.get("lane"):
             return self._evaluate_lane(job, python=python)
         proposal = dict(job.carry["_proposal"])
+        self.pinned(proposal["base"])
         if (proposal["judge_sha"] != sha(BENCHMARK.read_bytes()) or proposal["policy"] != POLICY
                 or proposal["regressions"] != list(REGRESSIONS)):
             raise ImprovementError("the frozen judge changed; register a new candidate under the new protocol")
         artifact = Path(proposal["artifact"])
         judge = artifact / "judge"
         judge.mkdir(exist_ok=True)
-        (judge / "benchmark.py").write_bytes(BENCHMARK.read_bytes())
         receipt = {"policy": POLICY, "judge_sha": proposal["judge_sha"], "base": proposal["base"], "head": proposal["head"], "trees": {}}
         with tempfile.TemporaryDirectory(prefix="harness-eval-") as temp:
             for name in ("base", "head"):
                 tree = Path(temp) / name
-                archive(self.repo, proposal[name], tree)
+                if name == "base":
+                    archive(self.repo, proposal["base"], tree)
+                    # The benchmark is the BASE tree's, never the candidate's or the operator's checkout.
+                    if sha((tree / BENCHMARK_PATH).read_bytes()) != proposal["judge_sha"]:
+                        raise ImprovementError("the base tree's benchmark is not the pinned one")
+                    (judge / "benchmark.py").write_bytes((tree / BENCHMARK_PATH).read_bytes())
+                else:
+                    # The candidate is the base tree with only its staged file laid over it.
+                    candidate_tree(self.repo, proposal["base"], proposal["head"], [SCHEDULER_PATH], tree)
                 results = sandbox(tree, judge, ["/judge/benchmark.py"], python=python)
                 tests = sandbox(tree, judge, ["-m", "unittest", *proposal["regressions"], "-q"], python=python)
                 try:
@@ -505,7 +680,9 @@ class HarnessImprovement:
             raise ImprovementError("candidate is not awaiting or following a deployment")
         if job.details.get("lane"):
             # On the House: the deploy receipts every time (a rollback is noticed at once), the registered window's
-            # read-only measurement only once it has ended and no decision exists yet.
+            # read-only measurement only once it has ended and no decision exists yet. The retain/revert decision itself
+            # runs only as the pinned base commit's code, checked against the owner's repository (`pinned`,
+            # `measured_by_base`): where that repository is absent it refuses, and the owner's machine decides.
             proposal = job.carry.get("_proposal") or {}
             arm = proposal.get("canary") or {}
             rows = read_deploys(deploy_log)
@@ -549,6 +726,10 @@ class HarnessImprovement:
             return {"waiting": "the evaluated release is not currently running", "current": current_release}
         if proposal.get("observation"):
             return proposal["observation"]  # one registered observation window; later favorable peeks cannot reverse it
+        if self.approved(proposal) is None:
+            # MACHINE-CHECKED: the observation window opens only for a patch an adversarial review approved.
+            return {"waiting": f"an adversarial review approving patch {str(proposal.get('patch_sha'))[:16]} is required "
+                               "before the observation window opens (`review`)"}
         at = dt.datetime.fromisoformat(final["at"].replace("Z", "+00:00")).timestamp()
         source = running_evidence(swarm, None, now=self.clock())
         if Path(source["release"]).name != current_release or source["digest"] != proposal["release_digest"]:
@@ -649,6 +830,8 @@ class HarnessImprovement:
                 row["state"] = old.state
                 out.append(row)
                 continue
+            # The rules a candidate will be staged, judged and decided by are the base's: so is the code registering it.
+            self.pinned(base)
             data = measurement["lanes"][name]
             motivating = lanes.motivating_units(name, data)
             baseline: dict[str, Any] = {"metrics": lanes.lane_metrics(name, data),
@@ -666,13 +849,21 @@ class HarnessImprovement:
                                           "source": {k: source.get(k) for k in ("release", "digest", "started_at")},
                                           "measurement_sha": digest, "stake": row["stake"], "rank": row["rank"],
                                           "value": row["value"], "payback": row.get("payback"),
-                                          "required_units": row.get("required_units")})
+                                          "required_units": row.get("required_units"),
+                                          **({"voids": int(old.details.get("voids") or 0) + 1} if voided else {})})
             if voided:
-                # A voided comparison judged nothing: the bottleneck, measured again, reopens, and the voided attempt
-                # does not count against its three.
-                self.worklist.transition(key, "proposed", attempt=max(0, old.attempt - 1),
-                                         note="Reopened on a new measurement after a voided canary.",
-                                         extra={"_proposal": {"reopened_after": "voided"}, "decision": "reopened"})
+                # A voided comparison judged nothing: the bottleneck, measured again, reopens. The first void does not
+                # count against its three attempts; every later one does (a stream of voids, each a deploy and on the
+                # execution lane an evidence reset, cannot run on without a decision).
+                voids = int(self.worklist.get(key).details.get("voids") or 1)
+                free = voids <= 1
+                self.worklist.transition(key, "proposed", attempt=max(0, old.attempt - 1) if free else old.attempt,
+                                         note=("Reopened on a new measurement after a voided canary"
+                                               + (" (the first void: the attempt is not counted)." if free else
+                                                  f" (void {voids}: the attempt counts; declare a release freeze over the "
+                                                  "next window before its canary).")),
+                                         extra={"_proposal": {"reopened_after": "voided", "voids": voids},
+                                                "decision": "reopened"})
             row["state"] = self.worklist.get(key).state
             out.append(row)
         return out
@@ -690,7 +881,8 @@ class HarnessImprovement:
         arms = canary.get("mode") == "arms"
         unit = {"family": 'the family id (`fam["id"]`)',
                 "mechanism": "canary.mechanism_unit(mechanism) inside `Architect.admit` (the admitted text: a birth's "
-                             'family id does not exist yet), or canary.mechanism_unit(fam["mechanism"]) for a family',
+                             'family id does not exist yet), or canary.mechanism_unit(fam["mechanism"]) for a family in '
+                             "league/swarm/researcher.py",
                 }.get(canary.get("unit")) if arms else None
         where = {"research": "`Researcher._admit` (the check before any Gym run or sweep; the judge screens through it), "
                              "calling new code in preflight.py or new functions",
@@ -711,14 +903,22 @@ class HarnessImprovement:
                 "payback": job.details.get("payback"),
                 "motivating_examples": job.evidence[:12],
                 "surface": list(lane.surface),
-                "protected": "every path in league/swarm/harness_lanes.py PROTECTED (the objective and this loop, sealed data "
-                             "and the evaluator, spend limits, capital permissions including the real-money order path, the "
-                             "release train) and every path outside the surface; no delete, rename or mode change, and no "
-                             "edit of an existing test; no new use (aliased or not) of a process, network, reflection, "
-                             "file-write or file-move, print, exit or dynamic-access name, `os` member beyond the path "
-                             "helpers, interpreter plumbing, assignment to another object's attribute, store write, read of "
-                             "the holdout, Validation or forward evidence, raw SQL statement, collaborator's private "
-                             "attribute, or spend/capital import; no definition under a name existing code uses",
+                "protected": "machine-checked: every path in league/swarm/harness_lanes.py PROTECTED (the objective and "
+                             "this loop, sealed data and the evaluator, spend limits, capital permissions including the "
+                             "real-money order path, the release train) and every path outside the surface, whatever the "
+                             "status (git diff --no-renames --name-status: deletions and renames included); no mode change "
+                             "and no edit of an existing test; no added import of the store, evaluator, gate, bands, "
+                             "settings or constitution, or of os, subprocess, shutil, socket, pathlib, io, logging, "
+                             "tempfile, importlib or ctypes. Static defense in depth on top (not a guarantee; the review "
+                             "checks what it cannot): no new use (aliased, held as a reference or called) of a process, "
+                             "network, reflection, file-write (constructors included) or file-move, print, exit or "
+                             "dynamic-access name, `os` member beyond the path helpers, interpreter plumbing, assignment "
+                             "to another object's attribute, store writer, reader of the holdout, Validation or forward "
+                             "evidence, key naming Validation, raw SQL statement, collaborator's private attribute, call "
+                             "through an expression, or new path to a function that writes records; no definition under a "
+                             "name existing code uses, no new dunder, no new member of an existing class with bases",
+                "review": "an adversarial review of your exact patch by a separate agent, recorded with the verdict "
+                          "approve, is required before the canary (playbooks/harness-improvement.md, the review checklist)",
                 "frozen": {"symbols": frozen,
                            "rule": "every function that writes trial, lineage, look or graveyard records "
                                    f"({', '.join(sorted(lanes.TRIAL_WRITES))}) is frozen whole, except "
@@ -743,7 +943,7 @@ class HarnessImprovement:
                 "deploy_rules": {c: lanes.DEPLOY_RULES[c] for c in lane.release_classes},
                 "attempts_left": max(0, self.MAX_ATTEMPTS - job.attempt)}
 
-    def _stage_lane(self, job: Any, candidate: str, *, authoring_usd: float | None = None) -> dict:
+    def _stage_lane(self, job: Any, candidate: str, *, authoring_usd: float | None = None, author: str | None = None) -> dict:
         key, lane = job.key, lanes.LANES[job.details["lane"]]
         bottleneck = lane.bottleneck(job.details["metric"])
         base = str(job.details["base"])
@@ -753,12 +953,18 @@ class HarnessImprovement:
             raise ImprovementError(f"this bottleneck has used its {self.MAX_ATTEMPTS} attempts; a new capture on a new base is required")
         canary = lane.canary_for(bottleneck)
         mode = canary.get("mode", "window")
+        git(self.repo, "rev-parse", "--verify", f"{base}^{{commit}}")
+        self.pinned(base)  # not the candidate's fault: refused before an attempt is counted
         try:
             if job.details.get("lane_sha") != lanes.lane_sha(lane) or job.details.get("policy") != lanes.POLICY:
                 raise ImprovementError("the lane's predeclared definition changed after capture; capture again")
-            git(self.repo, "rev-parse", "--verify", f"{base}^{{commit}}")
             head = git(self.repo, "rev-parse", "--verify", f"{candidate}^{{commit}}")
             git(self.repo, "merge-base", "--is-ancestor", base, head)
+            # MACHINE-CHECKED first: any protected path touched, a deletion or either side of a rename included.
+            touched = lanes.protected_touch(name_status(self.repo, base, head))
+            if touched:
+                raise ImprovementError(f"the candidate touches protected paths {touched[:6]}; every lane's candidate is "
+                                       "refused there")
             entries = changes(self.repo, base, head)
             for status, path, old_mode, new_mode in entries:
                 if status not in ("M", "A"):
@@ -792,6 +998,9 @@ class HarnessImprovement:
                 if release_digest(tree) != job.details["source"]["digest"]:
                     raise ImprovementError("baseline commit does not match the measured running release")
                 classification = lanes.classify(paths, lanes.live_path_modules(tree))
+                # The judges the candidate is scored by are the BASE tree's (never the candidate's, never the operator's
+                # checkout): pinned by hash here, copied from the base tree at evaluation.
+                judge_sha = tree_judges_sha(tree)
             if classification["release_class"] not in lane.release_classes:
                 raise ImprovementError(f"a {classification['release_class']} change is outside the {lane.id} lane "
                                        f"({list(lane.release_classes)}): {classification['paths']}")
@@ -811,10 +1020,11 @@ class HarnessImprovement:
         (artifact / "candidate.patch").write_bytes(patch)
         proposal = {"base": base, "head": head, "artifact": str(artifact.resolve()), "patch_sha": sha(patch),
                     "policy": lanes.POLICY, "lane": lane.id, "metric": bottleneck.metric.name, "lane_sha": lanes.lane_sha(lane),
-                    "judge_sha": judges_sha(), "protocol": lane.protocol, "regressions": list(lane.regressions),
+                    "judge_sha": judge_sha, "protocol": lane.protocol, "regressions": list(lane.regressions),
                     "classification": classification, "canary_mode": mode, "gates": gates, "payback": pays,
                     "observation_seconds": int(canary.get("observe_seconds", OBSERVE_SECONDS)),
-                    "baseline": job.details["baseline"], "source": job.details["source"],
+                    "baseline": job.details["baseline"], "source": job.details["source"], "paths": paths,
+                    "author": (author or "").strip()[:120] or None, "reviews": [],
                     "cost": {"authoring_usd": authoring_usd}}
         self.worklist.transition(key, "testing", commit=head, attempt=attempt, cost_usd=authoring_usd or 0,
                                  note=f"Patch pinned inside the {lane.id} surface ({classification['release_class']}); "
@@ -826,6 +1036,7 @@ class HarnessImprovement:
         proposal = dict(job.carry["_proposal"])
         lane = lanes.LANES[proposal["lane"]]
         bottleneck = lane.bottleneck(proposal["metric"])
+        self.pinned(proposal["base"])
         if (proposal["judge_sha"] != judges_sha() or proposal["lane_sha"] != lanes.lane_sha(lane)
                 or proposal["policy"] != lanes.POLICY or proposal["regressions"] != list(lane.regressions)):
             raise ImprovementError("the frozen judge or lane changed; register a new candidate under the new protocol")
@@ -833,8 +1044,6 @@ class HarnessImprovement:
         artifact = Path(proposal["artifact"])
         judge = artifact / "judge"
         judge.mkdir(exist_ok=True)
-        for source in sorted(JUDGES.glob("*.py")):
-            (judge / source.name).write_bytes(source.read_bytes())
         seed = lanes.heldout_seed(self.secret(), job.key, proposal["head"])
         arms = proposal["canary_mode"] == "arms"
         receipt: dict[str, Any] = {"policy": lanes.POLICY, "lane": lane.id, "metric": proposal["metric"],
@@ -881,10 +1090,17 @@ class HarnessImprovement:
         runs = [("base", "base", "none")] + ([("head", "closed", "closed"), ("head", "open", "open")] if arms
                                              else [("head", "head", "none")])
         with tempfile.TemporaryDirectory(prefix="harness-eval-") as temp:
-            trees = {}
-            for name in ("base", "head"):
-                trees[name] = Path(temp) / name
-                archive(self.repo, proposal[name], trees[name])
+            trees = {"base": Path(temp) / "base", "head": Path(temp) / "head"}
+            archive(self.repo, proposal["base"], trees["base"])
+            # The judges are the BASE tree's (pinned at staging), never the candidate's or the operator's checkout.
+            if tree_judges_sha(trees["base"]) != proposal["judge_sha"]:
+                raise ImprovementError("the base tree's judges are not the pinned ones")
+            for source in sorted((trees["base"] / JUDGES_PATH).glob("*.py")):
+                (judge / source.name).write_bytes(source.read_bytes())
+            # The candidate is the base tree with only its staged surface files laid over it: every protected file the
+            # judges import (the gate, the store, the Gym) and every fixed test is the base's by construction.
+            staged = proposal.get("paths") or [p for _, p, _, _ in changes(self.repo, proposal["base"], proposal["head"])]
+            candidate_tree(self.repo, proposal["base"], proposal["head"], list(staged), trees["head"])
             for commit, label, gate in runs:
                 receipt["trees"][label] = {"splits": {split: judged(trees[commit], split, gate) for split in ("dev", "heldout")},
                                            "regressions": tested(trees[commit], gate), "gate": gate}
@@ -969,6 +1185,15 @@ class HarnessImprovement:
         lane = lanes.LANES[proposal["lane"]]
         bottleneck = lane.bottleneck(proposal["metric"])
         canary = lane.canary_for(bottleneck)
+        # MACHINE-CHECKED: no canary without an adversarial review approving exactly this patch (`review`).
+        if self.approved(proposal) is None:
+            raise ImprovementError(f"the canary needs an adversarial review of patch {str(proposal.get('patch_sha'))[:16]} "
+                                   "recorded with the verdict approve (`review KEY --report R --reviewer NAME "
+                                   "--patch-sha SHA`); none is")
+        self.pinned(proposal["base"])
+        self.measured_by_base(measurement, proposal["base"])
+        if control is not None:
+            self.measured_by_base(control, proposal["base"], "the control measurement")
         receipts = watchdog(list(measurement.get("deploys") or []), proposal["release_digest"])
         if "waiting" in receipts:
             return receipts
@@ -1160,6 +1385,9 @@ class HarnessImprovement:
             return {"waiting": "measure exactly the registered window", "since": since, "until": end}
         if float(measurement.get("taken_at") or 0.0) < end - 60:
             return {"waiting": "the measurement was not taken after the window ended (release B's `measure` records when)"}
+        # The retain/revert decision runs from the pinned base commit, on a measurement the base's code took.
+        self.pinned(proposal["base"])
+        self.measured_by_base(measurement, proposal["base"])
         others = sorted({str(r.get("deploy")) for r in measurement.get("deploys") or []
                          if r.get("stage") == "verdict" and r.get("verdict") == "promoted" and r.get("deploy") != arm.get("deploy")
                          and since < (lanes.epoch_of(r.get("at")) or 0.0) < end})
@@ -1251,11 +1479,14 @@ class HarnessImprovement:
     def next_steps(self, *, root: str = "<journal>", repo: str = "<owner repo>") -> list[dict]:
         """One command per open lane candidate: the next step the operator runs (the playbook's procedure)."""
         cli = f"python scripts/harness_improve.py --root {root} --repo {repo}"
-        house = "python -B scripts/harness_improve.py measure --swarm /workspace/state"
         out = []
         for job in sorted((j for j in self.worklist.jobs().values() if j.details.get("lane")),
                           key=lambda j: (int(j.details.get("rank") or 99), j.key)):
             p = job.carry.get("_proposal") or {}
+            # On the House, measure with the BASE release's code (the watchdog keeps it for rollback): the controller
+            # refuses a measurement whose code is not the base's (`measured_by_base`).
+            release = str((job.details.get("source") or {}).get("release") or "/workspace/releases/<the base release>")
+            house = f"python -B {release.rstrip('/')}/scripts/harness_improve.py measure --swarm /workspace/state"
             lane = lanes.LANES[job.details["lane"]]
             b = lane.bottleneck(job.details["metric"])
             mode = lane.canary_for(b).get("mode")
@@ -1272,6 +1503,13 @@ class HarnessImprovement:
                     step["last_refusal"] = why[:400]
             elif job.state == "testing":
                 step["next"] = f"{cli} evaluate {job.key} --python <a venv python with numpy>"
+            elif job.state == "canary" and not p.get("canary") and self.approved(p) is None:
+                step["next"] = (f"adversarial review (required before the deploy and the canary): give an agent other than "
+                                f"the author {p.get('artifact')}/candidate.patch (sha256 {p.get('patch_sha')}), the brief and "
+                                "the playbook's review checklist; its report cites that sha and ends `VERDICT: approve` or "
+                                f"`VERDICT: reject`; then `{cli} review {job.key} --report <report.md> --reviewer <agent> "
+                                f"--patch-sha {p.get('patch_sha')}`")
+                step["patch_sha"] = p.get("patch_sha")
             elif job.state == "canary" and not p.get("canary"):
                 rule = (p.get("classification") or {}).get("deploy_rule")
                 digest = str(p.get("release_digest"))[:12]
@@ -1335,5 +1573,5 @@ class HarnessImprovement:
 
 
 __all__ = ["HarnessImprovement", "ImprovementError", "snapshot", "patch_guard", "sandbox", "release_digest", "watchdog",
-           "changes", "read_deploys", "in_session",
-           "judges_sha"]
+           "changes", "name_status", "candidate_tree", "read_deploys", "in_session", "judges_sha", "tree_judges_sha",
+           "controller_paths", "base_blobs", "CONTROLLER"]

@@ -59,9 +59,9 @@ def _errno(name: Any) -> int:
 
 
 def fault_of(spec: dict[str, Any], url: str) -> BaseException:
-    """An exception from a declarative spec: {"type": "http", "code": 520}; {"type": "os", "errno": "EHOSTDOWN"};
-    {"type": "gai", "errno": "EAI_FAIL"}; {"type": "exc", "cls": "<a CLASSES name>", "args": [...]}; each optionally
-    `"wrap": "url"` (urllib's URLError around it)."""
+    """An exception from a declarative spec (the dev split's own shapes, e.g.): {"type": "http", "code": 503};
+    {"type": "os", "errno": "ECONNRESET"}; {"type": "gai", "errno": "EAI_AGAIN"}; {"type": "exc", "cls": "<a CLASSES
+    name>", "args": [...]}; each optionally `"wrap": "url"` (urllib's URLError around it)."""
     kind = spec["type"]
     if kind == "http":
         return HTTPError(url, int(spec["code"]), "synthetic", {}, io.BytesIO(b'{"message": "synthetic"}'))

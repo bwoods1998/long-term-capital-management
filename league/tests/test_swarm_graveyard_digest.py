@@ -489,13 +489,21 @@ class ArchitectRoutes(RouteCase):
         self.assertEqual(len(self.old_view(opener.body()["messages"][0]["content"])), 20)
 
     def test_every_lesson_a_model_reads_passes_lesson_view(self):
+        """The architect's prompt half (D2a): it stays required with a memory-lane gate open (`harness_lanes`
+        MEMORY_SUPERSEDES names only the admission half below)."""
         self.graves.bury("leaky", reason="Refuted. " + LEAK_A, structure="long_straddle", roots=("QQQ",),
                          mechanism="Owning a QQQ straddle before the open pays when overnight gaps extend.", notes=(LEAK_B,))
         router = self.router(claude=False)
-        a = self.architect(router)
-        prompt = a.prompt()
+        prompt = self.architect(router).prompt()
         for leak in LEAKS:
             self.assertNotIn(leak, prompt)
+
+    def test_a_birth_on_a_buried_slice_carries_lesson_view_lessons(self):
+        """The admission half: a restated idea on a buried slice is admitted and born with the lesson's D2a view. A
+        memory-lane lever that refuses restated ideas supersedes it with its gate open (closed, it must pass)."""
+        self.graves.bury("leaky", reason="Refuted. " + LEAK_A, structure="long_straddle", roots=("QQQ",),
+                         mechanism="Owning a QQQ straddle before the open pays when overnight gaps extend.", notes=(LEAK_B,))
+        a = self.architect(self.router(claude=False))
         [born] = a.admit([{"slug": "gap-straddle", "structure": "long_straddle", "roots": ["QQQ"], "dte": [0, 1],
                            "mechanism": "Owning a QQQ straddle before the open pays when overnight gaps extend further."}])
         lessons = self.store.family(born)["spec"]["lessons"]

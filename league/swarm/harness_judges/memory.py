@@ -131,8 +131,11 @@ def main() -> None:
 
         clock = Clock()
         roots = sorted({r for row in buried + proposals for r in row["roots"]})
+        # Release B's birth quota (league/swarm/allocation.py `BirthQuota`, a structure-family diversity pressure outside
+        # this lane's surface) rests here (`min_alive` above any population), as the class cap does: the judge measures
+        # the architect's idea admission, which the lane's lever changes, and nothing else refuses a proposal.
         settings = {"population": {"start": 0, "ceiling": 10_000}, "architect": {"max_new": 1000, "max_alive_per_class": 0},
-                    "gym": {"roots": roots}}
+                    "gym": {"roots": roots}, "allocation": {"births": {"min_alive": 10 ** 6}}}
         with tempfile.TemporaryDirectory() as temp:
             store = SwarmStore(Path(temp), clock=clock)
             try:

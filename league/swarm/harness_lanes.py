@@ -27,16 +27,30 @@ THE LANES (`LANES`; the operator's procedure is `playbooks/harness-improvement.m
   (capital). Every file there moves the evaluator fingerprint (`league/swarm/evaluator.py`), so a candidate is a
   PLANNED release (an evidence reset) compared before and after, never a runtime gate splitting practice evidence.
 
-WHAT NO LANE MAY CHANGE. The protected paths (`PROTECTED`: the objective and this loop, sealed data and the evaluator,
-spend limits, capital permissions, the release train) and, inside the surface files, the frozen symbols
-(`FROZEN_SYMBOLS`, `symbol_guard`): every function that writes trial, lineage, look, graveyard, state or receipt
-records (the store's general writers and raw SQL that writes included), Train eligibility, the idle and drift screens,
-the evaluation key, the cycle record the research lane's metrics come from, a program's path from the model's tool call
-to the Gym, the architect's same-idea rule and its pass from the model call to `admit`; in `Architect.admit` (the memory
-lane's lever: it may refuse more) what an admitted birth keeps (its text, slice, lineage and trials). No new store
-write, sealed read, raw SQL statement or private collaborator access anywhere (`content_guard`), and in the practice
-engine no reject reason reworded. So a candidate improves its metric by changing the harness, not the records the metric
-or the multiple-testing control is computed from.
+WHAT NO LANE MAY CHANGE, AND HOW IT IS CHECKED. Two kinds of check, which must not be confused:
+
+- MACHINE-CHECKED BOUNDARY (exact, no analysis of the code's meaning). Staging refuses a candidate whose diff, listed
+  with `git diff --no-renames --name-status` (deletions and renames included), touches a protected path (`PROTECTED`:
+  the objective and this loop, sealed data and the evaluator, spend limits, capital permissions, the release train) or
+  any path outside its lane's surface, and one that adds an import of the store, evaluator, gate, bands, settings or
+  constitution modules or of a process, file, network or loader module (`NO_NEW_IMPORTS`, `PROTECTED_MODULES`). Every
+  candidate needs an ADVERSARIAL REVIEW of its exact diff, recorded in the journal with the verdict approve, before its
+  canary starts (`HarnessImprovement.review`, `canary_start`). Capture, staging, evaluation, the judges, the benchmarks
+  and the retain/revert decision run from the PINNED BASE commit (a separate checkout the CLI re-executes from; the
+  controller refuses to run any other code, `HarnessImprovement.pinned`), the candidate is judged as the base tree with
+  only its staged surface files laid over it, and a House measurement must carry the blob hashes of the base's
+  measuring code (`measure`'s `code`): a candidate cannot change its own judge, rules or score.
+- DEFENSE IN DEPTH (static analysis of arbitrary Python: useful, never complete). Inside the surface files, the frozen
+  symbols (`FROZEN_SYMBOLS`, `symbol_guard`): every function that writes or holds a reference to a writer of trial,
+  lineage, look, graveyard, state or receipt records (the store's general writers and raw SQL that writes included),
+  Train eligibility, the idle and drift screens, the evaluation key, the cycle record the research lane's metrics come
+  from, a program's path from the model's tool call to the Gym, the architect's same-idea rule and its pass from the model
+  call to `admit`; in `Architect.admit` (the memory lane's lever: it may refuse more) what an admitted birth keeps (its
+  text, slice, lineage and trials). And `content_guard`: no new use of a store writer, a sealed reader or a Validation
+  key, raw SQL statement, private collaborator access, file-writing constructor, reflection, process or network name;
+  in the practice engine no reject reason reworded. These guards refuse the routes reviewers have found; they do NOT
+  guarantee that a candidate cannot change trial counts, read sealed data or write files by a route nobody listed.
+  The review, the base-pinned judges and regressions (the D2a sentinels among them) and the canary carry that.
 
 WHAT THE OBSERVERS READ. Only operational counts, through read-only (`mode=ro`) SQLite opens: run statuses and times
 (never a run's score or summary figures), cycle counters (never the cycle's note or score), births' mechanisms and the
@@ -50,7 +64,9 @@ held-out split is PRIVATE CLASSES ITS DEV SPLIT NEVER USES: each lane's pool liv
 owner's `~/Work/.ltcm-main/harness-heldout/<judge>.json`, mode 0600), pinned here by SHA-256 (`HELDOUT_POOLS`), and
 reaches the judge only on standard input in held-out runs, never as a file in the sandbox; its cases are drawn from a
 seed that exists only after the candidate is committed (`heldout_seed`), stratified so every class appears. The author
-sees only pass or fail for it: no class, figure or output of a held-out run is kept. An "improve" rule also asks the
+sees only pass or fail for it (the brief and the journal's notes carry the verdict's public reasons only); the
+evaluation receipt in the owner's journal keeps the held-out split's scalar counts and the full reasons for the owner,
+never its per-class detail or anything a held-out run printed, and is never given to an author. An "improve" rule also asks the
 dev split's count (the motivating failures) to fall wherever its baseline has any, and the concurrent canary (or the
 window after the release) is the held-out test of the House itself.
 
@@ -126,7 +142,8 @@ NEW_TEST = "league/tests/test_harness_candidate_*.py"
 #: Names a candidate may not introduce anywhere (reflection, processes, network, file writes and moves, environment,
 #: output a judge could mistake for its answer, exits, dynamic attribute access). Counted per name wherever the name is
 #: used (a call, an attribute read, a plain name or an imported one: `f = os.system` or `from os import system as sh`
-#: counts as much as a call): moving an existing use is allowed, one more is not.
+#: counts as much as a call): moving an existing use is allowed, one more is not. Defense in depth: a list of names
+#: is never every route to a file or a process (the module docstring).
 DANGEROUS_CALLS = frozenset({
     "eval", "exec", "compile", "__import__", "globals", "locals", "vars", "_getframe", "setattr", "delattr", "getattr",
     "open", "fdopen", "system", "popen", "Popen", "check_output", "check_call", "urlopen", "create_connection", "putenv",
@@ -135,6 +152,13 @@ DANGEROUS_CALLS = frozenset({
     # file moves and creation, raw databases
     "rename", "renames", "rmdir", "removedirs", "truncate", "ftruncate", "touch", "mkdir", "makedirs", "symlink",
     "symlink_to", "hardlink_to", "link_to", "mkfifo", "mknod", "copyfile", "sendfile", "connect", "executescript",
+    # files written through constructors and writers that are not `open` (the fourth review: a logging FileHandler can
+    # rewrite the House's gate file; io.FileIO truncates the store; an archive writes members), and downloads to a path
+    "FileHandler", "RotatingFileHandler", "TimedRotatingFileHandler", "WatchedFileHandler", "basicConfig", "dictConfig",
+    "fileConfig", "FileIO", "ZipFile", "PyZipFile", "TarFile", "GzipFile", "BZ2File", "LZMAFile", "writestr",
+    "extractall", "NamedTemporaryFile", "TemporaryFile", "SpooledTemporaryFile", "TemporaryDirectory", "mkstemp",
+    "mkdtemp", "makefile", "urlretrieve", "dump", "save", "savez", "savez_compressed", "savetxt", "tofile", "to_csv",
+    "to_parquet", "to_pickle", "to_json", "setStream",
     # process replacement and spawning
     "execv", "execve", "execl", "execle", "execlp", "execlpe", "execvp", "execvpe", "spawnl", "spawnle", "spawnlp",
     "spawnlpe", "spawnv", "spawnve", "spawnvp", "spawnvpe", "posix_spawn", "posix_spawnp", "startfile", "dup2",
@@ -145,16 +169,30 @@ DANGEROUS_MODULES = frozenset({"subprocess", "socket", "urllib", "http", "ctypes
                                "marshal", "requests", "ssl", "multiprocessing", "atexit", "builtins", "inspect", "gc",
                                "__main__", "_common", "sys", "signal", "code", "pdb", "traceback", "weakref", "runpy",
                                "tempfile", "glob", "types", "zipimport", "pty", "fcntl", "mmap", "resource", "sqlite3",
-                               "threading", "_thread", "concurrent", "asyncio", "select", "selectors", "posix", "nt"})
+                               "threading", "_thread", "concurrent", "asyncio", "select", "selectors", "posix", "nt",
+                               # file writers that are not `open`: logging's handlers, raw io, archives, compressed
+                               # files, key-value files, in-place file rewriting
+                               "logging", "io", "pathlib", "zipfile", "tarfile", "gzip", "bz2", "lzma", "shelve", "dbm",
+                               "fileinput", "codecs"})
 #: A file that already speaks to the network (the Sailbox transport) may import more of the network family.
 NETWORK_MODULES = frozenset({"http", "urllib", "socket", "ssl"})
+#: MACHINE-CHECKED (the module docstring): modules a candidate may never add an import of, counted per import statement
+#: (a second `import os` inside a function is one more, even where the file already imports os at the top), whatever
+#: the file already imports. Their members a file already reaches stay governed by the per-name counts.
+NO_NEW_IMPORTS = frozenset({"os", "subprocess", "shutil", "socket", "pathlib", "io", "logging", "tempfile", "importlib",
+                            "ctypes"})
+#: MACHINE-CHECKED: the store, the evaluator, the gate, the bands, the settings and the constitution: a candidate may
+#: never add an import of them (absolute or relative, the module or a name from it).
+PROTECTED_MODULES = ("league.swarm.store", "league.swarm.evaluator", "league.swarm.gate", "league.swarm.bands",
+                     "league.swarm.settings", "league.constitution")
 #: `os` members a candidate may start using (pure path and identity helpers); any other `os.<name>` or `from os import
 #: <name>` is refused (remove, replace, system, exec*, spawn*, environ, ...).
 OS_SAFE = frozenset({"path", "sep", "linesep", "fspath", "fsencode", "fsdecode", "getpid", "cpu_count", "PathLike", "name",
                      "curdir", "pardir", "extsep", "altsep", "pathsep", "devnull"})
 #: Modules a new `import X as Y` may not alias (an alias hides the module's members from the per-name counts).
 NO_ALIAS = frozenset({"os", "operator", "functools", "pathlib", "io", "shutil", "subprocess", "sqlite3", "sys", "builtins",
-                      "importlib", "inspect", "types", "gc", "ctypes"})
+                      "importlib", "inspect", "types", "gc", "ctypes", "logging", "tempfile", "zipfile", "tarfile", "gzip",
+                      "bz2", "lzma", "shelve", "dbm", "fileinput", "codecs"})
 #: Store methods that write (every `SwarmStore` method but its reads): a candidate may not start calling one
 #: (counted per name: moving an existing call is allowed, one more is not). The lanes' metrics, the lineage's trials,
 #: eligibility marks and the run rows live in what these write.
@@ -163,9 +201,17 @@ STORE_WRITES = frozenset({"put", "update_family", "bump", "set_state", "compare_
                           "add_versions", "add_run", "prune_runs", "note", "bury", "add_look", "refuse", "add_forward",
                           "replace_forward", "event", "add_spend", "upsert_box", "box_used", "set_box_state", "save_convo",
                           "_exec", "practice_event", "_reject"})
-#: Store reads of the holdout, Validation and forward evidence (D2a): a candidate may not start reading them.
+#: Store reads of the holdout, Validation and forward evidence (D2a): a candidate may not start reading them, called or
+#: held as a reference. `runs` (its `window="validation"` rows), `run` and `run_result` return a Validation run's row or
+#: its full result as readily as a Train one's (the fourth review), so any new use of them counts.
 SEALED_READS = frozenset({"looks", "looked", "lineage_looks", "lineage_validated", "lineage_trial_sharpes", "forward",
-                          "version_runs"})
+                          "version_runs", "runs", "run", "run_result"})
+#: A string in a key position (a subscript, a call's argument, a keyword's value, a comparison) that names Validation, the
+#: holdout or a line's figures (`fam["state"]["validation_line"]["numbers"]`, `runs(fid, window="validation")`): a
+#: candidate may not add one (counted per text). Prose in a new prompt constant is not a key position.
+SEALED_KEY = re.compile(r"validation|holdout|^numbers$|^looks?$|^forward$", re.I)
+#: A key is a word, not prose: a sentence a gated prompt prints ("the validation line") is no key.
+KEY_SHAPE = re.compile(r"[A-Za-z_][\w.:-]*")
 #: Raw SQL calls: the text of every one is frozen (a new or changed statement is refused), and a function whose statement
 #: writes (INSERT, UPDATE, DELETE, ...) or is not a plain string is a record writer, frozen whole (`symbol_guard`).
 RAW_SQL = frozenset({"execute", "executemany", "executescript", "_exec", "_all", "_one"})
@@ -213,6 +259,48 @@ def protected_reason(path: str) -> str | None:
         if fnmatch.fnmatchcase(path, pattern):
             return why
     return None
+
+
+def protected_touch(entries: Iterable[tuple[str, str]]) -> list[str]:
+    """MACHINE-CHECKED (the module docstring): the entries of `git diff --no-renames --name-status` (status, path) that
+    touch a protected path, whatever the status: a deletion, a type change, either side of a rename (with --no-renames
+    a rename is a delete and an add). A candidate's own test file may only be added: a change or deletion of an existing
+    one (an earlier candidate's included) touches the fixed tests."""
+    out = []
+    for status, path in entries:
+        why = protected_reason(path)
+        if why is None and fnmatch.fnmatchcase(path, NEW_TEST) and status[:1] != "A":
+            why = "objective: an existing test"
+        if why:
+            out.append(f"{status[:1]} {path} ({why})")
+    return out
+
+
+def blob_sha(data: bytes) -> str:
+    """Git's blob id of `data` (what `git ls-tree` prints for a file holding these bytes)."""
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+def loaded_code() -> dict[str, str]:
+    """Every repository module this process has loaded, by repo-relative path, with its git blob id: a measurement
+    carries it (`measure`'s `code`), so the owner's controller can check that the code which measured the House is the
+    pinned base commit's, never a candidate's (`HarnessImprovement.measured_by_base`)."""
+    import sys
+
+    here = Path(__file__).resolve().parents[2]
+    out: dict[str, str] = {}
+    for module in list(sys.modules.values()):
+        name = getattr(module, "__file__", None)
+        if not name:
+            continue
+        try:
+            path = Path(name).resolve()
+            rel = path.relative_to(here).as_posix()
+            if rel.endswith(".py"):
+                out[rel] = blob_sha(path.read_bytes())
+        except (OSError, ValueError):
+            continue
+    return dict(sorted(out.items()))
 
 
 def live_path_modules(tree: Path) -> set[str]:
@@ -324,30 +412,59 @@ def _docstrings(tree: ast.AST) -> set[int]:
 def _facts(source: str | None) -> dict[str, Any]:
     """What `content_guard` compares, counted: uses of dangerous names (calls, attribute reads, plain and imported
     names), imported modules and aliases, sys/os plumbing and other `os` members, dunder accesses, attribute-assignment
-    targets on anything but `self`/`cls`, store writes, sealed reads, private attributes of a collaborator, raw SQL
-    statements, mentions of the judges' override, gate members, reject-reason texts."""
+    targets on anything but `self`/`cls`, store writers and sealed readers named (called or held), Validation keys,
+    calls through an expression, private attributes of a collaborator, raw SQL statements, mentions of the judges'
+    override, gate members, reject-reason texts."""
     out: dict[str, Any] = {"calls": Counter(), "modules": set(), "plumbing": Counter(), "dunders": Counter(),
                            "attr_targets": Counter(), "forced": 0, "gate": Counter(), "global": False, "canary_import": 0,
                            "writes": Counter(), "sealed": Counter(), "private": Counter(), "sql": Counter(),
-                           "aliases": Counter(), "os": Counter(), "reasons": Counter()}
+                           "aliases": Counter(), "os": Counter(), "reasons": Counter(), "sealed_keys": Counter(),
+                           "indirect": Counter()}
     if not source:
         return out
     tree = ast.parse(source)
     docs = _docstrings(tree)
     methods = {f.name for c in ast.walk(tree) if isinstance(c, ast.ClassDef) for f in c.body
                if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    keys: list[ast.AST] = []
     for n in ast.walk(tree):
+        # The texts in key positions (`SEALED_KEY`): a subscript, a call's arguments and keyword values, a comparison.
+        if isinstance(n, ast.Subscript):
+            keys.append(n.slice)
+        elif isinstance(n, ast.Call):
+            # The gate's own key names its bottleneck (`harness:memory:validation_attempts_per_usd:...`): not a read.
+            gate_call = isinstance(n.func, ast.Attribute) and n.func.attr == "enabled" \
+                and isinstance(n.func.value, ast.Name) and n.func.value.id == "canary"
+            keys.extend(list(n.args[1:] if gate_call else n.args) + [k.value for k in n.keywords])
+        elif isinstance(n, ast.Compare):
+            keys.extend([n.left] + list(n.comparators))
+    for k in keys:
+        for c in ast.walk(k) if isinstance(k, (ast.Tuple, ast.List, ast.Set)) else [k]:
+            if isinstance(c, ast.Constant) and isinstance(c.value, str) and KEY_SHAPE.fullmatch(c.value) \
+                    and SEALED_KEY.search(c.value):
+                out["sealed_keys"][c.value[:80]] += 1
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Call) and not isinstance(n.func, (ast.Name, ast.Attribute)):
+            # `[f][0](...)`, `(lambda: f)()(...)`, `table[k](...)`: a call through an expression hides what it calls.
+            out["indirect"]["a call through an expression"] += 1
         if isinstance(n, ast.Call) and isinstance(n.func, (ast.Name, ast.Attribute)):
             name = n.func.id if isinstance(n.func, ast.Name) else n.func.attr
-            if name in STORE_WRITES:
+            if isinstance(n.func, ast.Name) and name in STORE_WRITES:
                 out["writes"][name] += 1
-            if name in SEALED_READS:
+            if isinstance(n.func, ast.Name) and name in SEALED_READS:
                 out["sealed"][name] += 1
             if name in RAW_SQL:
                 out["sql"][f"{name}:{ast.dump(n.args[0]) if n.args else '<no statement>'}"] += 1
             if name == "replace" and len(n.args) == 1 and not n.keywords:
                 # `Path.replace(target)` moves a file; `str.replace` always takes two arguments.
                 out["calls"]["replace/1"] += 1
+        if isinstance(n, ast.Attribute):
+            # A store writer or sealed reader counts wherever it is named, called or not: `mark = self.store.set_state`
+            # or `[self.store.update_family][0](...)` is as much a write as the call (the fourth review).
+            if n.attr in STORE_WRITES:
+                out["writes"][n.attr] += 1
+            if n.attr in SEALED_READS:
+                out["sealed"][n.attr] += 1
         if isinstance(n, ast.Import):
             out["modules"].update(a.name for a in n.names)
             out["canary_import"] += sum(a.name.endswith(".canary") or a.name == "canary" for a in n.names)
@@ -370,6 +487,8 @@ def _facts(source: str | None) -> dict[str, Any]:
                     out["calls"][a.name] += 1
                 if a.name in STORE_WRITES:
                     out["writes"][a.name] += 1
+                if a.name in SEALED_READS:
+                    out["sealed"][a.name] += 1
                 if n.level == 0 and n.module in ("os", "sys") and a.name not in (OS_SAFE if n.module == "os" else ()):
                     out["os"][f"{n.module}.{a.name}"] += 1
                 if a.name in PLUMBING and n.module in ("os", "sys"):
@@ -438,16 +557,61 @@ def _facts(source: str | None) -> dict[str, Any]:
     return out
 
 
+def _absolute(module: str, level: int, package: Sequence[str]) -> str:
+    """A relative import's absolute name, from the importing file's package (`package`: its path's directories)."""
+    if not level:
+        return module
+    anchor = list(package[: len(package) - level + 1]) if level > 1 else list(package)
+    return ".".join(anchor + ([module] if module else []))
+
+
+def restricted_imports(source: str | None, path: str) -> Counter:
+    """MACHINE-CHECKED (the module docstring): per import statement, each restricted module it brings in
+    (`NO_NEW_IMPORTS`, by its top-level name, any submodule included; `PROTECTED_MODULES`, the module or a name from it),
+    resolved from the importing file's package. A count, so a second import of `os` is one more."""
+    out: Counter = Counter()
+    if not source:
+        return out
+    package = path[:-3].split("/")[:-1]
+    for n in ast.walk(ast.parse(source)):
+        names: list[str] = []
+        if isinstance(n, ast.Import):
+            names = [a.name for a in n.names]
+        elif isinstance(n, ast.ImportFrom):
+            base = _absolute(n.module or "", n.level, package)
+            # `from league.swarm import store` names the module in the alias: the base and every base.name.
+            names = [base] + [f"{base}.{a.name}" if base else a.name for a in n.names]
+        found = set()
+        for name in names:
+            top = name.split(".")[0]
+            if top in NO_NEW_IMPORTS:
+                found.add(top)
+            for module in PROTECTED_MODULES:
+                if name == module or name.startswith(module + "."):
+                    found.add(module)
+        out.update(found)
+    return out
+
+
 def content_guard(path: str, before: str | None, after: str) -> None:
-    """Refuse a Python change that introduces reflection, processes, network, file writes, output or exits a judge could
-    mistake for its answer, interpreter plumbing, attribute assignment on another object, a protected import, the judges'
-    gate override, or a gate in the evaluator fingerprint's files. Every comparison is a count per name, so moving an
-    existing call is allowed and one more is not. Not a proof of safety: the sandbox, the judges' open and closed runs
-    and the adversarial review remain."""
+    """Refuse a Python change that adds an import of a protected or process, file, network or loader module (exact and
+    machine-checked), and, as DEFENSE IN DEPTH (static analysis cannot be complete: the module docstring), one that
+    introduces reflection, processes, network, file writes (calls and constructors), output or exits a judge could mistake
+    for its answer, interpreter plumbing, attribute assignment on another object, a store writer or sealed reader named
+    anywhere (called or held), a Validation key, a call through an expression, the judges' gate override, or a gate in
+    the evaluator fingerprint's files. Every comparison is a count per name, so moving an existing call is allowed and one
+    more is not. Never a proof of safety: the adversarial review, the base-pinned judges and regressions, and the canary
+    remain."""
     if not path.endswith(".py"):
         return
     from .improvement import ImprovementError  # local: improvement imports this module
 
+    was, now = restricted_imports(before, path), restricted_imports(after, path)
+    added = sorted(m for m, v in now.items() if v > was.get(m, 0))
+    if added:
+        raise ImprovementError(f"{path}: candidate adds an import of {added}: no candidate may import the store, evaluator, "
+                               "gate, bands, settings or constitution, or os, subprocess, shutil, socket, pathlib, io, "
+                               "logging, tempfile, importlib or ctypes")
     old, new = _facts(before), _facts(after)
 
     def more(field: str) -> list[str]:
@@ -460,8 +624,11 @@ def content_guard(path: str, before: str | None, after: str) -> None:
                         ("attr_targets", "assignment to another object's attribute"),
                         ("os", "process, file or interpreter module members"),
                         ("aliases", "an alias of a process, file or dynamic-access module"),
-                        ("writes", "store writes (the lanes' records, the lineage's trials, eligibility marks)"),
-                        ("sealed", "reads of the holdout, Validation or forward evidence"),
+                        ("writes", "store writes, called or held as a reference (the lanes' records, the lineage's trials, "
+                                   "eligibility marks)"),
+                        ("sealed", "reads of the holdout, Validation or forward evidence (called or held as a reference)"),
+                        ("sealed_keys", "a key naming Validation, the holdout or a line's figures (D2a)"),
+                        ("indirect", "a call through an expression (it hides what it calls)"),
                         ("sql", "a new or changed raw SQL statement"),
                         ("private", "a collaborator's private attributes")):
         found = more(field)
@@ -641,9 +808,13 @@ def _sql_text(node: ast.AST) -> str | None:
     return None
 
 
-def _record_write(node: ast.AST) -> bool:
-    """A call that writes the records the lanes, the lineage and the evidence live in: a trial or store writer by name
-    (`TRIAL_WRITES`), or raw SQL whose statement writes or cannot be read (not a plain string)."""
+def _record_write(node: ast.AST, called: frozenset[int] | set[int] = frozenset()) -> bool:
+    """A write of the records the lanes, the lineage and the evidence live in: a call of a trial or store writer by name
+    (`TRIAL_WRITES`), a reference to one that is not that call's own name (`mark = self.store.set_state`,
+    `[self.store.update_family][0]`, `for w in (self.store.bump,)`: `called` holds the ids of the names calls use), or raw
+    SQL whose statement writes or cannot be read (not a plain string)."""
+    if isinstance(node, ast.Attribute) and node.attr in TRIAL_WRITES and id(node) not in called:
+        return True
     if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
         return False
     if node.func.attr in TRIAL_WRITES:
@@ -655,11 +826,13 @@ def _record_write(node: ast.AST) -> bool:
 
 
 def _writes(func: ast.AST, *, conditions: bool = True) -> list[str]:
-    """The trial writes inside `func`, each with the chain of conditions and loops around it."""
+    """The trial writes inside `func` (calls and references, `_record_write`), each with the chain of conditions and
+    loops around it."""
     found: list[str] = []
+    called = {id(n.func) for n in ast.walk(func) if isinstance(n, ast.Call)}
 
     def walk(node: ast.AST, chain: tuple[str, ...]) -> None:
-        if _record_write(node):
+        if _record_write(node, called):
             found.append(" > ".join(chain + (ast.dump(node),)) if conditions else ast.dump(node))
         for field_name, value in ast.iter_fields(node):
             children = value if isinstance(value, list) else [value]
@@ -682,10 +855,70 @@ def _writes(func: ast.AST, *, conditions: bool = True) -> list[str]:
     return sorted(found)
 
 
+#: Method names every list, dict, set, str and bytes has, and a few words most objects use: an attribute by one of these
+#: names counts as a reference to the module's own function of that name only on `self`, `cls` or one of the module's
+#: classes (`seen.add(x)` is a set's add, not `observe.add`); any other name counts on whatever object it is read.
+GENERIC_ATTRS = frozenset(n for t in (list, dict, set, str, bytes, tuple) for n in dir(t) if not n.startswith("_")) | {
+    "run", "status", "close", "start", "stop", "read", "summary", "__init__"}
+
+
+def _writer_names(functions: Mapping[str, ast.AST], classes: frozenset[str] = frozenset()) -> set[str]:
+    """The short names of the module's functions that write records (`_writes`), directly or by calling (or naming)
+    another such function of the module: the closure, by name (an over-approximation: a name shared with an unrelated
+    function counts too, which can only refuse more)."""
+    names = {q.rsplit(".", 1)[-1] for q, f in functions.items() if _writes(f)}
+    while True:
+        more = {q.rsplit(".", 1)[-1] for q, f in functions.items() if q.rsplit(".", 1)[-1] not in names
+                and _references(f, names, classes)}
+        if not more:
+            return names
+        names |= more
+
+
+def _references(tree: ast.AST, names: set[str], classes: frozenset[str] = frozenset()) -> Counter:
+    """How often `tree` names each of `names` (an attribute, or a plain name it reads), definitions aside. A generic
+    name (`GENERIC_ATTRS`) counts as an attribute only on `self`, `cls` or one of the module's `classes`."""
+    owners = {"self", "cls"} | set(classes)
+    out: Counter = Counter()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr in names and (
+                node.attr not in GENERIC_ATTRS or (isinstance(node.value, ast.Name) and node.value.id in owners)):
+            out[node.attr] += 1
+        elif isinstance(node, ast.Name) and node.id in names and isinstance(node.ctx, ast.Load):
+            out[node.id] += 1
+    return out
+
+
+def _aliases(value: ast.AST, names: Sequence[str]) -> bool:
+    """Whether `value` hands out a guarded binding itself (or a part of one, or one of its methods) rather than a value
+    computed from it: the name, an attribute or item of it, a container, a choice or a lambda holding one."""
+    if isinstance(value, ast.Name):
+        return value.id in names
+    if isinstance(value, (ast.Attribute, ast.Subscript)):
+        return _aliases(value.value, names)
+    if isinstance(value, (ast.Tuple, ast.List, ast.Set)):
+        return any(_aliases(e, names) for e in value.elts)
+    if isinstance(value, ast.Starred):
+        return _aliases(value.value, names)
+    if isinstance(value, ast.Dict):
+        return any(v is not None and _aliases(v, names) for v in value.values)
+    if isinstance(value, ast.IfExp):
+        return _aliases(value.body, names) or _aliases(value.orelse, names)
+    if isinstance(value, ast.BoolOp):
+        return any(_aliases(v, names) for v in value.values)
+    if isinstance(value, ast.NamedExpr):
+        return _aliases(value.value, names)
+    if isinstance(value, ast.Lambda):
+        return _aliases(value.body, names)
+    return False
+
+
 def symbol_guard(path: str, before: str | None, after: str) -> None:
-    """Refuse a change to a frozen symbol (`FROZEN_SYMBOLS`), to a function that writes trial records (frozen whole),
-    to any trial write or the conditions around it, or to a guarded binding (`GUARDED_BINDINGS`); refuse a new writer of
-    trial records anywhere in a surface file."""
+    """DEFENSE IN DEPTH (static: the module docstring). Refuse a change to a frozen symbol (`FROZEN_SYMBOLS`), to a
+    function that writes trial records or holds a reference to a writer (frozen whole), to any trial write or the
+    conditions around it, or to a guarded binding (`GUARDED_BINDINGS`: no rebinding, mutation, mutator reference or alias);
+    refuse a new writer of trial records anywhere in a surface file, and a new call of (or reference to) a function of the
+    module that writes records directly or through a call."""
     if not path.endswith(".py"):
         return
     from .improvement import ImprovementError
@@ -710,6 +943,15 @@ def symbol_guard(path: str, before: str | None, after: str) -> None:
     for qualname, func in new_f.items():
         if qualname not in writers and _writes(func):
             raise ImprovementError(f"{path}: {qualname} would be a new writer of trial, lineage, look or graveyard records")
+    # A new path to an existing writer: a new call of (or reference to) a function of this module that writes records,
+    # directly or through another such function (`_writer_names`), counted per name.
+    classes = frozenset(n.name for n in _scope(old.body) if isinstance(n, ast.ClassDef))
+    reach = _writer_names(old_f, classes)
+    was, now = _references(old, reach, classes), _references(new, reach, classes)
+    grown = sorted(n for n, v in now.items() if v > was.get(n, 0))
+    if grown:
+        raise ImprovementError(f"{path}: candidate adds a call of (or reference to) {grown[:6]}, which write trial, "
+                               "lineage, look or graveyard records directly or through a call: a new path to a record writer")
     for qualname, names in guarded.items():
         a, b = old_f.get(qualname), new_f.get(qualname)
         if a is None:
@@ -741,9 +983,15 @@ def symbol_guard(path: str, before: str | None, after: str) -> None:
                             root = root.value
                         if isinstance(root, ast.Name) and root.id in names:
                             found[f"mutate:{ast.dump(node)}"] += 1
-                if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in MUTATORS \
-                        and isinstance(node.func.value, ast.Name) and node.func.value.id in names:
+                # A mutator named on a guarded binding, called or not (`forget = dead.clear; forget()`, the fourth
+                # review), and a guarded binding (or a part of one) bound to another name: the alias could mutate it.
+                if isinstance(node, ast.Attribute) and node.attr in MUTATORS and isinstance(node.value, ast.Name) \
+                        and node.value.id in names:
                     found[f"mutate:{ast.dump(node)}"] += 1
+                value = getattr(node, "value", None) if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign,
+                                                                           ast.NamedExpr)) else None
+                if value is not None and _aliases(value, names):
+                    found[f"alias:{ast.dump(node)}"] += 1
             return found
 
         if bindings(a) != bindings(b):
@@ -759,13 +1007,18 @@ def symbol_guard(path: str, before: str | None, after: str) -> None:
 #: units the observer does not.
 UNIT_NAMES = frozenset({"fam", "fid", "family", "family_id"})
 MECHANISM_HOMES = {"league/swarm/architect.py": ("Architect.admit",)}
+#: Where a memory-lane gate may be asked about a family's stored text (`canary.mechanism_unit(fam["mechanism"])`): the
+#: researcher's per-family cycle (its retrieval and prompts), nowhere else (the fourth review: a per-pass text elsewhere
+#: could still be keyed by a loop's `fam`).
+FAMILY_MECHANISM_HOMES = ("league/swarm/researcher.py",)
 
 
 def _mechanism_arg(node: ast.AST, path: str | None, where: str | None) -> bool:
     if isinstance(node, ast.Name) and node.id == "mechanism":
         return path is None or where in MECHANISM_HOMES.get(path, ())
     return (isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) and node.value.id in ("fam", "family")
-            and isinstance(node.slice, ast.Constant) and node.slice.value == "mechanism")
+            and isinstance(node.slice, ast.Constant) and node.slice.value == "mechanism"
+            and (path is None or path in FAMILY_MECHANISM_HOMES))
 
 
 def unit_ok(node: ast.AST, unit: str | None, *, path: str | None = None, where: str | None = None) -> bool:
@@ -857,17 +1110,24 @@ def _plain(node: ast.AST) -> bool:
     return False
 
 
-def _inert_def(node: ast.stmt) -> bool:
-    """A new definition that runs nothing when the module loads: plain decorators, literal defaults, plain bases."""
+def _dunder(name: str) -> bool:
+    return name.startswith("__") and name.endswith("__")
+
+
+def _inert_def(node: ast.stmt, *, member: bool = False) -> bool:
+    """A new definition that runs nothing when the module loads and changes no lookup: plain decorators, literal
+    defaults, no dunder name (a module's `__getattr__`, a class's `__bool__` act with the gate closed; a NEW class's own
+    members, `member`, may be dunders: nothing existing knows the class), and a new class only on builtin bases
+    (another base's `__init_subclass__` or metaclass runs when the class is made)."""
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
         ok_decorators = all(isinstance(d, ast.Name) and d.id in ("staticmethod", "classmethod", "property")
                             for d in node.decorator_list)
         defaults = list(node.args.defaults) + [d for d in node.args.kw_defaults if d is not None]
-        return ok_decorators and all(_plain(d) for d in defaults)
+        return ok_decorators and all(_plain(d) for d in defaults) and (member or not _dunder(node.name))
     if isinstance(node, ast.ClassDef):
-        return (not node.decorator_list and not node.keywords
-                and all(isinstance(b, (ast.Name, ast.Attribute)) for b in node.bases)
-                and all(_inert_def(s) or _new_plain_assign(s, set()) or isinstance(s, ast.Pass)
+        return (not node.decorator_list and not node.keywords and not _dunder(node.name)
+                and all(isinstance(b, ast.Name) and b.id in BUILTIN_NAMES for b in node.bases)
+                and all(_inert_def(s, member=True) or _new_plain_assign(s, set()) or isinstance(s, ast.Pass)
                         for s in _docless(node.body)))
     return False
 
@@ -909,11 +1169,19 @@ def _referenced(tree: ast.AST) -> set[str]:
     return out
 
 
-def _strip_new(head: list[ast.stmt], base: list[ast.stmt], taken: set[str] = frozenset()) -> list[ast.stmt]:
+#: Names every class has (`object`'s): a new method by one of them overrides behavior with the gate closed.
+OBJECT_NAMES = frozenset(dir(object))
+
+
+def _strip_new(head: list[ast.stmt], base: list[ast.stmt], taken: set[str] = frozenset(), *,
+               owner: ast.ClassDef | None = None) -> list[ast.stmt]:
     """`head`'s statements of one scope without what it adds: new inert definitions, new plain constants, new imports,
     each under a name no existing code uses (`taken`: the baseline module's names and the builtins; a new
     `def round`, `LONG_SINGLE = ...` or `from x import same_slice` rebinds what existing code calls, so it is a change).
-    An existing class is compared member by member the same way."""
+    An existing class (`owner`) is compared member by member the same way, more strictly: a new member there may only
+    be a new method under a name `object` does not have, and none at all in a class with bases or decorators (a base's
+    method, a dispatch by name like `NodeTransformer.visit_*`, or a dataclass's or NamedTuple's fields would change);
+    a new class attribute or field, or an import in the class body, is a change."""
     bound = {n.name for n in base if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))} | set(taken)
     for n in base:
         for t in (n.targets if isinstance(n, ast.Assign) else [getattr(n, "target", None)]):
@@ -922,19 +1190,21 @@ def _strip_new(head: list[ast.stmt], base: list[ast.stmt], taken: set[str] = fro
         bound.update(_import_names(n))
     imports = {ast.dump(n) for n in base if isinstance(n, (ast.Import, ast.ImportFrom))}
     classes = {n.name: n for n in base if isinstance(n, ast.ClassDef)}
+    plain_owner = owner is None or not (owner.bases or owner.keywords or owner.decorator_list)
     out: list[ast.stmt] = []
     for node in head:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name not in bound:
-            if _inert_def(node):
+            if _inert_def(node) and plain_owner and not (owner is not None and node.name in OBJECT_NAMES):
                 continue
-        elif isinstance(node, (ast.Import, ast.ImportFrom)) and ast.dump(node) not in imports \
+        elif owner is None and isinstance(node, (ast.Import, ast.ImportFrom)) and ast.dump(node) not in imports \
                 and not set(_import_names(node)) & bound:
             continue
-        elif _new_plain_assign(node, bound):
+        elif owner is None and _new_plain_assign(node, bound):
             continue
         elif isinstance(node, ast.ClassDef) and node.name in classes:
             node = ast.ClassDef(name=node.name, bases=node.bases, keywords=node.keywords,
-                                body=_strip_new(_docless(node.body), _docless(classes[node.name].body), taken),
+                                body=_strip_new(_docless(node.body), _docless(classes[node.name].body), taken,
+                                                owner=classes[node.name]),
                                 decorator_list=node.decorator_list, type_params=getattr(node, "type_params", []))
         out.append(node)
     return out
@@ -964,7 +1234,8 @@ def gate_coverage(path: str, before: str | None, after: str, key: str, unit: str
         raise ImprovementError(f"{path}: the gate must be asked about the lane's unit ({unit}: "
                                + ('a name for the family, e.g. fam["id"]' if unit == "family" else
                                   'canary.mechanism_unit(mechanism) inside Architect.admit, or '
-                                  'canary.mechanism_unit(fam["mechanism"])') + "), the unit its observer splits")
+                                  'canary.mechanism_unit(fam["mechanism"]) in league/swarm/researcher.py') + "), the unit "
+                               "its observer splits")
     base = ast.parse(before) if before is not None else ast.Module(body=[], type_ignores=[])
     taken = _referenced(base)
     head, base = _Docless().visit(head), _Docless().visit(base)
@@ -1072,7 +1343,7 @@ COST_RATIO, COST_FLOOR, PAYS_SHARE = 1.25, 2.0, 0.25
 HELDOUT_POOLS = {
     "research": "c67e699af2a077fafb9f957b98c88dbc95bc6c6ff040d8c5f69b56d1334c0c63",
     "memory": "913af78057f5898d05d88b081eed7f47c9a4e6d0098e042a0844a0ed45c353da",
-    "data": "5a6228a6ab6817545db818df99cdd5ed53fb4b31a8fa34a49542ec1c688ecc64",
+    "data": "9cba19f92612d76ee7af56091723464b6ba33fea1a9a7184e120f8b574efcf3b",
     "execution": "46e65fbb329d8fce1117f524521b97f77a795017d5aab0cf0433f6020dfea8cd",
 }
 #: The research judge's "pays" rule in House terms (Sept 30, 2026, 24 hours read-only): 14.2% of Train runs were
@@ -1092,14 +1363,20 @@ CYCLE_USD = {"research": 10.0, "money_path": 25.0, "evidence_reset": 40.0}
 #: screen, dedupe, the evaluator identity and the graveyard digest, beside its own.
 CORE_REGRESSIONS = ("league.tests.test_swarm_long_single", "league.tests.test_swarm_rounds", "league.tests.test_swarm_drift",
                     "league.tests.test_swarm_dedupe", "league.tests.test_swarm_evaluator",
-                    "league.tests.test_swarm_graveyard_digest")
+                    "league.tests.test_swarm_graveyard_digest",
+                    # D2a at run time (the fourth review): Validation runs, lines, views and a leaderboard seeded with
+                    # sentinel figures; no model-facing text (the researcher's cycle, status, brief, prompt and
+                    # read_run tool, the architect's prompt, the strategist's and the diagnostician's packets) may
+                    # carry one. Run with the gate forced open too, so a gated leak fails here whatever route it took.
+                    "league.tests.test_swarm_d2a_sentinel")
 UNATTRIBUTED = Metric("unattributed_usd_per_hour", "unattributed_usd", "hours", min_effect=0.25, abs_tolerance=0.25)
 #: The memory lane's lever (refusing a restated buried idea) supersedes these regressions with its gate open: each admits
 #: a restated dead idea and checks the birth continues its lineage. With the gate closed they still run and must pass;
 #: the memory judge's `trials_uncounted` and `rebirths_fresh_lineage` carry the lineage invariant for what is admitted.
 MEMORY_SUPERSEDES: tuple[str, ...] = (
     "league.tests.test_swarm_rounds.ArchitectTests.test_a_proposal_on_a_retired_familys_slice_continues_its_lineage",
-    "league.tests.test_swarm_graveyard_digest.ArchitectRoutes.test_every_lesson_a_model_reads_passes_lesson_view",
+    # Only the admission half of the lesson-view test: its prompt half (D2a in the architect's prompt) stays required.
+    "league.tests.test_swarm_graveyard_digest.ArchitectRoutes.test_a_birth_on_a_buried_slice_carries_lesson_view_lessons",
     "league.tests.test_swarm_graveyard_digest.ArchitectRoutes.test_proposals_cite_the_rows_they_differ_from",
 )
 
@@ -1159,8 +1436,11 @@ LANES: dict[str, Lane] = {
         judge="memory", protocol="memory-rebirth-v3", judge_zero=("trials_uncounted", "mechanism_rewritten"),
         judge_no_worse=("novel_refused", "rebirths_fresh_lineage"),
         judge_cost="sqlite_statements", judge_cost_rule="ratio",
-        regressions=("league.tests.test_swarm_r11b", "league.tests.test_swarm_verdicts", "league.tests.test_swarm_store")
-        + CORE_REGRESSIONS,
+        # The researcher, the strategist and the diagnostician are in this surface: their tests run too (the fourth
+        # review: a retrieval change there could show Validation figures to a model).
+        regressions=("league.tests.test_swarm_r11b", "league.tests.test_swarm_verdicts", "league.tests.test_swarm_store",
+                     "league.tests.test_swarm_researcher", "league.tests.test_swarm_strategist",
+                     "league.tests.test_swarm_diagnostician") + CORE_REGRESSIONS,
         canary={"mode": "arms", "unit": "mechanism", "fraction": 0.5, "observe_seconds": 12 * 3600,
                 "min_units_per_arm": 15},
         population_guards=(UNATTRIBUTED,), arm_needs="births", birth_balance=True, heldout_pool=HELDOUT_POOLS["memory"],
@@ -1776,6 +2056,9 @@ def measure(root: Path, *, now: float | None = None, seconds: int = 6 * 3600, si
         out["deploys"] = None
     for name, lane in out["lanes"].items():
         lane["metrics"] = lane_metrics(name, lane)
+    # The code that took this measurement (run it from the base release's directory): the owner's controller refuses a
+    # measurement whose measuring code is not the pinned base commit's (`HarnessImprovement.measured_by_base`).
+    out["code"] = loaded_code()
     return out
 
 
@@ -2205,7 +2488,8 @@ def retention(lane: Lane, bottleneck: Bottleneck, treated: Mapping[str, Mapping[
             "min_effect": bottleneck.metric.min_effect}
 
 
-__all__ = ["LANES", "Lane", "Metric", "Bottleneck", "PROTECTED", "protected_reason", "classify", "live_path_modules",
+__all__ = ["LANES", "Lane", "Metric", "Bottleneck", "PROTECTED", "protected_reason", "protected_touch", "classify",
+           "live_path_modules", "restricted_imports", "NO_NEW_IMPORTS", "PROTECTED_MODULES", "blob_sha", "loaded_code",
            "content_guard", "symbol_guard", "gate_coverage", "is_gate", "surface_check", "measure", "rank", "lane_metrics",
            "motivating_units", "heldout_seed", "split_arms", "compare", "retention", "judge_verdict", "judge_counts",
            "payback", "required_units", "binomial_low", "fisher_less", "signature", "words", "jaccard", "same_idea",

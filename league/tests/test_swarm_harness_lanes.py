@@ -12,6 +12,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -74,6 +75,31 @@ def commit(repo: Path, message: str) -> str:
     labmod.git(repo, "add", ".")
     labmod.git(repo, "-c", "user.name=Harness Test", "-c", "user.email=harness@example.invalid", "commit", "-qm", message)
     return labmod.git(repo, "rev-parse", "HEAD")
+
+
+def controller_into(repo: Path) -> None:
+    """The running controller's own files (`improvement.CONTROLLER`, the judges), copied into a test repository before
+    its base commit: the controller runs only as its base commit's code (`HarnessImprovement.pinned`)."""
+    for rel in labmod.controller_paths():
+        target = Path(repo) / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((REPO / rel).read_bytes())
+
+
+def controller_code() -> dict:
+    """A measurement's `code` as the base's measuring code would report it (`harness_lanes.loaded_code`)."""
+    return {rel: lanes.blob_sha((REPO / rel).read_bytes()) for rel in labmod.controller_paths()}
+
+
+REPORT = "Adversarial review of patch {sha}.\n\nNo finding survives a probe.\n\nVERDICT: {verdict}\n"
+
+
+def review(lab, key, *, verdict="approve", reviewer="reviewer-agent", text=None):
+    """Record an adversarial review of the staged patch (the machine-checked step before any canary)."""
+    p = lab.worklist.get(key).carry["_proposal"]
+    path = Path(p["artifact"]) / f"incoming-{verdict}.md"
+    path.write_text(text if text is not None else REPORT.format(sha=p["patch_sha"], verdict=verdict))
+    return lab.review(key, report=path, reviewer=reviewer, patch_sha=p["patch_sha"])
 
 
 def run(fid: str, status: str, n: int) -> dict:
@@ -158,8 +184,9 @@ class Boundary(unittest.TestCase):
                   "        return os.path.join('a', json.dumps(rows))\n")
         lanes.content_guard(path, before, before.replace("text.replace('a', 'b')", "text.replace('b', 'c')"))
         for added, pattern in (
-                ("from os import system as _sh, write as _emit\n", "system"),
-                ("from os import environ as _env\n", "plumbing"),
+                # A new import of os is refused outright now (machine-checked), before any name is counted.
+                ("from os import system as _sh, write as _emit\n", r"import of \['os'\]"),
+                ("from os import environ as _env\n", r"import of \['os'\]"),
                 ("from operator import attrgetter as _ag\n", "attrgetter"),
                 ("import operator\nX = operator.attrgetter('_FOR' + 'CED')\n", "attrgetter"),
                 ("F = os.system\n", "system"),
@@ -172,7 +199,8 @@ class Boundary(unittest.TestCase):
                 ("def g(a):\n    return os.execv('/bin/sh', a)\n", "execv"),
                 ("def g(a):\n    return os.posix_spawn('/bin/sh', a, {})\n", "posix_spawn"),
                 ("def g(a):\n    return subprocess.run(a)\n", "members"),
-                ("import os as o\n", "alias"),
+                ("import os as o\n", r"import of \['os'\]"),
+                ("import operator as op\n", "alias"),
                 ("class S:\n    def g(self, fid):\n        self.store.set_state(fid, robust_failed=[], drift_failed={})\n",
                  "store writes"),
                 ("class S:\n    def g(self, fid):\n        self.store.update_family(fid, lineage=None, parent=None)\n",
@@ -291,6 +319,232 @@ class Frozen(unittest.TestCase):
         with self.assertRaisesRegex(labmod.ImprovementError, "new writer"):
             lanes.symbol_guard("league/swarm/architect.py", architect,
                                architect + "\n\ndef extra(store, fid):\n    store.bury(fid, 'x')\n")
+
+
+def staged(path, before, after, key, unit, lane):
+    """The per-file checks `_stage_lane` makes (surface, content, symbols, gate coverage): None when they pass."""
+    try:
+        lanes.surface_check(lanes.LANES[lane], [path])
+        lanes.content_guard(path, before, after)
+        lanes.symbol_guard(path, before, after)
+        lanes.gate_coverage(path, before, after, key, unit)
+    except labmod.ImprovementError as exc:
+        return str(exc)
+    return None
+
+
+class FourthReview(unittest.TestCase):
+    """The fourth review's probes, each a candidate gated as the brief says that got past every staging check. The static
+    guards are defense in depth (the module docstring): these routes are now refused, and the D2a sentinels, the review
+    and the base-pinned judges carry what no list of names can."""
+
+    KEY_R = "harness:research:train_dq_rate:0123456789abcdef"
+    KEY_M = "harness:memory:validation_attempts_per_usd:0123456789abcdef"
+
+    def setUp(self):
+        self.researcher = (REPO / "league/swarm/researcher.py").read_text()
+        self.gated_r = self.researcher.replace("from . import diagnostics, evidence, inputs, public\n",
+                                               "from . import diagnostics, evidence, inputs, public\nfrom . import canary\n", 1)
+        self.assertNotEqual(self.gated_r, self.researcher)
+
+    def admit(self, body):
+        anchor = "        why = check_code(code)\n"
+        self.assertEqual(self.gated_r.count(anchor), 1)
+        return self.gated_r.replace(anchor, f'        if canary.enabled("{self.KEY_R}", fam["id"], root=self.store.root):\n'
+                                    + body + anchor, 1)
+
+    def status(self, line, key=None, unit='fam["id"]'):
+        anchor = "        if state.get(\"best_train_version\") is not None:\n"
+        self.assertEqual(self.gated_r.count(anchor), 1)
+        return self.gated_r.replace(anchor, f'        if canary.enabled("{key or self.KEY_R}", {unit}, root=self.store.root):\n'
+                                    f"            {line}\n" + anchor, 1)
+
+    def refused(self, after, pattern, *, lane="research", key=None, unit="family", path="league/swarm/researcher.py",
+                before=None):
+        why = staged(path, self.researcher if before is None else before, after, key or self.KEY_R, unit, lane)
+        self.assertIsNotNone(why, f"staging passed:\n{after[-600:]}")
+        self.assertRegex(why, pattern)
+
+    def test_validation_readers_are_sealed_reads(self):
+        """P1, P1b, P1c: Researcher.status showing a family's Validation runs, or their full results, to the model."""
+        rows = 'json.dumps([r.get("summary") for r in self.store.runs(fam["id"], window="validation")], default=str)'
+        self.refused(self.status(f'parts.append("Validation runs: " + {rows})'), r"Validation .*\['runs'\]")
+        self.refused(self.status(f'parts.append("Validation runs: " + {rows})', key=self.KEY_M,
+                                 unit='canary.mechanism_unit(fam["mechanism"])'), r"\['runs'\]", lane="memory",
+                     key=self.KEY_M, unit="mechanism")
+        self.refused(self.status('parts.append(json.dumps([self.store.run_result(r["run_id"]) for r in '
+                                 'self.store.runs(fam["id"], window="validation", limit=3)], default=str))'),
+                     r"\['run_result', 'runs'\]")
+        held = self.status('read = self.store.run')
+        self.refused(held, r"\['run'\]")
+        # A Validation figure reached through the family's own state, with no store call at all: a sealed key.
+        self.refused(self.status('parts.append(json.dumps(state.get("validation_line", {}).get("numbers")))'),
+                     r"key naming Validation")
+        self.refused(self.status('parts.append(str((fam.get("state") or {})["validation_view"]))'), r"key naming Validation")
+        # Prose a gated prompt prints is no key.
+        self.assertIsNone(staged("league/swarm/researcher.py", self.researcher,
+                                 self.status('parts.append("Validation stays a verdict and a count of checks.")'),
+                                 self.KEY_R, "family", "research"))
+
+    def test_store_writers_held_as_references_are_store_writes(self):
+        """P2, P2b, P2c: a writer called through a first-class reference in the research lever `_admit`."""
+        for body, pattern in (('            mark = self.store.set_state\n'
+                               '            mark(fam["id"], robust_failed=[], drift_failed={})\n', r"store writes.*set_state"),
+                              ('            [self.store.update_family][0](fam["id"], trials=0, since_val_trials=0)\n',
+                               r"store writes.*update_family"),
+                              ('            for lower in (self.store.bump,):\n'
+                               '                lower(fam["id"], trials=-1)\n', r"store writes.*bump")):
+            probe = self.admit(body)
+            self.refused(probe, pattern)
+            with self.assertRaisesRegex(labmod.ImprovementError, "writer", msg=body):
+                lanes.symbol_guard("league/swarm/researcher.py", self.researcher, probe)
+
+    def test_a_call_through_an_expression_is_refused(self):
+        self.refused(self.admit('            (lambda: check_code)()(code)\n'), r"call through an expression")
+        self.refused(self.admit('            [check_code][0](code)\n'), r"call through an expression")
+
+    def test_a_new_path_to_an_existing_record_writer_is_refused(self):
+        """A gated branch calling one of the module's own writers (`_demote` demotes versions, `_count_holds` writes
+        counters): a new path to the records the multiple-testing control reads."""
+        for body in ('            self._demote(fam, 1, "probe")\n', '            self._count_holds(fam)\n'):
+            with self.assertRaisesRegex(labmod.ImprovementError, "new path to a record writer", msg=body):
+                lanes.symbol_guard("league/swarm/researcher.py", self.researcher, self.admit(body))
+        # A set's own `add` is not the module's writer of the same name (a generic name counts only on self or cls).
+        observe = (REPO / "league/live/observe.py").read_text()
+        self.assertIn("add", lanes._writer_names(lanes._functions(ast.parse(observe))))
+        lanes.symbol_guard("league/live/observe.py", observe, observe + "\n\ndef _seen(rows):\n    out = set()\n"
+                           "    for row in rows:\n        out.add(row)\n    return out\n")
+
+    def test_file_writes_through_constructors_and_new_file_module_imports_are_refused(self):
+        """P3, P3b, P3c: a logging FileHandler rewriting the House's gate file, io.FileIO truncating the store, an archive
+        written: refused as a new import (machine-checked) and, where the module was already imported, by name."""
+        write = ('            sink = logging.getLogger("probe")\n'
+                 '            sink.addHandler(logging.FileHandler(str(self.store.root) + "/harness/canary.json", mode="w"))\n'
+                 f'            sink.error(json.dumps({{"schema": 1, "arms": {{"{self.KEY_R}": {{"state": "retained"}}}}}}))\n')
+        self.refused(self.admit(write).replace("import json\n", "import json\nimport logging\n", 1),
+                     r"adds an import of \['logging'\]")
+        self.refused(self.admit('            io.FileIO(str(self.store.root) + "/swarm.sqlite", "w").close()\n')
+                     .replace("import json\n", "import json\nimport io\n", 1), r"adds an import of \['io'\]")
+        self.refused(self.admit('            zipfile.ZipFile(str(self.store.root) + "/x.zip", "w").writestr("x", "y")\n')
+                     .replace("import json\n", "import json\nimport zipfile\n", 1), r"ZipFile")
+        already = "import io\nimport json\nimport logging\n\n\ndef f(x):\n    return json.dumps(x)\n"
+        for added, pattern in (("logging.getLogger('x').addHandler(logging.FileHandler('/tmp/f', mode='w'))\n", "FileHandler"),
+                               ("io.FileIO('/tmp/f', 'w')\n", "FileIO"), ("json.dump({}, None)\n", "dump"),
+                               ("logging.basicConfig(filename='/tmp/f')\n", "basicConfig")):
+            with self.assertRaisesRegex(labmod.ImprovementError, pattern, msg=added):
+                lanes.content_guard("league/swarm/preflight.py", already, already + added)
+
+    def test_new_imports_of_protected_and_process_modules_are_refused_even_where_one_exists(self):
+        before = "import os\nfrom .store import SwarmStore\n\n\ndef f(x):\n    return os.path.join('a', x)\n"
+        lanes.content_guard("league/swarm/researcher.py", before, before.replace("def f(x):", "def f(x, y=1):"))
+        for added, module in (("    import os\n", "os"), ("    from os import path\n", "os"),
+                              ("    import pathlib\n", "pathlib"), ("    import tempfile\n", "tempfile"),
+                              ("    import importlib.util\n", "importlib"), ("    import ctypes\n", "ctypes"),
+                              ("    import shutil\n", "shutil"), ("    import socket\n", "socket"),
+                              ("    import subprocess\n", "subprocess"), ("    from . import store\n", "league.swarm.store"),
+                              ("    from .store import SwarmStore\n", "league.swarm.store"),
+                              ("    from league.swarm.evaluator import x\n", "league.swarm.evaluator"),
+                              ("    from . import gate\n", "league.swarm.gate"), ("    from .bands import read\n", "league.swarm.bands"),
+                              ("    from . import settings as S\n", "league.swarm.settings"),
+                              ("    from ..constitution import C\n", "league.constitution"),
+                              ("    import league.constitution\n", "league.constitution")):
+            after = before.replace("def f(x):\n", "def f(x):\n" + added)
+            with self.assertRaisesRegex(labmod.ImprovementError, f"adds an import of \\['{module}'\\]", msg=added):
+                lanes.content_guard("league/swarm/researcher.py", before, after)
+        self.assertEqual(lanes.restricted_imports("from . import canary, diagnostics\n", "league/swarm/researcher.py"), {})
+
+    def test_new_dunders_and_members_of_classes_with_bases_or_fields_are_changes(self):
+        """P4, P4b: a new `__getattr__` or `__bool__` on an existing class runs with the gate closed; so does a new
+        method a base dispatches by name (`NodeTransformer.visit_*`), a dataclass's new field and a module `__getattr__`."""
+        anchor = "    def brief(self, fam: Mapping[str, Any]) -> str:\n"
+        self.assertEqual(self.gated_r.count(anchor), 1)
+        for extra in ("    def __getattr__(self, name):\n        return None\n\n",
+                      "    def __bool__(self):\n        return False\n\n", "    def __init_subclass__(cls):\n        pass\n\n"):
+            probe = self.admit("            pass\n").replace(anchor, extra + anchor, 1)
+            self.refused(probe, "not every change is gated")
+        self.refused(self.admit("            pass\n") + "\n\ndef __getattr__(name):\n    return None\n", "not every change is gated")
+        base = "import ast\nfrom dataclasses import dataclass\n\n\nclass Strip(ast.NodeTransformer):\n" \
+               "    def visit_Name(self, node):\n        return node\n\n\n@dataclass\nclass Row:\n    a: int = 0\n\n\n" \
+               "def f(fam):\n    return Row()\n"
+        gate = base.replace("def f(fam):\n", f"from league.swarm import canary\n\n\ndef f(fam):\n    if canary.enabled("
+                                              f"'{self.KEY_R}', fam['id'], root='.'):\n        return None\n")
+        self.assertEqual(lanes.gate_coverage("league/swarm/preflight.py", base, gate, self.KEY_R, "family"), 1)
+        for head in (gate.replace("        return node\n", "        return node\n\n    def visit_Call(self, node):\n"
+                                                             "        return None\n"),
+                     gate.replace("    a: int = 0\n", "    a: int = 0\n    b: int = 1\n"),
+                     gate.replace("    a: int = 0\n", "    a: int = 0\n\n    def helper(self):\n        return 1\n")):
+            with self.assertRaisesRegex(labmod.ImprovementError, "not every change is gated"):
+                lanes.gate_coverage("league/swarm/preflight.py", base, head, self.KEY_R, "family")
+        # A new helper method on a plain existing class, and a new class of its own with dunders, stay inert.
+        plain = "class R:\n    def a(self, fam):\n        return 1\n"
+        head = plain.replace("        return 1\n", f"        if canary.enabled('{self.KEY_R}', fam['id'], root='.'):\n"
+                             "            return self._b()\n        return 1\n\n    def _b(self):\n        return 2\n") \
+            + "\n\nclass Fresh:\n    def __init__(self):\n        self.x = 1\n"
+        self.assertEqual(lanes.gate_coverage("league/swarm/preflight.py", plain, head, self.KEY_R, "family"), 1)
+
+    def test_a_guarded_binding_mutated_through_a_reference_or_alias_is_refused(self):
+        """P6: `forget = dead.clear; forget()` inside Architect.admit (a birth on a dead slice would start a fresh
+        lineage), under a House-only condition the judge never meets."""
+        architect = (REPO / "league/swarm/architect.py").read_text()
+        gated = architect.replace("from . import diagnostics, inputs\n", "from . import diagnostics, inputs\nfrom . import canary\n", 1)
+        anchor = "            prior = slice_priors(dead, structure) if dead and not parent else None\n"
+        self.assertEqual(gated.count(anchor), 1)
+        key = "harness:memory:graveyard_rebirth_rate:0123456789abcdef"
+        for body in ("                if len(mechanism) > 400:\n                    forget = dead.clear\n                    forget()\n",
+                     "                rows = dead\n                rows.clear()\n",
+                     "                rows = (dead, same)[0]\n                del rows[:]\n"):
+            probe = gated.replace(anchor, f'            if canary.enabled("{key}", canary.mechanism_unit(mechanism), '
+                                  "root=self.store.root):\n" + body + anchor, 1)
+            with self.assertRaisesRegex(labmod.ImprovementError, "what it admits", msg=body):
+                lanes.symbol_guard("league/swarm/architect.py", architect, probe)
+
+    def test_a_familys_stored_text_keys_a_memory_gate_only_in_the_researcher(self):
+        key = "harness:memory:graveyard_rebirth_rate:0123456789abcdef"
+        base = "def f(fam):\n    return fam\n"
+        head = base.replace("    return fam\n", f"    if canary.enabled('{key}', canary.mechanism_unit(fam['mechanism']), "
+                            "root='.'):\n        return None\n    return fam\n")
+        self.assertEqual(lanes.gate_coverage("league/swarm/researcher.py", base, head, key, "mechanism"), 1)
+        for path in ("league/swarm/architect.py", "league/swarm/strategist.py", "league/swarm/diagnostician.py"):
+            with self.assertRaisesRegex(labmod.ImprovementError, "unit", msg=path):
+                lanes.gate_coverage(path, base, head, key, "mechanism")
+
+    def test_the_legitimate_candidates_still_pass(self):
+        """The round-3 end-to-end research candidate (a dry run with the Gym's loader, gated per family in `_admit`) and
+        the memory candidate (refuse a restated buried idea, iterating the guarded graveyard rows) pass staging."""
+        anchor = "        needs = needs_of(code)\n        if needs is None:\n"
+        self.assertEqual(self.gated_r.count(anchor), 1)
+        trial = ('\n\ndef _misuse(code):\n    """A dry run before any Gym run."""\n    import numpy as np\n'
+                 "    from league.gym import ctx as C\n    from league.gym.runtime import load_program\n\n    try:\n"
+                 "        program = load_program(code)\n    except Exception as exc:  # noqa: BLE001\n"
+                 "        return 'the program does not load: ' + str(exc)[:200]\n"
+                 "    runner = program.start(max_errors=10 ** 6)\n    under = C.underlying_view('SPY', np.linspace(1.0, 2.0, 3))\n"
+                 "    runner.decide(C.build_ctx(minute=600, underlyings={'SPY': under}))\n"
+                 "    errors = runner.stats()['messages']\n    return errors[0][:200] if errors else None\n")
+        research = self.gated_r.replace(anchor, f'        if canary.enabled("{self.KEY_R}", fam["id"], root=self.store.root):\n'
+                                        "            misuse = _misuse(code)\n            if misuse:\n"
+                                        '                return {"status": "refused", "reason": misuse}, [], False\n'
+                                        + anchor, 1) + trial
+        self.assertIsNone(staged("league/swarm/researcher.py", self.researcher, research, self.KEY_R, "family", "research"))
+        architect = (REPO / "league/swarm/architect.py").read_text()
+        key = "harness:memory:graveyard_rebirth_rate:0123456789abcdef"
+        anchor = "            cited = self.differs(row, known)\n"
+        memory = architect.replace(anchor, f'            if canary.enabled("{key}", canary.mechanism_unit(mechanism), '
+                                   "root=self.store.root):\n"
+                                   '                if any(_restates(g["mechanism"], mechanism) for g in dead):\n'
+                                   "                    continue\n" + anchor, 1).replace(
+            "from . import diagnostics, inputs\n", "from . import diagnostics, inputs\nfrom . import canary\n", 1) + RESTATES
+        self.assertIsNone(staged("league/swarm/architect.py", architect, memory, key, "mechanism", "memory"))
+
+    def test_protected_touches_are_listed_by_name_status_whatever_the_status(self):
+        self.assertEqual(lanes.protected_touch([("M", "league/swarm/preflight.py"), ("A", "league/tests/test_harness_candidate_x.py")]),
+                         [])
+        self.assertEqual(lanes.protected_touch([("D", "league/swarm/guard.py"), ("A", "league/swarm/guard2.py"),
+                                                ("M", "league/tests/test_harness_candidate_old.py"),
+                                                ("D", "league/tests/test_harness_candidate_old.py"),
+                                                ("T", "league/swarm/canary.py")]),
+                         ["D league/swarm/guard.py (spend)", "M league/tests/test_harness_candidate_old.py (objective: an "
+                          "existing test)", "D league/tests/test_harness_candidate_old.py (objective: an existing test)",
+                          "T league/swarm/canary.py (objective)"])
 
 
 class GateCoverage(unittest.TestCase):
@@ -746,6 +1000,7 @@ class LaneCycle(unittest.TestCase):
         (self.repo / "league" / "swarm" / "preflight.py").write_text(SOURCE)
         (self.repo / "league" / "swarm" / "guard.py").write_text("CAP = 1\n")
         (self.repo / "league" / "sailbox.py").write_text(SAILBOX)
+        controller_into(self.repo)
         labmod.git(self.repo, "init", "-q")
         self.base = commit(self.repo, "baseline")
         self.clock = Clock(1_790_000_000.0)
@@ -775,7 +1030,7 @@ class LaneCycle(unittest.TestCase):
                "window": {"since": lanes.iso(since), "until": lanes.iso(until), "seconds": until - since},
                "source": {"digest": digest or self.digest, "release": "/r/base", "started_at": since - 10,
                           "heartbeat_age": 5.0},
-               "current": current, "deploys": list(deploys),
+               "current": current, "deploys": list(deploys), "code": controller_code(),
                "lanes": {lane: {"units": units, "spend": {"sail_model": 5.0},
                                 "examples": [{"signature": "AttributeError", "n": 3, "families": ["motive-1"],
                                               "boxes": ["sb_motive"], "first_at": "2026-09-30T00:00:00Z"}]}}}
@@ -879,7 +1134,7 @@ class LaneCycle(unittest.TestCase):
             if change == "rename":
                 (worktree / "league" / "tests").mkdir(parents=True, exist_ok=True)
                 labmod.git(worktree, "mv", "league/swarm/guard.py", "league/tests/test_harness_candidate_x.py")
-                pattern = "only modifies or adds"
+                pattern = r"protected paths \['D league/swarm/guard.py \(spend\)'\]"
             elif change == "delete":
                 labmod.git(worktree, "rm", "-q", "league/sailbox.py")
                 pattern = "only modifies or adds"
@@ -889,7 +1144,7 @@ class LaneCycle(unittest.TestCase):
             elif change == "edit test":
                 (worktree / "league" / "swarm" / "preflight.py").write_text(self.gated().replace(self.key, key))
                 (worktree / "league" / "tests" / "test_harness_candidate_old.py").write_text("X = 2\n")
-                pattern = "never edits an existing"
+                pattern = "an existing test"
             else:
                 (worktree / "league" / "swarm" / "preflight.py").write_text(SOURCE.replace("'passed'", "'refused'"))
                 (worktree / "league" / "tests").mkdir(parents=True, exist_ok=True)
@@ -899,11 +1154,12 @@ class LaneCycle(unittest.TestCase):
             with self.assertRaisesRegex(labmod.ImprovementError, pattern, msg=change):
                 self.lab.stage(key, commit(worktree, change))
 
-    def evaluated(self, head_wasted=1000.0, closed_wasted=None, forge=False):
-        self.capture()
-        worktree = Path(self.lab.prepare(self.key, self.temp / "wt")["worktree"])
+    def evaluated(self, head_wasted=1000.0, closed_wasted=None, forge=False, *, wt="wt", capture=True):
+        if capture:
+            self.capture()
+        worktree = Path(self.lab.prepare(self.key, self.temp / wt)["worktree"])
         (worktree / "league" / "swarm" / "preflight.py").write_text(self.gated())
-        self.lab.stage(self.key, commit(worktree, "gated"))
+        self.lab.stage(self.key, commit(worktree, "gated"), author="author-agent")
         calls = []
 
         def judge(tree, _judge, command, **kwargs):
@@ -974,10 +1230,11 @@ class LaneCycle(unittest.TestCase):
                 {**common, "stage": "canary", "ok": True, "ticks": 3}, {**common, "stage": "watch", "ok": True, "grace": False},
                 {**common, "stage": "verdict", "verdict": "promoted", "at": lanes.iso(promoted_at)}]
 
-    def started(self):
-        self.assertTrue(self.evaluated()["passed"])
+    def started(self, **kw):
+        self.assertTrue(self.evaluated(**kw)["passed"])
         self.assertEqual(self.lab.worklist.get(self.key).state, "canary")
         digest = self.lab.worklist.get(self.key).carry["_proposal"]["release_digest"]
+        review(self.lab, self.key)
         waiting = self.lab.canary_start(self.key, measurement=self.measurement({}, since=89000, until=90100, digest=digest))
         self.assertIn("waiting", waiting)
         started = self.lab.canary_start(self.key, measurement=self.measurement(
@@ -1064,6 +1321,109 @@ class LaneCycle(unittest.TestCase):
         job = self.lab.worklist.get(self.key)
         self.assertEqual((job.state, job.attempt), ("proposed", attempts - 1), "a void reopens and does not use an attempt")
         self.assertIn("prepare", self.lab.next_steps()[0]["next"])
+        # A second void uses its attempt: a stream of voids cannot spend deploys without a decision.
+        arm, digest = self.started(wt="wt-second", capture=False)
+        attempts = self.lab.worklist.get(self.key).attempt
+        other = [{"deploy": "other@2", "release": "other", "stage": "verdict", "verdict": "promoted",
+                  "at": lanes.iso(arm["since"] + 3600)}]
+        self.assertEqual(self.lab.reconcile_lane(self.key, measurement=self.measurement(
+            self.arms(arm, 1, 4), since=arm["since"], until=arm["since"] + 6 * 3600, digest=digest,
+            deploys=self.deploy_rows() + other, current="other"))["decision"], "voided")
+        again = self.measurement(self.units(30, 3, "f"), since=86400.0 * 4, until=86400.0 * 5)
+        again["lanes"]["data"] = {"units": {"sb": {"gym_usd": 100.0, "gym_seconds": 60000.0, "slots": 1000.0}}}
+        self.lab.capture_lanes(again, base=self.base)
+        job = self.lab.worklist.get(self.key)
+        self.assertEqual((job.state, job.attempt, job.details["voids"]), ("proposed", attempts, 2))
+        self.assertIn("void 2", job.note)
+
+    def test_the_canary_needs_an_approving_adversarial_review_of_the_exact_patch(self):
+        self.assertTrue(self.evaluated()["passed"])
+        p = self.lab.worklist.get(self.key).carry["_proposal"]
+        now = self.measurement({}, since=89000, until=90100, digest=p["release_digest"], deploys=self.deploy_rows(),
+                               current="cand-release")
+        with self.assertRaisesRegex(labmod.ImprovementError, "adversarial review"):
+            self.lab.canary_start(self.key, measurement=now)
+        step = self.lab.next_steps()[0]
+        self.assertIn("adversarial review", step["next"])
+        self.assertEqual(step["patch_sha"], p["patch_sha"])
+        report = Path(p["artifact"]) / "r.md"
+        for text, patch_sha, reviewer, pattern in (
+                (REPORT.format(sha=p["patch_sha"], verdict="approve"), "0" * 64, "r", "another diff"),
+                (REPORT.format(sha=p["patch_sha"], verdict="approve"), p["patch_sha"], "Author-Agent ", "author"),
+                (REPORT.format(sha=p["patch_sha"], verdict="approve"), p["patch_sha"], " ", "reviewer"),
+                (REPORT.format(sha="f" * 64, verdict="approve"), p["patch_sha"], "r", "does not cite"),
+                (f"patch {p['patch_sha']}: fine.\n", p["patch_sha"], "r", "exactly one verdict"),
+                (REPORT.format(sha=p["patch_sha"], verdict="approve") + "VERDICT: reject\n", p["patch_sha"], "r",
+                 "exactly one verdict")):
+            report.write_text(text)
+            with self.assertRaisesRegex(labmod.ImprovementError, pattern):
+                self.lab.review(self.key, report=report, reviewer=reviewer, patch_sha=patch_sha)
+        self.assertEqual(self.lab.worklist.get(self.key).state, "canary", "a refused review records nothing")
+        row = review(self.lab, self.key)
+        self.assertEqual((row["verdict"], row["n"]), ("approve", 1))
+        self.assertTrue(Path(row["report"]).is_file())
+        self.assertIn("deploy exactly", self.lab.next_steps()[0]["next"])
+        self.assertIn("started", self.lab.canary_start(self.key, measurement=now))
+
+    def test_a_rejecting_review_sends_the_candidate_back(self):
+        self.assertTrue(self.evaluated()["passed"])
+        review(self.lab, self.key, verdict="reject")
+        job = self.lab.worklist.get(self.key)
+        self.assertEqual(job.state, "revising")
+        self.assertIn("review", job.carry["_failure"]["reason"])
+        with self.assertRaisesRegex(labmod.ImprovementError, "not awaiting its canary"):
+            self.lab.canary_start(self.key, measurement=self.measurement({}))
+
+    def test_the_controller_runs_only_as_its_base_commits_code(self):
+        self.lab.pinned(self.base)
+        self.capture()
+        (self.repo / "league" / "swarm" / "harness_lanes.py").write_text(
+            (self.repo / "league" / "swarm" / "harness_lanes.py").read_text() + "\n# another controller\n")
+        other = commit(self.repo, "a base whose controller differs from the running one")
+        with self.assertRaisesRegex(labmod.ImprovementError, "not running the pinned base commit"):
+            self.lab.pinned(other)
+        worktree = Path(self.lab.prepare(self.key, self.temp / "wt")["worktree"])
+        (worktree / "league" / "swarm" / "preflight.py").write_text(self.gated())
+        candidate = commit(worktree, "gated")
+        with patch.object(labmod, "CONTROLLER", labmod.CONTROLLER + ("league/swarm/preflight.py",)):
+            with self.assertRaisesRegex(labmod.ImprovementError, "pinned base commit"):
+                self.lab.stage(self.key, candidate)
+        job = self.lab.worklist.get(self.key)
+        self.assertEqual((job.state, job.attempt), ("patching", 0), "the operator's checkout is no attempt of the author's")
+        self.lab.stage(self.key, candidate)
+
+    def test_the_candidate_is_judged_as_the_base_tree_with_its_staged_files_only(self):
+        worktree = self.temp / "cand"
+        labmod.git(self.repo, "worktree", "add", "--detach", str(worktree), self.base)
+        (worktree / "league" / "swarm" / "preflight.py").write_text(self.gated())
+        staged_only = commit(worktree, "the staged file")
+        tree = labmod.candidate_tree(self.repo, self.base, staged_only, ["league/swarm/preflight.py"], self.temp / "t1")
+        self.assertEqual((tree / "league" / "swarm" / "preflight.py").read_text(), self.gated())
+        self.assertEqual((tree / "league" / "swarm" / "guard.py").read_text(), "CAP = 1\n")
+        (worktree / "league" / "sailbox.py").write_text(SAILBOX.replace("2", "5"))
+        more = commit(worktree, "and an unstaged change")
+        with self.assertRaisesRegex(labmod.ImprovementError, "beyond its staged files"):
+            labmod.candidate_tree(self.repo, self.base, more, ["league/swarm/preflight.py"], self.temp / "t2")
+
+    def test_only_the_base_code_may_measure_a_canary(self):
+        self.assertTrue(self.evaluated()["passed"])
+        review(self.lab, self.key)
+        digest = self.lab.worklist.get(self.key).carry["_proposal"]["release_digest"]
+        now = self.measurement({}, since=89000, until=90100, digest=digest, deploys=self.deploy_rows(), current="cand-release")
+        for code, pattern in ((None, "which code"), ({**now["code"], "league/swarm/harness_lanes.py": "0" * 40}, "not taken by"),
+                              ({**now["code"], "league/swarm/preflight.py": lanes.blob_sha(self.gated().encode())},
+                               "not taken by")):
+            doc = {**now, "code": code} if code is not None else {k: v for k, v in now.items() if k != "code"}
+            with self.assertRaisesRegex(labmod.ImprovementError, pattern):
+                self.lab.canary_start(self.key, measurement=doc)
+        self.assertEqual(self.lab.worklist.get(self.key).state, "canary")
+        arm = self.lab.canary_start(self.key, measurement=now)["started"]
+        final = self.measurement(self.arms(arm, 1, 4), since=arm["since"], until=arm["since"] + 6 * 3600, digest=digest,
+                                 deploys=self.deploy_rows(), current="cand-release")
+        with self.assertRaisesRegex(labmod.ImprovementError, "not taken by"):
+            self.lab.reconcile_lane(self.key, measurement={**final, "code": {**final["code"],
+                                                                             "league/swarm/canary.py": "1" * 40}})
+        self.assertEqual(self.lab.reconcile_lane(self.key, measurement=final)["decision"], "retained")
 
     def test_evaluation_needs_the_pinned_private_pool(self):
         self.capture()
@@ -1083,6 +1443,7 @@ class LaneCycle(unittest.TestCase):
     def test_a_deploy_over_a_newer_release_or_changed_rules_voids_the_canary(self):
         self.assertTrue(self.evaluated()["passed"])
         digest = self.lab.worklist.get(self.key).carry["_proposal"]["release_digest"]
+        review(self.lab, self.key)
         newer = [{"deploy": "newer@1", "release": "newer", "stage": "stage", "ok": True, "digest": "e" * 64,
                   "at": lanes.iso(80000.0)}]
         rows = self.deploy_rows()
@@ -1150,6 +1511,7 @@ class LaneCycle(unittest.TestCase):
         with patch.object(labmod, "sandbox", side_effect=judge):
             self.assertTrue(self.lab.evaluate(key, python=Path(sys.executable))["passed"])
         digest = self.lab.worklist.get(key).carry["_proposal"]["release_digest"]
+        review(self.lab, key)
         promoted = 86400.0 * 3
         rows = [{**r, "digest": digest} if r.get("stage") == "stage" else r
                 for r in self.deploy_rows(promoted_at=promoted, digest=digest)]
@@ -1226,7 +1588,7 @@ class GatedMemoryCandidate(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root, repo = Path(td), Path(td) / "repo"
             repo.mkdir()
-            for name in ("league", "ltcm", "scripts", "playbooks", "deploy"):
+            for name in ("league", "ltcm", "scripts", "playbooks", "deploy", "gateway"):
                 if (labmod.REPO / name).is_dir():
                     shutil.copytree(labmod.REPO / name, repo / name,
                                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache", ".data"))
@@ -1422,6 +1784,34 @@ class Cli(unittest.TestCase):
             steps = subprocess.run([sys.executable, str(script), "--root", str(root / "j"), "next"], capture_output=True,
                                    text=True, timeout=120)
             self.assertEqual(json.loads(steps.stdout), {"next": []})
+
+    def test_a_pinned_command_reexecutes_from_a_checkout_of_its_base(self):
+        """`rank` (as `stage`, `evaluate`, `review`, `canary`, `reconcile`) on a base whose controller is not the running
+        one re-executes itself from `<journal>/controllers/<base>`, a read-only archive of that commit."""
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = root / "repo"
+            for name in ("league", "scripts"):
+                shutil.copytree(REPO / name, repo / name, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".data"))
+            lanes_py = repo / "league" / "swarm" / "harness_lanes.py"
+            lanes_py.write_text(lanes_py.read_text() + "\n# the base's own controller, not the running one\n")
+            labmod.git(repo, "init", "-q")
+            base = commit(repo, "a base with its own controller")
+            store = SwarmStore(root / "state", clock=Clock(1_790_000_000.0))
+            store.close()
+            doc = lanes.measure(root / "state", now=1_790_000_100.0, seconds=3600)
+            doc["source"].update(digest="d" * 64, heartbeat_age=5.0)
+            doc["taken_at"] = time.time()
+            (root / "m.json").write_text(json.dumps(doc))
+            env = {k: v for k, v in os.environ.items() if k != "LTCM_HARNESS_PINNED"}
+            out = subprocess.run([sys.executable, str(REPO / "scripts" / "harness_improve.py"), "--root", str(root / "j"),
+                                  "--repo", str(repo), "rank", "--measurement", str(root / "m.json"), "--base", base],
+                                 capture_output=True, text=True, timeout=300, env=env)
+            self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+            checkout = root / "j" / "controllers" / base
+            self.assertEqual((checkout / "league/swarm/harness_lanes.py").read_text(), lanes_py.read_text())
+            self.assertFalse(os.access(checkout / "league/swarm/harness_lanes.py", os.W_OK), "the checkout is read-only")
+            self.assertEqual(json.loads(out.stdout.strip().splitlines()[-1])["policy"], lanes.POLICY)
 
     def test_the_observer_writes_its_ranked_lanes_to_its_own_directory_only(self):
         from scripts import harness_improve as cli

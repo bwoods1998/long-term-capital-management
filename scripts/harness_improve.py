@@ -1,22 +1,33 @@
 #!/usr/bin/env python3
 """Operate the persistent, no-provider-call harness lab. See playbooks/harness-improvement.md.
 
-The scheduler lane: capture, prepare, stage, evaluate, reconcile, watch. The research, memory, data and execution lanes
-(`league/swarm/harness_lanes.py`), one command per step: `measure` (read-only, on the House) -> `rank` -> `prepare` ->
-`stage` -> `evaluate` -> deploy through the watchdog -> `canary` -> `reconcile`; `next` prints each candidate's next
-command, `brief` what its patch author may see, `lanes` the predeclared definitions.
+The scheduler lane: capture, prepare, stage, evaluate, review, reconcile, watch. The research, memory, data and execution
+lanes (`league/swarm/harness_lanes.py`), one command per step: `measure` (read-only, on the House, with the base
+release's copy of this script) -> `rank` -> `prepare` -> `stage` -> `evaluate` -> `review` (an adversarial review of the
+exact patch, approve or reject) -> deploy through the watchdog -> `canary` -> `reconcile`; `next` prints each candidate's
+next command, `brief` what its patch author may see, `lanes` the predeclared definitions.
+
+THE PINNED BASE. `rank`, `stage`, `evaluate`, `review`, `canary` and `reconcile` compute a candidate's fate from its
+base commit's code: when this script is not that commit's (`HarnessImprovement.pinned`), it re-executes itself from a
+separate read-only checkout of the base, `<journal>/controllers/<base>` (`git archive` of league/ and scripts/, made
+once), with `--repo` naming the owner repository.
 """
 from __future__ import annotations
 
 import argparse
 from contextlib import ExitStack
 import fcntl
+import io
 import json
 import math
 import os
 from pathlib import Path
+import re
+import shutil
 import sqlite3
+import subprocess
 import sys
+import tarfile
 import time
 
 REPO = Path(__file__).resolve().parents[1]
@@ -30,6 +41,10 @@ from league.watchdog import tree_digest
 
 #: Commands that never open a journal (read-only, or definitions only).
 NO_JOURNAL = ("measure", "lanes")
+#: Journal commands that compute a candidate's fate: they run from a checkout of its base commit (the module docstring).
+PINNED_COMMANDS = ("rank", "stage", "evaluate", "review", "canary", "reconcile")
+#: Set in a re-executed process: the base it was re-executed for (a second mismatch is an error, never a loop).
+PINNED_ENV = "LTCM_HARNESS_PINNED"
 #: The supervised observer's lane measurement: the last day, read only, at most this often (about 1.5 CPU seconds on the
 #: House per measurement, Sept 30, 2026). Written to its own directory only; registering candidates stays the operator's.
 LANES_EVERY = 1800
@@ -64,6 +79,14 @@ def parser() -> argparse.ArgumentParser:
     part.add_argument("key")
     part.add_argument("--candidate", required=True)
     part.add_argument("--authoring-usd", type=float, help="what writing this attempt cost (the agent's dollars), recorded")
+    part.add_argument("--author", help="the patch author's name (its reviewer must be another agent)")
+    part = sub.add_parser("review", help="record an adversarial review of a staged candidate's exact patch")
+    part.add_argument("key")
+    part.add_argument("--report", type=Path, required=True,
+                      help="the review: cites the patch's sha256 and states `VERDICT: approve` or `VERDICT: reject`")
+    part.add_argument("--reviewer", required=True, help="the reviewing agent (never the patch's author)")
+    part.add_argument("--patch-sha", required=True, help="the sha256 of the candidate.patch reviewed (`next` prints it)")
+    part.add_argument("--review-usd", type=float, help="what the review cost, recorded")
     part = sub.add_parser("evaluate")
     part.add_argument("key")
     part.add_argument("--python", type=Path, default=Path(sys.executable))
@@ -173,7 +196,10 @@ def step(lab, args):
     if args.command == "prepare":
         return lab.prepare(args.key, args.worktree)
     if args.command == "stage":
-        return lab.stage(args.key, args.candidate, authoring_usd=args.authoring_usd)
+        return lab.stage(args.key, args.candidate, authoring_usd=args.authoring_usd, author=args.author)
+    if args.command == "review":
+        return lab.review(args.key, report=args.report, reviewer=args.reviewer, patch_sha=args.patch_sha,
+                          review_usd=args.review_usd)
     if args.command == "evaluate":
         return lab.evaluate(args.key, python=args.python)
     if args.command == "reconcile":
@@ -224,6 +250,66 @@ def transition(args):
             lab.close()
 
 
+def base_of(args) -> str | None:
+    """The base commit a pinned command computes from: `rank --base`, else its candidate's (from the journal)."""
+    if args.command not in PINNED_COMMANDS:
+        return None
+    if args.command == "canary" and (args.revert or args.retain or args.graduated):
+        return None  # a flip by hand computes nothing, and a revert must work whatever the checkout
+    if args.command == "rank":
+        return args.base
+    lab = HarnessImprovement(args.root, repo=args.repo, heldout=args.heldout)
+    try:
+        job = lab.worklist.get(args.key)
+        return str(job.details["base"]) if job is not None and job.details.get("base") else None
+    finally:
+        lab.close()
+
+
+def base_checkout(root: Path, repo: Path, base: str) -> Path:
+    """`<journal>/controllers/<base>`: league/ and scripts/ of the base commit (`git archive`), read-only, made once."""
+    target = root / "controllers" / base
+    if target.is_dir():
+        return target
+    part = root / "controllers" / f".{base}.part"
+    shutil.rmtree(part, ignore_errors=True)
+    part.mkdir(parents=True)
+    raw = subprocess.run(["git", "-C", str(repo), "archive", "--format=tar", base, "league", "scripts"],
+                         capture_output=True, check=True).stdout
+    with tarfile.open(fileobj=io.BytesIO(raw)) as bundle:
+        bundle.extractall(part, filter="data")
+    for path in part.rglob("*"):
+        if path.is_file():
+            path.chmod(0o444)
+    part.rename(target)
+    return target
+
+
+def run_from_base(args) -> None:
+    """Re-execute this command from a checkout of its base commit unless this process already runs that commit's
+    controller (the module docstring). Returns only when no re-execution is needed."""
+    base = base_of(args)
+    if not base or not re.fullmatch(r"[0-9a-f]{40}", base):
+        return
+    known = subprocess.run(["git", "-C", str(args.repo), "rev-parse", "--verify", "--quiet", f"{base}^{{commit}}"],
+                           capture_output=True, check=False)
+    if known.returncode:
+        return  # not a commit of this repository: the controller refuses wherever a candidate's fate depends on it
+    lab = HarnessImprovement(args.root, repo=args.repo)
+    try:
+        lab.pinned(base)
+        return
+    except ImprovementError as exc:
+        if os.environ.get(PINNED_ENV) == base:
+            raise ImprovementError(f"the base checkout does not hold the base's controller: {exc}") from exc
+    finally:
+        lab.close()
+    checkout = base_checkout(args.root, Path(args.repo).resolve(), base)
+    script = checkout / "scripts" / "harness_improve.py"
+    os.execve(sys.executable, [sys.executable, "-B", str(script), "--repo", str(Path(args.repo).resolve()), *sys.argv[1:]],
+              {**os.environ, PINNED_ENV: base})
+
+
 def lanes_snapshot(root: Path, swarm: Path, *, now: float | None = None) -> dict:
     """The observer's bottleneck capture for the lanes: measure the last day read-only and write the measurement and its
     ranked bottlenecks to the observer's own directory (`lanes-measurement.json`, `lanes-ranked.json`, mode 0600). The
@@ -268,6 +354,11 @@ def main() -> int:
         print(json.dumps({"error": "--root (the private harness journal) is required for this command"}), flush=True)
         return 1
     args.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        run_from_base(args)
+    except (ValueError, OSError, sqlite3.Error, subprocess.CalledProcessError) as exc:
+        print(json.dumps({"error": f"cannot run from the pinned base: {exc}"}), flush=True)
+        return 1
     # A lifetime lock also covers a House crash before its child's process record is persisted.
     try:
         with ExitStack() as stack:
