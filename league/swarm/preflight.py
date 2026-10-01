@@ -1299,8 +1299,9 @@ def static_refusal(code: str) -> str | None:
 
 
 #: What a load-stage advisory's warnings say the load failure may be (`run`).
-LOAD_MAY_BE = ("this box's Python 3.11 and numpy 2.4 (the Gym's boxes run 3.12+ with numpy 2.5): the Gym loads it on its "
-               "own runtime and judges it")
+LOAD_MAY_BE = ("this box's Python 3.11 and numpy 2.4 (the Gym's boxes run 3.12+ with numpy 2.5). The Gym may still load and "
+               "run it, but the live path loads every program here on the House's 3.11 and numpy 2.4, so as written it can "
+               "never practise or trade live: make it load on Python 3.11 with numpy 2.4 too")
 
 
 def run(code: str, params: Mapping[str, Any] | None, decider: Any, *, universe: Sequence[str] | None = None,
@@ -1333,11 +1334,14 @@ def run(code: str, params: Mapping[str, Any] | None, decider: Any, *, universe: 
                                                         "say what a program may contain); nothing of the program ran")
         if "ran past" in message:
             return _answer("inconclusive", f"the load says nothing on this box: {message[:300]}", stage="load", calls=0)
-        # The module body, NEEDS or PARAMS failed on this box's runtime, not the Gym's: the Gym judges them.
-        out = _advisory("the program did not load on this box, but only the Gym's static code check refuses at load (it "
-                        "passes it): its module body, NEEDS and PARAMS ran here on the House's Python 3.11 and numpy 2.4, "
-                        "and the Gym loads it on its own runtime and judges it, so the run goes ahead", [message], code,
-                        (), params, stage="load", calls=0)
+        # The module body, NEEDS or PARAMS failed on this box's runtime (the House's, which the live path also uses): the
+        # run goes ahead (the Gym may load it on 3.12+), but the program cannot practise or trade live until it loads here.
+        out = _advisory("the program did not load on this box, though it passes the static code check (the only refusal at "
+                        "load): its module body, NEEDS and PARAMS ran here on the House's Python 3.11 and numpy 2.4. The "
+                        "Train run goes ahead (the Gym may load it on 3.12+), but the live path loads every program on this "
+                        "same 3.11 runtime, so as written it can never practise or trade live: make it load on 3.11 too",
+                        [message], code, (), params, stage="load", calls=0)
+        out["house_unloadable"] = True
         for warning in out["warnings"]:  # a load reads no market: what differs is the runtime
             warning["may_be"] = LOAD_MAY_BE
         return out

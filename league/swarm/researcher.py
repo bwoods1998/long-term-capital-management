@@ -1722,6 +1722,8 @@ class Researcher:
                 # Gym, and the researcher reads the warnings beside its answer.
                 out["preflight_advisory"] = int(out.get("preflight_advisory") or 0) + 1
                 out.setdefault("preflight_advisory_why", str(verdict.get("why") or "")[:200])
+                if verdict.get("house_unloadable"):  # trains, but can never load on the live path's runtime
+                    out["preflight_house_unloadable"] = int(out.get("preflight_house_unloadable") or 0) + 1
             if verdict.get("status") != "refused":
                 if advisories is not None and verdict.get("warnings"):
                     row = {"why": str(verdict.get("why") or "")[:400], "warnings": [

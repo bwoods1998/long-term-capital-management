@@ -86,8 +86,9 @@ itself read with `.get` or `[...]`, iterated or called, a field that does not ex
 can never hold (a root outside NEEDS, a PARAMS key you never declared). Then you get the exception, its
 line and the ctx API to use: no version, job or trial, and a note in your notebook. A sweep loses only
 the variants refused, each listed under `refused_variants`, and runs the others. Any other error does
-not stop the run: a module body, NEEDS or PARAMS that fails to load on the House (its Python and numpy
-are older than the Gym's, which judges the load), an empty selection, a filter that keeps nothing, a
+not stop the run: a module body, NEEDS or PARAMS that fails to load on the House (its Python 3.11 and
+numpy 2.4 are older than the Gym's; the run goes ahead, but the live path loads every program on the House,
+so such a program can never practise or trade live until it loads on 3.11 too), an empty selection, a filter that keeps nothing, a
 None, a STATE key not yet written, a numeric edge case, a keyword argument. Its warnings (the error, its
 line, the API to use) come back with the run's answer under `preflight`. It checks only that the code
 runs; passing it says nothing about a run. The Gym itself is stricter: 25 errors in total over a run
