@@ -95,19 +95,25 @@ deflated-Sharpe rule among them), the diagnostician and the population floor are
 THE OPERATOR'S RUN (Oct 1). The operator revives a retired family as a lineage fork whose version 1 (author
 "operator-revive", `OPERATOR_AUTHORS`) is the old validated program WITH its params, to be re-run unchanged on the current
 evaluator. Until Oct 1 no revival ran that program: a `gym_run` with no code reran the latest code with no params (`{}`,
-another program), and researchers often wrote new code at once. Now a living Gym family's latest operator-written version
-that has no Train run at the normal spread on the current evaluator and Train span (any status; `row_matches`), and whose
-evaluation no other version made (NO DUPLICATE RUNS), is run by the harness at the start of the cycle, before any rewrite,
-queued run or model turn (`operator_owed`, `_operator_run`): its stored code and params, through gym_run's own path (the
-same refusals, eval key, trial count, Train score, drift screen, candidates, best and robustness runs), never probed, and
-recorded as that version (the store keeps one version for one code and params: no version row, no revision). A new run
-is the cycle's one run: a rewrite and a run queued last cycle wait for the next cycle, and the model's turn is a READ of
-it. A Gym error ends the cycle and the harness tries again next cycle, at most `OPERATOR_RUN_ATTEMPTS` (3) times; a
-refusal, or the third error, gives up with a notebook note (`operator_run` in the family's state keeps the record per
-version and evaluator, so an adoption owes the run again). A run that landed after its wait is read back from the store
-and scored. The status tells the researcher that the revival runs unchanged first and that its evidence decides, never
-the evaluator change. Separately, `gym_run` with neither code nor params reruns the latest version exactly: its params
-carry over (explicit params, `{}` included, still replace them).
+another program unless the revived params were the defaults), and researchers often wrote new code at once. Now a living
+Gym family's latest operator-written version that has no Train run at the normal spread on the current evaluator and
+Train span that is the program's answer (`_operator_landed`: ok, disqualified, no_data or refused; a run the Gym could not
+finish, status "error", is none), and whose evaluation no other version made (NO DUPLICATE RUNS), is run by the harness at
+the start of the cycle, before any rewrite, queued run or model turn (`operator_owed`, `_operator_run`): its stored code
+and params, through gym_run's own path (the same refusals, eval key, trial count, Train score, drift screen, candidates,
+best and robustness runs), never probed, and recorded as that version (the store keeps one version for one code and
+params: no version row, no revision). A new evaluation of it, whatever its status, is the cycle's one run: a rewrite and a
+run queued last cycle wait for the next cycle (a run call of the model's in that cycle replaces the queued one), and the
+model reads it. A Gym error, a run the Gym could not finish or a failure of the attempt ends the cycle with no model call,
+and the harness tries again next cycle, at most `OPERATOR_RUN_ATTEMPTS` (3) times; an attempt whose wait gave up while the
+Gym ran it is never asked twice: the harness waits for it, at most a run's timeout more (`late_until`), and reads it
+back from the store when it lands (no Gym job, no trial; also after it gave up). A refusal, or the third failure, gives
+up with a notebook note that says how to run it; a gate-mode mechanism test that did not pass is its answer
+(`operator_run` in the family's state keeps the record per version, evaluator and Train span, so an adoption owes the
+run again). The harness's own stored result or refusal never counts as
+the researcher's idle doing (DORMANCY). The status tells the researcher that the revival runs unchanged first and that its
+evidence decides, never the evaluator change. Separately, `gym_run` with neither code nor params reruns the latest
+version exactly: its params carry over (explicit params, `{}` included, still replace them).
 
 EVENT-DRIVEN HOLDS (Sept 30). A held family is parked durably by `loop.Scheduler` until a result, rewrite, guidance,
 research agenda, data image or release changes. Elapsed time and process restarts alone never buy another call.
@@ -754,9 +760,11 @@ ALREADY_RUN = "the stored result"
 #: "operator-revive"). A living Gym family's latest such version is run by the harness exactly as stored, its code AND its
 #: params, before its researcher edits it (`Researcher.operator_owed`).
 OPERATOR_AUTHORS = ("operator-revive",)
-#: Gym errors the operator's run may meet, one a cycle, before the harness gives up on it with a note.
+#: Failed attempts of the operator's run (a Gym error, a run the Gym could not finish), one a cycle, before the harness
+#: gives up on it with a note.
 OPERATOR_RUN_ATTEMPTS = 3
-#: The family state's record of it under the current evaluator: {version, evaluator, tries, ran, gave_up}.
+#: The family state's record of it under the current evaluator and Train span: {version, evaluator, span, tries,
+#: late_until, ran, answered, gave_up}.
 OPERATOR_RUN_KEY = "operator_run"
 
 
@@ -2314,6 +2322,8 @@ class Researcher:
             result = self.pool.run(job, timeout=self.run_timeout() + 120, late=late)
         except PoolError as exc:
             out["gym_error"] = str(exc)[:300]
+            if "did not answer" in str(exc) and job.error is None and not job.done.is_set():
+                out["gym_in_flight"] = True  # the wait gave up while the Gym runs it: it lands late, as a trial (`late`)
             return {"status": "gym_error", "version": version["n"], "error": str(exc)[:500],
                     "hint": "the Gym could not run it now; your version is saved: rerun it next cycle"}
         out["gym_seconds"] = round(self.clock() - began, 2)
@@ -3708,33 +3718,34 @@ class Researcher:
         return identity(*self._gym_identity()) or self.store.get(KEY)
 
     def operator_record(self, fam: Mapping[str, Any], n: int) -> dict[str, Any]:
-        """The family state's record of version `n`'s exact run under the current evaluator ({} for another version or
-        evaluator: an adoption owes the run again)."""
+        """The family state's record of version `n`'s exact run under the current evaluator and Train span ({} for another
+        version, evaluator or span: an adoption, or a new span, owes the run again)."""
         record = (fam.get("state") or {}).get(OPERATOR_RUN_KEY)
-        if isinstance(record, Mapping) and record.get("version") == int(n) and record.get("evaluator") == self._evaluator_now():
+        if isinstance(record, Mapping) and record.get("version") == int(n) and record.get("evaluator") == self._evaluator_now() \
+                and record.get("span") == self.train_span():
             return dict(record)
         return {}
 
     def _operator_landed(self, fam: Mapping[str, Any], n: int) -> dict[str, Any] | None:
-        """Version `n`'s newest Train row at the normal spread on the current evaluator (`row_matches`) and Train span, of
-        any status (the Gym answered it: a refusal or an error is its answer too), or None."""
+        """Version `n`'s newest Train row at the normal spread on the current evaluator (`row_matches`) and Train span that
+        is the program's answer (ok, disqualified, no_data, refused), or None. A row of status "error" is none: the Gym
+        could not finish the run (a dead worker, a unit killed, perhaps for another program of its batch; no trial, no
+        figures), so the run is still owed."""
         from .evaluator import identity, row_matches
 
         expected, span = identity(*self._gym_identity()), self.train_span()
         for row in self.store.version_runs(str(fam["id"]), int(n), window="train", stress=1.0, limit=20):
+            if row.get("status") == "error":
+                continue
             spanned = row.get("status") == "ok" or "train_from" in (row.get("summary") or {})
             if row.get("purpose") in DRIFT_PURPOSES and (not spanned or row_span(row) == span) \
                     and row_matches(self.store, row, expected):
                 return row
         return None
 
-    def operator_owed(self, fam: Mapping[str, Any]) -> dict[str, Any] | None:
-        """THE OPERATOR'S RUN: the version the harness runs exactly this cycle, or None. A living Gym family's latest
-        operator-written version (`operator_version`) is owed while it has no Train run at the normal spread on the current
-        evaluator and Train span (`_operator_landed`), no other version made the same evaluation (NO DUPLICATE RUNS: `{}`
-        and its defaults spelled out are one program), and the harness neither ran it nor gave up on it under this evaluator
-        (`operator_record`). A run the harness asked for that landed after its wait gave up is owed once more, to be read
-        back from the store (no Gym job, no trial) and scored into the family's candidates and best like any run."""
+    def _operator_due(self, fam: Mapping[str, Any]) -> tuple[dict[str, Any], bool] | None:
+        """(the version the harness runs exactly this cycle, whether its evaluation is already stored), or None
+        (`operator_owed`)."""
         fid = str(fam["id"])
         if fam.get("band") != "gym" or fam.get("retired_at"):
             return None
@@ -3742,7 +3753,7 @@ class Researcher:
         if n is None:
             return None
         record = self.operator_record(fam, n)
-        if record.get("ran") or record.get("gave_up"):
+        if record.get("ran") or record.get("answered"):
             return None
         version = self.store.version(fid, n)
         if not version or not version.get("code"):
@@ -3751,58 +3762,116 @@ class Researcher:
         key = self.eval_key(code, params, stress=1.0, window="train", roots=needs_roots(code, fam["roots"]))
         stored = self._reusable(self.store.evaluated(fid, key), stress=1.0) if self.reuse else None
         if stored is not None:
-            return version if record.get("tries") else None  # its own late result, or the same program run already
-        return None if self._operator_landed(fam, n) is not None else version
+            # Its own attempt that landed after the wait gave up (even after the harness gave up), or the same program
+            # run already (by its researcher, or under another version: NO DUPLICATE RUNS).
+            return (version, True) if record.get("tries") else None
+        if record.get("gave_up"):
+            return None
+        return None if self._operator_landed(fam, n) is not None else (version, False)
+
+    def operator_owed(self, fam: Mapping[str, Any]) -> dict[str, Any] | None:
+        """THE OPERATOR'S RUN: the version the harness runs exactly this cycle, or None. A living Gym family's latest
+        operator-written version (`operator_version`) is owed while it has no Train run that is the program's answer at the
+        normal spread on the current evaluator and Train span (`_operator_landed`: a run the Gym could not finish is
+        none), no other version made the same evaluation (NO DUPLICATE RUNS: `{}` and its defaults spelled out are one
+        program), and the harness neither ran it, nor had its mechanism test's answer, nor gave up on it under this
+        evaluator and span (`operator_record`). An attempt that landed after its wait gave up is owed once more, to be read
+        back from the store (no Gym job, no trial) and scored into the family's candidates and best like any run."""
+        due = self._operator_due(fam)
+        return None if due is None else due[0]
+
+    def _operator_save(self, fid: str, record: Mapping[str, Any], note: str | None = None) -> None:
+        with self.store.atomic():
+            self.store.set_state(fid, **{OPERATOR_RUN_KEY: dict(record)})
+            if note:
+                self.store.note(fid, note)
 
     def _operator_run(self, fam: Mapping[str, Any], out: dict[str, Any]) -> dict[str, Any] | None:
         """THE OPERATOR'S RUN at the start of a model cycle: the owed version (`operator_owed`) run exactly as stored, its
         code and params, through gym_run's own path (`_gym_run`: its refusals, NO DUPLICATE RUNS, the trial counted against
         the lineage, the Train score, the drift screen, the candidates and best, a new best's robustness runs), never
         probed (`full`), and recorded as that version: the store keeps one version for one code and params, so no version
-        row is added and no revision counted. None when nothing is owed (or the family retired meanwhile); {"retry": True}
-        after a Gym error the harness tries again next cycle, at most `OPERATOR_RUN_ATTEMPTS` times, then a note and the
-        model goes on; else {"view", "message"}: what the model reads first this cycle."""
-        version = self.operator_owed(fam)
-        if version is None:
+        row is added and no revision counted. The harness's own stored result or refusal is never the researcher's idle
+        doing (DORMANCY). Returns None when nothing is owed (or the family retired meanwhile); {"retry": True} when the
+        cycle ends with no model call and the harness asks again next cycle: after a Gym error, a run the Gym could not
+        finish (status "error") or a failure of the attempt itself, at most `OPERATOR_RUN_ATTEMPTS` times (then a note,
+        and the model goes on), and while an attempt whose wait gave up is still on the Gym (`late_until`: one evaluation
+        is never asked twice; it is read back when it lands); else {"view", "message", "evaluated"}: what the model reads
+        first this cycle, and whether the Gym made a new evaluation of it (then that is the cycle's one run)."""
+        due = self._operator_due(fam)
+        if due is None:
             return None
+        version, landed = due
         fid, n = str(fam["id"]), int(version["n"])
-        record = {**self.operator_record(fam, n), "version": n, "evaluator": self._evaluator_now()}
+        record = {**self.operator_record(fam, n), "version": n, "evaluator": self._evaluator_now(), "span": self.train_span()}
+        whose = f"the operator's revival of {fam['parent']}'s program" if fam.get("parent") else "the operator's version"
+        out["operator_run"] = n
+        if not landed and float(record.get("late_until") or 0) > self.clock():
+            # Its last attempt's wait gave up while the Gym was running it: no second job for the same evaluation.
+            out["error"] = f"gym: the harness's exact run of version {n} is still on the Gym; it is read back when it lands"
+            return {"retry": True}
+        record.pop("late_until", None)
         args = {"code": str(version["code"]), "params": dict(version.get("params") or {}), "full": True,
                 "why": "the operator's version, run exactly as stored"}
-        out["operator_run"] = n
-        view = self._execute(fam, "gym_run", args, out, author=str(version.get("author") or OPERATOR_AUTHORS[0]))
+        idle = {k: out.get(k) for k in ("stored", "run_refused")}
+        try:
+            view = self._execute(fam, "gym_run", args, out, author=str(version.get("author") or OPERATOR_AUTHORS[0]))
+        except Exception as exc:  # noqa: BLE001 - an attempt that failed, counted as one, never a cycle error every cycle
+            view = {"status": "gym_error", "error": f"{type(exc).__name__}: {str(exc)[:300]}"}
+            out["gym_error"] = view["error"]
+        for k, v in idle.items():  # the harness's read-back or refusal is not the researcher's doing (DORMANCY)
+            if v is None:
+                out.pop(k, None)
+            else:
+                out[k] = v
         view = view if isinstance(view, dict) else {"status": "error", "reason": str(view)[:300]}
-        if view.get("status") == "retired":
+        status = str(view.get("status") or "")
+        if status == "retired":
             return None
-        whose = f"the operator's revival of {fam['parent']}'s program" if fam.get("parent") else "the operator's version"
-        if view.get("run_id"):
+        evaluated = int(out.get("trials") or 0) > 0
+        rerun = (f"To run it yourself, call gym_run with no code and no params while version {n} is your latest version "
+                 f"(it reruns it exactly), else with its code and params.")
+        if status in ("gym_error", "error"):
+            # The Gym could not run it, or could not finish it (status "error": no trial, no figures): not its answer.
+            why = str(view.get("error") or view.get("reason") or status)[:300]
+            record["tries"] = int(record.get("tries") or 0) + 1
+            if out.pop("gym_in_flight", None):
+                record["late_until"] = self.clock() + self.run_timeout() + 120.0
+            if record["tries"] < OPERATOR_RUN_ATTEMPTS:
+                self._operator_save(fid, record)
+                out["error"] = f"gym: {why[:200]}"
+                return {"retry": True}
+            record["gave_up"] = f"the Gym could not run it {record['tries']} times ({why})"
+        elif view.get("run_id"):
             record.update(ran=str(view["run_id"]))
-            with self.store.atomic():
-                self.store.set_state(fid, **{OPERATOR_RUN_KEY: record})
+            self._operator_save(fid, record)
             how = ("its exact run is already recorded on the current evaluator (read back from the store: no new Gym run, "
                    "no trial)" if view.get("already_run") else
                    "the harness ran it exactly as revived (its stored code and params, unchanged; no new version) on Train "
                    "under the current evaluator, as this cycle's run")
-            return {"view": view, "message": f"Your version {n} is {whose}: {how}. Its evidence decides (its Train score, its "
-                                             f"1.5x and drift runs, then validation), never the fact that the evaluator "
-                                             f"changed.\n{json.dumps(view, default=str)[:12000]}"}
-        why = str(view.get("error") or view.get("reason") or view.get("status") or "no result")[:300]
-        if view.get("status") == "gym_error":
-            record["tries"] = int(record.get("tries") or 0) + 1
-            if record["tries"] < OPERATOR_RUN_ATTEMPTS:
-                with self.store.atomic():
-                    self.store.set_state(fid, **{OPERATOR_RUN_KEY: record})
-                out["error"] = f"gym: {why[:200]}"
-                return {"retry": True}
-            why = f"the Gym erred {record['tries']} times ({why})"
-        record["gave_up"] = why
-        with self.store.atomic():
-            self.store.set_state(fid, **{OPERATOR_RUN_KEY: record})
-            self.store.note(fid, f"The harness could not run version {n} ({whose}) exactly as stored on the current Gym: "
-                                 f"{why}. Its evidence is still owed: an evaluator change is never a reason to retire.")
-        out["operator_gave_up"] = why[:200]
-        return {"view": view, "message": f"Your version {n} is {whose}. The harness could not run it exactly as stored on the "
-                                         f"current Gym: {why}.\n{json.dumps(view, default=str)[:6000]}"}
+            return {"view": view, "evaluated": evaluated,
+                    "message": f"Your version {n} is {whose}: {how}. Its evidence decides (its Train score, its 1.5x and "
+                               f"drift runs, then validation), never the fact that the evaluator changed.\n"
+                               f"{json.dumps(view, default=str)[:12000]}"}
+        elif status.startswith("mechanism_"):
+            # THE MECHANISM TEST (gate mode) came first and did not pass: that is the version's answer on this evaluator.
+            record.update(answered=status)
+            self._operator_save(fid, record)
+            return {"view": view, "evaluated": evaluated,
+                    "message": f"Your version {n} is {whose}. The harness ran it exactly as revived (its stored code and "
+                               f"params, unchanged): its mechanism test came first and did not pass, so its broad Train run "
+                               f"was skipped. That test is its evidence on the current evaluator; an evaluator change is never "
+                               f"a reason to retire.\n{json.dumps(view, default=str)[:12000]}"}
+        else:
+            record["gave_up"] = str(view.get("reason") or view.get("error") or status or "no result")[:300]
+        self._operator_save(fid, record, f"The harness could not run version {n} ({whose}) exactly as stored on the current "
+                                         f"Gym: {record['gave_up']}. It will not ask again on this evaluator. {rerun} An "
+                                         f"evaluator change is never a reason to retire.")
+        out["operator_gave_up"] = str(record["gave_up"])[:200]
+        return {"view": view, "evaluated": evaluated,
+                "message": f"Your version {n} is {whose}. The harness could not run it exactly as stored on the current Gym "
+                           f"({record['gave_up']}) and will not ask again on this evaluator. {rerun}\n"
+                           f"{json.dumps(view, default=str)[:6000]}"}
 
     def operator_text(self, fam: Mapping[str, Any]) -> str:
         """The status line of a family holding an operator-written version (THE OPERATOR'S RUN): the harness runs it
@@ -3816,12 +3885,17 @@ class Researcher:
         record = self.operator_record(fam, n)
         decides = ("Its evidence decides (its Train score, its 1.5x and drift runs, then validation): an evaluator change is "
                    "never a reason to retire.")
-        if record.get("gave_up"):
-            return (f"Your version {n} is {whose}. The harness could not run it unchanged on the current Gym "
-                    f"({str(record['gave_up'])[:200]}). {decides}")
         if self.operator_owed(fam) is not None:
             return (f"Your version {n} is {whose}. The harness runs it first, exactly as revived (its stored code and params, "
                     f"unchanged), on Train under the current evaluator, before you edit it. {decides}")
+        if record.get("gave_up"):
+            return (f"Your version {n} is {whose}. The harness could not run it unchanged on the current Gym "
+                    f"({str(record['gave_up'])[:200]}) and will not ask again on this evaluator: to run it yourself, call "
+                    f"gym_run with no code and no params while it is your latest version, else with its code and params. "
+                    f"{decides}")
+        if record.get("answered"):
+            return (f"Your version {n} is {whose}, run unchanged (its stored code and params) under the current evaluator: "
+                    f"its mechanism test came first and did not pass ({record['answered']}). {decides}")
         ran = f" (run {record['ran']})" if record.get("ran") else ""
         return (f"Your version {n} is {whose}, run unchanged (its stored code and params) on Train under the current "
                 f"evaluator{ran}. {decides}")
@@ -3926,16 +4000,23 @@ class Researcher:
         deadline = self.clock() + float(self.cfg.get("cycle_seconds", 170))
         gym_done = False
         # THE OPERATOR'S RUN first: an operator-written version owed its exact run on the current evaluator runs before
-        # anything the model or a rewrite wrote. When it makes a new run, that is this cycle's one run: a rewrite and a
-        # run queued last cycle wait for the next cycle, and the model's turn is a READ.
+        # anything the model or a rewrite wrote. When the Gym makes a new evaluation of it (ok, disqualified or not), that
+        # is this cycle's one run: a rewrite and a run queued last cycle wait for the next cycle (`carried`: a run call of
+        # the model's this cycle replaces that queued one), and the model reads it.
         operator = self._operator_run(fam, out)
         if operator is not None and operator.get("retry"):
-            return  # a Gym error: the harness tries the exact run again next cycle; no model is paid to read that
+            return  # a Gym error, or its run still on the Gym: the harness asks again next cycle; no model is paid to read that
+        operated = False
         if operator is not None:
-            current.append({"role": "user", "content": operator["message"]})
+            operated = bool(operator.get("evaluated"))
+            message = operator["message"]
+            if operated and pending:
+                message += ("\nThe run you queued last cycle has not run: it opens your next cycle. A run call this cycle "
+                            "replaces it.")
+            current.append({"role": "user", "content": message})
             gym_done = new_run(operator["view"])
             fam = self.store.family(fid) or fam
-        operated = gym_done
+        carried = pending if operated else None
         ready = (fam.get("state") or {}).get("rewrite_ready")
         if ready and ready.get("code") and not operated:  # a stronger model's rewrite came back: it is this cycle's run
             self.store.set_state(fid, rewrite_ready=None)
@@ -3948,7 +4029,7 @@ class Researcher:
             gym_done = new_run(view)
             pending = None  # the rewrite supersedes the queued input, including when the rewrite needs repair
             fam = self.store.family(fid) or fam
-        if pending and not gym_done:  # the run asked for at the end of the last cycle (its call was answered "queued" then)
+        if pending and not gym_done and not operated:  # the run asked for at the end of the last cycle (answered "queued" then)
             # A queued sweep carries its tool's name; a run queued before sweeps existed carries none.
             tool = pending.get("name") if pending.get("name") in RUNS else "gym_run"
             result = self._execute(fam, tool, pending.get("arguments") or {}, out, author=pending.get("author") or "model")
@@ -4001,7 +4082,7 @@ class Researcher:
         claude = self.claude_route(fam)
         session: ClaudeSession | None = None
         if claude:
-            skip = self.claude_skip(fam, fresh=gym_done)
+            skip = self.claude_skip(fam, fresh=gym_done or operator is not None)  # the operator's run is news too
             if skip:
                 out["claude_skipped"] = skip
                 claude = False
@@ -4089,18 +4170,23 @@ class Researcher:
                                     "output": json.dumps({"status": "refused", "reason": "you held this cycle: nothing runs "
                                                           "after a hold; run it next cycle"})})
                     continue
-                if call.name in RUNS and not hold and (out.get("run_id") or "gym_error" in out or
+                if call.name in RUNS and not hold and (out.get("run_id") or operated or "gym_error" in out or
                                                        self.clock() > deadline - 30 or out["tool_calls"] >= max_tools) \
-                        and pending is None and not call.error:
+                        and (pending is None or pending is carried) and not call.error:
                     # One run (or one sweep) a cycle: this one opens the next cycle. Its call is answered now (every call keeps
-                    # its output beside it in the history); its result arrives as a message when it has run.
+                    # its output beside it in the history); its result arrives as a message when it has run. After the
+                    # operator's run it replaces the run queued last cycle (`carried`): the newer call is the model's intent.
+                    replaced = pending is not None
                     pending = {"call_id": call.call_id, "name": call.name, "arguments": call.arguments, "author": author}
                     stop = True
+                    note = "this run opens your next cycle; its result comes then"
+                    if replaced:
+                        note += " (it replaces the run you queued last cycle, which will not run)"
+                        out["queued_replaced"] = True
                     current.append({"type": "function_call_output", "call_id": call.call_id,
-                                    "output": json.dumps({"status": "queued", "note": "this run opens your next cycle; its result "
-                                                          "comes then"})})
+                                    "output": json.dumps({"status": "queued", "note": note})})
                     continue
-                if call.name in RUNS and pending is not None:
+                if call.name in RUNS and pending is not None and pending is not carried:
                     current.append({"type": "function_call_output", "call_id": call.call_id,
                                     "output": json.dumps({"error": "one run is already queued for your next cycle"})})
                     continue
@@ -4135,7 +4221,7 @@ class Researcher:
             if invalid:  # answered as errors, never run: the rest of the cycle is Sail's
                 claude = False
                 out["claude_fallback"] = f"invalid: {invalid[0]}"[:200]
-            if stop or pending:
+            if stop or (pending is not None and pending is not carried):
                 break
         if self._terminal(fid, out):
             if pending:

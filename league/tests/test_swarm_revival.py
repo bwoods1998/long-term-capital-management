@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import json
 
+from league.gym.results import failed
 from league.swarm.researcher import ALREADY_RUN, OPERATOR_RUN_ATTEMPTS, OPERATOR_RUN_KEY, params_of
 from league.swarm.seeds import family_spec
 from league.tests.test_swarm_researcher import calls_in
-from league.tests.test_swarm_sweep import SweepCase
+from league.tests.test_swarm_sweep import SweepCase, scored
 
 #: The revived version's params (not its PARAMS defaults): the program the operator validated.
 REVIVED = {"vrp_min": 1.4}
@@ -102,9 +103,11 @@ class TheRevivedVersionRunsExactly(RevivalCase):
         self.steps = [{"calls": [("gym_run", {"hold": True, "note": "the Gym is down"})]}]
         out = self.researcher().cycle(rid)
         self.assertEqual(len(self.pool.train()), OPERATOR_RUN_ATTEMPTS, "one attempt a cycle")
-        self.assertIn("erred", self.store.family(rid)["state"][OPERATOR_RUN_KEY]["gave_up"])
+        self.assertIn("could not run it 3 times", self.store.family(rid)["state"][OPERATOR_RUN_KEY]["gave_up"])
         self.assertEqual(out["model_calls"], 1, "after the last attempt the model goes on")
-        self.assertIn("could not run version 1", self.store.notebook(rid)[-1]["text"] + self.store.notebook(rid)[-2]["text"])
+        notes = self.store.notebook(rid)[-1]["text"] + self.store.notebook(rid)[-2]["text"]
+        self.assertIn("could not run version 1", notes)
+        self.assertIn("call gym_run with no code and no params", notes, "the note says how to run it")
         self.pool.fail = lambda job: None
         self.steps = [{"calls": [("gym_run", {"hold": True, "note": "still nothing"})]}]
         self.researcher().cycle(rid)
@@ -120,12 +123,164 @@ class TheRevivedVersionRunsExactly(RevivalCase):
         self.assertIsNone(self.store.family(rid)["state"].get("best_train_version"), "a late row is not yet the best")
         self.pool.fail = lambda job: None
         self.steps = [{"calls": [("gym_run", {"hold": True, "note": "reading the revived run"})]}]
-        self.researcher().cycle(rid)
+        out = self.researcher().cycle(rid)
         self.assertEqual(len(self.pool.train()), 1, "read back from the store: no second Gym job")
+        self.assertNotIn("stored", out, "the harness's read-back is not the researcher's idle doing (DORMANCY)")
         state = self.store.family(rid)["state"]
         self.assertEqual(state["best_train_version"], 1)
         self.assertEqual(state[OPERATOR_RUN_KEY]["ran"], state["best_train_run"])
         self.assertIn("already recorded", json.dumps(self.sail.bodies[-1]["input"]))
+
+
+
+class WhatIsNotItsAnswer(RevivalCase):
+    """Review of #465: a run the Gym could not finish is not the program's answer; any new evaluation of it is the cycle's
+    one run; an attempt still on the Gym is never asked twice; a failure of the attempt itself is counted."""
+
+    def answer_for_the_revival(self, how):
+        """The Gym's answer to the operator's job (version 1 at the revived params) made by `how(job)`; others score."""
+        self.pool.answer = lambda job: how(job) if (job.version, job.params) == (1, REVIVED) and job.purpose == "train" \
+            else scored(job)
+
+    def test_a_run_the_gym_could_not_finish_is_retried_and_never_marked_ran(self):
+        rid = self.revive()
+        self.answer_for_the_revival(lambda job: failed(job.name, "the worker died (exit -9)"))
+        out = self.researcher().cycle(rid)
+        self.assertIn("gym:", out["error"])
+        self.assertEqual(out["model_calls"], 0)
+        record = self.store.family(rid)["state"][OPERATOR_RUN_KEY]
+        self.assertEqual((record["tries"], record.get("ran")), (1, None), "a run the Gym could not finish is no answer")
+        [row] = self.store.runs(rid, window="train")
+        self.assertEqual(row["status"], "error", "its row is kept (no trial)")
+        self.assertEqual(self.researcher().operator_owed(self.store.family(rid))["n"], 1, "still owed")
+        self.assertIn("runs it first", self.researcher().status(self.store.family(rid)))
+        self.pool.answer = scored  # the Gym recovered
+        self.steps = [{"text": "read it"}]
+        out = self.researcher().cycle(rid)
+        self.assertEqual(len(self.pool.train()), 2, "asked again next cycle")
+        state = self.store.family(rid)["state"]
+        self.assertEqual(state[OPERATOR_RUN_KEY]["ran"], state["best_train_run"])
+
+    def test_three_unfinished_runs_give_up_with_a_note(self):
+        rid = self.revive()
+        self.answer_for_the_revival(lambda job: failed(job.name, "the unit timed out and was killed"))
+        for _ in range(OPERATOR_RUN_ATTEMPTS - 1):
+            self.assertEqual(self.researcher().cycle(rid)["model_calls"], 0)
+        self.steps = [{"calls": [("gym_run", {"hold": True, "note": "the Gym keeps failing it"})]}]
+        out = self.researcher().cycle(rid)
+        self.assertEqual(out["model_calls"], 1)
+        record = self.store.family(rid)["state"][OPERATOR_RUN_KEY]
+        self.assertIn("could not run it 3 times", record["gave_up"])
+        self.assertNotIn("ran", record)
+        self.assertIn("will not ask again", self.researcher().status(self.store.family(rid)))
+
+    def test_a_disqualified_run_is_its_answer_and_the_cycles_one_run(self):
+        rid = self.revive()
+        self.answer_for_the_revival(lambda job: {**scored(job), "status": "disqualified"})
+        self.store.save_convo(rid, [], {"call_id": "queued-1", "name": "gym_run", "author": "synthetic",
+                                        "arguments": {"code": self.code, "params": {"vrp_min": 1.3}}})
+        self.steps = [{"calls": [("gym_run", {"hold": True, "note": "reading why it was disqualified"})]}]
+        out = self.researcher().cycle(rid)
+        self.assertEqual([j.params for j in self.pool.train()], [REVIVED], "no second Train job this cycle")
+        record = self.store.family(rid)["state"][OPERATOR_RUN_KEY]
+        [row] = self.store.runs(rid, window="train")
+        self.assertEqual((row["status"], record["ran"]), ("disqualified", row["run_id"]), "its answer")
+        self.assertEqual(self.store.convo(rid)[1]["call_id"], "queued-1", "the queued run waits")
+        self.assertTrue(out["pending_run"])
+        self.steps = [{"text": "read it"}]
+        self.researcher().cycle(rid)
+        self.assertEqual([j.params for j in self.pool.train()], [REVIVED, {"vrp_min": 1.3}], "it runs next cycle")
+        self.assertIsNone(self.researcher().operator_owed(self.store.family(rid)))
+
+    def test_a_waiting_rewrite_waits_for_the_next_cycle(self):
+        rid = self.revive()
+        rewrite = self.code + "\n# a stronger model's rewrite\n"
+        self.store.set_state(rid, rewrite_ready={"code": rewrite, "profile": "pro_balanced"})
+        self.steps = [{"text": "read it"}]
+        out = self.researcher().cycle(rid)
+        self.assertNotIn("rewrite", out)
+        self.assertEqual([(j.version, j.params) for j in self.pool.train()], [(1, REVIVED)], "only the operator's run")
+        self.assertEqual(self.store.family(rid)["state"]["rewrite_ready"]["code"], rewrite, "the rewrite is kept")
+        self.steps = [{"text": "read it"}]
+        out = self.researcher().cycle(rid)
+        self.assertEqual(out["rewrite"], "pro_balanced")
+        self.assertEqual([j.code for j in self.pool.train()], [self.code, rewrite], "it runs next cycle")
+        self.assertIsNone(self.store.family(rid)["state"].get("rewrite_ready"))
+
+    def test_a_run_call_after_the_operators_run_replaces_the_queued_one(self):
+        rid = self.revive()
+        self.store.save_convo(rid, [], {"call_id": "queued-1", "name": "gym_run", "author": "synthetic",
+                                        "arguments": {"code": self.code, "params": {"vrp_min": 1.3}}})
+        self.steps = [{"calls": [("notebook", {"action": "read"})]},
+                      {"calls": [("gym_run", {"code": self.code, "params": {"vrp_min": 1.5}, "why": "after the revival"})]}]
+        out = self.researcher().cycle(rid)
+        self.assertEqual(out["model_calls"], 2, "a READ turn goes on while only last cycle's run is queued")
+        self.assertIn("A run call this cycle replaces it", json.dumps(self.sail.bodies[0]["input"]))
+        queued = self.store.convo(rid)[1]
+        self.assertEqual(queued["arguments"]["params"], {"vrp_min": 1.5}, "the newer call is queued")
+        self.assertTrue(out.get("queued_replaced"))
+        self.assertEqual([j.params for j in self.pool.train()], [REVIVED])
+        self.steps = [{"text": "read it"}]
+        self.researcher().cycle(rid)
+        self.assertEqual([j.params for j in self.pool.train()], [REVIVED, {"vrp_min": 1.5}], "never the replaced one")
+
+    def test_an_attempt_still_on_the_gym_is_never_asked_twice(self):
+        rid = self.revive()
+        self.pool.fail = lambda job: "late" if job.purpose == "train" else None
+        self.researcher().cycle(rid)
+        record = self.store.family(rid)["state"][OPERATOR_RUN_KEY]
+        self.assertGreater(record["late_until"], self.clock(), "its wait gave up while the Gym ran it")
+        self.pool.fail = lambda job: None
+        out = self.researcher().cycle(rid)  # before it lands
+        self.assertEqual((len(self.pool.train()), out["model_calls"]), (1, 0), "no second job for one evaluation")
+        self.assertIn("still on the Gym", out["error"])
+        callback, landed = self.pool.lates[0]
+        callback(landed)
+        self.steps = [{"text": "read it"}]
+        self.researcher().cycle(rid)
+        self.assertEqual(len(self.pool.train()), 1, "read back when it lands")
+        state = self.store.family(rid)["state"]
+        self.assertEqual(self.store.family(rid)["trials"], 1, "one trial")
+        self.assertEqual(state[OPERATOR_RUN_KEY]["ran"], state["best_train_run"])
+
+    def test_an_attempt_that_never_lands_is_asked_again_after_its_wait(self):
+        rid = self.revive()
+        self.pool.fail = lambda job: "late" if job.purpose == "train" else None
+        self.researcher().cycle(rid)
+        late_until = self.store.family(rid)["state"][OPERATOR_RUN_KEY]["late_until"]
+        self.pool.fail = lambda job: None
+        self.clock.advance(late_until - self.clock() + 1)  # it failed on the Gym: nothing landed
+        self.steps = [{"text": "read it"}]
+        self.researcher().cycle(rid)
+        self.assertEqual(len(self.pool.train()), 2, "asked again once its wait is over")
+        self.assertTrue(self.store.family(rid)["state"][OPERATOR_RUN_KEY]["ran"])
+
+    def test_a_failure_of_the_attempt_itself_is_counted_and_bounded(self):
+        rid = self.revive()
+
+        def boom(job):
+            raise RuntimeError("an unexpected failure")
+
+        self.pool.fail = boom
+        for attempt in range(1, OPERATOR_RUN_ATTEMPTS):
+            out = self.researcher().cycle(rid)
+            self.assertEqual(out["model_calls"], 0)
+            self.assertEqual(self.store.family(rid)["state"][OPERATOR_RUN_KEY]["tries"], attempt)
+        self.steps = [{"calls": [("gym_run", {"hold": True, "note": "nothing new"})]}]
+        out = self.researcher().cycle(rid)
+        self.assertEqual(out["model_calls"], 1, "after the last attempt the model goes on")
+        self.assertIn("RuntimeError", self.store.family(rid)["state"][OPERATOR_RUN_KEY]["gave_up"])
+        self.assertEqual(len(self.pool.train()), OPERATOR_RUN_ATTEMPTS, "one attempt a cycle, then none")
+
+    def test_a_new_train_span_owes_the_run_again(self):
+        rid = self.revive()
+        self.steps = [{"text": "read it"}]
+        self.researcher().cycle(rid)
+        researcher = self.researcher()
+        self.assertIsNone(researcher.operator_owed(self.store.family(rid)))
+        researcher.train_span = lambda: "2020-01-01"
+        self.assertEqual(researcher.operator_record(self.store.family(rid), 1), {}, "the record is per Train span")
+        self.assertEqual(researcher.operator_owed(self.store.family(rid))["n"], 1)
 
 
 class GymRunWithNothing(RevivalCase):
