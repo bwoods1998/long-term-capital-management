@@ -85,8 +85,10 @@ counts wherever it is held: the family's line, any passed verdict of `VERDICTS_K
 other version's validation replaces), the selection the latest adoption archived (`previous_evaluator_selection`), and
 the selection every adoption within the window archived (its append-only `evaluator_adopted` event), so a second
 adoption, which replaces `previous_evaluator_selection` with the selection the first one already cleared, never lifts
-the guard. A failed holdout look does not end it (the gate retires nobody; only a failed validation under the current
-evaluator refutes here), and the tournament's own rules still apply. The status says so in place of any offer to
+the guard. An archived pass counts only while it is still that version's latest verdict: a later failed validation of
+the same version (its record, or a newer adoption's archive), under the evaluator then in force, refuted it, so the
+next adoption never revives it. A failed holdout look does not end it (the gate retires nobody; only a failed
+validation refutes here), and the tournament's own rules still apply. The status says so in place of any offer to
 retire. The tool stays offered (`can_retire` is unchanged). Operator retirements, the tournament's rules (the
 deflated-Sharpe rule among them), the diagnostician and the population floor are unaffected.
 
@@ -297,9 +299,9 @@ TOOLS: list[dict[str, Any]] = [
                                      "Gym evaluations since its birth or last validation without an eligible Train version "
                                      "(or far more with a best Train score below zero), or many cycles in a row with only "
                                      "holds and stored results, or a few holds in a row once your family has an eligible "
-                                     "Train run or enough trials behind it. Refused while your family holds a version that "
-                                     "passed the validation line, unless that version fails the line under the current "
-                                     "evaluator: an evaluator change is never a reason to retire.",
+                                     "Train run or enough trials behind it. Refused while your family holds a version whose "
+                                     "latest validation passed the line (only a failed validation of that version ends "
+                                     "this): an evaluator change is never a reason to retire.",
      "parameters": {"type": "object", "properties": {"reason": {"type": "string", "description": "Why the entire mechanism "
                     "is abandoned; retained in the private notebook and graveyard."}}, "required": ["reason"]}},
 ]
@@ -346,8 +348,8 @@ program and all evidence.
 AN EVALUATOR CHANGE IS NEVER A REASON TO RETIRE. When the Gym's evaluator changes, your best and your validation are
 archived and re-evaluated, never refuted: a version that passed the validation line keeps that evidence, and the
 tournament validates it again under the current evaluator by itself once you re-run it unchanged on Train (the same
-program and params) and it is your best (submit it). While your family holds a version that passed the line, the retire
-tool refuses, unless that version's validation under the current evaluator fails the line.
+program and params) and it is your best (submit it). While your family holds a version whose latest validation passed
+the line, the retire tool refuses; only a failed validation of that version under the current evaluator ends that.
 Holding parks your researcher without further paid calls until new evidence, guidance, data or a harness change arrives.
 Use it to wait for a specific missing input. If your evidence has exhausted the mechanism, retire when offered instead.
 Your notes (the notebook and gym_run's note) are PUBLIC: they may appear on the public site. Write the mechanism and your
@@ -1041,13 +1043,21 @@ def validated_at(store: SwarmStore, fid: str, n: int, state: Mapping[str, Any]) 
 ADOPTED_ACTION = "evaluator_adopted"
 
 
-def _passed_version(source: Any) -> int | None:
-    """The version whose validation line a selection (the family's state, or one an adoption archived) says passed."""
+def _line_verdict(source: Any) -> tuple[int, bool] | None:
+    """The version a selection's validation line (the family's state, or one an adoption archived) judged and whether it
+    passed the line; None when the line judged no version or says neither."""
     if not isinstance(source, Mapping):
         return None
     line = source.get("validation_line")
     n = _plain_int(source.get("validation_version"))
-    return n if n is not None and isinstance(line, Mapping) and line.get("passed") is True else None
+    passed = line.get("passed") if isinstance(line, Mapping) else None
+    return (n, passed) if n is not None and isinstance(passed, bool) else None
+
+
+def _passed_version(source: Any) -> int | None:
+    """The version whose validation line a selection (the family's state, or one an adoption archived) says passed."""
+    verdict = _line_verdict(source)
+    return verdict[0] if verdict and verdict[1] else None
 
 
 def adoption_archives(store: SwarmStore, fid: str, *, since: float) -> list[tuple[float, Mapping[str, Any]]]:
@@ -1074,17 +1084,22 @@ def adoption_archives(store: SwarmStore, fid: str, *, since: float) -> list[tupl
 def retire_guard(store: SwarmStore, fam: Mapping[str, Any], settings: Mapping[str, Any], *, now: float) -> dict[str, Any] | None:
     """THE VALIDATED-FAMILY GUARD (the module docstring): why the family's researcher may not retire it, or None.
 
-    The family holds a version that passed the validation line, that version's latest validation under the current
-    evaluator did not fail the line (`validation_refuted`), and it was last validated (`validated_at`) within
+    The family holds a version whose latest known verdict passed the validation line, no validation of it under the
+    current evaluator failed the line (`validation_refuted`), and it was last validated (`validated_at`) within
     `researcher.retire_guard_days`. A pass is read, in this order, from: the family's own line; each passed verdict the
     tournament recorded (`VERDICTS_KEY`, newest first: it survives any number of adoptions and another version's
     validation replacing the line); the selection the latest adoption archived (`previous_evaluator_selection`); and the
-    selection each adoption within the window archived (`adoption_archives`: a pass recorded before the verdicts were
-    kept, which a second adoption replaced in the state). A version whose validation time is unknown is guarded only
-    from an adoption's archive, counted from that adoption (a validation precedes the adoption that archived it); never
-    without a limit. A version validated only by a failed line never protects (`validated_version` alone records any
-    validation, passed or failed). Returns {"version", "archived", "days"}; `archived` says the pass was judged under an
-    earlier evaluator."""
+    selection each adoption within the window archived (`adoption_archives`, newest first: a pass recorded before the
+    verdicts were kept, which a second adoption replaced in the state). An archived pass counts only while it is still
+    that version's latest verdict: the tournament writes a version's record with each of its verdicts, so a record is
+    newer than any archive of that version, and an adoption clears the family's line, so each archive's line is newer
+    than every older archive's. A version with a record, or one a newer archive judged failed, is never guarded by an
+    older archive: a failed validation under an in-between evaluator (googl's case: passed under E1, re-run and failed
+    under E2, then E3 adopted) refutes it as a failure under the current one does. A version whose validation time is
+    unknown is guarded only from an adoption's archive, counted from that adoption (a validation precedes the adoption
+    that archived it); never without a limit. A version validated only by a failed line never protects
+    (`validated_version` alone records any validation, passed or failed). Returns {"version", "archived", "days"};
+    `archived` says the pass was judged under an earlier evaluator."""
     days = retire_guard_days(settings)
     if days <= 0:
         return None
@@ -1126,11 +1141,18 @@ def retire_guard(store: SwarmStore, fam: Mapping[str, Any], settings: Mapping[st
     archive = state.get("previous_evaluator_selection")
     if not isinstance(archive, Mapping):
         return None  # no adoption has archived a selection of this family: none of its events holds one either
-    guard = check(_passed_version(archive), True)
-    if guard:
-        return guard
-    for adopted_at, old in adoption_archives(store, fid, since=now - span):
-        guard = check(_passed_version(old), True, adopted_at)
+    recorded = records if isinstance(records, Mapping) else {}
+    # The archives newest first (the latest adoption's, then each adoption's own event): an archived verdict is a
+    # version's latest only when it has no record and no newer archive judged it. A later failure refutes an older pass.
+    for adopted_at, old in ((None, archive), *adoption_archives(store, fid, since=now - span)):
+        verdict = _line_verdict(old)
+        if verdict is None:
+            continue
+        n, passed = verdict
+        if not passed or str(n) in recorded:
+            seen.add(n)  # its record is its latest verdict (a recorded pass was judged above), or it failed after
+            continue
+        guard = check(n, True, adopted_at)
         if guard:
             return guard
     return None

@@ -828,14 +828,22 @@ class ValidatedFamilyGuard(ResearcherCase):
         self.store.set_state(self.fid, **{VERDICTS_KEY: None})
         self.assertEqual(retire_guard(self.store, self.store.family(self.fid), self.settings, now=self.clock())["version"], 1)
 
-    def test_a_pass_recorded_under_an_old_evaluator_is_no_refutation_nor_a_failure_under_one(self):
-        self.validate(1)
-        old = {"image": "old-image", "bundle": "gym-engine-3-old", "execution": "x"}
-        self.store.set_state(self.fid, **{VERDICTS_KEY: record_verdict({}, 1, False, evaluator=old, at=self.store.now())})
+    def test_a_record_is_the_versions_latest_verdict_whatever_evaluator_judged_it(self):
+        """The tournament writes a version's record with each of its verdicts, so a record is newer than any archive of
+        that version: a recorded failure under an earlier evaluator refutes an archived pass, and a recorded pass under
+        one is no refutation (it guards, archived)."""
+        self.validate(1)  # passed before the records were kept
         adopt(self.store, identity("new-image", bands._bundle()))
-        guard = retire_guard(self.store, self.store.family(self.fid), self.settings, now=self.clock())
-        self.assertEqual((guard["version"], guard["archived"]), (1, True),
-                         "a failure under another evaluator refutes nothing now")
+        between = self.store.get(KEY)
+        failed = record_verdict({}, 1, False, evaluator=between, at=self.store.now())
+        self.store.set_state(self.fid, **{VERDICTS_KEY: failed})
+        self.adopt_again()
+        self.assertNotEqual(self.store.get(KEY), between)
+        self.assertIsNone(self.guard(), "refuted under the evaluator in force then: the next adoption never revives it")
+        passed = record_verdict({}, 1, True, evaluator=between, at=self.store.now())
+        self.store.set_state(self.fid, **{VERDICTS_KEY: passed})
+        guard = self.guard()
+        self.assertEqual((guard["version"], guard["archived"]), (1, True), "a pass under an earlier evaluator guards")
 
     def test_a_passed_line_under_the_current_evaluator_guards_too(self):
         self.validate(1, image=None, bundle=None)
@@ -972,6 +980,68 @@ class ValidatedFamilyGuard(ResearcherCase):
         # A failure of version 1 itself under the current evaluator ends it.
         self.judge(1, passed=False, name="val-1-again")
         self.assertIsNone(retire_guard(self.store, self.store.family(self.fid), self.settings, now=self.clock()))
+
+    def guard(self):
+        return retire_guard(self.store, self.store.family(self.fid), self.settings, now=self.clock())
+
+    # A failed re-run under an in-between evaluator (the review of 1c0daf04): version 1 passes under E1, E2 is adopted,
+    # version 1 is re-run unchanged and fails under E2 (the guard lets the family go), then E3 is adopted. The E2
+    # adoption's event still holds the E1 pass, but it is no longer version 1's latest verdict: the failure refuted it.
+    def test_a_failure_under_an_in_between_evaluator_stays_a_refutation_after_the_next_adoption(self):
+        """googl's timeline, its pass written before the records were kept (the review's case A)."""
+        self.googl()
+        self.judge(1, passed=False, name="val-again")
+        self.assertIsNone(self.guard())
+        self.adopt_again()
+        self.assertIsNone(self.guard(), "its record of the failure is newer than any adoption's archive of it")
+        out, _, body = self.retire_cycle("Version 1 failed the validation line when re-run under the new evaluator.")
+        self.assertTrue(out["retired"])
+        self.assertNotIn("retire_refused", out)
+        self.assertNotIn("passed the validation line before the evaluator changed", self.status_of(body))
+        self.assertFalse(self.alive())
+
+    def test_a_recorded_pass_failed_under_an_in_between_evaluator_stays_refuted(self):
+        """The same timeline with the E1 pass recorded (the review's case B)."""
+        self.judge(1, passed=True)
+        self.store.set_state(self.fid, gate_ready=False)
+        self.adopt_again("e2-image")
+        self.judge(1, passed=False, name="val-again")
+        self.assertIsNone(self.guard())
+        self.adopt_again("e3-image")
+        self.assertIsNone(self.guard())
+        self.assertTrue(self.retire_cycle("Version 1 failed the validation line under E2.")[0]["retired"])
+        self.assertFalse(self.alive())
+
+    def test_an_unrecorded_failure_in_a_newer_archive_refutes_an_older_archived_pass(self):
+        """The failure written before the records were kept: only the E3 adoption's archive shows it. Walked newest
+        first, it refutes the E2 adoption's archived pass, through any number of further adoptions."""
+        self.googl()
+        self.judge(1, passed=False, name="val-again")
+        self.store.set_state(self.fid, **{VERDICTS_KEY: None})
+        self.adopt_again()
+        archived = self.store.family(self.fid)["state"]["previous_evaluator_selection"]
+        self.assertEqual((archived["validation_version"], archived["validation_line"]["passed"]), (1, False))
+        self.assertIsNone(self.guard())
+        self.adopt_again("newest-image")  # E4: archives nulls; E3's event still shows the failure
+        self.assertIsNone(self.store.family(self.fid)["state"]["previous_evaluator_selection"]["validation_line"])
+        self.assertIsNone(self.guard())
+        self.assertTrue(self.retire_cycle("Version 1 failed the validation line when re-run.")[0]["retired"])
+
+    def test_another_versions_failure_in_a_newer_archive_refutes_nothing_of_it(self):
+        """Version 2 fails under E2, then E3 is adopted: version 1's archived E1 pass is still its latest verdict and
+        guards, with the records kept or without them."""
+        self.googl()
+        self.store.add_version(self.fid, self.code + "\n# another version\n", {}, author="test")
+        self.judge(2, passed=False)
+        self.adopt_again()
+        self.assertEqual(self.store.family(self.fid)["state"]["previous_evaluator_selection"]["validation_version"], 2)
+        guard = self.guard()
+        self.assertEqual((guard["version"], guard["archived"]), (1, True))
+        self.store.set_state(self.fid, **{VERDICTS_KEY: None})
+        guard = self.guard()
+        self.assertEqual((guard["version"], guard["archived"]), (1, True))
+        self.assertTrue(self.retire_cycle()[0]["retire_refused"])
+        self.assertTrue(self.alive())
 
     def test_a_recorded_pass_lapses_with_the_window(self):
         self.judge(1, passed=True)

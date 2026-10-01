@@ -51,8 +51,8 @@
    it. Each counted verdict records the family's trials (`validated_trials`), from which the idle rule counts, and
    restarts its dormant cycles. Each verdict, counted or re-judged, is also kept per version with the evaluator it was
    judged under (`validation_verdicts`, Oct 1): THE VALIDATED-FAMILY GUARD (`researcher.retire_guard`) reads it, so a
-   researcher may not retire a family that holds a version which passed the line (archived by an adoption or not)
-   unless that version fails the line under the current evaluator. No rule here reads it. THE IDLE PASS (R4,
+   researcher may not retire a family that holds a version whose latest verdict passed the line (archived by an
+   adoption or not) unless a later validation of that version failed it. No rule here reads it. THE IDLE PASS (R4,
    `idle_pass`) retires by the idle rule alone every
    `tournament.retire_every_seconds` (300) between the rounds.
    THE COHORT KEEP (L1, release B, Sept 30, `incubator_keep`): a Gym family with an ACTIVE practice cohort (the House's
