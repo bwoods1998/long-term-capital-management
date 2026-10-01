@@ -58,14 +58,17 @@ counts the refusals by structure family (`structure_capped`). Forks and reseeds 
 THE STRUCTURES (Oct 1, 2026: since 03:50Z 15 of 26 births were structures real money cannot open at this account's
 equity: credit_vertical needs $2,000 of equity, and iron_condor, iron_butterfly, long_straddle, long_strangle, calendar
 and diagonal are not among the gateway's real types; the incubator, tuition and D2 need real structures).
-`architect.structures` (a list; absent or null: every type, as before) names the types a birth may be
-(`allowed_structures`: `long_single` too when it names both `long_call` and `long_put`; a list naming no known type is
-ignored whole, an unknown entry alone, and the pass's event says what was in `structures_ignored`). The GAPS (and the strategist's) are of those types only;
-the request names them after the roots, and RESEARCH COVERAGE shows only their rows; `admit` refuses a well-formed
-proposal of any other type, and the next request names each refused one (slug, type, roots; kv
-`architect_structure_refusals`, a truncated answer's retry included). The pass's event says the allowed types
-(`structures`) and counts the refusals by type (`structure_not_allowed`). The tournament's forks breed only families of
-an allowed type (league/swarm/tournament.py); a living family of another type keeps researching until a rule retires it.
+`architect.structures` (absent or null: every type, as before; "real": the allocator's `allocation.real_structures`, one
+list for both; or a list) names the types a birth may be (`allowed_structures`: `long_single` too when a list names both
+`long_call` and `long_put`; a list naming no known type is ignored whole, an unknown entry alone, and the pass's event
+says what was in `structures_ignored`). The GAPS (and the strategist's) are of those types only (a list naming one side
+alone makes that side a gap); the request names them after the roots, RESEARCH COVERAGE shows only their rows and the
+BIRTH QUOTAS only their structure families; `admit` refuses a well-formed proposal of any other type, and the next
+request names each refused one still outside the list (slug, type, roots; kv `architect_structure_refusals`, a truncated
+answer's retry included; a pass at the ceiling sends no request, so the refusals wait for the next one). The pass's
+event says the allowed types (`structures`) and counts the refusals by type (`structure_not_allowed`). The tournament's
+forks (league/swarm/tournament.py) and the loop's founding seeds and reseeds (league/swarm/loop.py) are of an allowed type
+only; a living family of another type keeps researching until a rule retires it.
 
 TRUNCATION SALVAGE (R11-3, Sept 29: 6 of 28 Sonnet passes were cut at the 32k output cap, and each cut fell to a Kimi-K3
 refill of 19-24 births). A Claude answer cut at max_tokens comes back to the pass (`ModelRouter.ask(claude_keep_truncated)`)
@@ -334,15 +337,23 @@ def family_slug(base: Any) -> str:
 #: request names; at most STRUCTURE_REFUSALS_MAX rows.
 STRUCTURE_REFUSALS_KEY = "architect_structure_refusals"
 STRUCTURE_REFUSALS_MAX = 24
+#: `architect.structures` = "real": the types real money can open on this account, read from the allocator's
+#: `allocation.real_structures` (league/swarm/allocation.py: the constitution's real types and long_single), one list for both.
+REAL_STRUCTURES = "real"
 
 
 def allowed_structures(settings: Mapping[str, Any]) -> tuple[str, ...]:
     """THE STRUCTURES (`architect.structures`, Oct 1, 2026): the structure types a birth may be, in STRUCTURES order.
-    Absent or null: every type, as before. A list: the known types it names, and `long_single` also when it names both
-    `long_call` and `long_put` (every order a long_single sends is one of them, so the gateway's real types admit it
-    without naming it). A list that names no known type, or anything but a list, is every type: a typo never stops
-    births (the pass's event says it was ignored, `structures_ignored`)."""
+    Absent or null: every type, as before. "real" (REAL_STRUCTURES): the allocator's `allocation.real_structures`, so
+    the births and the allocator's execution discount read one list. A list: the known types it names, and
+    `long_single` also when it names both `long_call` and `long_put` (every order a long_single sends is one of them, so
+    the gateway's real types admit it without naming it). A list that names no known type, or anything else, is every
+    type: a typo never stops births (the pass's event says it was ignored, `structures_ignored`)."""
     raw = (settings.get("architect") or {}).get("structures")
+    if raw == REAL_STRUCTURES:
+        from .allocation import cfg as allocation_cfg
+
+        raw = allocation_cfg(settings)["real_structures"]
     if not isinstance(raw, (list, tuple)):
         return STRUCTURES
     named = {x for x in raw if isinstance(x, str)}
@@ -358,6 +369,10 @@ def structures_ignored(settings: Mapping[str, Any]) -> str | None:
     raw = (settings.get("architect") or {}).get("structures")
     if raw is None:
         return None
+    if raw == REAL_STRUCTURES:
+        from .allocation import cfg as allocation_cfg
+
+        raw = allocation_cfg(settings)["real_structures"]
     if isinstance(raw, (list, tuple)) and any(isinstance(x, str) and x in STRUCTURES for x in raw):
         unknown = [x for x in raw if not (isinstance(x, str) and x in STRUCTURES)]
         return json.dumps(unknown, default=str)[:200] if unknown else None
@@ -962,17 +977,19 @@ class Architect:
         is never a gap). A single option's gap is ONE entry, `long_single` (Sept 29, 2026: the
         strategist's "stop call/put twin births"), covered only by a living `long_single` family on the root: the
         one-sided `long_call` and `long_put` are never gaps (they carry the market's drift and invited twin pairs), though
-        a proposal of either is still admitted."""
+        a proposal of either is still admitted. Only while `architect.structures` leaves `long_single` out (it names one
+        side alone) is an allowed side a gap of its own, so the GAPS never go empty with every allowed type unexplored."""
         roots = list(self.settings.get("gym", {}).get("roots", ["SPY", "QQQ", "IWM", "XSP", "SPXW"]))
         covered = {(r, f["structure"]) for f in self.store.families(alive=True) for r in f["roots"]}
         allowed = self.structures()
+        sides_are_gaps = LONG_SINGLE not in allowed
         out = {}
         for root in roots:
             out[root] = []
             for structure in allowed:
                 if root in ("XSP", "SPXW") and structure in ("calendar", "diagonal"):
                     continue
-                if structure in SINGLE_SIDES:
+                if structure in SINGLE_SIDES and not sides_are_gaps:
                     continue
                 if (root, structure) not in covered:
                     out[root].append(structure)
@@ -1087,18 +1104,24 @@ class Architect:
 
     def structures_text(self) -> str:
         """THE STRUCTURES in the request ("" while `architect.structures` leaves out no type): the allowed types, then
-        the proposals the last pass refused for their structure (kv STRUCTURE_REFUSALS_KEY), each by its slug, type and
-        roots, so the next answer does not spend its rows on them again."""
+        the proposals the last pass refused for their structure (kv STRUCTURE_REFUSALS_KEY) whose type is still left out,
+        each by its slug, type and roots, so the next answer does not spend its rows on them again."""
         if not self.restricted():
             return ""
-        allowed = ", ".join(self.structures())
-        out = (f"\n\nSTRUCTURES (architect.structures): propose only these types, the ones real money can open on this "
-               f"account now: {allowed}. A proposal of any other type is not born.")
+        types = self.structures()
+        allowed = ", ".join(types)
+        why = ("the types real money can open on this account (allocation.real_structures)"
+               if (self.settings.get("architect") or {}).get("structures") == REAL_STRUCTURES else "the operator's list")
+        single = " A single option on both sides is one long_single." if LONG_SINGLE in types else ""
+        out = (f"\n\nSTRUCTURES (architect.structures, {why}): propose only these types: {allowed}. A proposal of any "
+               f"other type is not born.{single}")
         last = self.store.get(STRUCTURE_REFUSALS_KEY)
         rows = last.get("rows") if isinstance(last, dict) else None
-        if isinstance(rows, list) and rows:
-            lines = [f"- {r.get('slug')} ({r.get('structure')} on {','.join(r.get('roots') or [])}): not born: "
-                     f"{r.get('structure')} is not one of the allowed types" for r in rows if isinstance(r, dict)]
+        # A refusal of a type allowed since is no longer news (the operator widened the list): it is not named.
+        lines = [f"- {r.get('slug')} ({r.get('structure')} on {','.join(r.get('roots') or [])}): not born: "
+                 f"{r.get('structure')} is not one of the allowed types"
+                 for r in (rows if isinstance(rows, list) else []) if isinstance(r, dict) and r.get("structure") not in types]
+        if lines:
             out += (f"\n\nNOT BORN FOR THEIR STRUCTURE (proposals at {last.get('at')}; architect.structures allows only "
                     f"{allowed}):\n" + "\n".join(lines)
                     + "\nPropose such a mechanism again only as one of the allowed types, and only if it survives the change.")
@@ -1161,7 +1184,7 @@ class Architect:
                      "families one class may have, so a proposal in one is not born):\n" + json.dumps(full)) if full else ""
         # Release B: THE BIRTH QUOTA (allocation.py `BirthQuota`): the structure families' births in the window, and which are full.
         quota = self.birth_quota()
-        quota_text = f"{quota.text()}\n\n" if quota is not None else ""
+        quota_text = f"{quota.text(self.structures() if self.restricted() else None)}\n\n" if quota is not None else ""
         # THE STRUCTURES (`architect.structures`): the allowed types and the last pass's refusals, right after the roots.
         types = self.structures_text()
         return (f"Propose {number} new families, on these roots only (the Gym "
@@ -1441,4 +1464,4 @@ __all__ = ["Architect", "SYSTEM", "GraveyardDigest", "Digest", "lesson_view", "p
            "GRAVEYARD_POINTER", "SECTION_MAX", "AGENDA_LOCKED_MAX", "MAX_DIGEST_BYTES", "COMPOSED_AGENDA_TITLE",
            "LEGACY_AGENDA_TITLE", "USAGE_KEYS", "ASCII_MAP", "is_operator", "operator_ids", "operator_scale", "LEVELS",
            "LIST_LEVEL", "WHERE_HEADER", "DIGEST_FORMAT", "LIBRARY_RULE", "allowed_structures", "structures_ignored",
-           "STRUCTURE_REFUSALS_KEY", "STRUCTURE_REFUSALS_MAX"]
+           "STRUCTURE_REFUSALS_KEY", "STRUCTURE_REFUSALS_MAX", "REAL_STRUCTURES"]

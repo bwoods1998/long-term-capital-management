@@ -2,7 +2,9 @@
 birth may be. Unset, every type, as before. Set, the GAPS (the architect's and the strategist's) and the coverage in the
 requests are of those types only, the request names them, `admit` refuses any other type and the next request names each
 refusal, the strategist's packet names them, and the tournament's forks breed only families of an allowed type (one of
-another type is never retired for it). Every family, program and number here is invented."""
+another type is never retired for it), nor do the loop's founding seeds and reseeds; the BIRTH QUOTAS show only the
+allowed types' families; "real" reads the allocator's `allocation.real_structures`. Every family, program and number
+here is invented."""
 
 from __future__ import annotations
 
@@ -10,7 +12,10 @@ import json
 import unittest
 
 from league.swarm import architect as arch_mod
-from league.swarm.architect import (STRUCTURE_REFUSALS_KEY, Architect, allowed_structures, structures_ignored)
+from league.swarm.allocation import BirthQuota
+from league.swarm.architect import (REAL_STRUCTURES, STRUCTURE_REFUSALS_KEY, Architect, allowed_structures,
+                                    structures_ignored)
+from league.swarm.seeds import SEEDS
 from league.swarm.store import STRUCTURES
 from league.swarm.strategist import Strategist
 from league.swarm.tournament import Tournament
@@ -18,6 +23,7 @@ from league.tests.test_claude import message
 from league.tests.test_frontier import FakeOpener
 from league.tests.test_swarm_graveyard_digest import RouteCase
 from league.tests.test_swarm_rounds import SPEC, RoundCase
+from league.tests.test_swarm_loop import LoopCase
 from league.tests.test_swarm_strategist import FakeRouter, StrategistCase
 
 #: The gateway's real types at this account's equity (Oct 1, 2026: `options_money.real_types`).
@@ -56,6 +62,17 @@ class TheSetting(unittest.TestCase):
         self.assertEqual(allowed_structures(partly), ("debit_vertical",))
         self.assertEqual(json.loads(structures_ignored(partly)), ["iron_condr"], "an unknown entry alone")
 
+    def test_real_reads_the_allocators_real_structures_one_list_for_both(self):
+        self.assertEqual(allowed_structures({"architect": {"structures": REAL_STRUCTURES}}), ALLOWED)
+        self.assertIsNone(structures_ignored({"architect": {"structures": REAL_STRUCTURES}}))
+        # The owner's equity crosses $2,000: one edit of the allocator's list moves the births too.
+        wider = {"architect": {"structures": "real"}, "allocation": {"real_structures": REAL + ["long_single", "credit_vertical"]}}
+        self.assertEqual(allowed_structures(wider), ALLOWED[:3] + ("debit_vertical", "credit_vertical", "long_butterfly"))
+        self.assertIsNone(structures_ignored(wider))
+        broken = {"architect": {"structures": "real"}, "allocation": {"real_structures": "debit_vertical"}}
+        self.assertEqual(allowed_structures(broken), ALLOWED, "a misread allocator list is its default")
+        self.assertEqual(allowed_structures({"architect": {"structures": "REAL"}}), STRUCTURES, "only the exact word")
+
 
 class TheArchitect(RoundCase):
     def restrict(self, types=REAL):
@@ -93,22 +110,97 @@ class TheArchitect(RoundCase):
         born = a.admit([proposal(1, "iron_condor"), proposal(2, "calendar", ("QQQ",)), proposal(3, "credit_vertical", ("IWM",))])
         self.assertEqual(born, ["idea-1", "idea-2", "idea-3"])
         self.assertEqual(a.not_allowed, [])
-        self.assertNotIn("STRUCTURES (architect.structures)", a.prompt())
+        self.assertNotIn("STRUCTURES (architect.structures", a.prompt())
         self.assertNotIn("NOT BORN FOR THEIR STRUCTURE", a.prompt())
 
     def test_the_request_names_the_allowed_types_and_shows_only_their_coverage(self):
         self.restrict()
         text = self.arch().prompt()
-        self.assertIn("STRUCTURES (architect.structures): propose only these types, the ones real money can open on this "
-                      "account now: long_call, long_put, long_single, debit_vertical, long_butterfly. A proposal of any other "
-                      "type is not born.", text)
-        self.assertLess(text.index("on these roots only"), text.index("STRUCTURES (architect.structures)"))
+        self.assertIn("STRUCTURES (architect.structures, the operator's list): propose only these types: long_call, "
+                      "long_put, long_single, debit_vertical, long_butterfly. A proposal of any other type is not born. A "
+                      "single option on both sides is one long_single.", text)
+        self.assertLess(text.index("on these roots only"), text.index("STRUCTURES (architect.structures"))
         label = "RESEARCH COVERAGE (effort, not profitability; validated means evaluated, not passed):\n"
         coverage = json.loads(text.split(label, 1)[1].split("\n\n", 1)[0])
         self.assertEqual(tuple(coverage), ALLOWED)
         gaps = json.loads(text.split("GAPS (uncovered structure types by root; [] means all covered):\n", 1)[1].split("\n\n", 1)[0])
         self.assertFalse({t for types in gaps.values() for t in types} - set(ALLOWED))
         self.assertEqual(len(self.arch().coverage()), len(STRUCTURES), "the coverage table itself keeps every row")
+
+    def test_real_says_why_and_a_list_without_long_single_says_nothing_of_it(self):
+        self.settings["architect"]["structures"] = REAL_STRUCTURES
+        self.assertIn("STRUCTURES (architect.structures, the types real money can open on this account "
+                      "(allocation.real_structures)): propose only these types: long_call, long_put, long_single, "
+                      "debit_vertical, long_butterfly.", self.arch().prompt())
+        self.restrict(["debit_vertical", "long_butterfly"])
+        text = self.arch().prompt()
+        self.assertIn("propose only these types: debit_vertical, long_butterfly. A proposal of any other type is not born.\n", text)
+        self.assertNotIn("long_single.", text.split("STRUCTURES (architect.structures", 1)[1].split("\n\n", 1)[0])
+
+    def test_a_list_naming_one_side_alone_makes_that_side_a_gap(self):
+        self.restrict(["long_call", "debit_vertical"])
+        self.assertEqual(self.arch()._gaps_by_root()["SPY"], ["long_call", "debit_vertical"])
+        self.store.add_family({**SPEC, "id": "call-spy", "structure": "long_call"}, origin="seed")
+        self.assertEqual(self.arch()._gaps_by_root()["SPY"], ["debit_vertical"])
+        self.assertEqual(self.arch()._gaps_by_root()["QQQ"], ["long_call", "debit_vertical"])
+        self.restrict(REAL)  # both sides: one long_single gap, as unset
+        self.assertNotIn("long_call", self.arch()._gaps_by_root()["QQQ"])
+
+    def quota_block(self, text):
+        return text.split("BIRTH QUOTAS", 1)[1].split("\n\n", 1)[0]
+
+    def window(self, counts):
+        for i, (structure, n) in enumerate(counts.items()):
+            for j in range(n):
+                self.store.event("swarm.born", f"w-{i}-{j}", {"structure": structure})
+
+    def test_the_birth_quotas_show_only_the_allowed_types_families(self):
+        # The review's case: singles hold the window, and the condor, straddle and calendar families are "open".
+        self.settings.setdefault("allocation", {})["births"] = {"min_alive": 0}
+        self.window({"long_single": 14, "iron_condor": 2, "long_straddle": 1, "calendar": 1, "credit_vertical": 1,
+                     "iron_butterfly": 1})
+        unset = self.quota_block(self.arch().prompt())
+        for line in ("- condor (iron_condor): 2 of 20", "- straddle (long_straddle, long_strangle): 1 of 20",
+                     "- vertical (debit_vertical, credit_vertical): 1 of 20", "propose across the open families.\n"):
+            self.assertIn(line, unset, "unset: every family, as before")
+        self.restrict()
+        block = self.quota_block(self.arch().prompt())
+        for gone in ("condor", "straddle", "calendar", "credit_vertical", "iron_butterfly", "iron_condor", "diagonal"):
+            self.assertNotIn(gone, block)
+        self.assertIn("- single (long_single, long_call, long_put): 14 of 20 (70%), FULL: at most 1 this pass", block)
+        self.assertIn("- butterfly (long_butterfly): 1 of 20 (5%), open:", block)
+        self.assertIn("- vertical (debit_vertical): 1 of 20 (5%), open:", block)
+        self.assertIn("Only the families of the allowed types are shown; a family's count is its births of every type in "
+                      "the window.", block)
+
+    def test_the_resting_quota_shows_only_the_allowed_types_families_too(self):
+        self.restrict()
+        self.window({"iron_condor": 3, "debit_vertical": 2})
+        block = self.quota_block(self.arch().prompt())
+        self.assertIn("they rest in this pass", block)
+        self.assertIn("- vertical (debit_vertical): 2 of 5", block)
+        self.assertNotIn("condor", block)
+
+    def test_the_quota_text_is_unchanged_without_an_allowlist(self):
+        self.window({"iron_condor": 6, "debit_vertical": 6})
+        for births in ({"min_alive": 0}, {}):
+            self.settings.setdefault("allocation", {})["births"] = births
+            q = BirthQuota(self.store, self.settings, now=self.clock(), want=6, alive=0)
+            self.assertEqual(q.text(), q.text(None))
+            self.assertEqual(q.text(STRUCTURES), q.text().replace(".\n", ". Only the families of the allowed types are "
+                                                                  "shown; a family's count is its births of every type in "
+                                                                  "the window.\n", 1))
+
+    def test_a_refusal_of_a_type_allowed_since_is_not_named(self):
+        self.restrict()
+        self.store.put(STRUCTURE_REFUSALS_KEY, {"at": "2026-10-01T04:00:00Z", "rows": [
+            {"slug": "idea-2", "structure": "iron_condor", "roots": ["QQQ"]}]})
+        self.assertIn("- idea-2 (iron_condor on QQQ): not born", self.arch().prompt())
+        self.restrict(REAL + ["iron_condor"])
+        text = self.arch().prompt()
+        self.assertIn("iron_condor", text.split("STRUCTURES (architect.structures", 1)[1].split("\n\n", 1)[0])
+        self.assertNotIn("NOT BORN FOR THEIR STRUCTURE", text)
+        self.assertNotIn("idea-2", text)
 
     def test_a_pass_refusal_is_named_in_the_next_request_and_a_clean_pass_clears_it(self):
         self.restrict()
@@ -154,6 +246,33 @@ class TheArchitect(RoundCase):
         self.assertEqual(out["born"], ["idea-1"], "an unusable list is ignored: every type, as before")
         self.assertEqual(json.loads(out["structures_ignored"]), ["debit_vertcal"])
         self.assertNotIn("structures", out)
+
+
+class TheSeeds(LoopCase):
+    def test_the_founding_seeds_are_of_the_allowed_types(self):
+        self.settings["architect"]["structures"] = list(REAL)
+        sw = self.swarm()
+        born = sw.seed()
+        real = [s for s in SEEDS if s["structure"] in ALLOWED]
+        self.assertEqual(born, [s["id"] for s in real][:48])
+        self.assertFalse({f["structure"] for f in self.store.families()} - set(ALLOWED))
+
+    def test_reseeds_are_of_the_allowed_types_and_unset_as_before(self):
+        sw = self.swarm()
+        sw.seed()
+        for fam in self.store.families(alive=True)[:20]:
+            self.store.retire(fam["id"], "synthetic")
+        sw.settings["population"]["reseed_max"] = 20
+        sw.settings["architect"]["structures"] = list(REAL)
+        born = sw.reseed()
+        self.assertTrue(born)
+        self.assertFalse({self.store.family(fid)["structure"] for fid in born} - set(ALLOWED))
+        for fam in self.store.families(alive=True)[:20]:
+            self.store.retire(fam["id"], "synthetic")
+        sw.settings["architect"]["structures"] = None
+        born = sw.reseed()
+        self.assertTrue({self.store.family(fid)["structure"] for fid in born} - set(ALLOWED),
+                        "unset: every seed's type, as before")
 
 
 class TheRetry(RouteCase):
