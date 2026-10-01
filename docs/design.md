@@ -548,11 +548,13 @@ has climbed, with no prose on the page:
 - **Levels:** where each agent stands now on the game's map (Train, Validation, Tuition, Candidate, Probe, Sized on the
   main stairs; Practice and the Incubator on the side path that never reaches the top; Retired off the map; a retired
   agent still holding real money stands on that money's step), and a funnel of how many families reached each level
-  since the reset.
-- **Rationale:** each agent's thesis (its family's mechanism in whole sentences: no digit, no number word, no colon,
-  bracket or code mark, no parameter name) and, for each real position, its route, why it opened and why its agent closed
-  it (the orders' own short reasons under the same rules), how it ended (agent, House or expiry) and its maximum loss at
-  open.
+  since the reset (Tuition is a branch off Validation: a holdout look needs no tuition lot first).
+- **Rationale:** each agent's thesis (its family's mechanism in whole sentences: no number in any form, digits,
+  numerals of any script, number words, "one" only as a pronoun; no colon, bracket or code mark, no parameter name) and,
+  for each real position, the route it was opened on, why it opened and why its agent closed it (the orders' own short
+  reasons under the same rules), how it ended (agent, House or expiry) and its maximum loss at open.
+- **No number in a mechanism:** the roster's mechanism and the birth news on the tape keep only sentences with no
+  number, so no entry window or threshold ("8-21 DTE") reaches the page; a mechanism with nothing left shows none.
 - **Pinning:** every agent a real position names stays on the public roster, retired or not.
 
 It is an opt-in read (`...&practice=1&window=1`), and a site that predates it gets the checkpoint without it.

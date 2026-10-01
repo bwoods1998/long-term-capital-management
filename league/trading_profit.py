@@ -269,8 +269,9 @@ def position_rows(positions: Sequence[Mapping[str, Any]], orders: Sequence[Mappi
     allowlist `site_position` builds the row's fourteen fields by name, and `clean` drops them anyway): `_instance` (whose
     program's parameter names a reason is filtered against), `_tag` (the opening order's reason as the book stored it),
     `_close_why` (the reason of its newest filled closing order its own program sent, only when that program closed it),
-    `_exit` (`exit_of`), `_route` (`route_of`; `bands` maps an instance id to its band) and `_max_loss` (its maximum loss
-    at open, to the cent: what `structures[].max_loss_usd` publishes while it is whole)."""
+    `_exit` (`exit_of`), `_route` (`route_of`; `bands` maps an instance id to its band now: the swarm window puts the band
+    at open in its place, `site_window.trades`), `_opened` (the book's own opening time, epoch seconds) and `_max_loss`
+    (its maximum loss at open, to the cent: what `structures[].max_loss_usd` publishes while it is whole)."""
     by_oid = {int(o['oid']): o for o in orders if o.get('oid') is not None}
     by_pid: dict[int, list[Mapping[str, Any]]] = {}
     for order in orders:
@@ -323,7 +324,7 @@ def position_rows(positions: Sequence[Mapping[str, Any]], orders: Sequence[Mappi
             'opened_at': _iso(_minute(opened)), 'closed_at': _iso(_minute(closed)),
             'pnl_usd': usd(value) if value is not None else None,
             '_instance': str(row.get('instance') or ''), '_tag': row.get('tag'), '_close_why': own.get('why') if own else None,
-            '_exit': exit_kind, '_route': route_of(row, bands), '_max_loss': max_loss,
+            '_exit': exit_kind, '_route': route_of(row, bands), '_opened': _epoch(row.get('opened_at')), '_max_loss': max_loss,
         })
     return out
 

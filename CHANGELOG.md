@@ -27,8 +27,14 @@ Main `3eaf4d06` is Release B, deployed Oct 1 (below). Under the freeze (Oct 1, "
 - **The swarm window** (branch `b/site-rationale`): the publisher sends `levels` (each agent's level and the levels
   funnel since the reset) and `rationale` (each agent's thesis, and each real position's route, reasons, exit and maximum
   loss), pins every agent a real position names to the roster, and filters every mechanism against its program's
-  parameter names. Publisher and swarm-feed files only (`league/publish.py`, `league/site_window.py`,
-  `league/trading_profit.py`, `league/swarm/public.py`, `league/swarm/sitefeed.py`): nothing in `league/live`,
+  parameter names. After its three reviews: a thesis, a tag, a note and a mechanism carry no number in any form (number
+  words including ordinals, fractions and run-together numbers; "one" only as a pronoun; numerals of any script; no
+  hidden format mark or look-alike letter; parameter names with hyphens or run together); the roster's mechanism and the
+  birth news drop every sentence with a number (no entry window or threshold on the page); Tuition counts only families
+  that held a tuition lot (its own branch of the funnel); a position's route is the band it was opened on; under the byte
+  limit the window leaves before any agent or row, with 16 KiB left for the site's names; the window is not read while
+  the site refuses it. Publisher and swarm-feed files only (`league/publish.py`, `league/site_window.py`,
+  `league/trading_profit.py`, `league/swarm/public.py`, `league/swarm/sitefeed.py`, `league/swarm/hook.py`): nothing in `league/live`,
   `league/gym` or `LEAGUE_FILES`, no evaluator adoption, no money digest. Site first (personal-site
   `capital/swarm-window`); an older site gets the checkpoint without the window. To verify after the deploy: no "the site
   refused the swarm window" warning, and `curl -s

@@ -2,7 +2,7 @@
 
 The site starts over for the options swarm. Its masthead shows the full real-options profit, including
 marked open positions, and the running timer. The Brokerage Account's balance and funding/compute basis
-remain separate. It also shows the swarm (each agent's family, its mechanism in a sentence, its band,
+remain separate. It also shows the swarm (each agent's family, its mechanism in words without a number, its band,
 record and optional promotion checklist); the Gym's pace; the
 open structures with their maximum loss and P&L; and the tape of the agents' decisions in their own
 words. The site's validators are `personal-site/capital/schema.js`; the contract is
@@ -81,14 +81,21 @@ book and the practice record:
 
 A level is where an agent stands now (Train, Validation, Practice, Incubator, Tuition, Candidate, Probe, Sized, Retired),
 never one its band rules out; the funnel counts the families that reached each level since the reset (unions, so each
-chain only narrows; a count it cannot read is null). A thesis is the family's own mechanism in whole sentences with no
-digit, no number word, no colon, bracket or code mark and no parameter name (`swarm/public.py` `thesis_text`, then
-`thesis_words` here); a trade's reasons are its orders' tags under the same rules (`tag_text`), none on the House's rows;
-`exit` is "agent", "house" or "expiry", never text; `max_loss_usd` is its maximum loss at open. Never a price, a strike,
-a mark, a parameter's value, a threshold, code, a sketch or a private note. Entries name only agents the page shows and
-rows the table lists. Every agent a real position names is pinned to the roster (alive or retired: `Publisher._pinned`),
-outside the retired list's 24. A site that refuses a checkpoint carrying the window gets it again without it (tried
-first) and is offered it again half an hour later (`WINDOW_RETRY_SECONDS`), with a warning that quotes the site's reply.
+chain only narrows, `FUNNEL_CHAINS`: Tuition is its own branch off Validation, never implied by Candidate; a count it
+cannot read is null). A thesis is the family's own mechanism in whole sentences with no number (no digit or numeral of
+any script, no number word, "one" only as a pronoun), no colon, bracket or code mark and no parameter name
+(`swarm/public.py` `thesis_text`, then `thesis_words` here); a trade's reasons are its orders' tags under the same rules
+(`tag_text`), none on the House's rows; `route` is the route it was opened on; `exit` is "agent", "house" or "expiry",
+never text; `max_loss_usd` is its maximum loss at open. Never a price, a strike, a mark, a parameter's value, a
+threshold, code, a sketch or a private note. Entries name only agents the page shows and rows the table lists. Every
+agent a real position names is pinned to the roster (alive or retired: `Publisher._pinned`), outside the retired list's
+24. A site that refuses a checkpoint carrying the window gets it again without it (tried first) and is offered it again
+half an hour later (`WINDOW_RETRY_SECONDS`, not read meanwhile), with a warning that quotes the site's reply. Under the
+byte limit the window leaves first (`fit`).
+
+**No number in a mechanism** (the swarm window's safety review, Oct 1, 2026). An agent's mechanism on the roster and in
+its birth news is its whole sentences with no number at all (`public.mechanism_text`, here `site_agent` and
+`league_news`): an entry window or a threshold ("8-21 DTE", "over the next 1-3 sessions") never reaches the page.
 
 The tape is made from ledger rows (`to_events`): `agent.thought` (and a research summary) is an agent's
 note; a `book.fill` of an option or a structure held as one instrument is a trade (a buy opens it, a sale
@@ -154,8 +161,10 @@ ROUTES_BY_SOURCE = {"calibration": ("calibration",), "house": ("house",), "incub
 EXITS = ("agent", "house", "expiry")
 FUNNEL_KEYS = ("since", "born", "practice", "validation", "tuition", "incubator", "looks", "looks_passed", "candidate", "probe",
                "sized", "retired", "calibration", "live_test")
-#: Each chain only narrows, lowest count first (a family counts at a level when it reached it or any higher one).
-FUNNEL_CHAINS = (("sized", "probe", "candidate", "tuition", "validation", "born"), ("incubator", "practice", "born"),
+#: Each chain only narrows, lowest count first (a family counts at a level when it reached it or any higher one on its
+#: track). Tuition is a branch of its own off Validation: a holdout look needs no tuition lot first, and a failed look
+#: means none follows, so Candidate never implies Tuition (the swarm window's safety review, Oct 1, 2026).
+FUNNEL_CHAINS = (("sized", "probe", "candidate", "validation", "born"), ("tuition", "validation"), ("incubator", "practice", "born"),
                  ("retired", "born"), ("looks_passed", "looks"))
 #: A thesis (whole sentences) and an order's reason, at most (`site_rationale`).
 THESIS_CHARS = 280
@@ -163,6 +172,10 @@ WHY_CHARS = 80
 #: A site that refused the swarm window is offered it again after this long (`Publisher.publish`).
 WINDOW_RETRY_SECONDS = 1800
 MAX_CHECKPOINT_BYTES = 512 * 1024
+#: What `fit` leaves free under the limit: the site's public read names every agent, position and practice row
+#: (`display_name`, about 32 bytes each, at most about 410 rows), so a body fitted to the limit itself could read back
+#: over it.
+FIT_HEADROOM_BYTES = 16 * 1024
 #: A profit is only as good as its funding check: the site shows none on a check older than ten minutes.
 FLOWS_EVERY_SECONDS = 300
 FLOWS_FRESH_SECONDS = 600
@@ -629,6 +642,14 @@ def title(agent_id: str) -> str:
     return " ".join(part[:1].upper() + part[1:] for part in agent_id.split("-") if part)
 
 
+def _mechanism(value: Any) -> str:
+    """A mechanism's whole sentences with no number in them (`public.mechanism_text`: no entry window or threshold ever
+    reaches the roster or the tape; the swarm window's safety review, Oct 1, 2026), or "" when none survives."""
+    from .swarm.public import mechanism_text
+
+    return mechanism_text(value) or ""
+
+
 def site_agent(value: Any, published_at: str) -> dict[str, Any] | None:
     """One agent, exactly the site's eight fields: id, family, mechanism (a sentence), structure, band, born_at,
     retired_at, and record {trials, revisions, forward, real}. The page names an agent by its id (a name in
@@ -648,7 +669,7 @@ def site_agent(value: Any, published_at: str) -> dict[str, Any] | None:
     born, retired = site_instant(value.get("born_at")), site_instant(value.get("retired_at"))
     record = value.get("record") if isinstance(value.get("record"), Mapping) else value
     out = {
-        "id": agent_id, "family": family, "mechanism": words(value.get("mechanism"), 240), "structure": structure, "band": band,
+        "id": agent_id, "family": family, "mechanism": words(_mechanism(value.get("mechanism")), 240), "structure": structure, "band": band,
         "born_at": born if born is not None and _not_after(born, published_at) else None,
         "retired_at": retired if retired is not None and _not_after(retired, published_at) else None,
         "record": {"trials": _count(record.get("trials")) or 0, "revisions": _count(record.get("revisions"), 1_000_000) or 0,
@@ -746,15 +767,16 @@ _DIGIT = re.compile(r"[0-9]")
 def thesis_words(value: Any, limit: int) -> str | None:
     """`value` as the site's `thesisWords(value, limit)` takes it, or None, never a partial string: the publisher's `words`
     (no markup, no venue, quote-free, not blank), then no digit, no colon, no bracket and no mark only code or a formula
-    uses, at most `limit` long as JavaScript counts it, and (the swarm's rule, `public.thesis_text`) no number written as a
-    word but the pronoun "one". The swarm filtered it first, against the program's parameter names too."""
-    from .swarm.public import SENTENCE, numbered
+    uses, at most `limit` long as JavaScript counts it, and (the swarm's rules, `public.thesis_text`) no numeral of any
+    script, no format or combining mark, no letter beyond Latin-1 (`public.plain_glyphs`) and no number in words
+    (`public.numbered`: the pronoun "one" passes). The swarm filtered it first, against the program's parameter names too."""
+    from .swarm.public import SENTENCE, numbered, plain_glyphs
 
-    if not isinstance(value, str) or any(ch.isdigit() for ch in value) or _THESIS_MARKS.search(value):
+    if not isinstance(value, str) or not plain_glyphs(value) or _THESIS_MARKS.search(value):
         return None  # refused before `words` could mask it into a partial string
     text = words(value, 8000)
     if (not text or js_length(text) > limit or _DIGIT.search(text) or _THESIS_MARKS.search(text) or not quote_free(text)
-            or _VENUE.search(text) or any(numbered(sentence) for sentence in SENTENCE.split(text))):
+            or _VENUE.search(text) or not plain_glyphs(text) or any(numbered(sentence) for sentence in SENTENCE.split(text))):
         return None
     return text
 
@@ -922,16 +944,22 @@ def build_checkpoint(inputs: "SiteInputs | Mapping[str, Any]", published_at: str
 
 
 def fit(body: dict[str, Any], pinned: Any = ()) -> dict[str, Any]:
-    """The body inside the site's byte limit: the oldest retired agents, then the lowest band's, then the
-    shadow book's smallest structures leave first, then the positions table's oldest rows fold into its
-    `earlier` line, the oldest closed first (a row never simply leaves: the table must still add up to Profit;
-    the publisher alerts on an open one folded). An agent a real position names (`pinned`) leaves only after every
-    other. The swarm window keeps entries only for the agents and rows that stay. The totals the page shows are the
-    House's, not a count."""
+    """The body inside the site's byte limit, less `FIT_HEADROOM_BYTES`. The swarm window leaves first: its theses, then
+    the whole window, so the window never costs the roster or the table anything, and the body an older site gets without
+    it (`windowless`) is what fitting the windowless body alone gives. Then the oldest retired agents, then the lowest
+    band's, then the shadow book's smallest structures leave, then the positions table's oldest rows fold into its
+    `earlier` line, the oldest closed first (a row never simply leaves: the table must still add up to Profit; the
+    publisher alerts on an open one folded). An agent a real position names (`pinned`) leaves only after every other.
+    The totals the page shows are the House's, not a count."""
     size = lambda: len(canonical(body).encode("utf-8"))  # noqa: E731
+    limit = MAX_CHECKPOINT_BYTES - FIT_HEADROOM_BYTES
     positions = body.get("positions")
     pinned = set(pinned or ())
-    while size() > MAX_CHECKPOINT_BYTES and (body["agents"] or body["structures"] or (positions and positions["rows"])):
+    if isinstance(body.get("rationale"), dict) and size() > limit:
+        body["rationale"]["agents"] = []
+    if "levels" in body and size() > limit:
+        body.pop("levels", None), body.pop("rationale", None)
+    while size() > limit and (body["agents"] or body["structures"] or (positions and positions["rows"])):
         if body["agents"]:
             spare = [i for i, agent in enumerate(body["agents"]) if agent["id"] not in pinned]
             body["agents"].pop(spare[-1] if spare else -1)
@@ -940,9 +968,6 @@ def fit(body: dict[str, Any], pinned: Any = ()) -> dict[str, Any]:
         else:
             _fold(positions, [positions["rows"].pop()["pnl_usd"] for _ in range(min(10, len(positions["rows"])))],
                   (body.get("trading") or {}).get("pnl_usd"))
-        _prune_window(body)
-    if "levels" in body and size() > MAX_CHECKPOINT_BYTES:
-        body.pop("levels"), body.pop("rationale")
     _prune_window(body)
     return body
 
@@ -1039,7 +1064,7 @@ def league_news(kind: str, agent: str, p: Mapping[str, Any]) -> str | None:
     `agent` field, and the page puts its name in front. Anything else says nothing."""
     if kind in ("agent.born", "swarm.born"):  # swarm.*: the options swarm's own rows (league/swarm/hook.py mirrors them)
         origin = "forked from its parent" if p.get("parent") else "a new family"
-        mechanism = str(p.get("mechanism") or "").strip()
+        mechanism = _mechanism(p.get("mechanism"))  # no number: an older row in the ledger kept its whole numbers
         return f"is born, {origin}{': ' + mechanism if mechanism else '.'}"
     if kind in ("agent.died", "swarm.retired"):
         return f"retired: {str(p.get('cause') or 'no reason given')}.".replace("..", ".")
@@ -1494,11 +1519,14 @@ class Publisher:
             inputs.agents = self._guard(lambda: attach_progress(inputs.agents, swarm.root,
                 live=getattr(house, "options_live", None), account=inputs.account, now=self.clock()), inputs.agents)
             practice = inputs.practice.get("rows") if isinstance(inputs.practice, Mapping) else None
-            window = self._guard(lambda: site_window(swarm.root, self.state_path.parent, agents=inputs.agents,
-                                                     positions_rows=(positions or {}).get("rows"), practice_rows=practice,
-                                                     start_at=self.performance.get("start_at"), at=now), None)
-            if window:
-                inputs.levels, inputs.rationale = window.get("levels"), window.get("rationale")
+            refused = self._window_refused
+            # Not read while the site refuses it: `publish` would send the checkpoint without it anyway.
+            if refused is None or self.clock() - refused >= WINDOW_RETRY_SECONDS:
+                window = self._guard(lambda: site_window(swarm.root, self.state_path.parent, agents=inputs.agents,
+                                                         positions_rows=(positions or {}).get("rows"), practice_rows=practice,
+                                                         start_at=self.performance.get("start_at"), at=now), None)
+                if window:
+                    inputs.levels, inputs.rationale = window.get("levels"), window.get("rationale")
         return inputs
 
     @staticmethod

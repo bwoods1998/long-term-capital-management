@@ -11,9 +11,11 @@ allowlist (`league/publish.py`) enforces it again. The newest retired families a
 retired list; the publisher caps the list. `agent_rows(root, ids)` gives the same rows for any families, alive or
 retired: the publisher pins every agent a real position names, so its card always has a name, a mechanism and a record.
 
-A mechanism is `public.news_text` filtered against its family's parameter names (`param_names`: every version's PARAMS
-overrides and every version's program's PARAMS keys, cached by the newest version), so a parameter named in a mechanism
-never publishes (the swarm window's review, C8, Oct 1, 2026).
+A mechanism is `public.mechanism_text`: its whole sentences while they fit 240, each with no number (no digit, no number
+word, no numeral of any script: so no entry window or threshold, "8-21 DTE", "over the next 1-3 sessions", ever reaches
+the roster; the swarm window's safety review, Oct 1, 2026), no code mark and no parameter name of its family
+(`param_names`: every version's PARAMS overrides and every version's program's PARAMS keys, cached by the newest version;
+the window's review, C8). A mechanism with nothing left publishes as None.
 
 Standard library only.
 """
@@ -118,9 +120,10 @@ def param_names(db: sqlite3.Connection, root: str | Path, ids: Any) -> dict[str,
     return out
 
 
-def _read(root: str | Path, ids: Any = None, *, retired_shown: int = 24) -> dict[str, Any] | None:
+def _read(root: str | Path, ids: Any = None, *, retired_shown: int = 24, light: bool = False) -> dict[str, Any] | None:
     """What the site's agents and the Gym's pace are made of, read once from the store (read-only); None when there is no
-    store or it cannot be read. `ids`: whose parameter names to read (default: the families `site_inputs` shows)."""
+    store or it cannot be read. `ids`: whose parameter names to read (default: the families `site_inputs` shows). `light`:
+    the agents' rows only (`agent_rows`, each publish): not the Gym's totals over every run, the spend or the meter."""
     path = Path(root) / DB_NAME
     if not path.exists():
         return None
@@ -131,10 +134,12 @@ def _read(root: str | Path, ids: Any = None, *, retired_shown: int = 24) -> dict
             fams = [dict(r) for r in db.execute("SELECT id, lineage, mechanism, structure, band, born_at, retired_at, trials,"
                                                 " revisions, spec FROM families")]
             chosen = list(ids) if ids is not None else [f["id"] for f in _shown(fams, retired_shown)]
-            totals = dict(db.execute("SELECT COALESCE(SUM(trials),0) AS trials, COALESCE(SUM(program_years),0) AS years FROM runs").fetchone())
-            spend = {r["kind"]: float(r["usd"] or 0.0) for r in db.execute("SELECT kind, SUM(usd) AS usd FROM spend GROUP BY kind")}
-            meter = {r["key"]: loads(r["value"], None) for r in db.execute(
-                "SELECT key, value FROM kv WHERE key IN ('metered_spent', 'burst_started_at')")}
+            totals, spend, meter = {}, {}, {}
+            if not light:
+                totals = dict(db.execute("SELECT COALESCE(SUM(trials),0) AS trials, COALESCE(SUM(program_years),0) AS years FROM runs").fetchone())
+                spend = {r["kind"]: float(r["usd"] or 0.0) for r in db.execute("SELECT kind, SUM(usd) AS usd FROM spend GROUP BY kind")}
+                meter = {r["key"]: loads(r["value"], None) for r in db.execute(
+                    "SELECT key, value FROM kv WHERE key IN ('metered_spent', 'burst_started_at')")}
             rows: dict[str, list[dict[str, Any]]] = {}
             banded: dict[str, Any] = {}
             for start in range(0, len(chosen), 500):  # only the families shown: their records and banded versions
@@ -205,7 +210,7 @@ def _agents(data: dict[str, Any], chosen: list[dict[str, Any]]) -> list[dict[str
                     "pnl_usd": round(sum(float(r["pnl"]) for r in reals), 2)}
         names, _known = data["names"].get(f["id"], ((), True))
         agents.append({"id": f["id"], "family": f["lineage"],
-                       "mechanism": public.news_text(f["mechanism"], param_names=public.unspelled(names, f["id"])),
+                       "mechanism": public.mechanism_text(f["mechanism"], param_names=public.unspelled(names, f["id"])),
                        "structure": f["structure"], "band": "retired" if f["retired_at"] else f["band"], "born_at": f["born_at"],
                        "retired_at": f["retired_at"],
                        "record": {"trials": lineage_trials(f["lineage"]), "revisions": int(f["revisions"]),
@@ -219,7 +224,7 @@ def agent_rows(root: str | Path, ids: Any) -> list[dict[str, Any]]:
     wanted = {str(i) for i in ids or ()}
     if not wanted:
         return []
-    data = _read(root, sorted(wanted))
+    data = _read(root, sorted(wanted), light=True)
     if data is None:
         return []
     return _agents(data, [f for f in data["fams"] if f["id"] in wanted])

@@ -16,19 +16,28 @@ now; else Train. A level never contradicts the band the page shows (`LEVELS_BY_B
 
 THE FUNNEL (`funnel`): families since `since` (`performance.start_at`, the reset), each count a union: a family counts at
 a level when it reached that level or any higher one on its track (the higher levels require the lower ones), so each
-chain only narrows. A count whose source cannot be read is None (the page shows a dash), never a guess. `looks` and
-`looks_passed` count holdout looks, not families. `calibration` and `live_test` count the House's own real positions.
+chain only narrows. The tracks (`publish.FUNNEL_CHAINS`): Sized -> Probe -> Candidate -> Validation -> born; Tuition ->
+Validation, a branch of its own (the swarm window's safety review, Oct 1, 2026: a holdout look needs no tuition lot
+first, and a failed look means none follows, so Tuition counts only the families that held a D2 tuition instance or
+position, never one that only looked or reached Candidate); Incubator -> Practice -> born; Retired -> born. A count
+whose source cannot be read is None (the page shows a dash), never a guess. `looks` and `looks_passed` count holdout
+looks, not families. `calibration` and `live_test` count the House's own real positions. Every family in the swarm's
+store was born after the reset (2,246 of 2,246 on Oct 1, 2026), so `born` is the families born since it.
 
 THE RATIONALE. A thesis is the family's FULL mechanism from the swarm store (a retired family keeps its reason) through
-`public.thesis_text`: whole sentences only, no digit, no number word (but the pronoun "one"), no colon, no bracket, no code
+`public.thesis_text`: whole sentences only, no number (no digit or numeral of any script, no number word, cardinal,
+ordinal or run together, "one" only as a pronoun: `public.numbered`, `public.plain_glyphs`), no colon, no bracket, no code
 mark, no parameter name (every version's PARAMS overrides, every version's program's PARAMS and the PARAMS of every live
-instance of the family; but a name the agent's public id already spells word for word, `public.unspelled`: "qqq_flat"
-in `googl-lags-msft-ai-cloud-qqq-flat`). A family whose current program, or whose live instances, cannot be read gets no
-thesis. A trade's `open_why` is its opening
+instance of the family, written with underscores, spaces, hyphens or nothing between its words; but a name the agent's
+public id already spells word for word, `public.unspelled`: "qqq_flat" in `googl-lags-msft-ai-cloud-qqq-flat`). A family
+whose current program, or whose live instances, cannot be read gets no thesis. A trade's `open_why` is its opening
 order's stored tag and its `close_why` the reason its own program gave its close, each through `public.tag_text`; both
-are None on the House's rows, and `close_why` is None unless the agent closed it itself (`exit` "agent"). `exit` is an
-enum, never text; `max_loss_usd` is the position's maximum loss at open. Never a price, a strike, a mark, a parameter's
-value, a threshold, a program, a sketch, a private note, `positions.note` or the raw `positions.reason`.
+are None on the House's rows, and `close_why` is None unless the agent closed it itself (`exit` "agent"). `route` is
+the route it was opened on: tuition and incubator from the book's own flags; Probe or Sized from the family's band when
+it opened (the newest `swarm.band` move before the book's opening time, so a Probe position whose instance has since
+moved to Sized still says Probe; the instance's band now when no move since the reset says). `exit` is an enum, never
+text; `max_loss_usd` is the position's maximum loss at open. Never a price, a strike, a mark, a parameter's value, a
+threshold, a program, a sketch, a private note, `positions.note` or the raw `positions.reason`.
 
 Every store is read read-only (`mode=ro`, a one-second timeout), each read guarded so a failure costs only its part.
 Nothing in `league/live` or `league/gym` is imported: the constants below are spelled here and held equal to the live
@@ -132,9 +141,9 @@ def read_swarm(root: str | Path, ids: Sequence[str], since: float) -> dict[str, 
                 "SELECT family, at FROM runs WHERE window='validation' AND status='ok'") if _since(r["at"], since)}
             looks = [dict(r) for r in db.execute("SELECT family, at, passed FROM looks") if _since(r["at"], since)]
             moves = []
-            for r in db.execute("SELECT family, at, payload FROM events WHERE kind='swarm.band'"):
+            for r in db.execute("SELECT family, at, payload FROM events WHERE kind='swarm.band' ORDER BY seq"):
                 if r["family"] and _since(r["at"], since):
-                    moves.append((r["family"], (_loads(r["payload"], {}) or {}).get("band_to")))
+                    moves.append((r["family"], (_loads(r["payload"], {}) or {}).get("band_to"), _epoch(r["at"])))
             db.rollback()
     except sqlite3.Error:
         return None
@@ -308,7 +317,7 @@ def funnel(since_at: str, since: float, swarm: Mapping[str, Any] | None, live: M
     if swarm is None:
         return out
     fams = swarm["fams"]
-    moved = lambda bands: {f for f, to in swarm["moves"] if to in bands}  # noqa: E731
+    moved = lambda bands: {move[0] for move in swarm["moves"] if move[1] in bands}  # noqa: E731
     now_in = lambda bands: {f for f, row in fams.items() if row.get("band") in bands and not row.get("retired_at")}  # noqa: E731
     sized = moved(("sized",)) | now_in(("sized",))
     probe = moved(("probe", "sized")) | now_in(("probe", "sized")) | sized
@@ -320,9 +329,8 @@ def funnel(since_at: str, since: float, swarm: Mapping[str, Any] | None, live: M
     out.update(sized=len(sized), probe=len(probe), candidate=len(candidate), retired=len(retired),
                looks=len(swarm["looks"]), looks_passed=sum(1 for look in swarm["looks"] if int(look.get("passed") or 0)))
     if tuition_live is not None:
-        tuition = tuition_live | looked | candidate
-        validation = swarm["validated"] | tuition
-        out.update(tuition=len(tuition), validation=len(validation))
+        validation = swarm["validated"] | looked | candidate | tuition_live
+        out.update(tuition=len(tuition_live), validation=len(validation))
         born |= validation | incubator_live
     out["born"] = len(born)
     return out
@@ -354,10 +362,24 @@ def theses(agents: Sequence[Mapping[str, Any]], swarm: Mapping[str, Any] | None,
     return out
 
 
+def band_at(moves: Iterable[Sequence[Any]], family: str, at: Any) -> str | None:
+    """The band the newest of `family`'s band moves (family, band_to, epoch) at or before `at` left it in; None when no
+    move before it is known."""
+    when = at if isinstance(at, (int, float)) and not isinstance(at, bool) else None
+    if when is None:
+        return None
+    out, newest = None, None
+    for move in moves:
+        if move[0] == family and move[2] is not None and move[2] <= when and (newest is None or move[2] >= newest):
+            out, newest = move[1], move[2]
+    return out
+
+
 def trades(rows: Sequence[Mapping[str, Any]] | None, family_names: Mapping[str, tuple[tuple[str, ...], bool]],
-           names_by_instance: Mapping[str, Iterable[str]] | None) -> list[dict[str, Any]]:
+           names_by_instance: Mapping[str, Iterable[str]] | None, moves: Sequence[Sequence[Any]] = ()) -> list[dict[str, Any]]:
     """[{id, route, open_why, close_why, exit, max_loss_usd}] for each row of the positions table
-    (`trading_profit.position_rows`, with the publisher's private keys)."""
+    (`trading_profit.position_rows`, with the publisher's private keys); `moves` are the swarm's band moves since the
+    reset (`read_swarm`), for the band an agent's position was opened on (the module docstring)."""
     from .swarm import public
 
     out = []
@@ -377,7 +399,12 @@ def trades(rows: Sequence[Mapping[str, Any]] | None, family_names: Mapping[str, 
                 open_why = _why(row.get("_tag"), names, public)
                 if closed and exit_kind == "agent":
                     close_why = _why(row.get("_close_why"), names, public)
-        out.append({"id": f"real:{pid}", "route": row.get("_route"), "open_why": open_why, "close_why": close_why,
+        route = row.get("_route")
+        if route in ("probe", "sized"):
+            then = band_at(moves, str(row.get("family") or ""), row.get("_opened"))
+            if then is not None:
+                route = then if then in ("probe", "sized") else None  # opened on neither: no route rather than today's
+        out.append({"id": f"real:{pid}", "route": route, "open_why": open_why, "close_why": close_why,
                     "exit": exit_kind, "max_loss_usd": row.get("_max_loss")})
     return out
 
@@ -418,9 +445,9 @@ def site_window(swarm_root: str | Path | None, state_root: str | Path, *, agents
         "levels": {"as_of": at, "agents": agent_levels(agents, swarm, live, practice_rows),
                    "funnel": funnel(start, since, swarm, live, practised)},
         "rationale": {"as_of": at, "agents": theses(agents, swarm, extra),
-                      "trades": trades(positions_rows, swarm["names"], by_instance)},
+                      "trades": trades(positions_rows, swarm["names"], by_instance, swarm["moves"])},
     }
 
 
 __all__ = ["CALIBRATION_FAMILY", "FUNNEL_KEYS", "HOUSE_TEST_FAMILY", "INCUBATOR_SUFFIX", "LEVELS", "LEVELS_BY_BAND", "LIVE_FILE",
-           "OBSERVE_FILE", "agent_levels", "funnel", "level_of", "money_routes", "site_window", "theses", "trades"]
+           "OBSERVE_FILE", "agent_levels", "band_at", "funnel", "level_of", "money_routes", "site_window", "theses", "trades"]

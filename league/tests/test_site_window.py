@@ -16,6 +16,7 @@ import shutil
 import sqlite3
 import tempfile
 import unittest
+import unittest.mock
 import urllib.error
 from pathlib import Path
 from types import SimpleNamespace
@@ -100,6 +101,59 @@ class ThesisTextTest(unittest.TestCase):
         self.assertIsNone(public.tag_text("a long reason " * 7), "longer than its limit")
         self.assertIsNone(public.tag_text("buy"), "too short to say anything")
         self.assertIsNone(public.tag_text("IWM at a 60-day low"))
+
+    def test_ordinary_quant_phrasing_of_a_number_never_passes(self):
+        """The safety review's adversarial list (Oct 1, 2026): each was a number the filters let through. The check is
+        a fixed list, never the filter graded against itself."""
+        for text in ("Buy the call when GOOGL lags MSFT by more than one stdev.", "Enter when the gap exceeds one ATR over the prior close.",
+                     "Enter at one sd.", "Use a lookback of one hr.", "Exit after one trading session if the gap has not closed.",
+                     "Buy when the move is one full standard deviation below the mean.", "Hold for one more week before rolling.",
+                     "Buy GOOGL calls with a strike one notch above spot.", "Stop out at negative one ATR.", "One leg is enough.",
+                     "Exit at the eleventh session.", "Enter when the lag reaches a twelfth of the range.", "Hold until the ninetieth minute.",
+                     "Buy when the drop exceeds twelve hundredths.", "The move must be threefold the median.", "Wait for a twentyfive delta call.",
+                     "Enter on a tenpercent move.", "Exit after a oneday hold.", "Enter at a single sigma move.", "Enter at a sigma move.",
+                     "Exit after an ATR against it.", "Hold for a fortnight.", "Enter when the spread is wider than a nickel.",
+                     "Enter when the move tops a dime.", "Enter when the move tops a penny.", "Enter when IV rank is in the top decile.",
+                     "Sell when IV sits in the twenties.", "Enter when volume doubles.", "Exit when ONE SIGMA is breached.",
+                     "Enter when the lag tops one-and-a-half sigma.", "Stop out at minus one hundred bps.", "Enter when RSI tops seventy.",
+                     "Exit in the last quarter of the session.", "Sell at a quarter of the range.", "Hold a quarter."):
+            self.assertIsNone(public.thesis_text(text), text)
+            self.assertIsNone(public.tag_text(text.rstrip(".")), text)
+            self.assertIsNone(public.note_text(text), text)
+            self.assertIsNone(public.mechanism_text(text), text)
+            self.assertIsNone(thesis_words(text, 280), text)
+        self.assertIsNone(public.tag_text("lag over one stdev"))
+
+    def test_the_pronoun_one_and_plain_words_still_pass(self):
+        for text in ("No one knows the open.", "The legs move one against the other.", "Each one decays.", "One of the names leads.",
+                     "They reprice one after another.", "Buyers favour one or the other.", "One’s edge is patience.",
+                     "A single stock leads.", "Uses a single-name option on the laggard.", "The edge is one-sided.",
+                     "Investors reprice one on the other’s news.", "The tape drifts — then the gap closes.",
+                     "The flow is predictable within the final sessions of each quarter.", "Funds dress their books at quarter-end."):
+            self.assertEqual(public.thesis_text(text), text)
+            self.assertEqual(thesis_words(text, 280), text)
+
+    def test_a_numeral_of_any_script_a_hidden_mark_or_a_look_alike_letter_never_passes(self):
+        for text in ("Enter when the gap exceeds \u00bd of the prior move.", "Sell when IV rank tops \u00be of its range.",
+                     "Use the \u216b month lookback.", "Wait for a \u3007 reading.", "Enter when IV is \u0663 points over realized.",
+                     "Exit at \u2460 sigma.", "Exit when \uff4f\uff4e\uff45 sigma is breached.", "Exit when \u03bfne sigma is breached.",
+                     "Exit when \u043ene sigma is breached.", "Wait sev\u00aden days.", "Wait sev\u200den days.", "Wait o\u0336ne day.",
+                     "Exit after \U0001f51f sessions.", "Exit at \u00b2 sigma."):
+            self.assertIsNone(public.thesis_text(text), ascii(text))
+            self.assertIsNone(public.tag_text(text.rstrip(".")), ascii(text))
+            self.assertIsNone(public.note_text(text), ascii(text))
+            self.assertIsNone(public.mechanism_text(text), ascii(text))
+            self.assertIsNone(thesis_words(text, 280), ascii(text))
+            self.assertFalse(public.plain_glyphs(text) and not public.numbered(text), ascii(text))
+
+    def test_a_parameter_name_written_with_hyphens_or_run_together_is_still_its_name(self):
+        names = ("drift_window", "lookback", "z_entry")
+        for text in ("Enter when the drift-window shows a lag.", "Enter when the driftwindow shows a lag.", "Enter when the drift window shows a lag.",
+                     "Use the look-back to time it.", "Enter when z-entry fires.", "Enter when the drift\u2011window shows a lag."):
+            self.assertIsNone(public.thesis_text(text, param_names=names), text)
+            self.assertIsNone(public.mechanism_text(text, param_names=names), text)
+            self.assertIsNone(public.note_text(text, param_names=names), text)
+        self.assertEqual(public.thesis_text("Exit when QQQ is flat again.", param_names=names), "Exit when QQQ is flat again.")
 
     def test_random_text_never_leaks_a_number_a_mark_or_a_parameter(self):
         rng = random.Random(20261001)
@@ -415,8 +469,8 @@ class FunnelTest(WorldCase):
         self.assertEqual(funnel["since"], RESET_AT)
         self.assertEqual((funnel["looks"], funnel["looks_passed"]), (3, 1), "looks, not families")
         self.assertEqual((funnel["sized"], funnel["probe"], funnel["candidate"]), (0, 0, 1))
-        self.assertEqual(funnel["tuition"], 3, "the GOOGL lot, and the two families that took a look")
-        self.assertEqual(funnel["validation"], 5, "+ condor-quiet's run, + old-before's run after the reset")
+        self.assertEqual(funnel["tuition"], 1, "the GOOGL lot only: a holdout look, failed or passed, is no tuition")
+        self.assertEqual(funnel["validation"], 5, "the GOOGL lot, the two that looked, + condor-quiet's run, + old-before's after the reset")
         self.assertEqual((funnel["incubator"], funnel["practice"]), (1, 3),
                          "practice: a row, a trade an evidence reset kept, and the incubator's family; never a trade before the reset")
         self.assertEqual(funnel["retired"], 31)
@@ -431,7 +485,7 @@ class FunnelTest(WorldCase):
             pick = lambda: set(rng.sample(fams, rng.randint(0, 12)))  # noqa: E731
             swarm = {"fams": {f: {"band": rng.choice(("gym", "candidate", "probe", "sized", "retired")), "born_at": iso(RESET + rng.choice((-1, 1)) * 999),
                                   "retired_at": rng.choice((None, iso(RESET - 99), iso(RESET + 99)))} for f in fams},
-                     "moves": [(f, rng.choice(("gym", "candidate", "probe", "sized"))) for f in pick()],
+                     "moves": [(f, rng.choice(("gym", "candidate", "probe", "sized")), RESET + 9) for f in pick()],
                      "looks": [{"family": f, "passed": rng.randint(0, 1)} for f in pick()], "validated": pick()}
             live = {"instances": [{"id": f"{f}@1:{rng.choice('ti')}", "family": f, "tuition": rng.randint(0, 1),
                                    "created_at": RESET + rng.choice((-5, 5))} for f in pick()],
@@ -450,9 +504,12 @@ class FunnelTest(WorldCase):
         funnel = {key: 1 for key in publish.FUNNEL_KEYS}
         funnel.update(since=RESET_AT, sized=5, looks_passed=3, looks=2)
         out = publish.site_funnel(funnel, PUBLISHED_AT)
-        for key in ("sized", "probe", "candidate", "tuition", "validation", "born", "looks", "looks_passed"):
+        for key in ("sized", "probe", "candidate", "validation", "born", "looks", "looks_passed"):
             self.assertIsNone(out[key], key)
-        self.assertEqual((out["incubator"], out["practice"], out["calibration"]), (1, 1, 1))
+        self.assertEqual((out["incubator"], out["practice"], out["calibration"], out["tuition"]), (1, 1, 1, 1))
+        branch = {**{key: 0 for key in publish.FUNNEL_KEYS}, "since": RESET_AT, "born": 9, "validation": 6, "candidate": 3, "tuition": 1}
+        self.assertEqual(publish.site_funnel(branch, PUBLISHED_AT), branch, "Candidate above Tuition: Tuition is a branch of its own")
+        self.assertIsNone(publish.site_funnel({**branch, "tuition": 7}, PUBLISHED_AT)["tuition"], "but never above Validation")
         self.assertIsNone(publish.site_funnel({**funnel, "since": "2026-10-02T00:00:00Z"}, PUBLISHED_AT))
         self.assertIsNone(publish.site_funnel({**funnel, "born": True}, PUBLISHED_AT)["born"], "a bool is no count")
 
@@ -493,6 +550,32 @@ class RationaleTest(WorldCase):
         self.assertEqual(len(house), 2)
         self.assertTrue(all((row["open_why"], row["close_why"], row["exit"]) == (None, None, "house") for row in house),
                         "the House's rows carry no reason")
+
+    def test_the_route_is_the_band_the_position_was_opened_on(self):
+        """The integration review (Oct 1, 2026): a Probe position whose instance has since moved to Sized says Probe."""
+        w = self.world
+        w.family("climber", code="PARAMS = {}\n")
+        w.clock.t = RESET + 20000
+        w.store.set_band("climber", "candidate", reason="its holdout look passed")
+        w.clock.t = RESET + 30000
+        w.store.set_band("climber", "probe", reason="the Money table")
+        w.instance("climber@1:r", "climber", band="sized")
+        early = w.position("climber", "climber@1:r", opened_at=RESET + 25000)
+        probe = w.position("climber", "climber@1:r", opened_at=RESET + 40000)
+        w.clock.t = RESET + 50000
+        w.store.set_band("climber", "sized", reason="the Money table")
+        sized = w.position("climber", "climber@1:r", opened_at=RESET + 60000)
+        w.family("unmoved", code="PARAMS = {}\n")
+        w.instance("unmoved@1:r", "unmoved", band="probe")
+        unmoved = w.position("unmoved", "unmoved@1:r", opened_at=RESET + 60000)
+        w.clock.t = NOW - 60
+        routes = {row["id"]: row["route"] for row in self.window(practice_rows=[])["rationale"]["trades"]}
+        self.assertEqual((routes[f"real:{probe}"], routes[f"real:{sized}"]), ("probe", "sized"))
+        self.assertIsNone(routes[f"real:{early}"], "opened while a Candidate, on no tuition flag: no route rather than today's")
+        self.assertEqual(routes[f"real:{unmoved}"], "probe", "no move since the reset: the instance's band")
+        self.assertEqual(site_window.band_at([("a", "probe", 5.0), ("a", "sized", 9.0), ("b", "gym", 1.0)], "a", 9.0), "sized")
+        self.assertIsNone(site_window.band_at([("a", "probe", 5.0)], "a", 4.0))
+        self.assertIsNone(site_window.band_at([("a", "probe", 5.0)], "a", None))
 
     def test_a_name_the_agents_public_id_spells_is_not_withheld(self):
         """Production, Oct 1: the GOOGL agent's newest program names `qqq_flat`, and its open reason "msft leads googl, qqq
@@ -595,6 +678,44 @@ class MechanismNamesTest(WorldCase):
         self.assertEqual(set(names), {"entry_delta", "wing_width"})
 
 
+class MechanismNumbersTest(WorldCase):
+    """The safety review (Oct 1, 2026): the roster's mechanism and the birth news kept whole numbers ("8-21 DTE", "over the
+    next 1-3 sessions"); no sentence with a number reaches either now."""
+
+    SPXW = ("When 7-14 DTE SPXW implied vol trades below trailing realized vol, long index volatility is underpriced. The "
+            "inversion is the entry (a rare one). Index volatility reprices when the tape wakes up.")
+
+    def test_a_mechanism_keeps_only_its_sentences_with_no_number(self):
+        self.assertEqual(public.mechanism_text(self.SPXW), "The inversion is the entry. Index volatility reprices when the tape wakes up.")
+        self.assertIsNone(public.mechanism_text("Buys 8-21 DTE GLD calls. Exits over the next 1-3 sessions."))
+        self.assertIsNone(public.mechanism_text("Enter when the z-score exceeds 2.5 standard deviations."),
+                          "never a number removed and the rest shown with its meaning changed")
+        self.assertEqual(public.mechanism_text("Edge: quiet tapes revert. Wings cost less."), "Edge: quiet tapes revert. Wings cost less.")
+        whole = public.mechanism_text(GOOGL)
+        self.assertEqual(whole, GOOGL.split(" When")[0], "whole sentences while they fit 240, never a fragment")
+        self.assertEqual(public.mechanism_text(GOOGL, limit=400), GOOGL)
+
+    def test_the_roster_and_the_birth_news_carry_no_number(self):
+        w = self.world
+        w.family("spxw-vol-discount-single", mechanism=self.SPXW, structure="long_straddle", code="PARAMS = {}\n")
+        w.family("gld-vol-discount-single", mechanism="Pushes 8-21 DTE GLD IV below trailing realized vol.", code="PARAMS = {}\n")
+        rows = {a["id"]: a for a in sitefeed.site_inputs(w.swarm)["agents"]}
+        self.assertEqual(rows["spxw-vol-discount-single"]["mechanism"],
+                         "The inversion is the entry. Index volatility reprices when the tape wakes up.")
+        self.assertIsNone(rows["gld-vol-discount-single"]["mechanism"])
+        self.assertEqual(publish.site_agent({**rows["gld-vol-discount-single"], "mechanism": "Buys 3-7 DTE calls."}, PUBLISHED_AT)["mechanism"], "",
+                         "the allowlist drops it too, whoever sent it")
+        from league.swarm.hook import public_payload
+
+        born = public_payload("swarm.born", {"parent": None, "mechanism": "Buys 14-21 DTE puts after a gap. Gaps fade.", "cause": "x"}, [])
+        self.assertEqual(born["mechanism"], "Gaps fade.")
+        self.assertEqual(public_payload("swarm.retired", {"cause": "no validation improvement in 30 revisions"}, [])["cause"],
+                         "no validation improvement in 30 revisions", "the swarm's own rule keeps its whole numbers")
+        older = publish.league_news("swarm.born", "gld-vol-discount-single", {"parent": None, "mechanism": "Buys 2-5 DTE calls. Gaps fade."})
+        self.assertEqual(older, "is born, a new family: Gaps fade.", "a ledger row written before this rule")
+        self.assertEqual(publish.league_news("swarm.born", "x", {"parent": "y", "mechanism": "Buys 2-5 DTE calls."}), "is born, forked from its parent.")
+
+
 # ------------------------------------------------------------------------------------------- the roster
 class PinningTest(WorldCase):
     def test_an_agent_a_real_position_names_is_pinned_outside_the_retired_24(self):
@@ -629,6 +750,37 @@ class PinningTest(WorldCase):
         self.assertIn("dead-0", kept)
         self.assertIn("dead-29", kept)
         self.assertLess(len(kept), len(body["agents"]))
+
+    def test_under_byte_pressure_the_window_leaves_before_any_agent_or_row(self):
+        """The integration review (Oct 1, 2026): the window is the first to go, theses first, so an older site's windowless
+        body is what fitting it alone gives; and the fit leaves room for the names the site's public read adds."""
+        agents = [{"id": f"alive-{n}", "family": "alive", "mechanism": "A quiet edge in words. " * 9, "structure": "iron_condor", "band": "gym",
+                   "born_at": RESET_AT, "retired_at": None, "trials": 1, "revisions": 1, "forward": None, "real": None} for n in range(150)]
+        theses = [{"id": a["id"], "thesis": "A quiet edge in words. " * 12} for a in agents]
+        inputs = SiteInputs(agents=agents, levels={"as_of": PUBLISHED_AT, "agents": [{"id": a["id"], "level": "train"} for a in agents],
+                                                   "funnel": {"since": RESET_AT}},
+                            rationale={"as_of": PUBLISHED_AT, "agents": [{**t, "thesis": t["thesis"].strip()} for t in theses], "trades": []})
+        body = build_checkpoint(inputs, PUBLISHED_AT)
+        self.assertEqual(len(body["rationale"]["agents"]), 150)
+        size = len(publish.canonical(body).encode())
+        windowless_size = len(publish.canonical(windowless(body)).encode())
+        theses_size = size - len(publish.canonical({**body, "rationale": {**body["rationale"], "agents": []}}).encode())
+        for cap, want in ((size + publish.FIT_HEADROOM_BYTES - theses_size // 2, "no theses"),
+                          (windowless_size + publish.FIT_HEADROOM_BYTES + 10, "no window"),
+                          (windowless_size + publish.FIT_HEADROOM_BYTES - 5000, "fewer agents")):
+            with unittest.mock.patch.object(publish, "MAX_CHECKPOINT_BYTES", cap):
+                fitted = build_checkpoint(inputs, PUBLISHED_AT)
+                alone = publish.fit(json.loads(json.dumps(windowless(body))))
+            self.assertLessEqual(len(publish.canonical(fitted).encode()), cap - publish.FIT_HEADROOM_BYTES)
+            self.assertEqual(windowless(fitted), alone, want)
+            if want == "no theses":
+                self.assertEqual((fitted["rationale"]["agents"], len(fitted["agents"]), len(fitted["levels"]["agents"])), ([], 150, 150))
+            elif want == "no window":
+                self.assertNotIn("levels", fitted)
+                self.assertEqual(len(fitted["agents"]), 150, "every agent stays")
+            else:
+                self.assertNotIn("rationale", fitted)
+                self.assertLess(len(fitted["agents"]), 150)
 
 
 # ------------------------------------------------------------------------------------------- the publisher
@@ -751,6 +903,20 @@ class PublisherWindowTest(WorldCase):
         publisher.publish(self.house)
         self.assertIn("rationale", site.checkpoints()[-1], "taken: offered every publish again")
 
+    def test_the_window_is_not_read_while_the_site_refuses_it(self):
+        site = Site(OLD_SITE)
+        publisher = self.publisher(site)
+        reads = []
+        real = site_window.site_window
+        with unittest.mock.patch.object(site_window, "site_window", lambda *a, **k: reads.append(1) or real(*a, **k)):
+            publisher.publish(self.house)
+            self.now += 60
+            publisher.publish(self.house)
+            self.assertEqual(len(reads), 1, "refused: not read again inside the half hour")
+            self.now += publish.WINDOW_RETRY_SECONDS
+            publisher.publish(self.house)
+            self.assertEqual(len(reads), 2, "offered again after half an hour")
+
     def test_a_site_before_the_table_too_converges_and_only_what_it_took_is_marked_refused(self):
         site = Site(TABLELESS_SITE)
         publisher = self.publisher(site)
@@ -826,7 +992,7 @@ def window_checkpoint():
                   "butterfly-pin": "candidate", "trend-vertical": "candidate", "gap-drift": "incubator", "skew-revert": "validation",
                   "calendar-term": "practice", "strangle-cheap": "train", "eod-drift": "train", "reversal-1": "retired", GOOGL_ID: "tuition"}
     levels = {"as_of": "2026-09-28T14:57:00.000Z", "agents": [{"id": a["id"], "level": levels_now[a["id"]]} for a in agents],
-              "funnel": {"since": RESET_AT, "born": 48, "practice": 4, "validation": 9, "tuition": 7, "incubator": 1, "looks": 6,
+              "funnel": {"since": RESET_AT, "born": 48, "practice": 4, "validation": 9, "tuition": 2, "incubator": 1, "looks": 6,
                          "looks_passed": 3, "candidate": 6, "probe": 3, "sized": 1, "retired": 37, "calibration": 1, "live_test": 0}}
     rationale = {"as_of": "2026-09-28T14:57:00.000Z",
                  "agents": [{"id": a["id"], "thesis": public.thesis_text(a["mechanism"])} for a in agents],
@@ -857,6 +1023,8 @@ class WindowFixtureTest(unittest.TestCase):
         self.assertEqual(trades["real:10"], {"id": "real:10", "route": "calibration", "open_why": None, "close_why": None, "exit": "house",
                                              "max_loss_usd": "40.00"})
         self.assertIsNone(trades["real:11"]["close_why"], "a House exit carries no reason")
+        funnel = body["levels"]["funnel"]
+        self.assertGreater(funnel["candidate"], funnel["tuition"], "Tuition is a branch of its own: the site must take this")
         self.assertIsNone(body["trading"]["pnl_usd"], "after hours: the open vertical is unpriced")
         path = FIXTURES / "site_checkpoint_window.json"
         if os.environ.get("LTCM_WRITE_SITE_FIXTURES"):

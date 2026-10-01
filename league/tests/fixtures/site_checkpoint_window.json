@@ -82,7 +82,7 @@
     {
       "id": "putspread-dip-2",
       "family": "putspread-dip",
-      "mechanism": "Buys a put debit vertical after a gap down that the first hour does not recover, and exits before the close.",
+      "mechanism": "",
       "structure": "debit_vertical",
       "band": "probe",
       "born_at": "2026-09-26T09:20:00.000Z",
@@ -143,7 +143,7 @@
     {
       "id": "trend-vertical",
       "family": "trend-vertical",
-      "mechanism": "Rides trend days: once the first two hours close far from the open, it buys a vertical in that direction.",
+      "mechanism": "",
       "structure": "debit_vertical",
       "band": "candidate",
       "born_at": "2026-09-26T16:02:11.000Z",
@@ -237,7 +237,7 @@
     {
       "id": "googl-lags-msft-ai-cloud-qqq-flat",
       "family": "googl-lags-msft-ai-cloud-qqq-flat",
-      "mechanism": "MSFT and GOOGL sell competing AI-cloud and search products, and investors reprice one on the other's capex or product news with a delay. When MSFT moves strongly over several sessions, QQQ is flat and GOOGL has not followed, GOOGL is expect",
+      "mechanism": "MSFT and GOOGL sell competing AI-cloud and search products, and investors reprice one on the other's capex or product news with a delay.",
       "structure": "debit_vertical",
       "band": "retired",
       "born_at": "2026-09-27T02:10:00.000Z",
@@ -252,7 +252,7 @@
     {
       "id": "reversal-1",
       "family": "reversal",
-      "mechanism": "Bought reversals after three down days; it never beat the fill cost on validation.",
+      "mechanism": "",
       "structure": "debit_vertical",
       "band": "retired",
       "born_at": "2026-09-26T16:02:11.000Z",
@@ -575,7 +575,7 @@
       "born": 48,
       "practice": 4,
       "validation": 9,
-      "tuition": 7,
+      "tuition": 2,
       "incubator": 1,
       "looks": 6,
       "looks_passed": 3,

@@ -353,8 +353,11 @@ The swarm window (`levels` and `rationale`, Oct 1, 2026: each agent's level and 
 and why each real position opened and closed) is the third exception.
 - **The order it tries:** a site that refuses a checkpoint carrying the window is sent it again without the window first
   (`publish.windowless`). Refused again, the ladder above goes on without the window.
-- **What gets marked:** the window, only when the windowless checkpoint was taken; it is offered again after 30 minutes.
-  A site that refuses the table too is told the window's refusal on the next publish.
+- **What gets marked:** the window, only when the windowless checkpoint was taken; it is offered again after 30 minutes,
+  and the House does not read it meanwhile. A site that refuses the table too is told the window's refusal on the next
+  publish.
+- **The byte limit:** the window leaves first (its theses, then all of it), before any agent or row, and the body is
+  fitted 16 KiB under the site's 512 KiB so the names the site's public read adds never push it over.
 - **The warning,** one per distinct reply: "the site refused the swarm window (levels and rationale: old site, or an
   entry it rejects) ... (the site said: ...)".
 - **The site that takes it:** personal-site branch `capital/swarm-window`. Its Worker serves the window only to

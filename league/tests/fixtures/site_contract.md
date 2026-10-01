@@ -246,25 +246,37 @@ rationale: {
   incubator instance (`:i`); a validation on the current evaluator (`state.validation_version`); it practises now (the
   practice row's `live`); else Train. A level its band rules out is never sent.
 - **The funnel** counts families since `since`, each a union up its track (a family counts at a level when it reached
-  that level or any higher one), so each chain narrows, and the site checks it: `sized <= probe <= candidate <= tuition
-  <= validation <= born`, `incubator <= practice <= born`, `retired <= born`, `looks_passed <= looks`. `looks` count
-  holdout looks, not families; `calibration` and `live_test` count the House's own real positions. A chain the House
-  could not make narrow is sent as nulls, never wrong.
+  that level or any higher one), so each chain narrows, and the site checks it: `sized <= probe <= candidate <=
+  validation <= born`, `tuition <= validation`, `incubator <= practice <= born`, `retired <= born`, `looks_passed <=
+  looks`. Tuition is a branch of its own: a holdout look needs no tuition lot first and a failed look means none follows,
+  so Candidate may exceed Tuition (the fixture's funnel does). `tuition` counts only families that held a D2 tuition
+  instance or position. `looks` count holdout looks, not families; `calibration` and `live_test` count the House's own
+  real positions. A chain the House could not make narrow is sent as nulls, never wrong.
 - **A thesis** is the family's full mechanism (the swarm store keeps every family, so a retired agent keeps its reason),
-  in whole sentences only (a fragment a cut left never shows), each with no digit, no number written as a word except the
-  pronoun "one", no colon, no bracket, no code mark (`= _ { } [ ] < > backtick # | \`) and no name of a parameter of any
-  version of its program or of its live instances' programs; at most 280 characters; then the publisher's `words`. A
-  family whose current program cannot be read gets none. `thesisWords` is `words` with no digit and none of those marks.
+  in whole sentences only (a fragment a cut left never shows), each with no number (no digit or numeral of any script,
+  "½", "Ⅻ", "٣"; no number word, cardinal, ordinal, fraction or run together, "eleventh", "threefold", "twentyfive", "a
+  fortnight", "a dime"; "single" or "a" before a unit of spread; "one" only as a pronoun: "one another", "one of", "one on
+  the other", "no one", "the one"), no invisible format mark, combining mark or letter beyond Latin-1 (a soft hyphen, a
+  Greek omicron, a fullwidth letter), no colon, no bracket, no code mark (`= _ { } [ ] < > backtick # | \`) and no name
+  of a parameter of any version of its program or of its live instances' programs (with underscores, spaces, hyphens or
+  nothing between its words); at most 280 characters; then the publisher's `words`. A family whose current program
+  cannot be read gets none. `thesisWords` is `words` with no digit and none of those marks; the site may also refuse
+  `\p{N}` and `\p{Cf}`, which the House never sends.
 - **A trade's reasons**: `open_why` is the opening order's stored tag, `close_why` the reason the agent's own program
   gave its close (only when `exit` is "agent"), each under the same rules at most 80 characters (a tag of exactly 80 was
   cut and is null). Both are null on the House's rows (`calibration`, `house`); `close_why` is null on an open row.
   `route` fits the row's source (`calibration` -> calibration, `house` -> house, `incubator` -> incubator, `agent` ->
-  tuition, probe, sized or null). `exit` is null on an open row, else null or `agent` (its own program closed it),
+  tuition, probe, sized or null) and is the route the position was OPENED on: a Probe position whose agent has since
+  moved to Sized says probe. `exit` is null on an open row, else null or `agent` (its own program closed it),
   `house` (a forced exit, a broken structure's legs, any House row) or `expiry` (a settlement, the broker's expiry,
   assignment or exercise). `max_loss_usd` is whole cents: the position's maximum loss at open, the figure
   `structures[].max_loss_usd` publishes while it is open and whole.
 - **Never**: a price, a strike, a mark, a fill, a maximum gain, a parameter's value, a threshold, code, a sketch, a
   private note, `positions.note` or the raw `positions.reason`.
+
+An agent's `mechanism` (the roster, and its birth news on the tape) is its whole sentences with **no number at all**
+(the thesis's number rules, here with bracketed asides removed and colons allowed): no entry window or threshold
+("8-21 DTE", "over the next 1-3 sessions") reaches the page, and a mechanism with nothing left is "".
 
 Every agent a real position names (a row of the table, an incubator row, an open real structure) is **pinned** to the
 roster, alive or retired, outside the 24 newest retired, and is the last to leave the byte limit: its card always has a
