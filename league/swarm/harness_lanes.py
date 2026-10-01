@@ -1819,7 +1819,8 @@ LANES: dict[str, Lane] = {
         release_classes=("research", "money_path"),
         # v4 (release B', family cards): the judge's cases carry cards and admission runs as production runs it; a
         # restatement of a row a mechanism verdict buried must meet the card check (`card_path_admitted`, 0), which the
-        # lever may not loosen however far it cuts the idea rows' rebirths.
+        # lever may not loosen however far it cuts the idea rows' rebirths; every idea row's slice holds a same-cell
+        # control (a new idea under the row's exact card key), so a refusal keyed on cards fails on `novel_refused`.
         judge="memory", protocol="memory-rebirth-v4",
         judge_zero=("trials_uncounted", "mechanism_rewritten", "card_path_admitted"),
         judge_no_worse=("novel_refused", "rebirths_fresh_lineage"),

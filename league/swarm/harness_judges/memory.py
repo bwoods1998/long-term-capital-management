@@ -20,7 +20,23 @@ word reads the underlying price); the holding is the bucket of the case's days t
 cost, comparison, ablation (the contract's default switch) and falsification are fixed sentences. A restatement keeps
 its buried row's terms (class, inputs, holding: the same idea on the same terms) with its own words as its hypothesis,
 and so does a moved idea (a buried mechanism on another slice). The card module is the pinned base's (no lane's surface
-holds it) and is read before the tree's architect loads.
+holds it) and is read before any of the tree's code loads (the held-out draw uses its keyword reading too).
+
+SAME-CELL CONTROLS (the card fields never tell a rebirth from a new idea). A restatement carries its buried row's exact
+card key on that row's slice, so without controls "the card equals a dead family's on its slice" would separate the
+rebirths perfectly: a lever refusing such cards would cut every rebirth here while, in production, refusing every new
+idea whose card reads like an idle death beside it (the vocabulary is coarse; those deaths are no finding about the
+mechanism). So every idea row's slice also holds a NOVEL proposal under that row's exact class, inputs and holding,
+with a new idea's text as its mechanism and hypothesis (dev: one of the public novel texts, never the one already on
+that slice, or a founding family's mechanism, `SAME_READING`; held-out: a novel text from the pool, never one already
+on that slice). The card rules admit it (an idea row is no refuted cell, and its holding is short), so a card-keyed
+refusal, exact or on overlapping inputs, refuses these controls too and `novel_refused` rises; only the words tell a
+restatement from a control, and the words are what the lane's lever reads (`same_cell_proposed`, `same_cell_refused`
+report them). The controls' words are their own idea's: a refusal that also asks the words to read (production's
+keyword reading) as the dead row's class or inputs refuses on the words' coarse reading, and is caught where a new
+idea's words read like a dead row's. On dev, rows 2 and 3's controls read exactly as their rows (class and inputs) and
+row 1's as its class; on held-out, each control takes the pool's novel text that reads closest to its row's first (the
+seed breaking ties), so how often the held-out split sees such a refusal depends on the pool's texts.
 
 TWO KINDS OF DEATH. The card check (`cards.RebirthIndex`) covers only rows killed by a mechanism verdict
 (`cards.MECHANISM_VERDICTS`); the rest of the graveyard, most of the House's, is left to idea admission, the memory lane's
@@ -29,26 +45,32 @@ must index the card-path rows and nothing else):
 - IDEA rows (the dev split's eight; the pool's `buried`): retired by the idle rule's THIN or EXHAUSTED verdict or by the
   tournament's STALL, in turn, all short-dated (0 to 5 days to expiry: days_1_3). Their restatements and every novel
   proposal reach idea admission; `rebirths_admitted` measures the lever on them.
-- CARD-PATH rows (the dev split's two; up to two more from the pool's bank, only when the bank can spare them without
-  repeating a novel text): REFUTED and long-dated (21 to 45 days: days_11_plus, a holding no other case has). Each is
-  restated once, on its slice, with its terms and no `rebirth` case, so production's card check must refuse it:
-  `card_path_admitted` must be 0, and a restatement it lets through counts in `rebirths_admitted` too.
-No novel card falls in a refuted cell, by construction (a refuted cell is a card-path row's class, structure family and
-holding). A new idea inside a refuted cell owes a rebirth case under the card rules; the judge builds none, so
-`novel_refused` counts refusals of new ideas outside every refuted cell: 0 by construction for a sound admission.
+- CARD-PATH rows (the dev split's two; from the pool's bank, at most two and only those it can spare without repeating
+  a novel text: a pool with no spare text has none, and then only the dev split exercises the card path): REFUTED and
+  long-dated (21 to 45 days: days_11_plus, a holding no other case has). Each is restated once, on its slice, with its
+  terms and no `rebirth` case, so production's card check must refuse it: `card_path_admitted` must be 0, and a
+  restatement it lets through counts in `rebirths_admitted` too.
+No novel card falls in a refuted cell (a refuted cell is a card-path row's class, structure family and holding). A new
+idea inside a refuted cell owes a rebirth case under the card rules; the judge builds none, so `novel_refused` counts
+refusals of new ideas outside every refuted cell: 0 by construction for a sound admission. The construction is checked
+with the card module's own matching before the tree's architect loads (`carded`: each card-path restatement falls in its
+own row's refuted cell and no other proposal falls in any; every control carries its row's exact key on its row's
+slice), or no answer.
 
-dev (this file): eight idea rows, two card-path rows, their light restatements and eight novel proposals. heldout: a
-PRIVATE bank of buried mechanisms, novel ideas, synonyms, second sentences, hedges and slices from the lane's pool, which
-lives outside this public repo and reaches the judge only on standard input (`_common.args`, `--pool-stdin`), restated
-with synonym swaps, reordered clauses and hedges from a seed that exists only once the candidate is committed. The pool
-needs no card field: every card is derived from the drawn cases.
+dev (this file): eight idea rows, two card-path rows, their light restatements and sixteen novel proposals (six on
+idea rows' slices under their own reading, two buried mechanisms moved to another root, eight same-cell controls).
+heldout: a PRIVATE bank of buried mechanisms, novel ideas, synonyms, second sentences, hedges and slices from the lane's
+pool, which lives outside this public repo and reaches the judge only on standard input (`_common.args`,
+`--pool-stdin`), restated with synonym swaps, reordered clauses and hedges from a seed that exists only once the
+candidate is committed. The pool needs no card field: every card is derived from the drawn cases.
 
 Answer: rebirths_admitted, novel_refused, trials_uncounted (a birth on a slice with a buried family that neither
 continues a lineage nor counts the slice's trials: the multiple-testing control loosened; must be 0),
 mechanism_rewritten (a birth whose mechanism is not its proposal's text: the rebirth detector would be fooled; must be
 0), rebirths_fresh_lineage (admitted rebirths that start a lineage other than their buried row's: a fresh look ration),
-card_path_admitted (card-path restatements born: the card check bypassed; must be 0), sqlite_statements (the store
-work, the lane's cost).
+card_path_admitted (card-path restatements born: the card check bypassed; must be 0), same_cell_proposed and
+same_cell_refused (the controls, refused ones counted in novel_refused too), sqlite_statements (the store work, the
+lane's cost).
 """
 from __future__ import annotations
 
@@ -81,6 +103,17 @@ CARD_BANK = ["Back-month implied volatility stays too steep after a volatility s
 CARD_SLICES = [("long_butterfly", ["SPY"]), ("calendar", ["QQQ"])]
 #: Card-path rows the held-out split draws from the pool's bank, at most (fewer when the bank cannot spare them).
 CARD_PATH = 2
+#: The dev split's same-cell control on idea row n's slice takes NOVEL[(n + CONTROL_SHIFT) % len(NOVEL)], never the text
+#: of the novel proposal already there (NOVEL[n % len(NOVEL)]), or its row's entry in SAME_READING.
+CONTROL_SHIFT = 3
+#: Dev controls whose words read exactly as their row's (production's keyword reading: the same class and inputs) while
+#: saying another idea: two founding families' mechanisms, verbatim from league/swarm/seeds.py (public since the swarm
+#: began; copied here, never read from the tree under test). No public novel text above reads exactly as a dev row.
+SAME_READING = {
+    2: "Weekend decay is priced into Monday's weekly options; a QQQ iron condor sells Monday's premium.",
+    3: "Short-dated index options price a bigger move than follows on average (the variance risk premium); an iron condor "
+       "sells it with the loss capped at the wing.",
+}
 SYNONYMS = {"lag": "trail", "catches up": "closes the distance", "tends to": "usually", "bid": "elevated", "decays": "fades",
             "rich": "overpriced", "partly": "partially", "reverses": "unwinds", "overshoots": "overreacts",
             "mean-reverts": "normalizes", "compete for": "share", "wide gap": "large spread", "inflates": "raises",
@@ -137,7 +170,8 @@ def restate(text: str, r: Any | None, pool: dict | None = None) -> str:
 
 def cases(split: str, seed: str, pool: dict | None = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """(buried, proposals). A buried row's `path` is "idea" or "card" (the module docstring) and its `dte` its days to
-    expiry; a restatement or a moved idea names its buried row by index (`source`)."""
+    expiry; a restatement or a moved idea names its buried row by index (`source`), a same-cell control the idea row whose
+    card key and slice it takes (`cell`)."""
     if split == "dev":
         idea = [{"mechanism": text, "structure": s, "roots": roots, "path": "idea", "dte": SHORT}
                 for text, (s, roots) in zip(BANK, SLICES[:8])]
@@ -151,6 +185,9 @@ def cases(split: str, seed: str, pool: dict | None = None) -> tuple[list[dict[st
                        "dte": SHORT, "cites": False} for n in range(6)]
         proposals += [{"label": "novel", "mechanism": idea[n]["mechanism"], "structure": SLICES[(n + 3) % 8][0],
                        "roots": ["DIA"], "dte": SHORT, "source": n, "cites": False} for n in range(2)]
+        proposals += [{"label": "novel", "mechanism": SAME_READING.get(n, NOVEL[(n + CONTROL_SHIFT) % len(NOVEL)]),
+                       "structure": b["structure"], "roots": b["roots"], "dte": SHORT, "cell": n, "cites": False}
+                      for n, b in enumerate(idea)]
         return buried, proposals
     if not pool:
         raise ValueError("the held-out split is drawn from the lane's private pool")
@@ -176,13 +213,39 @@ def cases(split: str, seed: str, pool: dict | None = None) -> tuple[list[dict[st
     fresh = order[n_buried + k:] + list(pool["novel"])
     r.shuffle(fresh)
     elsewhere = list(pool.get("elsewhere_roots") or ["DIA", "TLT", "GLD"])
-    proposals += [{"label": "novel", "mechanism": fresh[n % len(fresh)], "structure": slices[n % len(slices)][0],
-                   "roots": slices[n % len(slices)][1], "dte": SHORT, "cites": False} for n in range(novel_count)]
+    novel = [{"label": "novel", "mechanism": fresh[n % len(fresh)], "structure": slices[n % len(slices)][0],
+              "roots": slices[n % len(slices)][1], "dte": SHORT, "cites": False} for n in range(novel_count)]
+    proposals += novel
     proposals += [{"label": "novel", "mechanism": idea[n]["mechanism"], "structure": idea[n]["structure"],
                    "roots": [r.choice(elsewhere)], "dte": SHORT, "source": n, "cites": False}
                   for n in range(int(pool.get("moved_count", 4)))]
+    # The same-cell controls: one per idea row, on its slice, a novel text not yet there, the one whose own words read
+    # closest to the row's (production's keyword reading: class and inputs, then class) first, the seed breaking ties.
+    from league.swarm import cards  # the pinned base's (no lane's surface holds it): nothing of the tree's loads here
+
+    there: dict[tuple[str, tuple[str, ...]], set[str]] = {}
+    for p in novel:
+        there.setdefault((p["structure"], tuple(sorted(p["roots"]))), set()).add(p["mechanism"])
+    for n, b in enumerate(idea):
+        taken = there.setdefault((b["structure"], tuple(sorted(b["roots"]))), set())
+        options = [text for text in dict.fromkeys(fresh) if text not in taken]
+        if options:
+            near = {text: reads_as(cards, text, b) for text in options}
+            text = r.choice([text for text in options if near[text] == max(near.values())])
+            taken.add(text)
+            proposals.append({"label": "novel", "mechanism": text, "structure": b["structure"], "roots": b["roots"],
+                              "dte": SHORT, "cell": n, "cites": False})
     r.shuffle(proposals)
     return buried, proposals
+
+
+def reads_as(cards: Any, text: str, row: dict[str, Any]) -> int:
+    """How closely a text's own words read as a buried row's (production's keyword reading, `cards.infer_key` and
+    `cards.infer_inputs`): 2 the same class and inputs, 1 the same class, else 0."""
+    mine, theirs = cards.infer_key(text, None, row["dte"]), cards.infer_key(row["mechanism"], None, row["dte"])
+    if not (mine and theirs and mine["class"] == theirs["class"]):
+        return 0
+    return 2 if cards.infer_inputs(text) == cards.infer_inputs(row["mechanism"]) else 1
 
 
 def holding(dte: list[int]) -> str:
@@ -207,6 +270,40 @@ def card(text: str, cell: dict[str, Any]) -> dict[str, Any]:
     return {"hypothesis": hypothesis, **cell, **CARD_FIXED}
 
 
+def carded(cards: Any, buried: list[dict[str, Any]], proposals: list[dict[str, Any]]) -> tuple[list[dict], list[dict]]:
+    """(the buried rows' cards, the proposals' cards), from the cases alone (the module docstring), each valid, and the
+    construction checked with the card module's own matching (`match_keys`, `matches`, `match_inputs`, as
+    `cards.RebirthIndex` reads a carded row): each card-path restatement falls in its own row's refuted cell, no other
+    proposal falls in any, and every same-cell control carries its idea row's exact key on that row's slice. A defect
+    is no answer."""
+    cells = [terms(cards, b["mechanism"], b["dte"]) for b in buried]
+
+    def cell(p: dict[str, Any]) -> dict[str, Any]:
+        at = p.get("cell", p.get("source"))
+        return cells[at] if at is not None else terms(cards, p["mechanism"], p["dte"])
+
+    dead = [card(b["mechanism"], cells[n]) for n, b in enumerate(buried)]
+    live = [card(p["mechanism"], cell(p)) for p in proposals]
+    for c, structure in [*zip(dead, (b["structure"] for b in buried)), *zip(live, (p["structure"] for p in proposals))]:
+        valid, problems = cards.validate(c, structure)
+        if valid is None:
+            raise SystemExit(f"the judge built an invalid card ({'; '.join(problems)[:300]})")
+    refuted = {n: {**cards.key_of(dead[n], b["structure"]), "inputs": cards.match_inputs(dead[n], b["mechanism"])}
+               for n, b in enumerate(buried) if b["path"] == "card"}
+    for p, c in zip(proposals, live):
+        keys, _ = cards.match_keys(c, p["structure"], p["mechanism"], p["dte"])
+        hit = {n for n, row in refuted.items() if any(cards.matches(k, row) for k in keys)}
+        if (p["source"] not in hit) if p.get("path") == "card" else bool(hit):
+            raise SystemExit("the judge's cards do not fall as built (a card-path restatement falls in its row's refuted "
+                             "cell, and nothing else falls in any)")
+        if "cell" in p:
+            row = buried[p["cell"]]
+            if (row["path"] != "idea" or (p["structure"], sorted(p["roots"])) != (row["structure"], sorted(row["roots"]))
+                    or cards.key_of(c, p["structure"]) != cards.key_of(dead[p["cell"]], row["structure"])):
+                raise SystemExit("a same-cell control does not carry its idea row's key on that row's slice")
+    return dead, live
+
+
 def main() -> None:
     opts = _common.args()
     # The cases are drawn before the tree's code loads; the pool is not kept past this point.
@@ -215,18 +312,10 @@ def main() -> None:
 
     def body() -> dict[str, Any]:
         # The cards, from the cases alone, with the pinned base's card module (outside every lane's surface), before the
-        # tree's architect loads: each is valid, or the judge has no answer.
+        # tree's architect loads: each is valid and falls as built, or the judge has no answer.
         from league.swarm import cards
 
-        cells = [terms(cards, b["mechanism"], b["dte"]) for b in buried]
-        dead_cards = [card(b["mechanism"], cells[n]) for n, b in enumerate(buried)]
-        live_cards = [card(p["mechanism"], cells[p["source"]] if "source" in p else terms(cards, p["mechanism"], p["dte"]))
-                      for p in proposals]
-        for c, structure in [*zip(dead_cards, (b["structure"] for b in buried)),
-                             *zip(live_cards, (p["structure"] for p in proposals))]:
-            valid, problems = cards.validate(c, structure)
-            if valid is None:
-                raise SystemExit(f"the judge built an invalid card ({'; '.join(problems)[:300]})")
+        dead_cards, live_cards = carded(cards, buried, proposals)
 
         from league.swarm.architect import Architect
         from league.swarm.store import SwarmStore
@@ -285,7 +374,8 @@ def main() -> None:
                         by_case[int(sketch.split()[-1])] = fam
                 dead_slices = {(b["structure"], tuple(sorted(b["roots"]))) for b in buried}
                 lineage_of = [(store.family(i) or {}).get("lineage") for i in ids]
-                rebirths = novel_born = uncounted = rewritten = fresh = card_born = 0
+                rebirths = novel_born = uncounted = rewritten = fresh = card_born = controls_born = 0
+                controls = sum(1 for p in proposals if "cell" in p)
                 for n, p in enumerate(proposals):
                     fam = by_case.get(n)
                     if fam is None:
@@ -293,6 +383,7 @@ def main() -> None:
                     rebirths += p["label"] == "rebirth"
                     novel_born += p["label"] == "novel"
                     card_born += p.get("path") == "card"
+                    controls_born += "cell" in p
                     if fam["mechanism"] != " ".join(p["mechanism"].split())[:600]:
                         rewritten += 1
                     if ((p["structure"], tuple(sorted(p["roots"]))) in dead_slices and not fam.get("parent")
@@ -305,6 +396,7 @@ def main() -> None:
                         "trials_uncounted": uncounted, "mechanism_rewritten": rewritten, "rebirths_fresh_lineage": fresh,
                         "card_path_admitted": card_born,
                         "card_path_proposed": sum(1 for p in proposals if p.get("path") == "card"),
+                        "same_cell_proposed": controls, "same_cell_refused": controls - controls_born,
                         "rebirths_proposed": sum(1 for p in proposals if p["label"] == "rebirth"), "novel_proposed": novel_total,
                         "born": len(by_case), "sqlite_statements": len(statements), "cases": len(proposals)}
             finally:

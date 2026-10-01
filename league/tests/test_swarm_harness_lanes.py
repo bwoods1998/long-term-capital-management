@@ -2056,16 +2056,19 @@ class Judges(unittest.TestCase):
     def test_memory_judge_labels_by_construction(self):
         """Release B' (family cards): every case carries a complete card and admission runs as production runs it. The
         card path's restatements (rows a mechanism verdict buried) are refused by the card check; every novel card is
-        admitted; the idea rows' restatements reach idea admission, where the held-out baseline clears the floor."""
+        admitted, the same-cell controls among them; the idea rows' restatements reach idea admission, where the
+        held-out baseline clears the floor."""
         dev = self.judge("memory")
         self.assertEqual(dev["protocol"], lanes.LANES["memory"].protocol)
-        self.assertEqual((dev["rebirths_proposed"], dev["novel_proposed"], dev["provider_calls"]), (10, 8, 0))
+        self.assertEqual((dev["rebirths_proposed"], dev["novel_proposed"], dev["provider_calls"]), (10, 16, 0))
         self.assertEqual((dev["card_path_proposed"], dev["card_path_admitted"]), (2, 0))
+        self.assertEqual((dev["same_cell_proposed"], dev["same_cell_refused"]), (8, 0))
         self.assertEqual(dev["novel_refused"], 0)
         self.assertEqual((dev["trials_uncounted"], dev["mechanism_rewritten"]), (0, 0))
         held = self.judge("memory", "heldout", "00aa11bb22cc33dd")
-        self.assertEqual(held, {**held, "rebirths_proposed": 10, "novel_proposed": 6, "trials_uncounted": 0,
-                                "novel_refused": 0, "card_path_proposed": 2, "card_path_admitted": 0})
+        self.assertEqual(held, {**held, "rebirths_proposed": 10, "novel_proposed": 14, "trials_uncounted": 0,
+                                "novel_refused": 0, "card_path_proposed": 2, "card_path_admitted": 0,
+                                "same_cell_proposed": 8, "same_cell_refused": 0})
         self.assertEqual(held["seed"], "00aa11bb22cc33dd")
         self.assertGreaterEqual(held["rebirths_admitted"], lanes.LANES["memory"].bottlenecks[0].judge_floor)
         # The pool carries no card: the judge derives every card from the drawn cases, and the card path takes bank
@@ -2075,11 +2078,109 @@ class Judges(unittest.TestCase):
         self.addCleanup(sys.path.remove, str(REPO / "league/swarm/harness_judges"))
         import memory as memory_judge
         buried, proposals = memory_judge.cases("heldout", "s1", TEST_POOLS["memory"])
-        novel = [p["mechanism"] for p in proposals if p["label"] == "novel" and "source" not in p]
+        novel = [p["mechanism"] for p in proposals if p["label"] == "novel" and "source" not in p and "cell" not in p]
         self.assertEqual(len(novel), len(set(novel)))
-        self.assertFalse({b["mechanism"] for b in buried} & set(novel))
+        self.assertFalse({b["mechanism"] for b in buried} & {p["mechanism"] for p in proposals if "source" not in p})
         tight = {**TEST_POOLS["memory"], "novel_count": 6}
         self.assertEqual([b["path"] for b in memory_judge.cases("heldout", "s1", tight)[0]].count("card"), 0)
+
+    def test_every_idea_row_has_a_same_cell_control(self):
+        """Each idea row's slice holds one novel proposal under the row's exact card key (class, inputs, holding), with a
+        new idea's words, never the text of another proposal on that slice; the judge checks its construction with the
+        card module before the tree's architect loads and gives no answer when it does not hold."""
+        sys.path.insert(0, str(REPO / "league/swarm/harness_judges"))
+        self.addCleanup(sys.path.remove, str(REPO / "league/swarm/harness_judges"))
+        import memory as memory_judge
+
+        from league.swarm import cards
+
+        for split, seed, pool in (("dev", "dev", None), ("heldout", "s1", TEST_POOLS["memory"]),
+                                  ("heldout", "00aa11bb22cc33dd", TEST_POOLS["memory"])):
+            buried, proposals = memory_judge.cases(split, seed, pool)
+            dead, live = memory_judge.carded(cards, buried, proposals)
+            controls = {p["cell"]: (p, c) for p, c in zip(proposals, live) if "cell" in p}
+            idea = [n for n, b in enumerate(buried) if b["path"] == "idea"]
+            self.assertEqual(sorted(controls), idea, split)
+            novel_words = (set(memory_judge.NOVEL) | set(memory_judge.SAME_READING.values()) if pool is None
+                           else set(pool["bank"]) | set(pool["novel"]))
+            for n, (p, c) in controls.items():
+                row = buried[n]
+                self.assertEqual(p["label"], "novel")
+                self.assertEqual((p["structure"], sorted(p["roots"])), (row["structure"], sorted(row["roots"])))
+                self.assertEqual(cards.key_of(c, p["structure"]), cards.key_of(dead[n], row["structure"]))
+                self.assertIn(p["mechanism"], novel_words - {b["mechanism"] for b in buried})
+                here = [q["mechanism"] for q in proposals if (q["structure"], sorted(q["roots"])) == (p["structure"],
+                                                                                                    sorted(p["roots"]))]
+                self.assertEqual(here.count(p["mechanism"]), 1, "never a text already on its slice")
+            if pool is None:  # dev: rows 2 and 3's controls read exactly as their rows (production's keyword reading)
+                self.assertEqual([n for n, (p, _) in controls.items() if memory_judge.reads_as(cards, p["mechanism"], buried[n]) == 2],
+                                 sorted(memory_judge.SAME_READING))
+        buried, proposals = memory_judge.cases("dev", "dev")
+        card_row = next(n for n, b in enumerate(buried) if b["path"] == "card")
+        for broken in ({**proposals[-1], "cell": card_row},  # a control under a refuted row's key
+                       {**proposals[-1], "cell": 1}):          # a control on another row's slice
+            with self.assertRaises(SystemExit):
+                memory_judge.carded(cards, buried, [*proposals[:-1], broken])
+        moved = next(p for p in proposals if p["label"] == "novel" and "source" in p)
+        refuted = {**moved, "source": card_row, "structure": buried[card_row]["structure"], "roots": buried[card_row]["roots"],
+                   "dte": memory_judge.LONG}
+        with self.assertRaises(SystemExit):  # a new idea in a refuted cell: novel_refused would not be 0 by construction
+            memory_judge.carded(cards, buried, [*proposals, refuted])
+
+    #: A card-keyed refusal (the review of v4): before admission, each proposal whose card key equals a carded dead
+    #: family's on its slice is dropped ("exact"), or matches it on overlapping inputs ("overlap", `cards.matches`), or
+    #: equals it while the proposal's own words read as that key too ("reading", production's keyword reading).
+    CARD_KEYED = ("from league.swarm import architect, cards\n"
+                  "_admit = architect.Architect.admit\n"
+                  "def _keyed(self, rows, **kw):\n"
+                  "    dead = [((f['structure'], tuple(sorted(f['roots']))), c['key']) for f in self.store.families(alive=False)\n"
+                  "            for c in [cards.card_of(self.store, f['id'])] if c is not None]\n"
+                  "    def refused(row):\n"
+                  "        card = cards.validate(row.get('card'), row.get('structure'))[0]\n"
+                  "        if card is None:\n"
+                  "            return False\n"
+                  "        key, at = cards.key_of(card, row['structure']), (row['structure'], tuple(sorted(row['roots'])))\n"
+                  "        mine = cards.infer_key(row['mechanism'], row['structure'], row.get('dte'))\n"
+                  "        words = mine is not None and mine['class'] == key['class'] and \\\n"
+                  "            cards.infer_inputs(row['mechanism']) == key['inputs']\n"
+                  "        return any(s == at and {{'exact': key == k, 'overlap': cards.matches(key, k),\n"
+                  "                                 'reading': key == k and words}}[{mode!r}] for s, k in dead)\n"
+                  "    return _admit(self, [row for row in rows if not refused(row)], **kw)\n"
+                  "architect.Architect.admit = _keyed\n")
+
+    def keyed(self, mode, split, seed):
+        run = self.judge_patched("memory", self.CARD_KEYED.format(mode=mode), split, seed)
+        self.assertEqual(run.returncode, 0, run.stderr[-2000:])
+        return json.loads(run.stdout.strip().splitlines()[-1])
+
+    def test_a_card_keyed_refusal_refuses_the_same_cell_controls(self):
+        """The card fields never tell a rebirth from a new idea (the review of v4): a restatement carries its buried
+        row's exact card key on that row's slice, and so does the row's same-cell control, a new idea. A lever that
+        refuses a card equal to a carded dead family's on its slice (or matching it on overlapping inputs) cuts every
+        rebirth here and refuses every control too, on both splits, so the lane's rules fail it on `novel_refused`."""
+        memory = lanes.LANES["memory"]
+        for mode in ("exact", "overlap"):
+            trees = {name: {"regressions": {"exit": 0}, "splits": {}} for name in ("base", "closed", "open")}
+            for split, seed in (("dev", "dev"), ("heldout", "00aa11bb22cc33dd"), ("heldout", "s1")):
+                where = f"{split} {seed} {mode}"
+                base, out = self.judge("memory", split, seed), self.keyed(mode, split, seed)
+                self.assertEqual((base["novel_refused"], base["same_cell_refused"]), (0, 0), where)
+                self.assertEqual((out["rebirths_admitted"], out["trials_uncounted"], out["card_path_admitted"]), (0, 0, 0),
+                                 where)
+                self.assertEqual((out["same_cell_proposed"], out["same_cell_refused"]), (8, 8), where)
+                self.assertGreaterEqual(out["novel_refused"], 8, where)
+                for name, metrics in (("base", base), ("closed", base), ("open", out)):
+                    trees[name]["splits"][split] = {"metrics": metrics}
+            verdict = lanes.judge_verdict(memory, memory.bottleneck("graveyard_rebirth_rate"), trees)
+            self.assertFalse(verdict["passed"])
+            self.assertTrue(any(r.startswith("dev: novel_refused rose") for r in verdict["reasons"]), verdict["reasons"])
+            self.assertTrue(any(r.startswith("heldout: novel_refused rose") for r in verdict["reasons"]), verdict["reasons"])
+        # Narrowed to cards whose own words read as the dead key too (a refusal on the words' coarse reading), it still
+        # cuts rebirths, and the dev split's same-reading controls (SAME_READING) are refused with them.
+        base, out = self.judge("memory"), self.keyed("reading", "dev", "dev")
+        self.assertLess(out["rebirths_admitted"], base["rebirths_admitted"])
+        self.assertGreaterEqual(out["same_cell_refused"], 2)
+        self.assertGreater(out["novel_refused"], base["novel_refused"])
 
     def test_the_memory_judge_sees_the_card_check(self):
         """A tree whose admission skips the card check lets the card path's restatements be born, and they count as
