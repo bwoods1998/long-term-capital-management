@@ -45,7 +45,7 @@ from typing import Any, Callable, Mapping
 
 from . import allocation as allocation_mod
 from . import HEARTBEAT, LOCK_FILE, LOG_FILE, PID_FILE, settings as settings_mod
-from .architect import AGENDA_KEY, Architect, GraveyardDigest
+from .architect import AGENDA_KEY, Architect, GraveyardDigest, allowed_structures
 from .diagnostician import Diagnostician
 from .funding import FundingWatch
 from .gate import Gate
@@ -411,11 +411,13 @@ class Swarm:
 
     # ------------------------------------------------------------------ the population
     def seed(self) -> list[str]:
-        """The founding population, once: the first `population.start` seeds (each a `swarm.born` event)."""
+        """The founding population, once: the first `population.start` seeds (each a `swarm.born` event) of a type
+        `architect.structures` allows (THE STRUCTURES, league/swarm/architect.py; every seed while it is unset)."""
         if self.store.families():
             return []
         born = []
-        for spec in SEEDS[: int(self.settings.get("population", {}).get("start", 48))]:
+        allowed = allowed_structures(self.settings)
+        for spec in [s for s in SEEDS if s["structure"] in allowed][: int(self.settings.get("population", {}).get("start", 48))]:
             fam = self.store.add_family(family_spec(spec), origin="seed")
             self.store.event("swarm.born", fam["id"], {"parent": None, "mechanism": fam["mechanism"], "structure": fam["structure"],
                                                         "roots": fam["roots"], "origin": "seed", "founder": spec.get("founder")})
@@ -430,7 +432,8 @@ class Swarm:
         """Families from the seeds on admitted roots their mechanism never tried (a seed never founded on its own slice
         first), while fewer than `population.start` live, at most `population.reseed_max` a pass and one a seed. A
         reseed of a founded mechanism joins that founder's lineage like a fork (its trials, validated versions and
-        holdout looks); never XSP (its fee), never a calendar or diagonal on an index root. Each is a `swarm.born`."""
+        holdout looks); never XSP (its fee), never a calendar or diagonal on an index root, never a seed of a type
+        `architect.structures` leaves out (THE STRUCTURES). Each is a `swarm.born`."""
         pop = self.settings.get("population", {})
         room = min(int(pop.get("start", 48)) - len(self.store.families(alive=True)), int(pop.get("reseed_max", 0)))
         if room <= 0:
@@ -438,9 +441,12 @@ class Swarm:
         admitted = [str(r).upper() for r in self.settings.get("gym", {}).get("roots", []) if str(r).upper() not in NOT_ROTATED]
         families = self.store.families()
         born: list[str] = []
+        allowed = allowed_structures(self.settings)
         for seed in SEEDS:
             if len(born) >= room:
                 break
+            if seed["structure"] not in allowed:
+                continue  # THE STRUCTURES: a type no birth may be is not reseeded
             mechanism = " ".join(str(seed["mechanism"]).split())
             kin = [f for f in families if f["mechanism"] == mechanism]
             tried = {r for f in kin for r in f["roots"]}

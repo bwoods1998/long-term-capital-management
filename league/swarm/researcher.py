@@ -73,6 +73,25 @@ Every path uses the atomic `population.floor`; `population.start` is the archite
 additional floor. Gate work in flight, gate-ready versions and extension/operator holds are protected. Retirement
 preserves the program, lineage, trials, results and explanation. It never turns a research decision into an order.
 
+THE VALIDATED-FAMILY GUARD (Oct 1). On Sept 30 the swarm's only D2-tuition family (8 of 8 checks on Validation, review
+and audit passed, tuition traded) was retired by its own researcher 17 seconds after an evaluator adoption, because "the
+evaluator changed" and its validated version "must be re-evaluated". An evaluator change re-evaluates; it never refutes.
+So `retire` is refused (`retire_guard`, a plain refusal that says why and, for an archived version, hands back its
+program to re-run) while the family holds a version that passed the validation line, last validated within
+`researcher.retire_guard_days` (14) days, unless the family's latest validation of that version under the current
+evaluator failed the line (`validation_refuted`: the tournament's record of each version's latest verdict and the
+evaluator it was judged under, `VERDICTS_KEY`, else the family's own validation line, which an adoption clears). A pass
+counts wherever it is held: the family's line, any passed verdict of `VERDICTS_KEY` (which no adoption clears and no
+other version's validation replaces), the selection the latest adoption archived (`previous_evaluator_selection`), and
+the selection every adoption within the window archived (its append-only `evaluator_adopted` event), so a second
+adoption, which replaces `previous_evaluator_selection` with the selection the first one already cleared, never lifts
+the guard. An archived pass counts only while it is still that version's latest verdict: a later failed validation of
+the same version (its record, or a newer adoption's archive), under the evaluator then in force, refuted it, so the
+next adoption never revives it. A failed holdout look does not end it (the gate retires nobody; only a failed
+validation refutes here), and the tournament's own rules still apply. The status says so in place of any offer to
+retire. The tool stays offered (`can_retire` is unchanged). Operator retirements, the tournament's rules (the
+deflated-Sharpe rule among them), the diagnostician and the population floor are unaffected.
+
 EVENT-DRIVEN HOLDS (Sept 30). A held family is parked durably by `loop.Scheduler` until a result, rewrite, guidance,
 research agenda, data image or release changes. Elapsed time and process restarts alone never buy another call.
 The researcher should retire an exhausted mechanism when offered, and hold when a specific input is missing.
@@ -106,6 +125,33 @@ with no trade is the answer ("disqualified: no trades in the probe year", one tr
 reads) and the five-year run is skipped; the same program asked again is answered from that row. A probe that trades,
 fails or times out says nothing and the full run follows. `gym_run` with full=true skips it (a program that trades only in
 other years or on other roots); sweeps are never probed.
+
+THE MECHANISM TEST (release B, league/swarm/mechanism.py). A family born with a card (league/swarm/cards.py) takes it
+before a broad Train run, at any stress (`_mechanism_test`): its program with the signal on and with its card's ablation
+(PARAMS[param] = off; the signal arm alone for a flat comparison) over the four pre-registered Train windows (2022-2024,
+about 250 sessions), unsplit, the first window first; every arm a trial recorded trimmed as a `window="mechanism"` row.
+The bound rises with each failed test of the same hypothesis across its lineage (`mechanism_lineage`: the rebirth
+refusal's notion of the same hypothesis; forks and rebirths never reset it). SHADOW mode (the default,
+`researcher.mechanism_test.mode`): a `sample` share of carded families take one BLIND test each, at the first run that
+can take it (a run with the signal off or a program without the switch is skipped, not recorded) while it is still the
+gate's test: never once the family, or a family of its lineage with its card, has broad Train runs (a program already
+fitted to Train; such a run happens in shadow whatever any verdict said, so the skip stays blind); the verdict goes on the
+card and in the state, never to the researcher (not in the run's view, the status line or the notebook), with `exposed`
+(such a broad run had landed by the time it was recorded), and the broad run goes ahead whatever it says, so
+`mechanism.calibration_rows` (blind, unexposed rows) can measure what the verdict predicts. GATE mode: the
+broad run and gym_sweep wait for a pass (or broad Train runs) by a family of the lineage with the same card, which opens
+broad replay for all of them on any later Gym; a program without the card's switch, with it of another type, never
+reading it, or run with the signal off is refused before any version (`_mechanism_plan`); a test failed below the base
+bound retires the family with the MECHANISM verdict once its card holds `max_failures` such failures, and no other
+verdict does (`_mechanism_retire`). Gate verdicts go on the card, in the state and in the notebook, and the same test
+asked again is answered from them. A pool error that says the Gym has no data for a window drops that window (never a Gym
+error asked again every cycle); an arm the Gym failed for its own reasons (a dead worker, a unit past its deadline)
+makes the test a Gym error and is never reused, until the family's tests meet the same failure `max_infrastructure` (3)
+times in a row: then it is the program's (a runaway, a segfault), so the arm erred and the test is untestable or an
+invalid ablation (the family's state's `mechanism.infra` counts the run; a test whose arms all ran clears it). A version
+that just passed in gate mode is not probed (it traded); a mechanism row never counts as a version's Train run for the
+probe. The brief shows the card; the status, the test's state. Families born before cards run as before. Cycle events
+carry the test's verdict, `box_seconds` and a broad run's `gym_box_seconds`: the Gym time each costs.
 
 ROOTS. A family holds one to five roots of the admitted list (`gym.roots`). A program whose NEEDS names other
 admitted roots changes the family's roots (a Gym family only); its validation and holdout runs use the version's own
@@ -181,7 +227,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from . import diagnostics, evidence, inputs, public
+from . import cards, diagnostics, evidence, inputs, mechanism, public
 from . import settings as settings_mod
 from .claude_research import ClaudeSession, ClaudeTurn, anthropic_tools, sail_items, tool_calls
 from .library import LIBRARY_RULE, LITERATURE_TOOL
@@ -280,7 +326,9 @@ TOOLS: list[dict[str, Any]] = [
                                      "Gym evaluations since its birth or last validation without an eligible Train version "
                                      "(or far more with a best Train score below zero), or many cycles in a row with only "
                                      "holds and stored results, or a few holds in a row once your family has an eligible "
-                                     "Train run or enough trials behind it.",
+                                     "Train run or enough trials behind it. Refused while your family holds a version whose "
+                                     "latest validation passed the line (only a failed validation of that version ends "
+                                     "this): an evaluator change is never a reason to retire.",
      "parameters": {"type": "object", "properties": {"reason": {"type": "string", "description": "Why the entire mechanism "
                     "is abandoned; retained in the private notebook and graveyard."}}, "required": ["reason"]}},
 ]
@@ -324,6 +372,11 @@ results, or a few holds in a row once your family has an eligible Train run or e
 when you abandon the entire mechanism, not one rejected version; a dead mechanism is better
 retired than kept on holds, since its slot goes to a new idea. Retirement is final for the family and preserves its best
 program and all evidence.
+AN EVALUATOR CHANGE IS NEVER A REASON TO RETIRE. When the Gym's evaluator changes, your best and your validation are
+archived and re-evaluated, never refuted: a version that passed the validation line keeps that evidence, and the
+tournament validates it again under the current evaluator by itself once you re-run it unchanged on Train (the same
+program and params) and it is your best (submit it). While your family holds a version whose latest validation passed
+the line, the retire tool refuses; only a failed validation of that version under the current evaluator ends that.
 Holding parks your researcher without further paid calls until new evidence, guidance, data or a harness change arrives.
 Use it to wait for a specific missing input. If your evidence has exhausted the mechanism, retire when offered instead.
 Your notes (the notebook and gym_run's note) are PUBLIC: they may appear on the public site. Write the mechanism and your
@@ -941,6 +994,213 @@ RETIRE_HOLD_CYCLES = 3
 RETIRE_HOLD_TRIALS = 10
 
 
+# ------------------------------------------------------------------------------------ THE VALIDATED-FAMILY GUARD (Oct 1)
+#: `researcher.retire_guard_days`' default: how long a passed validation line keeps its family from its researcher's own
+#: `retire`, counted from that version's latest validation.
+RETIRE_GUARD_DAYS = 14.0
+#: The tournament's record of each validated version's latest verdict (`record_verdict`), in the family's state:
+#: {str(n): {"passed", "at", "evaluator"}}. It is no selection key of an adoption (`evaluator.SELECTION_KEYS`): it
+#: outlives one, and the evaluator each verdict was judged under says whether that verdict is current.
+VERDICTS_KEY = "validation_verdicts"
+#: At most this many versions' verdicts are kept (the newest).
+VERDICTS_KEPT = 64
+
+
+def retire_guard_days(settings: Mapping[str, Any]) -> float:
+    """`researcher.retire_guard_days` (14). A number at or below zero turns the guard off; anything else that is not a
+    finite number (null, a boolean, a string) reads as the default: a misread setting never unguards a validated family."""
+    raw = (settings.get("researcher") or {}).get("retire_guard_days", RETIRE_GUARD_DAYS)
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return RETIRE_GUARD_DAYS
+    try:
+        days = float(raw)
+    except OverflowError:
+        return RETIRE_GUARD_DAYS
+    return max(0.0, days) if math.isfinite(days) else RETIRE_GUARD_DAYS
+
+
+def record_verdict(state: Mapping[str, Any], n: int, passed: bool, *, evaluator: Any, at: str) -> dict[str, Any]:
+    """The family's `VERDICTS_KEY` with version `n`'s latest verdict (`Tournament._verdict`, counted or re-judged): whether
+    it passed the line (D2a's own answer, never a number), when, and the evaluator in force (`evaluator.KEY`'s value; None
+    in a store that never adopted one). The newest `VERDICTS_KEPT` versions are kept."""
+    old = state.get(VERDICTS_KEY)
+    kept = {str(k): v for k, v in old.items() if isinstance(v, Mapping)} if isinstance(old, Mapping) else {}
+    kept.pop(str(n), None)
+    kept[str(n)] = {"passed": bool(passed), "at": at, "evaluator": evaluator}
+    if len(kept) > VERDICTS_KEPT:
+        kept = dict(sorted(kept.items(), key=lambda kv: str(kv[1].get("at") or ""))[-VERDICTS_KEPT:])
+    return kept
+
+
+def _epoch(text: Any) -> float | None:
+    """An ISO time of the store (`2026-09-30T16:30:22Z`) in seconds, or None."""
+    try:
+        return dt.datetime.fromisoformat(str(text).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def validation_refuted(state: Mapping[str, Any], n: int, current: Any) -> bool:
+    """Version `n`'s latest validation under the current evaluator (`current`: `evaluator.KEY`'s value, None in a store
+    that never adopted one) failed the line: the tournament's record of its latest verdict (`VERDICTS_KEY`) when that was
+    judged under `current`, else the family's own validation line when it judged `n` (an adoption clears that line, so a
+    line there was judged under the evaluator in force since, and so is a family's born after the adoption)."""
+    records = state.get(VERDICTS_KEY)
+    record = records.get(str(n)) if isinstance(records, Mapping) else None
+    if isinstance(record, Mapping) and record.get("evaluator") == current:
+        return record.get("passed") is False
+    line = state.get("validation_line")
+    return _plain_int(state.get("validation_version")) == n and isinstance(line, Mapping) and line.get("passed") is False
+
+
+def validated_at(store: SwarmStore, fid: str, n: int, state: Mapping[str, Any]) -> float | None:
+    """When version `n` was last validated (seconds): its newest validation run at the normal spread, or its verdict's
+    record (`VERDICTS_KEY`, a re-judged result's too), whichever is later; None when neither says."""
+    records = state.get(VERDICTS_KEY)
+    record = records.get(str(n)) if isinstance(records, Mapping) else None
+    times = [_epoch(record.get("at"))] if isinstance(record, Mapping) else []
+    times += [_epoch(row.get("at")) for row in store.version_runs(fid, n, window="validation", stress=1.0, limit=1)]
+    known = [t for t in times if t is not None]
+    return max(known) if known else None
+
+
+#: The action of the event an adoption writes for each family (`evaluator.adopt`), whose `_previous_selection` keeps the
+#: selection it archived. The events are append-only, so each adoption's archive outlives the next adoption, which
+#: replaces the family's `previous_evaluator_selection` with the selection the first one already cleared.
+ADOPTED_ACTION = "evaluator_adopted"
+
+
+def _line_verdict(source: Any) -> tuple[int, bool] | None:
+    """The version a selection's validation line (the family's state, or one an adoption archived) judged and whether it
+    passed the line; None when the line judged no version or says neither."""
+    if not isinstance(source, Mapping):
+        return None
+    line = source.get("validation_line")
+    n = _plain_int(source.get("validation_version"))
+    passed = line.get("passed") if isinstance(line, Mapping) else None
+    return (n, passed) if n is not None and isinstance(passed, bool) else None
+
+
+def _passed_version(source: Any) -> int | None:
+    """The version whose validation line a selection (the family's state, or one an adoption archived) says passed."""
+    verdict = _line_verdict(source)
+    return verdict[0] if verdict and verdict[1] else None
+
+
+def adoption_archives(store: SwarmStore, fid: str, *, since: float) -> list[tuple[float, Mapping[str, Any]]]:
+    """The selections the evaluator adoptions since `since` (seconds) archived for family `fid`, newest first, each with
+    its adoption's time: read from the adoptions' own events (`ADOPTED_ACTION`), so an archive a later adoption replaced
+    in the family's state is still read. The events' (kind, at) index bounds the read to the window."""
+    from .store import iso
+
+    rows = store._all("SELECT at, payload FROM events WHERE kind='swarm.status' AND family=? AND at>=? AND payload LIKE ? "
+                      "ORDER BY seq DESC", (fid, iso(since), f'%"{ADOPTED_ACTION}"%'))
+    out: list[tuple[float, Mapping[str, Any]]] = []
+    for row in rows:
+        try:
+            payload = json.loads(row["payload"])
+        except (TypeError, ValueError):
+            continue
+        archive = payload.get("_previous_selection") if isinstance(payload, Mapping) else None
+        at = _epoch(row["at"])
+        if payload.get("action") == ADOPTED_ACTION and isinstance(archive, Mapping) and at is not None:
+            out.append((at, archive))
+    return out
+
+
+def retire_guard(store: SwarmStore, fam: Mapping[str, Any], settings: Mapping[str, Any], *, now: float) -> dict[str, Any] | None:
+    """THE VALIDATED-FAMILY GUARD (the module docstring): why the family's researcher may not retire it, or None.
+
+    The family holds a version whose latest known verdict passed the validation line, no validation of it under the
+    current evaluator failed the line (`validation_refuted`), and it was last validated (`validated_at`) within
+    `researcher.retire_guard_days`. A pass is read, in this order, from: the family's own line; each passed verdict the
+    tournament recorded (`VERDICTS_KEY`, newest first: it survives any number of adoptions and another version's
+    validation replacing the line); the selection the latest adoption archived (`previous_evaluator_selection`); and the
+    selection each adoption within the window archived (`adoption_archives`, newest first: a pass recorded before the
+    verdicts were kept, which a second adoption replaced in the state). An archived pass counts only while it is still
+    that version's latest verdict: the tournament writes a version's record with each of its verdicts, so a record is
+    newer than any archive of that version, and an adoption clears the family's line, so each archive's line is newer
+    than every older archive's. A version with a record, or one a newer archive judged failed, is never guarded by an
+    older archive: a failed validation under an in-between evaluator (googl's case: passed under E1, re-run and failed
+    under E2, then E3 adopted) refutes it as a failure under the current one does. A version whose validation time is
+    unknown is guarded only from an adoption's archive, counted from that adoption (a validation precedes the adoption
+    that archived it); never without a limit. A version validated only by a failed line never protects
+    (`validated_version` alone records any validation, passed or failed). Returns {"version", "archived", "days"};
+    `archived` says the pass was judged under an earlier evaluator."""
+    days = retire_guard_days(settings)
+    if days <= 0:
+        return None
+    from .evaluator import KEY
+
+    fid = str(fam["id"])
+    state = fam.get("state") or {}
+    span = days * 86400.0
+    seen: set[int] = set()
+    current: list[Any] = []
+
+    def check(n: int | None, archived: bool, adopted_at: float | None = None) -> dict[str, Any] | None:
+        if n is None or n in seen:
+            return None
+        if not current:
+            current.append(store.get(KEY))
+        if validation_refuted(state, n, current[0]):
+            seen.add(n)
+            return None
+        at = validated_at(store, fid, n, state)
+        at = adopted_at if at is None else at
+        if at is None:
+            return None  # an unknown time never guards without a limit; an adoption's archive of it may say when
+        seen.add(n)
+        return {"version": n, "archived": archived, "days": days} if now - at <= span else None
+
+    guard = check(_passed_version(state), False)
+    if guard:
+        return guard
+    records = state.get(VERDICTS_KEY)
+    passes = sorted(((str(r.get("at") or ""), str(k), r) for k, r in records.items()
+                     if isinstance(r, Mapping) and r.get("passed") is True), reverse=True) if isinstance(records, Mapping) else []
+    for _, k, record in passes:
+        if not current:
+            current.append(store.get(KEY))
+        guard = check(int(str(k)) if str(k).isdigit() else None, record.get("evaluator") != current[0])
+        if guard:
+            return guard
+    archive = state.get("previous_evaluator_selection")
+    if not isinstance(archive, Mapping):
+        return None  # no adoption has archived a selection of this family: none of its events holds one either
+    recorded = records if isinstance(records, Mapping) else {}
+    # The archives newest first (the latest adoption's, then each adoption's own event): an archived verdict is a
+    # version's latest only when it has no record and no newer archive judged it. A later failure refutes an older pass.
+    for adopted_at, old in ((None, archive), *adoption_archives(store, fid, since=now - span)):
+        verdict = _line_verdict(old)
+        if verdict is None:
+            continue
+        n, passed = verdict
+        if not passed or str(n) in recorded:
+            seen.add(n)  # its record is its latest verdict (a recorded pass was judged above), or it failed after
+            continue
+        guard = check(n, True, adopted_at)
+        if guard:
+            return guard
+    return None
+
+
+def guard_words(guard: Mapping[str, Any]) -> str:
+    """The researcher's words for `retire_guard`'s answer: the status line and the retire tool's refusal."""
+    n = guard["version"]
+    if guard.get("archived"):
+        head = (f"Your family holds version {n}, which passed the validation line before the evaluator changed. The change "
+                "archived that verdict and owes it re-evaluation; it did not refute it, and an evaluator change is never a "
+                "reason to retire.")
+        then = (f" Re-run version {n} unchanged on Train (gym_run with its whole program in `code` and its params) and "
+                "submit it: the tournament then validates it again under the current evaluator by itself.")
+    else:
+        head = f"Your family holds version {n}, which passed the validation line."
+        then = " Keep researching beside it, or hold for a specific missing input."
+    return (head + f" The retire tool refuses while that stands: only a validation of version {n} under the current "
+            f"evaluator that fails the line, or {guard['days']:g} days since its last validation, ends it." + then)
+
+
 # ------------------------------------------------------------------------------------ THE EXTENSION HOLD (R11-4's swarm rule)
 #: `researcher.extension_hold_checks`: a family whose latest validation met at least this many of the line's checks is
 #: exempt from the dormancy clause until its 2017-19 extension result lands (the operator clears the flag).
@@ -1285,6 +1545,9 @@ class Researcher:
         if lessons:
             lines.append("Lessons from the graveyard when you were born:")
             lines += [f"- {diagnostics.scrub(x)}" for x in lessons[:3]]
+        card = cards.brief_text(cards.card_of(self.store, str(fam["id"])))  # "" for a family born before cards
+        if card:
+            lines.append(card)
         literature = [x for x in spec.get("literature") or [] if isinstance(x, dict) and x.get("id")]
         if literature:  # THE LIBRARY: the papers the architect built this family on (a hypothesis, never evidence)
             lines.append("Literature the architect built on: " + "; ".join(f"{x['id']} {str(x.get('title') or '')[:160]}"
@@ -1315,6 +1578,9 @@ class Researcher:
         drift = self.drift_text(fam)
         if drift:
             parts.append(drift)
+        tested = self.mechanism_text(fam)
+        if tested:
+            parts.append(tested)
         parts.append(f"The validation line requires at least {evidence.MIN_TRADES} trades on at least {evidence.MIN_DAYS} days, "
                      "daily t >= 2, a deflated Sharpe probability >= 0.95 on traded days, 3 of 4 quarters positive, and positive "
                      "P&L at 1.5x spread. Seek mechanisms that produce enough independent opportunities to measure; never force "
@@ -1335,10 +1601,14 @@ class Researcher:
             parts.append(f"Cycles in a row without a new Gym evaluation (only stored results, holds and refused runs): {dormant}.")
         if notes:
             parts.append("Your notebook (latest):\n" + "\n".join(f"- {diagnostics.scrub(n['text'])[:300]}" for n in notes))
-        may_retire = self.can_retire(fam)
+        guard = self.guarded(fam)
+        # THE VALIDATED-FAMILY GUARD: its family is never urged to retire (the tool would refuse); it hears why instead.
+        may_retire = guard is None and self.can_retire(fam)
         dead = self.dead(fam) if may_retire else None
         from .practice import kept_version
-        if kept_version(self.store, str(fam["id"]), now=self.clock()) is not None:
+        if guard is not None:
+            parts.append(guard_words(guard))
+        elif kept_version(self.store, str(fam["id"]), now=self.clock()) is not None:
             # THE COHORT KEEP (L1, `tournament.py`): the tournament holds the family alive while its practice cohort runs,
             # so idleness is not urged as a reason to retire it; the retire tool stays offered (`can_retire`).
             parts.append("Your family is in a live practice cohort, so the tournament keeps it alive while the cohort runs: "
@@ -1579,6 +1849,11 @@ class Researcher:
         need = _count_setting(self.settings, "retire_min_trials", 10)
         tested = int(fam.get("validations") or 0) >= 2 or (need > 0 and int(fam.get("trials") or 0) >= need)
         return alive > int(pop.get("floor", 16)) and bool(tested or self.dead(fam) or self.hold_offer(fam))
+
+    def guarded(self, fam: Mapping[str, Any]) -> dict[str, Any] | None:
+        """THE VALIDATED-FAMILY GUARD (`retire_guard`) on this researcher's clock: why `retire` refuses, or None. It leaves
+        `can_retire` (the tool's offer) alone; the tool's answer and the status carry it."""
+        return retire_guard(self.store, fam, self.settings, now=float(self.clock()))
 
     def retire_floor(self, fam: Mapping[str, Any]) -> int:
         """The single population floor, checked atomically by ``retire_gym`` even for concurrent retirements."""
@@ -1934,6 +2209,15 @@ class Researcher:
         refused, roots, change = self._admit(fam, code, out)
         if refused is not None:
             return self._refusal(out, refused)
+        # THE MECHANISM TEST (release B): a carded family whose hypothesis has not passed takes it before this broad run, at
+        # any stress. In gate mode a program that cannot take it (no ablation switch, ...) is refused here, before any version;
+        # in shadow mode the test waits for a run that can take it, and this run goes on.
+        plan = self._mechanism_plan(fam, code, params)
+        if plan is not None and plan.get("refused"):
+            if plan["gate"]:
+                return self._refusal(out, plan["refused"])
+            out["mechanism_test"] = {"mode": "shadow", "skipped": str(plan["refused"].get("reason") or "")[:300]}
+            plan = None
         # NO DUPLICATE RUNS: the evaluation this run would be, on the roots it would run on.
         key = self.eval_key(code, params, stress=stress, window="train", roots=roots if change else fam["roots"])
         if self.preflight is not None and not (self.reuse and self._reusable(self.store.evaluated(fam["id"], key), stress=stress)):
@@ -1954,7 +2238,27 @@ class Researcher:
                 version = self.store.add_version(fam["id"], code, params, author=author, note=str(args.get("why") or "")[:300])
         if stored is not None:
             return self._stored_run(fam, stored, out, code=code, stress=stress)
-        probed = self._probe(fam, version["n"], code, params, stress=stress, full=full_run(args), out=out)
+        tested_view = None
+        if plan is not None:
+            tested = self._mechanism_test(fam, version["n"], code, params, plan, out)
+            if tested is not None and (plan["gate"] or tested.get("status") == "retired"):
+                return tested  # gate mode: the mechanism test did not pass, so no broad Train run
+            if plan["gate"]:
+                tested_view = {k: v for k, v in (out.get("mechanism_test") or {}).items()
+                               if k in ("verdict", "t", "bound", "method", "stored", "why", "mode", "gym_error")}
+            else:
+                # SHADOW IS BLIND: the researcher hears that a test was recorded, never its verdict (mechanism.py MODES).
+                done = "gym_error" not in (out.get("mechanism_test") or {})
+                tested_view = {"mode": "shadow", "recorded": done, "note": (
+                    "a mechanism test of this version ran and is recorded on your card, its arms charged as trials; its verdict "
+                    "is withheld until your family's outcome is known, and it did not stop this run" if done else
+                    "the Gym could not finish this version's mechanism test (the arms that ran are kept as trials); it did not "
+                    "stop this run")}
+            fam = self.store.family(fam["id"]) or fam
+        # A version that just passed its mechanism test (gate mode) traded on the sample: the zero-trade probe would say
+        # nothing new. In shadow the probe runs as it would without the test (whether it runs would tell the verdict).
+        passed = bool(plan is not None and plan["gate"] and (tested_view or {}).get("verdict") == "passed")
+        probed = None if passed else self._probe(fam, version["n"], code, params, stress=stress, full=full_run(args), out=out)
         if probed is not None:
             return probed  # THE ZERO-TRADE PROBE: no trade in the probe year, so the full Train run was skipped
         job = GymJob(family=fam["id"], version=version["n"], code=code, params=params, window="train", roots=tuple(fam["roots"]),
@@ -1978,6 +2282,9 @@ class Researcher:
             return {"status": "gym_error", "version": version["n"], "error": str(exc)[:500],
                     "hint": "the Gym could not run it now; your version is saved: rerun it next cycle"}
         out["gym_seconds"] = round(self.clock() - began, 2)
+        batch = getattr(job, "batch", None)  # the box time this run took (its batch's wall over its programs): the cost measure
+        if isinstance(batch, Mapping) and batch.get("wall_seconds") is not None:
+            out["gym_box_seconds"] = round(float(batch["wall_seconds"]) / max(1, int(batch.get("programs_in_batch") or 1)), 2)
         years = float((result.get("summary") or {}).get("days") or 0) / 252.0 * max(1, len(fam["roots"]))
         recorded, robust = self._with_score(result, stress)  # the run's row keeps its score (`submit` reads it)
         run = self.store.add_run(fam["id"], version["n"], recorded, window="train", stress=stress, purpose="train",
@@ -1991,6 +2298,8 @@ class Researcher:
         view["run_id"] = run["run_id"]
         score = self._scored(fam, version["n"], run["run_id"], robust, view, out, code=code, params=params, span=span_of(result))
         out["score"] = None if score is None else round(score, 3)
+        if tested_view:
+            view["mechanism_test"] = tested_view
         return view
 
     # ------------------------------------------------------------------ THE ZERO-TRADE PROBE (R11-6)
@@ -2055,8 +2364,9 @@ class Researcher:
         if stored is not None:
             out["stored"] = out.get("stored", 0) + 1
             return self._probe_view(stored, n, year, root, stored=True)
-        if self.store._one("SELECT 1 AS ran FROM runs WHERE family=? AND version=? LIMIT 1", (fid, int(n))):
-            return None  # not a new version's first run
+        if self.store._one("SELECT 1 AS ran FROM runs WHERE family=? AND version=? AND window IN ('train', 'probe') LIMIT 1",
+                           (fid, int(n))):
+            return None  # not a new version's first run (a mechanism test's rows are not a Train run)
         job = GymJob(family=fid, version=n, code=code, params=dict(params or {}), window="train", roots=(root,), stress=1.0,
                      purpose="probe", priority=float(fam.get("weight") or 0.0), start=f"{year}-01-01", end=f"{year}-12-31")
         began = self.clock()
@@ -2087,6 +2397,505 @@ class Researcher:
         out["probe"] = {"year": year, "root": root, "trades": 0, "status": result.get("status"), "seconds": seconds,
                         "skipped_full": True}
         return self._probe_view(run, n, year, root)
+
+    # ------------------------------------------------------------------ THE MECHANISM TEST (release B)
+    def mechanism_record(self, fam: Mapping[str, Any]) -> dict[str, Any]:
+        """The family's own test record (its state's `mechanism`): {passed: {...} or absent, failed: [versions], untestable:
+        [versions], last: {...}}. The hypothesis's record across its lineage is `mechanism_lineage`."""
+        rec = (fam.get("state") or {}).get(mechanism.STATE_KEY)
+        return dict(rec) if isinstance(rec, Mapping) else {}
+
+    def mechanism_lineage(self, fid: str, entry: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        """The hypothesis's test record across the lineage set (`store.lineages`: forks, parent-named revisions, rebirths
+        that join or count the lineage), for the family's card `entry`:
+        - "failed": failed tests (distinct family and version) of the SAME HYPOTHESIS, the rebirth refusal's notion of it
+          (`cards.match_keys` of this family's card and words against each lineage family's declared cell, its inputs
+          read the same way, `cards.match_inputs`: the same class, structure family and holding, with overlapping inputs):
+          what raises the noise bound;
+        - "hard": failed tests below the base bound by families with this family's card (its own, and its forks', which
+          read the same card): what counts toward a MECHANISM retirement;
+        - "passed": a family with the same card passed its test; "broad": such a family has broad Train runs;
+        - "own": the family's own test verdicts."""
+        entry = entry or cards.card_of(self.store, fid)
+        empty = {"failed": 0, "hard": 0, "passed": False, "broad": False, "own": 0}
+        if entry is None:
+            return empty
+        lines = self.store.lineages(fid)
+        if not lines:
+            return empty
+        fams = self.store._all(f"SELECT id, structure, mechanism, spec FROM families WHERE lineage IN ({','.join('?' * len(lines))})",
+                               tuple(lines))
+        ids = [f["id"] for f in fams]
+        marks = ",".join("?" * len(ids))
+        own = {r["family"]: r for r in self.store._all(f"SELECT family, sha, card FROM family_cards WHERE family IN ({marks})",
+                                                        tuple(ids))}
+        by_sha: dict[str, Any] = {}
+        me = next((f for f in fams if f["id"] == fid), None)
+        try:
+            dte = (json.loads(me["spec"] or "{}") or {}).get("dte") if me else None
+        except (TypeError, ValueError):
+            dte = None
+        keys, _ = cards.match_keys(entry["card"], me["structure"] if me else None, (me or {}).get("mechanism") or "", dte)
+        cell = cards.cell_of(entry["key"])
+        mine: dict[str, tuple[str | None, bool, tuple[str, str, str] | None]] = {}  # family -> (card sha, same hypothesis, cell)
+        for f in fams:
+            row = own.get(f["id"])
+            if row is not None:
+                sha, card = row["sha"], json.loads(row["card"])
+            else:
+                try:
+                    sha = (json.loads(f["spec"] or "{}") or {}).get("card_sha")
+                except (TypeError, ValueError):
+                    sha = None
+                if sha and sha not in by_sha:
+                    found = self.store._one("SELECT card FROM family_cards WHERE sha=? ORDER BY at LIMIT 1", (sha,))
+                    by_sha[sha] = json.loads(found["card"]) if found else None
+                card = by_sha.get(sha) if sha else None
+            if card:
+                # Their inputs are read as ours are (`cards.match_inputs`: declared, and named by their own words), as the
+                # rebirth refusal reads a dead carded row.
+                theirs = {**cards.key_of(card, f["structure"]), "inputs": cards.match_inputs(card, f["mechanism"])}
+                mine[f["id"]] = (sha, any(cards.matches(k, theirs) for k in keys), cards.cell_of(theirs))
+            else:
+                mine[f["id"]] = (sha, False, None)
+        rows = self.store._all(f"SELECT family, version, verdict, detail FROM card_evidence WHERE kind='mechanism_test' "
+                               f"AND family IN ({marks})", tuple(ids))
+        failed: set[tuple[str, Any]] = set()
+        hard: set[tuple[str, Any]] = set()
+        same = [f for f, (sha, _, c) in mine.items() if sha == entry["sha"] and c == cell]
+        passed = False
+        for r in rows:
+            sha, related, _ = mine.get(r["family"], (None, False, None))
+            if r["verdict"] == "passed" and r["family"] in same:
+                passed = True
+            if r["verdict"] != "failed":
+                continue
+            if related:
+                failed.add((r["family"], r["version"]))
+            if r["family"] == fid or r["family"] in same:
+                try:
+                    below = (json.loads(r["detail"] or "{}") or {}).get("below_base", True)
+                except (TypeError, ValueError):
+                    below = True
+                if below is not False:
+                    hard.add((r["family"], r["version"]))
+        broad = bool(same) and bool(self.store._one(f"SELECT 1 AS ran FROM runs WHERE family IN ({','.join('?' * len(same))}) "
+                                                    "AND window='train' AND purpose='train' LIMIT 1", tuple(same)))
+        return {"failed": len(failed), "hard": len(hard), "passed": passed, "broad": broad,
+                "own": sum(1 for r in rows if r["family"] == fid)}
+
+    def mechanism_passed(self, fam: Mapping[str, Any]) -> bool:
+        """Has the family's hypothesis passed (a family of its lineage with the same card passed, or has broad Train runs:
+        the test gates a hypothesis's first broad replay only, so a new Gym never asks for it again)?"""
+        lineage = self.mechanism_lineage(str(fam["id"]))
+        return bool(lineage["passed"] or lineage["broad"])
+
+    def _mechanism_plan(self, fam: Mapping[str, Any], code: str, params: Mapping[str, Any]) -> dict[str, Any] | None:
+        """None when no mechanism test comes before this broad run: the test is off, a family outside the Gym band, one born
+        before cards; in gate mode a hypothesis that passed (or was broadly replayed); in shadow a family outside the
+        `sample` share, with a verdict of its own (one blind test a family) or EXPOSED: it, or a family of its lineage with
+        its card (a fork running its parent's program), already has broad Train runs, so the test would not be the gate's
+        first test of an unfitted program (review of #446, P1/P2). In shadow a broad run happens whatever any verdict said,
+        so that skip reads no verdict, and a sibling's verdict never skips a test: what the researcher sees never depends on
+        a verdict. Else the plan ({entry, cfg, gate, flat, param, off,
+        off_params, lineage}), or with {"refused": answer} when the program cannot take the test (its ablation switch is
+        missing, of another type, never read, or this run already has the signal off): in gate mode the answer (no version,
+        job or trial); in shadow the run goes on untested and nothing is recorded, so a later run that can take it does."""
+        cfg = mechanism.config(self.settings)
+        if not cfg["enabled"]:
+            return None
+        fam = self.store.family(str(fam["id"])) or fam  # a pass earlier in this cycle counts
+        if fam.get("band") != "gym":
+            return None
+        entry = cards.card_of(self.store, str(fam["id"]))
+        if entry is None:
+            return None
+        gate = cfg["mode"] == "gate"
+        if not gate and not mechanism.in_sample(str(fam["id"]), cfg["sample"]):
+            return None
+        lineage = self.mechanism_lineage(str(fam["id"]), entry)
+        if lineage["broad"] or (lineage["passed"] if gate else lineage["own"]):
+            return None
+        base = {"entry": entry, "cfg": cfg, "gate": gate, "lineage": lineage}
+        ablation = entry["card"].get("ablation") or cards.DEFAULT_ABLATION
+        if ablation.get("flat"):
+            return {**base, "flat": True, "param": None, "off": None, "off_params": None}
+        param, off = str(ablation["param"]), ablation["off"]
+        hint = (f"declare {param!r} in PARAMS (on by default) and read it in decide: with {param}={off!r} the program must trade "
+                "your card's comparison (skip only the signal's condition)" + ("; no version, job or trial was created" if gate else ""))
+        defaults = params_of(code)
+        if defaults is None or param not in defaults:
+            return {**base, "refused": {"status": "refused", "reason": f"your card's ablation switch {param!r} is not in PARAMS, "
+                                                                       "so the mechanism test cannot run before broad replay",
+                                        "hint": hint}}
+        default = defaults[param]
+        if isinstance(default, bool):
+            off = bool(off)
+        elif isinstance(default, (int, float)) and isinstance(off, bool):
+            off = int(off)
+        why = check_params(defaults, {param: off})
+        if why:
+            return {**base, "refused": {"status": "refused", "reason": f"your card's ablation {param}={off!r}: {why}", "hint": hint}}
+        merged = {**defaults, **dict(params or {})}
+        if json.dumps(merged.get(param), default=str) == json.dumps(off, default=str):
+            return {**base, "refused": {"status": "refused", "reason": f"this run has the signal off ({param}={off!r}): the "
+                                                                       "mechanism test compares your program with the signal on "
+                                                                       "against that",
+                                        "hint": f"run it with {param} on; the test runs the ablation itself"}}
+        off_params = {**dict(params or {}), param: off}
+        from ..gym.experiment import check_experiment
+        from ..gym.safety import CodeRefused
+        try:
+            check_experiment(code, off_params)
+        except (CodeRefused, ValueError, TypeError) as exc:
+            return {**base, "refused": {"status": "refused", "reason": f"the ablation {param}={off!r} cannot run: {str(exc)[:400]}",
+                                        "hint": hint}}
+        return {**base, "flat": False, "param": param, "off": off, "off_params": off_params}
+
+    def _stored_mechanism(self, fid: str, key: str) -> dict[str, Any] | None:
+        """A recorded mechanism-test arm of this evaluation (its key), or None; only an arm that ran ("ok": an errored arm is
+        asked again), never one on another fill model than the one the Gym last returned (`_reusable`'s rule)."""
+        for row in self.store._all("SELECT run_id, summary FROM runs WHERE family=? AND window='mechanism' AND status='ok' "
+                                   "AND summary LIKE ? ORDER BY at DESC, rowid DESC", (fid, f'%"eval_key":"{key}"%')):
+            summary = json.loads(row["summary"] or "{}") or {}
+            if summary.get("eval_key") != key:
+                continue
+            if summary.get("fill_model") and self._fill_model and str(summary["fill_model"]) != self._fill_model:
+                continue
+            full = self.store.run_result(row["run_id"])
+            if full is not None:
+                return {**full, "run_id": row["run_id"]}
+        return None
+
+    def _mechanism_test(self, fam: Mapping[str, Any], n: int, code: str, params: Mapping[str, Any], plan: Mapping[str, Any],
+                        out: dict[str, Any]) -> dict[str, Any] | None:
+        """THE MECHANISM TEST (league/swarm/mechanism.py) before this version's broad Train run: None when it passed, else
+        the answer (a failed, thin, invalid or untestable verdict; a Gym error; a retirement), which gate mode returns in
+        place of the broad run and shadow mode only records. Every arm the Gym evaluates is a trial, recorded as it lands
+        (late too); an arm already recorded is read back, and the same test asked again is answered from its verdict."""
+        fid, cfg, entry = str(fam["id"]), plan["cfg"], plan["entry"]
+        holding = entry["card"].get("holding")
+        windows = mechanism.sample_windows()
+        wid = mechanism.windows_id(windows)
+        roots = tuple(fam["roots"])
+        arms = {"on": dict(params or {})} if plan["flat"] else {"on": dict(params or {}), "off": dict(plan["off_params"])}
+        ablation = {"flat": True} if plan["flat"] else {"param": plan["param"], "off": plan["off"]}
+        test_key = hashlib.sha256(json.dumps({arm: self.eval_key(code, p, stress=1.0, window=f"mechanism:{wid}:{holding}", roots=roots)
+                                              for arm, p in arms.items()}, sort_keys=True).encode()).hexdigest()[:32]
+        for row in reversed(cards.evidence(self.store, fid, kind="mechanism_test")):
+            if row["detail"].get("test_key") == test_key and row["verdict"] in mechanism.VERDICTS:
+                out["stored"] = out.get("stored", 0) + 1
+                out["mechanism_test"] = {"verdict": row["verdict"], "stored": True, "t": row["detail"].get("t"),
+                                         "method": row["detail"].get("method")}
+                if row["verdict"] == "passed":
+                    self._mechanism_state(fid, n, "passed", row["detail"], test_key)
+                    return None
+                return mechanism.view(row["detail"], version=n, windows=windows, ablation=ablation,
+                                      arms=row["detail"].get("arms") or {}, stored=True)
+        image, bundle = self._gym_identity()
+        results: dict[tuple[str, str], dict[str, Any]] = {}
+        run_ids: list[str] = []
+        failed: list[str] = []
+        box_seconds, jobs_made = 0.0, 0
+        # The family's identical infrastructure failures in a row (mechanism.py STAGES): from `max_infrastructure` on, the
+        # same failure is the program's. `infra`: this test's (kind, failures in a row), the first one it met.
+        before_infra = self.mechanism_record(self.store.family(fid) or fam).get("infra") or {}
+        max_infra = int(cfg.get("max_infrastructure", 3))
+        infra: tuple[str, int] | None = None
+
+        def record(arm: str, start: str, end: str, key: str, result: Mapping[str, Any]) -> dict[str, Any]:
+            kept = mechanism.trim(result)
+            days = float((kept.get("summary") or {}).get("days") or 0)
+            kept["summary"] = {**dict(kept.get("summary") or {}), "arm": arm, "mechanism_window": [start, end],
+                               "mechanism_test": test_key, "ablation": ablation}
+            run = self.store.add_run(fid, n, kept, window="mechanism", stress=1.0, purpose="mechanism",
+                                     program_years=days / 252.0 * max(1, len(roots)), key=key)
+            self._restart_dormancy(fid, result)
+            return run
+
+        began = self.clock()
+        deadline = began + float(cfg["timeout_seconds"])
+        early: dict[str, Any] | None = None
+        # STAGES: the first window, then the other three only when the first says the two arms can be compared.
+        for first, stage in ((True, windows[:1]), (False, windows[1:])):
+            jobs: list[tuple[str, str, str, str, GymJob]] = []
+            for arm, p in arms.items():
+                for start, end in stage:
+                    key = self.eval_key(code, p, stress=1.0, window=f"mechanism:{start}:{end}", roots=roots)
+                    stored = self._stored_mechanism(fid, key) if self.reuse else None
+                    if stored is not None:
+                        results[(arm, start)] = stored
+                        continue
+                    jobs.append((arm, start, end, key, GymJob(family=fid, version=n, code=code, params=dict(p), window="train",
+                                                              roots=roots, stress=1.0, purpose="mechanism", split=1, start=start,
+                                                              end=end, priority=float(fam.get("weight") or 0.0))))
+            if jobs:
+                out["gym_asked"] = True  # new evaluations asked of the Gym (DORMANCY)
+                jobs_made += len(jobs)
+                submit, wait = getattr(self.pool, "submit", None), getattr(self.pool, "wait", None)
+                if callable(submit) and callable(wait):
+                    for *_, job in jobs:  # queued together: each window's jobs batch with every family's test of that window
+                        submit(job)
+                for arm, start, end, key, job in jobs:
+                    late = (lambda result, a=arm, s=start, e=end, k=key: record(a, s, e, k, result))  # a trial whenever it lands
+                    try:
+                        if callable(submit) and callable(wait):
+                            result = wait(job, max(0.0, deadline - self.clock()), late=late)
+                        else:
+                            result = self.pool.run(job, timeout=max(1.0, deadline - self.clock()), late=late)
+                    except PoolError as exc:
+                        if mechanism.MISSING_DATA.search(str(exc)):
+                            # The Gym holds no data for these roots in this window: that window is not in the sample (never a
+                            # Gym error asked again every cycle, and no trial: nothing was evaluated).
+                            results[(arm, start)] = {"status": "no_data", "reason": str(exc)[:300], "trades": []}
+                        else:
+                            failed.append(str(exc))
+                        continue
+                    run = record(arm, start, end, key, result)
+                    run_ids.append(run["run_id"])
+                    out["trials"] = out.get("trials", 0) + int(result.get("trials", 0) or 0)
+                    kind = mechanism.infrastructure_kind(result)
+                    if kind is not None:
+                        # The Gym failed this arm for its own reasons (a dead worker, a unit past its deadline): not a
+                        # verdict about the program, so the test ends as a Gym error and the arm is not reused
+                        # (`_stored_mechanism`), until the family's tests met this same failure `max_infrastructure` times in
+                        # a row (review of #446, P3): then it is the program's (a runaway, a segfault), and the arm erred.
+                        in_a_row = int(before_infra.get("n") or 0) + 1 if before_infra.get("kind") == kind else 1
+                        infra = infra or (kind, in_a_row)
+                        if max_infra > 0 and in_a_row >= max_infra:
+                            results[(arm, start)] = {**mechanism.trim(result), "infrastructure": kind, "in_a_row": in_a_row}
+                        else:
+                            failed.append(f"the Gym could not run the {arm} arm: {str(result.get('reason') or '')[:200]}")
+                        continue
+                    results[(arm, start)] = mechanism.trim(result)
+                    batch = getattr(job, "batch", None)
+                    if isinstance(batch, Mapping) and batch.get("wall_seconds") is not None:
+                        box_seconds += float(batch["wall_seconds"]) / max(1, int(batch.get("programs_in_batch") or 1))
+            if failed:
+                break
+            if first:
+                early = self._mechanism_early(results, windows[0][0], plan["flat"])
+                if early is not None:
+                    break
+        seconds = round(self.clock() - began, 2)
+        out["mechanism_test"] = {"jobs": jobs_made, "gym_seconds": seconds, "box_seconds": round(box_seconds, 2),
+                                 "mode": cfg["mode"]}
+        if infra is not None:  # the run of identical failures goes on (or starts); a test whose arms all ran ends it
+            self._mechanism_infra(fid, {"kind": infra[0], "n": infra[1], "version": int(n), "at": self.store.now()})
+            out["mechanism_test"]["infrastructure"] = {"kind": infra[0], "in_a_row": infra[1]}
+        elif not failed and before_infra:
+            self._mechanism_infra(fid, None)
+        if failed:
+            error = failed[0][:300]
+            out["mechanism_test"]["gym_error"] = error
+            if plan["gate"]:
+                out["gym_error"] = error
+            return {"status": "gym_error", "version": n, "error": failed[0][:500],
+                    "hint": "the Gym could not finish your mechanism test now; your version is saved and the parts that ran are "
+                            "kept: run it again next cycle"}
+        ran = [s for s, _ in windows if all((arm, s) in results for arm in arms)]
+        on = [results[("on", s)] for s in ran]
+        off = [results[("off", s)] for s in ran] if not plan["flat"] else []
+        by_start = dict(windows)
+
+        def kept(arm_results: list[Mapping[str, Any]], starts: list[str]) -> list[Mapping[str, Any]]:
+            return [t for r, s in zip(arm_results, starts) if r.get("status") != "no_data"
+                    for t in mechanism.counted(r.get("trades") or [], s, by_start[s], holding)]
+
+        profiles: dict[str, Any] = {}
+        audit_skipped: list[str] = []
+        failed_before = plan["lineage"]["failed"]
+        min_t = mechanism.bound(cfg, failed_before)
+        if early is not None:
+            verdict: dict[str, Any] = early
+        else:
+            bad_on = [r for r in on if r.get("status") not in ("ok", "no_data")]
+            bad_off = [r for r in off if r.get("status") not in ("ok", "no_data")]
+            usable = [s for s, a, b in zip(ran, on, off or on) if a.get("status") != "no_data" and b.get("status") != "no_data"]
+            if bad_on:
+                verdict = {"verdict": "untestable", "why": f"the signal arm {_why_of(bad_on[0])}"}
+            elif bad_off:
+                verdict = {"verdict": "invalid_ablation", "why": f"the ablation arm {_why_of(bad_off[0])}"}
+            elif not usable:
+                verdict = {"verdict": "untestable", "why": f"no data for {', '.join(roots)} in the sample's windows"}
+            else:
+                on_trades = kept([results[("on", s)] for s in usable], usable)
+                profiles["on"] = mechanism.profile(on_trades)
+                if plan["flat"]:
+                    verdict = mechanism.compare_flat(mechanism.day_returns(on_trades), min_t=min_t, min_on_days=cfg["min_on_days"])
+                else:
+                    off_trades = kept([results[("off", s)] for s in usable], usable)
+                    profiles["off"] = mechanism.profile(off_trades)
+                    # A time-of-day card's comparison enters at other minutes by design (`mechanism.clock_skips`; declaring
+                    # the clock alone never skips a check). What it skipped is recorded with the verdict.
+                    skip = mechanism.clock_skips(entry["card"])
+                    audit_skipped = sorted(skip)
+                    wrong = mechanism.audit(profiles["on"], profiles["off"], skip=skip)
+                    if wrong:
+                        verdict = {"verdict": "invalid_ablation", "audit": wrong,
+                                   "why": f"the ablation arm is not your card's comparison: {wrong}"}
+                    else:
+                        # The bound rises with each failed test of the same hypothesis in the lineage (mechanism.py).
+                        verdict = mechanism.compare(mechanism.day_returns(on_trades), mechanism.day_returns(off_trades),
+                                                    min_t=min_t, min_on_days=cfg["min_on_days"], min_off_days=cfg["min_off_days"])
+                if verdict.get("verdict") == "failed":
+                    verdict["below_base"] = not (float(verdict.get("diff") or 0.0) > 0 and float(verdict.get("t") or 0.0) >= float(cfg["min_t"]))
+        repeated = [r for r in results.values() if r.get("infrastructure")]
+        if repeated and verdict.get("verdict") in ("untestable", "invalid_ablation"):
+            verdict = {**verdict, "infrastructure": {"kind": repeated[0]["infrastructure"], "in_a_row": repeated[0]["in_a_row"]},
+                       "why": f"{verdict.get('why')} (the same Gym failure {repeated[0]['in_a_row']} times in a row in this "
+                              "family's tests: counted as the program's own)"}
+        name = str(verdict["verdict"])
+        hurdle = (entry["card"].get("cost") or {}).get("hurdle")
+        verdict = {**verdict, "hurdle": hurdle,
+                   "net_positive": (float(verdict["mean_on"]) > 0) if verdict.get("mean_on") is not None else None}
+        arm_figures = {arm: mechanism.arm_summary([results[(arm, s)] for s in ran]) for arm in arms}
+        detail = {**verdict, "test_key": test_key, "version": n, "windows": [list(w) for w in windows], "ablation": ablation,
+                  "holding": holding, "arms": arm_figures, "profiles": profiles, "run_ids": run_ids,
+                  "trials": sum(int(results[(a, s)].get("trials", 0) or 0) for a in arms for s in ran), "jobs": jobs_made,
+                  "gym_seconds": seconds, "box_seconds": round(box_seconds, 2), "roots": list(roots), "mode": cfg["mode"],
+                  "bound": min_t, "failed_before": failed_before, "image": None if image is None else str(image),
+                  "bundle": None if bundle is None else str(bundle), "fill_model": self._fill_model, "card_sha": entry["sha"],
+                  "blind": not plan["gate"], "audit_skipped": audit_skipped}
+        with self.store.atomic():
+            if self._terminal(fid, out):
+                return {"status": "retired", "reason": "the family is retired; the mechanism test is not recorded"}
+            # EXPOSED (review of #446, P1/P2): the family, or a family of its lineage with its card, had broad Train runs when
+            # the test began (the plan skips that in shadow) or by now (one that landed while the arms ran). Such a test is
+            # not the gate's first test of an unfitted program, so `mechanism.calibration_rows` never counts it.
+            detail["exposed"] = bool(plan["lineage"].get("broad") or self.mechanism_lineage(fid, entry)["broad"])
+            cards.add_evidence(self.store, fid, entry["sha"], n, "mechanism_test", name, detail)
+            self._mechanism_state(fid, n, name, detail, test_key)
+        # The cycle's event (the operator's record, never the researcher's) carries the verdict in both modes.
+        out["mechanism_test"].update(verdict=name, t=verdict.get("t"), method=verdict.get("method"), bound=min_t,
+                                     why=verdict.get("why"))
+        if not plan["gate"]:
+            return None  # SHADOW IS BLIND: no notebook note and no answer; the broad run goes on (mechanism.py MODES)
+        words = (f"Mechanism test of version {n}: {name}"
+                 + (f" (t {verdict['t']:+.2f}, bound {min_t:g}, {verdict.get('method')})" if verdict.get("t") is not None else "")
+                 + (f": {verdict['why']}" if verdict.get("why") else "."))
+        self.store.note(fid, words[:600])
+        if name == "passed":
+            return None
+        answer = mechanism.view(detail, version=n, windows=windows, ablation=ablation, arms=arm_figures)
+        retired = self._mechanism_retire(fam, cfg, entry, out, verdict)
+        if retired:
+            answer["retired"] = retired
+        return answer
+
+    def _mechanism_early(self, results: Mapping[tuple[str, str], Mapping[str, Any]], start: str, flat: bool) -> dict[str, Any] | None:
+        """The first window's verdict when it already says the arms cannot be compared (the other windows then never run):
+        the signal arm erred (untestable); the ablation arm erred, or made no trade while the signal arm traded (a comparison
+        enters wherever the signal would: invalid). None: run the other windows."""
+        on, off = results.get(("on", start)), results.get(("off", start))
+        if on is None:
+            return None
+        if on.get("status") not in ("ok", "no_data"):
+            return {"verdict": "untestable", "why": f"the signal arm {_why_of(on)} (first window; the others were not run)"}
+        if flat or off is None:
+            return None
+        if off.get("status") not in ("ok", "no_data"):
+            return {"verdict": "invalid_ablation", "why": f"the ablation arm {_why_of(off)} (first window; the others were not run)"}
+        if on.get("status") == "ok" and off.get("status") == "ok" and (on.get("trades") or []) and not (off.get("trades") or []):
+            return {"verdict": "invalid_ablation",
+                    "why": ("the ablation arm made no trade in the first window while the signal arm traded: the comparison "
+                            "enters wherever the signal would, so it did not trade the comparison (the others were not run)")}
+        return None
+
+    def _mechanism_state(self, fid: str, n: int, verdict: str, detail: Mapping[str, Any], test_key: str) -> dict[str, Any]:
+        """The family's own test record after a verdict (its state's `mechanism`)."""
+        with self.store.atomic():
+            rec = self.mechanism_record(self.store.family(fid) or {})
+            if verdict == "passed":
+                rec["passed"] = {"version": int(n), "t": detail.get("t"), "method": detail.get("method"), "at": self.store.now(),
+                                 "image": detail.get("image"), "bundle": detail.get("bundle"), "test": test_key[:12]}
+            else:
+                name = "failed" if verdict == "failed" else "untestable"
+                rec[name] = sorted({*[int(v) for v in rec.get(name) or [] if isinstance(v, int)], int(n)})
+            rec["last"] = {"version": int(n), "verdict": verdict, "t": detail.get("t"), "bound": detail.get("bound")}
+            self.store.set_state(fid, **{mechanism.STATE_KEY: rec})
+        return rec
+
+    def _mechanism_infra(self, fid: str, run: Mapping[str, Any] | None) -> None:
+        """The family's run of identical infrastructure failures in its mechanism tests (its state's `mechanism.infra`:
+        {kind, n, version, at}), or None to end it (a test whose arms all ran)."""
+        with self.store.atomic():
+            rec = self.mechanism_record(self.store.family(fid) or {})
+            if run is None:
+                rec.pop("infra", None)
+            else:
+                rec["infra"] = dict(run)
+            self.store.set_state(fid, **{mechanism.STATE_KEY: rec})
+
+    def _mechanism_retire(self, fam: Mapping[str, Any], cfg: Mapping[str, Any], entry: Mapping[str, Any], out: dict[str, Any],
+                          verdict: Mapping[str, Any]) -> str | None:
+        """Gate mode, after this test's `verdict`: retire the family with MECHANISM (a tested finding) only when THIS test
+        failed below the base bound and its card holds `max_failures` such failures (its own and its forks': `hard`; a test
+        failed only by a raised bound, or another card's failure in the lineage, never counts toward it); with the idle
+        rule's words (untested) only when this test was thin, invalid or untestable and its own `max_untestable` versions
+        were. No other verdict retires it. The store's floor and gate hold apply. The retirement's cause, or None."""
+        fid = str(fam["id"])
+        name = str(verdict.get("verdict"))
+        if name == "failed" and verdict.get("below_base") is True:
+            hard = self.mechanism_lineage(fid, entry)["hard"]
+            if hard < int(cfg["max_failures"]):
+                return None
+            reason = mechanism.MECHANISM_CAUSE.format(n=hard)
+        elif name in ("thin", "invalid_ablation", "untestable"):
+            untestable = len(self.mechanism_record(self.store.family(fid) or fam).get("untestable") or [])
+            if untestable < int(cfg["max_untestable"]):
+                return None
+            reason = mechanism.UNTESTABLE_CAUSE.format(n=untestable)
+        else:
+            return None
+        with self.store.atomic():
+            current = self.store.family(fid) or fam
+            result = self.store.retire_gym(fid, reason, floor=self.retire_floor(current), source="the mechanism test")
+        if result.get("status") != "retired" or result.get("already_retired"):
+            out["mechanism_retire_deferred"] = result.get("deferred") or result.get("reason")
+            return None
+        out["retired"] = True
+        try:
+            self.pool.cancel_family(fid)
+        except Exception:  # noqa: BLE001 - queued work is also refused by the durable state on the next cycle
+            pass
+        return reason
+
+    def mechanism_text(self, fam: Mapping[str, Any]) -> str:
+        """The status line of a carded family's mechanism test ("" for a family born before cards or with the test off)."""
+        cfg = mechanism.config(self.settings)
+        if not cfg["enabled"] or fam.get("band") != "gym":
+            return ""
+        entry = cards.card_of(self.store, str(fam["id"]))
+        if entry is None:
+            return ""
+        days = "about 250 pre-registered Train sessions in four windows (2022-2024)"
+        if cfg["mode"] != "gate":
+            # SHADOW IS BLIND: never the verdict, nor anything that depends on one (mechanism.py MODES).
+            if not mechanism.in_sample(str(fam["id"]), cfg["sample"]):
+                return ""
+            rec = self.mechanism_record(fam)
+            if rec.get("last"):
+                return (f"Your mechanism test ran on version {rec['last'].get('version')} (shadow mode): it is recorded on your "
+                        "card, its verdict withheld until your family's outcome is known, and it never stops a run.")
+            if self.mechanism_lineage(str(fam["id"]), entry)["broad"]:
+                return ""  # exposed: a program already replayed broadly on Train is not tested in shadow (`_mechanism_plan`)
+            return ("Your next gym_run that has your card's switch on first runs your program with the signal on and with your "
+                    f"card's ablation over {days} (shadow mode: every arm counts as a trial, the verdict is recorded on your "
+                    "card and withheld from you, and the broad run goes ahead whatever it says).")
+        lineage = self.mechanism_lineage(str(fam["id"]), entry)
+        rec = self.mechanism_record(fam)
+        last = rec.get("last") or {}
+        if lineage["passed"] or lineage["broad"]:
+            return ("Your hypothesis passed its mechanism test (or its broad Train replay began before the gate): broad Train "
+                    "runs and sweeps are open.")
+        return ("Your mechanism test has not passed: your next gym_run first runs the program with the signal on and with your "
+                f"card's ablation over {days} (every arm counts as a trial); broad replay and gym_sweep wait for a pass, which "
+                f"needs your signal's entries to beat the comparison's by t >= {mechanism.bound(cfg, lineage['failed']):g} "
+                f"({lineage['failed']} failed test(s) of your hypothesis in its lineage). Tests of your card failed below the base "
+                f"bound {lineage['hard']} of {cfg['max_failures']} (a failure below the base bound at that count retires the "
+                f"family with the MECHANISM verdict); untestable {len(rec.get('untestable') or [])} of {cfg['max_untestable']}."
+                + (f" Last: version {last.get('version')} {last.get('verdict')}." if last else ""))
 
     def _scored(self, fam: Mapping[str, Any], n: int, run_id: str, robust: Mapping[str, Any] | None, view: dict[str, Any],
                 out: dict[str, Any], *, code: str, params: Mapping[str, Any], span: str | None = None) -> float | None:
@@ -2265,6 +3074,12 @@ class Researcher:
         if refused is not None:
             return self._refusal(out, refused)
         base = args.get("params") if isinstance(args.get("params"), dict) else {}
+        plan = self._mechanism_plan(fam, code, base)
+        if plan is not None and plan["gate"]:  # THE MECHANISM TEST (gate mode): a sweep is broad replay, so it waits for a pass
+            return self._refusal(out, plan.get("refused") or {
+                "status": "refused", "reason": "your family's mechanism test has not passed yet, and a sweep is broad replay",
+                "hint": "call gym_run with your program: its mechanism test runs first (signal on against your card's ablation "
+                        "on a small pre-registered sample), and sweeps open once it passes"})
         variants, dropped, why = sweep_variants(code, args.get("variants"), args.get("params"), limit=self.max_variants)
         if why:
             return self._refusal(out, {"status": "refused", "reason": why[:600],
@@ -2523,10 +3338,24 @@ class Researcher:
 
     def _execute(self, fam: Mapping[str, Any], name: str, args: Mapping[str, Any], out: dict[str, Any], *, author: str) -> Any:
         if name == "retire":
-            # Refused unless offered (`can_retire`); a refusal is a tool answer, never a cycle error (no backoff). The
-            # family is read, judged and retired in one transaction, so its floor follows the state it retires in.
+            # Refused unless offered (`can_retire`) and unguarded; a refusal is a tool answer, never a cycle error (no
+            # backoff). The family is read, judged and retired in one transaction, so its floor follows the state it
+            # retires in.
             with self.store.atomic():
                 current = self.store.family(fam["id"]) or fam
+                guard = self.guarded(current)
+                if guard is not None:
+                    # THE VALIDATED-FAMILY GUARD first (it says why, whatever else would refuse): for a version an
+                    # adoption archived, the answer hands back its program so the researcher can re-run it unchanged.
+                    out["retire_refused"] = True
+                    out["retire_guarded"] = guard["version"]
+                    answer: dict[str, Any] = {"status": "refused", "guard": "validated_version", "version": guard["version"],
+                                              "reason": guard_words(guard)}
+                    version = self.store.version(fam["id"], guard["version"]) if guard["archived"] else None
+                    if version and version.get("code"):
+                        answer["program"] = {"version": guard["version"], "code": version["code"],
+                                             "params": version.get("params") or {}}
+                    return answer
                 if not self.can_retire(current):
                     out["retire_refused"] = True
                     return {"status": "refused", "reason": "retire is not available to your family now (it needs at least two "
@@ -2967,6 +3796,11 @@ class Researcher:
                 current.append({"role": "user", "content": f"The {tool} you queued last cycle ran:\n"
                                                            f"{json.dumps(result, default=str)[:12000]}"})
                 gym_done = True
+            elif result.get("mechanism_test") and str(result.get("status") or "").startswith("mechanism_"):
+                # THE MECHANISM TEST did not pass (gate mode): the broad Train run was skipped
+                current.append({"role": "user", "content": f"The {tool} you queued last cycle took its mechanism test first and did "
+                                                           f"not pass, so its broad Train run was skipped:\n"
+                                                           f"{json.dumps(result, default=str)[:12000]}"})
             elif result.get("probe"):  # THE ZERO-TRADE PROBE: no trade in the probe year, the full run skipped
                 current.append({"role": "user", "content": f"The {tool} you queued last cycle made no trade in its probe year, so "
                                                            f"its full Train run was skipped:\n{json.dumps(result, default=str)[:12000]}"})
@@ -3258,6 +4092,12 @@ OBJECTIVE = "worst-train-year-v1"
 CORE_SPAN = settings_mod.TRAIN_CORE_START.isoformat()
 
 
+def _why_of(result: Mapping[str, Any]) -> str:
+    """A mechanism-test arm's failure in words: its status and reason (or its runtime's first messages)."""
+    messages = ((result.get("runtime") or {}).get("messages") or [])[:2]
+    return f"{result.get('status')}: {str(result.get('reason') or '; '.join(str(m) for m in messages))[:300]}"
+
+
 def span_of(result: Mapping[str, Any] | None) -> str:
     """The first Train day a result was run from (the pool stamps it; an older result: 2022-01-03)."""
     return str((result or {}).get("train_from") or CORE_SPAN)
@@ -3392,4 +4232,6 @@ __all__ = ["Researcher", "TOOLS", "TOOLS_READ", "TOOLS_REVISE", "RUNS", "needs_o
            "sweep_variants", "sweep_tool", "merged_key", "MAX_SWEEP_VARIANTS", "MAX_SWEEP_JOBS_IN_FLIGHT", "idle_dead",
            "idle_evaluations", "idle_limit", "RETIRE_IDLE_EVALUATIONS", "NEGATIVE_FACTOR", "DORMANT_CYCLES", "ALREADY_RUN",
            "dormant_limit", "dormant_count", "awaiting_validation", "holding", "held_at_gate", "new_run", "revalidation_owed",
-           "objective_for", "span_of", "CORE_SPAN"]
+           "objective_for", "span_of", "CORE_SPAN", "RETIRE_GUARD_DAYS", "VERDICTS_KEY", "retire_guard", "retire_guard_days",
+           "record_verdict", "validation_refuted", "validated_at", "guard_words", "adoption_archives",
+           "ADOPTED_ACTION"]

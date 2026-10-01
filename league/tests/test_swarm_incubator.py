@@ -1624,6 +1624,57 @@ class TheProgramAndTheAdoption(BarCase):
         self.store.update_family("a", retired_at="2026-10-06T00:00:00Z", state={**self.state("a"), "incubator_barred": {sha: {}}})
         self.assertEqual(live_rows(self.root, "b", m), [], "a retired family's bar on the program stands")
 
+    def test_a_retired_twins_pass_whose_audit_is_owed_bars_the_program_as_the_reader_refuses_it(self):
+        """The final integrated check of release B (swarm nit 1): a's gate review passed, its audit errored (every audit
+        route out of budget), and a retired, so its `review` is never cleared and its audit never lands. The reader
+        refuses the same program in b for good; the swarm now agrees (fail-closed) and never marks it in b nor pays for
+        b's incubator review and audit. Not a verdict: nothing is recorded and no passed review is revoked."""
+        contract = review_contract()["sha256"]
+        n = self.family("a")
+        sha = self.sha("a", n)
+        owed = {"sha": sha, "version": n, "verdict": "pass", "reasons": [], "contract_sha": contract}
+        self.store.set_state("a", review=owed)
+        self.store.retire_gym("a", "its researcher retired it", floor=0, source="test")
+        self.assertIsNotNone(self.store.family("a")["retired_at"])
+        self.assertIsNotNone(bands.program_refusal(self.state("a"), sha), "the reader refuses it there")
+        self.store.add_family({"id": "b", "mechanism": "Another invented mechanism for the incubator's facts.",
+                               "structure": "debit_vertical", "roots": ["SPY"], "dte": [0, 5]}, origin="test")
+        m = int(self.store.add_version("b", CODE.format(fid="a"), {"hold": 3}, author="test")["n"])
+        self.assertEqual(self.sha("b", m), sha, "the same program")
+        self.train("b", m)
+        self.robust("b", m)
+        self.cohort("b", m)
+        self.practised("b", m, [(SESSIONS[i % 2], 3.0, False) for i in range(5)], days=SESSIONS[:2])
+        out = I.facts(self.store, self.settings, self.root, clock=self.clock)
+        self.assertNotIn(f"b@{m}", out["written"], "never marked")
+        words = "the gate's review of it passed with its audit still owed (in a, which holds the same program)"
+        self.assertEqual(I.gate_bar(self.store, self.store.family("b"), m), words)
+        self.assertEqual(I.due_reviews(self.store, self.settings, self.root, clock=self.clock), [], "no review is paid")
+        asked = len(self.sail.bodies)
+        self.replies = [PASS, PASS]
+        self.assertNotIn("incubator", self.gate().run(), "never read")
+        self.assertEqual(len(self.sail.bodies), asked)
+        # The reader stays strict: with a mark and passed reviews written straight into b's state, still no row.
+        self.store.set_state("b", train_passed={str(m): {"evaluator": EVALUATOR, "objective": OBJECTIVE, "run": "r",
+                                                         "robust_pnl": 5.0, "drift": {"t": 1.0}, "at": 1.0}},
+                             incubator_reviews={sha: {"sha": sha, "version": m, "verdict": "pass", "contract_sha": contract,
+                                                      "audit": {"verdict": "pass", "contract_sha": contract}}})
+        self.assertEqual(live_rows(self.root, "b", m), [], "the reader refuses it while a's audit is owed")
+        self.assertFalse(I.reviewable(self.store, "b", m, sha))
+        # No verdict against it: the sweep takes the mark, records no bar and revokes no review (`program_only`).
+        self.assertIsNone(I.gate_bar(self.store, self.store.family("b"), m, program_only=True))
+        swept = I.sweep(self.store, self.settings, clock=self.clock)
+        self.assertEqual((swept["removed"], swept["barred"], swept["revoked"]), ([f"b@{m}"], [], []))
+        self.assertEqual(self.state("b")["incubator_reviews"][sha]["verdict"], "pass")
+        self.assertNotIn(sha, self.state("b").get("incubator_barred") or {})
+        self.assertNotIn("incubator_barred", self.state("a"))
+        # Were a's audit to land (an alive family's would), the bar lifts and both sides admit the program in b again.
+        self.store.update_family("a", state={**self.state("a"), "review": {
+            **owed, "audit": {"verdict": "pass", "contract_sha": contract}}})
+        self.assertIsNone(I.gate_bar(self.store, self.store.family("b"), m))
+        self.assertIn(f"b@{m}", I.facts(self.store, self.settings, self.root, clock=self.clock)["written"])
+        self.assertEqual(len(live_rows(self.root, "b", m)), 1)
+
     def test_the_backfill_records_release_bs_fails_that_only_the_event_log_holds(self):
         n, sha = self.passed()
         m = self.family("c")

@@ -95,6 +95,8 @@ class RoundCase(unittest.TestCase):
         self.settings["tournament"]["require_robustness"] = False
         # Nor the drift screen: these families have no Train run (league/tests/test_swarm_drift.py tests it).
         self.settings["tournament"]["drift_screen"] = False
+        # Nor the family card: these proposals carry none (league/tests/test_swarm_cards.py tests it).
+        self.settings["architect"]["require_card"] = False
         self.answer = strong
         self.pool = FakeGymPool(lambda job: self.answer(job))
         self.replies: list = []

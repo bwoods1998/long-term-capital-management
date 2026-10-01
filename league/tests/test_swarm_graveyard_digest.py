@@ -82,6 +82,7 @@ class StoreCase(unittest.TestCase):
         self.addCleanup(self.store.close)
         self.settings = copy.deepcopy(DEFAULTS)
         self.settings["architect"]["openai_model"] = None  # the box: Claude, then Sail
+        self.settings["architect"]["require_card"] = False  # proposals here carry no card (league/tests/test_swarm_cards.py)
         self.graves = Graves(self.store)
 
     def mixed(self, n: int = 60) -> list[str]:

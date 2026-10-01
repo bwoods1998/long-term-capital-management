@@ -1057,7 +1057,11 @@ never evidence.
   owes a bar is refused too (`incubator-bars-owed.json` beside the swarm store, written only when the store errs; if it
   cannot be read, every incubator row is refused until the gate writes it again). The swarm start backfills bars from
   release B's gate events (log line `incubator backfill: N programs barred`), and an evaluator adoption records every
-  failure it would clear before it clears it.
+  failure it would clear before it clears it. The swarm reads the belt's own rules in every other family holding the
+  program before it marks a version or pays for an incubator review (`incubator.program_bar`, Release B'), so it never
+  pays to review a program the belt would refuse. Another family's gate review that passed with its audit still owed
+  holds the program off until that audit lands, and for good if that family retired. This is not a verdict: nothing is
+  recorded and no passed review is revoked.
 
   An unreadable store refuses: no pin and no open, while exits go on. B2 (#444, in Release B) writes the
   Train-and-drift pass and the incubator's reviews.
@@ -1177,10 +1181,18 @@ completes, fails or reaches its session window.
   began before it.
 - **At most `tournament.incubator_keep_max` (12) families;** 0, null, a boolean or a string turns it off. Those that
   meet the sample come first, by return on risk.
+- **The incubator's cohorts come first and are never cut by the cap** (Release B', `tournament.incubator_held`). These
+  are cohorts that met the sample with a record that is not negative, and whose program the swarm's own incubator
+  facts admit (`bands.incubator`, the reader the House pins by). Every cohort the House can pin (L2', at most 8) is one
+  of them. The swarm never reads the House's live state, so it cannot see which ones were pinned and holds them all
+  (at most 96). So the keep never holds fewer families than the House can have pinned, and a pinned family is never
+  retired because a cohort with a higher return took its place. If the facts cannot be read, every cohort past the
+  sample is held for that read. The saved keep (`cohort_keep`) lists them under `held`, and a fresh process whose
+  first read fails keeps those families first, beyond the cap.
 - **What it never spares:** the deflated-Sharpe rule, the researcher's or the diagnostician's own retire, the
   population floor, and the operator's gate hold.
-- **Its record:** one private `swarm.status` event a round (`incubator_keep`), with each kept family and the rule it was
-  spared.
+- **Its record:** one private `swarm.status` event a round (`incubator_keep`), with each kept family, the rule it was
+  spared, and `held`, the incubator's cohorts' families, when there are any.
 - **The researcher's status line.** The keep is saved (`cohort_keep` in the swarm's kv), so a kept family's researcher
   is told that idleness is no reason to retire it. The retire tool stays offered.
 - **An unreadable record.** When `observe.sqlite` or the swarm's families cannot be read, the last good keep stands for
@@ -1447,16 +1459,18 @@ the swarm's loop for up to the meters' 20 s timeouts, at most once every 5 minut
 | `gym.start_boxes`, `max_boxes`, `train_from`, `image_checkpoint`, `gate_checkpoint` | `swarm.json` on the box | 2, 6 (since Release A, Sept 30; 4 from 16:07Z), "2020-01-02", the sealed 2020-24 image, its gate partner | the Gym pool, Train's first day and the images (defaults 4, 8, unset, none, none: the gate is off without a gate image). `train_from` takes "2022-01-03", "2020-01-02" or (since R11a) "2017-01-03"; the derived split and time limit are 8 and 900 s, 16 and 1500 s, 24 and 2400 s | edit `swarm.json`; `train_from` and a new image together |
 | `researcher.sail_usd_per_hour`, `usd_per_hour`, `top_families` | `swarm.json` on the box | 1.3 (since 02:47Z Oct 1; 1.1 from 16:41Z Sept 30; 12 before), 5 (not read while the Sail pace is set), 0 | the researcher pace (below) and the bandit's top band (defaults null, 4.0, 10) | edit `swarm.json` |
 | `researcher.retire_idle_evaluations`, `dormant_cycles`; `tournament.retire_revisions`, `retire_evaluations` | `swarm.json` on the box | 500, 12; 200, 4000 | the idle rule and its dormancy clause; the tournament's retirement (defaults 150, 40; 30, 2000) | edit `swarm.json` |
-| `tournament.incubator_keep_max` | `swarm.json` on the box | default 12 (Release B, L1) | the most families the cohort keep spares from the revision, evaluation and idle rules (at most 96); 0, null, a boolean or a string turns it off | edit `swarm.json` |
+| `tournament.incubator_keep_max` | `swarm.json` on the box | default 12 (Release B, L1) | the most families the cohort keep spares from the revision, evaluation and idle rules (at most 96), beside the incubator's cohorts, which it never cuts (Release B'); 0, null, a boolean or a string turns it off | edit `swarm.json` |
 | `guard.burst_cap_usd`, `burst_until` | `swarm.json` on the box | $900, 2026-10-05 | the swarm's Sail spend for the research burst (the owner's 24/7 research, Sept 27); the $32 line is unchanged (defaults $350 until Monday Sept 28's open) | edit `swarm.json` |
 | `diagnostician.enabled`, `usd_day`, `per_round`, `family_hours`, `min_validations`, `near_miss_checks` | `swarm.json` on the box | false (since 16:41Z Sept 30), $60, 6, 3, 2, 5 | the diagnostician on or off; its Claude spend a day, families a round, how often a family, who is eligible (defaults true, $15, 2, 6, 2, 6) | edit `swarm.json` |
 | `researcher.stall_revisions`, `rewrites_per_day` | `swarm.json` on the box | 10000 (since 16:41Z Sept 30: stall rewrites off; 12 before), 1 | the stall that buys a researcher one rewrite from a stronger model, and at most how many a family a day (defaults 5, 4) | edit `swarm.json` |
 | `claude.role_effort` | `swarm.json` on the box | `{"architect": "medium"}` (since Release A, Sept 30; it matters only while the architect has a Claude line) | a role's own Claude effort when the caller names none (R11b; default `{}`: `claude.effort` for every role, so the gate keeps "high") | edit `swarm.json` |
 | `architect.max_alive_per_class` | `swarm.json` on the box | default 12 (R11b) | the most living families of one mechanism class (structure x root group); `admit` refuses births past it; 0 or null off | edit `swarm.json` |
+| `architect.structures` | `swarm.json` on the box | default null: every type (Oct 1) | the structure types a birth may be. `"real"` reads the allocator's `allocation.real_structures` (one list for both, so a change of the account's real types is one edit); a list such as the gateway's real types (`["debit_vertical", "long_butterfly", "long_call", "long_put"]`) also admits `long_single` (a list must then change beside `allocation.real_structures`). The architect's and the strategist's GAPS and coverage show only these (a list naming one side alone makes that side a gap), the architect's request names them and its BIRTH QUOTAS show only their structure families, `admit` refuses any other type and the next request names each refusal still outside the list (kv `architect_structure_refusals`); the tournament forks and the loop's founding seeds and reseeds are only of these types, and a living family of another type keeps researching until a rule retires it. The pass's event: `structures`, `structure_not_allowed` by type, `structures_ignored` (a value naming no known type is ignored whole: every type) | edit `swarm.json` |
 | `researcher.retire_hold_cycles`, `retire_hold_trials`, `extension_hold_checks` | `swarm.json` on the box | defaults 3, 10, 6 (R11b) | the hold offer (retire after that many holds in a row with an eligible Train run or that many trials); the extension hold (a validation with that many checks met is exempt from the dormancy clause until cleared); 0 turns each off | edit `swarm.json` |
 | `researcher.probe_year`, `probe_timeout_seconds` | `swarm.json` on the box | default null (off), 300 (R11b) | the Gym's zero-trade probe: 2022 switches it on | edit `swarm.json` |
 | `tournament.exploit_per_positive` | `swarm.json` on the box | default 0.15 (R11b) | the bandit's exploit share a positive old family earns; null: `explore_share` alone, as before | edit `swarm.json` |
 | `researcher.hold_until_news`, `retire_min_trials` | `swarm.json` on the box | defaults true, 10 (Release A, #431) | durable holds that only new evidence wakes (false: the R4 timer); the trials after which a researcher may retire its family | edit `swarm.json` |
+| `researcher.retire_guard_days` | `swarm.json` on the box | default 14 (Oct 1) | the validated-family guard: a researcher may not retire a family that holds a version which passed the validation line (in its state, in the tournament's verdict records, or archived by any evaluator adoption) last validated within this many days, unless a later validation of that version failed the line; a number at or below 0 turns it off; null, a boolean or a string reads as 14 | edit `swarm.json` |
 | `funding` (`enabled`, `every_seconds`, `lead_hours`, `repeat_hours`, `clear_factor`, `claude_out_usd`, `burn_window_hours`, `after_end_hours`, `fallback_every_seconds`, `fallback_flush_seconds`) | `swarm.json` on the box | defaults (Release A, #439): on, 300, per cliff, 12, 1.5, 2, 6, 48, 21600, 30 | the funding cliff alerts (**Funding cliffs and alerts**) | edit `swarm.json` |
 | `research.enabled`, `requests_day`, `family_requests_day`, `cycle_calls` | `swarm.json` on the box | defaults (Release B, #447): false, 300, 12, 2 | the research library on the House, and its lines: calls a UTC day for the floor, a family, a research cycle (**The research library**) | edit `swarm.json`; on only after the gateway and the House that carry it |
 | The money rules | `league/constitution.py` | the sprint's D4 table and the House live test's bounds (money `a3e2aa7c`); Release B adds the incubator's row (`42c4a3af`) | what real money may do | owner deploy, then `--ratify` |
@@ -1574,6 +1588,24 @@ promotion threshold:
   diagnostician retirements use the atomic `population.floor`. `population.start` only governs refilling. Pending gate
   work and extension/operator holds remain protected; the floor prevents concurrent retirements from draining the
   population. The agent must explain abandonment, and all prior evidence remains.
+- The validated-family guard (Oct 1, `researcher.retire_guard_days`, default 14): the retire tool refuses while the
+  family holds a version whose latest validation passed the line, last validated within that many days (the
+  tournament keeps each version's latest verdict and its evaluator in `validation_verdicts`). A pass counts wherever it
+  is held: the family's line, a passed record in `validation_verdicts` (no adoption clears it and no other version's
+  validation replaces it), `previous_evaluator_selection`, and the selection each adoption within the window archived
+  in its own append-only `evaluator_adopted` event. So a second adoption, which overwrites
+  `previous_evaluator_selection` with the selection the first one already cleared (the House adopted at Sept 30 20:08Z
+  and again at Oct 1 03:51Z), never lifts it. An archived pass counts only while it is still that version's latest
+  verdict: a record of the version (always its newest verdict) or a newer adoption's archive that shows it failed
+  refutes it. So a version that passed under one evaluator and failed its re-run under the next stays refuted after a
+  third adoption. A version whose validation time is unknown guards only from an adoption's archive, counted from that
+  adoption. A
+  failed holdout look does not end it (the gate retires nobody; the tournament's rules still apply). The refusal says
+  why and, for a version passed under an earlier evaluator, returns its program to re-run unchanged; the status says so
+  in place of any offer to retire, and the prompt says an evaluator change is never a reason to retire. It exists
+  because googl-lags-msft-ai-cloud-qqq-flat, the only D2-tuition family, was retired by its own researcher 17 seconds
+  after the Sept 30 20:08Z adoption. Operator retirements, the tournament's rules (the deflated-Sharpe rule and the
+  idle rule among them), the diagnostician and the population floor are unaffected.
 - `gym_run` and every variant of `gym_sweep` receive the static experiment-contract check before any version or Gym job
   is created. Changed parameters that are provably unread, invalid override types and malformed declarations return
   an actionable refusal without consuming a replay trial. A valid zero-trade control remains admissible.
