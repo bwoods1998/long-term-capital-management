@@ -2,8 +2,12 @@
 
 A Gym family whose latest validation met `researcher.extension_hold_checks` (6) of the line's checks is exempt from the
 idle rule's dormancy clause until its 2017-19 extension result lands. The tournament sets the family's `extension_hold`
-when such a validation lands (`researcher.mark_extension`); the operator clears it once the extension verdict is in, and
-it is never set again for the same version. Runs ON THE HOUSE, from the release that carries the rule:
+when such a validation lands, and ends it when a validation of the held version falls below the checks
+(`researcher.judge_extension`); the operator clears it once the extension verdict is in, and on the same Gym it is never
+set again for the same version. An adoption of a new Gym image or bundle (`league.swarm.evaluator.gym_changed`) clears
+that record: the version is held again if it meets the checks on the new Gym, and the operator clears it again once its
+extension verdict under that Gym is in. An adoption that changes only league/live keeps it. Runs ON THE HOUSE, from the
+release that carries the rule:
 
     /workspace/.venv/bin/python /workspace/current/scripts/extension_hold.py --state /workspace/state            # list
     /workspace/.venv/bin/python /workspace/current/scripts/extension_hold.py --state /workspace/state --seed [--apply]
@@ -11,8 +15,8 @@ it is never set again for the same version. Runs ON THE HOUSE, from the release 
 
 LIST (the default; read-only): the alive families on hold, and the alive Gym families whose latest validation already met
 the checks before the rule shipped but were never held (`--seed` holds them). `--clear FID ...` ends each named family's
-hold (its version stays in `extension_versions`, so it is not held again; the state keeps it as `extension_cleared`). Every
-write is a dry run unless `--apply`, in one store transaction. Standard library only.
+hold (its version stays in `extension_versions`, so it is not held again on the same Gym; the state keeps it as
+`extension_cleared`). Every write is a dry run unless `--apply`, in one store transaction. Standard library only.
 """
 
 from __future__ import annotations

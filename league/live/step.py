@@ -59,6 +59,19 @@ the test's own bounds from the money table (`options_money.house_test`) in place
 after the families' of each minute, and its opens yielding to theirs; switched by `live.house_test` in `<state>/swarm.json`
 (off: exits only). Never a band, a promotion, a forward record or an agent's structure; its positions are Profit.
 
+THE INCUBATOR (the owner, Sept 29, 2026; the reading of Sept 30; `league/live/incubator.py`): a family whose practice cohort
+passed its pre-registered first look (3 completed sessions, 10 program closes, coverage 0.80 and P&L above $0 three ways),
+Train and the drift screen under the current evaluator and the gate's review and audit, trades that cohort's own program
+as a REAL, tuition-flagged instance `<family>@<version>:i`: one lot of a real structure of at most $50 of maximum loss,
+at most 4 held or working, and the weekly envelope ($150 of net realized loss with what is held and working), from the
+money table's `options_money.incubator` (`money.plan_incubator`); switched by `live.incubator` in `<state>/swarm.json`
+(off by default: exits only). `real.is_incubator` (the `:i` key) is the one test of the route: `Instance.incubator` is
+derived from it (coerced), the order path refuses a `:i` that is not a real tuition instance, and a `:i` open is sized
+only by `plan_incubator` and admitted only by `Incubator.admit` (never `plan_open` or `admit_open`). Within a minute the
+D2 families' intents go first (`:r`, `:t`), then the incubator's, then the House live test's, then the calibration. It
+is never evidence (never a forward row, a band move or a promotion; its rows are tuition-flagged and never in tuition's
+own sums), and its positions are Profit, labelled "incubator" on the site.
+
 Real opens need every one of: `config.json` `real_money`; the grant `options-swarm-20260928` active on the money digest
 in force (`House.grant`); the gateway's kill switch off; no stop tripped (`money.Stops`); reconciliation clean; the
 paper proof passed this session or before (`live.require_paper_proof`); the House not paused; the family's band (or
@@ -95,7 +108,7 @@ from .decider import BudgetSpent, DeciderError, ProgramRefused, MAX_BATCH_SECOND
 from .families import MemoryFamilies
 from .observe import ObserveStore, evaluator_bundle
 from .paper import PaperProof
-from .real import SINGLE_TYPES, RealBook, RLeg, RPosition, real_legs
+from .real import SINGLE_TYPES, RealBook, RLeg, RPosition, is_incubator, real_legs
 from .shadow import SHADOW_FILE, ShadowAccount, ShadowBook, needs_of
 from .state import STATE_FILE, LiveState
 from .venue import OPTION_EVENTS, Account, MarketData, VenueError, occ_parts, occ_symbol, parse_time, stock_price
@@ -168,6 +181,7 @@ class Instance:
     error_since: float | None = None
     retried_at: float = float("-inf")
     structure: str = ""          # the family's DECLARED structure (its swarm row's), read at each sync; "" until one is read
+    incubator: bool = False      # the incubator's real instance (`<family>@<version>:i`): derived from its key alone
 
     def __post_init__(self) -> None:
         # An observe instance is exactly a shadow, non-tuition instance under an observe key that was made one (the money
@@ -178,6 +192,9 @@ class Instance:
         # never read for it. Coerced, never raised: a bad row must not stop the House from building its live step (the
         # order path's belt, `_real_intent`, refuses whatever is not a real instance anyway).
         self.observe = self.observe is True and _is_observe(self.key) and self.kind == "shadow" and not self.tuition
+        # The incubator's route is its key's, and only its key's (`real.is_incubator`): coerced whatever was passed, never
+        # raised (a restore must build). The order path's belt refuses a `:i` that is not a real tuition instance.
+        self.incubator = is_incubator(self.key)
 
 
 def ny(t: float) -> dt.datetime:
@@ -226,6 +243,7 @@ class OptionsLive:
         self.observe_decider = observe_decider if observe_decider is not None else decider
         self._switches: dict[str, Any] | None = None
         self._switches_told = False
+        self._incubator_told = False
         self.observe_store = ObserveStore(self.root, alert=self.alert, clock=clock)
         #: The practice league: each observe instance's pinned row's {tier, lineage, structure, roots} (its record's
         #: first pin); the last session minutes' pressure (the shedding rule); the last shed; what `health` shows.
@@ -249,6 +267,9 @@ class OptionsLive:
                              if paper is not None else None)
         self.calibration = Calibration(self) if self.book is not None else None
         self.house_test = HT.HouseTest(self) if self.book is not None else None
+        from .incubator import Incubator
+
+        self.incubator = Incubator(self) if self.book is not None else None
         perf = dict(performance or {})
         self.start_at = str(perf.get("start_at") or "")
         start_equity = M.D(perf.get("start_equity") or 0)
@@ -346,7 +367,7 @@ class OptionsLive:
 
         off = {"observe": False, "observe_max": 0, "observe_train": False, "observe_roots_max": 0,
                "observe_read_calls": int(self.settings["observe_read_calls"]), "calibration": False,
-               "calibration_samples": 0, "house_test": False}
+               "calibration_samples": 0, "house_test": False, "incubator": False}
         try:
             from ..swarm import settings as swarm_settings
 
@@ -364,7 +385,7 @@ class OptionsLive:
             if not self._switches_told:
                 self._switches_told = True
                 self.alert("warning", f"live: <state>/swarm.json could not be read ({type(exc).__name__}): observe, "
-                                      "calibration and the House live test are OFF until it can")
+                                      "calibration, the House live test and the incubator are OFF until it can")
             self._switches = off
             return self._switches
         self._switches_told = False
@@ -386,7 +407,17 @@ class OptionsLive:
                           "observe_read_calls": calls,
                           "calibration": raw.get("calibration", defaults["calibration"]) is True,
                           "calibration_samples": count("calibration_samples", 0, 1000),
-                          "house_test": raw.get("house_test", defaults.get("house_test", False)) is True}
+                          "house_test": raw.get("house_test", defaults.get("house_test", False)) is True,
+                          "incubator": raw.get("incubator", defaults.get("incubator", False)) is True}
+        incubator = raw.get("incubator", defaults.get("incubator", False))
+        if not isinstance(incubator, bool):
+            # Only JSON true switches the incubator on: any other value reads off, and is said once.
+            if not self._incubator_told:
+                self._incubator_told = True
+                self.alert("warning", f"live: swarm.json live.incubator is {incubator!r}, not true or false: the incubator "
+                                      "reads OFF")
+        else:
+            self._incubator_told = False
         return self._switches
 
     def _decider_of(self, inst: Instance) -> Any:
@@ -587,9 +618,10 @@ class OptionsLive:
         for r in self.state.rows("SELECT * FROM instances WHERE retired_at IS NULL"):
             # Keywords, never positions: the tenth field is `observe`, and a mode string there made every restored real
             # instance an observe one (truthy) and dropped its saved mode (Sept 29, 2026).
+            # An incubator instance (`:i`) is restored tuition-flagged whatever its row says: never evidence.
             inst = Instance(r["id"], r["family"], int(r["version"] or 0), "real", r["code"], dict(json_or(r["params"], {})),
-                            run_sha=r["run_sha"] or "", band=r["band"] or "", tuition=bool(r["tuition"]),
-                            observe=False, mode=r["mode"] or "live")
+                            run_sha=r["run_sha"] or "", band=r["band"] or "",
+                            tuition=bool(r["tuition"]) or is_incubator(r["id"]), observe=False, mode=r["mode"] or "live")
             if str(r.get("why") or "").startswith(("disqualified:", "the program does not load:", "its decider could not recover")):
                 inst.error, inst.fatal, inst.mode = r["why"], True, "exit_only"
                 self.instances[inst.key] = inst
@@ -703,7 +735,20 @@ class OptionsLive:
         except Exception as exc:  # noqa: BLE001 - the live set stays as it was
             self.alert("warning", f"live: the swarm's bands could not be read ({type(exc).__name__}: {str(exc)[:160]})")
             return
-        observed = self._observe_wanted(now)
+        # THE INCUBATOR (`league/live/incubator.py`), in this order: the first looks at the session's first pass (before
+        # the practice league's completions), then L2' (the passed cohorts it keeps practising), then the practice league,
+        # then the D2 and tuition rows, then its pins (which yield to them).
+        keep: frozenset = frozenset()
+        if self.incubator is not None:
+            today, in_session = ny(now).date().isoformat(), self._in_session(now)
+            try:
+                if in_session and self.incubator.due(today):
+                    self.incubator.judge(today)
+                keep = self.incubator.keep(today, in_session=in_session)
+            except Exception as exc:  # noqa: BLE001 - the practice league goes on with its own rule
+                self.alert("warning", f"live: the incubator's first looks failed ({type(exc).__name__}: {str(exc)[:160]})")
+                keep = frozenset()
+        observed = self._observe_wanted(now, keep=keep)
         equity = self.sizing_equity()
         wanted: dict[str, tuple[dict, str, bool]] = {}
         for row in rows:
@@ -736,6 +781,11 @@ class OptionsLive:
         else:
             for key, row in observed.items():
                 wanted[key] = (row, "shadow", False)
+        if self.incubator is not None:
+            try:
+                self.incubator.wanted(rows, wanted, now)
+            except Exception as exc:  # noqa: BLE001 - no incubator instance this pass: its instances go to exits only
+                self.alert("warning", f"live: the incubator's pins failed ({type(exc).__name__}: {str(exc)[:160]})")
         for key, (row, kind, tuition) in wanted.items():
             if kind == "real":
                 saved = self.state.rows("SELECT why FROM instances WHERE id=?", (key,))
@@ -792,18 +842,25 @@ class OptionsLive:
         return session is not None and session[0] <= local.hour * 60 + local.minute < session[1]
 
     def _observe_repin_due(self, now: float) -> bool:
-        """The session's first sync must pin the observe band at once, not up to `FAMILIES_EVERY` later."""
-        if not self._in_session(now) or not self.switches()["observe"]:
+        """The session's first sync must pin the observe band (and take the incubator's first looks and pins) at once, not
+        up to `FAMILIES_EVERY` later."""
+        if not self._in_session(now):
             return False
-        return (self.state.get("observe_pins", {}) or {}).get("day") != ny(now).date().isoformat()
+        today = ny(now).date().isoformat()
+        if self.incubator is not None and self.incubator.due(today):
+            return True
+        if not self.switches()["observe"]:
+            return False
+        return (self.state.get("observe_pins", {}) or {}).get("day") != today
 
-    def _observe_wanted(self, now: float) -> dict[str, dict] | None:
+    def _observe_wanted(self, now: float, *, keep: Iterable[tuple[str, int]] = frozenset()) -> dict[str, dict] | None:
         """{instance key: row} of the practice league (the module docstring), or None when the band cannot be read (its
         instances then stay as they are). Pins `{day, order, versions, tiers, roots}` in the live state: taken afresh at the
         first session minute of each session day; outside the session the last session's pins stand (their instances
         idle) and no family joins. Cohort snapshots survive research churn; an instance winds down when its cohort
         completes, is Train-tier while `live.observe_train` is off, or was shed; the caps hold the
-        first families pinned (`live.observe_max` instances, `live.observe_roots_max` distinct roots)."""
+        first families pinned (`live.observe_max` instances, `live.observe_roots_max` distinct roots). `keep`: the incubator's
+        L2' cohorts (`Incubator.keep`), not completed at their observation target."""
         sw = self.switches()
         if not sw["observe"]:
             self._observe_status = {"max": 0, "roots_max": 0, "roots_used": 0, "effective_cap": 0, "shed": None}
@@ -821,7 +878,7 @@ class OptionsLive:
         try:
             current = self.observe_store.cohort_candidates(current, day=today, in_session=in_session,
                 min_sessions=int(self.settings["observe_min_sessions"]), min_trades=int(self.settings["observe_min_trades"]),
-                max_sessions=int(self.settings["observe_max_sessions"]))
+                max_sessions=int(self.settings["observe_max_sessions"]), keep=keep)
         except Exception as exc:  # noqa: BLE001 - a cohort must be durable before it can practise
             self.alert("warning", f"live: practice cohorts could not be read ({type(exc).__name__}); keeping current pins")
             return None
@@ -1344,11 +1401,14 @@ class OptionsLive:
         for key, acc in shadow_due.items():
             answer = results.get(key) or {}
             self._isolated(key, lambda: (self._stats(key, answer), self._shadow_intents(key, acc, day, mi - 1, answer.get("intents") or [])))
-        # The families' real intents first, the House live test's last: it takes only what they left.
-        for key, inst in sorted(real_due.items(), key=lambda item: item[1].family == HT.FAMILY):
+        # The D2 families' real intents first (`:r`, `:t`), then the incubator's (`:i`), the House live test's last: each
+        # takes only what those before it left.
+        for key, inst in sorted(real_due.items(), key=lambda item: _rank(item[1])):
             answer = results.get(key) or {}
             self._isolated(key, lambda: (self._stats(key, answer),
                                          self._real_intents(inst, day, mi, answer.get("intents") or [], out)))
+        if self.incubator is not None:
+            self._isolated("incubator", lambda: self.incubator.step(day, mi, out))
         if self.house_test is not None:
             self._house_test(lambda: self.house_test.step(day, mi, out))
         if self.book is not None:
@@ -1531,7 +1591,7 @@ class OptionsLive:
     @staticmethod
     def _entry_identity(inst: Instance) -> dict[str, Any]:
         return {"family": inst.family, "version": inst.version, "code": inst.code, "params": inst.params,
-                "band": inst.band, "tuition": inst.tuition, "observe": inst.observe}
+                "band": inst.band, "tuition": inst.tuition, "observe": inst.observe, "incubator": inst.incubator}
 
     @contextmanager
     def _shadow_admit(self, inst: Instance):
@@ -2320,6 +2380,13 @@ class OptionsLive:
             # pass; the calibration round trips never come this way (`league/live/calibration.py` sends its own).
             self.alert("error", f"live: {inst.key} is not a real instance and asked for a real order: refused")
             return "this instance is not a real one: it never sends a real order"
+        if inst.incubator is not is_incubator(inst.key) or (inst.incubator and (
+                inst.kind != "real" or inst.tuition is not True or self.incubator is None)):
+            # The incubator's belt (release B): a `:i` instance is a real, tuition-flagged one of a House with an
+            # incubator, and its route is its key's alone; anything else is refused, alerted.
+            self.alert("error", f"live: {inst.key} is not a real tuition incubator instance and asked for a real order: "
+                                "refused")
+            return "this incubator instance is not a real tuition one: it never sends a real order"
         today = day.day.isoformat()
         minute = day.open_min + mi + 1
         if "cancel" in intent:
@@ -2390,7 +2457,8 @@ class OptionsLive:
         unit = M.D(round(order.max_loss_share * V.MULTIPLIER + 2 * order.fees, 2))
         # The House live test (`league/live/house_test.py`) has no band and no forward record: its own bounds size it.
         house = getattr(self, "house_test", None) is not None and inst.family == HT.FAMILY
-        evidence = not inst.tuition and not house
+        incubator = inst.incubator
+        evidence = not inst.tuition and not house and not incubator
         family_rows = self.families.forward_rows(inst.family) if evidence else []
         fwd = M.forward_stats(family_rows, self.table.sized_confidence, version=inst.version) if evidence else None
         if fwd is not None and (fwd.negative or (inst.band == "sized" and (not M.sized_ok(self.table, fwd) or fwd.real_bad))):
@@ -2400,6 +2468,9 @@ class OptionsLive:
         exposure = book.exposure(inst.family, day=today, week_start=week_start)
         if house:
             plan = self.house_test.plan(unit=unit, equity=sizing, exposure=exposure, day=day)
+        elif incubator:
+            # One lot within the owner's caps (`money.plan_incubator`), the tally read afresh: never `plan_open`.
+            plan = self.incubator.plan(unit=unit, equity=sizing, exposure=exposure, day=day, family=inst.family)
         else:
             plan = M.plan_open(self.table, band=inst.band, tuition=inst.tuition, equity=sizing, unit=unit, fwd=fwd,
                                exposure=exposure)
@@ -2423,7 +2494,12 @@ class OptionsLive:
             return f"order budget: {int(self.settings['instance_orders_day'])} orders a day (the Gym's)"
         tif = order.tif
         identity = dict(self._entry_identity(inst), forward_rows=family_rows)
-        admit = self.house_test.admit(day.day) if house else self.families.admit_open(identity, real=True)
+        if house:
+            admit = self.house_test.admit(day.day)
+        elif incubator:
+            admit = self.incubator.admit(identity, day.day, unit=unit, equity=sizing, exposure=exposure)
+        else:
+            admit = self.families.admit_open(identity, real=True)
         # A fill's reason is public on the tape: the House live test's orders carry a fixed text, never the program's note.
         why = HT.OPEN_WHY if house else str(intent.get("note") or intent.get("tag") or "")[:200]
         with admit as allowed:
@@ -2482,9 +2558,9 @@ class OptionsLive:
         # max-pid cursor missed; the swarm deduplicates a retried export by its stable trade id.
         rows = self.book.closed_trades(unexported=True)
         for row in rows:
-            # Tuition and the House's own trades (the calibration round trips, the House live test) are never evidence:
-            # marked exported, never sent.
-            if not row["tuition"] and not str(row["family"]).startswith("house:"):
+            # Tuition, the incubator's (`:i`, tuition-flagged too) and the House's own trades (the calibration round trips,
+            # the House live test) are never evidence: marked exported, never sent.
+            if not row["tuition"] and not str(row["family"]).startswith("house:") and not is_incubator(row.get("instance")):
                 try:
                     self.families.add_forward(row["family"], "real", [{**row, "version": _version_of(row.get("instance") or "")}])
                 except Exception as exc:  # noqa: BLE001
@@ -2636,10 +2712,13 @@ class OptionsLive:
             for pos in list(self.book.positions.values()):
                 if pos.qty <= 0 or str(pos.family).startswith("house:"):
                     continue  # the calibration round trips and the House live test are the House's, never an agent's
-                rows.append({"id": f"real:{pos.pid}", "agent": pos.family, "underlying": pos.root, "structure": pos.type,
-                             "legs": len(pos.legs), "expiry": pos.expiry, "quantity": pos.qty, "real": True,
-                             "opened_at": dt.datetime.fromtimestamp(pos.opened_at, dt.timezone.utc).isoformat(),
-                             "max_loss_usd": round(pos.max_loss, 2), "pnl_usd": _pnl(pos, self.day)})
+                row = {"id": f"real:{pos.pid}", "agent": pos.family, "underlying": pos.root, "structure": pos.type,
+                       "legs": len(pos.legs), "expiry": pos.expiry, "quantity": pos.qty, "real": True,
+                       "opened_at": dt.datetime.fromtimestamp(pos.opened_at, dt.timezone.utc).isoformat(),
+                       "max_loss_usd": round(pos.max_loss, 2), "pnl_usd": _pnl(pos, self.day)}
+                if is_incubator(pos.instance):
+                    row["route"] = "incubator"             # real money at tuition size, never evidence (the site labels it)
+                rows.append(row)
         for acc in list(self.shadow.accounts.values()):
             if _is_observe(acc.instance):
                 continue  # the observe band is never on the site: it is not a Candidate's shadow book
@@ -2710,14 +2789,16 @@ class OptionsLive:
                 "paper_proof": self.proof.status() if self.proof is not None else None,
                 "paper_proof_single": self.proof_single.status() if self.proof_single is not None else None,
                 "instances": {k: {"family": i.family, "kind": i.kind, "band": i.band, "mode": i.mode, "error": i.error or None,
-                                  "tuition": i.tuition, "observe": i.observe} for k, i in self.instances.items()},
+                                  "tuition": i.tuition, "observe": i.observe, "incubator": i.incubator}
+                              for k, i in self.instances.items()},
                 # Read from the House's thread: the live state (its own lock) and the last minute's switches only; the
                 # calibration's samples file belongs to the minute thread (`python -m league.live --calibration` reads it).
                 "observe": {"switches": dict(self._switches or {}), "pins": self.state.get("observe_pins"),
                             **dict(self._observe_status or {})},
                 "budget_spent": dict(self.budget_spent),
                 "calibration": self.calibration.status() if self.calibration is not None else None,
-                "house_test": self.house_test.status() if self.house_test is not None else None}
+                "house_test": self.house_test.status() if self.house_test is not None else None,
+                "incubator": self.incubator.status() if self.incubator is not None else None}
 
 
 def _new_york_day(value: Any) -> str | None:
@@ -2736,6 +2817,12 @@ def _row_roots(row: Mapping[str, Any] | None) -> list[str]:
     """The roots a practice row's program reads (its NEEDS roots, else the family's)."""
     roots = (row or {}).get("needs_roots") or (row or {}).get("roots") or []
     return sorted({str(r).upper() for r in roots if str(r).strip()})
+
+
+def _rank(inst: Instance) -> int:
+    """A real instance's place in the minute's order: the D2 families (`:r`, `:t`) 0, the incubator (`:i`) 1, the House
+    live test 2 (its pre-registration: it yields to family orders)."""
+    return 2 if inst.family == HT.FAMILY else 1 if inst.incubator else 0
 
 
 def _is_observe(instance: str) -> bool:

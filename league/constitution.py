@@ -718,6 +718,23 @@ CONSTITUTION: dict[str, Any] = {
     #   loss plus what is held or working plus the new open at most `envelope_usd` at every open; no new open ever again
     #   once its realized loss reaches `stop_usd`; new opens only through its `sessions`th session and while its round
     #   trips are under `round_trips`. D2 and every promotion rule are unchanged.
+    # - `incubator`: THE INCUBATOR (`league/live/incubator.py`), a new shadow-to-real route. The owner approved it on
+    #   Sept 29, 2026, 14:51:12Z ("Yes, open the incubator"), and the reading was settled on Sept 30, about 14:35-14:45Z:
+    #   families that pass Train, pass the drift screen alone and show positive live practice (the gate's review and
+    #   audit still required) trade ONE lot of any approved real structure, at most `max_loss_usd` of maximum loss each
+    #   (with its open and close fees), at most `max_open` held or working at once, and the route stops for the ISO week
+    #   once its net realized loss reaches `week_loss_usd`: held as an envelope (this week's net realized loss, plus what
+    #   is held, plus what is working, plus the new open, at most `week_loss_usd` at every open), so the weekly figure is
+    #   a true bound apart from residuals (broker fees above the book's estimate, a broken structure closed leg by leg).
+    #   `contracts` is the one lot. Positive live practice is pre-registered: one first look per practice cohort, at the
+    #   first session pin with at least `min_sessions` completed sessions and `min_trades` program-closed practice
+    #   trades under the current evaluator, passing only with decision coverage at least `min_coverage` and realized
+    #   practice P&L above $0 over program closes, over all closes, and over all closes plus the open mark; a failed
+    #   first look is final. Incubator orders are real P&L (Profit) and NEVER strategy evidence: never a forward row,
+    #   never a band move, never a promotion. D2 is the only route to Probe and Sized. Expected value is negative until
+    #   a family has a real edge: at most about $650 a month on average ($750 in a five-week month) plus residuals.
+    #   Setting `max_open`, `week_loss_usd` or `max_loss_usd` to 0 stops the route (a tightening: a new digest and a
+    #   ratification).
     #
     # THE SPRINT (docs/goals/LTCM_SWARM_SPRINT.md, Sept 26, 2026; the owner's decisions D1, D3 and D4, all "yes"): the
     # table at the bold end of the plan's ranges -- Probe 5% a structure with a $100 one-contract floor, the family 15%,
@@ -741,6 +758,8 @@ CONSTITUTION: dict[str, Any] = {
         "calibration": {"day_usd": "50"},
         "house_test": {"structure_usd": "100", "open": 3, "envelope_usd": "300", "stop_usd": "150", "sessions": 20,
                        "round_trips": 30},
+        "incubator": {"max_loss_usd": "50", "contracts": 1, "max_open": 4, "week_loss_usd": "150",
+                      "min_sessions": 3, "min_trades": 10, "min_coverage": "0.80"},
         "order_path": {"max_orders_day": 250, "max_requests_minute": 150, "bp_buffer": "0.10",
                        "near_money_share": "0.01", "expiry_close_lead_minutes": 10},
         "gateway": {"order_max_loss_usd": "1000", "order_equity_share": "0.25", "day_equity_share": "1.0",
@@ -809,6 +828,16 @@ OPTIONS_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     "house_test.stop_usd": ("0", "150"),
     "house_test.sessions": ("0", "20"),
     "house_test.round_trips": ("0", "30"),
+    # The incubator (the owner, Sept 29, 2026; the reading of Sept 30; `league/live/incubator.py`): the owner's terms are
+    # the loose end of each range, so a row may only tighten (0 stops the route); loosening one is the owner's. The
+    # practice rule's floors are the pre-registered 3 sessions, 10 program closes and 0.80 coverage.
+    "incubator.max_loss_usd": ("0", "50"),
+    "incubator.contracts": ("1", "1"),
+    "incubator.max_open": ("0", "4"),
+    "incubator.week_loss_usd": ("0", "150"),
+    "incubator.min_sessions": ("3", "60"),
+    "incubator.min_trades": ("10", "1000"),
+    "incubator.min_coverage": ("0.80", "1.0"),
     "credit_min_equity_usd": ("2000", "2000"),
     "order_path.max_orders_day": ("1", "250"),
     "order_path.max_requests_minute": ("1", "150"),
@@ -834,7 +863,8 @@ OPTIONS_CREDIT_TYPES = ("credit_vertical", "iron_condor", "iron_butterfly")
 #: Rows read as whole counts.
 _OPTIONS_COUNTS = ("probe.open_per_family", "sized.min_trades", "sized.min_probe_real_trades", "sized.min_probe_sessions", "order_path.max_orders_day", "order_path.max_requests_minute",
                    "order_path.expiry_close_lead_minutes", "gateway.max_day_orders", "gateway.max_day_open_orders",
-                   "house_test.open", "house_test.sessions", "house_test.round_trips")
+                   "house_test.open", "house_test.sessions", "house_test.round_trips", "incubator.contracts",
+                   "incubator.max_open", "incubator.min_sessions", "incubator.min_trades")
 
 
 def options_money_problems(constitution: dict[str, Any] | None = None) -> list[str]:
@@ -897,4 +927,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = 'fcf8d735734d7f3512d684fb68ed4002b4f494c74a65e22bc7f9fcb877a8d60e'
+PINNED_DIGEST = '595228a68a0a0e146901ba08185dfa7b39bcb2952a2abc1ae0cf16f19193d102'

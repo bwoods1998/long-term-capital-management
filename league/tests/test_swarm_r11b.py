@@ -214,6 +214,7 @@ class ExploitPool(RoundCase):
             self.store.update_family(fid, validations=3)
             self.store.set_state(fid, validation_numbers={"mean": mean, "t": 1.0 if mean > 0 else -1.0})
         self.family("new")
+        self.settings["allocation"] = {"mode": "bandit"}  # R11-5's bandit (Release B's default is the value allocation)
         t = Tournament(self.store, self.pool, self.settings, rng=random.Random(5))
         self.assertAlmostEqual(t.allocate(self.store.families(alive=True))["pos"], 0.15)
         self.settings["tournament"]["exploit_per_positive"] = None
