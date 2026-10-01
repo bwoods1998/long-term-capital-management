@@ -1057,7 +1057,11 @@ never evidence.
   owes a bar is refused too (`incubator-bars-owed.json` beside the swarm store, written only when the store errs; if it
   cannot be read, every incubator row is refused until the gate writes it again). The swarm start backfills bars from
   release B's gate events (log line `incubator backfill: N programs barred`), and an evaluator adoption records every
-  failure it would clear before it clears it.
+  failure it would clear before it clears it. The swarm reads the belt's own rules in every other family holding the
+  program before it marks a version or pays for an incubator review (`incubator.program_bar`, Release B'), so it never
+  pays to review a program the belt would refuse. Another family's gate review that passed with its audit still owed
+  holds the program off until that audit lands, and for good if that family retired. This is not a verdict: nothing is
+  recorded and no passed review is revoked.
 
   An unreadable store refuses: no pin and no open, while exits go on. B2 (#444, in Release B) writes the
   Train-and-drift pass and the incubator's reviews.
@@ -1177,10 +1181,18 @@ completes, fails or reaches its session window.
   began before it.
 - **At most `tournament.incubator_keep_max` (12) families;** 0, null, a boolean or a string turns it off. Those that
   meet the sample come first, by return on risk.
+- **The incubator's cohorts come first and are never cut by the cap** (Release B', `tournament.incubator_held`). These
+  are cohorts that met the sample with a record that is not negative, and whose program the swarm's own incubator
+  facts admit (`bands.incubator`, the reader the House pins by). Every cohort the House can pin (L2', at most 8) is one
+  of them. The swarm never reads the House's live state, so it cannot see which ones were pinned and holds them all
+  (at most 96). So the keep never holds fewer families than the House can have pinned, and a pinned family is never
+  retired because a cohort with a higher return took its place. If the facts cannot be read, every cohort past the
+  sample is held for that read. The saved keep (`cohort_keep`) lists them under `held`, and a fresh process whose
+  first read fails keeps those families first, beyond the cap.
 - **What it never spares:** the deflated-Sharpe rule, the researcher's or the diagnostician's own retire, the
   population floor, and the operator's gate hold.
-- **Its record:** one private `swarm.status` event a round (`incubator_keep`), with each kept family and the rule it was
-  spared.
+- **Its record:** one private `swarm.status` event a round (`incubator_keep`), with each kept family, the rule it was
+  spared, and `held`, the incubator's cohorts' families, when there are any.
 - **The researcher's status line.** The keep is saved (`cohort_keep` in the swarm's kv), so a kept family's researcher
   is told that idleness is no reason to retire it. The retire tool stays offered.
 - **An unreadable record.** When `observe.sqlite` or the swarm's families cannot be read, the last good keep stands for
@@ -1447,7 +1459,7 @@ the swarm's loop for up to the meters' 20 s timeouts, at most once every 5 minut
 | `gym.start_boxes`, `max_boxes`, `train_from`, `image_checkpoint`, `gate_checkpoint` | `swarm.json` on the box | 2, 6 (since Release A, Sept 30; 4 from 16:07Z), "2020-01-02", the sealed 2020-24 image, its gate partner | the Gym pool, Train's first day and the images (defaults 4, 8, unset, none, none: the gate is off without a gate image). `train_from` takes "2022-01-03", "2020-01-02" or (since R11a) "2017-01-03"; the derived split and time limit are 8 and 900 s, 16 and 1500 s, 24 and 2400 s | edit `swarm.json`; `train_from` and a new image together |
 | `researcher.sail_usd_per_hour`, `usd_per_hour`, `top_families` | `swarm.json` on the box | 1.3 (since 02:47Z Oct 1; 1.1 from 16:41Z Sept 30; 12 before), 5 (not read while the Sail pace is set), 0 | the researcher pace (below) and the bandit's top band (defaults null, 4.0, 10) | edit `swarm.json` |
 | `researcher.retire_idle_evaluations`, `dormant_cycles`; `tournament.retire_revisions`, `retire_evaluations` | `swarm.json` on the box | 500, 12; 200, 4000 | the idle rule and its dormancy clause; the tournament's retirement (defaults 150, 40; 30, 2000) | edit `swarm.json` |
-| `tournament.incubator_keep_max` | `swarm.json` on the box | default 12 (Release B, L1) | the most families the cohort keep spares from the revision, evaluation and idle rules (at most 96); 0, null, a boolean or a string turns it off | edit `swarm.json` |
+| `tournament.incubator_keep_max` | `swarm.json` on the box | default 12 (Release B, L1) | the most families the cohort keep spares from the revision, evaluation and idle rules (at most 96), beside the incubator's cohorts, which it never cuts (Release B'); 0, null, a boolean or a string turns it off | edit `swarm.json` |
 | `guard.burst_cap_usd`, `burst_until` | `swarm.json` on the box | $900, 2026-10-05 | the swarm's Sail spend for the research burst (the owner's 24/7 research, Sept 27); the $32 line is unchanged (defaults $350 until Monday Sept 28's open) | edit `swarm.json` |
 | `diagnostician.enabled`, `usd_day`, `per_round`, `family_hours`, `min_validations`, `near_miss_checks` | `swarm.json` on the box | false (since 16:41Z Sept 30), $60, 6, 3, 2, 5 | the diagnostician on or off; its Claude spend a day, families a round, how often a family, who is eligible (defaults true, $15, 2, 6, 2, 6) | edit `swarm.json` |
 | `researcher.stall_revisions`, `rewrites_per_day` | `swarm.json` on the box | 10000 (since 16:41Z Sept 30: stall rewrites off; 12 before), 1 | the stall that buys a researcher one rewrite from a stronger model, and at most how many a family a day (defaults 5, 4) | edit `swarm.json` |

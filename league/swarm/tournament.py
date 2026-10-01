@@ -62,16 +62,23 @@
    would pass. Once it meets the sample it is kept only while that record is not negative (program-closed P&L at least
    0, and all closes at least 0). A cohort the House has not practised on `KEEP_UNPRACTICED` (2) sessions while it
    practises others, or whose practice row began before it (the incubator never looks at it), is not kept. At most
-   `tournament.incubator_keep_max` (12; 0 turns it off) families: first those that meet the sample (by return on risk,
-   highest first), then those whose record so far is not negative, then the rest, each by the practice league's own
-   order (`bands.priority`). It never spares a family from the deflated-Sharpe rule, its researcher's or the
-   diagnostician's own retire, the population floor or the operator's gate hold. Research attention only: no trial
-   count, look, validation, gate, band or money rule reads it. The keep is saved at each read (`practice.KEEP_KV`), so a
-   kept family's researcher is not urged to retire it for being idle (the retire tool stays offered). A record that
-   cannot be read leaves the last good keep standing for `KEEP_STALE_SECONDS` (an hour), then none; a FRESH PROCESS (a
-   deploy, a restart, the induced-failure kill: its idle pass runs at once) whose first read fails takes the keep the
-   last process saved for the rest of that hour and does not overwrite it before then. The round records
-   the kept families and what each was spared in one private `swarm.status` event (`incubator_keep`).
+   `tournament.incubator_keep_max` (12; 0 turns it off) families: first THE INCUBATOR'S COHORTS (`incubator_held`: the
+   sample met, a record not negative, and the swarm's own incubator facts admitting the cohort's program, so every
+   cohort the House's incubator can pin from its L2' keep is one of them), then the rest that meet the
+   sample (each group by return on risk, highest first), then those whose record so far is not negative, then the
+   rest, each by the practice league's own order (`bands.priority`). The incubator's cohorts are never cut by the cap
+   (at most `KEEP_CEILING`), so the keep never holds fewer families than the House can have pinned, and a pinned
+   family (retired, its incubation would go to exits only) is never dropped for a higher return. The swarm never reads
+   the House's live state, so it holds every cohort that could be pinned. It never spares a family from the
+   deflated-Sharpe rule, its researcher's or the diagnostician's own retire, the population floor or the operator's
+   gate hold. Research attention only: no trial count, look, validation, gate, band or money rule reads it. The keep
+   is saved at each read (`practice.KEEP_KV`, the incubator's cohorts' families too), so a kept family's researcher is
+   not urged to retire it for being idle (the retire tool stays offered). A record that cannot be read leaves the last
+   good keep standing for `KEEP_STALE_SECONDS` (an hour), then none; a FRESH PROCESS (a deploy, a restart, the
+   induced-failure kill: its idle pass runs at once) whose first read fails takes the keep the last process saved for
+   the rest of that hour (the incubator's cohorts' families first, never cut by the cap) and does not overwrite it
+   before then. The round records the kept families and what each was spared in one private `swarm.status` event
+   (`incubator_keep`).
 6. THE LEADERBOARD: one `swarm.tournament` event (the House mirrors it to its ledger) with every family's
    rank, share, validation summary, trials and band, and the totals. Its order (`board_rank`): Candidates and beyond,
    then families at the gate or with a look out, then by share, so the architect's and the strategist's first 60 rows
@@ -120,17 +127,67 @@ KEEP_UNPRACTICED = 2
 KEEP_STALE_SECONDS = 3600.0
 
 
+def _sample_met(r: Mapping[str, Any]) -> bool:
+    """A cohort row (`practice.cohort_status`) that met the incubator's sample before today."""
+    return (r.get("sessions") is not None and int(r["sessions"]) >= KEEP_SAMPLE_SESSIONS
+            and int(r["closes_program"]) >= KEEP_SAMPLE_TRADES)
+
+
+def _negative(r: Mapping[str, Any]) -> bool:
+    """A cohort row whose program-closed or all-closes P&L before today is below zero, to the cent."""
+    return round(float(r["pnl_program"]), 2) < 0 or round(float(r["pnl_all"]), 2) < 0
+
+
+def incubator_held(root: Any, rows: list[Mapping[str, Any]],
+                   alive: Mapping[str, Any] | set[str] | frozenset[str]) -> frozenset[tuple[str, int]]:
+    """THE INCUBATOR'S COHORTS in THE COHORT KEEP (L1 beside the House's L2' keep and pins, `league/live/incubator.py`):
+    the (family, version) of the active cohorts `rows` whose family is in `alive` that the House's incubator can pin, as
+    far as the swarm can see. Each met the incubator's sample with a record before today that is not negative,
+    and the swarm's own incubator facts admit its program (`bands.incubator`, the very reader the House pins by,
+    read-only: alive, Gym band, a current Train-and-drift mark, a passed review and audit, no bar), with the row's run
+    sha the cohort's. Every cohort the House pins is one of these: a pin needs a first look that passed on that sample,
+    a re-check that still passes (program and all closes above $0 before today), and those facts with the snapshot's
+    run sha. The swarm never reads the House's live state (its first-look verdicts and pins sit beside its real book),
+    so it cannot tell which of these were pinned; it holds them all. A cohort whose facts cannot be read is held (fail
+    open for keeping a cohort, as the House's L2' keep: research attention only). Never raises."""
+    if root is None:
+        return frozenset()
+    from .bands import incubator as facts_of
+
+    held: set[tuple[str, int]] = set()
+    for r in rows:
+        try:
+            if r["family"] not in alive or not _sample_met(r) or _negative(r):
+                continue
+            key = (str(r["family"]), int(r["version"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        try:
+            facts = facts_of(root, family=key[0], version=key[1])
+        except Exception:  # noqa: BLE001 - the swarm store unreadable for a moment: kept, never retired on it
+            held.add(key)
+            continue
+        if r.get("run_sha") and any(isinstance(f, Mapping) and f.get("run_sha") == r.get("run_sha") for f in facts):
+            held.add(key)
+    return frozenset(held)
+
+
 def keep_order(rows: list[Mapping[str, Any]], alive: Mapping[str, Any] | set[str] | frozenset[str],
-               cap: int) -> list[dict[str, Any]]:
+               cap: int, *,
+               held: set[tuple[str, int]] | frozenset[tuple[str, int]] = frozenset()) -> list[dict[str, Any]]:
     """THE COHORT KEEP's choice (pure): of the active cohorts `rows` (`practice.cohort_status`, each record before today),
     each one whose family is in `alive` (the living Gym families), whose session window has not run out (`elapsed <
     window`), that the House is practising (`unpracticed < KEEP_UNPRACTICED`, unless it practises no active cohort at
     all: an outage) and that the incubator can look at
     (`sessions` known), and that either has not met the incubator's sample (`KEEP_SAMPLE_SESSIONS` completed sessions and
     `KEEP_SAMPLE_TRADES` program closes) or has a record that is not negative (`pnl_program >= 0` and `pnl_all >= 0`, to
-    the cent). Ordered: the sample met, by return on risk, highest first; then the rest whose record so far is not
-    negative; then the rest; each then by the practice league's order (`bands.priority`), then by version. One row a
-    family (its first), at most `cap`; each row gains `sample` and `negative`."""
+    the cent). Ordered: THE INCUBATOR'S COHORTS (`held`, (family, version) from `incubator_held`: the sample met), by
+    return on risk, highest first; then the rest that met the sample, the same way; then the rest whose record so far
+    is not negative; then the rest; each then by the practice league's order (`bands.priority`), then by version. One
+    row a family (its first), at most `cap`, except that the incubator's cohorts are never cut by the cap (at most
+    `KEEP_CEILING`), so the keep never holds fewer families than the House's incubator can have pinned and a pinned
+    family is never dropped for a higher return; `cap` 0 or below keeps none. Each row gains `sample`, `negative` and
+    `held`."""
     from .bands import priority
 
     # The House practising no active cohort at all (down, or `live.observe` off) is an outage, not a cohort left out: the
@@ -142,17 +199,21 @@ def keep_order(rows: list[Mapping[str, Any]], alive: Mapping[str, Any] | set[str
             continue
         if int(r["elapsed"]) >= int(r["window"]) or (practising and int(r.get("unpracticed") or 0) >= KEEP_UNPRACTICED):
             continue
-        negative = round(float(r["pnl_program"]), 2) < 0 or round(float(r["pnl_all"]), 2) < 0
-        sample = int(r["sessions"]) >= KEEP_SAMPLE_SESSIONS and int(r["closes_program"]) >= KEEP_SAMPLE_TRADES
+        negative = _negative(r)
+        sample = _sample_met(r)
         if sample and negative:
             continue
+        mine = sample and (str(r["family"]), int(r["version"])) in held
         ror = r.get("return_on_risk") if sample else None
-        head = (0, ror is None, -float(ror or 0.0)) if sample else (1 + int(negative), False, 0.0)
-        ranked.append((head + tuple(priority(r)) + (int(r["version"]),), {**dict(r), "sample": sample, "negative": negative}))
+        head = (int(not mine), ror is None, -float(ror or 0.0)) if sample else (2 + int(negative), False, 0.0)
+        ranked.append((head + tuple(priority(r)) + (int(r["version"]),),
+                       {**dict(r), "sample": sample, "negative": negative, "held": mine}))
     ranked.sort(key=lambda x: x[0])
+    cap = max(0, int(cap))
     out: list[dict[str, Any]] = []
     for _, row in ranked:
-        if len(out) >= max(0, int(cap)):
+        # The incubator's cohorts come first, so the cap cuts only the rest.
+        if cap == 0 or len(out) >= (max(cap, KEEP_CEILING) if row["held"] else cap):
             break
         if all(row["family"] != o["family"] for o in out):
             out.append(row)
@@ -547,8 +608,9 @@ class Tournament:
 
     def incubator_keep(self) -> frozenset[str]:
         """THE COHORT KEEP (L1, the module docstring): the living Gym families the revision, evaluation and idle rules
-        spare now (`keep_order` over `practice.cohort_status`, at most `keep_max`). Reads the practice record read-only and
-        saves what it keeps (`practice.KEEP_KV`, for the researchers' status); never raises. When the practice record or
+        spare now (`keep_order` over `practice.cohort_status`, at most `keep_max` beside the incubator's cohorts,
+        `incubator_held`). Reads the practice record and the swarm's incubator facts read-only and saves what it keeps
+        (`practice.KEEP_KV`, for the researchers' status); never raises. When the practice record or
         the swarm's families cannot be read, the last good keep stands for `KEEP_STALE_SECONDS`, then none does. A fresh
         process (no read of its own yet: a deploy, a restart, the induced-failure kill) whose read fails takes the keep the
         last process saved (`_saved_keep`) as that last good keep, from the time it was read, so its first idle pass does
@@ -568,7 +630,8 @@ class Tournament:
         else:
             try:
                 alive = {f["id"] for f in self.store.families(alive=True) if f.get("band") == "gym"} if rows else set()
-                chosen = keep_order(rows, alive, cap)
+                held = incubator_held(getattr(self.store, "root", None), rows, alive) if rows else frozenset()
+                chosen = keep_order(rows, alive, cap, held=held)
             except Exception as exc:  # noqa: BLE001
                 error = f"the swarm's families could not be read or ordered ({type(exc).__name__})"
         if chosen is None:
@@ -593,8 +656,10 @@ class Tournament:
         read, its families as rows), or None when there is none, it keeps no family, it was read more than
         `KEEP_STALE_SECONDS` ago (or in the future), or it cannot be read. Only a good read saves a family (a failed or off
         read saves none), so its time is the last good read's. Its rows carry the family and version only (`sample`,
-        `negative`, `sessions` and `closes_program` None: this process has not read the record). At most `cap` (a cap
-        lowered since): the store keeps no order, so the first by name. Never raises."""
+        `negative`, `sessions` and `closes_program` None: this process has not read the record; `held` True for a
+        family the saved keep names among the incubator's cohorts, its `held`). The incubator's cohorts' families
+        first (at most `KEEP_CEILING`, never cut by the cap, as `keep_order`), then at most `cap` in all (a cap lowered
+        since): the store keeps no order, so each by name. Never raises."""
         try:
             value = self.store.get(practice.KEEP_KV)
             if not isinstance(value, Mapping):
@@ -604,28 +669,38 @@ class Tournament:
                 return None
             if not isinstance(families, Mapping):
                 return None
+            named = value.get("held")
+            named = {f for f in named if isinstance(f, str)} if isinstance(named, list) else set()
             rows = [{"family": fid, "version": version, "sample": None, "negative": None, "sessions": None,
-                     "closes_program": None}
+                     "closes_program": None, "held": fid in named}
                     for fid, version in sorted(families.items())
-                    if isinstance(fid, str) and isinstance(version, int) and not isinstance(version, bool)][:max(0, cap)]
+                    if isinstance(fid, str) and isinstance(version, int) and not isinstance(version, bool)]
+            held = [r for r in rows if r["held"]][:KEEP_CEILING]
+            rows = held + [r for r in rows if not r["held"]][:max(0, cap - len(held))]
         except Exception:  # noqa: BLE001 - a retirement pass never fails on the keep
             return None
         return (float(at), rows) if rows else None
 
     def _keep_set(self, now: float, chosen: list[dict[str, Any]], read: str) -> None:
-        """The keep in memory, and saved for the researchers (`practice.KEEP_KV`; a store error only loses the save)."""
+        """The keep in memory, and saved for the researchers (`practice.KEEP_KV`; a store error only loses the save),
+        with the incubator's cohorts' families (`held`) when there are any."""
         self.kept, self.kept_rows, self.keep_read = frozenset(r["family"] for r in chosen), list(chosen), read
+        value: dict[str, Any] = {"at": now, "families": {r["family"]: int(r["version"]) for r in chosen}}
+        held = sorted(r["family"] for r in chosen if r.get("held"))
+        if held:
+            value["held"] = held
         try:
-            self.store.put(practice.KEEP_KV, {"at": now, "families": {r["family"]: int(r["version"]) for r in chosen}})
+            self.store.put(practice.KEEP_KV, value)
         except Exception:  # noqa: BLE001 - the researchers' status line is a courtesy; the keep itself stands
             pass
 
     def keep_event(self) -> dict[str, Any] | None:
         """The round's one private `swarm.status` event of THE COHORT KEEP (action `incubator_keep`): the kept families in
         order (version, whether the sample is met, whether the record so far is negative, completed sessions, program
-        closes before today), the rule each family it spared since the last event would have retired it by (`spared`),
-        the cap, how the record read and, when it did not, why (`error`). None when the keep is off, or keeps and spares
-        nothing and read well. An unreadable record alerts once until it reads again."""
+        closes before today), the incubator's cohorts' families among them (`held`, when there are any), the rule each
+        family it spared since the last event would have retired it by (`spared`), the cap, how the record read and,
+        when it did not, why (`error`). None when the keep is off, or keeps and spares nothing and read well. An
+        unreadable record alerts once until it reads again."""
         spared, self.keep_spared = dict(sorted(self.keep_spared.items())), {}
         if self.keep_read == "ok":
             self._keep_told = False
@@ -638,6 +713,9 @@ class Tournament:
                       "sessions": r["sessions"], "closes": r["closes_program"]}
                      for r in self.kept_rows if r["family"] in alive],
             "spared": spared}
+        held = [r["family"] for r in self.kept_rows if r.get("held") and r["family"] in alive]
+        if held:
+            payload["held"] = held
         if self.keep_read != "ok" and self.keep_error:
             payload["error"] = self.keep_error
         if self.keep_read == "failed" and not self._keep_told:
@@ -818,5 +896,5 @@ def json_safe(value: Any) -> str:
         return str(value)[:400]
 
 
-__all__ = ["Tournament", "IDLE_CAUSE", "keep_order", "KEEP_MAX", "KEEP_CEILING", "KEEP_SAMPLE_SESSIONS", "KEEP_SAMPLE_TRADES",
-           "KEEP_UNPRACTICED", "KEEP_STALE_SECONDS"]
+__all__ = ["Tournament", "IDLE_CAUSE", "keep_order", "incubator_held", "KEEP_MAX", "KEEP_CEILING", "KEEP_SAMPLE_SESSIONS",
+           "KEEP_SAMPLE_TRADES", "KEEP_UNPRACTICED", "KEEP_STALE_SECONDS"]

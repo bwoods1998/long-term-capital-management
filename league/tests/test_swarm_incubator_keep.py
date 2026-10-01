@@ -14,6 +14,7 @@ import datetime as dt
 import importlib.util
 import os
 import random
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -21,13 +22,13 @@ from unittest import mock
 from zoneinfo import ZoneInfo
 
 from league.live.observe import ObserveStore
-from league.swarm import practice
+from league.swarm import bands, practice
 from league.swarm import settings as S
 from league.swarm.hook import PUBLIC_KINDS
 from league.swarm.researcher import idle_limit
 from league.swarm.store import SwarmStore
 from league.swarm.tournament import (KEEP_MAX, KEEP_SAMPLE_SESSIONS, KEEP_SAMPLE_TRADES, KEEP_STALE_SECONDS,
-                                    KEEP_UNPRACTICED, Tournament, keep_order)
+                                    KEEP_UNPRACTICED, Tournament, incubator_held, keep_order)
 from league.tests.swarm_fakes import Clock
 from league.tests.test_swarm_researcher import ResearcherCase
 from league.tests.test_swarm_rounds import FakeGymPool
@@ -81,12 +82,13 @@ class KeepCase(unittest.TestCase):
         self.store.update_family(fid, since_val_trials=idle_limit(self.settings), trials=idle_limit(self.settings))
 
     def cohort(self, fid: str, *, version: int = 1, day: str = FIRST, tier: str = "train", best_train: float | None = 1.0,
-               validation_t: float | None = None, dte: int = 3, practised: bool = True) -> dict:
+               validation_t: float | None = None, dte: int = 3, practised: bool = True, run_sha: str | None = None) -> dict:
         """A cohort frozen on `day`, practised by the House on each session from Oct 1 to Oct 5 unless `practised` is
-        False."""
+        False. Its snapshot's program is `run_sha` (default: one no version of the swarm's holds)."""
         snap = self.ledger.freeze({"family": fid, "version": version, "observe": True, "band": "gym", "tier": tier,
                                    "code": CODE.replace("[0, 3]", f"[0, {dte}]"), "params": {"hold": 3},
-                                   "structure": "debit_vertical", "roots": ["SPY"], "run_sha": f"sha-{fid}-{version}",
+                                   "structure": "debit_vertical", "roots": ["SPY"],
+                                   "run_sha": run_sha or f"sha-{fid}-{version}",
                                    "best_train": best_train, "validation_t": validation_t}, day=day)
         if practised:
             self.practised(fid, version=version)
@@ -439,6 +441,136 @@ class Cap(KeepCase):
         self.assertEqual((t.keep_read, t.keep_event()), ("off", None))
         self.assertEqual(self.store.get(practice.KEEP_KV)["families"], {}, "the researchers see no keep")
         self.assertEqual([r["family"] for r in t.retirements(self.store.families(alive=True))], ["a"], "main's rules")
+
+
+class IncubatorsCohorts(KeepCase):
+    """The final integrated check of release B (swarm nit 2): the L1 keep did not know which cohorts the House's
+    incubator pinned (L2', at most `MAX_PINS`), so on a day with more than `incubator_keep_max` cohorts past the sample a
+    pinned family with a lower return on risk left the keep for a round, was retired by the revision rule, and its
+    incubation went to exits only. The swarm never reads the House's live state; it holds every cohort the incubator can
+    pin (`incubator_held`: the sample met, a record not negative, and the swarm's own facts admitting the program), first
+    and never cut by the cap."""
+
+    EVALUATOR = {"image": "img-b", "bundle": "bundle-b", "execution": "exec-b"}
+    OBJECTIVE = "worst-train-year-v1"
+
+    def incubated(self, fid: str, total: float | None, *, version: int = 1, practises: str | None = None) -> str:
+        """The swarm's incubator facts admit `fid`'s program (B2's mark under the current evaluator and Train objective,
+        the gate's passed review and audit), and its cohort met the sample with `total` (None: not yet): one the House
+        can pin. The cohort practises `practises` (default: that program). Returns the program's run sha."""
+        from league.gym.review_contract import review_contract
+        from league.swarm.gate import run_sha
+
+        self.store.put("research_evaluator", self.EVALUATOR)
+        self.store.put("train_objective", self.OBJECTIVE)
+        sha = run_sha(self.store.version(fid, version))
+        contract = review_contract()["sha256"]
+        self.store.set_state(fid, train_passed={str(version): {
+            "evaluator": self.EVALUATOR, "objective": self.OBJECTIVE, "run": "r", "robust_pnl": 5.0,
+            "drift": {"t": 1.0, "positive": 4, "years": 5}, "at": 1.0}}, review={
+            "sha": sha, "version": version, "verdict": "pass", "contract_sha": contract,
+            "audit": {"verdict": "pass", "contract_sha": contract}})
+        self.cohort(fid, version=version, run_sha=practises or sha)
+        if total is not None:
+            self.sampled(fid, total, version=version)
+        self.assertEqual(len(bands.incubator(self.root, family=fid, version=version)), 1, "the reader the House pins by")
+        return sha
+
+    def test_a_pinned_family_is_never_dropped_for_a_higher_return_and_the_cap_never_holds_fewer(self):
+        self.family("pinned")
+        self.incubated("pinned", 5.0)                           # return on risk 0.01
+        for fid, total in (("high", 30.0), ("higher", 40.0)):   # more return, nothing the incubator can pin
+            self.family(fid)
+            self.cohort(fid)
+            self.sampled(fid, total)
+        self.settings["tournament"]["incubator_keep_max"] = 1
+        t = self.tournament()
+        self.assertEqual(t.incubator_keep(), frozenset({"pinned"}), "before both higher returns")
+        self.assertEqual([(r["family"], r["sample"], r["held"]) for r in t.kept_rows], [("pinned", True, True)])
+        self.family("second")                                   # a second cohort the incubator can pin, the cap still 1
+        self.incubated("second", 4.0)
+        self.assertEqual(t.incubator_keep(), frozenset({"pinned", "second"}), "the cap is never below them")
+        self.assertEqual([r["family"] for r in t.kept_rows], ["pinned", "second"], "by return on risk")
+        self.settings["tournament"]["incubator_keep_max"] = 3
+        t.incubator_keep()
+        self.assertEqual([r["family"] for r in t.kept_rows], ["pinned", "second", "higher"],
+                         "then the rest that met the sample, by return on risk")
+        self.settings["tournament"]["incubator_keep_max"] = 1
+        t.incubator_keep()
+        for fid in self.alive():
+            self.store.update_family(fid, since_val_revisions=int(self.settings["tournament"]["retire_revisions"]))
+        out = t.retirements(self.store.families(alive=True))
+        self.assertEqual(sorted(r["family"] for r in out), ["high", "higher"])
+        self.assertEqual(self.alive(), ["pinned", "second"], "never retired mid-incubation for a higher return")
+        self.assertEqual(t.keep_spared, {"pinned": "revisions", "second": "revisions"})
+        self.assertEqual(t.keep_event()["held"], ["pinned", "second"])
+        self.assertEqual(self.store.get(practice.KEEP_KV)["held"], ["pinned", "second"])
+        self.settings["tournament"]["incubator_keep_max"] = 0
+        self.assertEqual(self.tournament().incubator_keep(), frozenset(), "0 still turns the keep off")
+
+    def test_only_a_cohort_whose_program_the_swarms_facts_admit_comes_first(self):
+        self.family("held")
+        self.incubated("held", 5.0)
+        self.family("other-program")                            # facts for its version; its cohort practises another
+        self.incubated("other-program", 6.0, practises="another program")
+        self.family("barred")                                   # facts, then a bar on its program
+        sha = self.incubated("barred", 7.0)
+        self.store.set_state("barred", incubator_barred={sha: {"why": "the gate's audit failed it"}})
+        self.family("early")                                    # facts, the sample not met yet
+        self.incubated("early", None)
+        self.family("plain")                                    # no facts, the highest return
+        self.cohort("plain")
+        self.sampled("plain", 50.0)
+        rows = practice.cohort_status(self.root, today="2026-10-06")
+        alive = set(self.alive())
+        held = incubator_held(self.root, rows, alive)
+        self.assertEqual(held, frozenset({("held", 1)}))
+        self.assertEqual([(r["family"], r["held"]) for r in keep_order(rows, alive, 12, held=held)][:2],
+                         [("held", True), ("plain", False)])
+        self.assertEqual(incubator_held(self.root, rows, alive - {"held"}), frozenset(), "a family not alive")
+        with mock.patch.object(bands, "incubator", side_effect=sqlite3.OperationalError("database is locked")):
+            self.assertEqual(incubator_held(self.root, rows, alive),
+                             frozenset({("held", 1), ("other-program", 1), ("barred", 1), ("plain", 1)}),
+                             "facts that cannot be read: every cohort past the sample is held (fail open for keeping)")
+            t = self.tournament()
+            self.assertEqual(t.keep_read, "off")
+            t.incubator_keep()
+            self.assertEqual(t.keep_read, "ok", "never raises")
+        self.assertEqual(incubator_held(None, rows, alive), frozenset())
+
+    def test_a_fresh_process_keeps_the_saved_incubators_cohorts_beyond_the_cap(self):
+        for fid, total in (("p1", 5.0), ("p2", 4.0)):
+            self.family(fid)
+            self.incubated(fid, total)
+        self.family("high")
+        self.cohort("high")
+        self.sampled("high", 40.0)
+        self.settings["tournament"]["incubator_keep_max"] = 1
+        self.assertEqual(self.tournament().incubator_keep(), frozenset({"p1", "p2"}))
+        saved = self.store.get(practice.KEEP_KV)
+        self.assertEqual(saved, {"at": self.clock(), "families": {"p1": 1, "p2": 1}, "held": ["p1", "p2"]})
+        self.store.put(practice.KEEP_KV, {**saved, "families": {**saved["families"], "aaa": 1}})
+        self.clock.advance(60)
+        t = self.tournament()
+        with mock.patch.object(practice, "cohort_status", return_value=None):
+            self.assertEqual((t.incubator_keep(), t.keep_read), (frozenset({"p1", "p2"}), "stale"),
+                             "the incubator's first, beyond the cap (by name alone it would have been aaa)")
+            self.assertEqual([r["held"] for r in t.kept_rows], [True, True])
+
+    def test_the_order_is_pure_and_the_incubators_cohorts_need_the_sample(self):
+        for fid, total in (("a", 30.0), ("b", 5.0), ("c", None)):
+            self.family(fid)
+            self.cohort(fid)
+            if total is not None:
+                self.sampled(fid, total)
+        rows = practice.cohort_status(self.root, today="2026-10-06")
+        alive = {"a", "b", "c"}
+        self.assertEqual([r["family"] for r in keep_order(rows, alive, 2)], ["a", "b"])
+        self.assertEqual([r["family"] for r in keep_order(rows, alive, 1, held={("b", 1)})], ["b"])
+        self.assertEqual([r["family"] for r in keep_order(rows, alive, 1, held={("b", 1), ("a", 1)})], ["a", "b"])
+        self.assertEqual([(r["family"], r["held"]) for r in keep_order(rows, alive, 3, held={("c", 1)})],
+                         [("a", False), ("b", False), ("c", False)], "a cohort before the sample is never the incubator's")
+        self.assertEqual(keep_order(rows, alive, 0, held={("b", 1)}), [])
 
 
 # ------------------------------------------------------------------------------------------------ reads, events, reach
