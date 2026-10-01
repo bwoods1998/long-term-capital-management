@@ -1821,9 +1821,10 @@ LANES: dict[str, Lane] = {
         # v4 (release B', family cards): the judge's cases carry cards and admission runs as production runs it; a
         # restatement of a row a mechanism verdict buried must meet the card check (`card_path_admitted`, 0), which the
         # lever may not loosen however far it cuts the idea rows' rebirths; every idea row's slice holds a same-cell
-        # control (a new idea under the row's exact card key), so a refusal keyed on cards fails on `novel_refused`; and
+        # control (a new idea under the row's exact card key), so a refusal keyed on cards fails on `novel_refused`;
         # every proposal is written and cites a buried row the same way, so a refusal keyed on a citation or on the
-        # text's form fails there too.
+        # text's form fails there too; and no claim recurs in a batch but a twin pair (a restatement and its moved idea,
+        # a control and its twin, as many of each), so a refusal keyed on a claim's recurring fails there as well.
         judge="memory", protocol="memory-rebirth-v4",
         judge_zero=("trials_uncounted", "mechanism_rewritten", "card_path_admitted"),
         judge_no_worse=("novel_refused", "rebirths_fresh_lineage"),

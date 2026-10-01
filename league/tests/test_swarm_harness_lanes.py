@@ -56,10 +56,23 @@ TEST_POOLS = {
                         "Fixture premium is rich into fixture reports and cheap after the fixture results.",
                         "Fixture calls in crowded test names lose value once fixture attention moves elsewhere.",
                         "Fixture breakouts on heavy test volume continue through the fixture lunch hour."],
+               # Every same-cell control and plain new idea takes a claim of its own (the judge's CLAIMS): eight
+               # controls, four plain new ideas and two card-path rows need fourteen texts beyond the eight buried. The
+               # last eight are copied verbatim from test fixtures public before the memory pool's last rotation
+               # (e67bfa18: test_publish.py, test_swarm_store.py, test_swarm_rounds.py, test_swarm_search.py), so they
+               # add no public text.
                "novel": ["A test-only claim about lunch hours and nothing else at all in fixture land.",
                          "Another test-only claim about closing auctions in a fixture market.",
                          "A third test-only claim about roll weeks in fixture commodity funds.",
-                         "A fourth test-only claim about fixture inflows and implied volatility."],
+                         "A fourth test-only claim about fixture inflows and implied volatility.",
+                         "Buys the last hour's drift into the close on days the index is up from the open.",
+                         "Buy calls after a trend day on SPY: momentum carries.",
+                         "A calendar on the index where the front kinks over the back month.",
+                         "Sell index premium on quiet days when implied volatility is rich.",
+                         "Buys a strangle into scheduled news when the move the options expect is small beside past moves.",
+                         "The same afternoon drift shows up across the index ETFs on different days.",
+                         "Dealers short gamma amplify afternoon moves; buy a straddle when they are.",
+                         "Buy a butterfly at the pin strike into expiry on SPY."],
                "synonyms": {"rally": "climb", "spikes": "jumps", "drifts": "moves", "widens": "grows"},
                "seconds": ["The fixture entry waits a session.", "The fixture exit moves to the close."],
                "hedges": ["The fixture idea is unchanged."],
@@ -2033,12 +2046,12 @@ class Judges(unittest.TestCase):
 
     ENV = {**os.environ, "PYTHONPATH": str(REPO), "PYTHONDONTWRITEBYTECODE": "1", "LTCM_HARNESS_JUDGE": "1"}
 
-    def judge(self, name, split="dev", seed="dev"):
+    def judge(self, name, split="dev", seed="dev", pool=None):
         command = [sys.executable, str(REPO / "league/swarm/harness_judges" / f"{name}.py"), "--split", split, "--seed", seed]
         stdin = None
         if split == "heldout":
             command.append("--pool-stdin")
-            stdin = json.dumps(TEST_POOLS[name]) + "\n"
+            stdin = json.dumps(pool or TEST_POOLS[name]) + "\n"
         out = subprocess.run(command, input=stdin, capture_output=True, text=True, env=self.ENV, cwd=str(REPO), timeout=300)
         self.assertEqual(out.returncode, 0, out.stderr[-2000:])
         return json.loads(out.stdout.strip().splitlines()[-1])
@@ -2060,32 +2073,35 @@ class Judges(unittest.TestCase):
         held-out baseline clears the floor."""
         dev = self.judge("memory")
         self.assertEqual(dev["protocol"], lanes.LANES["memory"].protocol)
-        self.assertEqual((dev["rebirths_proposed"], dev["novel_proposed"], dev["provider_calls"]), (10, 16, 0))
+        self.assertEqual((dev["rebirths_proposed"], dev["novel_proposed"], dev["provider_calls"]), (10, 18, 0))
         self.assertEqual((dev["card_path_proposed"], dev["card_path_admitted"]), (2, 0))
         self.assertEqual((dev["same_cell_proposed"], dev["same_cell_refused"]), (8, 0))
         self.assertEqual(dev["novel_refused"], 0)
         self.assertEqual((dev["trials_uncounted"], dev["mechanism_rewritten"]), (0, 0))
         held = self.judge("memory", "heldout", "00aa11bb22cc33dd")
-        self.assertEqual(held, {**held, "rebirths_proposed": 10, "novel_proposed": 14, "trials_uncounted": 0,
+        self.assertEqual(dev["claims_short"], 0)
+        self.assertEqual(held, {**held, "rebirths_proposed": 10, "novel_proposed": 16, "trials_uncounted": 0,
                                 "novel_refused": 0, "card_path_proposed": 2, "card_path_admitted": 0,
-                                "same_cell_proposed": 8, "same_cell_refused": 0})
+                                "same_cell_proposed": 8, "same_cell_refused": 0, "claims_short": 0})
         self.assertEqual(held["seed"], "00aa11bb22cc33dd")
         self.assertGreaterEqual(held["rebirths_admitted"], lanes.LANES["memory"].bottlenecks[0].judge_floor)
         # The pool carries no card: the judge derives every card from the drawn cases, and the card path takes bank
-        # texts only while each novel proposal keeps a text of its own.
+        # texts only while each control and plain new idea keeps a claim of its own (CLAIMS).
         self.assertFalse(any("card" in k for k in TEST_POOLS["memory"]))
         sys.path.insert(0, str(REPO / "league/swarm/harness_judges"))
         self.addCleanup(sys.path.remove, str(REPO / "league/swarm/harness_judges"))
         import memory as memory_judge
         buried, proposals = memory_judge.cases("heldout", "s1", TEST_POOLS["memory"])
-        novel = [p["idea"] for p in proposals if p["label"] == "novel" and "source" not in p and "cell" not in p]
-        self.assertEqual(len(novel), len(set(novel)))
+        novel = [p["idea"] for p in proposals if p["label"] == "novel" and "source" not in p and "twin" not in p]
+        self.assertEqual(len(novel), len(set(novel)), "every control and plain new idea a claim of its own")
         self.assertFalse({b["mechanism"] for b in buried} & {p["idea"] for p in proposals if "source" not in p})
         # Every proposal's text is written from its claim the same way (WRITING), a restatement's from its buried row's.
         self.assertTrue(all(p["idea"] == buried[p["source"]]["mechanism"] for p in proposals if p["label"] == "rebirth"))
         self.assertTrue(all(p["mechanism"] != p["idea"] for p in proposals))
         tight = {**TEST_POOLS["memory"], "novel_count": 6}
-        self.assertEqual([b["path"] for b in memory_judge.cases("heldout", "s1", tight)[0]].count("card"), 0)
+        buried, proposals = memory_judge.cases("heldout", "s1", tight)
+        self.assertEqual([b["path"] for b in buried].count("card"), 0)
+        self.assertEqual(memory_judge.shortfall("heldout", tight, buried, proposals), 0)
 
     def test_every_idea_row_has_a_same_cell_control(self):
         """Each idea row's slice holds one novel proposal under the row's exact card key (class, inputs, holding), with a
@@ -2104,7 +2120,7 @@ class Judges(unittest.TestCase):
             controls = {p["cell"]: (p, c) for p, c in zip(proposals, live) if "cell" in p}
             idea = [n for n, b in enumerate(buried) if b["path"] == "idea"]
             self.assertEqual(sorted(controls), idea, split)
-            novel_words = (set(memory_judge.NOVEL) | set(memory_judge.SAME_READING.values()) if pool is None
+            novel_words = (set(memory_judge.CONTROLS.values()) | set(memory_judge.SAME_READING.values()) if pool is None
                            else set(pool["bank"]) | set(pool["novel"]))
             for n, (p, c) in controls.items():
                 row = buried[n]
@@ -2319,6 +2335,131 @@ class Judges(unittest.TestCase):
         base = {split: self.judge("memory", *split) for split in splits}
         for mode in ("two", "keyed"):
             self.caught_on_novel_refused(f"MODE = {mode!r}\n" + self.FORM, splits, base, controls=8)
+
+    #: The public test pool's seeds the duplicate-claim lever was found on (the round-2 review of v4's verdict fix).
+    POOL_SEEDS = ("00aa11bb22cc33dd", "s1", "s2", "s3", "s4", "s5")
+
+    def test_no_claim_recurs_in_a_batch_but_a_twin_pair(self):
+        """Every same-cell control and plain new idea carries a claim no other proposal carries, and a claim recurs only
+        as a twin pair, once on its dead slice and once on a live one: a restatement and its moved idea, a control and
+        its twin, as many of each (CLAIMS). A pool too small for that gets fewer cases, never a reused claim, and says
+        so (`claims_short`); a construction that reuses a claim gets no answer."""
+        import collections
+
+        sys.path.insert(0, str(REPO / "league/swarm/harness_judges"))
+        self.addCleanup(sys.path.remove, str(REPO / "league/swarm/harness_judges"))
+        import memory as memory_judge
+
+        def at(p):
+            return (p["structure"], tuple(sorted(p["roots"])))
+
+        for split, seed, pool in (("dev", "dev", None), *(("heldout", s, TEST_POOLS["memory"]) for s in self.POOL_SEEDS)):
+            where = f"{split} {seed}"
+            buried, proposals = memory_judge.cases(split, seed, pool)
+            memory_judge.paired(buried, proposals)
+            self.assertEqual(memory_judge.shortfall(split, pool, buried, proposals), 0, where)
+            dead = {at(b) for b in buried}
+            carried = collections.Counter(p["idea"] for p in proposals)
+            self.assertLessEqual(max(carried.values()), 2, where)
+            moved = [p for p in proposals if p["label"] == "novel" and "source" in p]
+            twins = [p for p in proposals if "twin" in p]
+            self.assertTrue(moved, where)
+            self.assertEqual(sorted(p["source"] for p in moved), sorted(p["twin"] for p in twins), where)
+            self.assertFalse({at(p) for p in moved + twins} & dead, where)
+            for p in proposals:
+                again = [q for q in proposals if q is not p and q["idea"] == p["idea"]]
+                if at(p) in dead:  # on a dead slice a claim recurs on no other dead slice, a restatement's and a control's
+                    self.assertFalse([q for q in again if at(q) in dead], where)
+            home = {(p["label"], "cell" in p) for p in proposals if at(p) in dead and carried[p["idea"]] == 2}
+            self.assertEqual(home, {("rebirth", False), ("novel", True)}, f"{where}: restatements and controls twinned alike")
+        # The dev controls are public test fixtures copied verbatim from files outside every lane's surface (each held
+        # it before the memory pool's last rotation, e67bfa18), so they add no public text.
+        import fnmatch
+
+        surfaces = [g for lane in lanes.LANES.values() for g in lane.surface]
+        tracked = subprocess.run(["git", "ls-files", "*.py"], capture_output=True, text=True, cwd=str(REPO),
+                                 check=True).stdout.split()
+        texts = {path: " ".join((REPO / path).read_text(errors="replace").split()) for path in tracked
+                 if path != "league/swarm/harness_judges/memory.py"}
+        for text in [*memory_judge.CONTROLS.values(), memory_judge.NOVEL[-1]]:
+            homes = [path for path, body in texts.items() if text in body]
+            self.assertTrue(homes, text)
+            self.assertFalse([h for h in homes if any(fnmatch.fnmatchcase(h, g) for g in surfaces)], homes)
+        # A pool short of texts: the controls first, then the plain new ideas, never a reused claim, and the answer says
+        # how many it lacks (the operator's floor check prints CHECK).
+        short = {**TEST_POOLS["memory"], "novel": TEST_POOLS["memory"]["novel"][:4]}
+        buried, proposals = memory_judge.cases("heldout", "s1", short)
+        memory_judge.paired(buried, proposals)
+        self.assertEqual((sum("cell" in p for p in proposals), [b["path"] for b in buried].count("card")), (6, 0))
+        self.assertEqual(memory_judge.shortfall("heldout", short, buried, proposals), 6)
+        out = self.judge("memory", "heldout", "s1", pool=short)
+        self.assertEqual((out["claims_short"], out["same_cell_proposed"], out["novel_refused"]), (6, 6, 0))
+        # A construction that reuses a claim, leaves a moved row's control untwinned or gives a new idea a buried
+        # claim gets no answer.
+        buried, proposals = memory_judge.cases("dev", "dev")
+        plain = next(p for p in proposals if p["label"] == "novel" and not {"source", "cell", "twin"} & set(p))
+        for broken in ([{**p, "idea": plain["idea"]} if p.get("cell") == 0 else p for p in proposals],
+                       [p for p in proposals if "twin" not in p],
+                       [{**p, "idea": buried[0]["mechanism"]} if p is plain else p for p in proposals]):
+            with self.assertRaises(SystemExit):
+                memory_judge.paired(buried, broken)
+
+    #: A recurring-claim lever (the round-2 review of v4's verdict fix): before admission, each proposal whose card key
+    #: equals a carded dead family's on its slice is dropped when its claim (its first sentence, "exact"; or half the
+    #: content words of the shorter, "words") recurs in no other proposal on another dead slice and its words do not
+    #: read exactly as its card ("elsewhere", the lever as found), or recurs in no other proposal at all ("nowhere"), or
+    #: recurs on no other dead slice whatever its words ("keyed"), or recurs on a slice no dead family holds ("moved":
+    #: a moved idea's twin), or that and its words do not read as its card ("moved_words").
+    RECURRING = ("import re\n"
+                 "from league.swarm import architect, cards\n"
+                 "_admit = architect.Architect.admit\n"
+                 "def _claim(text):\n"
+                 "    first = re.split(r'(?<=[.!?])\\s+', ' '.join(text.split()), maxsplit=1)[0]\n"
+                 "    return first.lower() if MATCH == 'exact' else frozenset(cards._content(first))\n"
+                 "def _same(a, b):\n"
+                 "    return a == b if MATCH == 'exact' else len(a & b) >= 0.5 * max(1, min(len(a), len(b)))\n"
+                 "def _recurring(self, rows, **kw):\n"
+                 "    dead = [((f['structure'], tuple(sorted(f['roots']))), c['key']) for f in self.store.families(alive=False)\n"
+                 "            for c in [cards.card_of(self.store, f['id'])] if c is not None]\n"
+                 "    graves = {s for s, _ in dead}\n"
+                 "    def at(row):\n"
+                 "        return (row['structure'], tuple(sorted(row['roots'])))\n"
+                 "    def refused(row):\n"
+                 "        card = cards.validate(row.get('card'), row.get('structure'))[0]\n"
+                 "        if card is None:\n"
+                 "            return False\n"
+                 "        key = cards.key_of(card, row['structure'])\n"
+                 "        if not any(s == at(row) and key == k for s, k in dead):\n"
+                 "            return False\n"
+                 "        mine = cards.infer_key(row['mechanism'], row['structure'], row.get('dte'))\n"
+                 "        words = (mine is not None and mine['class'] == key['class']\n"
+                 "                 and cards.infer_inputs(row['mechanism']) == key['inputs'])\n"
+                 "        claim = _claim(row['mechanism'])\n"
+                 "        again = [o for o in rows if o is not row and _same(_claim(o['mechanism']), claim)]\n"
+                 "        dead_too = any(at(o) in graves and at(o) != at(row) for o in again)\n"
+                 "        live_too = any(at(o) not in graves for o in again)\n"
+                 "        return {'elsewhere': not dead_too and not words, 'nowhere': not again and not words,\n"
+                 "                'keyed': not dead_too, 'moved': live_too, 'moved_words': live_too and not words}[MODE]\n"
+                 "    return _admit(self, [row for row in rows if not refused(row)], **kw)\n"
+                 "architect.Architect.admit = _recurring\n")
+
+    def test_a_recurring_claim_never_tells_a_rebirth_from_a_new_idea(self):
+        """No claim recurs in a batch but a twin pair (CLAIMS), so a claim's recurring, or where it recurs, never tells a
+        restatement from a new idea (the round-2 review of v4's verdict fix: dev controls reused the plain new ideas'
+        texts and the test pool's four novel texts filled four plain new ideas and eight controls, so a lever refusing a
+        keyed card whose first sentence recurred on no other dead slice and whose words did not read as its card cut the
+        rebirths 8 to 4 on dev, passing the lane's rules there and on six test-pool seeds with `novel_refused` 0; and a
+        lever refusing a keyed card whose claim recurs on a live slice, the moved idea's twin, cut them 8 to 6 and
+        passed too). That lever, exact or on shared words, and its loosened variants now refuse controls and fail the
+        lane's rules on `novel_refused` on dev and on the test pool."""
+        splits = (("dev", "dev"), *(("heldout", s) for s in self.POOL_SEEDS))
+        base = {split: self.judge("memory", *split) for split in splits}
+        self.caught_on_novel_refused("MODE = 'elsewhere'\nMATCH = 'exact'\n" + self.RECURRING, splits, base, controls=4)
+        for mode in ("elsewhere", "nowhere", "keyed", "moved", "moved_words"):
+            for match in ("exact", "words"):
+                if (mode, match) != ("elsewhere", "exact"):
+                    self.caught_on_novel_refused(f"MODE = {mode!r}\nMATCH = {match!r}\n" + self.RECURRING, splits[:3],
+                                                 base, controls=1)
 
     def test_the_memory_judge_sees_the_card_check(self):
         """A tree whose admission skips the card check lets the card path's restatements be born, and they count as

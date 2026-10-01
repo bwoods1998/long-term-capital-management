@@ -41,18 +41,38 @@ card key on that row's slice, so without controls "the card equals a dead family
 rebirths perfectly: a lever refusing such cards would cut every rebirth here while, in production, refusing every new
 idea whose card reads like an idle death beside it (the vocabulary is coarse; those deaths are no finding about the
 mechanism). So every idea row's slice also holds a NOVEL proposal under that row's exact class, inputs and holding,
-with a new idea's text as its mechanism and hypothesis (dev: one of the public novel texts, never the one already on
-that slice, or a public text whose words read exactly as the row's, `SAME_READING`; held-out: a novel text from the
-pool, never one already on that slice). The card rules admit it (an idea row is no refuted cell, and its holding is
-short), so a card-keyed refusal, exact or on overlapping inputs, refuses these controls too and `novel_refused` rises;
-with the citations' one shape (CITATIONS), only the words tell a restatement from a control, and the words are what
-the lane's lever reads (`same_cell_proposed`, `same_cell_refused` report them). The controls' words are their own
-idea's: a refusal that also asks the words to read (production's keyword reading) as the dead row's class or inputs
-refuses on the words' coarse reading, and is caught where a new idea's words read like a dead row's. On dev, rows 2 and
-3's controls read exactly as their rows (class and inputs), one of them a text from outside every lane's surface (so
-an exemption keyed to the surface's own texts, the founding families', does not shield such a refusal), and row 1's
-as its class; on held-out, each control takes the pool's novel text that reads closest to its row's first (the seed
-breaking ties), so how often the held-out split sees such a refusal depends on the pool's texts.
+with a new idea's text as its mechanism and hypothesis, a claim no other proposal carries but its twin (CLAIMS; dev:
+`CONTROLS`, or a public text whose words read exactly as the row's, `SAME_READING`; held-out: a text from the pool).
+The card rules admit it (an idea row is no refuted cell, and its holding is short), so a card-keyed refusal, exact or
+on overlapping inputs, refuses these controls too and `novel_refused` rises; with the citations' one shape
+(CITATIONS), only the words tell a restatement from a control, and the words are what the lane's lever reads
+(`same_cell_proposed`, `same_cell_refused` report them). The controls' words are their own idea's: a refusal that
+also asks the words to read (production's keyword reading) as the dead row's class or inputs refuses on the words'
+coarse reading, and is caught where a new idea's words read like a dead row's. On dev, rows 2 and 3's controls read
+exactly as their rows (class and inputs), one of them a text from outside every lane's surface (so an exemption keyed
+to the surface's own texts, the founding families', does not shield such a refusal), and row 1's as its class; on
+held-out, each control takes the untaken pool text (a spare bank text or a novel one) that reads closest to its row's
+first (the seed breaking ties), so how often the held-out split sees such a refusal depends on the pool's texts.
+
+CLAIMS (no claim twice in a batch but a twin pair). Every same-cell control and every plain new idea carries a claim
+(its `idea`) that no other proposal carries. A claim is carried twice only by a TWIN PAIR: once on its dead slice and
+once moved to a slice no buried row holds, under the same terms (class, inputs, holding) and citing the same row: a
+restatement and its moved idea (the buried claim on new conditions), and, for as many rows, that row's same-cell
+control and its twin (the control's claim on the moved idea's slice). So neither a claim's recurring in the batch nor
+where it recurs tells a restatement from a new idea; only the words against the graveyard's do (the round-2 review of
+v4's verdict: dev controls reused the plain new ideas' texts, and the test pool's four novel texts filled four plain
+new ideas and eight controls, so every control's claim also sat on another dead slice while a restatement's never did;
+a lever refusing a card keyed like a dead family's on its slice whose first sentence recurred on no other dead slice
+and whose words did not read as its card cut the rebirths 8 to 4 on dev and passed the lane's rules there and on six
+test-pool seeds. With every claim distinct, the moved ideas alone would have marked their restatements: a lever
+refusing a keyed card whose claim recurs on a live slice cut them 8 to 6 and passed too; the controls' twins answer
+it). Dev: every claim is the judge's own (public before the memory pool's last rotation, e67bfa18) or copied verbatim
+from a public file that held it before then, so none is new public text. Held-out: the controls and the plain new
+ideas are drawn without replacement from the bank's spare texts and the pool's novel ones, the controls first (an idea
+row without one would leave its restatement alone under its key on its slice), then the plain new ideas, then the card
+path; a pool with too few texts gets fewer cases, never a reused claim, and the answer reports the shortfall
+(`claims_short`, which the operator's floor check prints as CHECK). The construction is checked before the tree's
+architect loads (`paired`), or no answer.
 
 TWO KINDS OF DEATH. The card check (`cards.RebirthIndex`) covers only rows killed by a mechanism verdict
 (`cards.MECHANISM_VERDICTS`); the rest of the graveyard, most of the House's, is left to idea admission, the memory lane's
@@ -61,8 +81,9 @@ must index the card-path rows and nothing else):
 - IDEA rows (the dev split's eight; the pool's `buried`): retired by the idle rule's THIN or EXHAUSTED verdict or by the
   tournament's STALL, in turn, all short-dated (0 to 5 days to expiry: days_1_3). Their restatements and every novel
   proposal reach idea admission; `rebirths_admitted` measures the lever on them.
-- CARD-PATH rows (the dev split's two; from the pool's bank, at most two and only those it can spare without repeating
-  a novel text: a pool with no spare text has none, and then only the dev split exercises the card path): REFUTED and
+- CARD-PATH rows (the dev split's two; from the pool's bank, at most two and only those it can spare while every
+  control and plain new idea keeps a claim of its own, CLAIMS: a pool with no spare text has none, and then only the
+  dev split exercises the card path): REFUTED and
   long-dated (21 to 45 days: days_11_plus, a holding no other case has). Each is restated once, on its slice, with its
   terms and no `rebirth` case, so production's card check must refuse it: `card_path_admitted` must be 0, and a
   restatement it lets through counts in `rebirths_admitted` too.
@@ -73,9 +94,10 @@ with the card module's own matching before the tree's architect loads (`carded`:
 own row's refuted cell and no other proposal falls in any; every control carries its row's exact key on its row's
 slice), or no answer.
 
-dev (this file): eight idea rows, two card-path rows, their light restatements and sixteen novel proposals (six on
-idea rows' slices under their own reading, two buried mechanisms moved to another root, eight same-cell controls), each
-written with every table entry and no draw (every synonym that occurs, the first second sentence, no hedge).
+dev (this file): eight idea rows, two card-path rows, their light restatements and eighteen novel proposals (six on
+idea rows' slices under their own reading, two buried mechanisms moved to another root, eight same-cell controls and
+the twins of rows 0 and 1's controls), each written with every table entry and no draw (every synonym that occurs, the
+first second sentence, no hedge).
 heldout: a PRIVATE bank of buried mechanisms, novel ideas, synonyms, second sentences, hedges and slices from the lane's
 pool, which lives outside this public repo and reaches the judge only on standard input (`_common.args`,
 `--pool-stdin`), every proposal written with synonym swaps, reordered clauses and hedges from a seed that exists only
@@ -86,8 +108,9 @@ continues a lineage nor counts the slice's trials: the multiple-testing control 
 mechanism_rewritten (a birth whose mechanism is not its proposal's text: the rebirth detector would be fooled; must be
 0), rebirths_fresh_lineage (admitted rebirths that start a lineage other than their buried row's: a fresh look ration),
 card_path_admitted (card-path restatements born: the card check bypassed; must be 0), same_cell_proposed and
-same_cell_refused (the controls, refused ones counted in novel_refused too), sqlite_statements (the store work, the
-lane's cost).
+same_cell_refused (the controls, refused ones counted in novel_refused too), claims_short (controls and plain new
+ideas the split's texts could not give a claim of their own: 0, or the held-out split is thinner than built and the
+operator's floor check prints CHECK), sqlite_statements (the store work, the lane's cost).
 """
 from __future__ import annotations
 
@@ -124,21 +147,35 @@ CARD_BANK = ["Back-month implied volatility stays too steep after a volatility s
 CARD_SLICES = [("long_butterfly", ["SPY"]), ("calendar", ["QQQ"])]
 #: Card-path rows the held-out split draws from the pool's bank, at most (fewer when the bank cannot spare them).
 CARD_PATH = 2
-#: The dev split's same-cell control on idea row n's slice takes NOVEL[(n + CONTROL_SHIFT) % len(NOVEL)], never the text
-#: of the novel proposal already there (NOVEL[n % len(NOVEL)]), or its row's entry in SAME_READING.
-CONTROL_SHIFT = 3
 #: Dev controls whose words read exactly as their row's (production's keyword reading: the same class and inputs) while
 #: saying another idea, each copied verbatim from a public file (never read from the tree under test) that was public
 #: before the private pools were drawn: row 2's a graveyard-digest test fixture
 #: (league/tests/test_swarm_graveyard_digest.py, outside every lane's surface: no candidate edits it, and an exemption
 #: keyed to the founding families' texts does not cover it), row 3's a founding family's mechanism
 #: (league/swarm/seeds.py).
-#: No public novel text above reads exactly as a dev row.
+#: No other dev control's claim reads exactly as its row.
 SAME_READING = {
     2: "Owning a QQQ straddle before the open pays when overnight gaps extend.",
     3: "Short-dated index options price a bigger move than follows on average (the variance risk premium); an iron condor "
        "sells it with the loss capped at the wing.",
 }
+#: The dev split's other same-cell controls, idea row n's claim (CLAIMS in the module docstring: no claim twice in a
+#: batch but a twin pair). Each is copied verbatim from a test fixture outside every lane's surface that was public
+#: before the memory pool's last rotation (e67bfa18), so none is new public text: row 0's league/tests/test_commons.py,
+#: row 1's league/tests/test_swarm_rounds.py (its words read as row 1's class), rows 4 and 6's
+#: league/tests/test_publish.py, row 5's league/tests/test_swarm_store.py, row 7's
+#: league/tests/test_swarm_harness_lanes.py.
+CONTROLS = {
+    0: "Most of the index's return since 1993 accrued between the close and the next open, not during the day.",
+    1: "Single-name momentum after earnings with debit verticals on the move.",
+    4: "Rides trend days: once the first two hours close far from the open, it buys a vertical in that direction.",
+    5: "Buy a QQQ straddle into earnings: the overnight gap is underpriced convexity.",
+    6: "Trades the break of the opening range in the direction of the break, with a vertical sized by its maximum "
+       "loss.",
+    7: "Treasury auctions with weak demand push long yields up into the close of the day.",
+}
+#: Moved claims the dev split twins (CLAIMS): idea rows 0 and 1's restatements' (their moved ideas) and their controls'.
+MOVED = 2
 SYNONYMS = {"lag": "trail", "catches up": "closes the distance", "tends to": "usually", "bid": "elevated", "decays": "fades",
             "rich": "overpriced", "partly": "partially", "reverses": "unwinds", "overshoots": "overreacts",
             "mean-reverts": "normalizes", "compete for": "share", "wide gap": "large spread", "inflates": "raises",
@@ -148,11 +185,14 @@ SYNONYMS = {"lag": "trail", "catches up": "closes the distance", "tends to": "us
 SECONDS = ["This version holds for three sessions instead of one.", "The entry now waits for a confirming close.",
            "Width and delta are tuned more tightly this time.", "It trades only when the signal is in its top decile.",
            "The exit moves to the second session."]
+#: The dev split's plain new ideas, the one on idea row n's slice NOVEL[n], each a claim of its own (CLAIMS); the last
+#: is copied verbatim from league/tests/test_swarm_store.py (public before e67bfa18, outside every lane's surface).
 NOVEL = ["Index dispersion rises when single-name implied correlation falls, so wings on the index are cheap.",
          "Pre-holiday sessions carry lower realized volatility than the options market prices.",
          "A fund's premium to its intraday net asset value closes by the next open.",
          "Vol-of-vol spikes after flat weeks mark mispriced wings that normalize within days.",
-         "Close auctions with large imbalances extend in the imbalance direction at the next open."]
+         "Close auctions with large imbalances extend in the imbalance direction at the next open.",
+         "When the VIX term structure inverts, index puts are overpriced."]
 HEDGE = " The idea is kept but the timing differs."
 SHORT, LONG = [0, 5], [21, 45]
 #: How the graveyard's rows died: (retirement reason, lesson), as the House writes them (league/swarm/researcher.py's
@@ -198,8 +238,9 @@ def cases(split: str, seed: str, pool: dict | None = None) -> tuple[list[dict[st
     """(buried, proposals). A buried row's `path` is "idea" or "card" (the module docstring) and its `dte` its days to
     expiry; a proposal's `idea` is the claim its text is written from (`restate`, WRITING: a restatement's is its
     buried row's), a restatement or a moved idea names its buried row by index (`source`), a same-cell control the idea
-    row whose card key and slice it takes (`cell`), and every proposal the buried row its citation names (`cites`,
-    `cited`)."""
+    row whose card key and slice it takes (`cell`), a control's twin the idea row whose control it repeats on a live
+    slice (`twin`, CLAIMS), and every proposal the buried row its citation names (`cites`, `cited`). No claim is carried
+    twice but by a twin pair (CLAIMS)."""
     if split == "dev":
         idea = [{"mechanism": text, "structure": s, "roots": roots, "path": "idea", "dte": SHORT}
                 for text, (s, roots) in zip(BANK, SLICES[:8])]
@@ -208,13 +249,12 @@ def cases(split: str, seed: str, pool: dict | None = None) -> tuple[list[dict[st
         buried = idea + card
         proposals = [{"label": "rebirth", "idea": b["mechanism"], "structure": b["structure"], "roots": b["roots"],
                       "dte": b["dte"], "path": b["path"], "source": n} for n, b in enumerate(buried)]
-        proposals += [{"label": "novel", "idea": NOVEL[n % len(NOVEL)], "structure": SLICES[n][0],
-                       "roots": SLICES[n][1], "dte": SHORT} for n in range(6)]
-        proposals += [{"label": "novel", "idea": idea[n]["mechanism"], "structure": SLICES[(n + 3) % 8][0],
-                       "roots": ["DIA"], "dte": SHORT, "source": n} for n in range(2)]
-        proposals += [{"label": "novel", "idea": SAME_READING.get(n, NOVEL[(n + CONTROL_SHIFT) % len(NOVEL)]),
-                       "structure": b["structure"], "roots": b["roots"], "dte": SHORT, "cell": n}
-                      for n, b in enumerate(idea)]
+        proposals += [{"label": "novel", "idea": text, "structure": SLICES[n][0], "roots": SLICES[n][1], "dte": SHORT}
+                      for n, text in enumerate(NOVEL)]
+        controls = [{"label": "novel", "idea": SAME_READING.get(n) or CONTROLS[n], "structure": b["structure"],
+                     "roots": b["roots"], "dte": SHORT, "cell": n} for n, b in enumerate(idea)]
+        moved = [(SLICES[(n + 3) % 8][0], ["DIA"]) for n in range(MOVED)]
+        proposals += twinned(idea, controls, moved)
         return buried, cited(buried, written(proposals, None))
     if not pool:
         raise ValueError("the held-out split is drawn from the lane's private pool")
@@ -227,43 +267,94 @@ def cases(split: str, seed: str, pool: dict | None = None) -> tuple[list[dict[st
     novel_count = int(pool.get("novel_count", 8))
     idea = [{"mechanism": text, "structure": s, "roots": roots, "path": "idea", "dte": SHORT}
             for text, (s, roots) in zip(order[:n_buried], slices)]
-    # The card path takes bank texts only while every novel proposal still gets a text of its own.
-    spare = len(order[n_buried:]) + len(pool["novel"]) - novel_count
-    k = max(0, min(CARD_PATH, len(order[n_buried:]), spare))
+    # CLAIMS: each same-cell control and each plain new idea takes a text no other proposal carries, drawn without
+    # replacement from the bank's spare texts and the pool's novel ones; the card path takes bank texts only while every
+    # control and plain new idea still gets one. A pool with too few texts gets fewer cases, never a reused claim
+    # (`shortfall`, reported as `claims_short`).
+    spare = [text for text in dict.fromkeys(order[n_buried:]) if text not in order[:n_buried]]
+    extra = [text for text in dict.fromkeys(pool["novel"]) if text not in order]
+    k = max(0, min(CARD_PATH, len(spare), len(spare) + len(extra) - len(idea) - novel_count))
     card = [{"mechanism": text, "structure": slices[(len(idea) + n) % len(slices)][0],
              "roots": slices[(len(idea) + n) % len(slices)][1], "path": "card", "dte": LONG}
-            for n, text in enumerate(order[n_buried:n_buried + k])]
+            for n, text in enumerate(spare[:k])]
     buried = idea + card
     proposals = [{"label": "rebirth", "idea": b["mechanism"], "structure": b["structure"], "roots": b["roots"],
                   "dte": b["dte"], "path": b["path"], "source": n} for n, b in enumerate(buried)]
-    fresh = order[n_buried + k:] + list(pool["novel"])
+    fresh = spare[k:] + extra
     r.shuffle(fresh)
-    elsewhere = list(pool.get("elsewhere_roots") or ["DIA", "TLT", "GLD"])
-    novel = [{"label": "novel", "idea": fresh[n % len(fresh)], "structure": slices[n % len(slices)][0],
-              "roots": slices[n % len(slices)][1], "dte": SHORT} for n in range(novel_count)]
-    proposals += novel
-    proposals += [{"label": "novel", "idea": idea[n]["mechanism"], "structure": idea[n]["structure"],
-                   "roots": [r.choice(elsewhere)], "dte": SHORT, "source": n}
-                  for n in range(int(pool.get("moved_count", 4)))]
-    # The same-cell controls: one per idea row, on its slice, a novel text not yet there, the one whose own words read
-    # closest to the row's (production's keyword reading: class and inputs, then class) first, the seed breaking ties.
+    # The same-cell controls first, one per idea row while texts last (an idea row without one would leave its
+    # restatement alone under its key on its slice), on its slice, the text whose own words read closest to the row's
+    # (production's keyword reading: class and inputs, then class) first, the seed breaking ties.
     from league.swarm import cards  # the pinned base's (no lane's surface holds it): nothing of the tree's loads here
 
-    there: dict[tuple[str, tuple[str, ...]], set[str]] = {}
-    for p in novel:
-        there.setdefault((p["structure"], tuple(sorted(p["roots"]))), set()).add(p["idea"])
+    controls = []
     for n, b in enumerate(idea):
-        taken = there.setdefault((b["structure"], tuple(sorted(b["roots"]))), set())
-        options = [text for text in dict.fromkeys(fresh) if text not in taken]
-        if options:
-            near = {text: reads_as(cards, text, b) for text in options}
-            text = r.choice([text for text in options if near[text] == max(near.values())])
-            taken.add(text)
-            proposals.append({"label": "novel", "idea": text, "structure": b["structure"], "roots": b["roots"],
-                              "dte": SHORT, "cell": n})
+        if not fresh:
+            break
+        near = {text: reads_as(cards, text, b) for text in fresh}
+        text = r.choice([text for text in fresh if near[text] == max(near.values())])
+        fresh.remove(text)
+        controls.append({"label": "novel", "idea": text, "structure": b["structure"], "roots": b["roots"], "dte": SHORT,
+                         "cell": n})
+    proposals += [{"label": "novel", "idea": text, "structure": slices[n % len(slices)][0],
+                   "roots": slices[n % len(slices)][1], "dte": SHORT} for n, text in enumerate(fresh[:novel_count])]
+    elsewhere = list(pool.get("elsewhere_roots") or ["DIA", "TLT", "GLD"])
+    moved = [(idea[n]["structure"], [r.choice(elsewhere)])
+             for n in range(min(int(pool.get("moved_count", 4)), len(idea)))]
+    proposals += twinned(idea, controls, moved)
     proposals = cited(buried, written(proposals, r, pool))
     r.shuffle(proposals)
     return buried, proposals
+
+
+def twinned(idea: list[dict[str, Any]], controls: list[dict[str, Any]],
+            moved: list[tuple[str, list[str]]]) -> list[dict[str, Any]]:
+    """The moved ideas (idea row n's claim on `moved[n]`, a slice no buried row holds), the same-cell controls, and each
+    moved row's control's twin (its claim, under its row's terms, on the same live slice): the twin pairs of CLAIMS, as
+    many for the controls as for the restatements, so a claim's recurring on a live slice tells neither."""
+    have = {p["cell"]: p for p in controls}
+    out = [{"label": "novel", "idea": idea[n]["mechanism"], "structure": s, "roots": list(roots), "dte": SHORT,
+            "source": n} for n, (s, roots) in enumerate(moved)]
+    out += controls
+    out += [{"label": "novel", "idea": have[n]["idea"], "structure": s, "roots": list(roots), "dte": SHORT, "twin": n}
+            for n, (s, roots) in enumerate(moved) if n in have]
+    return out
+
+
+def shortfall(split: str, pool: dict | None, buried: list[dict[str, Any]], proposals: list[dict[str, Any]]) -> int:
+    """How many same-cell controls and plain new ideas the batch lacks for want of a claim of its own (CLAIMS): one
+    control per idea row and the split's plain new ideas (dev: NOVEL; held-out: the pool's `novel_count`). 0 when the
+    split's texts suffice; the operator's floor check prints CHECK otherwise."""
+    wanted = sum(1 for b in buried if b["path"] == "idea")
+    wanted += len(NOVEL) if split == "dev" else int((pool or {}).get("novel_count", 8))
+    have = sum(1 for p in proposals if p["label"] == "novel" and not {"source", "twin"} & set(p))
+    return wanted - have
+
+
+def paired(buried: list[dict[str, Any]], proposals: list[dict[str, Any]]) -> None:
+    """The construction checked (CLAIMS): no new idea's claim is a buried row's but a moved idea's, and a claim two
+    proposals carry is a twin pair (a restatement or a same-cell control on its dead slice, and its moved idea or twin
+    on a slice no buried row holds), a moved restatement's row's control twinned too. A defect is no answer."""
+    dead = {(b["structure"], tuple(sorted(b["roots"]))) for b in buried}
+    graves = {b["mechanism"] for b in buried}
+    if any(p["label"] == "novel" and "source" not in p and p["idea"] in graves for p in proposals):
+        raise SystemExit("a new idea carries a buried row's claim")
+    carriers: dict[str, list[dict[str, Any]]] = {}
+    for p in proposals:
+        carriers.setdefault(p["idea"], []).append(p)
+    for ps in carriers.values():
+        if len(ps) == 1:
+            continue
+        home = [p for p in ps if p["label"] == "rebirth" or "cell" in p]
+        away = [p for p in ps if p not in home]
+        if not (len(home) == 1 == len(away) and (away[0]["structure"], tuple(sorted(away[0]["roots"]))) not in dead
+                and away[0].get("source", away[0].get("twin")) == home[0].get("source", home[0].get("cell"))
+                and ("twin" in away[0]) == ("cell" in home[0])):
+            raise SystemExit("the judge's claims recur outside a twin pair (a claim twice in a batch tells a "
+                             "restatement from a new idea)")
+    moved = {p["source"] for p in proposals if p["label"] == "novel" and "source" in p}
+    if {p["twin"] for p in proposals if "twin" in p} != moved & {p["cell"] for p in proposals if "cell" in p}:
+        raise SystemExit("a moved restatement's row's control is not twinned")
 
 
 def written(proposals: list[dict[str, Any]], r: Any | None, pool: dict | None = None) -> list[dict[str, Any]]:
@@ -274,15 +365,16 @@ def written(proposals: list[dict[str, Any]], r: Any | None, pool: dict | None = 
 
 def cited(buried: list[dict[str, Any]], proposals: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Each proposal with `cites`, the buried row its `differs_from` names (CITATIONS in the module docstring): its
-    own (a restatement's or a moved idea's `source`, a control's `cell`), else the first buried row on its slice, else
-    an idea row by its place in the batch. Nothing about its label decides whether or how it cites."""
+    own (a restatement's or a moved idea's `source`, a control's `cell`, a control's twin's `twin`), else the first
+    buried row on its slice, else an idea row by its place in the batch. Nothing about its label decides whether or how
+    it cites."""
     idea = [n for n, b in enumerate(buried) if b["path"] == "idea"]
     on: dict[tuple[str, tuple[str, ...]], int] = {}
     for n, b in enumerate(buried):
         on.setdefault((b["structure"], tuple(sorted(b["roots"]))), n)
     out = []
     for k, p in enumerate(proposals):
-        at = p.get("source", p.get("cell"))
+        at = p.get("source", p.get("cell", p.get("twin")))
         if at is None:
             at = on.get((p["structure"], tuple(sorted(p["roots"]))), idea[k % len(idea)])
         out.append({**p, "cites": at})
@@ -330,12 +422,12 @@ def carded(cards: Any, buried: list[dict[str, Any]], proposals: list[dict[str, A
     """(the buried rows' cards, the proposals' cards), from the cases alone (the module docstring), each valid, and the
     construction checked with the card module's own matching (`match_keys`, `matches`, `match_inputs`, as
     `cards.RebirthIndex` reads a carded row): each card-path restatement falls in its own row's refuted cell, no other
-    proposal falls in any, and every same-cell control carries its idea row's exact key on that row's slice. A defect
-    is no answer."""
+    proposal falls in any, and every same-cell control carries its idea row's exact key on that row's slice (and its
+    twin that key on its own live slice). A defect is no answer."""
     cells = [terms(cards, b["mechanism"], b["dte"]) for b in buried]
 
     def cell(p: dict[str, Any]) -> dict[str, Any]:
-        at = p.get("cell", p.get("source"))
+        at = p.get("cell", p.get("source", p.get("twin")))
         return cells[at] if at is not None else terms(cards, p["mechanism"], p["dte"])
 
     dead = [card(b["mechanism"], cells[n]) for n, b in enumerate(buried)]
@@ -364,6 +456,7 @@ def main() -> None:
     opts = _common.args()
     # The cases are drawn before the tree's code loads; the pool is not kept past this point.
     buried, proposals = cases(opts.split, opts.seed, opts.pool)
+    short = shortfall(opts.split, opts.pool, buried, proposals)
     opts.pool = None
 
     def body() -> dict[str, Any]:
@@ -372,6 +465,7 @@ def main() -> None:
         from league.swarm import cards
 
         dead_cards, live_cards = carded(cards, buried, proposals)
+        paired(buried, proposals)
 
         from league.swarm.architect import Architect
         from league.swarm.store import SwarmStore
@@ -451,6 +545,7 @@ def main() -> None:
                         "card_path_admitted": card_born,
                         "card_path_proposed": sum(1 for p in proposals if p.get("path") == "card"),
                         "same_cell_proposed": controls, "same_cell_refused": controls - controls_born,
+                        "claims_short": short,
                         "rebirths_proposed": sum(1 for p in proposals if p["label"] == "rebirth"), "novel_proposed": novel_total,
                         "born": len(by_case), "sqlite_statements": len(statements), "cases": len(proposals)}
             finally:
