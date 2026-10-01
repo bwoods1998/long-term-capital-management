@@ -471,8 +471,82 @@ class Reads(KeepCase):
         self.cohort("a")
         with mock.patch.object(practice, "cohort_status", side_effect=RuntimeError("boom")):
             t = self.tournament()
-            self.assertEqual((t.incubator_keep(), t.keep_read), (frozenset(), "failed"))
+            self.assertEqual((t.incubator_keep(), t.keep_read), (frozenset(), "failed"), "no keep was saved")
             self.assertIn("RuntimeError", t.keep_event()["error"])
+
+    def test_a_fresh_process_that_cannot_read_takes_the_keep_the_last_process_saved_until_its_hour_ends(self):
+        # The review of release B (Sept 30): a restarted swarm (a deploy, the induced-failure kill) runs its idle pass at
+        # once; one failed first read retired the kept families and overwrote the saved keep with {}.
+        for fid in ("kept", "dead"):
+            self.family(fid)
+            self.dead(fid)
+        self.cohort("kept")
+        self.assertEqual(self.tournament().incubator_keep(), frozenset({"kept"}))
+        saved = self.store.get(practice.KEEP_KV)
+        self.clock.advance(60)                              # the swarm restarts a minute later
+        t = self.tournament()                               # a fresh process: no read of its own
+        with mock.patch.object(practice, "cohort_status", return_value=None):
+            out = t.idle_pass()
+            self.assertEqual([r["family"] for r in out["retired"]], ["dead"], "the saved keep spares its family")
+            self.assertEqual((t.kept, t.keep_read), (frozenset({"kept"}), "stale"))
+            self.assertEqual(t.keep_spared, {"kept": "idle"})
+            self.assertEqual(self.store.get(practice.KEEP_KV), saved, "not overwritten while it stands")
+            event = t.keep_event()
+            self.assertEqual((event["read"], event["error"]),
+                             ("stale", "the practice record (observe.sqlite) could not be read"))
+            self.assertEqual(event["kept"], [{"family": "kept", "version": 1, "sample": None, "negative": None,
+                                              "sessions": None, "closes": None}], "this process has not read the record")
+            self.assertNotIn("alert", event)
+            self.clock.advance(KEEP_STALE_SECONDS - 60)     # an hour after the last good read: it still stands
+            self.assertEqual(t.idle_pass()["retired"], [])
+            self.assertEqual((t.keep_read, self.store.get(practice.KEEP_KV)), ("stale", saved))
+            self.clock.advance(1)                           # then none does, with one alert
+            self.assertEqual([r["family"] for r in t.idle_pass()["retired"]], ["kept"])
+            self.assertEqual((t.kept, t.keep_read), (frozenset(), "failed"))
+            self.assertEqual(self.store.get(practice.KEEP_KV), {"at": self.clock(), "families": {}})
+            self.assertTrue(t.keep_event()["alert"])
+
+    def test_a_saved_keep_older_than_the_hour_or_malformed_is_not_used(self):
+        self.family("kept")
+        self.dead("kept")
+        self.cohort("kept")
+        self.tournament().incubator_keep()
+        self.clock.advance(KEEP_STALE_SECONDS + 1)
+        t = self.tournament()
+        with mock.patch.object(practice, "cohort_status", return_value=None):
+            self.assertEqual((t.incubator_keep(), t.keep_read), (frozenset(), "failed"), "a stale saved keep")
+            self.assertEqual(self.store.get(practice.KEEP_KV), {"at": self.clock(), "families": {}})
+            now = self.clock()
+            for value in ("not a keep", [1], {"at": True, "families": {"kept": 1}}, {"at": now + 60, "families": {"kept": 1}},
+                          {"at": now, "families": ["kept"]}, {"at": now, "families": {"kept": True}},
+                          {"at": now, "families": {"kept": "1"}}, {"at": now, "families": {}}, {"families": {"kept": 1}}):
+                self.store.put(practice.KEEP_KV, value)
+                t = self.tournament()
+                self.assertEqual((t.incubator_keep(), t.keep_read), (frozenset(), "failed"), value)
+            with mock.patch.object(self.store, "get", side_effect=RuntimeError("locked")):
+                t = self.tournament()
+                self.assertEqual((t.incubator_keep(), t.keep_read), (frozenset(), "failed"), "never raises")
+
+    def test_a_saved_keep_stands_only_until_a_read_of_its_own_and_at_most_the_cap(self):
+        for fid in ("a", "b", "c"):
+            self.family(fid)
+            self.cohort(fid)
+        self.store.put(practice.KEEP_KV, {"at": self.clock() - 60, "families": {"gone": 4, "b": 1, "a": 1}})
+        t = self.tournament()
+        self.assertEqual((t.incubator_keep(), t.keep_read), (frozenset({"a", "b", "c"}), "ok"), "a good read")
+        self.assertEqual(self.store.get(practice.KEEP_KV),
+                         {"at": self.clock(), "families": {"a": 1, "b": 1, "c": 1}}, "the good read overwrites it")
+        self.store.put(practice.KEEP_KV, {"at": self.clock() - 60, "families": {"gone": 4, "b": 1, "a": 1}})
+        self.settings["tournament"]["incubator_keep_max"] = 3
+        t = self.tournament()
+        with mock.patch.object(practice, "cohort_status", return_value=None):
+            self.assertEqual((t.incubator_keep(), t.keep_read), (frozenset({"gone", "a", "b"}), "stale"), "the saved keep")
+        self.settings["tournament"]["incubator_keep_max"] = 2
+        t = self.tournament()
+        with mock.patch.object(practice, "cohort_status", return_value=None):
+            self.assertEqual((t.incubator_keep(), t.keep_read), (frozenset({"a", "b"}), "stale"), "the cap, by name")
+        self.assertEqual((t.incubator_keep(), t.keep_read), (frozenset({"a", "b"}), "ok"), "then its own read")
+        self.assertEqual(self.store.get(practice.KEEP_KV), {"at": self.clock(), "families": {"a": 1, "b": 1}})
 
     def test_a_swarm_store_error_is_not_blamed_on_the_practice_record(self):
         self.family("a")

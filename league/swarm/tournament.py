@@ -39,9 +39,9 @@
    lesson carries the verdict of its Train record (R11-1, `researcher.train_record`: DRIFT, STRESS, THIN or EXHAUSTED,
    tested findings), and only an untested family's (it never traded on Train) says it was a time limit, not a
    refutation. A validation that meets `researcher.extension_hold_checks` (6) of the line's checks sets the family's
-   extension hold (R11-4's swarm rule, `researcher.judge_extension`); one of the held version below them ends it. Each
-   counted verdict records the family's trials (`validated_trials`), from which the idle rule counts, and restarts its
-   dormant cycles. THE IDLE PASS (R4, `idle_pass`) retires by the idle rule alone every
+   extension hold (R11-4's swarm rule, `researcher.judge_extension`); a validation of the held version below them ends
+   it. Each counted verdict records the family's trials (`validated_trials`), from which the idle rule counts, and
+   restarts its dormant cycles. THE IDLE PASS (R4, `idle_pass`) retires by the idle rule alone every
    `tournament.retire_every_seconds` (300) between the rounds.
    THE COHORT KEEP (L1, release B, Sept 30, `incubator_keep`): a Gym family with an ACTIVE practice cohort (the House's
    frozen program, `practice.cohort_status`) is spared the revision, evaluation and idle rules until its cohort completes,
@@ -59,7 +59,10 @@
    order (`bands.priority`). It never spares a family from the deflated-Sharpe rule, its researcher's or the
    diagnostician's own retire, the population floor or the operator's gate hold. Research attention only: no trial
    count, look, validation, gate, band or money rule reads it. The keep is saved at each read (`practice.KEEP_KV`), so a
-   kept family's researcher is not urged to retire it for being idle (the retire tool stays offered). The round records
+   kept family's researcher is not urged to retire it for being idle (the retire tool stays offered). A record that
+   cannot be read leaves the last good keep standing for `KEEP_STALE_SECONDS` (an hour), then none; a FRESH PROCESS (a
+   deploy, a restart, the induced-failure kill: its idle pass runs at once) whose first read fails takes the keep the
+   last process saved for the rest of that hour and does not overwrite it before then. The round records
    the kept families and what each was spared in one private `swarm.status` event (`incubator_keep`).
 6. THE LEADERBOARD: one `swarm.tournament` event (the House mirrors it to its ledger) with every family's
    rank, share, validation summary, trials and band, and the totals.
@@ -102,7 +105,8 @@ KEEP_SAMPLE_TRADES = 10
 #: practises another active cohort (with none practised, the House is down or `live.observe` is off: an outage keeps them).
 KEEP_UNPRACTICED = 2
 #: When the practice record cannot be read, the last keep read stands this long, never longer: a record that stays
-#: unreadable gives every family main's rules again (and one alert).
+#: unreadable gives every family main's rules again (and one alert). Counted from the last good read, by this process or,
+#: for a fresh one, by the process that saved `practice.KEEP_KV` (`Tournament.incubator_keep`).
 KEEP_STALE_SECONDS = 3600.0
 
 
@@ -155,8 +159,9 @@ class Tournament:
         self.rng = rng or random.Random()
         self.idle_at = float("-inf")  # the last idle pass (`idle_due`); in memory: a restarted swarm runs one at once
         self.practice_bonus: dict[str, float] = {}  # the last allocation's practice bonus by family (`allocate`)
-        # THE COHORT KEEP (L1, `incubator_keep`), in memory: the last good read (when, the families, their rows), how the
-        # last read went ("ok", "stale", "failed" or "off"), and each kept family's spared rule since the round's event.
+        # THE COHORT KEEP (L1, `incubator_keep`), in memory: the last good read (when, the families, their rows; -inf
+        # until this process has read, or taken the saved keep), how the last read went ("ok", "stale", "failed" or
+        # "off"), and each kept family's spared rule since the round's event.
         self.kept_at = float("-inf")
         self.kept: frozenset[str] = frozenset()
         self.kept_rows: list[dict[str, Any]] = []
@@ -496,7 +501,10 @@ class Tournament:
         """THE COHORT KEEP (L1, the module docstring): the living Gym families the revision, evaluation and idle rules
         spare now (`keep_order` over `practice.cohort_status`, at most `keep_max`). Reads the practice record read-only and
         saves what it keeps (`practice.KEEP_KV`, for the researchers' status); never raises. When the practice record or
-        the swarm's families cannot be read, the last good keep stands for `KEEP_STALE_SECONDS`, then none does."""
+        the swarm's families cannot be read, the last good keep stands for `KEEP_STALE_SECONDS`, then none does. A fresh
+        process (no read of its own yet: a deploy, a restart, the induced-failure kill) whose read fails takes the keep the
+        last process saved (`_saved_keep`) as that last good keep, from the time it was read, so its first idle pass does
+        not retire what that keep protects and the saved keep is not overwritten before its hour has passed."""
         cap = self.keep_max()
         now = self.clock()
         if cap <= 0:
@@ -517,6 +525,12 @@ class Tournament:
                 error = f"the swarm's families could not be read or ordered ({type(exc).__name__})"
         if chosen is None:
             self.keep_error = error
+            if self.kept_at == float("-inf"):
+                # A FRESH PROCESS whose first read fails (the review of release B, Sept 30): the saved keep stands.
+                saved = self._saved_keep(now, cap)
+                if saved is not None:
+                    self.kept_at, self.kept_rows = saved
+                    self.kept = frozenset(r["family"] for r in self.kept_rows)
             if now - self.kept_at <= KEEP_STALE_SECONDS:
                 self.keep_read = "stale"
                 return self.kept
@@ -525,6 +539,30 @@ class Tournament:
         self.kept_at, self.keep_error = now, None
         self._keep_set(now, chosen, "ok")
         return self.kept
+
+    def _saved_keep(self, now: float, cap: int) -> tuple[float, list[dict[str, Any]]] | None:
+        """The keep the last process saved (`practice.KEEP_KV`), for a fresh process whose first read fails: (when it was
+        read, its families as rows), or None when there is none, it keeps no family, it was read more than
+        `KEEP_STALE_SECONDS` ago (or in the future), or it cannot be read. Only a good read saves a family (a failed or off
+        read saves none), so its time is the last good read's. Its rows carry the family and version only (`sample`,
+        `negative`, `sessions` and `closes_program` None: this process has not read the record). At most `cap` (a cap
+        lowered since): the store keeps no order, so the first by name. Never raises."""
+        try:
+            value = self.store.get(practice.KEEP_KV)
+            if not isinstance(value, Mapping):
+                return None
+            at, families = value.get("at"), value.get("families")
+            if isinstance(at, bool) or not isinstance(at, (int, float)) or not 0 <= now - float(at) <= KEEP_STALE_SECONDS:
+                return None
+            if not isinstance(families, Mapping):
+                return None
+            rows = [{"family": fid, "version": version, "sample": None, "negative": None, "sessions": None,
+                     "closes_program": None}
+                    for fid, version in sorted(families.items())
+                    if isinstance(fid, str) and isinstance(version, int) and not isinstance(version, bool)][:max(0, cap)]
+        except Exception:  # noqa: BLE001 - a retirement pass never fails on the keep
+            return None
+        return (float(at), rows) if rows else None
 
     def _keep_set(self, now: float, chosen: list[dict[str, Any]], read: str) -> None:
         """The keep in memory, and saved for the researchers (`practice.KEEP_KV`; a store error only loses the save)."""
