@@ -2052,6 +2052,19 @@ class Judges(unittest.TestCase):
     TRADE_VERB = r"\b(?:buy|buys|buying|bought|sell|sells|selling|sold|own|owns|owning|trades?|writes?|writing|shorts?|shorting)\b"
     TICKER = r"\b[A-Z]{2,5}\b"
     KIND = re.compile(f"(?i:{STRUCTURE_NOUN})|(?i:{TRADE_VERB})|{TICKER}")
+    #: A text's first sentence (as the levers below split it).
+    FIRST = r"(?<=[.!?])\s+"
+
+    @classmethod
+    def first_words(cls, text):
+        """How many words a text's first sentence has (a length lever's measure, the round-4 review)."""
+        return len(re.split(cls.FIRST, " ".join(text.split()), maxsplit=1)[0].split())
+
+    @staticmethod
+    def classes_hit(cards, text):
+        """How many mechanism classes production's keyword reading finds a word of in a text (1: an unambiguous
+        reading, the round-4 review's lever)."""
+        return sum(1 for pattern in cards._CLASS_WORDS.values() if pattern.search(text))
 
     def judge(self, name, split="dev", seed="dev", pool=None):
         command = [sys.executable, str(REPO / "league/swarm/harness_judges" / f"{name}.py"), "--split", split, "--seed", seed]
@@ -2083,8 +2096,8 @@ class Judges(unittest.TestCase):
         self.assertEqual((dev["rebirths_proposed"], dev["novel_proposed"], dev["provider_calls"]), (10, 18, 0))
         self.assertEqual((dev["card_path_proposed"], dev["card_path_admitted"]), (2, 0))
         self.assertEqual((dev["same_cell_proposed"], dev["same_cell_refused"]), (8, 0))
-        # How the dev controls' written words read as their rows' keys (SAME_READING): two exactly, four as the class.
-        self.assertEqual((dev["same_cell_reading_exact"], dev["same_cell_reading_class"]), (2, 4))
+        # How the dev controls' written words read as their rows' keys (SAME_READING): three exactly, three as class.
+        self.assertEqual((dev["same_cell_reading_exact"], dev["same_cell_reading_class"]), (3, 3))
         self.assertEqual(dev["novel_refused"], 0)
         self.assertEqual((dev["trials_uncounted"], dev["mechanism_rewritten"]), (0, 0))
         held = self.judge("memory", "heldout", "00aa11bb22cc33dd")
@@ -2153,7 +2166,7 @@ class Judges(unittest.TestCase):
             if pool is None:
                 # dev: the controls' written words read as their rows' keys as declared (SAME_READING: production's
                 # keyword reading, as a refusal on the words' reading compares them), and the plain ones (PLAIN) are
-                # market claims like the bank's, one reading exactly and some as the class only, so words naming no
+                # market claims like the bank's, two reading exactly and some as the class only, so words naming no
                 # structure, no trade and no ticker read as a dead key on a new idea too (the round-3 review).
                 read = {n: memory_judge.reading(cards, p["mechanism"], c) for n, (p, c) in controls.items()}
                 self.assertEqual({n: r for n, r in read.items() if r}, memory_judge.SAME_READING)
@@ -2247,22 +2260,28 @@ class Judges(unittest.TestCase):
         """The dev split's controls that read exactly as their rows (`SAME_READING`) are public texts copied verbatim,
         and at least one is from a file outside every lane's surface (no candidate can edit it, and no founding or
         library text is it) and a plain market claim (`PLAIN`), so neither an exemption keyed to the surface's own texts
-        nor one for words naming a structure, a trade or a ticker protects a words-also-match refusal on dev."""
+        nor one for words naming a structure, a trade or a ticker protects a words-also-match refusal on dev. One such
+        control also reads as one class only in a written first sentence of at least 12 words (the round-4 review: the
+        exact readers were short or ambiguous, so a refusal asking for a long or unambiguous reading passed dev)."""
         import fnmatch
 
         sys.path.insert(0, str(REPO / "league/swarm/harness_judges"))
         self.addCleanup(sys.path.remove, str(REPO / "league/swarm/harness_judges"))
         import memory as memory_judge
 
-        from league.swarm import seeds
+        from league.swarm import cards, seeds
 
         founding = {" ".join(s["mechanism"].split()) for s in [*seeds.FOUNDERS, *seeds.LIBRARY]}
         surfaces = [g for lane in lanes.LANES.values() for g in lane.surface]
-        tracked = subprocess.run(["git", "ls-files", "*.py"], capture_output=True, text=True, cwd=str(REPO),
+        tracked = subprocess.run(["git", "ls-files", "*.py", "*.json"], capture_output=True, text=True, cwd=str(REPO),
                                  check=True).stdout.split()
         exact = {n: memory_judge.CONTROLS[n] for n, r in memory_judge.SAME_READING.items() if r == 2}
         outside = {n: text for n, text in exact.items() if text not in founding}
         self.assertTrue(set(outside) & set(memory_judge.PLAIN), "a plain exact reader from outside every surface")
+        long_plain = [n for n in set(outside) & set(memory_judge.PLAIN)
+                      if self.first_words(memory_judge.restate(outside[n], None)) >= 12
+                      and self.classes_hit(cards, memory_judge.restate(outside[n], None)) == 1]
+        self.assertTrue(long_plain, "a plain, unambiguous exact reader of at least 12 words from outside every surface")
         for text in outside.values():
             homes = [path for path in tracked if path != "league/swarm/harness_judges/memory.py"
                      and text in " ".join((REPO / path).read_text(errors="replace").split())]
@@ -2429,9 +2448,10 @@ class Judges(unittest.TestCase):
     def test_the_dev_claims_add_no_public_text(self):
         """Every dev claim but the card path's two (`CARD_BANK`, new public text the operator's burn scan covers) was
         public before the memory pool's last rotation: the judge's own (this file at the rotation, or in its first
-        versions, 49303e42 and dae58397, both before it), a founding family's mechanism, or a test fixture copied
-        verbatim from a file outside every lane's surface that held it then. What it reads from the repository's
-        history (the texts at the rotation, the judge's first versions) a shallow clone skips; the rest runs there."""
+        versions, 49303e42 and dae58397, both before it), a founding family's mechanism, or a string copied verbatim
+        from a Python or JSON file outside every lane's surface that held it then (a test fixture, a desk's mandate).
+        What it reads from the repository's history (the texts at the rotation, the judge's first versions) a shallow
+        clone skips; the rest runs there."""
         import fnmatch
 
         sys.path.insert(0, str(REPO / "league/swarm/harness_judges"))
@@ -2448,19 +2468,34 @@ class Judges(unittest.TestCase):
         for rev in early if history else ():
             self.assertEqual(git("merge-base", "--is-ancestor", rev, self.ROTATION).returncode, 0, rev)
 
-        def literals(source):
-            """A Python file's string literals, whitespace collapsed (a literal split over lines is one)."""
+        def literals(path, source):
+            """A Python file's string literals, or a JSON file's string values, whitespace collapsed (a literal split
+            over lines is one)."""
+            if path.endswith(".json"):
+                try:
+                    stack, found = [json.loads(source)], set()
+                except ValueError:
+                    return set()
+                while stack:
+                    value = stack.pop()
+                    if isinstance(value, str):
+                        found.add(" ".join(value.split()))
+                    elif isinstance(value, dict):
+                        stack.extend([*value.keys(), *value.values()])
+                    elif isinstance(value, list):
+                        stack.extend(value)
+                return found
             return {" ".join(node.value.split()) for node in ast.walk(ast.parse(source))
                     if isinstance(node, ast.Constant) and isinstance(node.value, str)}
 
         def strings(rev, path):
             out = git("show", f"{rev}:{path}")
-            return literals(out.stdout) if out.returncode == 0 else set()
+            return literals(path, out.stdout) if out.returncode == 0 else set()
 
         surfaces = [g for lane in lanes.LANES.values() for g in lane.surface]
         self.assertFalse([g for g in surfaces if fnmatch.fnmatchcase(judge, g)], "the judge is no lane's surface")
-        bodies = {path: " ".join(literals((REPO / path).read_text(errors="replace")))
-                  for path in git("ls-files", "*.py").stdout.split() if path != judge}
+        bodies = {path: " ".join(literals(path, (REPO / path).read_text(errors="replace")))
+                  for path in git("ls-files", "*.py", "*.json").stdout.split() if path != judge}
         founding = {" ".join(s["mechanism"].split()) for s in [*seeds.FOUNDERS, *seeds.LIBRARY]}
         own = set().union(*(strings(rev, judge) for rev in (self.ROTATION, *early))) if history else set()
         for text in [*memory_judge.BANK, *memory_judge.NOVEL, *memory_judge.CONTROLS.values()]:
@@ -2539,7 +2574,9 @@ class Judges(unittest.TestCase):
     #: A reading lever (the round-3 review of v4's verdict): before admission, each proposal whose card key equals a
     #: carded dead family's on its slice is dropped when its words read as that key (production's keyword reading: its
     #: class and inputs, READ "exact"; or its class, "class") and they name no option structure ("structure", the lever
-    #: as found), no trade verb ("verb"), no ticker ("ticker"), or none of the three ("plain").
+    #: as found), no trade verb ("verb"), no ticker ("ticker"), none of the three ("plain"), or whatever they name
+    #: ("none"). A length lever (the round-4 review) also asks the proposal's own surface for more: a first sentence of
+    #: MIN_WORDS to MAX_WORDS words, and (ONE_CLASS) an unambiguous reading, only one class with a keyword hit.
     READING = ("import re\n"
                "from league.swarm import architect, cards\n"
                "_admit = architect.Architect.admit\n"
@@ -2548,6 +2585,10 @@ class Judges(unittest.TestCase):
                "def _spared(text):\n"
                "    found = {{k for k, p in KINDS.items() if p.search(text)}}\n"
                "    return bool(found) if MODE == 'plain' else MODE in found\n"
+               "def _words(text):\n"
+               "    return len(re.split({first!r}, ' '.join(text.split()), maxsplit=1)[0].split())\n"
+               "def _one_class(text):\n"
+               "    return sum(1 for p in cards._CLASS_WORDS.values() if p.search(text)) == 1\n"
                "def _reading(self, rows, **kw):\n"
                "    dead = [((f['structure'], tuple(sorted(f['roots']))), c['key']) for f in self.store.families(alive=False)\n"
                "            for c in [cards.card_of(self.store, f['id'])] if c is not None]\n"
@@ -2563,22 +2604,40 @@ class Judges(unittest.TestCase):
                "            return False\n"
                "        if READ == 'exact' and cards.infer_inputs(row['mechanism']) != key['inputs']:\n"
                "            return False\n"
+               "        if not MIN_WORDS <= _words(row['mechanism']) <= MAX_WORDS:\n"
+               "            return False\n"
+               "        if ONE_CLASS and not _one_class(row['mechanism']):\n"
+               "            return False\n"
                "        return not _spared(row['mechanism'])\n"
                "    return _admit(self, [row for row in rows if not refused(row)], **kw)\n"
                "architect.Architect.admit = _reading\n")
+    #: The reading levers tried: (READ, MODE, MIN_WORDS, MAX_WORDS, ONE_CLASS). The round-3 review's eight (the exact
+    #: reading or the class, sparing a kind of words), then the round-4 review's length levers: an exact, unambiguous
+    #: reading in a first sentence of at least 12 words (the lever as found), the round-3 lever (no structure) with that
+    #: floor, and an exact reading in a first sentence of 12 to 24 words.
+    READING_LEVERS = (*((read, mode, 0, 10 ** 9, False) for read in ("exact", "class")
+                        for mode in ("structure", "verb", "ticker", "plain")),
+                      ("exact", "none", 12, 10 ** 9, True), ("exact", "structure", 12, 10 ** 9, False),
+                      ("exact", "none", 12, 24, False))
 
     def test_a_refusal_of_reading_words_never_spares_a_kind_of_words(self):
         """The dev controls whose words read as their rows are of no kind apart from the restatements (the round-3
         review of v4's verdict: they all named an option structure and a trade, and no restatement did, so a lever
         refusing a keyed card whose words read as its key and named no structure cut the rebirths 8 to 4 on dev with
         `novel_refused` 0 and passed the lane's rules on 6 of 10 test-pool seeds). Plain market claims now read as
-        their rows on dev (`PLAIN`: one exactly, some as the class), so that lever, its variants sparing a trade verb,
+        their rows on dev (`PLAIN`: two exactly, some as the class), so that lever, its variants sparing a trade verb,
         a ticker or all three instead, and the same on the class alone, refuse a control on dev and fail the lane's
-        rules there with every test-pool seed. Held out refuses exactly the controls whose written words read so and
-        are not spared, so how often it catches such a lever depends on the pool's texts: the answer's
+        rules there with every test-pool seed. Nor are they all short or ambiguous (the round-4 review: dev's exact
+        readers were row 2's 10-word claim and row 3's two-class founding text, so a lever refusing an exact,
+        unambiguous reading in a first sentence of at least 12 words cut the rebirths 8 to 5 on dev with `novel_refused`
+        0 and passed the lane's rules on 4 of the 6 seeds): row 4's control reads exactly and as one class in 20 words,
+        so that lever, the round-3 lever with the same floor and an exact reading in 12 to 24 words fail the lane's
+        rules on dev with every seed too. Held out refuses exactly the controls whose written words read so and are
+        not spared, so how often it catches such a lever depends on the pool's texts: the answer's
         `same_cell_reading_exact` and `same_cell_reading_class` say how many controls read so (the operator's floor
         check prints CHECK when none reads exactly), and on the test pool the exact lever as found is caught on four
-        of the six seeds."""
+        of the six seeds. A lever conditioned on a surface feature the dev controls do not span still passes where the
+        held-out texts do not span it either; the review's rule refuses it (the playbook's memory checklist)."""
         sys.path.insert(0, str(REPO / "league/swarm/harness_judges"))
         self.addCleanup(sys.path.remove, str(REPO / "league/swarm/harness_judges"))
         import memory as memory_judge
@@ -2600,48 +2659,61 @@ class Judges(unittest.TestCase):
             self.assertEqual((reads.count(2), reads.count(1)), (base[(split, seed)]["same_cell_reading_exact"],
                                                                 base[(split, seed)]["same_cell_reading_class"]))
         caught = {}
-        for read in ("exact", "class"):
-            for mode in ("structure", "verb", "ticker", "plain"):
-                patch = f"READ = {read!r}\nMODE = {mode!r}\n" + self.READING.format(
-                    structure=self.STRUCTURE_NOUN, verb=self.TRADE_VERB, ticker=self.TICKER)
-                outs = {}
-                for split, seed in splits:
-                    run = self.judge_patched("memory", patch, split, seed)
-                    self.assertEqual(run.returncode, 0, run.stderr[-2000:])
-                    outs[(split, seed)] = json.loads(run.stdout.strip().splitlines()[-1])
+        for read, mode, low, high, one_class in self.READING_LEVERS:
+            lever = f"{read} {mode} {low}-{high} words{' one class' if one_class else ''}"
+            patch = (f"READ = {read!r}\nMODE = {mode!r}\nMIN_WORDS = {low!r}\nMAX_WORDS = {high!r}\n"
+                     f"ONE_CLASS = {one_class!r}\n") + self.READING.format(
+                structure=self.STRUCTURE_NOUN, verb=self.TRADE_VERB, ticker=self.TICKER, first=self.FIRST)
+            outs = {}
+            for split, seed in splits:
+                run = self.judge_patched("memory", patch, split, seed)
+                self.assertEqual(run.returncode, 0, run.stderr[-2000:])
+                outs[(split, seed)] = json.loads(run.stdout.strip().splitlines()[-1])
 
-                def spared(text):
-                    found = {k for k, pattern in kinds.items() if pattern.search(text)}
-                    return bool(found) if mode == "plain" else mode in found
+            def spared(text):
+                found = {k for k, pattern in kinds.items() if pattern.search(text)}
+                return bool(found) if mode == "plain" else mode in found
 
-                for split, seed in splits:
-                    where = f"{split} {seed} {read} {mode}"
-                    b, out = base[(split, seed)], outs[(split, seed)]
-                    self.assertEqual((b["novel_refused"], out["trials_uncounted"], out["card_path_admitted"]), (0, 0, 0),
-                                     where)
-                    # It refuses exactly the controls whose written words read as their row's key and are not spared.
-                    want = sum(1 for r, text in controls[(split, seed)] if r >= (2 if read == "exact" else 1)
-                               and not spared(text))
-                    self.assertEqual(out["same_cell_refused"], want, where)
-                dev, b = outs[("dev", "dev")], base[("dev", "dev")]
-                self.assertLessEqual(dev["rebirths_admitted"], 0.75 * b["rebirths_admitted"], f"{read} {mode}: it cuts")
-                self.assertGreater(dev["same_cell_refused"], 0, f"{read} {mode}")
-                for _, seed in splits[1:]:
-                    trees = {name: {"regressions": {"exit": 0},
-                                    "splits": {"dev": {"metrics": m_dev}, "heldout": {"metrics": m_held}}}
-                             for name, m_dev, m_held in (("base", b, base[("heldout", seed)]),
-                                                         ("closed", b, base[("heldout", seed)]),
-                                                         ("open", dev, outs[("heldout", seed)]))}
-                    verdict = lanes.judge_verdict(memory, memory.bottleneck("graveyard_rebirth_rate"), trees)
-                    self.assertFalse(verdict["passed"], f"{read} {mode} {seed}")
-                    self.assertTrue(any(r.startswith("dev: novel_refused rose") for r in verdict["reasons"]),
-                                    verdict["reasons"])
-                caught[(read, mode)] = sum(outs[("heldout", s)]["novel_refused"] > 0 for s in self.POOL_SEEDS)
+            def shaped(text):
+                return (low <= self.first_words(text) <= high
+                        and (not one_class or self.classes_hit(cards, text) == 1))
+
+            for split, seed in splits:
+                where = f"{split} {seed} {lever}"
+                b, out = base[(split, seed)], outs[(split, seed)]
+                self.assertEqual((b["novel_refused"], out["trials_uncounted"], out["card_path_admitted"]), (0, 0, 0),
+                                 where)
+                # It refuses exactly the controls whose written words read as their row's key, are not spared and
+                # have the surface it asks for.
+                want = sum(1 for r, text in controls[(split, seed)] if r >= (2 if read == "exact" else 1)
+                           and not spared(text) and shaped(text))
+                self.assertEqual(out["same_cell_refused"], want, where)
+            dev, b = outs[("dev", "dev")], base[("dev", "dev")]
+            self.assertLessEqual(dev["rebirths_admitted"], 0.75 * b["rebirths_admitted"], f"{lever}: it cuts")
+            self.assertGreater(dev["same_cell_refused"], 0, lever)
+            for _, seed in splits[1:]:
+                trees = {name: {"regressions": {"exit": 0},
+                                "splits": {"dev": {"metrics": m_dev}, "heldout": {"metrics": m_held}}}
+                         for name, m_dev, m_held in (("base", b, base[("heldout", seed)]),
+                                                     ("closed", b, base[("heldout", seed)]),
+                                                     ("open", dev, outs[("heldout", seed)]))}
+                verdict = lanes.judge_verdict(memory, memory.bottleneck("graveyard_rebirth_rate"), trees)
+                self.assertFalse(verdict["passed"], f"{lever} {seed}")
+                self.assertTrue(any(r.startswith("dev: novel_refused rose") for r in verdict["reasons"]),
+                                verdict["reasons"])
+            caught[(read, mode, low, high, one_class)] = sum(outs[("heldout", s)]["novel_refused"] > 0
+                                                             for s in self.POOL_SEEDS)
         # On the test pool, held out alone catches the exact lever as found on four of the six seeds (none of seed s2's
         # controls reads exactly as its row) and the class lever on all six.
-        self.assertEqual(caught[("exact", "structure")], 4, caught)
-        self.assertEqual(caught[("class", "structure")], len(self.POOL_SEEDS), caught)
+        self.assertEqual(caught[("exact", "structure", 0, 10 ** 9, False)], 4, caught)
+        self.assertEqual(caught[("class", "structure", 0, 10 ** 9, False)], len(self.POOL_SEEDS), caught)
         self.assertEqual(base[("heldout", "s2")]["same_cell_reading_exact"], 0)
+        # Held out alone catches none of the length levers on the test pool: every control there that reads exactly as
+        # its row has a first sentence of 10 words (the test pool only exercises the machinery; the private pool's
+        # novel texts that read exactly as bank keys should be as long as the bank's, the playbook's register note).
+        # Dev catches them, and the review's rule refuses any refusal by the proposal's own surface.
+        for lever in self.READING_LEVERS[8:]:
+            self.assertEqual(caught[lever], 0, caught)
 
     def test_the_memory_judge_sees_the_card_check(self):
         """A tree whose admission skips the card check lets the card path's restatements be born, and they count as

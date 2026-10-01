@@ -52,16 +52,24 @@ the dead row's class or inputs refuses on the words' coarse reading, and is caug
 dead row's. Nor are the controls' words that read so of a kind apart from a restatement's (the round-3 review of v4's
 verdict: the dev controls that read as their rows all named an option structure and a trade, while no restatement did,
 so a refusal of a keyed card whose words read as its key and named no structure cut the rebirths 8 to 4 on dev with
-`novel_refused` 0 and passed the lane's rules on 6 of 10 test-pool seeds). On dev (`SAME_READING`), rows 2 and 3's
-controls read exactly as their rows (class and inputs) and rows 0, 1, 4 and 6's as the class only, and rows 0, 1, 2, 4
-and 7's are plain market claims like the bank's (`PLAIN`: no structure noun, no trade verb, no ticker). Row 2's reads
-exactly, is plain, and is a public text from outside every lane's surface, so neither an exemption keyed to the
+`novel_refused` 0 and passed the lane's rules on 6 of 10 test-pool seeds). On dev (`SAME_READING`), rows 2, 3 and 4's
+controls read exactly as their rows (class and inputs) and rows 0, 1 and 6's as the class only, and rows 0, 1, 2, 4
+and 7's are plain market claims like the bank's (`PLAIN`: no structure noun, no trade verb, no ticker). Rows 2 and 4's
+read exactly, are plain, and are public texts from outside every lane's surface, so neither an exemption keyed to the
 surface's own texts (the founding families') nor one for words naming a structure, a trade or a ticker shields such a
-refusal there. On held-out, each control takes the untaken pool text (a spare bank text or a novel one) whose words
-read closest to its row's key first (the seed breaking ties), so how often the held-out split sees such a refusal
-depends on the pool's texts; the answer says how often it can (`same_cell_reading_exact`, `same_cell_reading_class`:
-the controls whose written words read exactly, or as the class only, as their row's key), and the operator's floor
-check prints CHECK when none reads exactly.
+refusal there. Row 4's also reads as one class only, in a first sentence as long as the bank's (the round-4 review:
+the dev controls that read exactly were short, row 2's 10 words, or read as two classes, row 3's, so a refusal of an
+exact, unambiguous reading in a first sentence of at least 12 words cut the rebirths 8 to 5 on dev with
+`novel_refused` 0 and passed the lane's rules on 4 of 6 test-pool seeds). That is one more surface shape on dev, not a
+cover of them all: the dev controls span few lengths, sentence shapes and keyword densities, and a refusal conditioned
+on one they do not span (a length band, a sentence count or shape, a reading's confidence, a vocabulary) can still pass
+this judge where the held-out pool's texts do not span it either. The hard controls on that are the adversarial
+review, which refuses any admission change in this lane that refuses by the proposal's own surface features rather
+than by reading it against the graveyard (the playbook's memory checklist), and the canary. On held-out, each control
+takes the untaken pool text (a spare bank text or a novel one) whose words read closest to its row's key first (the
+seed breaking ties), so how often the held-out split sees such a refusal depends on the pool's texts; the answer says
+how often it can (`same_cell_reading_exact`, `same_cell_reading_class`: the controls whose written words read exactly,
+or as the class only, as their row's key), and the operator's floor check prints CHECK when none reads exactly.
 
 CLAIMS (no claim twice in a batch but a twin pair). Every same-cell control and every plain new idea carries a claim
 (its `idea`) that no other proposal carries. A claim is carried twice only by a TWIN PAIR: once on its dead slice and
@@ -116,8 +124,9 @@ once the candidate is committed, the batch shuffled by the same seed. The pool n
 derived from the drawn cases. A known limit of the public TEST pool (league/tests/test_swarm_harness_lanes.py, which
 only exercises the machinery): its bank texts all carry the word "fixture" and most of its novel texts do not, so there
 a refusal keyed to that word tells a restatement (a bank text) from a control (mostly a novel text). Any pool whose bank
-and novel texts differ in vocabulary or register has the same tell, so the private pool's are written alike (plain
-market claims, in one register: the playbook's note on rotating the memory pool).
+and novel texts differ in vocabulary, register, length, sentence shape or keyword density has the same tell, so the
+private pool's are written alike (plain market claims, in one register, as long and as shaped on both sides: the
+playbook's note on rotating the memory pool).
 
 Answer: rebirths_admitted, novel_refused, trials_uncounted (a birth on a slice with a buried family that neither
 continues a lineage nor counts the slice's trials: the multiple-testing control loosened; must be 0),
@@ -168,13 +177,14 @@ CARD_SLICES = [("long_butterfly", ["SPY"]), ("calendar", ["QQQ"])]
 CARD_PATH = 2
 #: The dev split's same-cell controls, idea row n's claim (CLAIMS in the module docstring: no claim twice in a batch but
 #: a twin pair), each saying another idea than its row's. None is new public text: each was public before the memory
-#: pool's last rotation (e67bfa18), and none is read from the tree under test. Rows 0 and 4's are the judge's own first
+#: pool's last rotation (e67bfa18), and none is read from the tree under test. Row 0's is one of the judge's own first
 #: held-out bank texts (this file at 49303e42), row 1's one of its first held-out novel ideas (this file at dae58397),
 #: row 2's a strategist test fixture (league/tests/test_swarm_strategist.py), row 3's a founding family's mechanism
-#: (league/swarm/seeds.py), row 5's a store test fixture (league/tests/test_swarm_store.py), row 6's a graveyard-digest
+#: (league/swarm/seeds.py), row 4's a sentence of a desk's mandate (ltcm/desks/pending-alpaca/merton.json, added in
+#: 815ded8f on Sept 15), row 5's a store test fixture (league/tests/test_swarm_store.py), row 6's a graveyard-digest
 #: test fixture (league/tests/test_swarm_graveyard_digest.py), row 7's a lanes test fixture
-#: (league/tests/test_swarm_harness_lanes.py). Every test fixture here is outside every lane's surface: no candidate
-#: edits it, and an exemption keyed to the founding families' texts does not cover it.
+#: (league/tests/test_swarm_harness_lanes.py). Every file here but seeds.py is outside every lane's surface: no
+#: candidate edits it, and an exemption keyed to the founding families' texts does not cover it.
 CONTROLS = {
     0: "Semiconductor leadership over the broad growth index predicts a catch-up move in the laggard fund within two "
        "weeks.",
@@ -182,17 +192,20 @@ CONTROLS = {
     2: "Small caps overshoot and the move increases into quarter-end flows.",
     3: "Short-dated index options price a bigger move than follows on average (the variance risk premium); an iron condor "
        "sells it with the loss capped at the wing.",
-    4: "Quarter-end window dressing lifts recent winners into the last week of the quarter.",
+    4: "Hold eight to fifteen names for months, rebalance only on new filings or a broken thesis, and never chase "
+       "price.",
     5: "Buy a QQQ straddle into earnings: the overnight gap is underpriced convexity.",
     6: "Owning a QQQ straddle before the open pays when overnight gaps extend.",
     7: "Treasury auctions with weak demand push long yields up into the close of the day.",
 }
 #: How each dev control's written words read as its row's card key (`reading`, production's keyword reading): 2 the
 #: same class and inputs, 1 the same class only. The rows not named read as neither.
-SAME_READING = {0: 1, 1: 1, 2: 2, 3: 2, 4: 1, 6: 1}
-#: The dev controls that are plain market claims like the bank's: no structure noun, no trade verb, no ticker. Row 2's
-#: reads exactly as its row, so a refusal of reading words that spares texts naming a structure, a trade or a ticker
-#: still refuses a control on dev.
+SAME_READING = {0: 1, 1: 1, 2: 2, 3: 2, 4: 2, 6: 1}
+#: The dev controls that are plain market claims like the bank's: no structure noun, no trade verb, no ticker. Rows 2
+#: and 4's read exactly as their rows, so a refusal of reading words that spares texts naming a structure, a trade or a
+#: ticker still refuses a control on dev. Row 4's also reads as one class only (no other class has a keyword hit) in a
+#: first sentence of 20 words, as long as the bank's, so a refusal that also asks for an unambiguous reading or a long
+#: first sentence (the round-4 review: row 2's claim is 10 words, row 3's reading is ambiguous) refuses it too.
 PLAIN = (0, 1, 2, 4, 7)
 #: Moved claims the dev split twins (CLAIMS): idea rows 0 and 1's restatements' (their moved ideas) and their controls'.
 MOVED = 2
