@@ -179,7 +179,7 @@ import re
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
 from . import diagnostics, evidence, inputs, public
 from . import settings as settings_mod
@@ -632,6 +632,30 @@ def full_run(args: Any) -> bool:
     """A `gym_run` call that asks for the whole of Train at once (`full` true: no probe)."""
     value = args.get("full") if isinstance(args, Mapping) else None
     return value is True or (isinstance(value, str) and value.strip().lower() == "true")
+
+
+#: Warnings of one advisory preflight a run's answer carries at most (`_advised`).
+ADVISORY_WARNINGS = 3
+ADVISORY_NOTE = ("before this run, the program failed in the preflight (its load on the House's Python, or decide on a "
+                 "made-up market). It refuses only what the Gym's static code check refuses and a misuse of the ctx API "
+                 "that no market could spare, so the run went ahead; each line below may still cost Gym errors (25 in a "
+                 "run disqualify it) or fail the Gym's load. Fix what the hint names, especially if the run was "
+                 "disqualified or refused.")
+
+
+def _advised(answer: Any, advisories: Sequence[Mapping[str, Any]]) -> Any:
+    """A run's or a sweep's answer with the preflight's advisories beside it (`Researcher._preflight`): the first's
+    reason and warnings, and each variant's for a sweep with more than one. A refused answer is left as it is."""
+    if not advisories or not isinstance(answer, dict) or answer.get("stage") == "preflight":
+        return answer
+    first = advisories[0]
+    note: dict[str, Any] = {"status": "advisory", "note": ADVISORY_NOTE, "why": first.get("why"),
+                            "warnings": first.get("warnings") or []}
+    if len(advisories) > 1 or first.get("variant") is not None:
+        note["variants"] = [dict(a) for a in advisories[:MAX_SWEEP_VARIANTS]]
+        note.pop("warnings")
+        note.pop("why")
+    return {**answer, "preflight": note}
 
 
 #: The idle rule's default (`researcher.retire_idle_evaluations`): Gym evaluations (trials, `add_run`) since a family's birth
@@ -1185,7 +1209,7 @@ class Researcher:
 
     def __init__(self, store: SwarmStore, router: Any, pool: Any, settings: Mapping[str, Any], *, contract: str | None = None,
                  clock: Callable[[], float] = time.time, starter: Callable[[Mapping[str, Any]], tuple[str, dict]] | None = None,
-                 background: bool = True, library: Any = None):
+                 background: bool = True, library: Any = None, preflight: Callable[..., Mapping[str, Any]] | None = None):
         self.store = store
         self.router = router
         self.pool = pool
@@ -1197,6 +1221,12 @@ class Researcher:
         self.system = ROLE + self.contract
         self.starter = starter
         self.background = background
+        #: THE PREFLIGHT (`league/swarm/preflight.py`): a new Train run's program on synthetic sessions in the decider's
+        #: sandbox first, with the run's capital; it refuses only what the Gym's static code check refuses at load and
+        #: market-independent misuse of the ctx API, a sweep losing only its refused variants, and its advisories ride
+        #: along with the run's answer (`_advised`). None (tests, a House without the Gym's pool) runs none.
+        #: `researcher.preflight: false` switches it off.
+        self.preflight = preflight
         self._rewriting: dict[str, Any] = {}
         #: (family, version, label) robustness runs this process has in flight (a restart loses queued jobs: they are
         #: queued again; a run that failed leaves the set, so a later cycle queues it again).
@@ -1768,6 +1798,15 @@ class Researcher:
         out["run_refused"] = int(out.get("run_refused") or 0) + 1
         return answer
 
+    @staticmethod
+    def _refused_row(answer: Mapping[str, Any], base: Mapping[str, Any]) -> dict[str, Any]:
+        """One variant the preflight refused, as a sweep's answer lists it: the parameters it changes (as the table's
+        rows show them), the error, its line and source, the misuse and the hint."""
+        variant = dict(answer.get("variant") or {})
+        row: dict[str, Any] = {"params": {k: v for k, v in variant.items() if k not in base or base[k] != v}}
+        row.update({k: answer[k] for k in ("error", "line", "source", "misuse", "hint") if answer.get(k) is not None})
+        return row
+
     def _admit(self, fam: Mapping[str, Any], code: str, out: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str], bool]:
         """(a refusal or None, the roots its NEEDS names, whether they change the family's): the Gym's safety check, NEEDS a
         literal, and roots only from the admitted list, at most `MAX_ROOTS`, changed only by a Gym family."""
@@ -1793,7 +1832,70 @@ class Researcher:
                                                        "changes its roots"}, roots, change
         return None, roots, change
 
-    def _gym_run(self, fam: Mapping[str, Any], args: Mapping[str, Any], out: dict[str, Any], *, author: str) -> dict[str, Any]:
+    def _preflight(self, fam: Mapping[str, Any], code: str, variants: Sequence[Mapping[str, Any]], roots: Sequence[str],
+                   out: dict[str, Any], advisories: list[dict[str, Any]] | None = None) -> dict[int, dict[str, Any]]:
+        """THE PREFLIGHT (`league/swarm/preflight.py`): each variant about to become a Train job, on synthetic sessions in
+        the decider's sandbox, with the run's capital (`gym.capital`). {index in `variants`: its refusal} for each variant
+        refused (the Gym's static code check at load, or market-independent misuse of the ctx API): the researcher's own
+        doing, no version, no Gym job, no trial for it; each is written in the family's notebook with the error and the
+        API the program should have used. A run refuses on its one (`_refusal`); a sweep drops only its refused variants
+        and runs the others (`_gym_sweep`). Every other variant goes on to the Gym (it passed, it is advisory, or the
+        preflight could not say: it never blocks on its own failure). An advisory's warnings (each error, its line and the
+        API to use) go into `advisories`, for the run's own answer (`_advised`)."""
+        check = self.preflight
+        refused: dict[int, dict[str, Any]] = {}
+        if check is None or self.cfg.get("preflight", True) is False:
+            return refused
+        capital = (self.settings.get("gym") or {}).get("capital", 10000.0)
+        for n, params in enumerate(variants):
+            try:
+                verdict = dict(check(code, dict(params or {}), roots=list(roots), name=str(fam["id"]), capital=capital))
+            except Exception as exc:  # noqa: BLE001 - the preflight's own failure never costs the researcher a run
+                out["preflight_error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
+                return refused
+            out["preflight"] = int(out.get("preflight") or 0) + 1
+            out["preflight_seconds"] = round(float(out.get("preflight_seconds") or 0) + float(verdict.get("seconds") or 0), 3)
+            if verdict.get("status") == "inconclusive":
+                # It could not say (a timeout, the sandbox, its deadline, a busy lock): the run goes on to the Gym.
+                # Counted, with the first reason, so a preflight that silently does nothing shows.
+                out["preflight_inconclusive"] = int(out.get("preflight_inconclusive") or 0) + 1
+                out.setdefault("preflight_inconclusive_why", str(verdict.get("why") or "")[:200])
+            elif verdict.get("status") == "advisory":
+                # decide raised on a made-up market, but not with a misuse no market could spare: the run goes on to the
+                # Gym, and the researcher reads the warnings beside its answer.
+                out["preflight_advisory"] = int(out.get("preflight_advisory") or 0) + 1
+                out.setdefault("preflight_advisory_why", str(verdict.get("why") or "")[:200])
+                if verdict.get("house_unloadable"):  # trains, but can never load on the live path's runtime
+                    out["preflight_house_unloadable"] = int(out.get("preflight_house_unloadable") or 0) + 1
+            if verdict.get("status") != "refused":
+                if advisories is not None and verdict.get("warnings"):
+                    row = {"why": str(verdict.get("why") or "")[:400], "warnings": [
+                        {k: (str(v)[:400] if isinstance(v, str) else v) for k, v in w.items()}
+                        for w in list(verdict.get("warnings") or [])[:ADVISORY_WARNINGS]]}
+                    if len(variants) > 1:
+                        row["variant"] = dict(params or {})
+                    advisories.append(row)
+                continue
+            out["preflight_refused"] = int(out.get("preflight_refused") or 0) + 1
+            where = f"line {verdict['line']}: " if verdict.get("line") and not str(verdict.get("error") or "").startswith("line") else ""
+            error = where + str(verdict.get("error") or "")
+            which = f" (variant {n + 1} of {len(variants)}: {json.dumps(dict(params or {}), sort_keys=True, default=str)[:200]})" \
+                if len(variants) > 1 else ""
+            self.store.note(fam["id"], f"Preflight refused a program before any Train run{which}: {verdict.get('why')}: "
+                                       f"{error[:300]}. Fix: {str(verdict.get('hint') or '')[:600]} (no version, job or trial)")
+            answer = {"status": "refused", "stage": "preflight", "reason": f"{verdict.get('why')}: {error}"[:600],
+                      "error": error[:500], "line": verdict.get("line"), "source": verdict.get("source") or None,
+                      "hint": verdict.get("hint"),
+                      "next": "no version, job or trial was created: fix the line (the hint names what to use) and run again"}
+            if verdict.get("misuse"):
+                answer["misuse"] = str(verdict["misuse"])[:200]
+            if which:
+                answer["variant"] = dict(params or {})
+            refused[n] = {k: v for k, v in answer.items() if v is not None}
+        return refused
+
+    def _gym_run(self, fam: Mapping[str, Any], args: Mapping[str, Any], out: dict[str, Any], *, author: str,
+                 advisories: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         if self._terminal(fam["id"], out):
             return {"status": "retired", "reason": "the family is retired; no run started"}
         if holding(args):
@@ -1831,6 +1933,10 @@ class Researcher:
             return self._refusal(out, refused)
         # NO DUPLICATE RUNS: the evaluation this run would be, on the roots it would run on.
         key = self.eval_key(code, params, stress=stress, window="train", roots=roots if change else fam["roots"])
+        if self.preflight is not None and not (self.reuse and self._reusable(self.store.evaluated(fam["id"], key), stress=stress)):
+            refused = self._preflight(fam, code, [params], roots if change else fam["roots"], out, advisories)
+            if refused:
+                return self._refusal(out, refused[0])
         stored = None
         with self.store.atomic():
             if self._terminal(fam["id"], out):
@@ -2136,7 +2242,8 @@ class Researcher:
                           sort_keys=True, default=str)
         return f"{fid}:sweep:{hashlib.sha256(body.encode('utf-8')).hexdigest()[:16]}"
 
-    def _gym_sweep(self, fam: Mapping[str, Any], args: Mapping[str, Any], out: dict[str, Any], *, author: str) -> dict[str, Any]:
+    def _gym_sweep(self, fam: Mapping[str, Any], args: Mapping[str, Any], out: dict[str, Any], *, author: str,
+                   advisories: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         """`gym_sweep` (the module docstring, SWEEPS and SWEEP LOAD): the variants of one program on Train at once, each its
         own version and its own run and trial; a table sorted by the Train score."""
         fid = fam["id"]
@@ -2178,6 +2285,26 @@ class Researcher:
                 if run is not None:
                     stored[i] = run
         fresh = len(variants) - len(stored)
+        refused_rows: list[dict[str, Any]] = []
+        if fresh:
+            # THE PREFLIGHT: a variant it refuses is dropped, alone; the others run. Refused whole only when every new
+            # variant is (nothing new would run).
+            new = [i for i in range(len(variants)) if i not in stored]
+            refused = self._preflight(fam, code, [variants[i] for i in new], run_roots, out, advisories)
+            if refused and len(refused) == len(new):
+                answer = dict(refused[min(refused)])
+                if len(refused) > 1:
+                    answer["refused_variants"] = [self._refused_row(refused[k], base) for k in sorted(refused)]
+                    answer["reason"] = (f"the preflight refused every new variant of the sweep ({len(refused)}); the first: "
+                                        f"{answer.get('reason') or ''}")[:600]
+                return self._refusal(out, answer)
+            if refused:
+                drop = {new[k] for k in refused}
+                keep = [i for i in range(len(variants)) if i not in drop]
+                refused_rows = [self._refused_row(refused[k], base) for k in sorted(refused)]
+                stored = {j: stored[i] for j, i in enumerate(keep) if i in stored}
+                variants = [variants[i] for i in keep]
+                fresh = len(variants) - len(stored)
         if fresh and not self._reserve_sweep(fid, fresh):  # the pool's room for sweeps (SWEEP LOAD): a plain refusal, no backoff
             room = self.sweep_room()
             out["sweep_busy"] = True
@@ -2190,8 +2317,14 @@ class Researcher:
             if note:
                 self.store.note(fid, note)
                 out["note"] = note
-            return self._run_sweep(fam, args, out, code=code, base=base, variants=variants, dropped=dropped, roots=roots,
-                                   change=change, author=author, stored=stored)
+            answer = self._run_sweep(fam, args, out, code=code, base=base, variants=variants, dropped=dropped, roots=roots,
+                                     change=change, author=author, stored=stored)
+            if refused_rows and isinstance(answer, dict):
+                answer["refused_variants"] = refused_rows
+                answer["refused_note"] = (f"the preflight refused {len(refused_rows)} variant(s) of this sweep (no version, "
+                                          "job or trial for them); the others ran: fix each refused line (its hint) and "
+                                          "sweep it again")
+            return answer
         finally:
             if fresh:
                 self._release_sweep(fid, fresh)
@@ -2413,10 +2546,10 @@ class Researcher:
             else:
                 out["retire_refused"] = True
             return result
-        if name == "gym_run":
-            return self._gym_run(fam, args, out, author=author)
-        if name == "gym_sweep":
-            return self._gym_sweep(fam, args, out, author=author)
+        if name in RUNS:
+            advisories: list[dict[str, Any]] = []
+            run = self._gym_run if name == "gym_run" else self._gym_sweep
+            return _advised(run(fam, args, out, author=author, advisories=advisories), advisories)
         with self.store.atomic():  # local tools cannot change the best or notebook after another connection retires it
             if self._terminal(fam["id"], out):
                 return {"status": "refused", "reason": "the family is retired; no further tools run"}
