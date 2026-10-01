@@ -6,12 +6,12 @@ Gym engine and the real evidence lines, so it tests the execution contract (what
 survives between runs) as well as the statistics. It is a benchmark of the harness, never evidence about a strategy:
 every world is invented, every edge is planted, and no model, market data, sealed day or production state is read.
 
-This report scores main's evaluator (`gym-engine-4`, the tree of release B's base) on two independent cohorts: the
-development cohort, on which the threshold variants were chosen, and a confirmation cohort drawn afterwards from
-independent streams. **No threshold was changed, and none is recommended for adoption now** (the last section says
+This report scores main's evaluator at release A (`777b894f`, `gym-engine-4`, release B's base) on two independent
+cohorts: the development cohort, on which the threshold variants were chosen, and a confirmation cohort drawn afterwards
+from independent streams. **No threshold was changed, and none is recommended for adoption now** (the last section says
 why). The owner's rule (Sept 30) allows an eligibility or scoring change only when fixed benchmarks show false
 promotions do not rise and missed signals fall; the sealed holdout, the multiple-testing control and the forward
-requirement never loosen.
+requirement never loosen, and prior evidence keeps its prior verdicts.
 
 The machine-readable receipts are [evaluator_1.json](evaluator_1.json) (development) and
 [evaluator_1_confirmation.json](evaluator_1_confirmation.json): the suite hash, the tree and fixture fingerprints, the
@@ -25,15 +25,17 @@ python -m league.swarm.benchmarks --suite evaluator --cohort confirmation --froz
 python -m league.swarm.benchmarks --suite evaluator --json --compare docs/benchmarks/evaluator_1.json
 ```
 
-One run takes 11 to 15 minutes on one laptop core: eight engine worlds and 128 search lineages for each of ten search
-cases. What releases are compared on is the report's `headline`, a per-case vector: promotions of each negative,
-misses of each positive, the cases the static check refuses, impossible fills, stress-contaminated runs, each proof's
-held count, each ablation's detections and each variant's owner-rule verdict. `--compare OLD` lists regressions and
-improvements case by case and exits 4 when there is a regression or the runs are not comparable (a different suite,
-cohort or world fixture, or a run off the full protocol). A different Python, numpy or pyarrow is noted, since the
-synthetic streams may shift with them. Exit 3 means the suite file is not the pinned suite; exit 5 means the tree lacks
-an interface the suite calls (main at `f082cf5e` is the oldest tree that has them all; production's release before it
-cannot be scored); exit 2 means a confirmation run named no admissible development report.
+One run takes 11 to 25 minutes on one laptop core, depending on load: eight engine worlds and 128 search lineages for
+each of ten search cases. What releases are compared on is the report's `headline`, a per-case vector: promotions of
+each negative, misses of each positive, the cases the static check refuses, impossible fills and stress-contaminated
+runs per case, the review contract's two answers per case, each proof's held count, each ablation's detections and
+each variant's owner-rule verdict. `--compare OLD` lists regressions and improvements case by case (a review-contract
+answer that stops holding is a regression) and exits 4 when there is a regression or the runs are not comparable (a
+different suite, cohort or world fixture, or a run off the full protocol). A different Python, numpy or pyarrow is
+noted, since the synthetic streams may shift with them. Exit 3 means the suite file is not the pinned suite; exit 5
+means the tree lacks an interface the suite calls (main at `f082cf5e` is the oldest tree that has them all;
+production's release before it cannot be scored); exit 2 means a confirmation run named no admissible development
+report.
 
 `--tree CHECKOUT` runs this suite file against another checkout's `league` package in a child process. It guards
 against accidental drift of the cases (a tree's own copy of the suite is never used), not against a hostile tree: the
@@ -51,7 +53,8 @@ different fixtures are not compared.
 **Cohorts.** Development's worlds and search streams are the suite's first ones. Confirmation's hash the cohort's name
 in, and a confirmation run is admitted only against the frozen development receipt of the same pinned suite,
 execution fingerprint, evaluator sources, fixture and sample counts. A variant chosen on development is then judged on
-data it was not chosen on.
+data it was not chosen on, and only a variant whose development and confirmation verdicts are both met
+(`met_and_confirmed`) meets the owner's rule.
 
 ## What the suite runs
 
@@ -91,14 +94,15 @@ right rejection (a grounded finding stays a failure, the same claim without a re
   Validation floor short), sparse (about 13 a year), a conditional regime (only after a large overnight gap), and a
   year regime (absent in the first Train year).
 - **Leakage**: each probe trades the absent window, taking its direction from what it tried to read of the future,
-  else from a coin, and each would profit if its route were open. Paths: indexing past now; an array's base; the
-  engine's greek cache (it holds the whole day's underlying) behind a private attribute; a date table reached by
-  reconstructing each session's date (a recognized window start plus a session count); the greeks (solved in blocks
-  that include later minutes); prior-session bars (closes, highs, lows and opens join the history together at a day's
-  close, so one probe on the last close covers the mechanism); historical bar volume without publication receipts (the
-  world writes a volume column that encodes the day's later move); and a process-global numpy dict carrying one run's
-  realized moves into a later run of the same days. Next-session event flags are a **smoke test**, kept out of the
-  rates: the world's moves do not depend on the calendar, so that probe cannot profit whatever the engine does.
+  else from a coin. Paths: indexing past now; an array's base; the engine's greek cache (it holds the whole day's
+  underlying) behind a private attribute; a date table reached by reconstructing each session's date (a recognized
+  window start plus a session count); the greeks (solved in blocks that include later minutes); prior-session bars
+  (closes, highs, lows and opens join the history together at a day's close, so one probe on the last close covers the
+  mechanism); historical bar volume without publication receipts (the world writes a volume column that encodes the
+  day's later move); and a process-global numpy dict (`np.typecodes`)
+  carrying one run's realized moves into a later run of the same days. Next-session event flags are a **smoke test**,
+  kept out of the rates: the world's moves do not depend on the calendar, so that probe cannot profit whatever the
+  engine does.
 - **Memorized tables** (review-dependent negatives): a program that carries the realized direction of every session
   keyed by the session's opening price level; the same table kept only for the sessions whose window moved most (about
   13 a year, trading nowhere else); and a direction list indexed by a session counter from a recognized window start
@@ -110,7 +114,10 @@ right rejection (a grounded finding stays a failure, the same claim without a re
   crossed bid, and passive spread capture at the touch.
 - **State** (contract proofs): module STATE starts fresh each run; parameter lists are copied per run; a split Train run
   matches the unsplit one day for day and Validation is never split; no process-global object carries a run's decisions
-  into the next run; a batch-mate cannot change what another program sees or does.
+  into the next run, and a batch-mate cannot change what another program sees or does, each proved separately through
+  numpy's two mutable public dicts (`np.typecodes` and `np.sctypeDict`); the static check refuses every mutable public
+  numpy container (enumerated at run time from the scored process's numpy, top level and one submodule down); and a
+  batch-mate cannot write into the ctx objects another program is handed.
 - **Broken ablations**: a `signal_on` switch wired six ways (through `ctx.params`, a helper default capturing `PARAMS`, a
   module alias, a shadow copy that never reads `PARAMS`, a read defeated by a wrong comparison, and a computed key with
   a wrong test). Detection by the static contract and by a behavioral probe (the off variant over Validation).
@@ -121,12 +128,15 @@ right rejection (a grounded finding stays a failure, the same claim without a re
   opens: 12, 42 and 48 trades a year sit under today's floors (Train 40 a year, Validation 50), 126 above them. Planted
   lineages carry a fixed net edge at 12, 48 and 126 trades a year.
 
-## Results: main's evaluator
+## Results: main's evaluator at release A
 
-Tree: `gym-engine-4`, execution fingerprint `f1515bd98bfb` (unchanged by this branch), evaluator sources `0c4cc7ad582a`
-(the evidence, gate, researcher, review-contract, experiment, results and stats modules), fixture `1ee0e716bc8d`, suite
-`292b84723078`; Python 3.14.7, numpy 2.5.3, pyarrow 25.0.1. Each cohort: eight worlds and 128 search lineages per
-search case. Development took 659 s and confirmation 876 s on one core of a shared machine.
+Tree: main at `777b894f` (release A) with this branch, `gym-engine-4`, execution fingerprint `2d3d02847e7d` (release
+A's; this branch changes nothing it covers), evaluator sources `7305b9e199b3` (the evidence, gate, researcher,
+review-contract, experiment, results and stats modules), fixture `1ee0e716bc8d`, suite `ce1617764510`; Python 3.14.7,
+numpy 2.5.3, pyarrow 25.0.1. Each cohort: eight worlds and 128 search lineages per search case. Development took
+1200 s and confirmation 1453 s on one core of a loaded shared machine. The first draft scored main at `f082cf5e`
+(before release A): every case, search band, ablation and variant figure it shares with this run is identical in both
+cohorts; this run adds three numpy proofs.
 
 ### Headline
 
@@ -182,10 +192,14 @@ below any version with a positive worst year.
 
 On the paths tested, nothing in the ctx leaks the future: the arrays end at the current minute, the greeks are handed
 out one row at a time, the prior-session bars end yesterday, and historical bar volume without first-observation
-receipts is hidden even when the file holds it. Three probes would profit if the static check let them through (the
-greek cache holds the whole day's prices; the date table holds every session's answer); it does not. Not tested: open
-interest (the world writes none), and highs, lows and opens separately (they join the history on the same path as the
-closes). The holes the suite found let programs or runs pass information to each other instead: see State.
+receipts is hidden even when the file holds it. The static check refuses three probes. A unit test opens it for them
+on one validation world: the greek-cache probe (it reaches the cache through the snapshot's greeks source) and the
+date-table probe then read the window's future (65 of 65 directions right, t 7.4), so the check is what stops them.
+The array-base probe learns nothing even opened (30 of 65 right, and it loses money): the engine hands a program a copy
+whose base is a bytes copy of today so far, a second guard. The headline's refusal list flags a release that stops refusing any of the
+three. Not tested: open interest (the world writes none), and highs, lows and opens separately (they join the history
+on the same path as the closes). The holes the suite found let programs or runs pass information to each other
+instead: see State.
 
 ### Invalid fills
 
@@ -202,18 +216,22 @@ loses under adverse selection. Every fill probe loses money and stops at the Tra
 | Module STATE starts fresh every run | state | 8/8 | 5, 5 |
 | Parameter lists are copied per run | parameters | 8/8 | 1, 1 |
 | A split Train run matches the unsplit run day for day; Validation is never split | state | 8/8 | 195 = 195 days, Validation split 1 |
-| No process-global object carries a run into the next | state | **0/8** | 65, then 0 |
-| A batch-mate cannot change another program's result through a process-global object | state | **0/8** | 65, then 0 |
+| No process-global object carries a run into the next: `np.typecodes` | state | **0/8** | 65, then 0 |
+| The same through `np.sctypeDict` | state | **0/8** | 65, then 0 |
+| A batch-mate cannot change another program's result through a process-global object: `np.typecodes` | state | **0/8** | 65, then 0 |
+| The same through `np.sctypeDict` | state | **0/8** | 65, then 0 |
+| The static check refuses every mutable public numpy container | state | **0/8** | reachable: `np.sctypeDict`, `np.typecodes` |
 | A batch-mate cannot write into the ctx objects another program is handed | context | **0/8** | 65, then 0 |
 
 The first three rebuild the state-reset proof Codex ran on Sept 30 and lost: STATE resets between runs, and the
-engine-4 parameter binding holds (see Ablations). The last three are defects. numpy exposes mutable module-level
-dictionaries that pass the static check; a program can write them, and a later run or a batch-mate in the same process
-reads what it wrote. numpy itself consults one of them when it resolves dtype names, so a write can change what another
-program computes, not only what it knows. And the underlying's view is built once a minute and shared by every
-batch-mate with the same history, with a plain dict inside it. These contradict two of the review contract's facts
-(`state`: never across independent replay runs; `context`: read-only copies), so a reviewer who cites them today has a
-concrete route and is right.
+engine-4 parameter binding holds (see Ablations). The rest are three defects, proved six ways. numpy exposes two mutable
+module-level dictionaries that pass the static check, `np.typecodes` and `np.sctypeDict` (the only mutable public
+containers numpy 2.5.3 has at its top level or one public submodule down). A program can write either, and a later run
+or a batch-mate in the same process reads what it wrote. numpy itself consults `sctypeDict` when it resolves dtype
+names, so a write there can change what another program computes, not only what it knows. And the underlying's view is
+built once a minute and shared by every batch-mate with the same history, with a plain dict inside it. These contradict
+two of the review contract's facts (`state`: never across independent replay runs; `context`: read-only copies), so a
+reviewer who cites them today has a concrete route and is right.
 
 Scope: production Gym boxes run each batch unit in its own process, which isolates runs from each other but not the
 programs of one unit. The House's live decider holds every live program instance in one child process
@@ -221,9 +239,15 @@ programs of one unit. The House's live decider holds every live program instance
 batch isolation contains a failing program's errors; it does not separate this state. The fixes are small but belong to
 `league/gym` (a Gym change resets evidence): refuse numpy's mutable module attributes in the safety check (an allowlist
 of numpy names is the robust form) and make the view's coverage mapping read-only. They are listed for release B, the
-planned reset, and are not in this change. When either lands, its probes are refused (or the writer's write fails) and
-the proofs hold; a unit test runs the refused path through the whole report, so the suite needs no edit and keeps its
-pin.
+planned reset, and are not in this change.
+
+When they land, the probes are refused (or the writer's write fails) and the proofs hold with no edit to the suite (a
+unit test runs the refused path through the whole report). The suite certifies the numpy fix only when it is whole:
+each dictionary is proved on its own, and the reach proof enumerates, at run time, every mutable public numpy container
+(dict, list, set or bytearray, at numpy's top level and one public submodule down, in the scored process's numpy) and
+holds only when the static check refuses them all. A fix that refuses `typecodes` alone leaves the `sctypeDict` proofs
+and the reach proof failing; a unit test simulates the partial and the whole fix. The pipeline's numpy memo probe
+reaches `typecodes` only, so its refusal alone says nothing about `sctypeDict`.
 
 ### Broken ablations
 
@@ -279,7 +303,10 @@ Noise lineages that spent a holdout look, by band (of 128), and the planted 48-a
 | noise, 126 a year (Gaussian) | 3 | 3 | 2 | 2 |
 | planted, 48 a year: promoted | 0 | 104 | 0 | 102 |
 
-**No variant meets the rule in either cohort, and no threshold change is proposed from this suite.**
+**No variant meets the rule in either cohort, and no threshold change is proposed from this suite.** A single cohort's
+verdict is never cited alone: the confirmation receipt records, per variant, whether the frozen development verdict
+and its own were both met (`met_and_confirmed` in the headline's `owner_rule`; a development receipt leaves it unset).
+No variant is met and confirmed.
 
 - **`aligned_floors`: withdrawn.** An earlier draft of this report recommended it, on the development cohort's four
   original noise bands, where its look spend did not rise. With nulls in the band it opens (42 and 48 trades a year,
@@ -327,8 +354,9 @@ Noise lineages that spent a holdout look, by band (of 128), and the planted 48-a
   five-candidate schedule. It is not a simulation of model research.
 - Eight worlds and 128 lineages per case: a zero count supports an exact bound, not a claim of zero. Case-worlds
   cluster by case, and every bound is conditional on this case mix.
-- These figures score main at `f082cf5e`. Release A changes `league/gym` (batch error isolation, a compile check) but not
-  the world's fixture, so the integrated release B tree should be scored with the same pinned suite before it deploys
+- These figures score main at release A (`777b894f`). Release A changed `league/gym` (batch error isolation, a compile
+  check) but not the world's fixture, and moved no figure the first draft (main at `f082cf5e`) shares with this run.
+  The integrated release B tree should be scored with the same pinned suite before it deploys
   (`--compare docs/benchmarks/evaluator_1.json`); main at `f082cf5e` is the oldest tree the suite can score.
 
 ## Reproduction
@@ -341,6 +369,6 @@ python -m unittest league.tests.test_swarm_evaluator_benchmarks league.tests.tes
 ```
 
 A pinned suite is deterministic on the same Python, numpy and pyarrow: worlds, fills and bootstraps are seeded by
-hashes. The development cohort reproduced the first draft's figures exactly on every case and search band the two
-share. Each receipt's `replication_rows_sha256` is the digest of every world's figures (per-world seconds excluded),
+hashes. Both cohorts reproduced the earlier drafts' figures exactly on every case, search band, ablation and variant
+they share, across the re-pins and release A. Each receipt's `replication_rows_sha256` is the digest of every world's figures (per-world seconds excluded),
 recomputed from a saved full report by `receipt()`.

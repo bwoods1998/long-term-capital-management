@@ -465,7 +465,7 @@
   "context",
   "state"
  ],
- "frozen_development_headline_sha": "5c38da04ece6fc2c80da05bfa80f5956218d61d6c4b902a0ca0dac7e54a46722",
+ "frozen_development_headline_sha": "5443b3a0ba6407954c13eb0cb959be1b7fbbe739888bbee5f516b065028f76d1",
  "full_protocol": true,
  "headline": {
   "ablation_rates": {
@@ -535,7 +535,7 @@
    }
   },
   "cohort": "confirmation",
-  "elapsed_seconds": 875.5,
+  "elapsed_seconds": 1452.7,
   "facts_contradicted": [
    "context",
    "state"
@@ -558,6 +558,13 @@
   },
   "full_protocol": true,
   "impossible_fills": 0,
+  "impossible_fills_by_case": {
+   "fill_close_above_width": 0,
+   "fill_crossed_quotes": 0,
+   "fill_open_below_zero": 0,
+   "fill_passive_spread": 0,
+   "fill_stale_quote": 0
+  },
   "level_invariance_probe": {
    "detected": {
     "count": 8,
@@ -605,6 +612,7 @@
      "noise_looks_not_higher_in_any_band"
     ],
     "met": false,
+    "met_and_confirmed": false,
     "noise_bands_with_more_looks": [
      "noise_low_fat_search",
      "noise_low_search",
@@ -617,6 +625,7 @@
      "missed_signals_lower"
     ],
     "met": false,
+    "met_and_confirmed": false,
     "noise_bands_with_more_looks": []
    },
    "no_floors": {
@@ -626,6 +635,7 @@
      "noise_looks_not_higher_in_any_band"
     ],
     "met": false,
+    "met_and_confirmed": false,
     "noise_bands_with_more_looks": [
      "noise_low_fat_search",
      "noise_low_search",
@@ -643,6 +653,7 @@
      "search_false_promotions_not_higher"
     ],
     "met": false,
+    "met_and_confirmed": false,
     "noise_bands_with_more_looks": [
      "noise_dense_search",
      "noise_low_fat_search",
@@ -658,6 +669,7 @@
      "noise_looks_not_higher_in_any_band"
     ],
     "met": false,
+    "met_and_confirmed": false,
     "noise_bands_with_more_looks": [
      "noise_dense_search",
      "noise_low_fat_search",
@@ -673,6 +685,7 @@
      "noise_looks_not_higher_in_any_band"
     ],
     "met": false,
+    "met_and_confirmed": false,
     "noise_bands_with_more_looks": [
      "noise_low_fat_search",
      "noise_low_search",
@@ -717,14 +730,20 @@
   },
   "proofs_failed": [
    "state_numpy_runs",
+   "state_numpy_runs_sctypedict",
    "state_numpy_batchmates",
+   "state_numpy_batchmates_sctypedict",
+   "state_numpy_reachable",
    "state_ctx_batchmates"
   ],
   "proofs_held": {
    "state_ctx_batchmates": 0,
    "state_fresh_runs": 8,
    "state_numpy_batchmates": 0,
+   "state_numpy_batchmates_sctypedict": 0,
+   "state_numpy_reachable": 0,
    "state_numpy_runs": 0,
+   "state_numpy_runs_sctypedict": 0,
    "state_params_copied": 8,
    "state_split_segments": 8
   },
@@ -733,6 +752,24 @@
    "leak_date_literal",
    "leak_private_attr"
   ],
+  "review_contract": {
+   "leak_memorized_levels": {
+    "grounded_rejection_kept": true,
+    "ungrounded_rejection_downgraded": true
+   },
+   "leak_memorized_sessions": {
+    "grounded_rejection_kept": true,
+    "ungrounded_rejection_downgraded": true
+   },
+   "leak_memorized_sparse": {
+    "grounded_rejection_kept": true,
+    "ungrounded_rejection_downgraded": true
+   },
+   "leak_numpy_memo": {
+    "grounded_rejection_kept": true,
+    "ungrounded_rejection_downgraded": true
+   }
+  },
   "runtime": {
    "numpy": "2.5.3",
    "pyarrow": "25.0.1",
@@ -743,13 +780,13 @@
   },
   "stress_contaminated_total": 8,
   "suite": "evaluator-suite-1",
-  "suite_sha": "292b847230786bc5cb1437752271eff8b306eb490595f85765dc874c01ae969b",
+  "suite_sha": "ce1617764510c9963edc2ead3ad5a12f6a31876d747afb5ba1529ace847f4094",
   "tree": {
    "engine": "gym-engine-4",
-   "evaluator_sha": "0c4cc7ad582a49c8161b2eede7ae718f3c87ab3458aaa9d9f010a5fb98f65740",
-   "execution_sha256": "f1515bd98bfb22eb33154606408cc14da1a292cb20240c928e4e37183487770d",
+   "evaluator_sha": "7305b9e199b307c9f754af6b4bb32a999fc9b6353f0f39440d71d28805a8848f",
+   "execution_sha256": "2d3d02847e7d3b04689c159504d6080e37c81f81628a26535c50410102d031fa",
    "fixture_sha": "1ee0e716bc8d8f0ed7dc12377c44420ca1643064468d1985a18de715dab101b1",
-   "git_head": "b6f5a28228cdab0670eff18cbf8879ea37305e43",
+   "git_head": "118a8239ed8c9e9bba763e9f379780dd580accbf",
    "league_uncommitted_changes": false
   },
   "verdict_sensitivity": {
@@ -786,8 +823,40 @@
   "End-to-end false promotions cannot tell floor variants apart on noise: the holdout with Holm stops every noise lineage under any floors. The owner-rule verdict therefore also compares the holdout looks noise spends in every frequency band, and the sparse memorized table is a negative the floors are known to stop.",
   "--tree runs the candidate's code in the suite's interpreter with the operator's environment: it guards against accidental drift of the cases, not against a hostile tree."
  ],
+ "owner_rule_confirmation": {
+  "aligned_floors": {
+   "confirmation_met": false,
+   "development_met": false,
+   "met_and_confirmed": false
+  },
+  "current": {
+   "confirmation_met": false,
+   "development_met": false,
+   "met_and_confirmed": false
+  },
+  "no_floors": {
+   "confirmation_met": false,
+   "development_met": false,
+   "met_and_confirmed": false
+  },
+  "pooled_train": {
+   "confirmation_met": false,
+   "development_met": false,
+   "met_and_confirmed": false
+  },
+  "pooled_validation": {
+   "confirmation_met": false,
+   "development_met": false,
+   "met_and_confirmed": false
+  },
+  "sparse_floors": {
+   "confirmation_met": false,
+   "development_met": false,
+   "met_and_confirmed": false
+  }
+ },
  "pinned": true,
- "pinned_sha": "292b847230786bc5cb1437752271eff8b306eb490595f85765dc874c01ae969b",
+ "pinned_sha": "ce1617764510c9963edc2ead3ad5a12f6a31876d747afb5ba1529ace847f4094",
  "proofs": {
   "state_ctx_batchmates": {
    "claim": "a batch-mate cannot write into the ctx objects another program is handed",
@@ -812,7 +881,7 @@
    "refused": null
   },
   "state_numpy_batchmates": {
-   "claim": "a program's result does not depend on the batch-mates it shares a process with",
+   "claim": "a program's result does not depend on the batch-mates it shares a process with (np.typecodes)",
    "fact": "state",
    "held": 0,
    "observed": [
@@ -822,8 +891,42 @@
    "of": 8,
    "refused": null
   },
+  "state_numpy_batchmates_sctypedict": {
+   "claim": "a program's result does not depend on the batch-mates it shares a process with (np.sctypeDict)",
+   "fact": "state",
+   "held": 0,
+   "observed": [
+    65,
+    0
+   ],
+   "of": 8,
+   "refused": null
+  },
+  "state_numpy_reachable": {
+   "claim": "the static check refuses every mutable public numpy container (a program cannot hold one)",
+   "fact": "state",
+   "held": 0,
+   "observed": [
+    "np.sctypeDict",
+    "np.typecodes"
+   ],
+   "of": 8,
+   "refused": null,
+   "refused_containers": []
+  },
   "state_numpy_runs": {
-   "claim": "no process-global object carries one run's decisions into the next run",
+   "claim": "no process-global object (np.typecodes) carries one run's decisions into the next run",
+   "fact": "state",
+   "held": 0,
+   "observed": [
+    65,
+    0
+   ],
+   "of": 8,
+   "refused": null
+  },
+  "state_numpy_runs_sctypedict": {
+   "claim": "no process-global object (np.sctypeDict) carries one run's decisions into the next run",
    "fact": "state",
    "held": 0,
    "observed": [
@@ -906,37 +1009,37 @@
    "upper_95_one_sided": 0.9898
   }
  },
- "replication_rows_sha256": "a356c59ce889efed79eb3a986becc84837b7611e741ff9b9b1249f31a6641e2f",
+ "replication_rows_sha256": "17a6cb5933b3db026b49de78d02ed20cc0e6e4b8565d9a44d70727721e035a2b",
  "replications": 8,
  "reproduce": "python -m league.swarm.benchmarks --suite evaluator --cohort confirmation --frozen DEVELOPMENT.json --json --output FULL.json --receipt RECEIPT.json (the rows digest excludes per-world seconds)",
  "runtime": {
-  "elapsed_seconds": 875.5,
+  "elapsed_seconds": 1452.7,
   "numpy": "2.5.3",
   "pyarrow": "25.0.1",
   "python": "3.14.7"
  },
  "search_replications": 128,
  "suite": "evaluator-suite-1",
- "suite_sha": "292b847230786bc5cb1437752271eff8b306eb490595f85765dc874c01ae969b",
+ "suite_sha": "ce1617764510c9963edc2ead3ad5a12f6a31876d747afb5ba1529ace847f4094",
  "title": "evaluator-suite-1, confirmation cohort: a synthetic known-answer benchmark of the evaluator, not a qualification",
  "tree": {
   "engine": "gym-engine-4",
-  "evaluator_sha": "0c4cc7ad582a49c8161b2eede7ae718f3c87ab3458aaa9d9f010a5fb98f65740",
+  "evaluator_sha": "7305b9e199b307c9f754af6b4bb32a999fc9b6353f0f39440d71d28805a8848f",
   "evaluator_sources": {
    "league/gym/experiment.py": "9f48f8a776c79a9f6c10ecf67956e010274130c9b9c355df7662d8d082dd3b9f",
-   "league/gym/results.py": "1ad0ca4dc21ff3a758971a7092b058d014550d7e8f03a88666abf712062f3fc5",
+   "league/gym/results.py": "d29ed18d37a234238ef02fb1bc6f1abc32ad3360b747501ccefd2785a9851ae1",
    "league/gym/review_contract.py": "92f03273b68667cc92dd95736b47fb1ebc9f11bab3ae5ff48a7637d375e2f013",
    "league/stats.py": "866ecda27a79bbeaba033ef92847093e182a0dbe2bd1041a568c2dbf81a302d3",
    "league/swarm/evidence.py": "fee30d80b9a6afac99045b777d455a7284bdec21a466a4a6b9a012e88c2e64c9",
    "league/swarm/gate.py": "aec33d9b741ec9fa02fb245113b696ec3f0b2ffee4553c6f55b5e1d1c8a083d8",
    "league/swarm/researcher.py": "f23e16633e12f9e2c792fad205029e43f0440d1b0bd28830b8f79c8815889d18"
   },
-  "execution_sha256": "f1515bd98bfb22eb33154606408cc14da1a292cb20240c928e4e37183487770d",
+  "execution_sha256": "2d3d02847e7d3b04689c159504d6080e37c81f81628a26535c50410102d031fa",
   "fixture_sha": "1ee0e716bc8d8f0ed7dc12377c44420ca1643064468d1985a18de715dab101b1",
   "fixture_sources": {
    "league/gym/synth.py": "d48f0d9d71388c133ee3ac08e7ee7b144060b2f661e2055a2c60ffbe5339638d"
   },
-  "git_head": "b6f5a28228cdab0670eff18cbf8879ea37305e43",
+  "git_head": "118a8239ed8c9e9bba763e9f379780dd580accbf",
   "league_uncommitted_changes": false
  },
  "variants": {
