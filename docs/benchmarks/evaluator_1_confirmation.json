@@ -1,0 +1,2774 @@
+{
+ "ablation_rates": {
+  "behavioral_detection": {
+   "count": 24,
+   "lower_95": 0.8575,
+   "of": 24,
+   "rate": 1.0,
+   "upper_95": 1.0,
+   "upper_95_one_sided": 1.0
+  },
+  "behavioral_false_alarm": {
+   "count": 0,
+   "lower_95": 0.0,
+   "of": 24,
+   "rate": 0.0,
+   "upper_95": 0.1425,
+   "upper_95_one_sided": 0.1173
+  },
+  "static_detection": {
+   "count": 8,
+   "lower_95": 0.1563,
+   "of": 24,
+   "rate": 0.3333,
+   "upper_95": 0.5532,
+   "upper_95_one_sided": 0.5214
+  },
+  "static_false_alarm": {
+   "count": 0,
+   "lower_95": 0.0,
+   "of": 24,
+   "rate": 0.0,
+   "upper_95": 0.1425,
+   "upper_95_one_sided": 0.1173
+  }
+ },
+ "ablations": {
+  "ablation_ctx_params": {
+   "behavioral_effective": 8,
+   "broken": false,
+   "of": 8,
+   "static_reason": null,
+   "static_refused": 0
+  },
+  "ablation_default_capture": {
+   "behavioral_effective": 8,
+   "broken": false,
+   "of": 8,
+   "static_reason": null,
+   "static_refused": 0
+  },
+  "ablation_dynamic_key": {
+   "behavioral_effective": 0,
+   "broken": true,
+   "of": 8,
+   "static_reason": null,
+   "static_refused": 0
+  },
+  "ablation_module_alias": {
+   "behavioral_effective": 8,
+   "broken": false,
+   "of": 8,
+   "static_reason": null,
+   "static_refused": 0
+  },
+  "ablation_read_ignored": {
+   "behavioral_effective": 0,
+   "broken": true,
+   "of": 8,
+   "static_reason": null,
+   "static_refused": 0
+  },
+  "ablation_shadow_config": {
+   "behavioral_effective": 0,
+   "broken": true,
+   "of": 8,
+   "static_reason": "changed parameter(s) never read by this program: signal_on; use the requested values through ctx.params or PARAMS before replay",
+   "static_refused": 8
+  }
+ },
+ "cases": {
+  "absent_signal": {
+   "family": "signal",
+   "figures": {
+    "train_trades_per_year": [
+     65,
+     65
+    ],
+    "validation_t": [
+     -1.7242,
+     0.8461
+    ],
+    "validation_t_median": -0.2712,
+    "validation_trades": [
+     65,
+     65
+    ]
+   },
+   "kind": "negative",
+   "level_flagged": 0,
+   "of": 8,
+   "promoted": 0,
+   "promoted_and_level_flagged": 0,
+   "review_dependent": false,
+   "stopped_at": {
+    "train_stress": 8
+   },
+   "stress_contaminated": 0
+  },
+  "cost_erased": {
+   "family": "signal",
+   "figures": {
+    "train_trades_per_year": [
+     65,
+     65
+    ],
+    "validation_t": [
+     -1.9351,
+     0.9567
+    ],
+    "validation_t_median": -0.2579,
+    "validation_trades": [
+     65,
+     65
+    ]
+   },
+   "kind": "negative",
+   "level_flagged": 0,
+   "of": 8,
+   "promoted": 0,
+   "promoted_and_level_flagged": 0,
+   "review_dependent": false,
+   "stopped_at": {
+    "drift": 1,
+    "train_stress": 7
+   },
+   "stress_contaminated": 0
+  },
+  "drift_only": {
+   "family": "signal",
+   "figures": {
+    "train_trades_per_year": [
+     65,
+     65
+    ],
+    "validation_t": [
+     0.4056,
+     2.8966
+    ],
+    "validation_t_median": 1.0853,
+    "validation_trades": [
+     65,
+     65
+    ]
+   },
+   "kind": "negative",
+   "level_flagged": 0,
+   "of": 8,
+   "promoted": 0,
+   "promoted_and_level_flagged": 0,
+   "review_dependent": false,
+   "stopped_at": {
+    "drift": 8
+   },
+   "stress_contaminated": 0
+  },
+  "edge_disappears": {
+   "family": "signal",
+   "figures": {
+    "train_trades_per_year": [
+     65,
+     65
+    ],
+    "validation_t": [
+     2.5856,
+     4.8227
+    ],
+    "validation_t_median": 3.809,
+    "validation_trades": [
+     65,
+     65
+    ]
+   },
+   "kind": "negative",
+   "level_flagged": 0,
+   "of": 8,
+   "promoted": 0,
+   "promoted_and_level_flagged": 0,
+   "review_dependent": false,
+   "stopped_at": {
+    "holdout": 8
+   },
+   "stress_contaminated": 0
+  },
+  "fill_close_above_width": {
+   "family": "fill",
+   "figures": {
+    "train_trades_per_year": [
+     62,
+     65
+    ],
+    "validation_t": [
+     -24.5716,
+     -15.5941
+    ],
+    "validation_t_median": -17.52,
+    "validation_trades": [
+     62,
+     65
+    ]
+   },
+   "impossible_fills": 0,
+   "kind": "negative",
+   "level_flagged": 0,
+   "of": 8,
+   "promoted": 0,
+   "promoted_and_level_flagged": 0,
+   "review_dependent": false,
+   "stopped_at": {
+    "train_stress": 8
+   },
+   "stress_contaminated": 0
+  },
+  "fill_crossed_quotes": {
+   "family": "fill",
+   "figures": {
+    "train_trades_per_year": [
+     65,
+     65
+    ],
+    "validation_t": [
+     -13.6956,
+     -9.0011
+    ],
+    "validation_t_median": -11.6777,
+    "validation_trades": [
+     65,
+     65
+    ]
+   },
+   "impossible_fills": 0,
+   "kind": "negative",
+   "level_flagged": 0,
+   "of": 8,
+   "promoted": 0,
+   "promoted_and_level_flagged": 0,
+   "review_dependent": false,
+   "stopped_at": {
+    "train_stress": 8
+   },
+   "stress_contaminated": 0
+  },
+  "fill_open_below_zero": {
+   "family": "fill",
+   "figures": {
+    "train_trades_per_year": [
+     61,
+     65
+    ],
+    "validation_t": [
+     -36.9741,
+     -29.2151
+    ],
+    "validation_t_median": -35.1487,
+    "validation_trades": [
+     62,
+     65
+    ]
+   },
+   "impossible_fills": 0,
+   "kind": "negative",
+   "level_flagged": 0,
+   "of": 8,
+   "promoted": 0,
+   "promoted_and_level_flagged": 0,
+   "review_dependent": false,
+   "stopped_at": {
+    "train_stress": 8
+   },
+   "stress_contaminated": 0
+  },
+  "fill_passive_spread": {
+   "family": "fill",
+   "figures": {
+    "train_trades_per_year": [
+     192,
+     238
+    ],
+    "validation_t": [
+     -5.467,
+     -3.1151
+    ],
+    "validation_t_median": -4.4044,
+    "validation_trades": [
+     201,
+     223
+    ]
+   },
+   "impossible_fills": 0,
+   "kind": "negative",
+   "level_flagged": 0,
+   "of": 8,
+   "promoted": 0,
+   "promoted_and_level_flagged": 0,
+   "review_dependent": false,
+   "stopped_at": {
+    "train_stress": 8
+   },
+   "stress_contaminated": 0
+  },
+  "fill_stale_quote": {
+   "family": "fill",
+   "figures": {
+    "train_trades_per_year": [
+     64,
+     65
+    ],
+    "validation_t": [
+     -6.689,
+     -2.2521
+    ],
+    "validation_t_median": -3.2029,
+    "validation_trades": [
+     64,
+     65
+    ]
+   },
+   "impossible_fills": 0,
+   "kind": "negative",
+   "level_flagged": 0,
+   "of": 8,
+   "promoted": 0,
+   "promoted_and_level_flagged": 0,
+   "review_dependent": false,
+   "stopped_at": {
+    "train_stress": 8
+   },
+   "stress_contaminated": 0
+  },
+  "leak_array_base": {
+   "family": "leakage",
+   "kind": "negative",
+   "level_flagged": 0,
+   "of": 8,
+   "opened": {
+    "direction_hit_rate": 0.525,
+    "hits": 273,
+    "loaded": 8,
+    "profitable_worlds": 2,
+    "t_daily": [
+     -1.8089,
+     0.7358
+    ],
+    "trades": 520,
+    "worlds": 8
+   },
+   "promoted": 0,
+   "promoted_and_level_flagged": 0,
+   "refused": "line 30: .base is not allowed",
+   "refused_in": 8,
+   "review_dependent": false,
+   "stopped_at": {
+    "static": 8
+   },
+   "stress_contaminated": 0
+  },
+  "leak_daily_bars": {
+   "direction_hit_rate": 0.4968,
+   "family": "leakage",
+   "figures": {
+    "train_trades_per_year": [
+     65,
+     65
+    ],
+    "validation_t": [
+     -3.597,
+     -0.7702
+    ],
+    "validation_t_median": -1.5355,
+    "validation_trades": [
+     65,
+     65
+    ]
+   },
+   "kind": "negative",
+   "level_flagged": 0,
+   "of": 8,
+   "promoted": 0,
+   "promoted_and_level_flagged": 0,
+   "review_dependent": false,
+   "stopped_at": {
+    "train_stress": 8
+   },
+   "stress_contaminated": 0
+  },
+  "leak_date_literal": {
+   "family": "leakage",
+   "kind": "negative",
+   "level_flagged": 0,
+   "of": 8,
+   "opened": {
+    "direction_hit_rate": 1.0,
+    "hits": 520,
+    "loaded": 8,
+    "profitable_worlds": 8,
+    "t_daily": [
+     5.9309,
+     8.4455
+    ],
+    "trades": 520,
+    "worlds": 8
+   },
+   "promoted": 0,
+   "promoted_and_level_flagged": 0,
+   "refused": "line 7: a string naming a year or a date is not allowed; a program never names the calendar",
+   "refused_in": 8,
+   "review_dependent": false,
+   "stopped_at": {
+    "static": 8
+   },
+   "stress_contaminated": 0
+  },
+  "leak_events_next": {
+   "direction_hit_rate": 0.5115,
+   "family": "leakage",
+   "figures": {
+    "train_trades_per_year": [
+     65,
+     65
+    ],
+    "validation_stops": {
+     "failed_checks": {
+      "dsr": 1,
+      "mean_positive": 1,
+      "quarters": 1,
+      "stress": 1,
+      "t": 1
+     },
+     "t": [
+      -0.4302
+     ],
+     "trades": [
+      65
+     ]
+    },
+    "validation_t": [
+     -1.678,
+     0.811
+    ],
+    "validation_t_median": -0.4977,
+    "validation_trades": [
+     65,
+     65
+    ]
+   },
+   "kind": "smoke",
+   "level_flagged": 0,
+   "of": 8,
+   "promoted": 0,
+   "promoted_and_level_flagged": 0,
+   "review_dependent": false,
+   "stopped_at": {
+    "train_stress": 7,
+    "validation": 1
+   },
+   "stress_contaminated": 0
+  },
+  "leak_future_index": {
+   "direction_hit_rate": 0.5141,
+   "family": "leakage",
+   "figures": {
+    "train_trades_per_year": [
+     65,
+     65
+    ],
+    "validation_t": [
+     -1.7242,
+     0.8461
+    ],
+    "validation_t_median": -0.2712,
+    "validation_trades": [
+     65,
+     65
+    ]
+   },
+   "kind": "negative",
+   "level_flagged": 0,
+   "of": 8,
+   "promoted": 0,
+   "promoted_and_level_flagged": 0,
+   "review_dependent": false,
+   "stopped_at": {
+    "train_stress": 8
+   },
+   "stress_contaminated": 0
+  },
+  "leak_greeks_block": {
+   "direction_hit_rate": 0.5237,
+   "family": "leakage",
+   "figures": {
+    "train_trades_per_year": [
+     65,
+     65
+    ],
+    "validation_t": [
+     -4.4838,
+     0.5302
+    ],
+    "validation_t_median": -0.5582,
+    "validation_trades": [
+     65,
+     65
+    ]
+   },
+   "kind": "negative",
+   "level_flagged": 0,
+   "of": 8,
+   "promoted": 0,
+   "promoted_and_level_flagged": 0,
+   "review_dependent": false,
+   "stopped_at": {
+    "drift": 1,
+    "train_stress": 7
+   },
+   "stress_contaminated": 0
+  },
+  "leak_memorized_levels": {
+   "direction_hit_rate": 0.9949,
+   "family": "leakage",
+   "figures": {
+    "train_trades_per_year": [
+     65,
+     65
+    ],
+    "validation_t": [
+     5.9309,
+     8.4455
+    ],
+    "validation_t_median": 7.2496,
+    "validation_trades": [
+     65,
+     65
+    ]
+   },
+   "kind": "negative",
+   "level_flagged": 8,
+   "of": 8,
+   "promoted": 8,
+   "promoted_and_level_flagged": 8,
+   "review_contract": {
+    "grounded_rejection_kept": true,
+    "ungrounded_rejection_downgraded": true
+   },
+   "review_dependent": true,
+   "stopped_at": {
+    "promoted": 8
+   },
+   "stress_contaminated": 0
+  },
+  "leak_memorized_sessions": {
+   "direction_hit_rate": 1.0,
+   "family": "leakage",
+   "figures": {
+    "train_trades_per_year": [
+     65,
+     65
+    ],
+    "validation_t": [
+     5.9309,
+     8.4455
+    ],
+    "validation_t_median": 7.2496,
+    "validation_trades": [
+     65,
+     65
+    ]
+   },
+   "kind": "negative",
+   "level_flagged": 0,
+   "of": 8,
+   "promoted": 8,
+   "promoted_and_level_flagged": 0,
+   "review_contract": {
+    "grounded_rejection_kept": true,
+    "ungrounded_rejection_downgraded": true
+   },
+   "review_dependent": true,
+   "stopped_at": {
+    "promoted": 8
+   },
+   "stress_contaminated": 0
+  },
+  "leak_memorized_sparse": {
+   "direction_hit_rate": 0.9837,
+   "family": "leakage",
+   "figures": {
+    "train_trades_per_year": [
+     6,
+     20
+    ],
+    "validation_t": [
+     6.8702,
+     17.2605
+    ],
+    "validation_t_median": 11.8297,
+    "validation_trades": [
+     9,
+     19
+    ]
+   },
+   "kind": "negative",
+   "level_flagged": 8,
+   "of": 8,
+   "promoted": 0,
+   "promoted_and_level_flagged": 0,
+   "review_contract": {
+    "grounded_rejection_kept": true,
+    "ungrounded_rejection_downgraded": true
+   },
+   "review_dependent": true,
+   "stopped_at": {
+    "train_eligible": 8
+   },
+   "stress_contaminated": 0
+  },
+  "leak_numpy_memo": {
+   "direction_hit_rate": 0.5141,
+   "family": "leakage",
+   "figures": {
+    "train_trades_per_year": [
+     65,
+     65
+    ],
+    "validation_t": [
+     -2.3498,
+     0.482
+    ],
+    "validation_t_median": -1.3357,
+    "validation_trades": [
+     65,
+     65
+    ]
+   },
+   "kind": "negative",
+   "level_flagged": 0,
+   "of": 8,
+   "promoted": 0,
+   "promoted_and_level_flagged": 0,
+   "review_contract": {
+    "grounded_rejection_kept": true,
+    "ungrounded_rejection_downgraded": true
+   },
+   "review_dependent": false,
+   "stopped_at": {
+    "drift": 8
+   },
+   "stress_contaminated": 8
+  },
+  "leak_private_attr": {
+   "family": "leakage",
+   "kind": "negative",
+   "level_flagged": 0,
+   "of": 8,
+   "opened": {
+    "direction_hit_rate": 1.0,
+    "hits": 520,
+    "loaded": 8,
+    "profitable_worlds": 8,
+    "t_daily": [
+     5.9309,
+     8.4455
+    ],
+    "trades": 520,
+    "worlds": 8
+   },
+   "promoted": 0,
+   "promoted_and_level_flagged": 0,
+   "refused": "line 30: getattr takes a literal attribute name here",
+   "refused_in": 8,
+   "review_dependent": false,
+   "stopped_at": {
+    "static": 8
+   },
+   "stress_contaminated": 0
+  },
+  "leak_volume_bars": {
+   "direction_hit_rate": 0.5141,
+   "family": "leakage",
+   "figures": {
+    "train_trades_per_year": [
+     65,
+     65
+    ],
+    "validation_t": [
+     -1.7242,
+     0.8461
+    ],
+    "validation_t_median": -0.2712,
+    "validation_trades": [
+     65,
+     65
+    ]
+   },
+   "kind": "negative",
+   "level_flagged": 0,
+   "of": 8,
+   "promoted": 0,
+   "promoted_and_level_flagged": 0,
+   "review_dependent": false,
+   "stopped_at": {
+    "train_stress": 8
+   },
+   "stress_contaminated": 0
+  },
+  "planted_dense": {
+   "family": "signal",
+   "figures": {
+    "train_trades_per_year": [
+     65,
+     65
+    ],
+    "validation_t": [
+     3.231,
+     6.4195
+    ],
+    "validation_t_median": 4.237,
+    "validation_trades": [
+     65,
+     65
+    ]
+   },
+   "kind": "positive",
+   "level_flagged": 0,
+   "of": 8,
+   "promoted": 6,
+   "promoted_and_level_flagged": 0,
+   "review_dependent": false,
+   "stopped_at": {
+    "holdout": 2,
+    "promoted": 6
+   },
+   "stress_contaminated": 0
+  },
+  "planted_medium": {
+   "family": "signal",
+   "figures": {
+    "train_trades_per_year": [
+     45,
+     54
+    ],
+    "validation_stops": {
+     "failed_checks": {
+      "trades": 3
+     },
+     "t": [
+      3.4874,
+      3.7476,
+      4.5504
+     ],
+     "trades": [
+      45,
+      47,
+      48
+     ]
+    },
+    "validation_t": [
+     2.3592,
+     4.9198
+    ],
+    "validation_t_median": 3.8055,
+    "validation_trades": [
+     45,
+     57
+    ]
+   },
+   "kind": "positive",
+   "level_flagged": 0,
+   "of": 8,
+   "promoted": 4,
+   "promoted_and_level_flagged": 0,
+   "review_dependent": false,
+   "stopped_at": {
+    "holdout": 1,
+    "promoted": 4,
+    "validation": 3
+   },
+   "stress_contaminated": 0
+  },
+  "planted_regime_gap": {
+   "family": "signal",
+   "figures": {
+    "train_trades_per_year": [
+     16,
+     25
+    ],
+    "validation_t": [
+     2.9399,
+     7.2673
+    ],
+    "validation_t_median": 4.3781,
+    "validation_trades": [
+     17,
+     25
+    ]
+   },
+   "kind": "positive",
+   "level_flagged": 1,
+   "of": 8,
+   "promoted": 0,
+   "promoted_and_level_flagged": 0,
+   "review_dependent": false,
+   "stopped_at": {
+    "train_eligible": 8
+   },
+   "stress_contaminated": 0
+  },
+  "planted_regime_years": {
+   "family": "signal",
+   "figures": {
+    "train_trades_per_year": [
+     65,
+     65
+    ],
+    "validation_t": [
+     2.8418,
+     5.7191
+    ],
+    "validation_t_median": 4.2366,
+    "validation_trades": [
+     65,
+     65
+    ]
+   },
+   "kind": "positive",
+   "level_flagged": 0,
+   "of": 8,
+   "promoted": 8,
+   "promoted_and_level_flagged": 0,
+   "review_dependent": false,
+   "stopped_at": {
+    "promoted": 8
+   },
+   "stress_contaminated": 0
+  },
+  "planted_sparse": {
+   "family": "signal",
+   "figures": {
+    "train_trades_per_year": [
+     8,
+     20
+    ],
+    "validation_t": [
+     2.5728,
+     6.5437
+    ],
+    "validation_t_median": 4.1543,
+    "validation_trades": [
+     9,
+     18
+    ]
+   },
+   "kind": "positive",
+   "level_flagged": 0,
+   "of": 8,
+   "promoted": 0,
+   "promoted_and_level_flagged": 0,
+   "review_dependent": false,
+   "stopped_at": {
+    "train_eligible": 8
+   },
+   "stress_contaminated": 0
+  }
+ },
+ "cohort": "confirmation",
+ "compiled_pin_current": true,
+ "facts_contradicted": [
+  "context",
+  "state"
+ ],
+ "frozen_development_headline_sha": "09ace2c409de744e38006f9561afbe2f37c17ae951acdc1748786ef582e25de0",
+ "full_protocol": true,
+ "headline": {
+  "ablation_rates": {
+   "behavioral_detection": {
+    "count": 24,
+    "lower_95": 0.8575,
+    "of": 24,
+    "rate": 1.0,
+    "upper_95": 1.0,
+    "upper_95_one_sided": 1.0
+   },
+   "behavioral_false_alarm": {
+    "count": 0,
+    "lower_95": 0.0,
+    "of": 24,
+    "rate": 0.0,
+    "upper_95": 0.1425,
+    "upper_95_one_sided": 0.1173
+   },
+   "static_detection": {
+    "count": 8,
+    "lower_95": 0.1563,
+    "of": 24,
+    "rate": 0.3333,
+    "upper_95": 0.5532,
+    "upper_95_one_sided": 0.5214
+   },
+   "static_false_alarm": {
+    "count": 0,
+    "lower_95": 0.0,
+    "of": 24,
+    "rate": 0.0,
+    "upper_95": 0.1425,
+    "upper_95_one_sided": 0.1173
+   }
+  },
+  "ablations": {
+   "ablation_ctx_params": {
+    "behavioral_effective": 8,
+    "broken": false,
+    "static_refused": 0
+   },
+   "ablation_default_capture": {
+    "behavioral_effective": 8,
+    "broken": false,
+    "static_refused": 0
+   },
+   "ablation_dynamic_key": {
+    "behavioral_effective": 0,
+    "broken": true,
+    "static_refused": 0
+   },
+   "ablation_module_alias": {
+    "behavioral_effective": 8,
+    "broken": false,
+    "static_refused": 0
+   },
+   "ablation_read_ignored": {
+    "behavioral_effective": 0,
+    "broken": true,
+    "static_refused": 0
+   },
+   "ablation_shadow_config": {
+    "behavioral_effective": 0,
+    "broken": true,
+    "static_refused": 8
+   }
+  },
+  "cohort": "confirmation",
+  "elapsed_seconds": 972.7,
+  "facts_contradicted": [
+   "context",
+   "state"
+  ],
+  "false_promotion": {
+   "count": 16,
+   "lower_95": 0.0582,
+   "of": 160,
+   "rate": 0.1,
+   "upper_95": 0.1573,
+   "upper_95_one_sided": 0.1479
+  },
+  "false_promotion_mechanical_scope": {
+   "count": 0,
+   "lower_95": 0.0,
+   "of": 136,
+   "rate": 0.0,
+   "upper_95": 0.0268,
+   "upper_95_one_sided": 0.0218
+  },
+  "full_protocol": true,
+  "impossible_fills": 0,
+  "impossible_fills_by_case": {
+   "fill_close_above_width": 0,
+   "fill_crossed_quotes": 0,
+   "fill_open_below_zero": 0,
+   "fill_passive_spread": 0,
+   "fill_stale_quote": 0
+  },
+  "level_invariance_probe": {
+   "detected": {
+    "count": 8,
+    "lower_95": 0.2465,
+    "of": 16,
+    "rate": 0.5,
+    "upper_95": 0.7535,
+    "upper_95_one_sided": 0.7214
+   },
+   "false_alarm_on_positives": {
+    "count": 1,
+    "lower_95": 0.0006,
+    "of": 40,
+    "rate": 0.025,
+    "upper_95": 0.1316,
+    "upper_95_one_sided": 0.1132
+   }
+  },
+  "missed_by_case": {
+   "planted_dense": 2,
+   "planted_medium": 4,
+   "planted_regime_gap": 8,
+   "planted_regime_years": 0,
+   "planted_sparse": 8
+  },
+  "missed_signal": {
+   "count": 22,
+   "lower_95": 0.3849,
+   "of": 40,
+   "rate": 0.55,
+   "upper_95": 0.7074,
+   "upper_95_one_sided": 0.6854
+  },
+  "negative_cases_promoted": {
+   "count": 2,
+   "lower_95": 0.0123,
+   "of": 20,
+   "rate": 0.1,
+   "upper_95": 0.317,
+   "upper_95_one_sided": 0.2826
+  },
+  "owner_rule": {
+   "aligned_floors": {
+    "failed": [
+     "noise_looks_not_higher_in_any_band"
+    ],
+    "met": false,
+    "met_and_confirmed": false,
+    "noise_bands_with_more_looks": [
+     "noise_low_fat_search",
+     "noise_low_search",
+     "noise_medium_fat_search",
+     "noise_medium_search"
+    ]
+   },
+   "current": {
+    "failed": [
+     "missed_signals_lower"
+    ],
+    "met": false,
+    "met_and_confirmed": false,
+    "noise_bands_with_more_looks": []
+   },
+   "no_floors": {
+    "failed": [
+     "engine_false_promotions_not_higher",
+     "engine_negative_looks_not_higher",
+     "noise_looks_not_higher_in_any_band"
+    ],
+    "met": false,
+    "met_and_confirmed": false,
+    "noise_bands_with_more_looks": [
+     "noise_low_fat_search",
+     "noise_low_search",
+     "noise_medium_fat_search",
+     "noise_medium_search",
+     "noise_sparse_fat_search",
+     "noise_sparse_search"
+    ]
+   },
+   "pooled_train": {
+    "failed": [
+     "engine_false_promotions_not_higher",
+     "engine_negative_looks_not_higher",
+     "noise_looks_not_higher_in_any_band",
+     "search_false_promotions_not_higher"
+    ],
+    "met": false,
+    "met_and_confirmed": false,
+    "noise_bands_with_more_looks": [
+     "noise_dense_search",
+     "noise_low_fat_search",
+     "noise_low_search",
+     "noise_medium_fat_search",
+     "noise_medium_search",
+     "noise_sparse_fat_search",
+     "noise_sparse_search"
+    ]
+   },
+   "pooled_validation": {
+    "failed": [
+     "noise_looks_not_higher_in_any_band"
+    ],
+    "met": false,
+    "met_and_confirmed": false,
+    "noise_bands_with_more_looks": [
+     "noise_dense_search",
+     "noise_low_fat_search",
+     "noise_low_search",
+     "noise_medium_fat_search",
+     "noise_medium_search"
+    ]
+   },
+   "sparse_floors": {
+    "failed": [
+     "engine_false_promotions_not_higher",
+     "engine_negative_looks_not_higher",
+     "noise_looks_not_higher_in_any_band"
+    ],
+    "met": false,
+    "met_and_confirmed": false,
+    "noise_bands_with_more_looks": [
+     "noise_low_fat_search",
+     "noise_low_search",
+     "noise_medium_fat_search",
+     "noise_medium_search",
+     "noise_sparse_fat_search",
+     "noise_sparse_search"
+    ]
+   }
+  },
+  "pinned": true,
+  "positive_cases_missed_in_any_world": {
+   "count": 4,
+   "lower_95": 0.2836,
+   "of": 5,
+   "rate": 0.8,
+   "upper_95": 0.9949,
+   "upper_95_one_sided": 0.9898
+  },
+  "promoted_by_case": {
+   "absent_signal": 0,
+   "cost_erased": 0,
+   "drift_only": 0,
+   "edge_disappears": 0,
+   "fill_close_above_width": 0,
+   "fill_crossed_quotes": 0,
+   "fill_open_below_zero": 0,
+   "fill_passive_spread": 0,
+   "fill_stale_quote": 0,
+   "leak_array_base": 0,
+   "leak_daily_bars": 0,
+   "leak_date_literal": 0,
+   "leak_events_next": 0,
+   "leak_future_index": 0,
+   "leak_greeks_block": 0,
+   "leak_memorized_levels": 8,
+   "leak_memorized_sessions": 8,
+   "leak_memorized_sparse": 0,
+   "leak_numpy_memo": 0,
+   "leak_private_attr": 0,
+   "leak_volume_bars": 0
+  },
+  "proofs_failed": [
+   "state_numpy_runs",
+   "state_numpy_runs_sctypedict",
+   "state_numpy_runs_polynomial",
+   "state_numpy_batchmates",
+   "state_numpy_batchmates_sctypedict",
+   "state_numpy_batchmates_polynomial",
+   "state_numpy_draws",
+   "state_numpy_reachable",
+   "state_ctx_batchmates"
+  ],
+  "proofs_held": {
+   "state_ctx_batchmates": 0,
+   "state_fresh_runs": 8,
+   "state_numpy_batchmates": 0,
+   "state_numpy_batchmates_polynomial": 0,
+   "state_numpy_batchmates_sctypedict": 0,
+   "state_numpy_draws": 0,
+   "state_numpy_reachable": 0,
+   "state_numpy_runs": 0,
+   "state_numpy_runs_polynomial": 0,
+   "state_numpy_runs_sctypedict": 0,
+   "state_params_copied": 8,
+   "state_split_segments": 8
+  },
+  "refused": [
+   "leak_array_base",
+   "leak_date_literal",
+   "leak_private_attr"
+  ],
+  "review_contract": {
+   "leak_memorized_levels": {
+    "grounded_rejection_kept": true,
+    "ungrounded_rejection_downgraded": true
+   },
+   "leak_memorized_sessions": {
+    "grounded_rejection_kept": true,
+    "ungrounded_rejection_downgraded": true
+   },
+   "leak_memorized_sparse": {
+    "grounded_rejection_kept": true,
+    "ungrounded_rejection_downgraded": true
+   },
+   "leak_numpy_memo": {
+    "grounded_rejection_kept": true,
+    "ungrounded_rejection_downgraded": true
+   }
+  },
+  "runtime": {
+   "numpy": "2.5.3",
+   "pyarrow": "25.0.1",
+   "python": "3.14.7"
+  },
+  "stress_contaminated": {
+   "leak_numpy_memo": 8
+  },
+  "stress_contaminated_total": 8,
+  "suite": "evaluator-suite-1",
+  "suite_sha": "c78a851483432ee400dd6c9cc6622bee0710f8e41520464338c3964028e10311",
+  "tree": {
+   "engine": "gym-engine-4",
+   "evaluator_sha": "771b675df22a7683f666cea08fec471eafb9dd9052085f17d19ba3c30f09c047",
+   "execution_sha256": "47587e22c5af1a38bc4e0c766d2dc333b75e8a4b576c0ccc89342a06900a70e1",
+   "fixture_sha": "1ee0e716bc8d8f0ed7dc12377c44420ca1643064468d1985a18de715dab101b1",
+   "git_head": "2d028fa85c6f82303091afc9f868cd40b44e3406",
+   "league_uncommitted_changes": false
+  },
+  "verdict_sensitivity": {
+   "false_promotions_see_no_floors": true,
+   "no_floors_rejected": true,
+   "noise_looks_see_no_floors": true
+  }
+ },
+ "level_invariance_probe": {
+  "detected": {
+   "count": 8,
+   "lower_95": 0.2465,
+   "of": 16,
+   "rate": 0.5,
+   "upper_95": 0.7535,
+   "upper_95_one_sided": 0.7214
+  },
+  "false_alarm_on_positives": {
+   "count": 1,
+   "lower_95": 0.0006,
+   "of": 40,
+   "rate": 0.025,
+   "upper_95": 0.1316,
+   "upper_95_one_sided": 0.1132
+  }
+ },
+ "limitations": [
+  "Invented worlds: an arithmetic random walk with planted, deliberately strong edges and options priced fair by construction. Rates bound the evaluator's errors on these cases only, not on real markets or real research.",
+  "The review is not called: every rate is the mechanical pipeline's with a blind reviewer. Review-dependent cases show the load the review carries; the suite checks only that the review contract can carry a grounded rejection.",
+  "Runs are made in one process, as a one-worker batch makes them. Production Gym boxes run each unit in its own process, which isolates runs (not batch-mates) from process-global state.",
+  "The synthetic holdout is generated by the suite; the sealed market holdout is never read. Holm uses a fixed prior history of two failed looks, not the swarm's.",
+  "The search tier has no drift figures, no serial dependence and a fixed five-candidate schedule; it is not a simulation of model research.",
+  "Finite counts: an exact 95% upper bound, not a point estimate, is the claim a zero count supports. Run-level bounds treat each case-world as an independent trial; outcomes cluster by case (most go 0/8 or 8/8), so the case-level counts are the effective sample, and every bound is conditional on this fixed case mix.",
+  "End-to-end false promotions cannot tell floor variants apart on noise: the holdout with Holm stops every noise lineage under any floors. The owner-rule verdict therefore also compares the holdout looks noise spends in every frequency band, and the sparse memorized table is a negative the floors are known to stop.",
+  "--tree runs the candidate's code in the suite's interpreter with the operator's environment: it guards against accidental drift of the cases, not against a hostile tree.",
+  "The numpy reach proof covers what a program reaches from `import numpy` and `import math` without a call (public attributes, the names a module's dict, its package's submodules and its module __getattr__ can resolve, mapping values and keys, elements), in the scored process's numpy and the static check's own answer. Not covered: objects a program reaches only through a call's result, names a class or instance resolves only in a __getattr__, and state a call changes through a function neither named as a setter (set_*, register_*, seterr*, setbufsize) nor reading numpy.random's shared generator."
+ ],
+ "owner_rule_confirmation": {
+  "aligned_floors": {
+   "confirmation_met": false,
+   "development_met": false,
+   "met_and_confirmed": false
+  },
+  "current": {
+   "confirmation_met": false,
+   "development_met": false,
+   "met_and_confirmed": false
+  },
+  "no_floors": {
+   "confirmation_met": false,
+   "development_met": false,
+   "met_and_confirmed": false
+  },
+  "pooled_train": {
+   "confirmation_met": false,
+   "development_met": false,
+   "met_and_confirmed": false
+  },
+  "pooled_validation": {
+   "confirmation_met": false,
+   "development_met": false,
+   "met_and_confirmed": false
+  },
+  "sparse_floors": {
+   "confirmation_met": false,
+   "development_met": false,
+   "met_and_confirmed": false
+  }
+ },
+ "pinned": true,
+ "pinned_sha": "c78a851483432ee400dd6c9cc6622bee0710f8e41520464338c3964028e10311",
+ "proofs": {
+  "state_ctx_batchmates": {
+   "claim": "a batch-mate cannot write into the ctx objects another program is handed",
+   "fact": "context",
+   "held": 0,
+   "observed": [
+    65,
+    0
+   ],
+   "of": 8,
+   "refused": null
+  },
+  "state_fresh_runs": {
+   "claim": "module STATE starts fresh in every run (five trades each time)",
+   "fact": "state",
+   "held": 8,
+   "observed": [
+    5,
+    5
+   ],
+   "of": 8,
+   "refused": null
+  },
+  "state_numpy_batchmates": {
+   "claim": "a program's result does not depend on the batch-mates it shares a process with (np.typecodes)",
+   "fact": "state",
+   "held": 0,
+   "observed": [
+    65,
+    0
+   ],
+   "of": 8,
+   "refused": null
+  },
+  "state_numpy_batchmates_polynomial": {
+   "claim": "a batch-mate cannot change what another program computes (np.polynomial.Polynomial.domain)",
+   "fact": "state",
+   "held": 0,
+   "observed": [
+    65,
+    0
+   ],
+   "of": 8,
+   "refused": null
+  },
+  "state_numpy_batchmates_sctypedict": {
+   "claim": "a program's result does not depend on the batch-mates it shares a process with (np.sctypeDict)",
+   "fact": "state",
+   "held": 0,
+   "observed": [
+    65,
+    0
+   ],
+   "of": 8,
+   "refused": null
+  },
+  "state_numpy_draws": {
+   "claim": "a program's decisions repeat on two runs of the same days (np.matlib.rand draws from numpy.random's process-global generator)",
+   "fact": "state",
+   "held": 0,
+   "observed": [
+    65,
+    65
+   ],
+   "of": 8,
+   "refused": null
+  },
+  "state_numpy_reachable": {
+   "attribute_writes": [],
+   "channels": {
+    "batchmates": true,
+    "runs": true
+   },
+   "claim": "nothing reachable from `import numpy` or `import math` without a call (public attributes, mapping values, elements) carries a program's write past its run or to a batch-mate; no attribute write is admitted on a reached object, and no global setter (set_*, register_*) and no function that draws from numpy.random's shared generator is reachable",
+   "draws": [
+    "np.matlib.rand",
+    "np.matlib.randn"
+   ],
+   "fact": "state",
+   "foreign_modules": {
+    "abc": "np.matrixlib.defmatrix.N.arrayprint.contextlib.abc",
+    "ast": "np.matrixlib.defmatrix.ast",
+    "collections": "np.matrixlib.defmatrix.N.overrides.collections",
+    "collections.abc": "np.matrixlib.defmatrix.N.overrides.collections.abc",
+    "contextlib": "np.matrixlib.defmatrix.N.arrayprint.contextlib",
+    "functools": "np.polynomial.polyutils.functools",
+    "itertools": "np.matrixlib.defmatrix.N.itertools"
+   },
+   "held": 0,
+   "observed": [
+    "list(np.matrixlib.defmatrix.N.numerictypes.sctypes.values())[0]",
+    "list(np.matrixlib.defmatrix.N.numerictypes.sctypes.values())[1]",
+    "list(np.matrixlib.defmatrix.N.numerictypes.sctypes.values())[2]",
+    "list(np.matrixlib.defmatrix.N.numerictypes.sctypes.values())[3]",
+    "list(np.matrixlib.defmatrix.N.numerictypes.sctypes.values())[4]",
+    "np.matrixlib.defmatrix.N.array_function_dispatch.keywords",
+    "np.matrixlib.defmatrix.N.fromnumeric.array_function_dispatch.keywords",
+    "np.matrixlib.defmatrix.N.multiarray.array_function_from_c_func_and_dispatcher.keywords",
+    "np.matrixlib.defmatrix.N.multiarray.typeinfo",
+    "np.matrixlib.defmatrix.N.numerictypes.allTypes",
+    "np.matrixlib.defmatrix.N.numerictypes.genericTypeRank",
+    "np.matrixlib.defmatrix.N.numerictypes.sctypes",
+    "np.matrixlib.defmatrix.N.overrides.ARRAY_FUNCTIONS",
+    "np.matrixlib.defmatrix.N.shape_base.array_function_dispatch.keywords",
+    "np.polynomial.Chebyshev.domain",
+    "np.polynomial.Chebyshev.window",
+    "np.polynomial.Hermite.domain",
+    "np.polynomial.Hermite.window",
+    "np.polynomial.HermiteE.domain",
+    "np.polynomial.HermiteE.window",
+    "np.polynomial.Laguerre.domain",
+    "np.polynomial.Laguerre.window",
+    "np.polynomial.Legendre.domain",
+    "np.polynomial.Legendre.window",
+    "np.polynomial.Polynomial.domain",
+    "np.polynomial.Polynomial.window",
+    "np.polynomial.chebyshev.chebdomain",
+    "np.polynomial.chebyshev.chebone",
+    "np.polynomial.chebyshev.chebx",
+    "np.polynomial.chebyshev.chebzero",
+    "np.polynomial.hermite.hermdomain",
+    "np.polynomial.hermite.hermone",
+    "np.polynomial.hermite.hermx",
+    "np.polynomial.hermite.hermzero",
+    "np.polynomial.hermite_e.hermedomain",
+    "np.polynomial.hermite_e.hermeone",
+    "np.polynomial.hermite_e.hermex",
+    "np.polynomial.hermite_e.hermezero",
+    "np.polynomial.laguerre.lagdomain",
+    "np.polynomial.laguerre.lagone",
+    "np.polynomial.laguerre.lagx",
+    "np.polynomial.laguerre.lagzero",
+    "np.polynomial.legendre.legdomain",
+    "np.polynomial.legendre.legone",
+    "np.polynomial.legendre.legx",
+    "np.polynomial.legendre.legzero",
+    "np.polynomial.polynomial.polydomain",
+    "np.polynomial.polynomial.polyone",
+    "np.polynomial.polynomial.polyx",
+    "np.polynomial.polynomial.polyzero",
+    "np.sctypeDict",
+    "np.typecodes"
+   ],
+   "of": 8,
+   "refused": null,
+   "refused_containers": [
+    "np.set_printoptions",
+    "np.setbufsize",
+    "np.seterr",
+    "np.seterrcall"
+   ],
+   "setters": [
+    "np.dtypes.register_dlpack_dtype",
+    "np.matrixlib.defmatrix.N.multiarray.set_datetimeparse_function",
+    "np.matrixlib.defmatrix.N.multiarray.set_typeDict",
+    "np.matrixlib.defmatrix.set_module",
+    "np.polynomial.set_default_printstyle"
+   ],
+   "trades": [
+    65,
+    0,
+    0
+   ],
+   "unverified": [],
+   "walk": {
+    "complete": true,
+    "depth": 8,
+    "edges": 9377,
+    "numpy": "2.5.3",
+    "objects": 1913
+   }
+  },
+  "state_numpy_runs": {
+   "claim": "no process-global object (np.typecodes) carries one run's decisions into the next run",
+   "fact": "state",
+   "held": 0,
+   "observed": [
+    65,
+    0
+   ],
+   "of": 8,
+   "refused": null
+  },
+  "state_numpy_runs_polynomial": {
+   "claim": "no process-global object (np.polynomial.polynomial.polyx) carries one run's decisions into the next run",
+   "fact": "state",
+   "held": 0,
+   "observed": [
+    65,
+    0
+   ],
+   "of": 8,
+   "refused": null
+  },
+  "state_numpy_runs_sctypedict": {
+   "claim": "no process-global object (np.sctypeDict) carries one run's decisions into the next run",
+   "fact": "state",
+   "held": 0,
+   "observed": [
+    65,
+    0
+   ],
+   "of": 8,
+   "refused": null
+  },
+  "state_params_copied": {
+   "claim": "a run's parameter lists are its own; the next run starts from the defaults",
+   "fact": "parameters",
+   "held": 8,
+   "observed": [
+    1,
+    1
+   ],
+   "of": 8,
+   "refused": null
+  },
+  "state_split_segments": {
+   "claim": "a split Train run matches the unsplit run day for day for an intraday program; Validation is never split",
+   "fact": "state",
+   "held": 8,
+   "observed": [
+    195,
+    195
+   ],
+   "of": 8,
+   "refused": null
+  }
+ },
+ "rates": {
+  "false_promotion": {
+   "count": 16,
+   "lower_95": 0.0582,
+   "of": 160,
+   "rate": 0.1,
+   "upper_95": 0.1573,
+   "upper_95_one_sided": 0.1479
+  },
+  "false_promotion_mechanical_scope": {
+   "count": 0,
+   "lower_95": 0.0,
+   "of": 136,
+   "rate": 0.0,
+   "upper_95": 0.0268,
+   "upper_95_one_sided": 0.0218
+  },
+  "missed_signal": {
+   "count": 22,
+   "lower_95": 0.3849,
+   "of": 40,
+   "rate": 0.55,
+   "upper_95": 0.7074,
+   "upper_95_one_sided": 0.6854
+  },
+  "negative_cases_promoted": {
+   "count": 2,
+   "lower_95": 0.0123,
+   "of": 20,
+   "rate": 0.1,
+   "upper_95": 0.317,
+   "upper_95_one_sided": 0.2826
+  },
+  "negative_cases_promoted_mechanical_scope": {
+   "count": 0,
+   "lower_95": 0.0,
+   "of": 17,
+   "rate": 0.0,
+   "upper_95": 0.1951,
+   "upper_95_one_sided": 0.1616
+  },
+  "positive_cases_missed_in_any_world": {
+   "count": 4,
+   "lower_95": 0.2836,
+   "of": 5,
+   "rate": 0.8,
+   "upper_95": 0.9949,
+   "upper_95_one_sided": 0.9898
+  }
+ },
+ "replication_rows_sha256": "e9e52974db3d499abc52b54de9e266b005b50b228752681e65205a639ba2be3d",
+ "replications": 8,
+ "reproduce": "python -m league.swarm.benchmarks --suite evaluator --cohort confirmation --frozen DEVELOPMENT.json --json --output FULL.json --receipt RECEIPT.json (the rows digest excludes per-world seconds)",
+ "runtime": {
+  "elapsed_seconds": 972.7,
+  "numpy": "2.5.3",
+  "pyarrow": "25.0.1",
+  "python": "3.14.7"
+ },
+ "search_replications": 128,
+ "suite": "evaluator-suite-1",
+ "suite_sha": "c78a851483432ee400dd6c9cc6622bee0710f8e41520464338c3964028e10311",
+ "title": "evaluator-suite-1, confirmation cohort: a synthetic known-answer benchmark of the evaluator, not a qualification",
+ "tree": {
+  "engine": "gym-engine-4",
+  "evaluator_sha": "771b675df22a7683f666cea08fec471eafb9dd9052085f17d19ba3c30f09c047",
+  "evaluator_sources": {
+   "league/gym/experiment.py": "9f48f8a776c79a9f6c10ecf67956e010274130c9b9c355df7662d8d082dd3b9f",
+   "league/gym/results.py": "d29ed18d37a234238ef02fb1bc6f1abc32ad3360b747501ccefd2785a9851ae1",
+   "league/gym/review_contract.py": "92f03273b68667cc92dd95736b47fb1ebc9f11bab3ae5ff48a7637d375e2f013",
+   "league/stats.py": "866ecda27a79bbeaba033ef92847093e182a0dbe2bd1041a568c2dbf81a302d3",
+   "league/swarm/evidence.py": "fee30d80b9a6afac99045b777d455a7284bdec21a466a4a6b9a012e88c2e64c9",
+   "league/swarm/gate.py": "7e30040562186f08d6b79aabb9f31631d3bbab712e64fe23c0e42eda481a14a1",
+   "league/swarm/researcher.py": "c509b2cc201d89ea8cbceb52143760c54ab8d803b98776f140f20fae1860655a"
+  },
+  "execution_sha256": "47587e22c5af1a38bc4e0c766d2dc333b75e8a4b576c0ccc89342a06900a70e1",
+  "fixture_sha": "1ee0e716bc8d8f0ed7dc12377c44420ca1643064468d1985a18de715dab101b1",
+  "fixture_sources": {
+   "league/gym/synth.py": "d48f0d9d71388c133ee3ac08e7ee7b144060b2f661e2055a2c60ffbe5339638d"
+  },
+  "git_head": "2d028fa85c6f82303091afc9f868cd40b44e3406",
+  "league_uncommitted_changes": false
+ },
+ "variants": {
+  "aligned_floors": {
+   "engine_false_promotion": {
+    "count": 16,
+    "lower_95": 0.0582,
+    "of": 160,
+    "rate": 0.1,
+    "upper_95": 0.1573,
+    "upper_95_one_sided": 0.1479
+   },
+   "engine_false_promotion_by_case": {
+    "absent_signal": 0,
+    "cost_erased": 0,
+    "drift_only": 0,
+    "edge_disappears": 0,
+    "fill_close_above_width": 0,
+    "fill_crossed_quotes": 0,
+    "fill_open_below_zero": 0,
+    "fill_passive_spread": 0,
+    "fill_stale_quote": 0,
+    "leak_array_base": 0,
+    "leak_daily_bars": 0,
+    "leak_date_literal": 0,
+    "leak_future_index": 0,
+    "leak_greeks_block": 0,
+    "leak_memorized_levels": 8,
+    "leak_memorized_sessions": 8,
+    "leak_memorized_sparse": 0,
+    "leak_numpy_memo": 0,
+    "leak_private_attr": 0,
+    "leak_volume_bars": 0
+   },
+   "engine_false_promotion_mechanical_scope": {
+    "count": 0,
+    "lower_95": 0.0,
+    "of": 136,
+    "rate": 0.0,
+    "upper_95": 0.0268,
+    "upper_95_one_sided": 0.0218
+   },
+   "engine_missed_by_case": {
+    "planted_dense": 2,
+    "planted_medium": 1,
+    "planted_regime_gap": 8,
+    "planted_regime_years": 0,
+    "planted_sparse": 8
+   },
+   "engine_missed_signal": {
+    "count": 19,
+    "lower_95": 0.3151,
+    "of": 40,
+    "rate": 0.475,
+    "upper_95": 0.6387,
+    "upper_95_one_sided": 0.6152
+   },
+   "engine_negative_looks": {
+    "count": 24,
+    "lower_95": 0.0985,
+    "of": 160,
+    "rate": 0.15,
+    "upper_95": 0.2149,
+    "upper_95_one_sided": 0.2044
+   },
+   "owner_rule": {
+    "checks": {
+     "engine_false_promotions_not_higher": true,
+     "engine_negative_looks_not_higher": true,
+     "missed_signals_lower": true,
+     "noise_looks_not_higher_in_any_band": false,
+     "search_false_promotions_not_higher": true
+    },
+    "met": false,
+    "noise_bands_with_more_looks": [
+     "noise_low_fat_search",
+     "noise_low_search",
+     "noise_medium_fat_search",
+     "noise_medium_search"
+    ]
+   },
+   "rule": {
+    "objective": "worst_year",
+    "pooled_days": 0,
+    "pooled_trades": 0,
+    "val_days": 20,
+    "val_trades": 40,
+    "validation": "single",
+    "year_days": 20,
+    "year_trades": 40
+   },
+   "search_by_case": {
+    "noise_dense_search": {
+     "holdout_looks": 2,
+     "lineages_with_look": 2,
+     "of": 128,
+     "promoted": 0,
+     "validations": 490,
+     "with_candidates": 128
+    },
+    "noise_low_fat_search": {
+     "holdout_looks": 6,
+     "lineages_with_look": 5,
+     "of": 128,
+     "promoted": 0,
+     "validations": 564,
+     "with_candidates": 128
+    },
+    "noise_low_search": {
+     "holdout_looks": 5,
+     "lineages_with_look": 5,
+     "of": 128,
+     "promoted": 0,
+     "validations": 567,
+     "with_candidates": 128
+    },
+    "noise_medium_fat_search": {
+     "holdout_looks": 12,
+     "lineages_with_look": 10,
+     "of": 128,
+     "promoted": 0,
+     "validations": 570,
+     "with_candidates": 128
+    },
+    "noise_medium_search": {
+     "holdout_looks": 4,
+     "lineages_with_look": 4,
+     "of": 128,
+     "promoted": 0,
+     "validations": 562,
+     "with_candidates": 128
+    },
+    "noise_sparse_fat_search": {
+     "holdout_looks": 0,
+     "lineages_with_look": 0,
+     "of": 128,
+     "promoted": 0,
+     "validations": 0,
+     "with_candidates": 0
+    },
+    "noise_sparse_search": {
+     "holdout_looks": 0,
+     "lineages_with_look": 0,
+     "of": 128,
+     "promoted": 0,
+     "validations": 0,
+     "with_candidates": 0
+    },
+    "signal_dense": {
+     "holdout_looks": 123,
+     "lineages_with_look": 123,
+     "of": 128,
+     "promoted": 121,
+     "validations": 128,
+     "with_candidates": 128
+    },
+    "signal_medium": {
+     "holdout_looks": 118,
+     "lineages_with_look": 118,
+     "of": 128,
+     "promoted": 102,
+     "validations": 128,
+     "with_candidates": 128
+    },
+    "signal_sparse": {
+     "holdout_looks": 0,
+     "lineages_with_look": 0,
+     "of": 128,
+     "promoted": 0,
+     "validations": 0,
+     "with_candidates": 0
+    }
+   },
+   "search_false_promotion": {
+    "count": 0,
+    "lower_95": 0.0,
+    "of": 896,
+    "rate": 0.0,
+    "upper_95": 0.0041,
+    "upper_95_one_sided": 0.0033
+   },
+   "search_missed_signal": {
+    "count": 161,
+    "lower_95": 0.3694,
+    "of": 384,
+    "rate": 0.4193,
+    "upper_95": 0.4704,
+    "upper_95_one_sided": 0.4624
+   },
+   "search_noise_holdout_looks": {
+    "count": 26,
+    "lower_95": 0.019,
+    "of": 896,
+    "rate": 0.029,
+    "upper_95": 0.0422,
+    "upper_95_one_sided": 0.04
+   }
+  },
+  "current": {
+   "engine_false_promotion": {
+    "count": 16,
+    "lower_95": 0.0582,
+    "of": 160,
+    "rate": 0.1,
+    "upper_95": 0.1573,
+    "upper_95_one_sided": 0.1479
+   },
+   "engine_false_promotion_by_case": {
+    "absent_signal": 0,
+    "cost_erased": 0,
+    "drift_only": 0,
+    "edge_disappears": 0,
+    "fill_close_above_width": 0,
+    "fill_crossed_quotes": 0,
+    "fill_open_below_zero": 0,
+    "fill_passive_spread": 0,
+    "fill_stale_quote": 0,
+    "leak_array_base": 0,
+    "leak_daily_bars": 0,
+    "leak_date_literal": 0,
+    "leak_future_index": 0,
+    "leak_greeks_block": 0,
+    "leak_memorized_levels": 8,
+    "leak_memorized_sessions": 8,
+    "leak_memorized_sparse": 0,
+    "leak_numpy_memo": 0,
+    "leak_private_attr": 0,
+    "leak_volume_bars": 0
+   },
+   "engine_false_promotion_mechanical_scope": {
+    "count": 0,
+    "lower_95": 0.0,
+    "of": 136,
+    "rate": 0.0,
+    "upper_95": 0.0268,
+    "upper_95_one_sided": 0.0218
+   },
+   "engine_missed_by_case": {
+    "planted_dense": 2,
+    "planted_medium": 4,
+    "planted_regime_gap": 8,
+    "planted_regime_years": 0,
+    "planted_sparse": 8
+   },
+   "engine_missed_signal": {
+    "count": 22,
+    "lower_95": 0.3849,
+    "of": 40,
+    "rate": 0.55,
+    "upper_95": 0.7074,
+    "upper_95_one_sided": 0.6854
+   },
+   "engine_negative_looks": {
+    "count": 24,
+    "lower_95": 0.0985,
+    "of": 160,
+    "rate": 0.15,
+    "upper_95": 0.2149,
+    "upper_95_one_sided": 0.2044
+   },
+   "owner_rule": {
+    "checks": {
+     "engine_false_promotions_not_higher": true,
+     "engine_negative_looks_not_higher": true,
+     "missed_signals_lower": false,
+     "noise_looks_not_higher_in_any_band": true,
+     "search_false_promotions_not_higher": true
+    },
+    "met": false,
+    "noise_bands_with_more_looks": []
+   },
+   "rule": {
+    "objective": "worst_year",
+    "pooled_days": 0,
+    "pooled_trades": 0,
+    "val_days": 25,
+    "val_trades": 50,
+    "validation": "single",
+    "year_days": 20,
+    "year_trades": 40
+   },
+   "search_by_case": {
+    "noise_dense_search": {
+     "holdout_looks": 2,
+     "lineages_with_look": 2,
+     "of": 128,
+     "promoted": 0,
+     "validations": 490,
+     "with_candidates": 128
+    },
+    "noise_low_fat_search": {
+     "holdout_looks": 0,
+     "lineages_with_look": 0,
+     "of": 128,
+     "promoted": 0,
+     "validations": 564,
+     "with_candidates": 128
+    },
+    "noise_low_search": {
+     "holdout_looks": 0,
+     "lineages_with_look": 0,
+     "of": 128,
+     "promoted": 0,
+     "validations": 567,
+     "with_candidates": 128
+    },
+    "noise_medium_fat_search": {
+     "holdout_looks": 0,
+     "lineages_with_look": 0,
+     "of": 128,
+     "promoted": 0,
+     "validations": 570,
+     "with_candidates": 128
+    },
+    "noise_medium_search": {
+     "holdout_looks": 0,
+     "lineages_with_look": 0,
+     "of": 128,
+     "promoted": 0,
+     "validations": 562,
+     "with_candidates": 128
+    },
+    "noise_sparse_fat_search": {
+     "holdout_looks": 0,
+     "lineages_with_look": 0,
+     "of": 128,
+     "promoted": 0,
+     "validations": 0,
+     "with_candidates": 0
+    },
+    "noise_sparse_search": {
+     "holdout_looks": 0,
+     "lineages_with_look": 0,
+     "of": 128,
+     "promoted": 0,
+     "validations": 0,
+     "with_candidates": 0
+    },
+    "signal_dense": {
+     "holdout_looks": 123,
+     "lineages_with_look": 123,
+     "of": 128,
+     "promoted": 121,
+     "validations": 128,
+     "with_candidates": 128
+    },
+    "signal_medium": {
+     "holdout_looks": 0,
+     "lineages_with_look": 0,
+     "of": 128,
+     "promoted": 0,
+     "validations": 128,
+     "with_candidates": 128
+    },
+    "signal_sparse": {
+     "holdout_looks": 0,
+     "lineages_with_look": 0,
+     "of": 128,
+     "promoted": 0,
+     "validations": 0,
+     "with_candidates": 0
+    }
+   },
+   "search_false_promotion": {
+    "count": 0,
+    "lower_95": 0.0,
+    "of": 896,
+    "rate": 0.0,
+    "upper_95": 0.0041,
+    "upper_95_one_sided": 0.0033
+   },
+   "search_missed_signal": {
+    "count": 263,
+    "lower_95": 0.6358,
+    "of": 384,
+    "rate": 0.6849,
+    "upper_95": 0.7311,
+    "upper_95_one_sided": 0.724
+   },
+   "search_noise_holdout_looks": {
+    "count": 2,
+    "lower_95": 0.0003,
+    "of": 896,
+    "rate": 0.0022,
+    "upper_95": 0.008,
+    "upper_95_one_sided": 0.007
+   }
+  },
+  "no_floors": {
+   "engine_false_promotion": {
+    "count": 24,
+    "lower_95": 0.0985,
+    "of": 160,
+    "rate": 0.15,
+    "upper_95": 0.2149,
+    "upper_95_one_sided": 0.2044
+   },
+   "engine_false_promotion_by_case": {
+    "absent_signal": 0,
+    "cost_erased": 0,
+    "drift_only": 0,
+    "edge_disappears": 0,
+    "fill_close_above_width": 0,
+    "fill_crossed_quotes": 0,
+    "fill_open_below_zero": 0,
+    "fill_passive_spread": 0,
+    "fill_stale_quote": 0,
+    "leak_array_base": 0,
+    "leak_daily_bars": 0,
+    "leak_date_literal": 0,
+    "leak_future_index": 0,
+    "leak_greeks_block": 0,
+    "leak_memorized_levels": 8,
+    "leak_memorized_sessions": 8,
+    "leak_memorized_sparse": 8,
+    "leak_numpy_memo": 0,
+    "leak_private_attr": 0,
+    "leak_volume_bars": 0
+   },
+   "engine_false_promotion_mechanical_scope": {
+    "count": 0,
+    "lower_95": 0.0,
+    "of": 136,
+    "rate": 0.0,
+    "upper_95": 0.0268,
+    "upper_95_one_sided": 0.0218
+   },
+   "engine_missed_by_case": {
+    "planted_dense": 2,
+    "planted_medium": 1,
+    "planted_regime_gap": 4,
+    "planted_regime_years": 0,
+    "planted_sparse": 1
+   },
+   "engine_missed_signal": {
+    "count": 8,
+    "lower_95": 0.0905,
+    "of": 40,
+    "rate": 0.2,
+    "upper_95": 0.3565,
+    "upper_95_one_sided": 0.332
+   },
+   "engine_negative_looks": {
+    "count": 32,
+    "lower_95": 0.141,
+    "of": 160,
+    "rate": 0.2,
+    "upper_95": 0.2704,
+    "upper_95_one_sided": 0.2592
+   },
+   "owner_rule": {
+    "checks": {
+     "engine_false_promotions_not_higher": false,
+     "engine_negative_looks_not_higher": false,
+     "missed_signals_lower": true,
+     "noise_looks_not_higher_in_any_band": false,
+     "search_false_promotions_not_higher": true
+    },
+    "met": false,
+    "noise_bands_with_more_looks": [
+     "noise_low_fat_search",
+     "noise_low_search",
+     "noise_medium_fat_search",
+     "noise_medium_search",
+     "noise_sparse_fat_search",
+     "noise_sparse_search"
+    ]
+   },
+   "rule": {
+    "objective": "worst_year",
+    "pooled_days": 2,
+    "pooled_trades": 2,
+    "val_days": 2,
+    "val_trades": 2,
+    "validation": "single",
+    "year_days": 1,
+    "year_trades": 1
+   },
+   "search_by_case": {
+    "noise_dense_search": {
+     "holdout_looks": 2,
+     "lineages_with_look": 2,
+     "of": 128,
+     "promoted": 0,
+     "validations": 490,
+     "with_candidates": 128
+    },
+    "noise_low_fat_search": {
+     "holdout_looks": 6,
+     "lineages_with_look": 5,
+     "of": 128,
+     "promoted": 0,
+     "validations": 564,
+     "with_candidates": 128
+    },
+    "noise_low_search": {
+     "holdout_looks": 5,
+     "lineages_with_look": 5,
+     "of": 128,
+     "promoted": 0,
+     "validations": 567,
+     "with_candidates": 128
+    },
+    "noise_medium_fat_search": {
+     "holdout_looks": 12,
+     "lineages_with_look": 10,
+     "of": 128,
+     "promoted": 0,
+     "validations": 570,
+     "with_candidates": 128
+    },
+    "noise_medium_search": {
+     "holdout_looks": 4,
+     "lineages_with_look": 4,
+     "of": 128,
+     "promoted": 0,
+     "validations": 562,
+     "with_candidates": 128
+    },
+    "noise_sparse_fat_search": {
+     "holdout_looks": 10,
+     "lineages_with_look": 10,
+     "of": 128,
+     "promoted": 0,
+     "validations": 601,
+     "with_candidates": 128
+    },
+    "noise_sparse_search": {
+     "holdout_looks": 5,
+     "lineages_with_look": 5,
+     "of": 128,
+     "promoted": 0,
+     "validations": 617,
+     "with_candidates": 128
+    },
+    "signal_dense": {
+     "holdout_looks": 123,
+     "lineages_with_look": 123,
+     "of": 128,
+     "promoted": 121,
+     "validations": 128,
+     "with_candidates": 128
+    },
+    "signal_medium": {
+     "holdout_looks": 118,
+     "lineages_with_look": 118,
+     "of": 128,
+     "promoted": 102,
+     "validations": 128,
+     "with_candidates": 128
+    },
+    "signal_sparse": {
+     "holdout_looks": 118,
+     "lineages_with_look": 118,
+     "of": 128,
+     "promoted": 99,
+     "validations": 128,
+     "with_candidates": 128
+    }
+   },
+   "search_false_promotion": {
+    "count": 0,
+    "lower_95": 0.0,
+    "of": 896,
+    "rate": 0.0,
+    "upper_95": 0.0041,
+    "upper_95_one_sided": 0.0033
+   },
+   "search_missed_signal": {
+    "count": 62,
+    "lower_95": 0.1261,
+    "of": 384,
+    "rate": 0.1615,
+    "upper_95": 0.2021,
+    "upper_95_one_sided": 0.1956
+   },
+   "search_noise_holdout_looks": {
+    "count": 41,
+    "lower_95": 0.033,
+    "of": 896,
+    "rate": 0.0458,
+    "upper_95": 0.0616,
+    "upper_95_one_sided": 0.059
+   }
+  },
+  "pooled_train": {
+   "engine_false_promotion": {
+    "count": 23,
+    "lower_95": 0.0934,
+    "of": 160,
+    "rate": 0.1437,
+    "upper_95": 0.2078,
+    "upper_95_one_sided": 0.1975
+   },
+   "engine_false_promotion_by_case": {
+    "absent_signal": 0,
+    "cost_erased": 0,
+    "drift_only": 0,
+    "edge_disappears": 0,
+    "fill_close_above_width": 0,
+    "fill_crossed_quotes": 0,
+    "fill_open_below_zero": 0,
+    "fill_passive_spread": 0,
+    "fill_stale_quote": 0,
+    "leak_array_base": 0,
+    "leak_daily_bars": 0,
+    "leak_date_literal": 0,
+    "leak_future_index": 0,
+    "leak_greeks_block": 0,
+    "leak_memorized_levels": 8,
+    "leak_memorized_sessions": 8,
+    "leak_memorized_sparse": 7,
+    "leak_numpy_memo": 0,
+    "leak_private_attr": 0,
+    "leak_volume_bars": 0
+   },
+   "engine_false_promotion_mechanical_scope": {
+    "count": 0,
+    "lower_95": 0.0,
+    "of": 136,
+    "rate": 0.0,
+    "upper_95": 0.0268,
+    "upper_95_one_sided": 0.0218
+   },
+   "engine_missed_by_case": {
+    "planted_dense": 2,
+    "planted_medium": 1,
+    "planted_regime_gap": 4,
+    "planted_regime_years": 0,
+    "planted_sparse": 2
+   },
+   "engine_missed_signal": {
+    "count": 9,
+    "lower_95": 0.1084,
+    "of": 40,
+    "rate": 0.225,
+    "upper_95": 0.3845,
+    "upper_95_one_sided": 0.3598
+   },
+   "engine_negative_looks": {
+    "count": 31,
+    "lower_95": 0.1356,
+    "of": 160,
+    "rate": 0.1938,
+    "upper_95": 0.2636,
+    "upper_95_one_sided": 0.2524
+   },
+   "owner_rule": {
+    "checks": {
+     "engine_false_promotions_not_higher": false,
+     "engine_negative_looks_not_higher": false,
+     "missed_signals_lower": true,
+     "noise_looks_not_higher_in_any_band": false,
+     "search_false_promotions_not_higher": false
+    },
+    "met": false,
+    "noise_bands_with_more_looks": [
+     "noise_dense_search",
+     "noise_low_fat_search",
+     "noise_low_search",
+     "noise_medium_fat_search",
+     "noise_medium_search",
+     "noise_sparse_fat_search",
+     "noise_sparse_search"
+    ]
+   },
+   "rule": {
+    "objective": "pooled",
+    "pooled_days": 20,
+    "pooled_trades": 30,
+    "val_days": 8,
+    "val_trades": 10,
+    "validation": "single",
+    "year_days": 1,
+    "year_trades": 1
+   },
+   "search_by_case": {
+    "noise_dense_search": {
+     "holdout_looks": 3,
+     "lineages_with_look": 3,
+     "of": 128,
+     "promoted": 0,
+     "validations": 614,
+     "with_candidates": 128
+    },
+    "noise_low_fat_search": {
+     "holdout_looks": 4,
+     "lineages_with_look": 4,
+     "of": 128,
+     "promoted": 0,
+     "validations": 636,
+     "with_candidates": 128
+    },
+    "noise_low_search": {
+     "holdout_looks": 6,
+     "lineages_with_look": 6,
+     "of": 128,
+     "promoted": 0,
+     "validations": 639,
+     "with_candidates": 128
+    },
+    "noise_medium_fat_search": {
+     "holdout_looks": 9,
+     "lineages_with_look": 8,
+     "of": 128,
+     "promoted": 0,
+     "validations": 636,
+     "with_candidates": 128
+    },
+    "noise_medium_search": {
+     "holdout_looks": 4,
+     "lineages_with_look": 4,
+     "of": 128,
+     "promoted": 0,
+     "validations": 637,
+     "with_candidates": 128
+    },
+    "noise_sparse_fat_search": {
+     "holdout_looks": 10,
+     "lineages_with_look": 9,
+     "of": 128,
+     "promoted": 0,
+     "validations": 640,
+     "with_candidates": 128
+    },
+    "noise_sparse_search": {
+     "holdout_looks": 6,
+     "lineages_with_look": 6,
+     "of": 128,
+     "promoted": 1,
+     "validations": 636,
+     "with_candidates": 128
+    },
+    "signal_dense": {
+     "holdout_looks": 123,
+     "lineages_with_look": 123,
+     "of": 128,
+     "promoted": 121,
+     "validations": 128,
+     "with_candidates": 128
+    },
+    "signal_medium": {
+     "holdout_looks": 118,
+     "lineages_with_look": 118,
+     "of": 128,
+     "promoted": 102,
+     "validations": 128,
+     "with_candidates": 128
+    },
+    "signal_sparse": {
+     "holdout_looks": 118,
+     "lineages_with_look": 118,
+     "of": 128,
+     "promoted": 99,
+     "validations": 128,
+     "with_candidates": 128
+    }
+   },
+   "search_false_promotion": {
+    "count": 1,
+    "lower_95": 0.0,
+    "of": 896,
+    "rate": 0.0011,
+    "upper_95": 0.0062,
+    "upper_95_one_sided": 0.0053
+   },
+   "search_missed_signal": {
+    "count": 62,
+    "lower_95": 0.1261,
+    "of": 384,
+    "rate": 0.1615,
+    "upper_95": 0.2021,
+    "upper_95_one_sided": 0.1956
+   },
+   "search_noise_holdout_looks": {
+    "count": 40,
+    "lower_95": 0.0321,
+    "of": 896,
+    "rate": 0.0446,
+    "upper_95": 0.0603,
+    "upper_95_one_sided": 0.0577
+   }
+  },
+  "pooled_validation": {
+   "engine_false_promotion": {
+    "count": 16,
+    "lower_95": 0.0582,
+    "of": 160,
+    "rate": 0.1,
+    "upper_95": 0.1573,
+    "upper_95_one_sided": 0.1479
+   },
+   "engine_false_promotion_by_case": {
+    "absent_signal": 0,
+    "cost_erased": 0,
+    "drift_only": 0,
+    "edge_disappears": 0,
+    "fill_close_above_width": 0,
+    "fill_crossed_quotes": 0,
+    "fill_open_below_zero": 0,
+    "fill_passive_spread": 0,
+    "fill_stale_quote": 0,
+    "leak_array_base": 0,
+    "leak_daily_bars": 0,
+    "leak_date_literal": 0,
+    "leak_future_index": 0,
+    "leak_greeks_block": 0,
+    "leak_memorized_levels": 8,
+    "leak_memorized_sessions": 8,
+    "leak_memorized_sparse": 0,
+    "leak_numpy_memo": 0,
+    "leak_private_attr": 0,
+    "leak_volume_bars": 0
+   },
+   "engine_false_promotion_mechanical_scope": {
+    "count": 0,
+    "lower_95": 0.0,
+    "of": 136,
+    "rate": 0.0,
+    "upper_95": 0.0268,
+    "upper_95_one_sided": 0.0218
+   },
+   "engine_missed_by_case": {
+    "planted_dense": 2,
+    "planted_medium": 1,
+    "planted_regime_gap": 8,
+    "planted_regime_years": 0,
+    "planted_sparse": 8
+   },
+   "engine_missed_signal": {
+    "count": 19,
+    "lower_95": 0.3151,
+    "of": 40,
+    "rate": 0.475,
+    "upper_95": 0.6387,
+    "upper_95_one_sided": 0.6152
+   },
+   "engine_negative_looks": {
+    "count": 24,
+    "lower_95": 0.0985,
+    "of": 160,
+    "rate": 0.15,
+    "upper_95": 0.2149,
+    "upper_95_one_sided": 0.2044
+   },
+   "owner_rule": {
+    "checks": {
+     "engine_false_promotions_not_higher": true,
+     "engine_negative_looks_not_higher": true,
+     "missed_signals_lower": true,
+     "noise_looks_not_higher_in_any_band": false,
+     "search_false_promotions_not_higher": true
+    },
+    "met": false,
+    "noise_bands_with_more_looks": [
+     "noise_dense_search",
+     "noise_low_fat_search",
+     "noise_low_search",
+     "noise_medium_fat_search",
+     "noise_medium_search"
+    ]
+   },
+   "rule": {
+    "objective": "worst_year",
+    "pooled_days": 0,
+    "pooled_trades": 0,
+    "val_days": 25,
+    "val_trades": 50,
+    "validation": "pooled",
+    "year_days": 20,
+    "year_trades": 40
+   },
+   "search_by_case": {
+    "noise_dense_search": {
+     "holdout_looks": 7,
+     "lineages_with_look": 7,
+     "of": 128,
+     "promoted": 0,
+     "validations": 490,
+     "with_candidates": 128
+    },
+    "noise_low_fat_search": {
+     "holdout_looks": 10,
+     "lineages_with_look": 10,
+     "of": 128,
+     "promoted": 0,
+     "validations": 564,
+     "with_candidates": 128
+    },
+    "noise_low_search": {
+     "holdout_looks": 16,
+     "lineages_with_look": 15,
+     "of": 128,
+     "promoted": 0,
+     "validations": 567,
+     "with_candidates": 128
+    },
+    "noise_medium_fat_search": {
+     "holdout_looks": 22,
+     "lineages_with_look": 21,
+     "of": 128,
+     "promoted": 0,
+     "validations": 570,
+     "with_candidates": 128
+    },
+    "noise_medium_search": {
+     "holdout_looks": 15,
+     "lineages_with_look": 15,
+     "of": 128,
+     "promoted": 0,
+     "validations": 562,
+     "with_candidates": 128
+    },
+    "noise_sparse_fat_search": {
+     "holdout_looks": 0,
+     "lineages_with_look": 0,
+     "of": 128,
+     "promoted": 0,
+     "validations": 0,
+     "with_candidates": 0
+    },
+    "noise_sparse_search": {
+     "holdout_looks": 0,
+     "lineages_with_look": 0,
+     "of": 128,
+     "promoted": 0,
+     "validations": 0,
+     "with_candidates": 0
+    },
+    "signal_dense": {
+     "holdout_looks": 128,
+     "lineages_with_look": 128,
+     "of": 128,
+     "promoted": 124,
+     "validations": 128,
+     "with_candidates": 128
+    },
+    "signal_medium": {
+     "holdout_looks": 128,
+     "lineages_with_look": 128,
+     "of": 128,
+     "promoted": 111,
+     "validations": 128,
+     "with_candidates": 128
+    },
+    "signal_sparse": {
+     "holdout_looks": 0,
+     "lineages_with_look": 0,
+     "of": 128,
+     "promoted": 0,
+     "validations": 0,
+     "with_candidates": 0
+    }
+   },
+   "search_false_promotion": {
+    "count": 0,
+    "lower_95": 0.0,
+    "of": 896,
+    "rate": 0.0,
+    "upper_95": 0.0041,
+    "upper_95_one_sided": 0.0033
+   },
+   "search_missed_signal": {
+    "count": 149,
+    "lower_95": 0.339,
+    "of": 384,
+    "rate": 0.388,
+    "upper_95": 0.4388,
+    "upper_95_one_sided": 0.4308
+   },
+   "search_noise_holdout_looks": {
+    "count": 68,
+    "lower_95": 0.0594,
+    "of": 896,
+    "rate": 0.0759,
+    "upper_95": 0.0952,
+    "upper_95_one_sided": 0.0921
+   }
+  },
+  "sparse_floors": {
+   "engine_false_promotion": {
+    "count": 23,
+    "lower_95": 0.0934,
+    "of": 160,
+    "rate": 0.1437,
+    "upper_95": 0.2078,
+    "upper_95_one_sided": 0.1975
+   },
+   "engine_false_promotion_by_case": {
+    "absent_signal": 0,
+    "cost_erased": 0,
+    "drift_only": 0,
+    "edge_disappears": 0,
+    "fill_close_above_width": 0,
+    "fill_crossed_quotes": 0,
+    "fill_open_below_zero": 0,
+    "fill_passive_spread": 0,
+    "fill_stale_quote": 0,
+    "leak_array_base": 0,
+    "leak_daily_bars": 0,
+    "leak_date_literal": 0,
+    "leak_future_index": 0,
+    "leak_greeks_block": 0,
+    "leak_memorized_levels": 8,
+    "leak_memorized_sessions": 8,
+    "leak_memorized_sparse": 7,
+    "leak_numpy_memo": 0,
+    "leak_private_attr": 0,
+    "leak_volume_bars": 0
+   },
+   "engine_false_promotion_mechanical_scope": {
+    "count": 0,
+    "lower_95": 0.0,
+    "of": 136,
+    "rate": 0.0,
+    "upper_95": 0.0268,
+    "upper_95_one_sided": 0.0218
+   },
+   "engine_missed_by_case": {
+    "planted_dense": 2,
+    "planted_medium": 1,
+    "planted_regime_gap": 4,
+    "planted_regime_years": 0,
+    "planted_sparse": 2
+   },
+   "engine_missed_signal": {
+    "count": 9,
+    "lower_95": 0.1084,
+    "of": 40,
+    "rate": 0.225,
+    "upper_95": 0.3845,
+    "upper_95_one_sided": 0.3598
+   },
+   "engine_negative_looks": {
+    "count": 31,
+    "lower_95": 0.1356,
+    "of": 160,
+    "rate": 0.1938,
+    "upper_95": 0.2636,
+    "upper_95_one_sided": 0.2524
+   },
+   "owner_rule": {
+    "checks": {
+     "engine_false_promotions_not_higher": false,
+     "engine_negative_looks_not_higher": false,
+     "missed_signals_lower": true,
+     "noise_looks_not_higher_in_any_band": false,
+     "search_false_promotions_not_higher": true
+    },
+    "met": false,
+    "noise_bands_with_more_looks": [
+     "noise_low_fat_search",
+     "noise_low_search",
+     "noise_medium_fat_search",
+     "noise_medium_search",
+     "noise_sparse_fat_search",
+     "noise_sparse_search"
+    ]
+   },
+   "rule": {
+    "objective": "worst_year",
+    "pooled_days": 20,
+    "pooled_trades": 30,
+    "val_days": 8,
+    "val_trades": 10,
+    "validation": "single",
+    "year_days": 5,
+    "year_trades": 6
+   },
+   "search_by_case": {
+    "noise_dense_search": {
+     "holdout_looks": 2,
+     "lineages_with_look": 2,
+     "of": 128,
+     "promoted": 0,
+     "validations": 490,
+     "with_candidates": 128
+    },
+    "noise_low_fat_search": {
+     "holdout_looks": 6,
+     "lineages_with_look": 5,
+     "of": 128,
+     "promoted": 0,
+     "validations": 564,
+     "with_candidates": 128
+    },
+    "noise_low_search": {
+     "holdout_looks": 5,
+     "lineages_with_look": 5,
+     "of": 128,
+     "promoted": 0,
+     "validations": 567,
+     "with_candidates": 128
+    },
+    "noise_medium_fat_search": {
+     "holdout_looks": 12,
+     "lineages_with_look": 10,
+     "of": 128,
+     "promoted": 0,
+     "validations": 570,
+     "with_candidates": 128
+    },
+    "noise_medium_search": {
+     "holdout_looks": 4,
+     "lineages_with_look": 4,
+     "of": 128,
+     "promoted": 0,
+     "validations": 562,
+     "with_candidates": 128
+    },
+    "noise_sparse_fat_search": {
+     "holdout_looks": 10,
+     "lineages_with_look": 10,
+     "of": 128,
+     "promoted": 0,
+     "validations": 601,
+     "with_candidates": 128
+    },
+    "noise_sparse_search": {
+     "holdout_looks": 5,
+     "lineages_with_look": 5,
+     "of": 128,
+     "promoted": 0,
+     "validations": 617,
+     "with_candidates": 128
+    },
+    "signal_dense": {
+     "holdout_looks": 123,
+     "lineages_with_look": 123,
+     "of": 128,
+     "promoted": 121,
+     "validations": 128,
+     "with_candidates": 128
+    },
+    "signal_medium": {
+     "holdout_looks": 118,
+     "lineages_with_look": 118,
+     "of": 128,
+     "promoted": 102,
+     "validations": 128,
+     "with_candidates": 128
+    },
+    "signal_sparse": {
+     "holdout_looks": 118,
+     "lineages_with_look": 118,
+     "of": 128,
+     "promoted": 99,
+     "validations": 128,
+     "with_candidates": 128
+    }
+   },
+   "search_false_promotion": {
+    "count": 0,
+    "lower_95": 0.0,
+    "of": 896,
+    "rate": 0.0,
+    "upper_95": 0.0041,
+    "upper_95_one_sided": 0.0033
+   },
+   "search_missed_signal": {
+    "count": 62,
+    "lower_95": 0.1261,
+    "of": 384,
+    "rate": 0.1615,
+    "upper_95": 0.2021,
+    "upper_95_one_sided": 0.1956
+   },
+   "search_noise_holdout_looks": {
+    "count": 41,
+    "lower_95": 0.033,
+    "of": 896,
+    "rate": 0.0458,
+    "upper_95": 0.0616,
+    "upper_95_one_sided": 0.059
+   }
+  }
+ },
+ "verdict_sensitivity": {
+  "false_promotions_see_no_floors": true,
+  "no_floors_rejected": true,
+  "noise_looks_see_no_floors": true
+ },
+ "world_sessions": {
+  "holdout": 48,
+  "train": 195,
+  "validation": 65
+ }
+}

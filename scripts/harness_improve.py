@@ -1,15 +1,34 @@
 #!/usr/bin/env python3
-"""Operate the persistent, no-provider-call harness lab. See playbooks/harness-improvement.md."""
+"""Operate the persistent, no-provider-call harness lab. See playbooks/harness-improvement.md.
+
+The scheduler lane: capture, prepare, stage, evaluate, review, deploy, reconcile, watch. The research, memory, data and
+execution lanes (`league/swarm/harness_lanes.py`), one command per step: `measure` (read-only, on the House, with the
+base release's copy of this script) -> `rank` -> `prepare` -> `stage` -> `evaluate` -> `review` (an adversarial review
+of the exact patch and evaluated tree, approve or reject) -> `deploy` (the loop's deploy step: refuses without that
+approval, issues the ticket) -> the exact tree through the watchdog -> `canary` -> `reconcile`; `next` prints each
+candidate's next command, `brief` what its patch author may see, `lanes` the predeclared definitions.
+
+THE PINNED BASE. `rank`, `stage`, `evaluate`, `review`, `deploy`, `canary` and `reconcile` compute a candidate's fate
+from its base commit's code: when this script is not that commit's (`HarnessImprovement.pinned`), it re-executes itself
+from a separate read-only checkout of the base, `<journal>/controllers/<base>` (`git archive` of league/ and scripts/,
+made once), with `--repo` naming the owner repository.
+"""
 from __future__ import annotations
 
 import argparse
 from contextlib import ExitStack
 import fcntl
+import io
 import json
+import math
 import os
 from pathlib import Path
+import re
+import shutil
 import sqlite3
+import subprocess
 import sys
+import tarfile
 import time
 
 REPO = Path(__file__).resolve().parents[1]
@@ -18,13 +37,29 @@ if str(REPO) not in sys.path:
 
 from league.swarm.improvement import HarnessImprovement, ImprovementError
 from league.swarm.harness_runtime import process, write_json
+from league.swarm import harness_lanes as lanes
 from league.watchdog import tree_digest
+
+#: Commands that never open a journal (read-only, or definitions only).
+NO_JOURNAL = ("measure", "lanes")
+#: Journal commands that compute a candidate's fate: they run from a checkout of its base commit (the module docstring).
+PINNED_COMMANDS = ("rank", "stage", "evaluate", "review", "deploy", "canary", "reconcile")
+#: Set in a re-executed process: the base it was re-executed for (a second mismatch is an error, never a loop).
+PINNED_ENV = "LTCM_HARNESS_PINNED"
+#: The supervised observer's lane measurement: the last day, read only, at most this often (about 1.5 CPU seconds on the
+#: House per measurement, Sept 30, 2026). Written to its own directory only; registering candidates stays the operator's.
+LANES_EVERY = 1800
+LANES_WINDOW = 86400
 
 
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--root", type=Path, required=True, help="private, dedicated harness journal directory")
+    p.add_argument("--root", type=Path, help="private, dedicated harness journal directory (every command but measure/lanes)")
     p.add_argument("--repo", type=Path, default=REPO, help="reviewed owner repository with baseline/candidate commits")
+    p.add_argument("--heldout", type=Path, default=Path(os.environ["LTCM_HARNESS_HELDOUT"]) if os.environ.get(
+                       "LTCM_HARNESS_HELDOUT") else None,
+                   help="the private directory of the judges' held-out pools, outside the repo (evaluate); "
+                        "default $LTCM_HARNESS_HELDOUT")
     sub = p.add_subparsers(dest="command", required=True)
     for name in ("capture", "watch"):
         part = sub.add_parser(name)
@@ -44,18 +79,103 @@ def parser() -> argparse.ArgumentParser:
     part = sub.add_parser("stage")
     part.add_argument("key")
     part.add_argument("--candidate", required=True)
+    part.add_argument("--authoring-usd", type=float, help="what writing this attempt cost (the agent's dollars), recorded")
+    part.add_argument("--author", required=True, help="the patch author's name (its reviewer must be another agent)")
+    part = sub.add_parser("review", help="record an adversarial review of a staged candidate's exact patch")
+    part.add_argument("key")
+    part.add_argument("--report", type=Path, required=True,
+                      help="the review: cites the patch's sha256 and states `VERDICT: approve` or `VERDICT: reject`")
+    part.add_argument("--reviewer", required=True, help="the reviewing agent (never the patch's author)")
+    part.add_argument("--patch-sha", required=True, help="the sha256 of the candidate.patch reviewed (`next` prints it)")
+    part.add_argument("--review-usd", type=float, help="what the review cost, recorded")
+    part = sub.add_parser("deploy", help="the loop's deploy step: refuses without an approving review of the exact "
+                                         "evaluated tree; issues the ticket the tree is deployed under")
+    part.add_argument("key")
     part = sub.add_parser("evaluate")
     part.add_argument("key")
     part.add_argument("--python", type=Path, default=Path(sys.executable))
     part = sub.add_parser("reconcile")
     part.add_argument("key")
-    part.add_argument("--swarm", type=Path, required=True)
-    part.add_argument("--deploy-base", type=Path, required=True)
+    part.add_argument("--swarm", type=Path, help="scheduler lane (and lanes on the House): the swarm state, read only")
+    part.add_argument("--deploy-base", type=Path, help="scheduler lane: directory with current and deploys.jsonl")
+    part.add_argument("--measurement", type=Path, help="a lane candidate: `measure` of its registered window")
     sub.add_parser("status")
+    part = sub.add_parser("measure", help="read-only lane measurement of a swarm state directory (run it on the House)")
+    part.add_argument("--swarm", type=Path, required=True)
+    part.add_argument("--seconds", type=int, default=6 * 3600)
+    part.add_argument("--since", type=float, help="window start (epoch seconds); with --until instead of --seconds")
+    part.add_argument("--until", type=float, help="window end (epoch seconds; default now)")
+    part.add_argument("--lanes", help="comma-separated lanes (default: all)")
+    part.add_argument("--examples", type=int, default=40, help="retained disqualified results to read for signatures")
+    part.add_argument("--out", type=Path, help="write the document here (mode 0600) and print its summary")
+    sub.add_parser("lanes", help="print the lanes' predeclared definitions")
+    part = sub.add_parser("rank", help="register lane bottlenecks over their thresholds and print them ranked")
+    part.add_argument("--base", required=True, help="full Git SHA of the measured running release")
+    source = part.add_mutually_exclusive_group(required=True)
+    source.add_argument("--measurement", type=Path, help="a `measure` document")
+    source.add_argument("--swarm", type=Path, help="measure this state directory now (read only)")
+    part.add_argument("--seconds", type=int, default=6 * 3600)
+    part.add_argument("--out", type=Path, help="also write the ranked list here (mode 0600)")
+    part = sub.add_parser("brief", help="what a lane candidate's patch author may see")
+    part.add_argument("key")
+    part = sub.add_parser("canary", help="start a promoted lane candidate's canary, or flip its gate by hand")
+    part.add_argument("key")
+    part.add_argument("--measurement", type=Path, help="`measure` taken after the watchdog promoted the evaluated tree")
+    part.add_argument("--control", type=Path, help="window lanes: `measure` of the base release just before the deploy")
+    part.add_argument("--fraction", type=float, help="share of units in the canary arm (default: the lane's)")
+    part.add_argument("--deploy-usd", type=float, help="what the reviews and the deploy cost, recorded")
+    flip = part.add_mutually_exclusive_group()
+    flip.add_argument("--revert", action="store_true", help="flip the gate to the old behavior now (any time)")
+    flip.add_argument("--retain", action="store_true", help="re-install a gate the registered decision retained")
+    flip.add_argument("--graduated", metavar="MAIN_COMMIT", help="the retained change merged into main without its gate")
+    sub.add_parser("next", help="each lane candidate's next command")
     return p
 
 
+def load_json(path: Path) -> dict:
+    value = json.loads(Path(path).read_text())
+    if not isinstance(value, dict):
+        raise ImprovementError(f"{path} is not a JSON object")
+    return value
+
+
+def plain(value):
+    """`value` as strict JSON: other types as text, a non-finite number (a NaN a table may hold) as null."""
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {str(k): plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [plain(v) for v in value]
+    return value if value is None or isinstance(value, (str, int, bool)) else str(value)
+
+
+def write_private(path: Path, value) -> None:
+    """Mode 0600, whole-file replacement (`harness_runtime.write_json`), its directory created."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_json(path, plain(value))
+
+
+def measure(args) -> dict:
+    wanted = [x for x in (args.lanes or "").split(",") if x] or None
+    for name in wanted or []:
+        if name not in lanes.LANES:
+            raise ImprovementError(f"no lane {name!r}: {sorted(lanes.LANES)}")
+    now = args.until if args.until is not None else time.time()
+    doc = lanes.measure(args.swarm, now=now, since=args.since, seconds=args.seconds, lanes=wanted, examples=args.examples)
+    if args.out:
+        write_private(args.out, doc)
+        return {"written": str(args.out), "window": doc["window"], "errors": doc["errors"],
+                "metrics": {k: {m: v for m, v in lane["metrics"].items() if m != "tallies"} for k, lane in doc["lanes"].items()}}
+    return doc
+
+
 def reconcile(lab, args, key):
+    job = lab.worklist.get(key)
+    if job is not None and job.details.get("lane") and getattr(args, "measurement", None):
+        return lab.reconcile_lane(key, measurement=load_json(args.measurement))
+    if args.swarm is None or args.deploy_base is None:
+        raise ImprovementError("reconcile needs --measurement (a lane candidate) or --swarm and --deploy-base")
     link = args.deploy_base / "current"
     if not link.is_symlink():
         raise ImprovementError("the authoritative current-release symlink is required")
@@ -80,12 +200,41 @@ def step(lab, args):
     if args.command == "prepare":
         return lab.prepare(args.key, args.worktree)
     if args.command == "stage":
-        return lab.stage(args.key, args.candidate)
+        return lab.stage(args.key, args.candidate, authoring_usd=args.authoring_usd, author=args.author)
+    if args.command == "review":
+        return lab.review(args.key, report=args.report, reviewer=args.reviewer, patch_sha=args.patch_sha,
+                          review_usd=args.review_usd)
     if args.command == "evaluate":
         return lab.evaluate(args.key, python=args.python)
+    if args.command == "deploy":
+        return lab.deploy(args.key)
     if args.command == "reconcile":
         return reconcile(lab, args, args.key)
-    return {"verified_ledger_rows": lab.ledger.verify(), "jobs": [
+    if args.command == "rank":
+        doc = load_json(args.measurement) if args.measurement else lanes.measure(args.swarm, seconds=args.seconds)
+        ranked = lab.capture_lanes(doc, base=args.base)
+        # The capture records the document's hash; the journal keeps the document itself for the receipts.
+        from league.swarm.improvement import sha
+        write_private(args.root / "measurements" / f"{sha(doc)[:16]}.json", doc)
+        out = {"window": doc.get("window"), "source": {k: (doc.get("source") or {}).get(k) for k in ("release", "digest")},
+               "policy": lanes.POLICY, "candidates": ranked}
+        if args.out:
+            write_private(args.out, out)
+        return out
+    if args.command == "brief":
+        return lab.brief(args.key)
+    if args.command == "canary":
+        if args.graduated:
+            return lab.canary_stop(args.key, state="graduated", commit=args.graduated)
+        if args.revert or args.retain:
+            return lab.canary_stop(args.key, state="retained" if args.retain else "reverted")
+        if not args.measurement:
+            raise ImprovementError("canary needs --measurement (or --revert / --retain / --graduated)")
+        return lab.canary_start(args.key, measurement=load_json(args.measurement), fraction=args.fraction,
+                                control=load_json(args.control) if args.control else None, deploy_usd=args.deploy_usd)
+    if args.command == "next":
+        return {"next": lab.next_steps(root=str(args.root), repo=str(args.repo))}
+    return {"verified_ledger_rows": lab.ledger.verify(), "gates": lab.gates(), "jobs": [
         {**j.view(), "decision": j.last_status.get("decision"), "proposal": j.carry.get("_proposal")}
         for j in lab.worklist.jobs().values()]}
 
@@ -98,13 +247,92 @@ def transition(args):
             fcntl.flock(lock, flags)
         except BlockingIOError:
             return {"waiting": "another harness transition holds controller.lock"}
-        lab = HarnessImprovement(args.root, repo=args.repo)
+        lab = HarnessImprovement(args.root, repo=args.repo, heldout=args.heldout)
         try:
             return step(lab, args)
         except (ValueError, OSError, sqlite3.Error) as exc:
             return {"error": str(exc)}
         finally:
             lab.close()
+
+
+def base_of(args) -> str | None:
+    """The base commit a pinned command computes from: `rank --base`, else its candidate's (from the journal)."""
+    if args.command not in PINNED_COMMANDS:
+        return None
+    if args.command == "canary" and (args.revert or args.retain or args.graduated):
+        return None  # a flip by hand computes nothing, and a revert must work whatever the checkout
+    if args.command == "rank":
+        return args.base
+    lab = HarnessImprovement(args.root, repo=args.repo, heldout=args.heldout)
+    try:
+        job = lab.worklist.get(args.key)
+        return str(job.details["base"]) if job is not None and job.details.get("base") else None
+    finally:
+        lab.close()
+
+
+def base_checkout(root: Path, repo: Path, base: str) -> Path:
+    """`<journal>/controllers/<base>`: league/ and scripts/ of the base commit (`git archive`), read-only, made once."""
+    target = root / "controllers" / base
+    if target.is_dir():
+        return target
+    part = root / "controllers" / f".{base}.part"
+    shutil.rmtree(part, ignore_errors=True)
+    part.mkdir(parents=True)
+    raw = subprocess.run(["git", "-C", str(repo), "archive", "--format=tar", base, "league", "scripts"],
+                         capture_output=True, check=True).stdout
+    with tarfile.open(fileobj=io.BytesIO(raw)) as bundle:
+        bundle.extractall(part, filter="data")
+    for path in part.rglob("*"):
+        if path.is_file():
+            path.chmod(0o444)
+    part.rename(target)
+    return target
+
+
+def run_from_base(args) -> None:
+    """Re-execute this command from a checkout of its base commit unless this process already runs that commit's
+    controller (the module docstring). Returns only when no re-execution is needed."""
+    base = base_of(args)
+    if not base or not re.fullmatch(r"[0-9a-f]{40}", base):
+        return
+    known = subprocess.run(["git", "-C", str(args.repo), "rev-parse", "--verify", "--quiet", f"{base}^{{commit}}"],
+                           capture_output=True, check=False)
+    if known.returncode:
+        return  # not a commit of this repository: the controller refuses wherever a candidate's fate depends on it
+    lab = HarnessImprovement(args.root, repo=args.repo)
+    try:
+        lab.pinned(base)
+        return
+    except ImprovementError as exc:
+        if os.environ.get(PINNED_ENV) == base:
+            raise ImprovementError(f"the base checkout does not hold the base's controller: {exc}") from exc
+    finally:
+        lab.close()
+    checkout = base_checkout(args.root, Path(args.repo).resolve(), base)
+    script = checkout / "scripts" / "harness_improve.py"
+    os.execve(sys.executable, [sys.executable, "-B", str(script), "--repo", str(Path(args.repo).resolve()), *sys.argv[1:]],
+              {**os.environ, PINNED_ENV: base})
+
+
+def lanes_snapshot(root: Path, swarm: Path, *, now: float | None = None) -> dict:
+    """The observer's bottleneck capture for the lanes: measure the last day read-only and write the measurement and its
+    ranked bottlenecks to the observer's own directory (`lanes-measurement.json`, `lanes-ranked.json`, mode 0600). The
+    operator copies them out and registers candidates with `rank --measurement`; nothing here opens the journal."""
+    doc = lanes.measure(swarm, now=now, seconds=LANES_WINDOW, examples=20)
+    ranked = lanes.rank(doc)
+    write_private(root / "lanes-measurement.json", doc)
+    write_private(root / "lanes-ranked.json", {"at": doc["until"], "window": doc["window"], "policy": lanes.POLICY,
+                                               "source": {k: (doc.get("source") or {}).get(k) for k in ("release", "digest")},
+                                               "candidates": ranked})
+    from league.swarm import canary as gate
+
+    # The gates the House reads now (`<state>/harness/canary.json`): a retained one missing here has silently fallen
+    # back to the old behavior; the operator compares this with the journal's `status` (`gates`).
+    return {"lanes_at": doc["until"], "lanes_captured": sum(1 for r in ranked if r["captured"]),
+            "lanes_errors": sorted(doc["errors"]),
+            "gates": {k: v.get("state") for k, v in gate.read(Path(swarm) / gate.FILE).items()}}
 
 
 def heartbeat(args, identity, result):
@@ -115,12 +343,28 @@ def heartbeat(args, identity, result):
         parts.append(f"{len(failures)} reconciliation error(s): " + '; '.join(failures[:2]))
     write_json(args.root / "observer-heartbeat.json", {**identity, "at": time.time(),
         "error": '; '.join(parts)[:512] or None, "reconciliation_error_count": len(failures),
-        "waiting": result.get("waiting")})
+        "waiting": result.get("waiting"), **(result.get("lanes") or {})})
 
 
 def main() -> int:
     args = parser().parse_args()
+    if args.command in NO_JOURNAL:
+        try:
+            result = measure(args) if args.command == "measure" else {"policy": lanes.POLICY, "lanes": {
+                name: {**lane.spec(), "lane_sha": lanes.lane_sha(lane)} for name, lane in lanes.LANES.items()}}
+        except (ValueError, OSError, sqlite3.Error) as exc:
+            result = {"error": str(exc)}
+        print(json.dumps(result, sort_keys=True, default=str), flush=True)
+        return 1 if "error" in result else 0
+    if args.root is None:
+        print(json.dumps({"error": "--root (the private harness journal) is required for this command"}), flush=True)
+        return 1
     args.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        run_from_base(args)
+    except (ValueError, OSError, sqlite3.Error, subprocess.CalledProcessError) as exc:
+        print(json.dumps({"error": f"cannot run from the pinned base: {exc}"}), flush=True)
+        return 1
     # A lifetime lock also covers a House crash before its child's process record is persisted.
     try:
         with ExitStack() as stack:
@@ -141,6 +385,7 @@ def main() -> int:
                             "base": args.base, "release_digest": digest, "policy": args.policy_signature,
                             "session_started_at": time.time()}
                 heartbeat(args, identity, {"waiting": "first observation"})
+            lanes_last, lanes_state = 0.0, {}
             while True:
                 if args.command == "watch" and any(p.exists() for p in (args.swarm / "STOP", args.swarm.parent / "STOP")):
                     return 0
@@ -151,6 +396,13 @@ def main() -> int:
                 print(json.dumps(result, sort_keys=True, allow_nan=False), flush=True)
                 if args.command != "watch":
                     return 1 if "error" in result else 0
+                if time.time() - lanes_last >= LANES_EVERY:
+                    lanes_last = time.time()
+                    try:
+                        lanes_state = lanes_snapshot(args.root, args.swarm)
+                    except Exception as exc:  # noqa: BLE001 - odd House data never stops the observer; it is reported
+                        lanes_state = {"lanes_error": f"{type(exc).__name__}: {str(exc)[:200]}"}
+                result["lanes"] = lanes_state
                 heartbeat(args, identity, result)
                 time.sleep(max(30, min(60, args.interval)))
     except KeyboardInterrupt:

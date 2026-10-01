@@ -947,6 +947,77 @@ def sail_usage(usage: Any) -> dict[str, int]:
     return {k: v for k, v in pairs if isinstance(v, int) and not isinstance(v, bool)}
 
 
+def without_trailing_commas(text: Any) -> str:
+    """`text` with every comma that only closes an object or array (`,}` or `,]`, whitespace between allowed) removed,
+    outside JSON strings. Sail's k3 sometimes writes such commas into an otherwise complete answer (Oct 1, 2026: a
+    medium-effort pass's whole `families` array failed to parse and read as no proposals). Nothing else is changed."""
+    text = str(text or "")
+    out: list[str] = []
+    in_string = escaped = False
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if in_string:
+            out.append(ch)
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+        elif ch == '"':
+            in_string = True
+            out.append(ch)
+        elif ch == ",":
+            j = i + 1
+            while j < n and text[j] in " \t\r\n":
+                j += 1
+            if j < n and text[j] in "}]":
+                i += 1
+                continue
+            out.append(ch)
+        else:
+            out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def read_families(answer: Mapping[str, Any]) -> tuple[list[dict[str, Any]] | None, bool]:
+    """(the answer's proposals, whether they were read without stray trailing commas). A cut answer keeps its complete
+    families (R11-3, `salvage_families`); a complete one is read whole. Only when a complete answer's JSON has no
+    `families` array AND its `families` object carries a stray trailing comma (`,}` or `,]`: the whole object is then
+    unreadable, so the first readable inner object was taken instead) is it read again without them, whole or else object
+    by object. The strip starts at the `{` that opens the `families` object, so prose before it cannot flip the string
+    tracking. Any other unreadable answer reads as before (None)."""
+    text = str(answer.get("text") or "")
+    if answer.get("truncated"):
+        return salvage_families(_from_families(text, strip=True)), False
+    rows = (answer.get("json") or {}).get("families")
+    if rows is not None or not text:
+        return rows, False
+    body = _from_families(text, strip=False)
+    lenient = without_trailing_commas(body)
+    if not body or lenient == body:
+        return None, False
+    from .models import extract_json  # the router's own reader (models.py is not on the live path)
+    whole = (extract_json(lenient) or {}).get("families")
+    if isinstance(whole, list):
+        return whole, True
+    some = salvage_families(lenient)
+    return (some, True) if some else (None, False)
+
+
+def _from_families(text: str, *, strip: bool) -> str:
+    """`text` from the `{` that opens the object holding the `families` array ("" when there is none), its stray trailing
+    commas removed when `strip`."""
+    found = _FAMILIES.search(text)
+    if not found:
+        return ""
+    start = text.rfind("{", 0, found.start())
+    body = text[start:] if start >= 0 else text[found.start():]
+    return without_trailing_commas(body) if strip else body
+
+
 def salvage_families(text: Any) -> list[dict[str, Any]]:
     """The complete family objects of a cut answer's `families` array, in order (R11-3: a truncated architect answer keeps
     what it finished); [] when the array never opened or no object in it completed."""
@@ -1520,7 +1591,7 @@ class Architect:
         except Exception as exc:  # noqa: BLE001 - the pass keeps what it salvaged
             return {"born_ids": [], "effort": "medium", "error": f"{type(exc).__name__}: {str(exc)[:300]}"}
         cut = bool(answer.get("truncated"))
-        rows = salvage_families(answer.get("text")) if cut else (answer.get("json") or {}).get("families")
+        rows, _ = read_families(answer)  # the retry is read as the pass is (a cut one salvaged, stray commas dropped)
         on_digest = bool(extra) and answer.get("route") == "claude"
         born = self.admit(rows, digest=on_digest, library=library)
         if on_digest and self.digest is not None and info is not None:
@@ -1567,7 +1638,7 @@ class Architect:
         # A cut answer, on Claude (R11-3) or on Sail (`ModelRouter.ask`'s `truncated`, Oct 1, 2026), keeps its complete
         # families; a complete one is read whole.
         truncated = bool(answer.get("truncated"))
-        rows = salvage_families(answer.get("text")) if truncated else (answer.get("json") or {}).get("families")
+        rows, lenient = read_families(answer)
         on_digest = bool(extra) and answer.get("route") == "claude"
         born = self.admit(rows, digest=on_digest, library=library)
         proposed = len(rows) if isinstance(rows, list) else 0  # this pass's proposals, its retry's added below
@@ -1580,6 +1651,8 @@ class Architect:
         refused_cards = list(getattr(self, "card_refused", []) or [])
         out = {"born": born, "proposed": proposed, "route": answer.get("route"),
                "model": answer.get("model"), "cost_usd": answer.get("cost_usd"), "seconds": round(self.clock() - began, 1)}
+        if lenient:
+            out["lenient"] = True  # the families were read without the answer's stray trailing commas
         if library is not None:
             cited = [library.resolve(r.get("literature"))[0] for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
             out["library"] = {"queries": list(library.queries), "ids": list(library.ids), "cited": sum(1 for c in cited if c),
@@ -1654,7 +1727,7 @@ class Architect:
         return out
 
 
-__all__ = ["Architect", "SYSTEM", "GraveyardDigest", "Digest", "lesson_view", "parse_lesson", "tag_of", "compose", "salvage_families",
+__all__ = ["Architect", "SYSTEM", "GraveyardDigest", "Digest", "lesson_view", "parse_lesson", "tag_of", "compose", "salvage_families", "read_families", "without_trailing_commas",
            "SALVAGE_MIN", "SAIL_EFFORT", "SAIL_EFFORTS", "sail_usage",
            "locked_text", "fit", "AGENDA_KEY", "SEAL_KEY", "CPT_KEY", "LAST_KEY", "DIGEST_HEADER", "FULL_GRAVEYARD_RULE",
            "GRAVEYARD_POINTER", "SECTION_MAX", "AGENDA_LOCKED_MAX", "MAX_DIGEST_BYTES", "COMPOSED_AGENDA_TITLE",
