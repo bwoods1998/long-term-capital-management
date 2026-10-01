@@ -336,7 +336,7 @@ Agent count and simulated years measure activity; passing unseen evidence measur
 |---|---|---|---|---|
 | Inner | seconds to minutes | each researcher | revise the program, run it on Train, read the diagnostics, revise again | a better program or a lesson |
 | Tournament | hourly | the House | validation runs of each family's best versions, the reallocation by expected information value, forks and retirements, the leaderboard | Gym time and researcher turns follow the value of the next evidence |
-| Architect | every 4 hours by default, refilling hourly below the start; every 15 minutes live, refilling every 20 | Claude by default (`architect.openai_model` null live); Kimi-K3 on Sail when Claude has no room or line: live since Sept 30, when the architect's Claude line was set to $0 (never after a cut answer: R11b salvages its complete families and retries once on Claude at medium effort) | reads the leaderboard, the graveyard and the gaps; writes families with a mechanism, a structure and a rejection test; at most 12 living families a mechanism class (R11b) | 3-6 new families by default; the gap to the start, up to 24 a pass live |
+| Architect | every 4 hours by default, refilling hourly below the start; every 15 minutes live, refilling every 20 | Claude by default (`architect.openai_model` null live); Kimi-K3 on Sail when Claude has no room or line: live since Sept 30, when the architect's Claude line was set to $0 (never after a cut answer: R11b salvages its complete families and retries once on Claude at medium effort); on Sail at `architect.sail_effort` (`medium` by default since Oct 1), and a cut Sail answer is salvaged the same way, its retry on Claude alone | reads the leaderboard, the graveyard and the gaps; writes families with a mechanism, a structure and a rejection test; at most 12 living families a mechanism class (R11b) | 3-6 new families by default; the gap to the start, up to 24 a pass live |
 | Diagnostician | every 5 minutes | Claude | reads a stuck or nearly-there family's Train diagnostics (never Validation's numbers); rewrites its mechanism or writes its lesson; off live since Sept 30 (`diagnostician.enabled` false: its rewrites produced no validation in 48 hours) | a new mechanism, or a lesson and a retirement |
 | Gate | when a family meets the validation line | review: Claude when "review" is in `claude.roles` (live: Sonnet 5.5), else GPT-6 Sol while the OpenAI month has room and `gate.review_openai_model` names it (null live), else DeepSeek-V4-Pro on Sail; audit: Claude (live: Opus 5.5, `claude.role_model`), then GPT-6 Astra on the same terms (null live), then a second Sail model; the gate box | review for lookahead, leakage and fill abuse; the audit; one holdout look | a Candidate, or a recorded refusal |
 | Nightly forward | after 01:45 ET each trading night | the data box, the gate box | the new day goes to the gate image only; every Candidate is re-run on it | one unseen day a night for every Candidate |
@@ -364,7 +364,12 @@ Sonnet 5.5), on `claude.model` (Opus 5.5 by default). From 04:53Z Sept 29 the li
 five one-shot roles on Claude. Since the spend cut of Sept 30 (16:41Z; the owner: cut burn to evidence) Claude
 answers only the gate's review (Sonnet 5.5, $5 a day) and audit (Opus 5.5), so a program's two reads stay two
 different models, and the strategist. The architect's Claude line is $0, so its births run on Kimi-K3, which yielded as
-many strong validations per birth at about a quarter of the cost. Stall rewrites, the researcher's top band and the
+many strong validations per birth at about a quarter of the cost. Kimi-K3 answers the architect at
+`architect.sail_effort`, `medium` by default: on Oct 1, at the hard-coded `high`, every pass from 08:15Z spent the
+whole 32,000-token output on reasoning and came back cut, most with no text, while the same request at `medium` finished
+in about a minute with twelve carded families. The Sail route now says when an answer was cut (`truncated`, its
+`incomplete_reason` and its usage), so the architect salvages a cut Kimi-K3 answer's complete families as it does
+Claude's, and its event shows the effort, the reasoning tokens and why a pass was cut. Stall rewrites, the researcher's top band and the
 diagnostician are off. By default GPT-6 Sol reviews programs and GPT-6 Astra stands behind the audit while OpenAI's
 funded month lasts (to Sept 30), on its half-price flex tier wherever latency does not matter; the live
 settings switch both off, so OpenAI is unused. Sail is the last fallback of every role but the
@@ -380,7 +385,9 @@ diagnostician.
   fills already charge them), the naive comparison it must beat, the PARAMS switch that turns its signal into that
   comparison (or, for a structure that is not directional and carries no drift, a flat comparison: not trading), and a
   pre-declared falsification. A proposal without a complete card is not born (`architect.require_card`, on by default);
-  the refusal names each field. Researchers read their card in every brief.
+  the refusal names each field, and the next request shows the last pass's refusals with their lessons. A pass that
+  proposed nothing (an empty, cut or failed answer) leaves them, and the structure refusals, as they were. Researchers
+  read their card in every brief.
 - **Card-based rebirth refusal.** A proposal whose cell (mechanism class, structure family, holding; with inputs that
   overlap a carded row's, each side's inputs being those it declares and those its own words name: the proposal's
   mechanism and hypothesis, the dead row's hypothesis and mechanism text) holds a
@@ -522,7 +529,7 @@ diagnostician.
 | Rewrites on a stall | Claude, or Sail | Claude when "rewrite" is in `claude.roles` and its line has room; else DeepSeek-V4-Pro asap, Kimi-K3 balanced for the top ten | capped per family per day; off live since Sept 30 (`researcher.stall_revisions` 10000) |
 | Bulk overnight variants | Sail Batch | V4-Pro flex | capped per night |
 | Program review before live shadow | Claude or OpenAI via the gateway | Claude when "review" is in `claude.roles` (live: Sonnet 5.5); by default GPT-6 Sol, flex, while the September month has room (off live); else DeepSeek-V4-Pro on Sail | Claude's $5 a day live; about $0.03 a program on Sol |
-| Architect | Claude via the gateway, or Sail | `claude.model` (Sonnet 5.5 at $2 input, $10 output per million tokens; Opus 5.5 at $4 / $20); Kimi-K3 on Sail as the fallback, and live since Sept 30 (the architect's Claude line $0) | inside Claude's funded total, or the Sail pace |
+| Architect | Claude via the gateway, or Sail | `claude.model` (Sonnet 5.5 at $2 input, $10 output per million tokens; Opus 5.5 at $4 / $20); Kimi-K3 on Sail as the fallback, and live since Sept 30 (the architect's Claude line $0), at `architect.sail_effort` (`medium`) | inside Claude's funded total, or the Sail pace |
 | Gate audit | Claude via the gateway | `claude.role_model["audit"]` or `claude.model` (live: Opus 5.5); GPT-6 Astra while the September month has room (off live), then a second Sail model, as fallbacks | inside Claude's funded total |
 | Diagnostician | Claude via the gateway | `claude.model` | `diagnostician.usd_day`; off live since Sept 30 |
 | Weekly post-mortem | - | not built; the operator writes the post-mortem | - |
