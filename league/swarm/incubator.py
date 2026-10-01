@@ -57,7 +57,13 @@ family's state. Each is bound to the evaluator it was made under, so no stale fa
    passed afresh. `program_bar` (part of `gate_bar`, so no mark is made and no review is paid) bars a program when a
    refusal row names another version of it (`twins`) in any family, alive or retired, or another family holding it
    has a recorded bar, a bad `gate_outcome`, a failed gate or incubator review or audit, or (fail-closed) records that
-   cannot be read. The live side's reader reads the same in its own read-only connection.
+   cannot be read. The live side's reader reads the same in its own read-only connection, and is the stricter one in
+   another family: it also refuses a pass of the gate's `review` there whose audit is still owed (not final, so the
+   House waits), and a retired family's `review` never moves on. So `program_bar` also bars, in every other family,
+   whatever the reader's own rules refuse there (`bands.program_refusal`, FAIL-CLOSED: the two agree, and no review
+   is paid for a program the reader would refuse). Such a bar is never recorded and never revokes a review
+   (`program_only` leaves it out): it lifts when that family's audit lands, and lasts while a retired family's stays
+   owed. In the family's own `review`, a pass whose audit is owed still bars nothing (the gate is still reading it).
 
    THE BACKFILL (`backfill`, at every swarm start before the evaluator adoption). Before the verdict-first bar (release B
    and earlier), a failed review or audit whose compare-and-set lost to a newer validation was written only to the
@@ -296,13 +302,29 @@ def twins(store: SwarmStore, fid: str, n: int) -> list[tuple[str, int]]:
             if dumps(loads(r["params"], {}) or {}) == params]
 
 
+def owed_audit_bar(review: Any, sha: str) -> str | None:
+    """Why ANOTHER family's gate `review` holds off program `sha` while it is not final, or None: it names the program
+    with a pass whose audit is still owed. The reader (`bands.program_refusal`) refuses the program in every family
+    then, until that audit lands (never, once that family retired: its `review` stays). No verdict against the program,
+    so it is never recorded and never revokes a review (`program_bar`, unless `program_only`)."""
+    if (isinstance(review, Mapping) and review.get("sha") == sha and review.get("verdict") == "pass"
+            and "audit" not in review):
+        return "the gate's review of it passed with its audit still owed"
+    return None
+
+
 def program_bar(store: SwarmStore, fid: str, n: int, sha: str, *, program_only: bool = False) -> str | None:
     """THE PROGRAM (the module docstring, 1): why program `sha` (version `n` of family `fid`) is barred by a verdict made
     on the same program elsewhere, or None: a refusal of another version of it (`twins`) in any family, alive or
     retired, or, in another family holding it, a recorded bar, a bad `gate_outcome`, the gate's review or audit failing
     it (`gate_review_bar`) or the incubator's (`incubator_review_bar`); FAIL-CLOSED (unless `program_only`, as
-    `gate_bar`): another such family's state or records cannot be read (`family_bar`). The reader (`bands.incubator`)
-    reads the same, so no review is paid for a program it would refuse."""
+    `gate_bar`): another such family's state or records cannot be read (`family_bar`), its gate `review` names the
+    program with a pass whose audit is still owed (`owed_audit_bar`), or anything else THE READER'S BELT refuses there
+    (`bands.program_refusal`, the reader's own rules on that family's state). So wherever the reader (`bands.incubator`)
+    refuses a program for another family's records, this bars it too, and no mark is made and no review is paid for a
+    program the reader would refuse. `program_only` (the sweep's revocations, for good) takes only the verdicts."""
+    from .bands import program_refusal
+
     for other, m in twins(store, fid, n):
         if (other, m) == (str(fid), int(n)):
             continue
@@ -330,6 +352,9 @@ def program_bar(store: SwarmStore, fid: str, n: int, sha: str, *, program_only: 
         if why is None and isinstance(recorded, Mapping) and sha in recorded:
             entry = recorded[sha]
             why = str(entry.get("why") or "the gate barred it") if isinstance(entry, Mapping) else "the gate barred it"
+        if why is None and not program_only:
+            # THE READER'S BELT, read its own way: a pass whose audit is owed, then whatever else it refuses here.
+            why = owed_audit_bar(state.get("review"), sha) or program_refusal(state, sha)
         if why is not None:
             return f"{why} (in {other}, which holds the same program)"
     return None
@@ -945,7 +970,7 @@ def put_review(store: SwarmStore, fid: str, sha: str, record: Mapping[str, Any],
 
 __all__ = ["facts", "sweep", "due_reviews", "practice_cohorts", "practice_current", "current_mark", "final_review",
            "mark_of", "gate_bar", "gate_review_bar", "incubator_review_bar", "family_bar", "unrecorded_bars", "verdict_bar",
-           "record_verdict", "record_bar", "BAD_OUTCOMES", "twins", "program_bar", "adoption_bars", "save_owed", "load_owed",
-           "backfill", "BACKFILL_KEY",
+           "record_verdict", "record_bar", "BAD_OUTCOMES", "twins", "program_bar", "owed_audit_bar", "adoption_bars",
+           "save_owed", "load_owed", "backfill", "BACKFILL_KEY",
            "eligible_train_run", "reviewable", "put_review", "reviews_per_round", "session_day", "MARKS_KEPT",
            "REVIEWS_KEPT", "REVIEW_MIN_SESSIONS", "REVIEW_MIN_CLOSES", "REVIEWS_PER_ROUND", "REVIEWS_CEILING", "OBSERVE_FILE"]

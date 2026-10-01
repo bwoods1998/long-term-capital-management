@@ -332,11 +332,12 @@ COHORT_WINDOW = 10
 COHORT_WINDOW_MAX = 60
 COHORT_WINDOW_MIN = 3
 NEW_YORK = ZoneInfo("America/New_York")
-#: THE COHORT KEEP's store key (L1): the tournament's last keep, {"at": epoch, "families": {family: version}}, written at
-#: each read (`Tournament.incubator_keep`) and read by a researcher's status (`kept_version`) so that a family the keep
-#: holds is not urged to retire for being idle. A value older than `KEEP_KV_SECONDS` reads as no keep. A fresh swarm
-#: process whose first practice read fails takes it as its last good keep while it is at most an hour old
-#: (`tournament.KEEP_STALE_SECONDS`, `Tournament._saved_keep`).
+#: THE COHORT KEEP's store key (L1): the tournament's last keep, {"at": epoch, "families": {family: version}, and "held":
+#: [family] when any of them hold the incubator's cohorts (`tournament.incubator_held`)}, written at each read
+#: (`Tournament.incubator_keep`) and read by a researcher's status (`kept_version`) so that a family the keep holds is
+#: not urged to retire for being idle. A value older than `KEEP_KV_SECONDS` reads as no keep. A fresh swarm process whose
+#: first practice read fails takes it as its last good keep while it is at most an hour old
+#: (`tournament.KEEP_STALE_SECONDS`, `Tournament._saved_keep`: the "held" families first, never cut by the cap).
 KEEP_KV = "cohort_keep"  # not the House's own `incubator_keep` (L2', in its live state)
 KEEP_KV_SECONDS = 7200.0
 
