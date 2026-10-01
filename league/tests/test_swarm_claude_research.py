@@ -21,7 +21,7 @@ from league.claude import Answer, Claude, ClaudeError, ClaudeRefusal, ClaudeTrun
 from league.swarm import claude_research as CR
 from league.swarm import pool as pool_module
 from league.swarm.models import ModelError, ModelRouter
-from league.swarm.researcher import TOOLS, Researcher, sanitize
+from league.swarm.researcher import TOOLS, Researcher, awaiting_validation, sanitize
 from league.swarm.seeds import SEEDS, family_spec, program_for
 from league.tests import swarm_fakes
 from league.tests.test_claude import FakeStream
@@ -525,6 +525,23 @@ class ReviewFixes(Fallbacks):
             self.sail_revises()
             self.check_fallback("no_run", billed=0.02)
         self.assertIsNone(self.store.family(self.fid).get("retired_at"))
+
+    def test_retire_while_the_best_awaits_validation_is_refused_with_the_reason(self):
+        """THE VALIDATION WAIT (Oct 1, H1): a tested family whose best (the starter) the tournament has not validated; no
+        patch of `can_retire`. Claude hears why, as a Sail researcher does."""
+        self.store.update_family(self.fid, trials=12)
+        self.assertTrue(awaiting_validation(self.store.family(self.fid)))
+        self.claude_script[:] = [answer(call("retire", {"reason": "refuted"}), self.revise_call()),
+                                 answer(text("Read it."), stop="end_turn")]
+        out = self.cycle()
+        self.assertNotIn("error", out)
+        self.assertIsNone(self.store.family(self.fid).get("retired_at"), "the family is alive")
+        self.assertTrue(out.get("retire_refused"))
+        self.assertEqual((out["claude_refused_calls"], out["retire_awaiting"]), (1, 1))
+        refusal = last_results(self.bodies()[1])[0]["content"]
+        self.assertIn("retire is not offered on this turn", refusal)
+        self.assertIn("Your best Train version (1) awaits validation", refusal)
+        self.assertEqual(out["tool_calls"], 1, "the run ran")
 
     def test_a_revise_turn_answered_only_with_tools_it_does_not_offer_is_retried_on_sail(self):
         # Review 2, F1: Sail's REVISE requires a run; Claude's must too, or nothing runs and model calls burn.

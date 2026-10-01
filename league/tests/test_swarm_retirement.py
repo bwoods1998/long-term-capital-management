@@ -8,9 +8,9 @@ from league.swarm.architect import Architect
 from league.swarm.gate import Gate
 from league.swarm import bands
 from league.swarm.evaluator import KEY, adopt, identity
-from league.swarm.researcher import (RETIRE_GUARD_DAYS, RETIRE_IDLE_EVALUATIONS, SCREENED, SELF_REFUTED, VERDICTS_KEY, Researcher,
-                                     idle_cause, idle_dead, idle_evaluations, idle_limit, record_verdict, retire_guard,
-                                     validated_at)
+from league.swarm.researcher import (RETIRE_GUARD_DAYS, RETIRE_IDLE_EVALUATIONS, SCREENED, SELF_REFUTED, TOOLS, VERDICTS_KEY,
+                                     Researcher, awaiting_validation, idle_cause, idle_dead, idle_evaluations, idle_limit,
+                                     record_verdict, retire_guard, validated_at)
 from league.swarm.seeds import family_spec
 from league.swarm.store import SwarmStore
 from league.swarm.tournament import IDLE_CAUSE, Tournament
@@ -116,13 +116,14 @@ class StoreRetirement(StoreCase):
 
 class ResearcherRetirement(ResearcherCase):
     """`retire` is offered on a READ turn only above `population.start` with two validations (the sprint, Sept 26); these
-    cases put the family there (start 0, two validations) unless they test the guard itself."""
+    cases put the family there (start 0, two validations, its best validated) unless they test the guard itself."""
 
     def setUp(self):
         super().setUp()
         self.settings["population"]["floor"] = 0
         self.settings["population"]["start"] = 0
-        self.store.update_family(self.fam["id"], validations=2)
+        # Two validations, of its best (the starter, version 1): no best awaits validation (THE VALIDATION WAIT, H1).
+        self.store.update_family(self.fam["id"], validations=2, validated_version=1)
         self.cancelled = []
         self.pool.cancel_family = self.cancelled.append
 
@@ -1076,3 +1077,131 @@ class ValidatedFamilyGuard(ResearcherCase):
         self.assertEqual(min(int(k) for k in kept), 6)
         state[VERDICTS_KEY] = record_verdict(state, 6, True, evaluator={"image": "i"}, at="2026-10-02T00:00:00Z")
         self.assertEqual(state[VERDICTS_KEY]["6"], {"passed": True, "at": "2026-10-02T00:00:00Z", "evaluator": {"image": "i"}})
+
+
+class ValidationWait(ResearcherCase):
+    """THE VALIDATION WAIT (Oct 1, H1): seven of the ten families that made a drift-passing Train version retired themselves
+    before the tournament validated it. A family whose best Train version awaits validation is not offered `retire`, a
+    call is refused with the reason, and the status says so in place of any offer; the tournament's verdict, pass or
+    fail, ends it, and so does a demotion. Nothing else about the offer moves."""
+
+    def setUp(self):
+        super().setUp()
+        self.settings["population"].update(start=0, floor=0)
+        self.cancelled = []
+        self.pool.cancel_family = self.cancelled.append
+        self.fid = self.fam["id"]
+        self.researcher().cycle(self.fid)  # the starter: version 1, eligible, the family's best; its 1.5x run not back
+        self.store.update_family(self.fid, trials=12)  # tested (`retire_min_trials`): retire would be offered
+
+    def retire_cycle(self, reason="The condor never pays for its wings on Train: refuted."):
+        """A REVISE turn that calls retire, then holds. (out, the tool outputs, the REVISE request)."""
+        first = len(self.sail.bodies)
+        self.steps = [{"calls": [("retire", {"reason": reason}), ("gym_run", {"hold": True, "note": "Waiting."})]}]
+        out = self.researcher().cycle(self.fid)
+        outputs = [json.loads(i["output"]) for i in self.store.convo(self.fid)[0][-1]["items"]
+                   if i.get("type") == "function_call_output"]
+        return out, outputs, self.sail.bodies[first]
+
+    @staticmethod
+    def status_of(body):
+        return next(i["content"] for i in reversed(body["input"])
+                    if i.get("role") == "user" and "Now: if a run just came back" in str(i.get("content")))
+
+    def alive(self):
+        fam = self.store.family(self.fid)
+        return fam["band"] == "gym" and fam["retired_at"] is None
+
+    def test_a_tested_family_whose_best_awaits_validation_is_not_offered_retire_and_hears_why(self):
+        fam = self.store.family(self.fid)
+        self.assertTrue(awaiting_validation(fam))
+        r = self.researcher()
+        self.assertTrue(r.retire_earned(fam), "only the wait withholds the offer")
+        self.assertFalse(r.can_retire(fam))
+        out, outputs, body = self.retire_cycle()
+        self.assertNotIn("retire", [t["name"] for t in body["tools"]], "not offered")
+        self.assertTrue(out["retire_refused"])
+        self.assertEqual(out["retire_awaiting"], 1, "the cycle's record names the version the tournament owes a verdict")
+        self.assertNotIn("retired", out)
+        self.assertNotIn("error", out, "a refusal is a tool answer, never a cycle error (no backoff)")
+        self.assertEqual(outputs[0]["status"], "refused")
+        self.assertIn("retire is not offered on this turn", outputs[0]["reason"])
+        self.assertIn("Your best Train version (1) awaits validation", outputs[0]["reason"])
+        self.assertIn("retire is offered once the tournament has validated it", outputs[0]["reason"])
+        status = self.status_of(body)
+        self.assertIn("Your best Train version (1) awaits validation", status)
+        self.assertNotIn("call retire", status, "never urged to retire while it waits")
+        self.assertTrue(self.alive())
+        self.assertEqual((self.store.graveyard(), self.cancelled), ([], []))
+        self.assertEqual([e for e in self.store.events_after(0) if e["kind"] == "swarm.retired"], [])
+
+    def test_a_landed_1_5x_run_does_not_end_the_wait_the_tournaments_verdict_does(self):
+        # The 1.5x run landed with a profit: the tournament validates the version at its next round; until then it waits.
+        self.store.set_state(self.fid, robustness={"1": {"stress_1.5": {"status": "ok", "pnl": 120.0}}})
+        fam = self.store.family(self.fid)
+        self.assertTrue(awaiting_validation(fam))
+        self.assertFalse(self.researcher().can_retire(fam))
+        out, outputs, _ = self.retire_cycle()
+        self.assertTrue(out["retire_refused"])
+        self.assertIn("awaits validation", outputs[0]["reason"])
+        self.assertTrue(self.alive())
+        # The verdict is in (`validated_version`: a pass or a failure alike): the offer is back, and the retire goes through.
+        self.store.update_family(self.fid, validated_version=1)
+        fam = self.store.family(self.fid)
+        self.assertFalse(awaiting_validation(fam))
+        self.assertTrue(self.researcher().can_retire(fam))
+        out, outputs, body = self.retire_cycle()
+        self.assertIn("retire", [t["name"] for t in body["tools"]], "offered again")
+        self.assertNotIn("awaits validation", self.status_of(body))
+        self.assertEqual(outputs[0]["status"], "retired")
+        self.assertTrue(out["retired"])
+        self.assertNotIn("retire_awaiting", out)
+        self.assertEqual(self.store.family(self.fid)["band"], "retired")
+        self.assertEqual(self.cancelled, [self.fid])
+
+    def test_a_demotion_ends_the_wait_too(self):
+        # A loss at 1.5x: the version is never validated (`robust_failed`), so nothing is owed and the offer is back.
+        self.store.set_state(self.fid, robust_failed=[1])
+        fam = self.store.family(self.fid)
+        self.assertFalse(awaiting_validation(fam))
+        self.assertTrue(self.researcher().can_retire(fam))
+        out, _, body = self.retire_cycle()
+        self.assertIn("retire", [t["name"] for t in body["tools"]])
+        self.assertTrue(out["retired"])
+
+    def test_a_best_that_changes_between_the_offer_and_the_call_is_refused_by_the_tool(self):
+        self.store.update_family(self.fid, validated_version=1)  # offered: its best is validated
+
+        def answer(body):
+            self.assertIn("retire", [t["name"] for t in body["tools"]], "offered on this turn")
+            # A late Train result made version 2 the best before the call runs: the tool re-reads the family and refuses.
+            self.store.add_version(self.fid, self.code, {"vrp_min": 1.4}, author="test")
+            self.store.update_family(self.fid, best_version=2)
+            return {"calls": [("retire", {"reason": "Refuted."}), ("gym_run", {"hold": True, "note": "Waiting."})]}
+
+        self.steps = [answer]
+        out = self.researcher().cycle(self.fid)
+        outputs = [json.loads(i["output"]) for i in self.store.convo(self.fid)[0][-1]["items"]
+                   if i.get("type") == "function_call_output"]
+        self.assertTrue(out["retire_refused"])
+        self.assertNotIn("error", out)
+        self.assertEqual((outputs[0]["status"], outputs[0]["guard"], outputs[0]["version"]), ("refused", "awaiting_validation", 2))
+        self.assertIn("Your best Train version (2) awaits validation", outputs[0]["reason"])
+        self.assertEqual(out["retire_awaiting"], 2)
+        self.assertTrue(self.alive())
+        self.assertEqual(self.store.graveyard(), [])
+
+    def test_the_status_says_so_only_in_place_of_an_offer(self):
+        self.store.update_family(self.fid, trials=1)  # not tested, not dead, not holding: there is no offer to withhold
+        fam = self.store.family(self.fid)
+        self.assertTrue(awaiting_validation(fam))
+        self.assertFalse(self.researcher().retire_earned(fam))
+        self.steps = [{"calls": [("gym_run", {"hold": True, "note": "Waiting."})]}]
+        self.researcher().cycle(self.fid)
+        status = self.status_of(self.sail.bodies[-1])
+        self.assertNotIn("awaits validation", status)
+        self.assertNotIn("call retire", status)
+
+    def test_the_tool_says_so(self):
+        [tool] = [t for t in TOOLS if t["name"] == "retire"]
+        self.assertIn("Never offered while your best Train version awaits validation", tool["description"])

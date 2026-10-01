@@ -45,6 +45,23 @@ Main `3eaf4d06` is Release B, deployed Oct 1 (below). Under the freeze (Oct 1, "
   refused the swarm window" warning, and `curl -s
   'https://blakewoods.us/api/capital/checkpoint?progress=1&positions=1&practice=1&window=1'` shows `levels` and
   `rationale`.
+- **No retire while the best Train version awaits validation** (H1, branch `b/h1-no-retire-awaiting-validation`;
+  `league/swarm/researcher.py`, `league/swarm/diagnostician.py`, `league/swarm/harness_lanes.py`; the money path:
+  `researcher.py` is loaded by the live path through `gate`, so it deploys 20:05-13:25Z only, after two adversarial
+  reviews and green CI). On Oct 1 seven of the ten families that made a drift-passing Train version retired themselves
+  before the tournament validated it, four of them holding a positive best whose 1.5x run had landed with a profit:
+  `Researcher.can_retire` never asked `awaiting_validation`, which the dormancy clause and the status already honoured.
+  Now a Gym family whose best Train version awaits validation (not validated, not lost at 1.5x, not failed by the drift
+  screen) is not offered `retire`, a call is refused with the reason (on Sail and on Claude; the cycle's record carries
+  `retire_awaiting`), the status says so in place of any offer, and the diagnostician's retire defers as it does behind
+  the gate; the tournament's verdict, pass or fail, ends it, and so does a demotion. Nothing else moves: no threshold,
+  `retire_min_trials`, floor, eligibility or score; the tournament's own rules and `SwarmStore.retire_gym` are
+  unchanged (a store-level refusal would let a 1.5x run that never lands make a family no rule could retire). Not
+  done, a follow-up: queueing the validation when a new best lands. Nothing in `league/live`, `league/gym` or
+  `LEAGUE_FILES`, no evaluator adoption, no money digest. To verify after the deploy: `swarm.cycle` events carrying
+  `retire_refused` with `retire_awaiting` (the version the tournament owes a verdict), and no `swarm.retired` event
+  whose cause begins "Self-refuted" for a family whose `best_version` differs from its `validated_version` and sits in
+  neither `robust_failed` nor `drift_failed`.
 
 ## 2026-10-01
 

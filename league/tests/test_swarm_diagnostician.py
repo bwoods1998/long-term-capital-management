@@ -13,6 +13,7 @@ from decimal import Decimal
 
 from league.claude import Claude
 from league.swarm.diagnostician import SCHEMA, Diagnostician, withheld
+from league.swarm.researcher import awaiting_validation
 from league.tests.test_claude import message
 from league.tests.test_frontier import GATEWAY, FakeOpener
 from league.tests.test_swarm_loop import LoopCase
@@ -51,7 +52,8 @@ class DiagnosticianCase(ResearcherCase):
         self.stuck(self.fid)
 
     def stuck(self, fid, *, validations=2, checks=CHECKS_6_OF_8, passed=False):
-        self.store.update_family(fid, validations=validations, best_version=1)
+        # Its best (version 1) validated, as the tournament records it: no best awaits validation (THE VALIDATION WAIT).
+        self.store.update_family(fid, validations=validations, best_version=1, validated_version=1)
         self.store.set_state(fid, validation_line={"passed": passed, "checks": checks,
                                                    "numbers": {"t": SECRET_T, "mean": SECRET_MEAN, "dsr": SECRET_DSR}},
                              validation_view={"mean_return_on_max_loss": SECRET_MEAN, "t": SECRET_T, "line_met": passed,
@@ -272,6 +274,30 @@ class Retirement(DiagnosticianCase):
         self.assertEqual(self.events()[-1]["outcome"], "retired")
         self.assertEqual(self.store.family(self.fid)["band"], "retired")
         self.assertIn(lesson, self.store.graveyard("wings")[0]["lesson"])
+
+    def test_a_retirement_waits_for_a_best_that_awaits_validation(self):
+        """THE VALIDATION WAIT (researcher.py, Oct 1, H1): the researcher made version 2 its best since the validation the
+        diagnostician read; the tournament owes it a verdict, so the retire defers as it does behind the gate."""
+        self.settings["population"].update(start=96, ceiling=96, floor=0)
+        self.store.update_family(self.fid, validations=3)
+        self.store.add_version(self.fid, self.rewritten(), {}, author="model")
+        self.store.update_family(self.fid, best_version=2)  # submitted: not validated, its 1.5x run not back
+        self.assertTrue(awaiting_validation(self.store.family(self.fid)))
+        lesson = "Selling short-dated wings pays the spread twice for a premium the fills eat."
+        self.claude.script = [reply("retire", lesson=lesson)]
+        self.diagnostician().run()
+        event = self.events()[-1]
+        self.assertEqual((event["outcome"], event.get("reason")), ("retire_refused", "independent evidence is pending or held"))
+        self.assertIsNone(self.store.family(self.fid)["retired_at"])
+        self.assertIn("after its pending evidence", self.store.notebook(self.fid)[-1]["text"])
+        self.assertEqual(self.store.graveyard("wings"), [])
+        # The verdict is in (pass or fail alike) and the family is eligible again: the retire is honored.
+        self.store.update_family(self.fid, validated_version=2, validations=4)
+        self.clock.advance(6 * 3600 + 1)
+        self.claude.script = [reply("retire", lesson=lesson)]
+        self.diagnostician().run()
+        self.assertEqual(self.events()[-1]["outcome"], "retired")
+        self.assertEqual(self.store.family(self.fid)["band"], "retired")
 
 
 class Budgets(DiagnosticianCase):

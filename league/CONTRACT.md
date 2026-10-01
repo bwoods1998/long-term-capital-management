@@ -374,7 +374,9 @@ Retirement is final for that family; its program history, trial count and holdou
   row with no new Gym evaluation (only stored results, holds and refused runs) while no best of it awaits
   validation: a dead mechanism frees its slot for a new idea. Your status counts those cycles; a new
   evaluation (counted as soon as it lands) or a validation starts the count again, and a cycle whose new
-  run the Gym could not make leaves it.
+  run the Gym could not make leaves it. It is never offered while your best Train version awaits
+  validation: the tournament validates it first (pass or fail), and a retire call meanwhile is refused
+  with that reason.
   A retirement stops further research while preserving the evidence and lessons.
 
 ## How to work

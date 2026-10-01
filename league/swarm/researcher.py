@@ -70,8 +70,9 @@ never traded on Train is untested and keeps IDLE (`idle_cause`). A family's own 
 RETIRE (Sept 30). Both REVISE and READ offer an evidence-backed retirement after two validations or
 `researcher.retire_min_trials` counted trials (10 by default), and retain the idle-rule and legacy hold offers.
 Every path uses the atomic `population.floor`; `population.start` is the architect's refill target, not an
-additional floor. Gate work in flight, gate-ready versions and extension/operator holds are protected. Retirement
-preserves the program, lineage, trials, results and explanation. It never turns a research decision into an order.
+additional floor. Gate work in flight, gate-ready versions, extension/operator holds and a best that awaits validation
+(THE VALIDATION WAIT, below) are protected. Retirement preserves the program, lineage, trials, results and explanation.
+It never turns a research decision into an order.
 
 THE VALIDATED-FAMILY GUARD (Oct 1). On Sept 30 the swarm's only D2-tuition family (8 of 8 checks on Validation, review
 and audit passed, tuition traded) was retired by its own researcher 17 seconds after an evaluator adoption, because "the
@@ -91,6 +92,20 @@ next adoption never revives it. A failed holdout look does not end it (the gate 
 validation refutes here), and the tournament's own rules still apply. The status says so in place of any offer to
 retire. The tool stays offered (`can_retire` is unchanged). Operator retirements, the tournament's rules (the
 deflated-Sharpe rule among them), the diagnostician and the population floor are unaffected.
+
+THE VALIDATION WAIT (Oct 1, H1). On Oct 1 seven of the ten families that made a drift-passing Train version retired
+themselves before the tournament validated it, four of them holding a positive best whose 1.5x run had landed with a
+profit: `can_retire` never asked `awaiting_validation`, which the dormancy clause and the status already honoured. A
+family's own reading of Train never outranks the verdict the tournament owes its best. So while the best Train version
+awaits validation (`awaiting_validation`: not validated, not lost at 1.5x, not failed by the drift screen) `retire` is
+not offered (`can_retire`, beside the gate, look and extension holds; `retire_earned` is the offer it withholds), a call
+is refused with the reason (`retire_wait`, `awaiting_words`: the tool's answer on Sail and on Claude, and the cycle's
+record `retire_awaiting`), the status says so in place of any offer, and the diagnostician's retire defers the same way
+(league/swarm/diagnostician.py). The tournament's verdict, pass or fail (`validated_version`), ends it, and so does a
+demotion (a loss at 1.5x, a failed drift screen: the next candidate takes its place and is judged afresh). The
+tournament's own rules, operator retirements and the population floor are unaffected, and `SwarmStore.retire_gym` does
+not refuse: a 1.5x run that never lands would otherwise make a family no rule could retire. Validation is still the
+hourly round's (queueing it when a new best lands is a scheduling change, not this one).
 
 THE OPERATOR'S RUN (Oct 1). The operator revives a retired family as a lineage fork whose version 1 (author
 "operator-revive", `OPERATOR_AUTHORS`) is the old validated program WITH its params, to be re-run unchanged on the current
@@ -353,7 +368,8 @@ TOOLS: list[dict[str, Any]] = [
                                      "holds and stored results, or a few holds in a row once your family has an eligible "
                                      "Train run or enough trials behind it. Refused while your family holds a version whose "
                                      "latest validation passed the line (only a failed validation of that version ends "
-                                     "this): an evaluator change is never a reason to retire.",
+                                     "this): an evaluator change is never a reason to retire. Never offered while your best "
+                                     "Train version awaits validation: the tournament validates it first, pass or fail.",
      "parameters": {"type": "object", "properties": {"reason": {"type": "string", "description": "Why the entire mechanism "
                     "is abandoned; retained in the private notebook and graveyard."}}, "required": ["reason"]}},
 ]
@@ -815,6 +831,16 @@ def awaiting_validation(fam: Mapping[str, Any]) -> bool:
     if fam.get("validated_version") is not None and int(fam["validated_version"]) == int(n):
         return False
     return robust_at_stress(state, n) is not False and drift_failed(fam, n) is None
+
+
+def awaiting_words(fam: Mapping[str, Any]) -> str:
+    """THE VALIDATION WAIT's words (the module docstring) for a family whose best Train version awaits validation
+    (`awaiting_validation`): the retire tool's refusal, and the status line in place of any offer to retire."""
+    state = fam.get("state") or {}
+    n = fam.get("best_version") or state.get("best_train_version")
+    return (f"Your best Train version ({n}) awaits validation: retire is offered once the tournament has validated it "
+            "(pass or fail; it validates a version once its 1.5x robustness run has landed with a profit). Keep researching "
+            "beside it, or hold for a specific missing input.")
 
 
 def held_at_gate(fam: Mapping[str, Any]) -> bool:
@@ -1647,6 +1673,9 @@ class Researcher:
         from .practice import kept_version
         if guard is not None:
             parts.append(guard_words(guard))
+        elif fam.get("band") == "gym" and awaiting_validation(fam) and self.retire_earned(fam):
+            # THE VALIDATION WAIT: only the verdict the tournament owes its best withholds the offer; it hears why.
+            parts.append(awaiting_words(fam))
         elif kept_version(self.store, str(fam["id"]), now=self.clock()) is not None:
             # THE COHORT KEEP (L1, `tournament.py`): the tournament holds the family alive while its practice cohort runs,
             # so idleness is not urged as a reason to retire it; the retire tool stays offered (`can_retire`).
@@ -1872,27 +1901,44 @@ class Researcher:
             return True
         return bool(train_record(self.store, fam)["eligible"])
 
-    def can_retire(self, fam: Mapping[str, Any]) -> bool:
-        """An evidence-backed abandonment may use the atomic population floor, including on REVISE.
+    def retire_earned(self, fam: Mapping[str, Any]) -> bool:
+        """An evidence-backed abandonment is earned: two validations or `researcher.retire_min_trials` counted trials, the
+        idle rule's death or the hold offer, with the population above its floor. `can_retire` offers it unless pending
+        evidence or a hold withholds it; the status says why when THE VALIDATION WAIT alone does.
 
         ``start`` is a refill target, never a second floor: start == ceiling made normal retirement unreachable.
         A counted trial threshold offers retirement before an exhausted family has to buy hold calls to unlock it.
-        Pending independent evidence and operator extension holds remain protected.
         """
-        state = fam.get("state") or {}
-        if (fam.get("band") != "gym" or held_at_gate(fam) or state.get("gate_ready") or state.get("look_inflight")
-                or extension_held(fam)):
-            return False
         pop = self.settings.get("population", {})
         alive = len(self.store.families(alive=True))
         need = _count_setting(self.settings, "retire_min_trials", 10)
         tested = int(fam.get("validations") or 0) >= 2 or (need > 0 and int(fam.get("trials") or 0) >= need)
         return alive > int(pop.get("floor", 16)) and bool(tested or self.dead(fam) or self.hold_offer(fam))
 
+    def can_retire(self, fam: Mapping[str, Any]) -> bool:
+        """An evidence-backed abandonment (`retire_earned`) may use the atomic population floor, including on REVISE.
+        Pending independent evidence (a version at the gate, a holdout look out, a best Train version that awaits
+        validation: THE VALIDATION WAIT) and operator extension holds remain protected.
+        """
+        state = fam.get("state") or {}
+        if (fam.get("band") != "gym" or held_at_gate(fam) or state.get("gate_ready") or state.get("look_inflight")
+                or extension_held(fam) or awaiting_validation(fam)):
+            return False
+        return self.retire_earned(fam)
+
     def guarded(self, fam: Mapping[str, Any]) -> dict[str, Any] | None:
         """THE VALIDATED-FAMILY GUARD (`retire_guard`) on this researcher's clock: why `retire` refuses, or None. It leaves
         `can_retire` (the tool's offer) alone; the tool's answer and the status carry it."""
         return retire_guard(self.store, fam, self.settings, now=float(self.clock()))
+
+    def retire_wait(self, fam: Mapping[str, Any], out: dict[str, Any]) -> str | None:
+        """THE VALIDATION WAIT's answer to a retire call: its words (`awaiting_words`), with the version the tournament
+        owes a verdict in the cycle's record (`retire_awaiting`), while the Gym family's best Train version awaits
+        validation (`awaiting_validation`); else None."""
+        if fam.get("band") != "gym" or not awaiting_validation(fam):
+            return None
+        out["retire_awaiting"] = fam.get("best_version") or (fam.get("state") or {}).get("best_train_version")
+        return awaiting_words(fam)
 
     def retire_floor(self, fam: Mapping[str, Any]) -> int:
         """The single population floor, checked atomically by ``retire_gym`` even for concurrent retirements."""
@@ -3401,6 +3447,13 @@ class Researcher:
                         answer["program"] = {"version": guard["version"], "code": version["code"],
                                              "params": version.get("params") or {}}
                     return answer
+                wait = self.retire_wait(current, out)
+                if wait is not None:
+                    # THE VALIDATION WAIT: the tournament owes the best a verdict (the tool was not offered, or the best
+                    # changed between the offer and the call: the family is re-read here); the answer says so.
+                    out["retire_refused"] = True
+                    return {"status": "refused", "guard": "awaiting_validation", "version": out["retire_awaiting"],
+                            "reason": wait}
                 if not self.can_retire(current):
                     out["retire_refused"] = True
                     return {"status": "refused", "reason": "retire is not available to your family now (it needs at least two "
@@ -4146,9 +4199,12 @@ class Researcher:
                 if via == "claude" and call.name not in offered:
                     # Claude sees every tool every turn (its cached prefix); the turn's offer binds all the same, `retire`
                     # included (a REVISE turn offers it only to a dead family; `can_retire` alone never retires one).
+                    reason = f"{call.name} is not offered on this turn (offered: {', '.join(sorted(offered))})"
+                    wait = self.retire_wait(fam, out) if call.name == "retire" else None
+                    if wait is not None:
+                        reason += f". {wait}"  # THE VALIDATION WAIT: it hears why, as on Sail
                     current.append({"type": "function_call_output", "call_id": call.call_id,
-                                    "output": json.dumps({"status": "refused", "reason": f"{call.name} is not offered on this turn "
-                                                          f"(offered: {', '.join(sorted(offered))})"})})
+                                    "output": json.dumps({"status": "refused", "reason": reason})})
                     out["claude_refused_calls"] = int(out.get("claude_refused_calls") or 0) + 1
                     if call.name == "retire":
                         out["retire_refused"] = True  # a plain refusal, never a cycle error (no backoff), as on Sail
@@ -4191,7 +4247,9 @@ class Researcher:
                                     "output": json.dumps({"error": "one run is already queued for your next cycle"})})
                     continue
                 if call.name == "retire" and not any(t["name"] == "retire" for t in tools):  # not offered (REVISE, or `can_retire`)
-                    result: Any = {"status": "refused", "reason": "retire is not offered on this turn: revise and run"}
+                    wait = self.retire_wait(fam, out)  # THE VALIDATION WAIT: it hears why
+                    result: Any = {"status": "refused", "reason": "retire is not offered on this turn: revise and run"
+                                   + (f". {wait}" if wait is not None else "")}
                     out["retire_refused"] = True  # a plain refusal, never a cycle error (no backoff)
                 elif out["tool_calls"] >= max_tools:
                     result = {"error": "this cycle's tool budget is spent; continue next cycle"}
@@ -4496,7 +4554,8 @@ __all__ = ["Researcher", "TOOLS", "TOOLS_READ", "TOOLS_REVISE", "RUNS", "needs_o
            "sanitize", "date_like", "candidates_with", "migrate_objective", "OBJECTIVE", "params_of", "check_params",
            "sweep_variants", "sweep_tool", "merged_key", "MAX_SWEEP_VARIANTS", "MAX_SWEEP_JOBS_IN_FLIGHT", "idle_dead",
            "idle_evaluations", "idle_limit", "RETIRE_IDLE_EVALUATIONS", "NEGATIVE_FACTOR", "DORMANT_CYCLES", "ALREADY_RUN",
-           "dormant_limit", "dormant_count", "awaiting_validation", "holding", "held_at_gate", "new_run", "revalidation_owed",
+           "dormant_limit", "dormant_count", "awaiting_validation", "awaiting_words", "holding", "held_at_gate", "new_run",
+           "revalidation_owed",
            "objective_for", "span_of", "CORE_SPAN", "RETIRE_GUARD_DAYS", "VERDICTS_KEY", "retire_guard", "retire_guard_days",
            "record_verdict", "validation_refuted", "validated_at", "guard_words", "adoption_archives",
            "ADOPTED_ACTION"]

@@ -286,7 +286,9 @@ Agent count and simulated years measure activity; passing unseen evidence measur
   validation passed the line within 14 days (archived by one evaluator adoption or several, or replaced on the family's
   line by another version's validation). Only a failed validation of that version ends this, and a pass that failed
   its re-run under one evaluator stays refuted after the next adoption: an evaluator change re-evaluates, it never
-  refutes. A family whose latest validation
+  refutes. Nor may it retire while its best Train version awaits validation (not validated, not lost at 1.5x, not
+  failed by the drift screen): the tournament's verdict comes first, and the diagnostician's retire waits the same
+  way (Oct 1). A family whose latest validation
   met six of the eight checks is exempt from the dormancy clause until its 2017-19 extension result lands. Its
   lessons go to the graveyard, which every new family's researcher reads first. The graveyard is ranked
   by BM25, a new family is born with three distinct lessons, and it also holds the operator's own
