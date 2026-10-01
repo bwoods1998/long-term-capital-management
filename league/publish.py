@@ -101,7 +101,10 @@ The tape is made from ledger rows (`to_events`): `agent.thought` (and a research
 note; a `book.fill` of an option or a structure held as one instrument is a trade (a buy opens it, a sale
 with `realized` closes it; `book.settle` closes one at expiry); `floor.mark` rows this publisher writes
 (`brokerage_equity`) are the balance marks; births, band moves, deaths and audits are the swarm's news.
-Rows marked private on the ledger, and private keys, never leave.
+Rows marked private on the ledger, and private keys, never leave. A trade's `why` (the swarm window's post-fix
+verification, Oct 1, 2026) is its order's reason under the tag rules (`tape_why`: `public.tag_text` over the parameter
+names of the program that traded it, `site_window.tape_names`, then `thesis_words`), or "" when nothing passes or the
+names cannot be read: never an integer, a number word or a parameter name, as the `words` it used to be let through.
 """
 
 from __future__ import annotations
@@ -118,7 +121,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 from .ledger import HOUSE, Entry, canonical, now_iso, public_view
 
@@ -169,13 +172,22 @@ FUNNEL_CHAINS = (("sized", "probe", "candidate", "validation", "born"), ("tuitio
 #: A thesis (whole sentences) and an order's reason, at most (`site_rationale`).
 THESIS_CHARS = 280
 WHY_CHARS = 80
+#: A trade's reason on the tape, at most (the site's `prose(why, 240)`), and the length an open's reason is cut to on the
+#: ledger (`league/live/real.py`: `reason: order.why[:240]`), so one exactly this long was presumed cut (`tape_why`).
+TAPE_WHY_CHARS = 240
 #: A site that refused the swarm window is offered it again after this long (`Publisher.publish`).
 WINDOW_RETRY_SECONDS = 1800
 MAX_CHECKPOINT_BYTES = 512 * 1024
-#: What `fit` leaves free under the limit: the site's public read names every agent, position and practice row
-#: (`display_name`, about 32 bytes each, at most about 410 rows), so a body fitted to the limit itself could read back
-#: over it.
-FIT_HEADROOM_BYTES = 16 * 1024
+#: The rows the site's public read names (`display_name`: every agent, every agent's or the incubator's position, every
+#: practice row; personal-site `lib/capital.mjs` `readCheckpoint`), at most, and what a name adds to each at most: its key
+#: and the longest name the site takes (`validDisplayName`: 40 characters, all ASCII).
+NAMED_ROWS = MAX_AGENTS + MAX_POSITIONS + MAX_PRACTICE_ROWS
+DISPLAY_NAME_CHARS = 40
+DISPLAY_NAME_BYTES = len(',"display_name":""') + DISPLAY_NAME_CHARS
+#: What `fit` leaves free under the limit: room for a name on every row the site's public read names (508 rows of 58
+#: bytes, 29,464 bytes), so a body fitted to the limit never reads back over it. It was 16 KiB before the post-fix
+#: verification of Oct 1, 2026, which a full table with long names outgrew.
+FIT_HEADROOM_BYTES = 32 * 1024
 #: A profit is only as good as its funding check: the site shows none on a check older than ten minutes.
 FLOWS_EVERY_SECONDS = 300
 FLOWS_FRESH_SECONDS = 600
@@ -978,11 +990,27 @@ def _stream_agent(agent: Any) -> str | None:
     return agent if agent != HOUSE and _SLUG.match(agent) else None
 
 
-def trade_of(p: Mapping[str, Any], *, close: bool, pnl: Any = None) -> dict[str, Any] | None:
+def tape_why(value: Any, names: Iterable[str] | None, *, stored: int) -> str:
+    """A trade's reason on the tape (`agent.trade` `why`; the post-fix verification of Oct 1, 2026: it went out as the
+    publisher's `words`, which keep integers and number words): the order's reason under the tag rules
+    (`public.tag_text`: no number in any form, no colon, bracket or code mark, no name of a parameter of the traded program,
+    `names`), then `thesis_words`, at most `TAPE_WHY_CHARS`; else "" (the site's `prose` takes an empty reason, never
+    null): when nothing passes, when the reason is exactly `stored` long (it was cut where it was stored), or when the
+    program's parameter names could not be read (`names` None)."""
+    from .swarm.public import tag_text
+
+    if names is None:
+        return ""
+    tag = tag_text(value, param_names=names, limit=TAPE_WHY_CHARS, stored=stored)
+    return (thesis_words(tag, TAPE_WHY_CHARS) or "") if tag else ""
+
+
+def trade_of(p: Mapping[str, Any], *, close: bool, pnl: Any = None, names: Iterable[str] | None = None) -> dict[str, Any] | None:
     """An `agent.trade` payload from a fill or a settlement of an option or a structure held as one
     instrument, or None for anything else. Never its price, its strikes or its legs' codes: which
     underlying, which structure, how many legs and contracts, its (nearest) expiry, and what it can
-    lose (an open) or what it made (a close)."""
+    lose (an open) or what it made (a close). `why` is the open's reason (a close's is its opening tag) through
+    `tape_why`, filtered against `names`, the traded program's parameter names: "" when they are not known (None)."""
     from . import structure_core
 
     instrument = p.get("instrument") if isinstance(p.get("instrument"), Mapping) else {}
@@ -1010,7 +1038,8 @@ def trade_of(p: Mapping[str, Any], *, close: bool, pnl: Any = None) -> dict[str,
         loss = price * multiplier * quantity  # a held structure's price is what it can lose a share
     out = {"action": "close" if close else "open", "real": p.get("real_money") is True, "underlying": under, "structure": kind, "legs": legs,
            "expiry": _day(expiry), "quantity": quantity, "max_loss_usd": _money(loss), "pnl_usd": _money(pnl, signed=True) if close else None,
-           "why": words(p.get("entry_reason") if close and p.get("entry_reason") else p.get("reason"), 240)}
+           "why": (tape_why(p.get("entry_reason"), names, stored=WHY_CHARS) if close and p.get("entry_reason")  # its tag, cut at 80
+                   else tape_why(p.get("reason"), names, stored=TAPE_WHY_CHARS))}
     if not close and out["max_loss_usd"] is None:
         return None
     if close and out["pnl_usd"] is None:
@@ -1018,8 +1047,11 @@ def trade_of(p: Mapping[str, Any], *, close: bool, pnl: Any = None) -> dict[str,
     return out
 
 
-def to_events(entry: Entry) -> list[dict[str, Any]]:
-    """The site events one ledger row becomes: none, or one."""
+def to_events(entry: Entry, names: Callable[[Entry], Iterable[str] | None] | None = None) -> list[dict[str, Any]]:
+    """The site events one ledger row becomes: none, or one. `names(entry)`: the parameter names of the program a trade
+    row was traded from (`Publisher._tape_names`), or None when they cannot be read; without it a trade carries no reason
+    (`tape_why`)."""
+    known = (lambda: names(entry)) if names is not None else (lambda: None)
     if not entry.public:
         return []
     p = public_view(entry.payload)
@@ -1037,10 +1069,10 @@ def to_events(entry: Entry) -> list[dict[str, Any]]:
         out = (f"agent:{agent}", "agent.note", {"text": text}) if text else None
     elif kind == "book.fill" and agent and p.get("source") in ("venue", "cross"):
         closing = p.get("side") == "sell" and p.get("realized") is not None
-        trade = trade_of(p, close=closing, pnl=p.get("realized")) if closing or p.get("side") == "buy" else None
+        trade = trade_of(p, close=closing, pnl=p.get("realized"), names=known()) if closing or p.get("side") == "buy" else None
         out = (f"agent:{agent}", "agent.trade", trade) if trade else None
     elif kind == "book.settle" and agent:
-        trade = trade_of(p, close=True, pnl=p.get("pnl"))
+        trade = trade_of(p, close=True, pnl=p.get("pnl"), names=known())
         out = (f"agent:{agent}", "agent.trade", trade) if trade else None
     elif kind == "floor.mark" and "brokerage_equity" in p:
         equity, cash, at = _money(p.get("brokerage_equity")), _money(p.get("brokerage_cash")), site_instant(p.get("as_of"))
@@ -1297,7 +1329,7 @@ class Publisher:
                 break
             events: list[dict[str, Any]] = []
             for entry in batch:
-                events.extend(to_events(entry))
+                events.extend(to_events(entry, lambda row: self._tape_names(house, row)))
             for start in range(0, len(events), MAX_BATCH):
                 sent += self._send(events[start:start + MAX_BATCH])
             self._state["cursor"] = batch[-1].seq
@@ -1554,6 +1586,16 @@ class Publisher:
             return read()
         except Exception:  # noqa: BLE001 - one unreadable block, never a missing checkpoint
             return fallback
+
+    def _tape_names(self, house: Any, entry: Entry) -> tuple[str, ...] | None:
+        """The parameter names a trade's reason on the tape is filtered against (`site_window.tape_names`: the traded
+        instance's program's and every version of its family's), or None when they cannot be read."""
+        from .site_window import tape_names
+
+        p = entry.payload if isinstance(entry.payload, Mapping) else {}
+        swarm = getattr(house, "swarm", None)
+        return self._guard(lambda: tape_names(self.state_path.parent, getattr(swarm, "root", None), entry.agent,
+                                              oid=p.get("_order"), pid=p.get("_pid")), None)
 
     @staticmethod
     def _started(house: Any) -> str | None:

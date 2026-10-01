@@ -552,7 +552,8 @@ has climbed, with no prose on the page:
 - **Rationale:** each agent's thesis (its family's mechanism in whole sentences: no number in any form, digits,
   numerals of any script, number words, "one" only as a pronoun; no colon, bracket or code mark, no parameter name) and,
   for each real position, the route it was opened on, why it opened and why its agent closed it (the orders' own short
-  reasons under the same rules), how it ended (agent, House or expiry) and its maximum loss at open.
+  reasons under the same rules), how it ended (agent, House or expiry) and its maximum loss at open. A trade's reason
+  on the tape is under the same rules too, or empty.
 - **No number in a mechanism:** the roster's mechanism and the birth news on the tape keep only sentences with no
   number, so no entry window or threshold ("8-21 DTE") reaches the page; a mechanism with nothing left shows none.
 - **Pinning:** every agent a real position names stays on the public roster, retired or not.

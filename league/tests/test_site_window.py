@@ -48,6 +48,62 @@ def iso(seconds: float) -> str:
     return publish.site_instant(seconds)
 
 
+def googl_fill(*, side="buy", reason="", entry_reason=None, realized=None, **private):
+    """A `book.fill` of the GOOGL vertical as the live book records it (`league/live/real.py`), with its private keys."""
+    from league import structure_core as sc
+
+    spec = sc.classify("debit_vertical", [sc.leg(sc.occ_code("GOOGL", "2026-10-07", "call", 355), 1),
+                                          sc.leg(sc.occ_code("GOOGL", "2026-10-07", "call", 360), -1)])
+    out = {"source": "venue", "side": side, "real_money": True, "quantity": 1, "reason": reason,
+           "instrument": {"asset_class": "option", "symbol": "GOOGL", "multiplier": "100", "expiry": spec.expiry, "market_id": spec.code}}
+    if side == "buy":
+        out["max_loss_usd"] = 157.0
+    else:
+        out.update(realized=realized, entry_reason=entry_reason)
+    return {**out, **private}
+
+
+#: The safety review's adversarial list (Oct 1, 2026): each was a number the filters let through.
+QUANT_CASES = (
+    "Buy the call when GOOGL lags MSFT by more than one stdev.", "Enter when the gap exceeds one ATR over the prior close.",
+    "Enter at one sd.", "Use a lookback of one hr.", "Exit after one trading session if the gap has not closed.",
+    "Buy when the move is one full standard deviation below the mean.", "Hold for one more week before rolling.",
+    "Buy GOOGL calls with a strike one notch above spot.", "Stop out at negative one ATR.", "One leg is enough.",
+    "Exit at the eleventh session.", "Enter when the lag reaches a twelfth of the range.", "Hold until the ninetieth minute.",
+    "Buy when the drop exceeds twelve hundredths.", "The move must be threefold the median.", "Wait for a twentyfive delta call.",
+    "Enter on a tenpercent move.", "Exit after a oneday hold.", "Enter at a single sigma move.", "Enter at a sigma move.",
+    "Exit after an ATR against it.", "Hold for a fortnight.", "Enter when the spread is wider than a nickel.",
+    "Enter when the move tops a dime.", "Enter when the move tops a penny.", "Enter when IV rank is in the top decile.",
+    "Sell when IV sits in the twenties.", "Enter when volume doubles.", "Exit when ONE SIGMA is breached.",
+    "Enter when the lag tops one-and-a-half sigma.", "Stop out at minus one hundred bps.", "Enter when RSI tops seventy.",
+    "Exit in the last quarter of the session.", "Sell at a quarter of the range.", "Hold a quarter.")
+#: The post-fix verification's list (Oct 1, 2026, 09:30Z): an apostrophe around or inside a number word, an accent, a
+#: plural cardinal, a suffix or a percent run together, a multiple, a couple, unity, a score, a word split by a mark, and
+#: "one" before a measure the review missed.
+VERIFICATION_CASES = (
+    "Enter on a 'twenty-day' high.", "Respect the fifty's rule.", "Hold for \u2018twenty\u2019 sessions.",
+    "Hold for \u2018twenty\u2019s worth.", "Hold for tw\u00e9nty sessions.", "Wait sev\u00e9n days.", "Buy in fives.",
+    "Sell the sixes.", "Wait out the zeroes.", "Hold for twentyish sessions.", "Hold for twenty-ish sessions.",
+    "Hold for twentyodd sessions.", "The range is thirtysomething wide.", "Enter on a tenpct move.", "Stop out at fiftybps.",
+    "Enter when volume quintuples.", "Exit when the range trebles.", "Hold for a couple of sessions.",
+    "Enter when the ratio tops unity.", "Hold for a score of sessions.", "Wait scores of sessions.",
+    "Hold for twen\u00b7ty sessions.", "Hold for t.e.n sessions.", "Sell the fif-ty's high.", "Sell the twen\u00b7ty's high.",
+    "Buy in ones and twos.", "Read the ones digit.", "Enter at a halfsigma move.", "Sell a quarter's worth.",
+    "Hold the one whole session.", "Exit after one business day.", "Exit after a single business day.",
+    "Exit when \u00bane sigma is breached.", "Exit when \uff4f\uff4e\uff45 sigma is breached.", "Hold twenty'll do.",
+    "Exit at the trillionth.", "Enter at the twentieth's close.")
+#: Plain words that must still pass: the pronoun "one", the calendar's quarter, "ones" as a pronoun, a pair, a z-score.
+PLAIN_CASES = (
+    "No one knows the open.", "The legs move one against the other.", "Each one decays.", "One of the names leads.",
+    "They reprice one after another.", "Buyers favour one or the other.", "One\u2019s edge is patience.",
+    "A single stock leads.", "Uses a single-name option on the laggard.", "The edge is one-sided.",
+    "Investors reprice one on the other\u2019s news.", "The tape drifts \u2014 then the gap closes.",
+    "The flow is predictable within the final sessions of each quarter.", "Funds dress their books at quarter-end.",
+    "Funds dress their books at the quarter's end.", "The ones that lag catch up.", "The pair converges.",
+    "It is a pairs trade.", "The z-score tops its band.", "The legs are coupled.", "Someone's bid leads.", "No one's sure.",
+    "Often the tent is quiet.", "Prices move one from the other.", "They move one and the other.", "It won't last.", GOOGL)
+
+
 # ---------------------------------------------------------------------------------------------- the words
 class ThesisTextTest(unittest.TestCase):
     def test_the_googl_thesis_is_both_sentences_and_the_pronoun_one_passes(self):
@@ -103,20 +159,10 @@ class ThesisTextTest(unittest.TestCase):
         self.assertIsNone(public.tag_text("IWM at a 60-day low"))
 
     def test_ordinary_quant_phrasing_of_a_number_never_passes(self):
-        """The safety review's adversarial list (Oct 1, 2026): each was a number the filters let through. The check is
-        a fixed list, never the filter graded against itself."""
-        for text in ("Buy the call when GOOGL lags MSFT by more than one stdev.", "Enter when the gap exceeds one ATR over the prior close.",
-                     "Enter at one sd.", "Use a lookback of one hr.", "Exit after one trading session if the gap has not closed.",
-                     "Buy when the move is one full standard deviation below the mean.", "Hold for one more week before rolling.",
-                     "Buy GOOGL calls with a strike one notch above spot.", "Stop out at negative one ATR.", "One leg is enough.",
-                     "Exit at the eleventh session.", "Enter when the lag reaches a twelfth of the range.", "Hold until the ninetieth minute.",
-                     "Buy when the drop exceeds twelve hundredths.", "The move must be threefold the median.", "Wait for a twentyfive delta call.",
-                     "Enter on a tenpercent move.", "Exit after a oneday hold.", "Enter at a single sigma move.", "Enter at a sigma move.",
-                     "Exit after an ATR against it.", "Hold for a fortnight.", "Enter when the spread is wider than a nickel.",
-                     "Enter when the move tops a dime.", "Enter when the move tops a penny.", "Enter when IV rank is in the top decile.",
-                     "Sell when IV sits in the twenties.", "Enter when volume doubles.", "Exit when ONE SIGMA is breached.",
-                     "Enter when the lag tops one-and-a-half sigma.", "Stop out at minus one hundred bps.", "Enter when RSI tops seventy.",
-                     "Exit in the last quarter of the session.", "Sell at a quarter of the range.", "Hold a quarter."):
+        """The safety review's adversarial list and the post-fix verification's (Oct 1, 2026): each was a number the
+        filters let through. The check is a fixed list, never the filter graded against itself."""
+        for text in QUANT_CASES + VERIFICATION_CASES:
+            self.assertTrue(public.numbered(text) or not public.plain_glyphs(text), ascii(text))
             self.assertIsNone(public.thesis_text(text), text)
             self.assertIsNone(public.tag_text(text.rstrip(".")), text)
             self.assertIsNone(public.note_text(text), text)
@@ -125,11 +171,8 @@ class ThesisTextTest(unittest.TestCase):
         self.assertIsNone(public.tag_text("lag over one stdev"))
 
     def test_the_pronoun_one_and_plain_words_still_pass(self):
-        for text in ("No one knows the open.", "The legs move one against the other.", "Each one decays.", "One of the names leads.",
-                     "They reprice one after another.", "Buyers favour one or the other.", "One’s edge is patience.",
-                     "A single stock leads.", "Uses a single-name option on the laggard.", "The edge is one-sided.",
-                     "Investors reprice one on the other’s news.", "The tape drifts — then the gap closes.",
-                     "The flow is predictable within the final sessions of each quarter.", "Funds dress their books at quarter-end."):
+        for text in PLAIN_CASES:
+            self.assertFalse(public.numbered(text), text)
             self.assertEqual(public.thesis_text(text), text)
             self.assertEqual(thesis_words(text, 280), text)
 
@@ -177,6 +220,115 @@ class ThesisTextTest(unittest.TestCase):
                 self.assertTrue(published is None or not LEAK.search(published), published)
                 if not re.search(r"alpaca|kalshi", out, re.I):
                     self.assertEqual(published, out, "a filtered thesis passes the publisher's check unchanged")
+
+
+class NumberWordsFixtureTest(unittest.TestCase):
+    """`fixtures/number_words.json` is the case list both repositories test their number rule against (the House's
+    `public.numbered`, the site's `numbered` in `capital/capital.js`): this module's own lists, rewritten by
+    LTCM_WRITE_SITE_FIXTURES=1. LTCM_SITE_CAPITAL=<a site branch's capital/capital.js> runs the site's own rule over it."""
+
+    PATH = FIXTURES / "number_words.json"
+
+    def cases(self):
+        return {"about": "Each sentence under `numbered` is a number in words and each under `plain` is not, for "
+                         "league/swarm/public.py `numbered` and the site's `numbered` alike (league/tests/test_site_window.py).",
+                "numbered": list(QUANT_CASES + VERIFICATION_CASES), "plain": list(PLAIN_CASES)}
+
+    def test_the_fixture_is_this_modules_own_lists_and_the_house_agrees_with_it(self):
+        cases = self.cases()
+        if os.environ.get("LTCM_WRITE_SITE_FIXTURES"):
+            self.PATH.write_text(json.dumps(cases, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        self.assertEqual(json.loads(self.PATH.read_text(encoding="utf-8")), cases)
+        self.assertEqual([t for t in cases["numbered"] if not public.numbered(t)], [])
+        self.assertEqual([t for t in cases["plain"] if public.numbered(t)], [])
+
+    def test_the_sites_rule_agrees_case_for_case(self):
+        import subprocess
+
+        capital, node = os.environ.get("LTCM_SITE_CAPITAL"), shutil.which("node")
+        if not capital or node is None:
+            raise unittest.SkipTest("set LTCM_SITE_CAPITAL to a site branch's capital/capital.js (and have node)")
+        script = (f"import {{ numbered }} from {json.dumps(Path(capital).resolve().as_uri())};"
+                  "let text = ''; process.stdin.on('data', chunk => { text += chunk; });"
+                  "process.stdin.on('end', () => console.log(JSON.stringify(JSON.parse(text).map(t => numbered(t)))));")
+        cases = self.cases()
+        texts = cases["numbered"] + cases["plain"]
+        done = subprocess.run([node, "--input-type=module", "-e", script], input=json.dumps(texts), capture_output=True, text=True,
+                              timeout=120)
+        self.assertEqual(done.returncode, 0, done.stderr[-2000:])
+        site = dict(zip(texts, json.loads(done.stdout)))
+        self.assertEqual({t: site[t] for t in texts if site[t] != public.numbered(t)}, {}, "the site disagrees")
+
+
+class TapeWhyTest(unittest.TestCase):
+    """S3 of the post-fix verification (Oct 1, 2026): a trade's reason on the tape (`agent.trade` `why`, `/api/capital/events`
+    and the socket) went out as the publisher's `words`, which keep integers and number words. Now it is the tag rules
+    over the traded program's parameter names, or "" (the site's `prose` takes an empty reason, never null)."""
+
+    def test_a_reason_with_a_number_a_parameter_or_a_cut_never_reaches_the_tape(self):
+        reason = "lag thresh 3 sessions, z above 2 and qqq within 4 of flat"
+        self.assertEqual(publish.trade_of(googl_fill(reason=reason), close=False, names=())["why"], "")
+        self.assertEqual(publish.trade_of(googl_fill(reason=reason), close=False, names=("lag_thresh",))["why"], "")
+        self.assertEqual(publish.tape_why("lag thresh hit while qqq is flat", ("lag_thresh",), stored=240), "")
+        self.assertEqual(publish.tape_why("msft led for twenty sessions", (), stored=240), "")
+        self.assertEqual(publish.tape_why("msft led for fifty's worth of sessions", (), stored=240), "")
+        self.assertEqual(publish.tape_why("msft leads googl, qqq flat", None, stored=240), "", "names unknown: no reason")
+        self.assertEqual(publish.tape_why("msft leads googl " + "and more " * 30, (), stored=240), "", "longer than 240")
+        cut = ("msft leads googl " * 15)[:240]
+        self.assertEqual((len(cut), publish.tape_why(cut, (), stored=240)), (240, ""), "cut where it was stored")
+        self.assertEqual(publish.tape_why("msft leads googl, qqq flat", ("lag_thresh",), stored=240), "msft leads googl, qqq flat")
+        self.assertEqual(publish.tape_why("msft leads googl on alpaca", (), stored=240), "msft leads googl on the broker")
+
+    def test_a_close_carries_its_opening_tag_under_the_same_rules(self):
+        tag = "msft leads googl, qqq flat"
+        close = publish.trade_of(googl_fill(side="sell", reason="program", entry_reason=tag, realized=12.5), close=True, pnl=12.5, names=())
+        self.assertEqual((close["action"], close["why"]), ("close", tag))
+        cut = ("msft leads googl " * 6)[:80]
+        close = publish.trade_of(googl_fill(side="sell", reason="program", entry_reason=cut, realized=1.0), close=True, pnl=1.0, names=())
+        self.assertEqual(close["why"], "", "a tag of exactly 80 was cut")
+
+    def test_without_a_resolver_a_trade_carries_no_reason(self):
+        from league.ledger import Entry
+
+        entry = Entry(seq=1, id="le-1", kind="book.fill", agent=GOOGL_ID, at=PUBLISHED_AT, public=True,
+                      payload=googl_fill(reason="msft leads googl, qqq flat", _order=1), previous_hash="p", digest="d")
+        self.assertEqual(publish.to_events(entry)[0]["payload"]["why"], "")
+        self.assertEqual(publish.to_events(entry, lambda row: ())[0]["payload"]["why"], "msft leads googl, qqq flat")
+        self.assertEqual(publish.to_events(entry, lambda row: None)[0]["payload"]["why"], "")
+
+
+class HeadroomTest(unittest.TestCase):
+    def test_the_fit_leaves_room_for_a_name_on_every_row_the_sites_read_names(self):
+        """The post-fix verification (Oct 1, 2026): the public read adds `display_name` to every agent, every agent's
+        position and every practice row, each name at most 40 characters; a body fitted to the limit must read back
+        under it. The site's own bounds, where its schema spells them, are the House's."""
+        self.assertEqual(publish.NAMED_ROWS, publish.MAX_AGENTS + publish.MAX_POSITIONS + publish.MAX_PRACTICE_ROWS)
+        self.assertEqual(publish.DISPLAY_NAME_BYTES, len(json.dumps({"display_name": "M" * 40}, separators=(",", ":"))) - 1)
+        self.assertGreaterEqual(publish.FIT_HEADROOM_BYTES, publish.NAMED_ROWS * publish.DISPLAY_NAME_BYTES)
+        for schema in {SITE_SCHEMA, Path(os.environ.get("LTCM_SITE_SCHEMA") or SITE_SCHEMA)}:
+            text = schema.read_text(encoding="utf-8")
+            for name in ("MAX_AGENTS", "MAX_POSITIONS", "MAX_PRACTICE_ROWS", "MAX_CHECKPOINT_BYTES"):
+                found = re.search(rf"export const {name} = ([0-9 *]+);", text)
+                if found:
+                    self.assertEqual(eval(found.group(1), {}), getattr(publish, name), (schema, name))  # noqa: S307 - digits and "*"
+            longest = re.search(r"validDisplayName = value => typeof value === 'string' && value.length <= (\d+)", text)
+            if longest:
+                self.assertEqual(int(longest.group(1)), publish.DISPLAY_NAME_CHARS, schema)
+
+    def test_a_fitted_body_with_every_named_row_at_the_longest_name_reads_back_under_the_limit(self):
+        agents = [{"id": f"agent-{n}", "family": "agent", "mechanism": "A quiet edge in words. " * 9, "structure": "iron_condor",
+                   "band": "gym", "born_at": RESET_AT, "retired_at": None, "trials": 1, "revisions": 1, "forward": None, "real": None}
+                  for n in range(publish.MAX_AGENTS)]
+        body = build_checkpoint(SiteInputs(agents=agents), PUBLISHED_AT)
+        size = len(publish.canonical(body).encode())
+        cap = size + publish.FIT_HEADROOM_BYTES  # fitted exactly to the limit, nothing left out
+        with unittest.mock.patch.object(publish, "MAX_CHECKPOINT_BYTES", cap):
+            fitted = build_checkpoint(SiteInputs(agents=agents), PUBLISHED_AT)
+        self.assertEqual(len(fitted["agents"]), publish.MAX_AGENTS)
+        # The read names these agents, and at most a full table and a full practice league more.
+        named = {**fitted, "agents": [{**a, "display_name": "Meriwether " + "9" * 29} for a in fitted["agents"]]}
+        extra = (publish.MAX_POSITIONS + publish.MAX_PRACTICE_ROWS) * publish.DISPLAY_NAME_BYTES
+        self.assertLessEqual(len(json.dumps(named, separators=(",", ":"), ensure_ascii=False).encode()) + extra, cap)
 
 
 # ---------------------------------------------------------------------------------------------- the world
@@ -656,6 +808,22 @@ class RationaleTest(WorldCase):
         self.assertTrue(all(levels["funnel"][k] is None for k in publish.FUNNEL_KEYS if k != "since"), "a count not given is unknown")
 
 
+class TapeNamesTest(WorldCase):
+    def test_the_traded_instance_and_its_familys_parameter_names_by_order_or_position(self):
+        ids = self.today()
+        w = self.world
+        oid = w.live.rows("SELECT oid FROM orders WHERE pid=? AND action='open'", (ids["googl"],))[0]["oid"]
+        want = ("exit_after", "lag_thresh", "lead_sessions")  # qqq_flat: its public id spells it
+        self.assertEqual(site_window.tape_names(w.state, w.swarm, GOOGL_ID, oid=oid), want)
+        self.assertEqual(site_window.tape_names(w.state, w.swarm, GOOGL_ID, pid=ids["googl"]), want)
+        for unknown in ({"oid": 999}, {"pid": 999}, {}, {"oid": "1"}, {"oid": True}):
+            self.assertIsNone(site_window.tape_names(w.state, w.swarm, GOOGL_ID, **unknown), unknown)
+        self.assertIsNone(site_window.tape_names(w.state, None, GOOGL_ID, oid=oid), "no swarm store: unknown")
+        self.assertIsNone(site_window.tape_names(w.state / "missing", w.swarm, GOOGL_ID, oid=oid), "no live book: unknown")
+        with unittest.mock.patch.object(sitefeed, "param_names", lambda db, root, ids: {i: ((), False) for i in ids}):
+            self.assertIsNone(site_window.tape_names(w.state, w.swarm, GOOGL_ID, oid=oid), "its program cannot be read")
+
+
 class MechanismNamesTest(WorldCase):
     def test_a_parameter_named_in_a_mechanism_never_publishes(self):
         """The swarm window's review, C8: the roster's mechanism was `news_text` with no parameter names at all."""
@@ -744,7 +912,8 @@ class PinningTest(WorldCase):
         body = build_checkpoint(SiteInputs(agents=agents), PUBLISHED_AT)
         self.assertIn("dead-0", [a["id"] for a in body["agents"]], "pinned: kept though older than the 24 newest")
         body["structures"] = []
-        squeezed = publish.fit({**body, "agents": list(body["agents"]), "padding": "x" * (publish.MAX_CHECKPOINT_BYTES - 30_000)},
+        room = publish.MAX_CHECKPOINT_BYTES - publish.FIT_HEADROOM_BYTES - 13_616  # what the old 16 KiB headroom left
+        squeezed = publish.fit({**body, "agents": list(body["agents"]), "padding": "x" * room},
                                {"dead-0", "dead-29"})
         kept = [a["id"] for a in squeezed["agents"]]
         self.assertIn("dead-0", kept)
@@ -877,6 +1046,28 @@ class PublisherWindowTest(WorldCase):
         for value in publish_strings(body["rationale"]):
             if not re.match(r"^\d{4}-\d\d-\d\dT[\d:.]+Z$|^real:\d+$|^-?\d+\.\d\d$|^[a-z0-9-]{1,40}$", value):
                 self.assertFalse(re.search(r"[0-9:()\[\]{}<>=_`#|\\]", value), value)
+
+    def test_a_trades_reason_on_the_tape_is_filtered_against_the_traded_programs_parameters(self):
+        """S3 of the post-fix verification (Oct 1, 2026): `agent.trade` `why` on the public tape."""
+        w = self.world
+        oid = w.live.rows("SELECT oid FROM orders WHERE pid=? AND action='open'", (self.ids["googl"],))[0]["oid"]
+        reasons = ["lag thresh 3 sessions, z above 2 and qqq within 4 of flat", "lag thresh hit while qqq is flat",
+                   "msft led for twenty sessions", "msft leads googl, qqq flat"]
+        for n, reason in enumerate(reasons):
+            self.ledger.append("book.fill", googl_fill(reason=reason, _order=oid, _price=1.57), agent=GOOGL_ID, at=PUBLISHED_AT,
+                               id=f"fill-{n}")
+        self.ledger.append("book.fill", googl_fill(reason="msft leads googl, qqq flat", _order=999), agent=GOOGL_ID, at=PUBLISHED_AT,
+                           id="fill-unknown")
+        self.ledger.append("book.fill", googl_fill(side="sell", reason="program", entry_reason="msft leads googl, qqq flat", realized=12.5,
+                                                   _pid=self.ids["googl"]), agent=GOOGL_ID, at=PUBLISHED_AT, id="fill-close")
+        site = Site(WINDOW_SITE)
+        self.publisher(site).publish(self.house)
+        trades = [e["payload"] for path, body in site.posts if path == "events" for e in body["events"] if e["kind"] == "agent.trade"]
+        self.assertEqual([(t["action"], t["why"]) for t in trades],
+                         [("open", ""), ("open", ""), ("open", ""), ("open", "msft leads googl, qqq flat"), ("open", ""),
+                          ("close", "msft leads googl, qqq flat")])
+        for t in trades:
+            self.assertFalse(re.search(r"[0-9]|thresh|twenty", t["why"]), t)
 
     def test_an_older_site_gets_the_checkpoint_without_the_window_and_is_asked_again_later(self):
         site = Site(OLD_SITE)

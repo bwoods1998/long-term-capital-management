@@ -32,8 +32,13 @@ Main `3eaf4d06` is Release B, deployed Oct 1 (below). Under the freeze (Oct 1, "
   hidden format mark or look-alike letter; parameter names with hyphens or run together); the roster's mechanism and the
   birth news drop every sentence with a number (no entry window or threshold on the page); Tuition counts only families
   that held a tuition lot (its own branch of the funnel); a position's route is the band it was opened on; under the byte
-  limit the window leaves before any agent or row, with 16 KiB left for the site's names; the window is not read while
-  the site refuses it. Publisher and swarm-feed files only (`league/publish.py`, `league/site_window.py`,
+  limit the window leaves before any agent or row, with 32 KiB left for the site's names (a 40-character name on each
+  of 508 rows); the window is not read while the site refuses it. After the post-fix verification (Oct 1, 09:30Z): an
+  apostrophe never hides a number word ("fifty's", "'twenty-day'", typographic quotes), accents fold away before
+  reading ("twénty"), a word split by a mark joins ("twen·ty"), cardinal plurals, multiples ("quintuple"), "couple",
+  "unity", "a score of", "-ish"/"-odd"/"-something" and "pct"/"bps" run together are numbers (`number_words.json` is the
+  case list the site tests too); and a trade's `why` on the public tape (`agent.trade`, live today) is filtered by the
+  same rules and the traded program's parameter names, or empty. Publisher and swarm-feed files only (`league/publish.py`, `league/site_window.py`,
   `league/trading_profit.py`, `league/swarm/public.py`, `league/swarm/sitefeed.py`, `league/swarm/hook.py`): nothing in `league/live`,
   `league/gym` or `LEAGUE_FILES`, no evaluator adoption, no money digest. Site first (personal-site
   `capital/swarm-window`); an older site gets the checkpoint without the window. To verify after the deploy: no "the site

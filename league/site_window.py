@@ -37,7 +37,8 @@ the route it was opened on: tuition and incubator from the book's own flags; Pro
 it opened (the newest `swarm.band` move before the book's opening time, so a Probe position whose instance has since
 moved to Sized still says Probe; the instance's band now when no move since the reset says). `exit` is an enum, never
 text; `max_loss_usd` is the position's maximum loss at open. Never a price, a strike, a mark, a parameter's value, a
-threshold, a program, a sketch, a private note, `positions.note` or the raw `positions.reason`.
+threshold, a program, a sketch, a private note, `positions.note` or the raw `positions.reason`. A trade's reason on the
+public tape (`agent.trade` `why`) is filtered against the same names (`tape_names`, `publish.tape_why`).
 
 Every store is read read-only (`mode=ro`, a one-second timeout), each read guarded so a failure costs only its part.
 Nothing in `league/live` or `league/gym` is imported: the constants below are spelled here and held equal to the live
@@ -409,6 +410,36 @@ def trades(rows: Sequence[Mapping[str, Any]] | None, family_names: Mapping[str, 
     return out
 
 
+def tape_names(state_root: str | Path, swarm_root: str | Path | None, family: Any, *, oid: Any = None,
+               pid: Any = None) -> tuple[str, ...] | None:
+    """The parameter names a trade's reason on the tape is filtered against (`publish.tape_why`; the post-fix verification
+    of Oct 1, 2026): those of the instance that traded it (its opening order `oid`, or its position `pid`, in the live
+    book: `instance_names`) and of every version of its family (the swarm's store: `sitefeed.param_names`), but those its
+    public id spells (`public.unspelled`), as `trades` filters a reason. None, so the trade carries no reason, when the
+    book does not name the instance, or either cannot be read, or the family's current program cannot be read."""
+    from .swarm import public, sitefeed
+
+    family = str(family or "")
+    path = Path(state_root) / LIVE_FILE
+    if not family or swarm_root is None or not path.is_file() or not (Path(swarm_root) / SWARM_DB).is_file():
+        return None
+    sql, key = ("SELECT instance FROM orders WHERE oid=?", oid) if oid is not None else ("SELECT instance FROM positions WHERE pid=?", pid)
+    if not isinstance(key, int) or isinstance(key, bool):
+        return None
+    try:
+        with closing(_connect(path)) as db:
+            row = db.execute(sql, (key,)).fetchone()
+        with closing(_connect(Path(swarm_root) / SWARM_DB)) as db:
+            fam, known = sitefeed.param_names(db, swarm_root, [family]).get(family, ((), False))
+    except sqlite3.Error:
+        return None
+    instance = str(row["instance"]) if row is not None and row["instance"] else ""
+    inst = instance_names(state_root, [instance]) if instance and known else None
+    if inst is None or instance not in inst:
+        return None
+    return tuple(public.unspelled(sorted({*fam, *inst[instance]}), family))
+
+
 def _why(text: Any, names: Iterable[str], public: Any) -> str | None:
     if text is None or str(text).strip().lower() in NO_REASON:
         return None
@@ -450,4 +481,5 @@ def site_window(swarm_root: str | Path | None, state_root: str | Path, *, agents
 
 
 __all__ = ["CALIBRATION_FAMILY", "FUNNEL_KEYS", "HOUSE_TEST_FAMILY", "INCUBATOR_SUFFIX", "LEVELS", "LEVELS_BY_BAND", "LIVE_FILE",
-           "OBSERVE_FILE", "agent_levels", "band_at", "funnel", "level_of", "money_routes", "site_window", "theses", "trades"]
+           "OBSERVE_FILE", "agent_levels", "band_at", "funnel", "level_of", "money_routes", "site_window", "tape_names", "theses",
+           "trades"]
