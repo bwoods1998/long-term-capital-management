@@ -1743,10 +1743,11 @@ HOUSE_DQ_RATE, BOX_SECONDS_PER_JOB, SCREEN_CAP_SECONDS, SCREEN_FLOOR_SECONDS = 0
 PAYBACK_DAYS = 30
 CYCLE_USD = {"research": 10.0, "money_path": 25.0, "evidence_reset": 40.0}
 #: Every lane that may edit the researcher or the architect runs the tests that pin the lineage, the rounds, the drift
-#: screen, dedupe, the evaluator identity and the graveyard digest, beside its own.
+#: screen, dedupe, the evaluator identity, the graveyard digest and release B's mechanism test (the researcher runs it,
+#: and its shadow verdicts stay blind), beside its own.
 CORE_REGRESSIONS = ("league.tests.test_swarm_long_single", "league.tests.test_swarm_rounds", "league.tests.test_swarm_drift",
                     "league.tests.test_swarm_dedupe", "league.tests.test_swarm_evaluator",
-                    "league.tests.test_swarm_graveyard_digest",
+                    "league.tests.test_swarm_graveyard_digest", "league.tests.test_swarm_mechanism",
                     # D2a at run time (the fourth review): Validation runs, lines, views and a leaderboard seeded with
                     # sentinel figures; no model-facing text (the researcher's cycle, status, brief, prompt and
                     # read_run tool, the architect's prompt, the strategist's and the diagnostician's packets) may
@@ -1826,10 +1827,14 @@ LANES: dict[str, Lane] = {
         judge_no_worse=("novel_refused", "rebirths_fresh_lineage"),
         judge_cost="sqlite_statements", judge_cost_rule="ratio",
         # The researcher, the strategist and the diagnostician are in this surface: their tests run too (the fourth
-        # review: a retrieval change there could show Validation figures to a model).
+        # review: a retrieval change there could show Validation figures to a model). So do release B's card tests and
+        # THE STRUCTURES' (the architect's admission: a complete card, the card-based rebirth refusal, a rebirth's
+        # lineage and its row's and cell's budgets, the allowed types), which the rounds' and the graveyard digest's
+        # tests leave to them with `require_card` off: a lever may refuse more, never loosen those.
         regressions=("league.tests.test_swarm_r11b", "league.tests.test_swarm_verdicts", "league.tests.test_swarm_store",
                      "league.tests.test_swarm_researcher", "league.tests.test_swarm_strategist",
-                     "league.tests.test_swarm_diagnostician") + CORE_REGRESSIONS,
+                     "league.tests.test_swarm_diagnostician", "league.tests.test_swarm_cards",
+                     "league.tests.test_swarm_architect_structures") + CORE_REGRESSIONS,
         canary={"mode": "arms", "unit": "mechanism", "fraction": 0.5, "observe_seconds": 12 * 3600,
                 "min_units_per_arm": 15},
         population_guards=(UNATTRIBUTED,), arm_needs="births", birth_balance=True, heldout_pool=HELDOUT_POOLS["memory"],
