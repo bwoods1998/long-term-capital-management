@@ -21,33 +21,10 @@ on branch `run/options-swarm-2026-09-26`) has the detail.
 
 ## Not yet deployed
 
-Main `665a9e8d` is the H1 release, deployed Oct 1 at 20:35Z (below); the releases between B and H1 (B' 07:11Z,
-09:16Z, the site feed 10:19Z, 11:45Z, the lanes release 13:34Z) are recorded in the run record and get their entries in a
-follow-up docs pass. Under the freeze (Oct 1, "The freeze"), a change to
-`league/live` or `league/gym` waits for a planned release. Nothing merged is waiting for a release. Deployed at 10:19Z with the
-site-feed release `20261001T101853Z-466bca70278a` (#463), its dated entry to follow:
+Main `665a9e8d` is the H1 release, deployed Oct 1 at 20:35Z (below); every House release of Oct 1 has its dated entry.
+Under the freeze (Oct 1, "The freeze"), a change to `league/live` or `league/gym` waits for a planned release. Nothing
+merged is waiting for a release.
 
-- **The swarm window** (branch `b/site-rationale`): the publisher sends `levels` (each agent's level and the levels
-  funnel since the reset) and `rationale` (each agent's thesis, and each real position's route, reasons, exit and maximum
-  loss), pins every agent a real position names to the roster, and filters every mechanism against its program's
-  parameter names. After its three reviews: a thesis, a tag, a note and a mechanism carry no number in any form (number
-  words including ordinals, fractions and run-together numbers; "one" only as a pronoun; numerals of any script; no
-  hidden format mark or look-alike letter; parameter names with hyphens or run together); the roster's mechanism and the
-  birth news drop every sentence with a number (no entry window or threshold on the page); Tuition counts only families
-  that held a tuition lot (its own branch of the funnel); a position's route is the band it was opened on; under the byte
-  limit the window leaves before any agent or row, with 32 KiB left for the site's names (a 40-character name on each
-  of 508 rows); the window is not read while the site refuses it. After the post-fix verification (Oct 1, 09:30Z): an
-  apostrophe never hides a number word ("fifty's", "'twenty-day'", typographic quotes), accents fold away before
-  reading ("twénty"), a word split by a mark joins ("twen·ty"), cardinal plurals, multiples ("quintuple"), "couple",
-  "unity", "a score of", "-ish"/"-odd"/"-something" and "pct"/"bps" run together are numbers (`number_words.json` is the
-  case list the site tests too); and a trade's `why` on the public tape (`agent.trade`, live today) is filtered by the
-  same rules and the traded program's parameter names, or empty. Publisher and swarm-feed files only (`league/publish.py`, `league/site_window.py`,
-  `league/trading_profit.py`, `league/swarm/public.py`, `league/swarm/sitefeed.py`, `league/swarm/hook.py`): nothing in `league/live`,
-  `league/gym` or `LEAGUE_FILES`, no evaluator adoption, no money digest. Site first (personal-site
-  `capital/swarm-window`); an older site gets the checkpoint without the window. To verify after the deploy: no "the site
-  refused the swarm window" warning, and `curl -s
-  'https://blakewoods.us/api/capital/checkpoint?progress=1&positions=1&practice=1&window=1'` shows `levels` and
-  `rationale`.
 ## 2026-10-01
 
 ### 20:35Z, the H1 release: House release `20261001T203426Z-6fa69bfcda55` (main `665a9e8d`; PRs #475, #476, #477)
@@ -111,6 +88,262 @@ site-feed release `20261001T101853Z-466bca70278a` (#463), its dated entry to fol
   clean detached checkout; the deployed version's `CLAUDE_USD` reads 265 and every money cap still matches the
   constitution (pre-open check 3). Rollback: `dafcfa05`.
 
+### 16:25Z, the site (personal-site #20; version `3f6147f5`)
+
+- The owner's ideas as small additions to the prior design (trade reasons, the swarm's profit line, the live thought
+  queue, performance over time, per-trade results, the game's levels), after a code review and an honesty review.
+  `npm run check && npm test` (112 pass, 0 fail, 9 skipped), then `npm run deploy`. Rollback: `6e49f120`, the prior
+  page; the Worker and the data layer are unchanged, so it is safe.
+
+### 15:22Z, operator change (no deploy): agenda v16c, two structures, the cell rebirth budget, two retirements
+
+- **15:22:15Z, `swarm.json`** (a before-copy kept), the edge study's levers as settings after its adversarial critique:
+  `architect.agenda_locked` and the fallback `architect.agenda` are agenda v16c (steering only; D2 and every kill test
+  unchanged; the text stays private, sha256 `c7a46dca0707…`). The fallback it replaces (v15) carried Validation figures,
+  and that route is closed. In the same write: `architect.structures` `"real"` → `["debit_vertical", "long_single"]`,
+  and `architect.max_rebirths_per_cell` 3 → 6 (`max_rebirths_per_row` 2 and `card_rebirth` unchanged).
+- **15:22:40Z,** the strategist's agenda section (kv `architect_agenda_section`) cleared after a backup, so the
+  architect reads v16c verbatim until the strategist's next accepted section.
+- **15:22:59Z, two operator retirements** (`SwarmStore.retire_gym`, source "operator"):
+  `googl-lags-msft-ai-cloud-qqq-flat-r` and `googl-lags-msft-ai-cloud-qqq-flat--2`, the GOOGL lineage's two practice
+  families, withdrawn from practice and the incubator after the lineage's program failed its holdout look (09:39Z,
+  under the 09:16Z release). The open tuition lot stays exit-only to its programmed exit.
+- **What followed, as expected:** clearing the section woke the held families, and at 15:27Z the idle rule retired 26
+  architect-born families with no Train best (population 69 → 40; start 96, floor 12). One more, a 14:43Z revival whose
+  best Train version awaited validation, retired itself at 15:22:52Z: the defect the H1 release fixed at 20:35Z.
+- **A pre-registered 24-hour read** runs from 15:22:15Z, scored at about 15:22Z Oct 2, with its stop rule fixed in
+  advance (the run record, "The edge study").
+
+### 14:43Z, operator change (no deploy): seven revivals for practice
+
+- Seven of release A's drift-passing programs on real structures, revived for Train-tier practice and the incubator
+  route, not D2. Each is a lineage continuation that inherits its lineage's trials and holdout looks, with its reason
+  recorded; their validation verdicts stand. Since #465 (09:16Z) the harness runs each revived program exactly before
+  its researcher acts.
+
+  | Revived as | From | Inherited trials |
+  |---|---|---|
+  | `rate-lag-flat-index-meta-mara-r-2` | `rate-lag-flat-index-meta-mara` v33 | 227 |
+  | `hardborrow-forward-squeeze-single-r` | `hardborrow-forward-squeeze-single` v7 | 77 |
+  | `slv-iv-discount-momentum-single-r` | `slv-iv-discount-momentum-single` v19 | 48 |
+  | `qqq-exsemis-residual-smh-flat-on-s-2` | `qqq-exsemis-residual-smh-flat-on-spx` v116 | 450 |
+  | `levered-close-convergence-single-r` | `levered-close-convergence-single` v5 | 370 |
+  | `market-distraction-release-call-r--3` | `market-distraction-release-call-r-2` v2 | 133 |
+  | `slv-smh-staggered-coupling-single-r` | `slv-smh-staggered-coupling-single` v4 | 66 |
+
+- **Outcome, 14:56Z:** six re-passed Train and the drift screen with their release A numbers exactly (the revival fix at
+  work); `hardborrow-forward-squeeze-single-r` failed the drift screen. Those that passed joined practice at the next
+  sync, for 9 practice rows.
+
+### About 13:58Z, the site (personal-site #19; version `6e49f120`)
+
+- The prior design restored at the owner's request: the morning's swarm-window page is reverted, and its data layer
+  (the schema and the Worker) is kept, because rolling the Worker back after a window checkpoint is stored is unsafe.
+  Verified: 0 differing pixels against the prior page (`420a7de`) with the day's data, and `/capital/` answers 200.
+
+### 13:34Z, the lanes release: House release `20261001T133355Z-67c841b645ca` (main `a7542c1c`; PR #466: #449, #452, the memory judge v4, #472)
+
+- **Contents.** Research-class: no module the live path loads changes, so it deployed in session, after the open had
+  settled (never 19:30-20:00Z). Nothing under `league/gym`, `league/live`, `LEAGUE_FILES`, the constitution or the
+  gateway.
+  - **The harness improvement lanes** (#449): research, prompt/memory, data and execution lanes, each with a
+    predeclared metric, judges run on the pinned base, private held-out pools pinned by hash only, and an adversarial
+    review recorded before a candidate reaches the House
+    ([playbooks/harness-improvement.md](playbooks/harness-improvement.md)).
+  - **The evaluator benchmarks** (#452): the pinned suite `evaluator-suite-1`
+    (`python -m league.swarm.benchmarks --suite evaluator`) scores an evaluator's false promotions and missed signals on
+    known-answer cases; no threshold changes. Its results are in
+    [docs/benchmarks/EVALUATOR_1.md](docs/benchmarks/EVALUATOR_1.md), including writable numpy state reachable from Gym
+    programs, a channel between runs. The fix is in `league/gym`, so it waits for a planned release; until then it is a
+    known limit of the evaluator's isolation.
+  - **The memory judge v4** (`memory-rebirth-v4`, on the release branch). Since B', a proposal without a complete
+    card is not born, so v3's synthetic proposals were all refused and the judge measured nothing. v4 cards its
+    fixtures as production admits them and adds same-cell controls; it closed after four review rounds. The memory
+    lane's held-out pool pin moves after the operator's private rotation r7.
+  - **The architect's lenient read** (#472): a complete answer with stray trailing commas (`,}`), as Kimi-K3 wrote at
+    medium effort at 11:57Z, is read again without them (outside strings); the `swarm.architect` event says `lenient`.
+    On the real failed answer it recovers all 6 families.
+- **Deploy.** With the nightly forward daemon stopped idle across it: staged 13:33:57Z, promoted 13:34:48Z over
+  `20261001T114505Z-2d791c2ca9e7`.
+- **No evidence reset, verified** (read-only, after promotion): 0 evaluator adoptions; lineage snapshots before and
+  after compared 1,774 lineages and found 0 violations; the 3 practice cohorts intact; health `failures` []; the lanes
+  command (`scripts/harness_improve.py lanes`) runs on the box. The money digest is unchanged (`42c4a3af`), so no
+  ratify.
+- **After it (operator settings, no deploy):** 13:45Z `architect.sail_effort` "medium" and `architect.max_refill` 12,
+  with #472 live. The 13:59Z pass at medium proposed 12 and bore none (the card checks refused weaker cards: incomplete
+  falsifications and refuted-cell rebirths), so at about 14:00Z both went back, to "high" and 6. Harness cycle 2 then
+  measured the lanes on the box and ranked them on this base, registering two candidates: the research lane against
+  the Train disqualification rate, and the memory lane against validation attempts per research dollar. Each touches a
+  module the live path loads, so each deploys after a close and runs a canary window in which no other House release
+  ships.
+
+### 11:45Z, the architect on Sail: House release `20261001T114505Z-2d791c2ca9e7` (main `9b6d8857`; PR #470)
+
+- **Why.** From 08:15Z every architect pass on Sail (Kimi-K3 at a hard-coded "high" effort, 32,000 output tokens) came
+  back incomplete. Family cards (B') had doubled the visible answer, and the reasoning spent the whole output budget,
+  so the answer was empty or cut. `ModelRouter.ask` ignored Sail's `incomplete`, so each pass read as 0 proposals,
+  salvage never ran, and each empty pass erased the last card refusals. The empty passes cost $4.43 on Oct 1.
+- **Contents** (#470; `league/swarm/architect.py`, `league/swarm/models.py`). `architect.sail_effort` (default
+  "medium"; a value it does not know reads as the default). The Sail route also returns `truncated`,
+  `incomplete_reason` and `usage`, so a cut Sail answer is salvaged like a Claude one, and the one retry stays on
+  Claude only. A pass that proposed nothing no longer overwrites the card and structure refusals, and a retry no longer
+  counts refusals twice. Research-class: the live path loads neither module (verified on the box); the execution
+  fingerprint (`47587e22`) and the money digest (`42c4a3af`) are unchanged, so no ratify.
+- **Operator stopgaps before it (no deploy):** 11:03Z `architect.every_seconds` 900 → 3600, to stop paying for empty
+  passes; 11:15Z `architect.max_refill` 12 → 6, to halve the answer. A mistaken `architect.max_output_tokens` 24000 at
+  10:59:44Z was restored to 32000 within a minute.
+- **Deploy.** Staged 11:45:07Z, promoted 11:45:42Z over `20261001T101853Z-466bca70278a`.
+- **Verified** (read-only): lineage snapshots before and after (11:44:50Z, 11:51:11Z) compared 1,772 lineages and found
+  0 violations. At the 13:33Z open check, under this release, health listed no failure, the incubator's pins were dated
+  Oct 1 (no eligible family), and 3 practice cohorts were active. A health read and an adoption count taken right after
+  the promote are not recorded.
+- **After it:** the 11:57Z pass at medium completed in 48 s but read as 0, because stray trailing commas broke the
+  strict read (fixed by #472 in the 13:34Z release). At about 12:00Z `architect.sail_effort` was set to "high"; with
+  `max_refill` 6, a pass completes.
+
+### 10:19Z, the site feed: House release `20261001T101853Z-466bca70278a` (main `554b0aa8`; PR #469, which carries #463)
+
+- **The site first** (the verified safe order is site, then House): personal-site #18 (merge `b8ad841`), Worker version
+  `23d732c6`, at about 10:00Z, after `npm test` (108 pass, 9 skipped). Until the House sent the window, the site served
+  the checkpoint as before. **Rollback caution:** once a window checkpoint is stored, rolling the site back past #18
+  (to `420a7de`) is unsafe, because the older Worker spreads `levels` and `rationale` (PR #18's rollback note).
+- **Contents.** #469 is #463 plus the House's copy of the site schema, refreshed to `b8ad841`. Money path by the goal's
+  definition (the live path loads `league/swarm/public.py`), so it deployed outside 13:25-20:05Z. #463 as merged:
+  - **The swarm window** (branch `b/site-rationale`): the publisher sends `levels` (each agent's level and the levels
+    funnel since the reset) and `rationale` (each agent's thesis, and each real position's route, reasons, exit and
+    maximum loss), pins every agent a real position names to the roster, and filters every mechanism against its
+    program's parameter names. After its three reviews: a thesis, a tag, a note and a mechanism carry no number in any
+    form (number words including ordinals, fractions and run-together numbers; "one" only as a pronoun; numerals of any
+    script; no hidden format mark or look-alike letter; parameter names with hyphens or run together); the roster's
+    mechanism and the birth news drop every sentence with a number (no entry window or threshold on the page); Tuition
+    counts only families that held a tuition lot (its own branch of the funnel); a position's route is the band it was
+    opened on; under the byte limit the window leaves before any agent or row, with 32 KiB left for the site's names (a
+    40-character name on each of 508 rows); the window is not read while the site refuses it. After the post-fix
+    verification (Oct 1, 09:30Z): an apostrophe never hides a number word ("fifty's", "'twenty-day'", typographic
+    quotes), accents fold away before reading ("twénty"), a word split by a mark joins ("twen·ty"), cardinal plurals,
+    multiples ("quintuple"), "couple", "unity", "a score of", "-ish"/"-odd"/"-something" and "pct"/"bps" run together
+    are numbers (`number_words.json` is the case list the site tests too); and a trade's `why` on the public tape
+    (`agent.trade`, live today) is filtered by the same rules and the traded program's parameter names, or empty.
+    Publisher and swarm-feed files only (`league/publish.py`, `league/site_window.py`, `league/trading_profit.py`,
+    `league/swarm/public.py`, `league/swarm/sitefeed.py`, `league/swarm/hook.py`): nothing in `league/live`,
+    `league/gym` or `LEAGUE_FILES`, no evaluator adoption, no money digest. Site first (personal-site
+    `capital/swarm-window`); an older site gets the checkpoint without the window. Two nits from the verification
+    shipped as known limits: one accent case (a mark stuck to a number word) can still pass, and a fill on the netting
+    book publishes an empty `why`.
+- **Deploy.** With the nightly forward daemon stopped idle across it: staged 10:18:54Z, promoted 10:19:28Z over
+  `20261001T091620Z-08ad59436dc2`.
+- **No evidence reset, verified** (read-only): no evaluator adoption (fingerprint `47587e22`); lineage snapshots before
+  and after compared 1,770 lineages and found 0 violations. The money digest is unchanged (`42c4a3af`), so no ratify.
+- **The window, end to end:** at 10:29:02Z the public checkpoint (`curl -s
+  'https://blakewoods.us/api/capital/checkpoint?progress=1&positions=1&practice=1&window=1'`) carried `levels` and
+  `rationale`, so the site took the window; read again at 20:48Z, it still does.
+
+### 09:16Z, the money-path release: House release `20261001T091620Z-08ad59436dc2` (main `4bc49530`; PR #468: #465, #467)
+
+- **Contents.** Money path by the goal's definition (the live path's imports reach `researcher.py`, `gate.py`, `pool.py`
+  and `settings.py`), so it deployed outside 13:25-20:05Z. Nothing under `league/gym`, `league/live`, `LEAGUE_FILES`,
+  the constitution or the gateway. #463, first planned for this release, shipped on its own at 10:19Z.
+  - **An operator revival runs its program exactly** (#465, `league/swarm/researcher.py`). Until now a revival never ran
+    the revived program: a bare `gym_run` dropped the version's stored params, and cheap researchers rewrote the code at
+    once. Now, at the start of a cycle and before any rewrite or model turn, the harness runs a living Gym family's
+    latest operator-written version with its stored code and params, once per evaluator and Train span, through
+    `gym_run`'s own path (the same refusals, trial count, drift screen and robustness runs). A bare `gym_run` reruns the
+    latest version exactly. Audit a claim that a revival "re-validated with identical numbers" by its eval key (code sha
+    and merged params), not its version number.
+  - **Gate hardening** (#467; `scripts/data/nightly.py`, `league/swarm/settings.py`, `loop.py`, `pool.py`, `gate.py`).
+    The nightly forward chain records the gate image each day extends (`base_checkpoint`, `holdout_roots`), and the
+    swarm uses the ready file only when it extends `gym.gate_checkpoint` and covers `gym.roots`; otherwise it keeps
+    `swarm.json`'s gate and alerts `gate_chain_ignored`. The nightly refuses a chain it cannot prove before it wakes a
+    box. A gate box lists its holdout coverage when it starts, and the gate refuses a look up front for a missing root.
+    A look that fails for missing data costs no try, writes no "gym" refusal and bars nothing, and
+    `look_failed_three_times` fires at every count from three.
+- **Deploy.** The nightly forward daemon stopped idle; staged 09:16:23Z, promoted 09:16:58Z over B'
+  (`20261001T071033Z-95efdb353597`). Then #467's migration: `nightly.py stamp-ready`, a dry run and then `--apply`,
+  stamped the ready file with its base gate and its 25 holdout roots. The effective gate checkpoint did not change, no
+  ready file was ignored, and the daemon was un-stopped.
+- **No evidence reset, verified** (read-only): no evaluator adoption, the evaluator unchanged; lineage snapshots before
+  and after compared 1,770 lineages and found 0 violations; `real_money` true, `failures` []. The money digest is
+  unchanged (`42c4a3af`), so no ratify.
+- **The revival fix, in production.** Within 3 minutes the harness ran the living revivals' version 1 exactly
+  (`googl-lags-msft-ai-cloud-qqq-flat-r`, v27's program, and `silver-industrial-cycle-debit-r-r`, v20's), and Train and
+  the robustness runs landed. The GOOGL program then validated again under the current evaluator, passed review and
+  audit, and took its sealed 2026 holdout look at 09:39:56Z, the first look since Sept 27 and the first on the 25-root
+  gate. **It failed.** The gate barred the program from the incubator, and its open tuition lot stays exit-only to its
+  programmed exit.
+
+### 07:11Z, Release B': House release `20261001T071033Z-95efdb353597` (main `03c274c9`; PR #460: #446, #458, #459, #461)
+
+- **Contents.** Swarm-side only: nothing under `league/gym`, `league/live`, `LEAGUE_FILES`, the constitution or the
+  gateway, so no evidence reset. `researcher.py` and `bands.py` are in the live path's imports, so it deployed outside a
+  session.
+  - **Family cards** (#446; `league/swarm/cards.py`, `league/swarm/mechanism.py`). Every architect proposal carries a
+    schema-checked card (hypothesis, mechanism class, inputs, holding, cost, comparison, ablation, falsification); one
+    without a complete card is not born (`architect.require_card`). Cards are immutable in `family_cards`, and
+    researchers see them in every brief. A rebirth in a cell a mechanism verdict refuted is refused unless it names the
+    dead row, adds an input that row did not read and cites checkable evidence, within budgets
+    (`architect.max_rebirths_per_row` 2, `architect.max_rebirths_per_cell` 3 in 7 days; `architect.card_rebirth` "off"
+    turns it off). A blind mechanism test runs in shadow mode on a quarter of carded families and stops nothing.
+  - **The final release-B nits** (#458): the incubator's reader and the swarm agree on another family's owed audit
+    (fail-closed: no paid review for a program the reader would refuse), and the L1 keep holds every cohort the
+    incubator could pin, beyond its cap.
+  - **The architect's structure allowlist** (#459, `architect.structures`). Since release B, 47 of 78 births were
+    structures real money cannot trade at this equity. With `"real"`, the gaps, birth quotas, admission, forks and seeds
+    read only `allocation.real_structures` (debit verticals, long butterflies, long calls and puts, long singles), and a
+    refused proposal is named in the next request. Absent or null, every type stays allowed.
+  - **The retire guard** (#461; `researcher.retire_guard_days`, 14). Release B's adoption cleared every selection at
+    03:51Z, and within seconds the four families holding validated versions retired themselves, citing the evaluator
+    change. A researcher's `retire` is now refused while the family holds a version whose latest validation passed
+    within the window. The guard also reads the adoption events, so a second adoption cannot lift it; only a failed
+    validation of that version ends it.
+- **Deploy.** The nightly forward daemon stopped idle; staged 07:10:34Z, promoted 07:11:09Z over Release B
+  (`20261001T034829Z-d823e014ce16`); the daemon was un-stopped at 07:21:45Z. CI was green on 3.11 and 3.14.
+- **No evidence reset, verified** (read-only, after promotion): `research_evaluator` unchanged (bundle
+  `gym-engine-4-e1c896f8d304`, execution `47587e22…`, image `sbcp_13c5a61d`); 0 adoption events since 07:10Z; lineage
+  snapshots before and after compared 1,762 lineages and found 0 violations (11 grew by new trials); `real_money` true,
+  `failures` []. The money digest is unchanged (`42c4a3af`), so no ratify.
+- **Switched on, 07:20Z** (`swarm.json`, no deploy): `architect.structures` `"real"`. The first pass after B' bore a
+  silver-coupled vertical and a TSM long butterfly.
+- **Deferred:** #462 (keep the research selection when an adoption moves only the live fingerprint), a policy change,
+  because the owner's rule treats a live change as an evidence reset.
+- **Found after it:** two of the 07:02Z revivals retired themselves within 15 minutes after running new versions, never
+  the revived one. No more revivals until the 09:16Z release's fix (#465).
+
+### 05:55-07:30Z, operator changes (no deploy): revivals, a manual checkpoint, the holdout gate chain re-based
+
+- **About 05:55Z, the GOOGL family revived.** `googl-lags-msft-ai-cloud-qqq-flat` v27, whose tuition lot is open, had
+  retired itself over Sept 30's evaluator change. It is revived unchanged as `googl-lags-msft-ai-cloud-qqq-flat-r`, a
+  lineage continuation (123 inherited trials, no consumed look).
+- **06:58Z, a manual House checkpoint** (`house-manual-20261001`, kept to Oct 31): Sail's automatic House backups had
+  failed since Sept 30 05:54Z with a platform 503. They read OK again by 14:54Z.
+- **07:02Z, three revivals for Train-tier practice, not D2.** Each program passed Train at 1.5x and the drift screen
+  under release A; their validation verdicts stand.
+
+  | Revived as | From | Inherited trials |
+  |---|---|---|
+  | `silver-industrial-cycle-debit-r-r` | `silver-industrial-cycle-debit-r` v20 | 1,117 |
+  | `rate-lag-flat-index-meta-mara-r` | `rate-lag-flat-index-meta-mara` v33 | 217 |
+  | `market-distraction-release-call-r--2` | `market-distraction-release-call-r-2` v2 | 120 |
+
+  Two of them (`rate-lag-…-r`, `market-distraction-…-r--2`) retired themselves within 15 minutes without running the
+  revived program: the revival defect that #465 fixed at 09:16Z.
+- **07:05-07:30Z, the holdout gate chain re-based** (no data fetched, no evidence identity moved, no look consumed).
+  The nightly forward chain had extended the original five-root gate image, and its ready file overrode the 25-root
+  gate named in `swarm.json`. So every gate box since Sept 29 forked from a five-root holdout, and the GOOGL program's
+  look had failed three times on Sept 30 with "no holdout days for GOOGL, MSFT" (infrastructure failures, not looks).
+  With the daemon idle and stopped (07:05:31Z), the re-base wrote `data/images.json` and `data/nightly.json` (backups
+  kept) to name the 25-root gate image. The daemon restarted at 07:06:41Z, copied the forward days onto the new chain
+  (retrying through Sail transport timeouts) and published it at 07:26:13Z. Verified on an idle gate box: all 25 roots
+  hold the full 2026 holdout in nbbo, underlying and open interest, plus the forward days. The program's three failed
+  tries were reset to 0; the looks table still held 2 rows.
+
+### 04:25Z, operator change (no deploy): a pre-open research burst, reverted at 13:15Z
+
+- **`swarm.json` at 04:24:58Z:** `researcher.sail_usd_per_hour` 1.3 → 2.5, `gym.max_boxes` 6 → 8 and
+  `architect.every_seconds` 1800 → 900. Release B's reset had cleared every Train best, and practice cohorts form at
+  the 13:30Z open only from Train-eligible versions. Estimated cost: about $25. Train runs went from about 40 to about
+  195 an hour.
+- **Reverted at 13:15:00Z** by a timer, as planned, to 1.3, 6 and 1800 (verified at the 13:33Z open check). The revert
+  also ended the 11:03Z stopgap (`architect.every_seconds` 3600).
 
 ### 04:01Z, operator change (no deploy): the incubator switched on
 
