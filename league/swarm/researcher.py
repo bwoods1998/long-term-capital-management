@@ -77,13 +77,18 @@ THE VALIDATED-FAMILY GUARD (Oct 1). On Sept 30 the swarm's only D2-tuition famil
 and audit passed, tuition traded) was retired by its own researcher 17 seconds after an evaluator adoption, because "the
 evaluator changed" and its validated version "must be re-evaluated". An evaluator change re-evaluates; it never refutes.
 So `retire` is refused (`retire_guard`, a plain refusal that says why and, for an archived version, hands back its
-program to re-run) while the family holds a version that passed the validation line, in its state or in the selection an
-adoption archived (`previous_evaluator_selection`), last validated within `researcher.retire_guard_days` (14) days,
-unless the family's latest validation of that version under the current evaluator failed the line (`validation_refuted`:
-the tournament's record of each version's latest verdict and the evaluator it was judged under, `VERDICTS_KEY`, else the
-family's own validation line, which an adoption clears). The status says so in place of any offer to retire. The tool
-stays offered (`can_retire` is unchanged). Operator retirements, the tournament's rules (the deflated-Sharpe rule among
-them), the diagnostician and the population floor are unaffected.
+program to re-run) while the family holds a version that passed the validation line, last validated within
+`researcher.retire_guard_days` (14) days, unless the family's latest validation of that version under the current
+evaluator failed the line (`validation_refuted`: the tournament's record of each version's latest verdict and the
+evaluator it was judged under, `VERDICTS_KEY`, else the family's own validation line, which an adoption clears). A pass
+counts wherever it is held: the family's line, any passed verdict of `VERDICTS_KEY` (which no adoption clears and no
+other version's validation replaces), the selection the latest adoption archived (`previous_evaluator_selection`), and
+the selection every adoption within the window archived (its append-only `evaluator_adopted` event), so a second
+adoption, which replaces `previous_evaluator_selection` with the selection the first one already cleared, never lifts
+the guard. A failed holdout look does not end it (the gate retires nobody; only a failed validation under the current
+evaluator refutes here), and the tournament's own rules still apply. The status says so in place of any offer to
+retire. The tool stays offered (`can_retire` is unchanged). Operator retirements, the tournament's rules (the
+deflated-Sharpe rule among them), the diagnostician and the population floor are unaffected.
 
 EVENT-DRIVEN HOLDS (Sept 30). A held family is parked durably by `loop.Scheduler` until a result, rewrite, guidance,
 research agenda, data image or release changes. Elapsed time and process restarts alone never buy another call.
@@ -1030,37 +1035,104 @@ def validated_at(store: SwarmStore, fid: str, n: int, state: Mapping[str, Any]) 
     return max(known) if known else None
 
 
+#: The action of the event an adoption writes for each family (`evaluator.adopt`), whose `_previous_selection` keeps the
+#: selection it archived. The events are append-only, so each adoption's archive outlives the next adoption, which
+#: replaces the family's `previous_evaluator_selection` with the selection the first one already cleared.
+ADOPTED_ACTION = "evaluator_adopted"
+
+
+def _passed_version(source: Any) -> int | None:
+    """The version whose validation line a selection (the family's state, or one an adoption archived) says passed."""
+    if not isinstance(source, Mapping):
+        return None
+    line = source.get("validation_line")
+    n = _plain_int(source.get("validation_version"))
+    return n if n is not None and isinstance(line, Mapping) and line.get("passed") is True else None
+
+
+def adoption_archives(store: SwarmStore, fid: str, *, since: float) -> list[tuple[float, Mapping[str, Any]]]:
+    """The selections the evaluator adoptions since `since` (seconds) archived for family `fid`, newest first, each with
+    its adoption's time: read from the adoptions' own events (`ADOPTED_ACTION`), so an archive a later adoption replaced
+    in the family's state is still read. The events' (kind, at) index bounds the read to the window."""
+    from .store import iso
+
+    rows = store._all("SELECT at, payload FROM events WHERE kind='swarm.status' AND family=? AND at>=? AND payload LIKE ? "
+                      "ORDER BY seq DESC", (fid, iso(since), f'%"{ADOPTED_ACTION}"%'))
+    out: list[tuple[float, Mapping[str, Any]]] = []
+    for row in rows:
+        try:
+            payload = json.loads(row["payload"])
+        except (TypeError, ValueError):
+            continue
+        archive = payload.get("_previous_selection") if isinstance(payload, Mapping) else None
+        at = _epoch(row["at"])
+        if payload.get("action") == ADOPTED_ACTION and isinstance(archive, Mapping) and at is not None:
+            out.append((at, archive))
+    return out
+
+
 def retire_guard(store: SwarmStore, fam: Mapping[str, Any], settings: Mapping[str, Any], *, now: float) -> dict[str, Any] | None:
-    """THE VALIDATED-FAMILY GUARD (the module docstring): why the family's researcher may not retire it, or None. The
-    family holds a version that passed the validation line, in its state or in the selection an adoption archived
-    (`previous_evaluator_selection`), and that version's latest validation under the current evaluator did not fail the
-    line (`validation_refuted`), and it was last validated (`validated_at`) within `researcher.retire_guard_days`; a
-    version whose validation time is unknown counts as recent. A version validated only by a failed line never protects
-    (`validated_version` alone records any validation, passed or failed). Returns {"version", "archived", "days"}: the
-    state's own line first."""
+    """THE VALIDATED-FAMILY GUARD (the module docstring): why the family's researcher may not retire it, or None.
+
+    The family holds a version that passed the validation line, that version's latest validation under the current
+    evaluator did not fail the line (`validation_refuted`), and it was last validated (`validated_at`) within
+    `researcher.retire_guard_days`. A pass is read, in this order, from: the family's own line; each passed verdict the
+    tournament recorded (`VERDICTS_KEY`, newest first: it survives any number of adoptions and another version's
+    validation replacing the line); the selection the latest adoption archived (`previous_evaluator_selection`); and the
+    selection each adoption within the window archived (`adoption_archives`: a pass recorded before the verdicts were
+    kept, which a second adoption replaced in the state). A version whose validation time is unknown is guarded only
+    from an adoption's archive, counted from that adoption (a validation precedes the adoption that archived it); never
+    without a limit. A version validated only by a failed line never protects (`validated_version` alone records any
+    validation, passed or failed). Returns {"version", "archived", "days"}; `archived` says the pass was judged under an
+    earlier evaluator."""
     days = retire_guard_days(settings)
     if days <= 0:
         return None
     from .evaluator import KEY
 
+    fid = str(fam["id"])
     state = fam.get("state") or {}
+    span = days * 86400.0
+    seen: set[int] = set()
+    current: list[Any] = []
+
+    def check(n: int | None, archived: bool, adopted_at: float | None = None) -> dict[str, Any] | None:
+        if n is None or n in seen:
+            return None
+        if not current:
+            current.append(store.get(KEY))
+        if validation_refuted(state, n, current[0]):
+            seen.add(n)
+            return None
+        at = validated_at(store, fid, n, state)
+        at = adopted_at if at is None else at
+        if at is None:
+            return None  # an unknown time never guards without a limit; an adoption's archive of it may say when
+        seen.add(n)
+        return {"version": n, "archived": archived, "days": days} if now - at <= span else None
+
+    guard = check(_passed_version(state), False)
+    if guard:
+        return guard
+    records = state.get(VERDICTS_KEY)
+    passes = sorted(((str(r.get("at") or ""), str(k), r) for k, r in records.items()
+                     if isinstance(r, Mapping) and r.get("passed") is True), reverse=True) if isinstance(records, Mapping) else []
+    for _, k, record in passes:
+        if not current:
+            current.append(store.get(KEY))
+        guard = check(int(str(k)) if str(k).isdigit() else None, record.get("evaluator") != current[0])
+        if guard:
+            return guard
     archive = state.get("previous_evaluator_selection")
-    sources = [(state, False)] + ([(archive, True)] if isinstance(archive, Mapping) else [])
-    current: Any = None
-    read = False
-    for source, archived in sources:
-        line = source.get("validation_line")
-        n = _plain_int(source.get("validation_version"))
-        if n is None or not isinstance(line, Mapping) or line.get("passed") is not True:
-            continue
-        if not read:
-            current, read = store.get(KEY), True
-        if validation_refuted(state, n, current):
-            continue
-        at = validated_at(store, str(fam["id"]), n, state)
-        if at is not None and now - at > days * 86400.0:
-            continue
-        return {"version": n, "archived": archived, "days": days}
+    if not isinstance(archive, Mapping):
+        return None  # no adoption has archived a selection of this family: none of its events holds one either
+    guard = check(_passed_version(archive), True)
+    if guard:
+        return guard
+    for adopted_at, old in adoption_archives(store, fid, since=now - span):
+        guard = check(_passed_version(old), True, adopted_at)
+        if guard:
+            return guard
     return None
 
 
@@ -3555,4 +3627,5 @@ __all__ = ["Researcher", "TOOLS", "TOOLS_READ", "TOOLS_REVISE", "RUNS", "needs_o
            "idle_evaluations", "idle_limit", "RETIRE_IDLE_EVALUATIONS", "NEGATIVE_FACTOR", "DORMANT_CYCLES", "ALREADY_RUN",
            "dormant_limit", "dormant_count", "awaiting_validation", "holding", "held_at_gate", "new_run", "revalidation_owed",
            "objective_for", "span_of", "CORE_SPAN", "RETIRE_GUARD_DAYS", "VERDICTS_KEY", "retire_guard", "retire_guard_days",
-           "record_verdict", "validation_refuted", "validated_at", "guard_words"]
+           "record_verdict", "validation_refuted", "validated_at", "guard_words", "adoption_archives",
+           "ADOPTED_ACTION"]

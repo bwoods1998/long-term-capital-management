@@ -280,8 +280,9 @@ Agent count and simulated years measure activity; passing unseen evidence measur
   EXHAUSTED are tested findings, and only a family that never traded on Train is IDLE, a time limit.
   A family that holds three cycles in a row with a Train record behind it is offered `retire`, and its
   researcher's own retirement is SELF-REFUTED. Its researcher may not retire it while it holds a version that passed
-  the validation line (archived by an evaluator adoption or not) within 14 days, unless that version fails the line
-  under the current evaluator: an evaluator change re-evaluates, it never refutes. A family whose latest validation
+  the validation line within 14 days (archived by one evaluator adoption or several, or replaced on the family's line
+  by another version's validation), unless that version fails the line under the current evaluator: an evaluator
+  change re-evaluates, it never refutes. A family whose latest validation
   met six of the eight checks is exempt from the dormancy clause until its 2017-19 extension result lands. Its
   lessons go to the graveyard, which every new family's researcher reads first. The graveyard is ranked
   by BM25, a new family is born with three distinct lessons, and it also holds the operator's own

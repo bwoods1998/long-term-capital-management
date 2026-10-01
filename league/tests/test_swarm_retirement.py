@@ -891,6 +891,111 @@ class ValidatedFamilyGuard(ResearcherCase):
         self.assertEqual(row["family"], self.fid)
         self.assertFalse(self.alive())
 
+    # The second adoption (the House adopted at Sept 30 20:08Z and again at Oct 1 03:51Z, 7h43m apart): it replaces
+    # `previous_evaluator_selection` with the selection the first one already cleared, so the archived pass is no longer
+    # in the family's state. The guard reads the adoptions' own events and the tournament's verdicts instead.
+    SECOND_ADOPTION = 7 * 3600 + 43 * 60
+
+    def adopt_again(self, image="newer-image"):
+        self.clock.advance(self.SECOND_ADOPTION)
+        self.assertTrue(adopt(self.store, identity(image, bands._bundle()))["adopted"])
+
+    def judge(self, n, *, passed, name=None):
+        """Version n judged on Validation by the real tournament (its best now), so its verdict record is written."""
+        self.store.update_family(self.fid, best_version=n)
+        row = (result(name or f"val-{n}", window="validation") if passed else
+               result(name or f"val-{n}", window="validation", mean=-0.01, t=-0.5, quarters="1/4", pnl=-100.0))
+        verdict = Tournament(self.store, self.pool, self.settings, clock=self.clock).judge(self.fid, n, row)
+        self.assertEqual(verdict["passed"], passed)
+        return verdict
+
+    def test_a_second_adoption_does_not_lift_the_guard(self):
+        """googl's timeline with a pass written before the verdicts were kept (no record), then a second adoption."""
+        self.googl()
+        self.adopt_again()
+        state = self.store.family(self.fid)["state"]
+        self.assertIsNone(state["previous_evaluator_selection"]["validation_line"], "the second adoption archived nulls")
+        self.assertIsNone(state.get(VERDICTS_KEY))
+        guard = retire_guard(self.store, self.store.family(self.fid), self.settings, now=self.clock())
+        self.assertEqual((guard["version"], guard["archived"]), (1, True), "read from the first adoption's event")
+        out, outputs, body = self.retire_cycle()
+        self.assertTrue(out["retire_refused"])
+        self.assertEqual(out["retire_guarded"], 1)
+        self.assertNotIn("retired", out)
+        self.assertTrue(self.alive())
+        version = self.store.version(self.fid, 1)
+        self.assertEqual(outputs[0]["program"], {"version": 1, "code": version["code"], "params": version.get("params") or {}})
+        self.assertIn("passed the validation line before the evaluator changed", self.status_of(body))
+        self.adopt_again("newest-image")  # a third one too
+        self.assertEqual(retire_guard(self.store, self.store.family(self.fid), self.settings, now=self.clock())["version"], 1)
+
+    def test_a_recorded_pass_survives_any_number_of_adoptions(self):
+        self.judge(1, passed=True)
+        record = self.store.family(self.fid)["state"][VERDICTS_KEY]["1"]
+        self.assertTrue(record["passed"])
+        for image in ("newer-image", "newest-image"):
+            self.adopt_again(image)
+        state = self.store.family(self.fid)["state"]
+        self.assertIsNone(state["previous_evaluator_selection"]["validation_line"])
+        self.assertEqual(state[VERDICTS_KEY]["1"], record, "no adoption clears the record")
+        guard = retire_guard(self.store, self.store.family(self.fid), self.settings, now=self.clock())
+        self.assertEqual((guard["version"], guard["archived"]), (1, True), "judged under an earlier evaluator")
+        self.assertTrue(self.retire_cycle()[0]["retire_refused"])
+        self.assertTrue(self.alive())
+
+    def test_a_failure_under_the_current_evaluator_after_a_second_adoption_still_refutes(self):
+        self.googl()
+        self.adopt_again()
+        self.judge(1, passed=False, name="val-again")  # its researcher re-ran version 1 unchanged; it fails now
+        self.assertIsNone(retire_guard(self.store, self.store.family(self.fid), self.settings, now=self.clock()))
+        out, _, _ = self.retire_cycle("Version 1 failed the validation line under the current evaluator.")
+        self.assertTrue(out["retired"])
+        self.assertFalse(self.alive())
+
+    def test_a_pass_under_the_current_evaluator_survives_another_versions_failure(self):
+        """No adoption: version 1 passes, then version 2's failure replaces the family's line. Version 1 still guards."""
+        self.judge(1, passed=True)
+        self.store.set_state(self.fid, gate_ready=False)  # its holdout look spent
+        self.store.add_version(self.fid, self.code + "\n# another version\n", {}, author="test")
+        self.judge(2, passed=False)
+        state = self.store.family(self.fid)["state"]
+        self.assertEqual((state["validation_version"], state["validation_line"]["passed"]), (2, False))
+        self.assertEqual({k: v["passed"] for k, v in state[VERDICTS_KEY].items()}, {"1": True, "2": False})
+        guard = retire_guard(self.store, self.store.family(self.fid), self.settings, now=self.clock())
+        self.assertEqual((guard["version"], guard["archived"]), (1, False))
+        out, outputs, body = self.retire_cycle("Version 2 failed validation; the mechanism is exhausted.")
+        self.assertTrue(out["retire_refused"])
+        self.assertEqual(outputs[0]["version"], 1)
+        self.assertNotIn("program", outputs[0], "judged under the current evaluator: nothing to re-run")
+        self.assertTrue(self.alive())
+        self.assertIn("Your family holds version 1, which passed the validation line.", self.status_of(body))
+        # A failure of version 1 itself under the current evaluator ends it.
+        self.judge(1, passed=False, name="val-1-again")
+        self.assertIsNone(retire_guard(self.store, self.store.family(self.fid), self.settings, now=self.clock()))
+
+    def test_a_recorded_pass_lapses_with_the_window(self):
+        self.judge(1, passed=True)
+        self.adopt_again()
+        self.clock.advance(14 * 86400 - self.SECOND_ADOPTION - 60)
+        self.assertIsNotNone(retire_guard(self.store, self.store.family(self.fid), self.settings, now=self.clock()))
+        self.clock.advance(120)
+        self.assertIsNone(retire_guard(self.store, self.store.family(self.fid), self.settings, now=self.clock()))
+
+    def test_an_unknown_validation_time_never_guards_without_a_limit(self):
+        """A passed line with no validation run and no record: in the state alone it does not guard; archived by an
+        adoption it guards from that adoption, which the validation preceded, for the window and no longer."""
+        self.store.update_family(self.fid, validated_version=1, validations=1, trials=73)
+        self.store.set_state(self.fid, validation_line=line_of(8), validation_version=1)
+        self.assertIsNone(retire_guard(self.store, self.store.family(self.fid), self.settings, now=self.clock()))
+        self.clock.advance(3600)
+        adopt(self.store, identity("new-image", bands._bundle()))
+        adopted = self.clock()
+        self.adopt_again()
+        guard = retire_guard(self.store, self.store.family(self.fid), self.settings, now=self.clock())
+        self.assertEqual((guard["version"], guard["archived"]), (1, True))
+        self.clock.advance(adopted + 14 * 86400 + 60 - self.clock())
+        self.assertIsNone(retire_guard(self.store, self.store.family(self.fid), self.settings, now=self.clock()))
+
     def test_record_verdict_keeps_the_newest_versions(self):
         state: dict = {}
         for n in range(1, 70):

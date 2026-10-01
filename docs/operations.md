@@ -1457,7 +1457,7 @@ the swarm's loop for up to the meters' 20 s timeouts, at most once every 5 minut
 | `researcher.probe_year`, `probe_timeout_seconds` | `swarm.json` on the box | default null (off), 300 (R11b) | the Gym's zero-trade probe: 2022 switches it on | edit `swarm.json` |
 | `tournament.exploit_per_positive` | `swarm.json` on the box | default 0.15 (R11b) | the bandit's exploit share a positive old family earns; null: `explore_share` alone, as before | edit `swarm.json` |
 | `researcher.hold_until_news`, `retire_min_trials` | `swarm.json` on the box | defaults true, 10 (Release A, #431) | durable holds that only new evidence wakes (false: the R4 timer); the trials after which a researcher may retire its family | edit `swarm.json` |
-| `researcher.retire_guard_days` | `swarm.json` on the box | default 14 (Oct 1) | the validated-family guard: a researcher may not retire a family that holds a version which passed the validation line (in its state, or archived by an evaluator adoption) last validated within this many days, unless that version failed the line under the current evaluator; a number at or below 0 turns it off; null, a boolean or a string reads as 14 | edit `swarm.json` |
+| `researcher.retire_guard_days` | `swarm.json` on the box | default 14 (Oct 1) | the validated-family guard: a researcher may not retire a family that holds a version which passed the validation line (in its state, in the tournament's verdict records, or archived by any evaluator adoption) last validated within this many days, unless that version failed the line under the current evaluator; a number at or below 0 turns it off; null, a boolean or a string reads as 14 | edit `swarm.json` |
 | `funding` (`enabled`, `every_seconds`, `lead_hours`, `repeat_hours`, `clear_factor`, `claude_out_usd`, `burn_window_hours`, `after_end_hours`, `fallback_every_seconds`, `fallback_flush_seconds`) | `swarm.json` on the box | defaults (Release A, #439): on, 300, per cliff, 12, 1.5, 2, 6, 48, 21600, 30 | the funding cliff alerts (**Funding cliffs and alerts**) | edit `swarm.json` |
 | `research.enabled`, `requests_day`, `family_requests_day`, `cycle_calls` | `swarm.json` on the box | defaults (Release B, #447): false, 300, 12, 2 | the research library on the House, and its lines: calls a UTC day for the floor, a family, a research cycle (**The research library**) | edit `swarm.json`; on only after the gateway and the House that carry it |
 | The money rules | `league/constitution.py` | the sprint's D4 table and the House live test's bounds (money `a3e2aa7c`); Release B adds the incubator's row (`42c4a3af`) | what real money may do | owner deploy, then `--ratify` |
@@ -1576,14 +1576,20 @@ promotion threshold:
   work and extension/operator holds remain protected; the floor prevents concurrent retirements from draining the
   population. The agent must explain abandonment, and all prior evidence remains.
 - The validated-family guard (Oct 1, `researcher.retire_guard_days`, default 14): the retire tool refuses while the
-  family holds a version that passed the validation line, in its state or in `previous_evaluator_selection` (archived by
-  an adoption), last validated within that many days, unless the family's latest validation of that version under the
-  current evaluator failed the line (the tournament keeps each version's latest verdict and its evaluator in
-  `validation_verdicts`). The refusal says why and, for an archived version, returns its program to re-run unchanged;
-  the status says so in place of any offer to retire, and the prompt says an evaluator change is never a reason to
-  retire. It exists because googl-lags-msft-ai-cloud-qqq-flat, the only D2-tuition family, was retired by its own
-  researcher 17 seconds after the Sept 30 20:08Z adoption. Operator retirements, the tournament's rules (the
-  deflated-Sharpe rule and the idle rule among them), the diagnostician and the population floor are unaffected.
+  family holds a version that passed the validation line, last validated within that many days, unless the family's
+  latest validation of that version under the current evaluator failed the line (the tournament keeps each version's
+  latest verdict and its evaluator in `validation_verdicts`). A pass counts wherever it is held: the family's line, a
+  passed record in `validation_verdicts` (no adoption clears it and no other version's validation replaces it),
+  `previous_evaluator_selection`, and the selection each adoption within the window archived in its own append-only
+  `evaluator_adopted` event. So a second adoption, which overwrites `previous_evaluator_selection` with the selection
+  the first one already cleared (the House adopted at Sept 30 20:08Z and again at Oct 1 03:51Z), never lifts it. A
+  version whose validation time is unknown guards only from an adoption's archive, counted from that adoption. A
+  failed holdout look does not end it (the gate retires nobody; the tournament's rules still apply). The refusal says
+  why and, for a version passed under an earlier evaluator, returns its program to re-run unchanged; the status says so
+  in place of any offer to retire, and the prompt says an evaluator change is never a reason to retire. It exists
+  because googl-lags-msft-ai-cloud-qqq-flat, the only D2-tuition family, was retired by its own researcher 17 seconds
+  after the Sept 30 20:08Z adoption. Operator retirements, the tournament's rules (the deflated-Sharpe rule and the
+  idle rule among them), the diagnostician and the population floor are unaffected.
 - `gym_run` and every variant of `gym_sweep` receive the static experiment-contract check before any version or Gym job
   is created. Changed parameters that are provably unread, invalid override types and malformed declarations return
   an actionable refusal without consuming a replay trial. A valid zero-trade control remains admissible.
