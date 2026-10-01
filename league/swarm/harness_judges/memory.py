@@ -42,17 +42,26 @@ rebirths perfectly: a lever refusing such cards would cut every rebirth here whi
 idea whose card reads like an idle death beside it (the vocabulary is coarse; those deaths are no finding about the
 mechanism). So every idea row's slice also holds a NOVEL proposal under that row's exact class, inputs and holding,
 with a new idea's text as its mechanism and hypothesis, a claim no other proposal carries but its twin (CLAIMS; dev:
-`CONTROLS`, or a public text whose words read exactly as the row's, `SAME_READING`; held-out: a text from the pool).
+`CONTROLS`, public texts; held-out: a text from the pool).
 The card rules admit it (an idea row is no refuted cell, and its holding is short), so a card-keyed refusal, exact or
 on overlapping inputs, refuses these controls too and `novel_refused` rises; with the citations' one shape
 (CITATIONS), only the words tell a restatement from a control, and the words are what the lane's lever reads
 (`same_cell_proposed`, `same_cell_refused` report them). The controls' words are their own idea's: a refusal that
-also asks the words to read (production's keyword reading) as the dead row's class or inputs refuses on the words'
-coarse reading, and is caught where a new idea's words read like a dead row's. On dev, rows 2 and 3's controls read
-exactly as their rows (class and inputs), one of them a text from outside every lane's surface (so an exemption keyed
-to the surface's own texts, the founding families', does not shield such a refusal), and row 1's as its class; on
-held-out, each control takes the untaken pool text (a spare bank text or a novel one) that reads closest to its row's
-first (the seed breaking ties), so how often the held-out split sees such a refusal depends on the pool's texts.
+also asks the words to read (production's keyword reading of the written text against the card's key, `reading`) as
+the dead row's class or inputs refuses on the words' coarse reading, and is caught where a new idea's words read like a
+dead row's. Nor are the controls' words that read so of a kind apart from a restatement's (the round-3 review of v4's
+verdict: the dev controls that read as their rows all named an option structure and a trade, while no restatement did,
+so a refusal of a keyed card whose words read as its key and named no structure cut the rebirths 8 to 4 on dev with
+`novel_refused` 0 and passed the lane's rules on 6 of 10 test-pool seeds). On dev (`SAME_READING`), rows 2 and 3's
+controls read exactly as their rows (class and inputs) and rows 0, 1, 4 and 6's as the class only, and rows 0, 1, 2, 4
+and 7's are plain market claims like the bank's (`PLAIN`: no structure noun, no trade verb, no ticker). Row 2's reads
+exactly, is plain, and is a public text from outside every lane's surface, so neither an exemption keyed to the
+surface's own texts (the founding families') nor one for words naming a structure, a trade or a ticker shields such a
+refusal there. On held-out, each control takes the untaken pool text (a spare bank text or a novel one) whose words
+read closest to its row's key first (the seed breaking ties), so how often the held-out split sees such a refusal
+depends on the pool's texts; the answer says how often it can (`same_cell_reading_exact`, `same_cell_reading_class`:
+the controls whose written words read exactly, or as the class only, as their row's key), and the operator's floor
+check prints CHECK when none reads exactly.
 
 CLAIMS (no claim twice in a batch but a twin pair). Every same-cell control and every plain new idea carries a claim
 (its `idea`) that no other proposal carries. A claim is carried twice only by a TWIN PAIR: once on its dead slice and
@@ -66,11 +75,12 @@ a lever refusing a card keyed like a dead family's on its slice whose first sent
 and whose words did not read as its card cut the rebirths 8 to 4 on dev and passed the lane's rules there and on six
 test-pool seeds. With every claim distinct, the moved ideas alone would have marked their restatements: a lever
 refusing a keyed card whose claim recurs on a live slice cut them 8 to 6 and passed too; the controls' twins answer
-it). Dev: every claim is the judge's own (public before the memory pool's last rotation, e67bfa18) or copied verbatim
-from a public file that held it before then, so none is new public text. Held-out: the controls and the plain new
-ideas are drawn without replacement from the bank's spare texts and the pool's novel ones, the controls first (an idea
-row without one would leave its restatement alone under its key on its slice), then the plain new ideas, then the card
-path; a pool with too few texts gets fewer cases, never a reused claim, and the answer reports the shortfall
+it). Dev: every claim is the judge's own (in this file before the memory pool's last rotation, e67bfa18, some only in
+its first versions, 49303e42 and dae58397) or copied verbatim from a public file that held it before then, so none is
+new public text. Held-out: the controls and the plain new ideas are drawn without replacement from the bank's spare
+texts and the pool's novel ones, the controls first (an idea row without one would leave its restatement alone under
+its key on its slice), then the plain new ideas, then the card path; a pool with too few texts gets fewer cases, never
+a reused claim, and the answer reports the shortfall
 (`claims_short`, which the operator's floor check prints as CHECK). The construction is checked before the tree's
 architect loads (`paired`), or no answer.
 
@@ -97,20 +107,29 @@ slice), or no answer.
 dev (this file): eight idea rows, two card-path rows, their light restatements and eighteen novel proposals (six on
 idea rows' slices under their own reading, two buried mechanisms moved to another root, eight same-cell controls and
 the twins of rows 0 and 1's controls), each written with every table entry and no draw (every synonym that occurs, the
-first second sentence, no hedge).
+first second sentence, no hedge), the batch in a fixed public order (`DEV_ORDER`, a seeded shuffle, so a proposal's
+place carries no label: until the round-3 review the restatements came first).
 heldout: a PRIVATE bank of buried mechanisms, novel ideas, synonyms, second sentences, hedges and slices from the lane's
 pool, which lives outside this public repo and reaches the judge only on standard input (`_common.args`,
 `--pool-stdin`), every proposal written with synonym swaps, reordered clauses and hedges from a seed that exists only
-once the candidate is committed. The pool needs no card field: every card is derived from the drawn cases.
+once the candidate is committed, the batch shuffled by the same seed. The pool needs no card field: every card is
+derived from the drawn cases. A known limit of the public TEST pool (league/tests/test_swarm_harness_lanes.py, which
+only exercises the machinery): its bank texts all carry the word "fixture" and most of its novel texts do not, so there
+a refusal keyed to that word tells a restatement (a bank text) from a control (mostly a novel text). Any pool whose bank
+and novel texts differ in vocabulary or register has the same tell, so the private pool's are written alike (plain
+market claims, in one register: the playbook's note on rotating the memory pool).
 
 Answer: rebirths_admitted, novel_refused, trials_uncounted (a birth on a slice with a buried family that neither
 continues a lineage nor counts the slice's trials: the multiple-testing control loosened; must be 0),
 mechanism_rewritten (a birth whose mechanism is not its proposal's text: the rebirth detector would be fooled; must be
 0), rebirths_fresh_lineage (admitted rebirths that start a lineage other than their buried row's: a fresh look ration),
 card_path_admitted (card-path restatements born: the card check bypassed; must be 0), same_cell_proposed and
-same_cell_refused (the controls, refused ones counted in novel_refused too), claims_short (controls and plain new
-ideas the split's texts could not give a claim of their own: 0, or the held-out split is thinner than built and the
-operator's floor check prints CHECK), sqlite_statements (the store work, the lane's cost).
+same_cell_refused (the controls, refused ones counted in novel_refused too), same_cell_reading_exact and
+same_cell_reading_class (the controls whose written words read exactly, or as the class only, as their row's card key:
+how often the split can catch a refusal on the words' reading; the operator's floor check prints CHECK when no
+held-out control reads exactly), claims_short (controls and plain new ideas the split's texts could not give a claim of
+their own: 0, or the held-out split is thinner than built and the operator's floor check prints CHECK),
+sqlite_statements (the store work, the lane's cost).
 """
 from __future__ import annotations
 
@@ -147,33 +166,34 @@ CARD_BANK = ["Back-month implied volatility stays too steep after a volatility s
 CARD_SLICES = [("long_butterfly", ["SPY"]), ("calendar", ["QQQ"])]
 #: Card-path rows the held-out split draws from the pool's bank, at most (fewer when the bank cannot spare them).
 CARD_PATH = 2
-#: Dev controls whose words read exactly as their row's (production's keyword reading: the same class and inputs) while
-#: saying another idea, each copied verbatim from a public file (never read from the tree under test) that was public
-#: before the private pools were drawn: row 2's a graveyard-digest test fixture
-#: (league/tests/test_swarm_graveyard_digest.py, outside every lane's surface: no candidate edits it, and an exemption
-#: keyed to the founding families' texts does not cover it), row 3's a founding family's mechanism
-#: (league/swarm/seeds.py).
-#: No other dev control's claim reads exactly as its row.
-SAME_READING = {
-    2: "Owning a QQQ straddle before the open pays when overnight gaps extend.",
+#: The dev split's same-cell controls, idea row n's claim (CLAIMS in the module docstring: no claim twice in a batch but
+#: a twin pair), each saying another idea than its row's. None is new public text: each was public before the memory
+#: pool's last rotation (e67bfa18), and none is read from the tree under test. Rows 0 and 4's are the judge's own first
+#: held-out bank texts (this file at 49303e42), row 1's one of its first held-out novel ideas (this file at dae58397),
+#: row 2's a strategist test fixture (league/tests/test_swarm_strategist.py), row 3's a founding family's mechanism
+#: (league/swarm/seeds.py), row 5's a store test fixture (league/tests/test_swarm_store.py), row 6's a graveyard-digest
+#: test fixture (league/tests/test_swarm_graveyard_digest.py), row 7's a lanes test fixture
+#: (league/tests/test_swarm_harness_lanes.py). Every test fixture here is outside every lane's surface: no candidate
+#: edits it, and an exemption keyed to the founding families' texts does not cover it.
+CONTROLS = {
+    0: "Semiconductor leadership over the broad growth index predicts a catch-up move in the laggard fund within two "
+       "weeks.",
+    1: "Large single-name earnings in the index's top weights move index implied volatility more than its peers.",
+    2: "Small caps overshoot and the move increases into quarter-end flows.",
     3: "Short-dated index options price a bigger move than follows on average (the variance risk premium); an iron condor "
        "sells it with the loss capped at the wing.",
-}
-#: The dev split's other same-cell controls, idea row n's claim (CLAIMS in the module docstring: no claim twice in a
-#: batch but a twin pair). Each is copied verbatim from a test fixture outside every lane's surface that was public
-#: before the memory pool's last rotation (e67bfa18), so none is new public text: row 0's league/tests/test_commons.py,
-#: row 1's league/tests/test_swarm_rounds.py (its words read as row 1's class), rows 4 and 6's
-#: league/tests/test_publish.py, row 5's league/tests/test_swarm_store.py, row 7's
-#: league/tests/test_swarm_harness_lanes.py.
-CONTROLS = {
-    0: "Most of the index's return since 1993 accrued between the close and the next open, not during the day.",
-    1: "Single-name momentum after earnings with debit verticals on the move.",
-    4: "Rides trend days: once the first two hours close far from the open, it buys a vertical in that direction.",
+    4: "Quarter-end window dressing lifts recent winners into the last week of the quarter.",
     5: "Buy a QQQ straddle into earnings: the overnight gap is underpriced convexity.",
-    6: "Trades the break of the opening range in the direction of the break, with a vertical sized by its maximum "
-       "loss.",
+    6: "Owning a QQQ straddle before the open pays when overnight gaps extend.",
     7: "Treasury auctions with weak demand push long yields up into the close of the day.",
 }
+#: How each dev control's written words read as its row's card key (`reading`, production's keyword reading): 2 the
+#: same class and inputs, 1 the same class only. The rows not named read as neither.
+SAME_READING = {0: 1, 1: 1, 2: 2, 3: 2, 4: 1, 6: 1}
+#: The dev controls that are plain market claims like the bank's: no structure noun, no trade verb, no ticker. Row 2's
+#: reads exactly as its row, so a refusal of reading words that spares texts naming a structure, a trade or a ticker
+#: still refuses a control on dev.
+PLAIN = (0, 1, 2, 4, 7)
 #: Moved claims the dev split twins (CLAIMS): idea rows 0 and 1's restatements' (their moved ideas) and their controls'.
 MOVED = 2
 SYNONYMS = {"lag": "trail", "catches up": "closes the distance", "tends to": "usually", "bid": "elevated", "decays": "fades",
@@ -212,6 +232,9 @@ CARD_FIXED = {"cost": {"hurdle": 0.1, "why": "a fixed estimate of the round trip
               "comparison": "The same structure entered on the same schedule without the signal's condition.",
               "falsification": "Its entries do not beat the comparison's entries after the spread and fees on Train."}
 HYPOTHESIS_PAD = " (the judge's case, restated as its card's hypothesis)"
+#: The dev batch's order: a shuffle seeded by this public string, fixed, so a proposal's place in the batch carries no
+#: label (the held-out batch is shuffled by its own seed).
+DEV_ORDER = "memory-dev-order"
 
 
 def restate(text: str, r: Any | None, pool: dict | None = None) -> str:
@@ -251,11 +274,13 @@ def cases(split: str, seed: str, pool: dict | None = None) -> tuple[list[dict[st
                       "dte": b["dte"], "path": b["path"], "source": n} for n, b in enumerate(buried)]
         proposals += [{"label": "novel", "idea": text, "structure": SLICES[n][0], "roots": SLICES[n][1], "dte": SHORT}
                       for n, text in enumerate(NOVEL)]
-        controls = [{"label": "novel", "idea": SAME_READING.get(n) or CONTROLS[n], "structure": b["structure"],
-                     "roots": b["roots"], "dte": SHORT, "cell": n} for n, b in enumerate(idea)]
+        controls = [{"label": "novel", "idea": CONTROLS[n], "structure": b["structure"], "roots": b["roots"],
+                     "dte": SHORT, "cell": n} for n, b in enumerate(idea)]
         moved = [(SLICES[(n + 3) % 8][0], ["DIA"]) for n in range(MOVED)]
         proposals += twinned(idea, controls, moved)
-        return buried, cited(buried, written(proposals, None))
+        proposals = cited(buried, written(proposals, None))
+        _common.rng(DEV_ORDER, PROTOCOL).shuffle(proposals)
+        return buried, proposals
     if not pool:
         raise ValueError("the held-out split is drawn from the lane's private pool")
     r = _common.rng(seed, PROTOCOL)
@@ -284,7 +309,7 @@ def cases(split: str, seed: str, pool: dict | None = None) -> tuple[list[dict[st
     r.shuffle(fresh)
     # The same-cell controls first, one per idea row while texts last (an idea row without one would leave its
     # restatement alone under its key on its slice), on its slice, the text whose own words read closest to the row's
-    # (production's keyword reading: class and inputs, then class) first, the seed breaking ties.
+    # card key (production's keyword reading: class and inputs, then class) first, the seed breaking ties.
     from league.swarm import cards  # the pinned base's (no lane's surface holds it): nothing of the tree's loads here
 
     controls = []
@@ -388,12 +413,18 @@ def citation(row_id: str, mechanism: str) -> list[dict[str, str]]:
 
 
 def reads_as(cards: Any, text: str, row: dict[str, Any]) -> int:
-    """How closely a text's own words read as a buried row's (production's keyword reading, `cards.infer_key` and
-    `cards.infer_inputs`): 2 the same class and inputs, 1 the same class, else 0."""
-    mine, theirs = cards.infer_key(text, None, row["dte"]), cards.infer_key(row["mechanism"], None, row["dte"])
-    if not (mine and theirs and mine["class"] == theirs["class"]):
+    """How closely a text's own words read as a buried row's card key (`reading` against the row's `terms`)."""
+    return reading(cards, text, terms(cards, row["mechanism"], row["dte"]))
+
+
+def reading(cards: Any, text: str, cell: dict[str, Any]) -> int:
+    """How closely a text's own words read as a card's cell (production's keyword reading, `cards.infer_key` and
+    `cards.infer_inputs`, against the cell's class and inputs, as a refusal on the words' reading compares them): 2 the
+    same class and inputs, 1 the same class only, else 0."""
+    mine = cards.infer_key(text, None, SHORT)
+    if mine is None or mine["class"] != cell["mechanism_class"]:
         return 0
-    return 2 if cards.infer_inputs(text) == cards.infer_inputs(row["mechanism"]) else 1
+    return 2 if cards.infer_inputs(text) == sorted(cell["inputs"]) else 1
 
 
 def holding(dte: list[int]) -> str:
@@ -466,6 +497,9 @@ def main() -> None:
 
         dead_cards, live_cards = carded(cards, buried, proposals)
         paired(buried, proposals)
+        # How the controls' written words read as their cards' keys (each control's card is its row's): how often this
+        # split can catch a refusal on the words' reading (SAME-CELL CONTROLS in the module docstring).
+        reads = [reading(cards, p["mechanism"], c) for p, c in zip(proposals, live_cards) if "cell" in p]
 
         from league.swarm.architect import Architect
         from league.swarm.store import SwarmStore
@@ -545,6 +579,7 @@ def main() -> None:
                         "card_path_admitted": card_born,
                         "card_path_proposed": sum(1 for p in proposals if p.get("path") == "card"),
                         "same_cell_proposed": controls, "same_cell_refused": controls - controls_born,
+                        "same_cell_reading_exact": reads.count(2), "same_cell_reading_class": reads.count(1),
                         "claims_short": short,
                         "rebirths_proposed": sum(1 for p in proposals if p["label"] == "rebirth"), "novel_proposed": novel_total,
                         "born": len(by_case), "sqlite_statements": len(statements), "cases": len(proposals)}
