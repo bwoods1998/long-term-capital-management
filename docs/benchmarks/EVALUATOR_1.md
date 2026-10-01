@@ -257,21 +257,27 @@ shared generator a program can draw from (`state_numpy_draws`), and the ctx view
 (`state_ctx_batchmates`).
 
 **What a program can reach and write.** The reach proof walks everything a program can reach from `import numpy` and
-`import math` without calling anything: every public attribute, mapping value and key, and sequence and set element,
-through modules, classes and instances, transitively, as the scored tree's own static check admits each read. A module's
-names are not only what `dir()` lists. The walk also reads the module's own dict (numpy's `__dir__` hides `matrixlib`),
-its package's submodules as importlib finds them, and every name its module `__getattr__` can resolve (numpy's resolves
-`np.matlib`, which no `dir()` lists), and it repeats until a pass imports nothing new. On numpy 2.5.3 that is 1,913
-objects, 9,377 reads, 8 deep, and the walk finished (`complete`; `walk` in the receipt's reach proof). Every writable
-object it finds (a dict, list, set or bytearray, a writable numeric array, anything with item assignment) is written by
-one loaded program through the engine, and the suite checks what the write left behind after the run and whether a
-reader sees it on a later run and beside the writer in one batch. The proof also requires the check to refuse attribute
-writes (assignment, `del`, `setattr`, `delattr`) on every reached object, no global setter (a callable named `set_*`,
-`register_*`, `seterr*` or `setbufsize`) to be reachable, and no function that draws from numpy.random's process-global
-generator (`draws`). It holds only when all of that does. A fix that refuses the reads makes it hold. So does one that
-keeps the writes from outliving a program, provided the setters and the draws are still refused: a unit test runs an
-engine that isolates each program, and the proof holds with every writable object still reachable once the setters and
-draws are refused, and fails without that.
+`import math` without calling anything: every public name `dir()` lists, mapping value and key, and sequence and set
+element, through modules, classes and instances, transitively, as the scored tree's own static check admits each read.
+It does not read a class's metaclass attributes, which `dir()` never lists, so it misses `register` on 49 reachable ABCs
+(below). A module's names are not only what `dir()` lists. The walk also reads the module's own dict (numpy's `__dir__`
+hides `matrixlib`), its package's submodules as importlib finds them, and every name its module `__getattr__` can
+resolve (numpy's resolves `np.matlib`, which no `dir()` lists), and it repeats until a pass imports nothing new. On
+numpy 2.5.3 that is 1,913 objects, 9,377 reads, 8 deep, and the walk finished (`complete`; `walk` in the receipt's reach
+proof). Every writable object it finds (a dict, list, set or bytearray, a writable numeric array, anything with item
+assignment) is written by one loaded program through the engine, and the suite checks what the write left behind after
+the run and whether a reader sees it on a later run and beside the writer in one batch. The proof also requires the
+check to refuse attribute writes (assignment, `del`, `setattr`, `delattr`) on every reached object, no global setter (a
+callable named `set_*`, `register_*`, `seterr*` or `setbufsize`) to be reachable, and no function that draws from
+numpy.random's process-global generator (`draws`). It holds only when all of that does. A fix that refuses the reads
+makes it hold. A runtime fix that keeps the writes from outliving a program also makes it hold, but the proof would then
+certify a channel it cannot see: a unit test runs an engine that restores the walk's targets around each program, and
+the proof holds with every writable object still reachable once the setters and draws are refused (and fails without
+that), yet under that engine a program can still call `np.polynomial.Polynomial.register(dict)`, which registers a
+virtual subclass process-wide (below). A review probe ran exactly that: the proof held with nothing reachable, and a
+reader that stands aside when `isinstance(STATE, np.polynomial.Polynomial)` traded 65 sessions alone and 0 after the
+writer's run. So a runtime fix must also refuse or undo ABC registration, and it must still refuse the setters and the
+draws. Restoring the walk's targets is not isolation; only a fresh process per program is.
 
 It finds 52 writable objects, and a program's write to every one of them is still there after its run (`reachable`); a
 reader that checks every mark trades 65 sessions alone, 0 after the writer's run and 0 beside the writer in one batch
@@ -289,20 +295,28 @@ through its class's `domain`, so a write there changes what another program comp
 polynomial batch-mate proof's reader stands aside whenever `Polynomial([0, 1])(0.5)` is not 0.5, and it trades 65
 sessions alone and 0 beside a writer that sets `Polynomial.domain[1] = 3.0` (`state_numpy_batchmates_polynomial`).
 
-Five reachable functions change state every caller shares (`setters`), by their names and documentation (the suite lists
-them and does not call them): `np.polynomial.set_default_printstyle` (how every polynomial prints),
+Five reachable functions named as setters change state every caller shares (`setters`), by their names and documentation
+(the suite lists them and does not call them): `np.polynomial.set_default_printstyle` (how every polynomial prints),
 `np.dtypes.register_dlpack_dtype` (a process-wide registry that, its documentation says, raises on a conflicting second
 registration of a key), and, through np.matrixlib, `set_typeDict` (it replaces the dictionary numpy's C code looks array
 types up in), `set_datetimeparse_function` (undocumented) and `set_module`, a decorator that rewrites a function's
-`__module__`. Two more draw from numpy.random's process-global generator: `np.matlib.rand` and `np.matlib.randn`
-(`draws`). numpy seeds that generator from the operating system and every caller advances it, which is what
-`NUMPY_BANNED`'s `random` exists to close (a program is deterministic). The draws proof's program takes each session's
-side from `np.matlib.rand`: in the first world it trades 65 sessions on each of two runs of the same days, and the two
-runs' trades differ in every world of both cohorts (`state_numpy_draws`). The four setters numpy has at its top level
-(`seterr`, `seterrcall`, `setbufsize`, `set_printoptions`) are refused today (`refused_containers`). And the walk
-reaches seven standard-library modules outside the import allowlist without an import (`foreign_modules`): `functools`
-through `np.polynomial.polyutils`, and `abc`, `ast`, `collections`, `collections.abc`, `contextlib` and `itertools`
-through np.matrixlib. Nothing in them is writable, and the walk follows them.
+`__module__`. They are not the only such functions: the walk counts a callable only by its name, and it does not count
+`register` on an ABC, which registers a virtual subclass process-wide, so every caller's `isinstance` answers change
+(`np.polynomial.Polynomial.register(dict)` makes every dict a `Polynomial`). 49 reachable classes resolve `register`
+through their metaclass (`abc.ABCMeta` or a subclass of it), which `dir()` never lists, so the walk never visits it on
+them: np.polynomial's six classes and their base `ABCPolyBase`, and 42 standard-library ABCs in the modules np.matrixlib
+hands out (26 in `collections.abc`, 11 in `contextlib`, four in `collections`, `abc.ABC`). The walk does visit
+`abc.ABCMeta.register` itself, but its setter pattern needs `register_`, so that is not counted either. Two more draw
+from numpy.random's process-global generator: `np.matlib.rand` and `np.matlib.randn` (`draws`). numpy seeds that
+generator from the operating system and every caller advances it, which is what `NUMPY_BANNED`'s `random` exists to
+close (a program is deterministic). The draws proof's program takes each session's side from `np.matlib.rand`: in the
+first world it trades 65 sessions on each of two runs of the same days, and the two runs' trades differ in every world
+of both cohorts (`state_numpy_draws`). The four setters numpy has at its top level (`seterr`, `seterrcall`,
+`setbufsize`, `set_printoptions`) are refused today (`refused_containers`). And the walk reaches seven standard-library
+modules outside the import allowlist without an import (`foreign_modules`): `functools` through
+`np.polynomial.polyutils`, and `abc`, `ast`, `collections`, `collections.abc`, `contextlib` and `itertools` through
+np.matrixlib. Nothing in them is writable by the walk's measure (their ABCs' `register` is above), and the walk follows
+them.
 
 The underlying's view is built once a minute and shared by every batch-mate with the same history, with a plain dict
 inside it (`state_ctx_batchmates`). These contradict two of the review contract's facts (`state`: never across
@@ -324,14 +338,16 @@ batch isolation contains a failing program's errors; it does not separate this s
   process-global generator, so two runs of the same days differ) and `matrixlib` (its `defmatrix` module hands out
   numpy's core and modules outside the import allowlist). A unit test simulates it on both CI jobs' numpy, 2.4.4 and
   2.5.3: every numpy proof holds, and the walk reaches nothing writable, no setter, no draw and no module outside the
-  allowlist. Refusing a name is not refusing an object: with `sctypeDict` refused, the same dict is still reachable as
-  `numerictypes.typeDict` through np.matrixlib, which is why `matrixlib` has to go with it. `NUMPY_BANNED`'s
-  `polynomial_utils` names nothing numpy has (the module is `polyutils`). The robust form is an allowlist of the numpy
-  names programs use, since a numpy upgrade can add objects a denylist has never seen; the reach proof re-checks
-  whatever numpy the scored process has.
+  allowlist. It also closes ABC registration, which the walk does not count: a review probe on 2.5.3 finds that with the
+  six names refused the walk reaches no ABC at all (the only metaclass left is numpy's `_DTypeMeta`, whose one name
+  `dir()` hides is `mro`). Refusing a name is not refusing an object: with `sctypeDict` refused, the same dict is still
+  reachable as `numerictypes.typeDict` through np.matrixlib, which is why `matrixlib` has to go with it.
+  `NUMPY_BANNED`'s `polynomial_utils` names nothing numpy has (the module is `polyutils`). The robust form is an
+  allowlist of the numpy names programs use, since a numpy upgrade can add objects a denylist has never seen; the reach
+  proof re-checks whatever numpy the scored process has.
 - **ctx.** Make the view's coverage mapping read-only.
 
-When they land, the probes are refused (or the writes stop outliving a program) and the proofs hold with no edit to the
+When they land, the probes are refused (or each program runs in a fresh process) and the proofs hold with no edit to the
 suite; a unit test runs the refused path through the whole report. The pipeline's numpy memo probe reaches `typecodes`
 only, so its refusal alone says nothing about the other 51 objects.
 
@@ -454,7 +470,13 @@ variant is met and confirmed (0 of 6).
 - The reach proof covers what a program reaches without a call, in the scored process's numpy (2.5.3 here; a unit test
   checks the same 52 objects and the same draws on numpy 2.4.4, which the CI's Python 3.11 job runs). Objects reachable
   only through a call's result, names a class or instance resolves only in its own `__getattr__`, and state a call
-  changes through a function neither named as a setter nor reading numpy.random, are not covered.
+  changes through a function neither named as a setter nor reading numpy.random, are not covered. The walk reads the
+  names `dir()` lists and a module's names, never a class's metaclass attributes, and its setter pattern needs
+  `register_`, so it does not count `register` on the 49 reachable ABCs (np.polynomial's seven classes, and 42
+  standard-library ABCs through np.matrixlib); a call registers a virtual subclass process-wide. A runtime fix that
+  restores the walk's targets around each program makes the proof hold while that channel stays open: it must also
+  refuse or undo ABC registration, and only a fresh process per program is true isolation. The six-name denylist closes
+  it (the walk then reaches no ABC).
 - These figures score main at `3eaf4d06`, the release B that is deploying. If main moves, or carries a Gym fix, score it
   with the same pinned suite and `--compare docs/benchmarks/evaluator_1.json`; main at `f082cf5e` is the oldest tree the
   suite can score.
