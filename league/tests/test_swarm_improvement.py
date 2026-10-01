@@ -23,6 +23,23 @@ def commit(repo: Path, message: str) -> str:
     return labmod.git(repo, "rev-parse", "HEAD")
 
 
+def controller_into(repo: Path) -> None:
+    """The running controller's files, in the test repository's base commit: the controller runs only as its base
+    commit's code (`HarnessImprovement.pinned`)."""
+    for rel in labmod.controller_paths():
+        target = Path(repo) / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((labmod.REPO / rel).read_bytes())
+
+
+def approve(lab, key, reviewer="reviewer-agent"):
+    """The adversarial review of the evaluated patch, approving (required before the deploy step and the window)."""
+    proposal = lab.worklist.get(key).carry["_proposal"]
+    report = Path(proposal["artifact"]) / "review.md"
+    report.write_text(f"Review of patch {proposal['patch_sha']}: the Scheduler body only.\nVERDICT: approve\n")
+    return lab.review(key, report=report, reviewer=reviewer, patch_sha=proposal["patch_sha"])
+
+
 class HarnessCase(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
@@ -34,9 +51,11 @@ class HarnessCase(unittest.TestCase):
         self.source = self.repo / labmod.SCHEDULER_PATH
         self.source.parent.mkdir(parents=True)
         self.source.write_text(SOURCE)
+        controller_into(self.repo)
         self.base = commit(self.repo, "baseline")
         self.release = self.temp / "releases" / "base-release"
-        shutil.copytree(self.repo / "league", self.release / "league")
+        for tree in ("league", "scripts"):
+            shutil.copytree(self.repo / tree, self.release / tree)
         self.clock = Clock()
         self.clock.t = 1_790_000_000
         self.swarm = self.temp / "swarm"
@@ -69,7 +88,7 @@ class HarnessCase(unittest.TestCase):
 
     def evaluated(self, *, quality=5, improved=True, test_exit=0, expected=True):
         key = self.capture()
-        self.lab.stage(key, self.candidate())
+        self.lab.stage(key, self.candidate(), author="author-agent")
         def judge(tree, *_args, **_kwargs):
             data = {"protocol": "scheduler-work-v1", "quality": 5 if tree.name == "base" else quality,
                     "required": 5, "provider_calls": 0, "idle_model_turns": 3 if tree.name == "base" or not improved else 0,
@@ -79,13 +98,18 @@ class HarnessCase(unittest.TestCase):
         with patch.object(labmod, "sandbox", side_effect=judge):
             result = self.lab.evaluate(key, python=Path(sys.executable))
         self.assertEqual(result["passed"], expected)
+        if expected:
+            approve(self.lab, key)
+            self.lab.deploy(key)  # the loop's deploy step: it checks the approval and issues the ticket
         return key
 
     def deployment(self, key, *, complete=True):
         proposal = self.lab.worklist.get(key).carry["_proposal"]
         release = self.temp / "releases" / "candidate-release"
-        shutil.copytree(self.repo / "league", release / "league")
-        at = self.clock() + 60
+        for tree in ("league", "scripts"):
+            shutil.copytree(self.repo / tree, release / tree)
+        # The watchdog's rows follow the approval and the deploy step on the clock (its first row is the exposure).
+        at = self.clock() + 700
         self.promoted = at
         self.clock.t = at + 100
         self.heartbeat(release, at - 600)
@@ -146,7 +170,7 @@ class PersistentDecisions(HarnessCase):
         protected = self.repo / "league" / "evaluator.py"
         protected.write_text("ALLOW_EVERYTHING = True\n")
         with self.assertRaisesRegex(labmod.ImprovementError, "every other path"):
-            self.lab.stage(key, commit(self.repo, "attempt to change evaluator"))
+            self.lab.stage(key, commit(self.repo, "attempt to change evaluator"), author="author-agent")
         with self.assertRaisesRegex(labmod.ImprovementError, "protected"):
             labmod.patch_guard(SOURCE, SOURCE.replace("import time", "import os"))
         with self.assertRaisesRegex(labmod.ImprovementError, "reflective"):
@@ -162,11 +186,14 @@ class PersistentDecisions(HarnessCase):
         proposal = self.lab.worklist.get(key)
         self.lab.worklist.report(key=key, kind=proposal.kind, summary=proposal.summary, evidence=[], agents=[], source="operator", severity="high",
                                  details={"source": {"digest": "not-the-running-tree"}})
+        head = self.candidate()
+        with self.assertRaisesRegex(labmod.ImprovementError, "author"):
+            self.lab.stage(key, head)
         with self.assertRaisesRegex(labmod.ImprovementError, "baseline commit"):
-            self.lab.stage(key, self.candidate())
+            self.lab.stage(key, head, author="author-agent")
         self.lab.worklist.report(key=key, kind=proposal.kind, summary=proposal.summary, evidence=[], agents=[], source="operator", severity="high",
                                  details={"source": {"digest": labmod.tree_digest(self.release)[0]}})
-        self.lab.stage(key, "HEAD")
+        self.lab.stage(key, "HEAD", author="author-agent")
         changed = self.temp / "modified-judge.py"
         changed.write_text("print('always good')\n")
         with patch.object(labmod, "BENCHMARK", changed), self.assertRaisesRegex(labmod.ImprovementError, "frozen judge"):
@@ -180,7 +207,7 @@ class PersistentDecisions(HarnessCase):
         self.assertEqual(receipt["worktree"], str(target))
         (target / labmod.SCHEDULER_PATH).write_text(SOURCE.replace("return 2", "return 1"))
         head = commit(target, "isolated candidate")
-        self.lab.stage(key, head)
+        self.lab.stage(key, head, author="author-agent")
         self.assertEqual(self.source.read_text(), SOURCE)
 
     def test_canary_requires_exact_tree_complete_watch_and_subsequent_window(self):
@@ -206,6 +233,65 @@ class PersistentDecisions(HarnessCase):
         self.heartbeat(self.release, self.clock() - 4000)
         self.assertEqual(self.capture(), key)
         self.assertEqual(self.lab.ledger.head(), rows)
+
+    def passed(self):
+        key = self.capture()
+        self.lab.stage(key, self.candidate(), author="author-agent")
+        def judge(tree, *_args, **_kwargs):
+            data = {"protocol": "scheduler-work-v1", "quality": 5, "required": 5, "provider_calls": 0,
+                    "idle_model_turns": 3 if tree.name == "base" else 0, "sqlite_statements": 200, "cpu_seconds": 0.01}
+            return {"exit": 0, "seconds": 0.01, "cpu_seconds": 0.01, "stdout": json.dumps(data), "stderr": ""}
+        with patch.object(labmod, "sandbox", side_effect=judge):
+            self.assertTrue(self.lab.evaluate(key, python=Path(sys.executable))["passed"])
+        return key
+
+    def test_the_deploy_step_and_the_window_need_an_approving_review_first(self):
+        key = self.passed()
+        with self.assertRaisesRegex(labmod.ImprovementError, "no deploy without an adversarial review"):
+            self.lab.deploy(key)
+        with self.assertRaisesRegex(labmod.ImprovementError, "author"):
+            approve(self.lab, key, reviewer="author-agent")
+        row = approve(self.lab, key)
+        self.assertEqual(row["release_digest"], self.lab.worklist.get(key).carry["_proposal"]["release_digest"])
+        ticket = self.lab.deploy(key)["ticket"]
+        self.assertEqual((ticket["review"], ticket["release_digest"]), (1, row["release_digest"]))
+        self.deployment(key)
+        self.assertEqual(self.reconcile(key)["waiting"], "subsequent observation window")
+
+    def test_a_tree_deployed_before_its_review_is_rolled_back_not_observed(self):
+        """The reviewer's scenario (round 4): the operator deploys the evaluated tree, then a review approves it. The
+        watchdog's first row precedes the approval on the clock: no observation window opens, a rollback is asked for."""
+        key = self.passed()
+        self.deployment(key)  # the watchdog's rows, dated before any review
+        approve(self.lab, key)  # an approval recorded after the exposure
+        result = self.reconcile(key)
+        self.assertEqual(result["decision"], "rollback_required", result)
+        self.assertIn("before an adversarial review", result["reason"])
+        job = self.lab.worklist.get(key)
+        self.assertEqual(job.state, "rejected")
+        self.assertIn("roll it back", job.note)
+
+    def test_a_tree_deployed_around_the_deploy_step_is_rolled_back(self):
+        key = self.passed()
+        approve(self.lab, key)
+        self.deployment(key)  # approved, but sent without the loop's deploy step
+        result = self.reconcile(key)
+        self.assertEqual(result["decision"], "rollback_required", result)
+        self.assertIn("without the loop's deploy step", result["reason"])
+
+    def test_the_candidate_is_judged_on_the_base_trees_benchmark(self):
+        key = self.capture()
+        self.lab.stage(key, self.candidate(), author="author-agent")
+        seen = []
+        def judge(tree, judge_dir, command, **_kwargs):
+            seen.append((tree.name, (judge_dir / "benchmark.py").read_bytes()))
+            data = {"protocol": "scheduler-work-v1", "quality": 5, "required": 5, "provider_calls": 0,
+                    "idle_model_turns": 3 if tree.name == "base" else 0, "sqlite_statements": 200, "cpu_seconds": 0.01}
+            return {"exit": 0, "seconds": 0.01, "cpu_seconds": 0.01, "stdout": json.dumps(data), "stderr": ""}
+        with patch.object(labmod, "sandbox", side_effect=judge):
+            self.lab.evaluate(key, python=Path(sys.executable))
+        self.assertEqual({b for _, b in seen}, {labmod.BENCHMARK.read_bytes()})
+        self.assertEqual({t for t, _ in seen}, {"base", "head"})
 
     def test_retains_only_after_fixed_window_and_remembers_later_rollback(self):
         key = self.evaluated()
@@ -292,7 +378,7 @@ class IsolatedEvaluation(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root, repo = Path(td), Path(td) / "repo"
             repo.mkdir()
-            for name in ("league", "ltcm", "scripts", "playbooks", "deploy"):
+            for name in ("league", "ltcm", "scripts", "playbooks", "deploy", "gateway"):
                 if (labmod.REPO / name).is_dir():
                     shutil.copytree(labmod.REPO / name, repo / name,
                                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache", ".data"))
@@ -306,7 +392,8 @@ class IsolatedEvaluation(unittest.TestCase):
             labmod.git(repo, "init", "-q")
             base = commit(repo, "synthetic redundant-read baseline")
             release = root / "base-release"
-            shutil.copytree(repo, release, ignore=shutil.ignore_patterns(".git"))
+            # The upload's trees only (`floor_box.UPLOAD_TREES`): the gateway deploys on its own.
+            shutil.copytree(repo, release, ignore=shutil.ignore_patterns(".git", "gateway"))
             # Normalize exactly like the owner upload; repository executable bits are not the deployed modes.
             for file in release.rglob("*"):
                 if file.is_file():
@@ -323,7 +410,7 @@ class IsolatedEvaluation(unittest.TestCase):
                     clock.advance(1)
                 (swarm / "swarm.heartbeat").write_text(json.dumps({"at": clock(), "release": str(release), "started_at": clock() - 4000}))
                 key = lab.capture(swarm, base=base)[0]
-                lab.stage(key, head)
+                lab.stage(key, head, author="author-agent")
                 receipt = lab.evaluate(key, python=Path(sys.executable))
                 self.assertTrue(receipt["passed"], json.dumps(receipt, indent=2))
                 self.assertEqual(receipt["trees"]["head"]["metrics"]["quality"], 5)
