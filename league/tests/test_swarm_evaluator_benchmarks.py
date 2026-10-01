@@ -200,30 +200,57 @@ class OneWorld(unittest.TestCase):
         self.assertGreater(rate["rate"], 0.95)
 
     def test_the_refused_leak_probes_would_profit_if_the_static_check_let_them_through(self):
-        # Open the static check for these probes only (in-process): the greek-cache and date-table probes must then read
-        # the absent window's future, or their refusal would say nothing. The array-base probe has a second guard (the
-        # engine's copy: an array's base is a bytes copy of today so far), so it reads bytes, not prices, and learns
-        # nothing even opened.
+        # The suite opens the static check for the probes it refused (in-process, for their loads only): the greek-cache
+        # and date-table probes must then read the absent window's future, or their refusal would say nothing. The
+        # array-base probe has a second guard (the engine's copy: an array's base is a bytes copy of today so far), so
+        # it reads bytes, not prices, and learns nothing even opened.
         from league.gym import runtime
 
         names = ("leak_private_attr", "leak_date_literal", "leak_array_base")
-        with mock.patch.object(runtime, "check_program", lambda code: None):
-            programs = [self.load(name) for name in names]
-            results = EB.run(programs, self.store, "validation")
-        for name, result in zip(names[:2], results):
-            self.assertEqual(result["status"], "ok", name)
-            self.assertEqual({t.get("tag") for t in result["trades"]}, {"leak"}, name)
-            rate = EB.hit_rate(result, self.world)
-            self.assertGreater(rate["trades"], 50, name)
-            self.assertGreater(rate["rate"], 0.9, name)
-        self.assertEqual(results[2]["status"], "ok")
-        opened = EB.hit_rate(results[2], self.world)
-        self.assertGreater(opened["trades"], 50)
-        self.assertLess(opened["rate"], 0.7)  # a coin's hit rate: no information
+        closed = runtime.check_program
+        opened = EB.opened_routes(self.store, self.world,
+                                  {n: EB.render(next(c for c in EB.CASES if c["id"] == n), self.world) for n in names})
+        self.assertIs(runtime.check_program, closed)  # the check is closed again
+        for name in names[:2]:
+            self.assertTrue(opened[name]["loaded"] and opened[name]["status"] == "ok", opened[name])
+            self.assertGreater(opened[name]["trades"], 50, name)
+            self.assertGreater(opened[name]["rate"], 0.9, name)
+            self.assertGreater(opened[name]["pnl"], 0.0, name)
+        self.assertEqual(opened["leak_array_base"]["status"], "ok")
+        self.assertGreater(opened["leak_array_base"]["trades"], 50)
+        self.assertLess(opened["leak_array_base"]["rate"], 0.7)  # a coin's hit rate: no information
+        for name in names:  # and closed, each is refused
+            with self.assertRaises(CodeRefused):
+                self.load(name)
 
-    def test_the_numpy_proofs_hold_only_when_every_container_is_closed(self):
-        # A partial fix (refusing np.typecodes only) must leave the sctypeDict proofs and the reach proof failing; the
-        # whole fix (both containers) makes every numpy proof hold. The static check is patched in-process only.
+    def test_the_walk_finds_every_writable_object_a_program_reaches(self):
+        # numpy 2.4 and 2.5 (the CI's two) both expose the two dicts and np.polynomial's 36 module and class arrays; the
+        # walk must find them, through the lazily imported submodule and the classes, and refuse every attribute write.
+        import numpy as np
+        from league.gym.safety import check_program
+
+        walk = EB.numpy_walk()
+        polynomial = [p for p in walk["writable"] if p.startswith("np.polynomial.")]
+        self.assertTrue({"np.typecodes", "np.sctypeDict"} <= set(walk["writable"]), walk["writable"])
+        self.assertEqual(len(polynomial), 36, polynomial)
+        self.assertIn("np.polynomial.polynomial.polyx", polynomial)
+        self.assertIn("np.polynomial.Polynomial.domain", polynomial)
+        self.assertIn("np.polynomial.set_default_printstyle", walk["setters"])
+        if hasattr(np.dtypes, "register_dlpack_dtype"):  # numpy 2.5
+            self.assertIn("np.dtypes.register_dlpack_dtype", walk["setters"])
+        self.assertIn("np.seterr", walk["refused_containers"])  # a banned setter is seen, and refused
+        self.assertEqual(walk["foreign_modules"], {"functools": "np.polynomial.polyutils.functools"})
+        self.assertEqual(walk["attribute_writes"], [])
+        self.assertTrue(walk["walk"]["complete"])
+        for target in walk["_targets"]:  # every exact write test is admitted by the check (else it would prove nothing)
+            write, read = EB._write_test(target["path"], target["obj"])
+            check_program(EB.reach_program(body=f"{write}\nseen = {read}"))
+
+    def test_the_numpy_proofs_hold_only_when_every_object_is_closed(self):
+        # A partial fix (refusing np.typecodes only) leaves the sctypeDict and polynomial proofs and the reach proof
+        # failing; refusing both dicts (the old 'whole fix') still leaves np.polynomial's arrays and the setters open;
+        # only refusing everything the walk reports makes every numpy proof hold. The check is patched in-process only.
+        import numpy as np
         from league.gym import safety
 
         def proofs_with(banned):
@@ -231,22 +258,81 @@ class OneWorld(unittest.TestCase):
                     mock.patch.object(EB, "split_proof", lambda root: {"held": True, "claim": "stubbed (no Train here)"}):
                 return EB.proofs(self.store, self.dir)
 
-        numpy_proofs = ("state_numpy_runs", "state_numpy_batchmates", "state_numpy_runs_sctypedict",
-                        "state_numpy_batchmates_sctypedict", "state_numpy_reachable")
-        self.assertEqual(EB.numpy_containers(), ["np.sctypeDict", "np.typecodes"])
+        numpy_proofs = [c["id"] for c in EB.CASES if c["id"].startswith("state_numpy_")]
+        pristine = (np.polynomial.polynomial.polyx.copy(), np.polynomial.Polynomial.domain.copy(), dict(np.typecodes))
         partial = proofs_with(frozenset({"typecodes"}))
         self.assertTrue(partial["state_numpy_runs"]["held"] and partial["state_numpy_batchmates"]["held"])
         self.assertIn("refused", partial["state_numpy_runs"])
-        self.assertFalse(partial["state_numpy_runs_sctypedict"]["held"])
-        self.assertGreater(partial["state_numpy_runs_sctypedict"]["trades"][0], 50)
-        self.assertEqual(partial["state_numpy_runs_sctypedict"]["trades"][1], 0)
+        for name in ("state_numpy_runs_sctypedict", "state_numpy_runs_polynomial"):
+            self.assertFalse(partial[name]["held"], name)
+            self.assertGreater(partial[name]["trades"][0], 50, name)
+            self.assertEqual(partial[name]["trades"][1], 0, name)
         self.assertFalse(partial["state_numpy_batchmates_sctypedict"]["held"])
-        self.assertFalse(partial["state_numpy_reachable"]["held"])
-        self.assertEqual(partial["state_numpy_reachable"]["reachable"], ["np.sctypeDict"])
-        whole = proofs_with(frozenset({"typecodes", "sctypeDict"}))
-        self.assertTrue(all(whole[name]["held"] for name in numpy_proofs), {n: whole[n] for n in numpy_proofs})
-        self.assertEqual(whole["state_numpy_reachable"]["reachable"], [])
+        self.assertFalse(partial["state_numpy_batchmates_polynomial"]["held"])
+        reach = partial["state_numpy_reachable"]
+        self.assertFalse(reach["held"])
+        self.assertIn("np.sctypeDict", reach["reachable"])
+        self.assertNotIn("np.typecodes", reach["reachable"])
+        self.assertIn("np.typecodes", reach["refused_containers"])
+        self.assertEqual(reach["channels"], {"runs": True, "batchmates": True})
+
+        dicts = proofs_with(frozenset({"typecodes", "sctypeDict"}))
+        for name in ("state_numpy_runs", "state_numpy_batchmates", "state_numpy_runs_sctypedict",
+                     "state_numpy_batchmates_sctypedict"):
+            self.assertTrue(dicts[name]["held"], name)
+        self.assertFalse(dicts["state_numpy_runs_polynomial"]["held"])
+        self.assertEqual(dicts["state_numpy_runs_polynomial"]["trades"][1], 0)
+        self.assertFalse(dicts["state_numpy_batchmates_polynomial"]["held"])
+        reach = dicts["state_numpy_reachable"]
+        self.assertFalse(reach["held"])
+        self.assertEqual(len(reach["reachable"]), 36, reach["reachable"])
+        self.assertTrue(all(p.startswith("np.polynomial.") for p in reach["reachable"]))
+        self.assertIn("np.polynomial.set_default_printstyle", reach["setters"])
+
+        whole = frozenset({"typecodes", "sctypeDict", "polynomial"} | {p.rsplit(".", 1)[-1] for p in reach["setters"]})
+        closed = proofs_with(whole)
+        self.assertTrue(all(closed[name]["held"] for name in numpy_proofs), {n: closed[n] for n in numpy_proofs})
+        self.assertEqual(closed["state_numpy_reachable"]["reachable"], [])
+        self.assertEqual(closed["state_numpy_reachable"]["writable"], [])
+        self.assertEqual(closed["state_numpy_reachable"]["setters"], [])
+        # every probe's write was put back
+        self.assertTrue(np.array_equal(np.polynomial.polynomial.polyx, pristine[0]))
+        self.assertTrue(np.array_equal(np.polynomial.Polynomial.domain, pristine[1]))
+        self.assertEqual(dict(np.typecodes), pristine[2])
         self.assertEqual(EB.clear_numpy_marks(), 0)
+
+    def test_the_reach_proof_is_behavioral(self):
+        # A fix that leaves every object reachable but keeps writes from outliving a program (here: an engine that runs
+        # each program alone and puts numpy back after it) holds without a refusal; the walk still lists the objects.
+        from league.gym import safety
+
+        walk = EB.numpy_walk()
+        real_run = EB.run
+
+        def isolating(programs, store, window, *, stress=1.0):
+            out = []
+            for program in programs:
+                kept = EB.Restorer(walk["_targets"])
+                try:
+                    out += real_run([program], store, window, stress=stress)
+                finally:
+                    kept.reset()
+            return out
+
+        setters = frozenset(p.rsplit(".", 1)[-1] for p in walk["setters"])
+        with mock.patch.object(safety, "NUMPY_BANNED", safety.NUMPY_BANNED | setters), mock.patch.object(EB, "run", isolating):
+            reach = EB.numpy_reach(self.store)
+        self.assertTrue(reach["held"], {k: v for k, v in reach.items() if k != "writable"})
+        self.assertEqual(reach["writable"], walk["writable"])
+        self.assertEqual(reach["reachable"], [])
+        self.assertGreater(reach["trades"][0], 50)
+        self.assertEqual(len(set(reach["trades"])), 1)
+        # and without the isolation, the same proof fails on every object, through the run and the batch
+        with mock.patch.object(safety, "NUMPY_BANNED", safety.NUMPY_BANNED | setters):
+            reach = EB.numpy_reach(self.store)
+        self.assertFalse(reach["held"])
+        self.assertEqual(reach["reachable"], walk["writable"])
+        self.assertEqual(reach["trades"][1:], [0, 0])
 
     def test_historical_volume_without_receipts_is_hidden(self):
         [result] = EB.run([self.load("leak_volume_bars")], self.store, "validation")
@@ -477,7 +563,7 @@ class Report(unittest.TestCase):
         real = runtime.load_program
 
         def refusing(code, *args, **kwargs):
-            if "np.typecodes" in code or "np.sctypeDict" in code:
+            if any(name in code for name in ("np.typecodes", "np.sctypeDict", "np.polynomial", "np.dtypes")):
                 raise CodeRefused("numpy module attributes are not allowed (simulated)")
             return real(code, *args, **kwargs)
 
@@ -489,10 +575,12 @@ class Report(unittest.TestCase):
                 mock.patch.object(EB, "mates", lambda *a, **k: {"held": True, "claim": "stub"}):
             proofs = EB.proofs(store=None, root=Path("unused"))
         self.assertEqual(set(proofs), {c["id"] for c in EB.CASES if c["kind"] == "proof"})
-        for name in ("state_numpy_runs", "state_numpy_batchmates", "state_numpy_runs_sctypedict",
-                     "state_numpy_batchmates_sctypedict", "state_numpy_reachable"):
+        for name in [c["id"] for c in EB.CASES if c["id"].startswith("state_numpy_")]:
             self.assertTrue(proofs[name]["held"], name)
-        self.assertEqual(proofs["state_numpy_reachable"]["refused_containers"], EB.numpy_containers())
+        reach = proofs["state_numpy_reachable"]
+        self.assertEqual(reach["writable"], [])
+        self.assertTrue({"np.typecodes", "np.sctypeDict", "np.polynomial.polynomial.polyx",
+                         "np.polynomial.set_default_printstyle"} <= set(reach["refused_containers"]))
         rows = self.rows(2)
         for row in rows:
             row["proofs"] = proofs
@@ -500,6 +588,29 @@ class Report(unittest.TestCase):
         self.assertEqual(out["proofs"]["state_numpy_batchmates"]["held"], 2)
         self.assertEqual(out["proofs"]["state_numpy_reachable"]["observed"], [])
         self.assertNotIn("state", out["facts_contradicted"])
+
+    def test_the_case_figures_and_opened_routes_come_from_the_worlds(self):
+        rows = self.rows(2)
+        stop = _stopped_row("validation")
+        stop["validation"] = {"checks": {**stop["validation"]["checks"], "trades": False},
+                              "numbers": {"trades": 45, "days": 45, "t": 3.5}}
+        rows[0]["cases"]["planted_medium"] = stop
+        rows[1]["cases"]["planted_medium"]["validation"] = {"checks": {}, "numbers": {"trades": 52, "t": 4.25}}
+        for i, row in enumerate(rows):
+            row["opened"] = {"leak_private_attr": {"loaded": True, "status": "ok", "trades": 60, "hits": 59, "rate": 0.98,
+                                                   "t_daily": 7.0 + i, "pnl": 10.0 - 15.0 * i}}
+        out = EB.aggregate(rows, self.search())
+        medium = out["cases"]["planted_medium"]["figures"]
+        self.assertEqual(medium["train_trades_per_year"], [60, 60])
+        self.assertEqual(medium["validation_trades"], [45, 52])
+        self.assertEqual(medium["validation_t"], [3.5, 4.25])
+        self.assertEqual(medium["validation_t_median"], 3.875)
+        self.assertEqual(medium["validation_stops"], {"trades": [45], "t": [3.5], "failed_checks": {"trades": 1}})
+        self.assertEqual(out["cases"]["leak_private_attr"]["opened"],
+                         {"worlds": 2, "loaded": 2, "trades": 120, "hits": 118, "direction_hit_rate": 0.9833,
+                          "t_daily": [7.0, 8.0], "profitable_worlds": 1})
+        self.assertNotIn("figures", out["cases"]["leak_private_attr"])  # refused: no world ran it
+        self.assertNotIn("opened", out["cases"]["planted_medium"])
 
     def test_the_level_flag_counts_a_run_that_stopped_trading(self):
         self.assertTrue(EB._level_flag(3.0, None))
@@ -584,6 +695,172 @@ class Cli(unittest.TestCase):
         self.assertEqual(command[command.index("--output") + 1], str(Path("out.json").resolve()))
         self.assertEqual(command[command.index("--replications") + 1], "2")
         self.assertNotIn("PYTHONPATH", called.call_args.kwargs["env"])
+
+
+class ReportDocument(unittest.TestCase):
+    """EVALUATOR_1.md's tables are rendered from the committed receipts, and the receipts are the pinned suite's."""
+
+    def test_the_reports_tables_are_its_receipts(self):
+        docs = Path(__file__).resolve().parents[2] / "docs" / "benchmarks"
+        dev = json.loads((docs / "evaluator_1.json").read_text())
+        conf = json.loads((docs / "evaluator_1_confirmation.json").read_text())
+        for receipt, cohort in ((dev, "development"), (conf, "confirmation")):
+            self.assertEqual(receipt["cohort"], cohort)
+            self.assertTrue(receipt["pinned"] and receipt["full_protocol"])
+            self.assertEqual(receipt["suite_sha"], EB.PINNED_SUITE_SHA)  # the receipts are this pinned suite's
+        self.assertEqual(conf["frozen_development_headline_sha"], EB.digest(dev["headline"]))
+        text = (docs / "EVALUATOR_1.md").read_text()
+        for name, table in doc_tables(dev, conf).items():
+            self.assertIn(table, text, f"EVALUATOR_1.md's {name} table is not its receipts':\n{table}")
+
+
+#: The pipeline's stages, in order, as EVALUATOR_1 names them.
+STAGE_NAMES = {"static": "static", "train_eligible": "Train eligibility", "train_stress": "Train stress", "drift": "drift",
+               "validation": "Validation", "review": "review", "holdout": "holdout"}
+#: The owner-rule checks, as EVALUATOR_1's verdict column names a failed one.
+CHECK_NAMES = {"engine_false_promotions_not_higher": "engine false promotions rise",
+               "search_false_promotions_not_higher": "search false promotions rise",
+               "engine_negative_looks_not_higher": "engine looks rise", "noise_looks_not_higher_in_any_band": "noise looks rise",
+               "missed_signals_lower": "misses do not fall"}
+
+
+def _pct(x):
+    return f"{100 * x:.1f}%"
+
+
+def _rate_cell(r):
+    if not r["count"]:
+        return f"0/{r['of']} (95% upper {_pct(r['upper_95'])})"
+    return f"{r['count']}/{r['of']} ({_pct(r['rate'])}; 95% {100 * r['lower_95']:.1f}–{100 * r['upper_95']:.1f}%)"
+
+
+def _stops(case):
+    order = list(STAGE_NAMES)
+    stops = sorted(((k, n) for k, n in case["stopped_at"].items() if k != "promoted"), key=lambda kv: order.index(kv[0]))
+    text = f"{case['promoted']}/{case['of']}"
+    return text + (f" ({', '.join(f'{STAGE_NAMES[k]} {n}' for k, n in stops)})" if stops else "")
+
+
+def _both(a, b):
+    return a if a == b else f"{a} / {b}"
+
+
+def _table(head, rows):
+    lines = ["| " + " | ".join(head) + " |", "| " + " | ".join("---" for _ in head) + " |"]
+    return "\n".join(lines + ["| " + " | ".join(str(c) for c in row) + " |" for row in rows])
+
+
+def doc_tables(dev, conf):
+    """EVALUATOR_1.md's tables, rendered from the development and confirmation receipts."""
+    cohorts = (dev, conf)
+    out = {}
+    r = [c["rates"] for c in cohorts]
+
+    def one_sided(x):
+        return f"{x['count']}/{x['of']} (one-sided 95% upper {_pct(x['upper_95_one_sided'])})"
+
+    out["headline"] = _table(["Rate", "Development", "Confirmation"], [
+        ["False promotion, every negative case-world", *(_rate_cell(x["false_promotion"]) for x in r)],
+        ["False promotion, what the mechanical stages are meant to stop",
+         *(_rate_cell(x["false_promotion_mechanical_scope"]) for x in r)],
+        ["Negative cases promoted in any world", *(f"{x['negative_cases_promoted']['count']}/{x['negative_cases_promoted']['of']}"
+                                                   for x in r)],
+        ["Negative cases promoted, mechanical scope", *(one_sided(x["negative_cases_promoted_mechanical_scope"]) for x in r)],
+        ["Missed signal, planted case-worlds", *(_rate_cell(x["missed_signal"]) for x in r)],
+        ["Planted cases missed in at least one world",
+         *(f"{x['positive_cases_missed_in_any_world']['count']}/{x['positive_cases_missed_in_any_world']['of']}" for x in r)],
+    ])
+    ids = [c["id"] for c in EB.CASES]
+    signal = [cid for cid in ids if dev["cases"].get(cid, {}).get("family") == "signal"]
+    out["signal cases"] = _table(["Case", "Answer", "Development", "Confirmation"], [
+        [f"`{cid}`", "edge" if dev["cases"][cid]["kind"] == "positive" else "no edge",
+         *(_stops(c["cases"][cid]) for c in cohorts)] for cid in signal])
+
+    def leak(case):
+        text = _stops(case)
+        if case.get("opened"):
+            o = case["opened"]
+            lo, hi = o["t_daily"]
+            text += (f"; opened: hit {o['direction_hit_rate']:.2f}, t {lo:.1f} to {hi:.1f}, "
+                     f"profitable in {o['profitable_worlds']}/{o['worlds']}")
+        elif case.get("direction_hit_rate") is not None:
+            text += f"; hit {case['direction_hit_rate']:.2f}"
+        if case.get("stress_contaminated"):
+            text += f"; stress run contaminated {case['stress_contaminated']}/{case['of']}"
+        return text
+
+    leakage = [cid for cid in ids if dev["cases"].get(cid, {}).get("family") == "leakage"]
+    out["leakage"] = _table(["Probe", "Development", "Confirmation"], [
+        [f"`{cid}`" + (" (smoke)" if dev["cases"][cid]["kind"] == "smoke" else ""), *(leak(c["cases"][cid]) for c in cohorts)]
+        for cid in leakage])
+
+    def observed(proof):
+        seen = proof.get("observed")
+        if isinstance(proof.get("reachable"), list) or "setters" in proof:
+            paths = proof["observed"] or []
+            top = [p for p in paths if p.count(".") == 1]
+            poly = [p for p in paths if p.startswith("np.polynomial.")]
+            rest = [p for p in paths if p not in top and p not in poly]
+            parts = [f"`{p}`" for p in top] + ([f"{len(poly)} `np.polynomial` arrays"] if poly else []) + [f"`{p}`" for p in rest]
+            text = f"{len(paths)} reachable" + (f": {', '.join(parts)}" if parts else "")
+            if proof.get("setters"):
+                text += "; setters " + ", ".join(f"`{p}`" for p in proof["setters"])
+            return text
+        if isinstance(seen, list):
+            return ", ".join(str(x) for x in seen)
+        return "refused" if proof.get("refused") else str(seen)
+
+    proofs = [cid for cid in ids if cid in dev["proofs"]]
+    out["state"] = _table(["Proof", "Fact", "Development", "Confirmation", "Observed (development, first world)"], [
+        [f"`{name}`", dev["proofs"][name]["fact"], *(f"{c['proofs'][name]['held']}/{c['proofs'][name]['of']}" for c in cohorts),
+         observed(dev["proofs"][name])] for name in proofs])
+    out["ablations"] = _table(["Switch", "Broken", "Static contract refuses the off override", "Off variant still trades"], [
+        [f"`{name}`", "yes" if a["broken"] else "no",
+         _both(*(f"{c['ablations'][name]['static_refused']}/{c['ablations'][name]['of']}" for c in cohorts)),
+         _both(*(f"{c['ablations'][name]['of'] - c['ablations'][name]['behavioral_effective']}/{c['ablations'][name]['of']}"
+                 for c in cohorts))] for name in EB.ABLATIONS for a in [dev["ablations"][name]]])
+
+    def verdict(c, name):
+        if name == "current":
+            return "reference"
+        rule = c["variants"][name]["owner_rule"]
+        failed = [text for k, text in CHECK_NAMES.items() if not rule["checks"][k]]
+        return "met" if rule["met"] else "not met: " + ", ".join(failed)
+
+    def cell(key, name, extra=None):
+        values = []
+        for c in cohorts:
+            v = c["variants"][name]
+            text = str(v[key]["count"])
+            if extra:
+                text += f" ({v[extra]['leak_memorized_sparse']})"
+            values.append(text)
+        return " / ".join(values)
+
+    out["variants"] = _table(["Variant", "Engine false (sparse table)", "Engine missed", "Search false", "Noise looks",
+                              "Search missed", "Verdict"], [
+        [f"`{name}`", cell("engine_false_promotion", name, "engine_false_promotion_by_case"),
+         cell("engine_missed_signal", name), cell("search_false_promotion", name),
+         cell("search_noise_holdout_looks", name), cell("search_missed_signal", name),
+         _both(verdict(dev, name), verdict(conf, name))] for name in EB.VARIANTS])
+
+    def band(case):
+        spec = EB.SEARCH["cases"][case]
+        kind = "planted" if spec["positive"] else "noise"
+        tails = ", t3" if spec.get("tails") else ""
+        return f"{kind}, {spec['trades_per_year']} a year{tails}"
+
+    rows = []
+    for case, spec in EB.SEARCH["cases"].items():
+        if spec["positive"] and spec["trades_per_year"] != 48:
+            continue
+        key = "promoted" if spec["positive"] else "lineages_with_look"
+        label = band(case) + (": promoted" if spec["positive"] else "")
+        rows.append([label, *(c["variants"][name]["search_by_case"][case][key] for c in cohorts
+                              for name in ("current", "aligned_floors"))])
+    out["bands"] = _table(["Band (128 lineages each)", "`current` dev", "`aligned_floors` dev", "`current` conf",
+                           "`aligned_floors` conf"], rows)
+    return out
 
 
 def _passing_row():

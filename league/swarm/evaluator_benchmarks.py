@@ -25,18 +25,20 @@ Case families (the suite's pinned `CASES`):
   computed in blocks, prior-session bars, bar volume without publication receipts, a process-global numpy dict carried
   from an earlier run) and memorized tables a static check cannot see (keyed by price level, densely and sparsely, and
   by a session counter from a recognized window start). Each must be refused or score as no edge, except the memorized
-  tables, which only the review can stop (`review_dependent`). The greek-cache and date-table probes profit when the
-  static check is opened for them (a unit test opens it); the array-base probe has a second guard, the engine's copy
-  (an array's base is a bytes copy of today so far), so it learns nothing even then. The numpy memo reaches
-  `np.typecodes` only. Next-session event flags are a smoke test (`kind: smoke`): the world's moves do not depend on
-  the calendar, so that probe cannot profit and is kept out of the rates;
+  tables, which only the review can stop (`review_dependent`). Every probe the static check refuses is also run with
+  the check opened (`opened`, in the suite's process, for that load only): the greek-cache and date-table probes then
+  profit, so the check is what stops them; the array-base probe has a second guard, the engine's copy (an array's base
+  is a bytes copy of today so far), so it learns nothing even then. The numpy memo reaches `np.typecodes` only.
+  Next-session event flags are a smoke test (`kind: smoke`): the world's moves do not depend on the calendar, so that
+  probe cannot profit and is kept out of the rates;
 - INVALID FILLS: programs that profit only from impossible fills: the decision minute's stale quote, crossed quotes,
   package prices beyond the payoff range on open and close, and passive spread capture without adverse selection;
 - STATE: contract proofs that module STATE resets between runs, that parameters are copied, that a split Train run
   matches the unsplit run day for day and Validation is never split, and probes for channels between runs and between
-  batch-mates: each of numpy's two mutable public dicts (`typecodes`, `sctypeDict`) on its own, every mutable public
-  numpy container the static check lets a program reach (enumerated at run time, so a partial fix shows), and a ctx
-  object shared by a batch;
+  batch-mates: numpy's two mutable public dicts (`typecodes`, `sctypeDict`) and np.polynomial's module and class arrays
+  (`polyx`, `Polynomial.domain`), each on its own; the reach proof (`numpy_reach`), which walks everything a program can
+  reach from `import numpy` and `import math` without a call and writes every writable object it finds through the
+  engine (so a partial fix shows, whatever object it misses); and a ctx object shared by a batch;
 - BROKEN ABLATIONS: switches that work, that the static contract refuses, and that are read but ignored (which only a
   behavioral ablation catches);
 - a SEARCH tier: the same statistical lines on generated outcomes with lineage selection over noise variants, where
@@ -739,24 +741,93 @@ def decide(ctx):
         return []
     return enter(ctx, "C")
 ''',
-    # The reach probe: a program that binds one numpy object and does nothing else ($PATH, e.g. np.typecodes). The static
-    # check refuses it, or a program can hold (and write) that object.
+    # The reach probe's shape: a program that imports what a program may import, binds one object ($BIND, e.g.
+    # `REACHED = np.typecodes`) or does one thing with it in decide ($BODY). The static check refuses it, or a program
+    # can hold (and write) that object.
     "state_numpy_reach": '''
+import math
 import numpy as np
 NEEDS = {"roots": ["SPY"], "dte": [1, 1], "band": 0.03, "cadence": 30, "history": 0, "start": 859, "end": 859}
 PARAMS = {"probe": 1}
-REACHED = $PATH
+$BIND
 def decide(ctx):
+    $BODY
     return []
+''',
+    # np.polynomial's module-level arrays are process-global and writable by subscript: a run marks `polyx` (pristine
+    # [0, 1]); a later run in the same process that finds the mark stands aside. The write is guarded, so a fix that
+    # makes the array read-only leaves the probe trading the same way twice (the proof holds), not failing.
+    "state_numpy_runs_polynomial": '''
+import numpy as np
+NEEDS = {"roots": ["SPY"], "dte": [1, 1], "band": 0.03, "cadence": 30, "history": 0, "start": 859, "end": 889}
+PARAMS = {"probe": 1}
+MARK = np.polynomial.polynomial.polyx
+STATE = {"started": 0, "inherited": 0}
+''' + ENTRY + '''
+def decide(ctx):
+    if ctx.minute != 859:
+        return leave(ctx)
+    if not STATE["started"]:
+        STATE["started"] = 1
+        STATE["inherited"] = 1 if float(MARK[0]) != 0.0 else 0
+        try:
+            MARK[0] = 1
+        except Exception:
+            pass
+    if STATE["inherited"]:
+        return []
+    return enter(ctx, "C")
+''',
+    # A batch-mate moves the class-level default domain every morning; the reader's pure computation (a polynomial
+    # built with the defaults, evaluated at 0.5) changes, and it stands aside when it does.
+    "state_numpy_mate_writer_polynomial": '''
+import numpy as np
+NEEDS = {"roots": ["SPY"], "dte": [1, 1], "band": 0.03, "cadence": 30, "history": 0, "start": 575, "end": 575}
+PARAMS = {"probe": 1}
+DOMAIN = np.polynomial.Polynomial.domain
+def decide(ctx):
+    try:
+        DOMAIN[1] = 3.0
+    except Exception:
+        pass
+    return []
+''',
+    "state_numpy_mate_reader_polynomial": '''
+import numpy as np
+NEEDS = {"roots": ["SPY"], "dte": [1, 1], "band": 0.03, "cadence": 30, "history": 0, "start": 859, "end": 889}
+PARAMS = {"probe": 1}
+''' + ENTRY + '''
+def decide(ctx):
+    if ctx.minute != 859:
+        return leave(ctx)
+    if abs(float(np.polynomial.Polynomial([0.0, 1.0])(0.5)) - 0.5) > 0.000001:
+        return []
+    return enter(ctx, "C")
 ''',
 }
 #: numpy's mutable public dicts, each proved on its own, so a fix that refuses one leaves the other's proofs failing.
 #: `typecodes` is the first probes' container; `sctypeDict` is the one numpy resolves dtype names with, so a write there
-#: can change what a batch-mate computes, not only what it knows.
+#: can change what a batch-mate computes, not only what it knows. np.polynomial's arrays have their own proofs (above):
+#: a fix that refuses the two dicts and nothing else leaves those and the reach proof failing.
 STATE_PROGRAMS.update({name + "_sctypedict": STATE_PROGRAMS[name].replace("MARK = np.typecodes", "MARK = np.sctypeDict")
                        for name in ("state_numpy_runs", "state_numpy_mate_writer", "state_numpy_mate_reader")})
 #: Keys the probes may leave in numpy's process-global dicts; the suite removes them after every run it makes.
 NUMPY_MARK_PREFIX = "ltcm-bench-"
+
+#: The reach proof's walk (`numpy_walk`). It starts from the modules a program may import and follows what a program's
+#: code can follow without calling anything: public attributes (no leading underscore; numpy's lazy submodules
+#: included), mapping values and keys, and sequence and set elements, through every module (numpy's, and any other a
+#: reached module exposes), class and instance it meets. An edge counts only when the scored tree's static check admits
+#: a program that reads it; a read that returns a new object each time (a view, a bound method) carries no state and is
+#: not followed. `setters`: callables on anything reached whose name says they change state every caller shares.
+REACH: dict[str, Any] = {
+    "roots": {"np": "numpy", "math": "math"},
+    "mark": NUMPY_MARK_PREFIX + "reach",
+    "max_objects": 50_000,
+    "setters": r"^(set_|register_|seterr|setbufsize)",
+    "attribute_writes": ("$PATH.ltcm_bench_reach = 1", "del $PATH.ltcm_bench_reach",
+                         'setattr($PATH, "ltcm_bench_reach", 1)', 'delattr($PATH, "ltcm_bench_reach")'),
+}
 
 
 def _window(name: str) -> tuple[int, int, int]:
@@ -835,8 +906,12 @@ CASES: list[dict[str, Any]] = [
      "parts": "state_numpy_runs_sctypedict", "subs": {}, "fact": "state"},
     {"id": "state_numpy_batchmates_sctypedict", "family": "state", "kind": "proof", "template": "STATE",
      "parts": "state_numpy_mate_reader_sctypedict", "subs": {}, "fact": "state"},
+    {"id": "state_numpy_runs_polynomial", "family": "state", "kind": "proof", "template": "STATE",
+     "parts": "state_numpy_runs_polynomial", "subs": {}, "fact": "state"},
+    {"id": "state_numpy_batchmates_polynomial", "family": "state", "kind": "proof", "template": "STATE",
+     "parts": "state_numpy_mate_reader_polynomial", "subs": {}, "fact": "state"},
     {"id": "state_numpy_reachable", "family": "state", "kind": "proof", "template": "STATE", "parts": "state_numpy_reach",
-     "subs": {"PATH": "np.typecodes"}, "fact": "state"},
+     "subs": {"BIND": "REACHED = np.typecodes", "BODY": "pass"}, "fact": "state"},
     {"id": "state_ctx_batchmates", "family": "state", "kind": "proof", "template": "STATE", "parts": "state_ctx_mate_reader",
      "subs": {}, "fact": "context"},
     {"id": "state_split_segments", "family": "state", "kind": "proof", **_signal("dense"), "fact": "state"},
@@ -928,7 +1003,7 @@ def _dated_tables(world: Mapping[str, Any]) -> tuple[str, str]:
 def suite_definition() -> dict[str, Any]:
     """Everything that defines the question: the protocol, the world, the channels, every case and every template."""
     return {"protocol": PROTOCOL, "world": WORLD, "channels": CHANNELS, "cases": CASES, "templates": TEMPLATES,
-            "leaks": LEAKS, "fills": FILLS, "ablations": ABLATIONS, "state_programs": STATE_PROGRAMS}
+            "leaks": LEAKS, "fills": FILLS, "ablations": ABLATIONS, "state_programs": STATE_PROGRAMS, "reach": REACH}
 
 
 def suite_sha() -> str:
@@ -1128,11 +1203,46 @@ def replicate(replication: int, scratch: Path, cohort: str = "development") -> d
         if review is not None:
             row["review_contract"] = review
         out["cases"][case["id"]] = row
+    out["opened"] = opened_routes(store, world, {cid: codes[cid] for cid, row in out["cases"].items()
+                                                 if row.get("stopped_at") == "static"})
     out["proofs"] = proofs(store, root)
     out["ablations"] = ablations(store)
     out["seconds"] = round(time.monotonic() - began, 2)
     shutil.rmtree(root, ignore_errors=True)
     shutil.rmtree(scaled_root, ignore_errors=True)
+    return out
+
+
+def opened_routes(store: Any, world: Mapping[str, Any], codes: Mapping[str, str]) -> dict[str, Any]:
+    """The probes the static check refused, loaded with the check opened and run over Validation: does the route it
+    closes carry the future? The check is opened in this process for these loads only (the engine and everything else
+    run as they are). A refused probe that profits opened is stopped by the check; one that learns nothing opened has
+    another guard too."""
+    if not codes:
+        return {}
+    from league.gym import runtime
+
+    out: dict[str, Any] = {}
+    loaded = []
+    closed = runtime.check_program
+    runtime.check_program = lambda code: None
+    try:
+        for cid, code in codes.items():
+            try:
+                loaded.append((cid, runtime.load_program(code, name=cid)))
+            except Exception as exc:  # noqa: BLE001 - a probe that cannot load even opened is reported, not raised
+                out[cid] = {"loaded": False, "why": f"{type(exc).__name__}: {str(exc)[:160]}"}
+    finally:
+        runtime.check_program = closed
+    clear_numpy_marks()
+    try:
+        results = run([p for _, p in loaded], store, "validation")
+    finally:
+        clear_numpy_marks()
+    for (cid, _), result in zip(loaded, results):
+        summary = result.get("summary") or {}
+        out[cid] = {"loaded": True, "status": result.get("status"), **hit_rate(result, world),
+                    "t_daily": summary.get("t_daily"), "pnl": summary.get("pnl")}
     return out
 
 
@@ -1180,6 +1290,12 @@ def proofs(store: Any, root: Path) -> dict[str, Any]:
     from league.gym.safety import CodeRefused
 
     out: dict[str, Any] = {}
+    walk = numpy_walk()
+    saved = Restorer(walk["_targets"])
+
+    def reset() -> None:
+        clear_numpy_marks()
+        saved.reset()
 
     def program(name: str, code: str) -> Any:
         try:
@@ -1192,12 +1308,12 @@ def proofs(store: Any, root: Path) -> dict[str, Any]:
         loaded = program(name, render(next(c for c in CASES if c["id"] == name)))
         if loaded is None:
             return
-        clear_numpy_marks()
+        reset()
         try:
             [first] = run([loaded], store, "validation")
             [second] = run([loaded], store, "validation")
         finally:
-            clear_numpy_marks()
+            reset()
         same = trade_rows(first) == trade_rows(second)
         out[name] = {"held": same and (expect is None or len(first["trades"]) == expect),
                      "trades": [len(first["trades"]), len(second["trades"])], "claim": claim}
@@ -1208,75 +1324,326 @@ def proofs(store: Any, root: Path) -> dict[str, Any]:
         # The writer is half of the batch-mate proof, never a proof of its own: its refusal record never stays in `out`.
         writer_refused = out.pop(writer_name, None)
         if reader is not None and writer is not None:
-            clear_numpy_marks()
+            reset()
             try:
                 [alone] = run([reader], store, "validation")
-                clear_numpy_marks()
+                reset()
                 [_, mated] = run([writer, reader], store, "validation")
             finally:
-                clear_numpy_marks()
+                reset()
             out[name] = {"held": trade_rows(alone) == trade_rows(mated), "trades": [len(alone["trades"]), len(mated["trades"])],
                          "claim": claim}
         elif reader is not None:  # the reader loads, the writer is refused: the channel has no writer
             out[name] = {"held": True, "refused": (writer_refused or {}).get("refused"), "claim": "the static check refuses the writer"}
         # else: the reader was refused, and `program` recorded the proof as held by refusal
 
-    twice("state_fresh_runs", "module STATE starts fresh in every run (five trades each time)", 5)
-    twice("state_params_copied", "a run's parameter lists are its own; the next run starts from the defaults", 1)
-    twice("state_numpy_runs", "no process-global object (np.typecodes) carries one run's decisions into the next run", None)
-    twice("state_numpy_runs_sctypedict", "no process-global object (np.sctypeDict) carries one run's decisions into the next "
-          "run", None)
-    batchmates("state_numpy_batchmates", "state_numpy_mate_writer",
-               "a program's result does not depend on the batch-mates it shares a process with (np.typecodes)")
-    batchmates("state_numpy_batchmates_sctypedict", "state_numpy_mate_writer_sctypedict",
-               "a program's result does not depend on the batch-mates it shares a process with (np.sctypeDict)")
-    out["state_numpy_reachable"] = numpy_reach()
+    try:
+        twice("state_fresh_runs", "module STATE starts fresh in every run (five trades each time)", 5)
+        twice("state_params_copied", "a run's parameter lists are its own; the next run starts from the defaults", 1)
+        twice("state_numpy_runs", "no process-global object (np.typecodes) carries one run's decisions into the next run",
+              None)
+        twice("state_numpy_runs_sctypedict", "no process-global object (np.sctypeDict) carries one run's decisions into "
+              "the next run", None)
+        twice("state_numpy_runs_polynomial", "no process-global object (np.polynomial.polynomial.polyx) carries one run's "
+              "decisions into the next run", None)
+        batchmates("state_numpy_batchmates", "state_numpy_mate_writer",
+                   "a program's result does not depend on the batch-mates it shares a process with (np.typecodes)")
+        batchmates("state_numpy_batchmates_sctypedict", "state_numpy_mate_writer_sctypedict",
+                   "a program's result does not depend on the batch-mates it shares a process with (np.sctypeDict)")
+        batchmates("state_numpy_batchmates_polynomial", "state_numpy_mate_writer_polynomial",
+                   "a batch-mate cannot change what another program computes (np.polynomial.Polynomial.domain)")
+        out["state_numpy_reachable"] = numpy_reach(store, walk, saved)
+    finally:
+        reset()
     out["state_ctx_batchmates"] = mates(store, "state_ctx_mate_writer", "state_ctx_mate_reader",
                                         "a batch-mate cannot write into the ctx objects another program is handed")
     out["state_split_segments"] = split_proof(root)
     return out
 
 
-def numpy_containers() -> list[str]:
-    """numpy's public mutable builtin containers (dict, list, set, bytearray), at the top level and one public numpy
-    submodule down, as `np.` paths. Read from the module dicts, so enumerating imports nothing: it is what this
-    process's numpy holds (numpy 2.5: `np.sctypeDict` and `np.typecodes`)."""
-    import types
+def reach_program(bind: str = "", body: str = "pass") -> str:
+    """A program in the reach probe's shape: `bind` at module level, `body` (one statement per line) in decide."""
+    from string import Template
+
+    return Template(STATE_PROGRAMS["state_numpy_reach"]).substitute(
+        BIND=bind, BODY="\n    ".join(body.splitlines()) or "pass").lstrip("\n")
+
+
+def _write_test(path: str, obj: Any) -> tuple[str, str] | None:
+    """(the statement a program writes `obj` with, the expression that reads the write back), or None when the suite has
+    no exact write for the object's kind: such an object counts as reachable whenever the static check admits it."""
+    import numpy as np
+
+    mark = repr(REACH["mark"])
+    if type(obj) is dict:
+        return f"{path}[{mark}] = 1", f"{mark} in {path}"
+    if type(obj) is list:
+        return f"{path}.append({mark})", f"len([x for x in {path} if isinstance(x, str) and x == {mark}]) > 0"
+    if type(obj) is set:
+        return f"{path}.add({mark})", f"{mark} in {path}"
+    if type(obj) is bytearray:
+        return f"{path}.extend(b{mark})", f"b{mark} in {path}"
+    if isinstance(obj, np.ndarray) and obj.size and obj.dtype.kind in "biufc":
+        first = obj.flat[0]
+        if obj.dtype.kind == "b":
+            value = "False" if bool(first) else "True"
+        elif obj.dtype.kind in "iu":
+            value = "5" if first == 7 else "7"
+        else:
+            value = "0.625" if first == 0.375 else "0.375"
+        return f"{path}.flat[0] = {value}", f"bool({path}.flat[0] == {value})"
+    return None
+
+
+def _writable(obj: Any) -> bool:
+    """Can a program that holds `obj` change it in place? Containers and anything with item assignment; an ndarray only
+    while its writeable flag is set (a program cannot set it: `flags` and `setflags` are refused)."""
+    import collections.abc as cabc
 
     import numpy as np
 
-    mutable = (dict, list, set, bytearray)
-    found = []
-    for name, value in sorted(vars(np).items()):
-        if name.startswith("_"):
-            continue
-        if isinstance(value, mutable):
-            found.append(f"np.{name}")
-        elif isinstance(value, types.ModuleType) and value.__name__.startswith("numpy."):
-            found += [f"np.{name}.{inner}" for inner, item in sorted(vars(value).items())
-                      if not inner.startswith("_") and isinstance(item, mutable)]
-    return found
+    if isinstance(obj, np.ndarray):
+        return bool(obj.flags.writeable)
+    if isinstance(obj, (dict, list, set, bytearray, cabc.MutableMapping, cabc.MutableSequence, cabc.MutableSet)):
+        return True
+    return hasattr(type(obj), "__setitem__") or hasattr(type(obj), "__delitem__")
 
 
-def numpy_reach() -> dict[str, Any]:
-    """Every mutable public numpy container: does the static check refuse a program that reaches it? Held only when it
-    refuses them all. A container a program can hold is a channel between runs and batch-mates in one process, so a
-    fix that closes some containers and not others does not hold here."""
+def numpy_walk() -> dict[str, Any]:
+    """Everything a program can reach from its imports without calling anything (`REACH`), as the scored tree's static
+    check decides it: the writable objects (`_targets`, with the objects; `writable`, their first admitted path), the
+    writable objects seen only through refused reads, the global setters (`REACH`), the modules outside numpy and
+    math a program reaches, any attribute write the check admits on a reached object, and the walk's size. Imports only
+    what a program's own reads would import (a module's attribute is checked before it is read)."""
+    import collections
+    import collections.abc as cabc
+    import importlib
+    import re
+    import types
+    import warnings
     from string import Template
 
+    import numpy as np
+    from league.gym import safety
+    from league.gym.runtime import load_program
+
+    def admitted(code: str) -> bool:
+        try:
+            safety.check_program(code)
+            return True
+        except safety.CodeRefused:
+            return False
+
+    def loads(path: str) -> bool:
+        try:
+            load_program(reach_program(f"REACHED = {path}"), name="numpy-reach")
+            return True
+        except safety.CodeRefused:
+            return False
+
+    leaves = (str, bytes, int, float, complex, type(None), np.generic)
+    setter = re.compile(REACH["setters"])
+    roots = {alias: importlib.import_module(name) for alias, name in REACH["roots"].items()}
+    expanded: dict[int, str] = {id(obj): alias for alias, obj in roots.items()}
+    held = list(roots.values())  # keeps every expanded object alive, so no id is reused during the walk
+    queue = collections.deque((alias, obj, 0) for alias, obj in roots.items())
+    targets: list[dict[str, Any]] = []
+    setters: dict[str, None] = {}
+    foreign: dict[str, str] = {}
+    refused: dict[int, str] = {}
+    edges = depth = 0
+    complete = True
+    while queue:
+        path, obj, level = queue.popleft()
+        depth = max(depth, level)
+        children: list[tuple[str, Any]] = []
+        if isinstance(obj, cabc.Mapping):
+            try:
+                children += [(f"list({path}.values())[{i}]", v) for i, v in enumerate(list(obj.values()))]
+                children += [(f"list({path})[{i}]", k) for i, k in enumerate(list(obj))]
+            except Exception:  # noqa: BLE001 - a mapping that cannot be listed has no elements a program can reach
+                pass
+        elif isinstance(obj, (list, tuple)):
+            children += [(f"{path}[{i}]", v) for i, v in enumerate(obj)]
+        elif isinstance(obj, (set, frozenset)):
+            children += [(f"list({path})[{i}]", v) for i, v in enumerate(list(obj))]
+        try:
+            names = sorted(dir(obj))
+        except Exception:  # noqa: BLE001
+            names = []
+        for name in names:
+            if name.startswith("_"):
+                continue
+            child_path = f"{path}.{name}"
+            if isinstance(obj, types.ModuleType) and not admitted(reach_program(f"REACHED = {child_path}")):
+                # Never import what a program cannot read: the module's own dict is looked at, never its __getattr__.
+                peek = vars(obj).get(name)
+                if peek is not None and not isinstance(peek, leaves) and (
+                        _writable(peek) or callable(peek) and setter.search(name)):
+                    refused.setdefault(id(peek), child_path)
+                continue
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                try:
+                    first, again = getattr(obj, name), getattr(obj, name)
+                except Exception:  # noqa: BLE001
+                    continue
+            if setter.search(name) and callable(first) and not isinstance(obj, leaves):
+                setters.setdefault(child_path, None)  # a bound method too: calling it changes what every caller shares
+            if first is again:
+                children.append((child_path, first))
+        for child_path, child in children:
+            edges += 1
+            if isinstance(child, leaves) or id(child) in expanded:
+                continue
+            if not admitted(reach_program(f"REACHED = {child_path}")):
+                if _writable(child):
+                    refused.setdefault(id(child), child_path)
+                continue
+            if len(expanded) >= REACH["max_objects"]:
+                complete = False
+                break
+            expanded[id(child)] = child_path
+            held.append(child)
+            refused.pop(id(child), None)
+            if _writable(child):
+                targets.append({"path": child_path, "obj": child, "kind": type(child).__name__})
+            if isinstance(child, types.ModuleType):
+                name = child.__name__
+                if name not in REACH["roots"].values() and not name.startswith("numpy."):
+                    foreign[name] = child_path
+            queue.append((child_path, child, level + 1))
+    # A writable object or setter counts as reached when a program that binds it LOADS (the runtime's own refusal too).
+    loaded_targets, refused_paths = [], sorted(refused.values())
+    for target in targets:
+        if loads(target["path"]):
+            loaded_targets.append(target)
+        else:
+            refused_paths.append(target["path"])
+    open_setters = [path for path in setters if loads(path)]
+    refused_paths += [path for path in setters if path not in open_setters]
+    # Attribute writes (assignment, del, setattr, delattr) on every reached object, roots included: each must be refused.
+    writes = [Template(form).substitute(PATH=path) for path in sorted(expanded.values()) for form in REACH["attribute_writes"]]
+    attribute_writes = [write for write in writes if admitted(reach_program(body=write))]
+    return {"_targets": loaded_targets, "writable": sorted(t["path"] for t in loaded_targets),
+            "refused_containers": sorted(set(refused_paths)), "setters": sorted(open_setters),
+            "foreign_modules": dict(sorted(foreign.items())), "attribute_writes": attribute_writes,
+            "walk": {"objects": len(expanded), "edges": edges, "depth": depth, "complete": complete,
+                     "numpy": getattr(np, "__version__", None)}}
+
+
+class Restorer:
+    """What the reach targets held when it was made; `reset()` puts it back (dicts, lists, sets, bytearrays and arrays)
+    and `changed()` lists the paths that differ now. A probe's writes never outlive the proof that made them."""
+
+    def __init__(self, targets: Sequence[Mapping[str, Any]]):
+        self.saved = [(t["path"], t["obj"], self._copy(t["obj"])) for t in targets]
+
+    @staticmethod
+    def _copy(obj: Any) -> Any:
+        import numpy as np
+
+        if type(obj) in (dict, list, set):
+            return type(obj)(obj)
+        if type(obj) is bytearray:
+            return bytes(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.copy()
+        return None
+
+    @staticmethod
+    def _same(obj: Any, saved: Any) -> bool:
+        import numpy as np
+
+        if type(obj) is dict:
+            return obj.keys() == saved.keys() and all(obj[k] is saved[k] for k in saved)
+        if isinstance(obj, np.ndarray):
+            return obj.shape == saved.shape and bool(np.array_equal(obj, saved, equal_nan=obj.dtype.kind in "fc"))
+        if type(obj) is bytearray:
+            return bytes(obj) == saved
+        if type(obj) is list:
+            return len(obj) == len(saved) and all(a is b for a, b in zip(obj, saved))
+        return obj == saved
+
+    def changed(self) -> list[str]:
+        return [path for path, obj, saved in self.saved if saved is not None and not self._same(obj, saved)]
+
+    def reset(self) -> None:
+        for _, obj, saved in self.saved:
+            if saved is None or self._same(obj, saved):
+                continue
+            if type(obj) is dict:
+                for key in [k for k in obj if k not in saved]:
+                    del obj[key]
+                for key, value in saved.items():
+                    if key not in obj or obj[key] is not value:
+                        obj[key] = value
+            elif type(obj) is set:
+                obj.clear()
+                obj.update(saved)
+            elif type(obj) in (list, bytearray):
+                obj[:] = saved
+            elif obj.flags.writeable:
+                obj[...] = saved
+
+
+def numpy_reach(store: Any, walk: Mapping[str, Any] | None = None, saved: Restorer | None = None) -> dict[str, Any]:
+    """Can a program write anything numpy or math exposes so that the write outlives its run or reaches a batch-mate?
+
+    The walk (`numpy_walk`) lists every writable object a program can reach and bind. One loaded program then writes each
+    of them (every write guarded), through the engine; the suite looks at what the writes left behind after the run, and
+    a reader that checks every mark trades alone, after the writer's run, and beside the writer in one batch. Held only
+    when no write outlives its run, the reader's trades never change, no attribute write is admitted on any reached
+    object, no global setter is reachable, and the walk finished. An object the suite has no exact write for counts as
+    reachable whenever it can be bound (a false alarm, never a false certificate). Not covered: objects a program can
+    reach only through a call's result, and hidden state changed by a call to a function not named as a setter."""
     from league.gym.runtime import load_program
     from league.gym.safety import CodeRefused
 
-    reachable, refused = [], []
-    for path in numpy_containers():
-        code = Template(STATE_PROGRAMS["state_numpy_reach"]).substitute(PATH=path).lstrip("\n")
+    walk = walk if walk is not None else numpy_walk()
+    saved = saved if saved is not None else Restorer(walk["_targets"])
+    tests = {t["path"]: _write_test(t["path"], t["obj"]) for t in walk["_targets"]}
+    exact = {path: test for path, test in tests.items() if test is not None}
+    unverified = sorted(path for path, test in tests.items() if test is None)
+    out = {k: v for k, v in walk.items() if not k.startswith("_")}
+    persisted: list[str] = []
+    channels = {"runs": False, "batchmates": False}
+    if exact:
+        writes = "\n".join(f"try:\n    {write}\nexcept Exception:\n    pass" for write, _ in exact.values())
+        reads = "\n".join(f"try:\n    seen += 1 if {read} else 0\nexcept Exception:\n    pass" for _, read in exact.values())
+        writer_code = reach_program(body=writes).replace('"start": 859, "end": 859', '"start": 575, "end": 575')
+        reader_code = reach_program(body="seen = 0\n" + reads + "\nif ctx.minute == 859 and not seen:\n    return enter(ctx, \"C\")"
+                                    "\nif ctx.minute != 859:\n    return leave(ctx)") \
+            .replace('"start": 859, "end": 859', '"start": 859, "end": 889').replace("\ndef decide", ENTRY + "def decide", 1)
         try:
-            load_program(code, name="numpy-reach")
-            reachable.append(path)
-        except CodeRefused:
-            refused.append(path)
-    return {"held": not reachable, "reachable": reachable, "refused_containers": refused,
-            "claim": "the static check refuses every mutable public numpy container (a program cannot hold one)"}
+            writer = load_program(writer_code, name="numpy-reach-writer")
+            reader = load_program(reader_code, name="numpy-reach-reader")
+        except CodeRefused as exc:  # every write was admitted alone; together they are not: count them all
+            unverified = sorted(tests)
+            out["refused_together"] = str(exc)[:200]
+        else:
+            try:
+                saved.reset()
+                [alone] = run([reader], store, "validation")
+                saved.reset()
+                run([writer], store, "validation")
+                persisted = saved.changed()  # what the writer's run left in the process every later run shares
+                [after] = run([reader], store, "validation")
+                saved.reset()
+                [_, mated] = run([writer, reader], store, "validation")
+            finally:
+                saved.reset()
+            channels = {"runs": trade_rows(alone) != trade_rows(after), "batchmates": trade_rows(alone) != trade_rows(mated)}
+            out["trades"] = [len(alone["trades"]), len(after["trades"]), len(mated["trades"])]
+    # A reader that saw a mark the suite cannot attribute (nothing outlived the run, yet a batch-mate saw it) implicates
+    # every written object.
+    reachable = sorted(set(persisted) | set(unverified) | (set(exact) if any(channels.values()) and not persisted else set()))
+    held = (not reachable and not any(channels.values()) and not walk["setters"] and not walk["attribute_writes"]
+            and walk["walk"]["complete"])
+    return {"held": held, "reachable": reachable, **out, "unverified": unverified, "channels": channels,
+            "claim": "nothing reachable from `import numpy` or `import math` without a call (public attributes, mapping "
+                     "values, elements) carries a program's write past its run or to a batch-mate; no attribute write is "
+                     "admitted on a reached object, and no global setter (set_*, register_*) is reachable"}
 
 
 def mates(store: Any, writer_name: str, reader_name: str, claim: str) -> dict[str, Any]:
@@ -1575,6 +1942,10 @@ LIMITATIONS = [
     "frequency band, and the sparse memorized table is a negative the floors are known to stop.",
     "--tree runs the candidate's code in the suite's interpreter with the operator's environment: it guards against "
     "accidental drift of the cases, not against a hostile tree.",
+    "The numpy reach proof covers what a program reaches from `import numpy` and `import math` without a call (public "
+    "attributes, mapping values and keys, elements), in the scored process's numpy and the static check's own answer. "
+    "Not covered: objects a program reaches only through a call's result, and state a call changes through a function "
+    "not named as a setter (set_*, register_*, seterr*, setbufsize).",
 ]
 
 
@@ -1613,6 +1984,38 @@ def _rate(k: int, n: int) -> dict[str, Any]:
             "upper_95_one_sided": round(exact_upper(k, n, 1.0 - PROTOCOL["confidence"]), 4) if n else 1.0}
 
 
+def _span(values: Sequence[Any]) -> list[Any] | None:
+    """[lowest, highest] of the numbers given, or None."""
+    numbers = [v for v in values if isinstance(v, (int, float)) and not isinstance(v, bool)]
+    return [min(numbers), max(numbers)] if numbers else None
+
+
+def case_figures(runs: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
+    """The per-world figures EVALUATOR_1 quotes, over a case's worlds: trades in each Train year, Validation trades and
+    t (range and median), and, for the worlds stopped at Validation, their trades, t and the checks that failed."""
+    import statistics
+
+    years = [y.get("trades") for r in runs for y in ((r.get("train") or {}).get("years") or {}).values()]
+    numbers = [((r.get("validation") or {}).get("numbers") or {}) for r in runs]
+    ts = [n.get("t") for n in numbers if isinstance(n.get("t"), (int, float))]
+    if not _span(years) and not ts:
+        return None
+    out: dict[str, Any] = {"train_trades_per_year": _span(years), "validation_trades": _span([n.get("trades") for n in numbers]),
+                           "validation_t": _span(ts), "validation_t_median": round(statistics.median(ts), 4) if ts else None}
+    stops = [r for r in runs if r.get("stopped_at") == "validation"]
+    if stops:
+        failed: dict[str, int] = {}
+        for r in stops:
+            for check, ok in sorted(((r.get("validation") or {}).get("checks") or {}).items()):
+                if not ok:
+                    failed[check] = failed.get(check, 0) + 1
+        stopped = [((r.get("validation") or {}).get("numbers") or {}) for r in stops]
+        out["validation_stops"] = {
+            "trades": sorted(n["trades"] for n in stopped if isinstance(n.get("trades"), (int, float))),
+            "t": sorted(n["t"] for n in stopped if isinstance(n.get("t"), (int, float))), "failed_checks": failed}
+    return out
+
+
 def aggregate(rows: Sequence[Mapping[str, Any]], search: Mapping[str, Sequence[Mapping[str, Any]]]) -> dict[str, Any]:
     """The report's figures from the replication rows and the search trials (pure: no engine, no store)."""
     kinds = {c["id"]: c for c in CASES}
@@ -1644,6 +2047,19 @@ def aggregate(rows: Sequence[Mapping[str, Any]], search: Mapping[str, Sequence[M
         refused = [r["refused"] for r in runs if r.get("refused")]
         if refused:
             entry["refused"], entry["refused_in"] = refused[0], len(refused)
+        figures_out = case_figures(runs)
+        if figures_out:
+            entry["figures"] = figures_out
+        opened = [(r.get("opened") or {}).get(case["id"]) for r in rows]
+        opened = [o for o in opened if o]
+        if opened:
+            ran = [o for o in opened if o.get("loaded")]
+            trades = sum(int(o.get("trades") or 0) for o in ran)
+            ts = [o["t_daily"] for o in ran if isinstance(o.get("t_daily"), (int, float))]
+            entry["opened"] = {"worlds": len(opened), "loaded": len(ran), "trades": trades,
+                               "hits": sum(int(o.get("hits") or 0) for o in ran),
+                               "direction_hit_rate": round(sum(int(o.get("hits") or 0) for o in ran) / trades, 4) if trades else None,
+                               "t_daily": _span(ts), "profitable_worlds": sum(1 for o in ran if (o.get("pnl") or 0) > 0)}
         per_case[case["id"]] = entry
     negatives = [c for c in per_case.values() if c["kind"] == "negative"]
     positives = [c for c in per_case.values() if c["kind"] == "positive"]
@@ -1661,11 +2077,13 @@ def aggregate(rows: Sequence[Mapping[str, Any]], search: Mapping[str, Sequence[M
     for name in rows[0]["proofs"] if rows else []:
         held = sum(bool(r["proofs"][name]["held"]) for r in rows)
         first = rows[0]["proofs"][name]
-        observed = next((first[key] for key in ("trades", "train_days", "reachable") if key in first), None)
+        observed = next((first[key] for key in ("reachable", "trades", "train_days") if key in first), None)
         proofs_out[name] = {"held": held, "of": len(rows), "fact": (kinds.get(name) or {}).get("fact"), "claim": first["claim"],
                             "observed": observed, "refused": first.get("refused")}
-        if "refused_containers" in first:
-            proofs_out[name]["refused_containers"] = first["refused_containers"]
+        for key in ("trades", "refused_containers", "setters", "foreign_modules", "attribute_writes", "unverified", "channels",
+                    "walk"):
+            if key in first and key not in proofs_out[name] and first[key] is not observed:
+                proofs_out[name][key] = first[key]
     ablation_out: dict[str, Any] = {}
     for name in rows[0]["ablations"] if rows else []:
         runs = [r["ablations"][name] for r in rows]
@@ -1910,6 +2328,7 @@ def suite(replications: int | None = None, search_replications: int | None = Non
               "pinned_sha": pinned, "pinned": computed == pinned, "compiled_pin_current": PINNED_SUITE_SHA == pinned,
               "full_protocol": reps == PROTOCOL["replications"] and search_reps == SEARCH["replications"],
               "replications": reps, "search_replications": search_reps, "tree": tree,
+              "world_sessions": {window: len(days) for window, days in sessions().items()},
               "runtime": {**runtime_versions(), "elapsed_seconds": round(time.monotonic() - began, 1)},
               **aggregate(rows, search), "limitations": LIMITATIONS, "replication_rows": rows}
     report["owner_rule_confirmation"] = (confirm_owner_rule(frozen, report["variants"])
@@ -2149,7 +2568,7 @@ def run_on_tree(tree: Path, args: Any) -> int:
                           env=env, check=False).returncode
 
 
-PINNED_SUITE_SHA = "ce1617764510c9963edc2ead3ad5a12f6a31876d747afb5ba1529ace847f4094"
+PINNED_SUITE_SHA = "0e9badba6821b28f738ae40adb59dc00f969b717a939a35d7a16cfd11494b2fe"
 
 
 if __name__ == "__main__":
