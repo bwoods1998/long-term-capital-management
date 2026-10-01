@@ -1087,6 +1087,8 @@ FROZEN_SYMBOLS: dict[str, tuple[str, ...]] = {
     # The architect's pass: the model call and its spend reservation, the parse of the answer into proposals and the
     # hand-off to `admit` (a proposal's text reaches the store unchanged: the rebirth detector reads what was proposed).
     "league/swarm/architect.py": ("SAME_IDEA", "_STOP", "words", "same_idea", "salvage_families", "_FAMILIES",
+                                  "read_families", "recover_families", "_from_families", "without_trailing_commas",
+                                  "_past_object", "_CARD", "CARD_KEY",
                                   "SALVAGE_MIN", "Architect.run", "Architect._digest_call", "Architect._salvage_retry"),
     # The model's tool calls parsed into the arguments `Researcher._execute` receives (the program among them).
     "league/swarm/claude_research.py": ("ToolCall", "tool_calls", "validate", "check_input", "_type_error", "resolve_name",
