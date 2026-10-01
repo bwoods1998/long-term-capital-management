@@ -349,6 +349,22 @@ A, #441) are the second exception, handled together.
   then shows Net as a dash until the House sends `claude_usd`. The site must be live before the incubator is switched
   on.
 
+The swarm window (`levels` and `rationale`, Oct 1, 2026: each agent's level and the levels funnel, each agent's thesis,
+and why each real position opened and closed) is the third exception.
+- **The order it tries:** a site that refuses a checkpoint carrying the window is sent it again without the window first
+  (`publish.windowless`). Refused again, the ladder above goes on without the window.
+- **What gets marked:** the window, only when the windowless checkpoint was taken; it is offered again after 30 minutes,
+  and the House does not read it meanwhile. A site that refuses the table too is told the window's refusal on the next
+  publish.
+- **The byte limit:** the window leaves first (its theses, then all of it), before any agent or row, and the body is
+  fitted 32 KiB under the site's 512 KiB so the names the site's public read adds (a 40-character name on each of
+  at most 508 rows) never push it over.
+- **The warning,** one per distinct reply: "the site refused the swarm window (levels and rationale: old site, or an
+  entry it rejects) ... (the site said: ...)".
+- **The site that takes it:** personal-site branch `capital/swarm-window`. Its Worker serves the window only to
+  `?progress=1&positions=1&practice=1&window=1`; every older read gets exactly the keys it validated. Site first is
+  preferred; either order works.
+
 **Checkpoint the House box before risky work:** `python3 scripts/floor_box.py checkpoint --name why
 --ttl-days 30` (`checkpoints` lists them). A checkpoint holds the box's `.env`. Sail's checkpoint
 API failed twice on Sept 26 (06:35Z and 07:00Z, HTTP 503); the old state's archive is a tarball
@@ -397,6 +413,38 @@ its main commit.
    - Its re-validation under engine 4 is a new, counted trial, and the holdout still judges it.
    - Run a dry run first. The revived family is held once its re-validation meets the checks.
    - Record in the run record which families were revived, and that the operator chose them from the validation line.
+   - **The harness runs the revived program exactly** (Oct 1, `researcher.py` THE OPERATOR'S RUN). Take a living Gym
+     family's latest version written by the operator (author `operator-revive`). If it has no Train run at the normal
+     spread on the current evaluator (image and bundle) and Train span that is the program's answer, the harness runs it
+     at the start of the family's next cycle, before any rewrite, queued run or model turn. An answer is a run of status
+     ok, disqualified, no_data or refused. A run of status `error` is not one: the Gym could not finish it (a dead
+     worker, or a unit killed, perhaps for another program in its batch), with no trial and no figures.
+     - It runs with the version's stored code and params, through `gym_run`'s own path: the same refusals, no-duplicate
+       rule, lineage trial, Train score, drift screen, best and robustness runs. It is never probed. It is recorded as
+       that version (no version row, no revision).
+     - Any new evaluation of it, ok or not, is the cycle's one run. A rewrite and a run queued last cycle wait for the
+       next cycle, and the model reads the result. A run call the model makes in that cycle replaces the queued run.
+     - A Gym error, a run the Gym could not finish, or a failure of the attempt itself ends the cycle with no model call.
+       The harness tries again next cycle, at most 3 times. When a wait gave up while the Gym was still running the job,
+       the harness does not submit it again. It waits up to one more run timeout (`late_until`) and reads the result
+       back from the store when it lands, with no second job and no second trial. That holds even after it gave up.
+     - A refusal, or the third failure, gives up with a notebook note. The note and the status say how the researcher
+       can run the version itself. A gate-mode mechanism test that did not pass is the version's answer.
+     - The family state's `operator_run` keeps the record per version, evaluator and Train span, so a later adoption
+       owes one more run. The harness's own stored result or refusal never counts toward the dormancy clause.
+     - The status tells the researcher that its revival runs unchanged first, that its evidence decides, and that an
+       evaluator change is never a reason to retire.
+   - **Before this fix, revivals did not run the revived program.** Between Sept 30 and the fix, the harness never ran a
+     revival's version 1. A `gym_run` with no code reran the latest code with params `{}`, which dropped the revived
+     params; unless they equalled the program's `PARAMS` defaults, a different program ran. Researchers also often wrote
+     new code at once. A revival's Train, 1.5x and drift evidence on the evaluator in force therefore mostly never
+     landed. Check any run-record claim from that window that a revival "re-validated with identical numbers" by
+     evaluation, not by version number. Compare the run's code sha and merged params (its `eval_key`) with version 1's:
+     the revived program is that code with version 1's params merged over the `PARAMS` defaults, whichever version row
+     the run is under. On the first deploy with the fix, each living revived family whose version 1 has no such run gets
+     it in its next cycle. The deploy is a new release, so it also wakes a parked family.
+   - `gym_run` with neither `code` nor `params` now reruns the latest version exactly: its params carry over. Explicit
+     params, `{}` included, still replace them.
 
 **Checks after promotion.** Record each one in the run record.
 - **Evaluator adoption.**
@@ -582,7 +630,9 @@ cd /workspace/previous && /workspace/.venv/bin/python -m league.watchdog rollbac
   bill is not yet known; `kv claude_band` is the breaker (`trouble`, `paused_until`, `why`).
 - **The public page:** `curl -s https://blakewoods.us/api/capital/checkpoint` (its `published_at`);
   `curl -s 'https://blakewoods.us/api/capital/checkpoint?progress=1&positions=1'` adds the positions
-  table, which the default read omits.
+  table, which the default read omits; `...&practice=1&window=1` adds the practice league and the swarm window
+  (`levels`: each agent's level and the funnel since the reset; `rationale`: each agent's thesis and each real
+  position's route, reasons, exit and maximum loss).
 - **The public cost and Net** (Release A, #441, with personal-site PR #17).
   - **`compute` is the bill since the reset, by service.**
     - `sail_usd` is what Sail billed. It is the Sail guard's balance meter (`swarm.sqlite` kv `metered_spent`, since the
@@ -660,7 +710,50 @@ python3 scripts/data/box.py run -- ARGS         # run backfill.py ARGS (or check
   pulls the last trading day (from 01:45 ET) into the data box's store and the gate image only,
   stopping and restarting the backfill around it, re-checkpoints the gate and puts both boxes to
   sleep; `nightly.py schedule` sleeps the data box until the next 06:00Z wake. It is idempotent:
-  rerun it after any failure. It refuses the Gym image's box as a target.
+  rerun it after any failure. It refuses the Gym image's box as a target. On the House the supervised
+  `nightly.py daemon --state <root>/data --ready-file <root>/gym-forward.json` runs it each night and publishes the
+  ready file the swarm reads.
+- **The chain's rule** (Oct 1, 2026). The nightly extends the gate image that `<root>/data/images.json` names
+  (`gate.current`), and the swarm uses the gate that `swarm.json` names (`gym.gate_checkpoint`). On Sept 29-30 the two
+  differed: images.json still named the original five-root gate, the 25-root gate had been adopted through
+  `swarm.json` alone, and the ready file's checkpoint silently replaced it. Every gate box then forked from a five-root
+  holdout. These rules now keep them together:
+  - **Each day names its image.** The nightly records the image it extended with each day (`forward_days[day]`
+    `base_checkpoint` and `holdout_roots`, and `base` on each `gate.checkpoints` entry), and the ready file carries
+    `base_checkpoint` (the image's first checkpoint) and `holdout_roots` (the roots it was built with). A day finished
+    without them (by an earlier release) is completed but not published (`nightly.json` `unpublished`).
+  - **The swarm takes the chain only while it extends the named gate.** `settings.load` replaces `gym.gate_checkpoint`
+    with the ready file's checkpoint only when `base_checkpoint` equals it and `holdout_roots` covers `gym.roots`.
+    Otherwise the swarm uses the named gate itself, with no forward days, and the loop raises one `gate_chain_ignored`
+    alert per ignored file. An unreadable file never moves the gate.
+  - **A legacy ready file** (no `base_checkpoint`, written before this release) stands only when images.json proves
+    the same. Its current gate's first checkpoint must be the named gate, and its recorded roots must cover
+    `gym.roots`. The file's checkpoint must be its day's recorded checkpoint, adopted after the image was recorded
+    (`forward_days[day].adopted` not before `current.built_at`). It must also be on the image's chain
+    (`settings.chain_refusal`): it and every later `gate.checkpoints` entry name the image as `base`, or (an entry
+    written before this release) were taken after `built_at`. It need not be the chain's tip, because the nightly
+    records a new day's checkpoint shortly before it publishes the day. Production's file at this release is such a
+    file (written after the Oct 1 re-base), so the gate does not move at the deploy or at the first publish after it.
+    `nightly.py --state <root>/data stamp-ready --ready-file <root>/gym-forward.json [--apply]` writes
+    `base_checkpoint` and `holdout_roots` into a legacy file that stands. It needs the daemon stopped, because it
+    takes `nightly.lock`. It puts the old file back unless the swarm takes the new one with the same gate.
+  - **The nightly never extends a gate that lacks the swarm's roots, or a chain that is not on it.** `run` (and the
+    daemon) refuses before any box is woken (`preflight`, before the data box is resumed). It refuses when images.json's
+    gate does not list its roots or lacks a root of `gym.roots` (read from `<root>/swarm.json`; the daemon's root is the
+    ready file's folder, `run --swarm-root` for a hand run). It also refuses when the chain's tip (`current_checkpoint`)
+    is not proven on that gate (`settings.chain_refusal`): the chain records were not reset when the image was
+    adopted, and a re-fork of the gate box would carry another image's holdout under this one's name. The refusal is
+    the controller's `error` in `nightly.json`, retried every 300 s with no box woken. `schedule` and rehearsals are
+    not refused.
+  - **A day an earlier release checkpointed** (the daemon was stopped between its checkpoint and its publish) is
+    published with its image's name when the chain's records prove it (`Nightly.proven_identity`), and is completed
+    without a publish otherwise (`nightly.json` `unpublished`); the next day's publish names its chain.
+  - **To adopt a new gate image:** build it (`images.py build gate --roots ...`, which records its roots; or a staging
+    build), then point images.json's gate at it with the chain reset, as the operator's Oct 1 re-base did. The reset
+    sets `current` to the image's record, `current_checkpoint` to its first checkpoint, `checkpoints` to [] and
+    `forward_days` to the `pulled` markers only, and sets `nightly.json` `completed` to {}. Then name the same
+    checkpoint in `swarm.json`. Until the nightly publishes on the new chain, the swarm uses the new image itself.
+    `images.py build` and `finish` do not reset the chain records; until they are reset, the nightly refuses to run.
 - **Gym boxes** are forks of the Gym image checkpoint, sealed, driven through Sail's file and exec
   APIs (`league/gym/driver.py`, `python -m league.gym.batch` on the box). The swarm's pool starts
   `gym.start_boxes` when there is work (4 by default; 2 on the box since Sept 30's throttle), grows to
@@ -1338,6 +1431,11 @@ From Release A:
 - **"the site refused the practice league block or Claude's own compute part ..."** (#441). The site predates
   personal-site PR #17. The House sent it the older shape: no practice block, and Claude inside `other_usd`. It offers
   the newer shape again in 30 minutes. Deploy the site; nothing is lost.
+- **"the site refused the swarm window ..."** (the swarm window, Oct 1, 2026). The site predates the window (personal-site
+  `capital/swarm-window`), or it refused an entry. The House sent the checkpoint without `levels` and `rationale` and
+  offers them again in 30 minutes. Deploy the site; nothing is lost. If the deployed site should take it, read the reply
+  the warning quotes; `curl -s 'https://blakewoods.us/api/capital/checkpoint?progress=1&positions=1&practice=1&window=1'`
+  shows what the site serves.
 
 From Release B:
 
@@ -1543,6 +1641,47 @@ answers `retire_exempt: true`). Its clocks keep running while it is held, so a f
 retire at a tournament round after the hold is cleared if the gate has not started its look by then (the gate
 round comes every few minutes, the tournament hourly). A hold on a family without `gate_ready` protects nothing.
 The hold does not touch tuition of a version whose review and audit already passed (`bands.read`).
+
+The gate's data (Oct 1, 2026). A look needs the gate image to hold the holdout of every root the program needs. On
+Sept 30, three looks of a GOOGL/MSFT program failed with "no holdout days for GOOGL, MSFT". Each counted as a try, and
+the third wrote a stage "gym" refusal that bars the program from the incubator, although no verdict was made.
+- **Each gate box lists its holdout when it starts**, by file name only (holdout-dated `nbbo/<ROOT>/*.parquet` and
+  `underlying/<ROOT>/*.parquet`; no file is opened and the gate's capability is never minted). Its roots with the
+  image's full count of both (the count most roots have, 184 sessions on the current images) are the box's
+  `holdout_roots` (the `boxes` row and the `box_ready` event); a root copied only in part is not among them. A holdout
+  job needing another root fails at once as missing data. A store with no holdout at all fails the box, records the
+  image as holding none, and fails the holdout looks waiting for a gate box as missing data. The pool keeps the
+  coverage per gate image in kv `gate_coverage`, with the roots any Gym exit-3 answer named since ("no holdout days
+  for GOOGL, MSFT in ..."). An exit-3 answer that names no root (no store, a missing package) is a fault of the box,
+  not missing data: it is not recorded, and its look fails and counts a try as before. An image that lacks a root of
+  `gym.roots` raises one `gate_coverage` alert.
+- **The record is per image**, keyed by `gym.gate_checkpoint`, so each nightly publish starts a fresh one. To clear a
+  record that is wrong (say a Gym fault that named roots the image holds), drop that image's entry from kv
+  `gate_coverage` on the House:
+  `s=SwarmStore('/workspace/state'); c=s.get('gate_coverage') or {}; c.pop('<checkpoint>', None); s.put('gate_coverage', c)`.
+  The next gate box lists the image again.
+- **The gate refuses a look up front** when that record, or the ready file's `holdout_roots` while its chain is the
+  gate, says the image lacks a root the program needs. No look is marked, no try is counted, nothing is refused,
+  `gate_ready` stays, the round lists the family under `waiting`, and one `gate_missing_data` alert is raised per
+  program, image and gap (kv `gate_missing:<run_sha>`). The look runs once `gym.gate_checkpoint` names an image that
+  holds those roots (a new image starts with no record).
+- **A look that fails for missing data all the same** (the first look on an image no gate box has listed yet) is owed
+  again on the same terms: no try, no refusal, no incubator bar, the same alert.
+- **Any other failure counts a try** (kv `look_tries:<run_sha>`, kept by program). The third writes the "gym" refusal
+  and its incubator bar, as before. The `look_failed_three_times` alert now fires at every count from three on (its
+  `tries` field says which). A fourth failure, as when a revived family runs the same program, therefore parks the
+  version loudly instead of silently. After fixing the gate, reset the count: on the House,
+  `SwarmStore('/workspace/state').put('look_tries:<run_sha>', 0)`.
+- **A look that never reached a gate box** (the queue gave up on it after the run timeout because no gate box became
+  ready) still counts a try. The try is the loop's bound: a look holds the gate's round for up to the run timeout, and
+  gate boxes have no probe fork to find the image back. A store with no holdout is the one start-up failure that is
+  missing data (above).
+- **Sept 30's leftovers are not changed by this release.** The GOOGL/MSFT program of
+  `googl-lags-msft-ai-cloud-qqq-flat` v27 still has `look_tries` 3, the stage "gym" refusal row and its incubator bar,
+  from three failures this release treats as missing data. The revived `-r` family runs the same program. A single
+  real failure there makes the count 4 and parks it at once (with the alert). Reset the count once the gate is right
+  (above). Whether the refusal row and the bar stand is the owner's call: should an infrastructure refusal bar a
+  program from the incubator?
 
 Deploy impact (R3): the rule applies at once to every family that is already past it. On Sept 27 (start 72, floor
 44, 74 alive) about 29 families were past it, nearly all long-refuted placeholders, so the first tournament round and
@@ -1817,7 +1956,9 @@ Operator lessons (Sept 29, 2026): the operator's own experiments are in the grav
 04:33Z Sept 29), each dated when its experiment concluded and ending with a "do not re-propose unless ..." line. They
 are compiled from private results, reviewed as public-safe, and inserted by the operator's private tool with a backup.
 Operator revivals are lineage continuations (origin `operator-revive`): a fork that inherits its lineage's trials and
-holdout looks, so the deflated Sharpe and the holdout ration count every version.
+holdout looks, so the deflated Sharpe and the holdout ration count every version. Since Oct 1 the harness runs the
+revived version exactly, with its code and params, before its researcher edits it (**Operator revivals**, above).
+Before that fix, the harness never ran a revived program, and a bare `gym_run` dropped its params.
 
 The full graveyard and the strategist (Sept 29, 2026; `league/swarm/architect.py`, `league/swarm/strategist.py`), all in
 `swarm.json`. On the Claude route the architect reads every graveyard row as one sealed, cached digest ahead of its own

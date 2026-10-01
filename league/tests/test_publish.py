@@ -234,7 +234,7 @@ class LedgerCase(unittest.TestCase):
             self.row("floor.mark", {"brokerage_equity": "5694.3700", "brokerage_cash": "5210.1200", "as_of": "2026-09-28T14:55:00.000Z"}, agent=HOUSE,
                      at="2026-09-28T14:55:00.000Z"),
         ]
-        return [event for entry in rows for event in to_events(entry)]
+        return [event for entry in rows for event in to_events(entry, lambda entry: ())]  # programs with no parameters
 
 
 # ---------------------------------------------------------------------------- cleaning

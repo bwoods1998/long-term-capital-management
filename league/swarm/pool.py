@@ -19,7 +19,19 @@
   are superseded. So a busy queue cannot starve them (validation waits on the 1.5x run), one waiting past
   `pool.robust_age_seconds` (600; the mid run twice that) takes a Train job's priority and any free box.
 - FAILURES. A root the box's store lacks fails its job at once with the Gym's own words; a batch that
-  errs or times out is retried once on another box, then its jobs fail. A failure never kills the pool.
+  errs or times out is retried once on another box, then its jobs fail. A failure never kills the pool. A job that
+  failed for MISSING DATA carries the roots it lacked (`GymJob.missing`): the box's own list lacks them, or the Gym's
+  exit-3 answer NAMES them ("no holdout days for GOOGL, MSFT in ..."). The gate counts no try for it (`gate.py`, the owed
+  look). An exit-3 answer that names no root (no store, a missing package) is not missing data: its jobs fail as before.
+- THE GATE'S HOLDOUT COVERAGE (Oct 1, 2026). A gate box lists, when it starts, which roots its store holds holdout days
+  for: FILE NAMES only (`nbbo/<ROOT>/<day>.parquet` and `underlying/...` dated in the holdout; no file is opened and the
+  gate's capability is never minted). The roots with the image's full count of both (the count most roots have) are
+  `Box.holdout`; a holdout job needing another root fails at once as missing data. A store with no holdout at all fails
+  the box, records the image as holding none, and fails the holdout looks waiting for it as missing data. The coverage
+  is kept per gate image (kv `gate_coverage`, with the roots a Gym exit-3 answer named since), and the gate reads it
+  (`holdout_coverage`) to refuse a look up front. A gate image that lacks any of `gym.roots` raises one `swarm.status`
+  alert. Sept 30: every gate box had advertised every root of `gym.roots` without looking, and three looks failed on a
+  five-root holdout.
 - COST. Every awake second of a box (starting, ready and idle, busy, resuming) is booked at `box_usd_hour`
   as `gym_box` spend, at least every `book_seconds` and whenever it sleeps or ends (an estimate: Sail bills
   boxes on measured use, about $0.12-0.20 an hour for a busy l box; Sail's meter is the record, and the
@@ -47,9 +59,11 @@ from __future__ import annotations
 
 import datetime as dt
 import itertools
+import json
 import math
 import re
 import secrets
+import shlex
 import threading
 import time
 from dataclasses import dataclass, field
@@ -64,6 +78,37 @@ _IDS = itertools.count(1)
 ROBUSTNESS_PRIORITY = -1.0
 #: The name of every box the pool forks begins with this (and no other box on the account's does).
 NAME_PREFIX = "ltcm-swarm-"
+#: The holdout's first and last day (league/gym/day.py's WINDOWS; a test holds them equal). The pool is standard library
+#: only, so they are repeated here.
+HOLDOUT_FIRST, HOLDOUT_LAST = "2026-01-02", "2026-09-25"
+#: Gate images whose coverage is kept (kv `gate_coverage`), the newest.
+COVERAGE_KEPT = 6
+#: Run on a gate box at its start (THE GATE'S HOLDOUT COVERAGE): per root, how many holdout-dated nbbo and underlying file
+#: NAMES its store holds. It opens no file and mints no gate capability.
+HOLDOUT_LISTING = r"""
+import json, os, sys
+store, first, last = sys.argv[1:4]
+out = {}
+for kind in ("nbbo", "underlying"):
+    base = os.path.join(store, kind)
+    for root in (sorted(os.listdir(base)) if os.path.isdir(base) else []):
+        folder = os.path.join(base, root)
+        names = os.listdir(folder) if os.path.isdir(folder) else []
+        out.setdefault(root, {})[kind] = sum(1 for n in names if n.endswith(".parquet") and first <= n[:10] <= last)
+print(json.dumps(out, sort_keys=True))
+"""
+_MISSING_ROOTS = re.compile(r"no \w+ days for ([A-Z0-9., ]+?) in ")
+
+
+def named_missing(text: str) -> tuple[str, ...]:
+    """The roots a Gym "missing data" answer names ("no holdout days for GOOGL, MSFT in /data/store"); () when it names
+    none (a store-level fault: no store, no calendar, a missing package), which is not the image lacking a root."""
+    found = _MISSING_ROOTS.search(str(text))
+    return tuple(sorted({r.strip().upper() for r in found.group(1).split(",") if r.strip()})) if found else ()
+
+
+class HoldoutMissing(RuntimeError):
+    """A gate box's listing ran and found no root with holdout days: the image's data, not a fault of the box."""
 
 
 class PoolError(RuntimeError):
@@ -105,6 +150,8 @@ class GymJob:
     group: str | None = None
     #: Train's first day this job was stamped with (the running swarm's span; None: a job with its own `start`).
     span: str | None = None
+    #: The roots a MISSING DATA failure named (the box lacks them, or the Gym's own words); None for any other failure.
+    missing: tuple[str, ...] | None = None
 
     @property
     def name(self) -> str:
@@ -127,6 +174,7 @@ class Box:
     thread: threading.Thread | None = None
     failures: int = 0
     train_first: str | None = None    # its image's first Train day (the Gym's data check says; None: not known)
+    holdout: tuple[str, ...] | None = None  # a gate box's roots with holdout days (its listing; None: not listed)
 
 
 AWAKE = ("starting", "ready", "busy")
@@ -276,8 +324,10 @@ class GymPool:
                 self.queue.remove(job)
                 self._fail(job, "the family retired")
 
-    def _fail(self, job: GymJob, why: str) -> None:
+    def _fail(self, job: GymJob, why: str, *, missing: Sequence[str] | None = None) -> None:
         job.error = why
+        if missing:
+            job.missing = tuple(sorted({str(r).upper() for r in missing}))
         self.stats["failed_jobs"] += 1
         callback, job.late_fail = job.late_fail, None
         job.done.set()
@@ -400,6 +450,8 @@ class GymPool:
                     raise exc
             box.roots = tuple(sorted(r for r, row in (report.get("roots") or {}).items() if row and row.get("nbbo")))
             box.train_first = report.get("train_first") if kind == "gym" and isinstance(report, Mapping) else None
+            if kind == "gate":
+                box.holdout = self._holdout_listing(box_id)  # THE GATE'S HOLDOUT COVERAGE: by file name, before any look
         except Exception as exc:  # noqa: BLE001
             self._accrue(box)
             box.state = "failed"
@@ -412,6 +464,8 @@ class GymPool:
                 pass
             with self._lock:
                 self.boxes.pop(box_id, None)
+            if isinstance(exc, HoldoutMissing):
+                self._no_holdout(str(image), box_id, str(exc))
             return
         self._accrue(box)
         with self._wake:
@@ -421,12 +475,115 @@ class GymPool:
             self._wake.notify_all()
         self.store.upsert_box(box_id, kind=kind, version=str(image), state="ready", detail={"name": name, "roots": list(box.roots),
                                                                                            "bundle": getattr(box.driver, "version", None),
-                                                                                           "train_first": box.train_first})
-        self.store.event("swarm.pool", None, {"action": "box_ready", "box": box_id, "kind": kind, "roots": list(box.roots)})
+                                                                                           "train_first": box.train_first,
+                                                                                           "holdout_roots": None if box.holdout is None
+                                                                                           else list(box.holdout)})
+        self.store.event("swarm.pool", None, {"action": "box_ready", "box": box_id, "kind": kind, "roots": list(box.roots),
+                                              **({} if box.holdout is None else {"holdout_roots": list(box.holdout)})})
+        if box.holdout is not None:
+            try:
+                self._note_coverage(str(image), roots=box.holdout, box=box_id)
+            except Exception:  # noqa: BLE001 - the record is the gate's early refusal; the box's own check still holds
+                pass
         if self._stopping:  # the pool stopped while this fork was in flight: it sleeps (the next process adopts it)
             self._sleep(box)
             return
         self._spawn(box)
+
+    def _holdout_listing(self, box_id: str) -> tuple[str, ...] | None:
+        """THE GATE'S HOLDOUT COVERAGE: the roots a gate box's store holds the whole holdout for, by FILE NAME (nbbo and
+        underlying files dated in the holdout; `HOLDOUT_LISTING` opens none). A root counts when it has the image's full
+        count of both: the count most roots have (the larger on a tie), so a root copied in part is not taken for whole.
+        None when the client cannot run a command (test clients only); an error, so the box is not used, when the
+        listing fails twice, and `HoldoutMissing` when it finds no root at all."""
+        run = getattr(self.client, "exec", None)
+        if run is None:
+            return None
+        command = " ".join(shlex.quote(part) for part in (str(self.gym.get("python", "python3")), "-c", HOLDOUT_LISTING,
+                                                          str(self.gym.get("store_root", "/data/store")),
+                                                          HOLDOUT_FIRST, HOLDOUT_LAST))
+        last: Exception | None = None
+        for _ in range(2):
+            try:
+                result = run(box_id, command, timeout=300)
+                if getattr(result, "return_code", None) != 0:
+                    raise RuntimeError(f"exit {getattr(result, 'return_code', None)}: "
+                                       f"{str(getattr(result, 'stderr', '') or '')[-300:]}")
+                rows = json.loads(str(result.stdout).strip().splitlines()[-1])
+                break
+            except Exception as exc:  # noqa: BLE001
+                last = exc
+        else:
+            raise RuntimeError(f"the gate box's holdout listing failed: {str(last)[:300]}")
+        held: dict[str, int] = {}
+        for root, row in (rows or {}).items():
+            if isinstance(row, Mapping):
+                try:
+                    days = min(int(row.get("nbbo") or 0), int(row.get("underlying") or 0))
+                except (TypeError, ValueError):
+                    continue
+                if days > 0:
+                    held[str(root).upper()] = days
+        if not held:
+            raise HoldoutMissing("the gate image holds no holdout days for any root")
+        counts = sorted(held.values())
+        full = max(counts, key=lambda n: (counts.count(n), n))
+        return tuple(sorted(r for r, days in held.items() if days >= full))
+
+    def _no_holdout(self, image: str, box_id: str, why: str) -> None:
+        """A gate box of `image` found no holdout at all (`HoldoutMissing`): the image is recorded as holding none, so the
+        gate refuses every look up front, and the holdout looks queued for this image fail now as missing data (no try)
+        rather than wait to be abandoned."""
+        try:
+            self._note_coverage(image, roots=(), box=box_id)
+        except Exception:  # noqa: BLE001 - the box's own failure still stands
+            pass
+        with self._lock:
+            if image != str(self.image("gate") or ""):
+                return
+            waiting = [j for j in self.queue if j.gate and j.window == "holdout"]
+            for job in waiting:
+                self.queue.remove(job)
+        for job in waiting:
+            self._fail(job, f"the Gym has no holdout data for {', '.join(job.roots)} ({why})", missing=job.roots)
+
+    def holdout_coverage(self, image: str | None = None) -> dict[str, Any] | None:
+        """What the pool knows of a gate image's holdout (by default the configured one): {"roots": the roots a gate box's
+        listing found (None: not listed yet), "missing": the roots a Gym "missing data" answer named since}; None when
+        nothing is known (no gate box of it has started or failed a look)."""
+        image = str(image or self.image("gate") or "")
+        record = (self.store.get("gate_coverage") or {}).get(image) if image else None
+        return dict(record) if isinstance(record, Mapping) else None
+
+    def _note_coverage(self, image: str, *, roots: Sequence[str] | None = None, missing: Sequence[str] = (),
+                       box: str | None = None) -> dict[str, Any]:
+        """Keep what a gate box found (`roots`, its listing) or a holdout batch was told (`missing`) about `image`, and
+        raise one `swarm.status` alert per image while it lacks a root of `gym.roots`."""
+        with self.store.atomic():
+            kept = {k: v for k, v in dict(self.store.get("gate_coverage") or {}).items() if isinstance(v, Mapping)}
+            record = dict(kept.get(image) or {})
+            if roots is not None:
+                record.update(roots=sorted({str(r).upper() for r in roots}), box=box, listed_at=self.clock())
+            if missing:
+                record["missing"] = sorted(set(record.get("missing") or ()) | {str(r).upper() for r in missing})
+            record["at"] = self.clock()
+            wanted = {str(r).upper() for r in self.gym.get("roots", [])}
+            lacking = sorted((wanted - set(record["roots"]) if record.get("roots") is not None else set())
+                             | (wanted & set(record.get("missing") or ())))
+            alert = bool(lacking) and record.get("alerted") != lacking
+            if alert:
+                record["alerted"] = lacking
+            kept[image] = record
+            for old in sorted(kept, key=lambda k: float(kept[k].get("at") or 0))[:-COVERAGE_KEPT]:
+                kept.pop(old, None)
+            self.store.put("gate_coverage", kept)
+        if alert:
+            self.store.event("swarm.status", None, {
+                "action": "gate_coverage", "alert": True, "image": image, "missing": lacking, "box": box,
+                "text": (f"the gate image {image} holds no holdout for {', '.join(lacking)} (gym.roots): the gate refuses "
+                         "those looks up front, with no try counted, until gym.gate_checkpoint names an image that holds "
+                         "them")})
+        return record
 
     def sealed(self, box_id: str) -> bool:
         """The box runs under `no_network` (read back from Sail; a client that cannot say is trusted only in tests)."""
@@ -513,10 +670,13 @@ class GymPool:
         """Run one batch on one box and deliver its results (also called directly by tests)."""
         runnable, missing = [], []
         for job in batch:
-            lacking = [r for r in job.roots if box.roots and r not in box.roots]
+            held = box.holdout if box.kind == "gate" and job.window == "holdout" and box.holdout is not None else box.roots
+            lacking = [r for r in job.roots if held and str(r).upper() not in held]
             (missing if lacking else runnable).append((job, lacking))
         for job, lacking in missing:
-            self._fail(job, f"the Gym has no {job.window} data for {', '.join(lacking)} yet (it holds {', '.join(box.roots)})")
+            held = box.holdout if box.kind == "gate" and job.window == "holdout" and box.holdout is not None else box.roots
+            self._fail(job, f"the Gym has no {job.window} data for {', '.join(lacking)} yet (it holds {', '.join(held)})",
+                       missing=lacking)
         batch = [job for job, _ in runnable]
         if not batch:
             return
@@ -567,8 +727,15 @@ class GymPool:
             self.store.event("swarm.pool", None, {"action": "batch_failed", "box": box.id, "jobs": len(batch),
                                                   "error": f"{type(exc).__name__}: {str(exc)[:300]}"})
             if type(exc).__name__ == "GymDataMissing":
+                named = named_missing(str(exc))  # () when it names no root: a store fault, failed (and counted) as before
+                if named and box.kind == "gate" and head.window == "holdout":
+                    try:  # the gate refuses these roots' looks up front from now on, on this image
+                        self._note_coverage(box.version, missing=named, box=box.id)
+                    except Exception:  # noqa: BLE001
+                        pass
                 for job in batch:
-                    self._fail(job, f"the Gym is missing data: {str(exc)[:300]}")
+                    self._fail(job, f"the Gym is missing data: {str(exc)[:300]}",
+                               missing=(tuple(r for r in named if r in {str(x).upper() for x in job.roots}) or named) or None)
             else:
                 self._requeue(batch, f"{type(exc).__name__}: {str(exc)[:300]}")
             if box.state == "failed":
@@ -784,6 +951,8 @@ class GymPool:
                 box.driver = self._driver(box.id)
                 box.roots = tuple((row.get("detail") or {}).get("roots") or ())
                 box.train_first = (row.get("detail") or {}).get("train_first")
+                listed = (row.get("detail") or {}).get("holdout_roots")
+                box.holdout = tuple(listed) if kind == "gate" and isinstance(listed, list) and listed else None
             except Exception:  # noqa: BLE001
                 continue
             with self._lock:

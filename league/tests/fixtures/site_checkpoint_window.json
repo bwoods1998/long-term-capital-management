@@ -235,6 +235,21 @@
       }
     },
     {
+      "id": "googl-lags-msft-ai-cloud-qqq-flat",
+      "family": "googl-lags-msft-ai-cloud-qqq-flat",
+      "mechanism": "MSFT and GOOGL sell competing AI-cloud and search products, and investors reprice one on the other's capex or product news with a delay.",
+      "structure": "debit_vertical",
+      "band": "retired",
+      "born_at": "2026-09-27T02:10:00.000Z",
+      "retired_at": "2026-09-27T20:05:00.000Z",
+      "record": {
+        "trials": 3120,
+        "revisions": 27,
+        "forward": null,
+        "real": null
+      }
+    },
+    {
       "id": "reversal-1",
       "family": "reversal",
       "mechanism": "",
@@ -306,7 +321,7 @@
   ],
   "trading": {
     "as_of": "2026-09-28T14:57:00.000Z",
-    "pnl_usd": "10.90"
+    "pnl_usd": null
   },
   "positions": {
     "as_of": "2026-09-28T14:57:00.000Z",
@@ -344,6 +359,22 @@
         "pnl_usd": "12.50"
       },
       {
+        "id": "real:15",
+        "source": "agent",
+        "agent": "googl-lags-msft-ai-cloud-qqq-flat",
+        "underlying": "GOOGL",
+        "structure": "debit_vertical",
+        "right": "call",
+        "legs": 2,
+        "quantity": 1,
+        "open_quantity": 1,
+        "status": "open",
+        "expiry": "2026-10-07",
+        "opened_at": "2026-09-28T13:31:00.000Z",
+        "closed_at": null,
+        "pnl_usd": null
+      },
+      {
         "id": "real:12",
         "source": "agent",
         "agent": "orb-4",
@@ -358,6 +389,22 @@
         "opened_at": "2026-09-28T14:10:00.000Z",
         "closed_at": "2026-09-28T14:30:00.000Z",
         "pnl_usd": "31.00"
+      },
+      {
+        "id": "real:16",
+        "source": "incubator",
+        "agent": "gap-drift",
+        "underlying": "SPY",
+        "structure": "long_call",
+        "right": "call",
+        "legs": 1,
+        "quantity": 1,
+        "open_quantity": 0,
+        "status": "closed",
+        "expiry": "2026-10-02",
+        "opened_at": "2026-09-28T13:45:00.000Z",
+        "closed_at": "2026-09-28T14:20:00.000Z",
+        "pnl_usd": "4.10"
       },
       {
         "id": "real:10",
@@ -417,5 +464,250 @@
       "misc_usd": "0.00"
     },
     "unreconciled_usd": "0.00"
+  },
+  "practice": {
+    "as_of": "2026-09-28T14:57:00.000Z",
+    "sessions": 2,
+    "capital_usd": "10000.00",
+    "totals": {
+      "families": 3,
+      "trades": 15,
+      "wins": 6,
+      "pnl_usd": "17.30"
+    },
+    "rows": [
+      {
+        "agent": "condor-vrp-3",
+        "family": "condor-vrp",
+        "structure": "iron_condor",
+        "tier": "validated",
+        "status": "alive",
+        "sessions": 3,
+        "trades": 9,
+        "wins": 5,
+        "pnl_usd": "42.50",
+        "return_on_risk": "0.12"
+      },
+      {
+        "agent": "orb-4",
+        "family": "orb",
+        "structure": "debit_vertical",
+        "tier": "train",
+        "status": "alive",
+        "sessions": 3,
+        "trades": 4,
+        "wins": 1,
+        "pnl_usd": "-18.20",
+        "return_on_risk": "-0.09"
+      },
+      {
+        "agent": "gone-2",
+        "family": "gone",
+        "structure": "long_straddle",
+        "tier": "validated",
+        "status": "retired",
+        "sessions": 3,
+        "trades": 2,
+        "wins": 0,
+        "pnl_usd": "-7.00",
+        "return_on_risk": "-0.05"
+      }
+    ]
+  },
+  "levels": {
+    "as_of": "2026-09-28T14:57:00.000Z",
+    "agents": [
+      {
+        "id": "condor-vrp-3",
+        "level": "sized"
+      },
+      {
+        "id": "putspread-dip-2",
+        "level": "probe"
+      },
+      {
+        "id": "orb-4",
+        "level": "probe"
+      },
+      {
+        "id": "ironfly-quiet",
+        "level": "candidate"
+      },
+      {
+        "id": "butterfly-pin",
+        "level": "candidate"
+      },
+      {
+        "id": "trend-vertical",
+        "level": "candidate"
+      },
+      {
+        "id": "gap-drift",
+        "level": "incubator"
+      },
+      {
+        "id": "skew-revert",
+        "level": "validation"
+      },
+      {
+        "id": "calendar-term",
+        "level": "practice"
+      },
+      {
+        "id": "strangle-cheap",
+        "level": "train"
+      },
+      {
+        "id": "eod-drift",
+        "level": "train"
+      },
+      {
+        "id": "reversal-1",
+        "level": "retired"
+      },
+      {
+        "id": "googl-lags-msft-ai-cloud-qqq-flat",
+        "level": "tuition"
+      }
+    ],
+    "funnel": {
+      "since": "2026-09-26T06:25:30.000Z",
+      "born": 48,
+      "practice": 4,
+      "validation": 9,
+      "tuition": 2,
+      "incubator": 1,
+      "looks": 6,
+      "looks_passed": 3,
+      "candidate": 6,
+      "probe": 3,
+      "sized": 1,
+      "retired": 37,
+      "calibration": 1,
+      "live_test": 0
+    }
+  },
+  "rationale": {
+    "as_of": "2026-09-28T14:57:00.000Z",
+    "agents": [
+      {
+        "id": "condor-vrp-3",
+        "thesis": "Sells short-dated index premium when realized volatility runs under the level the options price in."
+      },
+      {
+        "id": "putspread-dip-2",
+        "thesis": null
+      },
+      {
+        "id": "orb-4",
+        "thesis": "Trades the break of the opening range in the direction of the break, with a vertical sized by its maximum loss."
+      },
+      {
+        "id": "ironfly-quiet",
+        "thesis": "Sells an at-the-money iron butterfly on quiet mornings when the overnight range was narrow."
+      },
+      {
+        "id": "butterfly-pin",
+        "thesis": "Buys a long butterfly around the strike with the largest open interest on expiry afternoons, where prices tend to pin."
+      },
+      {
+        "id": "trend-vertical",
+        "thesis": null
+      },
+      {
+        "id": "gap-drift",
+        "thesis": "Fades opening gaps that the premarket did not confirm, with a single long option."
+      },
+      {
+        "id": "skew-revert",
+        "thesis": "Sells the side of the smile that has steepened most against its own recent history."
+      },
+      {
+        "id": "calendar-term",
+        "thesis": "Buys a calendar when near-dated options are rich against the month behind them."
+      },
+      {
+        "id": "strangle-cheap",
+        "thesis": "Buys a strangle into scheduled news when the move the options expect is small beside past moves."
+      },
+      {
+        "id": "eod-drift",
+        "thesis": "Buys the last hour's drift into the close on days the index is up from the open."
+      },
+      {
+        "id": "reversal-1",
+        "thesis": null
+      },
+      {
+        "id": "googl-lags-msft-ai-cloud-qqq-flat",
+        "thesis": "MSFT and GOOGL sell competing AI-cloud and search products, and investors reprice one on the other's capex or product news with a delay. When MSFT moves strongly over several sessions, QQQ is flat and GOOGL has not followed, GOOGL is expected to close part of the gap."
+      }
+    ],
+    "trades": [
+      {
+        "id": "real:13",
+        "route": "probe",
+        "open_why": "range broke up early",
+        "close_why": null,
+        "exit": null,
+        "max_loss_usd": "96.00"
+      },
+      {
+        "id": "real:14",
+        "route": "sized",
+        "open_why": "the condor fits the quiet tape",
+        "close_why": null,
+        "exit": null,
+        "max_loss_usd": "184.00"
+      },
+      {
+        "id": "real:15",
+        "route": "tuition",
+        "open_why": "msft leads googl, qqq flat",
+        "close_why": null,
+        "exit": null,
+        "max_loss_usd": "157.00"
+      },
+      {
+        "id": "real:12",
+        "route": "probe",
+        "open_why": "range broke up",
+        "close_why": "the break failed by noon",
+        "exit": "agent",
+        "max_loss_usd": "96.00"
+      },
+      {
+        "id": "real:16",
+        "route": "incubator",
+        "open_why": "the gap was not confirmed",
+        "close_why": "filled the gap",
+        "exit": "agent",
+        "max_loss_usd": "38.00"
+      },
+      {
+        "id": "real:10",
+        "route": "calibration",
+        "open_why": null,
+        "close_why": null,
+        "exit": "house",
+        "max_loss_usd": "40.00"
+      },
+      {
+        "id": "real:11",
+        "route": "probe",
+        "open_why": "gap down held",
+        "close_why": null,
+        "exit": "house",
+        "max_loss_usd": "61.00"
+      },
+      {
+        "id": "real:9",
+        "route": null,
+        "open_why": null,
+        "close_why": null,
+        "exit": "expiry",
+        "max_loss_usd": "66.00"
+      }
+    ]
   }
 }

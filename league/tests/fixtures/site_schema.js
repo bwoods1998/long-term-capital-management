@@ -502,9 +502,248 @@ export function validPractice(value, publishedAt, { publicRead = false } = {}) {
     && rows.reduce((sum, row) => sum + scaledAmount(row.pnl_usd), 0n) === scaledAmount(totals.pnl_usd);
 }
 
+// ------------------------------------------------------------------------ the swarm window (Oct 1, 2026)
+// Two blocks the House adds together, each optional: `levels` (where each agent stands in the game, and how many
+// families have ever reached each level since the reset) and `rationale` (each agent's thesis in whole sentences, and why
+// each real position opened and closed). Both are allowlists built key by key on the House, and checked again here.
+//
+// The game's levels. The main stairs: Train (the Gym), Validation, Tuition (D2: one real contract), Candidate (past the
+// holdout look), Probe and Sized. The side path: Practice (shadow trades on live quotes) and the Incubator (real money at
+// tuition size, never evidence), which never reaches the top. Retired is off the map.
+export const LEVELS = ['train', 'practice', 'validation', 'incubator', 'tuition', 'candidate', 'probe', 'sized', 'retired'];
+// The route a real position was opened on, and who closed it.
+export const ROUTES = ['tuition', 'incubator', 'probe', 'sized', 'calibration', 'house'];
+export const EXITS = ['agent', 'house', 'expiry'];
+// Families counted since `since` (the reset), each a counter or null when the House could not read its source.
+export const FUNNEL_KEYS = ['since', 'born', 'practice', 'validation', 'tuition', 'incubator', 'looks', 'looks_passed', 'candidate', 'probe',
+  'sized', 'retired', 'calibration', 'live_test'];
+const FUNNEL_COUNTS = FUNNEL_KEYS.filter(key => key !== 'since');
+// Each chain only ever narrows: a family counts at a level when it reached that level or any higher one on its track.
+// Tuition is its own chain under Validation: a holdout look does not need tuition first, and a family whose look fails
+// never gets a tuition row, so Candidate may exceed Tuition (the House's `publish.FUNNEL_CHAINS`, Oct 1, 2026).
+export const FUNNEL_CHAINS = [['sized', 'probe', 'candidate', 'validation', 'born'], ['tuition', 'validation'], ['incubator', 'practice', 'born'],
+  ['retired', 'born'], ['looks_passed', 'looks']];
+// A level's band on the roster: a band above the Gym is its own level; a Gym family is somewhere on the way up; a retired
+// family is retired, unless it still holds open real money, when it stands on that money's step.
+export const LEVELS_BY_BAND = {
+  gym: ['train', 'practice', 'validation', 'incubator', 'tuition'],
+  candidate: ['candidate'], probe: ['probe'], sized: ['sized'],
+  retired: ['retired', 'tuition', 'incubator', 'probe', 'sized'],
+};
+// The route each kind of ledger row may carry.
+export const ROUTES_BY_SOURCE = { calibration: ['calibration'], house: ['house'], incubator: ['incubator'], agent: ['tuition', 'probe', 'sized'] };
+// A number in words (Oct 1, 2026), the House's rule mirrored word for word (league/swarm/public.py `numbered` and
+// `plain_glyphs`): the House drops every thesis and tag sentence these refuse before it publishes, and this refuses what it
+// missed. The two must agree exactly: a site stricter than the House would refuse the House's whole window for a sentence
+// the House kept (the window is then dropped for half an hour at a time), and a looser one would let a leak through. Both
+// sides test against the House's case list (league/tests/fixtures/number_words.json), and a parity test runs the House's own
+// code over the same sentences when its checkout is beside this one.
+//
+// A number is: a numeral of any script, a control, format or private character, a combining mark, or a letter or symbol
+// beyond Latin-1 (`plainGlyphs`, before and after NFKC folding); a number word, cardinal or ordinal, a fraction, every
+// cardinal's plural ("fives", "sixes", "the twenties"), a multiple ("doubled", "treble", "quintuple"), "a dozen", "a
+// fortnight", a coin, a quantile, "a couple", "unity"; "quarter" but the calendar's ("each quarter", "quarter-end", "the
+// quarter's end"); "score" as a count ("a score of", "scores of"; "the z-score" passes; "pair" is never a number: a pairs
+// trade); a number run together ("twentyfive", "tenpercent", "threefold", "twentyish", "twentyodd", "thirtysomething",
+// "tenpct", "fiftybps", "halfsigma"); a word split by marks that joins into one ("twen·ty", "t.e.n", "fif-ty's"); "single"
+// or "a"/"an" before a unit of spread ("a single sigma", "an ATR"); "ones" beside a number or before a unit ("ones and
+// twos"; "the ones that lag" passes); and "one" except as a pronoun ("one another", "one of", "one on the other", "no
+// one", "one's", "one-sided"). Words are read in lower case after NFKD folding with every combining mark dropped (a
+// fullwidth letter is the letter it looks like, an accented one its bare letter: "twénty"), with a typographic apostrophe
+// as "'", and an apostrophe splits a word ("fifty's", "'twenty'"), but the pronoun's "one's".
+const CARDINALS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen',
+  'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety', 'hundred',
+  'thousand', 'million', 'billion', 'trillion'];
+const ORDINALS = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth', 'eleventh', 'twelfth', 'thirteenth',
+  'fourteenth', 'fifteenth', 'sixteenth', 'seventeenth', 'eighteenth', 'nineteenth', 'twentieth', 'thirtieth', 'fortieth', 'fiftieth', 'sixtieth',
+  'seventieth', 'eightieth', 'ninetieth', 'hundredth', 'thousandth', 'millionth', 'billionth', 'trillionth'];
+// Every ordinal's plural is a fraction ("two thirds", "sixteenths"), but "firsts" and "seconds".
+const FRACTIONS = ORDINALS.filter(word => word !== 'first' && word !== 'second').map(word => `${word}s`);
+// Every cardinal's plural ("fives", "sixes", "the twenties", "zeros" and "zeroes"), but "ones": a pronoun ("the ones that
+// lag") unless a number or a unit is beside it (`numbered`).
+const PLURALS = [...CARDINALS.filter(word => word !== 'one')
+  .map(word => (word.endsWith('y') ? `${word.slice(0, -1)}ies` : word.endsWith('x') ? `${word}es` : `${word}s`)), 'zeroes'];
+// A multiple, as a word and its verb's forms ("double", "doubles", "doubled", "doubling"; "treble", "quintuple").
+const MULTIPLES = ['double', 'triple', 'treble', 'quadruple', 'quintuple', 'sextuple'].flatMap(stem => [stem, `${stem}s`, `${stem}d`, `${stem.slice(0, -1)}ing`]);
+// The rest. A couple is two ("a couple of sessions"; the verb's "coupled" passes) and unity is one ("above unity").
+const OTHER_NUMBERS = ['half', 'halves', 'halve', 'halved', 'halving', 'quarter', 'quarters', 'twice', 'thrice', 'dozen', 'dozens', 'teens', 'couple',
+  'couples', 'unity', 'point', 'percent', 'percentage', 'percentages', 'fraction', 'fractions', 'basis', 'bps', 'pct', 'fortnight', 'fortnights', 'nickel',
+  'nickels', 'dime', 'dimes', 'penny', 'pennies', 'tercile', 'terciles', 'quartile', 'quartiles', 'quintile', 'quintiles', 'decile', 'deciles'];
+export const NUMBER_WORDS = new Set([...CARDINALS, ...ORDINALS, ...FRACTIONS, ...PLURALS, ...MULTIPLES, ...OTHER_NUMBERS]);
+// A word that makes "single", "ones", or "one" in a pronoun's place, a measure ("the one day", "a single standard
+// deviation", "the ones digit").
+export const UNIT_WORDS = new Set(['day', 'days', 'session', 'sessions', 'week', 'weeks', 'month', 'months', 'year', 'years', 'hour', 'hours', 'minute',
+  'minutes', 'bar', 'bars', 'standard', 'sigma', 'sigmas', 'deviation', 'deviations', 'strike', 'strikes', 'contract', 'contracts', 'lot', 'lots', 'leg', 'legs',
+  'percent', 'point', 'points', 'dte', 'delta', 'deltas', 'times', 'x', 'tick', 'ticks', 'cent', 'cents', 'dollar', 'dollars', 'stdev', 'stdevs', 'sd', 'sds',
+  'atr', 'atrs', 'hr', 'hrs', 'min', 'mins', 'sec', 'secs', 'wk', 'wks', 'mo', 'mos', 'yr', 'yrs', 'notch', 'notches', 'digit', 'digits', 'unit', 'units',
+  'step', 'steps', 'handle', 'handles', 'bp', 'pip', 'pips', 'trading', 'business', 'calendar', 'full', 'whole', 'more', 'less', 'extra', 'additional',
+  'further']);
+// A unit of spread: "a sigma", "an ATR" and "a standard deviation" are each a number of them.
+const SPREAD_WORDS = new Set(['sigma', 'stdev', 'sd', 'standard', 'deviation', 'atr']);
+// A number run together: a cardinal (or "half", "quarter"), then one or more number words, units or what may follow a
+// number ("threefold", "twentyish", "twentyodd", "thirtysomething", "tenpct", "fiftybps", "oneday", "halfsigma").
+const RUN_SUFFIXES = ['fold', 'folds', 'ish', 'odd', 'something', 'somethings', 'pct', 'bps'];
+const byLength = list => [...new Set(list)].sort((left, right) => right.length - left.length);
+const COMPOUND = new RegExp(`^(?:${byLength([...CARDINALS, 'half', 'quarter']).join('|')})(?:${byLength([...CARDINALS, ...PLURALS, ...ORDINALS, ...FRACTIONS,
+  ...RUN_SUFFIXES, ...UNIT_WORDS]).join('|')})+$`);
+// A word as the rules read it: a run of letters, or the possessive pronoun "one's" whole.
+const TOKEN = /one's(?![a-z])|[a-z]+/g;
+// What Python's `str.split()` splits at (its `isspace`), so a chunk is the House's chunk.
+const SPACES = /[\t\n\v\f\r \x1c-\x1f\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+/;
+// "one" is a pronoun right after these ("no one", "the one", "each one") ...
+const ONE_BEFORE = new Set(['no', 'the', 'each', 'any', 'every', 'either', 'neither', 'which', 'this', 'that']);
+// ... or right before "another", "of" or "sided", or before one of these and then "the other", "its other", "another" or
+// "the others" ("reprice one on the other's news", "one or the other", "one after another", "one from the other").
+const ONE_RELATIONS = new Set(['on', 'to', 'over', 'against', 'versus', 'vs', 'after', 'or', 'from', 'than', 'and']);
+const OTHER = new Set(['other', 'others', 'another']);
+// "quarter" is the calendar's after these ("each quarter") or before these ("quarter-end"), unless "of" or a number follows.
+const CALENDAR_BEFORE = new Set(['each', 'every', 'new', 'this', 'next', 'last', 'prior', 'previous', 'calendar', 'fiscal']);
+const CALENDAR_AFTER = new Set(['end', 'ends', 'start', 'starts', 'turn', 'close', 'closes']);
+const numberWord = token => Boolean(token) && (NUMBER_WORDS.has(token) || COMPOUND.test(token));
+// `text` as the rules read it: lower case, NFKD-folded with every combining mark dropped, typographic apostrophes as "'".
+const folded = text => String(text ?? '').toLowerCase().normalize('NFKD').replace(/\p{M}/gu, '').replace(/[\u2018\u2019\u02bc]/g, "'");
+const tokensOf = text => text.match(TOKEN) || [];
+// The words of `sentence` as the rules read them.
+export const numberTokens = sentence => tokensOf(folded(sentence));
+function pronounOne(tokens, index) {
+  const before = index ? tokens[index - 1] : '';
+  const rest = tokens.slice(index + 1, index + 4);
+  const after = rest[0] || '';
+  if (numberWord(before) || numberWord(after) || UNIT_WORDS.has(after)) return false; // "twenty one", "one twenty", "the one day"
+  if (ONE_BEFORE.has(before) || ['another', 'of', 'sided'].includes(after)) return true;
+  if (ONE_RELATIONS.has(after)) {
+    const tail = rest.slice(1);
+    return tail.length > 0 && (OTHER.has(tail[0]) || (tail.length > 1 && ['the', 'its'].includes(tail[0]) && OTHER.has(tail[1])));
+  }
+  return false;
+}
+// The calendar's quarter, read past a possessive "s" ("the quarter's end").
+function calendarQuarter(tokens, index) {
+  const before = index ? tokens[index - 1] : '';
+  const rest = tokens.slice(index + 1, index + 3);
+  const after = rest[0] === 's' && rest.length > 1 ? rest[1] : rest[0] || '';
+  if (after === 'of' || numberWord(before) || numberWord(after) || UNIT_WORDS.has(after)) return false;
+  return CALENDAR_BEFORE.has(before) || CALENDAR_AFTER.has(after);
+}
+// A word split by marks inside it ("twen·ty", "t.e.n", "fif-ty's"), read whole: the words of one whitespace-separated
+// chunk, less a last "s", when two or more remain, joined.
+function joined(chunk) {
+  const parts = tokensOf(chunk);
+  if (parts.at(-1) === 's') parts.pop();
+  return parts.length > 1 && numberWord(parts.join(''));
+}
+export function numbered(sentence) {
+  const text = folded(sentence);
+  if (text.split(SPACES).some(chunk => chunk && joined(chunk))) return true;
+  const tokens = tokensOf(text);
+  return tokens.some((token, index) => {
+    const before = index ? tokens[index - 1] : '';
+    const after = tokens[index + 1] || '';
+    if (token === 'one') return !pronounOne(tokens, index);
+    if (token === 'ones') return numberWord(before) || numberWord(after) || UNIT_WORDS.has(after); // "ones and twos"; "the ones that lag" pass
+    if ((token === 'quarter' || token === 'quarters') && calendarQuarter(tokens, index)) return false;
+    if (token === 'score' || token === 'scores') return after === 'of' && (token === 'scores' || before === 'a' || numberWord(before));
+    if (numberWord(token)) return true;
+    if (token === 'single' && (UNIT_WORDS.has(after) || numberWord(after))) return true;
+    return (token === 'a' || token === 'an' || token === 'single') && SPREAD_WORDS.has(after);
+  });
+}
+// No numeral of any script ("½", "Ⅻ", "〇", "٣", "①"), before or after NFKC folding; no control, format, private or
+// unassigned character (a soft hyphen or a zero-width joiner hidden inside a word); no combining mark; and no letter or
+// symbol beyond Latin-1 ("οne" with a Greek omicron, a fullwidth "ｏｎｅ", an emoji). Punctuation and signs pass.
+const GLYPH_REFUSED = /[\p{N}\p{C}\p{M}]|(?![\0-\xff])[\p{L}\p{So}]/u;
+export const plainGlyphs = text => !GLYPH_REFUSED.test(String(text)) && !GLYPH_REFUSED.test(String(text).normalize('NFKC'));
+// The House's sentence split (`public.SENTENCE`): after ".", "!" or "?" and a space.
+export const houseSentences = text => String(text).split(/(?<=[.!?])\s+/);
+// A thesis or a trade's tag: quote-free words with no digit and no mark that only code or a formula uses, no numeral of any
+// script, no hidden mark and no foreign letter (`plainGlyphs`), and no number in words in any of its sentences
+// (`numbered`: the pronoun "one" passes): the House's own check before it sends one (league/publish.py `thesis_words`).
+// The publisher also drops a sentence naming a fitted parameter; that rule lives with the publisher, which knows the names.
+const THESIS_MARKS = /[:()[\]{}<>=_`#|\\]/;
+export const thesisWords = (value, max) => words(value, max) && plainGlyphs(value) && !THESIS_MARKS.test(value) && !houseSentences(value).some(numbered);
+const idsOf = list => new Set((Array.isArray(list) ? list : []).map(row => row?.id));
+export function validFunnel(value) {
+  if (!exact(value, FUNNEL_KEYS) || !instant(value.since) || !FUNNEL_COUNTS.every(key => nullable(value[key], counter))) return false;
+  return FUNNEL_CHAINS.every(chain => {
+    const known = chain.map(key => value[key]).filter(count => count !== null);
+    return known.every((count, index) => index === 0 || known[index - 1] <= count);
+  });
+}
+export function validLevels(value, checkpoint, at) {
+  if (!exact(value, ['as_of', 'agents', 'funnel']) || !notAfter(value.as_of, at)) return false;
+  const bands = new Map((Array.isArray(checkpoint?.agents) ? checkpoint.agents : []).map(agent => [agent?.id, agent?.band]));
+  const { agents } = value;
+  if (!Array.isArray(agents) || agents.length > MAX_AGENTS || new Set(agents.map(row => row?.id)).size !== agents.length) return false;
+  return agents.every(row => exact(row, ['id', 'level']) && agentId(row.id) && bands.has(row.id) && LEVELS.includes(row.level)
+    && (LEVELS_BY_BAND[bands.get(row.id)] || []).includes(row.level)) && validFunnel(value.funnel);
+}
+export function validRationaleTrade(value, row) {
+  if (!exact(value, ['id', 'route', 'open_why', 'close_why', 'exit', 'max_loss_usd']) || !plainObject(row)) return false;
+  const open = row.status === 'open';
+  const house = !AGENT_SOURCES.includes(row.source);
+  return positionId(value.id) && nullable(value.route, route => (ROUTES_BY_SOURCE[row.source] || []).includes(route))
+    && nullable(value.open_why, why => !house && thesisWords(why, 80))
+    && nullable(value.close_why, why => !house && !open && thesisWords(why, 80))
+    && nullable(value.exit, exit => !open && EXITS.includes(exit))
+    && nullable(value.max_loss_usd, amount => money(amount) && centsAmount(amount));
+}
+export function validRationale(value, checkpoint, at, { publicRead: _publicRead = false } = {}) {
+  if (!exact(value, ['as_of', 'agents', 'trades']) || !notAfter(value.as_of, at)) return false;
+  const { agents, trades } = value;
+  const roster = idsOf(checkpoint?.agents);
+  if (!Array.isArray(agents) || agents.length > MAX_AGENTS || new Set(agents.map(row => row?.id)).size !== agents.length
+    || !agents.every(row => exact(row, ['id', 'thesis']) && agentId(row.id) && roster.has(row.id) && nullable(row.thesis, thesis => thesisWords(thesis, 280)))) return false;
+  const rows = new Map((Array.isArray(checkpoint?.positions?.rows) ? checkpoint.positions.rows : []).map(row => [row?.id, row]));
+  if (!Array.isArray(trades) || trades.length > MAX_POSITIONS || new Set(trades.map(row => row?.id)).size !== trades.length) return false;
+  return trades.every(trade => rows.has(trade?.id) && validRationaleTrade(trade, rows.get(trade.id)));
+}
+
+// Performance over time: one point of the Worker's score archive from a checkpoint, measured against its own
+// `published_at` only. Profit as published while fresh; the itemized bill's total while fresh; and Net by the page's own
+// rule (`netNumber` in capital.js): Profit without open gains or an unreconciled gain, less the bill. Each null when
+// unknown. Every amount is summed in whole cents, as the page does.
+const toCents = value => {
+  const scaled = scaledAmount(value);
+  const size = scaled < 0n ? -scaled : scaled;
+  const whole = (size + 500000n) / 1000000n;
+  return scaled < 0n ? -whole : whole;
+};
+const fromCents = amount => { const size = amount < 0n ? -amount : amount; return `${amount < 0n ? '-' : ''}${size / 100n}.${(size % 100n).toString().padStart(2, '0')}`; };
+const freshAgainst = (at, publishedAt) => instant(at) && Math.abs(Date.parse(publishedAt) - Date.parse(at)) <= 10 * 60 * 1000;
+export function scorePoint(checkpoint) {
+  const at = checkpoint?.published_at;
+  const trading = checkpoint?.trading;
+  const profit = trading && signedMoney(trading.pnl_usd) && freshAgainst(trading.as_of, at) ? trading.pnl_usd : null;
+  const compute = checkpoint?.compute;
+  const itemized = plainObject(compute) && Object.hasOwn(compute, 'claude_usd');
+  const costs = itemized && freshAgainst(compute.as_of, at) && COMPUTE_PARTS.every(part => money(compute[part]))
+    ? fromCents(COMPUTE_PARTS.reduce((sum, part) => sum + toCents(compute[part]), 0n)) : null;
+  let net = null;
+  const block = checkpoint?.positions;
+  if (profit !== null && costs !== null && plainObject(block) && Array.isArray(block.rows) && block.as_of === trading.as_of) {
+    const gains = [...block.rows.filter(row => row?.status === 'open').map(row => row.pnl_usd), block.unreconciled_usd];
+    if (gains.every(value => signedMoney(value))) {
+      const unrealized = gains.reduce((sum, value) => sum + (toCents(value) > 0n ? toCents(value) : 0n), 0n);
+      net = fromCents(toCents(profit) - unrealized - toCents(costs));
+    }
+  }
+  return { at, profit_usd: profit, costs_usd: costs, net_usd: net };
+}
+export function validScorePoint(value) {
+  return exact(value, ['at', 'profit_usd', 'costs_usd', 'net_usd']) && instant(value.at) && nullable(value.profit_usd, signedMoney)
+    && nullable(value.costs_usd, money) && nullable(value.net_usd, signedMoney);
+}
+
+// A public read names every roster agent, ledger row and practice row (`display_name`, at most 40 characters: the Worker's
+// `namedAgent`, `namedPosition` and `namedPractice`), so it can be larger than the checkpoint the Worker stored, by at most
+// this much. The page takes any read the Worker can make of a checkpoint it accepted, however full the House fitted it
+// (Oct 1, 2026; the House still leaves `FIT_HEADROOM_BYTES` free for pages that predate this).
+export const MAX_NAMED_ROWS = MAX_AGENTS + MAX_POSITIONS + MAX_PRACTICE_ROWS;
+export const MAX_NAME_BYTES = ',"display_name":""'.length + 40;
+export const MAX_PUBLIC_CHECKPOINT_BYTES = MAX_CHECKPOINT_BYTES + MAX_NAMED_ROWS * MAX_NAME_BYTES;
 // Blocks a newer House adds, each optional so an older House's checkpoint still validates: Profit (`trading`), the
-// positions ledger beside it, and the practice league.
-export const OPTIONAL_CHECKPOINT_FIELDS = ['trading', 'positions', 'practice'];
+// positions ledger beside it, the practice league, and the swarm window's levels and rationale.
+export const OPTIONAL_CHECKPOINT_FIELDS = ['trading', 'positions', 'practice', 'levels', 'rationale'];
 export function validCheckpoint(checkpoint, { publicRead = false } = {}) {
   try {
     if (!plainObject(checkpoint) || !CHECKPOINT_FIELDS.every(field => Object.hasOwn(checkpoint, field))
@@ -527,7 +766,10 @@ export function validCheckpoint(checkpoint, { publicRead = false } = {}) {
       || !agents.every(agent => validAgent(agent, at, { publicRead }))) return false;
     if (!Array.isArray(structures) || structures.length > MAX_STRUCTURES || new Set(structures.map(row => row?.id)).size !== structures.length
       || !structures.every(row => validStructure(row, at))) return false;
-    return byteLength(checkpoint) <= MAX_CHECKPOINT_BYTES;
+    // The swarm window reads the roster and the ledger, so it is checked after them.
+    if (Object.hasOwn(checkpoint, 'levels') && !nullable(checkpoint.levels, value => validLevels(value, checkpoint, at))) return false;
+    if (Object.hasOwn(checkpoint, 'rationale') && !nullable(checkpoint.rationale, value => validRationale(value, checkpoint, at, { publicRead }))) return false;
+    return byteLength(checkpoint) <= (publicRead ? MAX_PUBLIC_CHECKPOINT_BYTES : MAX_CHECKPOINT_BYTES);
   } catch { return false; }
 }
 
