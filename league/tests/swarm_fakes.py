@@ -163,15 +163,23 @@ class FakeSail:
 
 
 def response_payload(model: str, *, text: str = "", calls: list[tuple[str, dict]] | None = None, input_tokens: int = 4000,
-                     output_tokens: int = 800, cached: int = 3000) -> dict:
+                     output_tokens: int = 800, cached: int = 3000, status: str = "completed",
+                     incomplete_reason: str | None = None, reasoning_tokens: int | None = None) -> dict:
+    """A Responses API payload; `status` "incomplete" with `incomplete_reason` is an answer cut short (Sail's
+    `incomplete_details`), and `reasoning_tokens` adds the output's reasoning count."""
     output: list[dict] = []
     if text:
         output.append({"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": text}]})
     for name, args in calls or []:
         n = next(_N)
         output.append({"type": "function_call", "id": f"fc_{n}", "call_id": f"call_{n}", "name": name, "arguments": json.dumps(args)})
-    return {"id": f"resp_{next(_N)}", "status": "completed", "model": model, "output": output,
-            "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens, "input_tokens_details": {"cached_tokens": cached}}}
+    usage: dict = {"input_tokens": input_tokens, "output_tokens": output_tokens, "input_tokens_details": {"cached_tokens": cached}}
+    if reasoning_tokens is not None:
+        usage["output_tokens_details"] = {"reasoning_tokens": reasoning_tokens}
+    payload = {"id": f"resp_{next(_N)}", "status": status, "model": model, "output": output, "usage": usage}
+    if incomplete_reason is not None:
+        payload["incomplete_details"] = {"reason": incomplete_reason}
+    return payload
 
 
 class ScriptedSail:
@@ -206,7 +214,7 @@ class FakeFrontier:
     def ask(self, *, system: str, user: str, agent: str, max_output_tokens: int = 6000, effort: str = "medium",
             service_tier: str | None = None, role: str | None = None) -> Any:
         self.asked.append({"model": self.model, "system": system, "user": user, "agent": agent,
-                           "service_tier": service_tier, "role": role, "max_output_tokens": max_output_tokens})
+                           "service_tier": service_tier, "role": role, "max_output_tokens": max_output_tokens, "effort": effort})
         if self.fail is not None:
             raise self.fail
 

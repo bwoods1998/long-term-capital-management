@@ -3,7 +3,8 @@
 - SAIL (`ModelRouter.sail`): the Responses API through `ltcm.provider.Provider` (durable request rows,
   reservations before dispatch, settled costs, a per-family daily cap and a floor cap). Its own request
   file in the state root, `swarm-provider.sqlite`. Each family's calls carry its own `prompt_cache_key`,
-  so its history is read from the cache on every turn.
+  so its history is read from the cache on every turn. A one-shot answer cut short on Sail says so (`ask`: `truncated`,
+  `incomplete_reason`, `usage`).
 - OPENAI (`ModelRouter.ask`): GPT-6 through the gateway (`league.frontier.Frontier`), used only when the
   gateway's month has room above the reserve (`FrontierMonth.remaining`) AND the swarm's own OpenAI
   spend is under its cap (plan: $150 for the burst). A refusal, an error or no room falls back to the
@@ -811,7 +812,14 @@ class ModelRouter:
         `claude_keep_truncated` (R11-3, the architect): a Claude answer cut at max_tokens is returned as the answer, marked
         `truncated` with its partial text, instead of falling to the next route; the caller salvages it. A ModelError's
         `kind` is the Claude route's last failure ("line", "no_room", "family_fuse", "admission", "truncated", "error")
-        when the call had no fallback after it."""
+        when the call had no fallback after it.
+
+        A Sail answer says whether it was cut (Oct 1, 2026: from 08:15Z every architect pass on Kimi-K3 came back
+        `incomplete` at max_output_tokens, most of it reasoning, and read as no proposals): `truncated` (the Provider's
+        `incomplete`), `incomplete_reason` (e.g. "max_output_tokens"; None when complete or not given) and `usage` (the
+        Provider's, reasoning tokens included). Its `text` and `json` are as before, so a caller that does not read
+        `truncated` (the gate's review and audit, the strategist, the stall rewrite) sees the same answer; the architect
+        salvages a cut answer's complete families."""
         self._require_committed_store()
         errors: list[str] = []
         billed: list[dict[str, Any]] = []
@@ -854,8 +862,13 @@ class ModelRouter:
             raise ModelError("; ".join(errors + [f"sail: {type(exc).__name__}: {getattr(exc, 'code', '') or str(exc)[:160]}"]),
                              billed=billed) from None
         text = response.output_text or ""
+        usage = getattr(response, "usage", None)
+        reason = getattr(response, "incomplete_reason", None)
         return {"text": text, "json": extract_json(text), "route": "sail", "model": sail_profile,
-                "cost_usd": float(response.cost_usd or 0), "fallback_reasons": errors}
+                "cost_usd": float(response.cost_usd or 0), "fallback_reasons": errors,
+                "truncated": getattr(response, "incomplete", False) is True,
+                "incomplete_reason": reason if isinstance(reason, str) else None,
+                "usage": dict(usage) if isinstance(usage, Mapping) else {}}
 
     def _ask_openai(self, *, role: str, system: str, user: str, family: str | None, key: str, openai_model: str,
                     max_output: int, effort: str, need_usd: float, errors: list[str]) -> dict[str, Any] | None:
