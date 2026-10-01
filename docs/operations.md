@@ -7,51 +7,104 @@ the swarm or live path describe their implementation, not evidence that producti
 enabled. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
-## Current operation and next work: September 30, 21:30Z
+## Current operation and next work: October 1, 04:05Z
 
-**The running House.** The House runs Release A, `20260930T200604Z-3bf48c3f8f9f`, built from main `777b894f` (PR #450):
-the Sept 30 foundation (#431-#436) plus #437, #443, #440, #439, #442 and #441.
-- It was promoted at 20:06:42Z Sept 30, and its watch passed at 20:16:42Z.
-- It was evidence reset 1.
-- A deliberate restart and an induced swarm crash both recovered under it ([CHANGELOG.md](../CHANGELOG.md), Sept 30).
+**The running House.** The House runs Release B, `20261001T034829Z-d823e014ce16`, built from main `3eaf4d06` (PR #454):
+Release A plus #451, #444, #445, #455, #456, #447, #453, #448 and #438, and the gateway's KV binding.
+- It was promoted at 03:49:07Z Oct 1, and its watch's verdict was PROMOTED.
+- It was evidence reset 2. The checks after promotion passed: 0 lineage violations; every alive family adopted the new
+  execution fingerprint, with the Gym bundle and image unchanged; the B2 backfill read 14 gate events and barred 1
+  program.
+- A deliberate restart (04:00Z) and an induced swarm crash (SIGKILL, recovered in 15 s) both recovered under it
+  ([CHANGELOG.md](../CHANGELOG.md), Oct 1).
+- The gateway runs `dafcfa05` (03:48Z): the research library and its KV binding, with the order routes unchanged. Its
+  rollback target is `ac2779ac`.
 
-**Real money is on** (since R2, Sept 27). The grant `options-swarm-20260928` is active on money digest `a3e2aa7c`. No
-family has passed the holdout: two looks, both failed. So the real orders are the House's own, plus one earlier tuition
-position:
+**Real money is on** (since R2, Sept 27). The grant `options-swarm-20260928` was re-ratified at about 03:59Z Oct 1 on
+money digest `42c4a3af` (its third ratification). No family has passed the holdout: two looks, both failed. So the real
+orders are the House's own, plus one earlier tuition position:
 - D3 calibration round trips;
 - the House live test: armed. It decides only inside its private, pre-registered window;
-- one tuition position opened before Release A, held by `googl-lags-msft-ai-cloud-qqq-flat@27:t`. Its instance is exits
-  only, since Release A's adoption dropped its engine-3 tuition row. Its program's own closes manage it.
+- one tuition position opened Sept 30, before Release A, held by `googl-lags-msft-ai-cloud-qqq-flat@27:t`. Its instance
+  is exits only, since Release A's adoption dropped its engine-3 tuition row. Its program's own closes manage it.
 
-**Release B** (branch `release/b-20261001`, PR #454) deploys overnight, before 13:25Z Oct 1. The gateway goes first,
-then the House, then the ratification at once.
-- It carries the incubator (B1, shipped switched off), L1, the research library and the adoption fixes (#453).
-- The money digest moves to `42c4a3af`.
-- It is evidence reset 2. After it, the Gym and live paths freeze (**Evaluator adoption and `gym-engine-4`**, below).
-- The steps are in **Release B: deploy, ratify, switch on**, below.
-- Shipping separately once clean, none of them a reset:
-  - B2 (#444, the incubator's facts: without it no family is eligible);
-  - the research-side PRs #438, #446, #448, #449 and #452.
+**The incubator is on** (since 04:01Z Oct 1: `live.incubator` true). Nothing can trade on it yet.
+- A cohort is pinned only after its first look passes, and a first look needs 3 completed sessions and 10 program closes
+  in the record before today. For cohorts admitted at the Oct 1 open, that is the Oct 6 open at the earliest (sessions
+  Oct 1, 2 and 5).
+- After that, the swarm's facts (B2), the caps and the weekly envelope still decide every open (**Real money**, "The
+  incubator", below).
+- **To switch it off**, on the box: keep a before-copy, set `live.incubator` to JSON `false` and replace the file
+  atomically, then read the switch back.
+
+  ```sh
+  cd /workspace/state && cp -p swarm.json "swarm.json.before-off-$(date -u +%Y%m%dT%H%M%SZ)"
+  /workspace/.venv/bin/python - <<'EOF'
+  import json, os
+  path, tmp = "/workspace/state/swarm.json", "/workspace/state/swarm.json.tmp"
+  with open(path) as f:
+      data = json.load(f)
+  data.setdefault("live", {})["incubator"] = False
+  with open(tmp, "w") as f:
+      json.dump(data, f, indent=2)
+  os.chmod(tmp, 0o600)
+  os.replace(tmp, path)
+  EOF
+  cd /workspace/current && /workspace/.venv/bin/python -B -m league.live --root /workspace/state --incubator
+  ```
+
+  The last command must show `switch` `on` false. Within a minute the incubator's instances go to exits only and their
+  working opens are cancelled. First looks are still recorded. Switch it off before any rollback across Release
+  B (**Roll back**, below).
+
+**The freeze** (since Release B). `league/live` and `league/gym` change only in a planned, deliberate release.
+- A change to either, or to `LEAGUE_FILES`, the fill model or the Gym image, moves the evaluator. Every practice cohort
+  is bound to its evaluator, so such a change ends every practice cohort, and with them every incubation, for good. It
+  also re-adopts selection (**Evaluator adoption and `gym-engine-4`**, below).
+- Batch such changes into planned releases. Rollbacks and fixes for bugs that block or endanger real orders are the only
+  exceptions.
+- Swarm-side changes that the fingerprint does not hash are no reset. They still deploy only outside the session when
+  the live path loads the module.
+
+**Next:**
+- **Oct 1, 13:31-13:35Z, the first session under B.** The deploy's canary never exercises the live path or the swarm,
+  so check by hand:
+  - `health.json` `options_live.incubator.pins.day` is `2026-10-01`;
+  - no incubator error alert, and no "the incubator's first looks failed" or "pins failed" warning;
+  - practice cohorts admitted at the open.
+- **About 4 hours after B:** Train runs and validation attempts an hour, against the spend plan's rule.
+- **After the Oct 1 close:** the close's economics, and B' (swarm side, no evidence reset): #446 family cards and the
+  final review's two fail-closed findings.
+- **In review:** #449 (harness lanes), #452 (evaluator benchmarks) and #446.
+- **The library stays off** (`research.enabled` false) until the order route's p99 is measured with the library under
+  load.
+- **The runtime skew.** The House runs Python 3.11 with numpy 2.4, the Gym Python 3.12 with numpy 2.5. A program can
+  train in the Gym and still fail to load on the live path; the preflight flags it (`preflight_house_unloadable`).
+  Align the runtimes in a planned release.
 
 **Spend** (the owner, Sept 30: cut burn to evidence). Since 16:41Z Sept 30:
 - architect births run on Kimi-K3 on Sail (`claude.role_usd_day.architect` 0);
 - stall rewrites and the diagnostician are off;
-- the researcher Sail pace is $1.1 an hour;
 - the Gym pool is at most 6 boxes (4 until Release A).
 
-The gate's review and audit and the strategist stay on Claude. Measured after the close: $84.89 over the 24 hours to
-21:00Z Sept 30, about $53 a day at the pace of its last four hours (the run record, Sept 30 night). **Models and
-Claude** and **Funding cliffs and alerts**, below, have the details.
+Since 02:47Z Oct 1:
+- the architect runs every 1,800 s (`architect.every_seconds`, 900 before);
+- the researcher Sail pace is $1.30 an hour (`researcher.sail_usd_per_hour`, $1.10 before).
 
-**Funding cliffs:**
-- The OpenAI month's cap goes to $0 at 00:00Z Oct 1. No role uses OpenAI.
-- Claude's funded room was $37.17 at 21:04Z Sept 30.
-- The Sail guard's brake is projected for about 20:00Z Oct 3 ($161.86 of balance at 21:04Z).
+With the architect's Claude line at 0, its passes fell back to Sail and took about 73% of the research pace, which
+starved research. Running the architect half as often and raising the pace moves that Sail draw to research, at about
+the same total. The gate's review and audit and the strategist stay on Claude. **Models and Claude** and **Funding cliffs
+and alerts**, below, have the details.
+
+**Funding cliffs** (as read at 21:04Z Sept 30):
+- The OpenAI month's cap is $0 since 00:00Z Oct 1. No role uses OpenAI.
+- Claude's funded room was $37.17.
+- The Sail guard's brake is projected for about 20:00Z Oct 3 ($161.86 of balance).
 - `guard.burst_until` ends Oct 5 00:00Z.
 
 The swarm says each of these ahead of time (#439).
 
-**Unchanged:** D2, the sealed holdout, no forced trades and the Sail guard's line. The money table gains only the
+**Unchanged:** D2, the sealed holdout, no forced trades and the Sail guard's line. The money table gained only the
 incubator's row, with Release B.
 
 Re-read main, the open PRs and the running release before acting: a document's timestamp is not a fresh health check.
@@ -171,8 +224,8 @@ current evidence. Evaluator adoption is not a strategy promotion or a claim of p
   - the Gym image.
 - The release before Release A had no evaluator record, so Release A's first start adopted one for every alive family.
   That was reset 1 (20:06Z Sept 30).
-- Release B, the incubator, is reset 2, overnight. It changes `league/live` only, not `league/gym` or `LEAGUE_FILES`,
-  so the execution fingerprint moves while the Gym bundle and image stay Release A's:
+- Release B, the incubator, was reset 2 (03:49Z Oct 1). It changed `league/live` only, not `league/gym` or
+  `LEAGUE_FILES`, so the execution fingerprint moved while the Gym bundle and image stayed Release A's:
   - selection is archived and cleared again, as at reset 1;
   - extension holds and the operator's clears stand, since only a new Gym image or bundle clears them (#453,
     `evaluator.gym_changed`);
@@ -182,9 +235,9 @@ current evidence. Evaluator adoption is not a strategy promotion or a claim of p
 
   After an adoption, the idle count restarts from `evaluator_trials`, and an idle retirement says "since the evaluator
   changed" (#453).
-- After B, those paths freeze for at least five sessions, and for as long as any family holds Candidate, Probe or Sized
-  or has an incubator-bound cohort. The only exceptions are rollbacks and fixes for bugs that block or endanger real
-  orders.
+- Since B, those paths are frozen for at least five sessions, and for as long as any family holds Candidate, Probe or
+  Sized or has an incubator-bound cohort. A change to them ends every practice cohort and every incubation. The only
+  exceptions are rollbacks and fixes for bugs that block or endanger real orders.
 - Other changes to those paths are batched into planned releases between evidence windows: harness-lane changes, the
   fill-model refit and new images.
 - The run record logs every reset. Never compare evidence across fingerprints.
@@ -391,11 +444,15 @@ its main commit.
 - **Then:** apply the Gym settings planned for after Release A: `gym.max_boxes` 6 and `architect.max_refill` 12
   (CHANGELOG, Sept 30).
 
-## Release B: deploy, ratify, switch on (overnight Sept 30 to Oct 1)
+## Release B: deploy, ratify, switch on (Oct 1, 2026; done 03:48-04:01Z)
 
-Release B (PR #454) is the incubator, L1, the research library and the adoption fixes
-([CHANGELOG.md](../CHANGELOG.md), "Not yet deployed"). It moves the money digest (`a3e2aa7c` → `42c4a3af`) and is
-evidence reset 2. It deploys outside the session, before 13:25Z Oct 1, and never 19:30-20:00Z.
+Done: the results are in [CHANGELOG.md](../CHANGELOG.md), Oct 1. Steps 1-7, 9 and 10 ran in order (the ratify after the
+watch's PROMOTED verdict). Step 8, the library, waits: `research.enabled` stays false until the order route's p99 is
+measured with the library under load. The steps stay here as the reference for the next money-path release.
+
+Release B (PR #454) is the incubator (B1 and B2), L1 and its restart fix, L2', the research library, the adoption fixes,
+information-value allocation and the preflight. It moved the money digest (`a3e2aa7c` → `42c4a3af`) and was evidence
+reset 2. It deployed outside the session, before 13:25Z Oct 1, and never 19:30-20:00Z.
 
 **The order.** Nothing here may be reordered.
 1. **Merge #454 to main** once CI is green. On the merge commit,
@@ -441,8 +498,7 @@ evidence reset 2. It deploys outside the session, before 13:25Z Oct 1, and never
 7. **Switch the incubator on**, outside a session, once the checks pass. The site already labels its rows (personal-site
    #17). In `swarm.json`, set `live.incubator` to JSON `true`, keeping a before-copy. Check it with `--incubator`:
    `switch.on` true.
-   - Nothing can be pinned before a first look passes (Oct 6 at the earliest), and nothing is eligible before B2 ships.
-     So switching on early costs nothing.
+   - Nothing can be pinned before a first look passes (Oct 6 at the earliest). So switching on early costs nothing.
    - `health.json` `options_live.incubator.switch` shows the last minute's read of `swarm.json`. Outside the session
      the switches are read only at a families pass (every 5 minutes), so between passes it can read false.
      `--incubator` reads the file itself.
@@ -1003,9 +1059,8 @@ never evidence.
   release B's gate events (log line `incubator backfill: N programs barred`), and an evaluator adoption records every
   failure it would clear before it clears it.
 
-  An unreadable store refuses: no pin and no open, while exits go on. **Release B writes none of these marks.** B2
-  (#444) writes the Train-and-drift pass and the incubator's reviews, so until it ships no family is eligible, even
-  with the switch on.
+  An unreadable store refuses: no pin and no open, while exits go on. B2 (#444, in Release B) writes the
+  Train-and-drift pass and the incubator's reviews.
 - **Pins,** at the session's first families pass. A restart reuses them, and nothing joins mid-session. At most 8
   cohorts, one per family, by first-look return on risk. Each needs:
   - the switch on and real money on;
@@ -1108,8 +1163,8 @@ never evidence.
   2. `max_open`, `week_loss_usd` or `max_loss_usd` set to 0 in the money table: a tightening, so a new digest, an
      owner deploy after a close and a ratify. The constitution is outside the fingerprint, so it is no evidence reset;
   3. `python3 scripts/gateway_admin.py kill`, which stops every route.
-- **Earliest possible open:** Tuesday Oct 6, 13:30Z, for cohorts that begin practice on Oct 1 (sessions Oct 1, 2 and 5),
-  and only once B2 is live.
+- **Earliest possible open:** Tuesday Oct 6, 13:30Z, for cohorts that begin practice on Oct 1 (sessions Oct 1, 2 and 5).
+  B2 is live with Release B.
 
 **L1, the cohort keep** (Release B, #445; `league/swarm/tournament.py`, `league/swarm/practice.py`; research side). So
 that a family is still alive when its cohort's sample is complete, the tournament spares a living Gym family with an
@@ -1378,7 +1433,7 @@ the swarm's loop for up to the meters' 20 s timeouts, at most once every 5 minut
 | `practice.feedback`, `sessions`, `bonus`, `bonus_total`, `min_trades` | `swarm.json` on the box | defaults: true, 10, 0.25, 0.10, 3 (from Release A) | the practice league's research feedback: the strategist's table, the architect's lines, the bandit's bonus (code ceilings 0.5 and 0.2); off: none of the three | edit `swarm.json` |
 | `live.calibration`, `live.calibration_samples` | `swarm.json` on the box | true, 100 | the D3 round trips (still only with real money on, the grant and the paper proof); samples a symbol's open cell (the mid, or the patient mid at 12:00 and 14:00) stops at (defaults false, 30) | edit `swarm.json` |
 | `live.house_test` | `swarm.json` on the box | true (since 00:17:28Z Sept 29) | the House live test (still only with real money on, the grant, the paper proof and its private program verified); off: exits only | edit `swarm.json` |
-| `live.incubator` | `swarm.json` on the box | default false (Release B ships it off) | the incubator (still only with real money on, the grant, a passed first look and the swarm's facts, which B2 writes); only JSON `true` is on; off: exits only, working opens cancelled within a minute; first looks are recorded either way | edit `swarm.json`, and switch on only outside a session |
+| `live.incubator` | `swarm.json` on the box | true (since 04:01Z Oct 1); default false (Release B ships it off) | the incubator (still only with real money on, the grant, a passed first look and the swarm's facts, which B2 writes); only JSON `true` is on; off: exits only, working opens cancelled within a minute; first looks are recorded either way | edit `swarm.json`, and switch on only outside a session |
 | The House live test's program | `/workspace/state/house-test/rebound-live/` on the box | present, verified | the frozen program and its params, hash-checked against `league/live/house_test.py` `FROZEN` | the operator's private upload script, `--apply` |
 | `FRONTIER_MONTH_USD`, `FRONTIER_MONTH_MAX_USD`, `FRONTIER_FUNDED_MONTH` | `gateway/wrangler.jsonc` | $707, September 2026 only; not topped up again (the owner, Sept 29), so $0 from Oct 1 | the OpenAI month; expires before an unfunded month can renew it | gateway deploy |
 | `CLAUDE_USD`, `CLAUDE_MODELS` | `gateway/wrangler.jsonc` | $200 (since 05:29Z Sept 29); Opus 5.5, Sonnet 5, Sonnet 5.5 | the Anthropic account's funded total (never resets) and the priced models (the allowlist) | gateway deploy after the owner adds funds |
@@ -1387,10 +1442,10 @@ the swarm's loop for up to the meters' 20 s timeouts, at most once every 5 minut
 | `researcher.claude_top`, `claude_effort`, `claude_max_tokens`, `claude_hold_every` | `swarm.json` on the box | 0 on the box (the band is off); defaults: 12, `medium`, 12000, 3 | the top band on Claude (PR #417): how many of the bandit's top families, at what effort, each call's output ceiling (it sizes the hold), and how often Claude looks during a hold streak (1: every cycle) | edit `swarm.json` |
 | `researcher.claude_family_usd_day`, `claude_min_room_usd`, `claude_timeout_seconds`, `claude_breaker_failures`, `claude_breaker_window_seconds`, `claude_breaker_pause_seconds` | `swarm.json` on the box | defaults: $15, $25, 180, 3, 3600, 3600 | the band's fuses: one family's Claude a UTC day, the funded room left to the other roles, one call's limit, and the breaker (unknown bills in the window that pause the band, and for how long) | edit `swarm.json` |
 | `gate.review_openai_model`, `gate.audit_openai_model` | `swarm.json` on the box | null, null (since 04:53Z Sept 29) | the review's and the audit's OpenAI route; null skips it (defaults `gpt-6-sol`, `gpt-6-astra`) | edit `swarm.json` |
-| `architect.openai_model`, `every_seconds`, `refill_seconds`, `max_refill`, `max_output_tokens` | `swarm.json` on the box | null, 900, 1200, 12 (since Release A, Sept 30; 4 from 16:07Z), 32000 | the architect: null leaves it Claude first (Sail's Kimi-K3 as the fallback, and its route while `claude.role_usd_day.architect` is 0); its cadence, its refill below `population.start` and each pass's births (defaults `gpt-6-astra`, 14400, 3600, 12, 12000) | edit `swarm.json` |
+| `architect.openai_model`, `every_seconds`, `refill_seconds`, `max_refill`, `max_output_tokens` | `swarm.json` on the box | null, 1800 (since 02:47Z Oct 1; 900 before), 1200, 12 (since Release A, Sept 30; 4 from 16:07Z), 32000 | the architect: null leaves it Claude first (Sail's Kimi-K3 as the fallback, and its route while `claude.role_usd_day.architect` is 0); its cadence, its refill below `population.start` and each pass's births (defaults `gpt-6-astra`, 14400, 3600, 12, 12000) | edit `swarm.json` |
 | `population.start`, `ceiling`, `floor` | `swarm.json` on the box | 96, 96, 12 | the refill target, the most alive, the fewest retirement may leave (defaults 48, 96, 16) | edit `swarm.json` |
 | `gym.start_boxes`, `max_boxes`, `train_from`, `image_checkpoint`, `gate_checkpoint` | `swarm.json` on the box | 2, 6 (since Release A, Sept 30; 4 from 16:07Z), "2020-01-02", the sealed 2020-24 image, its gate partner | the Gym pool, Train's first day and the images (defaults 4, 8, unset, none, none: the gate is off without a gate image). `train_from` takes "2022-01-03", "2020-01-02" or (since R11a) "2017-01-03"; the derived split and time limit are 8 and 900 s, 16 and 1500 s, 24 and 2400 s | edit `swarm.json`; `train_from` and a new image together |
-| `researcher.sail_usd_per_hour`, `usd_per_hour`, `top_families` | `swarm.json` on the box | 1.1 (since 16:41Z Sept 30; 12 before), 5 (not read while the Sail pace is set), 0 | the researcher pace (below) and the bandit's top band (defaults null, 4.0, 10) | edit `swarm.json` |
+| `researcher.sail_usd_per_hour`, `usd_per_hour`, `top_families` | `swarm.json` on the box | 1.3 (since 02:47Z Oct 1; 1.1 from 16:41Z Sept 30; 12 before), 5 (not read while the Sail pace is set), 0 | the researcher pace (below) and the bandit's top band (defaults null, 4.0, 10) | edit `swarm.json` |
 | `researcher.retire_idle_evaluations`, `dormant_cycles`; `tournament.retire_revisions`, `retire_evaluations` | `swarm.json` on the box | 500, 12; 200, 4000 | the idle rule and its dormancy clause; the tournament's retirement (defaults 150, 40; 30, 2000) | edit `swarm.json` |
 | `tournament.incubator_keep_max` | `swarm.json` on the box | default 12 (Release B, L1) | the most families the cohort keep spares from the revision, evaluation and idle rules (at most 96); 0, null, a boolean or a string turns it off | edit `swarm.json` |
 | `guard.burst_cap_usd`, `burst_until` | `swarm.json` on the box | $900, 2026-10-05 | the swarm's Sail spend for the research burst (the owner's 24/7 research, Sept 27); the $32 line is unchanged (defaults $350 until Monday Sept 28's open) | edit `swarm.json` |
