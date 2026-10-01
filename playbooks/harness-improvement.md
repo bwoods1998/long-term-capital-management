@@ -39,8 +39,9 @@ has been achieved.
    the review is recorded (`review`, verdict approve; see [The adversarial review](#the-adversarial-review)).
    Then the loop's deploy step (`deploy`) checks that approval and issues the ticket the tree is
    deployed under; only then deploy through the existing deployment watchdog. A tree the watchdog
-   shows on the House before the approval or the ticket gets no observation window: `reconcile`
-   records `rollback_required`. The controller follows its append-only receipts: the exact evaluated upload tree,
+   shows on the House before the approval or the ticket, more than two hours after its ticket, or
+   inside the hours its release class forbids gets no observation window: `reconcile` records
+   `rollback_required`. The controller follows its append-only receipts: the exact evaluated upload tree,
    at least three passing canary ticks, a watch configured for at least 600 seconds, passing
    non-grace readings, and a promoted verdict. It also requires the real `current` symlink and
    the swarm heartbeat to identify that tree. Offline success alone never means retained.
@@ -249,15 +250,23 @@ routes, and the judges' runtime checks catch what they can.
   import SwarmStore`, a `CFG = settings_mod.DEFAULTS` the candidate adds elsewhere: resolved over the
   base tree for the baseline and the candidate's tree for the change); an imported module's attribute
   that reaches one (`researcher.settings_mod`). No import of `os`, `subprocess`, `shutil`, `socket`,
-  `pathlib`, `io`, `logging`, `tempfile`, `importlib` or `ctypes`. Counted per import statement and
-  per attribute read: a second `import os` inside a function is one more, even where the file
-  imports os at the top. And through the names a file already binds to a protected module or its
-  tables (`settings_mod`, `from .store import STRUCTURES`): no new item or attribute assignment or
-  deletion, no mutator (`.clear()`, `.update(...)`, called or held), and no bare hand-out of the
-  module or a part of it (`d = settings_mod.DEFAULTS`, `f(settings_mod.TRAIN_STARTS)`, a return, a
-  container) where other code could mutate it: read a setting inline. An object handed over at run
-  time (an instance's attribute, a function's result) is not followed. A candidate's new test file is
-  held to the same rule.
+  `pathlib`, `io`, `logging`, `tempfile`, `importlib` or `ctypes`, and no route to them or to any
+  other process, file, network, loader or interpreter module through another module of the tree that
+  imports one (`from .loop import os as _o`, `from . import hook` then `hook.subprocess`,
+  `from .loop import Path`, a module's `_o = os`), nor to `builtins` through a module's
+  `__builtins__` (imported or read as an attribute; an imported dunder such as `__builtins__`,
+  `__loader__` or `__spec__` also counts as reflection). Counted per import statement and per
+  attribute read: a second `import os` inside a function is one more, even where the file imports os
+  at the top. And through the names a file already binds to a protected module or its tables
+  (`settings_mod`, `from .store import STRUCTURES`): no new item or attribute assignment or deletion
+  (a loop or `with` target included), no mutator (`.clear()`, `.update(...)`, called or held, also on
+  a part a call returns: `settings_mod.DEFAULTS.get("gym").update(...)`), and no bare hand-out of the
+  module or a part of it where other code could mutate it: `d = settings_mod.DEFAULTS`,
+  `f(settings_mod.TRAIN_STARTS)`, a return, a container, a loop's or a comprehension's iterable
+  (`for d in settings_mod.DEFAULTS.values()`), a function's or lambda's default value
+  (`def f(d=settings_mod.DEFAULTS)`), a `match` subject, through a conditional or `or`. Read a setting
+  inline. An object handed over at run time (an instance's attribute, a function's result such as
+  `settings_mod.load()`) is not followed. A candidate's new test file is held to the same rule.
 - **Frozen symbols** (`FROZEN_SYMBOLS`, `symbol_guard`). Every function that writes trial, lineage,
   look, graveyard, state or receipt records is frozen whole: the trial writers (`add_run`,
   `add_family`, `link_lineages`, `retire_gym`, ...), the store's general writers (`update_family`,
@@ -334,11 +343,16 @@ times:
   names the exact commit and digest to send through the watchdog. Deploy only after it.
 - `canary` (lanes) and the scheduler lane's `reconcile` read the watchdog's receipts: when the tree's
   first watchdog row (the `start` of any attempt that staged it) is earlier than the first approving
-  review or the first deploy ticket on the journal's clock, the candidate is voided
+  review on the journal's clock, or any attempt that staged it began without a deploy ticket issued
+  in the two hours before it (`TICKET_SECONDS`: a ticket is for a deploy now, not whenever), or ran
+  (its first row to its verdict) inside the hours its release class forbids, the candidate is voided
   (`rollback_required` on the scheduler lane), no canary or window opens, and `next` asks to roll the
   release back through the watchdog. A review recorded after the exposure never makes it acceptable.
   The release train (`floor_box.py`, the watchdog) does not read the journal, so a deploy around the
   loop is caught here rather than prevented: keep the laptop's and the House's clocks on NTP.
+  `measure` keeps the last 400 watchdog rows whole and, before them, each attempt's first row and its
+  stage, verdict and rollback rows, so a tree's first exposure stays in view however many deploys
+  followed.
 
 1. `next` prints the review step with the patch's sha256 once `evaluate` passes. Give the reviewing
    agent `<journal>/candidates/<id>/candidate.patch`, the brief (`brief KEY`) and this checklist;
@@ -360,7 +374,8 @@ times:
    `python scripts/harness_improve.py --root $J --repo $R review KEY --report review.md --reviewer
    <agent> --patch-sha <sha256> [--review-usd 2]`. The report is kept beside the patch. A reject
    sends the candidate back to revising (on its last attempt, rejected), and the author may read it;
-   a reject after a deploy ticket also asks for the tree's rollback. `stage --author <agent>` is
+   a reject after a deploy ticket also asks for the tree's rollback (`next` names it, on the last
+   attempt too). `stage --author <agent>` is
    required and records the author; the controller refuses a review by the same name.
 4. Then `deploy KEY` (the deploy step), and deploy exactly the named commit through the watchdog
    (from a clean checkout of it, `python3 scripts/floor_box.py deploy`; the watchdog's stage
@@ -413,11 +428,15 @@ load on the live path whenever the gate does: changes there are money path.
    anything the run printed, and the revising note and the brief carry only the public reasons. An "improve" rule also asks the dev split's count (the motivating failures) to fall by the
    same effect wherever its baseline has any. The patch author works in its worktree only: never give
    it the held-out directory (or the journal). A lost pool is restored from its backup, never
-   regenerated (a new pool is a new lane hash; every open capture must be taken again). A pooled
-   case named in any public text (a PR body, whose edit history GitHub keeps, a commit, a docstring,
-   a test fixture) is burned: it is rotated out for a case never shown, and the owner's private notes
-   beside the pools record which. Public text describes the pools only by their count and hash. The concurrent
-   canary (or the window after a release) is the held-out test of the House itself.
+   regenerated (a new pool is a new lane hash; every open capture must be taken again). Burns are by
+   FAMILY, not by case: a fault family (a status-code range, an errno group, a kind of misuse or of
+   malformed intent) any public text names (a PR body, whose edit history GitHub keeps, a comment, a
+   commit, a docstring, a test fixture, a judge's own vocabulary) is burned whole, and its cases are
+   rotated out for cases from families no public text names, chosen against a scan of every public
+   text; the owner's private notes beside the pools record which families are burned. Public text
+   describes the pools only by their count and hash, and a judge resolves a held-out case's exception
+   class by name at run time, so its public file lists only the dev split's. The concurrent canary (or
+   the window after a release) is the held-out test of the House itself.
 2. **Gate open and closed.** An arms-lane candidate is judged twice more than the baseline: with its
    gate forced open (`canary._FORCED`, set only by the judges in their sandboxed process, honored only
    under the sandbox's marker) it must meet the lane's rules; forced closed it must equal the baseline
@@ -487,6 +506,32 @@ load on the live path whenever the gate does: changes there are money path.
   dollars already spent do not enter the retention decision (they are sunk); the payback test decides
   whether a cycle starts, and the guards decide whether the change's running cost is acceptable.
 
+### Hard controls and known limits
+
+Three controls hold whatever a candidate's code does: the protected paths and the lane's surface
+(the diff's file list), the adversarial review recorded before the tree reaches the House (the
+deploy step's ticket, and the exposure check when the canary is registered), and the pinned-base
+evaluation (the judges, the rules and the decision are the base commit's code, run on the base tree
+with only the candidate's staged files laid over it). Everything static, the import and state rule,
+the content and symbol guards and gate coverage, is defense in depth: it refuses the routes
+reviewers have found and promises nothing about the rest. Known limits, each left to the review:
+
+- The static guards do not follow an object handed over at run time (an instance's attribute, a
+  function's result) or a dispatch through data the code already holds, and they resolve imports over
+  the base and candidate trees only.
+- The candidate's modules run inside the judge's interpreter: the per-run nonce, the static guards,
+  the review and the canary stand between them and the judge's answer, not a process boundary.
+- The release train does not read the journal: a deploy around the loop is voided and rolled back
+  when its canary is registered, not prevented. The hours and ticket checks read the watchdog's row
+  times against the journal's clock (keep both on NTP).
+- The D2a sentinels catch a sealed figure in its common printed forms only (rounded or truncated);
+  arithmetic of the code's own, or an unusual format, is the review's.
+- The held-out pools are burned by family against a scan of every public text when they rotate; a
+  family made public later (a new PR body, a comment) needs the scan again before the next
+  evaluation.
+- `measure` keeps the watchdog rows older than its last 400 only as each attempt's first, stage,
+  verdict and rollback rows: enough for the exposure check, not for an old attempt's full receipts.
+
 ### The procedure: one command per step
 
 The journal is the laptop's (for example `~/Work/.ltcm-main/harness/journal`); it holds the
@@ -542,11 +587,13 @@ the scheduler lane. The research and memory lanes' regressions include the D2a s
 (`league/tests/test_swarm_d2a_sentinel.py`): Validation runs, lines, views and a leaderboard seeded
 with sentinel figures, and every text a model reads (the researcher's cycle, status, brief, prompt
 and `read_run` tool, the architect's prompt, the strategist's and the diagnostician's packets)
-checked for them at any printed precision (each figure and its 1.5x twin's rounded to 1-6 decimals,
-as a percent, with separators, in scientific notation, the large ones whole), with the gate forced
-open as well as closed. A gated leak that prints a sealed figure fails there whatever route it took,
-a key built at run time included; a figure the model sees only after arithmetic of its own (a ratio
-of two sealed figures, a rank) is not a printed form, and the review checks for that. A failed evaluation leaves the candidate `revising`; a bottleneck gets three
+checked for them in their common printed forms (each figure and its 1.5x twin's rounded or truncated
+to 1-6 decimals, as a percent, with separators, in scientific notation, the large ones whole, rounded
+or truncated), with the gate forced open as well as closed. A gated leak that prints a sealed figure
+in one of those forms fails there by whichever route it came, a key built at run time included; a
+figure the model sees only in another form (after arithmetic of its own: a ratio of two sealed
+figures, a rank, a shifted or scaled figure; an unusual format) is not caught, and the review checks
+for that. A failed evaluation leaves the candidate `revising`; a bottleneck gets three
 attempts on one base (each with a fresh held-out seed), then it is `rejected` until a new capture on
 a new base.
 

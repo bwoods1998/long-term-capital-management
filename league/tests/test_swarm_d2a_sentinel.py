@@ -4,17 +4,20 @@ A family is given Validation runs (normal spread and the 1.5x twin, full results
 numbers, and a leaderboard row, every figure a SENTINEL no other code produces. Then every text a model reads is built
 the way the swarm builds it: the researcher's cycle (its request bodies), status, brief and prompt, its `read_run` tool
 asked for the Validation run, the architect's prompt, the strategist's packet and the diagnostician's packet. None may
-carry a sentinel AT ANY PRINTED PRECISION: each figure (and its 1.5x twin's) is looked for rounded to 1-6 decimals, as
-`round()` and `repr` print it, as a percent, with thousands separators, in scientific notation, and the large ones as a
-whole number (`printed_forms`), each between non-digits. The harness lanes run this module with a candidate's gate forced
-OPEN as well as closed (`harness_lanes.CORE_REGRESSIONS`), so a gated change that shows Validation figures to a model
-fails here whatever route it took (a store reader, a state key built at run time, a tool), which the static guards can
-never promise. A figure a model sees only after arithmetic of its own (a ratio of two sealed figures, a rank) is not a
-printed form of a sentinel: the review checks for that. Every figure here is invented."""
+carry a sentinel in a common printed form: each figure (and its 1.5x twin's) is looked for rounded or truncated to 1-6
+decimals, as `round()` and `repr` print it, as a percent, with thousands separators, in scientific notation, and the large
+ones as a whole number, rounded or truncated (`printed_forms`), each between non-digits. The harness lanes run this module
+with a candidate's gate forced OPEN as well as closed (`harness_lanes.CORE_REGRESSIONS`), so a gated change that prints a
+Validation figure to a model in one of those forms fails here, by whichever route the figure came (a store reader, a
+state key built at run time, a tool), which the static guards can never promise. A figure a model sees only in another
+form (arithmetic of its own: a ratio of two sealed figures, a rank, a figure shifted or scaled; an unusual format) is
+not caught here: the review checks for that. Every figure here is invented."""
 from __future__ import annotations
 
 import json
+import math
 import re
+from decimal import ROUND_DOWN, Decimal
 from unittest.mock import patch
 
 from league.swarm.architect import Architect
@@ -35,19 +38,25 @@ CHECKS = {"status_ok": True, "trades": True, "days": True, "mean_positive": True
           "quarters": True, "stress": True}
 
 
+def truncated(value: float, places: int) -> str:
+    """`value` cut (not rounded) to `places` decimals, as `int()`, `math.trunc` or a string slice print it."""
+    return str(Decimal(repr(value)).quantize(Decimal(1).scaleb(-places), rounding=ROUND_DOWN))
+
+
 def printed_forms(value: float, *, whole: bool = True) -> set[str]:
-    """Every way a figure is commonly printed: 1-6 decimals (fixed, `round` and `repr`), a percent at 0-4 decimals,
-    thousands separators, scientific notation at 1-4 digits, and (`whole`) the whole number for a figure of 100 or more."""
+    """Every way a figure is commonly printed: 1-6 decimals (fixed, `round` and `repr`) rounded or truncated, a percent
+    at 0-4 decimals, thousands separators, scientific notation at 1-4 digits, and (`whole`) the whole number, rounded or
+    truncated (`int()`), for a figure of 100 or more."""
     forms = {repr(value), str(value)}
     for d in range(1, 7):
-        forms.update({f"{value:.{d}f}", str(round(value, d))})
+        forms.update({f"{value:.{d}f}", str(round(value, d)), truncated(value, d)})
     for d in range(0, 5):
         forms.add(f"{value * 100:.{d}f}")
     if abs(value) >= 1000:
         forms.update(f"{value:,.{d}f}" for d in range(0, 3))
     forms.update(f"{value:.{d}e}" for d in range(1, 5))
     if whole and abs(value) >= 100:
-        forms.add(f"{value:.0f}")
+        forms.update({f"{value:.0f}", str(math.trunc(value))})
     return {f for f in forms if len(f.replace("-", "").replace(".", "")) >= 3}
 
 
@@ -102,6 +111,12 @@ class ValidationSentinels(ResearcherCase):
                          f"{value * 100:.1f}%", f"{value:.2e}", json.dumps({"t": round(value, 2)})):
                 with self.assertRaises(AssertionError, msg=text):
                     self.clean(text, "a leak")
+        # Truncated as well as rounded (the sixth review): `int()`, and a figure cut to 1-6 decimals.
+        for value in FIGURES:
+            for text in (f"t {int(value)}", f"t={math.trunc(value)}", f"t {str(value)[:str(value).index('.') + 3]}",
+                         f"t {truncated(value, 3)}"):
+                with self.assertRaises(AssertionError, msg=text):
+                    self.clean(text, "a truncated leak")
         self.clean("t 1738.64 and 38.64, 2 of 8 checks passed, 600 seconds, 0.7 stress, 7.3 on Train", "no leak")
 
     def test_a_rounded_leak_through_a_computed_key_is_caught(self):

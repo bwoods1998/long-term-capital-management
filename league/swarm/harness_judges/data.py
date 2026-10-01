@@ -17,6 +17,7 @@ candidate is committed. Answer: failed_transient, retried_permanent, requests (t
 """
 from __future__ import annotations
 
+import builtins  # noqa: F401 - `exception_class` reads it from sys.modules
 import errno
 import http.client
 import io
@@ -33,20 +34,20 @@ BOX = "sb_0123456789abcdef"
 PATH = "/workspace/gym/jobs/synthetic/results.json"
 PAYLOAD = b'{"synthetic": true}'
 
-#: The exception classes a fault spec may name (a fixed vocabulary: the pool only picks and labels them).
-CLASSES = {
-    "TimeoutError": TimeoutError, "ConnectionError": ConnectionError, "ConnectionResetError": ConnectionResetError,
-    "ConnectionAbortedError": ConnectionAbortedError, "ConnectionRefusedError": ConnectionRefusedError,
-    "BrokenPipeError": BrokenPipeError, "PermissionError": PermissionError, "FileNotFoundError": FileNotFoundError,
-    "IsADirectoryError": IsADirectoryError, "InterruptedError": InterruptedError, "OSError": OSError,
-    "ValueError": ValueError, "EOFError": EOFError, "socket.timeout": socket.timeout,
-    "http.client.HTTPException": http.client.HTTPException, "http.client.BadStatusLine": http.client.BadStatusLine,
-    "http.client.RemoteDisconnected": http.client.RemoteDisconnected,
-    "http.client.IncompleteRead": http.client.IncompleteRead, "http.client.LineTooLong": http.client.LineTooLong,
-    "http.client.ResponseNotReady": http.client.ResponseNotReady,
-    "ssl.SSLError": ssl.SSLError, "ssl.SSLEOFError": ssl.SSLEOFError, "ssl.SSLZeroReturnError": ssl.SSLZeroReturnError,
-    "ssl.SSLCertVerificationError": ssl.SSLCertVerificationError, "ssl.SSLWantReadError": ssl.SSLWantReadError,
-}
+#: The modules a fault spec may name an exception class from (`module.Class`, or a builtin's bare name). The judge only
+#: checks that the name is an exception class there: the pool picks and labels it, so this public file lists no
+#: held-out class.
+MODULES = ("builtins", "socket", "ssl", "http.client", "urllib.error")
+
+
+def exception_class(name: Any) -> type[BaseException]:
+    """The exception class a spec names: `TimeoutError`, `socket.timeout`, `http.client.IncompleteRead`, ..."""
+    module, _, attr = str(name).rpartition(".")
+    module = module or "builtins"
+    cls = getattr(sys.modules.get(module), attr, None) if module in MODULES else None
+    if not (isinstance(cls, type) and issubclass(cls, BaseException)):
+        raise ValueError(f"no exception class {name!r} in {', '.join(MODULES)}")
+    return cls
 
 
 def _errno(name: Any) -> int:
@@ -60,8 +61,8 @@ def _errno(name: Any) -> int:
 
 def fault_of(spec: dict[str, Any], url: str) -> BaseException:
     """An exception from a declarative spec (the dev split's own shapes, e.g.): {"type": "http", "code": 503};
-    {"type": "os", "errno": "ECONNRESET"}; {"type": "gai", "errno": "EAI_AGAIN"}; {"type": "exc", "cls": "<a CLASSES
-    name>", "args": [...]}; each optionally `"wrap": "url"` (urllib's URLError around it)."""
+    {"type": "os", "errno": "ECONNRESET"}; {"type": "gai", "errno": "EAI_AGAIN"}; {"type": "exc", "cls": "<module.Class,
+    `exception_class`>", "args": [...]}; each optionally `"wrap": "url"` (urllib's URLError around it)."""
     kind = spec["type"]
     if kind == "http":
         return HTTPError(url, int(spec["code"]), "synthetic", {}, io.BytesIO(b'{"message": "synthetic"}'))
@@ -70,7 +71,7 @@ def fault_of(spec: dict[str, Any], url: str) -> BaseException:
     elif kind == "gai":
         cause = socket.gaierror(_errno(spec["errno"]), "synthetic")
     elif kind == "exc":
-        cls = CLASSES[spec["cls"]]
+        cls = exception_class(spec["cls"])
         args = list(spec.get("args") or ["synthetic"])
         if cls is http.client.IncompleteRead:
             cause = cls(str(args[0]).encode(), *(int(a) for a in args[1:2]))

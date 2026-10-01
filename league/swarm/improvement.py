@@ -512,23 +512,44 @@ class HarnessImprovement:
         return reviews[-1] if reviews and reviews[-1].get("verdict") == "approve" else None
 
     @staticmethod
-    def exposure(proposal: Mapping[str, Any], rows: list[dict]) -> float | None:
-        """When the evaluated tree first reached the House: the earliest watchdog row (`start`, before staging) of any
-        deploy attempt that staged that exact tree (`stage` ok with its digest), or None when none did."""
+    def deploys_of(proposal: Mapping[str, Any], rows: list[dict]) -> list[tuple[float, float]]:
+        """Each deploy attempt that staged the evaluated tree (`stage` ok with its digest), as (its first watchdog row,
+        its verdict's row, or its last row while it has none): when that deploy put the tree on the House."""
         digest = proposal.get("release_digest")
         attempts = {r.get("deploy") for r in rows if r.get("stage") == "stage" and r.get("ok") is True
                     and digest and r.get("digest") == digest and r.get("deploy")}
-        times = [lanes.epoch_of(r.get("at")) for r in rows if r.get("deploy") in attempts]
-        times = [t for t in times if t is not None]
-        return min(times) if times else None
+        times: dict[Any, list[float]] = {}
+        verdicts: dict[Any, float] = {}
+        for r in rows:
+            at = lanes.epoch_of(r.get("at")) if r.get("deploy") in attempts else None
+            if at is not None:
+                times.setdefault(r.get("deploy"), []).append(at)
+                if r.get("stage") == "verdict":
+                    verdicts.setdefault(r.get("deploy"), at)
+        return sorted((min(t), verdicts.get(d, max(t))) for d, t in times.items())
+
+    @classmethod
+    def exposure(cls, proposal: Mapping[str, Any], rows: list[dict]) -> float | None:
+        """When the evaluated tree first reached the House: the earliest watchdog row (`start`, before staging) of any
+        deploy attempt that staged that exact tree (`stage` ok with its digest), or None when none did."""
+        spans = cls.deploys_of(proposal, rows)
+        return spans[0][0] if spans else None
+
+    #: A deploy ticket covers a deploy the watchdog starts within this long after it was issued (the deploy step names
+    #: the commit to send now, at an hour its release class allows): a later deploy needs a new ticket.
+    TICKET_SECONDS = 2 * 3600
 
     def unreviewed(self, proposal: Mapping[str, Any], rows: list[dict]) -> str | None:
         """MACHINE-CHECKED: why the evaluated tree's exposure on the House is not covered, or None. Every deploy of it
-        must come after an approving adversarial review of that exact tree was recorded and after the loop's deploy step
-        (`deploy`) issued its ticket, both on the journal's clock before the watchdog's first row for it."""
-        first = self.exposure(proposal, rows)
-        if first is None:
+        must come after an approving adversarial review of that exact tree was recorded and within `TICKET_SECONDS` of a
+        ticket the loop's deploy step (`deploy`) issued, both on the journal's clock before the watchdog's first row for
+        it, and run (its first row to its verdict) wholly outside the hours its release class forbids: New York's session
+        for a money-path or evidence-reset tree, 15:30-16:00 New York for a research-side one (the sixth review: the
+        deploy step checks the hours when it issues the ticket, this checks when the tree actually went out)."""
+        spans = self.deploys_of(proposal, rows)
+        if not spans:
             return None
+        first = spans[0][0]
         digest = str(proposal.get("release_digest"))[:12]
         review = self.approved(proposal)
         approvals = [float(r["at"]) for r in proposal.get("reviews") or [] if r.get("verdict") == "approve"
@@ -536,11 +557,25 @@ class HarnessImprovement:
         if review is None or not approvals or min(approvals) >= first:
             return (f"the evaluated tree {digest} reached the House ({iso(first)}) before an adversarial review approving "
                     "it was recorded")
-        tickets = [float(t["at"]) for t in proposal.get("deploys") or [] if t.get("release_digest") == proposal.get(
-            "release_digest")]
-        if not tickets or min(tickets) >= first:
-            return (f"the evaluated tree {digest} reached the House ({iso(first)}) without the loop's deploy step "
-                    "(`deploy KEY`, which checks the approval) before it")
+        tickets = sorted(float(t["at"]) for t in proposal.get("deploys") or [] if t.get("release_digest") == proposal.get(
+            "release_digest"))
+        release_class = (proposal.get("classification") or {}).get("release_class") or "research"
+        for began, ended in spans:
+            covering = [t for t in tickets if t < began]
+            if not covering:
+                return (f"the evaluated tree {digest} reached the House ({iso(began)}) without the loop's deploy step "
+                        "(`deploy KEY`, which checks the approval) before it")
+            if began - covering[-1] > self.TICKET_SECONDS:
+                return (f"the evaluated tree {digest} reached the House ({iso(began)}) more than "
+                        f"{self.TICKET_SECONDS // 3600} hours after its latest deploy ticket ({iso(covering[-1])}): the "
+                        "deploy step issues a ticket for a deploy now, at hours it checks")
+            minutes = [began + k * 60.0 for k in range(int((ended - began) // 60) + 1)] + [ended]
+            if release_class in ("money_path", "evidence_reset") and any(in_session(t) for t in minutes):
+                return (f"the {release_class} tree {digest} was deployed in New York's session ({iso(began)} to "
+                        f"{iso(ended)}): it deploys only outside 09:30-16:05")
+            if release_class == "research" and any(house_test_hours(t) for t in minutes):
+                return (f"the evaluated tree {digest} was deployed 15:30-16:00 New York ({iso(began)} to {iso(ended)}), "
+                        "while the House test runs")
         return None
 
     def deploy(self, key: str) -> dict:
@@ -1041,8 +1076,11 @@ class HarnessImprovement:
                              "one, of their parent packages `league` and `league.swarm`, `import league.<anything>`, any "
                              "star import, or an imported module's attribute that reaches one), no mutation or bare "
                              "hand-out of their state (`settings_mod.DEFAULTS[...] = ...`, `.clear()`, `d = "
-                             "settings_mod.DEFAULTS`, `f(settings_mod.TRAIN_STARTS)`; read a setting inline), no import of "
-                             "os, subprocess, shutil, socket, pathlib, io, logging, tempfile, importlib or ctypes; no new use "
+                             "settings_mod.DEFAULTS`, `f(settings_mod.TRAIN_STARTS)`, a default value, a match subject, a "
+                             "loop over `.values()`, a part `.get()` returns; read a setting inline), no import of "
+                             "os, subprocess, shutil, socket, pathlib, io, logging, tempfile, importlib or ctypes, nor of a "
+                             "process, file or loader module through another module that imports it (`from .loop import "
+                             "os`, `loop.os`) or of a module's `__builtins__`; no new use "
                              "(aliased, held as a reference or called) of a process, network, reflection, file-write "
                              "(constructors included) or file-move, print, exit or dynamic-access name, `os` member beyond "
                              "the path helpers, interpreter plumbing, assignment to another object's attribute, store writer "
@@ -1716,6 +1754,13 @@ class HarnessImprovement:
                     "measure and rank again on the running release (a new capture may register it)" if mode == "arms" else
                     "the candidate's release is still deployed: roll it back through the watchdog, or keep it through a "
                     "new capture (measure and rank again on the running release)"))
+                step["decision"] = decision
+            elif job.state == "rejected" and (job.carry.get("_failure") or {}).get("rollback"):
+                # A review rejected a ticketed tree on the candidate's last attempt (the sixth review): the tree may be on
+                # the House with nothing left to revise.
+                step["rollback"] = step["next"] = (
+                    "a review rejected a tree the deploy step had ticketed: if it reached the House, roll it back through "
+                    "the watchdog; the bottleneck has used its attempts (a new capture on a new base may register it)")
                 step["decision"] = decision
             else:
                 step["next"] = None

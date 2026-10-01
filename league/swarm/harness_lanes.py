@@ -36,19 +36,23 @@ WHAT NO LANE MAY CHANGE, AND HOW IT IS CHECKED. Two kinds of check, which must n
   evaluated tree, recorded in the journal with the verdict approve, before the loop's deploy step issues the ticket the
   tree is deployed under (`HarnessImprovement.review`, `deploy`); registering its canary (`canary_start`; the scheduler
   lane's `reconcile`) voids it, and asks for a rollback, when the watchdog shows the tree on the House before that
-  approval and ticket (`unreviewed`). The release train itself does not read the journal, so a deploy made around the
-  loop is caught there, not prevented. The judges, the benchmarks, the rules and the retain/revert decision are the
+  approval, without a ticket issued in the two hours before the deploy, or deployed in hours its release class forbids
+  (`unreviewed`). The release train itself does not read the journal, so a deploy made around the loop is caught
+  there, not prevented. The judges, the benchmarks, the rules and the retain/revert decision are the
   PINNED BASE commit's code (a separate checkout the CLI re-executes from; the controller refuses to run any other code,
   `HarnessImprovement.pinned`), the candidate is judged as the base tree with only its staged surface files laid over
   it, and a House measurement must carry the blob hashes of the base's measuring code (`measure`'s `code`). The
   candidate's own modules still run inside the judge's interpreter, which imports the tree: between them and the judge's
   answer stand the per-run nonce, the static guards below, the review and the canary, not a process boundary.
+  These machine-checked steps are the hard controls: the protected paths and the surface, the review before the tree
+  reaches the House, and the pinned-base evaluation.
 - DEFENSE IN DEPTH (static analysis of arbitrary Python: useful, never complete). The import and state rule
   (`protected_routes`, `content_guard`): no new route to the store, evaluator, gate, bands, settings or constitution (an
   import of one, of a name from or re-exported from one, of their parent packages, any star import, an imported module's
   attribute that reaches one: resolved statically over the base and candidate trees) or to a process, file, network or
-  loader module (`NO_NEW_IMPORTS`), and no new mutation or bare hand-out of a protected module's state through the
-  names a file already binds. Inside the surface files, the frozen
+  loader module (`NO_NEW_IMPORTS`; through another module that imports one, `RESTRICTED_MODULES`; a module's
+  `__builtins__`), and no new mutation or bare hand-out of a protected module's state through the names a file already
+  binds. Inside the surface files, the frozen
   symbols (`FROZEN_SYMBOLS`, `symbol_guard`): every function that writes or holds a reference to a writer of trial,
   lineage, look, graveyard, state or receipt records (the store's general writers and raw SQL that writes included),
   Train eligibility, the idle and drift screens, the evaluation key, the cycle record the research lane's metrics come
@@ -68,9 +72,9 @@ number or the holdout (`looks`). Error texts are cut to a normalized signature (
 
 HELD-OUT, HONESTLY. A capture names its motivating units (the families, mechanisms or boxes the brief shows the patch
 author); the arms comparison excludes them, and a before/after window is later than all of them. The offline judge's
-held-out split is PRIVATE CLASSES ITS DEV SPLIT NEVER USES: each lane's pool lives outside this public repo (the
-owner's `~/Work/.ltcm-main/harness-heldout/<judge>.json`, mode 0600), pinned here by SHA-256 (`HELDOUT_POOLS`), and
-reaches the judge only on standard input in held-out runs, never as a file in the sandbox; its cases are drawn from a
+held-out split is PRIVATE FAMILIES ITS DEV SPLIT NEVER USES AND NO PUBLIC TEXT NAMES: each lane's pool lives outside
+this public repo (the owner's `~/Work/.ltcm-main/harness-heldout/<judge>.json`, mode 0600), pinned here by SHA-256
+(`HELDOUT_POOLS`, which says how families are burned), and reaches the judge only on standard input in held-out runs, never as a file in the sandbox; its cases are drawn from a
 seed that exists only after the candidate is committed (`heldout_seed`), stratified so every class appears. The author
 sees only pass or fail for it (the brief and the journal's notes carry the verdict's public reasons only); the
 evaluation receipt in the owner's journal keeps the held-out split's scalar counts and the full reasons for the owner,
@@ -189,6 +193,9 @@ NETWORK_MODULES = frozenset({"http", "urllib", "socket", "ssl"})
 #: file already reaches stay governed by the per-name counts. Defense in depth (`protected_routes`).
 NO_NEW_IMPORTS = frozenset({"os", "subprocess", "shutil", "socket", "pathlib", "io", "logging", "tempfile", "importlib",
                             "ctypes"})
+#: Modules a candidate may not reach through another module of the tree that imports them (`from .loop import os`,
+#: `loop.subprocess`, `from .library import __builtins__`), counted per route by top-level name (`protected_routes`).
+RESTRICTED_MODULES = NO_NEW_IMPORTS | DANGEROUS_MODULES
 #: The store, the evaluator, the gate, the bands, the settings and the constitution: a candidate may never add a route
 #: to them (absolute or relative, the module, a name from it or re-exported from it, a parent package, a star import, a
 #: module attribute that reaches it), nor mutate their state. Defense in depth (`protected_routes`).
@@ -498,6 +505,11 @@ def _facts(source: str | None) -> dict[str, Any]:
                 # An imported name counts as a use of that name, whatever it is bound as.
                 if a.name in DANGEROUS_CALLS:
                     out["calls"][a.name] += 1
+                # A module's own dunders and frame names, imported (`from .library import __builtins__`, `__loader__`,
+                # `__spec__`), are reflection exactly as the same attribute read is (the sixth review).
+                if (a.name.startswith("__") and a.name.endswith("__") and a.name not in SAFE_DUNDERS) \
+                        or a.name in FRAME_ATTRS:
+                    out["dunders"][a.name] += 1
                 if a.name in STORE_WRITES:
                     out["writes"][a.name] += 1
                 if a.name in SEALED_READS:
@@ -611,7 +623,46 @@ class _Exports:
     instance's attribute, a function's return value) is not followed."""
 
     def __init__(self, read: Any) -> None:
-        self.read, self.trees, self.memo, self.modules = read, {}, {}, {}
+        self.read, self.trees, self.memo, self.modules, self.outside = read, {}, {}, {}, {}
+
+    def external(self, module: str, name: str, depth: int = 0) -> str | None:
+        """The module outside the tree that `module`'s attribute `name` is or comes from, followed through the tree's
+        own re-exports (the sixth review): `import os` binds `os`; `from os import environ` binds a member of `os`;
+        `from .loop import os` or `_o = os` passes either on; every module's `__builtins__` is `builtins`. A name a
+        function or a call computes is not followed (defense in depth)."""
+        key = (module, name)
+        if key in self.outside or depth > 16:
+            return self.outside.get(key)
+        self.outside[key] = None  # an import cycle resolves to nothing
+        src = self.source(module)
+        if src is None or self.is_module(f"{module}.{name}"):
+            return None
+        package, tree = src
+        out = None
+        for node in _scope(tree.body):
+            if isinstance(node, ast.Import):
+                for a in node.names:
+                    if (a.asname or a.name.split(".")[0]) == name:
+                        target = a.name if a.asname else a.name.split(".")[0]
+                        out = out or (None if self.is_module(target) else target)
+            elif isinstance(node, ast.ImportFrom):
+                base = _absolute(node.module or "", node.level, package)
+                if not base:
+                    continue
+                inside = self.is_module(base)
+                for a in node.names:
+                    if a.name == "*":
+                        out = out or (self.external(base, name, depth + 1) if inside else None)
+                    elif (a.asname or a.name) == name:
+                        out = out or (self.external(base, a.name, depth + 1) if inside else base)
+            elif _binds(node, name) and isinstance(node, (ast.Assign, ast.AnnAssign)) and isinstance(
+                    getattr(node, "value", None), (ast.Name, ast.Attribute)):
+                root = _root_name(node.value)
+                out = out or (self.external(module, root.id, depth + 1) if root is not None else None)
+        if out is None and name == "__builtins__":
+            out = "builtins"
+        self.outside[key] = out
+        return out
 
     def source(self, module: str) -> tuple[list[str], ast.Module] | None:
         """(the module's package as path parts, its AST), or None when the tree has no such module."""
@@ -730,11 +781,36 @@ class _Exports:
         return None
 
 
-def _root_name(node: ast.AST) -> ast.Name | None:
-    """The name an attribute or item chain starts from (`settings_mod` in `settings_mod.DEFAULTS["gym"]`)."""
-    while isinstance(node, (ast.Attribute, ast.Subscript, ast.Starred)):
-        node = node.value
+#: Calls that return a part of their receiver, not a new object: `settings_mod.DEFAULTS.get("gym")` is the shared
+#: section as much as `settings_mod.DEFAULTS["gym"]` is (the sixth review).
+VIEWS = frozenset({"get", "values", "items", "setdefault", "pop", "popitem", "copy", "__getitem__"})
+
+
+def _root_name(node: ast.AST, *, views: bool = False) -> ast.Name | None:
+    """The name an attribute or item chain starts from (`settings_mod` in `settings_mod.DEFAULTS["gym"]`); with `views`,
+    also through a call that returns a part of its receiver (`settings_mod.DEFAULTS.get("gym").update`, `VIEWS`)."""
+    while True:
+        if isinstance(node, (ast.Attribute, ast.Subscript, ast.Starred)):
+            node = node.value
+        elif views and isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in VIEWS:
+            node = node.func.value
+        else:
+            break
     return node if isinstance(node, ast.Name) else None
+
+
+def _leaves(node: ast.AST) -> Iterable[ast.AST]:
+    """The values an expression may evaluate to: through a conditional, `or`/`and`, a walrus and a star."""
+    if isinstance(node, ast.IfExp):
+        yield from _leaves(node.body)
+        yield from _leaves(node.orelse)
+    elif isinstance(node, ast.BoolOp):
+        for value in node.values:
+            yield from _leaves(value)
+    elif isinstance(node, (ast.NamedExpr, ast.Starred, ast.Await)):
+        yield from _leaves(node.value)
+    else:
+        yield node
 
 
 def protected_routes(source: str | None, path: str, read: Any = None) -> tuple[Counter, Counter]:
@@ -801,6 +877,11 @@ def protected_routes(source: str | None, path: str, read: Any = None) -> tuple[C
                     sub = exports.module_of(base, a.name)
                     if sub:
                         modules[bound] = sub
+                    # A process, file or loader module (or a member of one) another module of the tree imports, passed
+                    # on (`from .loop import os as _o`, `from .library import __builtins__`): the sixth review.
+                    outside = exports.external(base, a.name)
+                    if outside and outside.split(".")[0] in RESTRICTED_MODULES:
+                        found.add(f"{outside.split('.')[0]} (re-exported as {base}.{a.name})")
         routes.update(found)
     # A protected module reached through an attribute of an imported module (`researcher.settings_mod.DEFAULTS`).
     def module_expr(node: ast.AST) -> str | None:
@@ -817,11 +898,15 @@ def protected_routes(source: str | None, path: str, read: Any = None) -> tuple[C
             hit = exports.member(owner, n.attr) if owner else None
             if hit:
                 routes[f"{hit} (through {ast.unparse(n)[:60]})"] += 1
+            outside = exports.external(owner, n.attr) if owner and not hit else None
+            if outside and outside.split(".")[0] in RESTRICTED_MODULES:
+                # `loop.os.remove`, `library.__builtins__`: another module's process, file or loader module.
+                routes[f"{outside.split('.')[0]} (through {ast.unparse(n)[:60]})"] += 1
     # Mutations of the names bound to protected modules or their mutable members.
     mutable = {name for name, may in protected.items() if may}
 
     def rooted(node: ast.AST, *, bare: bool) -> bool:
-        root = _root_name(node)
+        root = _root_name(node, views=True)
         if root is None:
             return False
         if root.id in mutable:
@@ -833,8 +918,10 @@ def protected_routes(source: str | None, path: str, read: Any = None) -> tuple[C
         targets: list[ast.AST] = []
         if isinstance(n, (ast.Assign, ast.Delete)):
             targets = list(n.targets)
-        elif isinstance(n, (ast.AugAssign, ast.AnnAssign)):
+        elif isinstance(n, (ast.AugAssign, ast.AnnAssign, ast.For, ast.AsyncFor, ast.comprehension)):
             targets = [n.target]
+        elif isinstance(n, ast.withitem) and n.optional_vars is not None:
+            targets = [n.optional_vars]
         for t in targets:
             for sub in ast.walk(t):
                 if isinstance(sub, (ast.Attribute, ast.Subscript)) and isinstance(sub.ctx, (ast.Store, ast.Del)) \
@@ -854,11 +941,19 @@ def protected_routes(source: str | None, path: str, read: Any = None) -> tuple[C
             escapes += [v for v in n.values if v is not None]
         elif isinstance(n, ast.Lambda):
             escapes.append(n.body)
-        elif isinstance(n, (ast.For, ast.AsyncFor, ast.withitem)):
-            escapes.append(n.iter if isinstance(n, (ast.For, ast.AsyncFor)) else n.context_expr)
-        for e in escapes:
-            e = e.value if isinstance(e, ast.Starred) else e
-            if isinstance(e, (ast.Name, ast.Attribute, ast.Subscript)) and rooted(e, bare=True):
+        elif isinstance(n, (ast.For, ast.AsyncFor, ast.comprehension)):
+            escapes.append(n.iter)
+        elif isinstance(n, ast.withitem):
+            escapes.append(n.context_expr)
+        elif isinstance(n, ast.Match):
+            # `match settings_mod.DEFAULTS: case dict() as d: d.clear()` binds the subject (the sixth review).
+            escapes.append(n.subject)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            # A default value is bound to the parameter on every call (`def f(d=settings_mod.DEFAULTS)`).
+            escapes += [d for d in list(n.args.defaults) + list(n.args.kw_defaults) if d is not None]
+        for e in (leaf for escape in escapes for leaf in _leaves(escape)):
+            viewed = isinstance(e, ast.Call) and isinstance(e.func, ast.Attribute) and e.func.attr in VIEWS
+            if (isinstance(e, (ast.Name, ast.Attribute, ast.Subscript)) or viewed) and rooted(e, bare=True):
                 mutations[f"hands out {ast.unparse(e)[:80]}"] += 1
     return routes, mutations
 
@@ -1623,14 +1718,16 @@ class Lane:
 COST_RATIO, COST_FLOOR, PAYS_SHARE = 1.25, 2.0, 0.25
 #: Pinned private held-out pools (`Lane.heldout_pool`): SHA-256 of `<held-out directory>/<judge>.json`. The files live
 #: outside the repo (`~/Work/.ltcm-main/harness-heldout/` on the owner's machine, mode 0600 in a 0700 directory, backed
-#: up with the journal); a lost pool is restored from its backup, never regenerated (a new pool is a new lane hash). A
-#: case named in any public text (a PR body and its edit history, a commit, a docstring) is burned: it is replaced in a
-#: rotated pool, never reused, and the owner's private notes beside the pools record which.
+#: up with the journal); a lost pool is restored from its backup, never regenerated (a new pool is a new lane hash).
+#: Burns are by FAMILY: a fault family any public text names (a PR body and its edit history, a comment, a commit, a
+#: docstring, a test fixture, a judge's dev split or vocabulary) is burned whole, and a rotated pool draws its cases from
+#: families no public text names, checked by a scan of every public text; the owner's private notes beside the pools
+#: record which families are burned. Public text gives the pools by count and hash only.
 HELDOUT_POOLS = {
-    "research": "c67e699af2a077fafb9f957b98c88dbc95bc6c6ff040d8c5f69b56d1334c0c63",
+    "research": "594e8e70d7dd6a91c7bbc163b37127bdf5dbfc5c6b8c39dc8556fe3c5070d86e",
     "memory": "50e857f3bce8bbab327b6b863d8b75c034d7cd339d22ad36f9d3ca2669139d1c",
-    "data": "6427a6babe206e037ad34780007318619e1bc760be81b23ba60b763c0b5f9acf",
-    "execution": "46e65fbb329d8fce1117f524521b97f77a795017d5aab0cf0433f6020dfea8cd",
+    "data": "aa17f07ef5befd661aa850ea7372bb4ec4dbd926551f935d0fff0fcf9673df4a",
+    "execution": "eecc352b864c624c7913b3b037892a9a099afc4530e21b329ece2f96c1d692d1",
 }
 #: The research judge's "pays" rule in House terms (Sept 30, 2026, 24 hours read-only): 14.2% of Train runs were
 #: disqualified at runtime (2,755 of 19,365), and a Gym job slot took 26 box-seconds (517,618 box-seconds over 19,910
@@ -1653,7 +1750,8 @@ CORE_REGRESSIONS = ("league.tests.test_swarm_long_single", "league.tests.test_sw
                     # D2a at run time (the fourth review): Validation runs, lines, views and a leaderboard seeded with
                     # sentinel figures; no model-facing text (the researcher's cycle, status, brief, prompt and
                     # read_run tool, the architect's prompt, the strategist's and the diagnostician's packets) may
-                    # carry one. Run with the gate forced open too, so a gated leak fails here whatever route it took.
+                    # carry one in a common printed form (rounded or truncated). Run with the gate forced open too,
+                    # so a gated leak printed in one of those forms fails here, by whichever route it came.
                     "league.tests.test_swarm_d2a_sentinel")
 UNATTRIBUTED = Metric("unattributed_usd_per_hour", "unattributed_usd", "hours", min_effect=0.25, abs_tolerance=0.25)
 #: The memory lane's lever (refusing a restated buried idea) supersedes these regressions with its gate open: each admits
@@ -2329,12 +2427,21 @@ def measure(root: Path, *, now: float | None = None, seconds: int = 6 * 3600, si
         link = root.parent / "current"
         out["current"] = link.resolve().name if link.is_symlink() else None
         rows = []
-        for line in (root.parent / "deploys.jsonl").read_text().splitlines()[-400:]:
+        lines = (root.parent / "deploys.jsonl").read_text().splitlines()
+        recent = len(lines) - 400
+        seen: set[Any] = set()
+        for n, line in enumerate(lines):
             try:
                 row = json.loads(line)
             except ValueError:
                 continue
-            if isinstance(row, dict):
+            if not isinstance(row, dict):
+                continue
+            # The last 400 rows whole; before them each attempt's first row, its stage, verdict and rollback rows: when
+            # every tree first reached the House stays in view however many deploys followed (the sixth review).
+            first = row.get("deploy") not in seen
+            seen.add(row.get("deploy"))
+            if n >= recent or first or row.get("stage") in ("stage", "verdict", "rollback"):
                 rows.append({k: row.get(k) for k in ("at", "deploy", "release", "stage", "ok", "digest", "verdict", "ticks",
                                                      "watch_seconds", "grace", "from", "to", "current", "previous")})
         out["deploys"] = rows

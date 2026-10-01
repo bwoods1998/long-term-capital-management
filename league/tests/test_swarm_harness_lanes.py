@@ -639,6 +639,57 @@ class FifthReview(unittest.TestCase):
             lanes.content_guard(path, source, source + "\n# an unrelated comment\n")
 
 
+class SixthReview(unittest.TestCase):
+    """The sixth review's probes (round 5), in the same gated research-lane branch: a module's `__builtins__` or a
+    process or file module another module imports, reached through an imported name or a module attribute; and the
+    state rule's escapes through default values, match subjects, loops and the parts a call returns. Each passed every
+    staging check; each is now refused (defense in depth)."""
+
+    KEY, setUp, admit, refused = FifthReview.KEY, FifthReview.setUp, FifthReview.admit, FifthReview.refused
+
+    def test_builtins_and_reexported_process_and_file_modules_are_routes(self):
+        """N5, N7 and their variants: `from .loop import os as _o`, `from .library import __builtins__ as _b`, the same
+        modules through a module attribute, and a pathlib name another module imports."""
+        for imports, body, label in (
+                ("from .loop import os as _o\n", "            _o.remove('/tmp/x')\n", "'os \\(re-exported"),
+                ("from .loop import os as _o\n", "            _ = _o.environ.get('X')\n", "'os \\(re-exported"),
+                ("from .loop import os\n", "            _ = os.listdir('/')\n", "'os \\(re-exported"),
+                ("from .library import __builtins__ as _b\n", "            f = _b['exec']\n            f('x = 1')\n",
+                 "'builtins \\(re-exported"),
+                ("from .library import __builtins__ as _b\n", "            f = _b.get('compile')\n", "'builtins"),
+                ("from . import loop as _l\n", "            _l.os.replace('a', 'b')\n", "'os \\(through _l.os\\)"),
+                ("from . import library as _l\n", "            _ = _l.__builtins__\n", "'builtins \\(through"),
+                ("from .hook import subprocess as _sp\n", "            _sp.run(['true'])\n", "'subprocess"),
+                ("from . import guard as _g\n", "            _g.shutil.rmtree('/tmp/x')\n", "'shutil"),
+                ("from .library import urllib as _u\n", "            _ = _u.request\n", "'urllib"),
+                ("from .loop import Path as _P\n", "            _ = _P('/tmp/x')\n", "'pathlib")):
+            with self.subTest(imports=imports, body=body.strip()):
+                self.refused(self.admit(imports, body), f"adds a route to .*{label}")
+
+    def test_an_imported_dunder_is_reflection(self):
+        for name in ("__loader__", "__spec__", "__dict__"):
+            with self.subTest(name=name):
+                self.refused(self.admit(f"from .library import {name} as _x\n", "            pass\n"),
+                             "reflective attributes|adds a route")
+
+    def test_protected_state_escapes_through_defaults_match_loops_and_views(self):
+        """S1-S5, S9, S15, S16: a part a call returns (`.get`, `.values()`, `.items()`), a loop's or a comprehension's
+        iterable, a function's or a lambda's default, a match subject, a conditional."""
+        for body in ("            settings_mod.DEFAULTS.get('gym').update(max_runs=10 ** 6)\n",
+                     "            for d in settings_mod.DEFAULTS.values():\n                d.update(max_runs=1)\n",
+                     "            _ = [d.clear() for d in settings_mod.DEFAULTS.values()]\n",
+                     "            def _f(d=settings_mod.DEFAULTS):\n                d['gym'] = {}\n            _f()\n",
+                     "            _g = lambda d=settings_mod.TRAIN_STARTS: d.clear()\n            _g()\n",
+                     "            def _h(*, d=settings_mod.DEFAULTS):\n                d.clear()\n            _h()\n",
+                     "            next(iter(settings_mod.DEFAULTS.values())).clear()\n",
+                     "            match settings_mod.DEFAULTS:\n                case dict() as d:\n                    d.clear()\n",
+                     "            for _k, _v in settings_mod.DEFAULTS.items():\n                _v.clear()\n",
+                     "            d = settings_mod.DEFAULTS if fam else None\n            d.clear()\n",
+                     "            settings_mod.DEFAULTS.copy()['gym'].clear()\n"):
+            with self.subTest(body=body.strip()):
+                self.refused(self.admit("", body), "mutates or hands out")
+
+
 class GateCoverage(unittest.TestCase):
     KEY = "harness:research:train_dq_rate:0123456789abcdef"
     BASE = "import json\n\nLIMIT = 3\n\n\nclass R:\n    def admit(self, fam, code):\n        why = None\n        return why\n"
@@ -799,6 +850,26 @@ class House(unittest.TestCase):
         self.store.event("swarm.pool", None, {"action": "batch_failed", "box": "sb_1", "jobs": 8,
                                               "error": "GymError: download failed on sb_1: sailbox transport failed: TimeoutError"})
 
+    def test_the_first_exposure_of_a_tree_stays_in_view_past_the_last_400_rows(self):
+        """The sixth review: `measure` kept only the last 400 watchdog rows, so a tree's unreviewed first deploy dropped
+        out of view once enough deploys followed. Older rows now keep each attempt's first, stage, verdict and rollback
+        rows: the exposure check still sees the first one."""
+        t0 = self.clock() - 86400
+        rows = [{"deploy": "old@1", "release": "old", "stage": "start", "watch_seconds": 600, "at": lanes.iso(t0)},
+                {"deploy": "old@1", "release": "old", "stage": "stage", "ok": True, "digest": "d" * 64, "at": lanes.iso(t0 + 60)},
+                {"deploy": "old@1", "release": "old", "stage": "canary", "ok": True, "ticks": 3, "at": lanes.iso(t0 + 120)},
+                {"deploy": "old@1", "release": "old", "stage": "verdict", "verdict": "promoted", "at": lanes.iso(t0 + 900)}]
+        for n in range(120):
+            at = t0 + 3600 + n * 600
+            rows += [{"deploy": f"r{n}@1", "release": f"r{n}", "stage": stage, "ok": True, "digest": f"{n:064x}",
+                      "at": lanes.iso(at + k)} for k, stage in enumerate(("start", "stage", "canary", "watch", "verdict"))]
+        self.root.parent.joinpath("deploys.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+        doc = lanes.measure(self.root, now=self.clock(), seconds=3600, lanes=[])
+        self.assertLess(len(doc["deploys"]), len(rows))
+        self.assertEqual(doc["deploys"][-400:], [{k: r.get(k) for k in doc["deploys"][-1]} for r in rows[-400:]])
+        self.assertEqual(labmod.HarnessImprovement.exposure({"release_digest": "d" * 64}, doc["deploys"]), t0)
+        self.assertEqual(labmod.HarnessImprovement.deploys_of({"release_digest": "d" * 64}, doc["deploys"]), [(t0, t0 + 900)])
+
     def test_research_and_data_counts_join_cycles_to_runs_and_hide_scores(self):
         self.research()
         self.clock.advance(60)
@@ -812,7 +883,8 @@ class House(unittest.TestCase):
         self.assertIn("'list' object has no attribute 'items'", doc["lanes"]["research"]["examples"][0]["signature"])
         data = doc["lanes"]["data"]["metrics"]
         self.assertEqual((data["tallies"]["slots"], data["tallies"]["slots_failed"]), (8.0, 8.0))
-        text = json.dumps(doc)
+        # Every field but the wall-clock `taken_at` (whose digits can hold "7.7" by chance).
+        text = json.dumps({k: v for k, v in doc.items() if k != "taken_at"})
         for secret in ("7.7", "9.9", "private words", "train_score"):
             self.assertNotIn(secret, text)
 
@@ -1733,6 +1805,73 @@ class LaneCycle(unittest.TestCase):
                 self.assertIn("roll it back", step["next"])
                 self.clock.advance(7 * 86400)
 
+    def test_a_tree_deployed_in_hours_its_class_forbids_is_voided_whenever_its_ticket_was_issued(self):
+        """The sixth review: the deploy step checks the hours when it issues the ticket, and the exposure is checked
+        again when the canary is registered. An evidence-reset (execution) tree ticketed after the close but deployed
+        the next weekday at 15:00Z (11:00 New York); next, a research-side tree deployed 15:30-16:00 New York."""
+        key, digest = self.window_candidate("execution")
+        review(self.lab, key)
+        self.after_close()
+        self.lab.deploy(key)
+        self.promoted = (self.clock() // 86400 + 1) * 86400 + 15 * 3600
+        self.assertTrue(labmod.in_session(self.promoted - 900))
+        self.clock.t = self.promoted + 1000
+        now = self.measurement({}, since=self.promoted, until=self.promoted + 900, digest=digest, lane="execution",
+                               deploys=self.deploy_rows(key=key), current="cand-release")
+        result = self.lab.canary_start(key, measurement=now)
+        self.assertEqual((result["decision"], result.get("rollback")), ("voided", True), result)
+        self.assertRegex(result["reason"], "New York's session|after its latest deploy ticket")
+
+    def test_an_evidence_reset_deploy_that_runs_into_the_session_is_voided(self):
+        """A fresh ticket at 09:00 New York, before the session; the watchdog starts at 09:20 and promotes at 09:35."""
+        key, digest = self.window_candidate("execution")
+        review(self.lab, key)
+        self.clock.t = (self.clock() // 86400 + 1) * 86400 + 13 * 3600
+        self.assertFalse(labmod.in_session(self.clock()))
+        self.lab.deploy(key)
+        self.promoted = self.clock() + 35 * 60
+        self.clock.t = self.promoted + 1000
+        now = self.measurement({}, since=self.promoted, until=self.promoted + 900, digest=digest, lane="execution",
+                               deploys=self.deploy_rows(key=key), current="cand-release")
+        result = self.lab.canary_start(key, measurement=now)
+        self.assertEqual((result["decision"], result.get("rollback")), ("voided", True), result)
+        self.assertIn("New York's session", result["reason"])
+
+    def test_a_research_tree_deployed_while_the_house_test_runs_is_voided(self):
+        self.assertTrue(self.evaluated()["passed"])
+        digest = self.lab.worklist.get(self.key).carry["_proposal"]["release_digest"]
+        review(self.lab, self.key)
+        self.clock.t = (self.clock() // 86400 + 1) * 86400 + 19 * 3600  # 15:00 New York: the ticket may be issued
+        self.lab.deploy(self.key)
+        self.promoted = self.clock() + 35 * 60 + 900  # the watchdog starts at 15:35 New York, in the House test
+        self.assertTrue(labmod.house_test_hours(self.promoted - 900))
+        self.clock.t = self.promoted + 1000
+        result = self.lab.canary_start(self.key, measurement=self.now_doc(digest))
+        self.assertEqual((result["decision"], result.get("rollback")), ("voided", True), result)
+        self.assertIn("House test", result["reason"])
+
+    def test_a_ticket_covers_a_deploy_started_within_two_hours_only(self):
+        self.assertTrue(self.evaluated()["passed"])
+        digest = self.lab.worklist.get(self.key).carry["_proposal"]["release_digest"]
+        review(self.lab, self.key)
+        self.lab.deploy(self.key)
+        self.promoted = self.clock() + labmod.HarnessImprovement.TICKET_SECONDS + 60 + 900
+        self.clock.t = self.promoted + 1000
+        result = self.lab.canary_start(self.key, measurement=self.now_doc(digest))
+        self.assertEqual((result["decision"], result.get("rollback")), ("voided", True), result)
+        self.assertIn("after its latest deploy ticket", result["reason"])
+
+    def test_a_reject_of_a_ticketed_tree_on_the_last_attempt_still_asks_for_its_rollback(self):
+        self.assertTrue(self.evaluated()["passed"])
+        self.lab.MAX_ATTEMPTS = self.lab.worklist.get(self.key).attempt  # this attempt is the last
+        review(self.lab, self.key)
+        self.lab.deploy(self.key)
+        review(self.lab, self.key, verdict="reject", reviewer="second-reviewer")
+        self.assertEqual(self.lab.worklist.get(self.key).state, "rejected")
+        step = next(s for s in self.lab.next_steps() if s["key"] == self.key)
+        self.assertIn("roll it back", step["next"])
+        self.assertEqual(step["rollback"], step["next"])
+
     def test_an_execution_tree_reviewed_and_ticketed_first_reaches_its_control_step(self):
         key, digest = self.window_candidate("execution")
         review(self.lab, key)
@@ -1932,6 +2071,13 @@ class Judges(unittest.TestCase):
         self.assertFalse({k for c in data_judge.cases("dev", "dev")[0] for k in c} & {k for c in held for k in c})
         dev_buried = {b["mechanism"] for b in memory_judge.cases("dev", "dev")[0]}
         self.assertFalse(dev_buried & {b["mechanism"] for b in memory_judge.cases("heldout", "s1", TEST_POOLS["memory"])[0]})
+        # The data judge names no class vocabulary: a spec's class is resolved by module and name, exceptions only.
+        self.assertFalse(hasattr(data_judge, "CLASSES"))
+        for name in {s["cls"] for s in data_judge.FAULTS.values() if s["type"] == "exc"}:
+            self.assertTrue(issubclass(data_judge.exception_class(name), BaseException), name)
+        for name in ("os.system", "builtins.object", "print", "subprocess.CalledProcessError", "nowhere.Error"):
+            with self.assertRaises(ValueError, msg=name):
+                data_judge.exception_class(name)
 
     def test_data_judge_faults_and_their_labels(self):
         dev = self.judge("data")
