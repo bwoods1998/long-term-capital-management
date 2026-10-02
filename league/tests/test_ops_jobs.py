@@ -183,6 +183,27 @@ class Hygiene(Base):
         self.now += 3600
         self.assertEqual(HY.retire_idle(self.ctx("hygiene"), store=self.store, settings=settings)["retired"], [])
 
+    def test_a_family_the_swarms_heartbeat_names_in_a_cycle_is_spared_until_the_heartbeat_is_stale(self):
+        from league.swarm import HEARTBEAT, settings as swarm_settings
+
+        settings = swarm_settings.load(self.root, config={})
+        settings["population"]["floor"] = 0
+        for fid in ("dormant-a", "dormant-b"):
+            self.store.add_family({**SPEC, "id": fid}, origin="seed")
+            self.store.set_state(fid, dormant_cycles=10_000)
+        # dormant-b's cycle started a minute ago: no `swarm.cycle` event yet (it is written when the cycle ends).
+        beat = self.root / HEARTBEAT
+        beat.write_text(json.dumps({"at": self.now - 20, "status": {"running": 1, "running_families": ["dormant-b"]}}))
+        out = HY.retire_idle(self.ctx("hygiene"), store=self.store, settings=settings)
+        self.assertEqual((out["retired"], out["busy"]), (["dormant-a"], 1))
+        # A fresh heartbeat that counts running cycles but names none (an older swarm): the part judges no family.
+        beat.write_text(json.dumps({"at": self.now - 20, "status": {"running": 2}}))
+        self.assertIn("skipped", HY.retire_idle(self.ctx("hygiene"), store=self.store, settings=settings))
+        self.assertIsNone(self.store.family("dormant-b").get("retired_at"))
+        # A stale heartbeat: no swarm loop is taking turns, and the backstop judges every family.
+        beat.write_text(json.dumps({"at": self.now - 3600, "status": {"running": 1, "running_families": ["dormant-b"]}}))
+        self.assertEqual(HY.retire_idle(self.ctx("hygiene"), store=self.store, settings=settings)["retired"], ["dormant-b"])
+
     def test_stale_live_instances_are_reported(self):
         (self.root / "health.json").write_text(json.dumps({"options_live": {"instances": {
             "retired@1:o": {"family": "retired", "mode": "observe"}, "alive@1:o": {"family": "alive", "mode": "observe"},
@@ -247,6 +268,22 @@ class Scoreboard(Base):
         got = SB.deploy_counts(self.base, day="2026-10-06")
         self.assertEqual((got["self_promoted"], got["self_rolled_back"], got["owner_promoted"]), (1, 1, 1))
         self.assertEqual((got["self_promoted_today"], got["self_rolled_back_today"]), (1, 1))
+
+    def test_a_rollback_drill_is_counted_as_a_drill_never_as_an_owner_deploy(self):
+        rows = [{"at": "2026-10-10T15:20:00.000Z", "stage": "verdict", "verdict": "rolled_back",
+                 "release": "drill-20261010T150000Z", "deploy": "drill-20261010T150000Z@1"},
+                {"at": "2026-10-10T15:21:00.000Z", "stage": "drill", "outcome": "passed", "ok": True,
+                 "release": "drill-20261010T150000Z"},
+                {"at": "2026-10-10T16:00:00.000Z", "stage": "verdict", "verdict": "promoted", "release": "20261010-owner"}]
+        (self.base / "deploys.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+        got = SB.deploy_counts(self.base, day="2026-10-10")
+        self.assertEqual((got["drill_rolled_back"], got["drill_promoted"]), (1, 0))
+        self.assertEqual((got["owner_promoted"], got["owner_rolled_back"], got["self_rolled_back"]), (1, 0, 0))
+        text = SB.build(day="2026-10-10", release="r", economics=None, deploys=got, budget=None,
+                        ladder={"entrants": "n/a", "in_practice": "n/a", "promoted": "n/a", "bh_family_size": "n/a"},
+                        jobs={"ok": 0, "failed": 0, "missed": 0, "skipped": 0}, written_at="2026-10-10T23:30:00Z")
+        self.assertIn("Owner deploys: 1 promoted, 0 rolled back. Rollback drills: 1 rolled back as intended, 0 not caught.", text)
+        self.assertEqual(SB.public_problems(text), [])
 
     def test_ladder_counts_are_na_until_the_ladder_tables_exist(self):
         self.assertEqual(SB.ladder_counts(self.root, self.now)["entrants"], "n/a")
@@ -413,6 +450,51 @@ class Wiring(unittest.TestCase):
             self.assertEqual(health(house)["day"], "2026-10-05")  # read only: a tick here could start a real job child
             runner.store.close()
         self.assertIsNone(tick(SimpleNamespace(ops=None)))
+
+
+    def test_a_runner_that_cannot_be_built_is_a_warning_never_a_house_that_does_not_start(self):
+        from unittest import mock
+
+        from league import ops
+
+        alerts = []
+        house = SimpleNamespace(clock=lambda: at("2026-10-05T01:00:00Z"), alert=lambda level, text, **k: alerts.append((level, text)))
+        with tempfile.TemporaryDirectory() as tmp, mock.patch("league.ops.runner.OpsStore", side_effect=OSError("read-only file system")):
+            self.assertIsNone(ops.start(house, Path(tmp) / "state", base=Path(tmp)))
+        self.assertIsNone(house.ops)
+        self.assertEqual(alerts[0][0], "warning")
+        self.assertIn("the House's jobs could not start (OSError: read-only file system)", alerts[0][1])
+
+    def test_only_the_houses_own_loop_builds_the_job_runner(self):
+        """A `status`, `verify` or `tick` beside the running House never builds a runner: its start would kill the
+        House's job child as an orphan."""
+        from unittest import mock
+
+        import league.__main__ as M
+
+        for command, jobs in (("verify", False), ("status", False), ("tick", False), ("run", True)):
+            house = mock.MagicMock()
+            house.ledger.verify.return_value, house.books, house.tick.return_value = 0, {}, {}
+            built = mock.MagicMock(return_value=house) if command != "run" else mock.MagicMock(side_effect=RuntimeError("built"))
+            with tempfile.TemporaryDirectory() as tmp, mock.patch.object(M, "build", built), \
+                    mock.patch.object(M, "load_config", return_value={}), mock.patch.object(M, "table", return_value={}), \
+                    mock.patch("builtins.print"):
+                if command == "run":
+                    with self.assertRaises(RuntimeError):
+                        M.main([command, "--root", tmp])
+                else:
+                    M.main([command, "--root", tmp])
+            self.assertIs(built.call_args.kwargs["jobs"], jobs, command)
+
+    def test_the_house_box_is_the_configs_pin_before_the_environment(self):
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"SAILBOX_ID": "sb_aaaaaaaa-0000"}):
+            pinned = Context("economics", root=Path(tmp), due_at=0.0, settings_value={},
+                             config={"backup": {"box_id": "sb_bbbbbbbb-1111", "box_name": "house"}})
+            self.assertEqual(pinned.house_box(), "sb_bbbbbbbb-1111")
+            self.assertEqual(Context("economics", root=Path(tmp), due_at=0.0, settings_value={}, config={}).house_box(),
+                             "sb_aaaaaaaa-0000")
 
 
 class DeskReceipts(unittest.TestCase):

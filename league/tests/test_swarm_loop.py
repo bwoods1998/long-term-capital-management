@@ -406,5 +406,13 @@ class Library(LoopCase):
         self.assertEqual(sw.status()["library"], {"enabled": True, "calls_today": 4, "line": 300, "families_today": 0})
 
 
+class Heartbeat(LoopCase):
+    def test_the_heartbeat_names_the_families_in_a_cycle_now(self):
+        sw = self.swarm()
+        sw.scheduler.running.update({"fam-b", "fam-a"})
+        status = sw.status()
+        self.assertEqual((status["running"], status["running_families"]), (2, ["fam-a", "fam-b"]))
+
+
 if __name__ == "__main__":
     unittest.main()

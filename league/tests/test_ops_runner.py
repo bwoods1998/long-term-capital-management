@@ -193,6 +193,80 @@ class Runner(unittest.TestCase):
         row = [r for r in self.rows() if r["job"] == "a"][0]
         self.assertEqual((row["status"], row["attempts"]), ("ok", 2))
 
+    def test_a_failed_run_is_started_again_inside_its_grace_after_the_backoff_and_never_past_it(self):
+        jobs = (Job("a", "league.ops.a", (S.daily(2, 0),), grace=3600, cpu=60, wall=600),)
+        ops = self.ops(jobs=jobs)
+        self.now = at("2026-10-05T02:00:30Z")
+        ops.tick(self.house)
+        self.finish(self.children[0], status="failed")  # a gateway blip
+        self.now += 30
+        ops.tick(self.house)
+        row = self.rows()[0]
+        self.assertEqual((row["status"], row["attempts"]), ("failed", 1))
+        self.assertTrue(any("the a job failed (boom); attempt 1 of 3, started again from 02:16Z" in t for _, t in self.house.alerts))
+        self.now += 600  # inside the backoff: nothing starts
+        self.assertEqual(ops.tick(self.house), {})
+        self.assertEqual(len(self.children), 1)
+        self.now = at("2026-10-05T02:16:30Z")
+        self.assertEqual(ops.tick(self.house)["started"], "a")
+        self.finish(self.children[-1], status="failed")
+        self.now += 30
+        ops.tick(self.house)
+        self.assertTrue(any("attempt 2 of 3, started again from 02:32Z" in t for _, t in self.house.alerts))
+        self.now = at("2026-10-05T02:40:00Z")
+        self.assertEqual(ops.tick(self.house)["started"], "a", "still inside the grace: the third and last attempt")
+        self.finish(self.children[-1])
+        self.now += 30
+        ops.tick(self.house)
+        row = self.rows()[0]
+        self.assertEqual((row["status"], row["attempts"]), ("ok", 3))
+        # The next day's occurrence fails and its backoff runs past the grace: it stays failed, never `missed`.
+        self.now = at("2026-10-06T02:50:00Z")
+        ops.tick(self.house)
+        self.finish(self.children[-1], status="failed")
+        self.now += 30
+        ops.tick(self.house)
+        self.now = at("2026-10-06T03:20:00Z")
+        self.assertNotIn("started", ops.tick(self.house))
+        self.assertTrue(any("attempt 1, not started again" in t for _, t in self.house.alerts),
+                        "its next try would start past the grace")
+        late = [r for r in self.rows() if r["due_at"].startswith("2026-10-06")][0]
+        self.assertEqual((late["status"], late["attempts"]), ("failed", 1))
+
+    def test_a_job_that_may_not_be_repeated_is_never_started_twice(self):
+        jobs = (Job("a", "league.ops.a", (S.daily(2, 0),), grace=6 * 3600, retry=False),)
+        ops = self.ops(jobs=jobs)
+        self.now = at("2026-10-05T02:00:30Z")
+        ops.tick(self.house)
+        self.finish(self.children[0], status="failed")
+        self.now += 30
+        ops.tick(self.house)
+        self.assertTrue(any("attempt 1, not started again" in t for _, t in self.house.alerts))
+        self.now += 3600
+        ops.tick(self.house)
+        self.assertEqual(len(self.children), 1)
+        self.assertEqual(self.rows()[0]["status"], "failed")
+
+    def test_alert_texts_carry_no_box_id_and_no_dollar_figure_but_the_receipt_keeps_them(self):
+        ops = self.ops()
+        self.now = at("2026-10-05T02:00:30Z")
+        ops.tick(self.house)
+        result = Path(self.children[0].argv[self.children[0].argv.index("--result") + 1])
+        result.parent.mkdir(parents=True, exist_ok=True)
+        result.write_text(json.dumps({
+            "status": "failed", "error": "SailboxError: GET /sailboxes/sb_1234abcd-0000 gave 502",
+            "alerts": [{"level": "warning", "text": "preopen 2 grant FAIL: deposit settled: above the grant's capital "
+                                                    "$1,200.00 (Sail balance $87.5, spent -$18.62)"}]}))
+        self.children[0].returncode = 1
+        self.now += 30
+        ops.tick(self.house)
+        texts = " ".join(t for _, t in self.house.alerts)
+        self.assertNotIn("sb_1234abcd", texts)
+        self.assertNotRegex(texts, r"\$\s?-?[0-9]")
+        self.assertIn("capital $<amount> (Sail balance $<amount>, spent $<amount>)", texts)
+        self.assertIn("/sailboxes/<id> gave 502", texts)
+        self.assertIn("sb_1234abcd", [r for r in self.rows() if r["job"] == "a"][0]["error"])
+
     def test_health_says_what_is_late_failed_and_running_today(self):
         ops = self.ops()
         self.now = at("2026-10-05T02:00:30Z")

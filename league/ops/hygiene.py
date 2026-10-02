@@ -7,9 +7,11 @@
    every entrant's whole record.
 2. The Gym pool's `failed` box rows: marked `terminated` when Sail lists the box terminal or no longer knows it.
 3. Families past the idle rule: the tournament's own idle pass (`Tournament.idle_pass`: the same rule, reasons,
-   lessons and cohort keep), never below `population.floor` (`SwarmStore.retire_gym`), sparing a family that had a
-   research cycle in the last `BUSY_SECONDS`. The swarm runs the same pass every few minutes; this is its daily
-   backstop when that pass is off or stalled.
+   lessons and cohort keep), never below `population.floor` (`SwarmStore.retire_gym`), sparing a family in a
+   researcher's cycle now, as the swarm's own pass does (`Scheduler.busy`): the families the swarm's fresh heartbeat
+   names as running (`status.running_families`), and any that ended a cycle in the last `BUSY_SECONDS`. A heartbeat
+   that is fresh, says cycles are running and names none (a swarm from before `running_families`) skips the part. The
+   swarm runs the same pass every few minutes; this is its daily backstop when that pass is off or stalled.
 4. Stale live instances (reported only): a live-path instance whose family is retired or unknown, or that errors.
 
 Each part runs in its own try: one that fails is in the receipt, and the others still run.
@@ -152,6 +154,29 @@ class _NoPool:
         return None
 
 
+def running_families(ctx: Any) -> set[str] | None:
+    """The families in a researcher's cycle now, by the swarm's heartbeat when it is fresh (written in the last
+    `BUSY_SECONDS`): its `status.running_families`. An empty set when the heartbeat is stale or absent (no swarm loop is
+    taking turns); None when it is fresh, counts running cycles and names none (the caller then judges no family)."""
+    from ..swarm import HEARTBEAT
+    from .context import read_json
+
+    beat = read_json(ctx.root / HEARTBEAT, None)
+    if not isinstance(beat, Mapping):
+        return set()
+    try:
+        age = ctx.now() - float(beat.get("at"))
+    except (TypeError, ValueError):
+        return set()
+    if age > BUSY_SECONDS:
+        return set()
+    status = beat.get("status") if isinstance(beat.get("status"), Mapping) else {}
+    names = status.get("running_families")
+    if isinstance(names, list):
+        return {str(n) for n in names if n}
+    return None if status.get("running") else set()
+
+
 def retire_idle(ctx: Any, *, store: Any = None, settings: Mapping[str, Any] | None = None) -> dict[str, Any]:
     from ..swarm import settings as swarm_settings
     from ..swarm.tournament import Tournament
@@ -161,9 +186,12 @@ def retire_idle(ctx: Any, *, store: Any = None, settings: Mapping[str, Any] | No
 
         store = SwarmStore(ctx.root)
     settings = settings if settings is not None else swarm_settings.load(ctx.root, config=ctx.config)
+    in_flight = running_families(ctx)
+    if in_flight is None:
+        return {"skipped": "the swarm's heartbeat says cycles are running but does not name their families"}
     since = S.iso(ctx.now() - BUSY_SECONDS)
     busy = {r["family"] for r in store._all("SELECT DISTINCT family FROM events WHERE kind='swarm.cycle' AND at>=?", (since,))
-            if r.get("family")}
+            if r.get("family")} | in_flight
     tournament = Tournament(store, _NoPool(), settings, clock=ctx.clock)
     result = tournament.idle_pass(busy=lambda fid: fid in busy)
     return {"retired": [r["family"] for r in result.get("retired") or []], "busy": result.get("busy"),

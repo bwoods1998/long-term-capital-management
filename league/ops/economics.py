@@ -595,7 +595,7 @@ def sail_windows(sail: Any, app: str, cutoff: float, house: Mapping[str, Any], *
 def house_app(sail: Any, box: str | None) -> str:
     """The House box's Sail app id (`SailboxClient.get(SAILBOX_ID)`)."""
     if not box:
-        raise RuntimeError("the House box's Sail id is not in the environment (SAILBOX_ID)")
+        raise RuntimeError("no House box: league/config.json pins none (backup.box_id) and Sail's environment names none (SAILBOX_ID)")
     row = sail.get(box) or {}
     app = row.get("app_id")
     if not app and isinstance(row.get("app"), dict):
@@ -1034,7 +1034,8 @@ def run(ctx: Any) -> dict[str, Any]:
         # As on the laptop: the report goes on without a section it could not read (a missing mark is valued at zero, a
         # check says so); a section the arithmetic needs fails the render, and with it the job.
         ctx.alert("warning", "economics: the House read had errors in " + ", ".join(sorted(house["errors"])))
-    app = house_app(ctx.sail, ctx.house_box())
+    # `ops.json` `economics.app_id` overrides the app Sail names for the House box.
+    app = str(mine.get("app_id") or "") or house_app(ctx.sail, ctx.house_box())
     sail = sail_windows(ctx.sail, app, cut, house, now=now)
     for name, row in sail.items():
         write_json(out / "receipts" / f"sail-boxes-{name}.json", row)
