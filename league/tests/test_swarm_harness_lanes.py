@@ -23,6 +23,9 @@ from league.swarm import improvement as labmod
 from league.swarm.store import SwarmStore
 from league.tests.swarm_fakes import Clock
 
+#: The research lane's registered canary window (the lane decides it; the tests follow).
+RESEARCH_WINDOW = lanes.LANES["research"].canary["observe_seconds"]
+
 REPO = Path(__file__).resolve().parents[2]
 # researcher.py's module import line, where the lane tests add a candidate's imports. It must exist exactly once:
 # a test that silently failed to insert would pass staging for the wrong reason.
@@ -1472,7 +1475,7 @@ class LaneCycle(unittest.TestCase):
 
     def test_canary_beats_the_control_and_is_retained_once(self):
         arm, digest = self.started()
-        since, until = arm["since"], arm["since"] + 6 * 3600
+        since, until = arm["since"], arm["since"] + RESEARCH_WINDOW
         early = self.lab.reconcile_lane(self.key, measurement=self.measurement(
             self.arms(arm, 1, 4), since=since, until=since + 600, digest=digest, deploys=self.deploy_rows(), current="cand-release"))
         self.assertIn("waiting", early)
@@ -1508,7 +1511,7 @@ class LaneCycle(unittest.TestCase):
         arm, digest = self.started()
         since = arm["since"]
         result = self.lab.reconcile_lane(self.key, measurement=self.measurement(
-            self.arms(arm, 3, 3), since=since, until=since + 6 * 3600, digest=digest, deploys=self.deploy_rows(),
+            self.arms(arm, 3, 3), since=since, until=since + RESEARCH_WINDOW, digest=digest, deploys=self.deploy_rows(),
             current="cand-release"))
         self.assertEqual(result["decision"], "reverted")
         self.assertEqual(self.lab.worklist.get(self.key).state, "rejected")
@@ -1523,7 +1526,7 @@ class LaneCycle(unittest.TestCase):
         other = [{"deploy": "other@1", "release": "other", "stage": "verdict", "verdict": "promoted",
                   "at": lanes.iso(since + 3600)}]
         result = self.lab.reconcile_lane(self.key, measurement=self.measurement(
-            self.arms(arm, 1, 4), since=since, until=since + 6 * 3600, digest=digest,
+            self.arms(arm, 1, 4), since=since, until=since + RESEARCH_WINDOW, digest=digest,
             deploys=self.deploy_rows() + other, current="other"))
         self.assertEqual(result["decision"], "voided", result)
         self.assertEqual(self.lab.worklist.get(self.key).state, "rejected")
@@ -1542,7 +1545,7 @@ class LaneCycle(unittest.TestCase):
         other = [{"deploy": "other@2", "release": "other", "stage": "verdict", "verdict": "promoted",
                   "at": lanes.iso(arm["since"] + 3600)}]
         self.assertEqual(self.lab.reconcile_lane(self.key, measurement=self.measurement(
-            self.arms(arm, 1, 4), since=arm["since"], until=arm["since"] + 6 * 3600, digest=digest,
+            self.arms(arm, 1, 4), since=arm["since"], until=arm["since"] + RESEARCH_WINDOW, digest=digest,
             deploys=self.deploy_rows() + other, current="other"))["decision"], "voided")
         again = self.measurement(self.units(30, 3, "f"), since=86400.0 * 4, until=86400.0 * 5)
         again["lanes"]["data"] = {"units": {"sb": {"gym_usd": 100.0, "gym_seconds": 60000.0, "slots": 1000.0}}}
@@ -1683,7 +1686,7 @@ class LaneCycle(unittest.TestCase):
                 self.lab.canary_start(self.key, measurement=doc)
         self.assertEqual(self.lab.worklist.get(self.key).state, "canary")
         arm = self.lab.canary_start(self.key, measurement=now)["started"]
-        final = self.measurement(self.arms(arm, 1, 4), since=arm["since"], until=arm["since"] + 6 * 3600, digest=digest,
+        final = self.measurement(self.arms(arm, 1, 4), since=arm["since"], until=arm["since"] + RESEARCH_WINDOW, digest=digest,
                                  deploys=self.deploy_rows(), current="cand-release")
         with self.assertRaisesRegex(labmod.ImprovementError, "not taken by"):
             self.lab.reconcile_lane(self.key, measurement={**final, "code": {**final["code"],
@@ -1726,7 +1729,7 @@ class LaneCycle(unittest.TestCase):
         since = arm["since"]
         with patch.dict(lanes._RULES, {"sha": "a changed rebirth detector"}):
             result = self.lab.reconcile_lane(self.key, measurement=self.measurement(
-                self.arms(arm, 1, 4), since=since, until=since + 6 * 3600, digest=digest, deploys=self.deploy_rows(),
+                self.arms(arm, 1, 4), since=since, until=since + RESEARCH_WINDOW, digest=digest, deploys=self.deploy_rows(),
                 current="cand-release"))
         self.assertEqual(result["decision"], "voided", result)
         self.assertIn("rules changed", result["reason"])
@@ -1734,7 +1737,7 @@ class LaneCycle(unittest.TestCase):
 
     def test_the_watch_measures_a_registered_window_once(self):
         arm, digest = self.started()
-        end = arm["since"] + 6 * 3600
+        end = arm["since"] + RESEARCH_WINDOW
         (self.temp / "deploys.jsonl").write_text("\n".join(json.dumps(r) for r in self.deploy_rows()) + "\n")
         window = self.measurement(self.arms(arm, 1, 4), since=arm["since"], until=end, digest=digest)
         with patch.object(lanes, "measure", return_value=window) as measured, \
