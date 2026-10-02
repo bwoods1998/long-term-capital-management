@@ -89,19 +89,15 @@ def build(root: str | Path, base: str | Path, now: float, *, day: str | None = N
 
 def latest_economics(root: str | Path) -> dict[str, Any] | None:
     """Where the newest close economics is, and its headline (private)."""
-    folder = Path(root) / "economics"
-    try:
-        dirs = sorted(p for p in folder.iterdir() if p.is_dir() and p.name.endswith("-close"))
-    except OSError:
+    from .economics import latest
+
+    summary = latest(root)
+    if summary is None:
         return None
-    for path in reversed(dirs):
-        summary = read_json(path / "summary.json", None)
-        if isinstance(summary, dict):
-            net = summary.get("net") or {}
-            return {"dir": str(path), "cutoff": summary.get("cutoff"), "net_usd": net.get("net_usd"),
-                    "realized_options_pnl_usd": (summary.get("realized") or {}).get("realized_options_pnl_usd"),
-                    "total_costs_usd": summary.get("total_costs_usd"), "p30": summary.get("p30")}
-    return None
+    net = summary.get("net") or {}
+    return {"cutoff": summary.get("cutoff"), "net_usd": net.get("net_usd"),
+            "realized_options_pnl_usd": (summary.get("realized") or {}).get("realized_options_pnl_usd"),
+            "total_costs_usd": summary.get("total_costs_usd"), "p30": summary.get("p30")}
 
 
 def write(root: str | Path, base: str | Path, now: float) -> str:
