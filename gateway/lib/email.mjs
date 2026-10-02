@@ -112,13 +112,25 @@ export function compose(kind, facts = {}) {
   return { subject, text: lines.filter(line => line !== undefined && line !== null).join('\n') + '\n' };
 }
 
-// What the floor may post to /v1/notify: fills, settlements, the sample, a disk warning, and a real-money stop.
-export const NOTICE_KINDS = ['trade', 'settled', 'test', 'disk_low', 'live_stop'];
+// What the floor may post to /v1/notify: fills, settlements, the sample, a disk warning, a real-money stop, and a
+// funding cliff (V3-A, WP8: the budget rule's card notice, league/ops/budget.py).
+export const NOTICE_KINDS = ['trade', 'settled', 'test', 'disk_low', 'live_stop', 'funding'];
+//: The meters a funding notice may name (league/ops/budget.py): Sail's prefund and the Anthropic account.
+export const FUNDING_METERS = { sail: 'Sail', claude: 'Claude (Anthropic)' };
 //: The stops the House trips on real money (Sept 26, 2026 (the options-swarm run, Wave 5)). A stop not named here is not
 //: composed (a 400): a subject names only these words.
 export const LIVE_STOPS = ['drawdown', 'daily', 'reconciliation', 'assignment'];
 export const RELEASE_DRAWDOWN = 'Exits go on; the Gym keeps running. Release the drawdown pause on the box with python3 -m league.live --root /workspace/state --release-drawdown.';
 const DECIMAL = /^-?\d{1,12}(\.\d{1,6})?$/;
+//: A dollar figure or a count of days the House sent as a string or a number: echoed only when it reads as a decimal.
+const decimal = value => {
+  const text = typeof value === 'number' && Number.isFinite(value) ? String(value) : value;
+  return typeof text === 'string' && DECIMAL.test(text) ? text : null;
+};
+const dollars = value => (decimal(value) === null ? 'unknown' : `$${Number(decimal(value)).toFixed(2)}`);
+const dayCount = value => (decimal(value) === null ? 'unknown' : `${Number(decimal(value))}`);
+const DATE = /^\d{4}-\d{2}-\d{2}(T[0-9:.]{2,15}Z)?$/;
+const dateOf = value => (typeof value === 'string' && DATE.test(value) ? value.slice(0, 10) : 'unknown');
 const clip = (value, max) => (typeof value === 'string' ? value.slice(0, max) : '');
 const price = value => (typeof value === 'string' && value ? `$${value}` : 'unknown');
 
@@ -181,6 +193,24 @@ export function composeNotice(facts = {}) {
         `Equity: ${equity}.`,
         `At: ${clip(facts.at, 40) || 'an unknown time'}.`,
         stop === 'drawdown' ? RELEASE_DRAWDOWN : null,
+      );
+      break;
+    }
+    case 'funding': {
+      // A prefund under the card line (V3-A, WP8): the budget rule (league/ops/budget.py) found a meter's runway at its
+      // current total rate under `card_line_days`, and says exactly what restores `restore_days`. At most once per meter
+      // per ISO week (its notice id, which the gateway also remembers for eight days). `test: true` is a drill.
+      if (!Object.hasOwn(FUNDING_METERS, facts.meter)) return null;
+      const meter = FUNDING_METERS[facts.meter];
+      const drill = facts.test === true;
+      subject = `${drill ? 'LTCM [drill]' : 'LTCM'}: ${meter} runway ${dayCount(facts.runway_days)} days; add ${dollars(facts.restore_usd)} by ${dateOf(facts.card_date)}`;
+      lines.push(
+        drill ? 'THIS IS A DRILL: a synthetic cliff tests that this notice reaches you. Nothing needs doing.' : null,
+        `${meter} balance: ${dollars(facts.balance_usd)}, spending ${dollars(facts.usd_day)} a day (fixed ${dollars(facts.fixed_usd_day)}, research ${dollars(facts.research_usd_day)}).`,
+        `Runway at that rate: ${dayCount(facts.runway_days)} days (runs out about ${dateOf(facts.runs_out_on)}); the card line is ${dayCount(facts.card_line_days)} days.`,
+        `Adding ${dollars(facts.restore_usd)} restores ${dayCount(facts.restore_days)} days of runway. Add it by ${dateOf(facts.card_date)}.`,
+        'The research budget already throttles itself toward the floor; it never raises a cap or moves money.',
+        `At: ${clip(facts.at, 40) || 'an unknown time'}.`,
       );
       break;
     }

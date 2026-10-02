@@ -24,18 +24,21 @@ the House (Sailbox)        this Worker                                  outside
 ## Routes the options House uses
 
 Every route takes `Authorization: Bearer $GATEWAY_TOKEN` except `/v1/unkill`, which takes only the
-owner's `GATEWAY_ADMIN_TOKEN`.
+owner's `GATEWAY_ADMIN_TOKEN`; `/v1/kill` takes either (V3-A: stopping is never gated).
 
 | Route | What it does |
 |---|---|
 | `GET /v1/health` | the kill switch, caps and today's counters, the OpenAI month, the Claude meter (`claude`: funded total, spent, in flight, remaining, holds, overruns, the priced models, `by_role`, `by_agent`, stop reasons, geographies), Sail's balance and the House box's state; never reads a venue itself |
-| `POST /v1/kill`, `POST /v1/unkill` | engage the kill switch (any token), release it (owner only) |
+| `POST /v1/kill`, `POST /v1/unkill` | engage the kill switch (either token), release it (owner only); both written to the admin log |
 | `/v1/alpaca/<path>` | the Brokerage Account (orders to `api.alpaca.markets`, market data to `data.alpaca.markets`) |
 | `/v1/alpaca-paper/<path>` | the paper account: never metered, not stopped by the kill switch, held to the same defined-risk shapes |
 | `POST /v1/frontier/responses`, `GET /v1/frontier/models` | one metered OpenAI Responses call; the models the key reaches |
 | `POST /v1/claude/messages` | one Claude Messages call, reserved and settled against the funded total; streamed when `stream: true`; stopped by the kill switch |
 | `GET /v1/claude/models`, `GET /v1/claude/request/<id>` | the Claude models the key reaches and which are priced; what became of the House's call `<id>` (its `X-LTCM-Request`): held, settled, unknown, released or absent |
 | `POST /v1/github/pr`, `GET /v1/github/pr/<n>[/failures]` | open a pull request from a proposal; read its state and CI |
+| `POST /v1/github/docs` | commit one desk page `docs/runs/desk/<date>[-slug].md` to `main` (V3-A, below) |
+| `POST /v1/github/review`, `POST /v1/github/merge` | record the automated reviewer's verdict on an engineer pull request's exact head; squash-merge it inside the walls below (V3-A) |
+| `POST /v1/notify` | one notice to the owner: a `live_stop`, a `funding` cliff (V3-A), a `test` |
 | `GET /v1/research/search?q=&cat=&max=` | the research library: up to `max` (1-10) arXiv papers posted before 2025 for plain keywords, each pinned to a version (below) |
 | `GET /v1/research/read?id=&start=&chars=` | one pinned version's metadata and a window (at most 10,000 characters) of its text |
 | `GET /v1/research/health` | the library's pace, lease and day's count (the same `library` block `/v1/health` carries) |
@@ -43,7 +46,8 @@ owner's `GATEWAY_ADMIN_TOKEN`.
 Still in the code until the prune removes them (Wave 2b), and unused by the options House:
 `/v1/kalshi/*` and `/v1/kalshi/ws-auth`, `/v1/typesafe/systemone` (Jev), `/v1/web/fetch`,
 and the crypto and stock order paths (the close of an assignment's shares stays). `/v1/notify`
-mails the owner a `live_stop` notice when a real-money stop trips (Sept 26, 2026).
+mails the owner a `live_stop` notice when a real-money stop trips (Sept 26, 2026), and a `funding`
+notice when the budget rule finds a prefund under its card line (V3-A, below).
 
 ## The caps
 
@@ -59,7 +63,7 @@ account. **Reads and cancels always pass.** Deployed values (`wrangler.jsonc`, d
 | `MAX_DAY_OPEN_ORDERS` | 250 | no order OPENS once the day's orders (exits included) reach it: the last 50 are kept for exits (`403 {cap: "day_open_orders"}`) |
 | `CREDIT_MIN_EQUITY_USD` | 2000 | a credit structure (credit vertical, iron condor, iron butterfly) opens only at this equity or more |
 | `EQUITY_CAP_MAX_AGE_MS` | 120000 | the oldest equity reading an opening order is sized against |
-| `OPTION_STRUCTURES_REAL` | `debit_vertical,long_butterfly,long_call,long_put` | the types a real OPEN may be: exactly the constitution's `options_money.real_types` under $2,000 of equity; `off` opens none. Paper structures and closes of already held real positions go whatever it says |
+| `OPTION_STRUCTURES_REAL` | `debit_vertical,long_butterfly,long_call,long_put` (V3-A adds `credit_vertical,iron_condor,iron_butterfly`) | the types a real OPEN may be: exactly the constitution's `options_money.real_types`; the credit types only at `CREDIT_MIN_EQUITY_USD` of the gateway's own equity reading; `off` opens none. Paper structures and closes of already held real positions go whatever it says |
 | `CAP_TIMEZONE` | America/New_York | the calendar the day rolls on |
 | `MAX_ORDER_USD`, `MAX_ORDER_USD_KALSHI`, `MAX_DAY_USD` | 75, 75, 4000 | Kalshi only (dead until the prune removes it); the real account's orders never spend Kalshi's day |
 
@@ -233,6 +237,51 @@ on them, so the swarm gets a library instead, and the date rule is enforced here
   `main` holds: `npm run check && npm test`, `npx wrangler deploy`. No Durable Object class is added (a new class would
   end `wrangler rollback` for the gateway that carries real orders); never delete the namespace once a version has
   bound it.
+
+## The desk's own writes and the admin log (LTCM v3, V3-A)
+
+The 30-day unattended clock needs the House to publish its record and merge its engineer's research-class changes with
+no laptop step, and the owner to see that nothing else touched production. Four additions, each walled in code (a
+constant changes only by a gateway deploy):
+
+- **`POST /v1/github/docs`** ([lib/desk.mjs](lib/desk.mjs)) `{path, content, message?}`: one file committed straight
+  to `main` through the Contents API. The path is `docs/runs/desk/<YYYY-MM-DD>[-<slug>].md` with a real date and
+  nothing else; the content is UTF-8 text without NUL, at most 64 KB, carrying no credential the gateway holds and no
+  key-shaped text (a private key block, a GitHub token, an `sk-` key): `403 {refused: "secret"}`; the message is
+  `desk: <one line>` plus a footer. At most 6 commits a New York day (`429 {cap: "docs_day"}`); the same text again
+  commits nothing and takes no place (`{committed: false, unchanged: true}`); GitHub's no gives the place back; no
+  answer keeps it. What the page says is the House's own public filter (`league/ops` scoreboard).
+- **`POST /v1/github/review`** `{pr, head_sha, verdict: "approve"|"reject", reasons}`: the automated reviewer's
+  verdict, kept by the Gate for that exact commit after the pull request is read (open, an `engineer/` branch of this
+  repository aimed at `main`, headed by `head_sha`). A reject is final for its commit (an approve after it is
+  `409 {refused: "review_rejected"}`); a revision is a new commit, reviewed again. Nothing is written to GitHub.
+- **`POST /v1/github/merge`** `{pr, head_sha}` ([lib/merge.mjs](lib/merge.mjs)): a squash merge of exactly
+  `head_sha`, only when the branch starts `engineer/` and lives in this repository, the pull request is open, no draft
+  and aimed at `main`; the latest `checks.yml` run on that commit finished `success` with the jobs `gateway`,
+  `tests (3.11)` and `tests (3.14)` each `success`; an approve and no reject is recorded for that commit; no changed
+  file (either name of a rename) is protected ([lib/protected.mjs](lib/protected.mjs): `league/ci.py` FORBIDDEN, which a
+  test holds as a subset, plus `league/ops/{budget,drills,grant}.py`, `league/live/`, `league/gym/`,
+  `league/swarm/{gate,bands,evaluator,settings,store}.py`, `ltcm/data/`, `scripts/data/`, `.github/`, `gateway/`,
+  `deploy/`, `league/config.json`, `league/constitution.py`, and git's own `.git*` files), read whole from GitHub's
+  list (at most 300 files); at most 2 merges a New York day (`429 {cap: "merge_day"}`). Every refusal names its rule in
+  `refused` (`review_missing`, `review_rejected`, `branch`, `fork`, `base`, `not_open`, `draft`, `head_moved`,
+  `protected_path`, `files`, `ci_missing`, `ci_pending`, `ci_failed`, `ci_jobs`, `github`, `no_answer`). A merge GitHub
+  refused gives its place back; one nothing answered keeps it (`merged: "unknown"`). The engineer opens its pull
+  requests through `POST /v1/github/pr` with role `engineer` (branch `engineer/<slug>-<hash>`, any path but the
+  protected ones). The kill switch does not stop these routes: they move no money.
+- **The admin log**: every kill and unkill and every call presenting `GATEWAY_ADMIN_TOKEN` (refused anywhere but the
+  switch) is written with its time, the caller's kind (`admin`, `runtime`), the route, the method and the answer; a
+  call at the switch with no accepted token is counted (`unauthorized`), never listed. `/v1/health` carries `admin_log`
+  (`counts` and the `last` 20, newest first) and `autonomy` (today's docs commits and merges with the last few, the
+  reviews recorded), each read under its own guard. A release whose entry cannot be written releases nothing (`503`);
+  an engage never waits on the log.
+- **`funding` notices** on `/v1/notify` (`league/ops/budget.py` `notice_facts`): the meter (`sail` or `claude`), its
+  balance, $/day, runway, the amount that restores 90 days and the date to add it by; `test: true` is marked a drill. A
+  `funding*` notice id is remembered eight days (others 48 hours); `NOTIFY_MAX_PER_DAY` is unchanged.
+
+The token needs nothing new: Contents and Pull requests read/write already cover the docs commit and the merge, and the
+Actions runs and jobs it reads are public on this repository. A branch protection rule on `main` that requires pull
+requests or reviews would refuse the docs commit and the merge; the owner keeps `main` as it is or exempts the token.
 
 ## The watchdog
 

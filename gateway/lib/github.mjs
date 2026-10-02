@@ -1,10 +1,12 @@
-// Pull requests, and nothing else (Sept 19, 2026).
+// Pull requests (Sept 19, 2026).
 //
 // The frontier model proposes changes to the floor: a new strategy, a tool, a game dial, a
 // lesson. The rule is that a change reaches the repository only as a pull request, and the
 // credential that can open one lives here for the same reason the venue keys do: the trading VM
 // can ask, it cannot push. CI on GitHub judges every pull request and a repository workflow
-// merges the ones that pass. Nothing in this module merges, approves, closes or deletes.
+// merges the ones that pass. Nothing in this module merges, approves, closes or deletes: the
+// engineer's merges (V3-A) are lib/merge.mjs's, and the desk's own docs commits lib/desk.mjs's,
+// each behind its own walls; both reuse the REST client below.
 //
 // Every rule below is enforced a second time by the repository's own CI. They are enforced here
 // first because this is the last place a confused or compromised VM can be stopped before its
@@ -13,6 +15,7 @@
 // role, by name, even if a role's paths were loosened later.
 
 import { createHash } from 'node:crypto';
+import { protectedRefusal } from './protected.mjs';
 
 export const HOST = 'https://api.github.com';
 //: The branch every proposal is cut from and aimed at.
@@ -33,7 +36,14 @@ export const ROLES = {
   operator: { only: ['league/config.json'] },
   designer: { only: ['league/game.json'] },
   teacher: { under: ['league/playbook/'] },
+  // The engineer (LTCM v3, V3-A, D5): an isolated harness change in a lane's surface, anywhere but the protected paths
+  // (lib/protected.mjs), on an `engineer/<slug>-<hash>` branch, the only branches `POST /v1/github/merge` merges. The
+  // merge route checks the same list again against the pull request's whole diff.
+  engineer: { anywhere: true },
 };
+
+//: The branch prefix of the engineer's pull requests (lib/merge.mjs merges only these).
+export const ENGINEER_PREFIX = 'engineer/';
 
 //: The judges. No role writes these, whatever `ROLES` says: a proposal must never be able to
 //: change the rules it is judged by, or the gateway that holds the keys.
@@ -82,6 +92,10 @@ export function pathRefusal(role, path, roles = ROLES) {
   if (segments.some(segment => /^\.git/i.test(segment))) return 'a path may not name git\'s own files';
   const rule = Object.hasOwn(roles, role) ? roles[role] : null;
   if (!rule) return 'the role is unknown';
+  if (rule.anywhere === true) {
+    const why = protectedRefusal(path);
+    return why ? `no automated change may write this file: ${why}` : null;
+  }
   const allowed = (rule.only || []).includes(path) || (rule.under || []).some(prefix => path.startsWith(prefix));
   return allowed ? null : `outside what the ${role} may write`;
 }
@@ -93,10 +107,14 @@ export function canonicalFiles(files) {
     .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 }
 
-/** `merton/<role>/<slug>-<8 hex>`: a retry of the same proposal is the same branch. */
+/**
+ * `merton/<role>/<slug>-<8 hex>`, or `engineer/<slug>-<8 hex>` for the engineer: a retry of the same proposal is the
+ * same branch.
+ */
 export function branchName(role, slug, files) {
   const canonical = JSON.stringify(canonicalFiles(files).map(file => [file.path, file.content]));
-  return `merton/${role}/${slug}-${createHash('sha256').update(canonical, 'utf8').digest('hex').slice(0, 8)}`;
+  const hash = createHash('sha256').update(canonical, 'utf8').digest('hex').slice(0, 8);
+  return role === 'engineer' ? `${ENGINEER_PREFIX}${slug}-${hash}` : `merton/${role}/${slug}-${hash}`;
 }
 
 /**
@@ -148,17 +166,21 @@ export const headers = (token, { write = false } = {}) => ({
 const tidy = (text, token) =>
   String(text ?? '').split(token).join('[redacted]').replace(/\s+/g, ' ').trim().slice(0, 200);
 
-/** Why a call sequence stopped. `status` is what the gateway's caller is told. */
-class Refusal extends Error {
-  constructor(reason, status = 502) {
+/**
+ * Why a call sequence stopped. `status` is what the gateway's caller is told; `refused` (optional) names the rule that
+ * stopped it, for the merge and docs routes' answers.
+ */
+export class Refusal extends Error {
+  constructor(reason, status = 502, refused = null) {
     super(reason);
     this.status = status;
+    this.refused = refused;
   }
 }
 
 // Anything that is not a Refusal is a bug here, and a bug is reported without its details.
-const refused = (error, token) => (error instanceof Refusal
-  ? { error: tidy(error.message, token), status: error.status }
+export const refused = (error, token) => (error instanceof Refusal
+  ? { error: tidy(error.message, token), status: error.status, ...(error.refused ? { refused: error.refused } : {}) }
   : { error: 'The GitHub call failed unexpectedly.', status: 502 });
 
 /**
@@ -166,7 +188,7 @@ const refused = (error, token) => (error instanceof Refusal
  * nothing answered; `need` turns an answer that is not a success into a refusal that says which
  * step failed and what GitHub said about it; `get` is both.
  */
-function client({ repo, token, fetcher }) {
+export function client({ repo, token, fetcher }) {
   const ask = async (step, method, path, body) => {
     let upstream;
     try {
@@ -190,7 +212,7 @@ function client({ repo, token, fetcher }) {
   return { ask, need, get: async (step, method, path, body) => need(await ask(step, method, path, body), step) };
 }
 
-const sha = (value, step) => {
+export const sha = (value, step) => {
   if (typeof value !== 'string' || !/^[0-9a-f]{40,64}$/.test(value)) throw new Refusal(`GitHub's answer carried no sha (${step}).`);
   return value;
 };
