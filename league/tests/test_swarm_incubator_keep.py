@@ -82,14 +82,25 @@ class KeepCase(unittest.TestCase):
         self.store.update_family(fid, since_val_trials=idle_limit(self.settings), trials=idle_limit(self.settings))
 
     def cohort(self, fid: str, *, version: int = 1, day: str = FIRST, tier: str = "train", best_train: float | None = 1.0,
-               validation_t: float | None = None, dte: int = 3, practised: bool = True, run_sha: str | None = None) -> dict:
+               validation_t: float | None = None, dte: int = 3, practised: bool = True, run_sha: str | None = None,
+               ladder: bool = False) -> dict:
         """A cohort frozen on `day`, practised by the House on each session from Oct 1 to Oct 5 unless `practised` is
-        False. Its snapshot's program is `run_sha` (default: one no version of the swarm's holds)."""
+        False. Its snapshot's program is `run_sha` (default: one no version of the swarm's holds). The keep (L1) is the
+        incubator's, read for cohorts frozen BEFORE the forward ladder (evidence v3): unless `ladder`, the cohort is made
+        one (no `ladder` mark, the window its declared DTE gave), so the old observation target and window govern it."""
         snap = self.ledger.freeze({"family": fid, "version": version, "observe": True, "band": "gym", "tier": tier,
                                    "code": CODE.replace("[0, 3]", f"[0, {dte}]"), "params": {"hold": 3},
                                    "structure": "debit_vertical", "roots": ["SPY"],
                                    "run_sha": run_sha or f"sha-{fid}-{version}",
                                    "best_train": best_train, "validation_t": validation_t}, day=day)
+        if not ladder:
+            import json
+            import math
+
+            snap = {k: v for k, v in snap.items() if k != "ladder"}
+            snap["practice_max_sessions"] = min(60, math.ceil(dte * 5 / 7) + 3)
+            self.ledger._connect().execute("UPDATE cohorts SET snapshot=? WHERE family=? AND version=?",
+                                           (json.dumps(snap, sort_keys=True), fid, version))
         if practised:
             self.practised(fid, version=version)
         return snap
@@ -335,6 +346,31 @@ class Record(KeepCase):
                     break
             day += dt.timedelta(days=1)
         self.assertEqual(iso, "2026-10-15")
+
+    @unittest.skipUnless(HAVE_NUMPY, "the House's cohort rule needs numpy (league.live.chains)")
+    def test_a_ladder_cohorts_window_is_the_same_on_both_sides(self):
+        """A forward-ladder cohort (evidence v3) has no observation target and a sixty-session window: the research side
+        counts it out on exactly the session the House completes it."""
+        self.family("ladder")
+        self.cohort("ladder", ladder=True)
+        self.closed("ladder", [(d, 1.0, 50.0, False) for d in PRACTISED for _ in range(4)])
+        self.ledger.cohort_candidates([], day="2026-10-06", in_session=True)
+        self.assertEqual(self.tournament().incubator_keep(), frozenset({"ladder"}), "no observation target ends it")
+        day = dt.date(2026, 10, 7)
+        while day < dt.date(2027, 2, 1):
+            iso = day.isoformat()
+            [row] = [r for r in practice.cohort_status(self.root, today=iso) if r["family"] == "ladder"] or [None]
+            expired = row is None or row["elapsed"] >= row["window"]
+            if row is not None:
+                self.assertEqual(row["window"], 60)
+            if day.weekday() < 5:
+                self.ledger.cohort_candidates([], day=iso, in_session=True)
+                done = not [r for r in practice.cohort_status(self.root, today=iso) if r["family"] == "ladder"]
+                self.assertEqual(done, expired, iso)
+                if done:
+                    break
+            day += dt.timedelta(days=1)
+        self.assertLess(iso, "2027-02-01", "it ended at its window")
 
     @unittest.skipUnless(HAVE_NUMPY, "the House's step defaults import numpy")
     def test_the_sample_and_the_window_are_the_houses_and_the_money_rows(self):
