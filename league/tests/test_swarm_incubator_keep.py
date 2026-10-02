@@ -189,6 +189,56 @@ class Spares(KeepCase):
         self.assertEqual(self.tournament().incubator_keep(), frozenset({"next"}))
 
 
+# ------------------------------------------------------------------------------------------------ the ladder's cohorts
+class LadderCohorts(KeepCase):
+    """THE LADDER'S COHORTS (evidence v3, the WP6 review): a forward-ladder cohort whose version met the Validation line is
+    kept for its whole window whatever its record so far, beside the incubator's cohorts and never cut by the cap; the
+    ladder judges it on 20 sessions, and it can be promoted only while its family is alive in the Gym band."""
+
+    def setUp(self):
+        super().setUp()
+        for fid in ("val", "train", "failed", "other"):
+            self.family(fid)
+            self.dead(fid)
+        self.store.set_state("val", validation_version=1, validation_line={"passed": True})
+        self.store.set_state("failed", validation_version=1, validation_line={"passed": False})
+        self.store.set_state("other", validation_version=1, validation_line={"passed": True})
+        for fid in ("val", "train", "failed"):
+            self.cohort(fid, ladder=True)
+            self.sampled(fid, -5.0)                   # the incubator's sample met, its record so far negative
+        self.cohort("other")                          # a cohort frozen before the ladder: the incubator's rule
+        self.sampled("other", 3.0)
+
+    def test_a_validated_ladder_cohort_is_kept_past_a_negative_record_and_the_cap(self):
+        self.settings["tournament"]["incubator_keep_max"] = 1
+        t = self.tournament()
+        self.assertEqual(t.incubator_keep(), frozenset({"val"}), "the cap cuts only the rest")
+        self.assertEqual(self.store.get(practice.KEEP_KV)["ladder"], ["val"])
+        self.assertEqual([r["family"] for r in t.idle_pass()["retired"]], ["failed", "other", "train"])
+        self.assertEqual(self.alive(), ["val"])
+        self.assertEqual(t.keep_spared, {"val": "idle"})
+        self.assertEqual(t.keep_event()["ladder"], ["val"])
+
+    def test_the_rest_keep_the_incubators_rule(self):
+        self.settings["tournament"]["incubator_keep_max"] = 4
+        self.assertEqual(self.tournament().incubator_keep(), frozenset({"val", "other"}),
+                         "a ladder cohort not validated (or that failed the line) has no place of its own")
+
+    def test_a_validation_under_another_research_evaluator_keeps_nothing(self):
+        self.store.put("research_evaluator", "E2")
+        self.store.set_state("val", validation_line=None,
+                             validation_verdicts={"1": {"passed": True, "at": "x", "evaluator": "E1"}})
+        self.assertNotIn("val", self.tournament().incubator_keep())
+        self.store.set_state("val", validation_verdicts={"1": {"passed": True, "at": "x", "evaluator": "E2"}})
+        self.assertIn("val", self.tournament().incubator_keep())
+
+    def test_a_fresh_process_takes_the_saved_ladder_families_first(self):
+        self.settings["tournament"]["incubator_keep_max"] = 4
+        self.tournament().incubator_keep()
+        rows = self.tournament()._saved_keep(self.clock(), 1)[1]
+        self.assertEqual([(r["family"], r["ladder"]) for r in rows], [("val", True)], "never cut by the cap")
+
+
 # ------------------------------------------------------------------------------------------------ the record it reads
 class Record(KeepCase):
     def keeps(self, fid: str) -> bool:
@@ -397,7 +447,8 @@ class Record(KeepCase):
         [row] = practice.cohort_status(self.root, today="2026-10-06")
         self.assertEqual((db.stat().st_mtime_ns, db.read_bytes()), before, "read-only (SQLite's WAL reader may add its "
                                                                            "empty -shm/-wal sidecars, as practice_summary's)")
-        self.assertEqual(row, {"family": "a", "version": 1, "first_day": FIRST, "evaluator": EVAL, "tier": "train",
+        self.assertEqual(row, {"family": "a", "version": 1, "first_day": FIRST, "evaluator": EVAL, "ladder": False,
+                               "tier": "train",
                                "validation_t": None, "best_train": 1.0, "structure": "debit_vertical", "run_sha": "sha-a-1",
                                "window": 10, "elapsed": 3, "sessions": 3, "unpracticed": 0, "coverage": 1.0,
                                "closes_program": 1, "pnl_program": 12.0, "closes_all": 2, "pnl_all": 11.0,

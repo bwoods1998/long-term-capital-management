@@ -13,16 +13,24 @@ evidence, no band). The practice league (Sept 29, 2026) keeps a record of it her
   (`prior_*`) its coverage and open mark as its last session before the current one left them, rolled at the current
   session day's first minute (`prior_day`: that day, the roll's) (the incubator reads the record before today, never
   today's values).
-- `cohorts`: immutable admitted program snapshots, retained through research retirement and revision until the
-  observation target or bounded session window completes; shadow-only entry authority. A FORWARD LADDER cohort (evidence
-  v3, Oct 2, 2026: every cohort frozen from that release on; its snapshot's `ladder`) has no observation target: it
-  practises until the ladder promotes it (`promoted`) or fails it (`failed`), or its practice window ends (the
-  constitution's `options_money.ladder.max_sessions`); a promoted cohort whose Probe goes back to the Gym is `demoted`.
+- `cohorts`: immutable admitted program snapshots, retained through research revision (and, before the ladder,
+  retirement) until the observation target or bounded session window completes; shadow-only entry authority. A FORWARD
+  LADDER cohort (evidence v3, Oct 2, 2026: every cohort frozen from that release on; its snapshot's `ladder`) has no
+  observation target: it practises until the ladder promotes it (`promoted`) or fails it (`failed`: its family retired
+  among the reasons), or its practice window ends (the constitution's `options_money.ladder.max_sessions`); a promoted
+  cohort whose Probe goes back to the Gym is `demoted`. Each row names the practice evaluator it was frozen under (`evaluator`). A program whose
+  cohort completed under ANOTHER evaluator (a release moved it: the plan's "practice cohorts restart on the new
+  fingerprint") is frozen again as a new cohort: the old row, with its practice row, moves to `cohort_archive`, and its
+  practice row starts again, so its sessions are the new cohort's. A cohort that failed, was promoted or was demoted
+  never re-enters, under any evaluator; nor does one completed under the running evaluator.
 - `events`: private decision, coverage, intent, rejection, order, quote and fill/slippage receipts, idempotent across
   restarts. Unwritten receipts live in the saved shadow account and retry; the bounded outage buffer reports drops.
-- `entrants`: one row per ladder cohort, written with its admission: every entrant is a trial of its lineage and of the
-  desk (the ladder's Benjamini-Hochberg counts every entrant of its trailing window), with its latest one-sided p-value.
+- `entrants`: one row per ladder cohort (family, version and its evaluator: a program frozen again under another
+  evaluator is another trial), written with its admission: every entrant is a trial of its lineage and of the desk (the
+  ladder's Benjamini-Hochberg counts every entrant of its trailing window), with its latest one-sided p-value.
 - `ladder_decisions`: the ladder's receipts, one per cohort a day it judged (`league/live/ladder.py`).
+- `cohort_archive`: cohorts that completed under an earlier evaluator and were frozen again, each with its practice row
+  as it stood (JSON), kept for good.
 
 WHO READS IT. THE FORWARD LADDER (evidence v3, the owner's D2 of Oct 2, 2026; `league/live/ladder.py`) reads a ladder
 cohort's own program closes under its own evaluator as the promotion evidence to Probe; nothing else that promotes reads
@@ -39,7 +47,9 @@ trade's P&L is the engine's after fees. The headline is REALIZED P&L; open posit
 mark (a mid inside the package's bounds), and never added to it. Forced (wind-down) closes stay in the headline, because
 they happened, and are counted apart; the feedback's statistics use program-closed trades only.
 
-Bounded: at most `MAX_ROWS` trades (the oldest go first); practice rows unseen for `KEEP_DAYS` days are pruned. Each write
+Bounded: at most `MAX_ROWS` trades (the oldest go first, but never a trade of an active or promoted ladder cohort under
+its own evaluator: the ladder judges and receipts that record whole, so the table may then hold more); practice rows
+unseen for `KEEP_DAYS` days are pruned. Each write
 is one transaction; a failure is caught, alerted once, and never stops the minute (trades stay in the shadow account and
 are offered again; a practice row is repaired by the next minute's upsert).
 """
@@ -95,8 +105,13 @@ CREATE TABLE IF NOT EXISTS practice (
     PRIMARY KEY (family, version));
 CREATE TABLE IF NOT EXISTS cohorts (
     family TEXT NOT NULL, version INTEGER NOT NULL, admitted_at REAL NOT NULL, first_day TEXT NOT NULL,
-    snapshot TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', completed_day TEXT, reason TEXT,
+    snapshot TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', completed_day TEXT, reason TEXT, evaluator TEXT,
     PRIMARY KEY (family, version));
+CREATE TABLE IF NOT EXISTS cohort_archive (
+    family TEXT NOT NULL, version INTEGER NOT NULL, evaluator TEXT, admitted_at REAL NOT NULL, first_day TEXT NOT NULL,
+    snapshot TEXT NOT NULL, status TEXT NOT NULL, completed_day TEXT, reason TEXT, practice TEXT,
+    archived_at REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS cohort_archive_program ON cohort_archive(family, version);
 CREATE TABLE IF NOT EXISTS events (
     instance TEXT NOT NULL, account TEXT NOT NULL, event_id INTEGER NOT NULL, family TEXT NOT NULL,
     version INTEGER NOT NULL, day TEXT, minute INTEGER, kind TEXT NOT NULL, body TEXT NOT NULL,
@@ -106,7 +121,7 @@ CREATE INDEX IF NOT EXISTS events_day ON events(day);
 CREATE TABLE IF NOT EXISTS entrants (
     family TEXT NOT NULL, version INTEGER NOT NULL, run_sha TEXT, lineage TEXT, tier TEXT, evaluator TEXT NOT NULL,
     entered_at REAL NOT NULL, entered_day TEXT NOT NULL, p_value REAL, p_day TEXT,
-    PRIMARY KEY (family, version));
+    PRIMARY KEY (family, version, evaluator));
 CREATE INDEX IF NOT EXISTS entrants_day ON entrants(entered_day);
 CREATE TABLE IF NOT EXISTS ladder_decisions (
     id INTEGER PRIMARY KEY AUTOINCREMENT, day TEXT NOT NULL, family TEXT NOT NULL, version INTEGER NOT NULL,
@@ -181,7 +196,12 @@ class ObserveStore:
                                "max_loss, recorded_at, body, exit_day, reason, forced, evaluator) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
                 over = int(db.execute("SELECT count(*) FROM trades").fetchone()[0]) - self.max_rows
                 if over > 0:
-                    db.execute("DELETE FROM trades WHERE seq IN (SELECT seq FROM trades ORDER BY seq LIMIT ?)", (over,))
+                    # The oldest go first, never a trade of an active or promoted ladder cohort under its own evaluator:
+                    # the ladder judges (and its receipts hash) that record whole.
+                    db.execute("DELETE FROM trades WHERE seq IN (SELECT t.seq FROM trades t WHERE NOT EXISTS ("
+                               "SELECT 1 FROM cohorts c WHERE c.family=t.family AND c.version=t.version AND "
+                               "c.status IN ('active', 'promoted') AND c.evaluator=t.evaluator) ORDER BY t.seq LIMIT ?)",
+                               (over,))
             return True
         except Exception as exc:  # noqa: BLE001 - the practice record never stops the minute
             if not self.told and self.alert is not None:
@@ -197,7 +217,10 @@ class ObserveStore:
                           min_sessions: int = 3, min_trades: int = 10, max_sessions: int = 10,
                           keep: Iterable[tuple[str, int]] = frozenset()) -> list[dict]:
         """Keep admitted immutable snapshots across research revisions and retirement. Completed snapshots never
-        re-enter. A cohort finishes between sessions after enough observed days and program closes, or its bounded
+        re-enter under the evaluator they completed under: one that completed under another (an active one whose
+        evaluator changed is completed here) is offered again from `current`, and `freeze` makes it a new cohort (the
+        module docstring). A failed, promoted or demoted cohort never re-enters. A cohort finishes between sessions
+        after enough observed days and program closes, or its bounded
         calendar-session window; capacity/pressure switches still apply in the caller. This is shadow authority only.
         `keep` (L2', the incubator's: (family, version) of cohorts whose first look passed, while `live.incubator` is on):
         such a cohort is not completed at its observation target; its window, an evaluator change or a failure still
@@ -210,16 +233,19 @@ class ObserveStore:
 
         db = self._connect()
         frozen, seen = [], set()
-        rows = db.execute("SELECT family, version, first_day, snapshot, status FROM cohorts ORDER BY admitted_at, family")
-        for family, version, first, snapshot, status in rows.fetchall():
-            seen.add((family, version))
+        rows = db.execute("SELECT family, version, first_day, snapshot, status, evaluator FROM cohorts "
+                          "ORDER BY admitted_at, family")
+        for family, version, first, snapshot, status, evaluator in rows.fetchall():
             if status != "active":
+                if status != "complete" or _evaluator_of(evaluator, snapshot) == self.evaluator:
+                    seen.add((family, version))  # never again; a completed one under another evaluator may re-enter
                 continue
             row = json.loads(snapshot)
             if row.get("practice_evaluator") != self.evaluator:
                 db.execute("UPDATE cohorts SET status='complete', completed_day=?, reason=? WHERE family=? AND version=?",
-                           (day, "evaluator changed; a new version needs fresh practice", family, version))
-                continue
+                           (day, "evaluator changed; its practice starts again under the new one", family, version))
+                continue  # not seen: offered again from `current`, frozen as a new cohort under this evaluator
+            seen.add((family, version))
             # THE FORWARD LADDER's cohorts (evidence v3, `league/live/ladder.py`): no observation target ends one; it runs
             # until the ladder promotes it or fails it, or its own practice window (`practice_max_sessions`, at most 60).
             ladder = bool(row.get("ladder"))
@@ -283,8 +309,23 @@ class ObserveStore:
         family, version = str(row["family"]), int(row["version"])
         with db:
             db.execute("BEGIN IMMEDIATE")
-            db.execute("INSERT OR IGNORE INTO cohorts(family, version, admitted_at, first_day, snapshot) VALUES(?,?,?,?,?)",
-                       (family, version, self.clock(), day, json.dumps(snapshot, sort_keys=True, allow_nan=False)))
+            old = db.execute("SELECT admitted_at, first_day, snapshot, status, completed_day, reason, evaluator "
+                             "FROM cohorts WHERE family=? AND version=?", (family, version)).fetchone()
+            if old is not None and old[3] in ("active", "complete") and _evaluator_of(old[6], old[2]) != self.evaluator:
+                # PRACTICE STARTS AGAIN ON A NEW EVALUATOR (the module docstring): the earlier cohort and its practice
+                # row go to the archive, so this program's cohort, sessions and record are the new evaluator's alone.
+                practice = _dicts(db.execute("SELECT * FROM practice WHERE family=? AND version=?", (family, version)))
+                db.execute("INSERT INTO cohort_archive(family, version, evaluator, admitted_at, first_day, snapshot, "
+                           "status, completed_day, reason, practice, archived_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                           (family, version, _evaluator_of(old[6], old[2]), old[0], old[1], old[2], "complete",
+                            old[4] or day, old[5] if old[3] == "complete" else
+                            "evaluator changed; its practice starts again under the new one",
+                            json.dumps(practice[0], sort_keys=True, default=str) if practice else None, self.clock()))
+                db.execute("DELETE FROM cohorts WHERE family=? AND version=?", (family, version))
+                db.execute("DELETE FROM practice WHERE family=? AND version=?", (family, version))
+            db.execute("INSERT OR IGNORE INTO cohorts(family, version, admitted_at, first_day, snapshot, evaluator) "
+                       "VALUES(?,?,?,?,?,?)", (family, version, self.clock(), day,
+                                               json.dumps(snapshot, sort_keys=True, allow_nan=False), self.evaluator))
             stored = db.execute("SELECT snapshot, status, admitted_at, first_day FROM cohorts WHERE family=? AND version=?",
                                 (family, version)).fetchone()
             kept = json.loads(stored[0])
@@ -371,10 +412,11 @@ class ObserveStore:
             "SELECT family, version, run_sha, lineage, tier, evaluator, entered_day, p_value, p_day FROM entrants "
             "WHERE entered_day>=? ORDER BY entered_at, family, version", (str(since),)))
 
-    def set_entrant_p(self, family: str, version: int, p: float, *, day: str) -> None:
-        """An entrant's latest one-sided p-value (the ladder's bootstrap; 1.0 without a full record), as of `day`."""
-        self._connect().execute("UPDATE entrants SET p_value=?, p_day=? WHERE family=? AND version=?",
-                                (float(p), str(day), str(family), int(version)))
+    def set_entrant_p(self, family: str, version: int, p: float, *, day: str, evaluator: str | None = None) -> None:
+        """An entrant's latest one-sided p-value (the ladder's bootstrap; 1.0 without a full record), as of `day`: the
+        entrant under `evaluator` (default: the running one)."""
+        self._connect().execute("UPDATE entrants SET p_value=?, p_day=? WHERE family=? AND version=? AND evaluator=?",
+                                (float(p), str(day), str(family), int(version), str(evaluator or self.evaluator)))
 
     def add_decision(self, row: Mapping[str, Any]) -> int:
         """One `ladder_decisions` row (the ladder's receipt): its id."""
@@ -386,6 +428,12 @@ class ObserveStore:
              row.get("bh_size"), row.get("bh_threshold"), str(row["verdict"]),
              json.dumps(list(row.get("reasons") or []), default=str), int(bool(row.get("binding"))), self.clock()))
         return int(cur.lastrowid)
+
+    def decision(self, receipt: int) -> dict[str, Any] | None:
+        """One `ladder_decisions` row by its id (a receipt), or None."""
+        rows = _dicts(self._connect().execute("SELECT id, day, family, version, run_sha, verdict, binding FROM "
+                                              "ladder_decisions WHERE id=?", (int(receipt),)))
+        return rows[0] if rows else None
 
     def set_verdict(self, receipt: int, verdict: str, reasons: Iterable[str]) -> None:
         """The verdict a receipt ends with (a promotion the swarm's store refused, say)."""
@@ -508,8 +556,28 @@ def _dicts(cursor: sqlite3.Cursor) -> list[dict[str, Any]]:
     return [dict(zip(names, row)) for row in cursor.fetchall()]
 
 
+def _evaluator_of(column: Any, snapshot: Any) -> str | None:
+    """A cohort row's practice evaluator: its `evaluator` column, else its snapshot's (a row written before the column,
+    or by hand)."""
+    if column is not None:
+        return str(column)
+    try:
+        value = json.loads(snapshot).get("practice_evaluator")
+    except (TypeError, ValueError, AttributeError):
+        return None
+    return None if value is None else str(value)
+
+
 def _migrate(db: sqlite3.Connection) -> None:
-    """The practice league's trade columns on a file written before them, filled from each trade's own row."""
+    """The practice league's trade columns on a file written before them, filled from each trade's own row; and the
+    cohorts' evaluator column (evidence v3), filled from each snapshot."""
+    if "evaluator" not in {row[1] for row in db.execute("PRAGMA table_info(cohorts)")}:
+        with db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("ALTER TABLE cohorts ADD COLUMN evaluator TEXT")
+            for family, version, snapshot in db.execute("SELECT family, version, snapshot FROM cohorts").fetchall():
+                db.execute("UPDATE cohorts SET evaluator=? WHERE family=? AND version=?",
+                           (_evaluator_of(None, snapshot), family, version))
     columns = {row[1] for row in db.execute("PRAGMA table_info(practice)")}
     if "missed_errors" not in columns:
         db.execute("ALTER TABLE practice ADD COLUMN missed_errors INTEGER NOT NULL DEFAULT 0")

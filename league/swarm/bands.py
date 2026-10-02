@@ -78,8 +78,13 @@ Gym bundle's version is built once per `BUNDLE_TTL` seconds a process, not once 
 of the Gym's code).
 
 THE LADDER'S BELT (`ladder_refusal`, evidence v3): before the forward ladder promotes a practised program, the family is
-alive in the Gym band, the store's version is that very program, it was not demoted, and THE READER'S BELT finds no bar,
-failed review or audit, refusal or bad gate outcome on the program in any family (fail-closed).
+alive in the Gym band, the store's version is that very program, the version met THE VALIDATION LINE (`validation_passed`:
+its latest validation under the current research evaluator; a Train-tier entrant never validated is refused), it was not
+demoted (by the Gym, or by the ladder itself), and THE READER'S BELT finds no bar, failed review or audit, refusal or bad
+gate outcome on the program in any family (fail-closed). A ladder Probe's proof is taken only with its receipt
+(`ladder_receipt`): `read` gives no row for a family whose ladder proof names no `promote` receipt of the House's
+practice record (`<root>/observe.sqlite`, `ladder_decisions`) for the same family, version and program, so a proof
+copied into the store by any other writer never trades.
 
 OWNERSHIP OF THE BANDS. The swarm moves gym <-> candidate (the gate's holdout pass, retired by evidence v3; a Candidate
 whose forward record turns negative over 20 trades goes back to the Gym) and retires families. The LIVE PATH alone moves
@@ -224,6 +229,10 @@ def read(root: str | Path, *, family: str | None = None, tuition: bool | None = 
         sha = run_sha({"sha": v["sha"], "params": params})
         if fam["band"] in LIVE_BANDS and not current_banded_evaluator(state, sha):
             continue  # preserved historical band/positions, but no new entry under unqualified semantics
+        if fam["band"] in LIVE_BANDS and (state.get("banded_evaluator") or {}).get("route") == "ladder" and \
+                not ladder_receipt(root, family=fam["id"], version=int(v["n"]), run_sha=sha,
+                                   receipt=state["banded_evaluator"].get("receipt")):
+            continue  # a ladder proof without its practice receipt: no entry (`ladder_receipt`)
         if fam["band"] == "gym":
             if not image or state.get("validation_image") != image or not bundle or state.get("validation_bundle") != bundle:
                 continue
@@ -589,14 +598,60 @@ def incubator(root: str | Path, *, family: str, version: int) -> list[dict[str, 
              "observe": False, "holdout_passed": False, "validation_passed": False}]
 
 
+def validation_passed(state: Mapping[str, Any], n: int, current: Any) -> bool | None:
+    """THE VALIDATION LINE as the forward ladder reads it (evidence v3: Train -> Validation, its line unchanged -> the
+    pre-filter -> Practice): whether version `n`'s latest validation under the current research evaluator (`current`:
+    the store's `research_evaluator`, None in a store that never adopted one) met the line: True, False, or None when it
+    has none under it (never validated: a Train-tier entrant). Read from the tournament's record of each version's latest
+    verdict (`validation_verdicts`) when judged under `current`, else from the family's own line when it judged `n` (an
+    adoption clears that line, so a line there was judged under the evaluator in force), as
+    `researcher.validation_refuted` reads a failure."""
+    if not isinstance(state, Mapping):
+        return None
+    records = state.get("validation_verdicts")
+    record = records.get(str(int(n))) if isinstance(records, Mapping) else None
+    if isinstance(record, Mapping) and record.get("evaluator") == current and isinstance(record.get("passed"), bool):
+        return record["passed"]
+    line = state.get("validation_line")
+    if _count(state.get("validation_version")) == int(n) and isinstance(line, Mapping) and \
+            isinstance(line.get("passed"), bool):
+        return line["passed"]
+    return None
+
+
+def ladder_receipt(root: str | Path, *, family: str, version: int, run_sha: str, receipt: Any) -> bool:
+    """A ladder proof's practice receipt (evidence v3, `league/live/ladder.py`): True only when `receipt` is a
+    `ladder_decisions` row of the House's practice record (`<root>/observe.sqlite`) with the verdict "promote" naming this
+    family, version and program (`run_sha`). Read-only (`mode=ro`, a one-second timeout), never raising: False when the
+    record cannot be read (fail-closed: no entry on an unread receipt)."""
+    if not isinstance(receipt, int) or isinstance(receipt, bool) or receipt <= 0:
+        return False
+    path = Path(root) / "observe.sqlite"
+    if not path.exists():
+        return False
+    try:
+        db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1.0)
+        try:
+            row = db.execute("SELECT family, version, run_sha, verdict FROM ladder_decisions WHERE id=?",
+                             (int(receipt),)).fetchone()
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return False
+    return (row is not None and str(row[0]) == str(family) and _count(row[1]) == _count(version)
+            and row[2] == run_sha and row[3] == "promote")
+
+
 def ladder_refusal(root: str | Path, *, family: str, version: int, run_sha: str) -> str | None:
     """THE LADDER'S BELT (evidence v3, `league/live/ladder.py`): why the forward ladder may not promote version `version`
     of `family`, practised as program `run_sha`, now; None when it may. Read-only (`mode=ro`, a one-second timeout) and
     FAIL-CLOSED: a store that is missing or cannot be read, or a record the belt reads that cannot be read, is a reason.
     In order: the family alive and in the Gym band; the version in the store and the very program practised (its run
-    sha); not demoted (a loss at 1.5x, or the drift screen failed); THE READER'S BELT (`incubator_refusal`: no bar, no
-    review or audit that did not pass, no refused, failed, demoted or held gate outcome, in this family or any other
-    holding the same program); no gate refusal of the program in any family; no bar owed (`owed_bars`)."""
+    sha); THE VALIDATION LINE met (`validation_passed`, under the store's current research evaluator); not demoted (a
+    loss at 1.5x, or the drift screen failed; nor by the ladder itself, `ladder_demoted`); THE READER'S BELT
+    (`incubator_refusal`: no bar, no review or audit that did not pass, no refused, failed, demoted or held gate outcome,
+    in this family or any other holding the same program); no gate refusal of the program in any family; no bar owed
+    (`owed_bars`)."""
     path = Path(root) / DB_NAME
     n = _count(version)
     if not path.exists() or n is None or not family:
@@ -609,6 +664,7 @@ def ladder_refusal(root: str | Path, *, family: str, version: int, run_sha: str)
         try:
             fam = db.execute("SELECT id, band, retired_at, state FROM families WHERE id=?", (str(family),)).fetchone()
             row = db.execute("SELECT n, sha, params FROM versions WHERE family=? AND n=?", (str(family), n)).fetchone()
+            current = db.execute("SELECT value FROM kv WHERE key='research_evaluator'").fetchone()
             ruled, others = (None, []) if row is None else _program_rows(db, str(family), str(row["sha"]), str(run_sha))
         finally:
             db.close()
@@ -630,8 +686,15 @@ def ladder_refusal(root: str | Path, *, family: str, version: int, run_sha: str)
         return "its robust_failed cannot be read"
     if state.get("drift_failed") is not None and not isinstance(state.get("drift_failed"), Mapping):
         return "its drift_failed cannot be read"
+    if validation_passed(state, n, None if current is None else loads(current["value"], None)) is not True:
+        return "its version has not met the Validation line under the current research evaluator"
     if demoted(state, n):
         return "its version was demoted (a loss at 1.5x, or the drift screen failed)"
+    ladder_demoted = state.get("ladder_demoted")
+    if ladder_demoted is not None and not isinstance(ladder_demoted, Mapping):
+        return "its ladder_demoted cannot be read"
+    if _count((ladder_demoted or {}).get("version")) == n:
+        return "the forward ladder demoted this version"
     why = incubator_refusal(state, run_sha)
     if why:
         return why
@@ -650,5 +713,5 @@ def ladder_refusal(root: str | Path, *, family: str, version: int, run_sha: str)
 
 
 __all__ = ["read", "observe", "incubator", "incubator_refusal", "program_refusal", "owed_bars", "priority", "practice_tier",
-           "demoted", "ladder_refusal", "LIVE_BANDS", "TIERS", "BUNDLE_TTL", "BELT_RECORDS", "BARS_OWED_FILE",
-           "BAD_OUTCOMES", "TUITION_ROWS"]
+           "demoted", "ladder_refusal", "validation_passed", "ladder_receipt", "LIVE_BANDS", "TIERS", "BUNDLE_TTL",
+           "BELT_RECORDS", "BARS_OWED_FILE", "BAD_OUTCOMES", "TUITION_ROWS"]

@@ -252,6 +252,85 @@ class StoreCase(unittest.TestCase):
 
 
 class TheCohortLifecycle(StoreCase):
+    # ------------------------------------------------------------------ practice restarts on a new evaluator (the review)
+    def test_a_program_completed_under_another_evaluator_practises_again_as_a_new_cohort(self):
+        self.store.freeze(self.program(), day="2026-10-05")
+        old = sessions("2026-10-05", 4)
+        self.add_record("fam", 1, old, [[0.2]] * 4)
+        self.store.evaluator = "bundle-2:fills-1:exec-2"         # a release moved the practice evaluator
+        out = self.store.cohort_candidates([self.program()], day="2026-10-12", in_session=True)
+        self.assertEqual([(r["family"], r.get("practice_frozen")) for r in out], [("fam", None)],
+                         "offered again, not as the old snapshot")
+        snap = self.store.freeze(out[0], day="2026-10-12")
+        self.assertEqual(snap["practice_evaluator"], "bundle-2:fills-1:exec-2")
+        db = self.store._connect()
+        self.assertEqual(db.execute("SELECT status, first_day, evaluator FROM cohorts").fetchall(),
+                         [("active", "2026-10-12", "bundle-2:fills-1:exec-2")])
+        [(status, reason, evaluator, practice)] = db.execute(
+            "SELECT status, reason, evaluator, practice FROM cohort_archive").fetchall()
+        self.assertEqual((status, evaluator), ("complete", EVALUATOR))
+        self.assertIn("evaluator changed", reason)
+        self.assertEqual(json.loads(practice)["sessions"], 4, "its old practice row is kept in the archive")
+        self.assertIsNone(db.execute("SELECT 1 FROM practice").fetchone(), "its practice row starts again")
+        self.assertEqual(sorted((e["evaluator"], e["entered_day"]) for e in self.store.entrants(since="2026-01-01")),
+                         [(EVALUATOR, "2026-10-05"), ("bundle-2:fills-1:exec-2", "2026-10-12")], "two trials")
+        new = sessions("2026-10-12", 3)
+        self.store.practice([{"family": "fam", "version": 1, "tier": "validated", "capital": 10000.0, "account": "b",
+                              "at": self.now[0] + 86_400.0 * i, "day": d, "equity": 10000.0} for i, d in enumerate(new)])
+        practice, _ = self.store.ladder_rows("fam", 1, evaluator=self.store.evaluator, first_day="2026-10-12",
+                                             through=new[-1])
+        cohort = self.store.ladder_cohorts()[0]
+        figures = L.judge(cohort, practice, [], through=new[-1], rules=L.Rules.from_constitution())
+        self.assertEqual((figures["eligible"], figures["sessions"]), (True, 3), "judged on its own sessions")
+        self.store.set_entrant_p("fam", 1, 0.5, day=new[-1])
+        self.assertEqual({e["evaluator"]: e["p_value"] for e in self.store.entrants(since="2026-01-01")},
+                         {"bundle-2:fills-1:exec-2": 0.5, EVALUATOR: None})
+
+    def test_a_cohort_completed_under_this_evaluator_or_ended_by_the_ladder_never_reenters(self):
+        for i, status in enumerate(("complete", "failed", "promoted", "demoted")):
+            fid = f"f{i}"
+            self.store.freeze(self.program(fid), day="2026-10-05")
+            self.store._connect().execute("UPDATE cohorts SET status=? WHERE family=?", (status, fid))
+        current = [self.program(f"f{i}") for i in range(4)]
+        self.assertEqual(self.store.cohort_candidates(current, day="2026-10-12", in_session=True), [])
+        self.store.evaluator = "another"
+        out = self.store.cohort_candidates(current, day="2026-10-12", in_session=True)
+        self.assertEqual([r["family"] for r in out], ["f0"], "only the one that completed under another evaluator")
+        for i in (1, 2, 3):
+            with self.assertRaises(ValueError):
+                self.store.freeze(self.program(f"f{i}"), day="2026-10-12")
+
+    def test_the_trade_cap_spares_an_active_or_promoted_ladder_record(self):
+        store = ObserveStore(self.root / "capped", clock=lambda: 1.0, max_rows=10)
+        store.evaluator = EVALUATOR
+        self.addCleanup(store.close)
+        store.freeze(self.program("kept"), day="2026-10-05")
+        store.freeze(self.program("up"), day="2026-10-05")
+        store.close_cohort("up", 1, status="promoted", day="2026-11-02", reason="r")
+        for fid in ("kept", "up", "other"):
+            store.add(f"{fid}@1:o", fid, 1, [{"id": i, "pnl": 1.0, "max_loss": 10.0, "exit_day": "2026-10-06",
+                                              "evaluator": EVALUATOR} for i in range(8)], account="a")
+        counts = dict(store._connect().execute("SELECT family, COUNT(*) FROM trades GROUP BY family").fetchall())
+        self.assertEqual((counts.get("kept"), counts.get("up"), counts.get("other")), (8, 8, None),
+                         "the oldest unprotected rows go; the ladder's records stay whole")
+
+    def test_an_older_file_gains_the_cohorts_evaluator(self):
+        import sqlite3
+
+        path = self.root / "old"
+        path.mkdir()
+        db = sqlite3.connect(str(path / "observe.sqlite"))
+        db.execute("CREATE TABLE cohorts (family TEXT NOT NULL, version INTEGER NOT NULL, admitted_at REAL NOT NULL, "
+                   "first_day TEXT NOT NULL, snapshot TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', "
+                   "completed_day TEXT, reason TEXT, PRIMARY KEY (family, version))")
+        db.execute("INSERT INTO cohorts(family, version, admitted_at, first_day, snapshot) VALUES('a', 1, 1, '2026-10-01', ?)",
+                   (json.dumps({"practice_evaluator": "e-old"}),))
+        db.commit()
+        db.close()
+        store = ObserveStore(path, clock=lambda: 1.0)
+        self.addCleanup(store.close)
+        self.assertEqual(store._connect().execute("SELECT evaluator FROM cohorts").fetchone(), ("e-old",))
+
     def test_a_frozen_cohort_is_a_ladder_entrant_once(self):
         snap = self.store.freeze(self.program(), day="2026-10-05")
         self.assertEqual(snap["ladder"], L.LADDER_VERSION)
@@ -321,6 +400,10 @@ class MemoryBridge:
         self.families: list[dict] = []
         self.forward: dict[str, list[dict]] = {}
         self.demoted: list[tuple[str, str]] = []
+        #: L0: each family's validation verdict (True unless named); the families as the swarm's store holds them.
+        self.validated: dict[str, bool | None] = {}
+        self.status: dict[str, dict | None] = {}
+        self.swept: list[set] = []
 
     def prefilter(self, run_sha):
         return self.prefilters.get(run_sha)
@@ -330,6 +413,22 @@ class MemoryBridge:
 
     def settle_prefilter(self, run_sha):
         self.requests.pop(run_sha, None)
+
+    def sweep_prefilter(self, active):
+        keep = set(active)
+        self.swept.append(keep)
+        gone = [sha for sha in self.requests if sha not in keep]
+        for sha in gone:
+            self.requests.pop(sha)
+        return len(gone)
+
+    def family_status(self, family):
+        if family in self.status:
+            return self.status[family]
+        return {"retired": False, "band": "gym", "version": None, "proof": {}}
+
+    def validation(self, family, version):
+        return self.validated.get(family, True)
 
     def refusal(self, family, version, run_sha):
         return self.refused
@@ -513,8 +612,149 @@ class TheSessionEnd(StoreCase):
     def test_no_swarm_store_promotes_nothing(self):
         self.strong()
         self.ladder.bridge = None
-        self.assertEqual(self.run_day(binding=True)["verdicts"], {"await_prefilter": 1})
+        self.assertEqual(self.run_day(binding=True)["verdicts"], {"await_validation": 1})
         self.assertIn("no swarm store", self.receipts()[-1]["reasons"])
+
+    # ------------------------------------------------------------------ L0: the Validation line (the WP6 review)
+    def test_a_version_that_did_not_meet_the_validation_line_fails_and_asks_the_gate_nothing(self):
+        self.strong()
+        self.bridge.validated["fam"] = False
+        self.bridge.prefilters["sha-fam-1"] = {"status": "done", "passed": True, "bundle": "bundle-1",
+                                               "ran_bundle": "bundle-1"}
+        self.assertEqual(self.run_day(binding=True)["verdicts"], {"validation_failed": 1})
+        self.assertEqual(self.bridge.promoted, [])
+        self.assertEqual(self.bridge.requests, {}, "no pre-filter read is asked for")
+        self.assertEqual(self.status(), ("failed", "ladder: its version did not meet the Validation line"))
+        self.assertEqual(self.receipts()[-1]["verdict"], "validation_failed")
+
+    def test_a_train_entrant_never_validated_waits_and_is_still_a_trial(self):
+        self.strong()
+        self.store.freeze(self.program("other", tier="train"), day=self.days[0])
+        self.bridge.validated["fam"] = None
+        out = self.run_day(binding=True)
+        self.assertEqual(out["verdicts"], {"await_validation": 1, "short": 1})
+        self.assertEqual(out["bh_size"], 2)
+        self.assertEqual(self.status(), ("active", None), "it keeps practising")
+        self.assertEqual((self.bridge.requests, self.bridge.promoted), ({}, []))
+        self.bridge.validated["fam"] = True              # the tournament validated it since: the next rung
+        self.assertEqual(self.run_day(binding=True)["verdicts"], {"await_prefilter": 1, "short": 1})
+
+    # ------------------------------------------------------------------ the family's state first (the WP6 review)
+    def test_a_retired_familys_cohort_ends_and_its_request_goes(self):
+        self.strong()
+        self.bridge.requests["sha-fam-1"] = {"family": "fam", "version": 1, "bundle": "bundle-1", "day": self.days[0]}
+        self.bridge.status["fam"] = {"retired": True, "band": "retired", "version": None, "proof": {}}
+        out = self.run_day(binding=True)
+        self.assertEqual((out["ended"], out["verdicts"], out["judged"]), ({"family_retired": 1}, {}, 0))
+        self.assertEqual(self.status(), ("failed", "ladder: its family retired"))
+        self.assertEqual(self.bridge.requests, {})
+        self.assertEqual(self.receipts(), [], "nothing judged")
+        self.bridge.status["fam"] = None
+        self.strong("gone")
+        self.bridge.status["gone"] = None
+        self.assertEqual(self.run_day()["ended"], {"family_retired": 1})
+        self.assertEqual(self.status("gone"), ("failed", "ladder: its family is not in the swarm's store"))
+
+    def test_a_promotion_whose_house_writes_failed_is_made_good_at_the_next_session_end(self):
+        self.strong()
+        self.bridge.prefilters["sha-fam-1"] = {"status": "done", "passed": True, "bundle": "bundle-1",
+                                               "ran_bundle": "bundle-1"}
+        alerts = []
+        self.live.alert = lambda level, text: alerts.append(text)
+        close = self.store.close_cohort
+
+        def locked(family, version, **kw):
+            if kw.get("status") == "promoted":
+                raise __import__("sqlite3").OperationalError("database is locked")
+            return close(family, version, **kw)
+
+        with patch.object(self.store, "close_cohort", side_effect=locked):
+            self.assertEqual(self.run_day(binding=True)["verdicts"], {"error": 1})
+        [promotion] = self.bridge.promoted                   # the swarm's band was written
+        self.assertEqual(self.status(), ("active", None))
+        self.assertEqual([e for e in self.events if e[0] == "live.band"], [])
+        self.assertTrue(alerts)
+        # The swarm's store now holds the band the ladder gave this program by its receipt: a restart (a new ladder on
+        # the same stores) makes the House's records good instead of failing the cohort.
+        self.bridge.status["fam"] = {"retired": False, "band": "probe", "version": 1,
+                                                  "proof": {"route": "ladder", "run_sha": "sha-fam-1",
+                                               "receipt": promotion["receipt"]}}
+        self.ladder = L.Ladder(self.live, bridge=self.bridge)
+        out = self.run_day(binding=True)
+        self.assertEqual((out["ended"], out["verdicts"]), ({"promoted": 1}, {}))
+        self.assertEqual(self.status()[0], "promoted")
+        self.assertEqual(self.events[-1], ("live.band", {"family": "fam", "from": "gym", "to": "probe", "version": 1,
+                                                         "receipt": promotion["receipt"],
+                                                         "why": "the forward ladder promoted it"}))
+        self.assertNotIn("sha-fam-1", self.bridge.requests)
+        self.bridge.families = [{"family": "fam", "band": "probe", "version": 1, "promoted_at": self.now[0]}]
+        self.bridge.forward["fam"] = [{"day": "2027-01-04", "source": "real", "pnl": -5.0, "max_loss": 100.0,
+                                       "version": 1}] * 21
+        self.run_day()
+        self.assertEqual(self.status()[0], "demoted", "its later demotion finds it promoted")
+
+    def test_a_band_another_receipt_or_program_gave_is_not_taken_for_this_promotion(self):
+        self.strong()
+        receipt = self.store.add_decision({"day": self.days[0], "family": "fam", "version": 1, "run_sha": "sha-fam-1",
+                                           "inputs": "x", "stats": {}, "verdict": "would_promote", "binding": False})
+        for proof in ({"route": "ladder", "run_sha": "sha-fam-1", "receipt": receipt},       # not a promote receipt
+                      {"route": "ladder", "run_sha": "sha-other", "receipt": receipt},
+                      {"route": "holdout", "run_sha": "sha-fam-1", "receipt": receipt}):
+            self.bridge.status["fam"] = {"retired": False, "band": "probe", "version": 1, "proof": proof}
+            self.assertEqual(self.run_day()["ended"], {}, proof)
+        self.assertEqual(self.status(), ("active", None))
+
+    # ------------------------------------------------------------------ one error stops nothing else (the WP6 review)
+    def test_one_cohorts_read_error_stops_neither_another_nor_the_demotions(self):
+        self.strong()
+        self.strong("two")
+        alerts = []
+        self.live.alert = lambda level, text: alerts.append(text)
+        rows = self.store.ladder_rows
+
+        def broken(family, version, **kw):
+            if family == "fam":
+                raise __import__("sqlite3").OperationalError("database is locked")
+            return rows(family, version, **kw)
+
+        self.bridge.families = [{"family": "old", "band": "probe", "version": 1, "promoted_at": None}]
+        self.bridge.forward["old"] = [{"day": d, "source": "real", "pnl": -5.0, "max_loss": 100.0, "version": 1}
+                                      for d in self.days[:21]]
+        with patch.object(self.store, "ladder_rows", side_effect=broken):
+            out = self.run_day(binding=True)
+        self.assertEqual(out["verdicts"], {"error": 1, "await_prefilter": 1})
+        self.assertEqual([d["family"] for d in out["demoted"]], ["old"])
+        self.assertIn("fam@1", alerts[0])
+
+    def test_one_familys_demotion_error_stops_no_other(self):
+        alerts = []
+        self.live.alert = lambda level, text: alerts.append(text)
+        self.bridge.families = [{"family": "bad", "band": "probe", "version": 1, "promoted_at": None},
+                                {"family": "old", "band": "probe", "version": 1, "promoted_at": None}]
+        self.bridge.forward["old"] = [{"day": d, "source": "real", "pnl": -5.0, "max_loss": 100.0, "version": 1}
+                                      for d in self.days[:21]]
+        forward = self.bridge.forward_rows
+
+        def rows(family):
+            if family == "bad":
+                raise RuntimeError("unreadable")
+            return forward(family)
+
+        self.bridge.forward_rows = rows
+        self.assertEqual([d["family"] for d in self.run_day()["demoted"]], ["old"])
+        self.assertIn("bad", alerts[0])
+        self.bridge.ladder_families = lambda: (_ for _ in ()).throw(RuntimeError("the store is locked"))
+        self.assertEqual(self.run_day()["demoted"], [], "the session's end still ends")
+
+    def test_requests_of_cohorts_no_longer_active_are_swept(self):
+        self.strong()
+        self.bridge.requests["sha-ended"] = {"family": "ended", "version": 1, "bundle": "bundle-1", "day": self.days[0]}
+        out = self.run_day(binding=False)                    # its own request stays: its cohort is active
+        self.assertEqual(out["swept"], 1)
+        self.assertEqual(set(self.bridge.requests), {"sha-fam-1"})
+        self.store.close_cohort("fam", 1, status="failed", day=self.days[-1], reason="r")
+        self.run_day()
+        self.assertEqual(self.bridge.requests, {}, "its cohort ended: its request goes too")
 
     def test_a_ladder_probe_is_demoted_on_a_negative_record_or_a_low_session_bound(self):
         self.strong()
@@ -565,34 +805,45 @@ class TheSwarmSide(unittest.TestCase):
         from league.swarm.gate import run_sha
 
         self.sha = run_sha(self.store.version("fam", 1))
+        self.store.set_state("fam", validation_version=1, validation_line={"passed": True})
         self.families = SimpleNamespace(root=self.root, lock=__import__("threading").Lock(), _db=lambda: self.store)
         self.bridge = L.SwarmBridge(self.families)
         self.snapshot = {"code": CODE, "params": {"hold": 3}, "run_sha": self.sha, "practice_evaluator": EVALUATOR}
+        self.observed = ObserveStore(self.root, clock=lambda: 1.0)
+        self.addCleanup(self.observed.close)
+
+    def receipt(self, verdict="promote", **changes) -> int:
+        """A receipt of the House's practice record (`ladder_decisions`)."""
+        row = {"day": "2026-11-02", "family": "fam", "version": 1, "run_sha": self.sha, "inputs": "x", "stats": {},
+               "verdict": verdict, "binding": True, **changes}
+        return self.observed.add_decision(row)
 
     def test_a_promotion_bands_exactly_the_practised_program(self):
         from league.swarm import bands
 
         self.assertIsNone(self.bridge.refusal("fam", 1, self.sha))
-        self.assertIsNone(self.bridge.promote(family="fam", version=1, snapshot=self.snapshot, receipt=7, typical=52.6,
-                                              at=1_790_000_000.0))
+        receipt = self.receipt()
+        self.assertIsNone(self.bridge.promote(family="fam", version=1, snapshot=self.snapshot, receipt=receipt,
+                                              typical=52.6, at=1_790_000_000.0))
         fam = self.store.family("fam")
         self.assertEqual(fam["band"], "probe")
         state = fam["state"]
         self.assertEqual((state["banded_version"], state["banded_evaluator"]["route"], state["banded_evaluator"]["receipt"],
-                          state["typical_by_version"]["1"], state["live_promoted_at"]), (1, "ladder", 7, 52.6, 1_790_000_000.0))
+                          state["typical_by_version"]["1"], state["live_promoted_at"]),
+                         (1, "ladder", receipt, 52.6, 1_790_000_000.0))
         self.assertTrue(bands.current_banded_evaluator(state, self.sha))
         [row] = bands.read(self.root)
         self.assertEqual((row["band"], row["version"], row["code"], row["params"], row["run_sha"], row["holdout_passed"],
                           row["typical_max_loss_usd"]), ("probe", 1, CODE, {"hold": 3}, self.sha, True, 52.6))
         events = [e for e in self.store.events_after(0) if e["kind"] == "swarm.band"]
-        self.assertIn("practice receipt 7", events[-1]["payload"]["reason"])
+        self.assertIn(f"practice receipt {receipt}", events[-1]["payload"]["reason"])
         self.assertEqual(self.bridge.ladder_families(), [{"family": "fam", "band": "probe", "version": 1,
                                                           "promoted_at": 1_790_000_000.0}])
 
     def test_a_proof_without_its_receipt_or_under_another_fingerprint_is_not_current(self):
         from league.swarm import bands
 
-        self.bridge.promote(family="fam", version=1, snapshot=self.snapshot, receipt=7, typical=None, at=1.0)
+        self.bridge.promote(family="fam", version=1, snapshot=self.snapshot, receipt=self.receipt(), typical=None, at=1.0)
         state = self.store.family("fam")["state"]
         for change in ({"receipt": None}, {"receipt": True}, {"execution_sha256": "another"}, {"run_sha": "x"}):
             broken = dict(state, banded_evaluator={**state["banded_evaluator"], **change})
@@ -610,6 +861,67 @@ class TheSwarmSide(unittest.TestCase):
                                                        typical=None, at=1.0))
         self.store.retire("fam", "test")
         self.assertEqual(self.bridge.refusal("fam", 1, self.sha), "the family retired")
+
+    def test_a_ladder_proof_trades_only_with_its_practice_receipt(self):
+        from league.live.families import SwarmFamilies
+        from league.swarm import bands
+
+        self.bridge.promote(family="fam", version=1, snapshot=self.snapshot, receipt=41, typical=52.6, at=1.0)
+        self.assertEqual(bands.read(self.root), [], "no receipt 41 in the House's record: no row")
+        for changes in ({"verdict": "would_promote"}, {"family": "other"}, {"version": 2}, {"run_sha": "another"}):
+            receipt = self.receipt(**changes)
+            self.store.set_state("fam", banded_evaluator={**self.store.family("fam")["state"]["banded_evaluator"],
+                                                          "receipt": receipt})
+            self.assertEqual(bands.read(self.root), [], changes)
+            self.assertFalse(bands.ladder_receipt(self.root, family="fam", version=1, run_sha=self.sha, receipt=receipt))
+        receipt = self.receipt()
+        self.store.set_state("fam", banded_evaluator={**self.store.family("fam")["state"]["banded_evaluator"],
+                                                      "receipt": receipt})
+        [row] = bands.read(self.root)
+        families = SwarmFamilies(self.root)
+        self.addCleanup(lambda: families._store.close() if families._store is not None else None)
+        forward = families.forward_rows("fam")
+        self.assertTrue(families.confirm_band(row, "probe", "unchanged", forward))
+        self.store.set_state("fam", banded_evaluator={**self.store.family("fam")["state"]["banded_evaluator"],
+                                                      "receipt": receipt + 1000})
+        self.assertFalse(families.confirm_band(row, "probe", "unchanged", forward), "a copied proof never confirms")
+        self.assertFalse(bands.ladder_receipt(self.root / "nowhere", family="fam", version=1, run_sha=self.sha,
+                                              receipt=receipt), "an unread record admits nothing")
+
+    def test_the_belt_needs_the_validation_line_under_the_current_research_evaluator(self):
+        from league.swarm import bands
+
+        self.store.set_state("fam", validation_version=None, validation_line=None)
+        self.assertIn("Validation line", self.bridge.refusal("fam", 1, self.sha), "a Train-tier entrant never validated")
+        self.assertIsNone(self.bridge.validation("fam", 1))
+        self.store.set_state("fam", validation_version=1, validation_line={"passed": False})
+        self.assertIn("Validation line", self.bridge.refusal("fam", 1, self.sha))
+        self.assertIs(self.bridge.validation("fam", 1), False)
+        self.store.put("research_evaluator", "E2")
+        self.store.set_state("fam", validation_version=2, validation_line={"passed": True},
+                             validation_verdicts={"1": {"passed": True, "at": "x", "evaluator": "E1"}})
+        self.assertIn("Validation line", self.bridge.refusal("fam", 1, self.sha), "a pass under another evaluator")
+        self.store.set_state("fam", validation_verdicts={"1": {"passed": True, "at": "x", "evaluator": "E2"}})
+        self.assertIsNone(self.bridge.refusal("fam", 1, self.sha), "its latest verdict under this one passed")
+        self.assertIs(self.bridge.validation("fam", 1), True)
+        self.assertIs(bands.validation_passed({"validation_version": 1, "validation_line": {"passed": True}}, 1, None), True)
+        self.assertIsNone(bands.validation_passed({"validation_version": 2, "validation_line": {"passed": True}}, 1, None))
+
+    def test_a_version_the_ladder_demoted_is_refused_again(self):
+        self.store.set_state("fam", ladder_demoted={"receipt": 4, "why": "w", "at": 2.0, "version": 1})
+        self.assertIn("ladder demoted", self.bridge.refusal("fam", 1, self.sha))
+        self.store.set_state("fam", ladder_demoted={"receipt": 4, "why": "w", "at": 2.0, "version": 3})
+        self.assertIsNone(self.bridge.refusal("fam", 1, self.sha))
+
+    def test_the_family_as_the_store_holds_it_and_the_requests_sweep(self):
+        self.assertEqual(self.bridge.family_status("fam"), {"retired": False, "band": "gym", "version": None, "proof": {}})
+        self.assertIsNone(self.bridge.family_status("nobody"))
+        for sha in ("a", "b", "c"):
+            self.bridge.request_prefilter(sha, family="fam", version=1, bundle="b1", day="2026-11-02")
+        self.assertEqual(self.bridge.sweep_prefilter(["b"]), 2)
+        self.assertEqual(set(self.store.get(L.PREFILTER_REQUESTS)), {"b"})
+        self.store.retire("fam", "test")
+        self.assertTrue(self.bridge.family_status("fam")["retired"])
 
     def test_the_belt_reads_the_programs_verdicts_and_demotions(self):
         self.store.set_state("fam", incubator_barred={self.sha: {"why": "test"}})
@@ -697,6 +1009,82 @@ class TheLivePath(PracticeCase):
         [(verdict,)] = db.execute("SELECT verdict FROM ladder_decisions").fetchall()
         self.assertEqual(verdict, "short")
         self.assertEqual([a for a in self.alerts if "ladder" in a[1]], [])
+
+
+from league.tests.test_live_step import HAVE as HAVE_LIVE, LiveCase  # noqa: E402
+from league.tests.live_fakes import VERTICAL  # noqa: E402
+
+
+@unittest.skipUnless(HAVE_LIVE, "numpy not installed")
+class TheLadderProbeLive(LiveCase):
+    """A ladder promotion read by the House's own path (`SwarmFamilies`, `OptionsLive`): real money only from the session
+    after it, the money table's type and fit checks, and the practice receipt the live path reads (the WP6 review)."""
+
+    def ladder_live(self, *, structure="debit_vertical", typical=50.0, promoted_at=None):
+        from league.live.families import SwarmFamilies
+        from league.swarm.gate import run_sha
+        from league.swarm.store import SwarmStore
+
+        live = self.make([])
+        self.addCleanup(live.observe_store.close)
+        store = SwarmStore(self.root)
+        self.addCleanup(store.close)
+        store.add_family({"id": "vert", "mechanism": "An invented mechanism for the ladder's live test.",
+                          "structure": structure, "roots": ["SPY"], "dte": [0, 2]}, origin="test")
+        version = store.add_version("vert", VERTICAL, {"hold": 600}, author="test")
+        sha = run_sha(version)
+        store.set_state("vert", validation_version=1, validation_line={"passed": True})
+        live.families = SwarmFamilies(self.root)
+        self.addCleanup(lambda: live.families._store.close() if live.families._store is not None else None)
+        live.account_row = self.venue.account()
+        receipt = live.observe_store.add_decision({"day": MONDAY.isoformat(), "family": "vert", "version": 1,
+                                                   "run_sha": sha, "inputs": "x", "stats": {}, "verdict": "promote",
+                                                   "binding": True})
+        snapshot = {"code": VERTICAL, "params": {"hold": 600}, "run_sha": sha,
+                    "practice_evaluator": live.observe_store.evaluator}
+        self.assertIsNone(L.SwarmBridge(live.families).promote(
+            family="vert", version=1, snapshot=snapshot, receipt=receipt, typical=typical,
+            at=self.clock() if promoted_at is None else promoted_at))
+        return live, store, receipt
+
+    def test_a_ladder_probe_trades_real_money_only_from_the_session_after_its_promotion(self):
+        live, store, _ = self.ladder_live()                  # promoted in the session (a late session end's judgement)
+        self.run_to(9, 40)
+        self.assertEqual(store.family("vert")["band"], "probe")
+        self.assertIn("vert@1:s", live.instances)
+        self.assertNotIn("vert@1:r", live.instances, "no real instance the session it was promoted")
+        self.assertEqual(self.venue.sent, [])
+        self.clock.set(at(MONDAY + dt.timedelta(days=1), 9, 31))
+        live.minute()
+        real = live.instances["vert@1:r"]
+        self.assertEqual((real.code, real.params, real.version), (VERTICAL, {"hold": 600}, 1),
+                         "exactly the practised program")
+        self.assertEqual(len(self.venue.sent), 1)
+
+    def test_a_ladder_probe_whose_type_is_not_real_is_held_at_candidate(self):
+        live, store, _ = self.ladder_live(structure="long_straddle", promoted_at=at(MONDAY - dt.timedelta(days=3), 16, 5))
+        self.run_to(9, 35)
+        self.assertEqual(store.family("vert")["band"], "candidate")
+        self.assertNotIn("vert@1:r", live.instances)
+        self.assertEqual(self.venue.sent, [])
+
+    def test_a_ladder_probe_whose_typical_unit_does_not_fit_is_held_at_candidate(self):
+        live, store, _ = self.ladder_live(typical=5000.0, promoted_at=at(MONDAY - dt.timedelta(days=3), 16, 5))
+        self.run_to(9, 35)
+        self.assertEqual(store.family("vert")["band"], "candidate")
+        self.assertNotIn("vert@1:r", live.instances)
+        self.assertEqual(self.venue.sent, [])
+        held = [p for p, _ in self.ledger.of("live.band") if p.get("to") == "candidate"]
+        self.assertIn("over the Probe's cap", held[0]["why"])
+
+    def test_a_ladder_band_without_its_receipt_never_trades(self):
+        live, store, receipt = self.ladder_live(promoted_at=at(MONDAY - dt.timedelta(days=3), 16, 5))
+        live.observe_store._connect().execute("UPDATE ladder_decisions SET verdict='blocked' WHERE id=?", (receipt,))
+        self.run_to(9, 35)
+        self.assertEqual(live.families.read(), [])
+        self.assertNotIn("vert@1:r", live.instances)
+        self.assertNotIn("vert@1:s", live.instances)
+        self.assertEqual(self.venue.sent, [])
 
 
 # ================================================================================================== the scoreboard

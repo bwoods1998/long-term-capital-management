@@ -34,23 +34,39 @@ closes are left out), every line of the constitution's `options_money.ladder` (`
   L5 FDR       Benjamini-Hochberg at `fdr_q` over every entrant of the trailing `fdr_days` days (each with its latest
                p-value; an entrant without a full record, L1, counts with p = 1): its p-value is one the procedure
                rejects;
+  L0 VALIDATION the Validation line, unchanged (the ladder's second rung; read once L1-L5 are met, before the
+               pre-filter is asked for): the version's latest validation under the current research evaluator met the
+               line (`bands.validation_passed`: the tournament's record of each version's latest verdict, else the
+               family's own line). A validation that did not meet it fails the cohort for good; none yet (a Train-tier
+               entrant the tournament has not validated, or no swarm store to ask) waits ("await_validation"). Every
+               entrant, validated or not, is a trial of the desk's false-discovery control (L5);
   L6 PRE-FILTER the gate's free read of the 2026 holdout (`league/swarm/gate.py`, `Gate.prefilter_round`), requested
-               when a cohort first meets L1-L5 (kv `ladder_prefilter_requests`, the House's) and written by the gate
+               when a cohort first meets L0-L5 (kv `ladder_prefilter_requests`, the House's) and written by the gate
                (kv `ladder_prefilter:<run_sha>`, the gate's): its net P&L after fees is not negative, on the Gym bundle
-               the House runs. A negative read fails the cohort for good.
+               the House runs. A negative read fails the cohort for good. A request whose cohort is no longer
+               active (its window ended, it failed, its family retired) leaves the requests at the next session's end.
 
 Every judgement is a `ladder_decisions` row (its inputs' hash, its figures, its BH rank and family size, its verdict):
 the PRACTICE RECEIPT. A cohort that meets every line is PROMOTED (only while `binding` is true) through the swarm's
 store (`SwarmStore.set_band(family, "probe")`, the receipt's id in its reason and in the family's `banded_evaluator`
 proof, `route` "ladder"): its banded version is the cohort's version, whose code and parameters in the store must be
 the snapshot's (`run_sha` too), so the real instance runs exactly the practised program, and it trades real money from
-the session after its promotion (`OptionsLive._real_eligible`). THE LADDER'S BELT comes first (`bands.ladder_refusal`:
-the family alive in the Gym band, the version undemoted, no review, audit, refusal or bar against the program). A
-cohort whose family retired or holds another band cannot be promoted: it fails. `binding` false: the ladder judges and
-records everything ("would_promote") and promotes nothing.
+the session after its promotion (`OptionsLive._real_eligible`). The live path takes a ladder proof only with its
+receipt: a `promote` row of this file naming the same family, version and program (`bands.ladder_receipt`, read by
+`bands.read` and `SwarmFamilies.confirm_band`). THE LADDER'S BELT comes first (`bands.ladder_refusal`: the family alive in
+the Gym band, the version's Validation line met, the version undemoted (by the Gym or by the ladder), no review, audit,
+refusal or bar against the program). A cohort whose family holds another band cannot be promoted: it fails. `binding` false: the
+ladder judges and records everything ("would_promote") and promotes nothing. The swarm's band is written first; the
+House's own records follow (the cohort `promoted`, the `live.band` record, the request settled). When one of them fails,
+the next session's end makes it good (`_reconcile`): a cohort whose family already holds the band the ladder gave this
+very program, by a `promote` receipt of this file, ends `promoted` and its move is recorded.
 
 A cohort runs until it is promoted, failed, or its practice window ends (`max_sessions`, `ObserveStore.
-cohort_candidates`); the old observation target (3 sessions, 10 closes) never ends a ladder cohort.
+cohort_candidates`); the old observation target (3 sessions, 10 closes) never ends a ladder cohort. A cohort whose
+family retired ends `failed` at the next session's end (`_reconcile`): no promotion can come of it (the swarm's COHORT
+KEEP spares a family whose ladder cohort's version met the Validation line from the idle, revision and evaluation rules,
+`league/swarm/tournament.py`). Each cohort is judged apart: one cohort's error (a read, a write) is alerted and judged
+again at the next session's end, and stops neither another's judgement nor the demotions.
 
 DEMOTION (at each session's end): a ladder Probe or Sized family (and a Candidate the money table moved down) goes back
 to the GYM, its cohort "demoted", when its forward record since its promotion (`money.one_record`: its own version,
@@ -89,8 +105,8 @@ EXIT_SPOT_STALE_MINUTES = 5
 PREFILTER_REQUESTS = "ladder_prefilter_requests"
 PREFILTER_KEY = "ladder_prefilter:"
 #: The verdicts a receipt can carry.
-VERDICTS = ("short", "ineligible", "fail", "await_prefilter", "prefilter_negative", "would_promote", "promote",
-            "promoted", "blocked", "demote")
+VERDICTS = ("short", "ineligible", "fail", "await_validation", "validation_failed", "await_prefilter",
+            "prefilter_negative", "would_promote", "promote", "promoted", "blocked", "demote")
 
 
 # ------------------------------------------------------------------------------------------------------- the rules
@@ -400,6 +416,47 @@ class SwarmBridge:
                 if requests.pop(str(run_sha), None) is not None:
                     store.put(PREFILTER_REQUESTS, requests)
 
+    def sweep_prefilter(self, active: Iterable[str]) -> int:
+        """Every request whose program is no active ladder cohort's (`active`: their run shas) leaves the requests: its
+        window ended, it failed, its family retired. How many left."""
+        keep = {str(sha) for sha in active}
+        with self.families.lock:
+            store = self._store()
+            with store.atomic():
+                requests = dict(store.get(PREFILTER_REQUESTS) or {})
+                gone = [sha for sha in requests if sha not in keep]
+                for sha in gone:
+                    requests.pop(sha)
+                if gone:
+                    store.put(PREFILTER_REQUESTS, requests)
+        return len(gone)
+
+    def family_status(self, family: str) -> dict[str, Any] | None:
+        """The family as the swarm's store holds it: {retired, band, version (its banded version), proof (its
+        `banded_evaluator`)}; None when the store has no such family."""
+        with self.families.lock:
+            fam = self._store().family(str(family))
+        if fam is None:
+            return None
+        state = fam.get("state") or {}
+        return {"retired": bool(fam.get("retired_at")), "band": fam.get("band"), "version": state.get("banded_version"),
+                "proof": dict(state.get("banded_evaluator") or {})}
+
+    def validation(self, family: str, version: int) -> bool | None:
+        """L0, THE VALIDATION LINE (`bands.validation_passed`): True when the version's latest validation under the
+        current research evaluator met the line, False when it did not, None when it has none (or the store has no such
+        family). Raises when the store cannot be read."""
+        from ..swarm.bands import validation_passed
+        from ..swarm.evaluator import KEY
+
+        with self.families.lock:
+            store = self._store()
+            fam = store.family(str(family))
+            current = store.get(KEY)
+        if fam is None:
+            return None
+        return validation_passed(fam.get("state") or {}, int(version), current)
+
     def refusal(self, family: str, version: int, run_sha: str) -> str | None:
         from ..swarm.bands import ladder_refusal
 
@@ -509,27 +566,50 @@ class Ladder:
         except Exception:  # noqa: BLE001 - no bundle: no pre-filter read can be matched (fail-closed)
             return None
 
+    def _alert(self, text: str) -> None:
+        alert = getattr(self.live, "alert", None)
+        if callable(alert):
+            alert("warning", text)
+
     def end_of_day(self, day: str) -> dict[str, Any]:
-        """Judge every active ladder cohort through the session day `day`, then the demotions."""
+        """Judge every active ladder cohort through the session day `day`, then the requests' sweep, then the demotions:
+        each cohort, the sweep and each demotion apart (the module docstring)."""
         rules = Rules.from_constitution()
         store = self.live.observe_store
         evaluator = store.evaluator
-        out: dict[str, Any] = {"day": day, "binding": rules.binding, "judged": 0, "verdicts": {}}
-        judged = []
+        out: dict[str, Any] = {"day": day, "binding": rules.binding, "judged": 0, "verdicts": {}, "ended": {}}
+
+        def count(key: str, verdict: str) -> None:
+            out[key][verdict] = out[key].get(verdict, 0) + 1
+
+        judged, active = [], []
         for cohort in store.ladder_cohorts():
             snap = cohort["snapshot"]
             if snap.get("practice_evaluator") != evaluator:
                 continue  # completed at the next session's pins ("evaluator changed")
-            practice, rows = store.ladder_rows(cohort["family"], cohort["version"], evaluator=evaluator,
-                                               first_day=cohort["first_day"], through=day)
-            figures = judge(cohort, practice, rows, through=day, rules=rules)
-            store.set_entrant_p(cohort["family"], cohort["version"], figures["p"], day=day)
+            try:
+                ended = self._reconcile(cohort, day=day)
+                if ended:
+                    count("ended", ended)
+                    continue
+                active.append(str(snap.get("run_sha") or ""))
+                practice, rows = store.ladder_rows(cohort["family"], cohort["version"], evaluator=evaluator,
+                                                   first_day=cohort["first_day"], through=day)
+                figures = judge(cohort, practice, rows, through=day, rules=rules)
+                store.set_entrant_p(cohort["family"], cohort["version"], figures["p"], day=day, evaluator=evaluator)
+            except Exception as exc:  # noqa: BLE001 - one cohort's error stops no other's judgement
+                out["judged"] += 1
+                count("verdicts", "error")
+                self._alert(f"live: the forward ladder could not read {cohort['family']}@{cohort['version']}'s record "
+                            f"({type(exc).__name__}: {str(exc)[:160]}); judged again at the next session's end")
+                continue
             judged.append((cohort, figures))
         since = (dt.date.fromisoformat(day) - dt.timedelta(days=rules.fdr_days)).isoformat()
-        entrants = {(e["family"], int(e["version"])): (1.0 if e["p_value"] is None else float(e["p_value"]))
+        entrants = {(e["family"], int(e["version"]), str(e["evaluator"])): (1.0 if e["p_value"] is None else
+                                                                            float(e["p_value"]))
                     for e in store.entrants(since=since)}
         for cohort, figures in judged:  # a judged cohort is always an entrant (`freeze`); counted once if not
-            entrants.setdefault((cohort["family"], int(cohort["version"])), figures["p"])
+            entrants.setdefault((cohort["family"], int(cohort["version"]), evaluator), figures["p"])
         cut, m = benjamini_hochberg(entrants.values(), rules.fdr_q)
         ordered = sorted(entrants.values())
         for cohort, figures in judged:
@@ -538,15 +618,56 @@ class Ladder:
                                        rank=bisect.bisect_left(ordered, figures["p"]) + 1)
             except Exception as exc:  # noqa: BLE001 - one cohort's error promotes nothing and stops no other's judgement
                 verdict = "error"
-                alert = getattr(self.live, "alert", None)
-                if callable(alert):
-                    alert("warning", f"live: the forward ladder could not judge {cohort['family']}@{cohort['version']} "
-                                     f"({type(exc).__name__}: {str(exc)[:160]}); judged again at the next session's end")
+                self._alert(f"live: the forward ladder could not judge {cohort['family']}@{cohort['version']} "
+                            f"({type(exc).__name__}: {str(exc)[:160]}); judged again at the next session's end")
             out["judged"] += 1
-            out["verdicts"][verdict] = out["verdicts"].get(verdict, 0) + 1
+            count("verdicts", verdict)
         out["entrants"], out["bh_size"] = len(entrants), m
-        out["demoted"] = self.demotions(day, rules)
+        if self.bridge is not None:
+            try:
+                out["swept"] = self.bridge.sweep_prefilter(sha for sha in active if sha)
+            except Exception as exc:  # noqa: BLE001 - swept again at the next session's end
+                self._alert(f"live: the forward ladder could not sweep the pre-filter requests ({type(exc).__name__})")
+        try:
+            out["demoted"] = self.demotions(day, rules)
+        except Exception as exc:  # noqa: BLE001 - read again at the next session's end
+            out["demoted"] = []
+            self._alert(f"live: the forward ladder could not read the families it banded for demotion "
+                        f"({type(exc).__name__}: {str(exc)[:160]}); read again at the next session's end")
         return out
+
+    def _reconcile(self, cohort: Mapping[str, Any], *, day: str) -> str | None:
+        """What the swarm's store already says of an active cohort, before it is judged (the module docstring): its
+        family retired (or gone), it ends `failed` ("family_retired"); its family already holds the band the ladder gave
+        this very program by a `promote` receipt of this file, it ends `promoted` and its move is recorded ("promoted").
+        None: neither, it is judged."""
+        if self.bridge is None:
+            return None
+        store = self.live.observe_store
+        snap = cohort["snapshot"]
+        f, n, sha = cohort["family"], int(cohort["version"]), str(snap.get("run_sha") or "")
+        status = self.bridge.family_status(f)
+        if status is None or status["retired"]:
+            why = "its family retired" if status is not None else "its family is not in the swarm's store"
+            if store.close_cohort(f, n, status="failed", day=day, reason=f"ladder: {why}") and sha:
+                self.bridge.settle_prefilter(sha)
+            return "family_retired"
+        proof = status.get("proof") or {}
+        receipt = proof.get("receipt")
+        if (status["band"] in ("candidate", "probe", "sized") and proof.get("route") == "ladder" and sha
+                and status.get("version") == n and proof.get("run_sha") == sha and isinstance(receipt, int)
+                and not isinstance(receipt, bool)):
+            row = store.decision(receipt)
+            if (row is not None and row["verdict"] == "promote" and row["family"] == f and int(row["version"]) == n
+                    and row["run_sha"] == sha):
+                why = f"ladder: promoted to Probe (receipt {receipt}; recorded at a later session's end)"
+                if store.close_cohort(f, n, status="promoted", day=day, reason=why):
+                    self.live.record("live.band", {"family": f, "from": "gym", "to": "probe", "version": n,
+                                                   "receipt": receipt, "why": "the forward ladder promoted it"},
+                                     agent=f)
+                    self.bridge.settle_prefilter(sha)
+                return "promoted"
+        return None
 
     def _receipt(self, cohort: Mapping[str, Any], figures: Mapping[str, Any], *, day: str, rules: Rules, verdict: str,
                  reasons: list[str], rank: int | None, m: int, cut: float | None) -> int:
@@ -582,14 +703,26 @@ class Ladder:
         if not sha:
             receipt("blocked", ["its snapshot names no run sha"])
             return "blocked"
+        validated = self.bridge.validation(f, n) if self.bridge is not None else None
+        if validated is False:
+            receipt("validation_failed", ["its version's latest validation under the current research evaluator "
+                                          "did not meet the Validation line"])
+            store.close_cohort(f, n, status="failed", day=day,
+                               reason="ladder: its version did not meet the Validation line")
+            self.bridge.settle_prefilter(sha)
+            return "validation_failed"
+        if validated is not True:
+            receipt("await_validation", ["no swarm store to ask" if self.bridge is None else
+                                         "its version has no validation under the current research evaluator yet"])
+            return "await_validation"
         bundle = self._bundle()
-        result = self.bridge.prefilter(sha) if self.bridge is not None else None
+        result = self.bridge.prefilter(sha)
         current = (result is not None and result.get("status") == "done" and bundle is not None
                    and result.get("bundle") == bundle and result.get("ran_bundle") == bundle)
         if not current:
-            if self.bridge is not None and bundle is not None:
+            if bundle is not None:
                 self.bridge.request_prefilter(sha, family=f, version=n, bundle=bundle, day=day)
-            why = ("no swarm store to ask" if self.bridge is None else "the pre-filter read is requested from the gate"
+            why = ("the pre-filter read is requested from the gate"
                    if result is None or result.get("bundle") != bundle else
                    "the pre-filter read ran on another Gym bundle" if result.get("status") == "done" else
                    f"the pre-filter read is {result.get('status')}")
@@ -617,47 +750,65 @@ class Ladder:
             store.close_cohort(f, n, status="failed", day=day, reason=f"ladder: {why}")
             self.bridge.settle_prefilter(sha)
             return "blocked"
-        store.close_cohort(f, n, status="promoted", day=day, reason=f"ladder: promoted to Probe (receipt {receipt_id})")
+        # The swarm's band is written: the House's own records follow, made good at a later session's end when one of
+        # these writes fails (`_reconcile`; the requests' sweep).
+        if store.close_cohort(f, n, status="promoted", day=day,
+                              reason=f"ladder: promoted to Probe (receipt {receipt_id})"):
+            try:
+                self.live.record("live.band", {"family": f, "from": "gym", "to": "probe", "version": n,
+                                               "receipt": receipt_id, "why": "the forward ladder promoted it"}, agent=f)
+            except Exception as exc:  # noqa: BLE001 - the swarm's own band event names the receipt
+                self._alert(f"live: {f}'s ladder promotion could not be recorded in the ledger ({type(exc).__name__})")
         self.bridge.settle_prefilter(sha)
-        self.live.record("live.band", {"family": f, "from": "gym", "to": "probe", "version": n, "receipt": receipt_id,
-                                       "why": "the forward ladder promoted it"}, agent=f)
         return "promoted"
 
     def demotions(self, day: str, rules: Rules) -> list[dict[str, Any]]:
-        """DEMOTION (the module docstring) of the families the ladder banded."""
-        from . import money as M
-
+        """DEMOTION (the module docstring) of the families the ladder banded, each apart: [{family, why, receipt}]."""
         if self.bridge is None:
             return []
         out = []
         for fam in self.bridge.ladder_families():
-            version = fam.get("version")
-            since = None
-            if fam.get("promoted_at") is not None:
-                since = dt.datetime.fromtimestamp(float(fam["promoted_at"]), NEW_YORK).date().isoformat()
-            rows = [r for r in self.bridge.forward_rows(fam["family"]) if since is None or str(r.get("day") or "") > since]
-            fwd = M.forward_stats(rows, rules.demote_confidence, version=version)
-            days, lcb = M.session_bound(rows, sessions=rules.demote_sessions, confidence=rules.demote_confidence,
-                                        version=version)
-            if fwd.negative:
-                why = f"its forward record is negative over {fwd.n} trades"
-            elif lcb is not None and lcb < 0:
-                why = f"the lower bound of its trailing {days} sessions is below zero"
-            else:
+            try:
+                moved = self._demote(fam, day, rules)
+            except Exception as exc:  # noqa: BLE001 - one family's error stops no other's demotion
+                self._alert(f"live: the forward ladder could not judge {fam.get('family')}'s demotion "
+                            f"({type(exc).__name__}: {str(exc)[:160]}); judged again at the next session's end")
                 continue
-            receipt = self.live.observe_store.add_decision({
-                "day": day, "family": fam["family"], "version": int(version or 0), "run_sha": None,
-                "inputs": hashlib.sha256(json.dumps(rows, sort_keys=True, default=str).encode()).hexdigest(),
-                "stats": {"trades": fwd.n, "mean": fwd.mean, "session_days": days, "session_lcb": lcb, "band": fam["band"]},
-                "p_value": None, "verdict": "demote", "reasons": [why], "binding": rules.binding})
-            if self.bridge.demote(fam["family"], why=why, receipt=receipt, at=float(self.live.clock())):
-                self.live.observe_store.close_cohort(fam["family"], int(version or 0), status="demoted", day=day,
-                                                     reason=f"ladder: {why}", was=("promoted",))
-                self.live.record("live.band", {"family": fam["family"], "from": fam["band"], "to": "gym",
-                                               "version": version, "receipt": receipt,
-                                               "why": f"the forward ladder demoted it: {why}"}, agent=fam["family"])
-                out.append({"family": fam["family"], "why": why, "receipt": receipt})
+            if moved is not None:
+                out.append(moved)
         return out
+
+    def _demote(self, fam: Mapping[str, Any], day: str, rules: Rules) -> dict[str, Any] | None:
+        """One family's DEMOTION: {family, why, receipt} when it went back to the Gym, else None."""
+        from . import money as M
+
+        version = fam.get("version")
+        since = None
+        if fam.get("promoted_at") is not None:
+            since = dt.datetime.fromtimestamp(float(fam["promoted_at"]), NEW_YORK).date().isoformat()
+        rows = [r for r in self.bridge.forward_rows(fam["family"]) if since is None or str(r.get("day") or "") > since]
+        fwd = M.forward_stats(rows, rules.demote_confidence, version=version)
+        days, lcb = M.session_bound(rows, sessions=rules.demote_sessions, confidence=rules.demote_confidence,
+                                    version=version)
+        if fwd.negative:
+            why = f"its forward record is negative over {fwd.n} trades"
+        elif lcb is not None and lcb < 0:
+            why = f"the lower bound of its trailing {days} sessions is below zero"
+        else:
+            return None
+        receipt = self.live.observe_store.add_decision({
+            "day": day, "family": fam["family"], "version": int(version or 0), "run_sha": None,
+            "inputs": hashlib.sha256(json.dumps(rows, sort_keys=True, default=str).encode()).hexdigest(),
+            "stats": {"trades": fwd.n, "mean": fwd.mean, "session_days": days, "session_lcb": lcb, "band": fam["band"]},
+            "p_value": None, "verdict": "demote", "reasons": [why], "binding": rules.binding})
+        if not self.bridge.demote(fam["family"], why=why, receipt=receipt, at=float(self.live.clock())):
+            return None
+        self.live.observe_store.close_cohort(fam["family"], int(version or 0), status="demoted", day=day,
+                                             reason=f"ladder: {why}", was=("promoted",))
+        self.live.record("live.band", {"family": fam["family"], "from": fam["band"], "to": "gym", "version": version,
+                                       "receipt": receipt, "why": f"the forward ladder demoted it: {why}"},
+                         agent=fam["family"])
+        return {"family": fam["family"], "why": why, "receipt": receipt}
 
 
 def end_of_day(live: Any, day: str) -> dict[str, Any]:
@@ -694,7 +845,8 @@ def counts(root: str | Path, *, day: str | None = None) -> dict[str, Any] | None
             for status, key in (("active", "in_practice"), ("promoted", "promoted"), ("demoted", "demoted"),
                                 ("failed", "failed")):
                 out[key] = int(db.execute("SELECT COUNT(*) FROM cohorts c JOIN entrants e ON e.family=c.family AND "
-                                          "e.version=c.version WHERE c.status=?", (status,)).fetchone()[0])
+                                          "e.version=c.version AND e.evaluator=c.evaluator WHERE c.status=?",
+                                          (status,)).fetchone()[0])
             out["would_promote"] = int(db.execute("SELECT COUNT(DISTINCT family || '@' || version) FROM ladder_decisions "
                                                   "WHERE day=? AND verdict='would_promote'", (str(last),)).fetchone()[0])
             return out

@@ -76,7 +76,12 @@
    sample (each group by return on risk, highest first), then those whose record so far is not negative, then the
    rest, each by the practice league's own order (`bands.priority`). The incubator's cohorts are never cut by the cap
    (at most `KEEP_CEILING`), so the keep never holds fewer families than the House can have pinned, and a pinned
-   family (retired, its incubation would go to exits only) is never dropped for a higher return. The swarm never reads
+   family (retired, its incubation would go to exits only) is never dropped for a higher return. THE LADDER'S COHORTS
+   (evidence v3, `ladder_held`): an active FORWARD LADDER cohort (`league/live/ladder.py`) whose version met the
+   Validation line (`bands.validation_passed`, under the current research evaluator: the only cohorts the ladder can
+   promote, and only while their family is alive in the Gym band) is kept for its whole window whatever its record so
+   far (the ladder judges it on 20 sessions, never on the incubator's sample), right after the incubator's cohorts and,
+   like them, never cut by the cap. The swarm never reads
    the House's live state, so it holds every cohort that could be pinned. It never spares a family from the
    deflated-Sharpe rule, its researcher's or the diagnostician's own retire, the population floor or the operator's
    gate hold. Research attention only: no trial count, look, validation, gate, band or money rule reads it. The keep
@@ -182,9 +187,30 @@ def incubator_held(root: Any, rows: list[Mapping[str, Any]],
     return frozenset(held)
 
 
+def ladder_held(rows: list[Mapping[str, Any]], fams: Mapping[str, Mapping[str, Any]],
+                current: Any) -> frozenset[tuple[str, int]]:
+    """THE LADDER'S COHORTS in THE COHORT KEEP (the module docstring): the (family, version) of the active forward-ladder
+    cohorts `rows` (`ladder` True) whose family is one of `fams` (the living Gym families, by id, their states read) and
+    whose version met the Validation line under `current` (the store's research evaluator). Never raises."""
+    from .bands import validation_passed
+
+    out: set[tuple[str, int]] = set()
+    for r in rows:
+        try:
+            if not r.get("ladder") or r["family"] not in fams:
+                continue
+            key = (str(r["family"]), int(r["version"]))
+            if validation_passed(fams[key[0]].get("state") or {}, key[1], current) is True:
+                out.add(key)
+        except (KeyError, TypeError, ValueError):
+            continue
+    return frozenset(out)
+
+
 def keep_order(rows: list[Mapping[str, Any]], alive: Mapping[str, Any] | set[str] | frozenset[str],
                cap: int, *,
-               held: set[tuple[str, int]] | frozenset[tuple[str, int]] = frozenset()) -> list[dict[str, Any]]:
+               held: set[tuple[str, int]] | frozenset[tuple[str, int]] = frozenset(),
+               ladder: set[tuple[str, int]] | frozenset[tuple[str, int]] = frozenset()) -> list[dict[str, Any]]:
     """THE COHORT KEEP's choice (pure): of the active cohorts `rows` (`practice.cohort_status`, each record before today),
     each one whose family is in `alive` (the living Gym families), whose session window has not run out (`elapsed <
     window`), that the House is practising (`unpracticed < KEEP_UNPRACTICED`, unless it practises no active cohort at
@@ -192,12 +218,13 @@ def keep_order(rows: list[Mapping[str, Any]], alive: Mapping[str, Any] | set[str
     (`sessions` known), and that either has not met the incubator's sample (`KEEP_SAMPLE_SESSIONS` completed sessions and
     `KEEP_SAMPLE_TRADES` program closes) or has a record that is not negative (`pnl_program >= 0` and `pnl_all >= 0`, to
     the cent). Ordered: THE INCUBATOR'S COHORTS (`held`, (family, version) from `incubator_held`: the sample met), by
-    return on risk, highest first; then the rest that met the sample, the same way; then the rest whose record so far
+    return on risk, highest first; then THE LADDER'S COHORTS (`ladder`, from `ladder_held`: kept whatever their record
+    so far); then the rest that met the sample, the same way; then the rest whose record so far
     is not negative; then the rest; each then by the practice league's order (`bands.priority`), then by version. One
-    row a family (its first), at most `cap`, except that the incubator's cohorts are never cut by the cap (at most
-    `KEEP_CEILING`), so the keep never holds fewer families than the House's incubator can have pinned and a pinned
-    family is never dropped for a higher return; `cap` 0 or below keeps none. Each row gains `sample`, `negative` and
-    `held`."""
+    row a family (its first), at most `cap`, except that the incubator's and the ladder's cohorts are never cut by the
+    cap (at most `KEEP_CEILING`), so the keep never holds fewer families than the House's incubator can have pinned and a
+    pinned family is never dropped for a higher return; `cap` 0 or below keeps none. Each row gains `sample`,
+    `negative`, `held` and `ladder`."""
     from .bands import priority
 
     # The House practising no active cohort at all (down, or `live.observe` off) is an outage, not a cohort left out: the
@@ -211,19 +238,29 @@ def keep_order(rows: list[Mapping[str, Any]], alive: Mapping[str, Any] | set[str
             continue
         negative = _negative(r)
         sample = _sample_met(r)
-        if sample and negative:
+        key = (str(r["family"]), int(r["version"]))
+        on_ladder = key in ladder
+        if sample and negative and not on_ladder:
             continue
-        mine = sample and (str(r["family"]), int(r["version"])) in held
+        mine = sample and key in held
         ror = r.get("return_on_risk") if sample else None
-        head = (int(not mine), ror is None, -float(ror or 0.0)) if sample else (2 + int(negative), False, 0.0)
+        if mine:
+            head = (0, ror is None, -float(ror or 0.0))
+        elif on_ladder:
+            head = (1, False, 0.0)
+        elif sample:
+            head = (2, ror is None, -float(ror or 0.0))
+        else:
+            head = (3 + int(negative), False, 0.0)
         ranked.append((head + tuple(priority(r)) + (int(r["version"]),),
-                       {**dict(r), "sample": sample, "negative": negative, "held": mine}))
+                       {**dict(r), "sample": sample, "negative": negative, "held": mine,
+                        "ladder": on_ladder and not mine}))
     ranked.sort(key=lambda x: x[0])
     cap = max(0, int(cap))
     out: list[dict[str, Any]] = []
     for _, row in ranked:
-        # The incubator's cohorts come first, so the cap cuts only the rest.
-        if cap == 0 or len(out) >= (max(cap, KEEP_CEILING) if row["held"] else cap):
+        # The incubator's and the ladder's cohorts come first, so the cap cuts only the rest.
+        if cap == 0 or len(out) >= (max(cap, KEEP_CEILING) if row["held"] or row["ladder"] else cap):
             break
         if all(row["family"] != o["family"] for o in out):
             out.append(row)
@@ -649,9 +686,13 @@ class Tournament:
             error = error or "the practice record (observe.sqlite) could not be read"
         else:
             try:
-                alive = {f["id"] for f in self.store.families(alive=True) if f.get("band") == "gym"} if rows else set()
+                fams = {f["id"]: f for f in self.store.families(alive=True) if f.get("band") == "gym"} if rows else {}
+                alive = set(fams)
                 held = incubator_held(getattr(self.store, "root", None), rows, alive) if rows else frozenset()
-                chosen = keep_order(rows, alive, cap, held=held)
+                from .evaluator import KEY
+
+                ladder = ladder_held(rows, fams, self.store.get(KEY)) if rows else frozenset()
+                chosen = keep_order(rows, alive, cap, held=held, ladder=ladder)
             except Exception as exc:  # noqa: BLE001
                 error = f"the swarm's families could not be read or ordered ({type(exc).__name__})"
         if chosen is None:
@@ -677,9 +718,9 @@ class Tournament:
         `KEEP_STALE_SECONDS` ago (or in the future), or it cannot be read. Only a good read saves a family (a failed or off
         read saves none), so its time is the last good read's. Its rows carry the family and version only (`sample`,
         `negative`, `sessions` and `closes_program` None: this process has not read the record; `held` True for a
-        family the saved keep names among the incubator's cohorts, its `held`). The incubator's cohorts' families
-        first (at most `KEEP_CEILING`, never cut by the cap, as `keep_order`), then at most `cap` in all (a cap lowered
-        since): the store keeps no order, so each by name. Never raises."""
+        family the saved keep names among the incubator's cohorts, its `held`; `ladder` True for one it names among the
+        ladder's, its `ladder`). Those families first (at most `KEEP_CEILING`, never cut by the cap, as `keep_order`),
+        then at most `cap` in all (a cap lowered since): the store keeps no order, so each by name. Never raises."""
         try:
             value = self.store.get(practice.KEEP_KV)
             if not isinstance(value, Mapping):
@@ -691,12 +732,14 @@ class Tournament:
                 return None
             named = value.get("held")
             named = {f for f in named if isinstance(f, str)} if isinstance(named, list) else set()
+            laddered = value.get("ladder")
+            laddered = {f for f in laddered if isinstance(f, str)} if isinstance(laddered, list) else set()
             rows = [{"family": fid, "version": version, "sample": None, "negative": None, "sessions": None,
-                     "closes_program": None, "held": fid in named}
+                     "closes_program": None, "held": fid in named, "ladder": fid in laddered and fid not in named}
                     for fid, version in sorted(families.items())
                     if isinstance(fid, str) and isinstance(version, int) and not isinstance(version, bool)]
-            held = [r for r in rows if r["held"]][:KEEP_CEILING]
-            rows = held + [r for r in rows if not r["held"]][:max(0, cap - len(held))]
+            first = [r for r in rows if r["held"] or r["ladder"]][:KEEP_CEILING]
+            rows = first + [r for r in rows if not (r["held"] or r["ladder"])][:max(0, cap - len(first))]
         except Exception:  # noqa: BLE001 - a retirement pass never fails on the keep
             return None
         return (float(at), rows) if rows else None
@@ -709,6 +752,9 @@ class Tournament:
         held = sorted(r["family"] for r in chosen if r.get("held"))
         if held:
             value["held"] = held
+        laddered = sorted(r["family"] for r in chosen if r.get("ladder"))
+        if laddered:
+            value["ladder"] = laddered
         try:
             self.store.put(practice.KEEP_KV, value)
         except Exception:  # noqa: BLE001 - the researchers' status line is a courtesy; the keep itself stands
@@ -717,7 +763,8 @@ class Tournament:
     def keep_event(self) -> dict[str, Any] | None:
         """The round's one private `swarm.status` event of THE COHORT KEEP (action `incubator_keep`): the kept families in
         order (version, whether the sample is met, whether the record so far is negative, completed sessions, program
-        closes before today), the incubator's cohorts' families among them (`held`, when there are any), the rule each
+        closes before today), the incubator's cohorts' families among them (`held`, when there are any), the ladder's
+        (`ladder`, when there are any), the rule each
         family it spared since the last event would have retired it by (`spared`), the cap, how the record read and,
         when it did not, why (`error`). None when the keep is off, or keeps and spares nothing and read well. An
         unreadable record alerts once until it reads again."""
@@ -736,6 +783,9 @@ class Tournament:
         held = [r["family"] for r in self.kept_rows if r.get("held") and r["family"] in alive]
         if held:
             payload["held"] = held
+        laddered = [r["family"] for r in self.kept_rows if r.get("ladder") and r["family"] in alive]
+        if laddered:
+            payload["ladder"] = laddered
         if self.keep_read != "ok" and self.keep_error:
             payload["error"] = self.keep_error
         if self.keep_read == "failed" and not self._keep_told:
@@ -916,5 +966,5 @@ def json_safe(value: Any) -> str:
         return str(value)[:400]
 
 
-__all__ = ["Tournament", "IDLE_CAUSE", "keep_order", "incubator_held", "KEEP_MAX", "KEEP_CEILING", "KEEP_SAMPLE_SESSIONS",
-           "KEEP_SAMPLE_TRADES", "KEEP_UNPRACTICED", "KEEP_STALE_SECONDS"]
+__all__ = ["Tournament", "IDLE_CAUSE", "keep_order", "incubator_held", "ladder_held", "KEEP_MAX", "KEEP_CEILING",
+           "KEEP_SAMPLE_SESSIONS", "KEEP_SAMPLE_TRADES", "KEEP_UNPRACTICED", "KEEP_STALE_SECONDS"]

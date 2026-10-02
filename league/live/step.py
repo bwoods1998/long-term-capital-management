@@ -25,10 +25,14 @@ half day), so a slow House tick never delays a fill and a slow minute never dela
 THE PRACTICE LEAGUE (the observe band: the sprint, B4, Sept 26, 2026; the league, Sept 29, 2026): every alive Gym-band
 family with a validated version, or an eligible Train version, runs a SHADOW instance `<family>@<version>:o`
 (`league.swarm.bands.observe`), switched by `live.observe` in `<state>/swarm.json` (read at runtime: no deploy). Its
-program is frozen in `observe.sqlite` before its first decision. A cohort survives research revision and retirement
-for its whole FORWARD LADDER window (evidence v3, `league/live/ladder.py`: at most sixty sessions) until the ladder
-promotes or fails it (a cohort frozen before the ladder kept the old rule: three observed sessions and ten program
-closes while flat, a ten-session maximum extended to fit its declared DTE horizon). Restarts preserve snapshots and shadow accounts. ADMISSION walks the rows
+program is frozen in `observe.sqlite` before its first decision. A cohort survives research revision for its whole
+FORWARD LADDER window (evidence v3, `league/live/ladder.py`: at most sixty sessions) until the ladder promotes or fails
+it (its family's retirement fails it at the next session's end: no promotion can come of it); a cohort frozen before
+the ladder kept the old rule (it survived retirement too: three observed sessions and ten program closes while flat, a
+ten-session maximum extended to fit its declared DTE horizon). Restarts preserve snapshots and shadow accounts. A
+program whose cohort completed under another practice evaluator (a release moved it) is frozen again as a new cohort
+(`ObserveStore.freeze`); the account of its earlier cohort winds down (its closes forced, never the new cohort's
+record) and, once flat, a new account is made under the running evaluator. ADMISSION walks the rows
 in the league's order (validated by validation t, then Train by Train score, then id) under two caps: `live.observe_max`
 instances and `live.observe_roots_max` distinct roots (the binding one: every root is read every minute); a family whose
 roots would pass the roots cap is skipped and a later one on roots already read may still join. `live.observe_train`
@@ -1243,6 +1247,16 @@ class OptionsLive:
             if key not in self.instances and acc.winding_down and not acc.positions and not acc.orders:
                 self._export_one(acc)
                 self.shadow.accounts.pop(key, None)
+        # A practice program frozen again under this evaluator (`ObserveStore.freeze`: the plan's "practice cohorts
+        # restart on the new fingerprint") whose instance still holds its earlier cohort's account: once that account is
+        # flat it leaves the book, and the program loads again (`_observe_loads`) with an account made under this one.
+        for key, acc in list(self.shadow.accounts.items()):
+            inst = self.instances.get(key)
+            if (inst is not None and inst.observe and inst.mode == "live" and acc.winding_down and not acc.positions
+                    and not acc.orders and acc.practice_evaluator != self.observe_store.evaluator):
+                self._export_one(acc)
+                self.shadow.accounts.pop(key, None)
+                inst.loaded = False
 
     # ------------------------------------------------------------------ chains
     def _roots(self, phase: str = "real") -> dict[str, tuple[int, int, float]]:
@@ -1582,6 +1596,11 @@ class OptionsLive:
             if _is_observe(key) != (phase == "observe"):
                 continue
             inst = self.instances.get(key)
+            if phase == "observe" and not acc.winding_down and acc.practice_evaluator != self.observe_store.evaluator:
+                # An earlier cohort's account (another practice evaluator): never a cohort's record under this one. It
+                # winds down; a program frozen again under this evaluator gets a new account once it is flat
+                # (`_retire_finished`).
+                acc.winding_down = True
             if acc.began_day != day.ordinal:
                 acc.begin_day(day)
                 acc.began_day = day.ordinal

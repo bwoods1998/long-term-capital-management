@@ -152,7 +152,9 @@ class SwarmFamilies:
 
         The gate uses another SQLite connection and can demote, retire or replace this version while the House
         calculates its money band. The immediate transaction excludes those writers through the final band write.
-        Even an unchanged Probe/Sized band requires confirmation before scheduling a real instance.
+        Even an unchanged Probe/Sized band requires confirmation before scheduling a real instance. A band THE FORWARD
+        LADDER gave (its proof's `route` "ladder") confirms only with its practice receipt in the House's own record
+        (`bands.ladder_receipt`): a proof any other writer copied into the store never schedules real money.
         """
         from ..swarm.gate import run_sha
 
@@ -169,10 +171,15 @@ class SwarmFamilies:
                 selected = store.version(fam["id"], version)
                 if selected is None or run_sha(selected) != expected.get("run_sha"):
                     return False
-                from ..swarm.bands import current_banded_evaluator
+                from ..swarm.bands import current_banded_evaluator, ladder_receipt
 
                 if not current_banded_evaluator(state, run_sha(selected)):
                     return False
+                proof = state.get("banded_evaluator") or {}
+                if proof.get("route") == "ladder" and not ladder_receipt(
+                        self.root, family=fam["id"], version=version, run_sha=run_sha(selected),
+                        receipt=proof.get("receipt")):
+                    return False  # THE FORWARD LADDER's proof only with its practice receipt (`bands.ladder_receipt`)
                 typical = (state.get("typical_by_version") or {}).get(str(version),
                     state.get("typical_max_loss_usd") if state.get("validation_version") == version else None)
                 if (typical != expected.get("typical_max_loss_usd")

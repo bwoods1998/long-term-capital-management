@@ -2,6 +2,7 @@
 replace, judged on the SAME synthetic worlds before the ladder binds.
 
     python -m league.swarm.forward_benchmarks --json [--replications R] [--world W ...] [--output FULL.json]
+    python -m league.swarm.forward_benchmarks --demotion [--world W ...] [--programs N] [--output PART.json]
     python -m league.swarm.forward_benchmarks --combine PART.json ... [--output FULL.json] [--report REPORT.md]
 
 THE WORLDS (`WORLDS`, pinned before the first run): each is one kind of program, played as a whole desk of entrants.
@@ -24,9 +25,12 @@ THE TWO DESIGNS, on the same entrants in the same order:
 
 - THE LADDER (`league/live/ladder.py`, the exact functions the House runs: `judge`, `benjamini_hochberg`, `Rules` from
   the constitution, rows in the practice ledger's shape): `slots` cohorts practise at once; each judged at every
-  session's end on its forward record; a cohort that first meets L1-L5 asks for the pre-filter, which answers by the
-  next session's end, when it is promoted if every line still holds and its holdout P&L is not negative (a negative
-  read fails it); a cohort ends promoted, failed or at its window; a freed slot takes the next entrant.
+  session's end on its forward record; a cohort that first meets L1-L5 is read against THE VALIDATION LINE (L0, the
+  same `evidence.validation_line` verdict the sealed look starts from: one that did not meet it fails), then asks for
+  the pre-filter, which answers by the next session's end, when it is promoted if every line still holds and its
+  holdout P&L is not negative (a negative read fails it); a cohort ends promoted, failed or at its window; a freed slot
+  takes the next entrant. (Suite 2, after the WP6 review: suite 1's ladder arm had no Validation line, as the House's
+  ladder had none; the worlds and their random streams are suite 1's, `SEED_ID`.)
 - THE SEALED LOOK (the design the ladder replaces): the entrant's Validation year through `evidence.validation_line`
   (with its 1.5x stress twin), then THE LOOK HOLDS as the gate runs them (the drift hold on the Validation year's own
   drift fit; the power hold at the Holm level), then one holdout look through `evidence.holdout_line` with Holm across
@@ -43,6 +47,13 @@ entrants of the mixed desks, AND in every negative world on its own (and in the 
 was added after the first world's interim figures (pure noise, `absent`: the ladder 42 of 1,020, the sealed look 1 of
 1,020) showed that a pooled count depends on the mix of worlds; it can only make binding harder, and this codebase's
 evaluator suite never judges on pooled rates alone either. The whole suite was then run again from the start.
+
+THE DEMOTION RULE (`demotions`, after the WP6 review): a program promoted at the first forward session trades its
+world's forward stream as real fills for `DEMOTION["horizon"]` sessions, judged at each session's end by the ladder's
+demotion through the money table's own functions (`money.forward_stats`: negative over 20 trades; `money.session_bound`:
+the trailing `demote_sessions` closing days' one-sided `demote_confidence` lower bound below zero), and by other
+readings of the same words (`DEMOTION_READINGS`, never applied): the share demoted within 20, 40 and 60 sessions, per
+world. A planted edge demoted is a real edge lost; a negative one demoted is the rule working.
 
 What it is not: a market simulation. Returns are not bounded by the maximum loss, trades close the session they open,
 Train is not simulated (both designs start from the same Train-eligible programs), the Gym's drift screen upstream of
@@ -63,7 +74,9 @@ import time
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
-SUITE_ID = "forward-suite-1"
+SUITE_ID = "forward-suite-2"
+#: The worlds' random streams: suite 1's (the same entrants, markets and closes; only the designs' rules changed).
+SEED_ID = "forward-suite-1"
 
 PROTOCOL: dict[str, Any] = {
     "id": SUITE_ID,
@@ -119,12 +132,25 @@ VARIANTS: dict[str, dict[str, Any]] = {
     "sessions_40": {"min_sessions": 40},
     "checkpoints_20_40_60": {"checkpoints": [20, 40, 60]},
     "checkpoints_fdr_q_0.02": {"checkpoints": [20, 40, 60], "fdr_q": 0.02},
+    "no_validation": {"validation": False},
+}
+#: THE DEMOTION RULE's measurement (the module docstring): programs a world, sessions after the promotion.
+DEMOTION: dict[str, Any] = {"programs": 300, "horizon": 60, "marks": [20, 40, 60]}
+#: Readings of "a forward record negative over 20 trades, or a 20-session lower bound below zero": the rule as built
+#: (`as_built`: both, the bound re-read at every session's end at the constitution's `demote_confidence`), the bound at a
+#: higher confidence (`confidence`), the bound read only at the end of each non-overlapping block of `demote_sessions`
+#: sessions (`blocks`), and the negative record alone (`bound` False).
+DEMOTION_READINGS: dict[str, dict[str, Any]] = {
+    "as_built": {},
+    "bound_95": {"confidence": 0.95},
+    "blocks_of_20": {"blocks": True},
+    "negative_only": {"bound": False},
 }
 
 
 # ------------------------------------------------------------------------------------------------ the generator
 def _seed(*parts: Any) -> int:
-    return int(hashlib.sha256("|".join(str(p) for p in (SUITE_ID,) + parts).encode("utf-8")).hexdigest()[:16], 16)
+    return int(hashlib.sha256("|".join(str(p) for p in (SEED_ID,) + parts).encode("utf-8")).hexdigest()[:16], 16)
 
 
 def _rng(*parts: Any) -> Any:
@@ -418,6 +444,7 @@ def desk(world: str, replication: int, *, slots: int | None = None, sessions: in
                 ok = ok and ("checkpoints" not in v or practised in v["checkpoints"])
                 ok = ok and (v.get("fdr") is False or (cuts[name] is not None and figures["p"] <= cuts[name]))
                 ok = ok and (v.get("prefilter") is False or e["holdout_pnl"] >= 0)
+                ok = ok and (v.get("validation") is False or e["validation_line"]["passed"])
                 if ok:
                     variants[name][i] = day
             met = base and lines["drift"] and cut is not None and figures["p"] <= cut
@@ -430,6 +457,11 @@ def desk(world: str, replication: int, *, slots: int | None = None, sessions: in
                 ended.append(i)
                 continue
             if met and st["asked"] is None:
+                if not e["validation_line"]["passed"]:
+                    # L0, THE VALIDATION LINE: read once L1-L5 are met, before the pre-filter is asked for.
+                    outcome[i] = {"ladder": "validation_failed", "day": day}
+                    ended.append(i)
+                    continue
                 st["asked"] = day   # the House asks tonight; the gate's answer is there by the next session's end
             if t - st["start"] + 1 >= rules.max_sessions:
                 outcome[i] = {"ladder": "window", "day": day}
@@ -453,6 +485,51 @@ def desk(world: str, replication: int, *, slots: int | None = None, sessions: in
                               "bound": (last.get("lines") or {}).get("bound"),
                               "windows": (last.get("lines") or {}).get("windows")}})
     return {"world": world, "replication": replication, "entrants": len(entrants), "rows": rows}
+
+
+# ------------------------------------------------------------------------------------------------ the demotion rule
+def demotions(world: str, *, programs: int | None = None, horizon: int | None = None, rules: Any = None) -> dict[str, Any]:
+    """THE DEMOTION RULE on `world` (the module docstring): {world, kind, programs, readings: {reading: {mark: demoted
+    within that many sessions}}}. Each program's forward stream (its world's forward edge, one market path a program) is
+    its real record from the session after its promotion."""
+    from league.live import ladder as L
+    from league.live import money as M
+
+    rules = rules or L.Rules.from_constitution()
+    programs = int(programs or DEMOTION["programs"])
+    horizon = int(horizon or DEMOTION["horizon"])
+    days = nyse_sessions(PROTOCOL["first_session"], horizon)
+    drift = float(WORLDS[world].get("drift", PROTOCOL["market_drift"]))
+    marks = [m for m in DEMOTION["marks"] if m <= horizon]
+    out = {name: {str(m): 0 for m in marks} for name in DEMOTION_READINGS}
+    for k in range(programs):
+        path = market(days, drift=drift, replication=k, period="probe", world=f"demotion:{world}")
+        rows = [{"day": c["day"], "source": "real", "pnl": c["pnl"], "max_loss": PROTOCOL["max_loss"], "version": 1}
+                for c in trades(world, k, -1, "forward", days, path)]
+        demoted_at: dict[str, int] = {}
+        for t, day in enumerate(days, 1):
+            seen = [r for r in rows if r["day"] <= day]
+            negative = M.forward_stats(seen, rules.demote_confidence, version=1).negative
+            bounds: dict[float, float | None] = {}
+            for name, reading in DEMOTION_READINGS.items():
+                if name in demoted_at:
+                    continue
+                hit = negative
+                if not hit and reading.get("bound", True) and (not reading.get("blocks") or t % rules.demote_sessions == 0):
+                    confidence = float(reading.get("confidence", rules.demote_confidence))
+                    if confidence not in bounds:
+                        bounds[confidence] = M.session_bound(seen, sessions=rules.demote_sessions, confidence=confidence,
+                                                             version=1)[1]
+                    hit = bounds[confidence] is not None and bounds[confidence] < 0
+                if hit:
+                    demoted_at[name] = t
+            if len(demoted_at) == len(DEMOTION_READINGS):
+                break
+        for name, t in demoted_at.items():
+            for m in marks:
+                out[name][str(m)] += int(t <= m)
+    return {"world": world, "kind": WORLDS[world]["kind"], "programs": programs, "horizon": horizon,
+            "readings": {name: {m: rate(c, programs) for m, c in by.items()} for name, by in out.items()}}
 
 
 # ------------------------------------------------------------------------------------------------ the report
@@ -566,19 +643,43 @@ def run(worlds: Sequence[str], replications: int, *, slots: int | None = None, s
             "seconds": round(time.time() - started, 1), "desks": desks}
 
 
+def run_demotions(worlds: Sequence[str], *, programs: int | None = None, horizon: int | None = None,
+                  log: Any = None) -> dict[str, Any]:
+    """THE DEMOTION RULE's part (`demotions` for each world), for `--combine`."""
+    from dataclasses import asdict
+
+    from league.live import ladder as L
+
+    rules = L.Rules.from_constitution()
+    started = time.time()
+    out = []
+    for world in worlds:
+        if world == MIXED:
+            continue
+        out.append(demotions(world, programs=programs, horizon=horizon, rules=rules))
+        if log is not None:
+            print(f"demotion {world} ({time.time() - started:.0f}s)", file=log, flush=True)
+    return {"suite": SUITE_ID, "suite_sha": suite_sha(), "rules": asdict(rules), "seconds": round(time.time() - started, 1),
+            "demotion": out}
+
+
 def combine(parts: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """Several runs' desks as one report (the same suite, slots and sessions only)."""
-    first = parts[0]
-    for p in parts[1:]:
-        for key in ("suite_sha", "slots", "sessions", "replications"):
+    """Several runs' desks (and the demotion rule's parts) as one report (the same suite, slots and sessions only)."""
+    if len({p.get("suite_sha") for p in parts}) != 1:
+        raise ValueError("the parts differ in suite_sha")
+    runs = [p for p in parts if "desks" in p]
+    first = runs[0]
+    for p in runs[1:]:
+        for key in ("slots", "sessions", "replications"):
             if p.get(key) != first.get(key):
                 raise ValueError(f"the parts differ in {key}")
-    desks = [d for p in parts for d in p["desks"]]
+    desks = [d for p in runs for d in p["desks"]]
     report = {k: first[k] for k in ("suite", "suite_sha", "protocol", "rules", "replications", "slots", "sessions")}
     report["worlds"] = sorted({d["world"] for d in desks})
     report["seconds"] = round(sum(float(p.get("seconds") or 0) for p in parts), 1)
     report["aggregate"] = aggregate(desks)
     report["bootstrap_agreement"] = bootstrap_agreement()
+    report["demotion"] = sorted((w for p in parts for w in p.get("demotion") or []), key=lambda w: w["world"])
     return report
 
 
@@ -625,6 +726,19 @@ def markdown(report: Mapping[str, Any]) -> str:
     lines += ["", f"Worlds where the ladder's false promotions exceed the sealed look's (with holds): "
                   f"{', '.join(agg['worlds_where_ladder_exceeds_sealed']) or 'none'}.", "",
               f"Bootstrap port agreement (max p gap): {report['bootstrap_agreement']['max_p_gap']}.", ""]
+    if report.get("demotion"):
+        marks = [str(m) for m in DEMOTION["marks"]]
+        lines += ["## The demotion rule (a program promoted at session 0, its world's forward stream as real fills)", "",
+                  "Demoted within " + ", ".join(marks) + " sessions (count/programs). A planted edge demoted is a real "
+                  "edge lost; a negative one demoted is the rule working.", "",
+                  "| world | " + " | ".join(DEMOTION_READINGS) + " |", "|---|" + "---|" * len(DEMOTION_READINGS)]
+        for w in report["demotion"]:
+            cells = []
+            for name in DEMOTION_READINGS:
+                by = w["readings"][name]
+                cells.append(" / ".join(f"{by[m]['count']}" for m in marks if m in by) + f" of {w['programs']}")
+            lines.append(f"| {w['world']} ({w['kind']}) | " + " | ".join(cells) + " |")
+        lines.append("")
     return "\n".join(lines)
 
 
@@ -639,7 +753,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--output", help="a run: its desks (a part); --combine: the combined report")
     parser.add_argument("--report", help="the markdown report")
     parser.add_argument("--json", action="store_true", help="print the headline")
+    parser.add_argument("--demotion", action="store_true", help="the demotion rule's part (`demotions`), not the desks")
+    parser.add_argument("--programs", type=int, help="--demotion: programs a world")
     args = parser.parse_args(argv)
+    if args.demotion:
+        part = run_demotions(args.world or sorted(WORLDS), programs=args.programs, log=sys.stderr)
+        if args.output:
+            Path(args.output).write_text(json.dumps(part, sort_keys=True, default=str))
+        if args.json:
+            print(json.dumps({w["world"]: {n: {m: r["count"] for m, r in by.items()} for n, by in w["readings"].items()}
+                              for w in part["demotion"]}, indent=1))
+        return 0
     if args.combine:
         report = combine([json.loads(Path(p).read_text()) for p in args.combine])
         if args.output:

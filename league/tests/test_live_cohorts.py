@@ -30,23 +30,38 @@ class Cohorts(PracticeCase):
             db.execute("UPDATE cohorts SET snapshot=? WHERE family=? AND version=?", (json.dumps(snap, sort_keys=True),
                                                                                      family, version))
 
-    def test_live_only_semantic_upgrade_winds_down_an_existing_cohort_after_restart(self):
+    def test_live_only_semantic_upgrade_restarts_the_programs_practice_after_restart(self):
+        """The plan's "practice cohorts restart on the new fingerprint" (evidence v3, the WP6 review): the program is
+        frozen again as a new cohort; the restored account of its old cohort winds down (its closes forced, never either
+        cohort's program record) and, once flat, a new account is made under the new evaluator."""
         with patch("league.swarm.evaluator.execution_fingerprint", return_value="old-live-code"):
             self.build(observed=[trained("f", params={"hold": 600, "opens": 2})])
             self.run_to(9, 34)
         old_evaluator = self.live.observe_store.evaluator
-        self.assertTrue(self.live.shadow.accounts["f@1:o"].positions)
+        old = self.live.shadow.accounts["f@1:o"]
+        self.assertTrue(old.positions)
         with patch("league.swarm.evaluator.execution_fingerprint", return_value="new-live-code"):
             self.restart()
-            self.assertNotEqual(self.live.observe_store.evaluator, old_evaluator)
+            new_evaluator = self.live.observe_store.evaluator
+            self.assertNotEqual(new_evaluator, old_evaluator)
             self.live.sync_families(self.clock(), force=True)
-            self.assertEqual(self.observing(), [])
+            self.assertEqual(self.observing(), ["f@1:o"], "frozen again under the new evaluator")
             self.assertEqual(self.live.shadow.accounts["f@1:o"].practice_evaluator, old_evaluator)
             self.run_to(9, 39)
-            self.assertGreater(self.row("f")["forced"], 0, "the restored orphan account closes without new decisions")
+            self.assertGreater(self.row("f")["forced"], 0, "the restored old account closes without new decisions")
             self.assertEqual(self.row("f")["program"]["trades"], 0)
-        snapshot = self.live.observe_store._connect().execute("SELECT snapshot FROM cohorts").fetchone()[0]
-        self.assertEqual(json.loads(snapshot)["practice_evaluator"], old_evaluator)
+            account = self.live.shadow.accounts["f@1:o"]
+            self.assertEqual(account.practice_evaluator, new_evaluator, "a new account once the old one was flat")
+            self.assertNotEqual(account.nonce, old.nonce)
+        db = self.live.observe_store._connect()
+        snapshot, evaluator = db.execute("SELECT snapshot, evaluator FROM cohorts").fetchone()
+        self.assertEqual((json.loads(snapshot)["practice_evaluator"], evaluator), (new_evaluator, new_evaluator))
+        archived = db.execute("SELECT snapshot, reason FROM cohort_archive").fetchone()
+        self.assertEqual(json.loads(archived[0])["practice_evaluator"], old_evaluator)
+        self.assertIn("evaluator changed", archived[1])
+        forced = db.execute("SELECT DISTINCT forced FROM trades WHERE account=? AND evaluator=?",
+                            (old.nonce, new_evaluator)).fetchall()
+        self.assertEqual(forced, [(1,)], "every close of the old account since is forced: no cohort's record")
         self.assertEqual(self.venue.sent, [])
 
     def test_retired_snapshot_survives_restart_with_open_positions_and_rejects_identity_changes(self):
@@ -155,19 +170,24 @@ class Cohorts(PracticeCase):
         self.build(observed=[trained("f")])
         self.run_to(9, 34)
         inst = self.live.instances["f@1:o"]
+        old = self.live.shadow.accounts["f@1:o"]
         self.live.observe_store.evaluator = "new-evaluator"
         self.assertFalse(self.live.observe_store.cohort_allowed(self.live._entry_identity(inst)))
         self.live.sync_families(self.clock(), force=True)
-        self.assertEqual(inst.mode, "wind_down")
-        self.assertEqual(self.live.observe_store.cohort_candidates(self.families.observe(),
-                         day=MONDAY.isoformat(), in_session=True), [], "a new source version is required")
-        snapshot, reason = self.live.observe_store._connect().execute("SELECT snapshot, reason FROM cohorts").fetchone()
-        self.assertNotEqual(json.loads(snapshot)["practice_evaluator"], "new-evaluator")
+        db = self.live.observe_store._connect()
+        reason = db.execute("SELECT reason FROM cohort_archive").fetchone()[0]
         self.assertIn("evaluator changed", reason)
+        self.assertEqual(json.loads(db.execute("SELECT snapshot FROM cohorts").fetchone()[0])["practice_evaluator"],
+                         "new-evaluator", "the program practises again as a new cohort under the new evaluator")
+        self.assertEqual(self.live.observe_store.cohort_candidates(self.families.observe(), day=MONDAY.isoformat(),
+                                                                  in_session=True)[0]["practice_evaluator"],
+                         "new-evaluator", "and never as the old one")
         self.run_to(9, 39)
-        record = self.row("f")
-        self.assertGreater(record["forced"], 0)
-        self.assertEqual(record["program"]["trades"], 0, "new-engine wind-down exits are never program evidence")
+        self.assertTrue(old.winding_down)
+        forced = db.execute("SELECT DISTINCT forced FROM trades WHERE account=? AND evaluator='new-evaluator'",
+                            (old.nonce,)).fetchall()
+        self.assertEqual(forced, [(1,)], "the old account's new-engine wind-down exits are never program evidence")
+        self.assertGreater(self.row("f")["forced"], 0)
 
     def test_long_dated_snapshot_gets_enough_sessions_to_observe_its_declared_horizon(self):
         row = trained("long")

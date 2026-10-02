@@ -129,7 +129,8 @@ class TheDesk(unittest.TestCase):
         self.assertGreaterEqual(out["entrants"], 3)
         for row in out["rows"]:
             self.assertEqual(row["kind"], "negative")
-            self.assertIn(row["ladder_outcome"], ("promoted", "prefilter_negative", "window", "running"))
+            self.assertIn(row["ladder_outcome"], ("promoted", "validation_failed", "prefilter_negative", "window",
+                                                  "running"))
             self.assertEqual(set(row["variants"]), set(FB.VARIANTS))
         again = FB.desk("absent", 0, slots=3, sessions=45)
         self.assertEqual(json.dumps(out, sort_keys=True), json.dumps(again, sort_keys=True), "deterministic")
@@ -139,6 +140,19 @@ class TheDesk(unittest.TestCase):
         self.assertTrue(any(r["ladder"] for r in out["rows"]), [r["ladder_outcome"] for r in out["rows"]])
         promoted = [r for r in out["rows"] if r["ladder"]]
         self.assertTrue(all(r["holdout_nonnegative"] for r in promoted), "never past a negative pre-filter")
+        self.assertTrue(all(r["validation_passed"] for r in promoted), "never past a Validation line it did not meet")
+
+    def test_the_ladder_arm_reads_the_validation_line_before_the_prefilter(self):
+        """Suite 2 (the WP6 review): an entrant that meets L1-L5 without having met the Validation line fails there; the
+        `no_validation` variant is the ladder without that rung."""
+        out = FB.desk("skewed_null", 2, slots=8, sessions=60)  # a desk where nulls meet L1-L5 (found, then pinned)
+        failed = [r for r in out["rows"] if r["ladder_outcome"] == "validation_failed"]
+        self.assertTrue(failed, [r["ladder_outcome"] for r in out["rows"]])
+        self.assertTrue(all(not r["validation_passed"] and not r["ladder"] for r in failed))
+        self.assertTrue(all(r["validation_passed"] for r in out["rows"] if r["ladder"]))
+        self.assertTrue(any(r["variants"]["no_validation"] for r in failed), "without the rung some would have gone on")
+        self.assertEqual(FB.SEED_ID, "forward-suite-1", "the worlds' streams are suite 1's")
+
 
     def test_a_mixed_desk_draws_several_worlds_and_the_report_renders(self):
         part = FB.run([FB.MIXED, "drift_only"], 1, slots=3, sessions=64)
@@ -152,6 +166,36 @@ class TheDesk(unittest.TestCase):
             path.write_text(json.dumps(part, default=str))
             self.assertEqual(FB.main(["--combine", str(path), "--report", str(Path(tmp) / "r.md")]), 0)
             self.assertTrue((Path(tmp) / "r.md").read_text().startswith("# Forward ladder benchmark"))
+
+
+@unittest.skipUnless(HAVE, "numpy not installed")
+class TheDemotionRule(unittest.TestCase):
+    """THE DEMOTION RULE's measurement (the WP6 review): the ladder's demotion through the money table's own functions,
+    and the other readings of its words, on a promoted program's forward stream."""
+
+    def test_the_readings_are_ordered_as_their_definitions_say(self):
+        for world in ("absent", "planted_dense"):
+            out = FB.demotions(world, programs=12, horizon=40)
+            self.assertEqual((out["world"], out["programs"], out["horizon"]), (world, 12, 40))
+            r = {name: {m: by[m]["count"] for m in by} for name, by in out["readings"].items()}
+            self.assertEqual(set(r["as_built"]), {"20", "40"})
+            for m in ("20", "40"):
+                self.assertGreaterEqual(r["bound_95"][m], r["as_built"][m], "a higher confidence's bound is lower")
+                self.assertLessEqual(r["blocks_of_20"][m], r["as_built"][m], "a block reads the bound less often")
+                self.assertLessEqual(r["negative_only"][m], r["as_built"][m])
+                self.assertLessEqual(r["as_built"]["20"], r["as_built"]["40"])
+        self.assertEqual(json.dumps(FB.demotions("absent", programs=3, horizon=25), sort_keys=True),
+                         json.dumps(FB.demotions("absent", programs=3, horizon=25), sort_keys=True), "deterministic")
+
+    def test_its_part_combines_into_the_report(self):
+        part = FB.run(["absent"], 1, slots=2, sessions=30)
+        demotion = FB.run_demotions(["absent", FB.MIXED], programs=2, horizon=25)
+        self.assertEqual([w["world"] for w in demotion["demotion"]], ["absent"], "a world's own programs, never mixed")
+        report = FB.combine([part, demotion])
+        self.assertEqual([w["world"] for w in report["demotion"]], ["absent"])
+        self.assertIn("The demotion rule", FB.markdown(report))
+        with self.assertRaises(ValueError):
+            FB.combine([part, dict(demotion, suite_sha="another")])
 
 
 if __name__ == "__main__":
