@@ -74,6 +74,9 @@ export class Gate extends DurableObject {
   mergesToday(at) { return this.gate.mergesToday(at); }
   mergeReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.mergeReserve(request)); }
   mergeSettle(request) { return this.ctx.storage.transactionSync(() => this.gate.mergeSettle(request)); }
+  // The engineer's pull requests (V3-A, WP8b): a New York day's count of their own, each step one transaction.
+  engineerPullReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.engineerPullReserve(request)); }
+  engineerPullSettle(request) { return this.ctx.storage.transactionSync(() => this.gate.engineerPullSettle(request)); }
   reviewFor(request) { return this.gate.reviewFor(request); }
   reviewRecord(request) { return this.ctx.storage.transactionSync(() => this.gate.reviewRecord(request)); }
   webFetchReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.webFetchReserve(request)); }

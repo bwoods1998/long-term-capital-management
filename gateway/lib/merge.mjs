@@ -5,21 +5,23 @@
 // GitHub token lives here and nowhere on the House. `POST /v1/github/review` records a reviewer's verdict for one exact
 // head commit (the Gate keeps it); `POST /v1/github/merge` squash-merges a pull request only when ALL of these hold:
 //
-//  - its branch starts `engineer/`, lives in this repository (never a fork) and is aimed at `main`; it is open and no
-//    draft;
+//  - its branch is `engineer/<lane>/<slug>-<8 hex>` with a known lane (github.ENGINEER_LANES), lives in this repository
+//    (never a fork) and is aimed at `main`; it is open and no draft;
 //  - its head is the commit the caller names, and GitHub is told to merge exactly that commit (a head that moved
 //    between the checks and the merge is GitHub's 409, and nothing merges);
 //  - the `checks.yml` workflow's latest run on that commit finished `success`, with its jobs `gateway`, `tests (3.11)`
 //    and `tests (3.14)` each `success`;
 //  - an `approve` verdict is recorded for that exact commit and no `reject` is (a rejected commit stays rejected: a
 //    revision is a new commit, reviewed again);
-//  - no file it changes, adds, removes or renames (either name) is protected (lib/protected.mjs), read from GitHub's own
-//    list of the pull request's files, whole (a list that cannot be read whole refuses the merge);
+//  - no file it changes, adds, removes or renames (either name) is protected (lib/protected.mjs), and every one is inside
+//    its branch's lane: that lane's surface or a new `league/tests/test_harness_candidate_*.py` (WP8b; the same list
+//    the proposal route admits, `github.laneRefusal`), read from GitHub's own list of the pull request's files, whole (a
+//    list that cannot be read whole refuses the merge);
 //  - fewer than MERGES_PER_DAY merges were made today, New York's day.
 //
 // Every refusal names its rule in `refused`. Nothing here approves on GitHub, pushes, re-runs CI or closes anything.
 
-import { client, Refusal, refused as refusal, sha as needSha, ENGINEER_PREFIX, BASE } from './github.mjs';
+import { client, Refusal, refused as refusal, sha as needSha, ENGINEER_PREFIX, BASE, engineerLane, laneRefusal } from './github.mjs';
 import { protectedRefusal } from './protected.mjs';
 
 //: The workflow whose run on the exact head commit must have succeeded, and the jobs it must have run and passed.
@@ -79,10 +81,7 @@ export function pullRefusal(pull, { repo, headSha }) {
   if (!pull || typeof pull !== 'object') return no('GitHub\'s answer carried no pull request.', 'github', 502);
   if (pull.state !== 'open' || pull.merged === true) return no('The pull request is not open.', 'not_open');
   if (pull.draft === true) return no('The pull request is a draft.', 'draft');
-  const ref = pull.head?.ref;
-  if (typeof ref !== 'string' || !ref.startsWith(ENGINEER_PREFIX) || ref.length <= ENGINEER_PREFIX.length) {
-    return no(`Only an ${ENGINEER_PREFIX} branch merges here.`, 'branch', 403);
-  }
+  if (engineerLane(pull.head?.ref) === null) return no(`Only an ${ENGINEER_PREFIX}<lane>/<slug>-<hash> branch merges here.`, 'branch', 403);
   if (pull.head?.repo?.full_name !== repo) return no('The branch is not in this repository.', 'fork', 403);
   if (pull.base?.ref !== BASE || pull.base?.repo?.full_name !== repo) return no(`The pull request is not aimed at ${BASE}.`, 'base', 403);
   if (pull.head?.sha !== headSha) return no('The pull request\'s head is not the commit named.', 'head_moved');
@@ -101,8 +100,9 @@ async function readPull(github, { repo, number, headSha }) {
 
 /**
  * Every file the pull request changes, read whole from GitHub's list (`GET /pulls/<n>/files`, a page of 100 at a time),
- * and refused when any of them, by its name or its name before a rename, is protected. A list longer than MAX_FILES,
- * or one whose length is not the pull request's own `changed_files`, refuses the merge: it was not read whole.
+ * and refused when any of them, by its name or its name before a rename, is protected (`protected_path`) or outside
+ * the lane its branch names (`lane_path`). A list longer than MAX_FILES, or one whose length is not the pull request's
+ * own `changed_files`, refuses the merge: it was not read whole.
  */
 async function vetFiles(github, pull, number) {
   const expected = pull.changed_files;
@@ -118,13 +118,16 @@ async function vetFiles(github, pull, number) {
   if (files.length !== expected) {
     throw new Refusal(`GitHub listed ${files.length} changed files of ${expected}: the list was not read whole.`, 409, 'files');
   }
-  const names = [];
-  for (const file of files) {
-    for (const name of [file?.filename, ...(file?.previous_filename !== undefined ? [file.previous_filename] : [])]) {
-      const why = protectedRefusal(name);
-      if (why) throw new Refusal(`The pull request changes ${String(name).slice(0, 200)}: ${why}.`, 403, 'protected_path');
-      names.push(name);
-    }
+  const names = files.flatMap(file => [file?.filename, ...(file?.previous_filename !== undefined ? [file.previous_filename] : [])]);
+  // Every protected name first, so a protected file is always refused as one, wherever it sits in the list.
+  for (const name of names) {
+    const why = protectedRefusal(name);
+    if (why) throw new Refusal(`The pull request changes ${String(name).slice(0, 200)}: ${why}.`, 403, 'protected_path');
+  }
+  const lane = engineerLane(pull.head?.ref);
+  for (const name of names) {
+    const why = laneRefusal(lane, name);
+    if (why) throw new Refusal(`The pull request changes ${String(name).slice(0, 200)}: ${why}.`, 403, 'lane_path');
   }
   return names;
 }

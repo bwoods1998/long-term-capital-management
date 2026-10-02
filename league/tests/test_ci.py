@@ -181,3 +181,96 @@ class TheDeployedGatewaysPrefix(unittest.TestCase):
         self.assertIn("if [ -f requirements-gym.txt ]; then python3 -m pip install", text)
         self.assertIn("discover -s ltcm/tests -t .", text)
         self.assertIn("discover -s league/tests -t .", text)
+
+
+class TheEngineersLanes(unittest.TestCase):
+    """LTCM v3, V3-A, WP8b: a branch `engineer/<lane>/<slug>-<8 hex>` may change only its lane's surface and add new
+    `test_harness_candidate_*` tests, the same table the gateway admits and merges by (`gateway/lib/github.mjs`
+    ENGINEER_LANES; a gateway test holds the two equal)."""
+
+    SURFACES = {
+        "scheduler": ("league/swarm/loop.py",),
+        "research": ("league/swarm/researcher.py", "league/swarm/preflight.py", "league/swarm/claude_research.py"),
+        "memory": ("league/swarm/architect.py", "league/swarm/strategist.py", "league/swarm/diagnostician.py",
+                   "league/swarm/seeds.py", "league/swarm/mechanisms.py"),
+        "data": ("league/sailbox.py", "league/data_job.py"),
+    }
+
+    def test_the_lanes_are_the_gateways_and_the_old_roles_are_unchanged(self):
+        self.assertEqual(ci.ENGINEER_LANES, self.SURFACES)
+        self.assertEqual(ci.ENGINEER_TESTS, "league/tests/test_harness_candidate_*.py")
+        for lane, paths in self.SURFACES.items():
+            self.assertEqual(ci.ROLE_PATHS[f"engineer/{lane}"], (*paths, ci.ENGINEER_TESTS))
+        self.assertEqual({role: ci.ROLE_PATHS[role] for role in ("architect", "toolsmith", "operator", "designer", "teacher")}, {
+            "architect": ("league/strategies/",), "toolsmith": ("league/tools/", "league/tests/test_tool_"),
+            "operator": ("league/config.json",), "designer": ("league/game.json",), "teacher": ("league/playbook/",)})
+        self.assertEqual(len(ci.ROLE_PATHS), 9)
+
+    def test_the_lane_comes_from_the_branch_name_in_the_gateways_exact_shape(self):
+        for lane in self.SURFACES:
+            self.assertEqual(ci.role_of(f"engineer/{lane}/a-thing-0123abcd"), f"engineer/{lane}")
+        for branch in ("engineer/a-thing-0123abcd", "engineer/execution/a-thing-0123abcd", "engineer/research/a-thing",
+                       "engineer/research/a-thing-0123ABCD", "engineer/research/a/thing-0123abcd", "engineer/research/-thing-0123abcd",
+                       "engineer/Research/a-thing-0123abcd", "engineer/research/a-thing-0123abcd\n", "engineer/research",
+                       "merton/engineer/research/a-thing-0123abcd", "merton/engineer/a-thing", "astra/engineer/x", "engineer/", ""):
+            self.assertIsNone(ci.role_of(branch), branch)
+        self.assertEqual(ci.role_of("merton/architect/new-idea-abcd1234"), "architect")
+
+    def test_each_lane_changes_its_own_surface_and_new_tests_and_nothing_else(self):
+        tests = ["league/tests/test_harness_candidate_preflight.py", "league/tests/test_harness_candidate_x_2.py",
+                 "league/tests/test_harness_candidate_0.py"]
+        for lane, paths in self.SURFACES.items():
+            role = ci.role_of(f"engineer/{lane}/a-thing-0123abcd")
+            self.assertEqual(ci.guard([*paths, *tests], role), [], lane)
+            for other, theirs in self.SURFACES.items():
+                if other != lane:
+                    for path in theirs:
+                        self.assertEqual(ci.guard([path], role), [f"{path}: outside what the {role} may change "
+                                                                  f"({', '.join((*paths, ci.ENGINEER_TESTS))})"], (lane, path))
+            for path in ("league/ops/agenda.py", "league/swarm/models.py", "league/swarm/harness_lanes.py", "League/Swarm/Loop.py",
+                         "league/swarm/loop_v2.py", "league/tests/test_swarm_loop.py", "league/tests/test_harness_candidate_.py",
+                         "league/tests/test_harness_candidate_x.pyc", "league/tests/test_harness_candidate_x/y.py",
+                         "league/tests/test_harness_candidate_X.py", "league/tests/test_harness_candidate_a-b.py",
+                         "league/tests/sub/test_harness_candidate_x.py", "league/tests/test_tool_x.py", "league/strategies/x.py"):
+                self.assertTrue(ci.guard([path], role), (lane, path))
+            for path in ("league/ci.py", "league/constitution.py", "league/ops/budget.py", "league/live/step.py", "gateway/lib/github.mjs",
+                         ".github/workflows/checks.yml", "league/swarm/../ci.py"):
+                self.assertTrue(ci.guard([path], role), (lane, path))
+        # Nor does a lane's file or a new test reach any other role.
+        for role in ("architect", "toolsmith", "operator", "designer", "teacher"):
+            self.assertTrue(ci.guard(["league/swarm/loop.py"], role))
+            self.assertTrue(ci.guard(["league/tests/test_harness_candidate_x.py"], role))
+
+    def test_guard_branch_judges_an_engineer_branch_by_its_lane(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            def git(*args):
+                return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false",
+                                       *args], cwd=root, capture_output=True, text=True, check=True).stdout.strip()
+
+            git("init", "-q", "-b", "main")
+            (root / "league" / "swarm").mkdir(parents=True)
+            (root / "league" / "tests").mkdir()
+            (root / "league" / "swarm" / "loop.py").write_text("A = 1\n")
+            (root / "league" / "swarm" / "models.py").write_text("B = 1\n")
+            git("add", "-A")
+            git("commit", "-q", "-m", "base")
+            base = git("rev-parse", "HEAD")
+            (root / "league" / "swarm" / "loop.py").write_text("A = 2\n")
+            (root / "league" / "tests" / "test_harness_candidate_loop.py").write_text("X = 1\n")
+            git("add", "-A")
+            git("commit", "-q", "-m", "lane")
+            self.assertEqual(ci.guard_branch(base, "HEAD", "engineer/scheduler/faster-loop-0123abcd", root=root), [])
+            self.assertEqual(ci.guard_branch(base, "HEAD", "engineer/research/faster-loop-0123abcd", root=root),
+                             [f"league/swarm/loop.py: outside what the engineer/research may change "
+                              f"({', '.join((*self.SURFACES['research'], ci.ENGINEER_TESTS))})"])
+            self.assertEqual(ci.guard_branch(base, "HEAD", "engineer/faster-loop-0123abcd", root=root),
+                             [f"engineer/faster-loop-0123abcd: not a branch name of the form {ci.BRANCH_FORMS}"])
+            (root / "league" / "swarm" / "models.py").write_text("B = 2\n")
+            git("commit", "-q", "-am", "outside")
+            self.assertEqual(ci.guard_branch(base, "HEAD", "engineer/scheduler/faster-loop-0123abcd", root=root),
+                             [f"league/swarm/models.py: outside what the engineer/scheduler may change "
+                              f"(league/swarm/loop.py, {ci.ENGINEER_TESTS})"])
