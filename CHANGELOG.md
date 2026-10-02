@@ -29,6 +29,12 @@ merged is waiting for a release. Those comment edits touch modules the live path
 release from main deploys in the money path's window (20:05-13:25Z); the money digest does not move. Under the freeze (Oct 1, "The freeze"), a change to `league/live` or `league/gym` waits
 for a planned release. Active development is paused (Oct 2, 14:15Z, below).
 
+Also merged after the pause: a prune of dead files from the Kalshi era and the first run.
+`scripts/jev_lab_eval/`, `scripts/{attribute_fills,repair_leg_fills,repair_no_fills,survey_kalshi}.py`,
+`deploy/ltcm.service` and `league/FEEDS.md` are removed. Nothing imports or runs them, and they stay
+readable at tag `archive/pre-options-2026-09-26`. These paths are in the release bundle, so the next
+release id moves with them. No behaviour changes, and the money digest does not move.
+
 ## 2026-10-02
 
 ### 14:15Z, the pause (no deploy)
