@@ -105,7 +105,14 @@ the row did not read and checkable evidence, within the row's and the cell's reb
 on the named row's slice continues that row's lineage; on another slice it is a new lineage that counts the named row's
 lineage as a prior (`prior_lineage`: its trials and failed mechanism tests count). The request carries the vocabulary,
 the REFUTED CELLS with each cell's rebirth room and the last pass's card refusals with the lessons they point at (kv
-`architect_card_refusals`); the pass's event counts them (`card_refused`).
+`architect_card_refusals`); the pass's event counts them (`card_refused`). THE CELL'S YIELD (`architect.cell_yield`, off
+by default; cards.py): switched on, a cell whose recent births pass the drift screen often enough is open, and there a
+card matching only self-refuted and drift rows needs no rebirth; a claim such a card makes anyway is kept only when it
+holds, else it is stripped before the card is stored (the birth's event says why: `claim_dropped`). The REFUTED CELLS
+then mark each cell open or exhausted, and the pass's event carries `cell_yield` (each cell's settled births, drift
+passes and bound; the open-cell births and the dropped claims). `architect.claimable_rows` (0, off) lists up to that many
+rows a claim may name in each cell where one can be needed, with the inputs each read. Ids and input names only: no
+Validation or holdout figure reaches the request.
 
 THE LIBRARY (Sept 29, 2026; league/swarm/library.py). While `research.enabled`, the pass retrieves a block of pre-2025
 literature first (`loop.Swarm.architect_pass`: the strategist's accepted `library_queries`, else the seed searches) and
@@ -124,6 +131,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import time
 import unicodedata
@@ -1220,6 +1228,17 @@ GRAVEYARD_POINTER = "THE GRAVEYARD: every row is in the system prompt's graveyar
 
 #: kv: the last pass's proposals the card checks refused (the next request shows them with their lessons).
 CARD_REFUSALS_KEY = "architect_card_refusals"
+#: The REFUTED CELLS' header with `architect.cell_yield` on (THE CELL'S YIELD, cards.py): what open and exhausted mean.
+#: Words only: no figure.
+YIELD_CELLS_NOTE = ("; each cell is marked open or exhausted by how often its recent births passed the drift screen: in an "
+                    "open cell a card that matches only its self-refuted and drift rows needs no \"rebirth\" (one given there "
+                    "is kept only if it holds, else dropped), and a card matching any other row of it needs one as above; in "
+                    "an exhausted cell every row needs one")
+#: With `architect.claimable_rows`: what a cell's claimable rows are.
+CLAIMABLE_NOTE = ("; \"claimable\" lists rows a rebirth may name, newest first, each with the inputs it read: your card's "
+                  "inputs must add one it did not read, and a carded row is matched only when your inputs overlap what it read")
+#: The most claimable rows a cell lists (`architect.claimable_rows`).
+CLAIMABLE_ROWS_MAX = 12
 #: THE LIBRARY's addition to the system prompt, sent only with a retrieved block (Sept 29, 2026).
 LIBRARY_RULE = """
 
@@ -1507,6 +1526,15 @@ class Architect:
         """`architect.card_rebirth`: "refuse" (the default: a card in a refuted cell needs a valid rebirth) or "off"."""
         return "off" if str(self.cfg.get("card_rebirth") or "refuse").lower() == "off" else "refuse"
 
+    def claimable_rows(self) -> int:
+        """`architect.claimable_rows` (0, off): the most rows a claim may name that the REFUTED CELLS list for each cell
+        where a claim can be needed and the cell has rebirth room (`cards.RebirthIndex.cells`), at most
+        `CLAIMABLE_ROWS_MAX`; anything but a whole number above 0 is off."""
+        raw = self.cfg.get("claimable_rows")
+        if not isinstance(raw, (int, float)) or isinstance(raw, bool) or not math.isfinite(raw) or raw < 1 or raw != int(raw):
+            return 0
+        return min(int(raw), CLAIMABLE_ROWS_MAX)
+
     def card_block(self) -> str:
         """The request's card section: the vocabularies, the REFUTED CELLS (the rows the rebirth refusal reads, most rows
         first) and the last pass's card refusals, each with the lesson it points at. "" while cards are not required."""
@@ -1514,15 +1542,28 @@ class Architect:
             return ""
         parts = ["FAMILY CARD VOCABULARY (each family's card uses exactly these words):\n" + cards.vocabulary_text()]
         if self.rebirth_mode() == "refuse":
+            claimable, extra = self.claimable_rows(), ""
             try:
-                cells = cards.RebirthIndex(self.store, self.settings).cells()
+                index = cards.RebirthIndex(self.store, self.settings)
+                cells = index.cells(claimable=claimable)
             except Exception:  # noqa: BLE001 - the request goes without the list; admit still checks every card
                 cells = []
+            else:
+                if index.yield_cfg is not None:
+                    extra += YIELD_CELLS_NOTE
+                    # THE CELL'S YIELD: the pass's admission reads the cells as its request showed them (`run`).
+                    # Read the yields first: `yields` computes them and may set `yield_error`; checking the flag
+                    # before the read saw no error and passed an empty, failed reading as error-free (review A, E1).
+                    yields = index.yields
+                    self.pass_yields = yields if index.yield_error is None else None
+                if claimable:
+                    extra += CLAIMABLE_NOTE
             if cells:
                 parts.append("REFUTED CELLS (mechanism_class / structure family / holding: graveyard rows killed by a mechanism "
                              "verdict; a card in one needs \"rebirth\" naming one of its rows with an input that row did not read, "
                              "and the cell's rebirth room; carded rows count when your inputs, declared or named in your "
-                             "mechanism and hypothesis, overlap theirs, declared or named in their own words):\n" + "\n".join(cells))
+                             "mechanism and hypothesis, overlap theirs, declared or named in their own words)" + extra + ":\n"
+                             + "\n".join(cells))
         last = self.store.get(CARD_REFUSALS_KEY)
         items = last.get("items") if isinstance(last, dict) else None
         if items:
@@ -1544,6 +1585,12 @@ class Architect:
         from .strategist import mechanism_class  # a local import: the strategist imports this module
 
         self.card_refused: list[dict[str, Any]] = []
+        # THE CELL'S YIELD (`architect.cell_yield`): this call's births in an open cell that needed no claim, and the claims
+        # stripped there (`cell_yield_seen`, for the pass's event; None while the setting is off or no card was checked).
+        open_born: list[str] = []
+        dropped: list[dict[str, Any]] = []
+        self.cell_yield_seen: dict[str, Any] | None = None
+        pass_yields, self.pass_yields = getattr(self, "pass_yields", None), None  # the request's reading, used once
         require_card, index = self.require_card(), None
         cap = self.want()
         known = self.graveyard_ids()
@@ -1603,12 +1650,16 @@ class Architect:
             # CARD-BASED REBIRTH REFUSAL: a card in a refuted cell needs a valid rebirth (deterministic, no model call).
             if card is not None and self.rebirth_mode() == "refuse":
                 if index is None:
-                    index = cards.RebirthIndex(self.store, self.settings)
+                    index = cards.RebirthIndex(self.store, self.settings, yields=pass_yields)
                 verdict = index.check(card, structure, mechanism, dte)
                 if not verdict["ok"]:
                     self.card_refused.append({"slug": slug, "why": verdict["reason"], "row": verdict.get("row"),
                                               "lesson": verdict.get("lesson"), "matched": verdict.get("count")})
                     continue
+                if verdict.get("dropped"):
+                    # THE CELL'S YIELD: an open cell needed no claim and the one made did not hold: born without it, so no
+                    # unchecked claim links a lineage or spends a budget (the birth's event says why).
+                    card = {k: v for k, v in card.items() if k != "rebirth"}
             else:
                 verdict = None
             cited = self.differs(row, known)
@@ -1697,10 +1748,19 @@ class Architect:
                     born_payload["card"]["new_inputs"] = verdict["new_inputs"]
                 if index is not None:  # the cell its own text reads as (the check reads its class too): for the audit
                     born_payload["card"]["text_cell"] = index.text_cell(mechanism, structure, [lo, hi])
+                if verdict and verdict.get("open"):  # THE CELL'S YIELD: born in an open cell that needed no claim
+                    born_payload["card"]["open_cell"] = True
+                    if not verdict.get("rebirth"):
+                        open_born.append(fam["id"])
+                    if verdict.get("dropped"):
+                        born_payload["card"]["claim_dropped"] = str(verdict["dropped"])[:300]
+                        dropped.append({"family": fam["id"], "why": str(verdict["dropped"])[:300]})
             if literature:
                 born_payload["literature"] = [x["id"] for x in literature]
             self.store.event("swarm.born", fam["id"], born_payload)
             born.append(fam["id"])
+        if index is not None and index.yield_cfg is not None:
+            self.cell_yield_seen = {"view": index.yield_view(), "open_born": open_born, "claims_dropped": dropped}
         return born
 
     def _digest_call(self, system: str, paired: bool, library: Any = None) -> tuple[dict[str, Any], dict[str, Any] | None]:
@@ -1765,6 +1825,7 @@ class Architect:
         # answer's retry; the pass's event counts its refusals, and the next pass reads its own window.
         self.pass_quota = None
         self.pass_quota = self.birth_quota()
+        self.pass_yields = None  # THE CELL'S YIELD: the request's reading of the cells (`card_block`), which `admit` uses
         info: dict[str, Any] | None = None
         try:
             # SYSTEM itself while Train is 2022-2024; else the running swarm's span (its store's migrated objective)
@@ -1793,6 +1854,7 @@ class Architect:
         rows, lenient, recovered = read_families(answer)
         on_digest = bool(extra) and answer.get("route") == "claude"
         born = self.admit(rows, digest=on_digest, library=library)
+        cell_yield = getattr(self, "cell_yield_seen", None)  # THE CELL'S YIELD: this admit's (a retry's is added below)
         proposed = len(rows) if isinstance(rows, list) else 0  # this pass's proposals, its retry's added below
         refused, self.not_allowed = list(getattr(self, "not_allowed", []) or []), []  # a retry's admit fills it anew
         if proposed:
@@ -1841,13 +1903,18 @@ class Architect:
             if len(rows) < SALVAGE_MIN and self.want() > 0:
                 # The retry's own refusals (one that never reaches `admit`, as when Claude has no line, adds none: the cut
                 # answer's are not counted twice).
-                self.card_refused, self.capped = [], {}
+                self.card_refused, self.capped, self.cell_yield_seen = [], {}, None
                 retry = self._salvage_retry(system, paired, began, library)
                 out["born"] = born + retry.pop("born_ids")
                 for cls, n in (getattr(self, "capped", {}) or {}).items():
                     capped[cls] = capped.get(cls, 0) + n
                 refused_cards += list(getattr(self, "card_refused", []) or [])
                 refused += list(getattr(self, "not_allowed", None) or [])
+                again = getattr(self, "cell_yield_seen", None)
+                if again is not None:
+                    cell_yield = again if cell_yield is None else {
+                        "view": again["view"], "open_born": cell_yield["open_born"] + again["open_born"],
+                        "claims_dropped": cell_yield["claims_dropped"] + again["claims_dropped"]}
                 proposed += int(retry.get("proposed") or 0)
                 if refused or retry.get("proposed"):
                     self.remember_refusals(refused, began)
@@ -1858,6 +1925,12 @@ class Architect:
             out["structure_capped"] = dict(quota.refused)  # proposals refused by the birth quota, by structure family
         if capped:
             out["class_capped"] = capped  # proposals refused by the class cap, by class
+        if cell_yield is not None:
+            # THE CELL'S YIELD: the cells' Train yields as the check read them, the births in an open cell that needed no
+            # claim, and the claims stripped there.
+            view = cell_yield["view"] or {}
+            out["cell_yield"] = {**view, "open_born": len(cell_yield["open_born"]),
+                                 "claims_dropped": cell_yield["claims_dropped"][:12]}
         if refused_cards or self.require_card():
             # The card checks' refusals: counted in the event, and shown with their lessons in the next request.
             out["card_refused"] = {"incomplete": sum(1 for r in refused_cards if str(r["why"]).startswith("incomplete card")),

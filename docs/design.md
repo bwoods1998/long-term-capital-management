@@ -402,6 +402,21 @@ diagnostician.
   class the proposal's own mechanism text reads as counts as well as the declared one, so a relabeled idea is caught.
   Rows from before cards are read into cells from their text. The check is deterministic and makes no model call. A
   rebirth on the named row's slice continues its lineage; on another slice it counts that lineage's trials.
+- **The cell's yield** (H2 of the Oct 1 edge study; `architect.cell_yield`, off by default). A self-refuted row (its own
+  researcher retired it) and a drift row (its Train record failed the drift screen) record a family's outcome, not a test
+  of the mechanism, and the productive cells hold the most of them: on Oct 1 the cells whose births passed the drift
+  screen most often were the ones the rebirth refusal closed. Switched on, each cell is read for its yield: the families
+  born in it in the lookback whose outcome is settled (retired, or holding a drift-passing eligible Train run), and how
+  many of those passed. A cell with at least the minimum of settled births whose Wilson 95% upper bound on that share is
+  below the floor is exhausted, and every one of its rows needs a rebirth as above. In every other cell, an open one, a
+  card that matches only self-refuted and drift rows needs no rebirth; a refuted row, the operator's, a diagnosed,
+  trial-adjusted or stress row and a failed mechanism test still need one. The verdict list, the rows indexed, the
+  matching, a claim's tests, both rebirth budgets, the same-slice and same-idea refusals, lineage and the card's
+  completeness are unchanged. A claim made in an open cell that needed none is kept only when it holds; otherwise the
+  card is stored without it and the birth's event says why, so an unchecked claim never links a lineage or spends a
+  budget. If the yield cannot be read, every cell is treated as exhausted. Drift-screen figures are Train figures; the
+  request shows only whether each cell is open or exhausted. A second setting (`architect.claimable_rows`, off by
+  default) lists, for each cell where a claim can be needed, the rows a claim may name and the inputs each read.
 - **The mechanism test** (release B, league/swarm/mechanism.py). Before a carded family's first broad Train replay,
   its program runs with the signal on and with its card's ablation over a pre-registered sample: four windows of three
   months inside 2022-2024 (the years every Gym image holds for every root), covering every calendar month once,
