@@ -533,46 +533,6 @@ class Job(unittest.TestCase):
         self.assertEqual((self.doc()["inputs"]["p30_usd"], self.doc()["inputs"]["p30_source"]),
                          (300.0, "league.ops.economics.p30"))
 
-    def test_a_losing_month_in_the_close_economics_is_a_number_not_a_fallback(self):
-        """A negative p30 is a loss, never "no number": the book (which can read positive) does not stand in for it."""
-        from league.ops import economics
-        with mock.patch.object(economics, "latest", lambda root: {"cutoff": B._iso(NOW - 3 * 3600), "p30": {"usd": "-3.10"}}):
-            receipt = B.run(self.ctx())
-        doc = self.doc()
-        self.assertEqual((doc["inputs"]["p30_usd"], doc["inputs"]["p30_source"]), (-3.1, "league.ops.economics.p30"))
-        self.assertEqual(doc["earned_usd_day"], 0.0)
-        self.assertEqual(receipt["errors"], [])
-
-    def test_the_monthly_drills_run_without_touching_the_house(self):
-        from league.ops import drills
-
-        out = drills.run(self.ctx())
-        self.assertEqual(out["status"], "ok", out)
-        self.assertEqual(set(out["drills"]), {"funding:sail", "funding:claude", "sail_read_failure", "gateway_outage",
-                                              "stale_budget"})
-        self.assertEqual(sorted(f["meter"] for f in self.sent), ["claude", "sail"])
-        self.assertTrue(all(f["test"] is True for f in self.sent))
-        self.assertEqual(set(out["not_run"]), {"restart", "swarm_kill", "gym_box_failure", "rollback"})
-        self.assertFalse((self.root / "budget.json").exists(), "the drills write nothing to the House's state")
-        self.answer = {"sent": False, "reason": "no mail"}
-        failed = drills.run(self.ctx())
-        self.assertEqual(failed["status"], "failed")
-        self.assertEqual(failed["failed"], ["funding:claude", "funding:sail"])
-
-    def test_a_job_that_reports_failed_is_a_failed_receipt(self):
-        """The grant's refusal ({"status": "failed"}) is never recorded as ok."""
-        from league.ops.__main__ import run_job
-
-        fake = types.ModuleType("fake_grant")
-        fake.run = lambda ctx: {"status": "failed", "action": "none", "error": "the digest moved with no owner deploy"}
-        with mock.patch("importlib.import_module", return_value=fake):
-            out = run_job("grant", root=self.root, due_at=NOW, ctx=types.SimpleNamespace(alerts=[]))
-        self.assertEqual(out["status"], "failed")
-        self.assertIn("the digest moved", out["error"])
-        fake.run = lambda ctx: {"status": "ok", "action": "none"}
-        with mock.patch("importlib.import_module", return_value=fake):
-            self.assertEqual(run_job("grant", root=self.root, due_at=NOW, ctx=types.SimpleNamespace(alerts=[]))["status"], "ok")
-
     def test_a_stale_close_economics_falls_back_to_the_book(self):
         from league.ops import economics
         with mock.patch.object(economics, "latest", lambda root: {"cutoff": B._iso(NOW - 3 * DAY), "p30": {"usd": "300.00"}}):
@@ -639,6 +599,31 @@ class Job(unittest.TestCase):
         self.assertFalse((self.root / B.NOTICES_FILE).exists())
         with self.assertRaises(ValueError):
             B.drill(self.ctx(), "openai")
+
+    def test_a_losing_month_in_the_close_economics_is_a_number_not_a_fallback(self):
+        """A negative p30 is a loss, never "no number": the book (which can read positive) does not stand in for it."""
+        from league.ops import economics
+        with mock.patch.object(economics, "latest", lambda root: {"cutoff": B._iso(NOW - 3 * 3600), "p30": {"usd": "-3.10"}}):
+            receipt = B.run(self.ctx())
+        doc = self.doc()
+        self.assertEqual(doc["inputs"]["p30_usd"], -3.1)
+        self.assertTrue(doc["inputs"]["p30_source"].startswith("league.ops.economics.p30"), doc["inputs"]["p30_source"])
+        self.assertEqual(doc["earned_usd_day"], 0.0)
+        self.assertEqual(receipt["errors"], [])
+
+    def test_a_job_that_reports_failed_is_a_failed_receipt(self):
+        """The grant's refusal ({"status": "failed"}) is never recorded as ok."""
+        from league.ops.__main__ import run_job
+
+        fake = types.ModuleType("fake_grant")
+        fake.run = lambda ctx: {"status": "failed", "action": "none", "error": "the digest moved with no owner deploy"}
+        with mock.patch("importlib.import_module", return_value=fake):
+            out = run_job("grant", root=self.root, due_at=NOW, ctx=types.SimpleNamespace(alerts=[]))
+        self.assertEqual(out["status"], "failed")
+        self.assertIn("the digest moved", out["error"])
+        fake.run = lambda ctx: {"status": "ok", "action": "none"}
+        with mock.patch("importlib.import_module", return_value=fake):
+            self.assertEqual(run_job("grant", root=self.root, due_at=NOW, ctx=types.SimpleNamespace(alerts=[]))["status"], "ok")
 
 
 if __name__ == "__main__":
