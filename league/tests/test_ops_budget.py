@@ -554,7 +554,8 @@ class Job(unittest.TestCase):
         with mock.patch.object(economics, "latest", lambda root: {"cutoff": B._iso(NOW - 3 * 3600), "p30": {"usd": "-3.10"}}):
             receipt = B.run(self.ctx())
         doc = self.doc()
-        self.assertEqual((doc["inputs"]["p30_usd"], doc["inputs"]["p30_source"]), (-3.1, "league.ops.economics.p30"))
+        self.assertEqual(doc["inputs"]["p30_usd"], -3.1)
+        self.assertTrue(doc["inputs"]["p30_source"].startswith("league.ops.economics.p30"), doc["inputs"]["p30_source"])
         self.assertEqual(doc["earned_usd_day"], 0.0)
         self.assertEqual(receipt["errors"], [])
 

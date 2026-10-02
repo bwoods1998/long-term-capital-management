@@ -7,7 +7,7 @@ from pathlib import Path
 
 from league.ops import drills
 from league.updater import DRILL_REQUEST
-from league.watchdog import iso
+from league.watchdog import epoch
 
 NOW = 1_791_039_600.0  # 2026-10-03T15:00:00Z, the first Saturday of October
 
@@ -36,7 +36,7 @@ class TheDrillsJob(unittest.TestCase):
 
     def test_the_rollback_drill_is_requested_not_run(self):
         out = drills.request_rollback(self.ctx())
-        self.assertEqual(json.loads((self.root / DRILL_REQUEST).read_text())["at"], iso(NOW))
+        self.assertEqual(epoch(json.loads((self.root / DRILL_REQUEST).read_text())["at"]), NOW, "what the updater reads")
         self.assertEqual((out["requested_ts"], out.get("replaced")), (NOW, None))
         self.assertTrue(drills.request_rollback(self.ctx())["replaced"], "one request stands at a time")
         self.assertFalse(hasattr(drills, "launch_rollback"), "nothing in the job's child starts a watchdog")

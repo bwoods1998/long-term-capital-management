@@ -331,7 +331,8 @@ class TheEngineersLanes(unittest.TestCase):
             (root / "league" / "swarm").mkdir(parents=True)
             (root / "league" / "tests").mkdir()
             (root / "league" / "swarm" / "loop.py").write_text("A = 1\n")
-            (root / "league" / "swarm" / "models.py").write_text("B = 1\n")
+            (root / "league" / "swarm" / "pool.py").write_text("B = 1\n")
+            (root / "league" / "swarm" / "models.py").write_text("C = 1\n")
             git("add", "-A")
             git("commit", "-q", "-m", "base")
             base = git("rev-parse", "HEAD")
@@ -345,11 +346,16 @@ class TheEngineersLanes(unittest.TestCase):
                               f"({', '.join((*self.SURFACES['research'], ci.ENGINEER_TESTS))})"])
             self.assertEqual(ci.guard_branch(base, "HEAD", "engineer/faster-loop-0123abcd", root=root),
                              [f"engineer/faster-loop-0123abcd: not a branch name of the form {ci.BRANCH_FORMS}"])
-            (root / "league" / "swarm" / "models.py").write_text("B = 2\n")
+            (root / "league" / "swarm" / "pool.py").write_text("B = 2\n")
             git("commit", "-q", "-am", "outside")
             self.assertEqual(ci.guard_branch(base, "HEAD", "engineer/scheduler/faster-loop-0123abcd", root=root),
-                             [f"league/swarm/models.py: outside what the engineer/scheduler may change "
+                             [f"league/swarm/pool.py: outside what the engineer/scheduler may change "
                               f"(league/swarm/loop.py, {ci.ENGINEER_TESTS})"])
+            # A path that feeds or enforces the budget is no lane's at all (FORBIDDEN, V3-A integration).
+            (root / "league" / "swarm" / "models.py").write_text("C = 2\n")
+            git("commit", "-q", "-am", "protected")
+            self.assertIn("league/swarm/models.py: no role may change this file",
+                          ci.guard_branch(base, "HEAD", "engineer/scheduler/faster-loop-0123abcd", root=root))
 
     def test_a_lane_may_only_add_a_test_never_change_remove_or_rename_one(self):
         """harness_lanes' NEW_TEST: an earlier candidate's retained test is never modified, removed or renamed away."""
