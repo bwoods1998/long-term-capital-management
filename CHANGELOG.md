@@ -21,53 +21,13 @@ on branch `run/options-swarm-2026-09-26`) has the detail.
 
 ## Not yet deployed
 
-Main `665a9e8d` is the H1 release, deployed Oct 1 at 20:35Z (below); every House release of Oct 1 has its dated entry.
-Under the freeze (Oct 1, "The freeze"), a change to `league/live` or `league/gym` waits for a planned release. Merged
-since and waiting for a release:
+Main `e3d0111f` is the 11:26Z Oct 2 House release (below). Under the freeze (Oct 1, "The freeze"), a change to
+`league/live` or `league/gym` waits for a planned release. Nothing merged is waiting for a release.
 
-- **The duplicate look** (H3a, branch `gate/h3a-no-duplicate-look`; `league/swarm/gate.py`, `league/swarm/store.py`,
-  `league/CONTRACT.md`; the money path: `gate.py` and `store.py` are loaded by the live path, so it deploys 20:05-13:25Z
-  only, after two adversarial reviews and green CI). Every holdout look raises the Holm bar for every later one, and the
-  three looks since the Sept 26 reset covered two programs (the edge study: the two Sept 27 looks had identical Train
-  and Validation results). The gate now refuses a look that would repeat an earlier one, in any family and lineage,
-  before anything else is asked of the version (the experiment contract, the drift screen, the rations, the paid review
-  and audit, the look): the same program (`run_sha`), or a version whose stored Validation run says the same as a looked
-  version's (the Gym's own run sha, the code with its parameters merged over the defaults; or the same evaluation with
-  the same outcome). Recorded as every gate refusal is (stage "duplicate look": the refusal row, the program's incubator
-  bar, `gated_sha` with `gate_ready` cleared, outcome "refused"), plus a private `swarm.gate` event `duplicate_look`
-  naming the earlier look; no look row, no try, no review, no holdout read; the researcher hears the earlier look's
-  number, never a figure. A repeat of a look in flight in another family waits for it; a version whose own look landed
-  is only closed. Before this, a gate-ready version whose `run_sha` had been looked at was skipped silently every round
-  and kept `gate_ready`, and a repeat under another `run_sha` was reviewed and looked at. Tightening only: no threshold,
-  Holm, deflated-Sharpe or forward rule moves; nothing in `league/live`, `league/gym` or `LEAGUE_FILES`, no evaluator
-  adoption, no money digest. To verify after the deploy: `swarm.gate` events with action `duplicate_look` (expect none
-  for a genuinely new version) and `refusals` rows with stage "duplicate look".
-- **The cell's yield** (H2 of the Oct 1 edge study, branch `cards/h2-yield-aware`; `league/swarm/cards.py`,
-  `league/swarm/architect.py`, `league/swarm/settings.py`; off by default, so the deploy changes nothing until the
-  operator sets it). From 22:00Z Oct 1 the architect bore nothing for seven passes and the population fell to 13
-  (floor 12). Every refusal was the card check's rebirth rule: the productive cells are full of self-refuted and drift
-  rows, which `RebirthIndex` counts as mechanism verdicts, and the model's claims named rows outside the six the refusal
-  listed. Two settings, in `swarm.json` with no deploy:
-  - `architect.cell_yield` (null) opens a cell unless it is exhausted. Exhausted means at least `min_births` settled
-    births in `lookback_days` whose Wilson 95% upper bound on drift-pass share is below `floor` (recommended, and `true`:
-    30, 0.10, 7). In an open cell a card matching only self-refuted and drift rows needs no rebirth claim. Every other
-    mechanism verdict still needs one, and so does every row of an exhausted cell.
-  - `architect.claimable_rows` (0) lists, for each cell where a claim can be needed, the newest rows a claim may name,
-    with the inputs each read.
+## 2026-10-02
 
-  Unchanged: `MECHANISM_VERDICTS` and the rows indexed (the memory lane's judge), the matching, a claim's tests, both
-  rebirth budgets, `card_rebirth` "refuse", the same-slice and same-idea refusals, lineage and card completeness. A
-  claim made in an open cell that needed none is kept only when it holds; otherwise it is stripped before the card is
-  stored (`claim_dropped` on the birth). A yield that cannot be read leaves every cell as before. No Validation or
-  holdout figure reaches the request. The pass's event carries `cell_yield` (Train figures only). On the edge study's
-  Oct 1 12:59Z extract, none of the 127 classified cells would be exhausted. Nothing in `league/live`, `league/gym` or
-  `LEAGUE_FILES`, no evaluator adoption, no money digest. The money path: an import trace of the tree
-  (`league/live/*.py`, then the modules `league/live` imports lazily:
-  `league/swarm/{store,bands,gate,evaluator,settings}.py`, and the docs' lazy `league/gym` modules and the
-  constitution) loads `cards.py` (through `gate`, `researcher`) and `settings.py`, never `architect.py`, and no module
-  it did not load before (`cards.py` now imports `evidence.py`, already loaded), so it deploys 20:05-13:25Z only,
-  after two adversarial reviews and green CI. The live path never builds a `RebirthIndex`. To switch on and verify:
-  `docs/operations.md`, **The cell's yield**.
+### 11:26Z, House release `20261002T112610Z-e11710692569` (main `e3d0111f`; PRs #484, #481)
+
 - **The look holds** (L6(b) and L6(c), branch `gate/l6-look-holds`; `league/swarm/gate.py`, `league/swarm/evidence.py`,
   `league/swarm/store.py`, `league/swarm/settings.py`, `league/swarm/bands.py` (the House's reader),
   `league/swarm/incubator.py`, `league/CONTRACT.md`, `scripts/verify_swarm.py`, `scripts/look_holds_benchmark.py`; the
@@ -131,6 +91,70 @@ since and waiting for a release:
   move: every registered candidate is re-captured on this release. Research-class (not on the live path). To verify
   after the deploy: `measure` + `rank` on the new release register fresh keys; the research brief's canary reads
   fraction 0.5, 43,200 s.
+- **Deploy.** CI green on the combined head; the nightly forward daemon stopped idle first; staged 11:26:23Z, promoted 11:26:54Z
+  over `20261002T051530Z-1aebcf26b145`, the watch's verdict PROMOTED. No evidence reset (the evaluator's execution fingerprint
+  `47587e22…`, bundle and image unchanged); the money digest unchanged; the open tuition lot exit-only and the 9 practice cohorts
+  intact; lineage snapshot diff 0 violations. A deliberate restart at 11:37Z restored every instance, and a killed swarm process
+  recovered in 31 seconds.
+
+### Operator changes on Oct 2 (no deploy)
+
+- **03:00-05:26Z:** the owner chose "claims first": `architect.claimable_rows` 4 (05:26Z); `architect.cell_yield` stays null.
+- **05:03Z:** `tournament.fork_top` 3 → 0 (no automatic forks of already-validated lineages; the edge study's L7).
+- **00:06Z / 06:09Z / 06:51Z / 11:38Z:** the architect's Claude line 5 → 0 → 5 → 0 → 5 (Claude's rebirth claims failed the card
+  check; then Sail's architect calls timed out from 07:20Z to 11:27Z, 13 passes, no births). **11:38Z:** `architect.sail_effort`
+  high → medium so the Sail fallback fits its poll window.
+- **07:38-07:51Z, an operator error:** a large read-only extract on the House exhausted its memory and stalled the swarm; the
+  House's supervisor restarted the swarm itself. Extracts are now batched and capped.
+
+### 05:16Z, House release `20261002T051530Z-1aebcf26b145` (main `81ad284c`; PRs #480, #483)
+
+- **The duplicate look** (H3a, branch `gate/h3a-no-duplicate-look`; `league/swarm/gate.py`, `league/swarm/store.py`,
+  `league/CONTRACT.md`; the money path: `gate.py` and `store.py` are loaded by the live path, so it deploys 20:05-13:25Z
+  only, after two adversarial reviews and green CI). Every holdout look raises the Holm bar for every later one, and the
+  three looks since the Sept 26 reset covered two programs (the edge study: the two Sept 27 looks had identical Train
+  and Validation results). The gate now refuses a look that would repeat an earlier one, in any family and lineage,
+  before anything else is asked of the version (the experiment contract, the drift screen, the rations, the paid review
+  and audit, the look): the same program (`run_sha`), or a version whose stored Validation run says the same as a looked
+  version's (the Gym's own run sha, the code with its parameters merged over the defaults; or the same evaluation with
+  the same outcome). Recorded as every gate refusal is (stage "duplicate look": the refusal row, the program's incubator
+  bar, `gated_sha` with `gate_ready` cleared, outcome "refused"), plus a private `swarm.gate` event `duplicate_look`
+  naming the earlier look; no look row, no try, no review, no holdout read; the researcher hears the earlier look's
+  number, never a figure. A repeat of a look in flight in another family waits for it; a version whose own look landed
+  is only closed. Before this, a gate-ready version whose `run_sha` had been looked at was skipped silently every round
+  and kept `gate_ready`, and a repeat under another `run_sha` was reviewed and looked at. Tightening only: no threshold,
+  Holm, deflated-Sharpe or forward rule moves; nothing in `league/live`, `league/gym` or `LEAGUE_FILES`, no evaluator
+  adoption, no money digest. To verify after the deploy: `swarm.gate` events with action `duplicate_look` (expect none
+  for a genuinely new version) and `refusals` rows with stage "duplicate look".
+- **The cell's yield** (H2 of the Oct 1 edge study, branch `cards/h2-yield-aware`; `league/swarm/cards.py`,
+  `league/swarm/architect.py`, `league/swarm/settings.py`; off by default, so the deploy changes nothing until the
+  operator sets it). From 22:00Z Oct 1 the architect bore nothing for seven passes and the population fell to 13
+  (floor 12). Every refusal was the card check's rebirth rule: the productive cells are full of self-refuted and drift
+  rows, which `RebirthIndex` counts as mechanism verdicts, and the model's claims named rows outside the six the refusal
+  listed. Two settings, in `swarm.json` with no deploy:
+  - `architect.cell_yield` (null) opens a cell unless it is exhausted. Exhausted means at least `min_births` settled
+    births in `lookback_days` whose Wilson 95% upper bound on drift-pass share is below `floor` (recommended, and `true`:
+    30, 0.10, 7). In an open cell a card matching only self-refuted and drift rows needs no rebirth claim. Every other
+    mechanism verdict still needs one, and so does every row of an exhausted cell.
+  - `architect.claimable_rows` (0) lists, for each cell where a claim can be needed, the newest rows a claim may name,
+    with the inputs each read.
+
+  Unchanged: `MECHANISM_VERDICTS` and the rows indexed (the memory lane's judge), the matching, a claim's tests, both
+  rebirth budgets, `card_rebirth` "refuse", the same-slice and same-idea refusals, lineage and card completeness. A
+  claim made in an open cell that needed none is kept only when it holds; otherwise it is stripped before the card is
+  stored (`claim_dropped` on the birth). A yield that cannot be read leaves every cell as before. No Validation or
+  holdout figure reaches the request. The pass's event carries `cell_yield` (Train figures only). On the edge study's
+  Oct 1 12:59Z extract, none of the 127 classified cells would be exhausted. Nothing in `league/live`, `league/gym` or
+  `LEAGUE_FILES`, no evaluator adoption, no money digest. The money path: an import trace of the tree
+  (`league/live/*.py`, then the modules `league/live` imports lazily:
+  `league/swarm/{store,bands,gate,evaluator,settings}.py`, and the docs' lazy `league/gym` modules and the
+  constitution) loads `cards.py` (through `gate`, `researcher`) and `settings.py`, never `architect.py`, and no module
+  it did not load before (`cards.py` now imports `evidence.py`, already loaded), so it deploys 20:05-13:25Z only,
+  after two adversarial reviews and green CI. The live path never builds a `RebirthIndex`. To switch on and verify:
+  `docs/operations.md`, **The cell's yield**.
+- **Deploy.** CI green on the combined head; the daemon stopped idle; staged 05:15:30Z, promoted 05:16:03Z. No evidence reset; the
+  money digest unchanged; lineage diff 0 violations. A deliberate restart at 05:27Z restored every instance, and a killed swarm
+  process recovered in 31 seconds.
 
 ## 2026-10-01
 
