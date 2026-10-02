@@ -95,7 +95,8 @@ def main(argv=None) -> int:
     config = load_config()
     if config.get("real_money") and args.local_sandbox:
         parser.error("real money needs sealed Sailboxes: drop --local-sandbox")
-    house = build(root, config=config, local_sandbox=args.local_sandbox, research=not args.no_research, publish=not args.no_publish, tape=args.tape, canary=canary)
+    house = build(root, config=config, local_sandbox=args.local_sandbox, research=not args.no_research, publish=not args.no_publish, tape=args.tape, canary=canary,
+                  jobs=args.command == "run")
     try:
         if args.command == "found":
             born = house.found(args.seeds.split(",") if args.seeds else None)

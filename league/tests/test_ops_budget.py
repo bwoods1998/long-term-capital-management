@@ -277,7 +277,7 @@ class SettingsLoad(unittest.TestCase):
     def test_a_state_root_always_carries_a_budget_and_none_without_one(self):
         loaded = S.load(self.root, config={})
         self.assertEqual(loaded["budget"]["source"], "floor")
-        self.assertEqual(loaded["population"]["ceiling"], S.DEFAULTS["population"]["floor"] + B.BIRTH_MARGIN)
+        self.assertEqual(loaded["population"]["ceiling"], loaded["population"]["floor"] + B.BIRTH_MARGIN)
         self.assertGreater(loaded["population"]["ceiling"], loaded["population"]["floor"])
         self.assertEqual(loaded["guard"]["openai_cap_usd"], 0.0, "no OpenAI room under the budget")
         self.assertNotIn("budget", S.load(None, config={}))

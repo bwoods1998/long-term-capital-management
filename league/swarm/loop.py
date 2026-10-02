@@ -485,7 +485,11 @@ class Swarm:
         recent = [json.loads(row["payload"]) for row in
                   self.store._all("SELECT payload FROM events WHERE kind='swarm.cycle' AND at >= ? ORDER BY seq DESC LIMIT 3000", (since,))]
         seconds = sorted(float(p.get("seconds") or 0) for p in recent[:300] if not p.get("error"))
-        return {"families_alive": len(self.store.families(alive=True)), "running": len(self.scheduler.running),
+        with self.scheduler._lock:
+            running = sorted(self.scheduler.running)
+        return {"families_alive": len(self.store.families(alive=True)), "running": len(running),
+                # The families in a researcher's cycle now (`Scheduler.busy`): the House's daily hygiene spares them too.
+                "running_families": running,
                 "holding": self.scheduler.waiting(),
                 "totals": self.store.totals(), "spend_last_hour": spend, "usd_per_hour": round(sum(spend.values()), 4),
                 "median_cycle_seconds": seconds[len(seconds) // 2] if seconds else None, "cycles_last_hour": len(recent),

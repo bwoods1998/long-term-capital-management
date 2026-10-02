@@ -201,7 +201,7 @@ class PublicAlerts(unittest.TestCase):
             ops._alert(house, "info", "plain")
             ops.close()
         (level, text, payload), plain = house.alerts
-        self.assertEqual(text, "standing grant: capital $[private] does not cover the smallest real stake")
+        self.assertEqual(text, "standing grant: capital $<amount> does not cover the smallest real stake")
         self.assertIn("$87.20", payload["_detail"])
         self.assertEqual(plain, ("info", "plain", {}))
         from league.ops.scoreboard import public_problems
@@ -267,11 +267,11 @@ class HouseBox(unittest.TestCase):
     def test_the_config_pin_wins_over_the_environment(self):
         from league.ops.context import Context
 
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"SAILBOX_ID": "sb_forkedfrom01"}):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"SAILBOX_ID": "sb_0f0e0d0c-0a0b"}):
             pinned = Context("economics", root=Path(tmp), due_at=0.0, config={"backup": {"box_id": "sb_thehouse001"}}, settings_value={})
             self.assertEqual(pinned.house_box(), "sb_thehouse001")
             bare = Context("economics", root=Path(tmp), due_at=0.0, config={}, settings_value={})
-            self.assertEqual(bare.house_box(), "sb_forkedfrom01")
+            self.assertEqual(bare.house_box(), "sb_0f0e0d0c-0a0b")
 
 
 class Drills(unittest.TestCase):

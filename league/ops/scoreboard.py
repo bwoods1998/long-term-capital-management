@@ -50,11 +50,17 @@ def public_problems(text: str) -> list[str]:
     return [name for name, pattern in FORBIDDEN if pattern.search(text)]
 
 
+#: A rollback drill's release id starts so (`league.watchdog.DRILL_PREFIX`, `python -m league.watchdog drill-rollback`).
+DRILL_PREFIX = "drill-"
+
+
 def deploy_counts(base: str | Path, *, since: str = T0, day: str | None = None) -> dict[str, Any]:
     """Self-deploys (the updater's: a verdict row carrying the attested `sha`) promoted and rolled back since `since`,
-    and on `day`; every verdict counted apart."""
+    and on `day`; every verdict counted apart. A rollback drill's verdicts (its release a `DRILL_PREFIX` copy) are
+    drills, never owner deploys: the drill deploys through the watchdog with no attestation, and its `rolled_back`
+    is the drill passing."""
     out = {"self_promoted": 0, "self_rolled_back": 0, "self_promoted_today": 0, "self_rolled_back_today": 0,
-           "owner_promoted": 0, "owner_rolled_back": 0}
+           "owner_promoted": 0, "owner_rolled_back": 0, "drill_promoted": 0, "drill_rolled_back": 0}
     try:
         with (Path(base) / "deploys.jsonl").open(encoding="utf-8") as handle:
             for line in handle:
@@ -69,7 +75,8 @@ def deploy_counts(base: str | Path, *, since: str = T0, day: str | None = None) 
                 verdict = row.get("verdict")
                 if verdict not in ("promoted", "rolled_back"):
                     continue
-                who = "self" if row.get("sha") else "owner"
+                who = ("drill" if str(row.get("release") or "").startswith(DRILL_PREFIX)
+                       else "self" if row.get("sha") else "owner")
                 key = f"{who}_{'promoted' if verdict == 'promoted' else 'rolled_back'}"
                 out[key] += 1
                 if who == "self" and day and str(row.get("at") or "").startswith(day):
@@ -181,7 +188,9 @@ def build(*, day: str, release: str, economics: Mapping[str, Any] | None, deploy
               "## Releases", "",
               f"Self-deployed releases since T0: {deploys.get('self_promoted', 0)} ({deploys.get('self_promoted_today', 0)} today); "
               f"self-rollbacks: {deploys.get('self_rolled_back', 0)} ({deploys.get('self_rolled_back_today', 0)} today). "
-              f"Owner deploys: {deploys.get('owner_promoted', 0)} promoted, {deploys.get('owner_rolled_back', 0)} rolled back.", "",
+              f"Owner deploys: {deploys.get('owner_promoted', 0)} promoted, {deploys.get('owner_rolled_back', 0)} rolled back. "
+              f"Rollback drills: {deploys.get('drill_rolled_back', 0)} rolled back as intended, "
+              f"{deploys.get('drill_promoted', 0)} not caught.", "",
               "## The forward ladder", "", "| Entrants | In practice | Promoted by the ladder | BH family size (90 d) |",
               "|---:|---:|---:|---:|",
               f"| {_cell(ladder.get('entrants'))} | {_cell(ladder.get('in_practice'))} | {_cell(ladder.get('promoted'))} | "

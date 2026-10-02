@@ -6,7 +6,10 @@ packages are imported lazily by name and may be absent: a due job whose module i
 `preopen` (an hour before the open) and `economics` (ten minutes after the close), which follow the session itself.
 
 `grace` is how long after it is due a job may still START; past it, the occurrence is `missed` (a receipt row and a
-House warning). `cpu` and `wall` bound the child: `RLIMIT_CPU` and a kill after `wall` seconds of wall time.
+House warning). `cpu` and `wall` bound the child: `RLIMIT_CPU` and a kill after `wall` seconds of wall time. A run that
+fails is started again inside its grace (`store.retry_state`) unless `retry` is False: a job that must not be repeated
+after it may have done part of its work (the drills restart the House and roll a release back; the engineer opens a
+pull request).
 """
 from __future__ import annotations
 
@@ -36,6 +39,8 @@ class Job:
     in_pause: bool = False
     #: Spends Claude or Sail money: also skipped while the House has stopped buying work (`stopped_because`).
     paid: bool = False
+    #: May a failed run be started again inside its grace (`store.retry_state`)? Not for jobs whose repeat would act twice.
+    retry: bool = True
 
 
 JOBS: tuple[Job, ...] = (
@@ -62,13 +67,13 @@ JOBS: tuple[Job, ...] = (
     # Twice: 15:00Z runs the drills and launches the rollback drill last; 17:00Z checks its verdict (and runs any drill
     # the first could not reach). A drill done this month is never run again (`league/ops/drills.py`).
     Job("drills", "league.ops.drills", (S.monthly_first(5, 15, 0), S.monthly_first(5, 17, 0)), grace=6 * HOUR, cpu=1800, wall=3600, owner="WP1/WP3",
-        what="the monthly failure drills, each with a recovery check"),
+        what="the monthly failure drills, each with a recovery check", retry=False),
     Job("postmortem", "league.ops.postmortem", (S.weekly(5, 14, 0),), grace=6 * HOUR, cpu=900, wall=1800, owner="Phase 5",
         paid=True, what="the weekly post-mortem"),
     Job("agenda", "league.ops.agenda", (S.daily(3, 0),), grace=6 * HOUR, cpu=900, wall=1800, owner="Phase 2",
         paid=True, what="the strategist's daily agenda"),
     Job("engineer", "league.ops.engineer", (S.daily(4, 0),), grace=6 * HOUR, cpu=1800, wall=3600, owner="Phase 4",
-        paid=True, what="the engineer's daily harness change"),
+        paid=True, what="the engineer's daily harness change", retry=False),
 )
 
 
