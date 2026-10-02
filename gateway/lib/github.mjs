@@ -36,11 +36,33 @@ export const ROLES = {
   operator: { only: ['league/config.json'] },
   designer: { only: ['league/game.json'] },
   teacher: { under: ['league/playbook/'] },
-  // The engineer (LTCM v3, V3-A, D5): an isolated harness change in a lane's surface, anywhere but the protected paths
-  // (lib/protected.mjs), on an `engineer/<slug>-<hash>` branch, the only branches `POST /v1/github/merge` merges. The
-  // merge route checks the same list again against the pull request's whole diff.
-  engineer: { anywhere: true },
+  // The engineer (LTCM v3, V3-A, D5; GOAL §5 Phase 4): an isolated harness change inside a lane's surface
+  // (ENGINEER_SURFACE), never a protected path (lib/protected.mjs), on an `engineer/<slug>-<hash>` branch, the only
+  // branches `POST /v1/github/merge` merges. The merge route checks the same rule again against the pull request's
+  // whole diff.
+  engineer: { surface: true },
 };
+
+//: What the engineer may write: the union of the harness lanes' surfaces (`league/swarm/harness_lanes.py` LANES) less
+//: every protected path (the execution lane's league/live/ files and the data lane's scripts/data/ files are the
+//: owner's deploys). `only` is a whole path; `tests` is the lanes' NEW_TEST, a candidate's own test file, which may only
+//: be added, never edited (the merge route reads its status). test/merge.test.mjs reads LANES from the repository and
+//: fails while this list is wider than the lanes or misses an unprotected path of theirs. A new lane, or a wider one,
+//: is a change to harness_lanes.py and to this list, both owner deploys.
+export const ENGINEER_SURFACE = Object.freeze({
+  only: Object.freeze([
+    // research: the researcher's workflow, its preflight screens, its Claude path
+    'league/swarm/researcher.py', 'league/swarm/preflight.py', 'league/swarm/claude_research.py',
+    // memory: the architect's, the strategist's and the diagnostician's prompts and retrieval, the seeds
+    'league/swarm/architect.py', 'league/swarm/strategist.py', 'league/swarm/diagnostician.py', 'league/swarm/seeds.py',
+    // data: the Sail box client and the data job (the data builders under scripts/data/ are protected)
+    'league/sailbox.py', 'league/data_job.py',
+  ]),
+  tests: /^league\/tests\/test_harness_candidate_[a-z0-9_]{1,80}\.py$/,
+});
+
+/** Whether `path` is the engineer's own new test file (ENGINEER_SURFACE.tests), which may only be added. */
+export const engineerTest = path => typeof path === 'string' && ENGINEER_SURFACE.tests.test(path);
 
 //: The branch prefix of the engineer's pull requests (lib/merge.mjs merges only these).
 export const ENGINEER_PREFIX = 'engineer/';
@@ -92,9 +114,10 @@ export function pathRefusal(role, path, roles = ROLES) {
   if (segments.some(segment => /^\.git/i.test(segment))) return 'a path may not name git\'s own files';
   const rule = Object.hasOwn(roles, role) ? roles[role] : null;
   if (!rule) return 'the role is unknown';
-  if (rule.anywhere === true) {
+  if (rule.surface === true) {
     const why = protectedRefusal(path);
-    return why ? `no automated change may write this file: ${why}` : null;
+    if (why) return `no automated change may write this file: ${why}`;
+    return ENGINEER_SURFACE.only.includes(path) || engineerTest(path) ? null : `outside the ${role}'s lane surfaces`;
   }
   const allowed = (rule.only || []).includes(path) || (rule.under || []).some(prefix => path.startsWith(prefix));
   return allowed ? null : `outside what the ${role} may write`;
@@ -211,6 +234,12 @@ export function client({ repo, token, fetcher }) {
   };
   return { ask, need, get: async (step, method, path, body) => need(await ask(step, method, path, body), step) };
 }
+
+/**
+ * Whether GitHub's HTTP status on a write says the write was not made: a 4xx. A 5xx (or anything else that is not a
+ * success) may come after the write was made, so a cap's place taken for it stays taken (lib/merge.mjs, lib/desk.mjs).
+ */
+export const definiteNo = status => Number.isInteger(status) && status >= 400 && status < 500;
 
 export const sha = (value, step) => {
   if (typeof value !== 'string' || !/^[0-9a-f]{40,64}$/.test(value)) throw new Refusal(`GitHub's answer carried no sha (${step}).`);

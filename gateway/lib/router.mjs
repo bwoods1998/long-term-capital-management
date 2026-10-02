@@ -44,7 +44,9 @@
 // the gate at all.
 //
 // The GitHub routes move no money, so the kill switch does not stop them: a halted floor may still
-// propose its own repair. Until V3-A there was no merge route. Since V3-A (the owner's decision D5)
+// propose its own repair, and publish its desk page. The one exception is the merge, which lands
+// code the updater then deploys: while the switch is engaged it is refused (423, `kill_switch`).
+// Until V3-A there was no merge route. Since V3-A (the owner's decision D5)
 // one exists for the engineer's research-class pull requests alone: an `engineer/` branch, at an
 // exact head commit, on green `checks.yml` jobs and a recorded approve, touching no protected path
 // (lib/protected.mjs), at most two a New York day (lib/merge.mjs). Every other branch is still
@@ -906,7 +908,8 @@ async function recordReview(request, env, { gate, fetcher, now }) {
   if (review.error) return refusedWith(review);
   const target = await merge.reviewTarget({ ...account, number: review.pr, headSha: review.head_sha, fetcher });
   if (target.error) return refusedWith(target);
-  const recorded = await gate.reviewRecord({ pr: review.pr, sha: review.head_sha, verdict: review.verdict, reasons: review.reasons, at: now() });
+  const recorded = await gate.reviewRecord({ pr: review.pr, sha: review.head_sha, verdict: review.verdict, reasons: review.reasons,
+    opened_at: typeof target.pull?.created_at === 'string' ? target.pull.created_at : null, at: now() });
   if (!recorded.ok) return refusedWith(recorded);
   return json({ ok: true, pr: review.pr, head_sha: review.head_sha, verdict: recorded.verdict, at: recorded.at,
     ...(recorded.duplicate ? { duplicate: true } : {}) });
@@ -915,8 +918,9 @@ async function recordReview(request, env, { gate, fetcher, now }) {
 /**
  * Squash-merge one engineer pull request (V3-A, WP8; lib/merge.mjs). The Gate's checks first (the day's count, an
  * approve and no reject on the exact commit), then GitHub's (the pull request, its files, its CI), then one of the
- * day's MERGES_PER_DAY places, then the merge of exactly that commit. A place is given back only when GitHub answered
- * no; a merge nothing answered stays counted (`merged: "unknown"`).
+ * day's MERGES_PER_DAY places, taken in the step that checks the kill switch and the review again, then the merge of
+ * exactly that commit. A place is given back only when GitHub answered a definite no (a 4xx); a merge nothing answered,
+ * or answered with a 5xx, stays counted (`merged: "unknown"`).
  */
 async function mergePull(request, env, { gate, fetcher, now }) {
   const account = github.configured(env);

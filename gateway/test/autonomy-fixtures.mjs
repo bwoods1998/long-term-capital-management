@@ -14,8 +14,8 @@ const gitBlob = text => createHash('sha1').update(Buffer.concat([Buffer.from(`bl
 
 /** An open engineer pull request at HEAD, as GitHub's `GET /pulls/<n>` answers it. */
 export const enginePull = (extra = {}) => ({
-  number: 77, state: 'open', merged: false, draft: false, title: 'Faster agenda reads', changed_files: 2,
-  head: { ref: 'engineer/agenda-reads-1a2b3c4d', sha: HEAD, repo: { full_name: GITHUB_REPO } },
+  number: 77, state: 'open', merged: false, draft: false, title: 'Screen unrunnable programs before the Gym', changed_files: 2,
+  head: { ref: 'engineer/preflight-screen-1a2b3c4d', sha: HEAD, repo: { full_name: GITHUB_REPO } },
   base: { ref: 'main', repo: { full_name: GITHUB_REPO } },
   ...extra,
 });
@@ -32,7 +32,7 @@ export function fakeHub({ script = () => undefined } = {}) {
   const state = {
     calls,
     pulls: new Map([[77, enginePull()]]),
-    files: new Map([[77, [{ filename: 'league/ops/agenda.py', status: 'modified' }, { filename: 'league/tests/test_ops_agenda.py', status: 'added' }]]]),
+    files: new Map([[77, [{ filename: 'league/swarm/researcher.py', status: 'modified' }, { filename: 'league/tests/test_harness_candidate_agenda.py', status: 'added' }]]]),
     runs: [passedRun()],
     jobs: new Map([[9001, passedJobs()]]),
     contents: new Map(),       // path -> text on main

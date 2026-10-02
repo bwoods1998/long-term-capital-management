@@ -3,7 +3,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 
 import { route } from '../lib/router.mjs';
 import { createGate } from '../lib/gate.mjs';
@@ -27,56 +27,178 @@ const call = async (request, { gate, hub, at = NOW, settings = {} }) => {
 };
 const gateAt = () => createGate({ store: memoryStore(), env: env(), now: () => NOW });
 const approve = (gate, hub, pr = 77, sha = HEAD, at = NOW) =>
-  call(ask('POST', '/v1/github/review', { pr, head_sha: sha, verdict: 'approve', reasons: ['Isolated to the agenda reader; tests cover it.'] }), { gate, hub, at });
+  call(ask('POST', '/v1/github/review', { pr, head_sha: sha, verdict: 'approve', reasons: ['Isolated to the preflight screen; tests cover it.'] }), { gate, hub, at });
 const mergeIt = (gate, hub, pr = 77, sha = HEAD, at = NOW) => call(ask('POST', '/v1/github/merge', { pr, head_sha: sha }), { gate, hub, at });
 const writes = hub => hub.calls.filter(made => made.method !== 'GET');
 
 // --------------------------------------------------------------------------------------------- the protected paths
 
+const repoText = rel => readFileSync(new URL(`../../${rel}`, import.meta.url), 'utf8');
+const repoHas = rel => existsSync(new URL(`../../${rel}`, import.meta.url));
+//: The quoted strings of a Python tuple assignment `NAME... = (...)` in `source` (comments dropped).
+const pyTuple = (source, pattern) => {
+  const block = pattern.exec(source);
+  assert.ok(block, `${pattern} is declared`);
+  return [...block[1].replace(/#[^\n]*/g, '').matchAll(/"([^"]+)"/g)].map(match => match[1]);
+};
+//: A tree entry is held when a file inside it is refused; a file entry when it is.
+const held = entry => protectedRefusal(entry.endsWith('/') ? `${entry}x.py` : entry) !== null;
+
 test('the protected paths hold every entry of league/ci.py FORBIDDEN, WP1\'s protected jobs, and the evaluator\'s identity', () => {
-  const source = readFileSync(new URL('../../league/ci.py', import.meta.url), 'utf8');
-  const block = /FORBIDDEN: tuple\[str, \.\.\.\] = \(([\s\S]*?)\n\)/.exec(source);
-  assert.ok(block, 'league/ci.py declares FORBIDDEN');
-  const entries = [...block[1].replace(/#[^\n]*/g, '').matchAll(/"([^"]+)"/g)].map(match => match[1]);
+  const entries = pyTuple(repoText('league/ci.py'), /FORBIDDEN: tuple\[str, \.\.\.\] = \(([\s\S]*?)\n\)/);
   assert.ok(entries.length >= 30, `read ${entries.length} entries`);
   for (const entry of entries) assert.ok(MERGE_FORBIDDEN.includes(entry), `league/ci.py forbids ${entry}; the merge route must too`);
   for (const entry of ['league/ops/budget.py', 'league/ops/drills.py', 'league/ops/grant.py', 'league/live/', 'league/gym/',
     'league/swarm/gate.py', 'league/swarm/bands.py', 'league/swarm/evaluator.py', 'league/swarm/settings.py', 'league/swarm/store.py',
-    'ltcm/data/', 'scripts/data/', '.github/', 'gateway/', 'deploy/', 'league/config.json', 'league/constitution.py']) {
+    'ltcm/data/', 'scripts/data/', '.github/', 'gateway/', 'deploy/', 'league/config.json', 'league/constitution.py',
+    'league/swarm/policy.json', 'league/ops/']) {
     assert.ok(MERGE_FORBIDDEN.includes(entry), entry);
   }
   assert.ok(Object.isFrozen(MERGE_FORBIDDEN));
 });
 
-test('a protected path is refused by name, by tree and without case; a plain research-class path is not', () => {
+test('what the Gym bundle, the evaluator fingerprint and the decider\'s sealed runtime carry is protected', () => {
+  const sources = {
+    'league/gym/driver.py LEAGUE_FILES': pyTuple(repoText('league/gym/driver.py'), /\nLEAGUE_FILES = \(([\s\S]*?)\)/),
+    'league/swarm/harness_lanes.py LEAGUE_FILES': pyTuple(repoText('league/swarm/harness_lanes.py'), /\nLEAGUE_FILES = \(([\s\S]*?)\)/),
+    'league/practice_runner.py RUNTIME_FILES': pyTuple(repoText('league/practice_runner.py'), /\nRUNTIME_FILES = \(([\s\S]*?)\n\)/),
+    'league/practice_runner.py EXTRA_EVALUATOR_FILES': pyTuple(repoText('league/practice_runner.py'), /\nEXTRA_EVALUATOR_FILES = \(([\s\S]*?)\)/),
+    'league/live/decider.py runtime files': pyTuple(repoText('league/live/decider.py'), /\n\s+files = \(("league\/__init__\.py"[\s\S]*?)\)/),
+  };
+  for (const [source, files] of Object.entries(sources)) {
+    assert.ok(files.length >= 4, `${source}: read ${files.length}`);
+    for (const file of files) assert.ok(held(file), `${source} carries ${file}; no automated merge may change it`);
+  }
+});
+
+test('every module league/live/ and league/gym/ import from outside their trees is protected', () => {
+  // `from ..x.y import a, b`, `from .. import a`, `from ltcm.x import a`, `import ltcm.x`, at any indentation.
+  const importsOf = rel => {
+    const text = repoText(rel);
+    const pkg = rel.split('/').slice(0, -1);
+    const found = [];
+    for (const [, dots, module, names] of text.matchAll(/^[ \t]*from[ \t]+(\.*)([\w.]*)[ \t]+import[ \t]+(\([^)]*\)|[^\n]+)/gm)) {
+      const base = dots ? [...pkg.slice(0, pkg.length - (dots.length - 1)), ...(module ? module.split('.') : [])] : module.split('.');
+      found.push(base);
+      for (const name of names.replace(/[()]/g, '').split(',').map(part => part.trim().split(/\s+/)[0]).filter(Boolean)) found.push([...base, name]);
+    }
+    for (const [, module] of text.matchAll(/^[ \t]*import[ \t]+([\w.]+)/gm)) found.push(module.split('.'));
+    return found.filter(parts => ['league', 'ltcm'].includes(parts[0]));
+  };
+  // Each package on the way and the module itself, as files of the repository.
+  const filesOf = parts => parts.flatMap((_, i) => {
+    const at = parts.slice(0, i + 1).join('/');
+    return repoHas(`${at}/__init__.py`) ? [`${at}/__init__.py`] : repoHas(`${at}.py`) ? [`${at}.py`] : [];
+  });
+  const trees = ['league/live', 'league/gym'];
+  const modules = trees.flatMap(tree => readdirSync(new URL(`../../${tree}/`, import.meta.url)).filter(name => name.endsWith('.py')).map(name => `${tree}/${name}`));
+  assert.ok(modules.length >= 30, `read ${modules.length} modules`);
+  // The Sail client ships the Gym bundle and reads the results back; it is in neither the bundle nor the fingerprint,
+  // and it is the data lane's surface (league/swarm/harness_lanes.py), the one import the engineer may change.
+  const transport = ['league/sailbox.py'];
+  const outside = new Set();
+  for (const rel of modules) {
+    for (const file of importsOf(rel).flatMap(filesOf)) if (!trees.some(tree => file.startsWith(`${tree}/`))) outside.add(file);
+  }
+  for (const file of ['league/__init__.py', 'league/structure_core.py', 'ltcm/__init__.py', 'ltcm/performance.py', 'league/swarm/__init__.py']) {
+    assert.ok(outside.has(file), `the import reader finds ${file}`);
+  }
+  for (const file of outside) {
+    if (transport.includes(file)) continue;
+    assert.ok(held(file), `league/live/ or league/gym/ imports ${file}; no automated merge may change it`);
+  }
+});
+
+test('the harness loop\'s own protected paths are protected here, but the candidate\'s new test files', () => {
+  const source = repoText('league/swarm/harness_lanes.py');
+  const block = /\nPROTECTED: tuple\[tuple\[str, str\], \.\.\.\] = \(([\s\S]*?)\n\)/.exec(source);
+  assert.ok(block);
+  const patterns = [...block[1].replace(/#[^\n]*/g, '').matchAll(/\("([^"]+)", "[a-z]+"\)/g)].map(match => match[1]);
+  assert.ok(patterns.length >= 50, `read ${patterns.length} patterns`);
+  for (const pattern of patterns) {
+    if (pattern === 'league/tests/*') continue;  // the engineer's surface holds its own new tests (ENGINEER_SURFACE.tests)
+    const path = pattern.endsWith('/*') ? `${pattern.slice(0, -1)}x.py` : pattern;
+    assert.ok(!pattern.slice(0, -1).includes('*'), pattern);
+    assert.notEqual(protectedRefusal(path), null, `harness_lanes protects ${pattern}; so must the merge route`);
+    assert.notEqual(github.pathRefusal('engineer', path), null, pattern);
+  }
+});
+
+test('the engineer\'s surface is the harness lanes\' surfaces, less the protected paths, and no wider', () => {
+  const source = repoText('league/swarm/harness_lanes.py');
+  const newTest = /\nNEW_TEST = "([^"]+)"/.exec(source)[1];
+  assert.equal(newTest, 'league/tests/test_harness_candidate_*.py');
+  const lanes = [...source.matchAll(/\n\s+surface=\(([\s\S]*?)\),\n/g)].map(match =>
+    [...match[1].matchAll(/"([^"]+)"|NEW_TEST/g)].map(found => found[1] ?? newTest));
+  assert.equal(lanes.length, 4, 'the research, memory, data and execution lanes');
+  const surface = new Set(lanes.flat());
+  for (const path of github.ENGINEER_SURFACE.only) {
+    assert.ok(surface.has(path), `${path} is in no lane's surface`);
+    assert.equal(protectedRefusal(path), null, path);
+    assert.equal(github.pathRefusal('engineer', path), null, path);
+    assert.ok(repoHas(path), `${path} exists`);
+  }
+  for (const path of surface) {
+    if (path === newTest) continue;
+    assert.ok(github.ENGINEER_SURFACE.only.includes(path) || protectedRefusal(path) !== null, `the lanes' ${path} is neither in the engineer's surface nor protected`);
+  }
+  assert.ok(Object.isFrozen(github.ENGINEER_SURFACE) && Object.isFrozen(github.ENGINEER_SURFACE.only));
+});
+
+test('a protected path is refused by name, by tree, by a file that would shadow it, and without case; a plain path is not', () => {
   for (const path of ['league/constitution.py', 'League/Constitution.PY', 'league/live/step.py', 'league/gym/engine.py',
     'league/swarm/gate.py', 'league/swarm/settings.py', 'ltcm/data/us_equity_session.py', 'scripts/data/storelib.py',
     '.github/workflows/checks.yml', 'gateway/lib/merge.mjs', 'deploy/README.md', 'league/config.json', 'league/ops/grant.py',
-    'league/updater.py', 'league/ci.py', 'league/live_trading.py']) {
+    'league/updater.py', 'league/ci.py', 'league/live_trading.py', 'league/structure_core.py', 'league/__init__.py',
+    'league/structures.py', 'ltcm/__init__.py', 'ltcm/performance.py', 'league/swarm/policy.json', 'league/swarm/guard.py',
+    'league/swarm/funding.py', 'league/ops/economics.py', 'league/ops/__init__.py', 'league/ops/registry.py',
+    'league/swarm/harness_lanes.py', 'league/swarm/harness_judges/research.py', 'league/house.py', 'league/swarm/__init__.py']) {
     assert.match(protectedRefusal(path), /^protected \(/, path);
+  }
+  // A package, an extension module or bytecode of a protected module's name shadows it; so does a module of a
+  // protected namespace package's name.
+  for (const path of ['league/constitution/__init__.py', 'League/Constitution/__init__.py', 'league/swarm/gate/__init__.py',
+    'league/updater/__init__.py', 'league/ci/__init__.py', 'league/structure_core/__init__.py',
+    'league/constitution.cpython-311-x86_64-linux-gnu.so', 'league/swarm/bands.pyc', 'scripts/data.py', 'ltcm/data.py']) {
+    assert.match(protectedRefusal(path), /^protected \(.*: a file that would shadow it\)$/, path);
+  }
+  for (const path of ['league/__pycache__/constitution.cpython-311.pyc', 'league/swarm/researcher.so', 'hook.pth',
+    'league/sitecustomize.py', 'usercustomize.py', 'league/swarm/__pycache__/x.py', 'league/swarm/researcher.cpython-311.PYD']) {
+    assert.equal(protectedRefusal(path), 'a file Python loads instead of source', path);
   }
   for (const path of ['/league/house.py', 'league/../league/ci.py', 'league//house.py', 'league/./house.py', 'league\\ci.py',
     'league/house.py\n', '', null, 7, 'x'.repeat(401)]) {
     assert.equal(protectedRefusal(path), 'not a plain repository path', JSON.stringify(path));
   }
   for (const path of ['.gitattributes', 'league/.gitignore', '.gitmodules']) assert.equal(protectedRefusal(path), 'git\'s own files');
-  for (const path of ['league/house.py', 'league/ops/agenda.py', 'league/ops/runner.py', 'league/swarm/models.py',
-    'league/swarm/settings_view.py', 'league/livery.py', 'docs/runs/desk/2026-10-05.md', 'league/tests/test_ops_agenda.py']) {
+  for (const path of ['league/swarm/researcher.py', 'league/sailbox.py', 'league/swarm/settings_view.py', 'league/livery.py',
+    'league/structures_view.py', 'docs/runs/desk/2026-10-05.md', 'league/tests/test_ops_agenda.py', 'league/gymnasium.py']) {
     assert.equal(protectedRefusal(path), null, path);
   }
 });
 
-test('the engineer opens engineer/ branches anywhere but the protected paths, through the proposal route', () => {
-  assert.equal(github.pathRefusal('engineer', 'league/ops/agenda.py'), null);
-  assert.equal(github.pathRefusal('engineer', 'league/swarm/models.py'), null);
+test('the engineer opens engineer/ branches inside its lanes\' surfaces only, through the proposal route', () => {
+  for (const path of ['league/swarm/researcher.py', 'league/swarm/preflight.py', 'league/swarm/architect.py', 'league/sailbox.py',
+    'league/tests/test_harness_candidate_screen.py']) {
+    assert.equal(github.pathRefusal('engineer', path), null, path);
+  }
+  for (const path of ['league/swarm/hook.py', 'league/swarm/pool.py', 'league/tests/test_swarm_researcher.py', 'docs/runs/desk/2026-10-05.md',
+    'league/tests/test_harness_candidate_x/evil.py', 'league/tests/test_harness_candidate_.py', 'league/tests/test_harness_candidate_x.pyc',
+    'League/Swarm/Researcher.py']) {
+    assert.match(github.pathRefusal('engineer', path), /outside the engineer's lane surfaces|no automated change may write this file/, path);
+  }
   assert.match(github.pathRefusal('engineer', 'league/swarm/bands.py'), /no automated change may write this file: protected/);
   assert.match(github.pathRefusal('engineer', 'league/ops/budget.py'), /protected \(league\/ops\/budget\.py\)/);
+  assert.match(github.pathRefusal('engineer', 'league/ops/agenda.py'), /protected \(league\/ops\/\)/);
+  assert.match(github.pathRefusal('engineer', 'league/structure_core.py'), /protected \(league\/structure_core\.py\)/);
+  assert.match(github.pathRefusal('engineer', 'league/swarm/gate/__init__.py'), /shadow/);
   assert.match(github.pathRefusal('engineer', 'league/ledger.py'), /no role may write this file/);
-  const admitted = github.admit({ role: 'engineer', slug: 'agenda-reads', title: 'Faster agenda reads', files: [{ path: 'league/ops/agenda.py', content: 'x = 1\n' }] });
-  assert.match(admitted.branch, /^engineer\/agenda-reads-[0-9a-f]{8}$/);
+  const admitted = github.admit({ role: 'engineer', slug: 'preflight-screen', title: 'Screen unrunnable programs', files: [{ path: 'league/swarm/preflight.py', content: 'x = 1\n' }] });
+  assert.match(admitted.branch, /^engineer\/preflight-screen-[0-9a-f]{8}$/);
   assert.equal(github.admit({ role: 'architect', slug: 'x1', title: 't', files: [{ path: 'league/strategies/x.py', content: '' }] }).branch.slice(0, 17), 'merton/architect/');
-  const refused = github.admit({ role: 'engineer', slug: 'live-tweak', title: 't', files: [{ path: 'league/live/step.py', content: '' }] });
-  assert.equal(refused.status, 403);
+  for (const path of ['league/live/step.py', 'league/swarm/models.py', 'league/house.py']) {
+    assert.equal(github.admit({ role: 'engineer', slug: 'tweak-x', title: 't', files: [{ path, content: '' }] }).status, 403, path);
+  }
 });
 
 test('a review and a merge are read for their shape before anything is asked', () => {
@@ -112,7 +234,7 @@ test('an approved engineer pull request with green checks merges by squash at ex
   assert.equal(put.key, 'PUT /pulls/77/merge');
   assert.equal(put.body.sha, HEAD, 'GitHub is told the exact commit');
   assert.equal(put.body.merge_method, 'squash');
-  assert.equal(put.body.commit_title, 'Faster agenda reads (#77)');
+  assert.equal(put.body.commit_title, 'Screen unrunnable programs before the Gym (#77)');
   assert.match(put.body.commit_message, /checks\.yml run 9001 passed gateway, tests \(3\.11\), tests \(3\.14\) on a{40} and the automated review approved/);
   assert.equal(put.headers.Authorization, `Bearer ${GITHUB_TOKEN}`);
   assert.equal(JSON.stringify(merged.body).includes(GITHUB_TOKEN), false);
@@ -193,15 +315,22 @@ test('a pull request touching any protected path, by its name or its name before
     { filename: 'league/constitution.py', status: 'modified' },
     { filename: 'league/live/step.py', status: 'removed' },
     { filename: 'League/Swarm/Bands.py', status: 'modified' },
-    { filename: 'league/ops/agenda_v2.py', previous_filename: 'league/ops/budget.py', status: 'renamed' },
+    { filename: 'league/swarm/preflight.py', previous_filename: 'league/ops/budget.py', status: 'renamed' },
     { filename: '.github/workflows/checks.yml', status: 'modified' },
     { filename: 'gateway/lib/merge.mjs', status: 'modified' },
     { filename: 'league/config.json', status: 'modified' },
     { filename: '.gitattributes', status: 'added' },
     { filename: null, status: 'added' },
+    { filename: 'league/structure_core.py', status: 'modified' },
+    { filename: 'league/__init__.py', status: 'modified' },
+    { filename: 'ltcm/performance.py', status: 'modified' },
+    { filename: 'league/swarm/policy.json', status: 'added' },
+    { filename: 'league/swarm/gate/__init__.py', status: 'added' },
+    { filename: 'league/constitution/__init__.py', status: 'added' },
+    { filename: 'league/swarm/researcher.py', previous_filename: 'league/swarm/guard.py', status: 'renamed' },
   ]) {
     const hub = fakeHub();
-    hub.files.set(77, [{ filename: 'league/ops/agenda.py', status: 'modified' }, file]);
+    hub.files.set(77, [{ filename: 'league/swarm/researcher.py', status: 'modified' }, file]);
     const gate = gateAt();
     await approve(gate, hub);
     const refused = await mergeIt(gate, hub);
@@ -211,9 +340,31 @@ test('a pull request touching any protected path, by its name or its name before
   }
 });
 
+test('a pull request changing anything outside the engineer\'s lane surfaces, or an existing test, is never merged', async () => {
+  for (const file of [
+    { filename: 'league/swarm/hook.py', status: 'modified' },
+    { filename: 'league/swarm/pool.py', status: 'modified' },
+    { filename: 'league/tests/test_swarm_researcher.py', status: 'modified' },
+    { filename: 'league/tests/test_harness_candidate_agenda.py', status: 'modified' },
+    { filename: 'league/tests/test_harness_candidate_agenda.py', status: 'removed' },
+    { filename: 'league/tests/test_harness_candidate_new.py', previous_filename: 'league/tests/test_harness_candidate_old.py', status: 'renamed' },
+    { filename: 'league/swarm/researcher.py', previous_filename: 'league/swarm/hook.py', status: 'renamed' },
+    { filename: 'README.md', status: 'modified' },
+  ]) {
+    const hub = fakeHub();
+    hub.files.set(77, [{ filename: 'league/swarm/researcher.py', status: 'modified' }, file]);
+    const gate = gateAt();
+    await approve(gate, hub);
+    const refused = await mergeIt(gate, hub);
+    assert.equal(refused.response.status, 403, JSON.stringify(file));
+    assert.equal(refused.body.refused, 'outside_surface', JSON.stringify(file));
+    assert.equal(writes(hub).length, 0);
+  }
+});
+
 test('the changed files are read whole, page by page, or the merge is refused', async () => {
   // 230 files over three pages, none protected: read whole, merged.
-  const many = Array.from({ length: 230 }, (_, n) => ({ filename: `league/ops/lane_${n}.py`, status: 'added' }));
+  const many = Array.from({ length: 230 }, (_, n) => ({ filename: `league/tests/test_harness_candidate_lane_${n}.py`, status: 'added' }));
   let hub = fakeHub();
   hub.files.set(77, many);
   hub.pulls.set(77, enginePull({ changed_files: 230 }));
@@ -282,7 +433,7 @@ test('two merges a New York day, then 429 before GitHub hears of it; the next Ne
   for (const [n, sha] of shas.entries()) {
     const number = 80 + n;
     hub.pulls.set(number, enginePull({ number, head: { ...enginePull().head, sha } }));
-    hub.files.set(number, [{ filename: 'league/ops/agenda.py', status: 'modified' }]);
+    hub.files.set(number, [{ filename: 'league/swarm/researcher.py', status: 'modified' }]);
     hub.pulls.get(number).changed_files = 1;
     hub.runs.push(passedRun(sha, { id: 9100 + n }));
     hub.jobs.set(9100 + n, passedJobs());
@@ -325,6 +476,96 @@ test('a merge GitHub refused gives its place back; a merge nothing answered keep
   assert.equal(lost.body.refused, 'no_answer');
   assert.equal(gate.status(NOW).autonomy.merges.count, 1);
   assert.equal(gate.status(NOW).autonomy.merges.recent[0].outcome, 'unknown');
+});
+
+test('a 5xx on the merge is no answer: the place stays taken, so a third merge cannot follow on the same day', async () => {
+  const hub = fakeHub({ script: key => (key === 'PUT /pulls/77/merge' ? new Response(JSON.stringify({ message: 'Bad Gateway' }), { status: 502 }) : undefined) });
+  const gate = gateAt();
+  await approve(gate, hub);
+  const lost = await mergeIt(gate, hub);
+  assert.equal(lost.response.status, 502);
+  assert.equal(lost.body.merged, 'unknown');
+  assert.equal(lost.body.refused, 'no_answer');
+  assert.equal(gate.status(NOW).autonomy.merges.count, 1, 'GitHub\'s edge may have answered after the merge was made');
+  assert.equal(gate.status(NOW).autonomy.merges.recent[0].outcome, 'unknown');
+  // Another pull request takes the second place, and a third is refused before GitHub hears of it.
+  for (const [number, sha] of [[78, '1'.repeat(40)], [79, '2'.repeat(40)]]) {
+    hub.pulls.set(number, enginePull({ number, head: { ...enginePull().head, sha } }));
+    hub.files.set(number, [{ filename: 'league/swarm/researcher.py', status: 'modified' }]);
+    hub.pulls.get(number).changed_files = 1;
+    hub.runs.push(passedRun(sha, { id: 9000 + number }));
+    hub.jobs.set(9000 + number, passedJobs());
+    await approve(gate, hub, number, sha);
+  }
+  assert.equal((await mergeIt(gate, hub, 78, '1'.repeat(40))).response.status, 200);
+  assert.equal((await mergeIt(gate, hub, 79, '2'.repeat(40))).body.cap, 'merge_day');
+  // Each 4xx is GitHub's no, and gives the place back.
+  for (const status of [403, 404, 405, 409, 422]) {
+    const refusing = fakeHub({ script: key => (key === 'PUT /pulls/77/merge' ? new Response(JSON.stringify({ message: 'no' }), { status }) : undefined) });
+    const fresh = gateAt();
+    await approve(fresh, refusing);
+    const answer = await mergeIt(fresh, refusing);
+    assert.equal(answer.body.merged, false, String(status));
+    assert.equal(answer.body.refused, 'github', String(status));
+    assert.equal(fresh.status(NOW).autonomy.merges.count, 0, String(status));
+  }
+});
+
+test('while the kill switch is engaged no merge is made; the docs and review routes still answer', async () => {
+  const hub = fakeHub();
+  const gate = gateAt();
+  await approve(gate, hub);
+  gate.setKill(true, NOW);
+  const halted = await mergeIt(gate, hub);
+  assert.equal(halted.response.status, 423);
+  assert.equal(halted.body.cap, 'kill_switch');
+  assert.equal(writes(hub).length, 0);
+  assert.equal(gate.status(NOW).autonomy.merges.count, 0);
+  const page = await call(ask('POST', '/v1/github/docs', { path: 'docs/runs/desk/2026-10-05.md', content: '# Desk\n' }), { gate, hub });
+  assert.equal(page.response.status, 200, JSON.stringify(page.body));
+  gate.setKill(false, NOW);
+  assert.equal((await mergeIt(gate, hub)).response.status, 200);
+});
+
+test('a reject recorded while the merge reads GitHub stops it in the step that takes the day\'s place', async () => {
+  let gate;
+  const hub = fakeHub({ script: key => {
+    if (key.startsWith('GET /actions/runs/9001/jobs')) gate.reviewRecord({ pr: 77, sha: HEAD, verdict: 'reject', reasons: ['Found a leak on a second read.'] });
+    return undefined;
+  } });
+  gate = gateAt();
+  await approve(gate, hub);
+  const refused = await mergeIt(gate, hub);
+  assert.equal(refused.response.status, 409);
+  assert.equal(refused.body.refused, 'review_rejected');
+  assert.equal(writes(hub).length, 0);
+  assert.equal(gate.status(NOW).autonomy.merges.count, 0);
+});
+
+test('a reject outlives the verdict list; once one is forgotten, no approve it could have been about counts', async () => {
+  const gate = gateAt();
+  const hub = fakeHub();
+  hub.pulls.set(77, enginePull({ created_at: '2026-10-01T12:00:00Z' }));
+  // Approved, then rejected on a second look; then 250 approves of other commits push both out of the verdict list.
+  gate.reviewRecord({ pr: 77, sha: HEAD, verdict: 'approve', reasons: ['x'], at: NOW - 3000 });
+  gate.reviewRecord({ pr: 77, sha: HEAD, verdict: 'reject', reasons: ['x'], at: NOW - 2000 });
+  for (let n = 0; n < 250; n += 1) gate.reviewRecord({ pr: 1000 + n, sha: n.toString(16).padStart(40, '0'), verdict: 'approve', reasons: ['x'], at: NOW - 1000 });
+  assert.equal(gate.reviewFor({ pr: 77, sha: HEAD }).verdict, 'reject');
+  assert.equal((await approve(gate, hub)).body.refused, 'review_rejected');
+  assert.equal((await mergeIt(gate, hub)).body.refused, 'review_rejected');
+  // 2,000 later rejects push it out of the rejects kept: the approve before it no longer counts, and a new approve of a
+  // pull request opened before the forgotten reject is refused.
+  for (let n = 0; n < 2000; n += 1) gate.reviewRecord({ pr: 5000 + n, sha: n.toString(16).padStart(40, 'f'), verdict: 'reject', reasons: ['x'], at: NOW - 500 });
+  assert.deepEqual(gate.reviewFor({ pr: 77, sha: HEAD }), { verdict: null });
+  const late = await approve(gate, hub);
+  assert.equal(late.response.status, 409);
+  assert.equal(late.body.refused, 'review_forgotten');
+  assert.equal((await mergeIt(gate, hub)).body.refused, 'review_missing');
+  assert.equal(writes(hub).length, 0);
+  // A pull request opened after every forgotten reject is reviewed and merged as before.
+  hub.pulls.set(77, enginePull({ created_at: '2026-10-05T15:59:59Z' }));
+  assert.equal((await approve(gate, hub)).response.status, 200);
+  assert.equal((await mergeIt(gate, hub)).response.status, 200);
 });
 
 test('the merge and review routes are POST behind the runtime token, and need GitHub configured', async () => {

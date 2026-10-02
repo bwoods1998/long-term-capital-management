@@ -159,6 +159,24 @@ test('GitHub\'s no gives the place back; no answer keeps it; an unreadable main 
   assert.equal(gate.status(NOW).autonomy.docs.commits, 1);
 });
 
+test('a 5xx on the commit is no answer: GitHub\'s edge may say so after the commit was made, so the place stays taken', async () => {
+  const path = 'docs/runs/desk/2026-10-05.md';
+  for (const status of [500, 502, 503, 504]) {
+    const gate = gateAt();
+    const hub = fakeHub({ script: key => (key.startsWith('PUT ') ? new Response(JSON.stringify({ message: 'Server Error' }), { status }) : undefined) });
+    const lost = await call(post({ path, content: PAGE }), { gate, hub });
+    assert.equal(lost.response.status, 502, String(status));
+    assert.equal(lost.body.refused, 'no_answer', String(status));
+    assert.equal(gate.status(NOW).autonomy.docs.commits, 1, `${status}: it may have committed`);
+    assert.equal(gate.status(NOW).autonomy.docs.recent[0].outcome, 'unknown');
+  }
+  // A 4xx is GitHub's no, and gives the place back (422: the blob moved meanwhile).
+  const gate = gateAt();
+  const stale = fakeHub({ script: key => (key.startsWith('PUT ') ? new Response(JSON.stringify({ message: 'sha mismatch' }), { status: 422 }) : undefined) });
+  assert.equal((await call(post({ path, content: PAGE }), { gate, hub: stale })).body.refused, 'github');
+  assert.equal(gate.status(NOW).autonomy.docs.commits, 0);
+});
+
 test('the docs route is POST behind the runtime token, refuses a body it cannot read, and needs GitHub configured', async () => {
   const hub = fakeHub();
   const gate = gateAt();

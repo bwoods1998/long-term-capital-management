@@ -13,13 +13,15 @@
 //    and `tests (3.14)` each `success`;
 //  - an `approve` verdict is recorded for that exact commit and no `reject` is (a rejected commit stays rejected: a
 //    revision is a new commit, reviewed again);
-//  - no file it changes, adds, removes or renames (either name) is protected (lib/protected.mjs), read from GitHub's own
-//    list of the pull request's files, whole (a list that cannot be read whole refuses the merge);
-//  - fewer than MERGES_PER_DAY merges were made today, New York's day.
+//  - every file it changes, adds, removes or renames (either name) lies inside the engineer's lane surfaces
+//    (`github.ENGINEER_SURFACE`; a candidate's own test file only added) and none is protected (lib/protected.mjs),
+//    read from GitHub's own list of the pull request's files, whole (a list that cannot be read whole refuses the merge);
+//  - fewer than MERGES_PER_DAY merges were made today, New York's day, and the kill switch is not engaged (both
+//    checked again, with the review, in the one step that takes the day's place: `Gate.mergeReserve`).
 //
 // Every refusal names its rule in `refused`. Nothing here approves on GitHub, pushes, re-runs CI or closes anything.
 
-import { client, Refusal, refused as refusal, sha as needSha, ENGINEER_PREFIX, BASE } from './github.mjs';
+import { client, Refusal, refused as refusal, sha as needSha, ENGINEER_PREFIX, BASE, pathRefusal, engineerTest, definiteNo } from './github.mjs';
 import { protectedRefusal } from './protected.mjs';
 
 //: The workflow whose run on the exact head commit must have succeeded, and the jobs it must have run and passed.
@@ -120,9 +122,17 @@ async function vetFiles(github, pull, number) {
   }
   const names = [];
   for (const file of files) {
-    for (const name of [file?.filename, ...(file?.previous_filename !== undefined ? [file.previous_filename] : [])]) {
+    const renamed = file?.previous_filename !== undefined;
+    for (const name of [file?.filename, ...(renamed ? [file.previous_filename] : [])]) {
+      const shown = String(name).slice(0, 200);
       const why = protectedRefusal(name);
-      if (why) throw new Refusal(`The pull request changes ${String(name).slice(0, 200)}: ${why}.`, 403, 'protected_path');
+      if (why) throw new Refusal(`The pull request changes ${shown}: ${why}.`, 403, 'protected_path');
+      const outside = pathRefusal('engineer', name);
+      if (outside) throw new Refusal(`The pull request changes ${shown}: ${outside}.`, 403, 'outside_surface');
+      // A candidate's own test file is added, never edited, removed or renamed: the fixed tests stay fixed.
+      if (engineerTest(name) && (renamed || file.status !== 'added')) {
+        throw new Refusal(`The pull request changes the existing test ${shown}: a candidate may only add its own.`, 403, 'outside_surface');
+      }
       names.push(name);
     }
   }
@@ -192,8 +202,10 @@ export const mergeMessage = ({ headSha, ci }) =>
 
 /**
  * Squash-merge `number` at exactly `headSha` (GitHub refuses with 409 when the head moved). `{ merged: true, sha }`,
- * `{ merged: false, error, status, refused }` when GitHub answered no, or `{ merged: null, error, status }` when nothing
- * answered: the merge may have been made, so the day's place stays taken.
+ * `{ merged: false, error, status, refused }` when GitHub answered a definite no (a 4xx: 405 not mergeable, 409 the head
+ * moved, 422, 403, 404, 429), or `{ merged: null, error, status, refused }` when nothing answered or the answer was not
+ * one (a 5xx, which GitHub's edge can return after the merge was made, or anything else that is neither a merge nor a
+ * 4xx): the merge may have been made, so the day's place stays taken.
  */
 export async function squashMerge({ repo, token, number, headSha, title, ci, fetcher = fetch }) {
   const github = client({ repo, token, fetcher });
@@ -213,12 +225,13 @@ export async function squashMerge({ repo, token, number, headSha, title, ci, fet
     }
   }
   // GitHub answered, and the answer was not a merge: 405 (not mergeable) and 409 (the head moved) are the caller's to
-  // look at again; anything else is GitHub's.
+  // look at again; any other 4xx is GitHub's no; anything else (a 5xx, a 2xx that is no merge) is no answer at all.
   let error;
   try {
     github.need({ ...reply, ok: false }, 'merge');
   } catch (caught) {
     error = refusal(caught, token).error;
   }
+  if (!definiteNo(reply.status)) return { merged: null, error, status: 502, refused: 'no_answer' };
   return { merged: false, error, status: reply.status === 405 || reply.status === 409 ? 409 : 502, refused: 'github' };
 }
