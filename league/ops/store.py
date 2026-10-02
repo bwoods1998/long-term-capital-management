@@ -3,8 +3,11 @@
     runs(id, job, due_at, started_at, finished_at, status, summary_json, error, pid, attempts)
 
 `status` is `ok`, `failed`, `missed` or `skipped` once the occurrence is settled, and `running` while its child runs.
-(job, due_at) is unique: an occurrence is run at most once, except that a run the House's own restart interrupted
-(`error` starting `INTERRUPTED`) is started again while it is still inside its grace, at most `MAX_ATTEMPTS` times.
+(job, due_at) is unique: one row per occurrence, started at most `MAX_ATTEMPTS` times (`retry_state`). A run the
+House's own restart interrupted (`error` starting `INTERRUPTED`) is started again at once while its grace allows (past
+it, `missed`). A run that failed on its own (a gateway or Sail blip, a raising job) is started again `RETRY_AFTER`
+seconds after it ended while it can still START inside its grace (past it, it stays `failed`). A job that says it may
+not be repeated (`Job.retry` False) is never started twice, even after an interruption.
 Only the House process writes here (the runner, on the tick); a job's child writes its result to a file the runner
 reads. `kv` keeps the runner's small state (`installed_at`: the first time this House ran jobs, so an older
 occurrence is never reported missed).
@@ -18,11 +21,16 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from . import guard
+from .schedule import epoch
 
 FILE = "ops.sqlite"
 STATUSES = ("ok", "failed", "missed", "skipped")
 INTERRUPTED = "interrupted"
-MAX_ATTEMPTS = 2
+#: Three, not two: an updater release launched as its session hold lifts (20:05Z) promotes about when `economics` starts
+#: (close + 10) and a rollback inside its ten-minute watch restarts the House again: two interruptions of one run.
+MAX_ATTEMPTS = 3
+#: How long after a failed run ends before it is started again (a blip passes; a broken job fails fewer times a day).
+RETRY_AFTER = 15 * 60
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
@@ -43,9 +51,13 @@ class OpsStore:
         os.chmod(self.path, 0o600)
         self.db = sqlite3.connect(str(self.path), timeout=2.0, isolation_level=None, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
-        self.db.execute("PRAGMA journal_mode=WAL")
-        self.db.execute("PRAGMA synchronous=NORMAL")
-        self.db.executescript(SCHEMA)
+        try:
+            self.db.execute("PRAGMA journal_mode=WAL")
+            self.db.execute("PRAGMA synchronous=NORMAL")
+            self.db.executescript(SCHEMA)
+        except sqlite3.Error:
+            self.db.close()  # a torn file or a held lock: the caller decides (`league.ops.attach`)
+            raise
 
     def close(self) -> None:
         self.db.close()
@@ -128,6 +140,21 @@ def retryable(row: Mapping[str, Any]) -> bool:
     """A run the House's restart interrupted, with an attempt left."""
     return (row.get("status") == "failed" and str(row.get("error") or "").startswith(INTERRUPTED)
             and int(row.get("attempts") or 0) < MAX_ATTEMPTS)
+
+
+def retry_state(row: Mapping[str, Any], *, due_at: float, grace: float, now: float, retry: bool = True) -> str:
+    """What an occurrence's row asks of the runner at `now`: `settled` (nothing more), `retry` (start it again; an
+    interrupted run past its grace becomes `missed`) or `wait` (a failed run inside its grace, before `RETRY_AFTER`).
+    A job that may not be repeated (`retry=False`) is settled by its first run, interrupted or not."""
+    if not retry:
+        return "settled"
+    if retryable(row):
+        return "retry"
+    if (row.get("status") != "failed" or str(row.get("error") or "").startswith(INTERRUPTED)
+            or int(row.get("attempts") or 0) >= MAX_ATTEMPTS or now > due_at + grace):
+        return "settled"
+    ended = epoch(row.get("finished_at"))
+    return "wait" if ended is not None and now < ended + RETRY_AFTER else "retry"
 
 
 def read_runs(root: str | Path, start: str, end: str) -> list[dict[str, Any]]:

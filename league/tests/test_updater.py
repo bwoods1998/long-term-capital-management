@@ -936,7 +936,7 @@ class TheNightlyDaemonStopsFirst(unittest.TestCase):
     def updater(self, **kw):
         return Updater(self.base, head=lambda: self.sha, fetch=lambda sha: self.main,
                        launch=lambda source, rid, record=None: self.launched.append((source, rid)),
-                       clock=self.clock, judge=lambda incoming, running: [], attest=self.attest,
+                       clock=self.clock, judge=kw.pop("judge", lambda incoming, running: []), attest=self.attest,
                        workflows_pin=workflows_digest(tarball(tree())), in_flight=lambda: self.flight, **kw)
 
     def hold_lock(self, **beat):
@@ -1023,7 +1023,7 @@ class TheNightlyDaemonStopsFirst(unittest.TestCase):
         out = updater.check()
         self.assertEqual((out["action"], self.stop()), ("stopping_nightly", None))
         self.assertIn("running a job (2026-09-25)", out["reasons"][0])
-        for beat in ({"state": "waiting", "busy": False, "next_wake": iso(self.clock() + 300)},  # its next job is five minutes off
+        for beat in ({"state": "waiting", "busy": False, "next_wake": iso(self.clock() + 90)},   # its next job is due within a poll or two
                      {"state": "complete", "busy": False},                                     # a catch-up may follow
                      {"at": self.clock() - 200}):                                              # a heartbeat that says nothing now
             self.clock.advance(20)
@@ -1176,6 +1176,99 @@ class TheNightlyDaemonStopsFirst(unittest.TestCase):
         self.assertIsNone(deploy_in_flight(self.base, argv_of=lambda pid: None))
 
 
+    # ------------------------------------------------------------ review of V3-A (Oct 2)
+    def test_a_night_that_keeps_failing_does_not_keep_releases_out(self):
+        """A failing night is idle in `retry`, its next try at most 300 s off (`Controller.retry_seconds`), for
+        as long as it fails: with a ten-minute margin no head ever launched."""
+        self.hold_lock(state="retry", next_wake=None, retry_at=self.clock() + 300, error="RuntimeError: the data box is down")
+        updater = self.updater()
+        out = updater.check()
+        self.assertEqual((out["action"], self.stop()), ("stopping_nightly", f"updater:{out['release']}"))
+        self.release_lock()  # the supervisor TERMs it at the stop; it was sleeping, so nothing was cut short
+        self.clock.advance(20)
+        self.assertEqual(updater.check()["action"], "deploying")
+
+    def test_a_daemon_that_keeps_every_release_out_for_hours_is_stopped_anyway_with_a_warning(self):
+        from types import SimpleNamespace
+
+        from league.house import House
+
+        self.hold_lock(state="running", busy=True, day="2026-09-25")
+        updater = self.updater()
+        for _ in range(31):  # ten minutes of waiting, then held on `nightly`
+            out = updater.check()
+            self.clock.advance(20)
+            self.heartbeat(state="running", busy=True, day="2026-09-25")
+        self.assertEqual((out["action"], out["holds"], self.stop()), ("held", ["nightly"], None))
+        self.clock.advance(6 * 3600)
+        self.heartbeat(state="running", busy=True, day="2026-09-25")
+        alerts = []
+        house = SimpleNamespace(updater=updater, ledger=SimpleNamespace(append=lambda kind, payload: None),
+                                alert=lambda level, text, **payload: alerts.append((level, text)), _state={},
+                                _state_lock=__import__("threading").Lock(), clock=self.clock)
+        House._update(house)
+        self.assertEqual(self.stop(), f"updater:{out['release']}")  # written over a busy daemon
+        self.release_lock()
+        self.clock.advance(20)
+        House._update(house)
+        self.assertEqual([rid for _, rid in self.launched], [out["release"]])
+        [(level, text)] = alerts
+        self.assertEqual(level, "warning")
+        self.assertIn("kept every updater release out since", text)
+        self.assertIn("running a job (2026-09-25)", text)
+
+    def test_a_held_head_is_judged_once_and_not_at_all_beside_a_deploy(self):
+        judged = []
+        self.flight = "a watchdog is running (pid 4242, deploy.pid)"
+        updater = self.updater(judge=lambda incoming, running: judged.append(incoming.name) or [])
+        self.assertEqual(updater.check()["holds"], ["deploy"])
+        self.assertEqual(judged, [])  # the cheap question first
+        self.flight = None
+        self.hold_lock(state="running", busy=True, day="2026-09-25")
+        self.clock.advance(1800)
+        self.assertEqual(updater.check()["action"], "stopping_nightly")
+        for _ in range(30):
+            self.clock.advance(20)
+            self.heartbeat(state="running", busy=True, day="2026-09-25")
+            out = updater.check()
+        self.assertEqual(out["holds"], ["nightly"])
+        self.release_lock()
+        self.clock.advance(1800)
+        self.assertEqual(updater.check()["action"], "deploying")
+        self.assertEqual(len(judged), 1)
+
+    def test_spent_trees_in_incoming_are_swept_once_nothing_is_in_flight(self):
+        from unittest import mock
+
+        from league import updater as module
+
+        incoming = self.base / "incoming"
+        for name in ("main-0123456789ab", "drill-20261003T150000Z", "20261001T120000Z-0123456789ab"):
+            (incoming / name / "league").mkdir(parents=True)
+        (incoming / "main-0123456789ab.attestation.json").write_text("{}")
+        updater = self.updater()
+        self.flight = "a watchdog is running (pid 4242, deploy.pid)"
+        with mock.patch.object(module, "INCOMING_STALE_SECONDS", -1):
+            self.assertEqual(updater._sweep_incoming(), [])
+            self.flight = None
+            self.assertEqual(sorted(updater._sweep_incoming()), ["drill-20261003T150000Z", "main-0123456789ab", "main-0123456789ab.attestation.json"])
+        self.assertEqual([p.name for p in incoming.iterdir()], ["20261001T120000Z-0123456789ab"])  # the owner's upload stays
+        (incoming / "main-fedcba987654").mkdir()
+        self.assertEqual(updater._sweep_incoming(), [])  # fresh: perhaps not launched yet
+        self.assertEqual(updater._sweep_incoming(now=__import__("time").time() + 3601), ["main-fedcba987654"])
+
+    def test_a_watchdog_that_exits_is_reaped(self):
+        from types import SimpleNamespace
+
+        polls = []
+        done = SimpleNamespace(pid=1, poll=lambda: polls.append("done") or 0)
+        going = SimpleNamespace(pid=2, poll=lambda: polls.append("going"))
+        updater = self.updater()
+        updater._children = [done, going]
+        updater.due()
+        self.assertEqual((polls, updater._children), (["done", "going"], [going]))
+
+
 class TheDrillCopyBreaksItself(unittest.TestCase):
     """V3-A (WP1): a House started from a rollback drill's copy (`DRILL_BREAK` in a `drill-...` release)
     raises an error alert at every tick and never looks at main; any other release ignores the file."""
@@ -1221,46 +1314,52 @@ class TheDrillCopyBreaksItself(unittest.TestCase):
         self.assertEqual(alerts[0][2], {"drill": "drill-20261003T150000Z"})
         self.assertEqual((rows, house._state), ([], {}))
 
+    def test_a_copy_whose_drill_died_launches_its_own_recovery_once(self):
+        """The drill's process holds deploy.pid until its rollback restarted this House: a copy that sees no
+        deploy in flight for fifteen minutes was left current by a drill that died."""
+        import os
+        from types import SimpleNamespace
+        from unittest import mock
+
+        from league import updater as module
+
+        flight = ["a watchdog is running (pid 4242, deploy.pid)"]
+        updater = Updater(self.base, trusted=self.release("drill-20261003T150000Z"), clock=self.clock, in_flight=lambda: flight[0],
+                          head=None, fetch=None, attest=lambda sha: {}, launch=None)
+        spawned = []
+
+        def popen(argv, **kw):
+            spawned.append((argv, kw))
+            return SimpleNamespace(pid=5151, poll=lambda: None)
+
+        with mock.patch.object(module.subprocess, "Popen", popen), mock.patch.dict(os.environ, {"GATEWAY_TOKEN": "g" * 40}):
+            for _ in range(40):  # twenty minutes with the drill alive: nothing
+                self.assertNotIn("recovery", updater.check())
+                self.clock.advance(30)
+            flight[0] = None
+            for _ in range(30):  # fourteen and a half minutes since the drill went
+                self.assertNotIn("recovery", updater.check())
+                self.clock.advance(30)
+            out = updater.check()
+            self.assertEqual((out["action"], out["recovery"]["pid"], out["new"]), ("drill", 5151, True))
+            for _ in range(5):
+                self.clock.advance(30)
+                again = updater.check()
+            self.assertEqual(again["action"], "drill")
+            self.assertIn("drill-recover launched", again["reasons"][-1])
+        [(argv, kw)] = spawned
+        self.assertEqual(argv[1:5], ["-m", "league.watchdog", "drill-recover", "--base"])
+        self.assertIn("drill orphaned", argv[-1])
+        self.assertTrue(kw["start_new_session"])
+        self.assertNotIn("GATEWAY_TOKEN", kw["env"])
+        self.assertEqual((self.base / "deploy.pid").read_text(), "5151\n")
+        rows = [r for r in Releases(self.base).history() if r.get("stage") == "drill"]
+        self.assertEqual([(r["outcome"], r["release"]) for r in rows], [("orphaned", "drill-20261003T150000Z")])
+
     def test_the_file_in_any_other_release_is_nothing(self):
         for name in ("main-0123456789ab", "20261003T150000Z-0123456789ab"):
             self.assertIsNone(Updater(self.base, trusted=self.release(name), clock=self.clock).drill, name)
         self.assertIsNone(Updater(self.base, trusted=self.release("drill-20261003T160000Z", marker=False), clock=self.clock).drill)
-
-    def test_a_drill_copy_with_no_drill_alive_rolls_itself_back_once(self):
-        """The drill died (or was killed with the job that ran it): nothing would roll the copy back, and the House would
-        raise its error alert at every tick with the nightly job stopped until the owner came."""
-        from league.updater import DRILL_ORPHAN_SECONDS
-        from league.watchdog import Releases
-
-        name = "drill-20261003T150000Z"
-        trusted = self.release(name)
-        releases = Releases(self.base)
-        releases._point("current", name)
-        flight, launched = ["a watchdog is running (pid 77, deploy.pid)"], []
-
-        def never(*_):
-            raise AssertionError("a drill copy never looks at main")
-
-        updater = Updater(self.base, trusted=trusted, head=never, fetch=never, attest=never, launch=never, clock=self.clock,
-                          in_flight=lambda: flight[0], launch_watchdog=lambda args: launched.append(args) or 4242)
-        self.clock.advance(DRILL_ORPHAN_SECONDS + 60)
-        out = updater.check()
-        self.assertEqual((out["action"], launched), ("drill", []), "the drill is alive: its watch decides")
-        self.assertNotIn("orphan", out)
-        flight[0] = None
-        out = updater.check()
-        self.assertEqual(out["action"], "drill")
-        self.assertEqual(out["orphan"]["pid"], 4242)
-        self.assertEqual(launched, [["rollback", "--base", str(self.base), "--reason", out["orphan"]["reason"]]])
-        self.assertIn("no drill alive", out["reasons"][-1])
-        updater.check()
-        self.assertEqual(len(launched), 1, "once")
-        [row] = [r for r in releases.history() if r.get("stage") == "drill"]
-        self.assertEqual((row["outcome"], row["release"], row["unjudged"]), ("orphaned", name, True))
-        # A young copy is left to its drill, whatever deploy.pid says.
-        young = Updater(self.base, trusted=trusted, head=never, fetch=never, attest=never, launch=never, clock=self.clock,
-                        in_flight=lambda: None, launch_watchdog=lambda args: launched.append(args) or 1)
-        self.assertNotIn("orphan", young.check())
 
     def test_an_unreadable_marker_in_a_drill_copy_still_breaks(self):
         root = self.release("drill-20261003T150000Z")
@@ -1322,11 +1421,44 @@ class TheDrillRequest(unittest.TestCase):
         self.clock.advance(1800)
         out = updater.check()
         self.assertEqual((out["action"], out["pid"], out["new"]), ("drill_launched", 999, True))
-        self.assertEqual(self.started, [["drill-rollback", "--base", str(self.base)]])
+        self.assertEqual(self.started, [["drill-rollback", "--base", str(self.base), "--here"]])
         self.assertFalse(path.exists())
         self.clock.advance(1800)
         self.assertNotEqual(updater.check()["action"], "drill_launched")
         self.assertEqual(len(self.started), 1)
+
+    def test_the_default_launch_is_the_drill_itself_in_deploy_pid(self):
+        """`_spawn` gives the drill its own session, the scrubbed environment and ITS pid in deploy.pid. With `--here`
+        the drill runs in that very process, so the pid it finds in deploy.pid is its own (ignored); without it the
+        command re-ran itself as a child that took the launch's pid for a deploy in flight, and refused."""
+        import os
+        from types import SimpleNamespace
+        from unittest import mock
+
+        from league import updater as module
+        from league.watchdog import deploy_in_flight
+
+        self.request()
+        spawned = []
+
+        def popen(argv, **kw):
+            spawned.append((argv, kw))
+            return SimpleNamespace(pid=6161, poll=lambda: None)
+
+        updater = Updater(self.base, head=lambda: self.sha, fetch=lambda sha: self.main, launch=lambda *a: None, clock=self.clock,
+                          judge=lambda incoming, running: [], attest=self.attest, workflows_pin=workflows_digest(tarball(tree())),
+                          in_flight=lambda: None)
+        with mock.patch.object(module.subprocess, "Popen", popen), mock.patch.dict(os.environ, {"GATEWAY_TOKEN": "g" * 40}):
+            out = updater.check()
+        self.assertEqual((out["action"], out["pid"]), ("drill_launched", 6161))
+        [(argv, kw)] = spawned
+        self.assertEqual(argv[1:], ["-m", "league.watchdog", "drill-rollback", "--base", str(self.base), "--here"])
+        self.assertTrue(kw["start_new_session"])
+        self.assertNotIn("GATEWAY_TOKEN", kw["env"])
+        self.assertEqual((self.base / "deploy.pid").read_text(), "6161\n")
+        drill = lambda pid: ["python3", "-m", "league.watchdog", *argv[3:]]  # noqa: E731
+        self.assertIsNone(deploy_in_flight(self.base, argv_of=drill, ignore_pid=6161), "the drill's own pid")
+        self.assertIn("pid 6161", deploy_in_flight(self.base, argv_of=drill), "a deploy in flight to everyone else")
 
     def test_a_stale_or_unreadable_request_is_dropped_with_a_row(self):
         from league.updater import DRILL_REQUEST_TTL_SECONDS

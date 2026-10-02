@@ -4044,6 +4044,9 @@ class House:
             # The attestation is the record of what GitHub said about the exact commit (see
             # league/updater.py); a head that is merely waiting for its checks is not news.
             self.ledger.append("ops.deploy", {k: v for k, v in outcome.items() if k in ("action", "release", "reasons", "files", "sha", "attestation")})
+        if outcome.get("warn"):
+            # A launch that had to stop the nightly data job while it was not idle (`NIGHTLY_FORCE_AFTER_SECONDS`).
+            self.alert("warning", str(outcome["warn"])[:700])
         if action in ("refused", "blocked", "waiting") and outcome.get("new"):
             # A warning, never an error: an error alert inside a release's watch rolls THAT release
             # back, and a head that cannot be deployed says nothing about the one running.

@@ -12,10 +12,10 @@ export const OTHER = 'b'.repeat(40);
 const reply = (status, data) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
 const gitBlob = text => createHash('sha1').update(Buffer.concat([Buffer.from(`blob ${Buffer.byteLength(text)}\u0000`), Buffer.from(text)])).digest('hex');
 
-/** An open engineer pull request at HEAD, as GitHub's `GET /pulls/<n>` answers it. */
+/** An open engineer pull request of the research lane at HEAD, as GitHub's `GET /pulls/<n>` answers it. */
 export const enginePull = (extra = {}) => ({
-  number: 77, state: 'open', merged: false, draft: false, title: 'Faster agenda reads', changed_files: 2,
-  head: { ref: 'engineer/agenda-reads-1a2b3c4d', sha: HEAD, repo: { full_name: GITHUB_REPO } },
+  number: 77, state: 'open', merged: false, draft: false, title: 'Faster preflight reads', changed_files: 2,
+  head: { ref: 'engineer/research/preflight-reads-1a2b3c4d', sha: HEAD, repo: { full_name: GITHUB_REPO } },
   base: { ref: 'main', repo: { full_name: GITHUB_REPO } },
   ...extra,
 });
@@ -32,7 +32,8 @@ export function fakeHub({ script = () => undefined } = {}) {
   const state = {
     calls,
     pulls: new Map([[77, enginePull()]]),
-    files: new Map([[77, [{ filename: 'league/ops/agenda.py', status: 'modified' }, { filename: 'league/tests/test_ops_agenda.py', status: 'added' }]]]),
+    files: new Map([[77, [{ filename: 'league/swarm/preflight.py', status: 'modified' },
+      { filename: 'league/tests/test_harness_candidate_preflight.py', status: 'added' }]]]),
     runs: [passedRun()],
     jobs: new Map([[9001, passedJobs()]]),
     contents: new Map(),       // path -> text on main

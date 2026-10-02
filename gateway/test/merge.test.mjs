@@ -27,7 +27,7 @@ const call = async (request, { gate, hub, at = NOW, settings = {} }) => {
 };
 const gateAt = () => createGate({ store: memoryStore(), env: env(), now: () => NOW });
 const approve = (gate, hub, pr = 77, sha = HEAD, at = NOW) =>
-  call(ask('POST', '/v1/github/review', { pr, head_sha: sha, verdict: 'approve', reasons: ['Isolated to the agenda reader; tests cover it.'] }), { gate, hub, at });
+  call(ask('POST', '/v1/github/review', { pr, head_sha: sha, verdict: 'approve', reasons: ['Isolated to the preflight reader; tests cover it.'] }), { gate, hub, at });
 const mergeIt = (gate, hub, pr = 77, sha = HEAD, at = NOW) => call(ask('POST', '/v1/github/merge', { pr, head_sha: sha }), { gate, hub, at });
 const writes = hub => hub.calls.filter(made => made.method !== 'GET');
 
@@ -67,17 +67,21 @@ test('a protected path is refused by name, by tree and without case; a plain res
   }
 });
 
-test('the engineer opens engineer/ branches anywhere but the protected paths, through the proposal route', () => {
-  assert.equal(github.pathRefusal('engineer', 'league/ops/agenda.py'), null);
-  assert.equal(github.pathRefusal('engineer', 'league/swarm/pool.py'), null);
-  assert.match(github.pathRefusal('engineer', 'league/swarm/models.py'), /protected \(league\/swarm\/models\.py\)/);
-  assert.match(github.pathRefusal('engineer', 'league/swarm/bands.py'), /no automated change may write this file: protected/);
-  assert.match(github.pathRefusal('engineer', 'league/ops/budget.py'), /protected \(league\/ops\/budget\.py\)/);
-  assert.match(github.pathRefusal('engineer', 'league/ledger.py'), /no role may write this file/);
-  const admitted = github.admit({ role: 'engineer', slug: 'agenda-reads', title: 'Faster agenda reads', files: [{ path: 'league/ops/agenda.py', content: 'x = 1\n' }] });
-  assert.match(admitted.branch, /^engineer\/agenda-reads-[0-9a-f]{8}$/);
+test('the engineer opens engineer/<lane>/ branches inside its lane and never on a protected path (WP8b: test/engineer.test.mjs)', () => {
+  assert.equal(github.pathRefusal('engineer', 'league/swarm/preflight.py', github.ROLES, 'research'), null);
+  assert.match(github.pathRefusal('engineer', 'league/ops/agenda.py', github.ROLES, 'research'), /outside the research lane/);
+  assert.match(github.pathRefusal('engineer', 'league/swarm/bands.py', github.ROLES, 'research'), /no automated change may write this file: protected/);
+  assert.match(github.pathRefusal('engineer', 'league/ops/budget.py', github.ROLES, 'research'), /protected \(league\/ops\/budget\.py\)/);
+  assert.match(github.pathRefusal('engineer', 'league/swarm/models.py', github.ROLES, 'research'), /protected \(league\/swarm\/models\.py\)/);
+  assert.match(github.pathRefusal('engineer', 'league/swarm/guard.py', github.ROLES, 'research'), /protected \(league\/swarm\/guard\.py\)/);
+  assert.match(github.pathRefusal('engineer', 'league/ops/context.py', github.ROLES, 'research'), /protected \(league\/ops\/context\.py\)/);
+  assert.match(github.pathRefusal('engineer', 'league/ledger.py', github.ROLES, 'research'), /no role may write this file/);
+  const admitted = github.admit({ role: 'engineer', lane: 'research', slug: 'preflight-reads', title: 'Faster preflight reads', base_sha: HEAD,
+    files: [{ path: 'league/swarm/preflight.py', content: 'x = 1\n' }] });
+  assert.match(admitted.branch, /^engineer\/research\/preflight-reads-[0-9a-f]{8}$/);
+  assert.equal(github.engineerLane(admitted.branch), 'research');
   assert.equal(github.admit({ role: 'architect', slug: 'x1', title: 't', files: [{ path: 'league/strategies/x.py', content: '' }] }).branch.slice(0, 17), 'merton/architect/');
-  const refused = github.admit({ role: 'engineer', slug: 'live-tweak', title: 't', files: [{ path: 'league/live/step.py', content: '' }] });
+  const refused = github.admit({ role: 'engineer', lane: 'research', slug: 'live-tweak', title: 't', files: [{ path: 'league/live/step.py', content: '' }] });
   assert.equal(refused.status, 403);
 });
 
@@ -114,7 +118,7 @@ test('an approved engineer pull request with green checks merges by squash at ex
   assert.equal(put.key, 'PUT /pulls/77/merge');
   assert.equal(put.body.sha, HEAD, 'GitHub is told the exact commit');
   assert.equal(put.body.merge_method, 'squash');
-  assert.equal(put.body.commit_title, 'Faster agenda reads (#77)');
+  assert.equal(put.body.commit_title, 'Faster preflight reads (#77)');
   assert.match(put.body.commit_message, /checks\.yml run 9001 passed gateway, tests \(3\.11\), tests \(3\.14\) on a{40} and the automated review approved/);
   assert.equal(put.headers.Authorization, `Bearer ${GITHUB_TOKEN}`);
   assert.equal(JSON.stringify(merged.body).includes(GITHUB_TOKEN), false);
@@ -161,6 +165,13 @@ test('only an open engineer/ branch of this repository, aimed at main, at the na
     [{ head: { ...enginePull().head, ref: 'merton/architect/x-12345678' } }, 403, 'branch'],
     [{ head: { ...enginePull().head, ref: 'engineer/' } }, 403, 'branch'],
     [{ head: { ...enginePull().head, ref: 'feature/engineer/x' } }, 403, 'branch'],
+    // WP8b: the lane is part of the name, and only a known lane in the gateway's own shape is one.
+    [{ head: { ...enginePull().head, ref: 'engineer/preflight-reads-1a2b3c4d' } }, 403, 'branch'],
+    [{ head: { ...enginePull().head, ref: 'engineer/execution/preflight-reads-1a2b3c4d' } }, 403, 'branch'],
+    [{ head: { ...enginePull().head, ref: 'engineer/Research/preflight-reads-1a2b3c4d' } }, 403, 'branch'],
+    [{ head: { ...enginePull().head, ref: 'engineer/research/preflight-reads' } }, 403, 'branch'],
+    [{ head: { ...enginePull().head, ref: 'engineer/research/x/preflight-reads-1a2b3c4d' } }, 403, 'branch'],
+    [{ head: { ...enginePull().head, ref: 'engineer/constructor/preflight-reads-1a2b3c4d' } }, 403, 'branch'],
     [{ head: { ...enginePull().head, repo: { full_name: 'someone/long-term-capital-management' } } }, 403, 'fork'],
     [{ head: { ...enginePull().head, repo: null } }, 403, 'fork'],
     [{ base: { ref: 'release', repo: { full_name: GITHUB_REPO } } }, 403, 'base'],
@@ -203,7 +214,7 @@ test('a pull request touching any protected path, by its name or its name before
     { filename: null, status: 'added' },
   ]) {
     const hub = fakeHub();
-    hub.files.set(77, [{ filename: 'league/ops/agenda.py', status: 'modified' }, file]);
+    hub.files.set(77, [{ filename: 'league/swarm/preflight.py', status: 'modified' }, file]);
     const gate = gateAt();
     await approve(gate, hub);
     const refused = await mergeIt(gate, hub);
@@ -213,9 +224,92 @@ test('a pull request touching any protected path, by its name or its name before
   }
 });
 
+test('every changed file, by its name and its name before a rename, is inside the branch s own lane, or nothing merges (WP8b)', async () => {
+  for (const file of [
+    { filename: 'league/ops/agenda.py', status: 'modified' },                       // research-class, but no lane's
+    { filename: 'league/swarm/loop.py', status: 'modified' },                       // the scheduler lane's, not research's
+    { filename: 'league/swarm/architect.py', status: 'modified' },                  // the memory lane's
+    { filename: 'league/sailbox.py', status: 'removed' },                           // the data lane's
+    { filename: 'League/Swarm/Preflight.py', status: 'modified' },                  // the lane's file, in another case
+    { filename: 'league/tests/test_harness_candidate_x.pyc', status: 'added' },
+    { filename: 'league/tests/test_harness_candidate_.py', status: 'added' },
+    { filename: 'league/tests/test_harness_candidate_x/y.py', status: 'added' },
+    { filename: 'league/tests/test_ops_agenda.py', status: 'added' },
+    { filename: 'league/tests/test_harness_candidate_ok.py', previous_filename: 'league/tests/test_swarm_loop.py', status: 'renamed' },
+    { filename: 'league/swarm/preflight_v2.py', previous_filename: 'league/swarm/preflight.py', status: 'renamed' },
+  ]) {
+    const hub = fakeHub();
+    hub.files.set(77, [{ filename: 'league/swarm/preflight.py', status: 'modified' }, file]);
+    const gate = gateAt();
+    await approve(gate, hub);
+    const refused = await mergeIt(gate, hub);
+    assert.equal(refused.response.status, 403, JSON.stringify(file));
+    assert.equal(refused.body.refused, 'lane_path', JSON.stringify(file));
+    assert.match(refused.body.error, /outside the research lane/);
+    assert.equal(writes(hub).length, 0);
+    assert.equal(gate.status(NOW).autonomy.merges.count, 0);
+  }
+  // A protected file is refused as one, even listed after a file outside the lane.
+  const hub = fakeHub();
+  hub.files.set(77, [{ filename: 'league/ops/agenda.py', status: 'modified' }, { filename: 'league/ops/grant.py', status: 'modified' }]);
+  const gate = gateAt();
+  await approve(gate, hub);
+  assert.equal((await mergeIt(gate, hub)).body.refused, 'protected_path');
+  // Each lane merges its own surface and the new tests, a rename inside it included.
+  for (const [lane, files] of Object.entries({
+    scheduler: ['league/swarm/loop.py'],
+    research: ['league/swarm/researcher.py', 'league/swarm/preflight.py', 'league/swarm/claude_research.py'],
+    memory: ['league/swarm/architect.py', 'league/swarm/strategist.py', 'league/swarm/diagnostician.py', 'league/swarm/seeds.py', 'league/swarm/mechanisms.py'],
+    data: ['league/sailbox.py', 'league/data_job.py'],
+  })) {
+    const lanes = fakeHub();
+    const listed = [...files.map(filename => ({ filename, status: 'modified' })),
+      { filename: `league/tests/test_harness_candidate_${lane}_2.py`, status: 'added' }];
+    lanes.files.set(77, listed);
+    lanes.pulls.set(77, enginePull({ changed_files: listed.length, head: { ...enginePull().head, ref: `engineer/${lane}/lane-change-0f0f0f0f` } }));
+    const at = gateAt();
+    await approve(at, lanes);
+    const merged = await mergeIt(at, lanes);
+    assert.equal(merged.response.status, 200, `${lane}: ${JSON.stringify(merged.body)}`);
+    assert.equal(merged.body.merged, true);
+    // And another lane's branch may not carry them.
+    const other = fakeHub();
+    other.files.set(77, listed);
+    other.pulls.set(77, enginePull({ changed_files: listed.length, head: { ...enginePull().head, ref: `engineer/${lane === 'data' ? 'scheduler' : 'data'}/lane-change-0f0f0f0f` } }));
+    const elsewhere = gateAt();
+    await approve(elsewhere, other);
+    assert.equal((await mergeIt(elsewhere, other)).body.refused, 'lane_path', lane);
+  }
+});
+
+test('an engineer lane may only ADD a test: a retained candidate test modified, removed or renamed is refused (V3-A)', async () => {
+  for (const file of [
+    { filename: 'league/tests/test_harness_candidate_prior.py', status: 'modified' },
+    { filename: 'league/tests/test_harness_candidate_prior.py', status: 'removed' },
+    { filename: 'league/tests/test_harness_candidate_prior_2.py', previous_filename: 'league/tests/test_harness_candidate_prior.py', status: 'renamed' },
+    { filename: 'league/tests/test_harness_candidate_prior.py', status: 'changed' },
+  ]) {
+    const hub = fakeHub();
+    hub.files.set(77, [{ filename: 'league/swarm/preflight.py', status: 'modified' }, file]);
+    const gate = gateAt();
+    await approve(gate, hub);
+    const refused = await mergeIt(gate, hub);
+    assert.equal(refused.response.status, 403, JSON.stringify(file));
+    assert.equal(refused.body.refused, 'lane_path', JSON.stringify(file));
+    assert.match(refused.body.error, /may only add a new test/);
+    assert.equal(writes(hub).length, 0);
+  }
+  const hub = fakeHub();
+  hub.files.set(77, [{ filename: 'league/swarm/preflight.py', status: 'modified' },
+    { filename: 'league/tests/test_harness_candidate_fresh.py', status: 'added' }]);
+  const gate = gateAt();
+  await approve(gate, hub);
+  assert.equal((await mergeIt(gate, hub)).response.status, 200);
+});
+
 test('the changed files are read whole, page by page, or the merge is refused', async () => {
-  // 230 files over three pages, none protected: read whole, merged.
-  const many = Array.from({ length: 230 }, (_, n) => ({ filename: `league/ops/lane_${n}.py`, status: 'added' }));
+  // 230 files over three pages, none protected and all in the lane: read whole, merged.
+  const many = Array.from({ length: 230 }, (_, n) => ({ filename: `league/tests/test_harness_candidate_${n}.py`, status: 'added' }));
   let hub = fakeHub();
   hub.files.set(77, many);
   hub.pulls.set(77, enginePull({ changed_files: 230 }));
@@ -284,7 +378,7 @@ test('two merges a New York day, then 429 before GitHub hears of it; the next Ne
   for (const [n, sha] of shas.entries()) {
     const number = 80 + n;
     hub.pulls.set(number, enginePull({ number, head: { ...enginePull().head, sha } }));
-    hub.files.set(number, [{ filename: 'league/ops/agenda.py', status: 'modified' }]);
+    hub.files.set(number, [{ filename: 'league/swarm/preflight.py', status: 'modified' }]);
     hub.pulls.get(number).changed_files = 1;
     hub.runs.push(passedRun(sha, { id: 9100 + n }));
     hub.jobs.set(9100 + n, passedJobs());

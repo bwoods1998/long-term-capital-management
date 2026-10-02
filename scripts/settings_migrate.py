@@ -14,8 +14,15 @@ repo is public, and listed. The move must change nothing: the settings `settings
 the new pair are compared, and on any difference nothing is written. A swarm.json that is not a JSON object, or a key or
 value that looks like a credential, is refused.
 
-ORDER AT THE DEPLOY: commit the proposed policy.json into the release and deploy it, THEN install the reduced swarm.json
-on the box. A reduced swarm.json under a release without its policy.json runs the swarm on config.json's defaults.
+ORDER AT THE DEPLOY: commit the proposed policy.json into the release and deploy it; let that release clear its watch
+(the watchdog's automatic rollback window) with the FULL swarm.json still on the box (neutral: swarm.json wins over
+policy.json); only THEN install the reduced swarm.json. A reduced swarm.json under a release without policy.json runs the
+swarm on config.json's defaults and silently lifts every floor the old swarm.json held, so KEEP the original swarm.json
+(this tool never overwrites `--swarm`; the reduced one goes to `--swarm-out`) and restore it on the box before, or with,
+any rollback to a release that has no league/swarm/policy.json.
+Nor is the reduced swarm.json installed while the watchdog's `previous` release is a pre-V3-A one: a rollback to it
+would run on that release's old DEFAULTS (OpenAI routes on, the old Claude role lines, no budget). Install it only once
+`previous` is itself a V3-A (or later) release; until then keep the full swarm.json.
 Standard library only.
 """
 
@@ -110,6 +117,10 @@ def plan(swarm: Any, *, policy: Any, config: Mapping[str, Any]) -> dict[str, Any
         raise MigrationError(f"these keys look like credentials and never go into the public policy.json: {', '.join(secrets)}")
     reduced = {k: copy.deepcopy(v) for k, v in swarm.items() if k in settings_mod.OWNER_KEYS or str(k).startswith("_")}
     proposed = settings_mod._merge(dict(policy), moved)  # the file's own notes ("_about") stay
+    bad = settings_mod.policy_shape(proposed)
+    if bad:
+        raise MigrationError(f"the proposed policy.json breaks the defaults' shape at {', '.join(sorted(bad)[:12])} "
+                             "(settings.load would drop the whole layer)")
     before = _effective(swarm, config=config, policy=policy)
     after = _effective(reduced, config=config, policy=proposed)
     if before != after:
@@ -156,6 +167,8 @@ def main(argv: list[str] | None = None) -> int:
     policy_out = Path(args.policy_out or args.policy)
     swarm_out = Path(args.swarm_out) if args.swarm_out else swarm_path.with_name(f"{swarm_path.stem}.reduced.json")
     try:
+        if swarm_out.resolve() == swarm_path.resolve():
+            raise MigrationError("--swarm-out is the original swarm.json: keep it (a rollback past V3-A restores it)")
         config = _read(Path(args.config))
         result = plan(_read(swarm_path), policy=_read(Path(args.policy), missing={}),
                       config=config if isinstance(config, Mapping) else {})
@@ -167,7 +180,11 @@ def main(argv: list[str] | None = None) -> int:
               "notes_left_out": result["notes_left_out"], "dollar_lines_made_public": result["dollar_lines"],
               "blocks_without_defaults": result["blocks_without_defaults"],
               "settings_in_effect": "unchanged (checked)",
-              "order": "commit and deploy the policy.json first, then install the reduced swarm.json on the box"}
+              "order": ("commit and deploy the policy.json first; install the reduced swarm.json on the box only after that "
+                        "release has cleared its watch"),
+              "rollback": (f"keep the original {swarm_path} (never overwritten): restore it on the box before, or with, any "
+                           "rollback to a release without league/swarm/policy.json, or that release runs on config.json's "
+                           "defaults")}
     if args.apply:
         _write(policy_out, result["policy"])
         _write(swarm_out, result["swarm"])

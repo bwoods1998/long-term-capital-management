@@ -4,7 +4,8 @@ asks a model anything.
 
     python3 -m league.ci --base origin/main [--branch merton/architect/some-slug]
 
-1. **Path guard.** A branch named `merton/<role>/...` may touch only that role's paths. The
+1. **Path guard.** A branch named `merton/<role>/...` may touch only that role's paths, and one
+   named `engineer/<lane>/<slug>-<hash>` only that lane's surface and new harness tests. The
    constitution, the ledger, the book, the evaluator, the statistics, the auditor, the watchdog,
    this file, the gateway and the workflows are out of reach of every role. (The gateway enforces
    the same list before a branch exists; this is the second wall, and it also covers a branch
@@ -36,12 +37,28 @@ from typing import Any, Iterable
 
 REPO = Path(__file__).resolve().parents[1]
 
+#: The engineer's lanes (LTCM v3, V3-A, WP8b): the whole paths of each lane's surface. A branch
+#: `engineer/<lane>/<slug>-<8 hex>` may change only these and add new tests (ENGINEER_TESTS). The
+#: gateway admits and merges by the same table (`gateway/lib/github.mjs` ENGINEER_LANES; a gateway
+#: test reads this one and fails while the two differ).
+ENGINEER_LANES: dict[str, tuple[str, ...]] = {
+    "scheduler": ("league/swarm/loop.py",),
+    "research": ("league/swarm/researcher.py", "league/swarm/preflight.py", "league/swarm/claude_research.py"),
+    "memory": ("league/swarm/architect.py", "league/swarm/strategist.py", "league/swarm/diagnostician.py",
+               "league/swarm/seeds.py", "league/swarm/mechanisms.py"),
+    "data": ("league/sailbox.py", "league/data_job.py"),
+}
+#: Every lane's new tests. `*` is one or more of a-z, 0-9 and `_`: never a `/`, never another suffix.
+ENGINEER_TESTS = "league/tests/test_harness_candidate_*.py"
+ENGINEER_BRANCH = re.compile(r"engineer/([a-z]+)/[a-z0-9][a-z0-9-]{1,48}-[0-9a-f]{8}")
+
 ROLE_PATHS: dict[str, tuple[str, ...]] = {
     "architect": ("league/strategies/",),
     "toolsmith": ("league/tools/", "league/tests/test_tool_"),
     "operator": ("league/config.json",),
     "designer": ("league/game.json",),
     "teacher": ("league/playbook/",),
+    **{f"engineer/{lane}": (*paths, ENGINEER_TESTS) for lane, paths in ENGINEER_LANES.items()},
 }
 #: Never, for any role, whatever the table above comes to say.
 FORBIDDEN: tuple[str, ...] = (
@@ -115,9 +132,26 @@ CONFIG_DIALS: dict[str, tuple[float, float]] = {
 PREFIXES = ("merton", "astra")
 
 
+#: What a branch name must look like to be judged by the path guard (`guard_branch`, `check`).
+BRANCH_FORMS = "merton/<role>/<slug> or engineer/<lane>/<slug>-<hash>"
+
+
 def role_of(branch: str) -> str | None:
-    parts = str(branch or "").split("/")
+    """`<role>` of `merton/<role>/...`, or `engineer/<lane>` of `engineer/<lane>/<slug>-<8 hex>`; else None."""
+    text = str(branch or "")
+    engineer = ENGINEER_BRANCH.fullmatch(text)
+    if engineer:
+        role = f"engineer/{engineer.group(1)}"
+        return role if role in ROLE_PATHS else None
+    parts = text.split("/")
     return parts[1] if len(parts) >= 3 and parts[0] in PREFIXES and parts[1] in ROLE_PATHS else None
+
+
+def _allows(entry: str, path: str) -> bool:
+    """A role's path entry: a whole path, a prefix (ending `/` or `_`), or a glob whose `*` is a name (ENGINEER_TESTS)."""
+    if "*" in entry:
+        return re.fullmatch(re.escape(entry).replace(r"\*", "[a-z0-9_]+"), path) is not None
+    return path == entry or (entry.endswith(("/", "_")) and path.startswith(entry))
 
 
 def guard(paths: Iterable[str], role: str | None) -> list[str]:
@@ -133,7 +167,7 @@ def guard(paths: Iterable[str], role: str | None) -> list[str]:
             problems.append(f"{path}: no role may change this file")
         elif role is not None:
             allowed = ROLE_PATHS[role]
-            if not any(clean == a or (a.endswith(("/", "_")) and clean.startswith(a)) for a in allowed):
+            if not any(_allows(a, clean) for a in allowed):
                 problems.append(f"{path}: outside what the {role} may change ({', '.join(allowed)})")
     return problems
 
@@ -460,21 +494,39 @@ def guard_branch(base: str, head: str, branch: str, *, root: Path = REPO) -> lis
     request's commits, so a branch cannot loosen the guard that judges it."""
     role = role_of(branch)
     if role is None:
-        return [f"{branch}: not a branch name of the form merton/<role>/<slug>"]
+        return [f"{branch}: not a branch name of the form {BRANCH_FORMS}"]
     paths = changed_paths(base, head, cwd=root)
     if not paths:
         return ["the branch changes nothing"]
-    return guard(paths, role)
+    problems = guard(paths, role)
+    if role.startswith("engineer/"):
+        problems += engineer_test_problems(base, head, cwd=root)
+    return problems
+
+
+def engineer_test_problems(base: str, head: str = "HEAD", *, cwd: Path = REPO) -> list[str]:
+    """An engineer lane may only ADD a test (`ENGINEER_TESTS`): a test of that name the branch modifies, removes or renames
+    away (renames read as a removal and an addition) is refused."""
+    out = subprocess.run(["git", "diff", "--name-status", "--no-renames", f"{base}...{head}"], cwd=cwd, capture_output=True,
+                         text=True, check=True)
+    problems = []
+    for line in out.stdout.splitlines():
+        status, _, path = line.partition("\t")
+        if path and _allows(ENGINEER_TESTS, path.strip()) and status.strip() != "A":
+            problems.append(f"{path.strip()}: an engineer lane may only add a new test, never change or remove one")
+    return problems
 
 
 def check(base: str | None, branch: str | None, *, root: Path = REPO, tests: bool = True, head: str = "HEAD") -> list[str]:
     problems: list[str] = []
     role = role_of(branch or "")
     paths = changed_paths(base, head, cwd=root) if base else []
-    if (branch or "").startswith(tuple(f"{p}/" for p in PREFIXES)):
+    if (branch or "").startswith(tuple(f"{p}/" for p in (*PREFIXES, "engineer"))):
         if role is None:
-            problems.append(f"{branch}: not a branch name of the form merton/<role>/<slug>")
+            problems.append(f"{branch}: not a branch name of the form {BRANCH_FORMS}")
         problems.extend(guard(paths, role))
+        if role is not None and role.startswith("engineer/") and base:
+            problems.extend(engineer_test_problems(base, head, cwd=root))
         if RETIRED_REGISTRY in paths:
             # Every proposal rewrote this one shared file from a stale copy and dropped the rows
             # merged after it (PRs #72/#73 against #71, Sept 21, 2026). Each strategy now carries

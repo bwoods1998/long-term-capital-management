@@ -29,21 +29,68 @@ export const MAX_REQUEST_BYTES = 256 * 1024;
 //: Pull requests a UTC day. A runaway loop is stopped here, not by GitHub's rate limit.
 export const MAX_PULLS_PER_DAY = 12;
 
-/** What each role may write: `under` is a path prefix, `only` is a whole path. */
+/**
+ * The engineer's lanes (LTCM v3, V3-A, D5; WP8b): the whole paths each lane's surface is, as `league/ci.py`
+ * ENGINEER_LANES lists them (test/engineer.test.mjs reads that table and fails while the two differ). Every lane may
+ * also add the new tests ENGINEER_TEST names, and nothing else.
+ */
+export const ENGINEER_LANES = Object.freeze({
+  scheduler: Object.freeze(['league/swarm/loop.py']),
+  research: Object.freeze(['league/swarm/researcher.py', 'league/swarm/preflight.py',
+    'league/swarm/claude_research.py']),
+  memory: Object.freeze(['league/swarm/architect.py', 'league/swarm/strategist.py', 'league/swarm/diagnostician.py',
+    'league/swarm/seeds.py', 'league/swarm/mechanisms.py']),
+  data: Object.freeze(['league/sailbox.py', 'league/data_job.py']),
+});
+//: `league/tests/test_harness_candidate_*.py`, the `*` one or more of a-z, 0-9 and `_`: never a `/`, never another
+//: suffix.
+export const ENGINEER_TEST_GLOB = 'league/tests/test_harness_candidate_*.py';
+export const ENGINEER_TEST = /^league\/tests\/test_harness_candidate_[a-z0-9_]+\.py$/;
+
+/** What each role may write: `under` is a path prefix, `only` is a whole path, `lanes` the engineer's lane surfaces. */
 export const ROLES = {
   architect: { under: ['league/strategies/'] },
   toolsmith: { under: ['league/tools/', 'league/tests/test_tool_'] },
   operator: { only: ['league/config.json'] },
   designer: { only: ['league/game.json'] },
   teacher: { under: ['league/playbook/'] },
-  // The engineer (LTCM v3, V3-A, D5): an isolated harness change in a lane's surface, anywhere but the protected paths
-  // (lib/protected.mjs), on an `engineer/<slug>-<hash>` branch, the only branches `POST /v1/github/merge` merges. The
-  // merge route checks the same list again against the pull request's whole diff.
-  engineer: { anywhere: true },
+  // The engineer (LTCM v3, V3-A, D5; WP8b): an isolated harness change inside ONE lane's surface (ENGINEER_LANES) and
+  // its new tests, never a protected path (lib/protected.mjs), on an `engineer/<lane>/<slug>-<hash>` branch, the only
+  // branches `POST /v1/github/merge` merges. The merge route checks the same lane again against the pull request's
+  // whole diff, and `league/ci.py` a third time.
+  engineer: { lanes: ENGINEER_LANES },
 };
 
 //: The branch prefix of the engineer's pull requests (lib/merge.mjs merges only these).
 export const ENGINEER_PREFIX = 'engineer/';
+//: The engineer's lane files run to hundreds of KiB, so its proposals carry fewer, larger files than any other role's,
+//: in a larger request; and they are counted on their own, a New York day (lib/merge.mjs DAY_ZONE), apart from the
+//: other roles' day. Constants: only the owner's deploy changes them.
+export const ENGINEER_MAX_FILES = 6;
+export const ENGINEER_MAX_CONTENT_BYTES = 512 * 1024;
+export const ENGINEER_MAX_REQUEST_BYTES = 1536 * 1024;
+export const ENGINEER_PULLS_PER_DAY = 2;
+
+/** The files, bytes a file and bytes a request a role's proposal may carry. */
+export const limitsFor = role => (role === 'engineer'
+  ? { files: ENGINEER_MAX_FILES, contentBytes: ENGINEER_MAX_CONTENT_BYTES, requestBytes: ENGINEER_MAX_REQUEST_BYTES }
+  : { files: MAX_FILES, contentBytes: MAX_CONTENT_BYTES, requestBytes: MAX_REQUEST_BYTES });
+
+const ENGINEER_BRANCH = /^engineer\/([a-z]+)\/[a-z0-9][a-z0-9-]{1,48}-[0-9a-f]{8}$/;
+
+/** The lane of an `engineer/<lane>/<slug>-<8 hex>` branch, or null for any other name. */
+export function engineerLane(ref) {
+  const match = typeof ref === 'string' ? ENGINEER_BRANCH.exec(ref) : null;
+  return match && Object.hasOwn(ENGINEER_LANES, match[1]) ? match[1] : null;
+}
+
+/** Why `lane` may not write `path`, or null when the path is the lane's own surface or a new test's. */
+export function laneRefusal(lane, path, lanes = ENGINEER_LANES) {
+  const surface = typeof lane === 'string' && Object.hasOwn(lanes, lane) ? lanes[lane] : null;
+  if (!surface) return 'the lane is unknown';
+  if (surface.includes(path) || (typeof path === 'string' && ENGINEER_TEST.test(path))) return null;
+  return `outside the ${lane} lane (${[...surface, ENGINEER_TEST_GLOB].join(', ')})`;
+}
 
 //: The judges. No role writes these, whatever `ROLES` says: a proposal must never be able to
 //: change the rules it is judged by, or the gateway that holds the keys.
@@ -56,6 +103,7 @@ export const FORBIDDEN_FILES = [
 export const FORBIDDEN_TREES = ['gateway/', '.github/'];
 
 const SLUG = /^[a-z0-9][a-z0-9-]{1,48}$/;
+const COMMIT = /^[0-9a-f]{40}$/;
 const REPO = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/;
 
 export const footer = role => `Opened by Merton (${role}) through the LTCM gateway.`;
@@ -76,9 +124,9 @@ export function dayCap(env = {}) {
 /**
  * Why this role may not write this path, or `null` when it may. The shape of the path is checked
  * first, then the judges, then the role's own paths -- so a judge is refused by name even under
- * a rule table (`roles`) that would otherwise let it through.
+ * a rule table (`roles`) that would otherwise let it through. The engineer's paths are its `lane`'s.
  */
-export function pathRefusal(role, path, roles = ROLES) {
+export function pathRefusal(role, path, roles = ROLES, lane = null) {
   if (typeof path !== 'string' || !path) return 'a path must be a non-empty string';
   if (path.length > MAX_PATH_CHARS) return `a path is at most ${MAX_PATH_CHARS} characters`;
   // A repository path, not a filesystem one: forward slashes, no way up, nothing invisible.
@@ -92,9 +140,9 @@ export function pathRefusal(role, path, roles = ROLES) {
   if (segments.some(segment => /^\.git/i.test(segment))) return 'a path may not name git\'s own files';
   const rule = Object.hasOwn(roles, role) ? roles[role] : null;
   if (!rule) return 'the role is unknown';
-  if (rule.anywhere === true) {
+  if (rule.lanes) {
     const why = protectedRefusal(path);
-    return why ? `no automated change may write this file: ${why}` : null;
+    return why ? `no automated change may write this file: ${why}` : laneRefusal(lane, path, rule.lanes);
   }
   const allowed = (rule.only || []).includes(path) || (rule.under || []).some(prefix => path.startsWith(prefix));
   return allowed ? null : `outside what the ${role} may write`;
@@ -108,34 +156,40 @@ export function canonicalFiles(files) {
 }
 
 /**
- * `merton/<role>/<slug>-<8 hex>`, or `engineer/<slug>-<8 hex>` for the engineer: a retry of the same proposal is the
- * same branch.
+ * `merton/<role>/<slug>-<8 hex>`, or `engineer/<lane>/<slug>-<8 hex>` for the engineer: a retry of the same proposal
+ * is the same branch.
  */
-export function branchName(role, slug, files) {
+export function branchName(role, slug, files, lane = null) {
   const canonical = JSON.stringify(canonicalFiles(files).map(file => [file.path, file.content]));
   const hash = createHash('sha256').update(canonical, 'utf8').digest('hex').slice(0, 8);
-  return role === 'engineer' ? `${ENGINEER_PREFIX}${slug}-${hash}` : `merton/${role}/${slug}-${hash}`;
+  return role === 'engineer' ? `${ENGINEER_PREFIX}${lane}/${slug}-${hash}` : `merton/${role}/${slug}-${hash}`;
 }
 
 /**
- * Check a proposal before anything is sent. `{ role, slug, title, body, files, branch }` or
- * `{ error, status }`; a path refusal is a `403` that names the path.
+ * Check a proposal before anything is sent. `{ role, slug, title, body, files, branch }` (and `lane`, the engineer's)
+ * or `{ error, status }`; a path refusal is a `403` that names the path.
  */
 export function admit(proposal) {
   const bad = (error, status = 400, extra = {}) => ({ error, status, ...extra });
   if (!proposal || typeof proposal !== 'object' || Array.isArray(proposal)) return bad('The proposal must be a JSON object.');
-  const { role, slug, title, body = '', files } = proposal;
+  const { role, slug, title, body = '', files, lane } = proposal;
   if (typeof role !== 'string' || !Object.hasOwn(ROLES, role)) return bad(`The role must be one of: ${Object.keys(ROLES).join(', ')}.`);
+  if (role === 'engineer') {
+    if (typeof lane !== 'string' || !Object.hasOwn(ENGINEER_LANES, lane)) return bad(`The lane must be one of: ${Object.keys(ENGINEER_LANES).join(', ')}.`);
+  } else if (lane !== undefined) {
+    return bad('Only the engineer names a lane.');
+  }
+  const limits = limitsFor(role);
   if (typeof slug !== 'string' || !SLUG.test(slug)) return bad('The slug must be 2 to 49 of a-z, 0-9 and "-", and start with a letter or a digit.');
   if (typeof title !== 'string' || !title.trim() || title.length > MAX_TITLE_CHARS || /[\r\n]/.test(title)) {
     return bad(`The title must be one line of at most ${MAX_TITLE_CHARS} characters.`);
   }
   if (typeof body !== 'string' || body.length > MAX_BODY_CHARS) return bad(`The body must be text of at most ${MAX_BODY_CHARS} characters.`);
-  if (!Array.isArray(files) || files.length < 1 || files.length > MAX_FILES) return bad(`A proposal carries 1 to ${MAX_FILES} files.`);
+  if (!Array.isArray(files) || files.length < 1 || files.length > limits.files) return bad(`A proposal carries 1 to ${limits.files} files.`);
   const seen = new Set();
   for (const file of files) {
     if (!file || typeof file !== 'object' || Array.isArray(file)) return bad('Each file must be an object with a path and a content.');
-    const refusal = pathRefusal(role, file.path);
+    const refusal = pathRefusal(role, file.path, ROLES, role === 'engineer' ? lane : null);
     if (refusal) {
       const shown = String(file.path ?? '').slice(0, MAX_PATH_CHARS);
       return bad(`The path "${shown}" is refused: ${refusal}.`, 403, { path: shown });
@@ -144,14 +198,25 @@ export function admit(proposal) {
     seen.add(file.path);
     // Text only: a string that is not well-formed Unicode has no UTF-8 form to commit.
     if (typeof file.content !== 'string' || !file.content.isWellFormed()) return bad(`The content of "${file.path}" must be UTF-8 text.`);
-    if (Buffer.byteLength(file.content, 'utf8') > MAX_CONTENT_BYTES) return bad(`The content of "${file.path}" is over ${MAX_CONTENT_BYTES} bytes.`);
+    if (Buffer.byteLength(file.content, 'utf8') > limits.contentBytes) return bad(`The content of "${file.path}" is over ${limits.contentBytes} bytes.`);
+  }
+  // The engineer writes whole files against the tree it read (V3-A): `base_sha` names that commit, and the proposal is
+  // refused when main has since changed any file it carries (`openPullRequest`), never silently laid over main's edits.
+  const base = proposal.base_sha;
+  if (role === 'engineer' ? typeof base !== 'string' || !COMMIT.test(base) : base !== undefined) {
+    return bad(role === 'engineer' ? 'base_sha must be the full 40-hex commit the files were written against.' : 'Only the engineer names a base_sha.');
   }
   const canonical = canonicalFiles(files);
-  return { role, slug, title: title.trim(), body, files: canonical, branch: branchName(role, slug, canonical) };
+  return {
+    role, ...(role === 'engineer' ? { lane } : {}), slug, title: title.trim(), body, files: canonical,
+    branch: branchName(role, slug, canonical, lane), ...(base ? { base } : {}),
+  };
 }
 
-/** The pull request's text: the proposal's own words, then who opened it and how. */
-export const pullBody = (role, body) => [String(body || '').trimEnd(), '---', footer(role)].filter(Boolean).join('\n\n');
+/** The pull request's text: the proposal's own words, then the base it was written against (the engineer's), then who opened it and how. */
+export const pullBody = (role, body, base = null) =>
+  [String(body || '').trimEnd(), '---', base ? `Base: ${base} (each file read the same on main when this was opened).` : '', footer(role)]
+    .filter(Boolean).join('\n\n');
 
 /** The headers every GitHub call carries. The token goes out in this one place and never comes back. */
 export const headers = (token, { write = false } = {}) => ({
@@ -234,6 +299,7 @@ export async function openPullRequest({ repo, token, proposal, fetcher = fetch }
   try {
     const parent = sha((await github.get('base ref', 'GET', `/git/ref/heads/${BASE}`)).object?.sha, 'base ref');
     const baseTree = sha((await github.get('base commit', 'GET', `/git/commits/${parent}`)).tree?.sha, 'base commit');
+    if (role === 'engineer') await baseHolds(github, { base: proposal.base, parent, parentTree: baseTree, files });
 
     const entries = [];
     for (const file of files) {
@@ -256,7 +322,7 @@ export async function openPullRequest({ repo, token, proposal, fetcher = fetch }
       head = await existingBranch(github, { branch, tree, entries });
     }
 
-    const pull = await github.ask('pull request', 'POST', '/pulls', { title, head: branch, base: BASE, body: pullBody(role, proposal.body) });
+    const pull = await github.ask('pull request', 'POST', '/pulls', { title, head: branch, base: BASE, body: pullBody(role, proposal.body, proposal.base) });
     let opened = pull.data;
     if (pull.status === 422) {
       // An open pull request for this head is the retry's answer; any other 422 is GitHub's no.
@@ -270,6 +336,53 @@ export async function openPullRequest({ repo, token, proposal, fetcher = fetch }
     return { ok: true, branch, number: opened.number, url: String(opened.html_url || ''), head, created };
   } catch (error) {
     return { ...refused(error, token), created };
+  }
+}
+
+/**
+ * The blob at `path` in the tree `root` (`<type>:<sha>` when the path names something that is not a file), or null when
+ * nothing is there. One directory read a level, each read once per call (`cache`): a proposal's few files share most.
+ */
+async function blobAt(github, root, path, cache) {
+  const parts = path.split('/');
+  let tree = root;
+  for (let i = 0; i < parts.length; i += 1) {
+    let listing = cache.get(tree);
+    if (!listing) {
+      const read = await github.get('base tree', 'GET', `/git/trees/${tree}`);
+      if (read.truncated === true || !Array.isArray(read.tree)) throw new Refusal('A tree on the base could not be read whole.', 502, 'base_tree');
+      listing = new Map(read.tree.map(entry => [entry?.path, entry]));
+      cache.set(tree, listing);
+    }
+    const entry = listing.get(parts[i]);
+    if (!entry) return null;
+    if (i === parts.length - 1) return entry.type === 'blob' ? String(entry.sha) : `${entry.type}:${entry.sha}`;
+    if (entry.type !== 'tree') return null;
+    tree = sha(entry.sha, 'base tree');
+  }
+  return null;
+}
+
+/**
+ * The engineer's base (V3-A): every file the proposal carries must read on main's head (`parent`) exactly as it read on
+ * the commit the engineer wrote against (`base`), present or absent alike. Otherwise main changed it since, and laying
+ * the whole file over main would silently undo that change: a 409 (`base_moved`) naming the files, and the engineer
+ * rebuilds on main's head. A base GitHub does not know is a 409 too (`base_unknown`).
+ */
+export async function baseHolds(github, { base, parent, parentTree, files }) {
+  if (typeof base !== 'string' || !COMMIT.test(base)) throw new Refusal('The engineer\'s proposal names no base commit.', 400, 'base_missing');
+  if (base === parent) return;
+  const found = await github.ask('engineer base', 'GET', `/git/commits/${base}`);
+  if (found.status === 404 || found.status === 422) throw new Refusal(`The base ${base.slice(0, 12)} is not a commit of this repository.`, 409, 'base_unknown');
+  const baseTree = sha(github.need(found, 'engineer base').tree?.sha, 'engineer base');
+  if (baseTree === parentTree) return;
+  const cache = new Map();
+  const moved = [];
+  for (const file of files) {
+    if (await blobAt(github, baseTree, file.path, cache) !== await blobAt(github, parentTree, file.path, cache)) moved.push(file.path);
+  }
+  if (moved.length) {
+    throw new Refusal(`main changed ${moved.join(', ')} since the base ${base.slice(0, 12)}: rebuild the change on main's head.`, 409, 'base_moved');
   }
 }
 

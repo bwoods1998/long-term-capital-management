@@ -26,7 +26,7 @@ export function authorized(request, secret) {
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
-/** Read a request body as text, refusing anything larger than `limit` bytes. */
+/** Read a request body as text (`size` is its bytes), refusing anything larger than `limit` bytes. */
 export async function readBody(request, limit = 256 * 1024) {
   if (!request.body) return { text: null };
   const declared = Number(request.headers.get('Content-Length') || 0);
@@ -44,8 +44,8 @@ export async function readBody(request, limit = 256 * 1024) {
     }
     chunks.push(value);
   }
-  if (!size) return { text: null };
-  return { text: Buffer.concat(chunks).toString('utf8') };
+  if (!size) return { text: null, size: 0 };
+  return { text: Buffer.concat(chunks).toString('utf8'), size };
 }
 
 export const b64url = bytes =>

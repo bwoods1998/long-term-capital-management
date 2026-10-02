@@ -296,6 +296,10 @@ def check_gateway(h: Mapping[str, Any]) -> Check:
     if not ml:
         c.req(False, f"gateway /v1/health unreadable: {g.get('health_error') or h.get('errors', {}).get('gateway')}")
         return c
+    if not m or (h.get("errors") or {}).get("money"):
+        # Nothing to compare is no PASS: a constitution that failed to read would otherwise skip every pair.
+        c.req(False, f"the constitution's money table is unreadable: {(h.get('errors') or {}).get('money') or 'no money section'}")
+        return c
     gw = m.get("gateway") or {}
     pairs = (("order_equity_share", ml.get("order_equity_share"), gw.get("order_equity_share")),
              ("max_order_max_loss_usd", ml.get("max_order_max_loss_usd"), gw.get("order_max_loss_usd")),

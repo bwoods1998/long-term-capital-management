@@ -127,6 +127,7 @@ PROTECTED: tuple[tuple[str, str], ...] = (
     # sealed evaluation data, the evaluator and what a researcher may see of Validation (D2a)
     ("league/gym/*", "sealed"), ("league/swarm/gate.py", "sealed"), ("league/swarm/bands.py", "sealed"),
     ("league/swarm/evaluator.py", "sealed"), ("league/swarm/settings.py", "sealed"), ("league/swarm/diagnostics.py", "sealed"),
+    ("league/swarm/policy.json", "sealed"),  # settings as code: overrides config.json and settings.py's DEFAULTS
     ("league/swarm/tournament.py", "sealed"), ("league/swarm/store.py", "sealed"), ("ltcm/data/*", "sealed"),
     ("scripts/data/window.py", "sealed"), ("scripts/data/images.py", "sealed"), ("scripts/data/universe.py", "sealed"),
     ("scripts/data/frames.py", "sealed"), ("scripts/data/complete.py", "sealed"), ("scripts/data/check.py", "sealed"),

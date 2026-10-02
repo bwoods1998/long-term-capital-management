@@ -154,6 +154,11 @@ OBSERVE_NARROWEST = 2
 STORE_STRIKES, STORE_DEFAULT_STRIKES = {"SPXW": 40}, 25
 STORE_FRONT_DTE, STORE_BACK_DTE, STORE_BACK_ROOTS = 14, 45, frozenset({"SPY", "QQQ"})
 STORE_STEPS = {"SPY": 1.0, "QQQ": 1.0, "SPXW": 5.0, "SPX": 5.0, "IWM": 1.0, "XSP": 1.0, "DIA": 1.0, "GLD": 1.0}
+#: The roots listed on their near-money step across the store's whole reach (preflight `FIXED_STEP`); any other root's
+#: listings coarsen away from the money, so its price window is drawn on the next wider step (preflight `WIDER`) and
+#: `_nearest_strikes` keeps the store's count of listed strikes a side.
+STORE_FIXED_STEP = frozenset({"SPY", "QQQ", "IWM", "XSP", "DIA", "SPXW", "SPX"})
+STORE_WIDER = {0.5: 1.0, 1.0: 2.5, 2.5: 5.0, 5.0: 10.0}
 #: The session days the site's practice block covers (`site_inputs`).
 SITE_PRACTICE_SESSIONS = 20
 CALIBRATION_BACKSTOP = 10    # minutes before the close from which the House itself closes a calibration position left open
@@ -1404,21 +1409,24 @@ class OptionsLive:
                        pages: Mapping[str, Any], out: dict) -> dict[str, Any]:
         """THE STORE CLAMP (the module docstring): an observe read of `root`'s chain inside the program's window
         (`_roots`: days `lo`-`hi`, `band` of spot) and what the Gym's store holds of it, its strikes a side of the money
-        (`_store_strikes`; the price window half a step wider, then each expiry kept to them, `_nearest_strikes`). A read
-        over the page cap is read again narrower, at most `OBSERVE_NARROWEST` times and only while the minute's read and
-        time budgets allow (else it raises, as before): half the strikes a side, then half the expiry span too; the
-        level is kept for the session day so later minutes go straight to it. With no spot to centre it on, the read is
-        the first two days of the window, unclamped, as before."""
+        (`_store_strikes`; the price window half a step wider, on the next wider step for a root whose listings coarsen
+        away from the money, `_reach_step`, then each expiry kept to them, `_nearest_strikes`). A read over the page cap
+        is read again narrower, at most `OBSERVE_NARROWEST` times and only while the minute's read and time budgets
+        allow (else it raises, as before): half the strikes a side, then half the expiry span too; the level is kept for
+        the session day so later minutes go straight to it. A window the clamp empties (`lo` past `hi`) reads nothing,
+        spot or none. With no spot to centre it on, the read is the first two days of the window, unclamped, as
+        before."""
+        if lo > hi:
+            return {}  # the program's window lies past what the store holds: only its held contracts are read
         start = (day.day + dt.timedelta(days=lo)).isoformat()
         if not (math.isfinite(spot) and spot > 0):
             return self.market.chain(root, expiry_from=start,
                                      expiry_to=(day.day + dt.timedelta(days=min(hi, lo + 1))).isoformat(), **pages)
-        if lo > hi:
-            return {}  # the program's window lies past what the store holds: only its held contracts are read
         today = day.day.isoformat()
         if self._observe_narrow.get("day") != today:
             self._observe_narrow = {"day": today, "roots": {}}
         side, step = _store_strikes(root, spot)
+        step = _reach_step(root, step)
         level = int(self._observe_narrow["roots"].get(root, 0))
         while True:
             n = side if level == 0 else max(1, side // 2)
@@ -2947,6 +2955,12 @@ def _store_strikes(root: str, spot: float) -> tuple[int, float]:
     root = str(root).upper()
     step = STORE_STEPS.get(root) or (0.5 if spot < 75 else 1.0 if spot < 150 else 2.5 if spot < 500 else 5.0)
     return int(STORE_STRIKES.get(root, STORE_DEFAULT_STRIKES)), float(step)
+
+
+def _reach_step(root: str, step: float) -> float:
+    """The step THE STORE CLAMP's price window is drawn on: a fixed-step root's own, any other's next wider one (its
+    listings coarsen away from the money, where the store still counts listed strikes)."""
+    return step if str(root).upper() in STORE_FIXED_STEP else STORE_WIDER.get(step, 2.0 * step)
 
 
 def _nearest_strikes(rows: Mapping[str, Any], spot: float, side: int) -> dict[str, Any]:

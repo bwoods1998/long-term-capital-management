@@ -36,6 +36,7 @@ owner's `GATEWAY_ADMIN_TOKEN`; `/v1/kill` takes either (V3-A: stopping is never 
 | `POST /v1/claude/messages` | one Claude Messages call, reserved and settled against the funded total; streamed when `stream: true`; stopped by the kill switch |
 | `GET /v1/claude/models`, `GET /v1/claude/request/<id>` | the Claude models the key reaches and which are priced; what became of the House's call `<id>` (its `X-LTCM-Request`): held, settled, unknown, released or absent |
 | `POST /v1/github/pr`, `GET /v1/github/pr/<n>[/failures]` | open a pull request from a proposal; read its state and CI |
+| `GET /v1/github/pr/<n>/files?head_sha=`, `POST /v1/github/close` | the exact diff of a pull request at one head; close one engineer pull request at its head (V3-A, below) |
 | `POST /v1/github/docs` | commit one desk page `docs/runs/desk/<date>[-slug].md` to `main` (V3-A, below) |
 | `POST /v1/github/review`, `POST /v1/github/merge` | record the automated reviewer's verdict on an engineer pull request's exact head; squash-merge it inside the walls below (V3-A) |
 | `POST /v1/notify` | one notice to the owner: a `live_stop`, a `funding` cliff (V3-A), a `test` |
@@ -252,26 +253,49 @@ constant changes only by a gateway deploy):
   commits nothing and takes no place (`{committed: false, unchanged: true}`); GitHub's no gives the place back; no
   answer keeps it. What the page says is the House's own public filter (`league/ops` scoreboard).
 - **`POST /v1/github/review`** `{pr, head_sha, verdict: "approve"|"reject", reasons}`: the automated reviewer's
-  verdict, kept by the Gate for that exact commit after the pull request is read (open, an `engineer/` branch of this
-  repository aimed at `main`, headed by `head_sha`). A reject is final for its commit (an approve after it is
+  verdict, kept by the Gate for that exact commit after the pull request is read (open, an
+  `engineer/<lane>/<slug>-<hash>` branch of this repository aimed at `main`, headed by `head_sha`). A reject is final for its commit (an approve after it is
   `409 {refused: "review_rejected"}`); a revision is a new commit, reviewed again. Nothing is written to GitHub.
 - **`POST /v1/github/merge`** `{pr, head_sha}` ([lib/merge.mjs](lib/merge.mjs)): a squash merge of exactly
-  `head_sha`, only when the branch starts `engineer/` and lives in this repository, the pull request is open, no draft
-  and aimed at `main`; the latest `checks.yml` run on that commit finished `success` with the jobs `gateway`,
+  `head_sha`, only when the branch is `engineer/<lane>/<slug>-<8 hex>` with a known lane and lives in this repository,
+  the pull request is open, no draft and aimed at `main`; the latest `checks.yml` run on that commit finished `success` with the jobs `gateway`,
   `tests (3.11)` and `tests (3.14)` each `success`; an approve and no reject is recorded for that commit; no changed
   file (either name of a rename) is protected ([lib/protected.mjs](lib/protected.mjs): `league/ci.py` FORBIDDEN, which a
   test holds as a subset, plus `league/ops/{budget,drills,grant}.py`, `league/live/`, `league/gym/`,
   `league/swarm/{gate,bands,evaluator,settings,store}.py`, `ltcm/data/`, `scripts/data/`, `.github/`, `gateway/`,
-  `deploy/`, `league/config.json`, `league/constitution.py`, and git's own `.git*` files), read whole from GitHub's
-  list (at most 300 files); at most 2 merges a New York day (`429 {cap: "merge_day"}`). Every refusal names its rule in
-  `refused` (`review_missing`, `review_rejected`, `branch`, `fork`, `base`, `not_open`, `draft`, `head_moved`,
-  `protected_path`, `files`, `ci_missing`, `ci_pending`, `ci_failed`, `ci_jobs`, `github`, `no_answer`). A merge GitHub
-  refused gives its place back; one nothing answered keeps it (`merged: "unknown"`). The engineer opens its pull
-  requests through `POST /v1/github/pr` with role `engineer` (branch `engineer/<slug>-<hash>`, any path but the
-  protected ones). The kill switch does not stop these routes: they move no money.
+  `deploy/`, `league/config.json`, `league/constitution.py`, and git's own `.git*` files) and every one (both names of
+  a rename) is inside the branch's lane (below), read whole from GitHub's list (at most 300 files); at most 2 merges a
+  New York day (`429 {cap: "merge_day"}`). Every refusal names its rule in `refused` (`review_missing`,
+  `review_rejected`, `branch`, `fork`, `base`, `not_open`, `draft`, `head_moved`, `protected_path`, `lane_path`, `files`,
+  `ci_missing`, `ci_pending`, `ci_failed`, `ci_jobs`, `github`, `no_answer`). A merge GitHub refused gives its place
+  back; one nothing answered keeps it (`merged: "unknown"`). The kill switch stops the merge (`423 {cap:
+  "kill_switch"}`): with `auto_update` on a merge is a deploy, and the owner's stop must freeze the code being looked
+  at. The proposal, review, close and docs routes stay open: they move no money and deploy nothing.
+- **The engineer's pull requests** (WP8b; [lib/github.mjs](lib/github.mjs) `ENGINEER_LANES`): `POST /v1/github/pr` with
+  role `engineer` and a `lane`, on the branch `engineer/<lane>/<slug>-<8 hex>`. Each lane writes only its surface:
+  `scheduler` `league/swarm/loop.py`; `research` `league/swarm/{researcher,preflight,claude_research}.py`; `memory`
+  `league/swarm/{architect,strategist,diagnostician,seeds,mechanisms}.py`; `data` `league/{sailbox,data_job}.py`; and
+  every lane may add `league/tests/test_harness_candidate_*.py` (`*` one or more of `a-z0-9_`). Never a protected path.
+  At most 6 files of 512 KiB each, 1.5 MiB a request (the other roles keep 12 files of 64 KiB, 256 KiB a request), and
+  at most 2 a New York day, counted apart from the other roles' `GITHUB_MAX_PULLS_PER_DAY` (`429 {cap:
+  "engineer_day"}`; `/v1/health` `autonomy.engineer_pulls`). A retry that finds its own pull request, or GitHub's no
+  before any branch, gives the place back. `league/ci.py` holds the same table (`ENGINEER_LANES`; a gateway test reads
+  it) and its path guard judges `engineer/<lane>/` branches by it.
+- **The engineer's base**: an engineer proposal names `base_sha`, the full commit its whole files were written against
+  (the running release's attested sha). Before anything is written, every file it carries must read on `main`'s head
+  exactly as on that base, present or absent alike; otherwise `409 {refused: "base_moved"}` names the files `main`
+  changed since (laying the whole file over them would silently undo them), and the engineer rebuilds on `main`'s head.
+  An unknown base is `409 base_unknown`. The pull request's body records the base.
+- **`GET /v1/github/pr/<n>/files?head_sha=<40 hex>`** ([lib/pulls.mjs](lib/pulls.mjs)): the files a pull request
+  changes at exactly that head, each with GitHub's patch, read whole (at most 300 files; a moved head is
+  `409 head_moved`); a patch GitHub left out or one cut at 600 KiB (1.5 MiB in all) makes `complete: false`, which a
+  reviewer must read as "not seen". Read-only.
+- **`POST /v1/github/close`** `{pr, head_sha}`: closes one open engineer pull request at its exact head inside the merge
+  route's walls on the branch (a superseded revision, a rejected one). It never deletes a branch, merges or reopens.
 - **The admin log**: every kill and unkill and every call presenting `GATEWAY_ADMIN_TOKEN` (refused anywhere but the
   switch) is written with its time, the caller's kind (`admin`, `runtime`), the route, the method and the answer; a
-  call at the switch with no accepted token is counted (`unauthorized`), never listed. `/v1/health` carries `admin_log`
+  call at the switch with no accepted token is not written at all: the Gate serializes every order reservation, so a
+  stranger's flood at the public switch must not queue writes in front of them (`unauthorized` stays in `counts`). `/v1/health` carries `admin_log`
   (`counts` and the `last` 20, newest first) and `autonomy` (today's docs commits and merges with the last few, the
   reviews recorded), each read under its own guard. A release whose entry cannot be written releases nothing (`503`);
   an engage never waits on the log.

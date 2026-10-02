@@ -6,7 +6,7 @@
 `run` lowers its own priority (`nice` 19), bounds its address space at what it holds now plus `--extra-mb` (RLIMIT_AS)
 and its CPU time at `--cpu` seconds (RLIMIT_CPU), then imports the job's module and calls `run(ctx)`. The outcome goes
 to `--result` as JSON ({status, summary, error, alerts}), written atomically, and to stdout when no file is named. Exit
-0 when the job ran (ok or skipped), 1 when it failed.
+0 when the job ran (ok or skipped), 1 when it failed (it raised, or returned `{"status": "failed", ...}`).
 """
 from __future__ import annotations
 
@@ -82,6 +82,11 @@ def run_job(name: str, *, root: Path, due_at: float, base: Path | None = None, c
         return {"status": "failed", "error": f"{type(exc).__name__}: {str(exc)[:600]}",
                 "trace": traceback.format_exc()[-2000:], "alerts": ctx.alerts}
     summary = dict(summary) if isinstance(summary, dict) else {"value": summary}
+    if summary.get("status") == "failed":
+        # A job may report its own failure without raising (the standing grant's refusal does): a failed receipt, with
+        # the job's own reason as the error, never an `ok` row that hides it from health.json and the receipts.
+        error = summary.get("error") or summary.get("why") or "the job reported failed"
+        return {"status": "failed", "error": str(error)[:600], "summary": summary, "alerts": ctx.alerts}
     status = "skipped" if summary.get("status") == "skipped" else "ok"
     return {"status": status, "summary": summary, "alerts": ctx.alerts}
 

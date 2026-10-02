@@ -11,7 +11,7 @@ import { monthCapMicro } from './frontier.mjs';
 import * as claude from './claude.mjs';
 import * as equity from './equity.mjs';
 import * as account from './account.mjs';
-import { dayCap as pullDayCap } from './github.mjs';
+import { dayCap as pullDayCap, ENGINEER_PULLS_PER_DAY } from './github.mjs';
 import { formatUsd, formatUsdMicro } from './money.mjs';
 import { iso } from './http.mjs';
 import * as typesafe from './typesafe.mjs';
@@ -44,6 +44,8 @@ export const CLAUDE_KEY = 'claude-funded-v1';
 export const DOCS_KEY = 'github-docs-v1';
 export const MERGES_KEY = 'github-merges-v1';
 export const REVIEWS_KEY = 'github-reviews-v1';
+//: The engineer's pull requests (V3-A, WP8b): a New York day's count of their own, apart from the other roles' UTC day.
+export const ENGINEER_PULLS_KEY = 'github-engineer-pulls-v1';
 export const ADMIN_LOG_KEY = 'admin-log-v1';
 //: How many recent docs commits and merges the Gate keeps (and /v1/health shows); verdicts kept; admin entries kept.
 const RECENT = 20;
@@ -142,10 +144,13 @@ export function createGate({ store, env = {}, now = Date.now }) {
       recent: [...row.recent, { id, at: iso(at), ...what, outcome: 'pending' }].slice(-RECENT) });
     return { ok: true, day: row.day, id, count: row.count + 1 };
   };
+  // `refused` (GitHub answered no) and `existing` (a retry found what an earlier attempt made) made nothing, so their
+  // place is given back; `committed`, `merged`, `opened` and `unknown` (nothing answered) keep it.
   const slotSettle = (key, { day, id, outcome, at, extra }) => {
     const row = slotRow(key, at);
-    const known = ['committed', 'merged', 'refused', 'unknown'].includes(outcome) ? outcome : 'unknown';
-    const giveBack = known === 'refused' && day === row.day && row.recent.some(entry => entry.id === id && entry.outcome === 'pending');
+    const known = ['committed', 'merged', 'opened', 'existing', 'refused', 'unknown'].includes(outcome) ? outcome : 'unknown';
+    const giveBack = (known === 'refused' || known === 'existing') && day === row.day
+      && row.recent.some(entry => entry.id === id && entry.outcome === 'pending');
     const recent = row.recent.map(entry => (entry.id === id ? { ...entry, outcome: known, ...extra } : entry));
     write(store, key, { day: row.day, count: giveBack ? Math.max(0, row.count - 1) : row.count, next: row.next, recent });
     return { ok: true, given_back: giveBack };
@@ -718,10 +723,26 @@ export function createGate({ store, env = {}, now = Date.now }) {
     },
     mergesToday(at = now()) { return slotRow(MERGES_KEY, at).count; },
     mergeReserve({ pr = null, sha = null, at = now() } = {}) {
+      // With auto_update on a merge is a deploy: the owner's kill switch stops it (proposals, reviews and docs pass).
+      if (killed()) return { ok: false, status: 423, cap: 'kill_switch', error: 'The kill switch is engaged; no pull request is being merged.' };
       return slotReserve(MERGES_KEY, MERGES_PER_DAY, 'merge_day', 'merges', at, { pr, sha: typeof sha === 'string' ? sha.slice(0, 64) : null });
     },
     mergeSettle({ day, id, outcome, merge_sha = null, at = now() } = {}) {
       return slotSettle(MERGES_KEY, { day, id, outcome, at, extra: { merge_sha: typeof merge_sha === 'string' ? merge_sha.slice(0, 64) : null } });
+    },
+    /**
+     * The engineer's pull requests (V3-A, WP8b; cap ENGINEER_PULLS_PER_DAY a New York day, apart from `pullReserve`'s
+     * UTC day of the other roles). The settle's outcome is `opened` (a new branch), `existing` (a retry that found its
+     * branch and pull request: given back), `refused` (GitHub answered no before any branch: given back) or `unknown`
+     * (a branch may exist: kept).
+     */
+    engineerPullsToday(at = now()) { return slotRow(ENGINEER_PULLS_KEY, at).count; },
+    engineerPullReserve({ branch = null, at = now() } = {}) {
+      return slotReserve(ENGINEER_PULLS_KEY, ENGINEER_PULLS_PER_DAY, 'engineer_day', 'engineer pull requests', at,
+        { branch: typeof branch === 'string' ? branch.slice(0, 120) : null });
+    },
+    engineerPullSettle({ day, id, outcome, pr = null, at = now() } = {}) {
+      return slotSettle(ENGINEER_PULLS_KEY, { day, id, outcome, at, extra: { pr: Number.isSafeInteger(pr) ? pr : null } });
     },
 
     /**
@@ -747,14 +768,19 @@ export function createGate({ store, env = {}, now = Date.now }) {
       return { ok: true, verdict, at: entry.at };
     },
 
-    /** What /v1/health shows of the desk's docs commits, the engineer's merges and the reviews (V3-A, WP8). */
+    /**
+     * What /v1/health shows of the desk's docs commits, the engineer's pull requests and merges, and the reviews (V3-A,
+     * WP8 and WP8b).
+     */
     autonomyStatus(at = now()) {
       const docs = slotRow(DOCS_KEY, at);
+      const pulls = slotRow(ENGINEER_PULLS_KEY, at);
       const merges = slotRow(MERGES_KEY, at);
       const reviews = reviewRows();
       return {
         day: docs.day,
         docs: { commits: docs.count, cap: DOCS_PER_DAY, recent: docs.recent.slice(-5).reverse() },
+        engineer_pulls: { count: pulls.count, cap: ENGINEER_PULLS_PER_DAY, recent: pulls.recent.slice(-5).reverse() },
         merges: { count: merges.count, cap: MERGES_PER_DAY, recent: merges.recent.slice(-5).reverse() },
         reviews: { recorded: reviews.length, approve: reviews.filter(row => row.verdict === 'approve').length,
           reject: reviews.filter(row => row.verdict === 'reject').length },

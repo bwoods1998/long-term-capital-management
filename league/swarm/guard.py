@@ -11,7 +11,7 @@ researchers to zero, when:
 - THE BUDGET's day is spent (LTCM v3, league/ops/budget.py `sail_caps`, from the settings' `budget` block): the
   swarm's own Sail spend today (UTC) reached the Sail research dollars a day, or Sail's own meter today (every fall of
   the balance since midnight, the whole account) reached that plus the fixed boxes a day. Settings with no `budget`
-  block (never loaded from a state root) are the floor; a malformed block is no research. The burst trio
+  block read the store root's budget.json themselves (the floor when none); a malformed block is no research. The burst trio
   (`burst_cap_usd`, `burst_until`, `after_burst_usd_day`) is gone: the budget is the one daily cap;
 - the balance could not be read (FAIL CLOSED: at once, and a failed read never releases a brake), or no
   good reading is `stale_seconds` old;
@@ -34,13 +34,14 @@ from .store import SwarmStore
 SWARM_SAIL_KINDS = ("sail_model", "gym_box")
 
 
-def budget_caps(settings: Mapping[str, Any]) -> dict[str, Any]:
-    """THE BUDGET's daily Sail caps (league/ops/budget.py `sail_caps`): {research, fixed, account, source}. FAIL CLOSED:
-    a rule that cannot be read is no research."""
+def budget_caps(settings: Mapping[str, Any], root: Any = None, now: float | None = None) -> dict[str, Any]:
+    """THE BUDGET's daily Sail caps (league/ops/budget.py `sail_caps`): {research, fixed, account, source}; with `root`
+    (the store's state root) also capped by the guard's own read of `<root>/budget.json`. FAIL CLOSED: a rule that
+    cannot be read is no research."""
     try:
         from ..ops.budget import sail_caps
 
-        return sail_caps(settings)
+        return sail_caps(settings, root, now)
     except Exception as exc:  # noqa: BLE001 - no rule, no research spend
         return {"research": 0.0, "fixed": 0.0, "account": 0.0, "source": f"the budget rule could not be read ({type(exc).__name__})"}
 
@@ -115,7 +116,7 @@ class SailGuard:
         metered, metered_today = self._metered(balance, now)
         midnight = now - (now % 86400)
         today_spent = self.store.spent(SWARM_SAIL_KINDS, since=midnight)
-        caps = budget_caps(self.settings)
+        caps = budget_caps(self.settings, getattr(self.store, "root", None), now)
         reasons = []
         if balance is None:
             # FAIL CLOSED: a failed read never releases a brake, and brakes an unbraked guard at once.

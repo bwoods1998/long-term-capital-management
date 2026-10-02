@@ -167,7 +167,8 @@ class Overlay(unittest.TestCase):
         out = self.overlay()
         k = B.knobs(10.0, 6.0)
         self.assertEqual(out["gym"]["max_boxes"], min(8, k["gym.max_boxes"]))
-        self.assertEqual(out["population"]["ceiling"], k["population.ceiling"])
+        self.assertEqual(out["population"]["ceiling"],
+                         max(k["population.ceiling"], S.DEFAULTS["population"]["floor"] + B.BIRTH_MARGIN))
         self.assertEqual(out["architect"]["every_seconds"], 14400, "max(): the configured 4 h is slower than the budget's")
         self.assertEqual(out["researcher"]["usd_per_hour"], k["researcher.sail_usd_per_hour"],
                          "sail_usd_per_hour unset: the combined pace that then governs Sail is capped")
@@ -209,7 +210,7 @@ class Overlay(unittest.TestCase):
 
     def test_no_usable_file_is_the_floor(self):
         floor = (B.floor_usd_day("sail"), B.floor_usd_day("claude"))
-        cases = {"missing": None, "stale": dict(at_=NOW - 37 * 3600), "future": dict(at_=NOW + 3600),
+        cases = {"missing": None, "future": dict(at_=NOW + 3600),
                  "negative": dict(sail=-1.0), "not a number": dict(claude="lots")}
         for name, kw in cases.items():
             (self.root / "budget.json").unlink(missing_ok=True)
@@ -223,6 +224,41 @@ class Overlay(unittest.TestCase):
         self.assertIn("cannot be read", self.overlay()["budget"]["why"])
         (self.root / "budget.json").write_text(json.dumps({"schema": 2, "at": NOW}))
         self.assertEqual(self.overlay()["budget"]["source"], "floor")
+
+    def test_a_stale_file_never_loosens(self):
+        """A budget job that stopped: each meter is the lower of the floor and the stale file, never the floor alone."""
+        for sail, claude, want in ((0.0, 0.0, (0.0, 0.0)), (0.33, 50.0, (0.33, B.floor_usd_day("claude"))),
+                                   (10.0, 6.0, (B.floor_usd_day("sail"), B.floor_usd_day("claude")))):
+            self.write(sail=sail, claude=claude, at_=NOW - 37 * 3600)
+            out = self.overlay()
+            self.assertEqual(out["budget"]["source"], "stale budget.json")
+            self.assertIn("stale", out["budget"]["why"])
+            self.assertEqual((out["budget"]["sail_usd_day"], out["budget"]["claude_usd_day"]), want, (sail, claude))
+            self.assertEqual(B.sail_caps(out)["research"], want[0])
+        doc = {"schema": 1, "at": NOW - 40 * 3600, "meters": {"sail": {"research_usd_day": 0.0, "limited_by": "unreadable"},
+                                                             "claude": {"research_usd_day": "x"}}}
+        (self.root / "budget.json").write_text(json.dumps(doc))
+        out = self.overlay()
+        self.assertEqual((out["budget"]["sail_usd_day"], out["budget"]["claude_usd_day"]), (0.0, 0.0),
+                         "a meter the stale file could not read (or did not say) is 0, not the floor")
+
+    def test_the_ceiling_never_falls_to_the_population_floor(self):
+        """Births and forks stay possible at the floor's dollars (the production floor of 8 and BUILD-2's 8/16)."""
+        settings = copy.deepcopy(S.DEFAULTS)
+        settings["population"].update(start=16, ceiling=16, floor=8)
+        out = self.overlay(settings)  # no budget.json: the floor
+        self.assertEqual(out["budget"]["source"], "floor")
+        self.assertEqual(out["population"]["ceiling"], 8 + B.BIRTH_MARGIN)
+        self.assertGreater(out["population"]["ceiling"], out["population"]["floor"])
+        settings["population"]["ceiling"] = 10
+        self.assertEqual(self.overlay(settings)["population"]["ceiling"], 10, "still tighten-only: a lower ceiling stands")
+
+    def test_openai_is_closed_by_the_budget(self):
+        """OpenAI is no meter of the rule: the overlay leaves it no room, whatever the layers under it say."""
+        self.write(sail=500.0, claude=400.0)
+        out = self.overlay()
+        self.assertEqual(out["guard"]["openai_cap_usd"], 0.0)
+        self.assertEqual(out["budget"]["openai_usd_day"], 0.0)
 
     def test_the_operators_budget_key_is_replaced(self):
         settings = copy.deepcopy(S.DEFAULTS)
@@ -241,7 +277,9 @@ class SettingsLoad(unittest.TestCase):
     def test_a_state_root_always_carries_a_budget_and_none_without_one(self):
         loaded = S.load(self.root, config={})
         self.assertEqual(loaded["budget"]["source"], "floor")
-        self.assertEqual(loaded["population"]["ceiling"], 8)
+        self.assertEqual(loaded["population"]["ceiling"], loaded["population"]["floor"] + B.BIRTH_MARGIN)
+        self.assertGreater(loaded["population"]["ceiling"], loaded["population"]["floor"])
+        self.assertEqual(loaded["guard"]["openai_cap_usd"], 0.0, "no OpenAI room under the budget")
         self.assertNotIn("budget", S.load(None, config={}))
         self.assertEqual(S.load(None, config={})["population"]["ceiling"], 96)
 
@@ -295,9 +333,14 @@ class ClaudeRoom(unittest.TestCase):
                                         errors=errors)
         return out, errors
 
-    def test_no_block_no_budget_line(self):
-        self.assertIsNone(self.router.claude_budget_room())
-        self.assertEqual(self.router.claude_room(), 495.0)
+    def test_no_block_is_the_routers_own_read(self):
+        """Settings handed in without the block (a scheduler change that dropped it) never lift the budget: the router
+        reads its store root's budget.json itself, the floor when there is none."""
+        self.assertEqual(self.router.claude_budget_room(), B.floor_usd_day("claude"))
+        self.assertEqual(self.router.claude_room(), B.floor_usd_day("claude"))
+        (Path(self.dir.name) / "budget.json").write_text(json.dumps({"schema": 1, "at": NOW - 60, "meters": {
+            "sail": {"research_usd_day": 1.0}, "claude": {"research_usd_day": 0.5}}}))
+        self.assertEqual(self.router.claude_budget_room(), 0.5)
 
     def test_the_budgets_claude_dollars_today_cap_the_room_and_admission(self):
         self.settings["budget"] = {"source": "budget.json", "sail_usd_day": 3.0, "claude_usd_day": 2.0}
@@ -316,6 +359,44 @@ class ClaudeRoom(unittest.TestCase):
             self.settings["budget"] = bad
             self.assertEqual(self.router.claude_room(), 0.0, bad)
             self.assertEqual(self.admit(0.01)[0], (None, "line"))
+
+
+class OwnRead(unittest.TestCase):
+    """The protected budget does not rest on the scheduler lane passing the block: the Sail guard and the router read
+    the store root's budget.json themselves when the settings carry none, and every Swarm step's settings carry it."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.root = Path(self.dir.name)
+
+    def test_the_guard_reads_the_budget_itself_without_a_block(self):
+        from league.swarm.guard import budget_caps
+
+        settings = {"guard": {"house_burn_usd_day": 1.0}}
+        self.assertEqual(budget_caps(settings, self.root, NOW)["research"], B.floor_usd_day("sail"))
+        (self.root / "budget.json").write_text(json.dumps({"schema": 1, "at": NOW - 60, "meters": {
+            "sail": {"research_usd_day": 0.0}, "claude": {"research_usd_day": 0.0}}}))
+        caps = budget_caps(settings, self.root, NOW)
+        self.assertEqual(caps["research"], 0.0, "a budget of 0 on disk is 0, not the floor")
+        self.assertIn("own read", caps["source"])
+
+    def test_every_swarm_step_carries_the_budget_block(self):
+        from league.swarm.loop import Swarm
+        from league.tests import test_swarm_loop as L
+
+        case = L.LoopCase("run")
+        case.setUp()
+        self.addCleanup(case.doCleanups)
+        sw = Swarm(case.root, settings=case.settings, config={}, store=case.store, router=case.router, pool=case.pool,
+                   sleep=lambda s: None)
+        self.assertIs(sw.guard.settings, sw.settings, "the guard reads the Swarm's own settings dict")
+        sw.guard = case.guard
+        sw.step()
+        self.assertIn("budget", sw.settings)
+        self.assertEqual(sw.settings["budget"]["source"], "floor")
+        self.assertEqual(sw.settings["guard"]["openai_cap_usd"], 0.0)
+        self.assertGreater(sw.settings["population"]["ceiling"], sw.settings["population"]["floor"])
 
 
 class Edge(unittest.TestCase):
@@ -415,7 +496,8 @@ class Job(unittest.TestCase):
         self.assertAlmostEqual(doc["earned_usd_day"], 0.5 * 39.98 / 30, places=4)
         sail, claude = doc["inputs"]["meters"]["sail"], doc["inputs"]["meters"]["claude"]
         self.assertEqual((sail["balance_usd"], sail["fixed_usd_day"], sail["need_usd"]), (600.0, 1.5, 21.0))
-        self.assertEqual((claude["balance_usd"], claude["need_usd"]), (105.0, 7.0))
+        # 300 - 185: the gateway's spent_usd already holds the 10 in flight, so it is not subtracted twice.
+        self.assertEqual((claude["balance_usd"], claude["need_usd"]), (115.0, 7.0))
         self.assertEqual(sorted(c[0] for c in self.sail.calls), ["sb_data", "sb_house"])
         self.assertEqual(doc["meters"]["sail"]["need_share"], 0.75)
         self.assertEqual(receipt["errors"], [])
@@ -465,6 +547,30 @@ class Job(unittest.TestCase):
             B.run(self.ctx())
         self.assertIsNone(self.doc()["inputs"]["p30_usd"])
         self.assertEqual(self.doc()["earned_usd_day"], 0.0)
+
+    def test_a_losing_month_in_the_close_economics_is_a_number_not_a_fallback(self):
+        """A negative p30 is a loss, never "no number": the book (which can read positive) does not stand in for it."""
+        from league.ops import economics
+        with mock.patch.object(economics, "latest", lambda root: {"cutoff": B._iso(NOW - 3 * 3600), "p30": {"usd": "-3.10"}}):
+            receipt = B.run(self.ctx())
+        doc = self.doc()
+        self.assertEqual((doc["inputs"]["p30_usd"], doc["inputs"]["p30_source"]), (-3.1, "league.ops.economics.p30"))
+        self.assertEqual(doc["earned_usd_day"], 0.0)
+        self.assertEqual(receipt["errors"], [])
+
+    def test_a_job_that_reports_failed_is_a_failed_receipt(self):
+        """The grant's refusal ({"status": "failed"}) is never recorded as ok."""
+        from league.ops.__main__ import run_job
+
+        fake = types.ModuleType("fake_grant")
+        fake.run = lambda ctx: {"status": "failed", "action": "none", "error": "the digest moved with no owner deploy"}
+        with mock.patch("importlib.import_module", return_value=fake):
+            out = run_job("grant", root=self.root, due_at=NOW, ctx=types.SimpleNamespace(alerts=[]))
+        self.assertEqual(out["status"], "failed")
+        self.assertIn("the digest moved", out["error"])
+        fake.run = lambda ctx: {"status": "ok", "action": "none"}
+        with mock.patch("importlib.import_module", return_value=fake):
+            self.assertEqual(run_job("grant", root=self.root, due_at=NOW, ctx=types.SimpleNamespace(alerts=[]))["status"], "ok")
 
     def test_a_stale_close_economics_falls_back_to_the_book(self):
         from league.ops import economics
@@ -526,12 +632,28 @@ class Job(unittest.TestCase):
         out = B.drill(self.ctx(), "claude")
         self.assertTrue(out["ok"], out)
         self.assertEqual(self.sent[-1]["test"], True)
-        self.assertEqual(self.sent[-1]["notice_id"], "funding-test:claude:2026-W43")
+        self.assertEqual(self.sent[-1]["notice_id"], f"funding-test:claude:2026-W43:{int(NOW // 60)}")
         self.assertEqual(self.sent[-1]["meter"], "claude")
         self.assertFalse((self.root / "budget.json").exists(), "a drill writes no budget")
         self.assertFalse((self.root / B.NOTICES_FILE).exists())
         with self.assertRaises(ValueError):
             B.drill(self.ctx(), "openai")
+
+    def test_a_second_drill_in_the_week_has_its_own_id_and_a_duplicate_is_not_delivered(self):
+        B.drill(self.ctx(), "claude")
+        B.drill(self.ctx(now=NOW + 3600), "claude")
+        self.assertNotEqual(self.sent[0]["notice_id"], self.sent[1]["notice_id"], "the gateway remembers ids 8 days")
+        self.answer = {"sent": True, "duplicate": True}
+        out = B.drill(self.ctx(), "claude")
+        self.assertFalse(out["sent"], "a duplicate sent no mail: the drill proves nothing")
+        self.assertFalse(out["ok"])
+
+    def test_the_claude_balance_never_subtracts_the_holds_twice(self):
+        self.assertEqual(B._claude_balance({"claude": {"cap_usd": "300", "spent_usd": "185", "inflight_usd": "10",
+                                                       "remaining_usd": "115"}}), 115.0)
+        self.assertEqual(B._claude_balance({"claude": {"cap_usd": 300, "spent_usd": 185, "inflight_usd": 10}}), 115.0)
+        self.assertIsNone(B._claude_balance({"claude": {"configured": False}}))
+        self.assertIsNone(B._claude_balance({"claude": {"cap_usd": "x", "spent_usd": 1}}))
 
 
 if __name__ == "__main__":

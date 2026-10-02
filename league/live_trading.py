@@ -25,9 +25,10 @@ sends no real opening order (exits always go on).
   (`league/ops/grant.py`, hourly and at House start), ratifies the grant itself, the way `--ratify` does,
   in exactly two cases: the money digest moved and an owner's release change (a deploy or rollback
   with no updater attestation) is on record since the grant was last pinned, or a deposit landed since
-  then. It never enables, never touches a revoked grant, never lifts capital above the lower of equity
-  and the ceiling nor the ceiling above the one last ratified without an owner's release change, and
-  refuses (changing nothing) when anything is unreadable or capital would not cover the smallest stake.
+  then (told by its id, so a deposit still pending at a ratification is answered when it settles). It
+  never enables, never touches a revoked grant, never lifts capital above the lower of equity and the
+  ceiling nor the ceiling above the one last ratified without an owner's release change, and refuses
+  (changing nothing) when anything is unreadable or capital would not cover the smallest stake.
   `--disable` stays the owner's stop; the ceiling and the money table stay the owner's deploy.
 """
 from __future__ import annotations
@@ -57,6 +58,10 @@ CENT = Decimal("0.01")
 LANDED = frozenset({"executed", "complete", "completed"})
 #: The deploy record's stages that change which release runs (`league/watchdog.py`): a promotion and a rollback.
 RELEASE_CHANGES = frozenset({"promote", "rollback"})
+#: How far before the grant's pin a deposit is still looked for. The venue times a funding row at its request, not at
+#: its settlement (an ACH deposit is listed for days as pending), so a deposit still pending when a ratification moved
+#: the pin lands with a time before it. Such a deposit is told apart by its id (`LiveGrant.landed`).
+DEPOSIT_LOOKBACK_SECONDS = 14 * 86400
 
 
 class GrantClosed(ValueError):
@@ -163,11 +168,11 @@ def _epoch(value: Any) -> float | None:
     return stamp.timestamp() if stamp.tzinfo is not None else None
 
 
-def deposits_after(funding: Iterable[Any], after: float) -> list[dict[str, Any]]:
-    """The owner's deposits that landed after `after` (epoch seconds) among the Brokerage Account's activities:
-    a funding type (`ltcm.performance.ALPACA_FUNDING`) with a positive amount, settled, timed when the money moved
-    (`transaction_time`, else `created_at`, else `date`). Anything else (trades, withdrawals, pending or failed
-    funding, a row with no readable time or amount) is no deposit."""
+def deposits(funding: Iterable[Any]) -> list[dict[str, Any]]:
+    """The owner's settled deposits among the Brokerage Account's activities: a funding type
+    (`ltcm.performance.ALPACA_FUNDING`) with a positive amount, settled, with its id and its time (`transaction_time`,
+    else `created_at`, else `date`; the venue gives the request's time, not the settlement's). Anything else (trades,
+    withdrawals, pending or failed funding, a row with no readable time or amount) is no deposit."""
     from ltcm.performance import ALPACA_FUNDING
 
     out = []
@@ -181,10 +186,17 @@ def deposits_after(funding: Iterable[Any], after: float) -> list[dict[str, Any]]
         except (InvalidOperation, ValueError):
             continue
         when = _epoch(row.get("transaction_time") or row.get("created_at") or row.get("date"))
-        if not amount.is_finite() or amount <= 0 or when is None or when <= after:
+        if not amount.is_finite() or amount <= 0 or when is None:
             continue
-        out.append({"id": row.get("id"), "activity_type": row.get("activity_type"), "at": when})
+        ident = str(row.get("id") or "").strip()[:200] or None
+        out.append({"id": ident, "activity_type": row.get("activity_type"), "at": when})
     return out
+
+
+def deposits_after(funding: Iterable[Any], after: float) -> list[dict[str, Any]]:
+    """The settled deposits timed after `after` (epoch seconds). A time alone cannot tell a deposit that settled after
+    a ratification from one it answered: the standing grant uses it only for a row with no id (`LiveGrant.landed`)."""
+    return [row for row in deposits(funding) if row["at"] > after]
 
 
 def owner_change(deploy_rows: Iterable[Any], after: float) -> dict[str, Any] | None:
@@ -229,6 +241,7 @@ class LiveGrant:
                 revoked REAL, owner TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS ratifications(id TEXT NOT NULL, at REAL NOT NULL, old_policy TEXT NOT NULL,
                 new_policy TEXT NOT NULL, why TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS deposits_seen(activity TEXT PRIMARY KEY, settled_by REAL NOT NULL);
         """)
 
     def close(self) -> None:
@@ -330,6 +343,43 @@ class LiveGrant:
         last = self.db.execute("SELECT MAX(at) FROM ratifications WHERE id=?", (row["id"],)).fetchone()[0]
         return max(float(row["started"]), float(last)) if last is not None else float(row["started"])
 
+    def _landed(self, funding: Iterable[Any], now: float, since: float) -> list[dict[str, Any]]:
+        """The deposits that landed since the pin `since`, inside the caller's transaction. A deposit with an id is
+        new when the standing grant first saw it settled (`deposits_seen`, written here at `now`) after the pin: a
+        deposit seen settled before the pin was in the equity that pin read, and one still pending at the pin is
+        seen settled only after it, whatever time the venue gives it. One timed more than `DEPOSIT_LOOKBACK_SECONDS`
+        before the pin is not looked at. A row with no id is new when it is timed after the pin. The first look
+        after this table exists (or after a pin the owner's `--ratify` set) may answer a deposit that pin already
+        held: one ratification more, at the same capital rule."""
+        out = []
+        for row in deposits(funding):
+            if row["id"] is None:
+                if row["at"] > since:
+                    out.append(row)
+                continue
+            if row["at"] <= since - DEPOSIT_LOOKBACK_SECONDS:
+                continue
+            self.db.execute("INSERT OR IGNORE INTO deposits_seen VALUES(?,?)", (row["id"], float(now)))
+            seen = self.db.execute("SELECT settled_by FROM deposits_seen WHERE activity=?", (row["id"],)).fetchone()[0]
+            if float(seen) > since:
+                out.append(row)
+        return out
+
+    def landed(self, funding: Iterable[Any], now: float) -> list[dict[str, Any]]:
+        """The deposits the grant in force has not answered (`_landed`), recording which ones are seen settled now.
+        None in force: no deposit (and nothing recorded)."""
+        funding = list(funding or ())
+        with self.lock:
+            self.db.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._latest()
+                out = [] if row is None or row["revoked"] is not None else self._landed(funding, now, self._pinned_at(row))
+                self.db.execute("COMMIT")
+            except BaseException:
+                self.db.execute("ROLLBACK")
+                raise
+        return out
+
     def standing_due(self) -> dict[str, Any]:
         """What the standing grant would look at, read only: the grant in force (None when there is none or the
         latest is revoked), when its policy was pinned (deposits after that are new), and whether the money digest
@@ -353,13 +403,14 @@ class LiveGrant:
         (a) `digest`: the policy's `constitution_digest` is not the money digest now. That moves only by an owner's
             deploy, so one must be on the deploy record since the grant was last pinned (`owner_change`), and the
             running `release` must be known; it is written in `why`.
-        (b) `deposit`: a deposit landed since the grant was last pinned (`deposits_after` over `funding`, the
-            Brokerage Account's funding activities), so capital is read again.
+        (b) `deposit`: a deposit landed since the grant was last pinned (`landed` over `funding`, the Brokerage
+            Account's funding activities: by id, seen settled after the pin), so capital is read again.
 
         Capital is `policy(equity, ceiling)`: the lower of equity and the owner's ceiling (`ceiling_usd`, else
         `league/config.json`), never above the project envelope, and refused below the smallest stake. A ceiling above
         the one last ratified also needs an owner's release change on record. A revoked grant is never touched and no
-        grant is ever created. A refusal changes nothing (a moved digest keeps new real entries held). A ratification
+        grant is ever created. A refusal changes nothing but the record of deposits seen (a moved digest keeps new
+        real entries held), and its `why` carries no figure of the account. A ratification
         always writes a `ratifications` row, even when the policy reads the same, so the pin moves past what it
         answered. Returns the receipt: `action` none | ratified | refused, `triggers`, `why`, policy hashes."""
         from .constitution import money_digest
@@ -387,7 +438,7 @@ class LiveGrant:
                 stored, since = json.loads(old), self._pinned_at(row)
                 out.update(grant=ident, before=policy_hash(old), after=policy_hash(old))
                 digest_moved = stored.get("constitution_digest") != money_digest()
-                landed = deposits_after(funding, since)
+                landed = self._landed(funding, float(now), since)
                 out["triggers"] = (["digest"] if digest_moved else []) + (["deposit"] if landed else [])
                 if not out["triggers"]:
                     self.db.execute("COMMIT")
@@ -405,7 +456,7 @@ class LiveGrant:
                     try:
                         new = policy(equity, top)
                     except ValueError as exc:
-                        refusal = str(exc)
+                        refusal = _refusal(exc)
                     else:
                         try:
                             was = Decimal(str(stored.get("ceiling_usd")))
@@ -440,6 +491,16 @@ class LiveGrant:
     def report(self) -> dict[str, Any]:
         return {"live_trading": self.current(), "micro_entries_allowed": self.allows_live(2),
                 "scaled_entries_allowed": self.allows_live(3), "ratifications": len(self.ratifications())}
+
+
+def _refusal(exc: ValueError) -> str:
+    """`policy`'s refusal without its figures (the receipt and the alert carry none of the account's)."""
+    text = str(exc)
+    if "smallest real stake" in text:
+        return "capital does not cover the smallest real stake"
+    if "project envelope" in text:
+        return "the owner's ceiling is above the project envelope"
+    return text if not any(ch.isdigit() for ch in text) else "the policy cannot be written from these readings"
 
 
 def _canonical(value: Mapping[str, Any]) -> str:
