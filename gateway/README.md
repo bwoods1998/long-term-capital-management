@@ -36,6 +36,7 @@ owner's `GATEWAY_ADMIN_TOKEN`; `/v1/kill` takes either (V3-A: stopping is never 
 | `POST /v1/claude/messages` | one Claude Messages call, reserved and settled against the funded total; streamed when `stream: true`; stopped by the kill switch |
 | `GET /v1/claude/models`, `GET /v1/claude/request/<id>` | the Claude models the key reaches and which are priced; what became of the House's call `<id>` (its `X-LTCM-Request`): held, settled, unknown, released or absent |
 | `POST /v1/github/pr`, `GET /v1/github/pr/<n>[/failures]` | open a pull request from a proposal; read its state and CI |
+| `GET /v1/github/pr/<n>/files?head_sha=`, `POST /v1/github/close` | the exact diff of a pull request at one head; close one engineer pull request at its head (V3-A, below) |
 | `POST /v1/github/docs` | commit one desk page `docs/runs/desk/<date>[-slug].md` to `main` (V3-A, below) |
 | `POST /v1/github/review`, `POST /v1/github/merge` | record the automated reviewer's verdict on an engineer pull request's exact head; squash-merge it inside the walls below (V3-A) |
 | `POST /v1/notify` | one notice to the owner: a `live_stop`, a `funding` cliff (V3-A), a `test` |
@@ -267,8 +268,9 @@ constant changes only by a gateway deploy):
   New York day (`429 {cap: "merge_day"}`). Every refusal names its rule in `refused` (`review_missing`,
   `review_rejected`, `branch`, `fork`, `base`, `not_open`, `draft`, `head_moved`, `protected_path`, `lane_path`, `files`,
   `ci_missing`, `ci_pending`, `ci_failed`, `ci_jobs`, `github`, `no_answer`). A merge GitHub refused gives its place
-  back; one nothing answered keeps it (`merged: "unknown"`). The kill switch does not stop these routes: they move no
-  money.
+  back; one nothing answered keeps it (`merged: "unknown"`). The kill switch stops the merge (`423 {cap:
+  "kill_switch"}`): with `auto_update` on a merge is a deploy, and the owner's stop must freeze the code being looked
+  at. The proposal, review, close and docs routes stay open: they move no money and deploy nothing.
 - **The engineer's pull requests** (WP8b; [lib/github.mjs](lib/github.mjs) `ENGINEER_LANES`): `POST /v1/github/pr` with
   role `engineer` and a `lane`, on the branch `engineer/<lane>/<slug>-<8 hex>`. Each lane writes only its surface:
   `scheduler` `league/swarm/loop.py`; `research` `league/swarm/{researcher,preflight,claude_research}.py`; `memory`
@@ -279,9 +281,21 @@ constant changes only by a gateway deploy):
   "engineer_day"}`; `/v1/health` `autonomy.engineer_pulls`). A retry that finds its own pull request, or GitHub's no
   before any branch, gives the place back. `league/ci.py` holds the same table (`ENGINEER_LANES`; a gateway test reads
   it) and its path guard judges `engineer/<lane>/` branches by it.
+- **The engineer's base**: an engineer proposal names `base_sha`, the full commit its whole files were written against
+  (the running release's attested sha). Before anything is written, every file it carries must read on `main`'s head
+  exactly as on that base, present or absent alike; otherwise `409 {refused: "base_moved"}` names the files `main`
+  changed since (laying the whole file over them would silently undo them), and the engineer rebuilds on `main`'s head.
+  An unknown base is `409 base_unknown`. The pull request's body records the base.
+- **`GET /v1/github/pr/<n>/files?head_sha=<40 hex>`** ([lib/pulls.mjs](lib/pulls.mjs)): the files a pull request
+  changes at exactly that head, each with GitHub's patch, read whole (at most 300 files; a moved head is
+  `409 head_moved`); a patch GitHub left out or one cut at 600 KiB (1.5 MiB in all) makes `complete: false`, which a
+  reviewer must read as "not seen". Read-only.
+- **`POST /v1/github/close`** `{pr, head_sha}`: closes one open engineer pull request at its exact head inside the merge
+  route's walls on the branch (a superseded revision, a rejected one). It never deletes a branch, merges or reopens.
 - **The admin log**: every kill and unkill and every call presenting `GATEWAY_ADMIN_TOKEN` (refused anywhere but the
   switch) is written with its time, the caller's kind (`admin`, `runtime`), the route, the method and the answer; a
-  call at the switch with no accepted token is counted (`unauthorized`), never listed. `/v1/health` carries `admin_log`
+  call at the switch with no accepted token is not written at all: the Gate serializes every order reservation, so a
+  stranger's flood at the public switch must not queue writes in front of them (`unauthorized` stays in `counts`). `/v1/health` carries `admin_log`
   (`counts` and the `last` 20, newest first) and `autonomy` (today's docs commits and merges with the last few, the
   reviews recorded), each read under its own guard. A release whose entry cannot be written releases nothing (`503`);
   an engage never waits on the log.

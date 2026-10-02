@@ -27,6 +27,8 @@
 //   POST            /v1/github/pr            a proposal becomes a branch and a pull request, never a push
 //   GET             /v1/github/pr/<n>        that pull request and its CI, so the VM can watch it
 //   GET             /v1/github/pr/<n>/failures  why CI refused it: failed runs and their annotations
+//   GET             /v1/github/pr/<n>/files?head_sha=  the exact change at that head, file by file (lib/pulls.mjs; V3-A)
+//   POST            /v1/github/close         close one engineer pull request at its exact head (lib/pulls.mjs; V3-A)
 //   POST            /v1/github/docs          one desk page committed to main under docs/runs/desk/ (lib/desk.mjs; V3-A)
 //   POST            /v1/github/review        the automated reviewer's verdict on one engineer pull request's exact head
 //   POST            /v1/github/merge         squash-merge one engineer pull request inside lib/merge.mjs's walls (V3-A)
@@ -50,7 +52,9 @@
 // (lib/protected.mjs) and nothing outside its lane (github.ENGINEER_LANES; WP8b), at most two a
 // New York day (lib/merge.mjs). Every other branch is still merged by a repository workflow or by
 // the owner. The desk's docs route commits one page under docs/runs/desk/ and nothing else
-// (lib/desk.mjs).
+// (lib/desk.mjs). The merge alone is stopped by the kill switch
+// (gate.mergeReserve, 423 `kill_switch`): with auto_update on, a merge is a deploy, and the owner's
+// stop must freeze the code the owner is looking at. Proposals, reviews, closes and docs stay open.
 //
 // `gate` is the Durable Object stub (or, in tests, the gate itself): every method is awaited, so
 // the same router works against both.
@@ -74,6 +78,7 @@ import * as library from './library.mjs';
 import * as github from './github.mjs';
 import * as desk from './desk.mjs';
 import * as merge from './merge.mjs';
+import * as pulls from './pulls.mjs';
 
 export const VENUES = ['kalshi', 'alpaca', 'alpaca-paper'];
 //: Venues that hold no real money. Their orders are never metered and the kill switch does not
@@ -138,7 +143,9 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
     }
   };
   if (!allowed) {
-    if (admin || switchAction) await audit(401);
+    // A caller with no accepted token is never written: the Gate serializes every order, and a stranger's flood at the
+    // public switch must not queue writes in front of them.
+    if (caller !== 'none' && (admin || switchAction)) await audit(401);
     return fail('Unauthorized.', 401, { 'WWW-Authenticate': 'Bearer' });
   }
 
@@ -292,6 +299,21 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
     if (!account) return fail('GitHub is not configured.', 503);
     const found = await github.pullFailures({ ...account, number: Number(refusals[1]), fetcher });
     return found.error ? fail(found.error, found.status) : json(found);
+  }
+  if (path === '/v1/github/close') {
+    if (request.method !== 'POST') return fail('Method not allowed.', 405, { Allow: 'POST' });
+    return closeEngineerPull(request, env, { fetcher });
+  }
+  const changes = /^\/v1\/github\/pr\/([1-9][0-9]{0,8})\/files$/.exec(path);
+  if (changes) {
+    // Read-only and free: the exact diff at one head, for the automated reviewer (lib/pulls.mjs).
+    if (request.method !== 'GET') return fail('Method not allowed.', 405, { Allow: 'GET' });
+    const account = github.configured(env);
+    if (!account) return fail('GitHub is not configured.', 503);
+    const asked = pulls.admitFilesQuery(url);
+    if (asked.error) return fail(asked.error, asked.status);
+    const found = await pulls.pullFiles({ ...account, number: Number(changes[1]), headSha: asked.headSha, fetcher });
+    return found.error ? refusedWith(found) : json(found);
   }
   const watched = /^\/v1\/github\/pr\/([1-9][0-9]{0,8})$/.exec(path);
   if (watched) {
@@ -934,6 +956,19 @@ async function recordReview(request, env, { gate, fetcher, now }) {
   if (!recorded.ok) return refusedWith(recorded);
   return json({ ok: true, pr: review.pr, head_sha: review.head_sha, verdict: recorded.verdict, at: recorded.at,
     ...(recorded.duplicate ? { duplicate: true } : {}) });
+}
+
+/** Close one engineer pull request at its exact head (V3-A; lib/pulls.mjs): a superseded revision or a rejected one. */
+async function closeEngineerPull(request, env, { fetcher }) {
+  const account = github.configured(env);
+  if (!account) return fail('GitHub is not configured.', 503);
+  const body = await jsonBody(request, merge.MAX_REQUEST_BYTES);
+  if (body.response) return body.response;
+  const asked = merge.admitMerge(body.parsed);
+  if (asked.error) return refusedWith(asked);
+  const result = await pulls.closePull({ ...account, number: asked.pr, headSha: asked.head_sha, fetcher });
+  if (result.error) return refusedWith(result);
+  return json({ ok: true, closed: true, pr: asked.pr, head_sha: asked.head_sha });
 }
 
 /**

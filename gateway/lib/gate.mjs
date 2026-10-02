@@ -723,6 +723,8 @@ export function createGate({ store, env = {}, now = Date.now }) {
     },
     mergesToday(at = now()) { return slotRow(MERGES_KEY, at).count; },
     mergeReserve({ pr = null, sha = null, at = now() } = {}) {
+      // With auto_update on a merge is a deploy: the owner's kill switch stops it (proposals, reviews and docs pass).
+      if (killed()) return { ok: false, status: 423, cap: 'kill_switch', error: 'The kill switch is engaged; no pull request is being merged.' };
       return slotReserve(MERGES_KEY, MERGES_PER_DAY, 'merge_day', 'merges', at, { pr, sha: typeof sha === 'string' ? sha.slice(0, 64) : null });
     },
     mergeSettle({ day, id, outcome, merge_sha = null, at = now() } = {}) {

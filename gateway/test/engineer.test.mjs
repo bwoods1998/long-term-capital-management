@@ -18,6 +18,11 @@ const GATEWAY = 'https://ltcm-gateway.workers.dev';
 const env = (extra = {}) => ({ GATEWAY_TOKEN: TOKEN, GITHUB_REPO, GITHUB_TOKEN, CAP_TIMEZONE: 'America/New_York', ...extra });
 const gateAt = (settings = {}) => createGate({ store: memoryStore(), env: env(settings), now: () => NOW });
 const send = async (body, { gate, hub, at = NOW, settings = {} }) => {
+  // The engineer writes against main's head (base_sha, the V3-A base check: test/engineer-contract.test.mjs) unless a
+  // test names its own base.
+  if (body && typeof body === 'object' && body.role === 'engineer' && (!('base_sha' in body) || body.base_sha === WROTE_AGAINST) && hub.refs) {
+    body = { ...body, base_sha: hub.refs.get('main') };
+  }
   const request = new Request(`${GATEWAY}/v1/github/pr`, {
     method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: typeof body === 'string' ? body : JSON.stringify(body),
   });
@@ -31,8 +36,10 @@ const SURFACES = {
   memory: ['league/swarm/architect.py', 'league/swarm/strategist.py', 'league/swarm/diagnostician.py', 'league/swarm/seeds.py', 'league/swarm/mechanisms.py'],
   data: ['league/sailbox.py', 'league/data_job.py'],
 };
+// A stand-in base for proposals admitted directly; through the route (`send`) it becomes main's head.
+const WROTE_AGAINST = 'b'.repeat(40);
 const engineer = (extra = {}) => ({
-  role: 'engineer', lane: 'research', slug: 'preflight-reads', title: 'Faster preflight reads',
+  role: 'engineer', lane: 'research', slug: 'preflight-reads', title: 'Faster preflight reads', base_sha: WROTE_AGAINST,
   body: 'The lane metric, the predicted effect and the canary plan.',
   files: [{ path: 'league/swarm/preflight.py', content: 'FAST = True\n' }, { path: 'league/tests/test_harness_candidate_preflight.py', content: 'X = 1\n' }],
   ...extra,

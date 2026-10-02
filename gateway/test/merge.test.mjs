@@ -72,7 +72,7 @@ test('the engineer opens engineer/<lane>/ branches inside its lane and never on 
   assert.match(github.pathRefusal('engineer', 'league/swarm/bands.py', github.ROLES, 'research'), /no automated change may write this file: protected/);
   assert.match(github.pathRefusal('engineer', 'league/ops/budget.py', github.ROLES, 'research'), /protected \(league\/ops\/budget\.py\)/);
   assert.match(github.pathRefusal('engineer', 'league/ledger.py', github.ROLES, 'research'), /no role may write this file/);
-  const admitted = github.admit({ role: 'engineer', lane: 'research', slug: 'preflight-reads', title: 'Faster preflight reads',
+  const admitted = github.admit({ role: 'engineer', lane: 'research', slug: 'preflight-reads', title: 'Faster preflight reads', base_sha: HEAD,
     files: [{ path: 'league/swarm/preflight.py', content: 'x = 1\n' }] });
   assert.match(admitted.branch, /^engineer\/research\/preflight-reads-[0-9a-f]{8}$/);
   assert.equal(github.engineerLane(admitted.branch), 'research');

@@ -35,7 +35,7 @@ test('kill and unkill are logged with the time and the caller\'s kind; the owner
   ]);
 });
 
-test('the owner\'s token at any other route is refused and logged; a runtime unkill is refused and logged; a stranger is counted only', async () => {
+test('the owner\'s token at any other route is refused and logged; a runtime unkill is refused and logged; a stranger writes nothing', async () => {
   const gate = gateOn(memoryStore());
   for (const [method, path] of [['GET', '/v1/health'], ['POST', '/v1/alpaca/v2/orders'], ['POST', '/v1/github/merge']]) {
     assert.equal((await call(gate, method, path, OWNER)).response.status, 401, path);
@@ -51,7 +51,8 @@ test('the owner\'s token at any other route is refused and logged; a runtime unk
   // Neither the runtime token's GETs nor its orders are the admin log's business.
   const health = (await call(gate, 'GET', '/v1/health', TOKEN)).body;
   assert.equal(health.kill_switch, false);
-  assert.deepEqual(health.admin_log.counts, { total: 11, kill: 0, unkill: 0, admin_token: 4, unauthorized: 6 });
+  // A stranger at the switch is never written either: the Gate serializes the orders, and a flood must not queue there.
+  assert.deepEqual(health.admin_log.counts, { total: 5, kill: 0, unkill: 0, admin_token: 4, unauthorized: 0 });
   assert.deepEqual(health.admin_log.last.map(entry => [entry.caller, entry.action, entry.method, entry.route, entry.status]), [
     ['runtime', 'call', 'POST', '/v1/unkill', 401],
     ['admin', 'call', 'GET', '/v1/unkill', 405],
@@ -71,7 +72,7 @@ test('the log keeps fifty entries, shows the newest twenty, and strangers cannot
   const log = gate.adminLog();
   assert.equal(log.last.length, ADMIN_SHOWN);
   assert.equal(log.last[0].action, 'unkill', 'the owner\'s release is still the newest entry');
-  assert.equal(log.counts.unauthorized, 200);
+  assert.equal(log.counts.unauthorized, 0, 'a stranger writes nothing to the Gate');
   // A route or a method a caller sends is never written raw.
   gate.adminRecord({ caller: 'admin', action: 'call', route: '/v1/x?token=<script>\n', method: 'get\n', status: 401, at: NOW });
   assert.deepEqual(gate.adminLog().last[0], { at: '2026-10-05T16:00:00.000Z', caller: 'admin', action: 'call', route: '/v1/x?token??script??', method: '', status: 401 });
