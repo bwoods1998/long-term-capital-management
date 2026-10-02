@@ -168,6 +168,17 @@ SETTLE_EVERY_SECONDS = 60
 #: A `drill:` stop is the drill's own to lift (`league/watchdog.py` `drill_rollback`, in a `finally`);
 #: one older than this with no deploy in flight is a drill that died, and is lifted here.
 DRILL_STOP_STALE_SECONDS = 2 * 3600
+#: A House running a drill copy with no drill alive this long after it started (`deploy_in_flight` finds no
+#: watchdog: the drill died, or was killed with its job) rolls itself back: nothing else would, and it
+#: would raise its deliberate error alert at every tick, with the nightly job stopped, until the owner came.
+#: The drill's own watch is ten minutes after a restart that takes up to five.
+DRILL_ORPHAN_SECONDS = 30 * 60
+#: The House's monthly `drills` job (league/ops/drills.py) asks for the rollback drill with this file, under
+#: the House's state directory; the updater, in the House's own process, launches it detached (a job child
+#: runs at nice 19 under CPU and memory limits that a watchdog, its canary and the House it restarts
+#: would inherit). A request older than this is dropped unlaunched.
+DRILL_REQUEST = Path("ops") / "drill-request.json"
+DRILL_REQUEST_TTL_SECONDS = 6 * 3600
 
 
 class UpdateError(RuntimeError):
@@ -519,7 +530,7 @@ class Updater:
                  attest: Callable[[str], Mapping[str, Any]] | None = None, trusted: str | Path | None = None,
                  workflows_pin: str = TRUSTED_WORKFLOWS_SHA256, hours: float | None = None,
                  in_flight: Callable[[], str | None] | None = None, nightly_held: Callable[[], bool] | None = None,
-                 nightly_busy: Callable[[], str | None] | None = None):
+                 nightly_busy: Callable[[], str | None] | None = None, launch_watchdog: Callable[[list[str]], int] | None = None):
         self.base = Path(base)
         self.releases = Releases(self.base, clock=clock)  # its rows are dated by the clock the train is measured on
         self.head = head or (lambda: resolve_head(repo))
@@ -555,6 +566,11 @@ class Updater:
         self._settle_next = 0.0
         #: The drill's deliberate break, read once when the House starts (`league/watchdog.py` `drill_marker`).
         self.drill = drill_marker(self.trusted)
+        #: When this House (and this updater) started: a drill copy with no drill alive long after it is an orphan.
+        self._started = self.clock()
+        self._orphan: dict[str, Any] | None = None
+        #: Starts `python -m league.watchdog <args>` detached, its pid in `deploy.pid`; returns the pid.
+        self.launch_watchdog = launch_watchdog or self._launch_watchdog
 
     def due(self) -> bool:
         now = self.clock()
@@ -592,6 +608,71 @@ class Updater:
             self.releases.record({"stage": "launch", "release": release_id, "unjudged": True, "pid": process.pid,
                                   "error": f"deploy.pid could not be written ({type(exc).__name__}: {str(exc)[:160]})"})
 
+    def _launch_watchdog(self, args: list[str]) -> int:
+        """`python -m league.watchdog <args>`, detached as `_launch` detaches a deploy (its own session, the scrubbed
+        environment, the House's own priority and limits), its pid in `<base>/deploy.pid` so nothing else deploys
+        beside it. For the rollback drill and an orphaned drill copy's rollback."""
+        current = self.base / "current"
+        argv = [sys.executable, "-m", "league.watchdog", *args]
+        with open(self.base / "deploy.log", "ab") as log:
+            process = subprocess.Popen(argv, cwd=str(current if current.exists() else self.trusted), stdout=log, stderr=log,
+                                       stdin=subprocess.DEVNULL, start_new_session=True, env=watchdog_environment(self.base))
+        write_pid(self.base / "deploy.pid", process.pid)
+        return int(process.pid)
+
+    def _drill_orphan(self) -> dict[str, Any] | None:
+        """A drill copy whose drill is gone: rolled back here, once. None while the drill is alive or young."""
+        if self._orphan is not None:
+            return self._orphan
+        now = self.clock()
+        if now - self._started < DRILL_ORPHAN_SECONDS or self.releases.current() != self.trusted.name:
+            return None
+        if self.in_flight():
+            return None
+        reason = (f"drill: {self.trusted.name} has run {int((now - self._started) // 60)} minutes with no drill alive; "
+                  "the House rolls the copy back itself")
+        self._orphan = {"at": iso(now), "reason": reason}
+        self.releases.record({"stage": "drill", "outcome": "orphaned", "release": self.trusted.name, "unjudged": True,
+                              "copy_of": self.drill.get("copy_of") if self.drill else None, "reasons": [reason]})
+        try:
+            self._orphan["pid"] = self.launch_watchdog(["rollback", "--base", str(self.base), "--reason", reason])
+        except Exception as exc:  # noqa: BLE001 - the House says so at every tick
+            self._orphan["error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
+        return self._orphan
+
+    def _drill_request(self) -> dict[str, Any] | None:
+        """The rollback drill the `drills` job asked for (`DRILL_REQUEST`): launched here, detached, once nothing is
+        in flight; the drill refuses by itself what it must (the session window, a stopped House, auto_update off) and
+        writes its `stage: "drill"` row either way. A request past `DRILL_REQUEST_TTL_SECONDS` is dropped."""
+        path = self.releases.state_dir / DRILL_REQUEST
+        try:
+            request = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError):
+            request = {}
+        now = self.clock()
+        asked = epoch(request.get("at")) if isinstance(request, dict) else None
+        if asked is None or not -300 <= now - asked <= DRILL_REQUEST_TTL_SECONDS:
+            path.unlink(missing_ok=True)
+            self.releases.record({"stage": "drill", "outcome": "dropped", "unjudged": True,
+                                  "reasons": ["the drill request was unreadable or older than "
+                                              f"{DRILL_REQUEST_TTL_SECONDS // 3600} h; nothing was launched"]})
+            return {"drill_request": "dropped"}
+        if self._launching is not None:
+            return {"drill_request": "waiting", "why": "a release launch is pending"}
+        why = self.in_flight()
+        if why:
+            return {"drill_request": "waiting", "why": why}
+        path.unlink(missing_ok=True)
+        try:
+            pid = self.launch_watchdog(["drill-rollback", "--base", str(self.base)])
+        except Exception as exc:  # noqa: BLE001 - the drills job's next receipt reads the row
+            self.releases.record({"stage": "drill", "outcome": "failed", "unjudged": True,
+                                  "reasons": [f"the drill could not be launched ({type(exc).__name__}: {str(exc)[:200]})"]})
+            return {"drill_request": "failed"}
+        return {"drill_request": "launched", "pid": pid}
+
     def tried(self) -> set[str]:
         """The releases the watchdog has really judged. A row marked `busy` is not one of them: it
         means another deploy held the lock, so the code was never unpacked, let alone run. And the
@@ -608,11 +689,19 @@ class Updater:
         2026): it is tried again at the next train, which its own restart holds off for
         `release_train_hours`. On Sept 24-25 five updater releases in a row (22:21Z to 01:14Z) were
         rolled back by Sail's checkpoint outage, not by anything in them, the two heads carrying the
-        backup fix (#289) among them. A second rollback, or a refusal, retires it for good."""
+        backup fix (#289) among them. A second rollback, or a refusal, retires it for good.
+
+        Nor is a tree that was promoted and never rolled back from, while the box runs ANOTHER updater
+        release (V3-A): main reverted to it (the engineer's revert of a bad change that passed its
+        watch) and that revert is the way back. Not while the box runs the owner's release (main may
+        lag what the owner deployed by hand), and not once anything rolled back from it."""
         judged: set[str] = set()
         verdicts: dict[str, list[str]] = {}
         starts: dict[str, int] = {}
+        backed_out: set[str] = set()
         for row in self.releases.history():
+            if row.get("stage") == "rollback" and row.get("ok") is not False:
+                backed_out.add(str(row.get("from") or row.get("release")))
             release = row.get("release")
             if not release or row.get("busy") or row.get("unjudged"):
                 continue
@@ -623,6 +712,10 @@ class Updater:
             elif row.get("stage") == "start":
                 starts[release] = starts.get(release, 0) + 1
         again = {r for r in judged if verdicts.get(r) == ["rolled_back"] and starts.get(r, 0) <= 1}
+        current = self.releases.current() or ""
+        if current.startswith("main-"):
+            again |= {r for r in judged if r != current and r.startswith("main-") and r not in backed_out
+                      and verdicts.get(r) and set(verdicts[r]) == {"promoted"}}
         return judged - again
 
     def _trusted_identity(self) -> dict[str, Any]:
@@ -646,15 +739,29 @@ class Updater:
         light, self._light = self._light, False
         if self.drill is not None:
             self._last = self.clock()
-            return {"action": "drill", "release": self.trusted.name, "drill": dict(self.drill), "new": False,
-                    "reasons": [f"drill: deliberate break (this House runs {self.trusted.name}, a rollback drill's copy of "
-                                f"{self.drill.get('copy_of') or 'the running release'}); the watch rolls it back"]}
+            out = {"action": "drill", "release": self.trusted.name, "drill": dict(self.drill), "new": False,
+                   "reasons": [f"drill: deliberate break (this House runs {self.trusted.name}, a rollback drill's copy of "
+                               f"{self.drill.get('copy_of') or 'the running release'}); the watch rolls it back"]}
+            orphan = self._drill_orphan()
+            if orphan is not None:
+                out["orphan"] = dict(orphan)
+                out["reasons"].append(orphan["reason"] + (f" (the rollback could not be launched: {orphan['error']})"
+                                                          if orphan.get("error") else ""))
+            resumed = self._settle_nightly()
+            if resumed:
+                out["nightly_resumed"] = resumed
+            return out
         if self._launching is not None:
             self._last = self.clock()
             return self._continue_launch()
         resumed = self._settle_nightly()
         if light:
             return {"action": "none", "reason": "looked only at the nightly stop", **({"nightly_resumed": resumed} if resumed else {})}
+        drill = self._drill_request()
+        if drill is not None and drill.get("drill_request") == "launched":
+            self._last = self.clock()
+            return {"action": "drill_launched", "reason": "the monthly rollback drill was launched", "new": True,
+                    "reasons": [f"the monthly rollback drill was launched (pid {drill['pid']}); it restarts the House twice"], **drill}
         self._last = self.clock()
         current = self.releases.current()
         if current is None:
@@ -930,8 +1037,10 @@ def protected_changes(incoming: Path, running: Path) -> list[str]:
     """The files of the running release's judges that the candidate adds, removes or changes.
 
     The list is the RUNNING `league/ci.py`'s `FORBIDDEN`, imported from this process's own package
-    (importing it executes no candidate code). Only the release trees are compared: `gateway/` and
-    `.github/` never reach the box as files (the workflows are pinned by `TRUSTED_WORKFLOWS_SHA256`)."""
+    (importing it executes no candidate code); the gateway's merge route refuses the same list and the House's
+    configuration (`ci.MERGE_ONLY`, whose dials only the running release's checks let through here). Only the release
+    trees are compared: `gateway/` and `.github/` never reach the box as files (the workflows are pinned by
+    `TRUSTED_WORKFLOWS_SHA256`)."""
     from .ci import FORBIDDEN
 
     def files(root: Path) -> dict[str, Path]:

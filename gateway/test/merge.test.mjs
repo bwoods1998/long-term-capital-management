@@ -42,6 +42,7 @@ test('the protected paths hold every entry of league/ci.py FORBIDDEN, WP1\'s pro
   for (const entry of entries) assert.ok(MERGE_FORBIDDEN.includes(entry), `league/ci.py forbids ${entry}; the merge route must too`);
   for (const entry of ['league/ops/budget.py', 'league/ops/drills.py', 'league/ops/grant.py', 'league/live/', 'league/gym/',
     'league/swarm/gate.py', 'league/swarm/bands.py', 'league/swarm/evaluator.py', 'league/swarm/settings.py', 'league/swarm/store.py',
+    'league/swarm/guard.py', 'league/swarm/models.py', 'league/ops/context.py',
     'ltcm/data/', 'scripts/data/', '.github/', 'gateway/', 'deploy/', 'league/config.json', 'league/constitution.py']) {
     assert.ok(MERGE_FORBIDDEN.includes(entry), entry);
   }
@@ -60,7 +61,7 @@ test('a protected path is refused by name, by tree and without case; a plain res
     assert.equal(protectedRefusal(path), 'not a plain repository path', JSON.stringify(path));
   }
   for (const path of ['.gitattributes', 'league/.gitignore', '.gitmodules']) assert.equal(protectedRefusal(path), 'git\'s own files');
-  for (const path of ['league/house.py', 'league/ops/agenda.py', 'league/ops/runner.py', 'league/swarm/models.py',
+  for (const path of ['league/house.py', 'league/ops/agenda.py', 'league/ops/runner.py', 'league/swarm/pool.py',
     'league/swarm/settings_view.py', 'league/livery.py', 'docs/runs/desk/2026-10-05.md', 'league/tests/test_ops_agenda.py']) {
     assert.equal(protectedRefusal(path), null, path);
   }
@@ -68,7 +69,8 @@ test('a protected path is refused by name, by tree and without case; a plain res
 
 test('the engineer opens engineer/ branches anywhere but the protected paths, through the proposal route', () => {
   assert.equal(github.pathRefusal('engineer', 'league/ops/agenda.py'), null);
-  assert.equal(github.pathRefusal('engineer', 'league/swarm/models.py'), null);
+  assert.equal(github.pathRefusal('engineer', 'league/swarm/pool.py'), null);
+  assert.match(github.pathRefusal('engineer', 'league/swarm/models.py'), /protected \(league\/swarm\/models\.py\)/);
   assert.match(github.pathRefusal('engineer', 'league/swarm/bands.py'), /no automated change may write this file: protected/);
   assert.match(github.pathRefusal('engineer', 'league/ops/budget.py'), /protected \(league\/ops\/budget\.py\)/);
   assert.match(github.pathRefusal('engineer', 'league/ledger.py'), /no role may write this file/);

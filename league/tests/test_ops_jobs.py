@@ -248,6 +248,14 @@ class Scoreboard(Base):
         self.assertEqual((got["self_promoted"], got["self_rolled_back"], got["owner_promoted"]), (1, 1, 1))
         self.assertEqual((got["self_promoted_today"], got["self_rolled_back_today"]), (1, 1))
 
+    def test_the_rollback_drills_verdicts_are_neither_the_owners_nor_the_updaters(self):
+        rows = [{"at": "2026-10-03T15:05:00.000Z", "stage": "verdict", "verdict": "rolled_back", "release": "drill-20261003T150000Z"},
+                {"at": "2026-10-03T15:05:01.000Z", "stage": "drill", "outcome": "rolled_back", "release": "drill-20261003T150000Z"},
+                {"at": "2026-10-03T16:00:00.000Z", "stage": "verdict", "verdict": "promoted", "release": "20261003T160000Z-abc"}]
+        (self.base / "deploys.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+        got = SB.deploy_counts(self.base, day="2026-10-03")
+        self.assertEqual((got["drill_rolled_back"], got["owner_rolled_back"], got["owner_promoted"], got["self_rolled_back"]), (1, 0, 1, 0))
+
     def test_ladder_counts_are_na_until_the_ladder_tables_exist(self):
         self.assertEqual(SB.ladder_counts(self.root, self.now)["entrants"], "n/a")
         db = sqlite3.connect(self.root / "observe.sqlite")

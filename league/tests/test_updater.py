@@ -271,6 +271,42 @@ class ABusyLockDoesNotRetireACommit(UpdaterCase):
         self.releases.record({"release": "main-twice", "stage": "verdict", "verdict": "rolled_back"})
         self.assertIn("main-twice", updater.tried())
 
+    def test_a_revert_to_a_tree_promoted_before_is_deployed_again(self):
+        """main-A promoted, then main-B (it passed its watch, but is bad); the engineer reverts B, so main's tree is A's
+        again. That revert is the way back: it must not be answered "already tried" while the box runs B."""
+        house_a, house_b = "# the house, improved\n", "# the house, improved again\n"
+
+        def ship(text):
+            self.main = tarball(tree(extra={"league/house.py": text}))
+            out = updater.check()
+            self.assertEqual(out["action"], "deploying", out)
+            source, release_id = self.launched[-1]
+            if release_id not in [row["id"] for row in self.releases.list()]:
+                self.releases.stage(source, release_id)
+            self.releases.promote(release_id)
+            self.releases.record({"release": release_id, "stage": "start"})
+            self.releases.record({"release": release_id, "stage": "verdict", "verdict": "promoted"})
+            return release_id
+
+        updater = self.updater()
+        rid_a = ship(house_a)
+        self.assertIn(rid_a, updater.tried())  # it is what runs
+        rid_b = ship(house_b)
+        self.assertNotIn(rid_a, updater.tried())
+        self.assertEqual(ship(house_a), rid_a)  # the revert ships
+        self.assertEqual(self.releases.current(), rid_a)
+        self.assertEqual(len(self.launched), 3)
+        # Once anything rolled back FROM a tree (the owner's rollback, or a watch's), it stays retired.
+        self.releases.record({"deploy": "rollback@1", "release": rid_b, "stage": "rollback", "ok": True, "from": rid_b, "to": "x"})
+        self.assertIn(rid_b, updater.tried())
+
+    def test_a_tree_promoted_before_stays_retired_while_the_box_runs_the_owners_release(self):
+        """main may lag what the owner deployed by hand: the owner's release is never replaced by a tree main had before."""
+        self.releases.record({"release": "main-aaaaaaaaaaaa", "stage": "start"})
+        self.releases.record({"release": "main-aaaaaaaaaaaa", "stage": "verdict", "verdict": "promoted"})
+        self.assertEqual(self.releases.current(), "first-release")
+        self.assertIn("main-aaaaaaaaaaaa", self.updater().tried())
+
 
 class ExactCommitAttestation(UpdaterCase):
     """GitHub's check runs on the exact commit, or nothing deploys."""
@@ -1190,6 +1226,42 @@ class TheDrillCopyBreaksItself(unittest.TestCase):
             self.assertIsNone(Updater(self.base, trusted=self.release(name), clock=self.clock).drill, name)
         self.assertIsNone(Updater(self.base, trusted=self.release("drill-20261003T160000Z", marker=False), clock=self.clock).drill)
 
+    def test_a_drill_copy_with_no_drill_alive_rolls_itself_back_once(self):
+        """The drill died (or was killed with the job that ran it): nothing would roll the copy back, and the House would
+        raise its error alert at every tick with the nightly job stopped until the owner came."""
+        from league.updater import DRILL_ORPHAN_SECONDS
+        from league.watchdog import Releases
+
+        name = "drill-20261003T150000Z"
+        trusted = self.release(name)
+        releases = Releases(self.base)
+        releases._point("current", name)
+        flight, launched = ["a watchdog is running (pid 77, deploy.pid)"], []
+
+        def never(*_):
+            raise AssertionError("a drill copy never looks at main")
+
+        updater = Updater(self.base, trusted=trusted, head=never, fetch=never, attest=never, launch=never, clock=self.clock,
+                          in_flight=lambda: flight[0], launch_watchdog=lambda args: launched.append(args) or 4242)
+        self.clock.advance(DRILL_ORPHAN_SECONDS + 60)
+        out = updater.check()
+        self.assertEqual((out["action"], launched), ("drill", []), "the drill is alive: its watch decides")
+        self.assertNotIn("orphan", out)
+        flight[0] = None
+        out = updater.check()
+        self.assertEqual(out["action"], "drill")
+        self.assertEqual(out["orphan"]["pid"], 4242)
+        self.assertEqual(launched, [["rollback", "--base", str(self.base), "--reason", out["orphan"]["reason"]]])
+        self.assertIn("no drill alive", out["reasons"][-1])
+        updater.check()
+        self.assertEqual(len(launched), 1, "once")
+        [row] = [r for r in releases.history() if r.get("stage") == "drill"]
+        self.assertEqual((row["outcome"], row["release"], row["unjudged"]), ("orphaned", name, True))
+        # A young copy is left to its drill, whatever deploy.pid says.
+        young = Updater(self.base, trusted=trusted, head=never, fetch=never, attest=never, launch=never, clock=self.clock,
+                        in_flight=lambda: None, launch_watchdog=lambda args: launched.append(args) or 1)
+        self.assertNotIn("orphan", young.check())
+
     def test_an_unreadable_marker_in_a_drill_copy_still_breaks(self):
         root = self.release("drill-20261003T150000Z")
         (root / "DRILL_BREAK").write_text("not json")
@@ -1215,3 +1287,57 @@ class TheUpdaterIsOffUnlessTheConfigSaysOn(unittest.TestCase):
         for value in (False, None, 0, 1, "true", "yes"):
             self.assertFalse(auto_update({"auto_update": value}), value)
         self.assertTrue(auto_update({"auto_update": True}))
+
+
+class TheDrillRequest(unittest.TestCase):
+    """The monthly `drills` job (league/ops/drills.py) asks for the rollback drill with a file; the updater, in the
+    House's own process, launches it detached (never the job's child: its limits, its priority, its death at restart)."""
+
+    setUp, tearDown, attest = UpdaterCase.setUp, UpdaterCase.tearDown, UpdaterCase.attest
+
+    def request(self, at=None):
+        from league.watchdog import iso
+
+        path = self.base / "state" / "ops" / "drill-request.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"at": iso(self.clock() if at is None else at), "by": "league.ops.drills"}))
+        return path
+
+    def updater(self, **kw):
+        self.started = []
+        self.flight = kw.pop("flight", None)
+        return Updater(self.base, head=lambda: self.sha, fetch=lambda sha: self.main,
+                       launch=lambda source, rid, record=None: self.launched.append((source, rid)), clock=self.clock,
+                       judge=lambda incoming, running: [], attest=self.attest, workflows_pin=workflows_digest(tarball(tree())),
+                       in_flight=lambda: self.flight, launch_watchdog=lambda args: self.started.append(args) or 999)
+
+    def test_a_request_is_launched_detached_once_nothing_is_in_flight(self):
+        path = self.request()
+        updater = self.updater(flight="a watchdog is running (pid 5, deploy.pid)")
+        out = updater.check()
+        self.assertEqual(self.started, [])
+        self.assertTrue(path.exists(), "kept for the next look")
+        self.assertNotEqual(out["action"], "drill_launched")
+        self.flight = None
+        self.clock.advance(1800)
+        out = updater.check()
+        self.assertEqual((out["action"], out["pid"], out["new"]), ("drill_launched", 999, True))
+        self.assertEqual(self.started, [["drill-rollback", "--base", str(self.base)]])
+        self.assertFalse(path.exists())
+        self.clock.advance(1800)
+        self.assertNotEqual(updater.check()["action"], "drill_launched")
+        self.assertEqual(len(self.started), 1)
+
+    def test_a_stale_or_unreadable_request_is_dropped_with_a_row(self):
+        from league.updater import DRILL_REQUEST_TTL_SECONDS
+
+        path = self.request(at=self.clock() - DRILL_REQUEST_TTL_SECONDS - 60)
+        updater = self.updater()
+        updater.check()
+        self.assertFalse(path.exists())
+        path.write_text("not json")
+        self.clock.advance(1800)
+        updater.check()
+        self.assertEqual(self.started, [])
+        self.assertEqual([r["outcome"] for r in self.releases.history() if r.get("stage") == "drill"], ["dropped", "dropped"])
+

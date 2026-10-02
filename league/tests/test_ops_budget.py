@@ -444,12 +444,27 @@ class Job(unittest.TestCase):
         B.run(self.ctx())
         self.assertEqual(self.doc()["meters"]["sail"]["research_usd_day"], 0.0)
 
-    def test_the_close_economics_p30_is_preferred_when_present(self):
+    def test_the_close_economics_p30_may_cut_what_was_earned_never_raise_it(self):
+        """The close economics is research-class (league/ops/economics.py): an inflated p30 there must not lift the
+        budget past the live book's own read (the D4 rule), but a smaller one (more fees found) is used."""
         from league.ops import economics
         with mock.patch.object(economics, "latest", lambda root: {"cutoff": B._iso(NOW - 3 * 3600), "p30": {"usd": "300.00"}}):
             B.run(self.ctx())
-        self.assertEqual((self.doc()["inputs"]["p30_usd"], self.doc()["inputs"]["p30_source"]),
-                         (300.0, "league.ops.economics.p30"))
+        self.assertEqual(self.doc()["inputs"]["p30_usd"], 39.98)
+        self.assertIn("the live book", self.doc()["inputs"]["p30_source"])
+        with mock.patch.object(economics, "latest", lambda root: {"cutoff": B._iso(NOW - 3 * 3600), "p30": {"usd": "12.50"}}):
+            B.run(self.ctx())
+        self.assertEqual(self.doc()["inputs"]["p30_usd"], 12.5)
+        self.assertTrue(self.doc()["inputs"]["p30_source"].startswith("league.ops.economics.p30"))
+
+    def test_an_unreadable_book_earns_nothing_whatever_the_economics_says(self):
+        from league.ops import economics
+        (self.root / "live.sqlite").unlink()
+        self.book([(9, 50.0, NOW - 6 * DAY, NOW - 5 * DAY)], qty=1)  # a "closed" row still holding contracts
+        with mock.patch.object(economics, "latest", lambda root: {"cutoff": B._iso(NOW - 3 * 3600), "p30": {"usd": "300.00"}}):
+            B.run(self.ctx())
+        self.assertIsNone(self.doc()["inputs"]["p30_usd"])
+        self.assertEqual(self.doc()["earned_usd_day"], 0.0)
 
     def test_a_stale_close_economics_falls_back_to_the_book(self):
         from league.ops import economics

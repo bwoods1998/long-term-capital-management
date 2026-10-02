@@ -5,9 +5,9 @@
 // by the owner's own deploy, so a pull request that touches any path below is never merged here, whatever CI and the
 // reviewer said, and the engineer may not even open one (`github.pathRefusal`, role `engineer`).
 //
-// The list mirrors `league/ci.py` FORBIDDEN (the updater's own wall; test/merge.test.mjs reads that tuple from the
-// repository and fails while any of its entries is missing here) and adds the evaluator's identity and the data the
-// evidence is computed from. A name ending in "/" is a tree. Compared without case, as `league.ci` compares.
+// The list is `league/ci.py` FORBIDDEN (the updater's own wall) and `ci.MERGE_ONLY` (league/config.json, whose bounded
+// dials alone the updater lets through). test/merge.test.mjs reads FORBIDDEN from the repository and fails while any
+// of its entries is missing here, and league/tests/test_ci.py fails while the lists differ by anything else. A name ending in "/" is a tree. Compared without case, as `league.ci` compares.
 
 export const MERGE_FORBIDDEN = Object.freeze([
   // league/ci.py FORBIDDEN, in its order.
@@ -22,6 +22,9 @@ export const MERGE_FORBIDDEN = Object.freeze([
   'league/families.py', 'league/shards.py', 'league/labbox.py', 'league/resolution.py',
   // The House's protected jobs (V3-A, WP1's additions to ci.FORBIDDEN): the budget rule, the drills, the standing grant.
   'league/ops/budget.py', 'league/ops/drills.py', 'league/ops/grant.py',
+  // What feeds and enforces the budget rule (V3-A integration): the Sail guard, the model router's Claude room and the
+  // job context (the settings' overlay is below).
+  'league/swarm/guard.py', 'league/swarm/models.py', 'league/ops/context.py',
   // The evaluator's identity and the evidence it reads: the Gym, the gate, the bands, the evaluator, the settings and
   // the store of the swarm; the data layer and its builders.
   'league/gym/', 'league/swarm/gate.py', 'league/swarm/bands.py', 'league/swarm/evaluator.py',

@@ -54,7 +54,7 @@ def deploy_counts(base: str | Path, *, since: str = T0, day: str | None = None) 
     """Self-deploys (the updater's: a verdict row carrying the attested `sha`) promoted and rolled back since `since`,
     and on `day`; every verdict counted apart."""
     out = {"self_promoted": 0, "self_rolled_back": 0, "self_promoted_today": 0, "self_rolled_back_today": 0,
-           "owner_promoted": 0, "owner_rolled_back": 0}
+           "owner_promoted": 0, "owner_rolled_back": 0, "drill_rolled_back": 0}
     try:
         with (Path(base) / "deploys.jsonl").open(encoding="utf-8") as handle:
             for line in handle:
@@ -68,6 +68,12 @@ def deploy_counts(base: str | Path, *, since: str = T0, day: str | None = None) 
                     continue
                 verdict = row.get("verdict")
                 if verdict not in ("promoted", "rolled_back"):
+                    continue
+                if str(row.get("release") or "").startswith("drill-"):
+                    # The rollback drill's copy (league/watchdog.py `drill_rollback`): no sha, and no owner's either.
+                    # Its promotion is the drill's own step; its rollback is the self-rollback the drill proves.
+                    if verdict == "rolled_back":
+                        out["drill_rolled_back"] += 1
                     continue
                 who = "self" if row.get("sha") else "owner"
                 key = f"{who}_{'promoted' if verdict == 'promoted' else 'rolled_back'}"
@@ -181,7 +187,8 @@ def build(*, day: str, release: str, economics: Mapping[str, Any] | None, deploy
               "## Releases", "",
               f"Self-deployed releases since T0: {deploys.get('self_promoted', 0)} ({deploys.get('self_promoted_today', 0)} today); "
               f"self-rollbacks: {deploys.get('self_rolled_back', 0)} ({deploys.get('self_rolled_back_today', 0)} today). "
-              f"Owner deploys: {deploys.get('owner_promoted', 0)} promoted, {deploys.get('owner_rolled_back', 0)} rolled back.", "",
+              f"Owner deploys: {deploys.get('owner_promoted', 0)} promoted, {deploys.get('owner_rolled_back', 0)} rolled back. "
+              f"Rollback drills rolled back by the watch: {deploys.get('drill_rolled_back', 0)}.", "",
               "## The forward ladder", "", "| Entrants | In practice | Promoted by the ladder | BH family size (90 d) |",
               "|---:|---:|---:|---:|",
               f"| {_cell(ladder.get('entrants'))} | {_cell(ladder.get('in_practice'))} | {_cell(ladder.get('promoted'))} | "

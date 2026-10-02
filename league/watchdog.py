@@ -813,6 +813,13 @@ NIGHTLY_WAIT_SECONDS = 600
 NIGHTLY_IDLE_MARGIN_SECONDS = 10 * 60
 #: A heartbeat older than this says nothing about what the daemon is doing now.
 NIGHTLY_HEARTBEAT_FRESH_SECONDS = 90
+#: A daemon in `retry` is backing off between attempts at a job that failed (`retry_seconds` 300 in
+#: scripts/data/nightly.py), so its `retry_at` is never ten minutes off: with the full margin, a nightly
+#: job that kept failing held every deploy and every drill for as long as it failed, the deploy that fixes
+#: it included. Stopping it in its backoff loses no work, so only the attempt itself must not be cut:
+#: its `retry_at` at least this far away (twice the heartbeat's period, so a retry that began since the
+#: heartbeat was written is never taken for a backoff).
+NIGHTLY_RETRY_MARGIN_SECONDS = 60
 #: The markers automation writes. Only these are ever removed by code.
 NIGHTLY_MARKERS = ("updater:", "drill:")
 
@@ -858,8 +865,9 @@ def unstop_nightly(base: str | Path, marker: str) -> bool:
 
 def nightly_busy(base: str | Path, now: float, *, margin: float = NIGHTLY_IDLE_MARGIN_SECONDS) -> str | None:
     """Why the nightly daemon must not be stopped at `now`, or None when it may be: no daemon holds the
-    lock, or its fresh heartbeat (`scripts/data/nightly.py daemon`) says it is idle and its next job (the
-    `next_wake` of a `waiting` daemon, the `retry_at` of one in `retry`) is at least `margin` away.
+    lock, or its fresh heartbeat (`scripts/data/nightly.py daemon`) says it is idle and its next job is far
+    enough off: the `next_wake` of a `waiting` daemon at least `margin` away, the `retry_at` of one backing
+    off in `retry` at least `NIGHTLY_RETRY_MARGIN_SECONDS` away (never more than `margin`).
     Anything else is busy: a job running, a daemon `starting` or just `complete` (a catch-up may follow),
     and a heartbeat that is missing, unreadable or stale (fail closed: the supervisor itself ends a
     daemon whose heartbeat stays stale)."""
@@ -879,10 +887,12 @@ def nightly_busy(base: str | Path, now: float, *, margin: float = NIGHTLY_IDLE_M
         due = epoch(beat.get("next_wake"))
     elif phase == "retry":
         due = float(beat["retry_at"]) if isinstance(beat.get("retry_at"), (int, float)) and not isinstance(beat.get("retry_at"), bool) else None
+        margin = min(margin, NIGHTLY_RETRY_MARGIN_SECONDS)
     else:
         return f"the nightly daemon is {str(phase)[:40]!r}, not idle"
     if due is None or due - now < margin:
-        return f"the nightly daemon's next job is due {'at an unreadable time' if due is None else 'at ' + iso(due)}, within {int(margin // 60)} minutes"
+        within = f"{int(margin // 60)} minutes" if margin >= 120 else f"{int(margin)} seconds"
+        return f"the nightly daemon's next job is due {'at an unreadable time' if due is None else 'at ' + iso(due)}, within {within}"
     return None
 
 
@@ -1422,7 +1432,13 @@ def drill_rollback(dog: Watchdog, *, state: str | Path | None = None, session: C
         while True:
             busy = None if stopped else nightly_busy(base, dog.clock())
             if not stopped and busy is None:
-                stop_nightly(base, marker)
+                standing = stop_nightly(base, marker)
+                if standing != marker and standing.startswith(NIGHTLY_MARKERS):
+                    # The updater's stop: it is launching a release (it waits for the daemon with its stop
+                    # written), and when it sees this drill in flight it gives up and lifts its stop -- in the
+                    # middle of the drill. A launch pending is a deploy in flight.
+                    return finish("refused", False, [f"another automated nightly stop stands ({standing[:80]}): a deploy is "
+                                                     "being launched; the drill is tried again later"], **extra)
                 stopped = True
             if stopped and not nightly_lock_held(base):
                 break

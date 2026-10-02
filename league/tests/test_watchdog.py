@@ -768,7 +768,15 @@ class NightlyStopTest(Case):
             self.assertIsNone(busy(state="retry", retry_at=now + 3600, next_wake=None))
             self.assertIn("running a job (store-completion)", busy(state="running", busy=True, job="store-completion"))
             self.assertIn("within 10 minutes", busy(next_wake=wd.iso(now + 540)))
-            self.assertIn("within 10 minutes", busy(state="retry", retry_at=now + 60))
+            # A daemon backing off in `retry` (its retry_seconds is 300) is stopped unless the attempt is
+            # about to begin: a nightly job that keeps failing must not hold every deploy for as long as it fails.
+            self.assertIsNone(busy(state="retry", retry_at=now + 300, next_wake=None))
+            self.assertIsNone(busy(state="retry", retry_at=now + 61, next_wake=None))
+            self.assertIn("within 60 seconds", busy(state="retry", retry_at=now + 59, next_wake=None))
+            self.assertIn("within 60 seconds", busy(state="retry", retry_at=now - 5, next_wake=None))
+            self.assertIn("unreadable time", busy(state="retry", retry_at="soon", next_wake=None))
+            self.assertIn("running a job", busy(state="retry", retry_at=now + 300, busy=True, next_wake=None))
+            self.assertIn("within 10 minutes", busy(next_wake=wd.iso(now + 300)))  # a waiting daemon keeps the full margin
             self.assertIn("unreadable time", busy(next_wake="soon"))
             self.assertIn("not idle", busy(state="complete"))
             self.assertIn("not idle", busy(state="starting"))
@@ -919,6 +927,25 @@ class DrillTest(Case):
         self.assertIsNone(wd.nightly_marker(self.base))
         self.assertFalse((self.base / "incoming" / result["release"]).exists())
         self.assertEqual(self.releases.current(), "rel-0001")
+
+    def test_a_launch_the_updater_is_waiting_on_refuses_the_drill(self):
+        """An updater launch pending (its `updater:` stop written, waiting for the daemon) is a deploy in flight: a drill
+        that reused that stop would see the updater give up its launch and lift the stop in the middle of the drill."""
+        self.running_with()
+        self.broken()
+        self.assertEqual(wd.stop_nightly(self.base, "updater:main-0123456789ab"), "updater:main-0123456789ab")
+        result = self.drill()
+        self.assertEqual((result["ok"], result["outcome"]), (False, "refused"))
+        self.assertIn("another automated nightly stop stands (updater:main-0123456789ab)", result["reasons"][0])
+        self.assertEqual(self.world.canary_calls, [])
+        self.assertEqual(wd.nightly_marker(self.base), "updater:main-0123456789ab", "the updater's stop is the updater's to lift")
+        self.assertEqual(self.releases.current(), "rel-0001")
+        # An operator's own stop is no launch: the drill goes on under it and leaves it standing.
+        wd.unstop_nightly(self.base, "updater:main-0123456789ab")
+        (self.base / "state" / "data" / "nightly.stop").write_text("")
+        self.broken()
+        self.assertEqual(self.drill()["outcome"], "rolled_back")
+        self.assertEqual(wd.nightly_marker(self.base), "")
 
     def test_refusals_stage_and_stop_nothing(self):
         cases = []
