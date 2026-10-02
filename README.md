@@ -27,47 +27,42 @@ session was Monday September 28 (13:30Z); no family had passed the holdout, so i
 orders were the House's own calibration round trips. Profitable production trading is the goal, not an
 outcome established by more agents, more trials, or a successful backtest.
 
-## Current state: October 2, 14:15Z (paused)
+## Current state: October 3, 2026 (autopilot)
 
-- **Active development is paused** (the owner, Oct 2). Production keeps running unchanged: no deploy and no settings
-  change until work resumes. How to resume is in [operations](docs/operations.md) ("Paused").
+- **The project runs on autopilot** (the owner, Oct 2). Production keeps running on the release below: the swarm
+  researches around the clock at a funded floor and the live path trades every New York session. Nothing is deployed
+  until work resumes. What runs, the settings in effect and how to resume are in [operations](docs/operations.md)
+  ("Autopilot").
 - **What runs.** The House runs `20261002T112610Z-e11710692569` (main `e3d0111f`, promoted 11:26Z Oct 2), the gateway
   `4471596a`, the money digest `42c4a3af`, and the grant `options-swarm-20260928` is active (re-ratified at Release B,
   Oct 1). There have been two planned evidence resets (Release A, Sept 30; Release B, Oct 1) and none since. Main is
-  ahead of the running release by docs and comments only.
+  ahead of the running release by docs and comments only; the box's updater is off.
 - **Real money** (on since Sept 27). No family has passed the holdout (3 looks, 0 passes), so no family trades real
   money on D2. The real orders are the House's own:
-  - D3 calibration round trips (19 closed by the Oct 2 open);
+  - D3 calibration round trips (23 closed by the Oct 2 close);
   - the House live test, one frozen, pre-registered program at tuition size and never evidence (no order yet);
   - one tuition lot opened Sept 30 (a 1-lot GOOGL debit vertical, never evidence), exit-only since its program failed
-    its holdout look.
+    its holdout look; its program exits it before its Oct 7 expiry cutoff.
 
-  The incubator (one real lot for a family whose live practice was positive, never evidence) has been on since Oct 1;
-  no first look is possible before about Oct 6-7.
-- **Net since the reset** (08:56Z Oct 2 cutoff): realized options P&L -$37.80, input costs $596.28 (the owner declared
-  no external costs), so Net is -$634.08 ([the run record](docs/runs/2026-09-30-continuous-learning.md), "Oct 2:
-  pause").
-- **Research.** About 20 families alive (start 96, floor 12) and the practice league's cohorts trading shadow on live
-  quotes. The architect runs on Sail as DeepSeek-V4-Pro on the asap queue (`architect.sail_profile` `pro_asap`, high
-  effort, at most 6 births a pass, a pass every 20 minutes while the population is below its start): Sail's balanced
-  queue did not answer from 07:00Z to 12:53Z Oct 2, and the Claude architect bore no family in its 4 passes that day. It
-  reads agenda v16c (private) and may bear only debit verticals and two-sided singles. A rebirth in a refuted cell must
-  name a listed row (`architect.claimable_rows` 4); open cells stay off by the owner's decision, and automatic forks of
-  validated lineages are off. The gate refuses a duplicate look and holds a look the holdout cannot judge (Oct 2). The
-  swarm trains on 25 roots, with Train 2020-2024 (2022-2024 for the 20 added names). Alpaca's asset lookup returned
-  6,177 tradable optionable equity/ETF assets: discovery is much broader than training readiness.
-- **Models.** The Sail researchers (DeepSeek) do the inner loop at a $1.30 an hour pace. Claude reads programs at the
-  gate (Sonnet 5.5 for the review, Opus 5.5 for the audit) and writes the strategist's section. Stall rewrites, the
-  diagnostician and the Claude research band are off. OpenAI is unused.
-- **While paused.** The research burst ends Oct 5 00:00Z (`guard.burst_until`), and the swarm's Sail spend then falls to
-  `guard.after_burst_usd_day` ($12 a day by default). Sail has about $130 and runs out around Oct 7-9 at the current
-  pace; the guard brakes the swarm at $32, before the House is at risk. Claude has about $93 of its $265. The tuition
-  lot closes before its Oct 7 expiry cutoff. No harness improvement is retained.
+  The incubator (one real lot for a family whose live practice was positive, never evidence) has been on since Oct 1.
+- **Net since the reset** (the Oct 2 close): realized options P&L -$40.63, input costs $607.88 (the owner declared no
+  external costs), so Net is -$648.51 ([the run record](docs/runs/2026-10-02-unattended-desk.md)).
+- **Research at a funded floor** (Oct 2 evening). The swarm had been spending about $29 a day; research now runs at a
+  pace Sail's balance can fund for about three weeks with no top-up: 16 families at the start (floor 8), one Gym box,
+  the Sail researchers (DeepSeek) at $0.25 an hour, the architect every two hours (DeepSeek-V4-Pro on the asap queue,
+  agenda v16c, debit verticals and two-sided singles only), the strategist once a day. The practice league's cohorts
+  trade shadow on live quotes. Claude reads programs at the gate (Sonnet 5.5 review, Opus 5.5 audit). OpenAI is unused.
+- **v3, the unattended desk: built, not deployed.** On Oct 2 the project was diagnosed as a treadmill (2,370 families
+  born and 2,349 retired in six days, no family through the holdout, every deploy and decision a human step) and a v3
+  was built on branches: the House's own jobs, a research budget funded by realized profit, a standing grant,
+  self-deploy behind the updater's walls, a forward-evidence ladder, research on stronger models, and an engineer that
+  improves the harness. It is parked (draft PR #489 and the `v3/*` branches) until it is fully integrated and tested;
+  [the run record](docs/runs/2026-10-02-unattended-desk.md) has the plan, what was built and why it waits.
 - **What real money may open:** four debit types under $2,000 of equity. The simulator supports 11 types. Covered calls
   and cash-secured puts still need inventory and collateral support, and there is no general agent paper book (the paper
   proofs check the route).
-- **The public page** is the owner's (revamped by the owner on Oct 2). The House's publisher feeds it; the page's own
-  code lives in the owner's `personal-site` repository and is not changed from here.
+- **The public page** is the owner's. The House's publisher feeds it; the page's own code lives in the owner's
+  `personal-site` repository.
 
 The [goal](docs/goals/LTCM_OPTIONS_SWARM.md) and [the sprint that amends it](docs/goals/LTCM_SWARM_SPRINT.md)
 record the direction and remaining work; [operations](docs/operations.md) distinguishes merged code from
