@@ -179,9 +179,9 @@ class EveryConditionAlone(FactsCase):
         self.store.set_state("fam", incubator_reviews={"another-sha": self.review("another-sha")})
         self.assertNoRow("the incubator's review of another sha")
 
-    def test_the_gate_refused_failed_or_demoted_it(self):
+    def test_the_gate_refused_failed_demoted_or_held_it(self):
         sha = self.eligible()
-        for result in ("refused", "failed", "demoted"):
+        for result in ("refused", "failed", "demoted", "held"):  # "held": THE LOOK HOLDS (a held look is a failed one here)
             self.store.set_state("fam", gate_outcome={"sha": sha, "result": result})
             self.assertNoRow(result)
         self.store.set_state("fam", gate_outcome={"sha": "another-sha", "result": "refused"})

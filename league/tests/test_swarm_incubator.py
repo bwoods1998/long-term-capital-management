@@ -78,7 +78,8 @@ def accepts(state: dict, n: int, sha: str, kv: dict) -> bool:
     if not (passed(state.get("review")) or passed((state.get("incubator_reviews") or {}).get(sha))):
         return False
     outcome = state.get("gate_outcome") or {}
-    return not (outcome.get("sha") == sha and outcome.get("result") in ("refused", "failed", "demoted"))
+    # "held" (THE LOOK HOLDS, Oct 2, 2026) joined the reader's outcomes: a held look bars as a failed one does.
+    return not (outcome.get("sha") == sha and outcome.get("result") in ("refused", "failed", "demoted", "held"))
 
 
 class Fixture:
@@ -806,8 +807,9 @@ class BarCase(GateCase):
 
 
 class GateBar(BarCase):
-    """A program the gate refused, whose holdout look failed or which it demoted loses its incubator mark for good, and
-    the bar outlives the family's `gate_outcome` moving on to a newer version (which is all the live side reads)."""
+    """A program the gate refused, whose holdout look failed or was held, or which it demoted loses its incubator mark
+    for good, and the bar outlives the family's `gate_outcome` moving on to a newer version (which is all the live side
+    reads)."""
 
     def test_the_gates_reviewer_refusing_the_program_bars_it_after_gate_outcome_moves_on(self):
         n, sha = self.passed()
@@ -831,6 +833,19 @@ class GateBar(BarCase):
         self.moved_on()
         self.gate().run()
         self.barred(n, sha, "holdout look failed")
+
+    def test_a_held_look_is_recorded_and_bars_it_after_gate_outcome_moves_on(self):
+        """THE LOOK HOLDS (Oct 2, 2026): a held look bars its program as a failed look does, also when only the family's
+        `gate_outcome` names it, as a demotion's does (the gate's own bar, recorded first, is tested in
+        test_swarm_look_holds.py)."""
+        n, sha = self.passed()
+        self.store.set_state("a", gate_outcome={"sha": sha, "result": "held"})
+        swept = self.gate()._incubator_sweep()
+        self.assertEqual(swept["barred"], [f"a:{sha[:12]}"])
+        self.assertIn(sha, self.state("a")["incubator_barred"])
+        self.moved_on()
+        self.gate().run()
+        self.barred(n, sha, "held")
 
     def test_a_forward_demotion_is_recorded_and_bars_it_after_gate_outcome_moves_on(self):
         n, sha = self.passed()
