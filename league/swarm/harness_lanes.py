@@ -11,7 +11,8 @@ THE LANES (`LANES`; the operator's procedure is `playbooks/harness-improvement.m
 - `research` (research workflow and tools). Bottleneck: Train runs spent on programs that cannot run. Primary metric
   `train_dq_rate` = runtime-disqualified Train runs / Train runs; secondary `gym_seconds_wasted_per_birth`; guards: OK
   runs per research dollar, cycle errors, and cycles that ran the Gym but name no recorded run. Surface: the
-  researcher's admission and tools, preflight, the Claude research adapter. Canary: 25% of families, concurrent.
+  researcher's admission and tools, preflight, the Claude research adapter. Canary: 50% of families for 12 hours,
+  concurrent.
 - `memory` (prompts, memory, retrieval). Bottleneck: failed mechanisms reborn. Primary `graveyard_rebirth_rate` =
   births whose mechanism is the same idea (a FROZEN detector below, not the architect's) as an earlier graveyard row on
   the same slice / births; or `validation_attempts_per_usd` = Validation runs at the normal spread / research dollars.
@@ -1077,6 +1078,9 @@ FROZEN_SYMBOLS: dict[str, tuple[str, ...]] = {
         "Researcher._with_score", "Researcher.dead", "Researcher.hold_offer", "Researcher.can_retire",
         "Researcher.retire_earned", "Researcher.retire_floor", "Researcher._scored", "Researcher.eligible_run",
         "Researcher.screen",
+        # The validated-family retire guard (Oct 1): `_execute` asks the unfrozen `guarded` first, so a lane that returned
+        # None there would lift it (the H1 review, finding 5).
+        "Researcher.guarded", "retire_guard", "retire_guard_days",
         "Researcher.drift_blocks", "Researcher._demote", "Researcher._terminal", "Researcher.cycle",
         "Researcher._count_dormancy", "Researcher._count_holds",
         # A program's path from the model's tool call to the Gym: the arguments a tool call carries, the program text
@@ -1778,7 +1782,9 @@ LANES: dict[str, Lane] = {
             "a research cycle each.", judge_primary="gym_seconds_wasted", judge_effect=0.20,
             judge_floor=5 * 130.0),),
         guards=(Metric("ok_runs_per_usd", "ok_runs", "research_usd", direction="higher", min_effect=0.10),
-                Metric("cycle_error_rate", "cycle_errors", "cycles", min_effect=0.20),
+                # An absolute floor like its siblings' (the lanestats study): at about 0.5% of cycles, 20% relative is
+                # a tenth of a point, which no canary of feasible size can resolve.
+                Metric("cycle_error_rate", "cycle_errors", "cycles", min_effect=0.20, abs_tolerance=0.005),
                 # A cycle that ran the Gym but names no recorded run: the join the lane's own metrics rest on.
                 Metric("unmatched_gym_cycle_rate", "gym_cycles_unmatched", "gym_cycles", min_effect=0.0,
                        abs_tolerance=0.01),
@@ -1792,7 +1798,9 @@ LANES: dict[str, Lane] = {
         judge_cost="screen_cpu_seconds", judge_cost_rule="pays",
         regressions=("league.tests.test_swarm_researcher", "league.tests.test_swarm_store", "league.tests.test_swarm_loop")
         + CORE_REGRESSIONS,
-        canary={"mode": "arms", "unit": "family", "fraction": 0.25, "observe_seconds": 6 * 3600,
+        # Half the families for twelve hours (the lanestats study, Oct 1 2026): at about 120 Train runs an hour a 25%
+        # arm over six hours reached the 200-run floor in 8% of windows; this reaches it in all of them.
+        canary={"mode": "arms", "unit": "family", "fraction": 0.5, "observe_seconds": 12 * 3600,
                 "min_units_per_arm": 12},
         population_guards=(UNATTRIBUTED,), heldout_pool=HELDOUT_POOLS["research"],
     ),
@@ -1918,8 +1926,8 @@ RULE_SYMBOLS: dict[str, tuple[str, ...]] = {
         "REJECT_CLASSES", "reject_class", "signature", "COST_RATIO", "HOUSE_DQ_RATE", "PAYBACK_DAYS", "CYCLE_USD",
         "HELDOUT_POOLS", "PSEUDO_UNITS", "RESEARCH_KINDS", "_WASTED", "_num", "_add", "totals", "_spend", "_research",
         "_read_runtime", "_memory", "_data", "_execution", "measure", "lane_tallies", "lane_metrics", "rank", "payback",
-        "motivating_units", "heldout_seed", "split_arms", "_ratio", "compare", "fisher_less", "judge_counts", "_pays",
-        "judge_verdict", "binomial_low", "required_units", "retention"),
+        "DOMINANT_SHARE", "motivating_units", "heldout_seed", "split_arms", "_ratio", "GUARD_ALPHA", "tolerated", "compare",
+        "fisher_less", "judge_counts", "_pays", "judge_verdict", "binomial_low", "required_units", "retention"),
     "league/swarm/canary.py": ("MECHANISM_CHARS", "in_arm", "mechanism_unit", "decide"),
     "league/swarm/improvement.py": ("ALPHA", "HarnessImprovement.canary_start", "HarnessImprovement.reconcile_lane"),
 }
@@ -2614,8 +2622,17 @@ def payback(lane: Lane, stake: Mapping[str, Any], release_class: str | None = No
                                     f"${worth:.2f} over {PAYBACK_DAYS} days, below a {klass} cycle's ${cost:.0f}")}
 
 
+#: Pre-treatment outliers (the lanestats study, Oct 1 2026). In an arms lane, a unit that held at least DOMINANT_SHARE
+#: of a lower-is-better check's events in the capture (when the capture had at least DOMINANT_EVENTS of them) is excluded
+#: from both arms with the motivating units. It is chosen from the capture, before the arms exist, so it cannot bias the
+#: comparison; without it one family already broken before the canary (Oct 1: 53 of the capture's 70 cycle errors, in 53
+#: of its 56 cycles) decides that guard by the arm its hash falls in.
+DOMINANT_SHARE, DOMINANT_EVENTS = 0.25, 20
+
+
 def motivating_units(lane: str, measurement_lane: Mapping[str, Any]) -> list[str]:
-    """The units a brief shows its patch author: every unit named by an example. The retention comparison excludes them."""
+    """The units a brief shows its patch author: every unit named by an example; and, in an arms lane, every unit that
+    held most of a check's events in the capture (`DOMINANT_SHARE`). The retention comparison excludes them."""
     found: list[str] = []
     for row in measurement_lane.get("examples") or []:
         for key in ("families", "boxes"):
@@ -2625,6 +2642,15 @@ def motivating_units(lane: str, measurement_lane: Mapping[str, Any]) -> list[str
                 found.append(str(row[key]))
         if row.get("graveyard_row"):
             found.append(str(row["graveyard_row"]))
+    spec = LANES.get(lane)
+    if spec is not None and spec.canary.get("mode") == "arms":
+        units = {str(u): r for u, r in (measurement_lane.get("units") or {}).items() if str(u) not in spec.arm_exclude}
+        for metric in [m for b in spec.bottlenecks for m in b.secondary] + list(spec.guards):
+            if metric.direction != "lower":
+                continue
+            total = sum(float(r.get(metric.numerator) or 0.0) for r in units.values())
+            if total >= DOMINANT_EVENTS:
+                found.extend(u for u, r in units.items() if float(r.get(metric.numerator) or 0.0) >= DOMINANT_SHARE * total)
     return sorted(set(found))
 
 
@@ -2656,12 +2682,37 @@ def _ratio(rows: Sequence[Mapping[str, float]], metric: Metric) -> float | None:
     return num / den if den > 0 else None
 
 
+#: How an arms canary judges a secondary or guard check (the lanestats study, Oct 1 2026). On the point estimate a benign
+#: change failed at least one check in about 80% of windows (composition noise across a split of heterogeneous
+#: families; a zero tolerance fails half of all windows on its own), while a guard's real harm of twice its tolerance
+#: still passed in a third of them. So a check is judged on the same cluster bootstrap as the primary: it fails when its
+#: worsening beyond its tolerance is significant (one-sided p <= GUARD_ALPHA), or, when it has a tolerance, when more
+#: than GUARD_BETA of the replicates are worse than TWICE its tolerance (the canary cannot rule out a gross harm). A
+#: check with no bootstrap (a population guard, a group-level count, fewer than two units a side) keeps the point
+#: estimate, as do the window lanes.
+GUARD_ALPHA, GUARD_BETA = 0.10, 0.20
+
+
+def tolerated(metric: Metric, treated: float | None, control: float | None, times: float = 1.0) -> bool:
+    """Whether `treated` is no worse than `control` beyond `times` x the metric's tolerance: relative (`min_effect`), or
+    absolute when `abs_tolerance` is set. A zero control makes the relative change undefined: then only the absolute
+    tolerance can pass it (a guard that goes from no errors to some errors fails). Unmeasured on either side passes."""
+    if treated is None or control is None:
+        return True
+    sign = 1.0 if metric.direction == "lower" else -1.0
+    worse = (treated - control) * sign
+    relative = -worse / abs(control) if control else (0.0 if worse == 0 else None)
+    return (relative is not None and relative >= -times * metric.min_effect) or worse <= times * metric.abs_tolerance
+
+
 def compare(metric: Metric, treated: Mapping[str, Mapping[str, float]], control: Mapping[str, Mapping[str, float]], *,
             seed: str, resamples: int = 2000, extra_treated: Mapping[str, float] | None = None,
-            extra_control: Mapping[str, float] | None = None) -> dict[str, Any]:
+            extra_control: Mapping[str, float] | None = None, guard: bool = False) -> dict[str, Any]:
     """The metric in each group (a ratio of sums over units) and a one-sided cluster-bootstrap p-value that the treated
     group is better. Units are resampled whole, so correlated rows of one family count once. `extra_*` are group-level
-    tallies with no unit split (e.g. restarts)."""
+    tallies with no unit split (e.g. restarts). With `guard`, the same replicates also give `harm_p`, the one-sided
+    p-value that the treated group is worse beyond the metric's tolerance, and `beyond_twice`, the share of replicates
+    worse than twice it (`GUARD_ALPHA`)."""
     def has(row: Mapping[str, float]) -> bool:
         return metric.numerator in row or metric.denominator in row
 
@@ -2693,7 +2744,7 @@ def compare(metric: Metric, treated: Mapping[str, Mapping[str, float]], control:
         return out
     out["test"] = "cluster_bootstrap_one_sided"
     rng = random.Random(int(hashlib.sha256(f"{seed}:{metric.name}".encode()).hexdigest()[:12], 16))
-    worse = draws = 0
+    worse = draws = within = gross = 0
     if a and b:
         for _ in range(resamples):
             ra = _ratio([a[rng.randrange(len(a))] for _ in a], metric)
@@ -2702,7 +2753,12 @@ def compare(metric: Metric, treated: Mapping[str, Mapping[str, float]], control:
                 continue
             draws += 1
             worse += (rb - ra) * sign <= 0
+            if guard:
+                within += tolerated(metric, ra, rb)
+                gross += not tolerated(metric, ra, rb, 2.0)
     out["p_value"] = (worse + 1) / (draws + 1) if draws else None
+    if guard and draws:
+        out.update(harm_p=(within + 1) / (draws + 1), beyond_twice=gross / draws)
     return out
 
 
@@ -2817,11 +2873,16 @@ def judge_verdict(lane: Lane, bottleneck: Bottleneck, trees: Mapping[str, Mappin
 
 
 def binomial_low(k: int, n: int, p: float) -> float:
-    """P(X <= k) for X ~ Binomial(n, p)."""
+    """P(X <= k) for X ~ Binomial(n, p). Each term in logs: `math.comb(n, x)` exceeds a float from about 1,040 births,
+    which raised OverflowError in a memory window that large (the lanestats study, Oct 1 2026)."""
     if n <= 0:
         return 1.0
     p = min(max(p, 0.0), 1.0)
-    return min(1.0, sum(math.comb(n, x) * p ** x * (1 - p) ** (n - x) for x in range(0, k + 1)))
+    if p in (0.0, 1.0):
+        return 1.0 if p == 0.0 or k >= n else 0.0
+    lp, lq, ln = math.log(p), math.log1p(-p), math.lgamma(n + 1)
+    return min(1.0, sum(math.exp(ln - math.lgamma(x + 1) - math.lgamma(n - x + 1) + x * lp + (n - x) * lq)
+                        for x in range(0, min(k, n) + 1)))
 
 
 def required_units(control: Mapping[str, float], metric: Metric, *, alpha: float, cap: int = 60) -> int | None:
@@ -2840,7 +2901,8 @@ def retention(lane: Lane, bottleneck: Bottleneck, treated: Mapping[str, Mapping[
               population: tuple[Mapping[str, float], Mapping[str, float]] | None = None, fraction: float | None = None,
               min_units: int | None = None) -> dict[str, Any]:
     """The registered decision: the primary metric better by at least `min_effect` with p <= alpha and enough
-    denominator in each group; every secondary and guard metric (quality and cost) no worse than its tolerance; every
+    denominator in each group; every secondary and guard metric (quality and cost) no worse than its tolerance (in an
+    arms canary on the bootstrap: no significant worsening beyond it, and twice it ruled out, `GUARD_ALPHA`); every
     population guard (the window's whole-population tallies against the capture's, `population` = (window, capture))
     no worse than its tolerance; and, with `lane.birth_balance` and the arm's `fraction`, the canary arm's share of the
     births not significantly below its fraction (a canary that refuses more than restated ideas misses signals)."""
@@ -2861,20 +2923,23 @@ def retention(lane: Lane, bottleneck: Bottleneck, treated: Mapping[str, Mapping[
     improved = (enough and primary["relative"] is not None and primary["relative"] >= bottleneck.metric.min_effect
                 and primary["p_value"] is not None and primary["p_value"] <= alpha)
     checks = []
+    arms = lane.canary_for(bottleneck).get("mode") == "arms"
 
     def tolerate(metric: Metric, row: dict[str, Any]) -> dict[str, Any]:
-        # A guard fails when it worsens by more than its tolerance (relative, or absolute when `abs_tolerance` is set).
-        # A zero control makes the relative change undefined: then only the absolute tolerance can pass it (a guard that
-        # goes from no errors to some errors fails). Unmeasured on either side passes, and the decision records it.
-        sign = 1.0 if metric.direction == "lower" else -1.0
-        worse = None if row["treated"] is None or row["control"] is None else (row["treated"] - row["control"]) * sign
-        row["ok"] = ((row["relative"] is not None and row["relative"] >= -metric.min_effect)
-                     or (worse is not None and worse <= metric.abs_tolerance) or worse is None)
+        # A check fails when it worsens by more than its tolerance (`tolerated`). In an arms canary that is judged on
+        # the bootstrap (`GUARD_ALPHA`); without one (a population guard, a group count, a window lane) on the point
+        # estimate. Unmeasured on either side passes, and the decision records it.
+        row["point_ok"] = tolerated(metric, row["treated"], row["control"])
+        if row.get("harm_p") is None:
+            row["ok"] = row["point_ok"]
+        else:
+            row["ok"] = row["harm_p"] > GUARD_ALPHA and (
+                row["beyond_twice"] <= GUARD_BETA or not (metric.min_effect or metric.abs_tolerance))
         return row
 
     for metric in list(bottleneck.secondary) + list(lane.guards):
         checks.append(tolerate(metric, compare(metric, treated, control, seed=seed, extra_treated=extra_treated,
-                                               extra_control=extra_control)))
+                                               extra_control=extra_control, guard=arms)))
     if population is not None:
         window, capture = population
         for metric in lane.population_guards:

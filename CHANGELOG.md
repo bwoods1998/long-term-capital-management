@@ -22,8 +22,27 @@ on branch `run/options-swarm-2026-09-26`) has the detail.
 ## Not yet deployed
 
 Main `665a9e8d` is the H1 release, deployed Oct 1 at 20:35Z (below); every House release of Oct 1 has its dated entry.
-Under the freeze (Oct 1, "The freeze"), a change to `league/live` or `league/gym` waits for a planned release. Nothing
-merged is waiting for a release.
+Under the freeze (Oct 1, "The freeze"), a change to `league/live` or `league/gym` waits for a planned release. Merged
+and waiting for a release:
+
+- **The canary's retention rule judges guards on the bootstrap, not the point estimate** (branch `lanes/retention-guard-rule`;
+  `league/swarm/harness_lanes.py`, `playbooks/harness-improvement.md`, new `league/tests/test_harness_guard_rule.py`). The
+  lanestats study (Oct 1, operator-only simulation on the 24 h capture's per-family tallies, reproducing the base
+  `retention()` on 24 of 24 draws) found the old rule defective both ways: with no effect at least one guard failed in
+  81-86% of windows (tolerance/noise 0.06-1.0), and a real harm of twice a guard's tolerance was still retained up to 12%
+  of the time; the research canary (25% of families, 6 h) also ended `insufficient_activity` in 93% of windows at the
+  night pace. Now, in arms mode, a check fails when its worsening beyond tolerance is significant (one-sided p <= 0.10,
+  `GUARD_ALPHA`) or, with a tolerance, when more than 20% of replicates are worse than twice it (`GUARD_BETA`); the
+  research canary holds 50% of families for 12 h; `cycle_error_rate` gets an absolute tolerance of 0.005 like its
+  sibling rate guards; a unit that held >= 25% of a lower-is-better check's events in the capture (>= 20 events) sits
+  out both arms, chosen before the arms exist; `binomial_low` no longer overflows past ~1,040 births. Unchanged: every
+  primary metric, `min_effect`, the primary alpha, every guard (none removed), population guards, window lanes. Simulated
+  (research, 50%/12 h): false retention with no effect 1.5-3.5%; retention of a 1x-benefit change that harms one guard by
+  2x its tolerance <= 9.3%; retention of a true 1x / 2x benefit 19-21% / 37-46% (old rule at night pace: 1.3% / 2%).
+  Also: `Researcher.guarded`, `retire_guard` and `retire_guard_days` join the research lane's frozen symbols (the H1
+  review's finding 5). The rule and lane hashes move: every registered candidate is re-captured on this release.
+  Research-class (not on the live path). To verify after the deploy: `measure` + `rank` on the new release register
+  fresh keys; the research brief's canary reads fraction 0.5, 43,200 s.
 
 ## 2026-10-01
 
