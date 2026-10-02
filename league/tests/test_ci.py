@@ -274,3 +274,43 @@ class TheEngineersLanes(unittest.TestCase):
             self.assertEqual(ci.guard_branch(base, "HEAD", "engineer/scheduler/faster-loop-0123abcd", root=root),
                              [f"league/swarm/models.py: outside what the engineer/scheduler may change "
                               f"(league/swarm/loop.py, {ci.ENGINEER_TESTS})"])
+
+    def test_a_lane_may_only_add_a_test_never_change_remove_or_rename_one(self):
+        """harness_lanes' NEW_TEST: an earlier candidate's retained test is never modified, removed or renamed away."""
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            def git(*args):
+                return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false",
+                                       *args], cwd=root, capture_output=True, text=True, check=True).stdout.strip()
+
+            git("init", "-q", "-b", "main")
+            (root / "league" / "swarm").mkdir(parents=True)
+            (root / "league" / "tests").mkdir()
+            (root / "league" / "swarm" / "loop.py").write_text("A = 1\n")
+            kept = root / "league" / "tests" / "test_harness_candidate_prior.py"
+            kept.write_text("PINNED = 1\n")
+            git("add", "-A")
+            git("commit", "-q", "-m", "base")
+            base = git("rev-parse", "HEAD")
+            branch = "engineer/scheduler/faster-loop-0123abcd"
+            (root / "league" / "tests" / "test_harness_candidate_new.py").write_text("X = 1\n")
+            git("add", "-A")
+            git("commit", "-q", "-m", "a new test")
+            self.assertEqual(ci.guard_branch(base, "HEAD", branch, root=root), [])
+            self.assertEqual(ci.engineer_test_problems(base, "HEAD", cwd=root), [])
+            for change in ("modify", "remove", "rename"):
+                git("checkout", "-q", "-B", change, base)
+                if change == "modify":
+                    kept.write_text("PINNED = 2\n")
+                elif change == "remove":
+                    kept.unlink()
+                else:
+                    kept.rename(root / "league" / "tests" / "test_harness_candidate_moved.py")
+                git("add", "-A")
+                git("commit", "-q", "-m", change)
+                problems = ci.guard_branch(base, "HEAD", branch, root=root)
+                self.assertIn("league/tests/test_harness_candidate_prior.py: an engineer lane may only add a new test, "
+                              "never change or remove one", problems, change)

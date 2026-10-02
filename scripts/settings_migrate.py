@@ -20,6 +20,9 @@ policy.json); only THEN install the reduced swarm.json. A reduced swarm.json und
 swarm on config.json's defaults and silently lifts every floor the old swarm.json held, so KEEP the original swarm.json
 (this tool never overwrites `--swarm`; the reduced one goes to `--swarm-out`) and restore it on the box before, or with,
 any rollback to a release that has no league/swarm/policy.json.
+Nor is the reduced swarm.json installed while the watchdog's `previous` release is a pre-V3-A one: a rollback to it
+would run on that release's old DEFAULTS (OpenAI routes on, the old Claude role lines, no budget). Install it only once
+`previous` is itself a V3-A (or later) release; until then keep the full swarm.json.
 Standard library only.
 """
 

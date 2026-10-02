@@ -418,16 +418,20 @@ class ModelRouter:
         budget = self.claude_budget_room()
         return room if budget is None else min(room, budget)
 
-    def claude_budget_room(self) -> float | None:
+    def claude_budget_room(self) -> float:
         """THE BUDGET's Claude dollars left this UTC day (league/ops/budget.py; the settings' `budget` block, set by every
         `settings.load` with a state root): `claude_usd_day` less the swarm's Claude spend today, holds included (a call
-        counts on the day its hold was booked). None for settings with no `budget` block (never loaded from a state root:
-        no budget line); 0 for a block that is not a budget (FAIL CLOSED)."""
+        counts on the day its hold was booked). Settings with no `budget` block are the router's own read of its store
+        root's budget.json (`budget.effective`: the floor when it gives none), as the Sail guard reads them: settings
+        handed in without the block never lift the budget. 0 for a block that is not a budget (FAIL CLOSED)."""
+        from ..ops import budget as budget_mod
+
         block = self.settings.get("budget")
-        if block is None:
-            return None
-        line = _line(block.get("claude_usd_day") if isinstance(block, Mapping) else None, invalid=0.0)
         now = float(self.store.clock())
+        if block is None:  # handed settings without the block: the router reads the budget itself, never no line
+            root = getattr(self.store, "root", None)
+            block = budget_mod.effective(root, now) if root is not None else budget_mod.floor_block("no budget block")
+        line = _line(block.get("claude_usd_day") if isinstance(block, Mapping) else None, invalid=0.0)
         return max(0.0, line - max(0.0, self.claude_spent(since=now - now % 86400)))
 
     def claude_funded_room(self) -> float:

@@ -481,7 +481,23 @@ def guard_branch(base: str, head: str, branch: str, *, root: Path = REPO) -> lis
     paths = changed_paths(base, head, cwd=root)
     if not paths:
         return ["the branch changes nothing"]
-    return guard(paths, role)
+    problems = guard(paths, role)
+    if role.startswith("engineer/"):
+        problems += engineer_test_problems(base, head, cwd=root)
+    return problems
+
+
+def engineer_test_problems(base: str, head: str = "HEAD", *, cwd: Path = REPO) -> list[str]:
+    """An engineer lane may only ADD a test (`ENGINEER_TESTS`): a test of that name the branch modifies, removes or renames
+    away (renames read as a removal and an addition) is refused."""
+    out = subprocess.run(["git", "diff", "--name-status", "--no-renames", f"{base}...{head}"], cwd=cwd, capture_output=True,
+                         text=True, check=True)
+    problems = []
+    for line in out.stdout.splitlines():
+        status, _, path = line.partition("\t")
+        if path and _allows(ENGINEER_TESTS, path.strip()) and status.strip() != "A":
+            problems.append(f"{path.strip()}: an engineer lane may only add a new test, never change or remove one")
+    return problems
 
 
 def check(base: str | None, branch: str | None, *, root: Path = REPO, tests: bool = True, head: str = "HEAD") -> list[str]:
@@ -492,6 +508,8 @@ def check(base: str | None, branch: str | None, *, root: Path = REPO, tests: boo
         if role is None:
             problems.append(f"{branch}: not a branch name of the form {BRANCH_FORMS}")
         problems.extend(guard(paths, role))
+        if role is not None and role.startswith("engineer/") and base:
+            problems.extend(engineer_test_problems(base, head, cwd=root))
         if RETIRED_REGISTRY in paths:
             # Every proposal rewrote this one shared file from a stale copy and dropped the rows
             # merged after it (PRs #72/#73 against #71, Sept 21, 2026). Each strategy now carries
