@@ -10,7 +10,7 @@ Measured on the production ledger, Sept 19-22, 2026 (7,370 research sessions, $1
   of the time; after two, 7%; after three, 6%; after five or more, 3.3% (147 of 4,513).
 - Most abstentions rediscovered a blocker nothing had changed: a closed session, an empty Kalshi
   window, a data feed the House does not have, an open paper position waiting to settle.
-- Replayed offline over those sessions on the v0 dials (scripts/jev_lab_eval/gate_replay.py),
+- Replayed offline over those sessions on the v0 dials (scripts/jev_lab_eval/gate_replay.py at tag archive/pre-options-2026-09-26),
   these rules would have skipped 4,978 sessions ($87 of $160); 146 of the skipped (2.9%) had
   retained a candidate, most of which fail replay.
 
