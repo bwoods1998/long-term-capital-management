@@ -17,10 +17,19 @@ XSP/SPXW and exercise of equity legs at the close, a day's working orders expiri
 
 State: the accounts are written to `<root>/live-shadow.json` after every minute (`ShadowBook.save`), so a restart
 resumes them, working orders and all.
+
+THE PRACTICE CAPS (v3, Oct 2026): a practice account (`<family>@<version>:o`) holds what a Probe may hold, scaled to its
+own shadow capital, from the constitution's `options_money.probe` (`money.Table`): at most `open_per_family` structures
+open or working; no open whose maximum loss with its open and close fees passes max(`max_loss_share` x capital,
+`floor_usd`); no open that takes the account's maximum loss at risk (open structures and working opens) past
+`family_share` x capital. An open the engine made that passes a cap is withdrawn before it can work (the engine's counts
+as if it was never sent) and refused: a practice `rejected` event with its reason, told to the program like any refusal,
+never a program error. A Candidate's shadow (`:s`) keeps the engine's own rules.
 """
 
 from __future__ import annotations
 
+import functools
 import math
 import os
 from dataclasses import asdict
@@ -108,10 +117,53 @@ class ShadowAccount(E.Account):
         before = set(self.orders)
         self.practice_event("intent", {"intent": dict(intent)}, day=day, mi=mi)
         super()._intent(day, mi, intent)
+        opens = [self.orders[oid] for oid in sorted(set(self.orders) - before) if self.orders[oid].order.action == "open"]
+        if opens:
+            why = self._practice_cap(opens)
+            if why:
+                for work in opens:
+                    self._withdraw(work)
+                raise L.Refused(why)
         for oid in set(self.orders) - before:
             work = self.orders[oid]
             self.practice_event("order", {"order": _working_state(work), "quotes": self._quotes(day, mi, work)},
                                 day=day, mi=mi)
+
+    def _practice_cap(self, opens: Sequence[E.Working]) -> str | None:
+        """Why the practice caps (the module docstring) refuse these new opens, or None. Never raises: caps that cannot
+        be read refuse the open."""
+        try:
+            (share, floor), open_max, family_share = _probe_caps()
+            capital = float(self.cfg.capital)
+            new = {w.oid for w in opens}
+            working = [w for w in self.orders.values() if w.order.action == "open" and w.oid not in new]
+            open_now = len(self.positions) + sum(1 for w in working if w.pid not in self.positions)
+            if open_now + len(opens) > open_max:
+                return f"practice cap: {open_now} structures open or working, the most a Probe holds is {open_max}"
+            # As the real book's exposure: open structures and working opens at their maximum loss; the new open with
+            # its open and close fees (the money table's `unit`).
+            at_risk = sum(p.max_loss_share * V.MULTIPLIER * p.qty for p in self.positions.values()) + sum(
+                w.order.max_loss_share * V.MULTIPLIER * w.remaining for w in working)
+            cap = max(share * capital, floor)
+            family = family_share * capital
+            for work in opens:
+                loss = work.order.max_loss_share * V.MULTIPLIER * work.order.qty + 2.0 * work.order.fees
+                if not math.isfinite(loss) or loss > cap + 1e-9:
+                    return f"practice cap: this open risks {loss:.2f} with fees, over the Probe's {cap:.2f} an open"
+                at_risk += loss
+            if not math.isfinite(at_risk) or at_risk > family + 1e-9:
+                return (f"practice cap: {at_risk:.2f} of maximum loss would be at risk, over the Probe's {family:.2f} "
+                        "a family")
+            return None
+        except Exception as exc:  # noqa: BLE001 - fail closed: no open without its caps read
+            return f"practice cap: the Probe's caps could not be read ({type(exc).__name__})"
+
+    def _withdraw(self, work: E.Working) -> None:
+        """An open the practice caps refused, taken back before it can work: the engine's counts as if never sent."""
+        self.orders.pop(work.oid, None)
+        self.orders_today = max(0, self.orders_today - 1)
+        for key in ("orders", "opens"):
+            self.counts[key] = max(0, int(self.counts.get(key, 0)) - 1)
 
     @staticmethod
     def _quotes(day: LiveDay, mi: int, work: E.Working) -> list[dict]:
@@ -255,6 +307,16 @@ class ShadowAccount(E.Account):
         acc.practice_dropped_events = int(row.get("practice_dropped_events") or 0)
         acc.practice_evaluator = row.get("practice_evaluator")
         return acc
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_caps() -> tuple[tuple[float, float], int, float]:
+    """((max_loss_share, floor_usd), open_per_family, family_share) of the constitution's `options_money.probe`, as the
+    money table reads it (ValueError on a table outside its bounds: the practice caps then refuse every open)."""
+    from .money import Table
+
+    table = Table.from_constitution()
+    return (float(table.probe_share), float(table.probe_floor)), int(table.probe_open), float(table.probe_family_share)
 
 
 def _num(value: float) -> float | None:
